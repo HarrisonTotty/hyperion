@@ -1,0 +1,19 @@
+# The liquid stand-ins' aerosol extinction at 550 nm (plan 14, P14.T49.p), the eighth table with
+# condensate_extinction's grid: rendering plan R08's committed index files that stand in for a
+# liquid with none of its own (the sim's `substance::aerosol::LIQUID_STAND_INS`), each a solid's
+# file, read where it lies and its data hash in the inputs hash (`hyperion_fit::materials`). Each
+# file's Mie spheres at its index at 550 nm, found by wavelength on its own grid, entered under the
+# liquid as a stand-in, since the client draws a liquid's droplets as spheres; each averaged over
+# Hansen and Travis 1974's gamma distribution and the log-normal. The grid, the fine radius grid
+# and the half-step check are constants of `src/tasks/condensate_extinction.rs`; the task takes no
+# parameters, no phase table and no dataset.
+task = "condensate_extinction_8"
+materials = [
+    "aluminium-oxide.json",
+    "calcium-titanate.json",
+    "enstatite-glass.json",
+    "forsterite-amorphous.json",
+    "iron.json",
+    "potassium-chloride.json",
+    "sodium-sulphide.json",
+]

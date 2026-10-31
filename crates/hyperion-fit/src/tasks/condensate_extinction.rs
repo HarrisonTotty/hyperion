@@ -73,6 +73,13 @@
 //! reddening tables are split ([`PARTS`]). The first also holds the grid's axes. Each table
 //! lists its files' entries (`hyperion_sim::substance::aerosol::ExtinctionEntry`): key, phase,
 //! variant, stand-in flag, basis, a phase table's sizes and grids.
+//!
+//! An eighth, `condensate_extinction_8`, holds the liquid stand-ins' spheres (P14.T49.p): for each
+//! solid's file that stands in for a liquid with none of its own
+//! (`hyperion_sim::substance::aerosol::LIQUID_STAND_INS`), the Mie spheres at the file's index,
+//! entered under the liquid as a stand-in ([`PartKind::LiquidStandIns`]). The client draws every
+//! liquid's droplets as spheres, whatever its file's shape class (its `modeShape`;
+//! science-r08-nonspherical.md §2.2), so the sim's extinction is the client's particle's there too.
 
 pub mod mie;
 pub mod phase;
@@ -169,8 +176,20 @@ pub const RIPPLE_REACH: f64 = 1_200.0;
 /// The fine nodes per chunk of the parallel map.
 const CHUNK: u64 = 32;
 
-/// One table: its name, its file, its index files, their phase tables and whether it holds the
-/// grid's axes.
+/// Which particles a table's entries draw, and in which phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PartKind {
+    /// Each file's own particles, its shape class's, in the file's own phase: the seven tables of
+    /// every aerosol file.
+    Files,
+    /// Mie spheres at each file's index, in the liquid's phase it stands in for, flagged a stand-in
+    /// (`hyperion_sim::substance::aerosol::LIQUID_STAND_INS`; P14.T49.p): each file a solid's of
+    /// its substance itself.
+    LiquidStandIns,
+}
+
+/// One table: its name, its file, its index files, their phase tables, whether it holds the
+/// grid's axes and which particles it draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Part {
     /// The table's name, its task's.
@@ -186,6 +205,8 @@ pub struct Part {
     items: &'static [&'static str],
     /// Whether it holds the grid's axes (the first table).
     axes: bool,
+    /// The particles its entries draw.
+    kind: PartKind,
 }
 
 impl Part {
@@ -205,6 +226,12 @@ impl Part {
     #[must_use]
     pub const fn phase(&self) -> &'static [&'static str] {
         self.phase
+    }
+
+    /// The particles its entries draw.
+    #[must_use]
+    pub const fn kind(&self) -> PartKind {
+        self.kind
     }
 }
 
@@ -235,8 +262,9 @@ macro_rules! file_items {
     };
 }
 
-/// The seven tables, the aerosol files in name order, seven to a table.
-pub const PARTS: [Part; 7] = [
+/// The eight tables: the aerosol files in name order, seven to a table, and the liquid stand-ins'
+/// spheres.
+pub const PARTS: [Part; 8] = [
     Part {
         name: "condensate_extinction",
         table_path: "condensate_extinction.rs",
@@ -261,6 +289,7 @@ pub const PARTS: [Part; 7] = [
             "BASALT",
         ),
         axes: true,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_2",
@@ -289,6 +318,7 @@ pub const PARTS: [Part; 7] = [
             "CHROMIUM",
         ),
         axes: false,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_3",
@@ -317,6 +347,7 @@ pub const PARTS: [Part; 7] = [
             "ICE_GIANT_HAZE",
         ),
         axes: false,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_4",
@@ -347,6 +378,7 @@ pub const PARTS: [Part; 7] = [
             "METHANE_ICE",
         ),
         axes: false,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_5",
@@ -371,6 +403,7 @@ pub const PARTS: [Part; 7] = [
             "SEAWATER",
         ),
         axes: false,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_6",
@@ -400,6 +433,7 @@ pub const PARTS: [Part; 7] = [
             "SULPHURIC_ACID_75",
         ),
         axes: false,
+        kind: PartKind::Files,
     },
     Part {
         name: "condensate_extinction_7",
@@ -428,6 +462,32 @@ pub const PARTS: [Part; 7] = [
             "ZINC_SULPHIDE",
         ),
         axes: false,
+        kind: PartKind::Files,
+    },
+    Part {
+        name: "condensate_extinction_8",
+        table_path: "condensate_extinction_8.rs",
+        files: &[
+            "aluminium-oxide.json",
+            "calcium-titanate.json",
+            "enstatite-glass.json",
+            "forsterite-amorphous.json",
+            "iron.json",
+            "potassium-chloride.json",
+            "sodium-sulphide.json",
+        ],
+        phase: &[],
+        items: file_items!(
+            "ALUMINIUM_OXIDE",
+            "CALCIUM_TITANATE",
+            "ENSTATITE_GLASS",
+            "FORSTERITE_AMORPHOUS",
+            "IRON",
+            "POTASSIUM_CHLORIDE",
+            "SODIUM_SULPHIDE",
+        ),
+        axes: false,
+        kind: PartKind::LiquidStandIns,
     },
 ];
 
@@ -667,6 +727,9 @@ pub enum FitExtinctionError {
         /// The table's phase.
         phase: String,
     },
+    /// A liquid stand-in's file is not a solid's of its substance itself.
+    #[error("it stands in for a liquid, and is not a solid's of its substance itself")]
+    StandInFile,
 }
 
 /// A file's [`FitExtinctionError`], with the file.
@@ -1230,9 +1293,7 @@ pub(crate) fn fit_file(
         "liquid" => CondensedPhase::Liquid,
         other => return Err(fail(FitExtinctionError::Phase(other.to_owned()))),
     };
-    let (n, k) = index_at(file, EXTINCTION_WAVELENGTH_NM)
-        .ok_or_else(|| fail(FitExtinctionError::NoIndexAt550))?;
-    let index = ComplexIndex::new(n, k).map_err(|e| fail(FitExtinctionError::Mie(e)))?;
+    let index = index_of(name, file)?;
     let particles = basis_of(file, table, index).map_err(fail)?;
     let spheres = spectrum(name, index, threads)?;
     let (spectrum, basis) = match particles {
@@ -1246,10 +1307,81 @@ pub(crate) fn fit_file(
         }
         Particles::SphereFallback => (spheres, EntryBasis::SphereFallback),
     };
+    let identity = Identity {
+        phase,
+        stand_in: file.provenance() == "standIn",
+        basis,
+    };
+    fit_grids(name, file, identity, &spectrum)
+}
+
+/// Computes the entry of file `name`, a solid's of its substance itself, for the liquid it stands
+/// in for ([`PartKind::LiquidStandIns`]): the Mie spheres at its index, in the liquid's phase,
+/// flagged a stand-in, on `threads` threads.
+///
+/// # Errors
+///
+/// [`RunTaskError::Input`] carrying a [`FitFileError`] with [`FitExtinctionError::StandInFile`] if
+/// the file is not a solid's of its substance itself; otherwise as [`fit_file`] for a `sphere`
+/// file.
+pub(crate) fn fit_liquid_stand_in(
+    name: &'static str,
+    file: &MaterialFile,
+    threads: NonZeroUsize,
+) -> Result<FileExtinction, RunTaskError> {
+    if file.phase() != "solid" || file.variant().is_some() {
+        return Err(input_error(name, FitExtinctionError::StandInFile));
+    }
+    let index = index_of(name, file)?;
+    let spheres = spectrum(name, index, threads)?;
+    let identity = Identity {
+        phase: CondensedPhase::Liquid,
+        stand_in: true,
+        basis: EntryBasis::Sphere,
+    };
+    fit_grids(name, file, identity, &spheres)
+}
+
+/// File `name`'s index at 550 nm, found by wavelength on its own grid.
+///
+/// # Errors
+///
+/// [`RunTaskError::Input`] carrying a [`FitFileError`] if the grid does not reach 550 nm, or the Mie
+/// refuses the index.
+fn index_of(name: &'static str, file: &MaterialFile) -> Result<ComplexIndex, RunTaskError> {
+    let fail = |cause: FitExtinctionError| input_error(name, cause);
+    let (n, k) = index_at(file, EXTINCTION_WAVELENGTH_NM)
+        .ok_or_else(|| fail(FitExtinctionError::NoIndexAt550))?;
+    ComplexIndex::new(n, k).map_err(|e| fail(FitExtinctionError::Mie(e)))
+}
+
+/// What an entry states beside its file's key and variant: the phase it serves, its stand-in flag
+/// and the particles drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Identity {
+    phase: CondensedPhase,
+    stand_in: bool,
+    basis: EntryBasis,
+}
+
+/// File `name`'s entry from its particles' `spectrum` on the fine grid: both families' grids, each
+/// held to the half-step check.
+///
+/// # Errors
+///
+/// [`RunTaskError::Input`] carrying a [`FitFileError`] if a cell lies off the fine grid, a half
+/// step lies off the table's grid, or the half-step check misses by more than [`HALVING_BOUND`].
+fn fit_grids(
+    name: &'static str,
+    file: &MaterialFile,
+    identity: Identity,
+    spectrum: &Spectrum,
+) -> Result<FileExtinction, RunTaskError> {
+    let fail = |cause: FitExtinctionError| input_error(name, cause);
     let mut misses = Misses::default();
     let mut fit_kind = |kind: SizeDistributionKind| -> Result<Grid, RunTaskError> {
-        let grid = grid_of(kind, &spectrum).map_err(fail)?;
-        let check = halving_check(kind, &spectrum, &grid).map_err(fail)?;
+        let grid = grid_of(kind, spectrum).map_err(fail)?;
+        let check = halving_check(kind, spectrum, &grid).map_err(fail)?;
         if check.exceed_the_bound() {
             let at = if worse(check.extinction, HALVING_BOUND) {
                 check.extinction_at
@@ -1272,10 +1404,10 @@ pub(crate) fn fit_file(
     Ok(FileExtinction {
         file: name,
         key: file.key().to_owned(),
-        phase,
+        phase: identity.phase,
         variant: file.variant().map(str::to_owned),
-        stand_in: file.provenance() == "standIn",
-        basis,
+        stand_in: identity.stand_in,
+        basis: identity.basis,
         gamma,
         log_normal,
         misses,
@@ -1283,13 +1415,15 @@ pub(crate) fn fit_file(
 }
 
 /// Computes every file of `part` in `manifest`'s material directory, each with its phase table
-/// from the `phase/` directory beside them if the part lists one under the file's name.
+/// from the `phase/` directory beside them if the part lists one under the file's name, or for the
+/// liquid stand-ins' part as the liquid it stands in for ([`fit_liquid_stand_in`]).
 ///
 /// # Errors
 ///
 /// [`RunTaskError::Input`] carrying [`FitExtinctionError::WrongMaterials`] or
 /// [`FitExtinctionError::WrongPhaseTables`] if the manifest names other files or phase tables
-/// than the part's, or as [`fit_file`]; [`RunTaskError::Dataset`] if a file cannot be read.
+/// than the part's, or as [`fit_file`], or for the liquid stand-ins' part as
+/// [`fit_liquid_stand_in`]; [`RunTaskError::Dataset`] if a file cannot be read.
 pub(crate) fn fit(
     part: &Part,
     manifest: &Manifest,
@@ -1314,12 +1448,17 @@ pub(crate) fn fit(
         .iter()
         .map(|&name| {
             let file = manifest.load_material(name).map_err(unreadable)?;
-            let table = if part.phase.contains(&name) {
-                Some(manifest.load_phase(name).map_err(unreadable)?)
-            } else {
-                None
-            };
-            fit_file(name, &file, table.as_ref(), threads)
+            match part.kind {
+                PartKind::Files => {
+                    let table = if part.phase.contains(&name) {
+                        Some(manifest.load_phase(name).map_err(unreadable)?)
+                    } else {
+                        None
+                    };
+                    fit_file(name, &file, table.as_ref(), threads)
+                }
+                PartKind::LiquidStandIns => fit_liquid_stand_in(name, &file, threads),
+            }
         })
         .collect()
 }
@@ -1492,6 +1631,31 @@ pub(crate) fn render(part: &Part, files: Vec<FileExtinction>) -> RustTable {
         items.extend(file_items(file));
     }
     items.push(TableItem::Source(entries));
+    match part.kind {
+        PartKind::Files => RustTable {
+            summary: vec![
+                "Aerosol extinction at 550 nm (plan 14, P14.T49.e), which `substance::aerosol`"
+                    .to_owned(),
+                "reads.".to_owned(),
+            ],
+            notes: files_notes(part),
+            items,
+        },
+        PartKind::LiquidStandIns => RustTable {
+            summary: vec![
+                "The liquid stand-ins' aerosol extinction at 550 nm (plan 14, P14.T49.p), which"
+                    .to_owned(),
+                "`substance::aerosol` reads from generator version 25.".to_owned(),
+            ],
+            notes: liquid_stand_in_notes(),
+            items,
+        },
+    }
+}
+
+/// The notes of a table of the files' own particles ([`PartKind::Files`]).
+#[must_use]
+fn files_notes(part: &Part) -> Vec<String> {
     let mut notes = vec![
         "Each index file's particles at its index at 550 nm, found by wavelength on its own grid:".to_owned(),
         "a `sphere` file's Mie spheres; a `nonSphericalMineral` or `crystal` file's own phase table".to_owned(),
@@ -1510,18 +1674,28 @@ pub(crate) fn render(part: &Part, files: Vec<FileExtinction>) -> RustTable {
                 .to_owned(),
         );
     }
-    RustTable {
-        summary: vec![
-            "Aerosol extinction at 550 nm (plan 14, P14.T49.e), which `substance::aerosol`"
-                .to_owned(),
-            "reads.".to_owned(),
-        ],
-        notes,
-        items,
-    }
+    notes
 }
 
-/// One of the seven tables' tasks ([`PARTS`]).
+/// The liquid stand-ins' table's notes ([`PartKind::LiquidStandIns`]).
+#[must_use]
+fn liquid_stand_in_notes() -> Vec<String> {
+    [
+        "For each solid's index file that stands in for a liquid with none of its own (the sim's",
+        "`LIQUID_STAND_INS`), its Mie spheres at its index at 550 nm, found by wavelength on its own",
+        "grid, entered under the liquid and flagged a stand-in: the client draws a liquid's droplets",
+        "as spheres whatever its file's shape class. Each is averaged over Hansen and Travis 1974's",
+        "gamma distribution and the log-normal on a fine grid even in ln r: the area-weighted `Q̄_ext`",
+        "and ln ω, the albedo's logarithm, to five significant digits, on the grid of",
+        "`condensate_extinction`'s `EFFECTIVE_RADII_M` and its variances, interpolated as its own",
+        "parts are.",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+/// One of the eight tables' tasks ([`PARTS`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CondensateExtinctionTask {
     part: usize,
@@ -1549,6 +1723,8 @@ pub static TASK_5: CondensateExtinctionTask = CondensateExtinctionTask { part: 4
 pub static TASK_6: CondensateExtinctionTask = CondensateExtinctionTask { part: 5 };
 /// The seventh table.
 pub static TASK_7: CondensateExtinctionTask = CondensateExtinctionTask { part: 6 };
+/// The eighth table, the liquid stand-ins' spheres.
+pub static TASK_8: CondensateExtinctionTask = CondensateExtinctionTask { part: 7 };
 
 impl FitTask for CondensateExtinctionTask {
     fn name(&self) -> &'static str {
@@ -1624,17 +1800,29 @@ impl FitTask for CondensateExtinctionTask {
             worst_file(|m| m.albedo),
             worst.coalbedo,
         );
+        let source = match part.kind {
+            PartKind::Files => {
+                "rendering plan R08's committed index files \
+                 (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
+                 own primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s \
+                 hexahedra (Saito et al. 2021, J. Atmos. Sci. 78, 2089) and Yang et al. 2013's \
+                 ice aggregate (J. Atmos. Sci. 70, 330), adapted CC BY 4.0 data; Mie spheres by \
+                 Wiscombe 1980 (Appl. Opt. 19, 1505; NCAR/TN-140+STR, 1996 edition), held to \
+                 MIEV0's test cases; the size distributions of Hansen and Travis 1974 (Space Sci. \
+                 Rev. 16, 527, (2.53)–(2.61))"
+            }
+            PartKind::LiquidStandIns => {
+                "rendering plan R08's committed index files \
+                 (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`) of the liquid \
+                 stand-ins (P14.T49.p), each citing its own primaries; Mie spheres by Wiscombe \
+                 1980 (Appl. Opt. 19, 1505; NCAR/TN-140+STR, 1996 edition), held to MIEV0's test \
+                 cases; the size distributions of Hansen and Travis 1974 (Space Sci. Rev. 16, 527, \
+                 (2.53)–(2.61))"
+            }
+        };
         Ok(TaskOutput {
             table: render(part, files),
-            source: "rendering plan R08's committed index files \
-                     (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
-                     own primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s \
-                     hexahedra (Saito et al. 2021, J. Atmos. Sci. 78, 2089) and Yang et al. 2013's \
-                     ice aggregate (J. Atmos. Sci. 70, 330), adapted CC BY 4.0 data; Mie spheres by \
-                     Wiscombe 1980 (Appl. Opt. 19, 1505; NCAR/TN-140+STR, 1996 edition), held to \
-                     MIEV0's test cases; the size distributions of Hansen and Travis 1974 (Space Sci. \
-                     Rev. 16, 527, (2.53)–(2.61))"
-                .to_owned(),
+            source: source.to_owned(),
             acceptance,
             provisional: None,
         })
@@ -1645,8 +1833,9 @@ impl FitTask for CondensateExtinctionTask {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use hyperion_sim::substance::aerosol::{LIQUID_STAND_INS, LiquidStandIn};
     use hyperion_sim::substance::by_key;
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
 
     use super::*;
     use crate::materials::{MATERIALS_FROM_CRATE, PHASE_FROM_MATERIALS};
@@ -1970,9 +2159,9 @@ mod tests {
         }
     }
 
-    /// The parts hold every file whose key is an aerosol material, and no other, seven to a table
-    /// in name order, the first with the axes; each part's items follow its files, and its manifest
-    /// names them.
+    /// The files' parts hold every file whose key is an aerosol material, and no other, seven to a
+    /// table in name order, the first with the axes, and the last part is the liquid stand-ins';
+    /// each part's items follow its files, and its manifest names them.
     #[test]
     fn condensate_extinction_the_parts_are_the_aerosol_files() {
         let mut aerosol: Vec<String> = std::fs::read_dir(dir())
@@ -1992,8 +2181,15 @@ mod tests {
             })
             .collect();
         aerosol.sort();
-        let listed: Vec<&str> = PARTS.iter().flat_map(|p| p.files.iter().copied()).collect();
+        let listed: Vec<&str> = PARTS
+            .iter()
+            .filter(|p| p.kind == PartKind::Files)
+            .flat_map(|p| p.files.iter().copied())
+            .collect();
         assert_eq!(listed, aerosol);
+        let kinds: Vec<PartKind> = PARTS.iter().map(Part::kind).collect();
+        assert_eq!(kinds[..7], [PartKind::Files; 7]);
+        assert_eq!(kinds[7], PartKind::LiquidStandIns);
         for (i, part) in PARTS.iter().enumerate() {
             assert!(part.files.len() <= 7, "{}", part.name);
             assert_eq!(part.axes, i == 0, "{}", part.name);
@@ -2055,7 +2251,7 @@ mod tests {
         tables.sort_by(|a, b| a.key().cmp(b.key()));
         let mut listed = 0;
         let mut fallbacks = Vec::new();
-        for part in &PARTS {
+        for part in PARTS.iter().filter(|p| p.kind == PartKind::Files) {
             for &name in part.files {
                 let file = read(name);
                 let own = tables.iter().find(|t| t.serves(&file));
@@ -2242,6 +2438,76 @@ mod tests {
             };
             assert!(low > 0.0 && high > 100.0 * low, "{name}: {low} to {high}");
         }
+    }
+
+    /// The liquid stand-ins' part is the sim's [`LIQUID_STAND_INS`]' files, in name order, with no
+    /// phase table. Each entry is its file's Mie spheres in the liquid's phase, flagged a stand-in,
+    /// whatever its shape class: enstatite glass's grids are its spheres', not its hexahedra's, and
+    /// aluminium oxide's, whose own entry is the sphere fallback, are that entry's to the bit. A
+    /// liquid's file is refused.
+    #[test]
+    fn condensate_extinction_the_liquid_stand_ins_are_their_files_spheres() {
+        let part = &PARTS[7];
+        let mut files: Vec<&str> = LIQUID_STAND_INS.iter().map(LiquidStandIn::file).collect();
+        files.sort_unstable();
+        assert_eq!(part.files, files);
+        assert_eq!(part.phase, Vec::<&str>::new());
+        for name in ["enstatite-glass.json", "aluminium-oxide.json"] {
+            let file = read(name);
+            let stand_in = fit_liquid_stand_in(name, &file, threads()).unwrap();
+            let own = fitted(name);
+            assert_eq!(stand_in.phase, CondensedPhase::Liquid, "{name}");
+            assert_eq!(own.phase, CondensedPhase::Solid, "{name}");
+            assert!(stand_in.stand_in, "{name}");
+            assert_eq!(stand_in.basis, EntryBasis::Sphere, "{name}");
+            assert_eq!((&stand_in.key, &stand_in.variant), (&own.key, &own.variant));
+            let (n, k) = index_at(&file, EXTINCTION_WAVELENGTH_NM).unwrap();
+            let spheres = spectrum(name, index(n, k), threads()).unwrap();
+            for (kind, grid) in [
+                (SizeDistributionKind::Gamma, &stand_in.gamma),
+                (SizeDistributionKind::LogNormal, &stand_in.log_normal),
+            ] {
+                let direct = grid_of(kind, &spheres).unwrap();
+                assert_eq!(grid_bits(grid), grid_bits(&direct), "{name} {kind:?}");
+            }
+            let (ours, theirs) = (
+                [&stand_in.gamma, &stand_in.log_normal].map(grid_bits),
+                [&own.gamma, &own.log_normal].map(grid_bits),
+            );
+            if own.basis == EntryBasis::SphereFallback {
+                assert_eq!(ours, theirs, "{name}");
+            } else {
+                assert!(matches!(own.basis, EntryBasis::PhaseTable { .. }), "{name}");
+                assert_ne!(ours, theirs, "{name}");
+            }
+        }
+        let water = read("water.json");
+        assert_eq!(
+            cause(fit_liquid_stand_in("water.json", &water, threads())),
+            FitExtinctionError::StandInFile
+        );
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::write(
+            scratch.path().join("variant.json"),
+            r#"{"key":"X","phase":"solid","variant":"Y","shape":"crystal","provenance":"measured",
+               "wavelengthsNm":[380,780],"n":[1.3,1.3],"k":[0,0]}"#,
+        )
+        .unwrap();
+        let variant = MaterialFile::read(scratch.path(), "variant.json").unwrap();
+        assert_eq!(
+            cause(fit_liquid_stand_in("variant.json", &variant, threads())),
+            FitExtinctionError::StandInFile
+        );
+    }
+
+    /// The bits of `grid`'s values, `Q̄_ext`'s rows then ln ω's.
+    fn grid_bits(grid: &Grid) -> Vec<u64> {
+        grid.extinction
+            .iter()
+            .chain(&grid.ln_albedo)
+            .flatten()
+            .map(|&v| bits(v))
+            .collect()
     }
 
     /// The cause a refused part carries.

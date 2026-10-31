@@ -93,10 +93,14 @@
 //!
 //! - **The optics.** A liquid with no index file of its own takes its key's one file, a solid's,
 //!   as a labelled stand-in ([`LiquidStandIn`]): the molten refractories (`MgSiO3`, `Mg2SiO4`,
-//!   `Al2O3`, `CaTiO3`, `Fe`) and the molten salts (`KCl`, `Na2S`). The stand-in reads the entry
-//!   its file already has, so no table moves, and its optics carry the stand-in flag. Each file is
-//!   its key's only one, so the client's named analogue for the liquid (`resolveMaterial`'s "no
-//!   liquid … on file") is the same file.
+//!   `Al2O3`, `CaTiO3`, `Fe`) and the molten salts (`KCl`, `Na2S`). Each file is its key's only
+//!   one, so the client's named analogue for the liquid (`resolveMaterial`'s "no liquid … on
+//!   file") is the same file, and the client draws it as a liquid's droplets, spheres, whatever
+//!   the file's shape class (its `modeShape`: "liquid iron is Mie, solid iron a
+//!   `nonSphericalMineral`"; science-r08-nonspherical.md §2.2). So a stand-in reads its own entry,
+//!   the file's Mie spheres entered under the liquid ([`liquid_stand_in_entries`],
+//!   `tables::condensate_extinction_8`), not the solid's hexahedra: its basis is
+//!   [`ExtinctionBasis::Sphere`], its optics carry the stand-in flag, and no other table moves.
 //! - **The densities.** `KCl`'s and `Na2S`'s liquids by temperature
 //!   ([`Substance::condensed`](super::Substance::condensed); `rows/condensed.rs`'s molten salts).
 //!
@@ -111,7 +115,7 @@ use crate::math;
 use crate::tables::{
     condensate_extinction, condensate_extinction_2, condensate_extinction_3,
     condensate_extinction_4, condensate_extinction_5, condensate_extinction_6,
-    condensate_extinction_7,
+    condensate_extinction_7, condensate_extinction_8,
 };
 use crate::units::{Kelvin, Metres};
 use crate::{GENERATOR_VERSION, GeneratorVersion};
@@ -141,7 +145,10 @@ const DENSITY_VARIANTS: [(&str, &str); 1] = [("H2SO4", "75wt%")];
 /// mode, the registry's golden and the client's fixture are version 24's bit for bit. 25's bump
 /// deletes this hold, [`MoltenDecksRules`] with its `Held` arm, `Substance::condensed`'s molten
 /// arm (folding `rows/condensed.rs`'s molten salts into their rows), the tests' switch, its line
-/// in `with_every_25_hold` and its tripwire (`the_molten_decks_are_held_only_until_the_25_bump`).
+/// in `with_every_25_hold` and its tripwire (`the_molten_decks_are_held_only_until_the_25_bump`),
+/// and restamps the stand-ins' table `condensate_extinction_8` `--since 25` by the fit tool's
+/// new-table path (the table deleted, then `hyperion-fit run`), since a run over an unchanged body
+/// keeps its stamp of 24.
 pub(crate) const MOLTEN_DECKS_VERSION: GeneratorVersion = GeneratorVersion::new(25);
 
 /// Whether the molten decks are served (P14.T49.p's hold, [`MOLTEN_DECKS_VERSION`]).
@@ -228,6 +235,8 @@ impl LiquidStandIn {
 /// registry order: the molten refractories and the molten salts of a hot giant's deep decks, none
 /// of whose melts has an open visible index (P14.T49.p, decision-galaxy-25-train §6; the molten
 /// salts' two, lean 2026-10-30).
+///
+/// Each reads its file's spheres ([`liquid_stand_in_entries`]).
 pub const LIQUID_STAND_INS: [LiquidStandIn; 7] = [
     LiquidStandIn {
         key: "Fe",
@@ -714,6 +723,17 @@ pub fn extinction_entries() -> impl Iterator<Item = &'static ExtinctionEntry> {
         .chain(&condensate_extinction_7::ENTRIES)
 }
 
+/// The liquid stand-ins' entries, in file-name order (P14.T49.p; `tables::condensate_extinction_8`).
+///
+/// For each of [`LIQUID_STAND_INS`], its file's Mie spheres at its index at 550 nm, on the table's
+/// grid, entered under the liquid (phase [`CondensedPhase::Liquid`], the substance itself),
+/// flagged a stand-in, basis [`EntryBasis::Sphere`]. [`aerosol_optics`] reads them from generator
+/// version 25 (`MOLTEN_DECKS_VERSION`) for a liquid with no file of its own; they are not among
+/// [`extinction_entries`], each of which is a file's own particles in its own phase.
+pub fn liquid_stand_in_entries() -> impl Iterator<Item = &'static ExtinctionEntry> {
+    condensate_extinction_8::ENTRIES.iter()
+}
+
 /// Which of a row's index files in a phase: the substance's own (a file whose `variant` is null,
 /// as `water.json`), or the variant a file names (`75wt%` for `sulphuric-acid-75.json`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
@@ -1037,8 +1057,8 @@ fn file_entry(
 }
 
 /// The entry of the file that stands in for `key`'s liquid of the substance itself
-/// ([`LIQUID_STAND_INS`]), or `None`: for another phase or variant, a key with none, or below
-/// [`MOLTEN_DECKS_VERSION`].
+/// ([`LIQUID_STAND_INS`]), its spheres ([`liquid_stand_in_entries`]), or `None`: for another phase
+/// or variant, a key with none, or below [`MOLTEN_DECKS_VERSION`].
 #[must_use]
 fn liquid_stand_in(
     key: &str,
@@ -1052,7 +1072,7 @@ fn liquid_stand_in(
         return None;
     }
     let stand_in = LIQUID_STAND_INS.iter().find(|s| s.key == key)?;
-    extinction_entries().find(|e| e.file == stand_in.file)
+    liquid_stand_in_entries().find(|e| e.file == stand_in.file && e.key == key)
 }
 
 #[cfg(test)]
@@ -1620,7 +1640,9 @@ mod tests {
              into their rows, with `molten_salt`), the tests' `with_molten_decks`, its line in \
              `with_every_25_hold` with its test \
              `the_molten_decks_hold_is_in_force_inside_25_s_helper_alone`, this test and \
-             `a_panic_inside_the_molten_decks_switch_sets_the_rules_back`"
+             `a_panic_inside_the_molten_decks_switch_sets_the_rules_back`; restamp the table \
+             `condensate_extinction_8` `--since 25` by the new-table path (delete it, then \
+             `hyperion-fit run condensate_extinction_8 --since 25`)"
         );
         assert_eq!(MoltenDecksRules::in_force(), MoltenDecksRules::Held);
         assert_eq!(
@@ -1666,6 +1688,51 @@ mod tests {
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
     }
 
+    /// Each liquid stand-in has one entry of its own, its file's under the liquid of the substance
+    /// itself, flagged, on spheres, in file-name order; aluminium oxide's grids, whose own entry is
+    /// the sphere fallback, are that entry's to the bit, and the other six differ from their
+    /// files' phase tables.
+    #[test]
+    fn substance_aerosol_each_liquid_stand_in_has_its_spheres() {
+        let entries: Vec<&ExtinctionEntry> = liquid_stand_in_entries().collect();
+        assert_eq!(entries.len(), LIQUID_STAND_INS.len());
+        assert!(entries.windows(2).all(|w| w[0].file() < w[1].file()));
+        for stand_in in &LIQUID_STAND_INS {
+            let key = stand_in.key();
+            let ours: Vec<&&ExtinctionEntry> = entries.iter().filter(|e| e.key() == key).collect();
+            assert_eq!(ours.len(), 1, "{key}");
+            let entry = ours[0];
+            assert_eq!(entry.file(), stand_in.file(), "{key}");
+            assert_eq!(entry.phase(), CondensedPhase::Liquid, "{key}");
+            assert_eq!(entry.variant(), None, "{key}");
+            assert!(entry.is_stand_in(), "{key}");
+            assert_eq!(entry.basis(), EntryBasis::Sphere, "{key}");
+            let own = extinction_entries()
+                .find(|e| e.file() == stand_in.file())
+                .unwrap();
+            let same = grid_bits(entry) == grid_bits(own);
+            match own.basis() {
+                EntryBasis::SphereFallback => assert!(same, "{key}: its spheres twice"),
+                EntryBasis::PhaseTable { .. } => assert!(!same, "{key}: not its hexahedra"),
+                EntryBasis::Sphere => panic!("{key}: a stand-in's file is a solid's mineral"),
+            }
+        }
+    }
+
+    /// The bits of `entry`'s four grids, in order.
+    fn grid_bits(entry: &ExtinctionEntry) -> Vec<u64> {
+        let gamma = entry.gamma_extinction.iter().chain(entry.gamma_ln_albedo);
+        let log_normal = entry
+            .log_normal_extinction
+            .iter()
+            .chain(entry.log_normal_ln_albedo);
+        gamma
+            .flatten()
+            .chain(log_normal.flatten())
+            .map(|&v| hyperion_testkit::float::bits(v))
+            .collect()
+    }
+
     /// The molten decks' liquids at a deck's temperature, each with its stand-in.
     const MOLTEN: [(&str, f64); 7] = [
         ("Fe", 2_000.0),
@@ -1679,8 +1746,9 @@ mod tests {
 
     /// Under 24's rules each molten liquid has no file (`NoFile`; a molten salt's mode stops
     /// earlier, at its size, for want of a density); under 25's (P14.T49.p) each resolves through
-    /// its stand-in, its flag set, its `Q̄_ext` and ω its solid's to the bit and its `κ_ext` at the
-    /// liquid's density. No other phase or variant takes a stand-in.
+    /// its stand-in, its flag set, on spheres: its `Q̄_ext` and ω its file's spheres' (its solid's
+    /// to the bit where those are the solid's own, aluminium oxide's sphere fallback) and its
+    /// `κ_ext` at the liquid's density. No other phase or variant takes a stand-in.
     #[test]
     fn substance_aerosol_the_molten_decks_resolve_through_their_stand_ins_from_25() {
         let mode = log_normal(2e-6, 0.2);
@@ -1709,19 +1777,40 @@ mod tests {
             });
             let of_solid = resolve(key, solid, FileVariant::Substance, t).unwrap();
             assert!(optics.is_stand_in(), "{key}");
+            assert_eq!(optics.extinction_basis(), ExtinctionBasis::Sphere, "{key}");
+            let spheres = liquid_stand_in_entries().find(|e| e.key() == key).unwrap();
+            let radius = mode.effective_radius().value();
+            let variance = mode.effective_variance();
+            let variances = &condensate_extinction::LOG_NORMAL_EFFECTIVE_VARIANCES;
+            let of_spheres =
+                |rows, space| interpolate(rows, variances, radius, variance, space).unwrap();
             assert_same_bits(
                 optics.extinction_efficiency(),
-                of_solid.extinction_efficiency(),
+                of_spheres(spheres.log_normal_extinction, GridSpace::Logarithmic),
             );
-            assert_same_bits(
-                optics.single_scattering_albedo(),
-                of_solid.single_scattering_albedo(),
-            );
-            assert_eq!(optics.extinction_basis(), of_solid.extinction_basis());
+            let ln_albedo = of_spheres(spheres.log_normal_ln_albedo, GridSpace::Linear);
+            let albedo = if ln_albedo >= 0.0 {
+                1.0
+            } else {
+                math::exp(ln_albedo)
+            };
+            assert_same_bits(optics.single_scattering_albedo(), albedo);
+            if of_solid.extinction_basis() == ExtinctionBasis::SphereFallback {
+                assert_same_bits(
+                    optics.extinction_efficiency(),
+                    of_solid.extinction_efficiency(),
+                );
+                assert_same_bits(
+                    optics.single_scattering_albedo(),
+                    of_solid.single_scattering_albedo(),
+                );
+            }
             let kappa = optics.mass_extinction_m2_per_kg();
             assert!(kappa.is_finite() && kappa > 0.0, "{key}: {kappa}");
             assert!(
-                (kappa / of_solid.mass_extinction_m2_per_kg() * melt.value() / crystal.value()
+                (kappa / optics.extinction_efficiency() * melt.value()
+                    / (of_solid.mass_extinction_m2_per_kg() / of_solid.extinction_efficiency()
+                        * crystal.value())
                     - 1.0)
                     .abs()
                     < 1e-12,
@@ -1799,5 +1888,63 @@ mod tests {
             }
         }
         assert_eq!(compared, 49 * 4);
+    }
+
+    /// `substance/aerosol_molten_decks.golden` pins, by their bits under 25's molten decks'
+    /// rules (P14.T49.p), each liquid stand-in's optics on its spheres, at its deck's temperature
+    /// (`MOLTEN`), with its basis and flag: at the off-node points of `tests/aerosol_golden.rs`,
+    /// near each family's lower corner, inside a cell and near its upper corner. The integration
+    /// golden cannot reach the tests' switch, so these are first pinned here, ahead of the bump.
+    #[test]
+    fn substance_aerosol_the_molten_decks_optics_are_pinned() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+        let points = [
+            ("gamma", gamma(1.05e-9, 0.0415)),
+            ("gamma", gamma(3.7e-7, 0.137)),
+            ("gamma", gamma(9.9e-5, 0.44)),
+            ("log-normal", log_normal(1.05e-9, 0.0415)),
+            ("log-normal", log_normal(3.7e-7, 0.137)),
+            ("log-normal", log_normal(3.2e-5, 0.64)),
+        ];
+        let mut w = GoldenWriter::new();
+        w.header(GENERATOR_VERSION.get());
+        with_molten_decks(MoltenDecksRules::Molten, || {
+            for (key, t) in MOLTEN {
+                for (family, mode) in &points {
+                    let label = format!(
+                        "{key} liquid at {t} K {family} r_eff {:e} m v_eff {}",
+                        mode.effective_radius().value(),
+                        mode.effective_variance()
+                    );
+                    let optics = aerosol_optics(
+                        id(key),
+                        CondensedPhase::Liquid,
+                        FileVariant::Substance,
+                        mode,
+                        Kelvin::new(t),
+                    )
+                    .unwrap_or_else(|e| panic!("{label}: {e}"));
+                    w.line(&format!(
+                        "{label}: basis {}, stand-in {}",
+                        optics.extinction_basis().name(),
+                        optics.is_stand_in()
+                    ));
+                    w.f64(
+                        &format!("{label}: mass_extinction_m2_per_kg"),
+                        optics.mass_extinction_m2_per_kg(),
+                    );
+                    w.f64(
+                        &format!("{label}: extinction_efficiency"),
+                        optics.extinction_efficiency(),
+                    );
+                    w.f64(
+                        &format!("{label}: single_scattering_albedo"),
+                        optics.single_scattering_albedo(),
+                    );
+                }
+            }
+        });
+        golden!("substance/aerosol_molten_decks", w.as_str());
     }
 }

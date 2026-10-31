@@ -138,7 +138,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 51] = [
+pub static REGISTRY: [&dyn FitTask; 52] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -155,6 +155,7 @@ pub static REGISTRY: [&dyn FitTask; 51] = [
     &tasks::condensate_extinction::TASK_5,
     &tasks::condensate_extinction::TASK_6,
     &tasks::condensate_extinction::TASK_7,
+    &tasks::condensate_extinction::TASK_8,
     &tasks::displaced_forms::DisplacedFormsTask,
     &tasks::equipartition::EquipartitionTask,
     &tasks::giant_cooling::GiantCoolingTask,
@@ -288,6 +289,7 @@ mod tests {
                 "condensate_extinction_5",
                 "condensate_extinction_6",
                 "condensate_extinction_7",
+                "condensate_extinction_8",
                 "displaced_forms",
                 "equipartition",
                 "giant_cooling",

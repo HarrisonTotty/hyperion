@@ -193,6 +193,18 @@ provisional = false
 acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 4, by the sphere fallback 2); the half-step check: `Q̄_ext` within 5.42e-4 (titanium-dioxide.json) and ω within 7.16e-4 (tholin.json) of the direct values, against 1e-3; 1 − ω within 8.23e-2"
 
 [[table]]
+name = "condensate_extinction_8"
+path = "condensate_extinction_8.rs"
+task = "condensate_extinction_8"
+revision = 0
+inputs_sha256 = "b9f933fd0d454d5091e7fa5f8ba467ff7b4ffad18d164d0279e1a9d3d7a6454e"
+body_sha256 = "673af05854783974a962106b27aefd8e1f0ca86a3d8f93d1ed853d9c99b98cfd"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 0, by spheres 7, by the sphere fallback 0); the half-step check: `Q̄_ext` within 5.09e-4 (calcium-titanate.json) and ω within 7.15e-4 (iron.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
+
+[[table]]
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"

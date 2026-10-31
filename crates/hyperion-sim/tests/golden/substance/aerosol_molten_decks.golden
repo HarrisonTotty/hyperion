@@ -1,0 +1,169 @@
+# generator_version = 24
+Fe liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Fe liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x408ab49ffb49a3be  # 854.5781160119147
+Fe liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f80cefda517aa54  # 0.00820730362007286
+Fe liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ee1ae89cc56aa7e  # 8.431334559263036e-6
+Fe liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Fe liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40893ca63f45c1aa  # 807.5811753701903
+Fe liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4005dd488d58e279  # 2.7330485384703107
+Fe liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fe5659e6a6d6890  # 0.6686546400699331
+Fe liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+Fe liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4001f31f77eea06c  # 2.2437123651216577
+Fe liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x400040f1658ebba5  # 2.0317104276832247
+Fe liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe8116f17d06cba  # 0.7521281685943884
+Fe liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Fe liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x408ab4a28c18cff1  # 854.5793687761744
+Fe liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f80ceff427d727e  # 0.0082073156515261
+Fe liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ee1cdc6bb2b87c9  # 8.48951990434559e-6
+Fe liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Fe liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x408939429b31d00d  # 807.1575225726716
+Fe liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4005da58dba6f196  # 2.7316147957155392
+Fe liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fe56b5c7641e1cc  # 0.6693556127275371
+Fe liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+Fe liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x401c43c1629d4027  # 7.066167393539252
+Fe liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x40008bae7021a7d0  # 2.0682038078566407
+Fe liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe7ebbdc0307a68  # 0.747527003640994
+KCl liquid at 1200 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+KCl liquid at 1200 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f6812bdefcedd07  # 0.002938624353614142
+KCl liquid at 1200 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e3960853c8b143e  # 5.908550933842982e-9
+KCl liquid at 1200 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+KCl liquid at 1200 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+KCl liquid at 1200 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b23cde8266f527  # 4668.869177279331
+KCl liquid at 1200 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400a76b6e40901c0  # 3.3079660239456814
+KCl liquid at 1200 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+KCl liquid at 1200 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+KCl liquid at 1200 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x40255be4964cea76  # 10.679478356255668
+KCl liquid at 1200 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x40003251dfe1cfd1  # 2.0245702257907188
+KCl liquid at 1200 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+KCl liquid at 1200 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+KCl liquid at 1200 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f6839588e5af6fa  # 0.0029570321665620654
+KCl liquid at 1200 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e3989371b05e7b1  # 5.94556263976235e-9
+KCl liquid at 1200 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+KCl liquid at 1200 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+KCl liquid at 1200 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b29c73d45a2d8b  # 4764.452458988303
+KCl liquid at 1200 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400b0168d857e49e  # 3.3756882573912455
+KCl liquid at 1200 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+KCl liquid at 1200 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+KCl liquid at 1200 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x4040bc4903dc90a1  # 33.470978243539555
+KCl liquid at 1200 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x400068738434e717  # 2.0510015801090833
+KCl liquid at 1200 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Na2S liquid at 1600 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Na2S liquid at 1600 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x405f357d24005e7e  # 124.83576297794386
+Na2S liquid at 1600 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f31b72a17a1f3ec  # 0.0002703168644371801
+Na2S liquid at 1600 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f0a15503f629e00  # 4.9749862158162544e-5
+Na2S liquid at 1600 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Na2S liquid at 1600 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40ae9f226fc5e8fd  # 3919.567259010974
+Na2S liquid at 1600 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4007ed1ec920a78c  # 2.990781375226055
+Na2S liquid at 1600 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fec1d539b7d80c0  # 0.878579906169783
+Na2S liquid at 1600 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+Na2S liquid at 1600 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4023d50bbbc96e31  # 9.91610514482372
+Na2S liquid at 1600 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x4000323543d0564e  # 2.0245156572298475
+Na2S liquid at 1600 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe23b9d17fbf68a  # 0.5697770565454487
+Na2S liquid at 1600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Na2S liquid at 1600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x405f35815eee66c4  # 124.83602116853132
+Na2S liquid at 1600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f31b72c7e593082  # 0.0002703174235179144
+Na2S liquid at 1600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f0a3f8f7c66dee2  # 5.006462702133813e-5
+Na2S liquid at 1600 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Na2S liquid at 1600 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40af126802f80f44  # 3977.203147651542
+Na2S liquid at 1600 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x40084730239dc5f6  # 3.034759786846503
+Na2S liquid at 1600 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fec2914def3bb17  # 0.8800148348362623
+Na2S liquid at 1600 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+Na2S liquid at 1600 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x403f127ff0a911af  # 31.072264710690146
+Na2S liquid at 1600 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x400067802faf94d0  # 2.0505374646623764
+Na2S liquid at 1600 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe23394e9beabd9  # 0.56879659322055
+MgSiO3 liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3fc231b1e9b3211a  # 0.14214157019728973
+MgSiO3 liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ea0eae3949d7243  # 5.041818351525946e-7
+MgSiO3 liquid at 2000 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f8f28bf1e9d1cef  # 0.015214436647183109
+MgSiO3 liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a4b6ff5391dd08  # 2651.4986844618143
+MgSiO3 liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400a8358233edfb1  # 3.3141329530298766
+MgSiO3 liquid at 2000 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feffeaabef58448  # 0.9998372773808422
+MgSiO3 liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x401836f0d5441bcf  # 6.053653080255528
+MgSiO3 liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x40003249b92d4b9b  # 2.0245546786258735
+MgSiO3 liquid at 2000 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3feeae38b8cf933d  # 0.9587672814928748
+MgSiO3 liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3fc23222f1ef90f1  # 0.1421550446822333
+MgSiO3 liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ea0eb4cae8c2552  # 5.042296296896688e-7
+MgSiO3 liquid at 2000 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f8f5a54ac4d7519  # 0.015309010990387993
+MgSiO3 liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a554dbcf166f4d  # 2730.429314328276
+MgSiO3 liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400b4d645cfeeb88  # 3.412789083985846
+MgSiO3 liquid at 2000 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feffeb49f252e5d  # 0.9998419864945834
+MgSiO3 liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+MgSiO3 liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x4032f8a64bf562bb  # 18.971287486466036
+MgSiO3 liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x4000680a7a83ef5c  # 2.0508012362969747
+MgSiO3 liquid at 2000 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fef8b161253bafd  # 0.9857282979918122
+Mg2SiO4 liquid at 2300 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3ff3548503a35177  # 1.2081346647365458
+Mg2SiO4 liquid at 2300 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ed25d80c52a50cc  # 4.3786158864420395e-6
+Mg2SiO4 liquid at 2300 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f6011b4cdbcaf12  # 0.0019615680047503437
+Mg2SiO4 liquid at 2300 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a408aafd365434  # 2564.3339631059443
+Mg2SiO4 liquid at 2300 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400a3328293185dc  # 3.2749789446104227
+Mg2SiO4 liquid at 2300 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feff322db759832  # 0.9984297071757793
+Mg2SiO4 liquid at 2300 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4017b2d5598c2163  # 5.924641989877588
+Mg2SiO4 liquid at 2300 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x40003249b92d4b9b  # 2.0245546786258735
+Mg2SiO4 liquid at 2300 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe890318cd2588c  # 0.7676017523215406
+Mg2SiO4 liquid at 2300 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3ff354934a01b365  # 1.2081482783207431
+Mg2SiO4 liquid at 2300 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ed25d8e551e2d26  # 4.378665225855747e-6
+Mg2SiO4 liquid at 2300 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f602b630d2cb23a  # 0.0019738134955302996
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a4ab3f48483f3e  # 2645.623598344536
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400b07c63f334a4a  # 3.3787960946586155
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feff388f5f7e2de  # 0.9984783939426867
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x403291397265929b  # 18.5672828195553
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x4000681bb86b5754  # 2.0508341224439537
+Mg2SiO4 liquid at 2300 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3feca4efbcaad606  # 0.8951338467510943
+Al2O3 liquid at 2500 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Al2O3 liquid at 2500 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f686bf517189398  # 0.0029811655920348283
+Al2O3 liquid at 2500 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e49da4321238928  # 1.2038548856086228e-8
+Al2O3 liquid at 2500 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 liquid at 2500 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Al2O3 liquid at 2500 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a0e042fd589388  # 2160.1308391265957
+Al2O3 liquid at 2500 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x40089736b1c8e3f0  # 3.073834790175617
+Al2O3 liquid at 2500 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 liquid at 2500 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+Al2O3 liquid at 2500 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x401544d691b70475  # 5.317224766536232
+Al2O3 liquid at 2500 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x4000322fec2f5a2a  # 2.0245054676008936
+Al2O3 liquid at 2500 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 liquid at 2500 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+Al2O3 liquid at 2500 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f689312c5e04e31  # 0.0029998175296073394
+Al2O3 liquid at 2500 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e4a03ab84a2f8c2  # 1.2113869147695418e-8
+Al2O3 liquid at 2500 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 liquid at 2500 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+Al2O3 liquid at 2500 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40a143fd0651d17d  # 2209.994188839743
+Al2O3 liquid at 2500 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4009288774c76c36  # 3.1447896121367434
+Al2O3 liquid at 2500 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 liquid at 2500 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+Al2O3 liquid at 2500 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x4030a97f33c05ed3  # 16.662097200837547
+Al2O3 liquid at 2500 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x4000679a9bfa8ab4  # 2.050587862571172
+Al2O3 liquid at 2500 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+CaTiO3 liquid at 2600 K gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x4016b91dcb1be3ca  # 5.680777715279826
+CaTiO3 liquid at 2600 K gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ef710570a18c869  # 2.1995380512681096e-5
+CaTiO3 liquid at 2600 K gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f529478b3bbf107  # 0.0011340311747850011
+CaTiO3 liquid at 2600 K gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x409f5d404412c1a6  # 2007.3127596789068
+CaTiO3 liquid at 2600 K gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4005e8f1abbe0ff1  # 2.73874220060133
+CaTiO3 liquid at 2600 K gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fef2cb59f8cc901  # 0.9742076984605604
+CaTiO3 liquid at 2600 K gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x40162e661d193c73  # 5.5453114077237045
+CaTiO3 liquid at 2600 K gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x400031f6a5f54d85  # 2.024396225498722
+CaTiO3 liquid at 2600 K gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe3a028ade23713  # 0.6133006473698707
+CaTiO3 liquid at 2600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x4016b91c440a3f34  # 5.680771887898846
+CaTiO3 liquid at 2600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ef710557d2a0164  # 2.199535794966799e-5
+CaTiO3 liquid at 2600 K log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f52b229f0f43353  # 0.0011411103803908487
+CaTiO3 liquid at 2600 K log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x409eea94f4bd542b  # 1978.6454648573515
+CaTiO3 liquid at 2600 K log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400598d71d4710ef  # 2.699629048091189
+CaTiO3 liquid at 2600 K log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fef27817870559d  # 0.9735724785156666
+CaTiO3 liquid at 2600 K log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+CaTiO3 liquid at 2600 K log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x40315f6cc07453e9  # 17.372753170395217
+CaTiO3 liquid at 2600 K log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x400066644c8b8b34  # 2.0499959926686646
+CaTiO3 liquid at 2600 K log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe551b05ea51e9e  # 0.666221794942391

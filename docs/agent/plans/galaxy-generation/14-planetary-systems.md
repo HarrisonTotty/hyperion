@@ -32997,3 +32997,16 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   `under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide` carries
   `should_panic(expected = "Mars's CO2 at")`, so `just test-slow` passes while the miss stands
   (0.22 bar, the same under every 25 and 26 hold); the Mars cure's task drops it.
+- **P14.T49.p's sphere entries, as built (2026-10-30; research-r08-t16a answer 4).** Under
+  `MOLTEN_DECKS_VERSION`'s `Molten` arm each liquid stand-in reads its own entry, its file's Mie
+  spheres under the liquid (basis `Sphere`, flagged), as the client's `modeShape` draws a liquid:
+  the new fit part `condensate_extinction_8` (`PartKind::LiquidStandIns`, `fit_liquid_stand_in`;
+  revision 0, fast), read by `substance::aerosol::liquid_stand_in_entries`. This supersedes the
+  record above's "six of the seven droplets read the hexahedra" and "no `condensate_extinction_8`".
+  - All seven stand-ins take one, Al₂O₃'s too: its grids are its solid's sphere fallback to the
+    bit, and its molten modes' basis reads `Sphere` (lean, 2026-10-30).
+  - The table is a first emission `--since 24` (the tool refuses a `--since` ahead of
+    `GENERATOR_VERSION`); 25's bump restamps it `--since 25` by the new-table path (the tripwire's
+    list says so). No other table moves.
+  - A new golden, `substance/aerosol_molten_decks` (header 24, written under `Molten`), pins the
+    seven stand-ins' optics; 25's bless restamps it.

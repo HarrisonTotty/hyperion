@@ -1,6 +1,6 @@
 //! The committed aerosol-extinction tables are exactly what `run condensate_extinction --since
-//! <current>` and its six other parts would write (plan 14, P14.T49.e; plan 15, P15.T2), from
-//! rendering plan R08's material files as they stand.
+//! <current>` and its seven other parts would write (plan 14, P14.T49.e and P14.T49.p; plan 15,
+//! P15.T2), from rendering plan R08's material files as they stand.
 //!
 //! CI runs this, so a material file whose n or k changed without a rerun, or a table edited by
 //! hand, fails it.
@@ -15,7 +15,7 @@ use hyperion_fit::task::{find, registry};
 use hyperion_sim::GENERATOR_VERSION;
 
 /// The tables the sim compiles, as committed, by task.
-const COMMITTED: [(&str, &str); 7] = [
+const COMMITTED: [(&str, &str); 8] = [
     (
         "condensate_extinction",
         include_str!("../../hyperion-sim/src/tables/condensate_extinction.rs"),
@@ -43,6 +43,10 @@ const COMMITTED: [(&str, &str); 7] = [
     (
         "condensate_extinction_7",
         include_str!("../../hyperion-sim/src/tables/condensate_extinction_7.rs"),
+    ),
+    (
+        "condensate_extinction_8",
+        include_str!("../../hyperion-sim/src/tables/condensate_extinction_8.rs"),
     ),
 ];
 
@@ -100,4 +104,9 @@ fn condensate_extinction_6_table_is_reproduced() {
 #[test]
 fn condensate_extinction_7_table_is_reproduced() {
     assert_reproduced(COMMITTED[6].0, COMMITTED[6].1);
+}
+
+#[test]
+fn condensate_extinction_8_table_is_reproduced() {
+    assert_reproduced(COMMITTED[7].0, COMMITTED[7].1);
 }

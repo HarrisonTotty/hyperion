@@ -36,7 +36,7 @@ pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
-// The seven `condensate_extinction` tables are written whole by `hyperion-fit`, so their one lint
+// The eight `condensate_extinction` tables are written whole by `hyperion-fit`, so their one lint
 // allowance is on their modules.
 #[allow(
     clippy::approx_constant,
@@ -73,6 +73,11 @@ pub mod condensate_extinction_6;
     reason = "fitted values that may land near a constant are data"
 )]
 pub mod condensate_extinction_7;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_8;
 pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
@@ -214,6 +219,12 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "condensate_extinction_7",
+        revision: 0,
+        since_generator_version: 24,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_8",
         revision: 0,
         since_generator_version: 24,
         provisional: false,
