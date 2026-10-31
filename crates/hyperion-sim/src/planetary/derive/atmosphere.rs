@@ -77,7 +77,8 @@ pub use escaping::{
 };
 #[cfg(test)]
 pub(crate) use escaping::{
-    Thermostat, ThermostatCounts, WaterPhase, water_phase, with_resolve_check, with_thermostat,
+    MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, water_phase, with_melt_oxygen,
+    with_resolve_check, with_thermostat,
 };
 pub(crate) use present::{
     PresentClimate, PresentFigures, present_state_in_force, published_ice_cover, state_to_carry,

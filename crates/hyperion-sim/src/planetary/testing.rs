@@ -492,13 +492,17 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the substellar deck of a world locked 1:1, `LOCKED_CLIMATE_VERSION` (P14.T24.j), at
 ///   `LockedClimateRules::Deck` through `with_locked_climate`: its column's deck albedo and locked
 ///   greenhouse over open water, which its record and its passes' steps read.
+/// - a molten body's surface on its published air, `MELT_OXYGEN_VERSION` (P14.T53.g), at
+///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
 /// here; 26's bump deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::atmosphere::{MeltOxygenRules, with_melt_oxygen};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
+    let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use super::audit_tests::{AuditCase, AuditSet, audit_walk};
 use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
+use crate::planetary::derive::atmosphere::{MeltOxygenRules, with_melt_oxygen};
 use crate::planetary::hooks::surface::deck;
 use crate::planetary::hooks::surface::regime::Forcing;
 use crate::planetary::testing::{with_every_25_hold, with_every_26_hold};
@@ -19,6 +20,12 @@ const DOMAIN_SYSTEMS: [usize; 3] = [243, 363, 187];
 /// The sample systems whose bodies the deck moves (the census, 2026-10-30): the pilot's three, and
 /// s59 and s102, whose published passes list no liquid water but whose earlier passes did.
 const MOVED_SYSTEMS: [usize; 5] = [59, 102, 187, 243, 363];
+
+/// `run`'s result under every 26 hold but P14.T53.g's, which this census leaves held: the deck
+/// alone against every 25 hold.
+fn deck_alone<R>(run: impl FnOnce() -> R) -> R {
+    with_every_26_hold(|| with_melt_oxygen(MeltOxygenRules::Held, run))
+}
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census of some 6,000 bodies keeps no
 /// record.
@@ -195,8 +202,8 @@ fn moved_between(a: &[CensusBody], b: &[CensusBody]) -> Vec<String> {
 #[test]
 fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
     let held = with_every_25_hold(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
-    let deck = with_every_26_hold(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
-    let again = with_every_26_hold(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
+    let deck = deck_alone(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
+    let again = deck_alone(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
     assert_eq!(
         moved_between(&deck, &again),
         Vec::<String>::new(),
@@ -240,9 +247,9 @@ fn under_every_26_hold_only_the_locked_worlds_under_their_deck_move_over_the_400
     let held = with_every_25_hold(census);
     let walk_held = start.elapsed();
     let start = Instant::now();
-    let deck = with_every_26_hold(census);
+    let deck = deck_alone(census);
     let walk_deck = start.elapsed();
-    let again = with_every_26_hold(census);
+    let again = deck_alone(census);
     assert_eq!(
         moved_between(&deck, &again),
         Vec::<String>::new(),

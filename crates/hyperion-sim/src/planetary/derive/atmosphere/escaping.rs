@@ -83,14 +83,15 @@ use crate::units::{
     Kelvin, Kilograms, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
-    EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
-    PartialPressures, PassSurface, PresentClimate, PublishedState, Retention, RunawayDeck,
-    SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState, TEMPERATE_AIRBORNE_CARBON,
-    earth_xuv_fluence, exobase_temperature, mole_fraction_of, partitioned_greenhouse,
-    present_state_in_force, retained, steam_envelope_in_force, surface_mix,
+    EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, GreenhouseConstants, IceHeld,
+    Insolation, PartialPressures, PassSurface, PresentClimate, PublishedState, Retention,
+    RunawayDeck, SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState,
+    TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
+    partitioned_greenhouse, present_state_in_force, retained, steam_envelope_in_force, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1989,6 +1990,90 @@ fn carbon_monoxide(
     }
 }
 
+/// The generator version from which a molten body whose melt takes its O₂ publishes its published
+/// air's own surface (P14.T53.g; decision-p14-t53a-thick-co2 §11.2's ruled follow-up): 26, the
+/// planetary bump after 25's, whose list it missed.
+///
+/// It is P14.T53.g's one hold. Below it [`MeltOxygenRules::in_force`] is [`MeltOxygenRules::Held`]:
+/// such a body publishes the `T_s` and τ its greenhouse solved with the O₂ in the column, and every
+/// figure is version 24's and 25's bit for bit. 26's bump deletes this hold, [`MeltOxygenRules`]
+/// with its `Held` arm, the tests' switch and its tripwire
+/// (`the_melt_oxygen_is_held_only_until_the_26_bump`).
+pub(crate) const MELT_OXYGEN_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether P14.T53.g's surface on the published air is in force (its hold,
+/// [`MELT_OXYGEN_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MeltOxygenRules {
+    /// Version 25's and before: the solve's `T_s` and τ, its column's O₂ included.
+    Held,
+    /// Version 26's: the published air's own `T_s` and τ, at least the solidus
+    /// ([`published_air_surface`]).
+    Published,
+}
+
+impl MeltOxygenRules {
+    /// The rules this generator version gives: the published air's from [`MELT_OXYGEN_VERSION`],
+    /// the solve's below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_melt_oxygen`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = MELT_OXYGEN_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= MELT_OXYGEN_VERSION {
+            Self::Published
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The melt's oxygen's rules a test sets on its thread, `None` for the version's.
+    static MELT_OXYGEN_RULES: core::cell::Cell<Option<MeltOxygenRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the melt's oxygen's rules `rules` on this thread, for the tests to reach
+/// P14.T53.g ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_melt_oxygen<R>(rules: MeltOxygenRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<MeltOxygenRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            MELT_OXYGEN_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(MELT_OXYGEN_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The surface temperature and optical depth of the body `body`'s published air, the partial
+/// pressures `partials` at surface gravity `gravity` (P14.T53.g): the grey surface over their τ from
+/// its base, under the thick-air closure and its ceiling as the greenhouse's steps take it
+/// ([`GreenhouseCeiling::surface_temperature`]), then held at its hottest host's
+/// ([`Body::saturate`]). It is one evaluation, with no new greenhouse steps: it is read on a molten
+/// body's air once its melt has taken the O₂, and a molten air has nothing to condense
+/// (decision-p14-t53a-thick-co2 §11.2).
+#[must_use]
+fn published_air_surface(
+    body: &Body<'_>,
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> (Kelvin, f64) {
+    let constants = GreenhouseConstants::in_force();
+    let tau = constants.optical_depth(partials, body.base, gravity);
+    let grey = body
+        .ceiling
+        .surface_temperature(&constants, (partials, tau), body.base, gravity);
+    (body.saturate(grey.value()), tau)
+}
+
 /// The atmosphere of the body `body` from the solve that stands, `solved`, in the state of its
 /// climate's division, whether that division stores no carbon for want of water (`dry`), at
 /// surface gravity `gravity`: its airborne gases counted to `ledger`, Gao et al.'s carbon monoxide
@@ -1997,7 +2082,10 @@ fn carbon_monoxide(
 /// (decision-t24i-airless-state D1.3). Otherwise it publishes the present class of a world inside
 /// the runaway limit at its hosts' peak alone, or in a hothouse's re-solve a runaway
 /// (`present_state`, P14.T53.b part 1 (a) and (c)), its water following the division's state
-/// ([`Atmosphere::water_state`]).
+/// ([`Atmosphere::water_state`]). A molten surface's melt takes the air's O₂, and from generator
+/// version 26 (P14.T53.g, behind its hold, [`MeltOxygenRules`]) such a body publishes its published
+/// air's own surface, at least the solidus, with that air's τ ([`published_air_surface`]); below it,
+/// the solve's, its column's O₂ included.
 #[must_use]
 fn finish(
     body: &Body<'_>,
@@ -2012,13 +2100,14 @@ fn finish(
         column,
         mut t,
         mut partials,
-        tau,
+        mut tau,
         ..
     } = *solved;
     let carrier = air.carrier;
     // The state, as before: a molten surface's melt holds the air's oxygen while it is molten.
     let molten = state == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value();
-    if molten && air.oxygen > 0.0 {
+    let melt_takes_oxygen = molten && air.oxygen > 0.0;
+    if melt_takes_oxygen {
         partials.0[Gas::Oxygen.index()] = Pascals::ZERO;
     }
     let kept_oxygen = match (body.retention.retains(Gas::Oxygen), molten) {
@@ -2055,6 +2144,11 @@ fn finish(
     let carrier = Some(carrier);
     let total = partials.total();
     let state = if molten {
+        // P14.T53.g, from 26: the surface of the air it publishes, its O₂ in the melt.
+        if melt_takes_oxygen && MeltOxygenRules::in_force() == MeltOxygenRules::Published {
+            let (surface, depth) = published_air_surface(body, &partials, gravity);
+            (t, tau) = (surface.value(), depth);
+        }
         t = t.max(SILICATE_SOLIDUS.value());
         SurfaceState::MagmaOcean
     } else if total < AIRLESS_PRESSURE {

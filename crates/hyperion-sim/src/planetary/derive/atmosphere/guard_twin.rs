@@ -15,12 +15,13 @@
 //! made here too. The 39 bodies' test, which finds each by name at all three times, fails if they
 //! drift apart.
 
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::lcg::Lcg;
 
 use super::{
-    Gas, GreenhouseCeiling, GreenhouseConstants, PASCALS_PER_BAR, SILICATE_SOLIDUS, SurfaceState,
-    THICK_AIR_ANCHOR_PRESSURE, VolatileDraws, grey_surface_temperature,
-    water_saturation_temperature, without_thick_air,
+    Gas, GreenhouseCeiling, GreenhouseConstants, MeltOxygenRules, PASCALS_PER_BAR,
+    SILICATE_SOLIDUS, SurfaceState, THICK_AIR_ANCHOR_PRESSURE, VolatileDraws,
+    grey_surface_temperature, water_saturation_temperature, with_melt_oxygen, without_thick_air,
 };
 use crate::Seed;
 use crate::coords::GalacticPosition;
@@ -40,6 +41,7 @@ use crate::planetary::placement::{
     HostPlacement, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs,
     ZoneHierarchy, ZoneStar, place, stable_zones,
 };
+use crate::planetary::testing::with_every_26_hold;
 use crate::stellar::Composition;
 use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
@@ -140,13 +142,18 @@ pub(crate) fn closure_jump_exempt(id: &str, before: &DerivedBody, after: &Derive
 /// greenhouse solve held O₂, which the melt takes only as the published air is finished
 /// (`escaping::finish`), each's published `T_s` against its published air's own surface: how many,
 /// how many differ by more than 1%, the largest difference, and how many of those airs lie under
-/// the silicate solidus, by name.
+/// the silicate solidus, by name; and for P14.T53.g, how many differ by more than 1% over an air at
+/// or above the solidus, and how many airs under it publish the solidus itself.
 #[derive(Debug, Default)]
 pub(crate) struct MeltOxygen {
     bodies: u32,
     above_one_percent: u32,
     largest: (f64, String),
     under_solidus: Vec<String>,
+    /// Those above 1% whose published air lies at or above the solidus: none under P14.T53.g.
+    off_their_air: u32,
+    /// Those whose published air lies under the solidus that publish it, to the bit.
+    at_solidus: u32,
 }
 
 impl MeltOxygen {
@@ -174,15 +181,19 @@ impl MeltOxygen {
             .value()
             .min(hottest.value());
         let t_s = air.surface_temperature().value();
+        let off = (t_s / published_air - 1.0).abs() > 0.01;
+        let under = published_air < SILICATE_SOLIDUS.value();
         self.bodies += 1;
-        self.above_one_percent += u32::from((t_s / published_air - 1.0).abs() > 0.01);
+        self.above_one_percent += u32::from(off);
+        self.off_their_air += u32::from(off && !under);
+        self.at_solidus += u32::from(under && t_s.total_cmp(&SILICATE_SOLIDUS.value()).is_eq());
         if (t_s - published_air).abs() > self.largest.0 {
             self.largest = (
                 (t_s - published_air).abs(),
                 format!("{id}: {t_s:.1} K against {published_air:.1} K"),
             );
         }
-        if published_air < SILICATE_SOLIDUS.value() {
+        if under {
             self.under_solidus.push(format!(
                 "{id}: {t_s:.1} K, its published air {published_air:.1} K"
             ));
@@ -193,13 +204,16 @@ impl MeltOxygen {
     pub(crate) fn line(&self) -> String {
         format!(
             "{} molten bodies with O₂ in their solve; {} differ by more than 1% from their \
-             published air's surface, the largest by {:.1} K ({}); {} whose published air lies \
-             under the solidus: [{}]",
+             published air's surface ({} over an air at or above the solidus), the largest by \
+             {:.1} K ({}); {} whose published air lies under the solidus ({} published at it): \
+             [{}]",
             self.bodies,
             self.above_one_percent,
+            self.off_their_air,
             self.largest.0,
             self.largest.1,
             self.under_solidus.len(),
+            self.at_solidus,
             self.under_solidus.join("; ")
         )
     }
@@ -690,24 +704,36 @@ fn guard(step: &str) -> (u32, f64, String, u32) {
 /// saturates at its host's effective temperature, where 117 of the 30,063 samples did before the
 /// closure; the largest `T_s` ÷ `T★` of an air is printed (the replica's 0.69). From the bump the
 /// integration test `planetary_properties::no_planet_hotter_than_its_star` is the guard itself,
-/// held to 10⁻³.
+/// held to 10⁻³. It holds under both arms of P14.T53.g's hold ([`MeltOxygenRules`]).
 #[test]
 #[ignore = "slow: the guard's 30,063 samples"]
 fn under_the_escape_batch_and_every_24_hold_no_planet_is_hotter_than_its_star() {
-    let (saturated, largest, at, samples) = guard("24");
-    eprintln!(
-        "the guard: {saturated} saturated of {samples}; the largest ratio {largest:.4} ({at})"
-    );
-    assert_eq!(saturated, 0);
+    for rules in [MeltOxygenRules::Held, MeltOxygenRules::Published] {
+        let (saturated, largest, at, samples) =
+            with_melt_oxygen(rules, || guard(&format!("24, the melt's O₂ {rules:?}")));
+        eprintln!(
+            "the guard ({rules:?}): {saturated} saturated of {samples}; the largest ratio \
+             {largest:.4} ({at})"
+        );
+        assert_eq!(saturated, 0);
+    }
 }
 
 /// The 39 bodies the escape's batch saturated ([`SATURATED_UNDER_THE_BATCH`]), each by name at
 /// all three times (decision-p14-t53a-thick-co2 §7.2): finite, under
 /// its star, its surface at least its top's grey temperature and at most its grey and its star.
 /// Each is stated (`T_s`, `p_s`, τ, `τ_a`, `T_a`, its crust's state, its deck, part 2's section and
-/// both limit ratios), with the count that stay molten against the replica's 13 ± 5.
+/// both limit ratios), with the count that stay molten against the replica's 13 ± 5. It holds under
+/// both arms of P14.T53.g's hold ([`MeltOxygenRules`]).
 #[test]
 fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_under_their_stars() {
+    for rules in [MeltOxygenRules::Held, MeltOxygenRules::Published] {
+        with_melt_oxygen(rules, || the_39_under(rules));
+    }
+}
+
+/// The 39's test under the arm `rules` of P14.T53.g's hold, which the calling thread sets.
+fn the_39_under(rules: MeltOxygenRules) {
     let named: std::collections::BTreeSet<String> = SATURATED_UNDER_THE_BATCH
         .iter()
         .map(|&(system, index)| format!("{system}.{index:04x}"))
@@ -725,7 +751,7 @@ fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_u
         let t_s = air.surface_temperature().value();
         let (grey, closure) = thick_air_figures(&body);
         eprintln!(
-            "{id} at {:+} yr, {:.1e} yr old: {}",
+            "{id} at {:+} yr, {:.1e} yr old ({rules:?}): {}",
             sample.years,
             sample.system.age.value(),
             body_line(&body, hottest)
@@ -757,9 +783,9 @@ fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_u
         *seen.entry(id).or_default() += 1;
     });
     eprintln!(
-        "the 39 at the epoch: {molten} MagmaOcean (the replica's 13 ± 5), {solid} solid, \
-         {sectioned} under a supercritical reservoir (part 2's section); the largest T_s ÷ T★ \
-         {largest:.4}"
+        "the 39 at the epoch ({rules:?}): {molten} MagmaOcean (the replica's 13 ± 5), {solid} \
+         solid, {sectioned} under a supercritical reservoir (part 2's section); the largest T_s ÷ \
+         T★ {largest:.4}"
     );
     assert_eq!(seen.len(), SATURATED_UNDER_THE_BATCH.len(), "{seen:?}");
     assert!(seen.values().all(|&n| n == 3), "{seen:?}");
@@ -925,5 +951,208 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
         Vec::<String>::new(),
         "TO MAIN: a new jump outside the closure's named nine, out of part 2's section or whose \
          state moved (decision-p14-t53a-thick-co2 §11.1)"
+    );
+}
+
+/// The `T_s` and τ of each of P14.T53.g's bodies by name at the epoch: under the hold with the
+/// version's rules, and inside 26's helper with the melt's hold set back (today's); under the new
+/// arm alone, and inside 26's helper
+/// (`the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm`).
+const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
+    (
+        "42002cb2000188e8.0100",
+        [
+            (2_565.374_824_337_405_7, 11_022.985_850_577_84),
+            (2_018.957_958_908_867_6, 10_861.918_420_525_659),
+            (1_832.413_503_151_926_8, 10_794.529_328_187_999),
+            (1_832.413_503_151_926_8, 10_794.529_328_187_999),
+        ],
+    ),
+    (
+        "42002cb200049423.0100",
+        [
+            (1_470.981_663_731_903_4, 26_836.684_627_488_543),
+            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
+            (1_394.0, 26_724.800_249_524_895),
+            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
+        ],
+    ),
+    (
+        "42002cb20001885b.0100",
+        [
+            (1_716.973_605_052_254_5, 3_229.786_323_044_295),
+            (1_428.081_981_432_391_3, 3_220.335_346_626_598),
+            (1_394.0, 2_977.650_050_331_51),
+            (1_394.0, 3_166.681_417_939_504_6),
+        ],
+    ),
+];
+
+/// P14.T53.g's bodies by name at the epoch (decision-p14-t53a-thick-co2 §11.2), each derived twice
+/// under each rule (D4), and each's `T_s` and τ pinned to the bit under the hold and under the new
+/// arm, with the version's other rules and inside 26's helper.
+///
+/// - 42002cb2000188e8.0100 publishes its published air's surface, within 1% of the ruling's
+///   1,832 K, under the new arm alone and under `with_every_26_hold`, `MagmaOcean`.
+/// - 42002cb200049423.0100, whose published air gives 1,308 K, publishes the solidus, 1,394 K, under
+///   the new arm alone, `MagmaOcean`. It is not molten under `with_every_26_hold`: P14.T53.b part
+///   3's steam (25) leaves it a solid `RunawayGreenhouse` at 1,202.5 K, which the rule does not
+///   reach, so it is the held arm's body to the bit there (recorded, for main).
+/// - 42002cb20001885b.0100, of the same class, publishes the solidus under both, `MagmaOcean`: under
+///   `with_every_26_hold` its published air gives 1,273.7 K (count (xvii)'s largest there).
+/// - Under the hold, with the version's rules and inside 26's helper alike, each publishes today's
+///   `T_s` and τ, its solve's, its column's O₂ included.
+#[test]
+fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm() {
+    let mut derived = Vec::new();
+    guard_walk(&mut |sample| {
+        let id = sample.id();
+        if sample.years != 0 || !MOLTEN_BY_NAME.iter().any(|&(name, _)| name == id) {
+            return;
+        }
+        let derive = || {
+            let (body, hottest) = sample.derive().expect("each is derived at the epoch");
+            assert_eq!(sample.derive().expect("twice"), (body, hottest), "{id}: D4");
+            (body, hottest)
+        };
+        let bodies = vec![
+            derive(),
+            with_every_26_hold(|| with_melt_oxygen(MeltOxygenRules::Held, derive)),
+            with_melt_oxygen(MeltOxygenRules::Published, derive),
+            with_every_26_hold(derive),
+        ];
+        derived.push((id, bodies));
+    });
+    assert_eq!(derived.len(), MOLTEN_BY_NAME.len());
+    for (id, bodies) in &derived {
+        for ((body, hottest), rule) in bodies.iter().zip([
+            "the hold",
+            "every 26 hold, the melt's held",
+            "the new arm alone",
+            "every 26 hold",
+        ]) {
+            let air = body.atmosphere();
+            eprintln!(
+                "{id} under {rule}: T_s {:?} K, τ {:?}; {}",
+                air.surface_temperature().value(),
+                air.optical_depth(),
+                body_line(body, *hottest)
+            );
+        }
+    }
+    for (id, bodies) in &derived {
+        let (_, pinned) = MOLTEN_BY_NAME
+            .iter()
+            .find(|(name, _)| name == id)
+            .expect("each is named");
+        for ((body, _), &(t_s, tau)) in bodies.iter().zip(pinned) {
+            assert_same_bits(body.atmosphere().surface_temperature().value(), t_s);
+            assert_same_bits(body.atmosphere().optical_depth(), tau);
+        }
+        let [_, held_26, alone, every_26] = bodies.as_slice() else {
+            unreachable!("four derivations of each");
+        };
+        let state = |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().state();
+        let t_s =
+            |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().surface_temperature().value();
+        assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
+        match id.as_str() {
+            "42002cb2000188e8.0100" => {
+                assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
+                for body in [alone, every_26] {
+                    assert!(
+                        (t_s(body) / 1_832.0 - 1.0).abs() < 0.01,
+                        "{id}: {} K",
+                        t_s(body)
+                    );
+                }
+            }
+            "42002cb200049423.0100" => {
+                assert_same_bits(t_s(alone), SILICATE_SOLIDUS.value());
+                assert_eq!(state(every_26), SurfaceState::RunawayGreenhouse, "{id}");
+                assert_eq!(every_26, held_26, "{id}: the rule reaches no solid body");
+            }
+            _ => {
+                assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
+                for body in [alone, every_26] {
+                    assert_same_bits(t_s(body), SILICATE_SOLIDUS.value());
+                }
+            }
+        }
+    }
+}
+
+/// Count (xvii) under P14.T53.g (decision-p14-t53a-thick-co2 §11.2), over the guard's samples,
+/// each derived under `with_every_26_hold` and again with the melt's hold set back: under the new
+/// arm no molten body differs from its published air's surface by more than 1% but those whose air
+/// lies under the solidus, each of which publishes the solidus; both counts are printed. No sample
+/// changes its state between the arms, so every counted body is `MagmaOcean` under both, and every
+/// sample that moves is a counted one; anything else goes to main.
+#[test]
+#[ignore = "slow: the guard's 30,063 samples, each derived under both arms of P14.T53.g's hold"]
+fn under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air() {
+    let (mut held, mut published) = (MeltOxygen::default(), MeltOxygen::default());
+    let (mut samples, mut movers, mut to_main) = (0_u32, 0_u32, Vec::new());
+    guard_walk(&mut |sample| {
+        let id = format!("{} at {:+} yr", sample.id(), sample.years);
+        let derived = with_every_26_hold(|| {
+            (
+                sample.derive(),
+                with_melt_oxygen(MeltOxygenRules::Held, || sample.derive()),
+            )
+        });
+        let ((after, hottest), (before, _)) = match derived {
+            (Some(after), Some(before)) => (after, before),
+            (None, None) => return,
+            (after, before) => {
+                to_main.push(format!(
+                    "{id} derives under one arm alone: published {}, held {}",
+                    after.is_some(),
+                    before.is_some()
+                ));
+                return;
+            }
+        };
+        samples += 1;
+        published.add(&id, &after, hottest);
+        held.add(&id, &before, hottest);
+        let (a, b) = (after.atmosphere(), before.atmosphere());
+        if a.state() != b.state() {
+            to_main.push(format!("{id}: {:?} → {:?}", b.state(), a.state()));
+        }
+        if after == before {
+            return;
+        }
+        movers += 1;
+        eprintln!(
+            "MOVER {id}\n  held      {}\n  published {}",
+            body_line(&before, hottest),
+            body_line(&after, hottest)
+        );
+        if b.state() != SurfaceState::MagmaOcean
+            || b.inventory_weights().of(Gas::Oxygen).value() <= 0.0
+        {
+            to_main.push(format!(
+                "{id} moves, not a molten body with O₂ in its solve"
+            ));
+        }
+    });
+    eprintln!("{movers} of {samples} samples move under P14.T53.g");
+    eprintln!("COUNT (xvii) held: {}", held.line());
+    eprintln!("COUNT (xvii) published: {}", published.line());
+    assert_eq!(
+        to_main,
+        Vec::<String>::new(),
+        "TO MAIN: a state change, a sample derived under one arm alone, or a mover that is not \
+         count (xvii)'s"
+    );
+    assert!(published.bodies > 200, "{}", published.line());
+    assert_eq!(published.bodies, held.bodies);
+    assert_eq!(published.off_their_air, 0);
+    assert_eq!(
+        published.at_solidus,
+        u32::try_from(published.under_solidus.len()).expect("a count of samples"),
+        "{}",
+        published.line()
     );
 }

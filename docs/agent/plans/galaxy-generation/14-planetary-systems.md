@@ -8221,6 +8221,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     name, the slow ones with `-- --ignored`.
   - _For 26's bump:_ re-bless `planetary/systems` and every golden whose record holds a counted
     body (the records list them).
+  - _Built_ 2026-10-30, held at 26 (`MELT_OXYGEN_VERSION`): Risks, "Deviations in P14.T53.g, as
+    built".
 
 #### P14.T54 The composition batches on the record
 
@@ -32973,3 +32975,21 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 25's bump: delete the hold, the switch and the tripwire; keep `Halvings` as a
     `#[cfg(test)]` oracle; read `MOST_SECANT_PASSES` where `MOST_PASSES` bounds a body's passes;
     re-run the measurement.
+- **Deviations in P14.T53.g, as built (2026-10-30).** Held at 26: `escaping::MELT_OXYGEN_VERSION`,
+  `MeltOxygenRules::{Held, Published}`, the tests' `with_melt_oxygen` (a line in
+  `with_every_26_hold`) and the tripwire `the_melt_oxygen_is_held_only_until_the_26_bump`; nothing
+  moves at 24 or 25. The rule is `escaping::published_air_surface`, on the steps' base, ceiling and
+  constants.
+  - 42002cb200049423.0100 is not molten under `with_every_26_hold`: P14.T53.b part 3's steam (25)
+    leaves it a solid `RunawayGreenhouse` at 1,202.5 K under both arms, which the rule does not
+    reach. Its solidus (1,394.0 K, `MagmaOcean`) is tested under the new arm alone, and
+    42002cb20001885b.0100, at the solidus under both, is pinned by name for 26 (lean, 2026-10-30).
+  - P14.T24.j's census and its fast twin (`system/locked_climate_tests.rs`) walk 26 with this hold
+    set back (`deck_alone`), so they still measure the deck alone.
+  - _Accept, as built:_ also `planetary::system::locked_climate_tests`; by name with
+    `-- --ignored`, `under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air` and
+    `under_the_escape_batch_and_every_24_hold_no_planet_is_hotter_than_its_star`.
+  - For 26's bump: the tripwire's list. No golden moves for this rule: with it forced at 24, a bless
+    over the sim's, the server's and the protocol's tests changed none, and under
+    `with_every_26_hold` none of the 15 golden systems' records moves. Two set-A bodies move,
+    21ffd6597ff80000.0200 and 01ffeb2b60010000.0100.
