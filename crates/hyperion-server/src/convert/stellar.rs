@@ -699,8 +699,30 @@ mod tests {
         cell[0]
     }
 
+    /// The galaxy of [`galaxy`]'s seed and parameters at version 26's rules, for the holds at 26.
+    fn galaxy_26() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            use hyperion_sim::GeneratorVersion;
+            use hyperion_sim::galaxy::imf::MassFunctionKind;
+            use hyperion_sim::galaxy::params::GalaxyParams;
+            let seed = Seed::new(0x4d2);
+            Galaxy::from_params_at_version(
+                seed,
+                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+                GeneratorVersion::new(26),
+            )
+            .expect("a drawn galaxy builds")
+        })
+    }
+
     /// The template's system with its primary of `mass` M☉ and `age` years old at the epoch.
     fn system(mass: f64, age: f64) -> SystemStars {
+        system_in(galaxy(), mass, age)
+    }
+
+    /// [`system`] in `galaxy`.
+    fn system_in(galaxy: &Galaxy, mass: f64, age: f64) -> SystemStars {
         let t = template();
         let record = SystemRecord::from_parts(
             t.id(),
@@ -710,7 +732,7 @@ mod tests {
             SolarMasses::new(mass),
             Years::new(age),
         );
-        SystemStars::generate(galaxy(), &record)
+        SystemStars::generate(galaxy, &record)
     }
 
     fn years(y: i64) -> UniverseTime {
@@ -989,26 +1011,7 @@ mod tests {
     /// running the list is sent empty. Below 26 the key is absent (the test above).
     #[test]
     fn from_26_the_running_events_and_their_light_are_sent() {
-        use hyperion_sim::GeneratorVersion;
-        use hyperion_sim::galaxy::imf::MassFunctionKind;
-        use hyperion_sim::galaxy::params::GalaxyParams;
-        let seed = Seed::new(0x4d2);
-        let galaxy = Galaxy::from_params_at_version(
-            seed,
-            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-            GeneratorVersion::new(26),
-        )
-        .expect("a drawn galaxy builds");
-        let t = template();
-        let record = SystemRecord::from_parts(
-            t.id(),
-            *t.epoch_position(),
-            SystemOrigin::Grid(t.component().expect("a grid record")),
-            t.population(),
-            SolarMasses::new(0.2),
-            Years::new(3e8),
-        );
-        let stars = SystemStars::generate(&galaxy, &record);
+        let stars = system_in(galaxy_26(), 0.2, 3e8);
         let at = |hours: i64| {
             UniverseTime::EPOCH
                 .checked_add(hyperion_sim::time::Span::from_seconds(3_600 * hours))
@@ -1058,6 +1061,54 @@ mod tests {
             .expect("a quiet hour");
         let wire = serde_json::to_value(&answer_at(quiet).stars[0]).expect("a summary serialises");
         assert_eq!(wire.get("active_events"), Some(&serde_json::json!([])));
+    }
+
+    /// From version 26 a thermal pulse's radius is on the wire: a 3 M☉ star on its thermally
+    /// pulsing AGB, in a pulse's transient, sends the composed radius, √F of the track's, and the
+    /// composed luminosity, with the track's temperature.
+    #[test]
+    fn from_26_a_thermal_pulse_s_radius_is_sent() {
+        let death = system_in(galaxy_26(), 3.0, 1e8)
+            .primary()
+            .lifetime()
+            .expect("a 3 M☉ star dies")
+            .value();
+        // A living star is summarised only inside the clock window, so the star's age at the
+        // epoch steps back from its death, rather than the time on.
+        let in_transient = |stars: &SystemStars| {
+            let summary = stars.summary_at(years(0));
+            let star = &summary.stars()[0];
+            star.event_effects().is_some_and(|effects| {
+                effects.radius().value().to_bits() != star.state().radius().value().to_bits()
+            })
+        };
+        let stars = (1..200)
+            .map(|k| system_in(galaxy_26(), 3.0, death - 7_000.0 * f64::from(k)))
+            .find(in_transient)
+            .expect("a pulse's transient in the last 1.4 Myr");
+        let summary = stars.summary_at(years(0));
+        let sim = &summary.stars()[0];
+        let effects = sim.event_effects().expect("a pulse's light");
+        let wire = &answer(&stars, 0).stars[0];
+        assert_eq!(
+            wire.radius_rsun.to_bits(),
+            effects.radius().value().to_bits()
+        );
+        assert_eq!(
+            wire.luminosity_lsun.to_bits(),
+            effects.luminosity().value().to_bits()
+        );
+        assert_eq!(
+            wire.teff_k.map(f64::to_bits),
+            Some(sim.state().effective_temperature().value().to_bits())
+        );
+        let events = wire.active_events.as_ref().expect("sent from 26");
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == StarEventKindDto::ThermalPulse),
+            "{events:?}"
+        );
     }
 
     /// A white dwarf just born from the AGB lights the nebula the sim gives it, field for field, and

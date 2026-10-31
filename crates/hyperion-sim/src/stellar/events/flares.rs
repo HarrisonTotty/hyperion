@@ -625,7 +625,16 @@ impl<'a> FlareModel<'a> {
 impl FlareModel<'_> {
     /// [`flares_active_at`] on this model: the star's flares on `series` running at `t`, sorted
     /// by onset and then by ID, appended to `out`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_FLARE`].
     pub fn flares_active_at(&self, series: &EventSeries, t: UniverseTime, out: &mut Vec<Flare>) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_FLARE,
+            "a star's flares are its star.ev.flare series"
+        );
         let mut events = Vec::new();
         bins().active_at(series, t, self, &mut events);
         out.extend(

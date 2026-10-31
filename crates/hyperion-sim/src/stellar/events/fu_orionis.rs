@@ -815,7 +815,16 @@ impl<'a> FuOrionisModel<'a> {
 impl FuOrionisModel<'_> {
     /// [`outbursts_in`] on this model: the star's outbursts on `series` with onsets in `window`,
     /// sorted by onset and then by ID, appended to `out`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_FU_ORIONIS`].
     pub fn outbursts_in(&self, series: &EventSeries, window: TimeWindow, out: &mut Vec<Outburst>) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_FU_ORIONIS,
+            "a star's FU Orionis outbursts are its star.ev.fu_orionis series"
+        );
         let Some(window) = active_part(self, window) else {
             return;
         };
@@ -826,12 +835,21 @@ impl FuOrionisModel<'_> {
 
     /// [`outbursts_active_at`] on this model: the star's outbursts on `series` running at `t`,
     /// sorted by onset and then by ID, appended to `out`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_FU_ORIONIS`].
     pub fn outbursts_active_at(
         &self,
         series: &EventSeries,
         t: UniverseTime,
         out: &mut Vec<Outburst>,
     ) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_FU_ORIONIS,
+            "a star's FU Orionis outbursts are its star.ev.fu_orionis series"
+        );
         if t <= self.formation() || t >= saturating_add(self.last_instant(), MAX_DURATION) {
             return;
         }

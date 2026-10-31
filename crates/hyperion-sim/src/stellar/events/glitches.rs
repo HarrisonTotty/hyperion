@@ -586,7 +586,16 @@ impl<'a> GlitchModel<'a> {
 impl GlitchModel<'_> {
     /// [`glitches_in`] on this model: the star's Crab-like glitches on `series` with onsets in
     /// `window`, in time order, appended to `out`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_GLITCH`].
     pub fn glitches_in(&self, series: &EventSeries, window: TimeWindow, out: &mut Vec<Glitch>) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_GLITCH,
+            "a star's Crab-like glitches are its star.ev.glitch series"
+        );
         let mut events = Vec::new();
         bins().events_in(series, window, self, &mut events);
         out.extend(events.into_iter().map(|event| self.glitch_of(event)));
@@ -594,7 +603,16 @@ impl GlitchModel<'_> {
 
     /// [`glitches_active_at`] on this model: the star's Crab-like glitches on `series` still
     /// recovering at `t`, in time order, appended to `out`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `series` is not of [`tags::STAR_GLITCH`].
     pub fn glitches_active_at(&self, series: &EventSeries, t: UniverseTime, out: &mut Vec<Glitch>) {
+        debug_assert_eq!(
+            series.tag(),
+            tags::STAR_GLITCH,
+            "a star's Crab-like glitches are its star.ev.glitch series"
+        );
         let mut events = Vec::new();
         bins().active_at(series, t, self, &mut events);
         out.extend(

@@ -855,6 +855,50 @@ mod tests {
         }
     }
 
+    /// What runs at a time is what the window's listing holds running then, each event for its
+    /// listed duration: `active_at` and `at` list it, a third of the way into events of every kind
+    /// and between them, on eight bodies of each representative star, from a window that reaches
+    /// back past every kind's longest event (two half spans: a day, 10⁵ years, a millennium);
+    /// `active_at` keeps what `out` held.
+    #[test]
+    fn what_runs_at_a_time_is_what_the_window_s_listing_holds_running() {
+        for (name, star) in kinds() {
+            let h = half_span(name);
+            let mut running = 0;
+            for index in 0..8 {
+                let mut whole = Vec::new();
+                events_in(&star, SEED, body(index), window(-3.0 * h, h), &mut whole);
+                let inside = whole
+                    .iter()
+                    .filter(|e| e.onset() >= years(-h))
+                    .map(|e| {
+                        let third = Span::from_seconds_f64(e.duration().as_seconds_f64() / 3.0);
+                        e.onset().checked_add(third.unwrap()).unwrap()
+                    })
+                    .filter(|&t| t < years(h))
+                    .take(4);
+                let between = [-1.0, 0.0, 0.333].map(|f| years(f * h));
+                let events = StarEvents::of(&star, SEED, body(index));
+                let prefix = &whole[..whole.len().min(1)];
+                for t in inside.chain(between) {
+                    let expected: Vec<StarEvent> = whole
+                        .iter()
+                        .filter(|e| e.is_active_at(t))
+                        .copied()
+                        .collect();
+                    running += expected.len();
+                    let mut listed = prefix.to_vec();
+                    active_at(&star, SEED, body(index), t, &mut listed);
+                    assert_eq!(&listed[..prefix.len()], prefix, "{name}: what out held");
+                    assert_eq!(&listed[prefix.len()..], &expected[..], "{name} at {t:?}");
+                    let (at, _) = events.at(t, &star.state_at(t).unwrap());
+                    assert_eq!(at, expected, "{name} at {t:?}");
+                }
+            }
+            assert!(running > 0, "{name}: nothing runs at the sampled times");
+        }
+    }
+
     /// `bound` is never exceeded (the plan's sweep across each kind's parameter range): the rates of
     /// the Poisson kinds built through the assembly, flares, FU Orionis outbursts, Crab-like
     /// glitches and giant eruptions, stay at or below their bins' bounds at 40 times in each of 200
