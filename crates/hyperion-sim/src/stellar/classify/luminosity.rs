@@ -7,9 +7,9 @@
 //! between two classes joins, type by type, the points halfway between them in (log
 //! T<sub>eff</sub>, value), linear in log T<sub>eff</sub> between types and held beyond the
 //! table's hottest and coolest; a star is compared with the boundary at its own temperature. The
-//! boundaries are the fitted table [`class_boundaries`](crate::tables::class_boundaries), which `hyperion-fit`'s `class_boundaries`
-//! task draws from the paper's tables; the tables themselves are not committed (P06.T23.b's
-//! licence fix, decision-r08-licences).
+//! boundaries are the fitted table [`class_boundaries`](crate::tables::class_boundaries), which
+//! `hyperion-fit`'s `class_boundaries` task draws from the paper's tables; the tables themselves
+//! are not committed (P06.T23.b's licence fix, decision-r08-licences).
 //!
 //! - **Gravity** separates the dwarfs (V), the subgiants (IV) and the rest, at the V/IV and
 //!   IV/III boundaries of the paper's Table VII. It is how spectra tell a subgiant from a dwarf,
@@ -144,9 +144,10 @@ impl LuminosityClass {
     }
 }
 
-/// The Sun's bolometric magnitude on which [`class_boundaries`](crate::tables::class_boundaries)' magnitudes stand, mag:
-/// Straižys and Kuriliene's (1981, section 3) zero point M<sub>bol</sub>☉ = +4.72, as Torres
-/// (2010, AJ 140, 1158, section 4) also reads it.
+/// The Sun's bolometric magnitude on which the magnitudes of
+/// [`class_boundaries`](crate::tables::class_boundaries) stand, mag: Straižys and Kuriliene's
+/// (1981, section 3) zero point M<sub>bol</sub>☉ = +4.72, as Torres (2010, AJ 140, 1158, section
+/// 4) also reads it.
 const SOLAR_M_BOL_MAG: f64 = 4.72;
 
 /// \[Fe/H\] below which a main-sequence dwarf is a subdwarf, dex: the plan's threshold
@@ -287,9 +288,9 @@ fn is_hypergiant(log_teff: f64, log_l: f64) -> bool {
     log_l > HYPERGIANT_LOG_L && log_l > log_l_hd - HYPERGIANT_DEPTH_DEX
 }
 
-/// A boundary of [`class_boundaries`](crate::tables::class_boundaries) at `log_teff`: linear in log T<sub>eff</sub> between its
-/// `nodes` (log T<sub>eff</sub>, value), which fall strictly in temperature (a test checks), and
-/// held beyond the first and the last.
+/// A boundary of [`class_boundaries`](crate::tables::class_boundaries) at `log_teff`: linear in
+/// log T<sub>eff</sub> between its `nodes` (log T<sub>eff</sub>, value), which fall strictly in
+/// temperature (a test checks), and held beyond the first and the last.
 #[must_use]
 fn boundary(log_teff: f64, nodes: &[(f64, f64)]) -> f64 {
     let mut previous: Option<(f64, f64)> = None;

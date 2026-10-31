@@ -15,8 +15,9 @@ use crate::math;
 use crate::sky::colour::{AtmosphereGrid, StarColour, star_colour};
 use crate::stellar::multiplicity::StarIndex;
 use crate::stellar::photometry::{
-    absolute_bolometric_magnitude, absolute_magnitude_v, bolometric_correction_v,
+    absolute_bolometric_magnitude, absolute_magnitude_v_under, bolometric_correction_v_under,
 };
+use crate::stellar::rules::StellarRules;
 use crate::stellar::system::SystemStars;
 use crate::stellar::{Phase, StarState};
 use crate::tables::limb_darkening::{
@@ -229,14 +230,17 @@ pub(crate) fn grid_of(phase: Phase) -> AtmosphereGrid {
 /// A star's absolute V magnitude for its disc: plan 06's for a living star; for a white dwarf,
 /// which plan 06 leaves without one until ask A4, the bolometric magnitude less the dwarfs'
 /// correction at its temperature (`photometry`'s own caution: up to about 0.6 mag off at 4,000 K).
+/// Both read the dwarf sequence the galaxy's stellar `rules` choose.
 #[must_use]
-fn disc_absolute_v(state: &StarState) -> Option<Magnitudes> {
+fn disc_absolute_v(state: &StarState, rules: StellarRules) -> Option<Magnitudes> {
     match grid_of(state.phase()) {
         AtmosphereGrid::WhiteDwarf => Some(
             absolute_bolometric_magnitude(state.luminosity())?
-                - bolometric_correction_v(state.effective_temperature())?,
+                - bolometric_correction_v_under(state.effective_temperature(), rules)?,
         ),
-        AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => absolute_magnitude_v(state),
+        AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => {
+            absolute_magnitude_v_under(state, rules)
+        }
     }
 }
 
@@ -247,7 +251,7 @@ fn disc_absolute_v(state: &StarState) -> Option<Magnitudes> {
 ///
 /// A star with no V magnitude (a neutron star, a black hole, a merged-away star, a substellar
 /// object, or a living star outside the corrections' table) has no disc and is left out. The
-/// galaxy is not read today; it is the argument the census's discs will need.
+/// galaxy gives the stellar rules its V magnitudes read (`stellar::rules`).
 ///
 /// The photopic mean follows from flux conservation, E = π L̄ (R ÷ d)² for a sphere: a star of
 /// absolute V `M` lights 2.54 µlx × `lux_per_v0` × 10^(−0.4 M) at 10 pc, so L̄ = that × (10 pc)² ÷
@@ -282,7 +286,8 @@ fn disc_absolute_v(state: &StarState) -> Option<Magnitudes> {
 /// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
 /// ```
 #[must_use]
-pub fn host_discs(_galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec<HostDisc> {
+pub fn host_discs(galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec<HostDisc> {
+    let rules = galaxy.rules().stellar;
     let Some(state) = stars.state_at(t) else {
         return Vec::new();
     };
@@ -292,7 +297,7 @@ pub fn host_discs(_galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec
         .iter()
         .enumerate()
         .filter_map(|(i, star)| {
-            let m_v = disc_absolute_v(star)?;
+            let m_v = disc_absolute_v(star, rules)?;
             let log_g = star.surface_gravity()?.value();
             let radius = star.radius().value() * SOLAR_RADIUS_M;
             let teff = star.effective_temperature();
@@ -358,6 +363,7 @@ fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stellar::photometry::absolute_magnitude_v;
 
     fn sun() -> [PowerTwo; 3] {
         limb_coefficients(Kelvin::new(5_772.0), 4.438, AtmosphereGrid::MainSequence)

@@ -7,7 +7,8 @@
 //! The bit-identity of the version in force is held by the goldens (D1), which pin every reader
 //! (`stellar/classify`, the systems' and the range rows' goldens among them), and by the rows' own
 //! tests in `pm13`, `classify` and `photometry`, which read the held arm. The sky census's reader
-//! is held by its own test, `the_census_reads_its_galaxy_s_dwarf_sequence`.
+//! is held by its own test, `the_census_reads_its_galaxy_s_dwarf_sequence`, and the host stars'
+//! discs by [`a_host_disc_takes_its_galaxy_s_dwarf_sequence`].
 //!
 //! Readers that cannot be shown to move on the fixture: the binary engine's Be stars. A B star's
 //! letter moves only within 0.05 of a subtype of B0 and A0, and a B star spins by its critical
@@ -26,6 +27,7 @@ use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+use crate::sky::disc::{HostDisc, host_discs};
 use crate::stellar::binary::{BinaryInput, evolve};
 use crate::stellar::brief::{BriefModel, BriefRoute};
 use crate::stellar::classify::tests::{star, star_g};
@@ -276,31 +278,29 @@ fn the_plans_figures_hold_under_the_reduced_sequence() {
 #[test]
 fn every_reader_moves_under_the_reduced_sequence() {
     let t = Kelvin::new(5_660.0);
-    let moved = |a: Option<Magnitudes>, b: Option<Magnitudes>| {
-        a.map(|m| bits(m.value())) != b.map(|m| bits(m.value()))
-    };
-    assert!(moved(
-        bolometric_correction_v_under(t, REDUCED),
-        bolometric_correction_v_under(t, VERSION)
-    ));
-    assert!(moved(
-        colour_b_v_under(t, REDUCED),
-        colour_b_v_under(t, VERSION)
-    ));
+    let as_bits = |m: Option<Magnitudes>| m.map(|m| bits(m.value()));
+    assert_ne!(
+        as_bits(bolometric_correction_v_under(t, REDUCED)),
+        as_bits(bolometric_correction_v_under(t, VERSION))
+    );
+    assert_ne!(
+        as_bits(colour_b_v_under(t, REDUCED)),
+        as_bits(colour_b_v_under(t, VERSION))
+    );
     let (a, b) = (
         subtype_from_teff_under(t, REDUCED).unwrap(),
         subtype_from_teff_under(t, VERSION).unwrap(),
     );
     assert_ne!(bits(a.value()), bits(b.value()));
     let dwarf = star(Phase::MainSequence, 0.95, 0.75, 5_660.0);
-    assert!(moved(
-        absolute_magnitude_v_under(&dwarf, REDUCED),
-        absolute_magnitude_v_under(&dwarf, VERSION)
-    ));
-    assert!(moved(
-        absolute_v_of_state_under(&dwarf, REDUCED),
-        absolute_v_of_state_under(&dwarf, VERSION)
-    ));
+    assert_ne!(
+        as_bits(absolute_magnitude_v_under(&dwarf, REDUCED)),
+        as_bits(absolute_magnitude_v_under(&dwarf, VERSION))
+    );
+    assert_ne!(
+        as_bits(absolute_v_of_state_under(&dwarf, REDUCED)),
+        as_bits(absolute_v_of_state_under(&dwarf, VERSION))
+    );
     let class = |rules| match classify_under(
         &dwarf,
         &Composition::SOLAR,
@@ -388,6 +388,35 @@ fn a_galaxy_s_stars_take_its_dwarf_sequence() {
     );
     assert!(moved.iter().all(|&n| n > 0), "{moved:?}");
     assert!(briefs_moved > 0);
+}
+
+/// D2, the host stars' discs: under the reduced sequence a main-sequence star's disc is lit by its
+/// galaxy's V, and only its luminance moves.
+#[test]
+fn a_host_disc_takes_its_galaxy_s_dwarf_sequence() {
+    let moved = records()
+        .iter()
+        .filter(|record| record.layer() == Layer::C)
+        .find_map(|record| {
+            let stars = SystemStars::generate(held(), record);
+            let (was, now) = (
+                host_discs(held(), &stars, UniverseTime::EPOCH),
+                host_discs(reduced(), &stars, UniverseTime::EPOCH),
+            );
+            assert_eq!(was.len(), now.len());
+            let luminance = |discs: &[HostDisc]| -> Vec<u64> {
+                discs
+                    .iter()
+                    .flat_map(|d| d.mean_luminance().map(|l| bits(l.value())))
+                    .collect()
+            };
+            let radii = |discs: &[HostDisc]| -> Vec<u64> {
+                discs.iter().map(|d| bits(d.radius().value())).collect()
+            };
+            assert_eq!(radii(&was), radii(&now));
+            (!was.is_empty() && luminance(&was) != luminance(&now)).then_some(was.len())
+        });
+    assert!(moved.is_some(), "no disc of layer C by the Sun moved");
 }
 
 /// D2, a pair: the engine's classification takes its input's rules, which a pair in a galaxy

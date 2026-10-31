@@ -34,9 +34,12 @@
 //!   P06.T23.a's licence fix): the dwarf sequence that classification, photometry and rotation
 //!   read, the source's rows to 25 and the fitted grids from 26, through
 //!   [`DwarfSequence::of`]. Its readers on the record are a star's classification, photometry and
-//!   rotation in its summary and its range brief, the binary engine's Be stars and the sky
-//!   census's stars; the sky's fitted tables, the server's converters and `hyperion-fit` take the
-//!   version's rules. The 25 → 26 bump deletes the field, its held arm and its tripwire.
+//!   rotation in its summary and its range brief, the binary engine's Be stars, the sky census's
+//!   stars and the host stars' discs. The sky's fitted tables, the server's converters and
+//!   `hyperion-fit` take the version's rules, as do the sky's luminosity tables
+//!   (`sky::luminosity`): the server builds them once per seed and keeps them under a key of the
+//!   seed alone, so they follow the version, not a test's arm. The 25 → 26 bump deletes the field,
+//!   its held arm and its tripwire.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of

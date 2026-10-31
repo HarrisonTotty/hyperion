@@ -3,11 +3,11 @@
 //!
 //! All three read the mean dwarf sequence of Pecaut and Mamajek (2013, ApJS 208, 9) in Mamajek's
 //! version 2022.04.16, the table [`classify`](crate::stellar::classify) types dwarfs on,
-//! interpolated linearly in log₁₀ T<sub>eff</sub>: its rows to version 25 and its fitted grids
-//! from 26 (`classify::pm13`'s hold), which the `_under` forms take from the stellar rules of a
-//! star's galaxy and the public ones from the version's. The table's bolometric corrections are on the
-//! IAU 2015 system, with M<sub>bol</sub>☉ = 4.74 ([`SOLAR_ABSOLUTE_BOLOMETRIC_MAGNITUDE`]), so the
-//! Sun (5,772 K) reads BC<sub>V</sub> = −0.085 and M<sub>V</sub> = 4.825. They are the dwarfs'
+//! interpolated linearly in log₁₀ T<sub>eff</sub>: its rows to version 25 and its fitted grids from
+//! 26 (`classify::pm13`'s hold), which the `_under` forms take from the stellar rules of a star's
+//! galaxy and the public ones from the version's. The table's bolometric corrections are on the IAU
+//! 2015 system, with M<sub>bol</sub>☉ = 4.74 ([`SOLAR_ABSOLUTE_BOLOMETRIC_MAGNITUDE`]), so the Sun
+//! (5,772 K) reads BC<sub>V</sub> = −0.085 and M<sub>V</sub> = 4.825. They are the dwarfs'
 //! corrections, read at the star's temperature whatever its gravity: a giant's differs little from
 //! G to early K, but Straižys and Kuriliene (1981, Ap&SS 80, 353, Table III) put the M giants'
 //! 0.1–0.5 mag more negative than the dwarfs' at the same temperature to M3 III, 1.1 mag at M5 III

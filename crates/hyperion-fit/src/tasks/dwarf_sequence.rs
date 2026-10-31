@@ -62,7 +62,7 @@ pub const DEFAULT_DATA_DIR: &str = concat!(
 pub const ROWS: usize = 118;
 
 /// The grids' step in log₁₀ T<sub>eff</sub>, dex, before each is fitted to its ends: our choice,
-/// fine enough that the grid's corners stay within [`ACCEPTANCE`] of the rows' (2,000 to 4,500
+/// fine enough that the grid's corners stay within [`ACCEPTANCE`] of the rows' (2,552 to 4,510
 /// nodes a quantity).
 pub const TARGET_STEP_DEX: f64 = 0.0005;
 
@@ -127,15 +127,23 @@ pub struct Row {
     pub colour_b_v: Option<f64>,
 }
 
-/// The file could not be read as the sequence: the line, counted from 1 (0 for the file as a
-/// whole), and why.
+/// The file could not be read as the sequence.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{FILE} line {line}: {why}")]
-pub struct ParseSequenceError {
-    /// The line, counted from 1, or 0 for the whole file.
-    pub line: usize,
-    /// What is wrong.
-    pub why: String,
+pub enum ParseSequenceError {
+    /// A line of the table is malformed.
+    #[error("{FILE} line {line}: {why}")]
+    Line {
+        /// The line, counted from 1.
+        line: usize,
+        /// What is wrong with it.
+        why: String,
+    },
+    /// The file as a whole is not the version's sequence.
+    #[error("{FILE}: {why}")]
+    File {
+        /// What is wrong with it.
+        why: String,
+    },
 }
 
 /// The spectral class letters in order, O0 at code 0.
@@ -159,10 +167,13 @@ fn value_of(field: &str, line: usize) -> Result<Option<f64>, ParseSequenceError>
     if !field.is_empty() && field.chars().all(|c| c == '.') {
         return Ok(None);
     }
-    field.parse().map(Some).map_err(|_| ParseSequenceError {
-        line,
-        why: format!("`{field}` is neither a number nor a blank"),
-    })
+    field
+        .parse()
+        .map(Some)
+        .map_err(|_| ParseSequenceError::Line {
+            line,
+            why: format!("`{field}` is neither a number nor a blank"),
+        })
 }
 
 /// The rows of the file's `text`, hottest first: the lines from its first `#SpT` header to its
@@ -173,7 +184,7 @@ fn value_of(field: &str, line: usize) -> Result<Option<f64>, ParseSequenceError>
 /// [`ParseSequenceError`] if the header does not name [`SOURCE_VERSION`], a row is malformed, or
 /// the rows are not the [`ROWS`] the version holds, falling in temperature and rising in code.
 pub fn parse(text: &str) -> Result<Vec<Row>, ParseSequenceError> {
-    let whole = |why: String| ParseSequenceError { line: 0, why };
+    let whole = |why: String| ParseSequenceError::File { why };
     if !text.lines().take(10).any(|l| l.contains(SOURCE_VERSION)) {
         return Err(whole(format!("the header names no {SOURCE_VERSION}")));
     }
@@ -191,7 +202,7 @@ pub fn parse(text: &str) -> Result<Vec<Row>, ParseSequenceError> {
             continue;
         }
         let fields: Vec<&str> = line.split_whitespace().collect();
-        let bad = |why: String| ParseSequenceError { line: i + 1, why };
+        let bad = |why: String| ParseSequenceError::Line { line: i + 1, why };
         if fields.len() < 9 {
             return Err(bad(format!("{} columns, fewer than nine", fields.len())));
         }
@@ -256,13 +267,14 @@ pub struct Grid {
 
 impl Grid {
     /// The grid's interpolation at log₁₀ T<sub>eff</sub> `x`, from `log_teff_hot`, its first node,
-    /// as the sim's `pm13` reads it: linear between nodes, `None` outside its ends.
+    /// as the sim's `pm13` reads it: linear between nodes, `None` outside its ends and for a grid
+    /// of fewer than two nodes.
     #[must_use]
     pub fn at(&self, log_teff_hot: f64, x: f64) -> Option<f64> {
         if !(x >= self.log_teff_cool && x <= log_teff_hot) {
             return None;
         }
-        let cells = self.values.len() - 1;
+        let cells = self.values.len().checked_sub(1).filter(|&c| c > 0)?;
         let position = (log_teff_hot - x) / self.step_dex;
         #[expect(
             clippy::cast_possible_truncation,
@@ -303,7 +315,8 @@ pub const SAMPLES: u32 = 200_000;
 ///
 /// # Panics
 ///
-/// If `rows` is empty or its first row lacks a quantity: [`parse`]'s rows never do.
+/// If `rows` is empty, if its first row lacks a quantity, or if a quantity's rows span less than
+/// half a [`TARGET_STEP_DEX`] in log₁₀ T<sub>eff</sub>: [`parse`]'s rows never do.
 #[must_use]
 pub fn fit(rows: &[Row]) -> DwarfSequence {
     let teff_hot_k = rows[0].teff_k;
@@ -318,11 +331,15 @@ pub fn fit(rows: &[Row]) -> DwarfSequence {
         let log_teff_cool = math::log10(coolest.teff_k);
         let span = log_teff_hot - log_teff_cool;
         let cells = (span / TARGET_STEP_DEX).round();
+        assert!(
+            cells >= 1.0,
+            "{q:?}'s rows span {span} dex, under half a grid step: no cell to fit"
+        );
         let step_dex = span / cells;
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "a whole, positive number of cells, a few thousand"
+            reason = "a whole number of cells, at least one (asserted) and a few thousand"
         )]
         let nodes = cells as u32 + 1;
         let values: Vec<f64> = (0..nodes)
@@ -585,16 +602,99 @@ mod tests {
         assert_eq!(value_of("...", 1).unwrap(), None);
         assert_eq!(value_of(".....", 1).unwrap(), None);
         assert_eq!(value_of("-0.085", 1).unwrap().map(bits), Some(bits(-0.085)));
-        assert_eq!(value_of("19.25:", 7).unwrap_err().line, 7);
+        assert!(matches!(
+            value_of("19.25:", 7),
+            Err(ParseSequenceError::Line { line: 7, .. })
+        ));
     }
 
     #[test]
     fn a_file_of_another_version_or_length_is_refused() {
-        assert_eq!(parse("# Version 2019.03.22\n").unwrap_err().line, 0);
+        assert!(matches!(
+            parse("# Version 2019.03.22\n"),
+            Err(ParseSequenceError::File { .. })
+        ));
         let short = format!(
             "# {SOURCE_VERSION}\n#SpT Teff\nO3V 44900 4.652 -4.01 5.82 -9.81 13.43 -5.80 -0.330\n#SpT\n"
         );
-        assert!(parse(&short).unwrap_err().why.contains("1 rows"));
+        assert!(
+            matches!(parse(&short), Err(ParseSequenceError::File { why }) if why.contains("1 rows"))
+        );
+    }
+
+    /// A file of the version's form: [`ROWS`] class V rows, from O3 by half subtypes, falling in
+    /// temperature, with BC<sub>V</sub> on the first 100 and B − V on the first 90; `edit` changes
+    /// row `i`'s nine fields.
+    fn synthetic(edit: impl Fn(usize, &mut Vec<String>)) -> String {
+        let mut text = format!("# {SOURCE_VERSION}\n#SpT Teff logT BCv a b c d B-V\n");
+        for i in 0..ROWS {
+            // Twice the code: O3 is 6, each row half a subtype on.
+            let halves = 6 + i;
+            let letter = LETTERS.chars().nth(halves / 20).expect("ten letters");
+            let subtype = f64::from(u32::try_from(halves % 20).expect("small")) / 2.0;
+            let mut fields: Vec<String> = vec![
+                format!("{letter}{subtype}V"),
+                format!("{}", 50_000 - 400 * i),
+                "...".to_owned(),
+                if i < 100 {
+                    format!("{}", -4.0 + 0.05 * index(i))
+                } else {
+                    "...".to_owned()
+                },
+                "...".to_owned(),
+                "...".to_owned(),
+                "...".to_owned(),
+                "...".to_owned(),
+                if i < 90 {
+                    format!("{}", -0.3 + 0.02 * index(i))
+                } else {
+                    "...".to_owned()
+                },
+            ];
+            edit(i, &mut fields);
+            text.push_str(&fields.join(" "));
+            text.push('\n');
+        }
+        text.push_str("#SpT\n");
+        text
+    }
+
+    /// A row of too few columns, an unknown type, rows out of order and a gap above a quantity's
+    /// last value are each refused.
+    #[test]
+    fn a_malformed_sequence_is_refused() {
+        assert_eq!(
+            parse(&synthetic(|_, _| {})).map(|rows| rows.len()),
+            Ok(ROWS)
+        );
+        let why = |text: String| match parse(&text) {
+            Err(ParseSequenceError::Line { why, .. } | ParseSequenceError::File { why }) => why,
+            Ok(rows) => panic!("{} rows parsed", rows.len()),
+        };
+        assert!(
+            why(synthetic(|i, f| if i == 5 {
+                f.truncate(4);
+            }))
+            .contains("fewer than nine")
+        );
+        assert!(
+            why(synthetic(|i, f| if i == 5 {
+                f[0] = "Q5V".to_owned();
+            }))
+            .contains("no type")
+        );
+        let swapped = synthetic(|i, f| {
+            if i == 5 {
+                f[1] = "1000".to_owned();
+            }
+        });
+        assert!(why(swapped).contains("fall in temperature"));
+        let gap = synthetic(|i, f| {
+            if i == 50 {
+                f[3] = "...".to_owned();
+            }
+        });
+        assert!(why(gap).contains("gap"));
     }
 
     /// Three rows linear in log₁₀ T<sub>eff</sub> in each quantity, B − V ending at the second.

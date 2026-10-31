@@ -51,8 +51,8 @@ use crate::tables::dwarf_sequence as reduced;
 /// through `StellarRules::every_26_hold()`.
 pub(crate) const DWARF_SEQUENCE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
-/// Which dwarf sequence the stellar stage reads (the stellar rules' `dwarf_sequence` field, the hold
-/// of [`DWARF_SEQUENCE_VERSION`]).
+/// Which dwarf sequence the stellar stage reads (the stellar rules' `dwarf_sequence` field, the
+/// hold of [`DWARF_SEQUENCE_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum DwarfSequenceRules {
     /// Version 25's and before: the source's rows, [`DWARF_SEQUENCE`].

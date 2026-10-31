@@ -1030,14 +1030,14 @@ id = "s.tab_mk"
 label = "MK calibration tables"
 kind = "table"
 cluster = "s.c_derived"
-summary = "PM13 dwarf sequence (v2022.04.16) and the SK81 class boundaries"
+summary = "PM13 dwarf sequence (v2022.04.16) and the SK81 grid"
 detail = [
   "Pecaut-Mamajek: Teff, BC_V, B-V by dwarf subtype",
-  "Straizys-Kuriliene: class boundaries in log g and",
-  "  M_bol for O5-M6, classes V to Ia",
+  "Straizys-Kuriliene: Teff, M_bol, log g for O5-M6",
+  "  and classes V to Ia",
 ]
 cite = ["Pecaut and Mamajek 2013", "Straizys and Kuriliene 1981"]
-source = ["crates/hyperion-sim/src/stellar/classify/pm13.rs", "crates/hyperion-sim/src/tables/class_boundaries.rs", "P06.T23.a", "P06.T23.b"]
+source = ["crates/hyperion-sim/src/stellar/classify/pm13.rs", "crates/hyperion-sim/src/stellar/classify/sk81.rs", "P06.T23.a", "P06.T23.b"]
 status = "built"
 
 [[node]]

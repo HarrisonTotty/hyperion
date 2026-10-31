@@ -39,8 +39,12 @@
 //! transcription itself gave it before P06.T23.b's licence fix, bit for bit.
 //!
 //! Table VI is read only to check the transcription: every gravity of Table VII must follow from
-//! Tables III, IV and VI by the paper's formula to within [`GRAVITY_TOLERANCE_DEX`], which a slip
-//! in any of the four would break.
+//! Tables III, IV and VI by the paper's formula to within [`GRAVITY_TOLERANCE_DEX`]. The residuals
+//! scatter by 0.005 dex, so the check catches a slip that moves a gravity by more than about
+//! 0.05 dex; a last-digit slip of 0.1 mag in M<sub>bol</sub> moves one by 0.04 and may pass. Nine
+//! magnitudes that boundaries read have no gravity to check them: O5 Ia, and M4 and M5 in classes
+//! II to Ia. The formula's constant and the section 3 quotation above are P06.T23.b's reading of
+//! the scan, not re-read since (the scan is out of reach).
 
 use std::num::NonZeroUsize;
 
@@ -69,8 +73,9 @@ pub const TYPES: usize = 42;
 
 /// How far, dex, a gravity of Table VII may lie from the paper's formula applied to Tables III, IV
 /// and VI, P06.T23.b's bound. The tables' rounding (two decimals in log g and log 𝔐, three in log
-/// T<sub>eff</sub>, one in M<sub>bol</sub>) reaches 0.03 dex, and the worst entry lies 0.044 dex
-/// off.
+/// T<sub>eff</sub>, one in M<sub>bol</sub>) reaches 0.032 dex. Two entries lie beyond it, M3 V at
+/// −0.044 dex and K1 Iab at +0.038 (M<sub>bol</sub> −7.0 for K1 Iab's −7.1 would give its printed
+/// 0.54): whether these are the paper's own or the transcription's waits on a reading of the scan.
 pub const GRAVITY_TOLERANCE_DEX: f64 = 0.045;
 
 /// The constant of the paper's formula for Table VII: log g = log 𝔐 + 4 log T<sub>eff</sub> + 0.4
@@ -163,8 +168,8 @@ pub struct ParseTranscriptionError {
 ///
 /// # Errors
 ///
-/// [`ParseTranscriptionError`] for a line of another length or a value that is not a number, and for a file
-/// of other than [`TYPES`] rows.
+/// [`ParseTranscriptionError`] for a line of another length or a value that is not a number, and
+/// for a file of other than [`TYPES`] rows.
 pub fn parse(text: &str) -> Result<Vec<Row>, ParseTranscriptionError> {
     let mut rows = Vec::with_capacity(TYPES);
     let mut last = 0;
@@ -212,13 +217,22 @@ pub fn parse(text: &str) -> Result<Vec<Row>, ParseTranscriptionError> {
     }
 }
 
+/// The table a boundary is drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Drawn {
+    /// Table VII's gravities.
+    Gravity,
+    /// Table IV's bolometric magnitudes.
+    Magnitude,
+}
+
 /// One of the six boundaries: the table it is drawn from, and the classes it separates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Boundary {
     /// The item's name in the table.
     pub name: &'static str,
-    /// Whether it is drawn from Table VII's gravities (else Table IV's magnitudes).
-    pub gravity: bool,
+    /// The table it is drawn from.
+    pub drawn: Drawn,
     /// The fainter (or higher-gravity) class.
     pub a: Column,
     /// The brighter (or lower-gravity) class.
@@ -230,37 +244,37 @@ pub struct Boundary {
 pub const BOUNDARIES: [Boundary; 6] = [
     Boundary {
         name: "V_IV_LOG_G",
-        gravity: true,
+        drawn: Drawn::Gravity,
         a: Column::Dwarf,
         b: Column::Subgiant,
     },
     Boundary {
         name: "IV_III_LOG_G",
-        gravity: true,
+        drawn: Drawn::Gravity,
         a: Column::Subgiant,
         b: Column::Giant,
     },
     Boundary {
         name: "III_II_M_BOL",
-        gravity: false,
+        drawn: Drawn::Magnitude,
         a: Column::Giant,
         b: Column::BrightGiant,
     },
     Boundary {
         name: "II_IB_M_BOL",
-        gravity: false,
+        drawn: Drawn::Magnitude,
         a: Column::BrightGiant,
         b: Column::SupergiantIb,
     },
     Boundary {
         name: "IB_IAB_M_BOL",
-        gravity: false,
+        drawn: Drawn::Magnitude,
         a: Column::SupergiantIb,
         b: Column::SupergiantIab,
     },
     Boundary {
         name: "IAB_IA_M_BOL",
-        gravity: false,
+        drawn: Drawn::Magnitude,
         a: Column::SupergiantIab,
         b: Column::SupergiantIa,
     },
@@ -273,7 +287,10 @@ impl Boundary {
     pub fn nodes(&self, rows: &[Row]) -> Vec<(f64, f64)> {
         rows.iter()
             .filter_map(|row| {
-                let values = if self.gravity { &row.log_g } else { &row.m_bol };
+                let values = match self.drawn {
+                    Drawn::Gravity => &row.log_g,
+                    Drawn::Magnitude => &row.m_bol,
+                };
                 let (ya, yb) = (values[self.a.index()]?, values[self.b.index()]?);
                 let (xa, xb) = (row.column_log_teff(self.a)?, row.column_log_teff(self.b)?);
                 Some((f64::midpoint(xa, xb), f64::midpoint(ya, yb)))
@@ -341,8 +358,8 @@ pub enum FitBoundariesError {
 ///
 /// # Errors
 ///
-/// [`FitBoundariesError`] if the transcription fails its gravity check or a boundary does not fall strictly
-/// in temperature.
+/// [`FitBoundariesError`] if the transcription fails its gravity check or a boundary does not fall
+/// strictly in temperature.
 pub fn fit(rows: &[Row]) -> Result<ClassBoundaries, FitBoundariesError> {
     let gravity = gravity_check(rows);
     if gravity.0 >= GRAVITY_TOLERANCE_DEX {
@@ -373,13 +390,12 @@ fn item_doc(b: &Boundary) -> Vec<String> {
         Column::SupergiantIab => "Iab",
         Column::SupergiantIa => "Ia",
     };
-    let (quantity, table) = if b.gravity {
-        ("log₁₀ g (cm s⁻²)", "Table VII")
-    } else {
-        (
+    let (quantity, table) = match b.drawn {
+        Drawn::Gravity => ("log₁₀ g (cm s⁻²)", "Table VII"),
+        Drawn::Magnitude => (
             "M<sub>bol</sub> (mag, M<sub>bol</sub>☉ = +4.72)",
             "Table IV",
-        )
+        ),
     };
     vec![
         format!(
@@ -588,11 +604,30 @@ M6 - 3.512 - - - -3.6 - - - - - - 0.4 - - - - - - 0.52 - - - -
         let (worst, checked) = gravity_check(&rows);
         assert_eq!(checked, 7);
         assert!(worst < GRAVITY_TOLERANCE_DEX, "{worst}");
-        let mut slipped = rows;
+        let mut slipped = rows.clone();
         slipped[0].log_g[0] = Some(4.0);
         assert!(matches!(
             fit(&slipped),
             Err(FitBoundariesError::Gravity { .. })
         ));
+    }
+
+    /// A type hotter than the one above it puts a boundary's nodes out of temperature order,
+    /// which the fit refuses: here the III/II boundary's, the first drawn from magnitudes alone.
+    #[test]
+    fn a_boundary_out_of_temperature_order_is_refused() {
+        let mut rows = sample_rows();
+        rows[1] = Row {
+            name: "X".to_owned(),
+            log_teff: [Some(4.9); 3],
+            log_g: [None; 7],
+            ..rows[0].clone()
+        };
+        assert_eq!(
+            fit(&rows),
+            Err(FitBoundariesError::NotFalling {
+                name: "III_II_M_BOL"
+            })
+        );
     }
 }
