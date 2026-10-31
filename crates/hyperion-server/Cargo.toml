@@ -49,6 +49,10 @@ name = "feature_range_query"
 harness = false
 
 [[bench]]
+name = "global_list_pool"
+harness = false
+
+[[bench]]
 name = "range_query"
 harness = false
 

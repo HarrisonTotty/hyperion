@@ -17,7 +17,9 @@
 //! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
 //! request marches (P07.T10.c). [`SharedFeatureCellCache`] holds plan 09's feature cells and
 //! [`SharedClusterModelCache`] their interiors (P09.T40.a), and [`served_range_query`] generates a
-//! cold range query's cells into those caches on the pool's workers before it walks them. A sky's
+//! cold range query's cells into those caches on the pool's workers before it walks them.
+//! [`global_list_on`] and [`tube_table_on`] make plan 10's global list and a stream's tube table
+//! on the pool's workers, each galaxy's spray table kept in [`SharedSprayForces`] (P10.T5.b). A sky's
 //! caps, census, band and limit
 //! map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright subset kept in
 //! the sky's own cell cache, and each galaxy's sky tables built once on the pool and kept in a cache
@@ -32,6 +34,7 @@ mod extinction_map;
 mod features;
 mod float_mode;
 mod galaxies;
+mod global_list;
 mod key;
 mod pool;
 mod range;
@@ -61,6 +64,10 @@ pub use features::{
 pub(crate) use features::{counted_members, expected_members_of};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
+pub use global_list::{
+    BuildTubeOnPoolError, SharedSprayForces, Shares, TRACERS_PER_SHARE, global_list_on, tracers_on,
+    tube_table_on,
+};
 pub use key::GalaxyKey;
 pub use pool::{
     BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError,
