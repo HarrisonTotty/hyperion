@@ -6,8 +6,9 @@ import type { ClassCountWire } from "./ClassCountWire";
  */
 export type CentreStructure = { 
 /**
- * The radius of the black hole's sphere of influence, in light-years: where the cluster's
- * stars inside it weigh as much as the black hole.
+ * The radius of the black hole's sphere of influence, in light-years: where the stars inside
+ * it, the nuclear cluster's and the rest of the galaxy's, weigh as much as the black hole,
+ * the edge of the Kepler regime.
  */
 influence_radius_ly: number, 
 /**

@@ -348,8 +348,9 @@ pub struct ClusterStructure {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CentreStructure {
-    /// The radius of the black hole's sphere of influence, in light-years: where the cluster's
-    /// stars inside it weigh as much as the black hole.
+    /// The radius of the black hole's sphere of influence, in light-years: where the stars inside
+    /// it, the nuclear cluster's and the rest of the galaxy's, weigh as much as the black hole,
+    /// the edge of the Kepler regime.
     pub influence_radius_ly: f64,
     /// The radius of the black hole's loss cone, in light-years: a member whose pericentre falls
     /// inside it is torn apart or swallowed.

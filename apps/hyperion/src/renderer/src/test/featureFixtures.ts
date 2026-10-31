@@ -296,7 +296,7 @@ export function aCentreDetail(): ResponseFor<"feature_detail"> {
     feature: GALACTIC_CENTRE,
     structure: {
       type: "centre",
-      influence_radius_ly: 10_000.000_000_000_01,
+      influence_radius_ly: 111.092_109_898_529_37,
       loss_cone_radius_ly: 0.000_085_231_461_947_658_41,
       classes: [],
     },

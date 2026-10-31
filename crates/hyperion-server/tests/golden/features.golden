@@ -1977,7 +1977,7 @@
     },
     "structure": {
       "type": "centre",
-      "influence_radius_ly": 10000.00000000001,
+      "influence_radius_ly": 111.09210989852937,
       "loss_cone_radius_ly": 0.00008523146194765841,
       "classes": [
         {

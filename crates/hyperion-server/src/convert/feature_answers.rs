@@ -595,7 +595,10 @@ pub(crate) fn detail_of(
     let (feature, structure) = match target {
         FeatureTarget::Centre => {
             let centre = galaxy.centre().map_err(centre_not_built)?;
-            (centre_summary(centre, galaxy), centre_structure(centre))
+            (
+                centre_summary(centre, galaxy),
+                centre_structure(centre, galaxy),
+            )
         }
         FeatureTarget::Catalogue(id) => FeatureCatalogue::resolve(galaxy, id)
             .and_then(|record| catalogue_detail(galaxy, &record, t))
@@ -753,12 +756,19 @@ fn class_count(class: &MemberClass, expected: f64) -> ClassCountWire {
     }
 }
 
-/// The galactic centre's structure: the black hole's sphere of influence and loss cone, and its
-/// classes, each with its episode and the distribution function its orbits are drawn from.
+/// The galactic centre's structure in `galaxy`: the black hole's sphere of influence and loss
+/// cone, and its classes, each with its episode and the distribution function its orbits are
+/// drawn from.
+///
+/// The sphere of influence is the Kepler regime's edge, where every mass inside weighs the black
+/// hole's ([`CentreMotion::influence_radius`]), and not the model's, which counts the cluster
+/// alone and gives its search's 10⁴ ly bracket where the black hole outweighs the cluster.
+///
+/// [`CentreMotion::influence_radius`]: hyperion_sim::galaxy::motion::CentreMotion::influence_radius
 #[must_use]
-fn centre_structure(centre: &CentreModel) -> FeatureStructure {
+fn centre_structure(centre: &CentreModel, galaxy: &Galaxy) -> FeatureStructure {
     FeatureStructure::Centre(CentreStructure {
-        influence_radius_ly: centre.influence_radius().value(),
+        influence_radius_ly: galaxy.centre_motion().influence_radius().value(),
         loss_cone_radius_ly: centre.loss_cone_radius().value(),
         classes: centre
             .classes()
@@ -975,6 +985,7 @@ mod tests {
 
     use hyperion_protocol::UniverseIdHex;
     use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+    use hyperion_sim::galaxy::features::centre::testing::milky_way_galaxy;
 
     use crate::compute::{GalaxyKey, SharedFeatureCellCache};
     use crate::convert::origins::{SEED, galaxy};
@@ -1123,5 +1134,50 @@ mod tests {
             clouds > 0 && associations > 0,
             "{clouds} embedded regions and {associations} associations near the Sun"
         );
+    }
+
+    /// The sphere of influence `centre_structure` serves for `galaxy`'s centre, ly.
+    fn served_influence_radius(galaxy: &Galaxy) -> f64 {
+        let centre = galaxy.centre().expect("the centre's model builds");
+        let FeatureStructure::Centre(structure) = centre_structure(centre, galaxy) else {
+            panic!("the centre's structure is a centre's");
+        };
+        structure.influence_radius_ly
+    }
+
+    /// The served sphere of influence at Milky Way values is the Kepler regime's edge, 7.19 ly
+    /// (2.20 pc; P09.T28.b.a as built), within 2% of it, against the 2.18 pc that Schödel et al.'s
+    /// (2018, A&A 609, A27, §4.5) masses inside 1 and 3 pc give.
+    #[test]
+    fn the_milky_way_s_centre_is_served_its_sphere_of_influence() {
+        let galaxy = milky_way_galaxy();
+        let served = served_influence_radius(galaxy);
+        assert_eq!(
+            served.to_bits(),
+            galaxy.centre_motion().influence_radius().value().to_bits()
+        );
+        assert!((7.05..7.33).contains(&served), "{served} ly");
+    }
+
+    /// Where the black hole outweighs the whole nuclear cluster, as in the server tests' galaxy,
+    /// the cluster alone has no sphere of influence (its search ends at its 10⁴ ly bracket); the
+    /// served one counts the rest of the galaxy too, and lies in the 1.9–177 ly that drawn
+    /// galaxies give (seeds 1–300, P09.T28.b.a as built).
+    #[test]
+    fn a_centre_whose_black_hole_outweighs_its_cluster_is_served_a_finite_sphere() {
+        let galaxy = galaxy();
+        let params = galaxy.params();
+        assert!(
+            params.black_hole().mass() > params.nuclear_cluster().mass(),
+            "the server tests' black hole outweighs its cluster"
+        );
+        let centre = galaxy.centre().expect("the centre's model builds");
+        assert!(centre.influence_radius().value() > 9_999.0);
+        let served = served_influence_radius(galaxy);
+        assert_eq!(
+            served.to_bits(),
+            galaxy.centre_motion().influence_radius().value().to_bits()
+        );
+        assert!((1.9..177.0).contains(&served), "{served} ly");
     }
 }

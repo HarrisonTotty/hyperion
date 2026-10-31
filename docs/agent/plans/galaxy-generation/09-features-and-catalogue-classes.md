@@ -5258,3 +5258,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _`DRIVE RANGE`._ Accepts 0.001–500 ly at four decimals (the query radii's span, D9's default
     radius following it); `RANGE` and `PLANE` labels go through `formatQueryRadius`, so a range
     below 0.01 ly reads in AU (`RANGE 94.9 AU SET`).
+- **P09.T40.b fix, the centre's served sphere of influence (lane `galaxy-centre-core`, 2026-10-31,
+  at 24 and 3; served value only, no switch).** `CentreStructure::influence_radius_ly` is now
+  `galaxy.centre_motion().influence_radius()`, every mass inside, not the cluster-only
+  `CentreProfile::influence_radius` (10⁴ ly where the hole outweighs the cluster). The server
+  tests' seed serves 111.09 ly; `features.golden` and the client's `aCentreDetail` moved with it.

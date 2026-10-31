@@ -151,7 +151,7 @@ describe("FeatureReadout (plan 09, P09.T41.c)", () => {
     expect(valueOf(readout, "KIND")).toBe("GALACTIC CENTRE");
     expect(valueOf(readout, "AGE")).toBe("—");
     expect(valueOf(readout, "MEMBERS")).toBe("~9.14E7");
-    expect(valueOf(readout, "INFLUENCE RADIUS")).toBe("10,000 ly");
+    expect(valueOf(readout, "INFLUENCE RADIUS")).toBe("111 ly");
     expect(valueOf(readout, "LOSS-CONE RADIUS")).toBe("8.52E-5 ly");
     expect(within(readout).getByRole("heading", { name: "BLACK HOLE" })).toBeInTheDocument();
     expect(valueOf(readout, "MASS", 1)).toBe("8.42E7 M");
