@@ -1650,8 +1650,9 @@ impl AerosolInventory {
             .map(|id| (id, sulphur.mole_fraction()));
         let gas = inputs.gases.iter().copied().chain(dioxide);
         // Two passes: the first finds each deck's base and vapour, from which its supply's
-        // sedimentation follows; the second forms the decks with it.
-        let first = Condensation::derive(
+        // sedimentation follows, and forms no particles (P14.T54.b.l); the second forms the decks
+        // with it.
+        let first = Condensation::derive_vapours(
             gas.clone(),
             profile,
             &column,

@@ -31552,6 +31552,13 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         (`under_aitken_s_step_the_movers_and_passes_are_stated`).
       - The locked climate's census (`deck_alone`) reads every 25 hold and the deck alone, so no
         lever of these reaches it.
+      - Bit-identical at every version, no switch (step 5, after a profile of `snapshot_at` under
+        every 26 hold: the record passes 43%, the envelope's atmosphere 30%, the insolation table
+        11%): the first of the envelope's and the aerosols' two condensations forms no particles
+        (`Condensation::derive_vapours`, which places every deck as `derive` does); a deck's
+        removal at each scan level is held as it is placed (`Placed::at_levels`); the scan levels
+        keep their pressures and a column's substep takes its end's pressure once; and the
+        insolation trapezoid's values are taken before their sum, in its order.
       - For 26's bump: delete each hold, its switch and its tripwire, keeping
         `FallRadiusRoot::Bisections`, `CompressionRules::Fixed`, `PassStop::Consecutive` and
         `PassStep::Plain` as the tests' oracles; 25's bump drops `with_every_25_hold` from

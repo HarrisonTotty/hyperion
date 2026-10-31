@@ -3274,6 +3274,9 @@ fn restored(transport: &ZonalTransport) -> bool {
 /// 2 × 10⁻⁶ at Earth's obliquity and 1 × 10⁻⁵ at 90°.
 const ZONAL_INSOLATION_STEPS: u32 = 1_024;
 
+/// The trapezoid's inner points, [`ZONAL_INSOLATION_STEPS`] − 1, as an array's length.
+const INNER_POINTS: usize = ZONAL_INSOLATION_STEPS as usize - 1;
+
 /// The annual-mean insolation at x = sin φ of a world at obliquity `obliquity`, relative to the
 /// mean S ÷ 4: (2 ÷ π²) ∫₀^{2π} √(1 − (√(1 − x²) sin β cos γ − x cos β)²) dγ, by
 /// `ZONAL_INSOLATION_STEPS` steps of the trapezoid rule on [0, π], the integrand being even in
@@ -3417,9 +3420,15 @@ fn insolation_with(obliquity: Radians, sine_latitude: f64, cosines: &[f64]) -> f
     };
     let (first, last) = (cosines[0], cosines[cosines.len() - 1]);
     let ends = f64::midpoint(integrand(first), integrand(last));
-    let inner = cosines[1..cosines.len() - 1]
-        .iter()
-        .fold(0.0, |sum, &cosine| sum + integrand(cosine));
+    // The inner points' values first, each independent of the others, so that they can be taken
+    // several at a time; then their sum in order, the trapezoid's bits (P14.T54.b.l): D5's
+    // `snapshot_at` under every 26 hold fell from 570 to 560 ms with it (pod, one core).
+    debug_assert_eq!(cosines.len(), INNER_POINTS + 2, "the trapezoid's cosines");
+    let mut values = [0.0_f64; INNER_POINTS];
+    for (value, &cosine) in values.iter_mut().zip(&cosines[1..cosines.len() - 1]) {
+        *value = integrand(cosine);
+    }
+    let inner = values.iter().fold(0.0, |sum, &value| sum + value);
     4.0 * step / (pi * pi) * (ends + inner)
 }
 

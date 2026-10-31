@@ -1172,7 +1172,7 @@ fn halving_the_substeps_moves_a_column_under_a_thousandth() {
                 &column(8.87, 2.64, 10.0, 30.0, 0.05, 50.0),
                 with(efficiency),
                 1.0,
-                substeps,
+                (substeps, Particles::Formed),
             )
             .expect("Uranus's clouds");
             ["CH4", "H2S"].map(|key| deck(&clouds, key).column_mass().value())
@@ -1497,5 +1497,79 @@ fn a_deck_s_level_masses_hold_its_column() {
             deck.column_level(1.0).expect("its base").value(),
             deck.base().value(),
         );
+    }
+}
+
+/// A test air: its gas below the clouds, its profile and its column.
+type TestAir<'a> = (
+    Vec<(SubstanceId, f64)>,
+    &'a dyn Fn(Pascals) -> Kelvin,
+    MixingColumn,
+);
+
+/// Without its particles a condensation places every deck as [`Condensation::derive`] does, to the
+/// bit, and forms no mode (P14.T54.b.l): over Ackerman and Marley's Jupiter, Uranus, a 600 K
+/// sub-Neptune and a hot Jupiter, each with the baseline's and a supply's sedimentation.
+#[test]
+fn without_its_particles_a_condensation_is_derive_s_but_its_modes() {
+    let airs: [TestAir<'_>; 4] = [
+        (ackerman_and_marley_gas(), &jupiter, jupiter_column()),
+        (
+            uranus_gas(),
+            &uranus,
+            column(8.87, 2.64, 1e3, 30.0, 0.05, 50.0),
+        ),
+        (
+            speciated(&protosolar(50.0), 2_800.0, bar(10.0)),
+            &sub_neptune,
+            column(8.9, 4.0, 1e3, 50.0, 1e-4, 10.0),
+        ),
+        (
+            speciated(&protosolar(1.0), 2_400.0, bar(100.0)),
+            &piecewise(&HOT_JUPITER),
+            column(9.4, 2.33, 1e3, 1.0, 1e-5, 1e3),
+        ),
+    ];
+    let mut decks = 0;
+    for (gas, profile, column) in &airs {
+        for sedimentation in [baseline as fn(SubstanceId) -> Sedimentation, |_| {
+            Sedimentation::new(0.3, 2.0).expect("a sedimentation")
+        }] {
+            let mut formed =
+                Condensation::derive(gas.iter().copied(), profile, column, sedimentation, 1.0)
+                    .expect("the clouds");
+            let vapours = Condensation::derive_vapours(
+                gas.iter().copied(),
+                profile,
+                column,
+                sedimentation,
+                1.0,
+            )
+            .expect("the clouds");
+            assert!(formed.decks.iter().all(|deck| deck.modes.len() == 1));
+            assert!(vapours.decks.iter().all(|deck| deck.modes.is_empty()));
+            for deck in &mut formed.decks {
+                deck.modes.clear();
+            }
+            assert_eq!(format!("{vapours:?}"), format!("{formed:?}"));
+            decks += formed.decks.len();
+        }
+    }
+    assert!(decks > 20, "{decks} decks");
+}
+
+/// Each scan level's held pressure is e^(ln p) of its ln p to the bit, at every level of a column of
+/// many (P14.T54.b.l): the scan's read of the level and a read at its ln p agree.
+#[test]
+fn each_scan_level_s_pressure_is_e_to_its_ln_p() {
+    let grid = grid(&jupiter, &jupiter_column()).expect("Jupiter's grid");
+    assert!(grid.len() > 20, "{} levels", grid.len());
+    for level in 0..grid.len() {
+        let (u, pressure, temperature) = Read::Level(level).point(&grid);
+        let (at_u, at_pressure, _) = Read::At(u).point(&grid);
+        assert_same_bits(at_u, u);
+        assert_same_bits(pressure.value(), math::exp(grid.u(level)));
+        assert_same_bits(at_pressure.value(), pressure.value());
+        assert_same_bits(temperature, grid.temperatures[level]);
     }
 }

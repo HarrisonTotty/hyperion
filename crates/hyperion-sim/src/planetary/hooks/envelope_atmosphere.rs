@@ -1584,7 +1584,9 @@ fn condense(
         Some(DeckKind::SulphideOrSalt) => Some(salt),
         Some(DeckKind::Volatile) | None => None,
     };
-    let first = Condensation::derive(
+    // The first derivation gives only the gas's molar mass and the volatile decks' supply, which
+    // read the decks' bases and vapours, so it forms no particles (P14.T54.b.l).
+    let first = Condensation::derive_vapours(
         deep.iter().copied(),
         profile,
         column,
