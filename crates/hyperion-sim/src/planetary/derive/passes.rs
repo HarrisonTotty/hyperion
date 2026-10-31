@@ -91,6 +91,20 @@
 //! settles alone, its own move within [`OWN_RESIDUAL_SHARE`] (1 − A) and its context its own air's
 //! ([`PassStop::OwnResidual`]): the same fixed point to the same tolerance, one pass sooner. The
 //! 2-cycle stop and the bracket are unchanged.
+//!
+//! # Aitken's step (P14.T54.b.l, from generator version 26)
+//!
+//! A body whose passes converge linearly, each move about r times the one before, needs some
+//! log(tolerance) ÷ log |r| passes to settle. From [`AITKEN_STEP_VERSION`], under the own
+//! residual's stop, the plain passes take Aitken's Δ² step once three passes in a row, each
+//! reading the albedo the one before gave, show it ([`PassStep::Aitken`]; Aitken 1926, Proc. R.
+//! Soc. Edinb. 46, 289): their two ratios rₙ₋₁ = gₙ₋₁ ÷ gₙ₋₂ and rₙ = gₙ ÷ gₙ₋₁ agree within
+//! [`AITKEN_RATIO_AGREEMENT`] of the larger, both are at most [`AITKEN_LARGEST_RATIO`] in size,
+//! the three read one context key and the last's own air gives it too. The next pass then reads the
+//! geometric series' sum, A* = Aₙ + gₙ ÷ (1 − rₙ), in place of F(Aₙ) = Aₙ + gₙ, where it is an
+//! albedo, and three plain passes run again before the next step. The stop's test reads each pass
+//! alone, so a body settles at a fixed point to the same tolerance; one that does not is
+//! bracketed as before, its ends the passes it took.
 
 use core::cmp::Ordering;
 use core::fmt;
@@ -389,6 +403,155 @@ pub(crate) fn with_pass_stop<R>(stop: PassStop, run: impl FnOnce() -> R) -> R {
     run()
 }
 
+/// The generator version from which a body's plain passes take Aitken's Δ² step once their moves
+/// show linear convergence, [`PassStep::Aitken`]: 26.
+///
+/// A planetary bump after 25 (P14.T54.b.l's cost lever toward decision-24-cost D5, after the own
+/// residual). Below it [`PassStep::in_force`] is [`PassStep::Plain`], each pass reading the albedo
+/// the one before gave, and every pass is version 24's and 25's bit for bit. 26's bump deletes
+/// this hold and the tests' switch (`with_pass_step`), keeps [`PassStep::Plain`] as the tests'
+/// oracle, and deletes the tripwire (`the_aitken_step_is_held_only_until_the_26_bump`).
+pub(crate) const AITKEN_STEP_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// The largest |r|, the ratio of a pass's move to the move of the pass before it, at which the
+/// plain passes take Aitken's step: 0.9, so that the step reaches at most 1 ÷ (1 − 0.9) = 10 of the
+/// last pass's moves from the albedo it read.
+const AITKEN_LARGEST_RATIO: f64 = 0.9;
+
+/// How closely two successive ratios of the moves must agree, as a share of the larger |r|, for
+/// the moves to show linear convergence and the plain passes to take Aitken's step: 0.1.
+///
+/// Where the ratio still changes by δr between passes, A* misses the fixed point by about
+/// δr ÷ (1 − r)² of the last move, the plain pass by about |r| ÷ (1 − r) of it; δr within a tenth
+/// of |r| keeps A*'s miss below the plain pass's wherever |r| ≤ [`AITKEN_LARGEST_RATIO`] (the
+/// lane's choice, 2026-10-31).
+const AITKEN_RATIO_AGREEMENT: f64 = 0.1;
+
+/// What the albedo a plain pass reads is ([`AITKEN_STEP_VERSION`]'s hold).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PassStep {
+    /// Version 25's and before: the albedo the pass before gave, F(Aₙ), every pass.
+    Plain,
+    /// Version 26's: Aitken's extrapolation A* = Aₙ + gₙ ÷ (1 − rₙ) once three passes in a row
+    /// show linear convergence (the [module](self)'s "Aitken's step"), else F(Aₙ). It runs only
+    /// under [`PassStop::OwnResidual`], whose test reads each pass alone: T51.b's test compares a
+    /// pass with the one before it, which an extrapolated albedo does not follow. Under every 26
+    /// hold the first 20 sample systems' generation takes 673 passes against 748, and their epoch
+    /// snapshots 1,698 against 1,740 (P14.T54.b.l's count,
+    /// `under_aitken_s_step_the_movers_and_passes_are_stated`).
+    Aitken,
+}
+
+impl PassStep {
+    /// The step this generator version gives: Aitken's from [`AITKEN_STEP_VERSION`], the plain
+    /// step below it; in the tests, the step a test's switch sets on its thread
+    /// (`with_pass_step`).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(step) = STEP.with(core::cell::Cell::get) {
+            return step;
+        }
+        if GENERATOR_VERSION >= AITKEN_STEP_VERSION {
+            Self::Aitken
+        } else {
+            Self::Plain
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The step a test sets on its thread, `None` for the version's.
+    static STEP: core::cell::Cell<Option<PassStep>> = const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the plain passes stepping as `step` says on this thread, for the tests to
+/// reach 26's Aitken step ahead of the bump; the version's step is set back after, a panic in
+/// `run` included. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_pass_step<R>(step: PassStep, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's step back as it drops.
+    struct Restore(Option<PassStep>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            STEP.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(STEP.with(|cell| cell.replace(Some(step))));
+    run()
+}
+
+/// Aitken's step over the plain passes ([`PassStep::Aitken`]): the last three passes of the
+/// current run, each reading the albedo the one before gave, the latest last.
+#[derive(Debug, Clone, Copy)]
+struct AitkenRun<P, C> {
+    /// Whether the step is in force: [`PassStep::Aitken`] under [`PassStop::OwnResidual`].
+    in_force: bool,
+    /// The run's last three passes, `None` before the run holds three.
+    last_three: [Option<Evaluated<P, C>>; 3],
+}
+
+impl<P: Copy, C: Context> AitkenRun<P, C> {
+    /// The run from the first pass `first`, under the stop `stop`.
+    #[must_use]
+    fn new(stop: PassStop, first: Evaluated<P, C>) -> Self {
+        Self {
+            in_force: PassStep::in_force() == PassStep::Aitken && stop == PassStop::OwnResidual,
+            last_three: [None, None, Some(first)],
+        }
+    }
+
+    /// The albedo the next pass reads by Aitken's step ([`aitken`]), `next` the context the last
+    /// pass's own air gives; `None` for the one the last pass gave.
+    #[must_use]
+    fn extrapolated(&self, next: &C) -> Option<BondAlbedo> {
+        match &self.last_three {
+            [Some(two_back), Some(previous), Some(last)] if self.in_force => {
+                aitken([two_back, previous, last], next)
+            }
+            _ => None,
+        }
+    }
+
+    /// The pass `now` taken, which starts a new run where it read Aitken's extrapolation.
+    fn push(&mut self, now: Evaluated<P, C>, extrapolated: bool) {
+        let [_, previous, last] = self.last_three;
+        self.last_three = if extrapolated {
+            [None, None, Some(now)]
+        } else {
+            [previous, last, Some(now)]
+        };
+    }
+}
+
+/// Aitken's Δ² extrapolation from the passes `two_back`, `previous` and `last`, each reading the
+/// albedo the one before gave, and `next`, the context `last`'s own air gives: A* = Aₙ + gₙ ÷
+/// (1 − rₙ), the sum of the geometric series their moves make; `None` where their moves do not
+/// show linear convergence (the [module](self)'s "Aitken's step": both ratios within
+/// [`AITKEN_LARGEST_RATIO`], so that a move of zero, whose ratio is infinite or not a number,
+/// never passes) or A* is not an albedo.
+///
+/// Every test is a comparison, so that a ratio that is not a number never passes it.
+#[must_use]
+fn aitken<P, C: Context>(
+    [two_back, previous, last]: [&Evaluated<P, C>; 3],
+    next: &C,
+) -> Option<BondAlbedo> {
+    let key = last.context.key();
+    if two_back.context.key() != key || previous.context.key() != key || next.key() != key {
+        return None;
+    }
+    let (r_before, r) = (previous.g / two_back.g, last.g / previous.g);
+    let linear = r.abs() <= AITKEN_LARGEST_RATIO
+        && r_before.abs() <= AITKEN_LARGEST_RATIO
+        && (r - r_before).abs() <= AITKEN_RATIO_AGREEMENT * r.abs().max(r_before.abs());
+    if !linear {
+        return None;
+    }
+    BondAlbedo::new(last.read.value() + last.g / (1.0 - r))
+}
+
 /// The most passes a body takes under a lagged context (P14.T54.a; decision-p14-t54a-passes §1.5):
 /// [`PLAIN_PASSES`], then two rounds of a bracket, each its two ends re-evaluated under its
 /// context, its [`HALVINGS`] and the one pass more where a bound of [0, 1⁻] is still an end: 24 +
@@ -631,7 +794,9 @@ impl<P: Copy, C: Copy> End<P, C> {
 /// The plain passes run as P14.T51.b built them, for at most [`PLAIN_PASSES`], and a body that
 /// settles publishes its last pass, [`Convergence::Converged`]; from 26 they end instead at the
 /// first pass that settles alone ([`PassStop::OwnResidual`], to [`OWN_RESIDUAL_SHARE`]), and
-/// `settled` is not read. One that does not, or that repeats a 2-cycle to the bit first, is bracketed and bisected ([`HALVINGS`]), as the module's
+/// `settled` is not read, and once their moves show linear convergence a pass reads Aitken's
+/// extrapolation ([`PassStep::Aitken`]). One that does not, or that repeats a 2-cycle to the bit
+/// first, is bracketed and bisected ([`HALVINGS`]), as the module's
 /// documentation says, and publishes the bracket's end with the smaller |F(A) − A|, ties to the
 /// lower albedo, [`Convergence::Bracketed`]. At most [`PLAIN_PASSES`] + [`HALVINGS`] + 1 passes are
 /// taken: the one more where a bound of [0, 1⁻] is still an end and needs its pass. Under the
@@ -666,8 +831,9 @@ pub(crate) fn solve<P: Copy>(
 /// Pass n reads Aₙ, the albedo pass n − 1 gave, and Cₙ = K(Pₙ₋₁), pass 1 the stand-in `first`.
 /// It settles where `settled` holds, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ) ([`Context::agrees`]); from 26
 /// instead at the first pass that settles alone ([`PassStop::OwnResidual`], to
-/// [`OWN_RESIDUAL_SHARE`]), `settled` not read. The plain passes stop early on (A, C) two passes
-/// back, bit for bit. A body that does not settle is
+/// [`OWN_RESIDUAL_SHARE`]), `settled` not read, a pass reading Aitken's extrapolation in place of
+/// Aₙ where the moves show linear convergence ([`PassStep::Aitken`]). The plain passes stop early
+/// on (A, C) two passes back, bit for bit. A body that does not settle is
 /// bracketed under its frozen context, and once more under K of the published pass where their
 /// keys differ, as the module's documentation says. At most [`MOST_PASSES`] passes are taken,
 /// [`MOST_SECANT_PASSES`] under the secant steps from 25 ([`PassRoot::Secant`]).
@@ -743,8 +909,11 @@ fn solve_with<C: Context, P: Copy>(
     let (mut lowest, mut highest) = (last, last);
     let mut previous: Option<Evaluated<P, C>> = None;
     let mut cycled = false;
+    let mut aitken_run = AitkenRun::new(stop, last);
     while count < plain.cap {
-        let now = evaluate(gives(&last.pass), last_next);
+        let extrapolated = aitken_run.extrapolated(&last_next);
+        let now = evaluate(extrapolated.unwrap_or_else(|| gives(&last.pass)), last_next);
+        aitken_run.push(now, extrapolated.is_some());
         let now_next = next(&now.pass);
         count += 1;
         let done = match stop {
@@ -2245,5 +2414,223 @@ mod tests {
             assert_eq!(after.count, before.count);
             assert_same_outcome(after.convergence, before.convergence);
         }
+    }
+
+    // P14.T54.b.l: Aitken's step, behind its hold at 26.
+
+    /// [`solved`] under 26's own residual, its plain passes stepping as `step` says.
+    fn stepped(step: PassStep, f: impl Fn(f64) -> f64) -> Solved<(f64, f64)> {
+        with_pass_stop(PassStop::OwnResidual, || with_pass_step(step, || solved(f)))
+    }
+
+    /// P14.T54.b.l's Aitken step is held until the 25 → 26 bump: the step in force is the plain
+    /// one.
+    #[test]
+    fn the_aitken_step_is_held_only_until_the_26_bump() {
+        assert!(
+            GENERATOR_VERSION < AITKEN_STEP_VERSION,
+            "the 25 → 26 bump puts P14.T54.b.l's Aitken step on the record: delete \
+             `AITKEN_STEP_VERSION`, `PassStep::in_force`'s version test, the tests' \
+             `with_pass_step` and its switch in `with_every_26_hold`, and this test, keeping \
+             `PassStep::Plain` as the tests' oracle"
+        );
+        assert_eq!(PassStep::in_force(), PassStep::Plain);
+        assert_eq!(
+            with_pass_step(PassStep::Aitken, PassStep::in_force),
+            PassStep::Aitken
+        );
+        assert_eq!(PassStep::in_force(), PassStep::Plain);
+        // Nothing moves at 25: 25's holds leave the plain step; 26's helper takes Aitken's.
+        assert_eq!(
+            crate::planetary::testing::with_every_25_hold(PassStep::in_force),
+            PassStep::Plain
+        );
+        assert_eq!(
+            crate::planetary::testing::with_every_26_hold(PassStep::in_force),
+            PassStep::Aitken
+        );
+    }
+
+    /// The step's switch sets the version's step back when its closure panics. Native only: on
+    /// wasm32-wasip1 a panic aborts the whole test binary (panic = abort), so `catch_unwind`
+    /// cannot catch it, and no switch is left to set back.
+    #[test]
+    #[cfg(not(target_family = "wasm"))]
+    fn a_panic_inside_the_pass_step_switch_sets_the_step_back() {
+        let unwound = std::panic::catch_unwind(|| {
+            with_pass_step(PassStep::Aitken, || panic!("inside the switch"));
+        });
+        let payload = unwound.expect_err("the closure panics");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the switch"));
+        assert_eq!(PassStep::in_force(), PassStep::Plain);
+    }
+
+    /// Three passes on branch `branch`, each reading the albedo the one before gave, whose moves
+    /// are `moves`, from 0.3.
+    fn run_of(moves: [f64; 3], branch: u8) -> [Evaluated<(), Lid>; 3] {
+        let mut read = 0.3;
+        moves.map(|g| {
+            let at = Evaluated {
+                read: BondAlbedo::from_fraction(read),
+                context: Lid::branch(branch),
+                pass: (),
+                g,
+            };
+            read += g;
+            at
+        })
+    }
+
+    /// Aitken's extrapolation is the sum of the geometric series the moves make, where two ratios
+    /// agree within a tenth of the larger and |r| ≤ 0.9; and none where they do not, past 0.9, at
+    /// a ratio or a move that is not a number, across a context key, or outside [0, 1).
+    #[test]
+    fn aitken_s_step_sums_the_moves_series_only_where_they_converge_linearly() {
+        let at = |moves: [f64; 3], branch: u8, next: u8| {
+            let [a, b, c] = run_of(moves, branch);
+            aitken([&a, &b, &c], &Lid::branch(next)).map(BondAlbedo::value)
+        };
+        // r = 0.5 twice: A* = A₂ + g₂ ÷ (1 − 0.5), the series' sum from A₀ = 0.3, 0.3 + 0.04 × 2.
+        let sum = at([0.04, 0.02, 0.01], 0, 0).expect("linear");
+        assert!((sum - 0.38).abs() < 1e-15, "{sum}");
+        // Falling, r = −0.5 twice.
+        let falling = at([0.04, -0.02, 0.01], 0, 0).expect("linear");
+        assert!((falling - (0.32 + 0.01 / 1.5)).abs() < 1e-15, "{falling}");
+        // Ratios 0.5 and 0.545 agree within a tenth of the larger; 0.5 and 0.6 do not.
+        assert!(at([0.04, 0.02, 0.0109], 0, 0).is_some());
+        assert_eq!(at([0.04, 0.02, 0.012], 0, 0), None);
+        // |r| past 0.9, a 2-cycle among them.
+        assert_eq!(at([0.01, 0.0095, 0.009_025], 0, 0), None);
+        assert_eq!(at([0.1, -0.1, 0.1], 0, 0), None);
+        // Not a number, and a move of zero, whose ratio is not one.
+        assert_eq!(at([0.04, f64::NAN, 0.01], 0, 0), None);
+        assert_eq!(at([0.0, 0.0, 0.0], 0, 0), None);
+        assert_eq!(at([0.0, 0.02, 0.01], 0, 0), None);
+        // Across a context key: the passes' or the one the last one's air gives.
+        assert_eq!(at([0.04, 0.02, 0.01], 0, 1), None);
+        let [a, b, c] = run_of([0.04, 0.02, 0.01], 0);
+        let other = Evaluated {
+            context: Lid::branch(1),
+            ..a
+        };
+        assert_eq!(aitken([&other, &b, &c], &Lid::branch(0)), None);
+        // A sum past 1.
+        assert_eq!(at([0.3, 0.27, 0.243], 0, 0), None);
+    }
+
+    /// Under Aitken's step a body whose moves converge linearly settles in fewer passes than the
+    /// plain passes take, at a pass whose own move is within the stop's tolerance, at its fixed
+    /// point: a linear rising map of slope 0.8, which the plain passes do not settle within 24 and
+    /// which settles at the pass after the step, a linear falling one of slope −0.5, and a curved
+    /// one, F′ = 0.6 at its fixed point 0.5.
+    #[test]
+    fn under_aitken_s_step_a_linearly_converging_body_settles_sooner() {
+        let own = |a: f64, given: f64| (given - a).abs() <= OWN_RESIDUAL_SHARE * (1.0 - a);
+        for (what, fixed, f) in [
+            (
+                "rising",
+                0.5,
+                Box::new(|a: f64| 0.5 + 0.8 * (a - 0.5)) as Box<dyn Fn(f64) -> f64>,
+            ),
+            ("falling", 0.6, Box::new(|a: f64| 0.6 - 0.5 * (a - 0.6))),
+            (
+                "curved",
+                0.5,
+                Box::new(|a: f64| 0.5 + 0.6 * (a - 0.5) - 0.8 * (a - 0.5) * (a - 0.5)),
+            ),
+        ] {
+            let plain = stepped(PassStep::Plain, &f);
+            let aitken = stepped(PassStep::Aitken, &f);
+            assert_eq!(aitken.convergence, Convergence::Converged, "{what}");
+            assert!(
+                aitken.count < plain.count,
+                "{what}: {aitken:?} against {plain:?}"
+            );
+            assert!(
+                own(aitken.albedo.value(), aitken.pass.1),
+                "{what}: {aitken:?}"
+            );
+            let off = (aitken.albedo.value() - fixed).abs();
+            assert!(off < 1e-8, "{what}: {off:e} from the fixed point");
+            eprintln!(
+                "{what}: {} passes against the plain passes' {}, {off:e} from the fixed point",
+                aitken.count, plain.count
+            );
+        }
+        let rising = stepped(PassStep::Aitken, |a| 0.5 + 0.8 * (a - 0.5));
+        // Three plain passes, then the step's, which reads the fixed point.
+        assert_eq!(rising.count, 4, "{rising:?}");
+        assert_ne!(
+            stepped(PassStep::Plain, |a| 0.5 + 0.8 * (a - 0.5)).convergence,
+            Convergence::Converged,
+            "the plain passes do not settle the slope 0.8 within 24"
+        );
+    }
+
+    /// Aitken's step changes nothing where the moves do not converge linearly, or under T51.b's
+    /// test: the slope −2 stub's 2-cycle and the jump at 0.4 publish the own residual's pass to the
+    /// bit, their count the same; a map settled at its start takes its one pass; and under T51.b's
+    /// test a linear map takes the plain passes' bits.
+    #[test]
+    fn aitken_s_step_leaves_cycles_jumps_and_t51b_s_test_as_they_are() {
+        for f in [
+            Box::new(|a: f64| (0.21 - 2.0 * (a - 0.21)).clamp(0.15, 0.278))
+                as Box<dyn Fn(f64) -> f64>,
+            Box::new(|a: f64| if a < 0.4 { 0.6 } else { 0.2 }),
+            Box::new(|_: f64| 0.3),
+        ] {
+            let plain = stepped(PassStep::Plain, &f);
+            let aitken = stepped(PassStep::Aitken, &f);
+            assert_same_bits(aitken.albedo.value(), plain.albedo.value());
+            assert_eq!(aitken.count, plain.count);
+            assert_same_outcome(aitken.convergence, plain.convergence);
+        }
+        let linear = |a: f64| 0.2 + 0.1 * (a - 0.2);
+        let (plain, aitken) = (
+            solved(linear),
+            with_pass_step(PassStep::Aitken, || solved(linear)),
+        );
+        assert_same_bits(aitken.albedo.value(), plain.albedo.value());
+        assert_eq!(aitken.count, plain.count);
+    }
+
+    /// Under Aitken's step a weakly coupled (A, C) stub settles at its joint fixed point, its
+    /// published pass reading the context its own air gives, and the lagged contexts' second
+    /// rounds and a curved map give the same bits twice.
+    #[test]
+    fn under_aitken_s_step_the_solver_under_a_context_settles_and_is_deterministic() {
+        let coupled = || {
+            lid_solve_from(
+                Plain::SOLVE,
+                |a, lid| 0.25 + 0.5 * (a - 0.25) + 1e-3 * (lid.level - 0.5),
+                |pass: &LidPass| Lid {
+                    level: 0.5 + 1e-3 * (pass.1 - 0.25),
+                    branch: 0,
+                },
+            )
+        };
+        let aitken = || {
+            with_pass_stop(PassStop::OwnResidual, || {
+                with_pass_step(PassStep::Aitken, coupled)
+            })
+        };
+        let plain = with_pass_stop(PassStop::OwnResidual, coupled);
+        let (one, two) = (aitken(), aitken());
+        assert_eq!(one.convergence, Convergence::Converged);
+        assert!(one.count < plain.count, "{one:?} against {plain:?}");
+        assert!(one.context.agrees(&one.next), "{one:?}");
+        assert!((one.albedo.value() - 0.25).abs() < 1e-8, "{one:?}");
+        assert_same_lid_outcome(&one, &two);
+        with_pass_stop(PassStop::OwnResidual, || {
+            with_pass_step(PassStep::Aitken, || {
+                for edge in [0.26, 0.250_4, 0.0] {
+                    assert_same_lid_outcome(&second_round(edge), &second_round(edge));
+                }
+                let curved = |a: f64| 0.5 + 0.6 * (a - 0.5) - 0.8 * (a - 0.5) * (a - 0.5);
+                let (one, two) = (solved(curved), solved(curved));
+                assert_same_bits(one.albedo.value(), two.albedo.value());
+                assert_eq!(one.count, two.count);
+            });
+        });
     }
 }

@@ -31515,11 +31515,22 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         the bracket is unchanged. 14 of the 415 systems move, by at most 3.7 × 10⁻¹⁰ of a figure,
         and 347 snapshots, by at most 1.5 × 10⁻⁴ (a trace frost's 8.5 × 10⁻¹⁰ kg m⁻²), with no text
         moved (`under_the_own_residual_stop_the_movers_and_passes_are_stated`).
-      - The locked climate's census (`deck_alone`) holds all three back: their moves, though tiny,
-        moved bodies outside the deck's domain.
+      - Aitken's step, `AITKEN_STEP_VERSION` (`passes::PassStep`, the tests' `with_pass_step`, and
+        the tripwire `the_aitken_step_is_held_only_until_the_26_bump`), under the own residual's
+        stop only: once three plain passes in a row show linear convergence (two move ratios within
+        a tenth of the larger, both |r| ≤ 0.9, one context key), the next pass reads Aitken's
+        A* = Aₙ + gₙ ÷ (1 − rₙ). Under every 26 hold the first 20 take 673 passes in `generate`
+        against 748 and 1,698 in `snapshot_at` against 1,740; their bracketed solves are mostly
+        jumps, which it leaves as they are. Against the own residual alone 2 of the 415 systems
+        move, by at most 1.1 × 10⁻¹⁰ of a figure, and 236 snapshots, by at most 2.9 × 10⁻⁴ (a basin
+        population's width at 01ffcb2be0000000), with no text moved
+        (`under_aitken_s_step_the_movers_and_passes_are_stated`).
+      - The locked climate's census (`deck_alone`) reads every 25 hold and the deck alone, so no
+        lever of these reaches it.
       - For 26's bump: delete each hold, its switch and its tripwire, keeping
-        `FallRadiusRoot::Bisections`, `CompressionRules::Fixed` and `PassStop::Consecutive` as the
-        tests' oracles; 25's bump drops `with_every_25_hold` from `with_every_26_hold`.
+        `FallRadiusRoot::Bisections`, `CompressionRules::Fixed`, `PassStop::Consecutive` and
+        `PassStep::Plain` as the tests' oracles; 25's bump drops `with_every_25_hold` from
+        `with_every_26_hold`.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

@@ -7207,6 +7207,70 @@ fn under_the_own_residual_stop_the_movers_and_passes_are_stated() {
     stated_movers(&|run| with_pass_stop(PassStop::OwnResidual, run));
 }
 
+/// P14.T54.b.l's Aitken step under 26's hold, a measurement for its record, run by name: the own
+/// residual alone against the own residual with Aitken's step (`with_pass_step`), as
+/// [`stated_movers_between`] states them; and under every 26 hold, with the plain step and with
+/// Aitken's, over the first 20 sample systems' generation and their epoch snapshots apart, each
+/// arm's solves, the settled and the bracketed ones' passes, and every pass.
+#[test]
+#[ignore = "a measurement for P14.T54.b.l's record, run by name"]
+fn under_aitken_s_step_the_movers_and_passes_are_stated() {
+    use crate::planetary::derive::passes::{
+        PassStep, PassStop, with_pass_step, with_pass_stop, with_solves,
+    };
+    use crate::planetary::testing::with_every_26_hold;
+    let contexts = &sample()[..20];
+    let tally = |what: &str, step: PassStep, stage: &str, solves: &[(u32, bool)]| {
+        let passes = |settled: bool| {
+            solves
+                .iter()
+                .filter(|solve| solve.1 == settled)
+                .fold((0_u32, 0_u32), |(n, sum), solve| (n + 1, sum + solve.0))
+        };
+        let ((settled, settled_passes), (bracketed, bracketed_passes)) =
+            (passes(true), passes(false));
+        eprintln!(
+            "{what}, {step:?} step, {stage}: {} solves, {settled} settled in {settled_passes} \
+             passes, {bracketed} bracketed in {bracketed_passes}, {} passes in all",
+            solves.len(),
+            settled_passes + bracketed_passes
+        );
+        settled_passes + bracketed_passes
+    };
+    let mut all = Vec::new();
+    for step in [PassStep::Plain, PassStep::Aitken] {
+        let (generated, snapshots) = with_every_26_hold(|| {
+            with_pass_step(step, || {
+                let (systems, generated) = with_solves(|| {
+                    contexts
+                        .iter()
+                        .map(|ctx| generate(SEED, ctx))
+                        .collect::<Vec<_>>()
+                });
+                let ((), snapshots) = with_solves(|| {
+                    for (ctx, system) in contexts.iter().zip(&systems) {
+                        let _ = system.snapshot_at(ctx, UniverseTime::EPOCH);
+                    }
+                });
+                (generated, snapshots)
+            })
+        });
+        all.push((
+            tally("every 26 hold", step, "generate", &generated),
+            tally("every 26 hold", step, "snapshot_at", &snapshots),
+        ));
+    }
+    assert!(
+        all[1].0 < all[0].0 && all[1].1 < all[0].1,
+        "Aitken's step takes fewer passes in both stages: {all:?}"
+    );
+    stated_movers_between(&|run| with_pass_stop(PassStop::OwnResidual, run), &|run| {
+        with_pass_stop(PassStop::OwnResidual, || {
+            with_pass_step(PassStep::Aitken, run)
+        })
+    });
+}
+
 /// The run an arm of [`stated_movers`] takes under its hold: a system generated and snapshotted
 /// at the epoch, each's Debug text.
 type Texts<'a> = &'a dyn Fn() -> (String, String);
@@ -7217,6 +7281,15 @@ type Texts<'a> = &'a dyn Fn() -> (String, String);
 /// systems and snapshots move, the largest relative move of a number in each where only numbers
 /// move, and every one whose text moves.
 fn stated_movers(arm: &dyn Fn(Texts<'_>) -> (String, String)) {
+    stated_movers_between(&|run| run(), arm);
+}
+
+/// [`stated_movers`] between two arms: each system and snapshot under `before`, against the same
+/// under `after`, for a lever that rides another hold.
+fn stated_movers_between(
+    before: &dyn Fn(Texts<'_>) -> (String, String),
+    after: &dyn Fn(Texts<'_>) -> (String, String),
+) {
     let sets: Vec<(String, Seed, SystemContext)> = sample()
         .iter()
         .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
@@ -7238,8 +7311,8 @@ fn stated_movers(arm: &dyn Fn(Texts<'_>) -> (String, String)) {
         ((0.0_f64, String::new()), (0.0_f64, String::new()));
     let mut texts_moved = Vec::new();
     for (name, seed, ctx) in &sets {
-        let (b_system, b_snapshot) = texts(*seed, ctx);
-        let (f_system, f_snapshot) = arm(&|| texts(*seed, ctx));
+        let (b_system, b_snapshot) = before(&|| texts(*seed, ctx));
+        let (f_system, f_snapshot) = after(&|| texts(*seed, ctx));
         for (what, moved, worst, one, two) in [
             (
                 "system",

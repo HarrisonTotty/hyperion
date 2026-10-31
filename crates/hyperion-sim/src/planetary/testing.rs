@@ -523,6 +523,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
+/// - the passes' Aitken step, `AITKEN_STEP_VERSION` (P14.T54.b.l's cost lever), at
+///   `PassStep::Aitken` through `with_pass_step`: a pass reading Aitken's Δ² extrapolation once
+///   three plain passes in a row show linear convergence, under the own residual's stop.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -534,7 +537,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
-    use crate::planetary::derive::passes::{PassStop, with_pass_stop};
+    use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
@@ -555,6 +558,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_pass_stop(PassStop::OwnResidual, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
+    let run = move || with_pass_step(PassStep::Aitken, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
