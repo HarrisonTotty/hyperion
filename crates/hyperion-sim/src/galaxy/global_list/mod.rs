@@ -108,7 +108,7 @@ pub mod tube;
 use std::error::Error;
 use std::fmt;
 
-pub use debris::Debris;
+pub use debris::{Debris, DebrisPlan};
 pub use share::discrete_share;
 pub use source::GlobalListSource;
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
@@ -593,14 +593,48 @@ impl GlobalList {
     /// [`CentreModel::new`]: crate::galaxy::features::centre::CentreModel::new
     #[must_use]
     pub fn build(galaxy: &Galaxy) -> Self {
-        let centre = galaxy.centre().expect(
-            "no galaxy the builder allows fails its centre's inversions (CentreModel::new's \
-             documentation and tests)",
-        );
-        let debris = Debris::generate(galaxy);
-        let mut entries = vec![centre.as_global_entry()];
-        entries.extend(debris_entries(galaxy, galaxy.potential(), &debris));
-        Self { entries, debris }
+        // The centre first, as the list always read it; it is kept in the galaxy either way.
+        centre_of(galaxy);
+        let plan = Self::plan(galaxy);
+        let force = SprayForce::new(galaxy.potential())
+            .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
+        let radii = spray::radii_over_ly(&force, plan.legs());
+        plan.finish(galaxy, &radii)
+    }
+
+    /// What [`build`](Self::build) decides before it integrates the shells' orbits: the
+    /// [`Debris`] and every shell's orbits, its [`Leg`]s, in list order (P10.T5.b).
+    ///
+    /// A caller's pool steps the legs ([`spray::radii_over_ly`], in any grouping, each leg's
+    /// radii a pure function of the leg) and gathers their radii by index into
+    /// [`ListPlan::finish`], for `build`'s list, bit for bit; and it may generate the debris
+    /// itself ([`Debris::plan`]) and plan from it ([`ListPlan::of_debris`]).
+    ///
+    /// # Panics
+    ///
+    /// As [`Debris::generate`]: if `galaxy` holds no kinematic tables.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::GlobalList;
+    /// use hyperion_sim::galaxy::global_list::spray::{SprayForce, radii_over_ly};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let plan = GlobalList::plan(&galaxy);
+    /// let force = SprayForce::new(galaxy.potential())?;
+    /// // Each leg alone, as a pool's workers could step them, gathered by index.
+    /// let radii: Vec<_> = plan.legs().iter().map(|leg| radii_over_ly(&force, &[*leg])[0]).collect();
+    /// assert_eq!(plan.finish(&galaxy, &radii), GlobalList::build(&galaxy));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn plan(galaxy: &Galaxy) -> ListPlan {
+        ListPlan::of_debris(Debris::generate(galaxy))
     }
 
     /// The entries, in list order.
@@ -664,9 +698,15 @@ impl GlobalList {
         for (k, c) in cores.iter().enumerate() {
             assert_eq!(usize::from(c.number().get()), k, "core {k}'s number");
         }
-        let debris = Debris::of_parts(streams, cores);
-        let entries = debris_entries(galaxy, tables, &debris);
-        Self { entries, debris }
+        let plan = ListPlan::of_debris(Debris::of_parts(streams, cores));
+        let force = SprayForce::new(tables)
+            .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
+        let radii = spray::radii_over_ly(&force, plan.legs());
+        let entries = plan.debris_entries(galaxy, tables, &radii);
+        Self {
+            entries,
+            debris: plan.debris,
+        }
     }
 
     /// The entries whose shells `sphere`, out to its padded radius, may meet
@@ -688,49 +728,122 @@ impl GlobalList {
     }
 }
 
-/// The entries of `debris`' streams and then its cores, in number order, each shell widened in
-/// the potential `tables` (module documentation, "Bounding shells"): what
-/// [`GlobalList::build`] lists after the centre.
-///
-/// It integrates every stream's and core's orbits together, side by side, in the spray's table of
-/// `tables`, which it builds once.
+/// The centre's model of `galaxy`, built on its first read and kept in the galaxy.
 ///
 /// # Panics
 ///
-/// If `tables` have no (R, z) grid, or a shell's orbit or widening is not finite, which no
-/// specification of [`Debris`] gives.
-#[must_use]
-fn debris_entries(galaxy: &Galaxy, tables: &PotentialTables, debris: &Debris) -> Vec<GlobalEntry> {
-    let force = SprayForce::new(tables)
-        .expect("the kinematic tables Debris::generate needs come with the (R, z) grid");
-    // Every shell's orbits at once, which `spray::radii_over_ly` steps side by side.
-    let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
-        .chain(debris.cores().iter().map(core_legs))
-        .collect();
-    let reached = reaches_ly(&force, &shells);
-    let (streams, cores) = reached.split_at(debris.streams().len());
-    let mut entries = Vec::with_capacity(shells.len());
-    entries.extend(debris.streams().iter().zip(streams).map(|(s, &reach)| {
-        GlobalEntry::new(
-            GlobalEntryKind::Stream(s.number()),
-            s.mass(),
-            widened_stream_shell(tables, s, reach),
-        )
-    }));
-    entries.extend(debris.cores().iter().zip(cores).map(|(c, &reach)| {
-        GlobalEntry::new(
-            GlobalEntryKind::DwarfCore(c.number()),
-            c.mass(),
-            widened_core_shell(galaxy, c, reach),
-        )
-    }));
-    entries
+/// As [`GlobalList::build`]: if its centre has no model.
+fn centre_of(galaxy: &Galaxy) -> &crate::galaxy::features::centre::CentreModel {
+    galaxy.centre().expect(
+        "no galaxy the builder allows fails its centre's inversions (CentreModel::new's \
+         documentation and tests)",
+    )
+}
+
+/// What [`GlobalList::build`] decides before it integrates the shells' orbits: the debris and
+/// every shell's legs in list order ([`GlobalList::plan`]; P10.T5.b).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListPlan {
+    debris: Debris,
+    /// Each stream's and then each core's orbits, in number order.
+    shells: Vec<ShellLegs>,
+    /// The shells' legs in turn: each one's backward leg, then its forward one if it has one.
+    legs: Vec<Leg>,
+}
+
+impl ListPlan {
+    /// The plan of the list of `debris`: its streams' and cores' shells' legs.
+    #[must_use]
+    pub fn of_debris(debris: Debris) -> Self {
+        let shells: Vec<ShellLegs> = (debris.streams().iter().map(stream_legs))
+            .chain(debris.cores().iter().map(core_legs))
+            .collect();
+        let legs = shells
+            .iter()
+            .flat_map(|s| core::iter::once(s.back).chain(s.ahead))
+            .collect();
+        Self {
+            debris,
+            shells,
+            legs,
+        }
+    }
+
+    /// The debris the list is built from.
+    #[must_use]
+    pub fn debris(&self) -> &Debris {
+        &self.debris
+    }
+
+    /// Every shell's legs, in list order: what [`spray::radii_over_ly`] steps for
+    /// [`finish`](Self::finish).
+    #[must_use]
+    pub fn legs(&self) -> &[Leg] {
+        &self.legs
+    }
+
+    /// The list of `galaxy`, the galaxy the plan's debris is of, from `radii`, each of
+    /// [`legs`](Self::legs)' least and greatest distances from the centre in turn, as
+    /// [`spray::radii_over_ly`] gives them: [`GlobalList::build`]'s, bit for bit. It reads the
+    /// galaxy's centre, which is built on its first read.
+    ///
+    /// # Panics
+    ///
+    /// - If `radii` do not number the legs.
+    /// - As [`GlobalList::build`]: if the centre has no model, or a shell's orbit or widening is
+    ///   not finite.
+    #[must_use]
+    pub fn finish(self, galaxy: &Galaxy, radii: &[[f64; 2]]) -> GlobalList {
+        let mut entries = vec![centre_of(galaxy).as_global_entry()];
+        entries.extend(self.debris_entries(galaxy, galaxy.potential(), radii));
+        GlobalList {
+            entries,
+            debris: self.debris,
+        }
+    }
+
+    /// The entries of the debris' streams and then its cores, in number order, each shell widened
+    /// in the potential `tables` (module documentation, "Bounding shells") from `radii`, its legs'
+    /// in turn: what [`GlobalList::build`] lists after the centre.
+    ///
+    /// # Panics
+    ///
+    /// If `radii` do not number the legs, or a shell's orbit or widening is not finite, which no
+    /// specification of [`Debris`] gives.
+    #[must_use]
+    fn debris_entries(
+        &self,
+        galaxy: &Galaxy,
+        tables: &PotentialTables,
+        radii: &[[f64; 2]],
+    ) -> Vec<GlobalEntry> {
+        assert_eq!(radii.len(), self.legs.len(), "one radius pair per leg");
+        let reached = reaches_ly(&self.shells, radii);
+        let debris = &self.debris;
+        let (streams, cores) = reached.split_at(debris.streams().len());
+        let mut entries = Vec::with_capacity(self.shells.len());
+        entries.extend(debris.streams().iter().zip(streams).map(|(s, &reach)| {
+            GlobalEntry::new(
+                GlobalEntryKind::Stream(s.number()),
+                s.mass(),
+                widened_stream_shell(tables, s, reach),
+            )
+        }));
+        entries.extend(debris.cores().iter().zip(cores).map(|(c, &reach)| {
+            GlobalEntry::new(
+                GlobalEntryKind::DwarfCore(c.number()),
+                c.mass(),
+                widened_core_shell(galaxy, c, reach),
+            )
+        }));
+        entries
+    }
 }
 
 /// The orbits a bounding shell is widened from, each from its entry's epoch state (module
 /// documentation, "Bounding shells"): one backwards, and one forwards for a stream whose
 /// stripping time is shorter than a radial period and for every dwarf core.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ShellLegs {
     back: Leg,
     ahead: Option<Leg>,
@@ -772,17 +885,12 @@ fn core_legs(spec: &DwarfCoreSpec) -> ShellLegs {
     }
 }
 
-/// The least and greatest distances from the galactic centre, ly, over each of `shells`' orbits
-/// in `force`'s field, in order.
+/// The least and greatest distances from the galactic centre, ly, over each of `shells`' orbits,
+/// in order, from `radii`, their legs' in turn: each shell's backward leg, then its forward one
+/// if it has one.
 #[must_use]
-fn reaches_ly(force: &SprayForce, shells: &[ShellLegs]) -> Vec<[f64; 2]> {
-    let mut legs = Vec::with_capacity(2 * shells.len());
-    legs.extend(
-        shells
-            .iter()
-            .flat_map(|s| core::iter::once(s.back).chain(s.ahead)),
-    );
-    let mut radii = spray::radii_over_ly(force, &legs).into_iter();
+fn reaches_ly(shells: &[ShellLegs], radii: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let mut radii = radii.iter().copied();
     let mut next = || radii.next().expect("one radius pair per leg");
     shells
         .iter()
@@ -812,7 +920,10 @@ fn reaches_ly(force: &SprayForce, shells: &[ShellLegs]) -> Vec<[f64; 2]> {
 #[cfg(test)]
 #[must_use]
 fn stream_shell(tables: &PotentialTables, force: &SprayForce, spec: &StreamSpec) -> BoundingShell {
-    widened_stream_shell(tables, spec, reaches_ly(force, &[stream_legs(spec)])[0])
+    let shell = stream_legs(spec);
+    let legs: Vec<Leg> = core::iter::once(shell.back).chain(shell.ahead).collect();
+    let radii = spray::radii_over_ly(force, &legs);
+    widened_stream_shell(tables, spec, reaches_ly(&[shell], &radii)[0])
 }
 
 /// The bounding shell of `spec`'s stream in a galaxy of `tables`, from the least and greatest
@@ -1066,6 +1177,7 @@ mod tests {
             the_lanes_give_every_shell_orbit_s_bits_alone();
             the_entries_are_the_centre_then_the_streams_then_the_cores();
             the_list_does_not_depend_on_whether_the_centre_was_built();
+            the_list_planned_and_made_in_shares_is_the_build();
             the_shells_hold_their_progenitors_and_spheres_touch_them_by_their_radii();
             a_shell_orbit_is_the_spray_s_progenitor_and_its_shell_holds_the_tracers();
         }
@@ -1248,7 +1360,7 @@ mod tests {
             }
             // The base's merge of a stream's two legs.
             let mut alone = alone.into_iter();
-            for (n, (shell, reach)) in shells.iter().zip(reaches_ly(&force, &shells)).enumerate() {
+            for (n, (shell, reach)) in shells.iter().zip(reaches_ly(&shells, &lanes)).enumerate() {
                 let [mut least, mut greatest] = alone.next().expect("a backward leg");
                 if shell.ahead.is_some() {
                     let [ahead_least, ahead_greatest] = alone.next().expect("a forward leg");
@@ -1272,6 +1384,51 @@ mod tests {
         fn the_list_does_not_depend_on_whether_the_centre_was_built() {
             let Fixture { galaxy, list } = fixture();
             assert_eq!(&GlobalList::build(galaxy), list);
+        }
+
+        /// The list as a caller's pool makes it (P10.T5.b): the debris planned, each orphan drawn
+        /// apart by its own copy of the plan, the last first, and gathered by index; the legs
+        /// stepped in three shares dealt out by their steps, the longest first, and gathered by
+        /// index; and the plan finished. Each step is the build's, bit for bit.
+        fn the_list_planned_and_made_in_shares_is_the_build() {
+            let Fixture { galaxy, list } = fixture();
+            let plan = Debris::plan(galaxy);
+            assert!(plan.orphan_count() > 100 && plan.orphan_room() > 1_000);
+            let mut drawn: Vec<_> = (0..plan.orphan_count())
+                .rev()
+                .map(|k| (k, plan.clone().orphan(galaxy, k)))
+                .collect();
+            drawn.sort_by_key(|&(k, _)| k);
+            let debris = plan.finish(drawn.into_iter().map(|(_, orphan)| orphan));
+            assert_eq!(&debris, list.debris());
+            let planned = ListPlan::of_debris(debris);
+            assert_eq!(planned, GlobalList::plan(galaxy));
+            let legs = planned.legs();
+            let force = SprayForce::new(galaxy.potential()).expect("the full potential");
+            let mut by_steps: Vec<usize> = (0..legs.len()).collect();
+            by_steps.sort_by_key(|&n| core::cmp::Reverse(legs[n].steps()));
+            let mut shares: [(u64, Vec<usize>); 3] = Default::default();
+            for n in by_steps {
+                let lightest = shares
+                    .iter_mut()
+                    .min_by_key(|(steps, _)| *steps)
+                    .expect("three shares");
+                lightest.0 += u64::from(legs[n].steps());
+                lightest.1.push(n);
+            }
+            let mut radii = vec![[f64::NAN; 2]; legs.len()];
+            for (_, share) in &shares {
+                let mine: Vec<Leg> = share.iter().map(|&n| legs[n]).collect();
+                for (&n, r) in share.iter().zip(spray::radii_over_ly(&force, &mine)) {
+                    radii[n] = r;
+                }
+            }
+            let whole = spray::radii_over_ly(&force, legs);
+            assert_eq!(
+                f64_digest(radii.as_flattened()),
+                f64_digest(whole.as_flattened())
+            );
+            assert_eq!(&planned.finish(galaxy, &radii), list);
         }
 
         fn the_shells_hold_their_progenitors_and_spheres_touch_them_by_their_radii() {

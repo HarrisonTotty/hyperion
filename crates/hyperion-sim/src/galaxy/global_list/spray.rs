@@ -909,7 +909,7 @@ impl<'a> Spray<'a> {
 
     /// Every tracer, in index order: [`tracer`](Self::tracer)'s, bit for bit, stepped side by side
     /// in lanes on one thread, as the global list's shell orbits are (module documentation, "A
-    /// pool").
+    /// pool"): [`tracers_in`](Self::tracers_in) of every index.
     ///
     /// # Panics
     ///
@@ -917,23 +917,61 @@ impl<'a> Spray<'a> {
     /// which no tracer of a valid specification does.
     #[must_use]
     pub fn tracers(&self) -> Vec<Tracer> {
-        let count = self.tracer_count();
-        let mut tracers = vec![
-            None;
-            usize::try_from(count).expect(
-                "a u32 fits a usize on every target the sim builds for, of 32 bits or more"
-            )
-        ];
+        self.tracers_in(0..self.tracer_count())
+    }
+
+    /// The tracers of `indices`, in index order: [`tracer`](Self::tracer)'s, bit for bit, stepped
+    /// side by side in lanes. A caller's pool sprays a tube's tracers in shares of indices on its
+    /// workers and gathers them in index order (P10.T5.b), for [`tracers`](Self::tracers)'s.
+    ///
+    /// # Panics
+    ///
+    /// If `indices` reach [`tracer_count`](Self::tracer_count), or as [`tracers`](Self::tracers).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
+    /// use hyperion_sim::galaxy::global_list::testing::pal5_like;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let force = SprayForce::new(galaxy.potential())?;
+    /// let spec = pal5_like(galaxy.potential());
+    /// let params = SprayParams::default();
+    /// let spray = Spray::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params)?;
+    /// // Shares of 250, as a pool's workers spray them, gathered in index order.
+    /// let count = spray.tracer_count();
+    /// let gathered: Vec<_> = (0..count)
+    ///     .step_by(250)
+    ///     .flat_map(|first| spray.tracers_in(first..count.min(first + 250)))
+    ///     .collect();
+    /// assert_eq!(gathered, spray.tracers());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn tracers_in(&self, indices: core::ops::Range<u32>) -> Vec<Tracer> {
+        assert!(
+            indices.end <= self.tracer_count(),
+            "tracers {indices:?} of a spray of {}",
+            self.tracer_count()
+        );
+        let first = indices.start;
+        let count = indices.end.saturating_sub(first);
+        let slot = |index: u32| {
+            usize::try_from(index - first)
+                .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more")
+        };
+        let mut tracers = vec![None; slot(first + count)];
         // In index order, the earliest releases, which have the most steps to take, come first:
         // the schedule's releases are in time order.
         step_in_lanes(
             self.force,
-            (0..count).map(|index| self.launch(index)),
-            |lane: TracerLane| {
-                tracers[usize::try_from(lane.index).expect(
-                    "a u32 fits a usize on every target the sim builds for, of 32 bits or more",
-                )] = Some(self.finish(&lane));
-            },
+            indices.map(|index| self.launch(index)),
+            |lane: TracerLane| tracers[slot(lane.index)] = Some(self.finish(&lane)),
         );
         tracers
             .into_iter()
@@ -1105,9 +1143,10 @@ pub fn spray(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Vec<Tracer>, BuildLea
 }
 
 /// A body's start and steps, for [`radii_over_ly`]: one of the orbits the global list's bounding
-/// shells are widened from (P10.T4, [`GlobalList`](super::GlobalList)).
+/// shells are widened from (P10.T4, [`GlobalList`](super::GlobalList)), as its plan lists them
+/// ([`ListPlan::legs`](super::ListPlan::legs)).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Leg {
+pub struct Leg {
     /// Where the body starts, about the galactic centre.
     position: GalacticDisplacement,
     /// Its velocity there.
@@ -1129,6 +1168,13 @@ impl Leg {
             velocity,
             fixed,
         }
+    }
+
+    /// The steps the body takes: what a leg costs, at some 50 ns a step in lanes, for a pool that
+    /// shares legs out by cost.
+    #[must_use]
+    pub fn steps(&self) -> u32 {
+        self.fixed.count()
     }
 }
 
@@ -1156,9 +1202,11 @@ const LANES: usize = 8;
 /// distance (`r̈` near `v_p² ÷ r_p`), under 10⁻⁴ of itself, which the shells' widening dwarfs.
 ///
 /// The legs are stepped side by side, longest first ([`step_in_lanes`]); a leg's radii are the
-/// same bits however the legs are grouped.
+/// same bits however the legs are grouped, so a caller's pool may step a list's legs in any
+/// shares and gather their radii by index ([`GlobalList::plan`](super::GlobalList::plan), whose
+/// example does; P10.T5.b).
 #[must_use]
-pub(super) fn radii_over_ly(force: &SprayForce, legs: &[Leg]) -> Vec<[f64; 2]> {
+pub fn radii_over_ly(force: &SprayForce, legs: &[Leg]) -> Vec<[f64; 2]> {
     let mut radii = vec![[0.0; 2]; legs.len()];
     let mut order: Vec<usize> = (0..legs.len()).collect();
     // Longest first, so that the lanes run full until only short legs are left.

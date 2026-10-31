@@ -2114,6 +2114,13 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   them in index order through `spray::step_in_lanes`, which the shell orbits share (a `Lane` trait
   over a `Walker`). `Spray::tracer(i)` stays the scalar path a pool calls; the spray's lib test
   holds the two bit for bit.
+- **P10.T5.b on the server's pool (lane `perf-list-pool`, 2026-10-31; no output moves).**
+  - Sim: `Debris::plan` gives a `DebrisPlan` (`orphan_count`, `orphan_room`, `orphan(galaxy, k)`
+    pure in `k`, `finish`). `GlobalList::plan` gives a `ListPlan` (`of_debris`, `legs`, `finish`).
+    `spray::Leg` (with `steps`) and `spray::radii_over_ly` are public; `Spray::tracers_in(range)`.
+  - Server: `compute::{global_list_on, tube_table_on, tracers_on}` with `SharedSprayForces` (a
+    galaxy's spray table) and `Shares`. They are not yet called from a request; P10.T10.b keeps the
+    list per universe and caches the tables, and calls them.
 - **P10.T6.a's arms by energy, as built (lane `p10-spray-arms`, 2026-10-30, at
   `GENERATOR_VERSION` 24).** Main's ruling of 2026-10-30, after the research lane
   `research-spray-arms`: a tube's arms split by the sign of each tracer's energy offset at

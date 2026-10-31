@@ -34,7 +34,7 @@ use crate::galaxy::features::kinds::globular::history;
 use crate::units::{LightYears, SolarMassesPerYear};
 
 use super::dwarfs::{CORE_MIN_SYSTEMS, DwarfDebris, dwarfs};
-use super::orphans::orphans;
+use super::orphans::OrphanDraw;
 use super::share::{ShareFigures, scale_cold_masses};
 use super::spec::{
     ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec, stripping_time,
@@ -99,6 +99,46 @@ impl Debris {
     /// ```
     #[must_use]
     pub fn generate(galaxy: &Galaxy) -> Self {
+        let DebrisPlan {
+            streams,
+            dwarfs,
+            room,
+            orphans: draw,
+        } = Self::plan(galaxy);
+        let orphans = (0..draw.count()).map(|k| draw.orphan(galaxy, k));
+        assembled(streams, dwarfs, room, orphans)
+    }
+
+    /// What [`generate`](Self::generate) decides before it draws the orphans: the living
+    /// globulars with tubes, the recent dwarfs' debris in the list's order, and how many orphans
+    /// it draws and keeps (P10.T5.b). A caller's pool draws each orphan
+    /// ([`DebrisPlan::orphan`]), a pure function of its index, and gathers them by index into
+    /// [`DebrisPlan::finish`], for `generate`'s debris, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` holds no kinematic tables, as [`generate`](Self::generate).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::Debris;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let plan = Debris::plan(&galaxy);
+    /// // The orphans in any order, as a pool's workers would draw them, gathered by index.
+    /// let mut drawn: Vec<_> = (0..plan.orphan_count()).rev().map(|k| (k, plan.orphan(&galaxy, k))).collect();
+    /// drawn.sort_by_key(|&(k, _)| k);
+    /// let debris = plan.finish(drawn.into_iter().map(|(_, orphan)| orphan));
+    /// assert_eq!(debris, Debris::generate(&galaxy));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn plan(galaxy: &Galaxy) -> DebrisPlan {
         assert!(
             galaxy.kinematics().is_some(),
             "the global list's debris needs the kinematic tables of Galaxy::with_full_potential"
@@ -116,42 +156,11 @@ impl Debris {
         streams.truncate(limit);
         let room = limit.saturating_sub(streams.len() + dwarf_tubes);
         let living = u32::try_from(streams.len()).expect("the streams are capped at 4,096");
-        let orphans = orphans(galaxy, living, room);
-        streams.extend(orphans);
-        let mut cores = Vec::new();
-        let (mut placed, mut cores_beyond_limit) = (0, 0);
-        for d in dwarfs {
-            // A tube the share scaled to nothing is dropped, as `dwarfs` gives none of no mass.
-            if let Some(tube) = d
-                .tube
-                .filter(|t| t.mass.value() > 0.0 && streams.len() < limit)
-            {
-                streams.push(tube);
-            }
-            if let Some(core) = d.core {
-                // The first four in the list's order take the core numbers, as the share counts
-                // them; one the share scaled under the floor is dropped and leaves its number to
-                // none.
-                if placed < DwarfCoreNumber::LIMIT {
-                    placed += 1;
-                    if core.systems >= CORE_MIN_SYSTEMS {
-                        cores.push(core);
-                    }
-                } else {
-                    cores_beyond_limit += 1;
-                }
-            }
-        }
-        for (n, stream) in (0_u16..).zip(&mut streams) {
-            stream.number = StreamNumber::new(n).expect("the streams are capped at the limit");
-        }
-        for (n, core) in (0_u8..).zip(&mut cores) {
-            core.number = DwarfCoreNumber::new(n).expect("the cores are capped at the limit");
-        }
-        Self {
+        DebrisPlan {
             streams,
-            cores,
-            cores_beyond_limit,
+            dwarfs,
+            room,
+            orphans: OrphanDraw::new(galaxy, living),
         }
     }
 
@@ -172,6 +181,104 @@ impl Debris {
     #[must_use]
     pub fn cores_beyond_limit(&self) -> u32 {
         self.cores_beyond_limit
+    }
+}
+
+/// What [`Debris::generate`] decides before it draws the orphans ([`Debris::plan`]; P10.T5.b).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebrisPlan {
+    /// The living globulars with tubes, in the catalogue's walk order, at most the limit.
+    streams: Vec<StreamSpec>,
+    /// The recent dwarfs' debris, in the list's order, their cold masses scaled.
+    dwarfs: Vec<DwarfDebris>,
+    /// The most orphans the list keeps.
+    room: usize,
+    orphans: OrphanDraw,
+}
+
+impl DebrisPlan {
+    /// The orphans drawn: orphan `k` for each `k` below this, of which the first
+    /// [`orphan_room`](Self::orphan_room) found are kept.
+    #[must_use]
+    pub const fn orphan_count(&self) -> u64 {
+        self.orphans.count()
+    }
+
+    /// The most orphans the list keeps, after its living globulars and before its dwarfs' tubes.
+    #[must_use]
+    pub const fn orphan_room(&self) -> usize {
+        self.room
+    }
+
+    /// Orphan `k`'s stream, numbered 0 until the list numbers it, or `None` if none of its
+    /// attempts found an orbit ([`orphans`](super::orphans)): a pure function of `galaxy`
+    /// and `k`, every one of its draws keyed by `k`, so that orphans may be drawn in any order and
+    /// on any thread.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the one the plan was made for, or `k` is not below
+    /// [`orphan_count`](Self::orphan_count).
+    #[must_use]
+    pub fn orphan(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
+        self.orphans.orphan(galaxy, k)
+    }
+
+    /// The debris, from `orphans`, orphan `k`'s [`orphan`](Self::orphan) for each `k` from 0 in
+    /// turn, of which it keeps the first [`orphan_room`](Self::orphan_room) found:
+    /// [`Debris::generate`]'s, bit for bit. It reads no further than it keeps.
+    #[must_use]
+    pub fn finish(self, orphans: impl IntoIterator<Item = Option<StreamSpec>>) -> Debris {
+        assembled(self.streams, self.dwarfs, self.room, orphans)
+    }
+}
+
+/// The debris of the living globulars' `streams`, the first `room` streams `orphans` find in
+/// turn, and `dwarfs`' tubes and cores, numbered: [`Debris::generate`]'s last step, which reads no
+/// further into `orphans` than it keeps.
+#[must_use]
+fn assembled(
+    mut streams: Vec<StreamSpec>,
+    dwarfs: Vec<DwarfDebris>,
+    room: usize,
+    orphans: impl IntoIterator<Item = Option<StreamSpec>>,
+) -> Debris {
+    let limit = usize::from(StreamNumber::LIMIT);
+    streams.extend(orphans.into_iter().flatten().take(room));
+    let mut cores = Vec::new();
+    let (mut placed, mut cores_beyond_limit) = (0, 0);
+    for d in dwarfs {
+        // A tube the share scaled to nothing is dropped, as `dwarfs` gives none of no mass.
+        if let Some(tube) = d
+            .tube
+            .filter(|t| t.mass.value() > 0.0 && streams.len() < limit)
+        {
+            streams.push(tube);
+        }
+        if let Some(core) = d.core {
+            // The first four in the list's order take the core numbers, as the share counts
+            // them; one the share scaled under the floor is dropped and leaves its number to
+            // none.
+            if placed < DwarfCoreNumber::LIMIT {
+                placed += 1;
+                if core.systems >= CORE_MIN_SYSTEMS {
+                    cores.push(core);
+                }
+            } else {
+                cores_beyond_limit += 1;
+            }
+        }
+    }
+    for (n, stream) in (0_u16..).zip(&mut streams) {
+        stream.number = StreamNumber::new(n).expect("the streams are capped at the limit");
+    }
+    for (n, core) in (0_u8..).zip(&mut cores) {
+        core.number = DwarfCoreNumber::new(n).expect("the cores are capped at the limit");
+    }
+    Debris {
+        streams,
+        cores,
+        cores_beyond_limit,
     }
 }
 

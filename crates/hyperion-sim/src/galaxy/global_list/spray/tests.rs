@@ -339,6 +339,7 @@ mod milky_way {
         the_force_inside_the_table_is_the_full_lookup_s_gradient_bit_for_bit();
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
         the_lanes_give_every_tracer_s_bits_alone();
+        a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s();
         the_drawn_offsets_keep_their_dispersions_within_the_cut();
         the_energy_at_release_names_each_tracer_s_arm();
     }
@@ -525,6 +526,56 @@ mod milky_way {
         for (n, (lanes, leg)) in radii_over_ly(force, &legs).iter().zip(&legs).enumerate() {
             let alone = radii_over_ly_alone(force, leg);
             assert_eq!(f64_digest(lanes), f64_digest(&alone), "leg {n}");
+        }
+    }
+
+    /// Split at every tracer boundary, each test stream's spray of six tracers an arm, its two
+    /// parts stepped apart ([`Spray::tracers_in`]) and gathered in index order, is its whole
+    /// spray, bit for bit; and so, split at every leg boundary, are shell orbits' radii
+    /// ([`radii_over_ly`]): what a caller's pool may do with either (P10.T5.b).
+    fn a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s() {
+        let bits = |t: &Tracer| {
+            let mut v = t.position().metres().to_vec();
+            v.extend(t.velocity().metres_per_second());
+            v.extend([t.psi().value(), t.weight().value(), t.released().value()]);
+            (t.arm(), t.release_step(), f64_digest(&v))
+        };
+        for (name, spec) in test_streams() {
+            let sprayed = spray(SEED, &spec, 6);
+            let count = sprayed.tracer_count();
+            let whole: Vec<_> = sprayed.tracers().iter().map(bits).collect();
+            assert_eq!(whole.len(), 12);
+            for split in 0..=count {
+                let mut parts = sprayed.tracers_in(0..split);
+                parts.extend(sprayed.tracers_in(split..count));
+                let parts: Vec<_> = parts.iter().map(bits).collect();
+                assert_eq!(parts, whole, "{name}: split at tracer {split}");
+            }
+        }
+        let force = &fixture().force;
+        let legs: Vec<Leg> = test_streams()
+            .iter()
+            .flat_map(|(_, spec)| {
+                let span = Seconds::from(spec.stripping_time()).value();
+                [0.0, -span / 1_000.0, span / 300.0, -span / 100.0].map(|by| {
+                    let fixed = spec
+                        .orbit()
+                        .fixed_step(Seconds::new(by))
+                        .expect("a finite span");
+                    Leg::new(spec.position(), spec.velocity(), fixed)
+                })
+            })
+            .collect();
+        let whole: Vec<_> = radii_over_ly(force, &legs)
+            .iter()
+            .map(|r| f64_digest(r))
+            .collect();
+        for split in 0..=legs.len() {
+            let (first, second) = legs.split_at(split);
+            let mut parts = radii_over_ly(force, first);
+            parts.extend(radii_over_ly(force, second));
+            let parts: Vec<_> = parts.iter().map(|r| f64_digest(r)).collect();
+            assert_eq!(parts, whole, "split at leg {split}");
         }
     }
 

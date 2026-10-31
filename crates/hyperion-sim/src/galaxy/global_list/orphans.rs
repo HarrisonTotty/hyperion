@@ -48,7 +48,7 @@ use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, VELOCITY_WORDS_PER_ATTEMPT,
 use crate::galaxy::params::HaloComponentKind;
 use crate::galaxy::quad::gl16;
 use crate::math;
-use crate::rng::{ObjectKey, Stream, tags};
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR;
 use crate::units::{Dex, LightYears, SolarMasses, Years};
 
@@ -122,103 +122,146 @@ pub(crate) fn expected_count(globulars: f64, living: u32) -> f64 {
     (ORPHAN_STREAMS_PER_GLOBULAR * globulars - f64::from(living)).max(0.0)
 }
 
-/// The orphan streams of `galaxy`, given `living` living globulars with tubes, at most `room`
-/// of them, in their order, numbered 0 until the list numbers them (module documentation).
-///
-/// # Panics
-///
-/// If `galaxy` holds no kinematic tables ([`Galaxy::with_full_potential`]).
-#[must_use]
-pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSpec> {
-    let seed = galaxy.seed();
-    let params = galaxy.params();
-    let tables = galaxy.potential();
-    let mean = expected_count(f64::from(params.accretion().globular_count()), living);
-    let count = Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
-    let Some(debris) = debris_component(galaxy) else {
-        return Vec::new();
-    };
-    let radial = RadialLaw::new();
-    let corotation = tables.bar_corotation().value();
-    let last_merger = params.accretion().last_major_merger();
-    (0..count)
-        .filter_map(|k| {
-            let key = ObjectKey::galaxy_item(k);
-            let mut marks = Stream::open(seed, tags::STREAM_ORPHAN_MARKS, key);
-            let mass = mass_quantile(marks.uniform());
-            let dissolved = marks.uniform();
-            let age = Years::new(marks.uniform_in(ACCRETED_AGES.0, ACCRETED_AGES.1));
-            let (fe_h_mean, fe_h_sigma) = METALLICITY_LAWS.1;
-            let fe_h = Dex::new(marks.normal(fe_h_mean, fe_h_sigma));
-            let mut stream = Stream::open(seed, tags::STREAM_ORPHAN_ORBIT, key);
-            // The first radius drawn outside corotation, inside which no pericentre clears it;
-            // later attempts redraw only the direction and the velocity (module documentation).
-            let mut kept = None;
-            let (position, velocity, orbit) = (0..ORBIT_ATTEMPTS).find_map(|attempt| {
-                let first = u64::from(attempt) * ORBIT_WORDS;
-                stream.seek(first);
-                // Every attempt reads its radius word, kept or not, so that each block's words
-                // keep their places.
-                let drawn = radial.quantile(stream.uniform());
-                if kept.is_none() && drawn > corotation {
-                    kept = Some(drawn);
-                }
-                let r = kept?;
-                let cos_theta = stream.uniform_in(-1.0, 1.0);
-                let azimuth = stream.uniform_in(0.0, 2.0 * core::f64::consts::PI);
-                let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
-                let (sin_phi, cos_phi) = math::sin_cos(azimuth);
-                let at = GalacticPosition::from_light_years([
-                    r * sin_theta * cos_phi,
-                    r * sin_theta * sin_phi,
-                    r * cos_theta,
-                ])
-                .expect("a radius under 10⁶ ly fits the i32 light-year cells");
-                let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
-                let motion = RadialMotion::new(galaxy, &at, velocity);
-                let peri = motion.pericentre();
-                // Only an attempt whose pericentre clears corotation pays for its apocentre's
-                // search, and only an accepted one for the orbit's quadrature. Most attempts fall
-                // inside corotation: searching both turning points of every attempt cost the
-                // Milky Way fixture's debris 158 ms against 110 (P10.T4's list bench, pod, 16
-                // vCPU).
-                let apo = (peri.value() > corotation)
-                    .then(|| motion.apocentre())
-                    .filter(|apo| apo.value() < APOCENTRE_LIMIT_LY)?;
-                let orbit = SphericalOrbit::between(tables, peri, apo)?;
-                Some((
-                    GalacticPosition::ORIGIN.displacement_to(&at),
-                    velocity,
-                    orbit,
-                ))
-            })?;
-            let tidal = LightYears::from(
-                tables.tidal_radius(mass, &PointLy::new(orbit.pericentre().value(), 0.0, 0.0)),
-            );
-            let window = stripping_time(&orbit, tidal, [last_merger, age]);
-            Some(StreamSpec {
-                number: StreamNumber(0),
-                origin: StreamOrigin::Orphan,
-                position,
+/// The orphans' draw in one galaxy before any orphan is drawn: how many attempts at an orphan it
+/// makes, and what each reads (module documentation). Orphan `k` is a pure function of the galaxy
+/// and `k` ([`orphan`](Self::orphan)), its every draw keyed by `k`, so a caller's pool may draw
+/// them in any order and gather them by `k` (P10.T5.b).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OrphanDraw {
+    /// The seed of the galaxy drawn in.
+    seed: Seed,
+    /// The orphans drawn: none if the galaxy has no globular-born debris.
+    count: u64,
+    /// The component whose velocity law the progenitors follow.
+    debris: Option<ComponentId>,
+    radial: RadialLaw,
+    /// The bar's corotation radius, ly, inside which no pericentre is kept.
+    corotation: f64,
+    last_merger: Years,
+}
+
+impl OrphanDraw {
+    /// The draw in `galaxy` given `living` living globulars with tubes.
+    #[must_use]
+    pub(crate) fn new(galaxy: &Galaxy, living: u32) -> Self {
+        let seed = galaxy.seed();
+        let params = galaxy.params();
+        let mean = expected_count(f64::from(params.accretion().globular_count()), living);
+        let count =
+            Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
+        let debris = debris_component(galaxy);
+        Self {
+            seed,
+            count: if debris.is_some() { count } else { 0 },
+            debris,
+            radial: RadialLaw::new(),
+            corotation: galaxy.potential().bar_corotation().value(),
+            last_merger: params.accretion().last_major_merger(),
+        }
+    }
+
+    /// The attempts at an orphan the draw makes: orphan `k` for each `k` below it.
+    #[must_use]
+    pub(crate) const fn count(&self) -> u64 {
+        self.count
+    }
+
+    /// Orphan `k`'s stream, numbered 0 until the list numbers it, or `None` if none of its
+    /// attempts gave an orbit that clears corotation inside [`APOCENTRE_LIMIT_LY`]: a pure
+    /// function of `galaxy` and `k` (module documentation).
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the one the draw was made in, if `k` is not below
+    /// [`count`](Self::count), or if `galaxy` holds no kinematic tables
+    /// ([`Galaxy::with_full_potential`]).
+    #[must_use]
+    pub(crate) fn orphan(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
+        assert_eq!(
+            galaxy.seed(),
+            self.seed,
+            "an orphan is drawn in the galaxy its draw was made in"
+        );
+        assert!(k < self.count, "orphan {k} of {}", self.count);
+        let debris = self
+            .debris
+            .expect("a draw of orphans has the galaxy's globular-born debris");
+        let (seed, tables) = (self.seed, galaxy.potential());
+        let (radial, corotation, last_merger) = (&self.radial, self.corotation, self.last_merger);
+        let key = ObjectKey::galaxy_item(k);
+        let mut marks = Stream::open(seed, tags::STREAM_ORPHAN_MARKS, key);
+        let mass = mass_quantile(marks.uniform());
+        let dissolved = marks.uniform();
+        let age = Years::new(marks.uniform_in(ACCRETED_AGES.0, ACCRETED_AGES.1));
+        let (fe_h_mean, fe_h_sigma) = METALLICITY_LAWS.1;
+        let fe_h = Dex::new(marks.normal(fe_h_mean, fe_h_sigma));
+        let mut stream = Stream::open(seed, tags::STREAM_ORPHAN_ORBIT, key);
+        // The first radius drawn outside corotation, inside which no pericentre clears it;
+        // later attempts redraw only the direction and the velocity (module documentation).
+        let mut kept = None;
+        let (position, velocity, orbit) = (0..ORBIT_ATTEMPTS).find_map(|attempt| {
+            let first = u64::from(attempt) * ORBIT_WORDS;
+            stream.seek(first);
+            // Every attempt reads its radius word, kept or not, so that each block's words
+            // keep their places.
+            let drawn = radial.quantile(stream.uniform());
+            if kept.is_none() && drawn > corotation {
+                kept = Some(drawn);
+            }
+            let r = kept?;
+            let cos_theta = stream.uniform_in(-1.0, 1.0);
+            let azimuth = stream.uniform_in(0.0, 2.0 * core::f64::consts::PI);
+            let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+            let (sin_phi, cos_phi) = math::sin_cos(azimuth);
+            let at = GalacticPosition::from_light_years([
+                r * sin_theta * cos_phi,
+                r * sin_theta * sin_phi,
+                r * cos_theta,
+            ])
+            .expect("a radius under 10⁶ ly fits the i32 light-year cells");
+            let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
+            let motion = RadialMotion::new(galaxy, &at, velocity);
+            let peri = motion.pericentre();
+            // Only an attempt whose pericentre clears corotation pays for its apocentre's
+            // search, and only an accepted one for the orbit's quadrature. Most attempts fall
+            // inside corotation: searching both turning points of every attempt cost the
+            // Milky Way fixture's debris 158 ms against 110 (P10.T4's list bench, pod, 16
+            // vCPU).
+            let apo = (peri.value() > corotation)
+                .then(|| motion.apocentre())
+                .filter(|apo| apo.value() < APOCENTRE_LIMIT_LY)?;
+            let orbit = SphericalOrbit::between(tables, peri, apo)?;
+            Some((
+                GalacticPosition::ORIGIN.displacement_to(&at),
                 velocity,
                 orbit,
-                stripping_time: window,
-                mass,
-                progenitor_mass: SolarMasses::new(0.0),
-                tidal_radius: tidal,
-                mass_loss: MassLoss::Dissolved {
-                    ago: Years::new(dissolved * window.value()),
-                },
-                stars: Some(ClusterStars {
-                    fe_h,
-                    age,
-                    kept: 0.0,
-                    depleted_slope: CANONICAL_SLOPE,
-                }),
-            })
+            ))
+        })?;
+        let tidal = LightYears::from(
+            tables.tidal_radius(mass, &PointLy::new(orbit.pericentre().value(), 0.0, 0.0)),
+        );
+        let window = stripping_time(&orbit, tidal, [last_merger, age]);
+        Some(StreamSpec {
+            number: StreamNumber(0),
+            origin: StreamOrigin::Orphan,
+            position,
+            velocity,
+            orbit,
+            stripping_time: window,
+            mass,
+            progenitor_mass: SolarMasses::new(0.0),
+            tidal_radius: tidal,
+            mass_loss: MassLoss::Dissolved {
+                ago: Years::new(dissolved * window.value()),
+            },
+            stars: Some(ClusterStars {
+                fe_h,
+                age,
+                kept: 0.0,
+                depleted_slope: CANONICAL_SLOPE,
+            }),
         })
-        .take(room)
-        .collect()
+    }
 }
 
 /// The component whose velocity law the orphans' progenitors follow: the globular-born debris.
@@ -251,6 +294,7 @@ fn mass_quantile(u: f64) -> SolarMasses {
 
 /// The metal-poor globulars' radial law out to [`APOCENTRE_LIMIT_LY`], tabulated as its cumulative
 /// function in `t = ln(1 + r ÷ r_c)`.
+#[derive(Debug, Clone, PartialEq)]
 struct RadialLaw {
     /// The cumulative share at knot `k`, `t = k × step`.
     cdf: Vec<f64>,
