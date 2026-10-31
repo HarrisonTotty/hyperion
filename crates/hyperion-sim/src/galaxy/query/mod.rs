@@ -18,6 +18,7 @@ mod census;
 mod expected;
 mod mode;
 mod motion;
+mod parts;
 mod request;
 mod result;
 mod segment;
@@ -35,6 +36,7 @@ pub use motion::{
     pad_for, pad_speed, position_at,
 };
 pub(crate) use motion::{drifted, walk_pad};
+pub use parts::{SourceHits, WalkedCells};
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,
     SubstellarRequest,
@@ -281,8 +283,10 @@ impl RangePlan {
             .flat_map(|(layer, sphere)| cells_in_sphere(*layer, sphere))
     }
 
-    /// The walk: every planned cell through `cache`, then the sources' hits, merged and sorted:
-    /// the answer [`range_query`] gives for the plan's query, bit for bit.
+    /// The walk: every planned cell through `cache`, and the sources' hits, merged and sorted: the
+    /// answer [`range_query`] gives for the plan's query, bit for bit. It is
+    /// [`finish`](Self::finish) of no walked part and of the sources' hits
+    /// ([`source_hits`](Self::source_hits)), which a server may make apart.
     ///
     /// # Panics
     ///
@@ -295,54 +299,8 @@ impl RangePlan {
         cache: &mut C,
         sources: &[&dyn SystemSource],
     ) -> RangeResult {
-        assert_eq!(
-            galaxy.seed(),
-            self.seed,
-            "a range plan is run in the galaxy it was made for"
-        );
-        let census = self.census;
-        let mut stats = QueryStats {
-            padded_radius: self.widest.padded_radius(),
-            ..QueryStats::default()
-        };
-        let mut systems = Vec::with_capacity(reserve_for(&census));
-        for (layer, sphere) in &self.spheres {
-            for key in cells_in_sphere(*layer, sphere) {
-                stats.cells_visited += 1;
-                cache.with_cell(galaxy, key, |cell| {
-                    for record in cell {
-                        stats.systems_examined += 1;
-                        if let Some(hit) = hit_at(galaxy, record, sphere)
-                            && !suppressed(sources, galaxy, record, sphere.time())
-                        {
-                            systems.push(hit);
-                        }
-                    }
-                });
-            }
-        }
-
-        let from_grid = systems.len();
-        for source in sources {
-            source.systems_in_sphere(galaxy, &self.widest, census.layers(), &mut systems);
-        }
-        // A source appends, by its contract, so this is what it added; `saturating_sub` keeps a
-        // source that broke the contract from poisoning the count.
-        debug_assert!(
-            systems.len() >= from_grid,
-            "a source removed hits from the buffer instead of appending to it"
-        );
-        stats.systems_examined += u64::try_from(systems.len().saturating_sub(from_grid))
-            .expect("a hit count fits in 64 bits on every target");
-        sort_hits(&mut systems);
-        // The sort is a strict order only while no ID appears twice, which the sources' contract
-        // promises and a debug build checks.
-        debug_assert!(
-            ids_are_unique(&systems),
-            "a system ID appears twice among the merged hits: a source broke the contract that its \
-             IDs are its own"
-        );
-        RangeResult::new(systems, census, stats)
+        let hits = self.source_hits(galaxy, sources);
+        self.finish(galaxy, cache, sources, &[], hits)
     }
 }
 

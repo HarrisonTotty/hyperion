@@ -23,6 +23,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{
     CellCache, CellKey, SystemRecord, cell_heap_bytes, generate_cell,
 };
+use hyperion_sim::galaxy::query::{RangePlan, SystemSource, WalkedCells};
 
 use super::GalaxyKey;
 use crate::cache::{HeapBytes, Insertion, LruCounters, SharedByteLru};
@@ -30,7 +31,7 @@ use crate::cache::{HeapBytes, Insertion, LruCounters, SharedByteLru};
 /// What names a cell in the cache: the galaxy it belongs to, and the cell itself.
 type CellEntryKey = (GalaxyKey, CellKey);
 
-/// The most cells [`SharedCellCache::generate_all`] stores under one hold of the cache's lock: 128,
+/// The most cells [`SharedCellCache::walk_generated`] stores under one hold of the cache's lock: 128,
 /// some 33 µs of insertions at the 0.26 µs one takes (measured 2026-10-31, pod, 16 vCPU), so that
 /// other queries' lookups wait no longer than that, while the 108 cells of a grid job of the
 /// Sun-like 50 ly query on 8 workers are stored at once.
@@ -129,11 +130,13 @@ impl SharedCellCache {
             .collect()
     }
 
-    /// Generates `cells` of `galaxy`, the galaxy `key` names, each whole, and stores them 128 at a
-    /// time, each chunk under one hold of the cache's lock: how a served query's jobs fill it
-    /// ahead of its walk, several at once
+    /// Generates `cells` of `galaxy`, the galaxy `key` names, each whole, walks each with `plan`
+    /// and `sources` as it is made ([`RangePlan::walk_cells`]), and stores them 128 at a time,
+    /// each chunk under one hold of the cache's lock: how a served query's jobs make and walk its
+    /// cold cells ahead of its finish, several at once
     /// ([`served_range_query`](super::served_range_query); P09.T40.a). A cell held already is
-    /// generated again and replaced by its equal; a cell larger than the whole budget is dropped.
+    /// generated again and replaced by its equal; a cell larger than the whole budget is dropped,
+    /// and its walk kept.
     ///
     /// Eight jobs each storing their cells one at a time spent most of their time waiting on the
     /// lock and its bookkeeping, 3.6 ms each where generating their cells took 1.1 (measured
@@ -141,35 +144,66 @@ impl SharedCellCache {
     ///
     /// # Panics
     ///
-    /// If `galaxy`'s seed is not the seed of `key`, as a handle's lookup.
-    pub fn generate_all(
+    /// If `galaxy`'s seed is not the seed of `key`, as a handle's lookup, or the seed `plan` was
+    /// made for.
+    pub fn walk_generated(
         &self,
         key: GalaxyKey,
         galaxy: &Galaxy,
+        plan: &RangePlan,
+        sources: &[&dyn SystemSource],
         cells: impl IntoIterator<Item = CellKey>,
-    ) {
+    ) -> WalkedCells {
         assert_eq!(
             galaxy.seed().get(),
             key.seed(),
             "a cell cache stores the cells of one galaxy under its key, and this is another's"
         );
-        let mut generated = Vec::with_capacity(GENERATED_CHUNK_CELLS);
-        let mut cells = cells.into_iter().peekable();
-        while cells.peek().is_some() {
-            generated.extend(cells.by_ref().take(GENERATED_CHUNK_CELLS).map(|cell| {
-                let mut systems = Vec::new();
-                generate_cell(galaxy, cell, &mut systems);
-                ((key, cell), Arc::new(CachedCell::new(systems)))
-            }));
-            // A refused cell is the walk's to generate again, as a handle's would be.
-            drop(self.cells.insert_all(generated.drain(..)));
-        }
+        let mut generating = Generating {
+            cells: &self.cells,
+            galaxy: key,
+            made: Vec::with_capacity(GENERATED_CHUNK_CELLS),
+        };
+        let walked = plan.walk_cells(galaxy, &mut generating, sources, cells);
+        generating.store();
+        walked
     }
+}
 
-    /// The bytes it may charge its cells.
-    #[must_use]
-    pub fn budget_bytes(&self) -> usize {
-        self.cells.counters().budget()
+/// One job's view of the cell cache for cells nobody holds: plan 03's [`CellCache`], which
+/// generates each cell it is asked for, lends it, and stores it with the others a chunk at a time
+/// ([`SharedCellCache::walk_generated`]).
+struct Generating<'a> {
+    cells: &'a SharedByteLru<CellEntryKey, CachedCell>,
+    galaxy: GalaxyKey,
+    /// The cells made and not yet stored.
+    made: Vec<(CellEntryKey, Arc<CachedCell>)>,
+}
+
+impl Generating<'_> {
+    /// Stores the cells made, under one hold of the lock.
+    fn store(&mut self) {
+        // A refused cell is the next query's to generate again, as a handle's would be.
+        drop(self.cells.insert_all(self.made.drain(..)));
+    }
+}
+
+impl CellCache for Generating<'_> {
+    fn with_cell<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> R {
+        let mut systems = Vec::new();
+        generate_cell(galaxy, key, &mut systems);
+        let cell = Arc::new(CachedCell::new(systems));
+        let result = f(cell.systems());
+        self.made.push(((self.galaxy, key), cell));
+        if self.made.len() >= GENERATED_CHUNK_CELLS {
+            self.store();
+        }
+        result
     }
 }
 

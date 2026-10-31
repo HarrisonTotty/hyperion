@@ -4798,7 +4798,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `compute/systems.rs`), which takes a `RangeCaches` and a `ServedQuery`; `AppState.cells` is an
     `Arc`. Its cell jobs are queued by the request's task, never by a job (the pool's FIFO would
     stall).
-  - Left: the walk's hit tests are still serial after the cells (the outbox's findings).
+  - Second pass: `RangePlan::{walk_cells, source_hits, finish}` with `WalkedCells` and
+    `SourceHits` (`query/parts.rs`); `run` is `finish` of no part. `finish` takes a part's cell
+    only if the part walked its layer with the plan's own sphere. The grid's jobs walk as they
+    generate (`SharedCellCache::walk_generated`, in place of `generate_all`); a sources job
+    (census and source hits) follows the feature jobs. A cold finish asks the cell cache for no
+    cell, so its counters read no lookup.
 - **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
   - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
     in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's
