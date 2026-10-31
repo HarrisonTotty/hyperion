@@ -50,7 +50,8 @@ use hyperion_sim::time::UniverseTime;
 /// # Panics
 ///
 /// If `record` is a feature member that does not resolve in `galaxy`, which only a record of
-/// another galaxy can be ([`Drift::of_record`]).
+/// another galaxy can be ([`Drift::of_record`]), or if `interiors` is a cache of another galaxy's
+/// interiors, which the server's handle asserts.
 pub(crate) fn system_motion(
     galaxy: &Galaxy,
     interiors: &dyn FeatureInteriorCache,
@@ -200,7 +201,10 @@ pub(crate) mod origins {
 mod tests {
     use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::coords::LyCell;
-    use hyperion_sim::galaxy::features::members::NoInteriorCache;
+    use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
+    use hyperion_sim::galaxy::features::members::{FeatureInterior, NoInteriorCache};
+    use hyperion_sim::galaxy::imf::MassBand;
+    use hyperion_sim::id::SystemIdKind;
 
     use super::origins::{
         SEED, a_catalogue_system, a_feature_member, a_grid_system, galaxy, the_centre_s_members,
@@ -243,29 +247,69 @@ mod tests {
         }
     }
 
-    /// A feature member is placed the same, bit for bit, whether the server's interior cache
-    /// lends its feature's interior, cold or warm, or none does (P12.T6).
+    /// Two members of the first feature with members near the Sun, and that feature's record.
+    fn two_members_of_one_feature() -> (FeatureRecord, [SystemRecord; 2]) {
+        let galaxy = galaxy();
+        let SystemIdKind::FeatureMember(id) = a_feature_member().id().kind() else {
+            panic!("a feature member's ID");
+        };
+        let feature =
+            FeatureCatalogue::resolve(galaxy, id.feature().into()).expect("the member's feature");
+        let interior = FeatureInterior::of(galaxy, &feature).expect("the feature has members");
+        let (mut members, mut found) = (Vec::new(), Vec::new());
+        for cell in interior.grid().owned_cells() {
+            interior.members_in_cell(galaxy, MassBand::C, cell, &mut members);
+            found.extend(members.iter().map(|(member, _)| *member.record()));
+            if found.len() >= 2 {
+                break;
+            }
+        }
+        (feature, [found[0], found[1]])
+    }
+
+    /// Two members of one feature are placed the same, bit for bit and in either order, whatever
+    /// state the server's interior cache is in: holding the feature's grid-reach bound alone, its
+    /// interior, through a job's kept view and with no budget, as through no cache (P12.T6).
     #[test]
     fn a_feature_member_is_placed_the_same_through_the_server_s_interior_cache() {
+        use hyperion_testkit::order::assert_order_independent;
+
         let galaxy = galaxy();
-        let record = a_feature_member();
+        let (feature, members) = two_members_of_one_feature();
+        let key = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let placed = |interiors: &dyn FeatureInteriorCache, record: &SystemRecord| {
+            times().map(|t| {
+                let (position, velocity) = system_motion(galaxy, interiors, record, t).unwrap();
+                (bits(&position), velocity_bits(velocity))
+            })
+        };
         let cache = SharedClusterModelCache::new(64 << 20);
-        let interiors = cache.handle(GalaxyKey::new(SEED, GENERATOR_VERSION));
-        for t in times() {
-            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
-            for pass in ["cold", "warm"] {
-                let (kept, kept_velocity) = system_motion(galaxy, &interiors, &record, t).unwrap();
+        let (handle, kept) = (cache.handle(key), cache.kept(key));
+        assert!(
+            handle.grid_reach(galaxy, &feature).is_some(),
+            "the bound held"
+        );
+        let unbudgeted = SharedClusterModelCache::new(0);
+        let none = unbudgeted.handle(key);
+        for (state, interiors) in [
+            ("the bound held", &handle as &dyn FeatureInteriorCache),
+            ("the interior held", &handle),
+            ("a kept view", &kept),
+            ("no budget", &none),
+        ] {
+            for record in &members {
                 assert_eq!(
-                    (bits(&kept), velocity_bits(kept_velocity)),
-                    (bits(&position), velocity_bits(velocity)),
-                    "{t}, {pass}"
+                    placed(interiors, record),
+                    placed(&NoInteriorCache, record),
+                    "{state}"
                 );
             }
+            assert_order_independent(&members, |record| placed(interiors, record));
         }
         assert_eq!(
             cache.counters().entries(),
             1,
-            "the member's interior is kept"
+            "the feature's interior is kept"
         );
     }
 

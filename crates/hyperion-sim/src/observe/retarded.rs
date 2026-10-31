@@ -276,21 +276,34 @@ impl Drift {
     ///
     /// ```no_run
     /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
     /// use hyperion_sim::galaxy::Galaxy;
-    /// use hyperion_sim::galaxy::features::members::source::{KeepInteriors, NoInteriorCache};
-    /// use hyperion_sim::galaxy::placement::resolve;
-    /// use hyperion_sim::id::SystemId;
+    /// use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
+    /// use hyperion_sim::galaxy::features::members::FeatureInterior;
+    /// use hyperion_sim::galaxy::features::members::source::KeepInteriors;
+    /// use hyperion_sim::galaxy::imf::MassBand;
+    /// use hyperion_sim::galaxy::placement::SystemOrigin;
     /// use hyperion_sim::observe::Drift;
+    /// use hyperion_sim::units::LightYears;
     ///
     /// let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
-    /// # let id = SystemId::from_raw(0x4200_2cb2_0000_0001)?;
-    /// let record = resolve(&galaxy, id)?;
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+    /// // A member of the first feature with members near the Sun.
+    /// let interior = FeatureCatalogue::near(&galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache)
+    ///     .find_map(|feature| FeatureInterior::of(&galaxy, &feature))
+    ///     .ok_or("a feature with members")?;
+    /// let mut members = Vec::new();
+    /// let found = interior.grid().owned_cells().any(|cell| {
+    ///     interior.members_in_cell(&galaxy, MassBand::C, cell, &mut members);
+    ///     !members.is_empty()
+    /// });
+    /// assert!(found, "a member in band C");
+    /// let record = *members[0].0.record();
+    /// assert!(matches!(record.origin(), SystemOrigin::FeatureMember { .. }));
+    /// // Through a cache that keeps its feature's interior, built once for all the members traced,
+    /// // the member's line is the one through none.
     /// let kept = KeepInteriors::new(&galaxy);
-    /// // The same line through a cache that keeps the member's interior as through none.
-    /// assert_eq!(
-    ///     Drift::of_record_in(&galaxy, &kept, &record)?,
-    ///     Drift::of_record_in(&galaxy, &NoInteriorCache, &record)?
-    /// );
+    /// assert_eq!(Drift::of_record_in(&galaxy, &kept, &record)?, Drift::of_record(&galaxy, &record)?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn of_record_in(

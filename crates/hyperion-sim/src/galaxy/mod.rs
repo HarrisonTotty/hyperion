@@ -341,9 +341,11 @@ impl Galaxy {
     /// built reads its rules but the field share and the carve-out (below): each other held call
     /// site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
     /// reads only the parameters and the mass model, and the potential only the motion. It keeps
-    /// the centre's model only if the stellar rules ([`GalaxyRules::stellar`]) stay as they were.
+    /// the centre's model and the field's Type Ia delay-time distribution only if the stellar rules
+    /// ([`GalaxyRules::stellar`]) stay as they were.
     /// The model's classes are built from the stellar law (the kick law's parameters and the
-    /// turn-off), so under other stellar rules the memo is emptied. The reset is pre-emptive: no
+    /// turn-off), and the distribution from stellar lifetimes, so under other stellar rules both
+    /// memos are emptied. The reset is pre-emptive: no
     /// stellar field reaches the model yet, and it builds again to the same bits. The first stellar
     /// hold that reaches it must also pass the galaxy's stellar rules into
     /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
@@ -371,13 +373,14 @@ impl Galaxy {
             "the carve-out is read when a galaxy is built: build it under the new rules with \
              `Galaxy::from_params_with_rules`"
         );
-        let centre = if rules.stellar == self.rules.stellar {
-            self.centre
+        let (centre, type_ia_delays) = if rules.stellar == self.rules.stellar {
+            (self.centre, self.type_ia_delays)
         } else {
-            CentreModelCell::default()
+            (CentreModelCell::default(), TypeIaDelaysCell::default())
         };
         Self {
             centre,
+            type_ia_delays,
             rules,
             ..self
         }
@@ -765,8 +768,10 @@ impl Galaxy {
     /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
     /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
     /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), and the
-    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), and the
-    /// companions, once read, 3.8 KiB, so the figure depends on what has been read.
+    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), the
+    /// companions, once read, 3.8 KiB, and the field's Type Ia delay-time distribution, once read,
+    /// its components' ages and its tables of lifetimes (P09.T34.a), so the figure depends on what
+    /// has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()

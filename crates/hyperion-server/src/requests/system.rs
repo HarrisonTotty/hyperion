@@ -89,10 +89,10 @@ pub(crate) async fn summary(
                 let observer = Observer::new(position, time).expect(
                     "the request's observer is in the root cube and its time in the clock window",
                 );
+                // Lent so that a feature member's line does not build its interior again.
+                let interiors = shared.cluster_models.handle(key);
                 // Only a member of the galactic centre has no traced motion yet, and the cache has
                 // refused it above, so this refusal waits for a system that reaches it.
-                // A feature member's interior from the server's cache, which resolved it above.
-                let interiors = shared.cluster_models.handle(key);
                 let (summary, retardation) =
                     summary_observed_in(&galaxy, &interiors, stars.record(), &stars, &observer)
                         .map_err(untraced)?;

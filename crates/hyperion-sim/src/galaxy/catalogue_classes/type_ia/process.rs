@@ -120,9 +120,10 @@ impl IaComponent {
 /// The Type Ia class's process (plan 09, P09.T34.a): the galaxy's recent Type Ia supernovae
 /// (module documentation).
 ///
-/// Built from the galaxy alone each time the production lookup visits the class: it holds the
-/// galaxy's delay-time distribution (a quadrature per component and 48 stellar lifetimes, a few
-/// milliseconds), the components with Type Ia and their rates, and the class's thinning interval.
+/// Built from the galaxy alone each time the production lookup visits the class: it shares the
+/// field's delay-time distribution the galaxy keeps once read (a quadrature per component and 48
+/// stellar lifetimes, some 31 ms to build), and holds the components with Type Ia and their rates,
+/// and the class's thinning interval.
 ///
 /// # Examples
 ///

@@ -158,8 +158,9 @@ pub const HYDROGEN_DONOR_SPEED_KM_S: (f64, f64) = (100.0, 250.0);
 /// The delay-time distribution and the galaxy's Type Ia rates, with what the delay-first draw
 /// needs: each component's formation history and its rate, and a table of lifetimes.
 ///
-/// Built once per galaxy ([`from_galaxy`](Self::from_galaxy)): a quadrature per component and 48
-/// stellar lifetimes, a few milliseconds.
+/// A quadrature per component and 48 stellar lifetimes, some 31 ms to build (release, pod, 16 vCPU,
+/// 2026-10-31): the galaxy keeps its field's, which [`TypeIaProcess`] shares, and a caller of
+/// [`from_galaxy`](Self::from_galaxy) holds the one it builds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DelayTimeDistribution {
     components: Vec<ComponentRate>,
@@ -996,27 +997,52 @@ mod tests {
     }
 
     /// Once read, the galaxy keeps its field's distribution: a fresh build of
-    /// [`DelayTimeDistribution::of_field`], bit for bit, the same at every read and in every Type Ia
-    /// process, and counted in the galaxy's `heap_bytes`. The galaxy's equality does not depend on
+    /// [`DelayTimeDistribution::of_field`], bit for bit (its `Debug` text, which shows a zero's
+    /// sign), the same `Arc` at every read and in every Type Ia process, and counted in the
+    /// galaxy's `heap_bytes`; under the generator's rules and under every 26 hold, whose field
+    /// share gives the field its own systems and ages. The galaxy's equality does not depend on
     /// whether it has been read.
     #[test]
     fn the_galaxy_keeps_its_field_s_distribution() {
         use std::sync::Arc;
 
         use super::process::TypeIaProcess;
+        use crate::galaxy::rules::GalaxyRules;
 
-        let galaxy = milky_way();
-        let unread = galaxy.heap_bytes();
-        let kept = Arc::clone(galaxy.type_ia_delays());
-        assert_eq!(*kept, DelayTimeDistribution::of_field(&galaxy));
-        assert!(Arc::ptr_eq(&kept, galaxy.type_ia_delays()));
-        assert!(kept.heap_bytes() > 0);
-        assert_eq!(
-            galaxy.heap_bytes(),
-            unread + size_of::<DelayTimeDistribution>() + kept.heap_bytes()
-        );
-        assert_eq!(TypeIaProcess::new(&galaxy).delays(), &*kept);
-        assert_eq!(galaxy, milky_way());
+        fn under_26() -> Galaxy {
+            Galaxy::from_params_with_rules(
+                Seed::new(0x0918_0001),
+                GalaxyParams::milky_way_like(),
+                GalaxyRules::every_26_hold(),
+            )
+            .unwrap()
+        }
+        /// A galaxy under one arm's rules, built afresh.
+        type Build = fn() -> Galaxy;
+        let arms: [(&str, Build); 2] = [
+            ("the generator's", milky_way),
+            ("every 26 hold's", under_26),
+        ];
+        for (arm, build) in arms {
+            let (galaxy, fresh) = (build(), build());
+            let unread = galaxy.heap_bytes();
+            let kept = Arc::clone(galaxy.type_ia_delays());
+            assert_eq!(
+                format!("{kept:?}"),
+                format!("{:?}", DelayTimeDistribution::of_field(&fresh)),
+                "{arm}"
+            );
+            assert!(Arc::ptr_eq(&kept, galaxy.type_ia_delays()));
+            let process = TypeIaProcess::new(&galaxy);
+            assert!(std::ptr::eq(process.delays(), Arc::as_ptr(&kept)));
+            assert!(kept.heap_bytes() > 0);
+            assert_eq!(
+                galaxy.heap_bytes(),
+                unread + size_of::<DelayTimeDistribution>() + kept.heap_bytes(),
+                "{arm}"
+            );
+            assert_eq!(galaxy, fresh, "{arm}");
+        }
     }
 
     fn interval() -> (UniverseTime, UniverseTime) {

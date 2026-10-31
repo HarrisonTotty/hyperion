@@ -61,7 +61,7 @@ pub(crate) async fn resolve_system(
     let answer = move |_: &CancelToken| {
         let record = resolve(&galaxy, wanted.system())
             .map_err(|error| unknown_system(&request.system, error))?;
-        // A feature member's interior from the server's cache, for its line here and below.
+        // Lent so that a feature member's lines here and below do not build its interior again.
         let interiors = shared.cluster_models.handle(key);
         let time = wanted.time();
         // A grid system is placed as the range query places it, bit for bit; a feature member moves
