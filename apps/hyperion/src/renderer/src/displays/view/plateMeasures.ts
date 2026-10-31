@@ -80,13 +80,14 @@ const YIELDING_PARTS: ReadonlyArray<YieldingPart> = ["survey", "datum", "readout
 /**
  * The parts of a laid-out lower plate whose widest unbroken run passes the plate (the width test;
  * plan R10, R10.T12.c): those whose group's content runs wider than the group, which is as wide as
- * the plate's content, by more than half a pixel. A plate stands at its widest where a run passes
- * it, so a group's content is wider than its box exactly where a run is wider than the plate can be.
+ * the plate's content, by more than a pixel, since both widths are whole pixels, each rounded. A
+ * plate stands at its widest where a run passes it, so a group's content is wider than its box
+ * exactly where a run is wider than the plate can be.
  */
 export function passingParts(plate: Element): YieldingPart[] {
   return YIELDING_PARTS.filter((part) =>
     [...plate.querySelectorAll(`:scope > .view-label__group[data-part="${part}"]`)].some(
-      (group) => group.scrollWidth > group.clientWidth + 0.5,
+      (group) => group.scrollWidth > group.clientWidth + 1,
     ),
   );
 }

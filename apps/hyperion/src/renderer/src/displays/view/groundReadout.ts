@@ -12,10 +12,11 @@
  *   (`lineOfSightOf`) and `TerrainSession.groundReadout` at the instant the view lights the body
  *   at, the scene's time less the body's light time (§6 (c)), with the baseline the publish gives
  *   (the `STYLE` panel's `BASELINE`, 2 m as the display mounts; R10.T12.a) and the reference pad.
- *   One query is in flight at a time: a publish while one is out at its baseline asks nothing, and
- *   the next asks afresh, so that the newest pose and baseline are the ones asked; an answer asked
- *   at a baseline since changed, and come before the change, is taken as it came, its `SLOPE`
- *   stating the baseline it was read over.
+ *   One query whose answer can stand is out at a time: a publish while one is out at its baseline
+ *   asks nothing, and the next asks afresh, so that the newest pose and baseline are the ones
+ *   asked (one let go at a choice of `BASELINE` runs on in the worker, its answer dropped); an
+ *   answer asked at a baseline since changed, and come before the change, is taken as it came, its
+ *   `SLOPE` stating the baseline it was read over.
  * - **A choice of `BASELINE`** (R10.T12.c) is asked at once, not at the next 4 Hz ask: the loop
  *   publishes out of its turn while {@link GroundReadouts.due} says so, and that publish lets a
  *   query still out at the baseline before go, its answer dropped, and asks at the new one; that

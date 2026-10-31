@@ -3,8 +3,13 @@ import type { ReactNode } from "react";
 import { StaleMark } from "../../components/StaleMark";
 import type { ReadoutLine, ReadoutPiece, ReadoutSegment } from "./readouts";
 
-/** The separator of a reading's parts (the guide's "Voice and nomenclature"). */
-const PART_SEPARATOR = " · ";
+/**
+ * The end of a reading's part that another follows: the guide's middle dot ("Voice and
+ * nomenclature"), its space before it set in a run that never breaks, so that a reading broken at
+ * its dots ends its line with the dot and never sets the dot alone (plan R10, R10.T12.c); the
+ * space after it, between the parts, is where the reading breaks.
+ */
+const PART_END = " ·";
 
 /** A reading line of the terrain model. */
 export type TerrainReadingLine = Extract<ReadoutLine, { readonly kind: "reading" }>;
@@ -129,9 +134,9 @@ interface SegmentsProps {
 }
 
 /**
- * A reading's segments, each kept on one line where it fits, joined by the guide's middle dot: set
- * as a chain of the first and the rest, as {@link Pieces} are, so that a segment's place in its
- * reading is its identity.
+ * A reading's segments, each kept on one line where it fits, joined by the guide's middle dot,
+ * which ends the segment before it ({@link PART_END}): set as a chain of the first and the rest, as
+ * {@link Pieces} are, so that a segment's place in its reading is its identity.
  */
 function Segments({ segments }: SegmentsProps) {
   const [first, ...rest] = segments;
@@ -139,8 +144,9 @@ function Segments({ segments }: SegmentsProps) {
     <>
       <span className="view-label__part">
         <Pieces pieces={first} />
+        {rest.length > 0 ? <span className="view-label__run">{PART_END}</span> : null}
       </span>
-      {rest.length > 0 ? PART_SEPARATOR : null}
+      {rest.length > 0 ? " " : null}
       <Segments segments={rest} />
     </>
   );

@@ -107,14 +107,14 @@ describe("the survey line on the lower plate (R10.T12; the guide's survey line)"
     ]);
   });
 
-  it("joins its coverage and FINEST with the middle dot, each part in a span of its own", () => {
+  it("joins its coverage and FINEST with the middle dot, each part in a span of its own, the dot ending the first (R10.T12.c)", () => {
     renderLine(surveyLineOf(aSurvey()));
     const shown = [...parts().childNodes].map((node) =>
       node instanceof HTMLElement ? `${node.className}: ${visibleText(node)}` : node.textContent,
     );
     expect(shown).toEqual([
-      `view-label__part: ${formatCoverage(coverageOf(77))}`,
-      " · ",
+      `view-label__part: ${formatCoverage(coverageOf(77))} ·`,
+      " ",
       "view-label__part: FINEST 2.0 m",
     ]);
   });
@@ -261,6 +261,8 @@ describe("the DATUM line on the lower plate (R10.T12; the guide's DATUM)", () =>
       "view-label__run: 6378.1 km ×",
       " ",
       "view-label__run: 6356.8 km S",
+      // The middle dot before SEA LEVEL's part, ending this one (R10.T12.c).
+      "view-label__run:  ·",
     ]);
   });
 

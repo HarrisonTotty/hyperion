@@ -9,7 +9,7 @@ export const BESIDE_CLASS = "view-label--beside";
 
 /**
  * The class of a plate in columns (`PlateArrangement`; R10.T12.c): the upper plate ending short of
- * the picture's centre, the lower plate standing at the bottom right from past it.
+ * the picture's centre, the lower plate standing at the bottom right from 1 rem past it.
  */
 export const COLUMNS_CLASS = "view-label--columns";
 

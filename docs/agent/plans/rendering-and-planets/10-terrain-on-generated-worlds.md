@@ -3007,8 +3007,8 @@ src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/ren
   - _Acceptance._
     `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view src/renderer/src/view/terrain`
     and `just test-render`.
-  - _Built 2026-10-31_ (lane `r10-t12c`, ahead of T15.b's served look; the plates in columns, guide
-    rows drafted for sign-off: the record).
+  - _Built 2026-10-31_ (lane `r10-t12c`, ahead of T15.b's served look; the plates in columns at the
+    floor; guide rows C1–C4 built to drafts, pending the owner's sign-off: the record).
 
 - **R10.T12.d The instruments' ground readings** (new; after R10.T12.c; decision-r10-t12a-scope
   §7 item 1; its scope ruled when T12.c lands, from T12.c's measured plates). Where an instrument's

@@ -1251,18 +1251,29 @@ function sliceSystemWithWithheldEarth(): SceneSystemDto {
 }
 
 describe("the primary's lower plate in columns (R10.T12.c)", () => {
-  it("stands the readout at the floor with no slot open, the lower plate and its sizer's forms in columns", async () => {
+  /** `TERRAIN TEST` read on the floor's stage, 1280 × 720 at 100%: 51 × 33.5 rem, no slot open. */
+  async function atTheFloor(): Promise<void> {
     const view = await terrainTestReading();
-    // The floor's stage, 1280 × 720 at 100%: 51 × 33.5 rem.
     view.resizeStage({ widthPx: 816, heightPx: 536 });
     await readAtBaselinesFor(view, 2);
-    const forms = [...document.querySelectorAll("[data-sizer='lower'] [data-form] > .view-label")];
+  }
+
+  it("stands the readout at the floor with no slot open", async () => {
+    await atTheFloor();
     expect(within(plate()).getByText(GROUND_HEADING)).toBeInTheDocument();
-    expect({
-      plate: plate().classList.contains("view-label--columns"),
-      forms:
-        forms.length > 0 && forms.every((form) => form.classList.contains("view-label--columns")),
-    }).toEqual({ plate: true, forms: true });
+  });
+
+  it("stands the lower plate in columns at the floor", async () => {
+    await atTheFloor();
+    expect(plate().classList.contains("view-label--columns")).toBe(true);
+  });
+
+  it("lays the lower plate's sizer forms out in columns, as the plate stands", async () => {
+    await atTheFloor();
+    const forms = [...document.querySelectorAll("[data-sizer='lower'] [data-form] > .view-label")];
+    expect(
+      forms.length > 0 && forms.every((form) => form.classList.contains("view-label--columns")),
+    ).toBe(true);
   });
 });
 
@@ -1287,15 +1298,20 @@ describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decisi
     });
   });
 
-  it("asks at a choice within two frames of it, and states the answer within two frames of its coming (R10.T12.c)", async () => {
-    const view = await terrainTestReading();
+  /**
+   * Chooses 5 m on the `Style PRIMARY` panel in the frame after a publish in the readouts' turn,
+   * whose query is then out at 2 m, so that the next turn is about 250 ms off (R10.T12.c); gives the
+   * baselines out as the choice is made and two frames after it.
+   */
+  async function chooseMidTurn(view: ViewDisplayHarness): Promise<{
+    readonly outAtTurn: number[];
+    readonly askedAtChoice: number[];
+  }> {
     await readAtBaselinesFor(view, 2);
     const pending = (): number[] =>
       view.heightWorkers.flatMap((worker) =>
         worker.pendingGroundReadouts.map((query) => query.slopeBaselineM),
       );
-    // To the frame after a publish in the readouts' turn, whose query is then out at 2 m, so that
-    // the next turn is about 250 ms off.
     for (let frame = 0; frame < 30 && pending().length === 0; frame += 1) {
       view.advance(16);
     }
@@ -1303,19 +1319,23 @@ describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decisi
     const style = screen.getByRole("region", { name: "Style PRIMARY" });
     await view.user.click(within(style).getByRole("button", { name: "5 m" }));
     view.advance(32);
-    const askedAtChoice = pending();
+    return { outAtTurn, askedAtChoice: pending() };
+  }
+
+  it("asks at a choice within two frames of it, out of the readouts' turn (R10.T12.c)", async () => {
+    const view = await terrainTestReading();
+    expect(await chooseMidTurn(view)).toEqual({ outAtTurn: [2], askedAtChoice: [2, 5] });
+  });
+
+  it("states the chosen answer within two frames of its coming (R10.T12.c)", async () => {
+    const view = await terrainTestReading();
+    await chooseMidTurn(view);
     answerAtAskedBaselines(view);
     await settle();
     view.advance(32);
-    expect({
-      outAtTurn,
-      askedAtChoice,
-      slope: readingIn(plate(), "SLOPE")?.trim(),
-    }).toEqual({
-      outAtTurn: [2],
-      askedAtChoice: [2, 5],
-      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
-    });
+    expect(readingIn(plate(), "SLOPE")?.trim()).toBe(
+      `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
+    );
   });
 
   it("leaves the row out with INSTRUMENT 1 as the CONTROLS view, and stands it again with its choice kept", async () => {

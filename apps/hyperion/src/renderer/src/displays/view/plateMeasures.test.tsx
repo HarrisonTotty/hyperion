@@ -273,9 +273,9 @@ describe("the lower plate's forms (R10.T12.b)", () => {
 
   it.each<readonly [string, number, number, ReadonlyArray<string>]>([
     ["no run past the plate", 200, 214, []],
-    ["the readout's run past it by a pixel", 214, 215, ["readout"]],
+    ["the readout's run past it by two pixels", 214, 216, ["readout"]],
     ["the survey line's and the readout's past it", 264, 270, ["survey", "readout"]],
-    ["a run past it by less than half a pixel, as sub-pixel layout gives", 214, 214.4, []],
+    ["a run past it by a pixel, as the two widths' rounding gives", 214, 215, []],
   ])("finds the parts whose widest run passes the plate, with %s (R10.T12.c)", (...args) => {
     const [, surveyPx, readoutPx, passing] = args;
     expect(measureLowerForms(wholeForm(surveyPx, readoutPx))?.passing).toEqual(passing);

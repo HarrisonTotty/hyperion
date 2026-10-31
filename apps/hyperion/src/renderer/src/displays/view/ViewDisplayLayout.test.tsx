@@ -1045,9 +1045,12 @@ describe("VIEW's plates in columns in the stylesheet (R10.T12.c)", () => {
     );
   });
 
-  it("stands the lower plate in columns at the bottom right, inset 0.5 rem", () => {
+  it("starts the lower plate in columns CENTRE_CLEAR_REM past the picture's centre", () => {
     expect(STYLES).toMatch(
-      /\.view-label--lower\.view-label--columns \{\s*right: 0\.5rem;\s*left: auto;\s*\}/u,
+      new RegExp(
+        `\\.view-label--lower\\.view-label--columns \\{\\s*left: calc\\(50% \\+ ${String(CENTRE_CLEAR_REM)}rem\\);\\s*\\}`,
+        "u",
+      ),
     );
   });
 });

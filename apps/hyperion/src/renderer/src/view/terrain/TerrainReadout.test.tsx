@@ -341,16 +341,22 @@ describe("the terrain readout on the lower plate (R10.T12)", () => {
     });
   });
 
-  it("joins a reading's parts with the middle dot, each part in a span of its own", () => {
+  it("joins a reading's parts with the middle dot, each part in a span of its own, the dot ending the first (R10.T12.c)", () => {
     renderReadout(groundAt());
     const parts = [...partsOf("SLOPE").childNodes].map((node) =>
       node instanceof HTMLElement ? `${node.className}: ${visibleText(node)}` : node.textContent,
     );
     expect(parts).toEqual([
-      `view-label__part: ~12°${PM}4°`,
-      " · ",
+      `view-label__part: ~12°${PM}4° ·`,
+      " ",
       "view-label__part: BASELINE 2 m",
     ]);
+  });
+
+  it("sets the middle dot with its space before it in a run that never breaks, so that it never stands alone (R10.T12.c)", () => {
+    renderReadout(groundAt());
+    const [first] = partsOf("SLOPE").querySelectorAll(":scope > .view-label__part");
+    expect(first?.lastElementChild?.outerHTML).toBe('<span class="view-label__run"> ·</span>');
   });
 
   it("sets GRAZING as the console's own word in its part, neither a value nor muted", () => {

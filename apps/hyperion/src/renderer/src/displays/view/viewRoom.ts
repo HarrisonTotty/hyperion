@@ -254,9 +254,9 @@ export type PlateStep = 0 | 1 | 2 | 3 | 5 | 6;
  * upper plate at its top and the lower plate at its foot, sharing its height; or `columns`, where no
  * slot stands on a stage under {@link COLUMNS_BELOW_HEIGHT_REM} tall and at least
  * {@link COLUMNS_MIN_WIDTH_REM} wide, either side of the picture's centre, the upper plate at the
- * top left and the lower plate at the bottom right, each ending {@link CENTRE_CLEAR_REM} short of
- * the centre and each with the stage's whole height, so that neither covers the point the readout
- * reads.
+ * top left and the lower plate at the bottom right, from {@link CENTRE_CLEAR_REM} past the centre,
+ * neither within that of it and each with the stage's whole height, so that neither covers the
+ * point the readout reads.
  */
 export type PlateArrangement = "stacked" | "columns";
 
@@ -529,6 +529,23 @@ function lowerStepIn(
   );
 }
 
+/** How far a room's upper plate gave way: 0 whole, its scroll's step, or 6 scrolling whole. */
+function upperStepOf(room: ViewRoom): PlateStep {
+  let step: PlateStep;
+  switch (room.upper.kind) {
+    case "whole":
+      step = 0;
+      break;
+    case "middle":
+      step = room.step;
+      break;
+    case "body":
+      step = 6;
+      break;
+  }
+  return step;
+}
+
 /**
  * The plates in columns (R10.T12.c): each in the stage's whole height, decided apart, the lower
  * plate's parts giving way only for its own height and widths and the upper plate's lines
@@ -551,12 +568,7 @@ function columnsAt(
           : 0;
   const lowerStep = lowerStepIn(lower, roomPx, sparePx, previousLower);
   const upperOnly: PlateMeasures = { upper, lower: null };
-  const previousUpper: PlateStep =
-    previous === null || previous.upper.kind === "whole"
-      ? 0
-      : previous.upper.kind === "body"
-        ? 6
-        : previous.step;
+  const previousUpper: PlateStep = previous === null ? 0 : upperStepOf(previous);
   const upperStanding =
     platesAt(upperOnly, roomPx, 0, sparePx, previousUpper, 5) ??
     bodyScrollAt(upperOnly, roomPx, 0, sparePx);

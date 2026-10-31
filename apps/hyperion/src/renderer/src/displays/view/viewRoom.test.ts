@@ -19,6 +19,7 @@ import {
   LINE_SPARE_REM,
   type LowerPlateMeasures,
   lowerYieldLine,
+  type PlateArrangement,
   type PlateMeasures,
   type RoomInput,
   roomToOpen,
@@ -355,14 +356,18 @@ describe("VIEW's room: the width test (R10.T12.c; decision-r10-t12a-scope §7 it
     ]).toEqual(["yields", "stands"]);
   });
 
-  it("is 0 with no lower plate, and ignores a run of a part the plate does not hold", () => {
+  it("is 0 with no lower plate", () => {
+    expect(leastStepOf(null)).toBe(0);
+  });
+
+  it("ignores a run of a part the plate does not hold", () => {
     const readoutOnly: LowerPlateMeasures = {
       wholePx: 120,
       readoutYieldedPx: 60,
       surveyYieldedPx: null,
       passing: ["survey"],
     };
-    expect([leastStepOf(null), leastStepOf(readoutOnly)]).toEqual([0, 0]);
+    expect(leastStepOf(readoutOnly)).toBe(0);
   });
 });
 
@@ -496,13 +501,17 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
     ]);
   });
 
-  it("first lays the plates out in columns where no slot is open and the stage fits them", () => {
-    expect([
-      wholeRoom([CLOSED, CLOSED], true).arrangement,
-      wholeRoom([OPEN, CLOSED], true).arrangement,
-      wholeRoom([CLOSED, CLOSED]).arrangement,
-      viewRoom(inputOn(stageOf(530), { ...COLUMNS, full: null }), null).arrangement,
-    ]).toEqual(["columns", "stacked", "stacked", "columns"]);
+  it.each<readonly [string, () => ViewRoom, PlateArrangement]>([
+    ["no slot open, the stage fitting them", () => wholeRoom([CLOSED, CLOSED], true), "columns"],
+    ["a slot open", () => wholeRoom([OPEN, CLOSED], true), "stacked"],
+    ["the stage not fitting them", () => wholeRoom([CLOSED, CLOSED]), "stacked"],
+    [
+      "the plates not yet measured",
+      () => viewRoom(inputOn(stageOf(530), { ...COLUMNS, full: null }), null),
+      "columns",
+    ],
+  ])("first lays the plates out, with %s, %s", (_, room, arrangement) => {
+    expect(room().arrangement).toBe(arrangement);
   });
 
   it.each<readonly [string, StageRoom, boolean]>([

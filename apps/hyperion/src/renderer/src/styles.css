@@ -4971,17 +4971,17 @@ body {
 /*
  * The primary's plates in columns (R10.T12.c), while no slot stands on a stage under 40 rem tall
  * and at least 48 rem wide (`viewRoom.ts`' `columnsFit`): either side of the picture's centre, each
- * ending 1 rem short of it past its 0.5 rem inset, the upper plate at the top left and the lower
- * plate at the bottom right, so that neither covers the point the readout reads and each has the
- * stage's whole height.
+ * at most as wide as its half less its 0.5 rem inset and 1 rem from the centre, the upper plate at
+ * the top left and the lower plate at the bottom right, so that neither covers the point the
+ * readout reads and each has the stage's whole height. The lower plate starts 1 rem past the
+ * centre, so that its lines keep their places as its widest line changes.
  */
 .view-label--columns {
   max-width: calc(50% - 1.5rem);
 }
 
 .view-label--lower.view-label--columns {
-  right: 0.5rem;
-  left: auto;
+  left: calc(50% + 1rem);
 }
 
 /*
