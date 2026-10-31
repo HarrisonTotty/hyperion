@@ -125,7 +125,7 @@ use crate::planetary::derive::atmosphere::{
     PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
     SpunClimate, SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory,
     atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
-    pass_regolith, solved_as_a_hothouse, solved_without_the_deck,
+    pass_regolith, pass_resurfacing, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -2230,7 +2230,11 @@ impl PassBody<'_> {
                 surface.regolith,
                 material,
                 ended.crust_lid.as_ref().map(|lid| (lid, None)),
-            ),
+            )
+            .with_resurfacing(pass_resurfacing(
+                &ended.air,
+                ended.spun.as_ref().map(SpunPasses::context),
+            )),
         };
         let regolith_albedo = regolith.bond(SurfaceState::Airless, shade.bands()).bond;
         // The field the published pass read reads that regolith, the same one function's bits

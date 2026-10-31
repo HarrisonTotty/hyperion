@@ -485,6 +485,9 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   outer system's fluffy amorphous ice as the water-ice form.
 /// - the zonal search's Z₀, `Z0_BRANCH_VERSION` (R09.T13.i), at `Z0BranchRules::Kept` through
 ///   `with_z0_branch`: Z₀'s drift stop, and the held run in its place where it drifted.
+/// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
+///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
+///   lag where its tidal heat does not resurface it.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -501,6 +504,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
     use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
+    use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -544,6 +548,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
     };
+    let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     with_locked_climate(LockedClimateRules::Deck, run)
 }
 

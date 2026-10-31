@@ -63,14 +63,17 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{OpenWater, PassContext, RecordSpin, WaterGate};
-use crate::planetary::derive::photometry::area_mix::{self, HostShade, LidWeathering, Regolith};
+use crate::planetary::derive::photometry::area_mix::{
+    self, HostShade, IcyResurfacing, LidWeathering, Regolith,
+};
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
     is_collisional, qualifies_by,
 };
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
 use crate::planetary::hooks::figures::{
-    Crust, DarkLag, FieldBody, PartitionGround, PartitionOver, WetEpoch, cover, lag, partition_over,
+    Crust, DarkLag, FieldBody, PartitionGround, PartitionOver, PassFigures, WetEpoch, cover, lag,
+    partition_over,
 };
 use crate::planetary::hooks::modifiers::{
     DeriveModifiersError, HeliocentricOrbit, ModifierHost, ModifierParts, Primary,
@@ -1125,6 +1128,19 @@ pub(crate) fn pass_regolith(
     }
 }
 
+/// What the pass of the atmosphere `air` under the context `context` knows of its body's
+/// resurfacing, which an `H2O` regolith's lag reads (P14.T49.m; [`Regolith::with_resurfacing`]):
+/// the tidal heat flux of the context's figures, the record's tide, not known where it reads no
+/// context (the passes' stand-in) or its context holds no figures (the first pass's C₀); and
+/// whether its air's ice holds a volatile ([`Atmosphere::ice_holds_a_volatile`]), on either.
+#[must_use]
+pub(crate) fn pass_resurfacing(air: &Atmosphere, context: Option<&PassContext>) -> IcyResurfacing {
+    let tidal = context
+        .and_then(PassContext::figures)
+        .map(PassFigures::tidal_heat_flow);
+    IcyResurfacing::new(tidal, air.ice_holds_a_volatile())
+}
+
 /// The maturity of the pass of the atmosphere `air` under its body's own climate `spun`, whose lid
 /// is `lid` (P14.T54.b.e), before it publishes its condensates: P14.T51.d's weathering law
 /// ([`surface_weathering`]) over its modifiers' parts, each the record's member to the bit where
@@ -1284,7 +1300,8 @@ fn surface_and_cloud(
                 given_partition(air, inputs, surface, (climate_of, gravity)),
                 None,
                 (Vec::new(), Err(NoMaturity::NoRegolith)),
-                pass_regolith(surface.regolith, inputs.material, None),
+                pass_regolith(surface.regolith, inputs.material, None)
+                    .with_resurfacing(pass_resurfacing(air, None)),
                 Err(NoColdTraps::ClimateGiven),
             ),
             PassClimate::Spun(spun) => {
@@ -1297,11 +1314,9 @@ fn surface_and_cloud(
                     surface_age: maturing.parts.surface_age,
                     state: air.state,
                 });
-                let regolith = pass_regolith(
-                    surface.regolith,
-                    inputs.material,
-                    lid.as_ref().map(|lid| (lid, at)),
-                );
+                let lid_at = lid.as_ref().map(|lid| (lid, at));
+                let regolith = pass_regolith(surface.regolith, inputs.material, lid_at)
+                    .with_resurfacing(pass_resurfacing(air, Some(&spun.context)));
                 // The cold traps' field, of this pass's own inputs, between its regolith and its
                 // publish (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (b)).
                 let cold_traps = pass_cold_traps(air, spun, &pending, (&regolith, shade));

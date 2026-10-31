@@ -98,6 +98,21 @@
 //! whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit joins
 //! the area mix at its row's optics ([`surface_bond`]).
 //!
+//! # The icy lid's regolith (P14.T49.m; from generator version 26)
+//!
+//! T49.i's `H2O` row is fresh 100 µm frost, 0.832 about a Sun, where measured icy satellites run
+//! from 0.10 to 0.76 by their non-ice fraction, radiolysis and resurfacing
+//! (decision-p14-t54a-ganymede §1.5). Behind its hold ([`ICY_REGOLITH_VERSION`]), an airless or
+//! tenuous body's `H2O` regolith, a known lid's or the stand-in's row for ice, is ice with its
+//! rock's lag ([`icy_lag_bins`]): T49.i's two-size intimate mixture (decision-p14-t49i-rock-mixtures
+//! (b)) of the frost and an icy body's rock, `chondrite_ci`, at [`ICY_LAG_NON_ICE_SHARE`] by
+//! volume, each grain's single-scattering albedo and phase asymmetry weighted by its cross-section
+//! (Hapke 2012's rule, as the ruling states it) into van de Hulst's similarity relation. Fresh frost
+//! stays where resurfacing outruns the lag: a tidal heat flux of at least
+//! [`RESURFACING_TIDAL_FLUX`] ([`IcyResurfacing`]). Neither size, density nor exposure age is read
+//! (the ruling: Enceladus and Ganymede are both about 60% rock; an exposure age is a weathering
+//! law, P14.T54.b's kind).
+//!
 //! # The Rayleigh floor (P14.T24.h.a; decision-p14-t54a-passes §G3.5)
 //!
 //! The area mix has no Rayleigh term, so a thick air's Bond albedo is its surface's alone, which
@@ -115,6 +130,7 @@
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
 use hyperion_surface::material::weathered_spherical_albedo;
+use hyperion_surface::tables::space_weathering as form_tables;
 
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -126,7 +142,8 @@ use crate::planetary::derive::atmosphere::{
 };
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{
-    SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, held_at_first_melt, palette_feo_mass_fraction,
+    CondensedOptics, ReferenceForm, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, held_at_first_melt,
+    palette_feo_mass_fraction,
 };
 use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
 use crate::substance::{
@@ -136,9 +153,13 @@ use crate::substance::{
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{
-    EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals, Years,
+    EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals,
+    WattsPerSquareMetre, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
+#[cfg(test)]
+mod icy_lag_tests;
 #[cfg(test)]
 mod tests;
 
@@ -1271,6 +1292,10 @@ pub(crate) struct Regolith {
     material: SurfaceMaterial,
     /// How it is weathered.
     weathering: RegolithWeathering,
+    /// What its pass knows of the body's resurfacing, which an `H2O` row's lag reads under the
+    /// icy regolith (P14.T49.m; [`with_resurfacing`](Self::with_resurfacing)): not known from
+    /// every constructor.
+    resurfacing: IcyResurfacing,
 }
 
 impl Regolith {
@@ -1282,6 +1307,7 @@ impl Regolith {
             row: None,
             material,
             weathering: RegolithWeathering::StandIn,
+            resurfacing: IcyResurfacing::NOT_KNOWN,
         }
     }
 
@@ -1293,6 +1319,19 @@ impl Regolith {
             row: Some(row),
             material,
             weathering: RegolithWeathering::StandIn,
+            resurfacing: IcyResurfacing::NOT_KNOWN,
+        }
+    }
+
+    /// The same regolith on a body whose resurfacing its pass knows as `resurfacing` (P14.T49.m):
+    /// an `H2O` row keeps its fresh frost where it is resurfaced, and takes its rock's lag
+    /// otherwise, under the icy regolith ([`IcyRegolithRules::Mixture`]); every other row reads
+    /// nothing of it.
+    #[must_use]
+    pub(crate) const fn with_resurfacing(self, resurfacing: IcyResurfacing) -> Self {
+        Self {
+            resurfacing,
+            ..self
         }
     }
 
@@ -1308,6 +1347,7 @@ impl Regolith {
             row: None,
             material,
             weathering: RegolithWeathering::Weathered { spherical_bins },
+            resurfacing: IcyResurfacing::NOT_KNOWN,
         }
     }
 
@@ -1338,7 +1378,10 @@ impl Regolith {
     ///   with no condensed optics, and one whose `FeO_T` is above 0 but whose solid has no grain
     ///   density at the temperature keep the stand-in (`with_lid`, capped where airless and
     ///   silicate): the law weathers only a row that carries its darkening agent
-    ///   (decision-pre-23-review item 16), and there is nothing it can read.
+    ///   (decision-pre-23-review item 16), and there is nothing it can read;
+    /// - under the icy regolith ([`IcyRegolithRules::Mixture`], P14.T49.m), an `H2O` lid keeps its
+    ///   row (`with_lid`), which [`bond`](Self::bond) reads as its fresh frost or its rock's lag:
+    ///   the law has no iron to darken there.
     ///
     /// # Panics
     ///
@@ -1350,6 +1393,9 @@ impl Regolith {
         material: SurfaceMaterial,
         at: LidWeathering,
     ) -> Self {
+        if row == water() && IcyRegolithRules::in_force() == IcyRegolithRules::Mixture {
+            return Self::with_lid(row, material);
+        }
         let substance = row.substance();
         let capped = CAPPED_ROWS.contains(&substance.key().as_str());
         let (Some(optics), Some(condensed), false) =
@@ -1365,6 +1411,7 @@ impl Regolith {
                 row: Some(row),
                 material,
                 weathering: RegolithWeathering::UnweatheredLava,
+                resurfacing: IcyResurfacing::NOT_KNOWN,
             };
         }
         let (maturity, temperature) = (at.maturity, at.temperature);
@@ -1441,11 +1488,17 @@ impl Regolith {
     ///   (decision-p14-t49c-split §1.5), and on any other the row by its material
     ///   ([`Regolith::stand_in_row`]), each labelled;
     /// - not yet a regolith ([`RegolithWeathering::UnweatheredLava`]), as under the stand-in of a
-    ///   known lid, its cap labelled [`StandIn::UnweatheredLava`].
+    ///   known lid, its cap labelled [`StandIn::UnweatheredLava`];
+    /// - under the icy regolith ([`IcyRegolithRules::Mixture`], P14.T49.m), an `H2O` row on an
+    ///   airless or tenuous body that is not resurfaced ([`IcyResurfacing`]): its rock's lag
+    ///   ([`icy_lag_bins`]) weighted by the light, a stand-in's row keeping its label.
     ///
     /// The one predicate the passes, the record and P14.T51.i's cold traps' bare regolith read.
     #[must_use]
     pub(crate) fn bond(&self, state: SurfaceState, bands: &[f64; OPTICS_BANDS]) -> Component {
+        if let Some(lagged) = self.icy_lag(state, bands) {
+            return lagged;
+        }
         let cap = match self.weathering {
             RegolithWeathering::Weathered { spherical_bins } => {
                 return Component {
@@ -1474,6 +1527,319 @@ impl Regolith {
             },
         }
     }
+
+    /// Its Bond albedo under the light `bands` as P14.T49.m's lag, on a body in the state `state`:
+    /// `Some` for an `H2O` row (a known lid's, or the stand-in's row for ice, labelled
+    /// [`StandIn::RowByMaterial`]) on an airless or tenuous body that is not resurfaced, under
+    /// [`IcyRegolithRules::Mixture`]; `None` for every other regolith, which [`bond`](Self::bond)
+    /// takes as before.
+    #[must_use]
+    fn icy_lag(&self, state: SurfaceState, bands: &[f64; OPTICS_BANDS]) -> Option<Component> {
+        let stand_in = match (self.row, self.weathering) {
+            (Some(row), RegolithWeathering::StandIn) if row == water() => None,
+            (None, RegolithWeathering::StandIn) if self.material == SurfaceMaterial::Ice => {
+                Some(StandIn::RowByMaterial)
+            }
+            _ => return None,
+        };
+        // A tenuous air's bare surface is weathered as an airless one's (P14.T53.c).
+        let airless = matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
+        if !airless
+            || self.resurfacing.resurfaced()
+            || IcyRegolithRules::in_force() == IcyRegolithRules::Frost
+        {
+            return None;
+        }
+        Some(Component {
+            bond: band_weighted(&icy_lag_bins(), bands),
+            stand_in,
+        })
+    }
+}
+
+/// The generator version from which an airless body's `H2O` regolith is ice with its rock's lag
+/// where it is not resurfaced (P14.T49.m; decision-p14-t54a-ganymede §1.5 and §1.8): 26, the
+/// train after 25's.
+///
+/// It is this rule's one hold. Below it [`IcyRegolithRules::in_force`] is
+/// [`IcyRegolithRules::Frost`]: every `H2O` regolith is T49.i's fresh frost, and every value on
+/// the record is version 24's bit for bit. 26's bump deletes this hold, [`IcyRegolithRules`] with
+/// its `Frost` arm, the guards that read it in [`Regolith::weathered_lid`] and
+/// [`Regolith::bond`], the tests' switch and its tripwire
+/// (`the_icy_regolith_is_held_only_until_the_26_bump`).
+pub(crate) const ICY_REGOLITH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// Whether an `H2O` regolith takes its rock's lag (its hold, [`ICY_REGOLITH_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum IcyRegolithRules {
+    /// Version 25's and before: every `H2O` regolith is T49.i's fresh 100 µm frost.
+    Frost,
+    /// Version 26's: an airless or tenuous body's `H2O` regolith is ice with its rock's lag
+    /// ([`icy_lag_bins`]), but where it is resurfaced ([`IcyResurfacing`]).
+    Mixture,
+}
+
+impl IcyRegolithRules {
+    /// The rules this generator version gives: the mixture from [`ICY_REGOLITH_VERSION`], the
+    /// frost below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_icy_regolith`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = ICY_REGOLITH_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= ICY_REGOLITH_VERSION {
+            Self::Mixture
+        } else {
+            Self::Frost
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The icy regolith's rules a test sets on its thread, `None` for the version's.
+    static ICY_REGOLITH_RULES: core::cell::Cell<Option<IcyRegolithRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the icy regolith's rules `rules` on this thread, for the tests to reach
+/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_icy_regolith<R>(rules: IcyRegolithRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<IcyRegolithRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ICY_REGOLITH_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(ICY_REGOLITH_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The tidal heat flux from which an icy surface is resurfaced faster than its lag forms, and keeps
+/// its fresh frost (P14.T49.m): 0.01 W m⁻² (the lane's lean, 2026-10-31).
+///
+/// - **What it stands for.** Enceladus, the least heated icy body seen resurfacing today, radiates
+///   15.8 ± 3.1 GW from its south polar terrain (Howett et al. 2011, JGR 116, E03003; from
+///   memory): 19.8 mW m⁻² over its 252.1 km sphere, 15.9 mW m⁻² at 1σ low. Europa's surface,
+///   some 60 Myr old, is estimated at tens of mW m⁻² (from memory). 10 mW m⁻² lies under both.
+/// - **What lies under it.** Ganymede's and Callisto's present tides, under 1 mW m⁻² (from
+///   memory), under shells of 100–150 km whose surfaces are old (Nimmo and Pappalardo 2016, JGR
+///   Planets 121, 1378, as [`ICE_SHELL_LIMIT`]'s documentation cites them): Ganymede's grooved
+///   terrain was resurfaced in a past tidal epoch (from memory), which the generator's present
+///   tides do not hold, and Callisto's never was.
+/// - **What it is not.** A step, not a resurfacing rate set against a lag's growth; and the
+///   generator's own tides decide it, so a body they under-heat (its Enceladus, at 5 µW m⁻²,
+///   decision-p14-t56d-membrane §2.4) takes the lag.
+///
+/// [`ICE_SHELL_LIMIT`]: crate::planetary::hooks::figures::interior::ICE_SHELL_LIMIT
+pub(crate) const RESURFACING_TIDAL_FLUX: WattsPerSquareMetre = WattsPerSquareMetre::new(0.01);
+
+/// What a pass knows of its body's resurfacing, which an `H2O` regolith's lag reads (P14.T49.m;
+/// [`Regolith::with_resurfacing`]): its tide and its volatile frost.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IcyResurfacing {
+    /// The tidal heat flux raised in the body (P14.T56.d), its figures' (`PassFigures`'s); `None`
+    /// where it is not known: the passes' stand-in, a pass with no figures in its context (the
+    /// first, C₀), and a body with no mass or radius.
+    tidal: Option<WattsPerSquareMetre>,
+    /// Whether its ice holds a volatile air, nitrogen, methane or argon (P14.T53.c; the pass's
+    /// air's `ice_holds_a_volatile`).
+    volatile_frost: bool,
+}
+
+impl IcyResurfacing {
+    /// Nothing known: no tide, no volatile frost. Its `H2O` regolith takes the lag, the old
+    /// surface's.
+    pub(crate) const NOT_KNOWN: Self = Self {
+        tidal: None,
+        volatile_frost: false,
+    };
+
+    /// A body whose tidal heat flux is `tidal`, `None` where it is not known, and whose ice holds
+    /// a volatile air where `volatile_frost`.
+    #[must_use]
+    pub(crate) const fn new(tidal: Option<WattsPerSquareMetre>, volatile_frost: bool) -> Self {
+        Self {
+            tidal,
+            volatile_frost,
+        }
+    }
+
+    /// Whether the body is resurfaced faster than its lag forms, so that its `H2O` regolith keeps
+    /// its fresh frost:
+    ///
+    /// - a tidal heat flux of at least [`RESURFACING_TIDAL_FLUX`], never where it is not known or
+    ///   not a number: Europa's and Enceladus's class;
+    /// - or a volatile air its ice holds (the lane's lean, 2026-10-31): its frost's seasonal cycle
+    ///   refreshes the ground it does not cover, Triton's and Pluto's class, whose surfaces are
+    ///   young or frost-covered (decision-p14-t51-batch E2's Triton 0.72–0.92). An icy body warm
+    ///   enough to lose its nitrogen to Jeans's test, Ganymede's and Callisto's, holds none.
+    #[must_use]
+    pub(crate) fn resurfaced(self) -> bool {
+        self.volatile_frost
+            || self
+                .tidal
+                .is_some_and(|flux| flux >= RESURFACING_TIDAL_FLUX)
+    }
+}
+
+/// The volume share of rock in an `H2O` regolith's lag ([`icy_lag_bins`]): 0.08, a calibration on
+/// one body (labelled).
+///
+/// - **Its source.** It is the share at which the lag gives the measured Ganymede's bolometric
+///   Bond albedo, 0.35 ± 0.03 (Squyres and Veverka 1982, Icarus 52; Buratti 1991, Icarus 92, 312;
+///   decision-p14-t54a-ganymede §1.5 and §Sources), about a Sun: 0.3500 (`icy_lag_tests`'s
+///   inversion). It is T13.c's airless ice, whose value the escape's calibration and T53.c's
+///   110 K surfaces read; the window 0.32–0.38 is shares 0.066–0.097.
+/// - **The bodies it misses.** Callisto, 0.11 ± 0.02 at a share of 0.47, whose generated twin has
+///   Ganymede's bulk and tide, and whose darker lag is thermal segregation (Spencer 1987, Icarus 69,
+///   297; Moore et al. 2004), a budget not built; the Uranian moons, 0.10–0.23 in the visible
+///   (Karkoschka 2001), darker by radiolysis, not modelled; Saturn's mid-sized moons, 0.43–0.68
+///   (Buratti et al. 2022), brighter under Enceladus's E-ring frost. Each is a deferred finding.
+/// - **By mass** it is some 19% of the lag at `chondrite_ci`'s grains and ice Ih's.
+pub(crate) const ICY_LAG_NON_ICE_SHARE: f64 = 0.08;
+
+/// The rock of an `H2O` regolith's lag ([`icy_lag_bins`]): `chondrite_ci`, the class the crust's
+/// rule gives an icy body's rock altered in place by its ice at an ice-to-rock mass ratio of at
+/// least 0.4 (`crust::CI_ICE_TO_ROCK`; Ganymede's and Callisto's are about 1), the dark,
+/// carbonaceous-chondrite-like lag of Callisto's spectra (Spencer 1987, Icarus 70, 99, as
+/// `figures::lag`'s documentation cites it). The body's own ratio is not read (the lane's lean,
+/// 2026-10-31): `chondrite_cm`'s lag is 0.003 brighter at the same share about a Sun.
+const ICY_LAG_ROCK: &str = "chondrite_ci";
+
+/// The spherical albedos in the optics' bins of an `H2O` regolith's lag (P14.T49.m): T49.i's
+/// two-size intimate mixture (decision-p14-t49i-rock-mixtures (b)) of the `H2O` row's fresh frost
+/// and [`ICY_LAG_ROCK`] at [`ICY_LAG_NON_ICE_SHARE`] by volume ([`two_size_mixture`]). It reads
+/// the registry's rows alone, so that it is the same for every body, and its Bond albedo follows
+/// the host's light.
+///
+/// # Panics
+///
+/// Never: both rows have condensed optics (P14.T49.i).
+#[must_use]
+pub(crate) fn icy_lag_bins() -> [f64; OPTICS_BANDS] {
+    let frost = water()
+        .substance()
+        .condensed_optics()
+        .expect("water's row has condensed optics (T49.c)");
+    let rock = by_key(ICY_LAG_ROCK)
+        .and_then(|row| row.substance().condensed_optics())
+        .expect("the registry holds chondrite_ci, with condensed optics (P14.T49.i)");
+    two_size_mixture(
+        (frost, 1.0 - ICY_LAG_NON_ICE_SHARE),
+        (rock, ICY_LAG_NON_ICE_SHARE),
+    )
+}
+
+/// The spherical albedos in the optics' bins of an intimate mixture of two rows' grains, each a
+/// row's condensed optics and its volume fraction (P14.T49.m; decision-p14-t49i-rock-mixtures §2.1),
+/// each row's grains at its reference form's diameter D and under its form's photometry:
+///
+/// 1. each row's single-scattering albedo w in the bin, its form's tabled spherical albedo
+///    inverted (`hyperion-fit`'s `space_weathering` tables, `substance_albedos`' own solution);
+/// 2. the mixture's, weighted by cross-section, volume fraction over diameter: w̄ = Σ (f ÷ D) w ÷ Σ
+///    (f ÷ D) (Hapke 2012, its section not read, as the ruling states it), and its phase
+///    asymmetry by the light each part scatters, ξ̄ = Σ (f ÷ D) w ξ ÷ Σ (f ÷ D) w, as Hapke's
+///    mixture averages its phase function (from memory);
+/// 3. its spherical albedo by van de Hulst's similarity relation (1974, A&A 35, 209), the one the
+///    rows' own albedos are (`substance::optics`' module documentation): the isotropic medium of
+///    albedo w* = w̄ (1 − ξ̄) ÷ (1 − w̄ ξ̄), read on the frost form's table at the w that its
+///    asymmetry takes to w*.
+///
+/// A frost row alone gives its own bins back within rounding, and a regolith row alone its own
+/// within the tables' interpolation, under 10⁻³ (`icy_lag_tests`).
+#[must_use]
+fn two_size_mixture(
+    (first, first_share): (&CondensedOptics, f64),
+    (second, second_share): (&CondensedOptics, f64),
+) -> [f64; OPTICS_BANDS] {
+    let part = |optics: &CondensedOptics, share: f64| {
+        let form = optics.reference_form();
+        let weight = share / form.grain_diameter().value();
+        let asymmetry = form.photometry().phase_function().asymmetry();
+        (
+            optics.spherical_albedo_bins(),
+            form_spherical(form),
+            weight,
+            asymmetry,
+        )
+    };
+    let (a, a_table, a_weight, a_asymmetry) = part(first, first_share);
+    let (b, b_table, b_weight, b_asymmetry) = part(second, second_share);
+    let frost = ReferenceForm::Frost;
+    let frost_asymmetry = frost.photometry().phase_function().asymmetry();
+    core::array::from_fn(|bin| {
+        let (a_w, b_w) = (
+            grain_albedo_of(a_table, a[bin]),
+            grain_albedo_of(b_table, b[bin]),
+        );
+        let scattered = a_weight * a_w + b_weight * b_w;
+        if scattered <= 0.0 {
+            return 0.0;
+        }
+        let w = scattered / (a_weight + b_weight);
+        let xi = (a_weight * a_w * a_asymmetry + b_weight * b_w * b_asymmetry) / scattered;
+        let isotropic = w * (1.0 - xi) / (1.0 - w * xi);
+        let on_frost = isotropic / (1.0 - frost_asymmetry + isotropic * frost_asymmetry);
+        spherical_of_grain(form_spherical(frost), on_frost)
+    })
+}
+
+/// The spherical albedo `A_S` of the reference form `form` at each node of the tables' w
+/// (`hyperion-fit`'s `space_weathering`, R10.T1.d's, by `substance_albedos`' own solution).
+#[must_use]
+const fn form_spherical(form: ReferenceForm) -> &'static [f64; form_tables::W.len()] {
+    match form {
+        ReferenceForm::Frost => &form_tables::FROST_SPHERICAL_ALBEDO,
+        ReferenceForm::Regolith => &form_tables::REGOLITH_SPHERICAL_ALBEDO,
+    }
+}
+
+/// The spherical albedo on the column `column` at single-scattering albedo `w`, linear in w between
+/// the nodes and its end node's beyond them (as R10.T1.d's law reads it).
+#[must_use]
+fn spherical_of_grain(column: &[f64; form_tables::W.len()], w: f64) -> f64 {
+    let nodes = &form_tables::W;
+    let last = nodes.len() - 1;
+    let above = nodes.partition_point(|&node| node <= w);
+    if above == 0 {
+        return column[0];
+    }
+    if above > last {
+        return column[last];
+    }
+    let k = above - 1;
+    column[k] + (w - nodes[k]) / (nodes[k + 1] - nodes[k]) * (column[k + 1] - column[k])
+}
+
+/// The single-scattering albedo whose spherical albedo on the ascending column `column` is
+/// `albedo`: the column inverted linearly between its nodes; 1 above its top and 0 at or below 0
+/// (as R10.T1.d's law inverts it).
+#[must_use]
+fn grain_albedo_of(column: &[f64; form_tables::W.len()], albedo: f64) -> f64 {
+    let nodes = &form_tables::W;
+    let last = nodes.len() - 1;
+    if albedo <= 0.0 {
+        return 0.0;
+    }
+    if albedo > column[last] {
+        return 1.0;
+    }
+    let above = column.partition_point(|&value| value <= albedo);
+    if above == 0 {
+        return nodes[0];
+    }
+    if above > last {
+        return nodes[last];
+    }
+    let k = above - 1;
+    nodes[k] + (albedo - column[k]) / (column[k + 1] - column[k]) * (nodes[k + 1] - nodes[k])
 }
 
 /// Whether a known lid's row `row` on a body in the state `state` takes the space-weathering

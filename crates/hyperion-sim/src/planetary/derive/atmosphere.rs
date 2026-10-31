@@ -102,6 +102,7 @@ pub(crate) use surface_mix::spun_read;
 pub(crate) use surface_mix::{
     LARGEST_BOND_ALBEDO, NoMaturity, PassClimate, PassLight, PassMaturity, PassSurface,
     PassWeathered, PassWeathering, SpunClimate, SpunColdTraps, WeatheringCase, pass_regolith,
+    pass_resurfacing,
 };
 
 use crate::Seed;
@@ -2854,6 +2855,17 @@ impl Atmosphere {
     #[must_use]
     pub(crate) const fn ice_held(&self) -> Retention {
         self.ice_held
+    }
+
+    /// Whether its ice holds a volatile air, its nitrogen, methane or argon (P14.T53.c), whose frost
+    /// cycles over its ground: what keeps an `H2O` regolith's fresh frost there (P14.T49.m;
+    /// `area_mix::IcyResurfacing`). Its water, which an ice crust holds as the crust itself, is not
+    /// one.
+    #[must_use]
+    pub(crate) const fn ice_holds_a_volatile(&self) -> bool {
+        self.ice_held.retains(Gas::Nitrogen)
+            || self.ice_held.retains(Gas::Methane)
+            || self.ice_held.retains(Gas::Argon)
     }
 
     /// Whether `gas` passes the bulk-air test, Jeans's at the exobase ([`Retention::of`]), as

@@ -14,6 +14,7 @@ use super::*;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Gas, LineSwitchRules, SurfaceState, settled_log, with_line_switch,
 };
+use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
 use crate::planetary::testing::with_every_26_hold;
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 use crate::units::Kelvin;
@@ -208,7 +209,19 @@ fn under_every_26_hold_the_line_is_read_once_by_the_steps_and_the_record() {
 
 /// The census body `id` of the sample, its system generated afresh under every 26 hold with the
 /// line's rules `rules`, the pore gas set back, and the solve that published it ([`settled_log`]).
+/// The icy regolith (P14.T49.m) is set back to the frost: its lag moves both off the line, to a
+/// `Snowball` under either rule
+/// (`under_every_26_hold_the_icy_regolith_moves_count_vii_s_two_off_the_line`).
 fn named(id: &str, rules: LineSwitchRules) -> (ThinAirBody, settled_log::Settled) {
+    named_under(id, rules, IcyRegolithRules::Frost)
+}
+
+/// [`named`] under the icy regolith's rules `icy`.
+fn named_under(
+    id: &str,
+    rules: LineSwitchRules,
+    icy: IcyRegolithRules,
+) -> (ThinAirBody, settled_log::Settled) {
     let system = id.split('.').next().unwrap_or_default();
     let ctx = sample()
         .iter()
@@ -216,7 +229,9 @@ fn named(id: &str, rules: LineSwitchRules) -> (ThinAirBody, settled_log::Settled
         .unwrap_or_else(|| panic!("{id}'s system is in the sample"));
     let sets = [("sample", SEED, ctx.clone())];
     let (bodies, solves) = settled_log::capture(|| {
-        with_every_26_hold_but_the_pore_gas(|| with_line_switch(rules, || thin_air_census(&sets)))
+        with_every_26_hold_but_the_pore_gas(|| {
+            with_icy_regolith(icy, || with_line_switch(rules, || thin_air_census(&sets)))
+        })
     });
     let body = bodies
         .into_iter()
@@ -295,4 +310,26 @@ fn under_every_26_hold_count_vii_s_first_system_repeats() {
         })
     };
     assert_eq!(records(), records());
+}
+
+/// P14.T49.m's movers among the line's bodies, stated: under every 26 hold the icy regolith's lag
+/// moves count (vii)'s two, ice-rich belt members held at the 100 Pa line, to a `Snowball` under
+/// either rule of the line (their regolith lagged while their pass is tenuous, their nitrogen then
+/// a bulk air at the line, its coldest zone 45.9 K against 33.3–33.8 K under the frost), each
+/// state printed under both rules.
+#[test]
+fn under_every_26_hold_the_icy_regolith_moves_count_vii_s_two_off_the_line() {
+    for (id, ..) in COUNT_VII {
+        for rules in [LineSwitchRules::Held, LineSwitchRules::OneSwitch] {
+            let (frost, _) = named_under(id, rules, IcyRegolithRules::Frost);
+            let (lagged, _) = named_under(id, rules, IcyRegolithRules::Mixture);
+            eprintln!(
+                "{id} ({rules:?}):\n  the frost: {}\n  the lag:   {}",
+                frost.line(),
+                lagged.line()
+            );
+            assert_eq!(frost.state, SurfaceState::Tenuous, "{id}");
+            assert_eq!(lagged.state, SurfaceState::Snowball, "{}", lagged.line());
+        }
+    }
 }

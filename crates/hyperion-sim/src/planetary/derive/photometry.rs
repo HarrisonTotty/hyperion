@@ -51,7 +51,7 @@ use core::f64::consts::PI;
 
 use crate::math;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{Gas, RunawayDeck, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{JUPITER_HEAVY_ELEMENT_FRACTION, SATURN_HEAVY_ELEMENT_FRACTION};
@@ -300,7 +300,8 @@ impl TemplateRow {
     ///   class I's 130 K model planet, where a giant's albedo is held at class I's (Jupiter's the
     ///   warmest: 124.4 ± 0.3 K, Hanel et al. 1981, as Guillot 2005, Annu. Rev. Earth Planet. Sci.
     ///   33, 493, Table 2, lists it; 125.57 ± 0.07 K, Li et al. 2012);
-    /// - airless ice's, `H2O`'s fresh frost;
+    /// - airless ice's, the regolith an airless icy body whose lid is not known takes: `H2O`'s fresh
+    ///   frost, and under the icy regolith (P14.T49.m, from generator version 26) its rock's lag;
     /// - the airless rock analogues' (the Moon's and Mercury's), the Moon's 0.11: an airless
     ///   rocky body's whose lid the passes do not know, and from P14.T54.a the cap of an airless
     ///   silicate lid's, which the Moon's `feldspathic` and Mercury's `basalt_reduced` take;
@@ -329,7 +330,11 @@ impl TemplateRow {
                 rock,
             ),
             PhaseTemplate::AirlessIce => (
-                Some(area_mix::solid_bond(Gas::Water.substance(), &area_mix::sun_bands()).bond),
+                Some(
+                    area_mix::Regolith::of_material(SurfaceMaterial::Ice)
+                        .bond(SurfaceState::Airless, &area_mix::sun_bands())
+                        .bond,
+                ),
                 SurfaceState::Airless,
                 SurfaceMaterial::Ice,
             ),
@@ -858,6 +863,7 @@ mod tests {
 
     use super::*;
     use crate::planetary::derive::DerivedBody;
+    use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::derive::radius::CoreComposition;
     use crate::planetary::derive::solar::{found, solar_system};
 
@@ -1140,12 +1146,13 @@ mod tests {
     /// (b) A snowball states a ratio within 5% of 1 (0.99). An airless-ice body states `p_V` `q_V`
     /// ÷ A = 0.43 × 0.80 ÷ `A_ref`, its reference the fresh `H2O` frost's about a Sun (0.832,
     /// P14.T51.b's area mix), where Ganymede's measured Bond albedo, whose p the row draws, is
-    /// 0.35 (0.98 at it): a stated check, recorded in the bless note. Its owner is the weathered
-    /// icy regolith, P14.T49.m (decision-p14-t54a-ganymede §1b), whose darker frost brings the
-    /// reference toward the measured; until then the closed form stands. The rest of the rule; two
-    /// calls agree bit for bit.
+    /// 0.35 (0.98 at it): a stated check, recorded in the bless note. Its owner is the icy
+    /// regolith, P14.T49.m (decision-p14-t54a-ganymede §1b): under its lag (at 26) the reference is
+    /// the lag's about a Sun, 0.3500, the measured Ganymede's, and the ratio within 5% of 1, as
+    /// the snowball's. The rest of the rule; two calls agree bit for bit.
     #[test]
     fn the_borrowed_curves_keep_their_ratios() {
+        use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
         let ice =
             BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35));
         assert_eq!(ice.template(), PhaseTemplate::AirlessIce);
@@ -1155,6 +1162,22 @@ mod tests {
         eprintln!(
             "airless ice: the stated ratio {:.4} at its reference {reference:.5}",
             ice.bond_ratio()
+        );
+        let (lagged, lagged_reference) = with_icy_regolith(IcyRegolithRules::Mixture, || {
+            (
+                BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35)),
+                PhaseTemplate::AirlessIce.row().reference_bond().value(),
+            )
+        });
+        eprintln!(
+            "airless ice under its lag: the ratio {:.4} at its reference {lagged_reference:.5}",
+            lagged.bond_ratio()
+        );
+        assert!((lagged_reference - 0.35).abs() < 1e-3, "{lagged_reference}");
+        assert!(
+            (lagged.bond_ratio() - 1.0).abs() < 0.05,
+            "{}",
+            lagged.bond_ratio()
         );
         let snow =
             BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Snowball, 0.50));

@@ -3489,6 +3489,106 @@ mod tests {
         }
     }
 
+    /// P14.T49.m's moons under every 26 hold (decision-p14-t54a-ganymede §1.5 and §1.8), at every
+    /// radius rank, each derived at 24 and under the icy regolith: the measured Ganymede's and
+    /// Callisto's ice crusts, on the passes' stand-in (their resurfacing not known), take the lag,
+    /// Ganymede's Bond albedo inside 0.32–0.38 and Callisto's pinned as it stands against 0.09–0.13
+    /// (a deferred finding: Ganymede's twin in the generator's inputs), each `T_eq` and state
+    /// printed; Triton keeps E2's 0.72–0.92 and Titan, under its air, its 24 albedo to the bit; and
+    /// every exobase stays albedo-free (ruling §1.4), each body's the same to the bit under both, its
+    /// state and its λ(N₂) with it. The same moon derived twice under the rule is the same.
+    #[test]
+    fn under_every_26_hold_the_icy_moons_take_their_rock_s_lag() {
+        use crate::planetary::derive::atmosphere::{Gas, SurfaceState, jeans_parameter};
+        use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
+        use crate::planetary::testing::with_every_26_hold;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let saturn = table_giant("Saturn", 6, None);
+        let neptune = table_giant("Neptune", 8, None);
+        for (name, moon, giant) in [
+            ("Ganymede", GANYMEDE, &jupiter),
+            ("Callisto", CALLISTO, &jupiter),
+            ("Titan", TITAN, &saturn),
+            ("Triton", TRITON, &neptune),
+        ] {
+            let ((kg, keep), orbit) = table_moon(moon, giant);
+            let (volatiles, bulk) = if name == "Triton" {
+                let volatiles = MoonVolatiles {
+                    draws: VolatileDraws::MEDIAN,
+                    site: VolatileSite::ParentZone,
+                };
+                (volatiles, captured_bulk(kg, moon.1).0)
+            } else {
+                (MoonVolatiles::SHARED, MoonBulk::Derived)
+            };
+            for rank in every_rank(keep) {
+                let derive = || own_moon((kg, rank), &orbit, giant, &volatiles, bulk);
+                let (at_24, at_26) = (derive(), with_every_26_hold(derive));
+                let held =
+                    with_every_26_hold(|| with_icy_regolith(IcyRegolithRules::Frost, derive));
+                let (bond_24, bond_26) = (at_24.albedo().value(), at_26.albedo().value());
+                let lambda = |moon: &DerivedMoon| {
+                    jeans_parameter(
+                        Kilograms::new(kg),
+                        moon.radius(),
+                        Gas::Nitrogen,
+                        moon.atmosphere().exobase_temperature(),
+                    )
+                };
+                eprintln!(
+                    "{name} at {rank:?}: Bond {bond_24:.4} → {bond_26:.4} (26 with the frost {:.4}), \
+                     T_eq {:.1} → {:.1} K, regolith {:.4} → {:.4}, {:?} → {:?}, λ(N₂) {:.3}",
+                    held.albedo().value(),
+                    at_24.equilibrium_temperature().value(),
+                    at_26.equilibrium_temperature().value(),
+                    at_24.regolith_albedo(),
+                    at_26.regolith_albedo(),
+                    at_24.atmosphere().state(),
+                    at_26.atmosphere().published_state(),
+                    lambda(&at_26),
+                );
+                assert_eq!(
+                    format!("{at_26:?}"),
+                    format!("{:?}", with_every_26_hold(derive)),
+                    "{name}: twice under the rule"
+                );
+                assert_same_bits(
+                    at_26.atmosphere().exobase_temperature().value(),
+                    held.atmosphere().exobase_temperature().value(),
+                );
+                assert_eq!(
+                    at_26.atmosphere().published_state(),
+                    held.atmosphere().published_state(),
+                    "{name}"
+                );
+                match name {
+                    "Ganymede" => {
+                        assert!(
+                            (0.32..=0.38).contains(&bond_26),
+                            "{name} at {rank:?}: {bond_26}"
+                        );
+                    }
+                    "Callisto" => {
+                        assert!(
+                            (bond_26 - 0.35).abs() < 0.03,
+                            "{name} at {rank:?}: {bond_26}"
+                        );
+                    }
+                    "Titan" => {
+                        assert_eq!(at_26.atmosphere().published_state(), SurfaceState::Snowball);
+                        assert_same_bits(bond_26, held.albedo().value());
+                    }
+                    _ => {
+                        assert!(
+                            (0.72..=0.92).contains(&bond_26),
+                            "{name} at {rank:?}: {bond_26}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The condensate partition of the moon `derived`'s air over the passes' stand-in surface: an
     /// isothermal climate at its surface temperature, on basins not known, its condensed water all
     /// at the surface.

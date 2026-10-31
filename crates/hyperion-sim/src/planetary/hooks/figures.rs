@@ -3268,6 +3268,13 @@ impl PassFigures {
         self.surface_age
     }
 
+    /// The tidal heat flux raised in the body, its figures' inputs' (P14.T56.d): zero for a body
+    /// that goes round a star. An `H2O` regolith's lag reads it (P14.T49.m).
+    #[must_use]
+    pub(crate) const fn tidal_heat_flow(&self) -> WattsPerSquareMetre {
+        self.heat.tidal
+    }
+
     /// The tectonic regime ([`GlobalFigures::tectonic_regime`]).
     #[must_use]
     pub(crate) const fn tectonic_regime(&self) -> TectonicRegime {
