@@ -62,7 +62,9 @@ use crate::units::{Dex, HeliumExcess, KilometresPerSecond, LightYears, SolarMass
 use super::catalogue::{FeatureMarks, FeatureRecord};
 use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, Retention, retention_tabulated};
 use super::kinds::globular::history;
+use super::kinds::nursery::NurseryStage;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
+use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
 use crate::rng::{ObjectKey, tags};
 
 /// The mean member mass in the relaxation time, M☉ (P09.T7).
@@ -212,8 +214,6 @@ impl ClusterParameters {
     /// how), without the model's time scales and remnants.
     #[must_use]
     pub(crate) fn of_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
-        use super::kinds::nursery::NurseryStage;
-        use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
         let position = PointLy::from(feature.position());
         let mut stream = Stream::open(
             galaxy.seed(),
