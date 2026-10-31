@@ -2,8 +2,9 @@
 //! `tables::displaced_forms` out.
 //!
 //! [`DisplacedFormsTask`] reads its manifest, `manifests/displaced_forms.toml`, whose one dataset
-//! is an orbit run's histograms (`displaced_orbits.txt`, as `hyperion-fit orbits` writes it,
-//! verified against the dataset's `PROVENANCE.toml`) and whose `orbit_manifest` names the orbit
+//! is an orbit run's histograms (`displaced_orbits.txt`, as `hyperion-fit orbits` writes it, or
+//! that file cut at class lines into several, which [`joined_histograms`] joins in the order the
+//! dataset's `PROVENANCE.toml` lists them, each verified against it) and whose `orbit_manifest` names the orbit
 //! manifest that made them: the histograms' header must carry that manifest's SHA-256. It then
 //! fits the disc-born forms ([`fit_disc`](super::fit_disc)), the old sources' and the own-form
 //! shares ([`fit_old`](super::fit_old)), reads the kinematics and in-cube shares
@@ -26,7 +27,9 @@
 //!    made elsewhere (that tree still calls the manifest `displaced_forms.toml`, same bytes), and
 //!    check that its second line carries `displaced_orbits.toml`'s SHA-256;
 //! 2. add `crates/hyperion-fit/data/displaced/PROVENANCE.toml`, as `displaced_smoke/`'s but naming the
-//!    production manifest, with the file's SHA-256;
+//!    production manifest, with the file's SHA-256; the production run's file (1.55 MB) is over
+//!    the 500 kB a committed file may hold, so commit it cut at class lines into pieces under
+//!    that, listed in order, each with its own SHA-256;
 //! 3. in `manifests/displaced_forms.toml` set `datasets = ["displaced"]`, `histograms =
 //!    "production"` and `orbit_manifest = "displaced_orbits.toml"`, and drop the provisional
 //!    paragraph of its header comment;
@@ -73,7 +76,7 @@ use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 /// The task's revision.
 pub const REVISION: u32 = 0;
 
-/// The histograms' file within their dataset.
+/// The histograms' file within their dataset, when it is one file.
 pub const ORBITS_FILE: &str = "displaced_orbits.txt";
 
 /// The radius at which the neutron stars' half-density height is read, ly: the Sun-like point's.
@@ -115,8 +118,8 @@ pub enum ReadOrbitsError {
         /// The named manifest's.
         expected: String,
     },
-    /// The dataset has no histogram file.
-    #[error("the dataset holds no `{ORBITS_FILE}`")]
+    /// The dataset lists no file.
+    #[error("the dataset lists no histogram file")]
     Missing,
     /// A class holds more unresolved orbits than [`UNRESOLVED_LIMIT`] allows (P15.T6.g).
     #[error(
@@ -170,6 +173,25 @@ pub fn check_unresolved(
         }
     }
     Ok(())
+}
+
+/// The histograms' text: a dataset's files, as [`Dataset`](crate::data::Dataset) holds them, joined
+/// in the order its `PROVENANCE.toml` lists them (P15.T6.b).
+///
+/// One file is the run's `displaced_orbits.txt` whole. Several are that file cut at class lines,
+/// for a run too large to commit as one file: the production run's 1.55 MB against the 500 kB
+/// a committed file may hold.
+///
+/// # Errors
+///
+/// [`ReadOrbitsError::Missing`] if there is no file, [`ReadOrbitsError::Malformed`] if the joined
+/// bytes are not UTF-8.
+pub fn joined_histograms(files: &[(String, Vec<u8>)]) -> Result<String, ReadOrbitsError> {
+    if files.is_empty() {
+        return Err(ReadOrbitsError::Missing);
+    }
+    let bytes = files.iter().flat_map(|(_, b)| b.iter().copied()).collect();
+    String::from_utf8(bytes).map_err(|e| ReadOrbitsError::Malformed(e.to_string()))
 }
 
 /// Reads an orbit run's histograms as [`render`](super::render) wrote them: the manifest hash in
@@ -977,15 +999,8 @@ impl FitTask for DisplacedFormsTask {
             )));
         };
         let data = manifest.load_dataset(dataset)?;
-        let bytes = data
-            .files
-            .iter()
-            .find(|(name, _)| name == ORBITS_FILE)
-            .map(|(_, b)| b)
-            .ok_or_else(|| input(ReadOrbitsError::Missing))?;
-        let text = std::str::from_utf8(bytes)
-            .map_err(|e| input(ReadOrbitsError::Malformed(e.to_string())))?;
-        let (hash, records) = read_orbits(text).map_err(input)?;
+        let text = joined_histograms(&data.files).map_err(input)?;
+        let (hash, records) = read_orbits(&text).map_err(input)?;
         let orbit_path = manifest
             .path()
             .parent()
@@ -1037,6 +1052,58 @@ mod tests {
         assert!(matches!(
             read_orbits(&text[..text.len() / 2]),
             Err(ReadOrbitsError::Malformed(_))
+        ));
+    }
+
+    /// P15.T6.b: a run's file cut at class lines into several reads back joined in the listed
+    /// order, as the whole file does, and not in another order.
+    #[test]
+    fn histograms_cut_at_class_lines_read_back_joined_in_order() {
+        let mut records: Vec<ClassHistogram> = classes()
+            .iter()
+            .map(|c| ClassHistogram::new(c.source.is_barred()))
+            .collect();
+        for (i, record) in records.iter_mut().enumerate() {
+            record.orbits = u64::try_from(i).unwrap() + 1;
+            record.outside = record.orbits;
+        }
+        let mut text =
+            String::from("# hyperion-fit displaced_forms orbit histograms (plan 15, P15.T6.b)\n");
+        text.push_str("# manifest-sha256 abc\n");
+        let mut cuts = Vec::new();
+        for (i, (class, record)) in classes().iter().zip(&records).enumerate() {
+            if [40, 80].contains(&i) {
+                cuts.push(text.len());
+            }
+            record.write(&class.name(), &mut text);
+        }
+        let pieces = [&text[..cuts[0]], &text[cuts[0]..cuts[1]], &text[cuts[1]..]];
+        let files: Vec<(String, Vec<u8>)> = pieces
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    format!("displaced_orbits.{}.txt", i + 1),
+                    p.as_bytes().to_vec(),
+                )
+            })
+            .collect();
+        let joined = joined_histograms(&files).unwrap();
+        assert_eq!(joined, text);
+        assert_eq!(
+            read_orbits(&joined).unwrap(),
+            (String::from("abc"), records)
+        );
+        let whole = [(ORBITS_FILE.to_owned(), text.as_bytes().to_vec())];
+        assert_eq!(joined_histograms(&whole).unwrap(), text);
+        let swapped = [files[1].clone(), files[0].clone(), files[2].clone()];
+        assert!(matches!(
+            read_orbits(&joined_histograms(&swapped).unwrap()),
+            Err(ReadOrbitsError::Malformed(_))
+        ));
+        assert!(matches!(
+            joined_histograms(&[]),
+            Err(ReadOrbitsError::Missing)
         ));
     }
 

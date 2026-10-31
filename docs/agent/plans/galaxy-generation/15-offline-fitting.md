@@ -3182,3 +3182,30 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   - (lean, 2026-10-31) `helium.toml`'s comment and `tables::helium`'s notes still name
     `helium.production.toml`. Both are hashed into the committed identity, so they wait for the
     bump.
+- **T3.c as built (lane `p15-t3c`, 2026-10-30): a held checkpoint of 25, built at 23, no bump.**
+  - `mge` is revision 2: `manifests/mge.toml` holds the refit's keys (`method = "free_widths"`),
+    and `mge.refit.toml` is gone. `items()` lists `MGE_BOXY`. The first cut still runs from a
+    manifest without `method` (`tests/mge.rs`) and emits the other three alone.
+  - The table is emitted at `--since 23` (lean, 2026-10-30, by main's ruling of 2026-10-29:
+    `check` refuses a since ahead of the version). The 25 wiring re-emits it at `--since 25`. It
+    stays `@provisional` by P15.T3.b.
+  - New in the sim: `potential::mge::{BoxyTerm, boxy_bulge(mass, s, h, boxiness)}`, 16 Gaussians
+    at a row's boxiness and 32 between, a `BuildComponentError` outside 3–4. The crate-private
+    `potential::axisymmetric_bulge_scales` replaces `bulge_spheroid`, which lives on in
+    `model.rs`'s tests for T3.b's rotation-curve check.
+    `potential::sigma::effective_radius_in_scales` replaces `EFFECTIVE_RADIUS_IN_SCALES` (plan
+    08's record).
+  - σ_e is 118.65 km/s (117.51 before; final table 118.85, 118.19 before). The fixture's
+    `bh_scatter` is −0.4076 (−0.3840 before, which now gives 4.54 × 10⁶ M☉), so the black hole
+    stays at 4.30 × 10⁶ M☉. `the_fixture_black_hole_follows_m_sigma` holds the offset to 0.41,
+    not plan 02's ±0.40: a finding.
+  - `potential::monopole`'s table test allows 3 × 10⁻³ inside the first knot and 3 × 10⁻⁵ below
+    1 ly (10⁻⁴ and 10⁻⁵ before), for the refit's terms 0.0024 scale lengths wide.
+  - Left for the 25 wiring: refit `displaced_forms` and `sky_binary_light_c`, whose fingerprints
+    the swap moved (until then `just fit-check` and `the_committed_tables_are_fresh` fail on them),
+    and re-bless the goldens the lane's handoff lists.
+- **T6.b's reader (lane `p15-t6b`, 2026-10-31).** `table::joined_histograms` joins a dataset's
+  files in the order its `PROVENANCE.toml` lists them, so the production run's 1.55 MB
+  `displaced_orbits.txt` is committed cut at class lines into four files under 500 kB
+  (`data/displaced/displaced_orbits.{1..4}.txt`). One file, as the smoke and 1% datasets list,
+  reads as before; `ReadOrbitsError::Missing` now means a dataset that lists none.
