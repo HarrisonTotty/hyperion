@@ -33305,13 +33305,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `Snowball` at 122 K (agreed by main).
   - "Settled" is the amendment's (main, 2026-10-31): one more partition over the span at the
     published state moves a mover's CO₂ by under 5%, read through the test-only
-    `atmosphere::settled_log`; its failures are listed, not pinned. Each mover's line prints a ÷
-    `L_Ro` and `T_c` at its published state's column, the gates aside
+    `atmosphere::settled_log`, asserted for every mover and nudged record. Each mover's line
+    prints a ÷ `L_Ro` and `T_c` at its published state's column, the gates aside
     (`hooks::surface::step_cap_figures`).
   - The scope reads CO₂'s inventory weight (`CapBody::carbon_dioxide_inventory`) against the other
     gases' step partials, not CO₂'s airborne partial pressure, which the cap itself sets: read so,
-    ten movers cycled across the gate (main, 2026-10-31). Every mover now settles, and the settled
-    check asserts it.
+    ten movers cycled across the gate (main, 2026-10-31). Every mover now settles.
   - Every locked world is outside the cap by `rotates` at both sites; the census asserts no mover
     is locked.
   - `locked_climate_tests::deck_alone` sets the cap back to `Held`.
