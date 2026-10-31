@@ -957,7 +957,9 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
 /// The `T_s` and τ of each of P14.T53.g's bodies by name at the epoch: under the hold with the
 /// version's rules, and inside 26's helper with the melt's hold set back (today's); under the new
 /// arm alone, and inside 26's helper
-/// (`the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm`).
+/// (`the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm`). The
+/// helper's arms read P14.T54.b.l's own-residual stop, which moves 42002cb20001885b.0100's by
+/// under 10⁻⁹ of themselves.
 const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb2000188e8.0100",
@@ -981,9 +983,9 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
         "42002cb20001885b.0100",
         [
             (1_716.973_605_052_254_5, 3_229.786_323_044_295),
-            (1_428.081_981_432_391_3, 3_220.335_346_626_598),
+            (1_428.081_982_261_054_2, 3_220.335_346_754_959_6),
             (1_394.0, 2_977.650_050_331_51),
-            (1_394.0, 3_166.681_417_939_504_6),
+            (1_394.0, 3_166.681_418_053_954),
         ],
     ),
 ];

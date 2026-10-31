@@ -7163,6 +7163,49 @@ fn under_the_settled_compression_the_movers_are_stated() {
     stated_movers(&|run| with_compression(CompressionRules::Settled, run));
 }
 
+/// P14.T54.b.l's own-residual stop under 26's hold, a measurement for its record, run by name:
+/// T51.b's test against the own residual (`with_pass_stop`), as [`stated_movers`] states them,
+/// and over the first 20 sample systems' generation and epoch snapshots each arm's solves, the
+/// settled ones' mean passes and every pass. Asserted: the two arms' solves pair up in order, each
+/// settled solve one pass fewer under the own residual and each bracketed one its passes the same.
+#[test]
+#[ignore = "a measurement for P14.T54.b.l's record, run by name"]
+fn under_the_own_residual_stop_the_movers_and_passes_are_stated() {
+    use crate::planetary::derive::passes::{PassStop, with_pass_stop, with_solves};
+    let walk = || {
+        with_solves(|| {
+            for ctx in sample().iter().take(20) {
+                let system = generate(SEED, ctx);
+                let _ = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            }
+        })
+        .1
+    };
+    let (before, after) = (walk(), with_pass_stop(PassStop::OwnResidual, walk));
+    for (what, solves) in [("T51.b's test", &before), ("the own residual", &after)] {
+        let settled: Vec<u32> = solves
+            .iter()
+            .filter(|(_, settled)| *settled)
+            .map(|(count, _)| *count)
+            .collect();
+        let settled_passes: u32 = settled.iter().sum();
+        let passes: u32 = solves.iter().map(|(count, _)| count).sum();
+        let settled_solves = u32::try_from(settled.len()).expect("a walk's solves fit a u32");
+        eprintln!(
+            "{what}: {} solves, {} settled at {:.3} passes, {passes} passes in all",
+            solves.len(),
+            settled.len(),
+            f64::from(settled_passes) / f64::from(settled_solves.max(1)),
+        );
+    }
+    assert_eq!(before.len(), after.len(), "one solve for one");
+    for (k, (&(was, settled), &(is, settles))) in before.iter().zip(&after).enumerate() {
+        assert_eq!(settles, settled, "solve {k}: {was} passes against {is}");
+        assert_eq!(is + u32::from(settled), was, "solve {k}, settled {settled}");
+    }
+    stated_movers(&|run| with_pass_stop(PassStop::OwnResidual, run));
+}
+
 /// The run an arm of [`stated_movers`] takes under its hold: a system generated and snapshotted
 /// at the epoch, each's Debug text.
 type Texts<'a> = &'a dyn Fn() -> (String, String);

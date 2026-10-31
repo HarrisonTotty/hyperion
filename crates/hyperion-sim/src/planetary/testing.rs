@@ -515,6 +515,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
 /// - the tidal and encounter stripping, `STRIP_VERSION` (P14.T29), at `StripRules::Stripped`
 ///   through `with_stripping`: plan 09's sphere of influence and a feature member's encounter cut.
+/// - the passes' own residual, `PASS_STOP_VERSION` (P14.T54.b.l's cost lever), at
+///   `PassStop::OwnResidual` through `with_pass_stop`: a body's plain passes ended at the first
+///   pass that settles alone.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -526,6 +529,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         LockedStateRules, MeltOxygenRules, SeaDeckRules, with_locked_state, with_melt_oxygen,
         with_sea_deck,
     };
+    use crate::planetary::derive::passes::{PassStop, with_pass_stop};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
@@ -541,6 +545,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_compression(CompressionRules::Settled, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
+    let run = move || with_pass_stop(PassStop::OwnResidual, run);
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 

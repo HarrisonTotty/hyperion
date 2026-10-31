@@ -31468,9 +31468,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
         5.5 steps a call in `generate` over the first 20, against 11.1 to a repeat. Generation
         does not move; 64 of the 415 snapshots move, by at most 2.2 × 10⁻⁷ of a figure, at a
         bracket of jumps (`under_the_settled_compression_the_movers_are_stated`).
+      - the passes' own residual, `PASS_STOP_VERSION` (`passes::PassStop`, the tests'
+        `with_pass_stop`, and the tripwire `the_own_residual_stop_is_held_only_until_the_26_bump`):
+        the plain passes end at the first pass whose own move |F(A) − A| is within
+        4 × `ATMOSPHERE_CONVERGENCE` × (1 − A) and whose context agrees with its own air's, one
+        pass before T51.b's test. A settled solve takes 3.42 passes against 4.42 over the first 20;
+        the bracket is unchanged. 14 of the 415 systems move, by at most 3.7 × 10⁻¹⁰ of a figure,
+        and 347 snapshots, by at most 1.5 × 10⁻⁴ (a trace frost's 8.5 × 10⁻¹⁰ kg m⁻²), with no text
+        moved (`under_the_own_residual_stop_the_movers_and_passes_are_stated`). The locked climate's
+        `deck_alone` holds it back.
       - For 26's bump: delete each hold, its switch and its tripwire, keeping
-        `FallRadiusRoot::Bisections` and `CompressionRules::Fixed` as the tests' oracles; 25's
-        bump drops `with_every_25_hold` from `with_every_26_hold`.
+        `FallRadiusRoot::Bisections`, `CompressionRules::Fixed` and `PassStop::Consecutive` as the
+        tests' oracles; 25's bump drops `with_every_25_hold` from `with_every_26_hold`.
 - **Deviations in P14.T52.f, as built (`p14-wire-24`, 2026-10-23).** A base at its condensable's
   critical point (decision-n2-critical-decks). `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION`
   3, with no hold. The three goldens hold to the byte (`planetary/condense`,

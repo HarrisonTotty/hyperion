@@ -82,16 +82,23 @@
 //!   cycle's midpoint, exact where F is linear;
 //! - the published pass is the bracket's end with the smaller |g|, ties to the lower albedo, as
 //!   the halvings' is.
+//!
+//! # The own residual (P14.T54.b.l, from generator version 26)
+//!
+//! The settled test above holds at pass n where pass n − 1 was self-consistent already: its own
+//! move |Aₙ − Aₙ₋₁| within T51.b's tolerance and its context the one its air gave, Cₙ₋₁ ≡ Cₙ. Pass n
+//! is taken to publish it. From [`PASS_STOP_VERSION`] the plain passes end at the first pass that
+//! settles alone, its own move within [`OWN_RESIDUAL_SHARE`] (1 − A) and its context its own air's
+//! ([`PassStop::OwnResidual`]): the same fixed point to the same tolerance, one pass sooner. The
+//! 2-cycle stop and the bracket are unchanged.
 
 use core::cmp::Ordering;
 use core::fmt;
 
+use crate::planetary::derive::ATMOSPHERE_CONVERGENCE;
 use crate::planetary::derive::atmosphere::LARGEST_BOND_ALBEDO;
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-#[cfg(doc)]
-use crate::planetary::derive::ATMOSPHERE_CONVERGENCE;
 
 /// The most plain passes the batch iterates before it brackets (P14.T51.h): 24, above the 19 that
 /// the slowest converging body of P14.T51.b's sample took (decision-p14-t51-batch §4). A body that
@@ -265,6 +272,120 @@ pub(crate) fn with_pass_root<R>(root: PassRoot, run: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(ROOT.with(|cell| cell.replace(Some(root))));
+    run()
+}
+
+/// The generator version from which a body's plain passes end at the first pass that settles
+/// alone, [`PassStop::OwnResidual`]: 26.
+///
+/// A planetary bump after 25 (P14.T54.b.l's cost lever toward decision-24-cost D5). Below it
+/// [`PassStop::in_force`] is [`PassStop::Consecutive`], T51.b's test on two passes in a row, and
+/// every pass is version 24's bit for bit. 26's bump deletes this hold and the tests' switch
+/// (`with_pass_stop`), keeps [`PassStop::Consecutive`] as the tests' oracle, and deletes the
+/// tripwire (`the_own_residual_stop_is_held_only_until_the_26_bump`).
+pub(crate) const PASS_STOP_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// How far a pass's albedo given may lie from the albedo A it read, as a share of 1 − A, for the
+/// pass to settle alone ([`PassStop::OwnResidual`]): 4 × [`ATMOSPHERE_CONVERGENCE`].
+///
+/// That is [`ATMOSPHERE_CONVERGENCE`] in the equilibrium temperature the move would give, since
+/// d`T_eq` ÷ `T_eq` = dA ÷ 4(1 − A): T51.b's tolerance, on the pass's own move rather than on the
+/// move between two passes.
+const OWN_RESIDUAL_SHARE: f64 = 4.0 * ATMOSPHERE_CONVERGENCE;
+
+/// When a body's plain passes end ([`PASS_STOP_VERSION`]'s hold).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PassStop {
+    /// Version 25's and before: at the pass n where `settled` holds between passes n − 1 and n,
+    /// and each of the two reads the context the other's air gives (Cₙ₋₁ ≡ Cₙ ≡ K(Pₙ)).
+    ///
+    /// Pass n − 1's own residual, |Aₙ − Aₙ₋₁|, is then within the tolerance, and pass n is taken
+    /// to publish it.
+    Consecutive,
+    /// Version 26's: at the first pass that settles alone, pass n's albedo given within
+    /// [`OWN_RESIDUAL_SHARE`] of 1 − Aₙ of the one it read and its context the one its own air
+    /// gives (Cₙ ≡ K(Pₙ)): the same tolerance on the same fixed point, the pass after it not taken.
+    /// Over the first 20 sample systems' generation and epoch snapshots each of the 545 settled
+    /// solves takes one pass fewer, 4.42 to 3.42, and the passes in all fall from 3,246 to 2,701
+    /// (P14.T54.b.l's count, `under_the_own_residual_stop_the_movers_and_passes_are_stated`).
+    OwnResidual,
+}
+
+impl PassStop {
+    /// The stop this generator version gives: the own residual's from [`PASS_STOP_VERSION`],
+    /// T51.b's below it; in the tests, the stop a test's switch sets on its thread
+    /// (`with_pass_stop`).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(stop) = STOP.with(core::cell::Cell::get) {
+            return stop;
+        }
+        if GENERATOR_VERSION >= PASS_STOP_VERSION {
+            Self::OwnResidual
+        } else {
+            Self::Consecutive
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The stop a test sets on its thread, `None` for the version's.
+    static STOP: core::cell::Cell<Option<PassStop>> = const { core::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Each solve's passes on this thread and whether its plain passes settled, while a test
+    /// collects them ([`with_solves`]).
+    static SOLVES: core::cell::RefCell<Option<Vec<(u32, bool)>>> =
+        const { core::cell::RefCell::new(None) };
+}
+
+/// `run`'s result with each solve's passes on this thread and whether its plain passes settled,
+/// in order.
+///
+/// The thread's log is set back after, a panic in `run` included.
+#[cfg(test)]
+pub(crate) fn with_solves<R>(run: impl FnOnce() -> R) -> (R, Vec<(u32, bool)>) {
+    /// Sets the thread's log back as it drops.
+    struct Restore(Option<Vec<(u32, bool)>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SOLVES.with(|cell| cell.replace(self.0.take()));
+        }
+    }
+    let restore = Restore(SOLVES.with(|cell| cell.replace(Some(Vec::new()))));
+    let result = run();
+    let solves = SOLVES.with(core::cell::RefCell::take).unwrap_or_default();
+    drop(restore);
+    (result, solves)
+}
+
+/// Logs a solve's `count` passes and whether its plain passes settled, while a test collects them.
+#[cfg(test)]
+fn log_solve(count: u32, settled: bool) {
+    SOLVES.with(|cell| {
+        if let Some(solves) = cell.borrow_mut().as_mut() {
+            solves.push((count, settled));
+        }
+    });
+}
+
+/// `run`'s result with the plain passes ending as `stop` says on this thread, for the tests to
+/// reach 26's own residual ahead of the bump; the version's stop is set back after, a panic in
+/// `run` included. 26's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_pass_stop<R>(stop: PassStop, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's stop back as it drops.
+    struct Restore(Option<PassStop>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            STOP.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(STOP.with(|cell| cell.replace(Some(stop))));
     run()
 }
 
@@ -508,8 +629,9 @@ impl<P: Copy, C: Copy> End<P, C> {
 /// the one before it.
 ///
 /// The plain passes run as P14.T51.b built them, for at most [`PLAIN_PASSES`], and a body that
-/// settles publishes its last pass, [`Convergence::Converged`]. One that does not, or that repeats
-/// a 2-cycle to the bit first, is bracketed and bisected ([`HALVINGS`]), as the module's
+/// settles publishes its last pass, [`Convergence::Converged`]; from 26 they end instead at the
+/// first pass that settles alone ([`PassStop::OwnResidual`], to [`OWN_RESIDUAL_SHARE`]), and
+/// `settled` is not read. One that does not, or that repeats a 2-cycle to the bit first, is bracketed and bisected ([`HALVINGS`]), as the module's
 /// documentation says, and publishes the bracket's end with the smaller |F(A) − A|, ties to the
 /// lower albedo, [`Convergence::Bracketed`]. At most [`PLAIN_PASSES`] + [`HALVINGS`] + 1 passes are
 /// taken: the one more where a bound of [0, 1⁻] is still an end and needs its pass. Under the
@@ -542,8 +664,10 @@ pub(crate) fn solve<P: Copy>(
 /// T51.b's test.
 ///
 /// Pass n reads Aₙ, the albedo pass n − 1 gave, and Cₙ = K(Pₙ₋₁), pass 1 the stand-in `first`.
-/// It settles where `settled` holds, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ) ([`Context::agrees`]), and the
-/// plain passes stop early on (A, C) two passes back, bit for bit. A body that does not settle is
+/// It settles where `settled` holds, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ) ([`Context::agrees`]); from 26
+/// instead at the first pass that settles alone ([`PassStop::OwnResidual`], to
+/// [`OWN_RESIDUAL_SHARE`]), `settled` not read. The plain passes stop early on (A, C) two passes
+/// back, bit for bit. A body that does not settle is
 /// bracketed under its frozen context, and once more under K of the published pass where their
 /// keys differ, as the module's documentation says. At most [`MOST_PASSES`] passes are taken,
 /// [`MOST_SECANT_PASSES`] under the secant steps from 25 ([`PassRoot::Secant`]).
@@ -604,9 +728,18 @@ fn solve_with<C: Context, P: Copy>(
 ) -> Solved<P, C> {
     let evaluate =
         |read: BondAlbedo, context: C| Evaluated::of(read, context, pass(read, &context), gives);
+    let stop = PassStop::in_force();
+    // Whether a pass settles alone (26's stop): by comparison, so that a g that is not a number
+    // never does.
+    let alone = |at: &Evaluated<P, C>, at_next: &C| {
+        at.g.abs() <= OWN_RESIDUAL_SHARE * (1.0 - at.read.value()) && at.context.agrees(at_next)
+    };
     let mut last = evaluate(start, first);
     let mut last_next = next(&last.pass);
     let mut count = 1;
+    if stop == PassStop::OwnResidual && alone(&last, &last_next) {
+        return settled_at(last, last_next, count);
+    }
     let (mut lowest, mut highest) = (last, last);
     let mut previous: Option<Evaluated<P, C>> = None;
     let mut cycled = false;
@@ -614,9 +747,14 @@ fn solve_with<C: Context, P: Copy>(
         let now = evaluate(gives(&last.pass), last_next);
         let now_next = next(&now.pass);
         count += 1;
-        let done = settled(&last.pass, &now.pass)
-            && last.context.agrees(&now.context)
-            && now.context.agrees(&now_next);
+        let done = match stop {
+            PassStop::Consecutive => {
+                settled(&last.pass, &now.pass)
+                    && last.context.agrees(&now.context)
+                    && now.context.agrees(&now_next)
+            }
+            PassStop::OwnResidual => alone(&now, &now_next),
+        };
         let repeats = previous.is_some_and(|two_back| {
             two_back.read.value().total_cmp(&now.read.value()).is_eq()
                 && two_back.context.rank(&now.context).is_eq()
@@ -630,14 +768,7 @@ fn solve_with<C: Context, P: Copy>(
             highest = now;
         }
         if done {
-            return Solved {
-                albedo: now.read,
-                pass: now.pass,
-                context: now.context,
-                next: now_next,
-                count,
-                convergence: Convergence::Converged,
-            };
+            return settled_at(now, now_next, count);
         }
         if repeats && plain.cycles == TwoCycles::Stop {
             cycled = true;
@@ -683,6 +814,8 @@ fn solve_with<C: Context, P: Copy>(
         count <= cap,
         "{count} passes, above {root:?}'s cap of {cap}"
     );
+    #[cfg(test)]
+    log_solve(count, false);
     Solved {
         albedo: published.read,
         pass: published.pass,
@@ -693,6 +826,22 @@ fn solve_with<C: Context, P: Copy>(
             residual: published.g.abs(),
             fit,
         },
+    }
+}
+
+/// What a body whose plain passes settled at the pass `at` publishes: that pass, the context its
+/// own air gives, `next`, and the `count` passes taken.
+#[must_use]
+fn settled_at<P, C>(at: Evaluated<P, C>, next: C, count: u32) -> Solved<P, C> {
+    #[cfg(test)]
+    log_solve(count, true);
+    Solved {
+        albedo: at.read,
+        pass: at.pass,
+        context: at.context,
+        next,
+        count,
+        convergence: Convergence::Converged,
     }
 }
 
@@ -1963,5 +2112,138 @@ mod tests {
             "too wide"
         );
         assert!(!crossing((a, f64::NAN), (b, -1e-3)), "not a number");
+    }
+
+    /// P14.T54.b.l's own residual is held until the 25 → 26 bump: the stop in force is T51.b's.
+    #[test]
+    fn the_own_residual_stop_is_held_only_until_the_26_bump() {
+        assert!(
+            GENERATOR_VERSION < PASS_STOP_VERSION,
+            "the 25 → 26 bump puts P14.T54.b.l's own-residual stop on the record: delete \
+             `PASS_STOP_VERSION`, `PassStop::in_force`'s version test, the tests' `with_pass_stop` \
+             and its switch in `with_every_26_hold`, and this test, keeping \
+             `PassStop::Consecutive` as the tests' oracle"
+        );
+        assert_eq!(PassStop::in_force(), PassStop::Consecutive);
+        assert_eq!(
+            with_pass_stop(PassStop::OwnResidual, PassStop::in_force),
+            PassStop::OwnResidual
+        );
+        assert_eq!(PassStop::in_force(), PassStop::Consecutive);
+    }
+
+    /// The stop's switch sets the version's stop back when its closure panics, as the solve log
+    /// sets its log back. Native only: on wasm32-wasip1 a panic aborts the whole test binary
+    /// (panic = abort), so `catch_unwind` cannot catch it, and no switch is left to set back.
+    #[test]
+    #[cfg(not(target_family = "wasm"))]
+    fn a_panic_inside_the_pass_stop_switch_sets_the_stop_back() {
+        let unwound = std::panic::catch_unwind(|| {
+            with_solves(|| with_pass_stop(PassStop::OwnResidual, || panic!("inside the switch")));
+        });
+        let payload = unwound.expect_err("the closure panics");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the switch"));
+        assert_eq!(PassStop::in_force(), PassStop::Consecutive);
+        assert!(
+            SOLVES.with(|cell| cell.borrow().is_none()),
+            "the log is set back"
+        );
+    }
+
+    /// Under 26's own residual the solver is deterministic: the same settling stub twice, and the
+    /// lagged contexts' second rounds twice, give the same bits.
+    #[test]
+    fn under_the_own_residual_the_solver_is_deterministic() {
+        with_pass_stop(PassStop::OwnResidual, || {
+            let f = |a: f64| 0.6 - 0.3 * (a - 0.6);
+            let (one, two) = (solved(f), solved(f));
+            assert_same_bits(one.albedo.value(), two.albedo.value());
+            assert_same_bits(one.pass.1, two.pass.1);
+            assert_eq!(one.count, two.count);
+            assert_same_outcome(one.convergence, two.convergence);
+            for edge in [0.26, 0.250_4, 0.0] {
+                assert_same_lid_outcome(&second_round(edge), &second_round(edge));
+            }
+        });
+    }
+
+    /// Under 26's own residual a settling body takes one pass fewer than under T51.b's test on the
+    /// equilibrium temperature, (1 − A)^¼ here as `read_settled`'s, at a pass whose own move is
+    /// within the tolerance, at the same fixed point: two contracting maps, one rising and one
+    /// falling, a map settled at its start, which takes one pass, and a weakly coupled context,
+    /// whose published pass reads the context its own air gives.
+    #[test]
+    fn under_the_own_residual_a_settling_body_takes_one_pass_fewer() {
+        let own = |a: f64, given: f64| (given - a).abs() <= OWN_RESIDUAL_SHARE * (1.0 - a);
+        let t_eq_solved = |f: &dyn Fn(f64) -> f64| {
+            solve(
+                BondAlbedo::BEFORE_ATMOSPHERES,
+                stub(f),
+                gives,
+                |last: &(f64, f64), now: &(f64, f64)| {
+                    let t_eq = |a: f64| (1.0 - a).sqrt().sqrt();
+                    (t_eq(now.0) - t_eq(last.0)).abs() <= 1e-9 * t_eq(now.0)
+                },
+            )
+        };
+        for (what, fixed, f) in [
+            (
+                "rising",
+                0.2,
+                Box::new(|a: f64| 0.2 + 0.1 * (a - 0.2)) as Box<dyn Fn(f64) -> f64>,
+            ),
+            ("falling", 0.6, Box::new(|a: f64| 0.6 - 0.3 * (a - 0.6))),
+            ("at its start", 0.3, Box::new(|_: f64| 0.3)),
+        ] {
+            let before = t_eq_solved(&f);
+            let after = with_pass_stop(PassStop::OwnResidual, || t_eq_solved(&f));
+            assert_eq!(before.convergence, Convergence::Converged, "{what}");
+            assert_eq!(after.convergence, Convergence::Converged, "{what}");
+            assert_eq!(after.count + 1, before.count, "{what}");
+            assert!(own(after.albedo.value(), after.pass.1), "{what}: {after:?}");
+            let off = (after.albedo.value() - fixed).abs();
+            assert!(off < 1e-8, "{what}: {off:e} from the fixed point");
+            eprintln!(
+                "{what}: {} passes against {}, {off:e} from the fixed point",
+                after.count, before.count
+            );
+        }
+        assert_eq!(
+            with_pass_stop(PassStop::OwnResidual, || t_eq_solved(&|_| 0.3)).count,
+            1
+        );
+        let coupled = || {
+            lid_solve_from(
+                Plain::SOLVE,
+                |a, lid| 0.25 + 1e-3 * (a - 0.25) + 1e-3 * (lid.level - 0.5),
+                |pass: &LidPass| Lid {
+                    level: 0.5 + 1e-3 * (pass.1 - 0.25),
+                    branch: 0,
+                },
+            )
+        };
+        let (before, after) = (coupled(), with_pass_stop(PassStop::OwnResidual, coupled));
+        assert_eq!(after.convergence, Convergence::Converged);
+        assert_eq!(after.count + 1, before.count);
+        assert!(own(after.albedo.value(), after.pass.1), "{after:?}");
+        assert!(after.context.agrees(&after.next), "{after:?}");
+        assert!((after.albedo.value() - 0.25).abs() < 1e-8, "{after:?}");
+    }
+
+    /// Under 26's own residual a body that does not settle is bracketed as under T51.b's test: the
+    /// slope −2 stub and the jump at 0.4 publish the same pass, their plain passes the same.
+    #[test]
+    fn under_the_own_residual_an_unsettled_body_is_bracketed_as_before() {
+        for f in [
+            Box::new(|a: f64| (0.21 - 2.0 * (a - 0.21)).clamp(0.15, 0.278))
+                as Box<dyn Fn(f64) -> f64>,
+            Box::new(|a: f64| if a < 0.4 { 0.6 } else { 0.2 }),
+        ] {
+            let before = solved(&f);
+            let after = with_pass_stop(PassStop::OwnResidual, || solved(&f));
+            assert_same_bits(after.albedo.value(), before.albedo.value());
+            assert_eq!(after.count, before.count);
+            assert_same_outcome(after.convergence, before.convergence);
+        }
     }
 }
