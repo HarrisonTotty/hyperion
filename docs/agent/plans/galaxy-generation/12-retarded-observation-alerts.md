@@ -2727,11 +2727,16 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `Detection::new`, so `retardation` is the onset's light, `Retardation::of_emission` as a
     one-shot's (lean, 2026-10-31): only it moved from the struct literal's. An onset's flux and
     resolvability are its peak's, whose light arrives after `arrival()` (minutes for a flare, up to
-    25 years for an outburst): T8 takes its sighting's flux and level at the peak's arrival.
+    25 years for an outburst). T8 pushes an onset when its flux at the observer first reaches
+    `detect`, as a bearing, and again when it reaches `resolve` (T8.a, T8.c). The detection's flux
+    is its peak's and decides only whether it is listed.
   - _Glitches (lean, 2026-10-30)._ In `Band::Radio` with zero flux, never resolvable, when the
     sensor has a radio band, the pulsar is radio-alive at the glitch and its beam sweeps the
     observer. No flux limit applies, since plan 06 gives a pulsar no radio luminosity. Under Design
-    note 11 a flux of zero clears at once, so T8 must clear a glitch otherwise.
+    note 11 a flux of zero clears at once. T8 clears a detection whose row has no light at its
+    arrival plus the glitch's recovery time, τ_d = 3.1 days (`Glitch::recovery_time_seconds`), for
+    both kinds (lean, 2026-10-31; on the owner's UX list). The wire and the list show it with no
+    flux.
   - _Lines and sightlines._ Each host moves on its record's epoch position at its velocity then,
     `Drift::of_record`'s line, and takes one sightline, from that epoch position to the observer, so
     that a row read at any time gives the same bits, and so does any split of the window to each

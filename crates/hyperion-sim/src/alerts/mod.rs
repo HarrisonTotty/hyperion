@@ -656,7 +656,9 @@ impl Detection {
         self.band
     }
 
-    /// The event's flux at the observer in [`band`](Self::band), after extinction.
+    /// The event's flux at the observer in [`band`](Self::band), after extinction: for an onset,
+    /// its peak's flux at the host's distance then; for an event in progress, its light at the
+    /// window's start.
     #[must_use]
     pub const fn flux(&self) -> WattsPerSquareMetre {
         self.flux
@@ -820,8 +822,10 @@ impl<'a> AlertContext<'a> {
     /// The budget is plan 07's extinction request's, shared for the same reason: a line's cost
     /// bounded whatever its length, up to the cube's diagonal. The same bits whichever way round
     /// the ends are given, as plan 07's [`sightline`] and its modifier sources promise; the noise
-    /// cache changes what the call costs, never what it returns. For an event, `from` is the
-    /// host's apparent position and `to` the observer.
+    /// cache changes what the call costs, never what it returns. For an event, `to` is the
+    /// observer and `from` where its light leaves: a one-shot event's site, and for a local event
+    /// the host's position at the epoch, so that its line depends neither on the window nor on
+    /// when the row was read ([`local_events`]).
     #[must_use]
     pub fn sightline(
         &mut self,
