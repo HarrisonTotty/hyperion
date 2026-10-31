@@ -33,7 +33,8 @@
  *   the absorber specs a worker keeps.
  * - **The disc's table** (R08.T16.b; `thick/discBake.ts`): its lights formed as the thick bake's,
  *   J the routed bake's where the request carries it and otherwise baked here as a `thick-bake`
- *   bakes it, the correction summed in where carried, then every band's and light's table marched.
+ *   bakes it, the correction summed in where carried, then every band's and light's table marched;
+ *   or, for a `disc-band-bake`, one band's alone, which the pool gathers (R08.T14.d).
  * - **The deck** (R08.T15.a.2; `thick/deck.ts`): its lights formed as the thick bake's, the deck
  *   prepared once a request (`prepareDeck`, the upper medium's thick-bake preparation among it),
  *   each band asked baked (`bakeDeck`), and where the column needs it the correction over the deck
@@ -45,9 +46,9 @@
  *
  * A throw in a job is a bug (`decision-r08-t10a-leans.md` item 6) and is answered `failed` with its
  * message, but for a bake's, which is answered `thick-bake-failed`, `polarisation-bake-failed`,
- * `disc-bake-failed` or `deck-bake-failed`: a failed bake is never the medium's fault
- * (decision-r08-t10a-leans, UX review item 1). A k-table
- * that cannot be loaded rejects, so that the worker raises its error and the pool replaces it.
+ * `disc-bake-failed` (a disc's band's too) or `deck-bake-failed`: a failed bake is never the
+ * medium's fault (decision-r08-t10a-leans, UX review item 1). A k-table that cannot be loaded
+ * rejects, so that the worker raises its error and the pool replaces it.
  */
 
 import { absorberCurvesFromSums, absorberCurveSums, type AbsorberSpec } from "./absorbers";
@@ -71,13 +72,15 @@ import type { BakeSpectrum } from "./spectralColour";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
   bakeMultipleScattering,
+  type MsSourceTable,
   prepareBake,
+  type ThickBakeBand,
   thickBakeBands,
   type ThickBakeLight,
   thickBakeLights,
 } from "./thick/bake";
 import { bakeDeck, bakeDeckPolarisation, prepareDeck, prepareDeckPolarisation } from "./thick/deck";
-import { discReflectanceFor } from "./thick/discBake";
+import { discBandFor, discReflectanceFor } from "./thick/discBake";
 import {
   bakePolarisationCorrection,
   needsPolarisationCorrection,
@@ -174,27 +177,17 @@ export class OpticsJobs {
         break;
       }
       case "disc-bake": {
-        const bands = thickBakeBands(request.body);
-        const table = discReflectanceFor(
-          request.air,
-          request.bands.map((band) => {
-            const geometry = bands[band];
-            if (geometry === undefined) {
-              throw new RangeError(
-                `the body has ${bands.length} latitude bands, not a band ${band}`,
-              );
-            }
-            return geometry;
-          }),
-          () => {
-            // The lights only where J is solved here: a routed bake's carries its own.
-            const prepared = prepareBake(request.column, this.#bakeLights(request, options));
-            return request.bands.map((band) =>
-              bakeMultipleScattering(prepared, request.body, band),
-            );
-          },
+        const table = discReflectanceFor(request.air, discBandsOf(request), () =>
+          this.#discJ(request, options),
         );
         reply = { kind: "disc-baked", id: request.id, table };
+        break;
+      }
+      case "disc-band-bake": {
+        const values = discBandFor(request.air, discBandsOf(request), request.part, () =>
+          this.#discJ(request, options),
+        );
+        reply = { kind: "disc-band-baked", id: request.id, values };
         break;
       }
       case "polarisation-bake": {
@@ -287,6 +280,7 @@ export class OpticsJobs {
           | "thick-bake"
           | "polarisation-bake"
           | "disc-bake"
+          | "disc-band-bake"
           | "deck-bake";
       }
     >,
@@ -301,6 +295,16 @@ export class OpticsJobs {
     return held.absorbers;
   }
 
+  /** A disc's J where its request carries none: its bands' thick bake, as a `thick-bake` bakes. */
+  #discJ(
+    request: Extract<OpticsRequest, { kind: "disc-bake" | "disc-band-bake" }>,
+    options: AssembleOptions,
+  ): ReadonlyArray<MsSourceTable> {
+    // The lights only where J is solved here: a routed bake's carries its own.
+    const prepared = prepareBake(request.column, this.#bakeLights(request, options));
+    return request.bands.map((band) => bakeMultipleScattering(prepared, request.body, band));
+  }
+
   /**
    * A bake's lights (the module's remarks; `thick/bake.ts`'s `thickBakeLights`): each light asked,
    * with the bin curves of the column's absorber terms, each the body's absorber spec of its name,
@@ -310,7 +314,9 @@ export class OpticsJobs {
   #bakeLights(
     request: Extract<
       OpticsRequest,
-      { kind: "thick-bake" | "polarisation-bake" | "disc-bake" | "deck-bake" }
+      {
+        kind: "thick-bake" | "polarisation-bake" | "disc-bake" | "disc-band-bake" | "deck-bake";
+      }
     >,
     options: AssembleOptions,
   ): ReadonlyArray<ThickBakeLight> {
@@ -372,6 +378,20 @@ export class OpticsJobs {
   }
 }
 
+/** A disc's request's bands, `bake.ts`'s `thickBakeBands` of its body at the indices it asks. */
+function discBandsOf(
+  request: Extract<OpticsRequest, { kind: "disc-bake" | "disc-band-bake" }>,
+): ReadonlyArray<ThickBakeBand> {
+  const bands = thickBakeBands(request.body);
+  return request.bands.map((band) => {
+    const geometry = bands[band];
+    if (geometry === undefined) {
+      throw new RangeError(`the body has ${bands.length} latitude bands, not a band ${band}`);
+    }
+    return geometry;
+  });
+}
+
 /** The spectra of the light slots asked. */
 function spectraOf(
   spectra: ReadonlyArray<BakeSpectrum>,
@@ -402,6 +422,7 @@ function failed(request: OpticsRequest, error: unknown): OpticsAnswer {
       reply = { kind: "polarisation-bake-failed", id: request.id, bands: request.bands, message };
       break;
     case "disc-bake":
+    case "disc-band-bake":
       reply = { kind: "disc-bake-failed", id: request.id, message };
       break;
     case "deck-bake":

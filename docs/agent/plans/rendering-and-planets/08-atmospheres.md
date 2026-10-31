@@ -24169,3 +24169,20 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     Saturn the edge sits up to 15% off the top (cosmetic at 16 H).
   - _The ground's gate_ checks the total flux, of which the sky is 9–23% at s0; the sky's part alone
     is within 2.1% (the science check), but a `diffuseGround` aggregate would test the read itself.
+- **The optics pool's bands, as built** (R08.T14.d's bake time, 2026-10-31; lane
+  `r08-optics-bands-pool`; what R08.T15.b.2 and R08.T16.a.2 consume; times in the lane's outbox):
+  - `OpticsWorkerPool`'s `bakeThick`, `bakePolarisation`, `bakeDeck` and `bakeDisc` ask one job a
+    band, in the bands' order, and gather the tables in the ask's order; an ask of one band is one
+    job, as before. `AtmosphereBuilder` and its asks are unchanged: a caller still asks every band
+    in one ask.
+  - A disc of several bands asks one `disc-band-bake` a band (`part`, an index of `bands`),
+    answered `disc-band-baked` with `discTable.ts`'s `DiscBandValues` and gathered by
+    `discTableOfBands`; `thick/discBake.ts` gains `bakeDiscBand` and `discBandFor`. A disc asked
+    with no `air.bake` bakes its J first as a spread thick bake, then gives it to its bands.
+  - Each band's job prepares the column itself from the same request (the same bits, held by
+    `opticsBandsBits.test.ts`). The first band to fail fails its body's bake and cancels its other
+    bands; another body's bakes go on.
+  - Left undone: posting one preparation to the bands (lights and preparation are 3.1 s against an
+    8.7 s band on the generated Earth, 0.01 s on `saturn-oblate`), the bands nearest the camera
+    baked first, and any split below a band, which one-band worlds (Earth, Venus, Titan) need to
+    gain from more workers.

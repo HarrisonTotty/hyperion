@@ -46,8 +46,10 @@ import {
   DISC_SUN_COSINES,
   DISC_VIEW_COSINES,
   discAzimuthAt,
+  type DiscBandValues,
   discSunCosineAt,
   type DiscReflectanceTable,
+  discTableOfBands,
   discTableValuesOf,
   discTexelIndex,
   discViewCosineAt,
@@ -848,7 +850,8 @@ export function discAirMarcher(
 
 /**
  * A body's disc reflectance table (`discTable.ts`; the module's remarks): every band and light slot
- * of `input.source`, each node marched, its values rounded to the half floats the texture holds.
+ * of `input.source`, each node marched, its values rounded to the half floats the texture holds:
+ * each band's {@link bakeDiscBand}, gathered by `discTable.ts`'s `discTableOfBands`.
  *
  * @throws RangeError for a source of another band count than `input.bands`, or of another kind
  *   than `thick`.
@@ -857,91 +860,81 @@ export function bakeDiscReflectance(
   input: DiscBakeInput,
   options: DiscBakeOptions = {},
 ): DiscReflectanceTable {
-  const { source, bands } = input;
+  checkDiscSource(input);
+  return discTableOfBands(input.bands.map((_, band) => bakeDiscBand(input, band, options)));
+}
+
+/**
+ * One band's share of a body's disc reflectance table (`discTable.ts`'s `DiscBandValues`; the
+ * module's remarks), as one optics job bakes it: its light slots' layers, each node marched and
+ * rounded to the half floats the texture holds, and its own light's π L_th at each view cosine
+ * where the medium is self-luminous.
+ *
+ * @param band - The band's index in `input.bands`.
+ * @throws RangeError as {@link bakeDiscReflectance}, or for a band the input does not hold.
+ */
+export function bakeDiscBand(
+  input: DiscBakeInput,
+  band: number,
+  options: DiscBakeOptions = {},
+): DiscBandValues {
+  checkDiscSource(input);
+  const { source, bands, thermal } = input;
+  const geometry = bands[band];
+  if (geometry === undefined) {
+    throw new RangeError(`the disc's bake has ${bands.length} bands, not a band ${band}`);
+  }
+  const slots = source.slots;
+  const sunFloor = discSunFloorOf(bands, input.medium.topHeightM);
+  const lit = new Float32Array(slots * DISC_LAYER_VALUES);
+  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
+  const scratch = nodeScratch();
+  const air: [number, number, number] = [0, 0, 0];
+  const frame = bandFrameOf(input.medium, geometry);
+  const rays = sunRaysOf(frame);
+  const views = Array.from({ length: DISC_VIEW_COSINES }, (_, v) =>
+    viewRayOf(frame, source, input.curves, slots, discViewCosineAt(v), steps),
+  );
+  // π L_th at each view cosine, rgb, where the medium is self-luminous.
+  let glow: Float64Array | null = null;
+  if (thermal !== undefined) {
+    const lnBands = bands.map((each) => log(each.gravityRatio));
+    const own = new Float64Array(DISC_VIEW_COSINES * 3);
+    const rgb: ThermalRgb = [0, 0, 0];
+    views.forEach((ray, v) => {
+      thermalAirInto(ray, thermal, lnBands, geometry.gravityRatio, rgb);
+      own.set(rgb, v * 3);
+    });
+    glow = own;
+  }
+  for (let slot = 0; slot < slots; slot += 1) {
+    const sun = sunTableOf(frame, rays, input.curves[slot] ?? input.curves[0] ?? []);
+    const decoded = decodedThickLayer(source, band * slots + slot);
+    for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
+      const muSun = discSunCosineAt(s, sunFloor);
+      for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
+        const azimuth = discAzimuthAt(k);
+        views.forEach((ray, v) => {
+          nodeAirInto(frame, ray, sun, decoded, slot, muSun, azimuth, scratch, air);
+          const through = ray.through[slot] ?? [1, 1, 1];
+          lit.set(
+            [air[0], air[1], air[2], (through[0] + through[1] + through[2]) / 3],
+            discTexelIndex(slot, s, v, k),
+          );
+        });
+      }
+    }
+  }
+  return { slots, sunFloor, lit: discTableValuesOf(lit), glow };
+}
+
+/** Refuses a disc's input whose source is not a `thick` table of its bands. */
+function checkDiscSource({ source, bands }: Pick<DiscBakeInput, "source" | "bands">): void {
   if (source.kind !== "thick" || source.bands !== bands.length) {
     throw new RangeError(
       `the disc's bake reads a thick table of its ${bands.length} bands, not a ${source.kind} table of ${source.bands}`,
     );
   }
-  const slots = source.slots;
-  const sunFloor = discSunFloorOf(bands, input.medium.topHeightM);
-  const lit = bands.length * slots * DISC_LAYER_VALUES;
-  const { thermal } = input;
-  const values = new Float32Array(
-    lit + (thermal === undefined ? 0 : bands.length * DISC_LAYER_VALUES),
-  );
-  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
-  const scratch = nodeScratch();
-  const air: [number, number, number] = [0, 0, 0];
-  const lnBands = bands.map((each) => log(each.gravityRatio));
-  // π L_th of each band at each view cosine, rgb, where the medium is self-luminous.
-  const own = new Float64Array(bands.length * DISC_VIEW_COSINES * 3);
-  bands.forEach((geometry, b) => {
-    const frame = bandFrameOf(input.medium, geometry);
-    const rays = sunRaysOf(frame);
-    const views = Array.from({ length: DISC_VIEW_COSINES }, (_, v) =>
-      viewRayOf(frame, source, input.curves, slots, discViewCosineAt(v), steps),
-    );
-    if (thermal !== undefined) {
-      const glow: ThermalRgb = [0, 0, 0];
-      views.forEach((ray, v) => {
-        thermalAirInto(ray, thermal, lnBands, geometry.gravityRatio, glow);
-        own.set(glow, (b * DISC_VIEW_COSINES + v) * 3);
-      });
-    }
-    for (let slot = 0; slot < slots; slot += 1) {
-      const sun = sunTableOf(frame, rays, input.curves[slot] ?? input.curves[0] ?? []);
-      const layer = b * slots + slot;
-      const decoded = decodedThickLayer(source, layer);
-      for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
-        const muSun = discSunCosineAt(s, sunFloor);
-        for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
-          const azimuth = discAzimuthAt(k);
-          views.forEach((ray, v) => {
-            nodeAirInto(frame, ray, sun, decoded, slot, muSun, azimuth, scratch, air);
-            const through = ray.through[slot] ?? [1, 1, 1];
-            values.set(
-              [air[0], air[1], air[2], (through[0] + through[1] + through[2]) / 3],
-              discTexelIndex(layer, s, v, k),
-            );
-          });
-        }
-      }
-    }
-  });
-  // The thermal layers, a band's at every sun row and azimuth, over their largest magnitude, so that
-  // the half floats hold them in [−1, 1] whatever the glow's luminance, signed: a cool glow's green
-  // and blue below about 2,000 K are negative (Rec. 709's matching functions' negative lobes).
-  const scale = Math.max(0, ...own.map((value) => Math.abs(value)));
-  if (thermal === undefined || !(scale > 0)) {
-    return {
-      bands: bands.length,
-      slots,
-      sunFloor,
-      values: discTableValuesOf(values.subarray(0, lit)),
-    };
-  }
-  const base = bands.length * slots;
-  for (let b = 0; b < bands.length; b += 1) {
-    for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
-      for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
-        for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
-          const at = (b * DISC_VIEW_COSINES + v) * 3;
-          values.set(
-            [(own[at] ?? 0) / scale, (own[at + 1] ?? 0) / scale, (own[at + 2] ?? 0) / scale, 0],
-            discTexelIndex(base + b, s, v, k),
-          );
-        }
-      }
-    }
-  }
-  return {
-    bands: bands.length,
-    slots,
-    sunFloor,
-    values: discTableValuesOf(values),
-    thermalScale: scale,
-  };
 }
 
 /**
@@ -986,6 +979,32 @@ export function discReflectanceFor(
   bands: ReadonlyArray<ThickBakeBand>,
   solve: () => ReadonlyArray<MsSourceTable>,
 ): DiscReflectanceTable {
+  return bakeDiscReflectance(discBakeInputOf(air, bands, solve));
+}
+
+/**
+ * One band's share of a body's disc reflectance table as the optics worker answers a
+ * `disc-band-bake` (the optics pool's bands, R08.T14.d): the input {@link discReflectanceFor}
+ * forms, then {@link bakeDiscBand} of band `band` alone.
+ *
+ * @param band - The band's index in `bands`.
+ * @throws RangeError as {@link discReflectanceFor} and {@link bakeDiscBand}.
+ */
+export function discBandFor(
+  air: DiscBakeAir,
+  bands: ReadonlyArray<ThickBakeBand>,
+  band: number,
+  solve: () => ReadonlyArray<MsSourceTable>,
+): DiscBandValues {
+  return bakeDiscBand(discBakeInputOf(air, bands, solve), band);
+}
+
+/** A disc's bake's input from what a job carries (`discReflectanceFor`'s remarks). */
+function discBakeInputOf(
+  air: DiscBakeAir,
+  bands: ReadonlyArray<ThickBakeBand>,
+  solve: () => ReadonlyArray<MsSourceTable>,
+): DiscBakeInput {
   const baked = air.bake ?? solve();
   const source = packThickTable(
     baked,
@@ -997,11 +1016,11 @@ export function discReflectanceFor(
     air.temperature === undefined
       ? undefined
       : thermalSourceOf(air.temperature, air.kernelMedium.topHeightM, scattering);
-  return bakeDiscReflectance({
+  return {
     medium: air.kernelMedium,
     curves: air.curves,
     bands,
     source,
     ...(thermal === undefined ? {} : { thermal }),
-  });
+  };
 }

@@ -65,7 +65,7 @@
  * **The thick bake** (R08.T14.c; Design note 9's routing). A drawn body whose regime the router
  * routes to its bake ({@link AtmosphereCacheOptions.routes}, `thick/routing.ts`'s
  * `thickBakeRouted`, which routes a `thickScattering` world within the range R08.T14.d.4's gates
- * pass, and no other) has its bake asked once its tables are made, every band in one request
+ * pass, and no other) has its bake asked once its tables are made, every band in one ask
  * ({@link AtmosphereBuilder.bakeThick}), and the bake given to its tables when it lands
  * (`AtmosphereTables.setThickTables`). Its labels follow the bake, at most one of
  * `ATMOSPHERE: COMPUTING` and `ATMOSPHERE: APPROXIMATE` (`labels.ts`'s precedence; the guide's
@@ -90,7 +90,7 @@
  * it ({@link AtmosphereCacheOptions.corrects}: `thick/routing.ts`'s `correctionRouted`, every world
  * with air, thin or thick, since R08.T14.d.4's route; a thick world the route does not route asks
  * for none) has its correction asked once its tables are made, beside any thick bake, every band
- * in one request ({@link AtmosphereBuilder.bakePolarisation}), and given to its tables when it
+ * in one ask ({@link AtmosphereBuilder.bakePolarisation}), and given to its tables when it
  * lands (`AtmosphereTables.setPolarisationCorrection`, which reads it beside Ψ_ms, or summed into
  * the thick bake where they hold one). Its labels follow it as a thick bake's do (the plan's "as
  * for any gated bake"), but `atmosphereComputing` takes `atmosphereApproximate`'s place for it only
@@ -130,7 +130,7 @@
  * `cloudDeck` and which the router routes (`routes`, which routes no `cloudDeck` until R08.T15.b.2)
  * is drawn over its deck: its tables are made of its upper medium on the deck's datum
  * (`thick/deckRead.ts`'s `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick
- * bake's place, every band in one request ({@link AtmosphereBuilder.bakeDeck}), on the body's own
+ * bake's place, every band in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own
  * figure, its split the regime's `deckAltitudeM` over a floor of the ground, or of an envelope where
  * the body's cover is one's, and given to its tables when it lands (`AtmosphereTables`'
  * `setDeckTables`, with the correction over the deck the same job bakes). Its labels and its

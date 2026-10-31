@@ -590,9 +590,9 @@ describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
     };
   }
 
-  it("asks every band in one thick-bake request and lands its tables as baked", async () => {
+  it("asks a sphere's one band in one thick-bake request and lands its table as baked", async () => {
     const { pool, workers } = scriptedPool(2);
-    const ask = bakeAsk(true);
+    const ask = bakeAsk();
     const bake = pool.bakeThick(ask);
     const worker = workerAt(workers, 0);
     const posted = lastPosted(worker);
@@ -604,6 +604,24 @@ describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
       posted,
       outcome.kind === "baked" && outcome.tables === tables,
     ]).toEqual([[1, 0], { kind: "thick-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it("asks Saturn's four bands one thick-bake request a band, the first two at once", () => {
+    const { pool, workers } = scriptedPool(2);
+    const ask = bakeAsk(true);
+    pool.bakeThick(ask);
+    expect([
+      workers.map((each) => each.received.map((request) => request.kind)),
+      workers.map((each) => each.received.map((request) => ({ ...request, id: 0 }))),
+      pool.queuedCount,
+    ]).toEqual([
+      [["thick-bake"], ["thick-bake"]],
+      [
+        [{ ...ask, kind: "thick-bake", id: 0, bands: [0] }],
+        [{ ...ask, kind: "thick-bake", id: 0, bands: [1] }],
+      ],
+      2,
+    ]);
   });
 
   it.each([

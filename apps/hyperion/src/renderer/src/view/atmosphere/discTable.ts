@@ -142,6 +142,87 @@ export function discTableValuesOf(values: Float32Array): Float32Array {
   return Float32Array.from(values, (value) => fromHalfBits(toHalfBits(value)));
 }
 
+/**
+ * One band's share of a disc reflectance table, as one optics job bakes it (plan R08, R08.T16.b;
+ * the optics pool's bands, R08.T14.d): its light slots' layers, and its own light before the
+ * thermal scale that only every band's together fix.
+ */
+export interface DiscBandValues {
+  /** The light slots a band. */
+  readonly slots: number;
+  /** The table's sun floor μ_f, from every band of the body: the lowest row. */
+  readonly sunFloor: number;
+  /** The band's layers, one a light slot in order, as {@link DiscReflectanceTable.values} holds. */
+  readonly lit: Float32Array;
+  /**
+   * π L_th of the band's own light at each view cosine (R08.T18.b), cd m⁻² times π, at
+   * `v × 3 + c`; `null` for a medium that is not self-luminous.
+   */
+  readonly glow: Float64Array | null;
+}
+
+/**
+ * A disc reflectance table of its bands' shares in the body's order: their layers, then, where the
+ * medium is self-luminous and glows, a thermal layer a band of its glow over the largest magnitude
+ * of every band's, rounded to the half floats the texture holds. So a table gathered from bands
+ * baked apart, in any order and on any worker, is the bits of one baked whole.
+ *
+ * @throws RangeError for no band, or a band of other light slots, sun floor, layers or glow than
+ *   the first's.
+ */
+export function discTableOfBands(parts: ReadonlyArray<DiscBandValues>): DiscReflectanceTable {
+  const first = parts[0];
+  if (first === undefined) {
+    throw new RangeError("a disc's table has at least one band");
+  }
+  const { slots, sunFloor } = first;
+  const layers = slots * DISC_LAYER_VALUES;
+  for (const [b, part] of parts.entries()) {
+    if (
+      part.slots !== slots ||
+      !Object.is(part.sunFloor, sunFloor) ||
+      part.lit.length !== layers ||
+      (part.glow === null) !== (first.glow === null) ||
+      (part.glow !== null && part.glow.length !== DISC_VIEW_COSINES * 3)
+    ) {
+      throw new RangeError(
+        `a disc's band ${b} holds other light slots, sun floor, layers or glow than band 0's`,
+      );
+    }
+  }
+  const bands = parts.length;
+  const lit = bands * layers;
+  const glows = parts.flatMap((part) => (part.glow === null ? [] : Array.from(part.glow)));
+  const scale = Math.max(0, ...glows.map((value) => Math.abs(value)));
+  const thermal = first.glow !== null && scale > 0;
+  const values = new Float32Array(lit + (thermal ? bands * DISC_LAYER_VALUES : 0));
+  for (const [b, part] of parts.entries()) {
+    values.set(part.lit, b * layers);
+  }
+  if (!thermal) {
+    return { bands, slots, sunFloor, values };
+  }
+  // A band's thermal layer is the same at every sun row and azimuth, signed: a cool glow's green
+  // and blue below about 2,000 K are negative (Rec. 709's matching functions' negative lobes).
+  const glowLayers = new Float32Array(bands * DISC_LAYER_VALUES);
+  for (const [b, part] of parts.entries()) {
+    const glow = part.glow ?? new Float64Array();
+    for (let s = 0; s < DISC_SUN_COSINES; s += 1) {
+      for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
+        for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
+          const at = v * 3;
+          glowLayers.set(
+            [(glow[at] ?? 0) / scale, (glow[at + 1] ?? 0) / scale, (glow[at + 2] ?? 0) / scale, 0],
+            discTexelIndex(b, s, v, k),
+          );
+        }
+      }
+    }
+  }
+  values.set(discTableValuesOf(glowLayers), lit);
+  return { bands, slots, sunFloor, values, thermalScale: scale };
+}
+
 /** The table's texels as the texture's upload takes them: each value's half bits, in order. */
 export function discTableHalves(table: DiscReflectanceTable): Uint16Array {
   return Uint16Array.from(table.values, (value) => toHalfBits(value));

@@ -14,7 +14,7 @@
 import type { AbsorberCurve, AbsorberCurveSums, AbsorberSpec, CurveShare } from "./absorbers";
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
-import type { DiscReflectanceTable } from "./discTable";
+import type { DiscBandValues, DiscReflectanceTable } from "./discTable";
 import type { AtmosphereMedium } from "./medium";
 import type { BakeSpectrum } from "./spectralColour";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
@@ -43,6 +43,9 @@ import type { SpectralColumn } from "./thick/spectralColumn";
  *   `bands` and light in `slots`, `thick-bake`'s fields with the medium as the tables hold it and
  *   the body's bakes that have landed (`air`): J from its routed bake where given, else baked as
  *   `thick-bake` bakes it.
+ * - `disc-band-bake` (the pool's bands, R08.T14.d): one band of a `disc-bake`'s table, `part`, an
+ *   index of `bands`, with every field of the whole table's request, the sun's floor and the
+ *   thermal source being every band's.
  * - `deck-bake` (R08.T15.a.2): a cloud-deck split's tables (`thick/deck.ts`) of `column` on `body`
  *   at `split`, laid out and lit as `thick-bake`'s: the deck prepared once, each band's
  *   `bakeDeck`, and, where the column needs it (`needsPolarisationCorrection`), each band's
@@ -101,6 +104,20 @@ export type OpticsRequest =
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
       readonly air: DiscBakeAir;
+    }
+  | {
+      readonly kind: "disc-band-bake";
+      readonly id: number;
+      readonly input: BodyAtmosphereInput;
+      readonly slots: ReadonlyArray<number>;
+      readonly bands: ReadonlyArray<number>;
+      readonly column: SpectralColumn;
+      readonly body: ThickBakeBody;
+      /** A kept body's absorber specs and light spectra, in place of the input's. */
+      readonly kept?: KeptBakeLights;
+      readonly air: DiscBakeAir;
+      /** The band baked: its index in `bands`. */
+      readonly part: number;
     }
   | {
       readonly kind: "deck-bake";
@@ -166,8 +183,9 @@ export function keptBakeLightsOf(
  * - `polarisation-bake-failed`: a `polarisation-bake` that threw or was refused, as
  *   `thick-bake-failed` is, never `failed`.
  * - `disc-baked`: a `disc-bake`'s table.
- * - `disc-bake-failed`: a `disc-bake` that threw or was refused, as `thick-bake-failed` is, never
- *   `failed`.
+ * - `disc-band-baked`: a `disc-band-bake`'s band (`discTable.ts`'s `DiscBandValues`).
+ * - `disc-bake-failed`: a `disc-bake` or `disc-band-bake` that threw or was refused, as
+ *   `thick-bake-failed` is, never `failed`.
  * - `deck-baked`: a `deck-bake`'s tables, one a band asked in its order, their slots the lights
  *   asked in theirs, and the correction over the deck the same way, or `null` where the column
  *   needs none.
@@ -210,6 +228,7 @@ export type OpticsReply =
       readonly message: string;
     }
   | { readonly kind: "disc-baked"; readonly id: number; readonly table: DiscReflectanceTable }
+  | { readonly kind: "disc-band-baked"; readonly id: number; readonly values: DiscBandValues }
   | { readonly kind: "disc-bake-failed"; readonly id: number; readonly message: string }
   | {
       readonly kind: "deck-baked";

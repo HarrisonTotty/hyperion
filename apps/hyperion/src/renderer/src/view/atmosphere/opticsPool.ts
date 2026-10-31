@@ -26,24 +26,34 @@
  * With every worker given up, every build fails. A job that throws is answered `failed` and fails
  * its build: a bug (`decision-r08-t10a-leans.md` item 6).
  *
- * **A thick bake** ({@link OpticsWorkerPool.bakeThick}; R08.T14.c) is one `thick-bake` job, every
- * band asked in its one request, queued as a build's jobs are. Its failures are the bake's own,
- * never a build's: a `thick-bake-failed` answer, a job that throws, and every worker given up each
- * settle it `failed` with their message, which the atmosphere cache reads as
- * `ATMOSPHERE: APPROXIMATE`, never as `ATMOSPHERE NOT AVAILABLE` (decision-r08-t10a-leans, UX
- * review item 1). Its request transfers nothing, so a worker that fails with it is replaced and
- * the bake asked again of the next free worker, as an assembly is.
+ * **A thick bake** ({@link OpticsWorkerPool.bakeThick}; R08.T14.c) is one `thick-bake` job a band
+ * asked, queued as a build's jobs are (see "Bands"). Its failures are the bake's own, never a
+ * build's: a `thick-bake-failed` answer, a job that throws, and every worker given up each settle
+ * it `failed` with their message, which the atmosphere cache reads as `ATMOSPHERE: APPROXIMATE`,
+ * never as `ATMOSPHERE NOT AVAILABLE` (decision-r08-t10a-leans, UX review item 1). Its requests
+ * transfer nothing, so a worker that fails with one is replaced and the job asked again of the
+ * next free worker, as an assembly is.
  *
  * **A polarisation correction** ({@link OpticsWorkerPool.bakePolarisation}; R08.T14.f) is one
- * `polarisation-bake` job, asked as a thick bake is, with the same request's fields, and failing as
- * one does: its own failure, never a build's.
- *
- * **A disc's table** ({@link OpticsWorkerPool.bakeDisc}; R08.T16.b) is one `disc-bake` job, asked as a
- * thick bake is, with its request's fields and the medium and landed bakes it marches with, and
+ * `polarisation-bake` job a band, asked as a thick bake is, with the same request's fields, and
  * failing as one does: its own failure, never a build's.
- * **A deck** ({@link OpticsWorkerPool.bakeDeck}; R08.T15.a.2) is one `deck-bake` job, a thick bake's
- * fields and the split, answered with the deck's tables and the correction over it together, and
- * failing as a thick bake does.
+ *
+ * **A disc's table** ({@link OpticsWorkerPool.bakeDisc}; R08.T16.b) is one `disc-band-bake` job a
+ * band, each with the whole table's fields and the medium and landed bakes it marches with, their
+ * bands gathered by `discTable.ts`'s `discTableOfBands`; a body whose routed bake has not landed
+ * has its J baked first as a thick bake is, then given to its bands. It fails as a thick bake does:
+ * its own failure, never a build's. A body of one band asks one `disc-bake`.
+ * **A deck** ({@link OpticsWorkerPool.bakeDeck}; R08.T15.a.2) is one `deck-bake` job a band, a
+ * thick bake's fields and the split, answered with the band's deck tables and the correction over
+ * it together, and failing as a thick bake does.
+ *
+ * **Bands** (R08.T14.d's bake time): a bake of several bands is asked one job a band, in the bands'
+ * order, so that the workers bake them side by side, each band's job preparing the column alone
+ * from the same request (on the bodies of several bands measured, a giant's air and its deck, the
+ * preparation takes 0.01 s against a band's 1–4 s; pod, 2026-10-31). A band's tables are a pure
+ * function of its request, so the bake gathers the same bits in the bands' order whichever worker
+ * bakes each and in whatever order they land. The first band to fail fails the bake, its other
+ * bands' jobs cancelled; another body's bakes go on.
  *
  * The workers start at the first build or bake, so a session that draws no disc loads none of the
  * optics. This module takes only types of `assemble.ts` and of the thick bake's modules, whose
@@ -59,7 +69,7 @@ import {
   type OpticsRequest,
   transferablesOf,
 } from "./opticsMessages";
-import type { DiscReflectanceTable } from "./discTable";
+import { type DiscBandValues, discTableOfBands, type DiscReflectanceTable } from "./discTable";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
 import type { DeckSplit, DeckTables } from "./thick/deck";
@@ -134,7 +144,8 @@ export interface OpticsBuild {
 
 /**
  * What a thick bake asks (plan R08, R08.T14.c): a `thick-bake` request's fields
- * (`opticsMessages.ts`'s {@link OpticsRequest}), every band in one request.
+ * (`opticsMessages.ts`'s {@link OpticsRequest}), every band in one ask, which the pool asks one
+ * job a band.
  */
 export interface ThickBakeAsk {
   /**
@@ -243,18 +254,18 @@ export interface DiscBake {
 export interface AtmosphereBuilder {
   /** Builds a body's assembly and its light slots' curves. */
   build(input: BodyAtmosphereInput): OpticsBuild;
-  /** Bakes a thick body's multiple-scattering tables (R08.T14.c), every band in one request. */
+  /** Bakes a thick body's multiple-scattering tables (R08.T14.c), every band in one ask. */
   bakeThick(ask: ThickBakeAsk): ThickBake;
   /**
-   * Bakes a body's polarisation correction (R08.T14.f), every band in one request: a thick bake's
+   * Bakes a body's polarisation correction (R08.T14.f), every band in one ask: a thick bake's
    * request's fields, for a thin or a thick body.
    */
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake;
-  /** Bakes a body's disc reflectance table (R08.T16.b), every band and light in one request. */
+  /** Bakes a body's disc reflectance table (R08.T16.b), every band and light in one ask. */
   bakeDisc(ask: DiscBakeAsk): DiscBake;
   /**
    * Bakes a cloud-deck split's tables and the correction over it (R08.T15.a.2), every band in one
-   * request.
+   * ask.
    */
   bakeDeck(ask: DeckBakeAsk): DeckBake;
   /** Stops every worker; builds and bakes under way settle `cancelled`. */
@@ -293,6 +304,21 @@ interface JobHandle {
   readonly outcome: Promise<JobOutcome>;
   cancel(): void;
 }
+
+/** How a bake, or one band of it, ended other than baked. */
+type Unbaked = { readonly kind: "failed"; readonly message: string } | typeof CANCELLED;
+
+/** How a bake, or one band of it, ended. */
+type Settled = { readonly kind: "baked" } | Unbaked;
+
+/** A bake, or one band of it, under way: what each of the pool's bakes answers. */
+interface Settling<Outcome> {
+  readonly outcome: Promise<Outcome>;
+  cancel(): void;
+}
+
+/** How a disc's band's job ended (the module's remarks, "Bands"). */
+type DiscBandOutcome = { readonly kind: "baked"; readonly values: DiscBandValues } | Unbaked;
 
 /** One place in the pool and the worker running in it. */
 interface Slot {
@@ -519,111 +545,151 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
 
   /**
    * Bakes a thick body's multiple-scattering tables (see the module's remarks): one `thick-bake`
-   * job asking every band and slot of `ask`.
+   * job a band of `ask`, each asking every slot.
    *
    * @throws Error once the pool is terminated.
    */
   bakeThick(ask: ThickBakeAsk): ThickBake {
-    if (this.#terminated) {
-      throw new Error("the optics-worker pool was terminated");
-    }
-    this.#start();
-    const job = this.#submit((id) => ({ kind: "thick-bake", id, ...ask }), []);
-    let cancelled = false;
-    const settled = job.outcome.then(
-      (outcome): ThickBakeOutcome => (cancelled ? CANCELLED : bakeOutcomeOf(outcome, ask)),
-      (error: unknown): ThickBakeOutcome => ({
-        kind: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      }),
+    this.#startBake();
+    return this.#byBand(
+      ask,
+      (band) => this.#bakeJob(band, (id) => ({ kind: "thick-bake", id, ...band }), bakeOutcomeOf),
+      (parts) => ({ kind: "baked", tables: parts.flatMap((part) => part.tables) }),
     );
-    return {
-      outcome: settled,
-      cancel: () => {
-        cancelled = true;
-        job.cancel();
-      },
-    };
   }
 
   /**
    * Bakes a body's polarisation correction (see the module's remarks): one `polarisation-bake` job
-   * asking every band and slot of `ask`.
+   * a band of `ask`, each asking every slot.
    *
    * @throws Error once the pool is terminated.
    */
   bakePolarisation(ask: ThickBakeAsk): PolarisationBake {
-    if (this.#terminated) {
-      throw new Error("the optics-worker pool was terminated");
-    }
-    this.#start();
-    const job = this.#submit((id) => ({ kind: "polarisation-bake", id, ...ask }), []);
-    let cancelled = false;
-    const settled = job.outcome.then(
-      (outcome): PolarisationBakeOutcome =>
-        cancelled ? CANCELLED : polarisationOutcomeOf(outcome, ask),
-      (error: unknown): PolarisationBakeOutcome => ({
-        kind: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      }),
+    this.#startBake();
+    return this.#byBand(
+      ask,
+      (band) =>
+        this.#bakeJob(
+          band,
+          (id) => ({ kind: "polarisation-bake", id, ...band }),
+          polarisationOutcomeOf,
+        ),
+      (parts) => ({ kind: "baked", tables: parts.flatMap((part) => part.tables) }),
     );
-    return {
-      outcome: settled,
-      cancel: () => {
-        cancelled = true;
-        job.cancel();
-      },
-    };
   }
 
   /**
-   * Bakes a body's disc reflectance table (see the module's remarks): one `disc-bake` job asking
-   * every band and slot of `ask`.
+   * Bakes a body's disc reflectance table (see the module's remarks): one `disc-band-bake` job a
+   * band of `ask`, its J baked first where `ask.air` holds none, or one `disc-bake` for a body of
+   * one band.
    *
    * @throws Error once the pool is terminated.
    */
   bakeDisc(ask: DiscBakeAsk): DiscBake {
-    if (this.#terminated) {
-      throw new Error("the optics-worker pool was terminated");
+    this.#startBake();
+    if (ask.bands.length <= 1) {
+      return this.#bakeJob(ask, (id) => ({ kind: "disc-bake", id, ...ask }), discOutcomeOf);
     }
-    this.#start();
-    const job = this.#submit((id) => ({ kind: "disc-bake", id, ...ask }), []);
+    if (ask.air.bake !== undefined) {
+      return this.#discBands(ask, ask.air);
+    }
+    // A body whose routed bake has not landed: its J spread over the workers, then its bands.
+    const { air, ...thick } = ask;
+    const solve = this.bakeThick(thick);
+    let bands: DiscBake | null = null;
     let cancelled = false;
-    const settled = job.outcome.then(
-      (outcome): DiscBakeOutcome => (cancelled ? CANCELLED : discOutcomeOf(outcome)),
-      (error: unknown): DiscBakeOutcome => ({
-        kind: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    const settled = solve.outcome
+      .then(async (solved): Promise<DiscBakeOutcome> => {
+        if (solved.kind !== "baked") {
+          return solved;
+        }
+        if (cancelled) {
+          return CANCELLED;
+        }
+        bands = this.#discBands(ask, { ...air, bake: solved.tables });
+        return bands.outcome;
+      })
+      .catch((error: unknown): DiscBakeOutcome => failedWith(error));
     return {
-      outcome: settled,
+      outcome: settled.then((outcome): DiscBakeOutcome => (cancelled ? CANCELLED : outcome)),
       cancel: () => {
         cancelled = true;
-        job.cancel();
+        solve.cancel();
+        bands?.cancel();
       },
     };
   }
 
   /**
-   * Bakes a cloud-deck split's tables (see the module's remarks): one `deck-bake` job asking every
-   * band and slot of `ask`.
+   * Bakes a cloud-deck split's tables (see the module's remarks): one `deck-bake` job a band of
+   * `ask`, each asking every slot.
    *
    * @throws Error once the pool is terminated.
    */
   bakeDeck(ask: DeckBakeAsk): DeckBake {
+    this.#startBake();
+    return this.#byBand(
+      ask,
+      (band) => this.#bakeJob(band, (id) => ({ kind: "deck-bake", id, ...band }), deckOutcomeOf),
+      deckOfBands,
+    );
+  }
+
+  /** Refuses a bake once the pool is terminated, and starts the workers at the first. */
+  #startBake(): void {
     if (this.#terminated) {
       throw new Error("the optics-worker pool was terminated");
     }
     this.#start();
-    const job = this.#submit((id) => ({ kind: "deck-bake", id, ...ask }), []);
+  }
+
+  /**
+   * A bake of `ask`'s bands, one ask a band (the module's remarks, "Bands"), each `one` of `ask`
+   * with that band alone, gathered in the bands' order; an ask of one band, or none, is `one` of
+   * itself.
+   */
+  #byBand<Ask extends ThickBakeAsk, Baked extends { readonly kind: "baked" }>(
+    ask: Ask,
+    one: (band: Ask) => Settling<Baked | Unbaked>,
+    gather: (parts: ReadonlyArray<Baked>) => Baked,
+  ): Settling<Baked | Unbaked> {
+    if (ask.bands.length <= 1) {
+      return one(ask);
+    }
+    return gathered(
+      ask.bands.map((band) => one({ ...ask, bands: [band] })),
+      gather,
+    );
+  }
+
+  /** A disc's table from one `disc-band-bake` a band, each with `air`, gathered in their order. */
+  #discBands(ask: DiscBakeAsk, air: DiscBakeAir): DiscBake {
+    return gathered(
+      ask.bands.map((_, part) =>
+        this.#bakeJob(
+          ask,
+          (id) => ({ kind: "disc-band-bake", id, ...ask, air, part }),
+          discBandOutcomeOf,
+        ),
+      ),
+      (parts): Extract<DiscBakeOutcome, { readonly kind: "baked" }> => ({
+        kind: "baked",
+        table: discTableOfBands(parts.map((part) => part.values)),
+      }),
+    );
+  }
+
+  /** One bake's job, `make`'s request, its outcome read by `outcomeOf` against `ask`. */
+  #bakeJob<Ask, Outcome extends Settled>(
+    ask: Ask,
+    make: (id: number) => OpticsRequest,
+    outcomeOf: (outcome: JobOutcome, ask: Ask) => Outcome,
+  ): Settling<Outcome | Unbaked> {
+    const job = this.#submit(make, []);
     let cancelled = false;
     const settled = job.outcome.then(
-      (outcome): DeckBakeOutcome => (cancelled ? CANCELLED : deckOutcomeOf(outcome, ask)),
-      (error: unknown): DeckBakeOutcome => ({
-        kind: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      }),
+      (outcome): Outcome | Unbaked => (cancelled ? CANCELLED : outcomeOf(outcome, ask)),
+      (error: unknown): Unbaked => failedWith(error),
     );
     return {
       outcome: settled,
@@ -976,6 +1042,113 @@ function deckOutcomeOf(outcome: JobOutcome, ask: DeckBakeAsk): DeckBakeOutcome {
       break;
   }
   return baked;
+}
+
+/** A `disc-band-bake` job's outcome as its band's, as {@link discOutcomeOf} reads a table's. */
+function discBandOutcomeOf(outcome: JobOutcome): DiscBandOutcome {
+  let baked: DiscBandOutcome;
+  switch (outcome.kind) {
+    case "answered": {
+      const { reply } = outcome;
+      if (reply.kind === "disc-band-baked") {
+        baked = { kind: "baked", values: reply.values };
+      } else if (reply.kind === "disc-bake-failed") {
+        baked = { kind: "failed", message: reply.message };
+      } else {
+        baked = { kind: "failed", message: `a disc's band was answered ${reply.kind}` };
+      }
+      break;
+    }
+    case "failed":
+      baked = outcome;
+      break;
+    case "lost":
+      baked = { kind: "failed", message: "an optics worker failed with the disc's band's request" };
+      break;
+    case "cancelled":
+      baked = CANCELLED;
+      break;
+  }
+  return baked;
+}
+
+/** A deck's bands' outcomes as its bake's, each band's tables and correction in their order. */
+function deckOfBands(
+  parts: ReadonlyArray<Extract<DeckBakeOutcome, { readonly kind: "baked" }>>,
+): Extract<DeckBakeOutcome, { readonly kind: "baked" }> {
+  const corrections = parts.map((part) => part.correction);
+  const corrected = corrections.filter((correction) => correction !== null);
+  if (corrected.length !== 0 && corrected.length !== corrections.length) {
+    throw new RangeError("a deck's bands were answered with and without a correction");
+  }
+  return {
+    kind: "baked",
+    tables: parts.flatMap((part) => part.tables),
+    correction: corrected.length === 0 ? null : corrected.flat(),
+  };
+}
+
+/**
+ * A bake of its bands' parts (the module's remarks, "Bands"): baked once every part has, `gather`
+ * of their outcomes in the parts' order; failed with the first part to fail, the others cancelled;
+ * cancelled with them, or by its own `cancel`.
+ */
+function gathered<
+  Part extends { readonly kind: "baked" },
+  Whole extends { readonly kind: "baked" },
+>(
+  parts: ReadonlyArray<Settling<Part | Unbaked>>,
+  gather: (baked: ReadonlyArray<Part>) => Whole,
+): Settling<Whole | Unbaked> {
+  let resolve: (outcome: Whole | Unbaked) => void = ignore;
+  const outcome = new Promise<Whole | Unbaked>((settleWith) => {
+    resolve = settleWith;
+  });
+  let open = true;
+  const finish = (ended: Whole | Unbaked): void => {
+    if (open) {
+      open = false;
+      resolve(ended);
+    }
+  };
+  const cancelParts = (): void => {
+    for (const part of parts) {
+      part.cancel();
+    }
+  };
+  const baked: Part[] = [];
+  let landed = 0;
+  const take = async (index: number, part: Settling<Part | Unbaked>): Promise<void> => {
+    const ended = await part.outcome;
+    if (ended.kind !== "baked") {
+      cancelParts();
+      finish(ended);
+      return;
+    }
+    baked[index] = ended;
+    landed += 1;
+    if (landed === parts.length && open) {
+      finish(gather(baked));
+    }
+  };
+  for (const [index, part] of parts.entries()) {
+    void take(index, part).catch((error: unknown) => {
+      cancelParts();
+      finish(failedWith(error));
+    });
+  }
+  return {
+    outcome,
+    cancel: () => {
+      finish(CANCELLED);
+      cancelParts();
+    },
+  };
+}
+
+/** A bake's failure from what was thrown: a bug in what it was asked, with its message. */
+function failedWith(error: unknown): { readonly kind: "failed"; readonly message: string } {
+  return { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 }
 
 /** A job's outcome other than an answer, as its build's. */
