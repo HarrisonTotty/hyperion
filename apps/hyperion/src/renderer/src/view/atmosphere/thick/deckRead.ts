@@ -60,6 +60,42 @@
  * 46 + ⌊i ÷ 208⌋): 208 × 48 texels, 159,744 B a band and light. The values are `f32`, as the
  * texture's words hold them: the deck's table is read once a ray, not a step, so the half floats of
  * the thick table, and their least normal, do not arise.
+ *
+ * **Below the deck** (R08.T15.b.2; {@link packBelowDeckTable}). Under a deck over a surface the
+ * kernels read `deck.ts`'s `BelowDeckTable`, the whole column's plane-parallel field at the deck's
+ * 17 altitudes from the ground to the split, in place of every table of the upper medium:
+ *
+ * - **The sky** ({@link belowDeckRadianceInto}): the diffuse I = Σ_m Iᵐ cos mΔφ, m = 0 … 2, of the
+ *   light's travel cosine −(v·n) and Δφ between the light's direction of travel and the sun's beam,
+ *   read as the deck's own series are: each mode stored over sinᵐ θ_v sinᵐ θ₀ at the cell's
+ *   centre and summed with the Chebyshev factors cᵐ of the horizontal parts, c¹ = h_⊥, so that
+ *   m = 1 is I¹ ÷ (sin θ_v sin θ₀) times h_⊥ = sin θ_v sin θ₀ cos Δφ, continuous where the view or
+ *   the sun is vertical. The field is delta-M's diffuse field: its aureole inside the truncated
+ *   lobe and its exact single scattering (Nakajima and Tanaka's TMS) are left out, a stated
+ *   approximation (the aureole's flux is 0.06% under a τ 12 deck and under 10⁻⁹ at a τ ≥ 30
+ *   ground, largest in the deck's upper rows; T15.b.1's science check). No source below the
+ *   horizontal lights it: under the first sun row (μ₀ 1/64) the field is scaled by μ₀ ÷ (1/64), as
+ *   the flux it carries falls, to 0 at the horizontal (a stated approximation: a deck's twilight
+ *   is dark beneath).
+ * - **The path to a target** ({@link belowDeckPathDepthInto}): I(h_obs, Ω) − T I(h_target, Ω), both
+ *   read in the observer's frame (plane-parallel), T = e^(−Δτ) with Δτ the path's optical depth in
+ *   the kernels' extinction (every forward delta out), from the vertical depth the info row holds,
+ *   held at 0. It is the field's own transmission where delta-M's truncation is 0 (Rayleigh's and
+ *   every gas's, so everywhere beneath a cloud's base) and the kernels' beam's elsewhere, a stated
+ *   approximation inside the deck.
+ * - **The ground's light** ({@link belowDeckLightInto}): the sky's irradiance is `irradiance`, the
+ *   downward flux the kernels' beam leaves out, and the sun's transmittance `direct`, the kernels'
+ *   beam's, so that μ₀ T plus the sky is the whole column's downward flux; a sight to space takes
+ *   e^(−τ ÷ μ) of the vertical depth, its green channel's.
+ *
+ * The texture is `rgba32uint`, each word an `f32` value's bits, a 2D array of one layer a band and
+ * light slot, {@link BELOW_DECK_TABLE_WIDTH} texels across: row a × 32 + s holds, for altitude a and
+ * sun cosine (s + ½) ÷ 32, at texel v × 3 + m mode m's Iᵐ ÷ (sinᵐ θ_v sinᵐ θ₀) at travel cosine
+ * (v + ½) ÷ 8 − 1, at texel 48 the irradiance and at 49 the beam, red, green and blue in the first
+ * three words; the info row, 544, at texel a the kernels' vertical optical depth from the top,
+ * −μ₀ ln T_k at the highest sun row, per channel, and the altitude's h\* in the fourth word.
+ * 50 × 545 texels, 436,000 B a band and light. As the deck's own table it is read once a ray or
+ * a froxel, not a step, so it takes `f32` and no half float.
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
@@ -74,12 +110,15 @@ import type { MsSourceTable } from "./bake";
 import type { DeckTables } from "./deck";
 import type { PolarisationTable } from "./polarisation";
 import {
+  THICK_SOURCE_MODES,
   THICK_SUN_COSINES,
   THICK_SUN_COSINES_BELOW,
+  THICK_SUN_ROWS_A_UNIT_ABOVE,
+  THICK_TRAVEL_COSINES,
   thickSunCosineAt,
   thickSunPlace,
 } from "./read";
-import { acos, cos, exp, log, sin } from "../../../lib/pinnedMath";
+import { acos, cos, exp, log, pow, sin } from "../../../lib/pinnedMath";
 
 /** The deck table's modes: `deck.ts`'s `DECK_MODES`, 8, held equal by `deckRead.test.ts`. */
 export const DECK_TABLE_MODES = 8;
@@ -456,6 +495,575 @@ export function deckGroundInto(
     const transmitted = carried ? 1 : (toSun[c] ?? 0);
     out[c] = Math.max(direct * transmitted * (beam[c] ?? 0) + share * (sky[c] ?? 0), 0);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Below the deck (R08.T15.b.2).
+
+/**
+ * The table below the deck's altitudes: `deck.ts`'s 32 deck layers at the bake's stride 2, 17 from
+ * the ground to the split (held equal by `deckRead.test.ts`; not imported, so that the render
+ * thread loads no solver).
+ */
+export const BELOW_DECK_ALTITUDES = 17;
+/** Its sun cosines: the thick table's 32 daylit rows, at (s + ½) ÷ 32. */
+export const BELOW_DECK_SUN_COSINES = THICK_SUN_ROWS_A_UNIT_ABOVE;
+/** Its travel cosines: 16, at (v + ½) ÷ 8 − 1, the downward half first. */
+export const BELOW_DECK_TRAVEL_COSINES = THICK_TRAVEL_COSINES;
+/** Its azimuthal modes: m = 0, 1 and 2, the bake's (`bake.ts`'s `THICK_BAKE_MODES`). */
+export const BELOW_DECK_MODES = THICK_SOURCE_MODES;
+/** The texel of a row that holds the downward irradiance the kernels' beam leaves out. */
+export const BELOW_DECK_IRRADIANCE_TEXEL = BELOW_DECK_TRAVEL_COSINES * BELOW_DECK_MODES;
+/** The texel of a row that holds the kernels' beam's transmission from the top. */
+export const BELOW_DECK_DIRECT_TEXEL = BELOW_DECK_IRRADIANCE_TEXEL + 1;
+/** The texels a row: 50, the 48 of the radiance's modes, then the irradiance and the beam. */
+export const BELOW_DECK_TABLE_WIDTH = BELOW_DECK_DIRECT_TEXEL + 1;
+/** The info row, after the 17 × 32 rows of the altitudes and sun cosines. */
+export const BELOW_DECK_INFO_ROW = BELOW_DECK_ALTITUDES * BELOW_DECK_SUN_COSINES;
+/** The rows a layer: 545. */
+export const BELOW_DECK_TABLE_ROWS = BELOW_DECK_INFO_ROW + 1;
+/** The texture's format: four 32-bit words a texel, each an `f32` value's bits. */
+export const BELOW_DECK_TABLE_FORMAT = "rgba32uint";
+/** A layer's bytes as allocated, B: 50 × 545 texels × 16 B, 436,000. */
+export const BELOW_DECK_LAYER_BYTES = BELOW_DECK_TABLE_WIDTH * BELOW_DECK_TABLE_ROWS * 16;
+
+/** The least positive `f32`, 2⁻¹⁴⁹: a beam the table holds as 0 is read as through this. */
+const F32_LEAST = 2 ** -149;
+
+/**
+ * A body's tables below its deck, packed (the module's remarks, "Below the deck"): what the
+ * kernels' `belowDeckTable` holds and the CPU twin reads. Structured-cloneable.
+ */
+export interface PackedBelowDeckTable {
+  /** Texels a row: {@link BELOW_DECK_TABLE_WIDTH}. */
+  readonly widthTexels: number;
+  /** Rows a layer: {@link BELOW_DECK_TABLE_ROWS}. */
+  readonly heightTexels: number;
+  /** Bands × slots. */
+  readonly layers: number;
+  /** The light slots a band. */
+  readonly slots: number;
+  /** The latitude bands, in the body's order. */
+  readonly bands: number;
+  /** Four words a texel, row-major in each layer, layer after layer. */
+  readonly texels: Uint32Array;
+}
+
+/** The bytes a packed table below a deck allocates, B: {@link BELOW_DECK_LAYER_BYTES} a layer. */
+export function belowDeckTableBytes(table: Pick<PackedBelowDeckTable, "layers">): number {
+  return table.layers * BELOW_DECK_LAYER_BYTES;
+}
+
+/** The sun cosine of row `s` below the deck: (s + ½) ÷ 32. */
+function belowSunCosineAt(s: number): number {
+  return (s + 0.5) / BELOW_DECK_SUN_COSINES;
+}
+
+/** The travel cosine of column `v` below the deck: (v + ½) ÷ 8 − 1. */
+function belowTravelCosineAt(v: number): number {
+  return (v + 0.5) / (BELOW_DECK_TRAVEL_COSINES / 2) - 1;
+}
+
+/**
+ * A body's tables below its deck packed for the kernels (the module's remarks, "Below the deck"):
+ * each band and light slot's radiance, its modes over sinᵐ θ_v sinᵐ θ₀, its irradiance and beam,
+ * and the info row of each altitude's h\* and the kernels' vertical optical depth from the top.
+ *
+ * @param bands - The deck's tables (`deck.ts`'s `bakeDeck`), one a latitude band in the body's
+ *   order, each over a surface, with the same light slots.
+ * @throws RangeError for no band or no light slot, a band with no table below (an envelope's),
+ *   bands with other light slots, a table off the grid ({@link BELOW_DECK_ALTITUDES} altitudes
+ *   ascending from 0, {@link BELOW_DECK_SUN_COSINES} sun cosines at (s + ½) ÷ 32,
+ *   {@link BELOW_DECK_TRAVEL_COSINES} travel cosines at (v + ½) ÷ 8 − 1, {@link BELOW_DECK_MODES}
+ *   modes), or a value that is not finite.
+ */
+export function packBelowDeckTable(bands: ReadonlyArray<DeckTables>): PackedBelowDeckTable {
+  const [first] = bands;
+  const slots = first?.below?.slots.length ?? 0;
+  if (first === undefined || slots === 0) {
+    throw new RangeError("a table below a deck has at least one band and one light slot");
+  }
+  const tables = bands.map((band, b) => {
+    const below = band.below;
+    if (
+      below === null ||
+      below.slots.length !== slots ||
+      below.modes !== BELOW_DECK_MODES ||
+      below.altitudesM.length !== BELOW_DECK_ALTITUDES ||
+      below.altitudesM[0] !== 0 ||
+      !below.altitudesM.every((h, a) => a === 0 || h > (below.altitudesM[a - 1] ?? Number.NaN)) ||
+      !onCosines(below.sunCosines, BELOW_DECK_SUN_COSINES, belowSunCosineAt) ||
+      !onCosines(below.travelCosines, BELOW_DECK_TRAVEL_COSINES, belowTravelCosineAt)
+    ) {
+      throw new RangeError(`the deck's band ${b} has no table below it on the packing's grid`);
+    }
+    return below;
+  });
+  const width = BELOW_DECK_TABLE_WIDTH;
+  const layerTexels = width * BELOW_DECK_TABLE_ROWS;
+  const layers = bands.length * slots;
+  const texels = new Uint32Array(layers * layerTexels * 4);
+  const values = new Float32Array(texels.buffer);
+  const suns = BELOW_DECK_SUN_COSINES;
+  const views = BELOW_DECK_TRAVEL_COSINES;
+  const modes = BELOW_DECK_MODES;
+  const put = (at: number, word: number, value: number, where: () => string): void => {
+    if (!Number.isFinite(value) || !Number.isFinite(Math.fround(value))) {
+      throw new RangeError(`the table below the deck's ${where()} is ${value}`);
+    }
+    values[at * 4 + word] = value;
+  };
+  for (const [b, below] of tables.entries()) {
+    for (const [k, slot] of below.slots.entries()) {
+      const base = (b * slots + k) * layerTexels;
+      for (let a = 0; a < BELOW_DECK_ALTITUDES; a += 1) {
+        for (let s = 0; s < suns; s += 1) {
+          const mu0 = below.sunCosines[s] ?? Number.NaN;
+          const sunSine = Math.sqrt(1 - mu0 * mu0);
+          const row = base + (a * suns + s) * width;
+          const where =
+            (what: string): (() => string) =>
+            () =>
+              `${what} at band ${b}, slot ${k}, altitude ${a}, μ₀ ${s}`;
+          for (let v = 0; v < views; v += 1) {
+            const muV = below.travelCosines[v] ?? Number.NaN;
+            const sines = sunSine * Math.sqrt(1 - muV * muV);
+            let power = 1;
+            for (let m = 0; m < modes; m += 1) {
+              for (let c = 0; c < 3; c += 1) {
+                const at = (((a * suns + s) * views + v) * modes + m) * 3 + c;
+                put(
+                  row + v * modes + m,
+                  c,
+                  (slot.radiance[at] ?? Number.NaN) / power,
+                  where(`radiance mode ${m}, travel cosine ${v}, channel ${c}`),
+                );
+              }
+              power *= sines;
+            }
+          }
+          for (let c = 0; c < 3; c += 1) {
+            const at = (a * suns + s) * 3 + c;
+            put(
+              row + BELOW_DECK_IRRADIANCE_TEXEL,
+              c,
+              slot.irradiance[at] ?? Number.NaN,
+              where("irradiance"),
+            );
+            put(row + BELOW_DECK_DIRECT_TEXEL, c, slot.direct[at] ?? Number.NaN, where("beam"));
+          }
+        }
+        // The info row: the kernels' vertical optical depth from the top, −μ₀ ln T_k at the
+        // highest sun, per channel, and the altitude's h*.
+        const info = base + BELOW_DECK_INFO_ROW * width + a;
+        const muTop = below.sunCosines[suns - 1] ?? Number.NaN;
+        for (let c = 0; c < 3; c += 1) {
+          const beam = slot.direct[(a * suns + suns - 1) * 3 + c] ?? Number.NaN;
+          put(info, c, -muTop * log(Math.max(beam, F32_LEAST)), () => `depth at altitude ${a}`);
+        }
+        put(info, 3, below.altitudesM[a] ?? Number.NaN, () => `altitude ${a}`);
+      }
+    }
+  }
+  return {
+    widthTexels: width,
+    heightTexels: BELOW_DECK_TABLE_ROWS,
+    layers,
+    slots,
+    bands: bands.length,
+    texels,
+  };
+}
+
+/** A texel of a table below the deck: its four values, read from its words' bits. */
+function belowTexelInto(
+  table: PackedBelowDeckTable,
+  layer: number,
+  x: number,
+  y: number,
+  out: number[],
+): void {
+  const at = ((layer * BELOW_DECK_TABLE_ROWS + y) * BELOW_DECK_TABLE_WIDTH + x) * 4;
+  let values = VALUES.get(table.texels);
+  if (values === undefined) {
+    values = new Float32Array(table.texels.buffer, table.texels.byteOffset, table.texels.length);
+    VALUES.set(table.texels, values);
+  }
+  out[0] = values[at] ?? 0;
+  out[1] = values[at + 1] ?? 0;
+  out[2] = values[at + 2] ?? 0;
+  out[3] = values[at + 3] ?? 0;
+}
+
+/** The reads' scratch below the deck, kept by a reader between reads. */
+export interface BelowDeckReadScratch {
+  readonly texel: number[];
+  /** The Chebyshev factors cᵐ, m = 0 … 2. */
+  readonly harmonics: Float64Array;
+  readonly sum: [number, number, number];
+  readonly other: [number, number, number];
+}
+
+/** A zeroed {@link BelowDeckReadScratch}. */
+export function belowDeckReadScratch(): BelowDeckReadScratch {
+  return {
+    texel: [0, 0, 0, 0],
+    harmonics: new Float64Array(BELOW_DECK_MODES),
+    sum: [0, 0, 0],
+    other: [0, 0, 0],
+  };
+}
+
+/** A place among a table's rows: the row below, its share to the next, and a scale on the value. */
+interface BelowPlace {
+  readonly i0: number;
+  readonly f: number;
+}
+
+/** Each packed table's altitudes by layer (the info row's fourth words), read once a table. */
+const ALTITUDES = new WeakMap<Uint32Array, Float64Array[]>();
+
+/** A layer's altitudes, h\* above the ground, ascending from 0 to the split. */
+function belowAltitudesOf(table: PackedBelowDeckTable, layer: number): Float64Array {
+  let byLayer = ALTITUDES.get(table.texels);
+  if (byLayer === undefined) {
+    const texel = [0, 0, 0, 0];
+    byLayer = Array.from({ length: table.layers }, (_, l) =>
+      Float64Array.from({ length: BELOW_DECK_ALTITUDES }, (__, a) => {
+        belowTexelInto(table, l, a, BELOW_DECK_INFO_ROW, texel);
+        return texel[3] ?? Number.NaN;
+      }),
+    );
+    ALTITUDES.set(table.texels, byLayer);
+  }
+  const altitudes = byLayer[layer];
+  if (altitudes === undefined) {
+    throw new RangeError(
+      `the table below the deck has ${table.layers} layers, not a layer ${layer}`,
+    );
+  }
+  return altitudes;
+}
+
+/**
+ * Where `heightStarM` lies among a layer's altitudes: the row below it and its share to the next,
+ * held at the ground and at the split.
+ */
+function belowAltitudePlace(
+  table: PackedBelowDeckTable,
+  layer: number,
+  heightStarM: number,
+): BelowPlace {
+  const altitudes = belowAltitudesOf(table, layer);
+  let lower = 0;
+  while (lower + 2 < BELOW_DECK_ALTITUDES && (altitudes[lower + 1] ?? Number.NaN) <= heightStarM) {
+    lower += 1;
+  }
+  const h0 = altitudes[lower] ?? Number.NaN;
+  const h1 = altitudes[lower + 1] ?? Number.NaN;
+  return { i0: lower, f: Math.min(Math.max((heightStarM - h0) / (h1 - h0), 0), 1) };
+}
+
+/**
+ * Where `muSun` lies among the sun cosines: the row below it, its share to the next, held at the
+ * last row; below the first row, (1/64), the first row, which the reads scale by μ₀ ÷ (1/64).
+ */
+function belowSunPlace(muSun: number): BelowPlace {
+  const x = Math.min(Math.max(muSun * BELOW_DECK_SUN_COSINES - 0.5, 0), BELOW_DECK_SUN_COSINES - 1);
+  const s0 = Math.min(Math.floor(x), BELOW_DECK_SUN_COSINES - 2);
+  return { i0: s0, f: x - s0 };
+}
+
+/**
+ * The diffuse field's scale at a low sun: μ₀ ÷ (1/64) under the first row, which the field and its
+ * flux follow to 0 at the horizontal; 0 below it, where the table holds no light (a stated
+ * approximation: a deck's twilight is dark beneath).
+ */
+function belowLowSunScale(muSun: number): number {
+  return Math.min(Math.max(muSun * 2 * BELOW_DECK_SUN_COSINES, 0), 1);
+}
+
+/** Where `muTravel` lies among the travel cosines: y = 8 (μ + 1) − ½ in [0, 15]. */
+function belowTravelPlace(muTravel: number): BelowPlace {
+  const half = BELOW_DECK_TRAVEL_COSINES / 2;
+  const y = Math.min(Math.max((muTravel + 1) * half - 0.5, 0), BELOW_DECK_TRAVEL_COSINES - 1);
+  const v0 = Math.min(Math.floor(y), BELOW_DECK_TRAVEL_COSINES - 2);
+  return { i0: v0, f: y - v0 };
+}
+
+/**
+ * Each band layer about the gravity ratio `s` with its weight, linear in ln s between the bands
+ * about it and the nearer band beyond them (`deckGroundInto`'s), for the light slot `slot`, the
+ * nearest slot held where the table has fewer.
+ */
+function belowLayersAt(
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  slot: number,
+): ReadonlyArray<readonly [number, number]> {
+  const k = Math.min(Math.max(slot, 0), table.slots - 1);
+  const last = table.bands - 1;
+  const ls = log(s);
+  if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
+    return [[k, 1]];
+  }
+  if (!(ls < (lnBands[last] ?? Number.NaN))) {
+    return [[last * table.slots + k, 1]];
+  }
+  let lower = 0;
+  while (lower + 1 < last && (lnBands[lower + 1] ?? Number.NaN) <= ls) {
+    lower += 1;
+  }
+  const l0 = lnBands[lower] ?? Number.NaN;
+  const w = (ls - l0) / ((lnBands[lower + 1] ?? Number.NaN) - l0);
+  return [
+    [lower * table.slots + k, 1 - w],
+    [(lower + 1) * table.slots + k, w],
+  ];
+}
+
+/**
+ * The diffuse radiance beneath a deck for one source, per unit of the source's weight, into `out`
+ * (the module's remarks, "Below the deck"; `deckRead.wgsl`'s `belowDeckRadianceAt`), sr⁻¹ per unit
+ * of the source's irradiance at the top: Σ_m Iᵐ cᵐ, cᵐ the Chebyshev factors of the view's and
+ * the source's horizontal parts (`deckGroundInto`'s), linear between the cells' centres in h\*, μ₀
+ * and μ, scaled by μ₀ ÷ (1/64) under the first sun row, held at 0.
+ *
+ * @param heightStarM - The point's h\* above the ground, held to the table's altitudes.
+ * @param muSun - The source's cosine against the datum's normal there.
+ * @param muTravel - The light's travel cosine, −(v·n), v the view's direction.
+ * @param horizontal - h_⊥ = v·s − (v·n)(s·n), the view's and the source's horizontal parts' dot
+ *   product.
+ */
+export function belowDeckRadianceInto(
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  heightStarM: number,
+  muSun: number,
+  muTravel: number,
+  horizontal: number,
+  slot: number,
+  scratch: BelowDeckReadScratch,
+  out: [number, number, number],
+): void {
+  const { texel, harmonics, sum } = scratch;
+  const scale = belowLowSunScale(muSun);
+  out.fill(0);
+  if (!(scale > 0)) {
+    return;
+  }
+  const crossed = (1 - muTravel * muTravel) * (1 - muSun * muSun);
+  harmonics[0] = 1;
+  harmonics[1] = horizontal;
+  for (let m = 2; m < BELOW_DECK_MODES; m += 1) {
+    harmonics[m] = 2 * horizontal * (harmonics[m - 1] ?? 0) - crossed * (harmonics[m - 2] ?? 0);
+  }
+  const sun = belowSunPlace(muSun);
+  const travel = belowTravelPlace(muTravel);
+  sum.fill(0);
+  for (const [layer, w] of belowLayersAt(table, lnBands, s, slot)) {
+    const altitude = belowAltitudePlace(table, layer, heightStarM);
+    for (const [da, wa] of [
+      [0, 1 - altitude.f],
+      [1, altitude.f],
+    ] as const) {
+      for (const [ds, ws] of [
+        [0, 1 - sun.f],
+        [1, sun.f],
+      ] as const) {
+        const row = (altitude.i0 + da) * BELOW_DECK_SUN_COSINES + sun.i0 + ds;
+        for (const [dv, wv] of [
+          [0, 1 - travel.f],
+          [1, travel.f],
+        ] as const) {
+          const weight = w * wa * ws * wv;
+          for (let m = 0; m < BELOW_DECK_MODES; m += 1) {
+            belowTexelInto(table, layer, (travel.i0 + dv) * BELOW_DECK_MODES + m, row, texel);
+            const h = weight * (harmonics[m] ?? 0);
+            for (let c = 0; c < 3; c += 1) {
+              sum[c] = (sum[c] ?? 0) + h * (texel[c] ?? 0);
+            }
+          }
+        }
+      }
+    }
+  }
+  for (let c = 0; c < 3; c += 1) {
+    out[c] = Math.max(scale * (sum[c] ?? 0), 0);
+  }
+}
+
+/**
+ * One step of the beam's read between two values: geometric at share `f` where both hold light,
+ * else linear at share `linear`.
+ */
+function beamStep(t0: number, t1: number, f: number, linear: number): number {
+  return t0 > 0 && t1 > 0 ? exp((1 - f) * log(t0) + f * log(t1)) : (1 - linear) * t0 + linear * t1;
+}
+
+/**
+ * The light on a horizontal surface beneath a deck for one source, per unit of the source's
+ * irradiance normal to its beam at the top (the module's remarks, "Below the deck";
+ * `deckRead.wgsl`'s `belowDeckSkyAt` and `belowDeckSunAt`): into `sky`, the downward irradiance
+ * the kernels' beam leaves out (the diffuse field's and delta-M's aureole), linear in h\* and μ₀ and
+ * scaled under the first sun row as the radiance is; into `sun`, the kernels' beam's transmission
+ * T_k from the top, geometric in 1 ÷ μ₀ between the rows about the point and then in h\* where both
+ * values of a step hold light (exact for a plane-parallel beam through a column of even
+ * extinction), else linear, T^(μ_r ÷ μ₀) of a row μ_r beyond the rows or above a row the `f32` holds
+ * as 0, 0 at and below the horizontal. A channel's beam is the bins' converted, whose factors may be
+ * negative, so it may be below 0 where the bins' beams are all but out; it is read as stored. μ₀ T_k plus the
+ * sky is the whole column's downward flux at the table's altitudes.
+ */
+export function belowDeckLightInto(
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  heightStarM: number,
+  muSun: number,
+  slot: number,
+  scratch: BelowDeckReadScratch,
+  sky: [number, number, number],
+  sun: [number, number, number],
+): void {
+  const { texel, sum } = scratch;
+  sky.fill(0);
+  sun.fill(0);
+  if (!(muSun > 0)) {
+    return;
+  }
+  const scale = belowLowSunScale(muSun);
+  const place = belowSunPlace(muSun);
+  const first = belowSunCosineAt(0);
+  const last = belowSunCosineAt(BELOW_DECK_SUN_COSINES - 1);
+  const beyond = muSun < first || muSun > last;
+  for (const [layer, w] of belowLayersAt(table, lnBands, s, slot)) {
+    const altitude = belowAltitudePlace(table, layer, heightStarM);
+    // The four corners' beams, [altitude][sun], per channel.
+    const beams: number[][] = [];
+    sum.fill(0);
+    for (const [da, wa] of [
+      [0, 1 - altitude.f],
+      [1, altitude.f],
+    ] as const) {
+      for (const [ds, ws] of [
+        [0, 1 - place.f],
+        [1, place.f],
+      ] as const) {
+        const row = (altitude.i0 + da) * BELOW_DECK_SUN_COSINES + place.i0 + ds;
+        belowTexelInto(table, layer, BELOW_DECK_IRRADIANCE_TEXEL, row, texel);
+        for (let c = 0; c < 3; c += 1) {
+          sum[c] = (sum[c] ?? 0) + wa * ws * (texel[c] ?? 0);
+        }
+        belowTexelInto(table, layer, BELOW_DECK_DIRECT_TEXEL, row, texel);
+        beams.push([texel[0] ?? 0, texel[1] ?? 0, texel[2] ?? 0]);
+      }
+    }
+    for (let c = 0; c < 3; c += 1) {
+      sky[c] = (sky[c] ?? 0) + w * scale * (sum[c] ?? 0);
+    }
+    // The beam: in 1 ÷ μ₀ between the rows (the edge row's power beyond them), then in h* between
+    // the altitudes, each step geometric where both its values hold light, else linear.
+    const mu0 = belowSunCosineAt(place.i0);
+    const mu1 = belowSunCosineAt(place.i0 + 1);
+    const edge = muSun < first ? 0 : 1;
+    const power = (muSun < first ? first : last) / muSun;
+    const fs = (1 / muSun - 1 / mu0) / (1 / mu1 - 1 / mu0);
+    for (let c = 0; c < 3; c += 1) {
+      const atRow = (da: 0 | 1): number => {
+        const lower = beams[da * 2]?.[c] ?? 0;
+        const upper = beams[da * 2 + 1]?.[c] ?? 0;
+        if (beyond) {
+          return pow(edge === 0 ? lower : upper, power);
+        }
+        // A lower row that the f32 holds as 0 under a lit one: the lit row's plane-parallel power.
+        // (A channel's beam is the bins' converted, whose factors may be negative, so a row may
+        // hold one below 0: that one is read linearly, as is.)
+        if (lower === 0 && upper > 0) {
+          return pow(upper, mu1 / muSun);
+        }
+        return beamStep(lower, upper, fs, place.f);
+      };
+      sun[c] = (sun[c] ?? 0) + w * beamStep(atRow(0), atRow(1), altitude.f, altitude.f);
+    }
+  }
+}
+
+/**
+ * The kernels' vertical optical depth from the top to h\* beneath a deck, per channel, into `out`
+ * (the info row's, linear in h\* between the altitudes and in ln s between the bands).
+ */
+export function belowDeckOpticalDepthInto(
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  heightStarM: number,
+  scratch: BelowDeckReadScratch,
+  out: [number, number, number],
+): void {
+  const { texel } = scratch;
+  out.fill(0);
+  for (const [layer, w] of belowLayersAt(table, lnBands, s, 0)) {
+    const altitude = belowAltitudePlace(table, layer, heightStarM);
+    for (const [da, wa] of [
+      [0, 1 - altitude.f],
+      [1, altitude.f],
+    ] as const) {
+      belowTexelInto(table, layer, altitude.i0 + da, BELOW_DECK_INFO_ROW, texel);
+      for (let c = 0; c < 3; c += 1) {
+        out[c] = (out[c] ?? 0) + w * wa * (texel[c] ?? 0);
+      }
+    }
+  }
+}
+
+/**
+ * The optical depth of a straight path beneath a deck, per channel, into `out` (the module's
+ * remarks, "Below the deck"): d s |τ(h\*₁) − τ(h\*₂)| ÷ |h\*₁ − h\*₂| of the vertical depth τ
+ * ({@link belowDeckOpticalDepthInto}), the plane-parallel path's own, and d s σ\*(h\*₁) where the
+ * two heights lie within a millimetre, σ\* = −dτ ÷ dh\* of the altitudes' interval about h\*₁.
+ *
+ * @param distanceM - The path's length, m.
+ */
+export function belowDeckPathDepthInto(
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  s: number,
+  fromHeightStarM: number,
+  toHeightStarM: number,
+  distanceM: number,
+  scratch: BelowDeckReadScratch,
+  out: [number, number, number],
+): void {
+  const { texel, sum, other } = scratch;
+  const rise = toHeightStarM - fromHeightStarM;
+  if (Math.abs(rise) > 1e-3) {
+    belowDeckOpticalDepthInto(table, lnBands, s, fromHeightStarM, scratch, sum);
+    belowDeckOpticalDepthInto(table, lnBands, s, toHeightStarM, scratch, other);
+    for (let c = 0; c < 3; c += 1) {
+      out[c] = (distanceM * s * Math.abs((sum[c] ?? 0) - (other[c] ?? 0))) / Math.abs(rise);
+    }
+    return;
+  }
+  out.fill(0);
+  for (const [layer, w] of belowLayersAt(table, lnBands, s, 0)) {
+    const altitude = belowAltitudePlace(table, layer, fromHeightStarM);
+    belowTexelInto(table, layer, altitude.i0, BELOW_DECK_INFO_ROW, texel);
+    const lower = [texel[0] ?? 0, texel[1] ?? 0, texel[2] ?? 0, texel[3] ?? 0];
+    belowTexelInto(table, layer, altitude.i0 + 1, BELOW_DECK_INFO_ROW, texel);
+    const span = (texel[3] ?? Number.NaN) - (lower[3] ?? Number.NaN);
+    for (let c = 0; c < 3; c += 1) {
+      out[c] = (out[c] ?? 0) + (w * distanceM * s * ((lower[c] ?? 0) - (texel[c] ?? 0))) / span;
+    }
+  }
+}
+
+/** The split's h\* of a table below a deck: its last altitude, layer 0's. */
+export function belowDeckSplitM(table: PackedBelowDeckTable): number {
+  const texel = [0, 0, 0, 0];
+  belowTexelInto(table, 0, BELOW_DECK_ALTITUDES - 1, BELOW_DECK_INFO_ROW, texel);
+  return texel[3] ?? Number.NaN;
 }
 
 // ---------------------------------------------------------------------------------------------

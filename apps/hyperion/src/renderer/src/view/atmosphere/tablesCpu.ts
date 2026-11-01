@@ -101,9 +101,15 @@ import {
 } from "./absorbers";
 import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
+  belowDeckLightInto,
+  belowDeckOpticalDepthInto,
+  belowDeckPathDepthInto,
+  belowDeckRadianceInto,
+  belowDeckReadScratch,
   deckGroundInto,
   type DeckReadScratch,
   deckReadScratch,
+  type PackedBelowDeckTable,
   type PackedDeckTable,
 } from "./thick/deckRead";
 import {
@@ -3498,6 +3504,285 @@ export function aerialPerspectiveTwin(
     }
   }
   return { widthTexels: w, heightTexels: h, slices, texels };
+}
+
+// --- Below the deck (R08.T15.b.2) ----------------------------------------------------------------
+
+/**
+ * A camera beneath a deck as the reads below it take it (`thick/deckRead.ts`, "Below the deck"):
+ * the table below, its bands' ln s, the split's h\* over the kernels' datum (the deck's), and the
+ * camera's gravity ratio and h\* above the ground, s (split ÷ s + h) for a camera h above the
+ * kernels' datum, held to [0, split].
+ */
+export interface TwinBelowDeck {
+  readonly table: PackedBelowDeckTable;
+  readonly lnBands: ArrayLike<number>;
+  readonly splitM: number;
+  readonly gravityRatio: number;
+}
+
+/** A camera's h\* above the ground beneath a deck: split + s h, h above the deck's datum, held. */
+export function belowDeckHeightStarM(below: TwinBelowDeck, heightM: number): number {
+  return Math.min(Math.max(below.splitM + below.gravityRatio * heightM, 0), below.splitM);
+}
+
+/** Σ_k w_k I_k of a view's sources along a unit `direction`, all in one frame of zenith `n`, at h\*. */
+function belowSkyInto(
+  below: TwinBelowDeck,
+  heightStarM: number,
+  n: Vec3,
+  direction: Vec3,
+  sources: ReadonlyArray<TwinRaySource>,
+  scratch: ReturnType<typeof belowDeckReadScratch>,
+  one: TwinRgb,
+  out: TwinRgb,
+): void {
+  const d = direction;
+  const mu = d.x * n.x + d.y * n.y + d.z * n.z;
+  out.fill(0);
+  for (const source of sources) {
+    const to = source.direction;
+    const muSun = to.x * n.x + to.y * n.y + to.z * n.z;
+    const horizontal = d.x * to.x + d.y * to.y + d.z * to.z - mu * muSun;
+    belowDeckRadianceInto(
+      below.table,
+      below.lnBands,
+      below.gravityRatio,
+      heightStarM,
+      muSun,
+      -mu,
+      horizontal,
+      source.slot,
+      scratch,
+      one,
+    );
+    for (const c of CHANNELS) {
+      out[c] += source.weight[c] * one[c];
+    }
+  }
+}
+
+/**
+ * The sky-view table's twin beneath a deck, texel by texel (`skyViewBelowDeck.wgsl`): each texel's
+ * direction as {@link skyViewRayTwin} lays it on the kernels' sphere, the camera's height held as
+ * the sky view's is, and the table below read along it at the camera's h\* for each of the view's
+ * sources ({@link belowDeckRadianceInto}), in place of a march; alpha 1.
+ *
+ * @param upper - The kernels' medium, the deck's upper medium, whose top the sky view's mapping
+ *   takes.
+ */
+export function belowDeckSkyViewTexelsTwin(
+  below: TwinBelowDeck,
+  upper: AtmosphereMedium,
+  view: TwinView,
+  size: TableSize,
+): (x: number, y: number) => Rgb {
+  const heightStarM = belowDeckHeightStarM(below, view.heightM);
+  const scratch = belowDeckReadScratch();
+  const one: TwinRgb = [0, 0, 0];
+  const kept = new Map<number, Rgb>();
+  const zenith = { x: 0, y: 0, z: 1 };
+  return (x, y) => {
+    const key = y * size.widthTexels + x;
+    let texel = kept.get(key);
+    if (texel === undefined) {
+      const ray = skyViewRayTwin(upper, view, x, y, size);
+      const out: TwinRgb = [0, 0, 0];
+      belowSkyInto(below, heightStarM, zenith, ray.direction, ray.sources ?? [], scratch, one, out);
+      texel = [out[0], out[1], out[2]];
+      kept.set(key, texel);
+    }
+    return texel;
+  };
+}
+
+/**
+ * The aerial-perspective volume's twin beneath a deck (`aerialPerspectiveBelowDeck.wgsl`): for each
+ * froxel column's ray, as {@link aerialPerspectiveTwin} lays it, at each slice's far face t, the
+ * path's light I(h\*_camera, Ω) − T I(h\*_t, Ω) summed over the view's sources and held at 0
+ * (rgb), and T's mean over the channels (a), T = e^(−Δτ) of the path's depth
+ * ({@link belowDeckPathDepthInto}), h_t the height along the ray on the camera's own sphere
+ * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame.
+ */
+export function belowDeckAerialPerspectiveTwin(
+  below: TwinBelowDeck,
+  view: TwinView,
+  size: VolumeSize,
+  reachM: number,
+): TwinVolume {
+  const { widthTexels: w, heightTexels: h, slices } = size;
+  const bottom = view.cameraRadiusM;
+  const heightM = view.heightM;
+  const fromM = belowDeckHeightStarM(below, heightM);
+  const n = view.normal;
+  const scratch = belowDeckReadScratch();
+  const one: TwinRgb = [0, 0, 0];
+  const atCamera: TwinRgb = [0, 0, 0];
+  const atTarget: TwinRgb = [0, 0, 0];
+  const depth: TwinRgb = [0, 0, 0];
+  const texels = new Float64Array(w * h * slices * 4);
+  const r = bottom + heightM;
+  const aboveGround = heightM * (2 * bottom + heightM);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
+      const mu = direction.x * n.x + direction.y * n.y + direction.z * n.z;
+      belowSkyInto(below, fromM, n, direction, view.sources, scratch, one, atCamera);
+      for (let slice = 0; slice < slices; slice += 1) {
+        const t = ((slice + 1) * reachM) / slices;
+        const rT = Math.sqrt(Math.max(t * t + 2 * r * mu * t + r * r, 0));
+        const heightAlongM = (t * t + 2 * r * mu * t + aboveGround) / (rT + bottom);
+        const toM = belowDeckHeightStarM(below, heightAlongM);
+        belowSkyInto(below, toM, n, direction, view.sources, scratch, one, atTarget);
+        belowDeckPathDepthInto(
+          below.table,
+          below.lnBands,
+          below.gravityRatio,
+          fromM,
+          toM,
+          t,
+          scratch,
+          depth,
+        );
+        const transmitted: TwinRgb = [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
+        const at = ((slice * h + y) * w + x) * 4;
+        for (const c of CHANNELS) {
+          texels[at + c] = Math.max(atCamera[c] - transmitted[c] * atTarget[c], 0);
+        }
+        texels[at + 3] = (transmitted[0] + transmitted[1] + transmitted[2]) / 3;
+      }
+    }
+  }
+  return { widthTexels: w, heightTexels: h, slices, texels };
+}
+
+/**
+ * What the composite multiplies the light from beyond the air by from a camera beneath a deck,
+ * along a unit `direction` (`composite.wgsl`'s `belowDeckBehind`): e^(−τ ÷ μ) of the vertical
+ * depth's green channel at the camera's h\* in every channel, the plane-parallel beam's, μ the
+ * direction's cosine against the zenith `n`; 0 at and below the horizontal.
+ */
+export function belowDeckBehindTwin(
+  below: TwinBelowDeck,
+  heightStarM: number,
+  n: Vec3,
+  direction: Vec3,
+): Rgb {
+  const mu = direction.x * n.x + direction.y * n.y + direction.z * n.z;
+  if (!(mu > 0)) {
+    return [0, 0, 0];
+  }
+  const depth: TwinRgb = [0, 0, 0];
+  belowDeckOpticalDepthInto(
+    below.table,
+    below.lnBands,
+    below.gravityRatio,
+    heightStarM,
+    belowDeckReadScratch(),
+    depth,
+  );
+  const t = exp(-depth[1] / mu);
+  return [t, t, t];
+}
+
+/**
+ * `surfaceLighting.wgsl`'s lookups over a deck with a table below it (R08.T15.b.2), each height
+ * above the body's own datum: beneath the split (s h under its h\*) the table below's, the sky's
+ * irradiance its `irradiance` and the sun's transmittance its beam ({@link belowDeckLightInto}),
+ * a wide source's by the same three-node rule over the beam; from the split up `upper`'s, the
+ * kernels' tables over the deck's datum, at h − split ÷ s.
+ */
+export function belowDeckSurfaceLightingTwin(
+  upper: SurfaceLightingReader,
+  table: PackedBelowDeckTable,
+  lnBands: ArrayLike<number>,
+  gravity: BodyGravity,
+  splitM: number,
+): SurfaceLightingReader {
+  const scratch = belowDeckReadScratch();
+  const sky: TwinRgb = [0, 0, 0];
+  const sun: TwinRgb = [0, 0, 0];
+  const lightAt = (
+    altitudeM: number,
+    muSun: number,
+    latitudeRad: number,
+    curve: number,
+  ): boolean => {
+    const s = gravityRatio(gravity, clampLatitude(latitudeRad));
+    const heightStarM = s * altitudeM;
+    if (!(heightStarM < splitM)) {
+      return false;
+    }
+    belowDeckLightInto(
+      table,
+      lnBands,
+      s,
+      Math.max(heightStarM, 0),
+      muSun,
+      curve,
+      scratch,
+      sky,
+      sun,
+    );
+    return true;
+  };
+  const above = (altitudeM: number, latitudeRad: number): number =>
+    altitudeM - splitM / gravityRatio(gravity, clampLatitude(latitudeRad));
+  return {
+    sunTransmittance: (altitudeM, muSun, latitudeRad, sunAzimuthRad, curve) =>
+      lightAt(altitudeM, muSun, latitudeRad, curve)
+        ? [sun[0], sun[1], sun[2]]
+        : upper.sunTransmittance(
+            above(altitudeM, latitudeRad),
+            muSun,
+            latitudeRad,
+            sunAzimuthRad,
+            curve,
+          ),
+    skyIrradiance: (altitudeM, muSun, latitudeRad, curve) =>
+      lightAt(altitudeM, muSun, latitudeRad, curve)
+        ? [sky[0], sky[1], sky[2]]
+        : upper.skyIrradiance(above(altitudeM, latitudeRad), muSun, latitudeRad, curve),
+    sourceTransmittance: (
+      altitudeM,
+      muCentre,
+      latitudeRad,
+      azimuthRad,
+      angularRadiusRad,
+      curve,
+    ) => {
+      if (!lightAt(altitudeM, muCentre, latitudeRad, curve)) {
+        return upper.sourceTransmittance(
+          above(altitudeM, latitudeRad),
+          muCentre,
+          latitudeRad,
+          azimuthRad,
+          angularRadiusRad,
+          curve,
+        );
+      }
+      // The disc's vertical diameter's three nodes, at μ_c cos δ ± sin θ_c sin δ and μ_c.
+      const delta = Math.min(Math.abs(angularRadiusRad) * SOURCE_NODE_OFFSET, Math.PI);
+      const sinZenith = Math.sqrt(Math.max(1 - muCentre * muCentre, 0));
+      const nodes = [1, 0, -1].map((sign) =>
+        sign === 0 ? muCentre : muCentre * cos(delta) + sign * sinZenith * sin(delta),
+      );
+      const sum: TwinRgb = [0, 0, 0];
+      let total = 0;
+      nodes.forEach((mu, k) => {
+        if (!(mu > 0)) {
+          return;
+        }
+        const w = (SOURCE_NODE_WEIGHTS[k] ?? Number.NaN) * mu;
+        lightAt(altitudeM, mu, latitudeRad, curve);
+        for (const c of CHANNELS) {
+          sum[c] += w * sun[c];
+        }
+        total += w;
+      });
+      return total > 0 ? [sum[0] / total, sum[1] / total, sum[2] / total] : [0, 0, 0];
+    },
+  };
 }
 
 /** The near and far distances along a ray to a spheroid of radii (a, a, c), or (−1, −1) if missed. */

@@ -1,16 +1,20 @@
 /**
  * Synthetic thick bakes, polarisation corrections and deck tables for the read path's tests and the
- * smoke page's checks (plan R08, R08.T14.c, R08.T14.f and R08.T15.a.2): `bake.ts`'s
- * `MsSourceTable`, `polarisation.ts`'s `PolarisationTable` and `deck.ts`'s `DeckTables` shapes on
- * the bake's grid, with values set so that the packed tables (`thick/read.ts`, `thick/deckRead.ts`)
+ * smoke page's checks (plan R08, R08.T14.c, R08.T14.f, R08.T15.a.2 and R08.T15.b.2): `bake.ts`'s
+ * `MsSourceTable`, `polarisation.ts`'s `PolarisationTable` and `deck.ts`'s `DeckTables` shapes, with
+ * the table below a deck (`BelowDeckTable`), on the bake's grid, with values set so that the packed tables (`thick/read.ts`, `thick/deckRead.ts`)
  * follow a pattern in every axis, without running a solve. The values are a test's, not a world's.
  */
 
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { TablesBand } from "../view/atmosphere/tables";
 import type { MsSourceSlot, MsSourceTable } from "../view/atmosphere/thick/bake";
-import type { DeckSlot, DeckTables } from "../view/atmosphere/thick/deck";
+import type { BelowDeckTable, DeckSlot, DeckTables } from "../view/atmosphere/thick/deck";
 import {
+  BELOW_DECK_ALTITUDES,
+  BELOW_DECK_MODES,
+  BELOW_DECK_SUN_COSINES,
+  BELOW_DECK_TRAVEL_COSINES,
   DECK_TABLE_MODES,
   DECK_TABLE_PHASE_ENTRIES,
   DECK_TABLE_VIEW_COSINES,
@@ -279,17 +283,118 @@ export function patternedDeckCorrection(
 }
 
 /**
+ * The vertical optical depth from the top of {@link patternedBelowDeck}'s beam, per channel, at h\*
+ * `heightM` beneath a split at `deckAltitudeM`, in band `b`: linear in h\*, 0.2 at the split and
+ * 3.2–3.6 at the ground by channel, so that its beam is exact for the read's geometric step.
+ */
+export function belowPatternDepth(
+  heightM: number,
+  deckAltitudeM: number,
+  b: number,
+  c: number,
+): number {
+  return 0.2 + (3 + 0.2 * c + 0.1 * b) * (1 - heightM / deckAltitudeM);
+}
+
+/**
+ * The table below's pattern at altitude row `a`, sun row `s`, travel cosine `v`, band `b`, light
+ * slot `k`, mode `m` and channel `c` (R08.T15.b.2): each mode's quotient over sinᵐ θ_v sinᵐ θ₀
+ * (`thick/deckRead.ts`'s stored value) of either sign past m = 0, falling with m, I⁰ about
+ * 0.02 sr⁻¹, and the irradiance about 0.3 μ₀.
+ */
+export function belowPatternAt(
+  a: number,
+  s: number,
+  v: number,
+  b: number,
+  k: number,
+  m: number,
+  c: number,
+): { readonly radiance: number; readonly irradiance: number } {
+  const wave = Math.cos(0.29 * a + 0.23 * s + 0.41 * v + 0.37 * m + 0.3 * c + 0.5 * b + 0.2 * k);
+  const mu0 = (s + 0.5) / BELOW_DECK_SUN_COSINES;
+  return {
+    radiance: (m === 0 ? 0.02 + 0.005 * wave : 0.006 * wave) * 0.5 ** m,
+    irradiance: mu0 * (0.3 + 0.05 * Math.sin(0.31 * a + 0.4 * c + b - 0.3 * k)),
+  };
+}
+
+/**
+ * A table below a deck split at `deckAltitudeM` over a surface whose packed values follow
+ * {@link belowPatternAt}, in band `b` with `slots` light slots (R08.T15.b.2): 17 altitudes evenly
+ * from the ground to the split, the daylit 32 sun cosines and the 16 travel cosines, and the beam
+ * e^(−τ ÷ μ₀) of {@link belowPatternDepth}, plane-parallel.
+ */
+export function patternedBelowDeck(
+  b: number,
+  slots: number,
+  deckAltitudeM: number,
+): BelowDeckTable {
+  const altitudesM = Float64Array.from(
+    { length: BELOW_DECK_ALTITUDES },
+    (_, a) => (a * deckAltitudeM) / (BELOW_DECK_ALTITUDES - 1),
+  );
+  const sunCosines = Float64Array.from(
+    { length: BELOW_DECK_SUN_COSINES },
+    (_, s) => (s + 0.5) / BELOW_DECK_SUN_COSINES,
+  );
+  const travelCosines = Float64Array.from(
+    { length: BELOW_DECK_TRAVEL_COSINES },
+    (_, v) => (v + 0.5) / (BELOW_DECK_TRAVEL_COSINES / 2) - 1,
+  );
+  const suns = BELOW_DECK_SUN_COSINES;
+  const views = BELOW_DECK_TRAVEL_COSINES;
+  const modes = BELOW_DECK_MODES;
+  const cells = BELOW_DECK_ALTITUDES * suns;
+  return {
+    altitudesM,
+    sunCosines,
+    travelCosines,
+    modes,
+    slots: Array.from({ length: slots }, (_, k) => {
+      const radiance = new Float32Array(cells * views * modes * 3);
+      const irradiance = new Float32Array(cells * 3);
+      const direct = new Float32Array(cells * 3);
+      for (let a = 0; a < BELOW_DECK_ALTITUDES; a += 1) {
+        for (let s = 0; s < suns; s += 1) {
+          const mu0 = sunCosines[s] ?? Number.NaN;
+          for (let c = 0; c < 3; c += 1) {
+            const at = (a * suns + s) * 3 + c;
+            irradiance[at] = belowPatternAt(a, s, 0, b, k, 0, c).irradiance;
+            direct[at] = Math.exp(
+              -belowPatternDepth(altitudesM[a] ?? Number.NaN, deckAltitudeM, b, c) / mu0,
+            );
+            for (let v = 0; v < views; v += 1) {
+              const muV = travelCosines[v] ?? Number.NaN;
+              const sines = Math.sqrt((1 - mu0 * mu0) * (1 - muV * muV));
+              for (let m = 0; m < modes; m += 1) {
+                radiance[(((a * suns + s) * views + v) * modes + m) * 3 + c] =
+                  belowPatternAt(a, s, v, b, k, m, c).radiance * sines ** m;
+              }
+            }
+          }
+        }
+      }
+      return { radiance, irradiance, direct };
+    }),
+  };
+}
+
+/**
  * Deck tables whose packed values follow {@link deckPatternAt} and {@link deckPhasePatternAt}
  * (R08.T15.a.2), one a band of `bands` (a tables plan's, in its order), with `slots` light slots, on
  * the deck's grid, the split at `deckAltitudeM` over the body's datum: the J above it
  * {@link patternedThickBake}'s over `medium`, the upper medium as the kernels read it, its altitudes
- * from the split up. Its beam's rows below the horizontal hold 0, as a bake's do.
+ * from the split up. Its beam's rows below the horizontal hold 0, as a bake's do. With `below`, a
+ * deck over a surface's, each band holds {@link patternedBelowDeck}'s table (R08.T15.b.2); else
+ * none, as an envelope's.
  */
 export function patternedDeckTables(
   bands: ReadonlyArray<TablesBand>,
   medium: AtmosphereMedium,
   slots: number,
   deckAltitudeM: number,
+  below = false,
 ): DeckTables[] {
   const above = patternedThickBake(bands, medium, slots);
   const { sunCosines } = patternGrid(medium);
@@ -361,7 +466,7 @@ export function patternedDeckTables(
       diffuseModes,
       deckOpticalDepth: new Float64Array(15),
       slots: deckSlots,
-      below: null,
+      below: below ? patternedBelowDeck(b, slots, deckAltitudeM) : null,
     };
   });
 }

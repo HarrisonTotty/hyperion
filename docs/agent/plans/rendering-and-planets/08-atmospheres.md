@@ -24214,3 +24214,16 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     T16.a.2 opens `envelope` on `giant-deck`'s envelope variant alone.
   - `AtmosphereCacheOptions.routes` takes a third argument, `envelope`. Its default is
     `thickBakeRouted || deckRouted`, so a routed `cloudDeck` body asks `deck-bake`.
+  - _The table below, packed_ (`thick/deckRead.ts`): `packBelowDeckTable`, `rgba32uint` of `f32` words,
+    50 × 545 texels, 436,000 B a band and light, no half float. Its info row holds each altitude's
+    h\* and the kernels' vertical depth, −μ₀ ln T_k at the top sun row. T15.b.1's 208,896 B was
+    m ≤ 1; the table holds m ≤ 2 since T14.d.1.
+  - _The reads_: `belowDeckRadianceInto` (m ≤ 2 by the deck read's Chebyshev factors, each mode over
+    sinᵐ θ_v sinᵐ θ₀), `belowDeckLightInto` (the sky is `irradiance`, the sun `direct`, so the
+    beam is not counted twice), `belowDeckPathDepthInto` and `belowDeckOpticalDepthInto`. Below
+    μ₀ 1/64 the field scales to 0 at the horizontal. A channel's `direct` may be negative (the
+    bins' factors) and is read as stored.
+  - _The twins_ (`tablesCpu.ts`): `belowDeckSkyViewTexelsTwin`, `belowDeckAerialPerspectiveTwin`,
+    `belowDeckBehindTwin`, `belowDeckSurfaceLightingTwin`. `twin.ts` lifts the refusal below a
+    deck's split; it still refuses one below an envelope's. Its `surfaceLighting` over such a deck
+    takes heights above the case's own datum. The reads below stand on a sphere.

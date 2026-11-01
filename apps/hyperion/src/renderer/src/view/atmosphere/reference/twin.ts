@@ -62,8 +62,19 @@
  * correction over it as its thick table, and where a ray from orbit meets the deck, nothing drawn
  * there, the march reads the deck's own tables in place of the bare ground's albedo, as the kernels
  * over a deck do (`hillaire.ts`'s `withDeckRead`). The observers stand where the case puts them, on
- * its own datum; one below the split, R08.T15.b.2's, is refused. The deck's bake is made on the
- * case's own body (`twinBakeBody`), whose split `thick/deck.ts`'s `prepareDeck` takes.
+ * its own datum. The deck's bake is made on the case's own body (`twinBakeBody`), whose split
+ * `thick/deck.ts`'s `prepareDeck` takes.
+ *
+ * **Below the deck** (R08.T15.b.2; `thick/deckRead.ts`, "Below the deck"). Under a deck over a
+ * surface, an observer below the split reads the deck's table below it in place of every upper
+ * table, as the kernels beneath a deck do: on the ground, the sky view filled from it
+ * (`tablesCpu.ts`'s `belowDeckSkyViewTexelsTwin`) on the kernels' sphere and read as the composite
+ * reads it; for aerial perspective, the volume of the path's light I(h_obs) − T I(h_target)
+ * (`belowDeckAerialPerspectiveTwin`); and the lit ground beneath, the table's sky and beam
+ * (`belowDeckSurfaceLightingTwin`), whose lookups then take heights above the case's own datum, as
+ * {@link ReferenceTwin.surfaceLighting} gives them. What lies beyond the air takes the vertical
+ * depth's e^(−τ ÷ μ) (`belowDeckBehindTwin`). A twin of a deck with no table below, an envelope's,
+ * refuses an observer below the split. The reads below stand on a sphere.
  *
  * **The multiple scattering** ({@link TwinOptions.multipleScattering}, R08.T13.c2): drawn, or
  * zeroed for the attribution of a miss, every band's multiple-scattering layer replaced by zeros
@@ -88,7 +99,7 @@ import {
   type TableSizes,
 } from "../hillaire";
 import { type AtmosphereMedium, layerEdgesM, type MediumTerm } from "../medium";
-import { bodyGravity, type OblateSlicing } from "../oblate";
+import { bodyGravity, gravityRatio, type OblateSlicing } from "../oblate";
 import type { SurfaceLightingReader } from "../surfaceLighting";
 import {
   type AbsorberCurveSlots,
@@ -100,6 +111,10 @@ import {
 } from "../tables";
 import {
   aerialPerspectiveTwin,
+  belowDeckAerialPerspectiveTwin,
+  belowDeckBehindTwin,
+  belowDeckSkyViewTexelsTwin,
+  belowDeckSurfaceLightingTwin,
   compositeTransmittanceTwin,
   IRRADIANCE_KERNEL_OPTIONS,
   OBLATE_KERNEL_SIZES,
@@ -122,6 +137,7 @@ import {
   type TwinBand,
   type TwinBody,
   twinBandOf,
+  type TwinBelowDeck,
   type TwinTable,
   type TwinVolume,
   twinView,
@@ -134,6 +150,7 @@ import {
   deckAboveTables,
   deckCorrectionAbove,
   deckDatumOf,
+  packBelowDeckTable,
   packDeckTable,
   upperMediumOf,
 } from "../thick/deckRead";
@@ -145,7 +162,7 @@ import {
   REFERENCE_DETECTOR_HALF_ANGLE_DEG,
   type ReferenceGeometry,
 } from "./geometries";
-import { asin, atan, atan2, cos, sin, tan } from "../../../lib/pinnedMath";
+import { asin, atan, atan2, cos, log, sin, tan } from "../../../lib/pinnedMath";
 
 /**
  * The figure a twin's case stands on: a case's own (`cases.ts`'s `CaseFigure`), a sphere of the
@@ -220,7 +237,8 @@ export interface TwinOptions {
    * A cloud deck as the medium's ground (plan R08, R08.T15.a.2; `thick/deckRead.ts`): the twin then
    * draws the upper medium alone, its ground the split, on the deck's datum, reads the deck's J above
    * it with the correction summed in, and the deck's own tables where a ray meets it, as the kernels
-   * over a deck do; none by default. Taken with no `thick` and no `polarisation` of its own.
+   * over a deck do, and beneath a deck over a surface its table below (R08.T15.b.2); none by default.
+   * Taken with no `thick` and no `polarisation` of its own.
    */
   readonly deck: TwinDeck | null;
   /**
@@ -453,7 +471,10 @@ export interface ReferenceTwin {
   readonly planet: PlanetTwin;
   /** The slices and bands the tables are built as: one of each on a sphere. */
   readonly oblate: OblatePlanetTwin;
-  /** The ground's lighting, `surfaceLighting.wgsl`'s lookups on the same tables. */
+  /**
+   * The ground's lighting, `surfaceLighting.wgsl`'s lookups on the same tables; over a deck with a
+   * table below it, each height above the case's own datum (R08.T15.b.2).
+   */
   readonly surfaceLighting: SurfaceLightingReader;
   /**
    * The twin's diffuse radiance at a geometry, averaged over the cone (the module's remarks).
@@ -764,21 +785,46 @@ export function referenceTwin(
     ...(oblate.thick === undefined ? {} : { thick: oblate.thick }),
     ...(oblate.deck === undefined ? {} : { deck: oblate.deck }),
   };
+  // Beneath a deck over a surface, its table below (R08.T15.b.2); an envelope's deck has none.
+  const belowTable =
+    deck !== null && deck.tables[0]?.below !== null ? packBelowDeckTable(deck.tables) : null;
+  const lnBands = oblate.bands.map((each) => log(each.gravityRatio));
   // The sky's irradiance at the ground: the table's ground row, which the ground reads alone.
   const groundRow = Array.from({ length: IRRADIANCE_SIZE.widthTexels }, (_, x) => [x, 0] as const);
-  const lighting = surfaceLightingTwin(
+  const upperLighting = surfaceLightingTwin(
     oblate,
     oblateIrradianceTwin(oblate, IRRADIANCE_KERNEL_OPTIONS, groundRow),
   );
+  const lighting =
+    belowTable === null
+      ? upperLighting
+      : belowDeckSurfaceLightingTwin(upperLighting, belowTable, lnBands, body.gravity, splitM);
   const { sizes } = settings;
   const sphere = figure.kind === "sphere";
   const sources = tableSources(planet);
 
-  const observerOf = (geometry: ReferenceGeometry): Vec3 => {
-    if (deck !== null && geometry.observer.heightM < splitM) {
+  /** A geometry's gravity ratio at its observer's latitude. */
+  const gravityAt = (geometry: ReferenceGeometry): number =>
+    gravityRatio(body.gravity, (geometry.observer.latitudeDeg * Math.PI) / 180);
+  /** Whether a geometry's observer stands below a deck's split, its h* under the split's. */
+  const belowTheSplit = (geometry: ReferenceGeometry): boolean =>
+    deck !== null && geometry.observer.heightM * gravityAt(geometry) < splitM;
+  /** A geometry's camera beneath the deck, as the reads below take it. */
+  const belowOf = (geometry: ReferenceGeometry): TwinBelowDeck => {
+    if (belowTable === null) {
       throw new RangeError(
-        `the twin draws no observer below a deck's split, R08.T15.b.2's: ${geometry.name}`,
+        `the twin draws no observer below a deck's split where it has no table below, an envelope's: ${geometry.name}`,
       );
+    }
+    if (!sphere) {
+      throw new RangeError(`the twin's reads below a deck stand on a sphere: ${geometry.name}`);
+    }
+    return { table: belowTable, lnBands, splitM, gravityRatio: gravityAt(geometry) };
+  };
+
+  const observerOf = (geometry: ReferenceGeometry): Vec3 => {
+    if (belowTheSplit(geometry)) {
+      belowOf(geometry);
     }
     return geodeticPoint(caseDatum, geometry.observer.latitudeDeg, geometry.observer.heightM);
   };
@@ -871,6 +917,43 @@ export function referenceTwin(
     return built;
   };
 
+  // Each ground observer's sky view beneath a deck, by its observer and sun, filled from the table
+  // below as read (R08.T15.b.2).
+  const belowSkyViews = new Map<string, SkyViewRead>();
+  const belowSkyViewOf = (geometry: ReferenceGeometry): SkyViewRead => {
+    const { observer, sun } = geometry;
+    const key = `${observer.heightM},${observer.latitudeDeg},${sun.zenithDeg},${sun.azimuthDeg}`;
+    let built = belowSkyViews.get(key);
+    if (built === undefined) {
+      const originM = observerOf(geometry);
+      const view = twinView(
+        cameraAlong(originM, normalise(originM), defaultFovRad),
+        sunState(geometry),
+        datum,
+        NEAR_M,
+      );
+      built = {
+        view,
+        texelAt: belowDeckSkyViewTexelsTwin(belowOf(geometry), marched, view, sizes.skyView),
+      };
+      belowSkyViews.set(key, built);
+    }
+    return built;
+  };
+
+  const belowGroundAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
+    if (figureGroundDistanceM(observerOf(geometry), direction, caseFigure) !== null) {
+      throw new RangeError(
+        `the twin draws no surface for a ground observer, and ${geometry.name}'s cone meets the ground`,
+      );
+    }
+    const { view, texelAt } = belowSkyViewOf(geometry);
+    return {
+      total: skyViewReadTwin(texelAt, sizes.skyView, marched, view, direction),
+      surface: DARK,
+    };
+  };
+
   const groundAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
     if (figureGroundDistanceM(observerOf(geometry), direction, figure) !== null) {
       throw new RangeError(
@@ -918,10 +1001,17 @@ export function referenceTwin(
     const size = { widthTexels: 2, heightTexels: 2, slices: sizes.aerialPerspective.slices };
     const reachM = sizes.aerialPerspectiveReachM;
     const samplesPerSlice = sizes.aerialPerspectiveSamplesPerSlice;
-    const volume: TwinVolume = sphere
-      ? aerialPerspectiveTwin(planet, view, size, samplesPerSlice, reachM)
-      : oblateAerialPerspectiveTwin(oblate, view, size, samplesPerSlice, reachM);
-    const groundM = figureGroundDistanceM(originM, direction, figure);
+    // Beneath a deck the volume is the table below's, and the ground the case's own (R08.T15.b.2).
+    const below = belowTheSplit(geometry);
+    let volume: TwinVolume;
+    if (below) {
+      volume = belowDeckAerialPerspectiveTwin(belowOf(geometry), view, size, reachM);
+    } else if (sphere) {
+      volume = aerialPerspectiveTwin(planet, view, size, samplesPerSlice, reachM);
+    } else {
+      volume = oblateAerialPerspectiveTwin(oblate, view, size, samplesPerSlice, reachM);
+    }
+    const groundM = figureGroundDistanceM(originM, direction, below ? caseFigure : figure);
     const onGround = groundM !== null && groundM < targetM;
     const surfaceM = onGround ? groundM : targetM;
     if (!(surfaceM <= reachM)) {
@@ -969,7 +1059,9 @@ export function referenceTwin(
     const kind = twinGeometryKind(geometry, deck === null ? drawn : medium, sizes);
     switch (kind) {
       case "ground":
-        parts = groundAlong(geometry, direction);
+        parts = belowTheSplit(geometry)
+          ? belowGroundAlong(geometry, direction)
+          : groundAlong(geometry, direction);
         break;
       case "orbit":
         parts = orbitAlong(geometry, direction);
@@ -1031,6 +1123,11 @@ export function referenceTwin(
 
   const transmittanceAlong = (geometry: ReferenceGeometry, direction: Vec3): Rgb => {
     const originM = observerOf(geometry);
+    if (belowTheSplit(geometry)) {
+      const below = belowOf(geometry);
+      const heightStarM = Math.min(geometry.observer.heightM * below.gravityRatio, splitM);
+      return belowDeckBehindTwin(below, heightStarM, normalise(originM), direction);
+    }
     const view = twinView(
       cameraAlong(originM, direction, defaultFovRad),
       sunState(geometry),

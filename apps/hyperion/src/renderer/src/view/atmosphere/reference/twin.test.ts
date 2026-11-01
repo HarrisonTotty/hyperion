@@ -7,7 +7,7 @@ import {
   type SweepGeometry,
   type SweepPoint,
 } from "../../../test/atmosphereSweep";
-import { patternedDeckTables } from "../../../test/thickTables";
+import { belowPatternAt, belowPatternDepth, patternedDeckTables } from "../../../test/thickTables";
 import { DEFAULT_FOV_DEG } from "../../camera/projection";
 import { lookAlong } from "../../camera/quaternion";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
@@ -783,6 +783,123 @@ describe("a twin over a cloud deck (R08.T15.a.2)", () => {
       expect(() =>
         twin.radiance({ ...NADIR, name: "under", observer: { heightM: 100, latitudeDeg: 0 } }),
       ).toThrow(/below a deck's split/u);
+    },
+  );
+});
+
+describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
+  /** The split: 3 km over the sweep's Earth-sized sphere, in its air and under its aerosol's top. */
+  const SPLIT_M = 3_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over a surface, with its patterned table below. */
+  const deck: TwinDeck = {
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M, true),
+    polarisation: null,
+  };
+  const twin = (): ReferenceTwin => referenceTwin(medium, FIGURE, { deck });
+  /** The pattern's altitude rows, the deck's 17 from the ground to the split. */
+  const altitudeAt = (a: number): number => (a * SPLIT_M) / 16;
+  /** A ground observer at row 4's height, 750 m, looking up; the sun 60° up. */
+  const UP: ReferenceGeometry = {
+    name: "up",
+    image: "ground-s30",
+    observer: { heightM: altitudeAt(4), latitudeDeg: 0 },
+    view: { zenithDeg: 0, azimuthDeg: 0 },
+    sun: { zenithDeg: 30, azimuthDeg: 0 },
+  };
+
+  it(
+    "draws a ground observer's sky beneath from the table below, through the sky view's read, to 10⁻⁶",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      // Straight up, the light travels straight down: μ −1, the modes past 0 nil. Its sun
+      // cosine cos 30° lies between rows 27 and 28 of the pattern, (s + ½) ÷ 32.
+      const mu0 = Math.cos(Math.PI / 6);
+      const x = mu0 * 32 - 0.5;
+      const s0 = Math.floor(x);
+      const fs = x - s0;
+      const radiance = twin().radiance(UP);
+      for (let c = 0; c < 3; c += 1) {
+        // The travel cosine −1 lies beyond the last cell, −15/16, which the read holds.
+        const at = (s: number): number => belowPatternAt(4, s, 0, 0, 0, 0, c).radiance;
+        const expected = (1 - fs) * at(s0) + fs * at(s0 + 1);
+        // Measured 2026-11-01: 2.3 × 10⁻⁸; the sky view's zenith texels are the read's own.
+        expect(Math.abs((radiance[c] ?? Number.NaN) / expected - 1)).toBeLessThan(1e-6);
+      }
+    },
+  );
+
+  it(
+    "lights the ground beneath by the table's sky and beam, heights above the case's own datum",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const lighting = twin().surfaceLighting;
+      const mu0 = (20 + 0.5) / 32;
+      const sky = lighting.skyIrradiance(0, mu0, 0, 0);
+      const beam = lighting.sunTransmittance(0, mu0, 0, 0, 0);
+      for (let c = 0; c < 3; c += 1) {
+        expect(sky[c]).toBeCloseTo(Math.fround(belowPatternAt(0, 20, 0, 0, 0, 0, c).irradiance), 7);
+        expect(
+          (beam[c] ?? Number.NaN) / Math.exp(-belowPatternDepth(0, SPLIT_M, 0, c) / mu0),
+        ).toBeCloseTo(1, 6);
+      }
+    },
+  );
+
+  it(
+    "draws aerial perspective beneath as I(h_obs) − T I(h_target), T of the path's depth, to 0.1%",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      // A level path of 2 km at row 4's height, its target at nearly the same height: the light
+      // I (1 − T), T = e^(−σ* d), σ* the pattern's (3 + 0.2 c) ÷ split.
+      const level: ReferenceGeometry = {
+        ...UP,
+        name: "level",
+        view: { zenithDeg: 90, azimuthDeg: 90 },
+        maxDistanceM: 2_000,
+      };
+      const radiance = twin().radiance(level);
+      const mu0 = Math.cos(Math.PI / 6);
+      const x = mu0 * 32 - 0.5;
+      const s0 = Math.floor(x);
+      const fs = x - s0;
+      for (let c = 0; c < 3; c += 1) {
+        // Level, the light travels at μ 0, between travel cells 7 and 8, its azimuth 90° from
+        // the sun's: Σ_m Iᵐ cos mΔφ, m = 0 and 2, the m = 2 term −I² at Δφ 90°.
+        const at = (s: number, m: number): number =>
+          0.5 *
+          (belowPatternAt(4, s, 7, 0, 0, m, c).radiance +
+            belowPatternAt(4, s, 8, 0, 0, m, c).radiance);
+        const sines = Math.sqrt(1 - mu0 * mu0) * Math.sqrt(1 - (0.5 / 8) ** 2);
+        const field = (s: number): number => at(s, 0) - at(s, 2) * sines ** 2;
+        const sky = (1 - fs) * field(s0) + fs * field(s0 + 1);
+        const t = Math.exp(-(2_000 * (3 + 0.2 * c)) / SPLIT_M);
+        // Measured 2026-11-01: 1.0 × 10⁻⁴, the target's rise of 0.3 m on the sphere and the slices.
+        expect(Math.abs((radiance[c] ?? Number.NaN) / (sky * (1 - t)) - 1)).toBeLessThan(1e-3);
+      }
+    },
+  );
+
+  it(
+    "dims what lies beyond the air from beneath by the vertical depth's green channel, e^(−τ ÷ μ), and hides it below the horizontal",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const t = twin();
+      const up = t.transmittanceAlong(UP, axisOf(UP));
+      const down = t.transmittanceAlong(UP, { x: -1, y: 0, z: 0 });
+      const expected = Math.exp(-belowPatternDepth(altitudeAt(4), SPLIT_M, 0, 1));
+      expect([up[0] / expected, up[1] / expected, up[2] / expected, ...down]).toEqual([
+        expect.closeTo(1, 6),
+        expect.closeTo(1, 6),
+        expect.closeTo(1, 6),
+        0,
+        0,
+        0,
+      ]);
     },
   );
 });
