@@ -4,11 +4,12 @@
 //! read through [`XrbClassRules::carves`] and each timeline's rules.
 //!
 //! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
-//! - Under the arm alone three pinned grid systems move, one a rule, found by a census of 3 × 10⁵
+//! - Under the arm alone four pinned grid systems move, one a rule, found by censuses of 3 × 10⁵
 //!   slab and 3 × 10⁵ young thin disc records: a neutron star fed 2.7 × 10⁻¹⁴ M☉ yr⁻¹ by a
 //!   helium white dwarf is no X-ray binary; a 24.5 M☉ star's wind feeding a black hole 30 days out,
-//!   far inside its Roche lobe, makes none; and a 12.3 M☉ main-sequence star that gained mass from
-//!   its neutron star's progenitor is a Be star, its pair a Be/X-ray binary.
+//!   far inside its Roche lobe, makes none; a 12.3 M☉ main-sequence star that gained mass from
+//!   its neutron star's progenitor is a Be star, its pair a Be/X-ray binary; and a Be star beside
+//!   a black hole makes none.
 //! - The catalogue: under the arm and plan 15's fitted tables the scan refuses the candidates its
 //!   sampler feeds under the floor, which the class's test will refuse at the bump, and keeps
 //!   exactly the cells' entries; and a pair's classes at its ages do not depend on the order they
@@ -24,8 +25,10 @@
 //! and the sky: the golden `sky/census_near_sun` (the grid's carve near the Sun) and, slow,
 //! `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s pinned misses (its Be/X members)
 //! and `merger::channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s (the
-//! grid redraws other systems); and this module's tests of the version's arm (2026-11-01).
-//! Nothing moves at 24–26.
+//! grid redraws other systems); `carve::tests::a_carved_first_attempt_is_redrawn` and
+//! `multiplicity::bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned
+//! record's first attempt is no X-ray binary under the arm (with the Be stars' rule); and this
+//! module's tests of the version's arm (2026-11-01). Nothing moves at 24–26.
 
 use std::sync::OnceLock;
 
@@ -81,6 +84,12 @@ const CENSUS_PARTS: u64 = 16;
 /// The threads the slow censuses run on: their reservation in `.config/nextest.toml`.
 const CENSUS_THREADS: usize = 16;
 
+/// A layer-E record of the young thin disc whose first attempt is a 4.1 M☉ black hole 26.9 days
+/// from a 19.3 M☉ main-sequence star that gained mass in stable transfer, a Be/X-ray binary under
+/// the arm before its Be rule (found by a census of 3 × 10⁵ young thin disc records under the arm
+/// alone).
+const BLACK_HOLE_BESIDE_A_BE_STAR: u64 = 0x8273_a85f_d000_000b;
+
 /// The bands a census runs, whose primaries can make a member.
 const CENSUS_BANDS: [MassBand; 3] = [MassBand::C, MassBand::D, MassBand::E];
 
@@ -95,11 +104,15 @@ const CITED_BEX_SHARE: f64 = 0.65;
 const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 
 /// The young disc's high-mass hosts under every 27 hold, as measured: Be/X and supergiant neutron
-/// stars and black holes. Be/X are 0.987 of the neutron stars' against [`CITED_BEX_SHARE`] (a
-/// finding: the spun-up mass gainers), and black holes 0.145 of all against at most
-/// [`CITED_BLACK_HOLE_SHARE`] (a finding: black holes beside spun-up Be stars and in Roche-lobe
-/// overflow).
-const PINNED_HIGH_MASS: [usize; 3] = [373, 5, 64];
+/// stars and black holes. Black holes are 0.005 of all, within [`CITED_BLACK_HOLE_SHARE`], since
+/// a Be star beside one makes no X-ray binary (main's ruling of 2026-11-01: before that rule 62
+/// of the 64 black holes, 0.145 of all, were beside Be stars). Be/X are 0.987 of the neutron stars'
+/// against [`CITED_BEX_SHARE`] (a finding: the census counts every neutron star beside a Be star,
+/// quiescent or not, where the catalogued share is of those seen; the Be/X phase outlasts the
+/// supergiant one some 10–100 times, so the Galaxy hides thousands of quiescent Be/X beside its
+/// tens of supergiant systems, Meurs and van den Heuvel 1989, A&A 226, 88, recalled; the spun-up
+/// Be/X's orbits are the observed ones, 301 of 360 at 10–330 days).
+const PINNED_HIGH_MASS: [usize; 3] = [373, 5, 2];
 
 /// The hydrogen-fed low-mass X-ray binaries the floor takes under every 27 hold, in the slab and
 /// in the young disc, as measured: none of the slab's, and one of the young disc's, a neutron star
@@ -179,9 +192,9 @@ fn the_xrb_class_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < XRB_CLASS_VERSION,
         "the bump to 27 deletes P11.T5's and P11.T8.b's X-ray binary hold: `XRB_CLASS_VERSION`, \
-         `XrbClassRules` with its `Held` arm, `StellarRules::xrb_class`, `classify`'s three \
-         calls of `carves` and the context's spun-up stars, this module and its line in \
-         `stellar/rules.rs`"
+         `XrbClassRules` with its `Held` arm, `StellarRules::xrb_class`, `classify`'s four \
+         calls of `carves` and the context's gainer masses, the X-ray binaries' scan's, this \
+         module and its line in `stellar/rules.rs`"
     );
     assert_eq!(version().xrb_class, XrbClassRules::Held);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).xrb_class;
@@ -318,6 +331,14 @@ fn the_scan_refuses_a_host_fed_under_the_floor_under_the_arm() {
         refused > 0,
         "the fitted tables feed some hosts under the floor"
     );
+}
+
+/// Under the arm alone a Be star beside a black hole makes no X-ray binary: the pinned 19.3 M☉ star,
+/// spun up by its transfer, is a Be star but feeds no neutron star, and its wind, far inside its
+/// Roche lobe, makes the hole no disc.
+#[test]
+fn a_be_star_beside_a_black_hole_makes_no_x_ray_binary_under_the_arm() {
+    assert_eq!(pinned_marks(&carved(), BLACK_HOLE_BESIDE_A_BE_STAR), None);
 }
 
 /// Under the arm a pair's classes at its segments' ages do not depend on the order they are asked

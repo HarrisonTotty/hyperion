@@ -748,7 +748,11 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
             continue;
         }
         let period = Days::from(orbit.period());
-        if is_neutron_star_or_black_hole(cp)
+        // From 27 a Be star feeds a neutron star alone: beside a black hole it is X-ray quiet
+        // (`xrb_class`).
+        let be_x_accretor =
+            cp == Phase::NeutronStar || (cp == Phase::BlackHole && !ctx.rules.xrb_class.carves());
+        if be_x_accretor
             && donor.mass() >= HMXB_MIN_DONOR_MASS
             && period <= BEX_MAX_PERIOD
             && (is_be_star(donor, ctx.composition, ctx.draws[d], ctx.rules)

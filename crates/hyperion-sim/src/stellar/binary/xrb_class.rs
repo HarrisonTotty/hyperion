@@ -29,10 +29,19 @@
 //!   e56); without one the hole's flow is radiatively inefficient. A neutron star's field takes a
 //!   wind with no disc (the wind-fed supergiant systems, Vela X-1 among them), so its rule is
 //!   unchanged: the brief named both, and the neutron stars are left as they are (a deviation).
+//! - **A Be star feeds a neutron star alone.** Beside a black hole a Be star makes no X-ray binary:
+//!   the hole truncates the Be star's disc and accretes inefficiently (Zhang, Li and Wang 2004, ApJ
+//!   603, 663; most OB stars beside black holes are X-ray quiet, Langer et al. 2020, A&A 638, A39),
+//!   and MWC 656, the one claimed (Casares et al. 2014, Nature 505, 378), shines at about
+//!   10³¹ erg s⁻¹ (Munar-Adrover et al. 2014, ApJ 786, L11; Ribó et al. 2017, ApJ 835, L33), far
+//!   under the catalogues' reach. Main's ruling of 2026-11-01
+//!   made the black holes' share of the young disc's high-mass hosts, 0.145 against at most 0.01,
+//!   a wrong state: 62 of its 64 black holes were beside Be stars, most spun up by transfer, and
+//!   none fed by a wind filled the Roche share its disc needs.
 //!
 //! Every figure is recalled, not read at source (the science checks of 2026-11-01 reached none);
 //! the floor sits at the very faint transients' upper bound, so it may cut the faintest of them.
-//! The rules' one `match` is [`XrbClassRules::carves`], which each of the three reads in
+//! The rules' one `match` is [`XrbClassRules::carves`], which each of the four reads in
 //! `classify` through the pair's own rules, and the X-ray binaries' scan reads for the floor
 //! through the galaxy's, so that it keeps exactly the class's entries whichever rules the class's
 //! test reads (its timelines, built from marks, take the version's). A timeline built from marks
@@ -51,7 +60,7 @@ use crate::units::SolarMassesPerYear;
 /// every generated value keeps its bits; the tests reach the new arm through
 /// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this module's version and
 /// [`XrbClassRules`] (its constants move to `classify`), the stellar rules' `xrb_class` field,
-/// the calls of [`XrbClassRules::carves`] (`classify`'s three and the X-ray binaries' scan's) and
+/// the calls of [`XrbClassRules::carves`] (`classify`'s four and the X-ray binaries' scan's) and
 /// the context's gainer masses, and the tripwire (`the_xrb_class_is_held_only_until_the_27_bump`).
 pub(crate) const XRB_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
@@ -60,10 +69,11 @@ pub(crate) const XRB_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum XrbClassRules {
     /// Versions 24–26's: every Roche-lobe overflow onto a compact star, every wind-fed black hole
-    /// above the luminosity floor, and a Be star by its own draw.
+    /// above the luminosity floor, and a Be star by its own draw beside a neutron star or a black
+    /// hole.
     Held,
-    /// Version 27's: the floor on the transfer rate, the spun-up Be donors and the wind-fed black
-    /// holes' disc (module documentation).
+    /// Version 27's: the floor on the transfer rate, the spun-up Be donors, the wind-fed black
+    /// holes' disc and Be/X-ray binaries of neutron stars alone (module documentation).
     Carved,
 }
 

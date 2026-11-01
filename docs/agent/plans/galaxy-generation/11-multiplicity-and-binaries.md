@@ -7368,11 +7368,21 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     only its six (lean: the other three's builds, marks and events are P11.T8.b work for main).
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
+  - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of
+    the young disc's high-mass hosts a wrong state). 62 of the 64 were beside Be stars, most spun
+    up by transfer, and no wind-fed black hole filled 0.9 of its lobe (0.03–0.3). From 27 a Be star
+    beside a black hole makes no X-ray binary (Zhang, Li and Wang 2004; MWC 656's 10³¹ erg s⁻¹):
+    black holes 2 of 380, 0.005. Be/X stay 0.987 of the neutron stars' against 0.65, pinned: the
+    census counts quiescent Be/X too, which the catalogued share under-sees (the share's
+    denominator; the Be/X phase outlasts the supergiant one 10–100 times, recalled). Its movers at
+    the bump add `carve::tests::a_carved_first_attempt_is_redrawn` and
+    `bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned carved record is no
+    X-ray binary under the arm.
   - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
     accretion and heavy donors): slab members 565 → 565, the 456 ultracompacts all fed just above
-    the floor (1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min: a finding); young disc 252 → 606,
-    Be/X 19 → 373, supergiant neutron stars 12 → 5, black holes 56 → 64. Before P11.T4's fixes
-    the slab's ultracompacts were 145 → 14.
+    the floor (1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min: a finding); young disc 252 → 544,
+    Be/X 19 → 373, supergiant neutron stars 12 → 5, black holes 56 → 2 (64 before the Be stars'
+    rule). Before P11.T4's fixes the slab's ultracompacts were 145 → 14.
   - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
     `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
     `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the
