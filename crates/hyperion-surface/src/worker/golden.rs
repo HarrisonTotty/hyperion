@@ -189,18 +189,20 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::tests::{
     MESH, TerrainFixture, WORLD, band_limit_level, cell, earth_fixture, earth_worker, face_uv,
-    fixture, lit, middle_weathered_world, payload_cover, probes, sight_lines, surveyed_about,
-    terrain_fixture, terrain_fixture_of, vertex_point, weathered_terrain_world,
+    fixture, lit, middle_weathered_world, probes, sight_lines, surveyed_about, terrain_fixture,
+    terrain_fixture_of, vertex_point, weathered_terrain_world,
 };
 use super::*;
 use crate::bake::WeightsLayer;
-use crate::field::{
-    ClimateModelKind, CoarseField, Cover, FieldHeader, FieldHeaderParts, PaletteEntry, PaletteRole,
-    PrecipitationSource,
-};
+use crate::field::{CoarseField, PaletteRole};
 use crate::material::{MaterialClass, MaturityNode, maturity_node_albedo, maturity_node_share};
 use crate::patch::{NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
+use crate::testing::{
+    TERRAIN_TEST_SEED, payload_cover, terrain_test_lines, terrain_test_text,
+    whole_terrain_test_fixture,
+};
+use crate::wire::DecodedBlock;
 
 /// A digest of `bytes` in the golden's form: each as an `f64`, which holds it exactly, as
 /// R10.T6.a's goldens take it.
@@ -567,176 +569,9 @@ fn worker_matches_its_earth_like_golden() {
     golden!("worker/earth_like", &earth_text());
 }
 
-/// A palette role as the wire spells it (`PaletteRoleDto`).
-fn role_name(role: PaletteRole) -> &'static str {
-    match role {
-        PaletteRole::PrimaryCrust => "primary_crust",
-        PaletteRole::SecondaryCrust => "secondary_crust",
-        PaletteRole::TertiaryCrust => "tertiary_crust",
-        PaletteRole::Province => "province",
-        PaletteRole::Ice => "ice",
-        PaletteRole::Liquid => "liquid",
-        PaletteRole::Cover => "cover",
-        PaletteRole::Deposit => "deposit",
-        PaletteRole::Bulk => "bulk",
-    }
-}
-
-/// A climate model as the wire spells it (`ClimateModelDto`).
-fn climate_name(kind: ClimateModelKind) -> &'static str {
-    match kind {
-        ClimateModelKind::EnergyBalance => "energy_balance",
-        ClimateModelKind::LockedEnergyBalance => "locked_energy_balance",
-        ClimateModelKind::RadiativeEquilibrium => "radiative_equilibrium",
-        ClimateModelKind::Isothermal => "isothermal",
-    }
-}
-
-/// A precipitation source as the wire spells it (`PrecipitationSourceDto`).
-fn precipitation_name(source: PrecipitationSource) -> &'static str {
-    match source {
-        PrecipitationSource::Heuristic => "heuristic",
-    }
-}
-
 /// A float in the terrain test's form: `0x` and its bits.
 fn float(x: f64) -> String {
     format!("0x{:016x}", bits(x))
-}
-
-/// Writes `dto <key> <x>` with the decimal for the reader.
-fn dto_f64(out: &mut GoldenWriter, key: &str, x: f64) {
-    out.line(&format!("dto {key} {}  # {x:?}", float(x)));
-}
-
-/// Writes `dto <key>`, then `x` as [`dto_f64`] does, or `-` for none.
-fn dto_option(out: &mut GoldenWriter, key: &str, x: Option<f64>) {
-    match x {
-        Some(x) => dto_f64(out, key, x),
-        None => out.line(&format!("dto {key} -")),
-    }
-}
-
-/// Writes the header's DTO lines, in `SurfaceHeaderDto`'s order.
-///
-/// The header's parts and each palette entry are taken apart whole, each member the wire does not
-/// carry named and dropped, so that a member added to either is a compile error here until the
-/// format takes it or says it does not (fixes-d D-A, after R09.T2.f added `FeO_T` and the
-/// weathering rate unseen).
-///
-/// # Panics
-///
-/// If a palette entry carries a liquid record, which the format does not hold: the fixture's
-/// Moon-like palette has none.
-fn write_dto(out: &mut GoldenWriter, header: &FieldHeader) {
-    let FieldHeaderParts {
-        body,
-        radius,
-        figure,
-        sea_level,
-        lapse_rate_k_per_m,
-        spectrum: _,
-        craters: _,
-        climate_model,
-        precipitation,
-        realised_sigma_h,
-        realised_relief,
-        months,
-        season_eccentricity,
-        reference_temperature,
-        temperature_step: _,
-        anomaly_step: _,
-        surface_age,
-        surface_pressure,
-        albedo_scale,
-        palette,
-        crust_palette: _,
-        main_liquid,
-        maturity,
-        organic_cover,
-        weathering_rate,
-    } = header.parts();
-    out.line(&format!(
-        "dto body {:016x}.{:04x}",
-        body.raw_system_id(),
-        body.body_index()
-    ));
-    out.line(&format!("dto level {}", header.level().get()));
-    dto_f64(out, "radius_m", radius.value());
-    dto_f64(out, "equatorial_radius_m", figure.equatorial_radius_m);
-    dto_f64(out, "polar_radius_m", figure.polar_radius_m);
-    dto_f64(
-        out,
-        "boundary_diameter_m",
-        header.boundary_diameter().value(),
-    );
-    dto_f64(out, "sea_level_m", sea_level.value());
-    dto_f64(out, "lapse_rate_k_per_m", *lapse_rate_k_per_m);
-    dto_f64(out, "realised_sigma_h_m", realised_sigma_h.value());
-    dto_f64(out, "realised_relief_m", realised_relief.value());
-    out.line(&format!("dto months {months}"));
-    dto_f64(out, "season_eccentricity", *season_eccentricity);
-    dto_f64(
-        out,
-        "reference_temperature_k",
-        reference_temperature.value(),
-    );
-    dto_f64(out, "surface_age_gyr", surface_age.value());
-    dto_f64(out, "surface_pressure_pa", surface_pressure.value());
-    dto_option(out, "albedo_scale", *albedo_scale);
-    out.line(&format!(
-        "dto climate_model {}",
-        climate_name(*climate_model)
-    ));
-    out.line(&format!(
-        "dto precipitation {}",
-        precipitation_name(*precipitation)
-    ));
-    for (index, entry) in palette.entries().iter().enumerate() {
-        let PaletteEntry {
-            substance,
-            role,
-            normal_albedo_bvr,
-            phase_row,
-            grain_density_kg_m3: _,
-            transition: _,
-            mechanics: _,
-            liquid,
-            feo_mass_fraction,
-        } = entry;
-        assert!(
-            liquid.is_none(),
-            "the terrain test's format holds no liquid record"
-        );
-        let [b, v, r] = normal_albedo_bvr.map(float);
-        let feo = feo_mass_fraction.map_or_else(|| "-".to_owned(), float);
-        out.line(&format!(
-            "dto palette {index} {} {} {b} {v} {r} {phase_row} - {feo}",
-            substance.as_str(),
-            role_name(*role),
-        ));
-    }
-    out.line(&format!(
-        "dto main_liquid {}",
-        main_liquid.map_or_else(|| "-".to_owned(), |m| m.to_string())
-    ));
-    dto_option(out, "maturity", *maturity);
-    dto_option(out, "organic_cover", *organic_cover);
-    dto_option(out, "weathering_rate", *weathering_rate);
-}
-
-/// `cover`'s runs in the terrain test's form, each `<first>-<past last>:<code>`, `-` for none.
-fn coded_runs(cover: &Cover) -> String {
-    if cover.is_empty() {
-        "-".to_owned()
-    } else {
-        cover
-            .ranges()
-            .iter()
-            .map(|r| format!("{}-{}:{}", r.start(), r.end(), r.code().get()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
 }
 
 /// `TERRAIN TEST`'s golden.
@@ -751,48 +586,26 @@ fn terrain_weathered_text() -> String {
     terrain_text_of(&terrain_fixture_of(field), field)
 }
 
-/// The terrain test's golden of the fixture `f` of `field`: its header, surveys, payloads and the
-/// changes its blocks make in turn, and, where the header carries a maturity, its maturity's lines
-/// ([`write_maturity`]).
+/// The terrain test's golden of the fixture `f` of `field`: its header, then the testing module's
+/// lines (`terrain_test_lines`: its surveys, payloads and the changes its blocks make in turn), and,
+/// where the header carries a maturity, its maturity's lines ([`write_maturity`]).
 fn terrain_text_of(f: &TerrainFixture, field: &CoarseField) -> String {
     let mut out = GoldenWriter::new();
     out.header(crate::generator_version());
-    out.line(&format!(
-        "body {:016x}.{:04x}",
-        f.body.raw_system_id(),
-        f.body.body_index()
-    ));
-    out.line(&format!("seed {:016x}", SEED.get()));
-    write_dto(&mut out, field.header());
-    for (revision, survey) in (1..).zip(&f.surveys) {
-        out.line(&format!("survey {revision} {}", coded_runs(survey)));
-    }
-    for (n, payload) in (1..).zip(&f.payloads) {
-        let have = payload
-            .have
-            .map_or_else(|| "-".to_owned(), |h| h.to_string());
-        out.line(&format!("payload {n} {} {have}", payload.revision));
-        out.line(&format!(
-            "cover {n} {}",
-            coded_runs(&payload_cover(&payload.blocks))
-        ));
-        for (index, block) in payload.blocks.iter().enumerate() {
-            out.line(&format!("block {n} {index} {}", hex(block)));
-        }
-    }
-    let mut fields = WorkerFields::new();
-    for (ordinal, block) in f.first_then_delta().enumerate() {
-        let change = if ordinal == 0 {
-            fields.init(f.body, block, SigmaSurvey::Surveyed)
-        } else {
-            fields.chunk(f.body, block)
-        }
-        .expect("the fixture's blocks are taken");
-        out.line(&format!("change {ordinal} {}", runs(change.runs())));
-        out.line(&format!("held {ordinal} {}", runs(change.held_runs())));
+    for line in terrain_test_lines(f, field, SEED) {
+        out.line(&line);
     }
     if field.header().maturity().is_some() {
-        write_maturity(&mut out, &mut fields, f.body, field);
+        let mut fields = WorkerFields::new();
+        for (ordinal, block) in f.first_then_delta().enumerate() {
+            if ordinal == 0 {
+                fields.init(f.body(), block, SigmaSurvey::Surveyed)
+            } else {
+                fields.chunk(f.body(), block)
+            }
+            .expect("the fixture's blocks are taken");
+        }
+        write_maturity(&mut out, &mut fields, f.body(), field);
     }
     out.finish()
 }
@@ -800,6 +613,105 @@ fn terrain_text_of(f: &TerrainFixture, field: &CoarseField) -> String {
 #[test]
 fn worker_matches_its_terrain_test_golden() {
     golden!("worker/terrain_test", &terrain_text());
+}
+
+/// The views check's tool's text of the patch (`terrain_test_text`, which `whole_terrain_test`
+/// writes for the whole body) is `terrain_test.golden`'s, header and all.
+#[test]
+fn worker_the_tool_s_text_of_the_patch_is_the_terrain_test_golden() {
+    assert_eq!(
+        terrain_test_text(&terrain_fixture(), world(WORLD), SEED),
+        terrain_text()
+    );
+}
+
+/// The whole body's payloads fit the client's requests: each whole answer in at most 257 chunks
+/// (`bulk.ts`' `MAX_BULK_CHUNKS`) of at most 16 KiB, and its delta, the patch's second survey's
+/// cells at their finer code alone, in at least two blocks of at most 3 KiB, for the forced loss
+/// mid-stream.
+#[test]
+fn worker_the_whole_body_s_payloads_fit_the_client_s_requests() {
+    let whole = whole_terrain_test_fixture(world(WORLD));
+    let [first, delta, at_two, held] = whole.payloads();
+    for answer in [first, at_two] {
+        assert!(
+            (2..=257).contains(&answer.blocks().len()),
+            "{}",
+            answer.blocks().len()
+        );
+        assert!(answer.blocks().iter().all(|block| block.len() <= 16_384));
+    }
+    assert!(delta.blocks().len() >= 2, "{}", delta.blocks().len());
+    assert!(delta.blocks().iter().all(|block| block.len() <= 3_072));
+    assert_eq!(held.blocks().len(), 1);
+    let [before, after] = whole.surveys();
+    let recoded: Vec<u32> = after
+        .cells()
+        .filter(|&cell| after.code(cell) != before.code(cell))
+        .collect();
+    assert_ne!(recoded, Vec::<u32>::new());
+    assert_eq!(
+        payload_cover(delta.blocks()).cells().collect::<Vec<_>>(),
+        recoded
+    );
+}
+
+/// Each surveyed cell of the decoded `blocks` with its code and record, and each climate record
+/// over them, by index.
+fn surveyed_records(
+    blocks: &[DecodedBlock],
+) -> (
+    std::collections::BTreeMap<u32, (u8, crate::field::SynthesisCell)>,
+    std::collections::BTreeMap<u32, crate::field::ClimateCell>,
+) {
+    let mut cells = std::collections::BTreeMap::new();
+    let mut climate = std::collections::BTreeMap::new();
+    for block in blocks {
+        let indices = block
+            .cover()
+            .ranges()
+            .iter()
+            .flat_map(|r| (r.start()..r.end()).map(move |index| (index, r.code())));
+        for ((index, code), record) in indices.zip(block.cells()) {
+            if code.is_surveyed() {
+                cells.insert(index, (code.get(), *record));
+            }
+        }
+        for (&index, record) in block.climate_indices().iter().zip(block.climate()) {
+            climate.insert(index, *record);
+        }
+    }
+    (cells, climate)
+}
+
+/// The whole body's field and `TERRAIN TEST`'s patch are one field cut twice (plan R10,
+/// R10.T14.c's whole-body run; research-leans-20 §2): at revision 2 the whole body's blocks decode,
+/// over each of the patch's surveyed cells, to the patch's record and code, and to its climate
+/// records; every cell of the field's level is surveyed; and the craters reaching the patch are
+/// among the whole body's.
+#[test]
+fn worker_the_whole_body_and_the_patch_are_one_field_cut_twice() {
+    let patch = decode_payload_of(terrain_fixture().payloads()[2].blocks());
+    let whole_fixture = whole_terrain_test_fixture(world(WORLD));
+    let whole = decode_payload_of(whole_fixture.payloads()[2].blocks());
+    let (patch_cells, patch_climate) = surveyed_records(&patch);
+    let (whole_cells, whole_climate) = surveyed_records(&whole);
+    assert_eq!(patch_cells.len(), 48);
+    assert_eq!(
+        u64::try_from(whole_cells.len()).unwrap(),
+        u64::from(world(WORLD).header().level().cell_count())
+    );
+    for (index, record) in &patch_cells {
+        assert_eq!(whole_cells.get(index), Some(record), "cell {index}");
+    }
+    for (index, record) in &patch_climate {
+        assert_eq!(whole_climate.get(index), Some(record), "climate {index}");
+    }
+    let whole_craters: Vec<_> = whole.iter().flat_map(DecodedBlock::craters).collect();
+    for crater in patch.iter().flat_map(DecodedBlock::craters) {
+        assert!(whole_craters.contains(&crater), "{crater:?}");
+    }
+    assert_eq!(TERRAIN_TEST_SEED.get(), SEED.get());
 }
 
 #[test]
@@ -1137,7 +1049,7 @@ fn worker_matches_its_maturity_layer_golden() {
 #[test]
 fn worker_terrain_test_block_zero_carries_the_world_s_header() {
     let f = terrain_fixture();
-    let blocks = decode_payload_of(&f.payloads[0].blocks);
+    let blocks = decode_payload_of(f.payloads()[0].blocks());
     assert_eq!(blocks[0].header(), Some(world(WORLD).header()));
 }
 

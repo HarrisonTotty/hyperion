@@ -25,12 +25,21 @@
 //! cell's centre rather than smoothed to the cell.
 
 mod liquids;
+mod terrain_test;
 mod worlds;
 
 pub use liquids::{
     LIQUID_METHANE_TITAN_DENSITY_KG_M3, LIQUID_WATER_DENSITY_KG_M3, basaltic_melt,
     liquid_methane_titan, liquid_water,
 };
+// `TERRAIN TEST`'s fields and their text: `worker::golden` blesses the patch's, and the views
+// check's whole-body run reads the whole body's (`examples/whole_terrain_test.rs`).
+pub use terrain_test::{
+    TERRAIN_TEST_SEED, TerrainTestFixture, TerrainTestPayload, terrain_test_lines,
+    terrain_test_text, whole_terrain_test_fixture,
+};
+#[cfg(test)]
+pub(crate) use terrain_test::{payload_cover, terrain_test_fixture};
 #[cfg(test)]
 pub(crate) use worlds::pluto_like;
 // R10.T1.c's tests and the bake's bench weather and vary the Moon-like world
