@@ -255,8 +255,9 @@ fn a_scan_of_the_galaxy_s_mergers_runs_no_engine() {
     assert_eq!(scanned, SCANNED_MERGERS);
 }
 
-/// The fixture's realised stellar mergers, as measured: 0.9901 of the 9 × 10⁴ expected.
-const SCANNED_MERGERS: usize = 89_106;
+/// The fixture's realised stellar mergers, as measured at generator version 25: 0.9902 of the
+/// 9 × 10⁴ expected (89,106 at 24).
+const SCANNED_MERGERS: usize = 89_116;
 
 /// Every neutron-star merger cell of `galaxy`, scanned: the galaxy's realised mergers.
 fn every_nsm(galaxy: &Galaxy) -> Vec<hyperion_sim::stellar::binary::scan::NsmScanMarks> {
