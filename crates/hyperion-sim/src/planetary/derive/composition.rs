@@ -68,6 +68,7 @@ use crate::planetary::derive::radius::{
     NEPTUNIAN_JOVIAN_TRANSITION, TablePosition, dry_radius, giant_mass, giant_share, radius_zeng,
     water_fraction_of_blend,
 };
+use crate::planetary::derive::rocky::CoreShareShift;
 use crate::planetary::params::{
     COMPOSITION_REFERENCE_AGE, ENVELOPE_CORE_FLOOR, INNER_WATER_CAP, OUTER_WATER_CAP,
 };
@@ -444,6 +445,7 @@ pub struct RadiusWindow {
     rock: EarthRadii,
     dry_top: EarthRadii,
     dry_top_core_mass_fraction: f64,
+    core_share_shift: CoreShareShift,
     greatest: EarthRadii,
 }
 
@@ -469,18 +471,28 @@ impl RadiusWindow {
     }
 
     /// The top of the rocky outcomes (rulings 53 and 58): the pure-rock curve inside the snow
-    /// line, and beyond it the Earth-like curve, above which a body formed there keeps Chen and
-    /// Kipping's radius and the water the solve reads in it.
+    /// line, and beyond it the Earth-like curve (at [`dry_top_core_mass_fraction`](Self::dry_top_core_mass_fraction),
+    /// Earth's about the body's host), above which a body formed there keeps Chen and Kipping's
+    /// radius and the water the solve reads in it.
     #[must_use]
     pub const fn dry_top(&self) -> EarthRadii {
         self.dry_top
     }
 
     /// The core mass fraction of the composition at [`dry_top`](Self::dry_top): 0, pure rock,
-    /// inside the snow line, and Earth's [`EARTH_CORE_MASS_FRACTION`], 0.325, beyond it.
+    /// inside the snow line, and beyond it Earth's [`EARTH_CORE_MASS_FRACTION`], 0.325, about the
+    /// body's host ([`CoreShareShift::about_host`]), 0.325 itself for no shift.
     #[must_use]
     pub const fn dry_top_core_mass_fraction(&self) -> f64 {
         self.dry_top_core_mass_fraction
+    }
+
+    /// The shift of the body's host ([`CoreShareShift`]), by which its rocky outcomes' core mass
+    /// fractions are drawn ([`rocky_core_mass_fraction`](crate::planetary::derive::rocky_core_mass_fraction)):
+    /// [`CoreShareShift::NONE`] for a [`radius_window`].
+    #[must_use]
+    pub const fn core_share_shift(&self) -> CoreShareShift {
+        self.core_share_shift
     }
 
     /// The largest radius kept: the largest envelope the mass allows on the side's core
@@ -524,6 +536,22 @@ pub fn radius_window(
     side: SnowLineSide,
     flux: EarthFluxes,
 ) -> Result<RadiusWindow, SolveCompositionError> {
+    radius_window_about(mass, side, flux, CoreShareShift::NONE)
+}
+
+/// [`radius_window`] about a host of shift `shift` ([`CoreShareShift`]): beyond the snow line its
+/// top is the Zeng radius at Earth's core mass fraction about the host, which keeps the radius
+/// continuous at the top's rank; with no shift it is [`radius_window`]'s, to the bit.
+///
+/// # Errors
+///
+/// As [`radius_window`]'s.
+pub(crate) fn radius_window_about(
+    mass: EarthMasses,
+    side: SnowLineSide,
+    flux: EarthFluxes,
+    shift: CoreShareShift,
+) -> Result<RadiusWindow, SolveCompositionError> {
     let m = mass.value();
     if !(m.is_finite() && m > 0.0) {
         return Err(SolveCompositionError::MassNotPositive);
@@ -552,10 +580,10 @@ pub fn radius_window(
     };
     let (dry_top, dry_top_core_mass_fraction) = match side {
         SnowLineSide::Inside => (rock, 0.0),
-        SnowLineSide::Beyond => (
-            dry_radius(&dry, EARTH_CORE_MASS_FRACTION),
-            EARTH_CORE_MASS_FRACTION,
-        ),
+        SnowLineSide::Beyond => {
+            let earth = shift.about_host(EARTH_CORE_MASS_FRACTION);
+            (dry_radius(&dry, earth), earth)
+        }
     };
     Ok(RadiusWindow {
         mass,
@@ -563,6 +591,7 @@ pub fn radius_window(
         rock: EarthRadii::new(rock),
         dry_top: EarthRadii::new(dry_top),
         dry_top_core_mass_fraction,
+        core_share_shift: shift,
         greatest: EarthRadii::new(greatest),
     })
 }

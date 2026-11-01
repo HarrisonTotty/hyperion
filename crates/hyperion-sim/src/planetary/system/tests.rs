@@ -8113,6 +8113,40 @@ pub(super) fn golden_contexts() -> Vec<(&'static str, SystemContext)> {
         .collect()
 }
 
+/// A rocky body's core share answers to the rock its crust's basis reads (the core share by the
+/// host, at 27): a golden system's bodies' hosts at the epoch, and its moon generators' parents'
+/// ([`host_rock`]), carry its host's Mg/Si and \[α/Fe\] as [`PlanetarySystem::crust_host`] gives
+/// them, the halo star's α-rich.
+#[test]
+fn a_body_s_hosts_carry_the_rock_its_crust_reads() {
+    let mut alpha_rich = 0;
+    for (name, ctx, system) in golden_systems() {
+        let host = system.crust_host(ctx);
+        let rock = (host.host_magnesium_to_silicon, host.alpha_fe);
+        assert_eq!(
+            host_rock(Seed::new(GOLDEN_SYSTEMS_SEED), ctx),
+            rock,
+            "{name}"
+        );
+        alpha_rich += u32::from(host.alpha_fe.value() > 0.1);
+        let epoch = Epoch::new(system, ctx, UniverseTime::EPOCH);
+        for zone in &system.zones {
+            let has_disc = system
+                .host(zone.host())
+                .and_then(|host| host.disc.profile())
+                .is_some();
+            if !has_disc || epoch.lights(zone).is_none() || epoch.companions(zone).is_none() {
+                continue;
+            }
+            let carried = system.with_hosts(&epoch, zone, zone.host_mass(), |_, hosts| {
+                (hosts.host_magnesium_to_silicon(), hosts.alpha_fe())
+            });
+            assert_eq!(carried, rock, "{name}");
+        }
+    }
+    assert!(alpha_rich > 0);
+}
+
 /// Batch E's review, R9: [`GOLDEN_SYSTEMS`] and [`GOLDEN_SYSTEMS_SEED`] are the golden test's own,
 /// `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS` (each name and pinned ID, in order) and
 /// `SYSTEMS_SEED`, as its source states them.

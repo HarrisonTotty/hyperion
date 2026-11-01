@@ -6,7 +6,7 @@
 
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
 use hyperion_sim::planetary::derive::rocky::{
-    HIGH_CORE_MASS_FRACTION, LOW_CORE_MASS_FRACTION, MEDIAN_CORE_MASS_FRACTION,
+    CoreShareShift, HIGH_CORE_MASS_FRACTION, LOW_CORE_MASS_FRACTION, MEDIAN_CORE_MASS_FRACTION,
     core_mass_fraction_rank,
 };
 use hyperion_sim::planetary::derive::{
@@ -139,7 +139,7 @@ fn rocky_core_mass_fractions_follow_plotnykov_and_valencia() {
         .enumerate()
         .map(|(k, &cmf)| {
             let below = f64::from(u32::try_from(k).unwrap()) / n;
-            (core_mass_fraction_rank(cmf) - below).abs()
+            (core_mass_fraction_rank(cmf, CoreShareShift::NONE) - below).abs()
         })
         .fold(0.0, f64::max);
     assert!(gap < 0.01, "Kolmogorov distance {gap}");

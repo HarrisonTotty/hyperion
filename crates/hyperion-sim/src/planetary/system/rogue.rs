@@ -52,7 +52,8 @@
 use core::slice;
 
 use super::{
-    Body, Part, PlanetarySystem, moon_state, moon_trajectory, parent_time, satellite_bodies,
+    Body, Part, PlanetarySystem, host_rock, moon_state, moon_trajectory, parent_time,
+    satellite_bodies,
 };
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
@@ -75,7 +76,7 @@ use crate::planetary::rings::RingParent;
 use crate::planetary::satellites::{SatelliteFrame, Satellites, satellites_inside};
 use crate::stellar::draws::UnitUniform;
 use crate::time::UniverseTime;
-use crate::units::{EarthFluxes, EarthMasses, Kilograms, Metres};
+use crate::units::{Dex, EarthFluxes, EarthMasses, Kilograms, Metres};
 
 /// A rogue planet, body `0x0000` of its system, as generated (P14.T27.b, design note 13): its
 /// mass, its radius rank and its birth orbit.
@@ -109,11 +110,14 @@ pub struct RoguePlanet {
     mass: EarthMasses,
     radius_rank: UnitUniform,
     birth: BirthOrbit,
+    /// Its birth host's rock, its own system's Mg/Si and \[α/Fe\] ([`host_rock`]).
+    rock: (f64, Dex),
 }
 
 impl RoguePlanet {
     /// The rogue planet of `ctx` in the universe of `seed`: its plan 13 mass, word 0 of its own
-    /// `planet.radius` stream and its birth orbit ([`BirthOrbit::draw`]).
+    /// `planet.radius` stream, its birth orbit ([`BirthOrbit::draw`]) and its birth host's rock,
+    /// its system's ([`host_rock`]).
     ///
     /// # Panics
     ///
@@ -128,6 +132,7 @@ impl RoguePlanet {
             mass: EarthMasses::from(mass),
             radius_rank: super::radius_rank(seed, object),
             birth: BirthOrbit::draw(seed, object),
+            rock: host_rock(seed, ctx),
         }
     }
 
@@ -185,9 +190,10 @@ impl RoguePlanet {
         } else {
             AloneMetals::Cloud
         };
+        let (magnesium_to_silicon, alpha_fe) = self.rock;
         derive_alone(
             &self.placed(),
-            &birth_host(ctx.composition()),
+            &birth_host(ctx.composition(), magnesium_to_silicon, alpha_fe),
             ctx.composition(),
             ctx.age_at(t),
             metals,

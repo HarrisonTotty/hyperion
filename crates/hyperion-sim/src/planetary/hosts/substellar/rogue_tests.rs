@@ -838,9 +838,12 @@ fn a_birth_orbit_reads_words_two_to_four_of_its_object_s_origin_stream() {
         );
         let au = AstronomicalUnits::from(birth.semi_major_axis()).value();
         assert!((lo..hi).contains(&au));
-        let snow =
-            AstronomicalUnits::from(birth_host(&crate::stellar::Composition::SOLAR).snow_line)
-                .value();
+        let sun = birth_host(
+            &crate::stellar::Composition::SOLAR,
+            crate::planetary::chem::solar_magnesium_to_silicon(),
+            Dex::ZERO,
+        );
+        let snow = AstronomicalUnits::from(sun.snow_line).value();
         inside += u32::from(au < snow);
         north += u32::from(birth.plane().inclination().value() < core::f64::consts::FRAC_PI_2);
         let elements = birth.elements(EarthMasses::new(1.0));

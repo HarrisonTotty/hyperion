@@ -120,6 +120,7 @@ use crate::planetary::chem::escape::{moon_impact_speed, planet_impact_speed};
 use crate::planetary::chem::inventory::{
     ElementInventory, InventoryInputs, Reservoir, element_inventory,
 };
+use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
     PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
@@ -128,7 +129,7 @@ use crate::planetary::derive::atmosphere::{
     pass_regolith, pass_resurfacing, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
-    SolveCompositionError, dry_composition, formed_with_envelope,
+    SolveCompositionError, dry_composition, formed_with_envelope, radius_window_about,
 };
 use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
@@ -159,9 +160,9 @@ use crate::substance::Element;
 use crate::time::UniverseTime;
 use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT};
 use crate::units::{
-    EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
-    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
-    Seconds, SolarLuminosities, SolarMasses, Watts, WattsPerSquareMetre, Years,
+    Dex, EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses,
+    Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared,
+    Pascals, Seconds, SolarLuminosities, SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -629,6 +630,8 @@ pub struct BodyHosts<'a> {
     companions: &'a [Illumination],
     shades: Option<&'a ShadeBook>,
     parent_orbital_speed: Option<MetresPerSecond>,
+    host_magnesium_to_silicon: f64,
+    alpha_fe: Dex,
 }
 
 impl PartialEq for BodyHosts<'_> {
@@ -640,13 +643,16 @@ impl PartialEq for BodyHosts<'_> {
             && self.orbited == other.orbited
             && self.companions == other.companions
             && self.parent_orbital_speed == other.parent_orbital_speed
+            && self.host_magnesium_to_silicon == other.host_magnesium_to_silicon
+            && self.alpha_fe == other.alpha_fe
     }
 }
 
 impl<'a> BodyHosts<'a> {
     /// Hosts of which the body orbits `primary_mass` (a star's mass at the time, or a pair's), in a
     /// system of composition `composition` (plan 06's, as drawn for the system), lit by `orbited`
-    /// at its own distance and by `companions` at theirs.
+    /// at its own distance and by `companions` at theirs. Its host's rock is at the Sun's Mg/Si
+    /// and \[α/Fe\] 0, which move no core share; a system's record gives its own host's.
     ///
     /// # Errors
     ///
@@ -672,7 +678,37 @@ impl<'a> BodyHosts<'a> {
             companions,
             shades: None,
             parent_orbital_speed: None,
+            host_magnesium_to_silicon: solar_magnesium_to_silicon(),
+            alpha_fe: Dex::ZERO,
         })
+    }
+
+    /// The same hosts, whose rock a body forms of has Mg/Si `host_magnesium_to_silicon` (by
+    /// number) and \[α/Fe\] `alpha_fe`, as the body's crust reads them: what its rocky outcomes'
+    /// core shares answer to from generator version 27 ([`rocky::CoreShareShift::of_host`]).
+    #[must_use]
+    pub(crate) const fn with_host_rock(
+        self,
+        host_magnesium_to_silicon: f64,
+        alpha_fe: Dex,
+    ) -> Self {
+        Self {
+            host_magnesium_to_silicon,
+            alpha_fe,
+            ..self
+        }
+    }
+
+    /// The host's Mg/Si by number, as its bodies' crusts read it ([`with_host_rock`](Self::with_host_rock)).
+    #[must_use]
+    pub(crate) const fn host_magnesium_to_silicon(&self) -> f64 {
+        self.host_magnesium_to_silicon
+    }
+
+    /// The host's \[α/Fe\], 0 for none ([`with_host_rock`](Self::with_host_rock)).
+    #[must_use]
+    pub(crate) const fn alpha_fe(&self) -> Dex {
+        self.alpha_fe
     }
 
     /// The same hosts, whose body's shade reads its call chain's book `shades` where there is one
@@ -1312,7 +1348,11 @@ pub fn rocky_core_mass_fraction(radius_rank: UnitUniform, window: &RadiusWindow)
     let r = radius_rank.value();
     (r <= top).then(|| {
         let share = ((r - iron) / (top - iron)).clamp(0.0, 1.0);
-        rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction())
+        rocky::core_mass_fraction_at_least(
+            1.0 - share,
+            window.dry_top_core_mass_fraction(),
+            window.core_share_shift(),
+        )
     })
 }
 
@@ -1668,7 +1708,7 @@ impl BeforePasses {
         if age_now.value().is_nan() || age_now.value() <= 0.0 {
             return Err(DeriveBodyError::NotYetFormed { age: age_now });
         }
-        let (formed, radius_rank, solved) = formation(placed, disc)?;
+        let (formed, radius_rank, solved) = formation(placed, hosts, disc)?;
 
         // T12, at the time: the light now, the worst it has been, and the X-rays so far.
         let sky = Sky::of(placed, hosts, age_now);
@@ -3079,26 +3119,26 @@ impl PlacedBody {
     }
 }
 
-/// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed
-/// on, its confined rank, and its solved composition, which is `None` from 0.414 Jupiter masses,
-/// where there is no window and no solve and the body is a giant (T11.d).
+/// What [`derive_body`] fixes at formation (T11) in `disc` about `hosts`: the side of the disc's
+/// snow line the body formed on, its confined rank, and its solved composition, which is `None`
+/// from 0.414 Jupiter masses, where there is no window and no solve and the body is a giant
+/// (T11.d).
 fn formation(
     placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
     disc: &DiscProfile,
 ) -> Result<(SnowLineSide, UnitUniform, Option<SolvedComposition>), DeriveBodyError> {
     formation_about(
         placed,
-        &FormationHost {
-            mass: disc.host_mass(),
-            luminosity: disc.host_luminosity(),
-            snow_line: disc.snow_line(),
-        },
+        &FormationHost::of_disc(disc)
+            .with_host_rock(hosts.host_magnesium_to_silicon(), hosts.alpha_fe()),
     )
 }
 
 /// The host a body formed about, as its formation (T11) reads it: its mass, its zero-age
 /// luminosity and its disc's snow line, a [`DiscProfile`]'s, or for a rogue planet its birth
-/// host's ([`derive_alone`]).
+/// host's ([`derive_alone`]); and its rock's Mg/Si and \[α/Fe\], to which a rocky outcome's core
+/// share answers from generator version 27 ([`rocky::CoreShareShift::of_host`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FormationHost {
     /// The host's mass.
@@ -3107,6 +3147,35 @@ pub(crate) struct FormationHost {
     pub(crate) luminosity: SolarLuminosities,
     /// The snow line of the host's disc.
     pub(crate) snow_line: Metres,
+    /// The host's Mg/Si by number, as its bodies' crusts read it (its system's
+    /// [`HostAbundances`](crate::planetary::chem::HostAbundances)).
+    pub(crate) magnesium_to_silicon: f64,
+    /// The host's \[α/Fe\], 0 for none.
+    pub(crate) alpha_fe: Dex,
+}
+
+impl FormationHost {
+    /// The host of `disc`, its rock at the Sun's Mg/Si and \[α/Fe\] 0.
+    #[must_use]
+    fn of_disc(disc: &DiscProfile) -> Self {
+        Self {
+            mass: disc.host_mass(),
+            luminosity: disc.host_luminosity(),
+            snow_line: disc.snow_line(),
+            magnesium_to_silicon: solar_magnesium_to_silicon(),
+            alpha_fe: Dex::ZERO,
+        }
+    }
+
+    /// The same host, its rock of Mg/Si `magnesium_to_silicon` and \[α/Fe\] `alpha_fe`.
+    #[must_use]
+    const fn with_host_rock(self, magnesium_to_silicon: f64, alpha_fe: Dex) -> Self {
+        Self {
+            magnesium_to_silicon,
+            alpha_fe,
+            ..self
+        }
+    }
 }
 
 /// [`formation`] about the host `host`.
@@ -3126,8 +3195,9 @@ fn formation_about(
         primordial.semi_major_axis(),
         primordial.eccentricity().value(),
     );
+    let shift = rocky::CoreShareShift::of_host(host.magnesium_to_silicon, host.alpha_fe);
     let host = host.mass;
-    match radius_window(mass, formed, formation_flux) {
+    match radius_window_about(mass, formed, formation_flux, shift) {
         Ok(window) if formed == SnowLineSide::Inside && m_dwarfs::rocky_host_share(host) > 0.0 => {
             let (rank, solved) = rocky_branch(placed.radius_rank, &window, host, formation_flux)?;
             Ok((formed, rank, Some(solved)))
@@ -3201,8 +3271,11 @@ fn rocky_branch(
     };
     if u <= rocky {
         let share = (u / rocky).clamp(0.0, 1.0);
-        let cmf =
-            rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction());
+        let cmf = rocky::core_mass_fraction_at_least(
+            1.0 - share,
+            window.dry_top_core_mass_fraction(),
+            window.core_share_shift(),
+        );
         Ok((
             rank(least + share * (top - least)),
             dry_composition(mass, cmf),
@@ -3232,7 +3305,9 @@ fn takes_formation_envelope(mass: EarthMasses, formed: SnowLineSide) -> bool {
 
 /// The composition a body is given at formation (P14.T11, ruling 102.1): the part of
 /// [`derive_body`] that its mass, primordial orbit, formation distance and rank fix in `disc`,
-/// whatever the time. `None` from 0.414 Jupiter masses, a giant's, which has no solve.
+/// whatever the time, about a host of the Sun's Mg/Si and \[α/Fe\] 0, as [`BodyHosts::new`]'s
+/// (a host's own rock moves a rocky outcome's core share from generator version 27). `None` from
+/// 0.414 Jupiter masses, a giant's, which has no solve.
 ///
 /// Its [`radius`](SolvedComposition::radius) is the body's at [`COMPOSITION_REFERENCE_AGE`] and
 /// the flux of its host's zero-age luminosity on its primordial orbit, the radius a survey of
@@ -3248,7 +3323,7 @@ pub fn formation_composition(
     placed: &PlacedBody,
     disc: &DiscProfile,
 ) -> Result<Option<SolvedComposition>, DeriveBodyError> {
-    formation(placed, disc).map(|(_, _, solved)| solved)
+    formation_about(placed, &FormationHost::of_disc(disc)).map(|(_, _, solved)| solved)
 }
 
 /// A body's radius, mass fractions and core at the time (T11), and its giant's radius if it is
@@ -3653,8 +3728,12 @@ pub(crate) mod solar {
                 .core()
                 .core_mass_fraction();
             let top = chen_kipping_rank(mass, window.dry_top());
-            let below = rocky::core_mass_fraction_rank(window.dry_top_core_mass_fraction());
-            let held = (rocky::core_mass_fraction_rank(cmf) - below) / (1.0 - below);
+            let below = rocky::core_mass_fraction_rank(
+                window.dry_top_core_mass_fraction(),
+                window.core_share_shift(),
+            );
+            let held = (rocky::core_mass_fraction_rank(cmf, window.core_share_shift()) - below)
+                / (1.0 - below);
             least + (1.0 - held) * (top - least)
         } else {
             chen_kipping_rank(mass, radius)
@@ -4563,6 +4642,116 @@ mod tests {
         );
     }
 
+    /// Under every 27 hold beyond the snow line the rocky part of the window about a host of
+    /// \[α/Fe\] +0.3 starts at its Earth, logistic(logit(0.325) + Δ), 0.194, and about an
+    /// iron-richer host (\[α/Fe\] −0.05) above 0.325; either way the radius is continuous across
+    /// the top's rank, and every rocky outcome is held to the floor.
+    #[test]
+    fn under_27_beyond_the_snow_line_the_rocky_part_starts_at_the_host_s_earth() {
+        use crate::planetary::testing::with_every_27_hold;
+        with_every_27_hold(|| {
+            let flux = EarthFluxes::new(0.05);
+            let solar = solar_magnesium_to_silicon();
+            for (alpha, floor) in [(0.3, 0.194), (-0.05, 0.351)] {
+                let shift = rocky::CoreShareShift::of_host(solar, Dex::new(alpha));
+                for m in [0.3, 1.0, 1.6, 3.0, 10.0] {
+                    let mass = EarthMasses::new(m);
+                    let side = SnowLineSide::Beyond;
+                    let window = radius_window_about(mass, side, flux, shift).unwrap();
+                    let earth = window.dry_top_core_mass_fraction();
+                    assert!((earth - floor).abs() < 0.005, "{m} M⊕ {alpha}: {earth}");
+                    assert_same_bits(earth, shift.about_host(radius::EARTH_CORE_MASS_FRACTION));
+                    assert_same_bits(
+                        window.dry_top().value(),
+                        dry_composition(mass, earth).radius().value(),
+                    );
+                    let top = chen_kipping_rank(mass, window.dry_top());
+                    let at = |r: f64| {
+                        confined_radius(mass, UnitUniform::new(r).unwrap(), &window, side, flux)
+                    };
+                    let (below, above) = (at(top * (1.0 - 1e-12)), at(top * (1.0 + 1e-12)));
+                    assert!(
+                        (above / below - 1.0).abs() < 1.1e-5,
+                        "{m} M⊕ {alpha}: {below}, {above}"
+                    );
+                    for i in 1..200_u32 {
+                        let rank = UnitUniform::new(top * f64::from(i) / 200.0).unwrap();
+                        if let Some(cmf) = rocky_core_mass_fraction(rank, &window) {
+                            assert!(cmf >= earth - 1e-12, "{m} M⊕ {alpha}: {cmf}");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// Under every 27 hold a body's hosts carry their rock into its formation: about a host of
+    /// \[α/Fe\] +0.3 a rocky outcome, the M-dwarf branch's and a rogue's birth host's among them,
+    /// takes the shifted draw at its rank, and about the Sun's ratios the population's, to the bit.
+    #[test]
+    fn under_27_a_body_s_hosts_carry_their_rock_into_its_draw() {
+        use crate::planetary::testing::with_every_27_hold;
+        with_every_27_hold(|| {
+            let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(0.3));
+            let shift = rocky::CoreShareShift::of_host(solar, alpha);
+            for (disc, a_au) in [(solar_disc(), 1.0), (disc_of(0.3), 0.03)] {
+                for u in [0.1, 0.3, 0.5] {
+                    let body = placed(EARTH_MASS_KG, a_au, 0.0, u);
+                    let solar_host = FormationHost::of_disc(&disc);
+                    let rich = solar_host.with_host_rock(solar, alpha);
+                    let core = |host: &FormationHost| {
+                        let (_, _, solved) = formation_about(&body, host).unwrap();
+                        solved.unwrap().core().core_mass_fraction()
+                    };
+                    let (population, about_rich) = (core(&solar_host), core(&rich));
+                    assert!(about_rich < population, "{a_au} au {u}: {about_rich}");
+                    // The shifted draw is the population's moved by Δ in its logit.
+                    let back = shift.solar_equivalent(about_rich);
+                    assert!((back - population).abs() < 1e-12, "{back} {population}");
+                    let lights = [sun()];
+                    let hosts = BodyHosts::new(
+                        Kilograms::from(disc.host_mass()),
+                        Composition::SOLAR,
+                        &lights,
+                        &[],
+                    )
+                    .unwrap();
+                    let derived = |hosts: &BodyHosts<'_>| {
+                        derive_body(&body, hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH)
+                            .unwrap()
+                            .core()
+                            .core_mass_fraction()
+                    };
+                    assert_same_bits(derived(&hosts), population);
+                    assert_same_bits(derived(&hosts.with_host_rock(solar, Dex::ZERO)), population);
+                    assert_same_bits(derived(&hosts.with_host_rock(solar, alpha)), about_rich);
+                }
+            }
+            let rogue =
+                crate::planetary::hosts::substellar::birth_host(&Composition::SOLAR, solar, alpha);
+            let body = placed(EARTH_MASS_KG, 1.0, 0.0, 0.5);
+            // A smaller core, a larger radius.
+            let alone = |host: &FormationHost| {
+                derive_alone(
+                    &body,
+                    host,
+                    &Composition::SOLAR,
+                    SOLAR_AGE,
+                    AloneMetals::DiscFormed,
+                )
+                .unwrap()
+                .radius()
+                .value()
+            };
+            let solar_rogue = FormationHost {
+                magnesium_to_silicon: solar,
+                alpha_fe: Dex::ZERO,
+                ..rogue
+            };
+            assert!(alone(&rogue) > alone(&solar_rogue));
+        });
+    }
+
     /// Ruling 58: beyond the snow line only the ranks below the Earth-like curve are rocky
     /// outcomes, held to Earth's core fraction and above, and every rank above that curve keeps
     /// its water; inside the snow line the rocky outcomes still reach the rock curve.
@@ -4826,7 +5015,8 @@ mod tests {
             let disc = disc_of(0.72);
             for u in [0.1, 0.5, 0.9] {
                 let body = placed(earths * EARTH_MASS_KG, a_au, 0.0, u);
-                let (_, rank, solved) = formation(&body, &disc).unwrap();
+                let (_, rank, solved) =
+                    formation_about(&body, &FormationHost::of_disc(&disc)).unwrap();
                 let window = radius_window(
                     mass,
                     SnowLineSide::Inside,
@@ -4894,7 +5084,12 @@ mod tests {
             let placed =
                 PlacedBody::new(EarthMasses::new(1.0), orbit(1.0, 0.0), d, UnitUniform::HALF)
                     .unwrap();
-            assert_eq!(formation(&placed, &disc).unwrap().0, side);
+            assert_eq!(
+                formation_about(&placed, &FormationHost::of_disc(&disc))
+                    .unwrap()
+                    .0,
+                side
+            );
             assert_same_bits(
                 zone.temperature().value(),
                 formation_temperature(d, line).value(),

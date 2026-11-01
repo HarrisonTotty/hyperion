@@ -1183,7 +1183,7 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         };
         let site = SatelliteSite {
             index: parent.index(),
-            parent: parent_at_epoch(&then, zone, profile, parent),
+            parent: parent_at_epoch(seed, &then, zone, profile, parent),
             belt,
         };
         satellites.push(site.find(seed, ctx, SatelliteFrame::OrbitalPlane));
@@ -1402,8 +1402,9 @@ fn parent_time(ctx: &SystemContext) -> UniverseTime {
 
 /// The body `body` of `zone`, whose disc is `profile`, as the moon generators read it
 /// (P14.T22.a), and for a planet as its rings read it: P14.T16.a's derivation at
-/// [`parent_time`], `epoch`'s time, on its primordial orbit about its zone's initial mass. `None`
-/// for a moon or a ring, and for a body whose system is not born even then.
+/// [`parent_time`], `epoch`'s time, on its primordial orbit about its zone's initial mass, of its
+/// system's rock in the universe of `seed` ([`host_rock`]). `None` for a moon or a ring, and for
+/// a body whose system is not born even then.
 ///
 /// At [`generate`]'s step 7 no body holds its law yet, so a planet's derivation here is the passes'
 /// stand-in: no rotation law, no basins, the bulk material's regolith; a system's record derives
@@ -1413,6 +1414,7 @@ fn parent_time(ctx: &SystemContext) -> UniverseTime {
 /// passes' to the bit (`an_envelope_body_s_passes_over_its_record_are_its_stand_in_s`).
 #[must_use]
 fn parent_at_epoch(
+    seed: Seed,
     epoch: &Epoch<'_>,
     zone: &OrbitZone,
     profile: &DiscProfile,
@@ -1438,9 +1440,11 @@ fn parent_at_epoch(
     // system whose age at `t` is not positive (born after the clock window's end) or a giant
     // above 13 Jupiter masses, which placement never makes; `MoonParent::new` and
     // `RingParent::new` only for a mass, radius or temperature that is not positive and finite.
+    let (magnesium_to_silicon, alpha_fe) = host_rock(seed, ctx);
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions)
         .ok()?
-        .with_shades(epoch.shades.as_ref());
+        .with_shades(epoch.shades.as_ref())
+        .with_host_rock(magnesium_to_silicon, alpha_fe);
     // An icy member's bulk, and from 25 a rocky member's lag, move only its air, albedo and
     // temperatures, none of which its moons' parent reads (its mass, its bulk's radius and class,
     // its moon limit and its orbit).
@@ -1554,7 +1558,21 @@ pub(crate) fn satellite_parent(
     let limits = within(zone.truncation(), ctx.strip_radius());
     let disc = disc::derive(inputs.host(), inputs.lifetime(), inputs.draws(), limits);
     let epoch = Epoch::of(ctx, parent_time(ctx)).with_shades();
-    parent_at_epoch(&epoch, zone, disc.profile()?, body)
+    parent_at_epoch(seed, &epoch, zone, disc.profile()?, body)
+}
+
+/// The rock the bodies of the system of `ctx` in the universe of `seed` form of, as their crusts'
+/// basis reads it ([`PlanetarySystem::crust_host`]): its host's Mg/Si by number, its
+/// `system.abundances` words 0–1 at its \[Fe/H\] (P14.T50.a's [`HostAbundances`]), and its
+/// \[α/Fe\], 0 for none. A rocky outcome's core share answers to it from generator version 27
+/// (`rocky::CoreShareShift::of_host`).
+#[must_use]
+fn host_rock(seed: Seed, ctx: &SystemContext) -> (f64, Dex) {
+    let abundances = HostAbundances::of(ctx.fe_h(), &AbundanceDraws::for_system(seed, ctx.id()));
+    (
+        abundances.magnesium_to_silicon(),
+        ctx.alpha_fe().unwrap_or(Dex::ZERO),
+    )
 }
 
 /// The system's cometary halo (P14.T21.d), if its planets scatter one: about the zone holding
@@ -2239,6 +2257,7 @@ impl PlanetarySystem {
         let companions = epoch
             .companions(zone)
             .expect("a system's stars are coeval, so every one has formed");
+        let host = self.crust_host(epoch.ctx);
         let hosts = BodyHosts::new(
             Kilograms::from(host_mass),
             *epoch.ctx.composition(),
@@ -2246,7 +2265,8 @@ impl PlanetarySystem {
             &companions,
         )
         .expect("a present body orbits a positive mass and at least one star")
-        .with_shades(epoch.shades.as_ref());
+        .with_shades(epoch.shades.as_ref())
+        .with_host_rock(host.host_magnesium_to_silicon, host.alpha_fe);
         read(disc, &hosts)
     }
 

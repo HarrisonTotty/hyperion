@@ -590,6 +590,10 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - an ocean-branch moon's porous rock core, `POROUS_CORE_VERSION` (P14.T56.e), at
 ///   `PorousCoreRules::Porous` through `with_porous_core`: a core under its compaction pressure
 ///   dissipates, and its moon's membrane floats on it.
+/// - a rocky body's core share by its host's iron, `CORE_SHARE_HOST_VERSION` (P14.T51.k's fix),
+///   at `CoreShareRules::Host` through `with_core_share`: its draw, ruling 58's floor and the
+///   window's dry top shifted by its host's Fe/(Mg + Si), and P14.T51.k's factor reading its core
+///   share about the Sun's ratios.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -603,10 +607,12 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
     use crate::planetary::moons::tides::{PorousCoreRules, with_porous_core};
     use crate::substance::{CarriersRules, with_carriers};
+    let run = move || with_core_share(CoreShareRules::Host, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
     let run = move || with_porous_core(PorousCoreRules::Porous, run);

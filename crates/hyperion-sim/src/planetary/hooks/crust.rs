@@ -187,6 +187,7 @@ use crate::planetary::chem::envelope_abundances::ALPHA_ELEMENTS;
 use crate::planetary::chem::redox::{RedoxClass, fmq_above_iw};
 use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
+use crate::planetary::derive::rocky::CoreShareShift;
 use crate::planetary::derive::{MassFractions, SnowLineSide, SurfaceLag};
 use crate::planetary::hooks::figures::interior::{
     ROCK_THERMAL_DIFFUSIVITY_M2_PER_S, RadiogenicIsotope, radiogenic_heat_production_w_per_kg,
@@ -871,10 +872,14 @@ pub(crate) fn iron_oxide_per_iron() -> f64 {
 /// body's bulk iron fraction; 0 for a core share of 1 or more, or NaN, a body of no mantle.
 ///
 /// Below version 27 (P14.T51.k's hold, `MINOR_OXIDES_VERSION`) `w_Fe` is its host's
-/// ([`bulk_iron_mass_fraction`]). From 27 it is its host's times 1 + η (`f_core` − `f₀`), η
+/// ([`bulk_iron_mass_fraction`]). From 27 it is its host's times 1 + η (f̃ − `f₀`), η
 /// [`BULK_IRON_CORE_SLOPE`] and `f₀` [`BULK_IRON_CORE_PIVOT`], so that a body's iron follows its
 /// core: at the Sun's ratios an Earth (0.325) has 8.05 wt% `FeO`, a Mars (0.204) 15.80, and a
-/// body of the generated Venus's core (0.288) 10.69.
+/// body of the generated Venus's core (0.288) 10.69. f̃ is the body's core share about the Sun's
+/// ratios, logistic(logit(`f_core`) − Δ) with Δ its host's shift
+/// ([`CoreShareShift::solar_equivalent`]; held, as Δ = 0, below 27 by `CORE_SHARE_HOST_VERSION`),
+/// and `f_core` itself about a host at the Sun's ratios: an Earth-like body about a host of
+/// \[α/Fe\] +0.3, its core 0.194, keeps 4.0 wt%.
 ///
 /// # Examples
 ///
@@ -902,7 +907,11 @@ pub fn mantle_iron_oxide_mass_fraction(
     let bulk = match MinorOxidesRules::in_force() {
         MinorOxidesRules::Held => host,
         MinorOxidesRules::Chondritic => {
-            host * (1.0 + BULK_IRON_CORE_SLOPE * (core_share - BULK_IRON_CORE_PIVOT))
+            // The factor's anchors are an Earth's and a Mars's about the Sun: it reads the body's
+            // core share about the Sun's ratios, and the mass balance below its own.
+            let own = CoreShareShift::of_host(host_magnesium_to_silicon, alpha_fe)
+                .solar_equivalent(core_share);
+            host * (1.0 + BULK_IRON_CORE_SLOPE * (own - BULK_IRON_CORE_PIVOT))
         }
     };
     let mantle_iron = bulk - core_share * CORE_IRON_FRACTION;

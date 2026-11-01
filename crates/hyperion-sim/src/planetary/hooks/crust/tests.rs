@@ -610,6 +610,123 @@ fn the_minor_oxides_move_no_core_fraction() {
     }
 }
 
+/// The share of a thousand rocky draws inside the snow line, at ranks 0.0005–0.9995 of the
+/// population about a host of the Sun's Mg/Si and \[α/Fe\] `alpha`, whose mantle's `FeO` clamps
+/// to 0, under the rules in force.
+fn clamped_share(alpha: f64) -> f64 {
+    use crate::planetary::derive::rocky::core_mass_fraction_at;
+    let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(alpha));
+    let shift = CoreShareShift::of_host(solar, alpha);
+    let clamped = (0..1_000_u32)
+        .filter(|&i| {
+            let core = core_mass_fraction_at((f64::from(i) + 0.5) / 1_000.0, shift);
+            mantle_iron_oxide_mass_fraction(core, solar, alpha) <= 0.0
+        })
+        .count();
+    f64::from(u32::try_from(clamped).unwrap()) / 1_000.0
+}
+
+/// Under every 27 hold the share of rocky draws inside the snow line whose mantle clamps to no
+/// `FeO` is the Mercury-likes' about every host, 0.26–0.34 at \[α/Fe\] 0, +0.12, +0.2 and +0.3
+/// (the research's 0.28, 0.30, 0.31 and 0.31), where the core share's population alone clamped
+/// 0.42 at +0.12 and 0.58 at +0.3, and the held share is the population's.
+#[test]
+fn under_27_the_same_share_of_rocky_draws_clamps_about_every_host() {
+    use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        for alpha in [0.0, 0.12, 0.2, 0.3] {
+            let share = clamped_share(alpha);
+            assert!((0.26..=0.34).contains(&share), "[α/Fe] {alpha}: {share}");
+        }
+        let population =
+            |alpha| with_core_share(CoreShareRules::Population, || clamped_share(alpha));
+        let (moderate, rich) = (population(0.12), population(0.3));
+        assert!((0.40..0.44).contains(&moderate), "{moderate}");
+        assert!((0.56..0.60).contains(&rich), "{rich}");
+        assert_same_bits(population(0.0), clamped_share(0.0));
+    });
+}
+
+/// Under every 27 hold an Earth-rank body about a host of \[α/Fe\] +0.3 (its core 0.194, Earth's
+/// rank in the population about the host) keeps a mantle of 3–5 wt% `FeO`, the research's 4.02,
+/// below an Earth's 8.05 about the Sun, where the population's draw clamped it to 0; and its
+/// basalt is not iron-free.
+#[test]
+fn under_27_an_earth_rank_body_about_an_alpha_rich_host_keeps_its_feo() {
+    use crate::planetary::derive::rocky::{
+        CoreShareRules, core_mass_fraction_at, core_mass_fraction_rank, with_core_share,
+    };
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(0.3));
+        let earth_rank = core_mass_fraction_rank(0.325, CoreShareShift::NONE);
+        let shift = CoreShareShift::of_host(solar, alpha);
+        let core = core_mass_fraction_at(earth_rank, shift);
+        assert!((0.193..0.195).contains(&core), "{core}");
+        let feo = mantle_iron_oxide_mass_fraction(core, solar, alpha);
+        assert!((0.03..0.05).contains(&feo), "{feo}");
+        assert!(feo < mantle_iron_oxide_mass_fraction(0.325, solar, Dex::ZERO));
+        let held = with_core_share(CoreShareRules::Population, || {
+            mantle_iron_oxide_mass_fraction(0.325, solar, alpha)
+        });
+        assert!(held <= 0.0, "{held}");
+    });
+}
+
+/// Under every 27 hold a host at the Sun's ratios keeps every figure the core share's population
+/// gives, to the bit: the mantle's `FeO` at every core share (an Earth's 8.05 wt%, a Mars's 15.80,
+/// the generated Venus's 10.69), and the Solar System table's mass fractions.
+#[test]
+fn under_27_the_sun_s_ratios_keep_every_feo_and_core_to_the_bit() {
+    use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
+    use crate::planetary::derive::solar::{historic, historic_table};
+    use crate::planetary::testing::with_every_27_hold;
+    let solar = solar_magnesium_to_silicon();
+    let both = |read: &dyn Fn() -> f64| {
+        with_every_27_hold(|| {
+            (
+                with_core_share(CoreShareRules::Population, read),
+                with_core_share(CoreShareRules::Host, read),
+            )
+        })
+    };
+    for step in 0..=100_u8 {
+        let core = 0.01 * f64::from(step);
+        let (population, host) = both(&|| mantle_iron_oxide_mass_fraction(core, solar, Dex::ZERO));
+        assert_same_bits(population, host);
+    }
+    let (earth, _) = both(&|| mantle_iron_oxide_mass_fraction(0.325, solar, Dex::ZERO));
+    let (mars, _) = both(&|| mantle_iron_oxide_mass_fraction(0.204, solar, Dex::ZERO));
+    assert!((earth - 0.080_5).abs() < 5e-5, "{earth}");
+    assert!((mars - 0.158_0).abs() < 5e-5, "{mars}");
+    let (venus_population, venus_host) = both(&|| {
+        let core = core_share(&historic("Venus").fractions());
+        mantle_iron_oxide_mass_fraction(core, solar, Dex::ZERO)
+    });
+    assert_same_bits(venus_population, venus_host);
+    assert!((venus_host - 0.106_9).abs() < 5e-5, "{venus_host}");
+    let table = |rules| with_every_27_hold(|| with_core_share(rules, historic_table));
+    let (population, host) = (
+        table(CoreShareRules::Population),
+        table(CoreShareRules::Host),
+    );
+    assert_eq!(population.len(), host.len());
+    for ((name, a), (other, b)) in population.iter().zip(&host) {
+        assert_eq!(name, other);
+        assert_same_bits(a.radius().value(), b.radius().value());
+        let (a, b) = (a.fractions(), b.fractions());
+        for (x, y) in [
+            (a.iron(), b.iron()),
+            (a.rock(), b.rock()),
+            (a.water(), b.water()),
+            (a.envelope(), b.envelope()),
+        ] {
+            assert_same_bits(x, y);
+        }
+    }
+}
+
 /// The secondary crust shifts with Mg/Si at fixed everything else (the Mg-rich side): an Earth's
 /// `basalt` turns `komatiite` where its mantle becomes periclase-normative, and stays so above.
 #[test]

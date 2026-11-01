@@ -530,14 +530,21 @@ impl BirthOrbit {
 
 /// A rogue planet's birth host as its formation reads it (P14.T27.b): [`BIRTH_HOST_MASS`] at its
 /// zero-age main sequence (plan 06's [`zams::luminosity`]) in the composition `composition`, the
-/// planet's own, with its disc's snow line (P14.T3.b's [`snow_line`]).
+/// planet's own, with its disc's snow line (P14.T3.b's [`snow_line`]), and its rock of Mg/Si
+/// `magnesium_to_silicon` and \[α/Fe\] `alpha_fe`, the planet's own system's.
 #[must_use]
-pub(crate) fn birth_host(composition: &Composition) -> FormationHost {
+pub(crate) fn birth_host(
+    composition: &Composition,
+    magnesium_to_silicon: f64,
+    alpha_fe: Dex,
+) -> FormationHost {
     let luminosity = zams::luminosity(BIRTH_HOST_MASS, &ZCoeffs::new(composition.z_fit()));
     FormationHost {
         mass: BIRTH_HOST_MASS,
         luminosity,
         snow_line: snow_line(luminosity),
+        magnesium_to_silicon,
+        alpha_fe,
     }
 }
 

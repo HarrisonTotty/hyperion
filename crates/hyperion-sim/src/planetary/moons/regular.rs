@@ -986,14 +986,18 @@ pub struct MoonInputs {
 }
 
 /// What lights a moon at a time: its planet's own glow at the moon's distance, and the planet's
-/// hosts at the planet's orbit (P14.T17.b, "the star as the source of light"); and the planet's
-/// orbital speed about them, which the moon's mean impact speed reads (P14.T53.a).
+/// hosts at the planet's orbit (P14.T17.b, "the star as the source of light"); the planet's
+/// orbital speed about them, which the moon's mean impact speed reads (P14.T53.a); and their rock,
+/// to which a moon's rocky core share answers from generator version 27.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoonSky {
     planet: [HostLight; 1],
     stars: Vec<Illumination>,
     composition: Composition,
     parent_orbital_speed: MetresPerSecond,
+    /// The planet's hosts' rock, Mg/Si and \[α/Fe\], which its moons form of
+    /// ([`BodyHosts::with_host_rock`]).
+    host_rock: (f64, Dex),
 }
 
 impl MoonSky {
@@ -1041,6 +1045,10 @@ impl MoonSky {
             stars,
             composition: *planet_hosts.composition(),
             parent_orbital_speed,
+            host_rock: (
+                planet_hosts.host_magnesium_to_silicon(),
+                planet_hosts.alpha_fe(),
+            ),
         })
     }
 
@@ -1898,6 +1906,7 @@ fn moon_hosts<'s>(
     sky: &'s MoonSky,
     shades: Option<&'s ShadeBook>,
 ) -> Result<BodyHosts<'s>, DeriveMoonError> {
+    let (magnesium_to_silicon, alpha_fe) = sky.host_rock;
     Ok(BodyHosts::new(
         Kilograms::from(parent.mass()),
         sky.composition,
@@ -1906,7 +1915,8 @@ fn moon_hosts<'s>(
     )
     .map_err(DeriveMoonError::Hosts)?
     .with_shades(shades)
-    .with_parent_orbital_speed(sky.parent_orbital_speed))
+    .with_parent_orbital_speed(sky.parent_orbital_speed)
+    .with_host_rock(magnesium_to_silicon, alpha_fe))
 }
 
 /// [`derive_moon`] at the system's age `age` at the epoch and the time `t`, its shade reading the
