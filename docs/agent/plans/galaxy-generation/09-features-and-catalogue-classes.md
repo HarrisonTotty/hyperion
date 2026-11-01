@@ -5607,6 +5607,28 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     little more field deaths than the class's field term places (from reading, not measured).
   - _Movers at 27._ `catalogue_classes/core_collapse` (the class's entries), and the slow census
     brackets of `core_collapses_over_seeds*`, restated at the bump.
+  - _Cost, after its perf pass (lane `p09-t33b-perf`, 2026-11-01; nothing moves at 24–27)._ The
+    galaxy keeps the process (`Galaxy::core_collapse`, which `ProductionClasses` visits), the
+    shared test's exact tier reads the candidate's lifetime (`death_in_interval_knowing`), and the
+    terms read one `FormPoint` a candidate. A digest of 336 cells' entries under every 27 hold and
+    its held arm is unchanged by each. Release, one thread, pod, 16 vCPU, every 27 hold against
+    its held arm, before and after: the centre's cell 469 → 332 ms (held 163 → 117 ms); the inner
+    disc's (0, 12, 0) 4.2 → 4.2 ms (held 3.2 → 2.9 ms); `system_of` 2.07 → 0.87 ms; P09.T40's
+    bench, the Sun-like 50 ly query at 27, every source cold 543 → 513 ms, warm 5.10 → 4.23 ms,
+    the core collapses alone cold 291 → 260 ms (held arm 160 → 144 ms), warm 0.22 ms.
+    - _Target missed (finding)._ "Within 10% of the held arm" is out of reach bit for bit. The
+      cost is `lifetime_under`, some 0.4 ms, at every candidate that reaches step 3, and the
+      test's star, 0.56 ms, at every one kept. Step 5's death-rate bound is the young disc's age
+      density at 100 Myr (`RECENT_DEATH_AGES`), about 9× its density at 3–20 Myr, where band E
+      dies (0.11 of it; 0.24 at 40 Myr), so some 85% of those candidates pay a lifetime and are
+      thinned away, in both arms. The 27 arm's terms add such candidates in proportion: 488
+      lifetimes against 301 in the range query, and 274 kept against 118 at the centre.
+    - _The terms' bound is not the lever._ `largest_share`'s rejections cost about 2 µs each
+      (the mass and `ejected_parts`). Squeezing on each mass interval's bound saves under 2 ms of
+      260, and any tighter thinning bound moves 27's entries. The lever is step 5's bound: the
+      young disc's density over the ages band E dies at (some 50 Myr) would spare about two
+      thirds of those lifetimes, but it moves every version's entries, so it needs a hold of its
+      own.
 - **P09.T34.b, as built (lane `p09-t34b`, 2026-11-01, at 24; held for 27, no output moves).**
   - _The weight._ `displaced::survivors::Survivors` (new), through `ClassTable::survivors()` and
     `class_count(D, hv)`; `class_weight` stays 0. Rate × shareᵢ × (`HYPERVELOCITY_MEAN_EXIT_LY` ÷
