@@ -4,11 +4,14 @@
 //! `spawn_blocking` task cannot be stopped, so it runs here (plan 04, design note 21). The pool is
 //! hand-written rather than rayon, whose queue is unbounded. There are two queues:
 //!
-//! - [`Priority::Interactive`]: range queries, galaxy builds and parameter reads. Workers always
-//!   take interactive work first, and a submission that finds the queue full fails at once with
-//!   [`SubmitJobError::QueueFull`], so that a client hears `queue_full` rather than waiting.
-//! - [`Priority::Bulk`]: density map bands. A submission waits for a slot, so a map cannot delay a
-//!   chart by more than the band a worker is running.
+//! - [`Priority::Interactive`]: range queries, galaxy builds, parameter reads and the alert scans'
+//!   interactive walks. Workers always take interactive work first, and a submission that finds
+//!   the queue full fails at once with [`SubmitJobError::QueueFull`], so that a client hears
+//!   `queue_full` rather than waiting; an alert scan, which no request waits on, waits for a slot
+//!   instead (plan 12, P12.T8.b).
+//! - [`Priority::Bulk`]: density map bands, and the alert scans' background walks in chunks of
+//!   cells. A submission waits for a slot, so a map cannot delay a chart by more than the band a
+//!   worker is running.
 //!
 //! Each queue is bounded by a [`Semaphore`]. A job holds a permit while it waits, and the permit
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs

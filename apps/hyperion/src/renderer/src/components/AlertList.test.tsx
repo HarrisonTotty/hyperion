@@ -278,6 +278,7 @@ describe("AlertList (plan 12, P12.T12)", () => {
       aCensusLine("complete", "core_collapse"),
       aCensusLine("pending", "accreting_white_dwarf"),
       aCensusLine("over_limit", "stellar_merger"),
+      aCensusLine("unwalked", "luminous_blue_variable"),
     ];
     renderList({ census });
 
@@ -288,6 +289,7 @@ describe("AlertList (plan 12, P12.T12)", () => {
       "CORE-COLLAPSE SUPERNOVA COMPLETE",
       "ACCRETING WD PENDING",
       "STELLAR MERGER OVER LIMIT",
+      "LUMINOUS BLUE VARIABLE NOT WALKED",
     ]);
     expect(censusLineWords(aCensusLine("pending", "accreting_white_dwarf_slow"))).toBe(
       "SLOW ACCRETING WD PENDING",

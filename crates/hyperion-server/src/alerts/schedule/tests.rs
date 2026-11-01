@@ -968,3 +968,102 @@ fn a_subscription_asks_the_sim_for_its_scans_window() {
     let _ = subscription.advance(observer(sun(), day(4.0)));
     assert_eq!(subscription.observer().time(), day(4.0));
 }
+
+/// A ramp's light from `arrival`: nothing before, then rising to 10⁻⁹ W m⁻² over ten days and
+/// holding there, crossing the detection limit 864 s in.
+fn ramp_from(
+    arrival: UniverseTime,
+) -> (
+    Vec<UniverseTime>,
+    impl Fn(UniverseTime) -> WattsPerSquareMetre + Copy,
+) {
+    let rise = days(10.0);
+    let light = move |t: UniverseTime| {
+        let since = t.checked_since(arrival).unwrap().as_seconds_f64();
+        w(1e-9 * (since / rise.as_seconds_f64()).clamp(0.0, 1.0))
+    };
+    (vec![arrival, arrival.checked_add(rise).unwrap()], light)
+}
+
+/// The detections of one event by two scans, with lights `shift` apart: as an onset's and a later
+/// detection in progress of a local event carry (P12.T5.d's two lights).
+fn two_lights(arrival: UniverseTime, shift: Span) -> (Tracked, Tracked) {
+    let source = Source::ramp(31, 0.0, 10.0, 10.0, 1e-9);
+    let found = |phase| {
+        let light = light_time(site().distance_to(&sun()));
+        detection(
+            source.event(),
+            host(),
+            None,
+            TransientKind::FuOrionisOutburst,
+            phase,
+            AlertBand::Photometric(Band::V),
+            w(1e-9),
+            true,
+            site(),
+            arrival.checked_sub(light).unwrap(),
+            &sun(),
+        )
+    };
+    let (knots, light) = ramp_from(arrival);
+    let first = Tracked::of_light(found(DetectionPhase::Onset), &sensor(), &knots, light).unwrap();
+    let (knots, light) = ramp_from(arrival.checked_add(shift).unwrap());
+    let later =
+        Tracked::of_light(found(DetectionPhase::InProgress), &sensor(), &knots, light).unwrap();
+    (first, later)
+}
+
+/// The bearings pushed when the first scan lists `first` and its renewal `later`.
+fn bearings_of(first: Tracked, later: Tracked) -> Vec<UniverseTime> {
+    let (mut subscription, opening) = Subscription::new(
+        observer(sun(), UniverseTime::EPOCH),
+        sensor(),
+        ClassSet::ALL,
+        DEFAULT_HOST_LIMIT,
+    );
+    subscription.merge(&opening, [first]).unwrap();
+    let advance = subscription.advance(observer(sun(), day(200.0)));
+    let Some(Rescan::Renew(renewal)) = advance.rescan().copied() else {
+        panic!("a renewal past half-way");
+    };
+    let mut pushes = advance.into_parts().0;
+    subscription.merge(&renewal, [later]).unwrap();
+    pushes.extend(
+        subscription
+            .advance(observer(sun(), day(700.0)))
+            .into_parts()
+            .0,
+    );
+    pushes
+        .iter()
+        .filter(|push| push.crossing() == Crossing::Detect)
+        .map(Push::at)
+        .collect()
+}
+
+/// One event listed by two scans with lights that put its crossing either side of the windows'
+/// edge, 1 ms before it in one and 1 ms after it in the other, is pushed once, at its first light's
+/// crossing, whichever way round: the first light owns the crossing (P12.T8.b, T5.d's gap).
+#[test]
+fn a_crossing_two_lights_put_either_side_of_a_window_edge_is_pushed_once() {
+    let edge = day(365.25);
+    let ms = |n: i64| Span::new(0, u32::try_from(n).unwrap() * 1_000_000).unwrap();
+    // The first light crosses at 864 s after its arrival, the later 2 ms after the first.
+    let before = edge
+        .checked_sub(Span::from_seconds(864))
+        .unwrap()
+        .checked_sub(ms(1))
+        .unwrap()
+        .checked_sub(Span::new(0, 500_000).unwrap())
+        .unwrap();
+    let (first, later) = two_lights(before, ms(2));
+    let detected = first.crossings()[0].0;
+    assert!(detected < edge && later.crossings()[0].0 > edge);
+    assert_eq!(bearings_of(first, later), [detected]);
+
+    let after = before.checked_add(ms(2)).unwrap();
+    let (first, later) = two_lights(after, Span::new(-1, 996_000_000).unwrap());
+    let detected = first.crossings()[0].0;
+    assert!(detected > edge && later.crossings()[0].0 < edge);
+    assert_eq!(bearings_of(first, later), [detected]);
+}

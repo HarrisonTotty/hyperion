@@ -419,9 +419,17 @@ pub struct ScanRequest {
     generation: Generation,
     position: GalacticPosition,
     window: TimeWindow,
+    first: bool,
 }
 
 impl ScanRequest {
+    /// Whether it is the first scan after the schedule started or restarted, whose walk reaches
+    /// back by the classes' longest rise and whose merge schedules the state at the start.
+    #[must_use]
+    pub const fn starts_schedule(&self) -> bool {
+        self.first
+    }
+
     /// Where the observer is.
     #[must_use]
     pub const fn position(&self) -> &GalacticPosition {
@@ -528,6 +536,10 @@ pub struct AlertSchedule {
     requested: UniverseTime,
     /// Every push not yet made.
     pending: BTreeMap<(UniverseTime, EventId, Crossing), Push>,
+    /// The tracks with crossings past the merged scans' end, each as its event was first listed:
+    /// a later scan's track of the same event gives way to it, so that each crossing has one
+    /// owner whatever light the later scan gives (P12.T8.b; T5.d's two lights of a local event).
+    carried: BTreeMap<EventId, Tracked>,
 }
 
 impl AlertSchedule {
@@ -542,6 +554,7 @@ impl AlertSchedule {
             covered: observer.time(),
             requested: observer.time(),
             pending: BTreeMap::new(),
+            carried: BTreeMap::new(),
         };
         let first = schedule.request(observer.time());
         (schedule, first)
@@ -634,16 +647,75 @@ impl AlertSchedule {
                 found: scan.window.start(),
             });
         }
-        let first = self.covered == self.start;
-        for track in found {
-            self.insert(track, scan.window, first);
+        let (from, to) = (scan.window.start(), scan.window.end());
+        let owned = self.owned(found);
+        let carried = std::mem::take(&mut self.carried).into_values();
+        let tracks = carried.map(|track| (track, false));
+        for (track, first) in tracks.chain(owned.into_iter().map(|track| (track, scan.first))) {
+            let event = track.detection.event();
+            if let Some(later) = self.insert(track, from, to, first) {
+                self.carried.insert(event, later);
+            }
         }
-        self.covered = scan.window.end();
+        self.covered = to;
         Ok(())
     }
 
-    /// Schedules `track`'s crossings in `window`, and its state at the start for the `first` scan.
-    fn insert(&mut self, track: Tracked, window: TimeWindow, first: bool) {
+    /// Merges what a scan already merged found late, the tracks of its classes walked in the
+    /// background (Design note 7): their crossings in the scan's own window, and their state at the
+    /// start for the first scan. Those already due are made at the next advance with their own
+    /// times. None is carried: a later scan's own background walk lists what crosses in its
+    /// window, on the same light, since a background class's light does not depend on the window
+    /// (P12.T8.b), so each late merge keeps to its window and none pushes a crossing twice.
+    ///
+    /// # Errors
+    ///
+    /// [`MergeScanError::Stale`] if the schedule has been dropped since it asked for `scan`, and
+    /// [`MergeScanError::OutOfOrder`] if `scan` is not merged yet; nothing is merged then.
+    pub fn merge_late(
+        &mut self,
+        scan: &ScanRequest,
+        found: impl IntoIterator<Item = Tracked>,
+    ) -> Result<(), MergeScanError> {
+        if scan.generation != self.generation {
+            return Err(MergeScanError::Stale);
+        }
+        if scan.window.end() > self.covered {
+            return Err(MergeScanError::OutOfOrder {
+                expected: self.covered,
+                found: scan.window.start(),
+            });
+        }
+        for track in self.owned(found) {
+            // Not carried: the module documentation's late merge keeps to its own window.
+            let _later = self.insert(track, scan.window.start(), scan.window.end(), scan.first);
+        }
+        Ok(())
+    }
+
+    /// The tracks of `found` the schedule takes: one per event, the first listed, and none of an
+    /// event it carries.
+    fn owned(&self, found: impl IntoIterator<Item = Tracked>) -> Vec<Tracked> {
+        let mut events = std::collections::BTreeSet::new();
+        found
+            .into_iter()
+            .filter(|track| {
+                let event = track.detection.event();
+                !self.carried.contains_key(&event) && events.insert(event)
+            })
+            .collect()
+    }
+
+    /// Schedules `track`'s crossings in `[from, to)`, and its state at the start for the `first`
+    /// scan: the track again if it crosses from `to` on, for a merge to carry.
+    #[must_use]
+    fn insert(
+        &mut self,
+        track: Tracked,
+        from: UniverseTime,
+        to: UniverseTime,
+        first: bool,
+    ) -> Option<Tracked> {
         let event = track.detection.event();
         let state = first.then(|| track.state_at(self.start));
         let in_window: Vec<CrossingAt> = track
@@ -651,8 +723,13 @@ impl AlertSchedule {
             .iter()
             .copied()
             // The first scan's crossings at the start are its state there.
-            .filter(|&(at, ..)| window.contains(at) && !(first && at == self.start))
+            .filter(|&(at, ..)| from <= at && at < to && !(first && at == self.start))
             .collect();
+        let later = track
+            .crossings
+            .iter()
+            .any(|&(at, ..)| at >= to)
+            .then(|| track.clone());
         let detection = Arc::new(track.detection);
         let at_start = state.into_iter().flat_map(|(detected, resolved)| {
             [detected, resolved]
@@ -669,6 +746,7 @@ impl AlertSchedule {
             };
             self.pending.insert((at, event, crossing), push);
         }
+        later
     }
 
     /// Drops the schedule and starts it again at `next`: its first scan.
@@ -680,6 +758,7 @@ impl AlertSchedule {
         self.covered = next.time();
         self.requested = next.time();
         self.pending.clear();
+        self.carried.clear();
         self.request(next.time())
     }
 
@@ -705,11 +784,13 @@ impl AlertSchedule {
             .min(ClockWindow::END);
         let window = TimeWindow::new(self.requested, end)
             .expect("the scans asked for end inside the clock window");
+        let first = self.requested == self.start;
         self.requested = end;
         ScanRequest {
             generation: self.generation,
             position: self.position,
             window,
+            first,
         }
     }
 }
@@ -812,6 +893,19 @@ impl Subscription {
         found: impl IntoIterator<Item = Tracked>,
     ) -> Result<(), MergeScanError> {
         self.schedule.merge(scan, found)
+    }
+
+    /// Merges what a scan already merged found late ([`AlertSchedule::merge_late`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`AlertSchedule::merge_late`].
+    pub fn merge_late(
+        &mut self,
+        scan: &ScanRequest,
+        found: impl IntoIterator<Item = Tracked>,
+    ) -> Result<(), MergeScanError> {
+        self.schedule.merge_late(scan, found)
     }
 }
 

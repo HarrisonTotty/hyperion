@@ -19,6 +19,7 @@ status: ClassCensusStatusDto,
  */
 reach_ly: number, 
 /**
- * The hosts it is expected to have in its reach.
+ * The hosts it is expected to have in its reach, an upper bound; absent for a class whose
+ * cells are too many to count interactively, or that is not walked.
  */
-expected_hosts: number, };
+expected_hosts: number | null, };

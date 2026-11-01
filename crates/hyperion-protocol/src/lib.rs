@@ -196,6 +196,10 @@ pub use universe::{
 /// version 2 client could not place it on its chart, its legend or its H-R diagram, and a version
 /// 2 and a version 3 build read each other as incompatible. The rulings above that left the
 /// version at 2 hold at 3 as they did at 2.
+///
+/// Giving the alerts' census its `unwalked` status and an optional `expected_hosts` (galaxy plan
+/// 12, P12.T8.b) leaves it at 3: P12.T9.a's build answered every census empty, so no build sent a
+/// `ClassCensusDto`, and the first that sends one sets its shape, as the surface section's did.
 pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]

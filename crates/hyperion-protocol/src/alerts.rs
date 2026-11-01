@@ -137,6 +137,9 @@ pub enum ClassCensusStatusDto {
     OverLimit,
     /// Its scan has not finished: it yields nothing yet.
     Pending,
+    /// It is not walked: its source is not built, or the server lends its walk no global list
+    /// (P12.T5.d). It yields nothing, and claims nothing.
+    Unwalked,
 }
 
 /// One class's census.
@@ -149,8 +152,9 @@ pub struct ClassCensusDto {
     pub status: ClassCensusStatusDto,
     /// How far the sensor sees its brightest event, ly, with no extinction (Design note 5).
     pub reach_ly: f64,
-    /// The hosts it is expected to have in its reach.
-    pub expected_hosts: f64,
+    /// The hosts it is expected to have in its reach, an upper bound; absent for a class whose
+    /// cells are too many to count interactively, or that is not walked.
+    pub expected_hosts: Option<f64>,
 }
 
 /// What kind of event a contact is (plan 12's `TransientKind`), or that its light does not say.
@@ -470,6 +474,7 @@ mod tests {
             (ClassCensusStatusDto::Complete, "complete"),
             (ClassCensusStatusDto::OverLimit, "over_limit"),
             (ClassCensusStatusDto::Pending, "pending"),
+            (ClassCensusStatusDto::Unwalked, "unwalked"),
         ]);
         assert_wire_strings(&[
             (BearingFrameDto::Local, "local"),
@@ -529,7 +534,7 @@ mod tests {
             class: CatalogueClassWire::TypeIa,
             status: ClassCensusStatusDto::Pending,
             reach_ly: 11_189.0,
-            expected_hosts: 4.0,
+            expected_hosts: Some(4.0),
         };
         let census_json = json!({
             "class": "type_ia", "status": "pending", "reach_ly": 11_189.0, "expected_hosts": 4.0,

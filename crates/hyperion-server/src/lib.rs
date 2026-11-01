@@ -162,6 +162,9 @@ pub(crate) struct AppState {
     /// Each universe's contacts, opened by its first alerts subscription and kept (plan 12,
     /// P12.T9.a).
     pub(crate) contacts: alerts::UniverseContacts,
+    /// The alert scans walked so far, shared by the alerts subscriptions, in the configured byte
+    /// budget (plan 12, P12.T8.b).
+    pub(crate) alert_scans: alerts::AlertScans,
 }
 
 impl Server {
@@ -245,6 +248,7 @@ impl Server {
             sky_service = ?config.sky_service(),
             extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
             sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
+            alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
             feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
             cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
             feature_members = ?config.feature_members(),
@@ -281,6 +285,7 @@ impl Server {
                 sky_cells,
                 surface,
                 contacts: alerts::UniverseContacts::new(),
+                alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
             }),
         })
     }

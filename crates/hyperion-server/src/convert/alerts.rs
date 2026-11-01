@@ -9,18 +9,19 @@ use std::num::NonZeroU32;
 
 use hyperion_protocol::{
     AlertBandDto, AlertsSubscribeRequest, BearingContactDto, BearingDto, BearingFrameDto,
-    CatalogueClassWire, ContactDto, DetectionPhaseDto, ErrorCode, RequestError, ResolvedContactDto,
-    SensorDto, SystemIdHex, TransientKindDto,
+    CatalogueClassWire, ClassCensusDto, ClassCensusStatusDto, ContactDto, DetectionPhaseDto,
+    ErrorCode, RequestError, ResolvedContactDto, SensorDto, SystemIdHex, TransientKindDto,
 };
 use hyperion_sim::alerts::{
-    AlertBand, BandLimits, ClassSet, DEFAULT_HOST_LIMIT, DetectionPhase, SensorHorizon,
-    TransientKind,
+    AlertBand, BandLimits, ClassCensus, ClassSet, ClassStatus, DEFAULT_HOST_LIMIT, DetectionPhase,
+    SensorHorizon, TransientKind, class_reach,
 };
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::observe::{Bearing, BearingFrame, Observer};
 use hyperion_sim::units::WattsPerSquareMetre;
 
+use super::features::catalogue_class;
 use super::{ConvertRequestError, clock_time, galactic_position, root_cube_position, wire_time};
 use crate::knowledge::{
     AcknowledgeContactError, Acknowledgement, BearingContact, ContactView, LoadKnowledgeError,
@@ -236,6 +237,38 @@ pub(crate) fn contact_dto(view: &ContactView) -> ContactDto {
             })
         }
     }
+}
+
+/// A class's census as the wire carries it (Design note 7): `pending` for a class its scan sends
+/// to the background (P12.T8.b), until the subscription's walk of it finishes, and `unwalked` for a
+/// class whose source is not built or whose walk the server lends no global list (P12.T5.d). `None`
+/// for a class with no wire value, which `catalogue_class`'s test keeps from being registered.
+#[must_use]
+pub(crate) fn census_dto(census: &ClassCensus) -> Option<ClassCensusDto> {
+    let status = match census.status() {
+        ClassStatus::Complete => ClassCensusStatusDto::Complete,
+        ClassStatus::OverLimit => ClassCensusStatusDto::OverLimit,
+        ClassStatus::NeedsBackgroundScan => ClassCensusStatusDto::Pending,
+        ClassStatus::Unwalked(_) => ClassCensusStatusDto::Unwalked,
+    };
+    Some(ClassCensusDto {
+        class: catalogue_class(census.class())?,
+        status,
+        reach_ly: census.reach().value(),
+        expected_hosts: census.expected_hosts(),
+    })
+}
+
+/// A class's census before its first scan has run: `pending`, at the reach of `sensor`, with no
+/// count of its hosts; `None` as [`census_dto`] gives it.
+#[must_use]
+pub(crate) fn pending_census(class: ClassId, sensor: &SensorHorizon) -> Option<ClassCensusDto> {
+    Some(ClassCensusDto {
+        class: catalogue_class(class)?,
+        status: ClassCensusStatusDto::Pending,
+        reach_ly: class_reach(class, sensor).value(),
+        expected_hosts: None,
+    })
 }
 
 /// The refusal of an alerts subscription whose universe's Knowledge cannot be opened.

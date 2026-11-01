@@ -100,14 +100,6 @@ fn multiplicity(multiplicity: Multiplicity) -> MultiplicityWire {
 /// here: it is `None`, and `every_registered_class_has_a_distinct_wire_string` fails until it is
 /// given one (the enum grows, by plan 04's reserved list, so that needs no bump).
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "its first caller is P09.T33.a's `catalogue_system` origin; until then the \
-                  registry's test holds it to every class"
-    )
-)]
 pub(crate) fn catalogue_class(class: ClassId) -> Option<CatalogueClassWire> {
     let wire = match class {
         ClassId::CORE_COLLAPSE => CatalogueClassWire::CoreCollapse,

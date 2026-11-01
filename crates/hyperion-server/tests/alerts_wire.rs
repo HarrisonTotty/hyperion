@@ -3,8 +3,10 @@
 //! and the requests that name no alerts subscription, or name what no sensor or contact has, are
 //! refused by the field at fault.
 //!
-//! The contacts are recorded in the universe's Knowledge before the server opens it, since no
-//! scan records sightings until P12.T8.b and P12.T8.c.
+//! The contacts are recorded in the universe's Knowledge before the server opens it. The
+//! subscription asks about no class, through an X-ray sensor that no local event lights, so that
+//! its scans find nothing and push nothing: this test is the wire's, and `alerts_scans` is the
+//! scans' (P12.T8.b).
 
 mod common;
 
@@ -49,12 +51,12 @@ fn subscribe(universe: &UniverseIdHex) -> RequestBody {
             time: epoch(),
             sensor: SensorDto {
                 bands: vec![BandLimitsDto {
-                    band: AlertBandDto::V,
+                    band: AlertBandDto::XRay,
                     detect_w_m2: 1e-12,
                     resolve_w_m2: 1e-10,
                 }],
             },
-            classes: None,
+            classes: Some(Vec::new()),
             host_limit: None,
         }),
     })

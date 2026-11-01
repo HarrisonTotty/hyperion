@@ -171,13 +171,18 @@ function censusStatusWords(status: ClassCensusStatusDto): string {
     case "pending":
       words = "PENDING";
       break;
+    // Its source is not built, or the server lends its walk no global list (plan 12, P12.T5.d).
+    case "unwalked":
+      words = "NOT WALKED";
+      break;
   }
   return words;
 }
 
 /**
  * A class's census line in words, its class's name and how its census stands: `ACCRETING WD
- * PENDING`, `STELLAR MERGER OVER LIMIT`; a class this build does not know is Missing, the em dash.
+ * PENDING`, `STELLAR MERGER OVER LIMIT`, `LUMINOUS BLUE VARIABLE NOT WALKED`; a class this build
+ * does not know is Missing, the em dash.
  */
 export function censusLineWords(census: ClassCensusDto): string {
   const name = catalogueClassWords(toCatalogueClass(census.class)) ?? "—";

@@ -3,4 +3,4 @@
 /**
  * How a class's census stands (Design note 7).
  */
-export type ClassCensusStatusDto = "complete" | "over_limit" | "pending";
+export type ClassCensusStatusDto = "complete" | "over_limit" | "pending" | "unwalked";

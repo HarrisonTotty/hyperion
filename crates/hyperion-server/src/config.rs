@@ -19,6 +19,7 @@
 //! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                                |
 //! | `--feature-cache`        | `HYPERION_FEATURE_CACHE_MB`        | 16 (MiB)                                               |
 //! | `--cluster-model-cache`  | `HYPERION_CLUSTER_MODEL_CACHE_MB`  | 64 (MiB)                                               |
+//! | `--alert-cache`          | `HYPERION_ALERT_CACHE_MB`          | 32 (MiB)                                               |
 //! | `--sky-cache`            | `HYPERION_SKY_CACHE_MB`            | 0 (MiB), off                                           |
 //! | `--sky-tables`           | `HYPERION_SKY_TABLES_MB`           | 160 (MiB)                                              |
 //! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                              |
@@ -92,6 +93,8 @@ pub const ENV_SIGHTLINE_CACHE_MB: &str = "HYPERION_SIGHTLINE_CACHE_MB";
 pub const ENV_FEATURE_CACHE_MB: &str = "HYPERION_FEATURE_CACHE_MB";
 /// The variable giving the cluster model cache's budget in MiB, for `--cluster-model-cache`.
 pub const ENV_CLUSTER_MODEL_CACHE_MB: &str = "HYPERION_CLUSTER_MODEL_CACHE_MB";
+/// The variable giving the alert scans' cache's budget in MiB, for `--alert-cache`.
+pub const ENV_ALERT_CACHE_MB: &str = "HYPERION_ALERT_CACHE_MB";
 /// The variable giving the sky's cell cache's budget in MiB, for `--sky-cache`.
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
@@ -126,6 +129,11 @@ pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 /// edge-on views half as tall, is 2,088,960 `f32` pixels, 8.0 MiB, so this holds two galaxies'
 /// worth, or one with room to spare.
 pub const DEFAULT_EXTINCTION_MAP_CACHE_MIB: usize = 16;
+/// The alert scans' cache's budget when `--alert-cache` is not given, in MiB (plan 12, P12.T8.b):
+/// a track is charged some 600 bytes, its detection's 456 and two or three crossings' 32 each
+/// (measured 2026-11-01), so a year's scan of a few thousand local events is about 2 MB, and this
+/// holds some fifteen such scans, a look-ahead each for as many subscriptions.
+pub const DEFAULT_ALERT_CACHE_MIB: usize = 32;
 /// The sightline cache's budget when `--sightline-cache` is not given, in MiB (plan 07,
 /// P07.T10.c): a line is charged its 32 bytes and the cache's 96 an entry, 128 bytes, so this holds
 /// 32,768, a few hundred charts' selections.
@@ -211,6 +219,9 @@ const DEFAULT_FEATURE_CACHE: CacheBudget = CacheBudget {
 const DEFAULT_CLUSTER_MODEL_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_CLUSTER_MODEL_CACHE_MIB * BYTES_PER_MIB,
 };
+const DEFAULT_ALERT_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_ALERT_CACHE_MIB * BYTES_PER_MIB,
+};
 const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_CACHE_MIB * BYTES_PER_MIB,
 };
@@ -280,6 +291,10 @@ pub struct ServerArgs {
     /// Budget of the cache of the large features' interiors, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_CLUSTER_MODEL_CACHE_MB, default_value_t = DEFAULT_CLUSTER_MODEL_CACHE)]
     cluster_model_cache: CacheBudget,
+
+    /// Budget of the cache of the alert scans' walks, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_ALERT_CACHE_MB, default_value_t = DEFAULT_ALERT_CACHE)]
+    alert_cache: CacheBudget,
 
     /// Budget of the cache of the sky census's cells, in MiB; 0, the default, keeps no cells, and
     /// 1280 holds a warm sky
@@ -425,6 +440,7 @@ impl From<ServerArgs> for ServerConfig {
             sightline_cache,
             feature_cache,
             cluster_model_cache,
+            alert_cache,
             sky_cache,
             sky_tables,
             surface_cache,
@@ -445,6 +461,7 @@ impl From<ServerArgs> for ServerConfig {
             .sightline_cache_bytes(sightline_cache.bytes)
             .feature_cache_bytes(feature_cache.bytes)
             .cluster_model_cache_bytes(cluster_model_cache.bytes)
+            .alert_cache_bytes(alert_cache.bytes)
             .sky_cache_bytes(sky_cache.bytes)
             .sky_tables_bytes(sky_tables.bytes)
             .surface_cache_bytes(surface_cache.bytes)
@@ -520,6 +537,7 @@ pub struct ServerConfig {
     sightline_cache_bytes: usize,
     feature_cache_bytes: usize,
     cluster_model_cache_bytes: usize,
+    alert_cache_bytes: usize,
     sky_cache_bytes: usize,
     sky_tables_bytes: usize,
     surface_cache_bytes: usize,
@@ -615,6 +633,12 @@ impl ServerConfig {
     #[must_use]
     pub fn cluster_model_cache_bytes(&self) -> usize {
         self.cluster_model_cache_bytes
+    }
+
+    /// The alert scans' cache's budget, in bytes (plan 12, P12.T8.b).
+    #[must_use]
+    pub fn alert_cache_bytes(&self) -> usize {
+        self.alert_cache_bytes
     }
 
     /// The sky's cell cache's budget, in bytes (rendering plan R06, Design note 12).
@@ -725,6 +749,7 @@ impl Default for ServerConfigBuilder {
                 sightline_cache_bytes: DEFAULT_SIGHTLINE_CACHE.bytes,
                 feature_cache_bytes: DEFAULT_FEATURE_CACHE.bytes,
                 cluster_model_cache_bytes: DEFAULT_CLUSTER_MODEL_CACHE.bytes,
+                alert_cache_bytes: DEFAULT_ALERT_CACHE.bytes,
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
@@ -830,6 +855,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn cluster_model_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.cluster_model_cache_bytes = bytes;
+        self
+    }
+
+    /// The alert scans' cache's budget, in bytes. Zero caches nothing: every scan walks afresh,
+    /// and only the subscriptions that ask for one walk at once share it.
+    #[must_use]
+    pub fn alert_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.alert_cache_bytes = bytes;
         self
     }
 
@@ -1026,14 +1059,14 @@ mod tests {
 
     /// The address, the data directory, the workers, the surface passes run at once, the caches'
     /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, feature
-    /// cells, feature interiors, the sky's cells, the sky tables and the surface), the sky's
-    /// switch, the feature members' gate and the stop on standard input.
+    /// cells, feature interiors, alert scans, the sky's cells, the sky tables and the surface),
+    /// the sky's switch, the feature members' gate and the stop on standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
         usize,
         usize,
-        [usize; 12],
+        [usize; 13],
         SkyService,
         FeatureMembers,
         StdinStop,
@@ -1055,6 +1088,7 @@ mod tests {
                 config.sightline_cache_bytes(),
                 config.feature_cache_bytes(),
                 config.cluster_model_cache_bytes(),
+                config.alert_cache_bytes(),
                 config.sky_cache_bytes(),
                 config.sky_tables_bytes(),
                 config.surface_cache_bytes(),
@@ -1093,6 +1127,7 @@ mod tests {
                     4 * 1024 * 1024,
                     16 * 1024 * 1024,
                     64 * 1024 * 1024,
+                    32 * 1024 * 1024,
                     0,
                     160 * 1024 * 1024,
                     128 * 1024 * 1024,
@@ -1133,6 +1168,8 @@ mod tests {
             "31",
             "--cluster-model-cache",
             "37",
+            "--alert-cache",
+            "41",
             "--sky-cache",
             "17",
             "--sky-tables",
@@ -1161,6 +1198,7 @@ mod tests {
                     13 << 20,
                     31 << 20,
                     37 << 20,
+                    41 << 20,
                     17 << 20,
                     19 << 20,
                     23 << 20
@@ -1254,6 +1292,7 @@ mod tests {
                     Some("cluster-model-cache"),
                     Some("HYPERION_CLUSTER_MODEL_CACHE_MB")
                 ),
+                (Some("alert-cache"), Some("HYPERION_ALERT_CACHE_MB")),
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
                 (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
@@ -1410,6 +1449,7 @@ mod tests {
         assert_eq!(DEFAULT_SIGHTLINE_CACHE.to_string(), "4");
         assert_eq!(DEFAULT_FEATURE_CACHE.to_string(), "16");
         assert_eq!(DEFAULT_CLUSTER_MODEL_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_ALERT_CACHE.to_string(), "32");
         assert_eq!(DEFAULT_SKY_CACHE.to_string(), "0");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
         assert_eq!(DEFAULT_SURFACE_CACHE.to_string(), "128");
@@ -1524,6 +1564,7 @@ mod tests {
             .sightline_cache_bytes(70)
             .feature_cache_bytes(110)
             .cluster_model_cache_bytes(120)
+            .alert_cache_bytes(130)
             .sky_cache_bytes(80)
             .sky_tables_bytes(90)
             .surface_cache_bytes(100)
@@ -1539,7 +1580,7 @@ mod tests {
                 Path::new("/tmp/x"),
                 2,
                 3,
-                [10, 20, 30, 40, 50, 60, 70, 110, 120, 80, 90, 100],
+                [10, 20, 30, 40, 50, 60, 70, 110, 120, 130, 80, 90, 100],
                 SkyService::Unsupported,
                 FeatureMembers::Served,
                 StdinStop::Watch,

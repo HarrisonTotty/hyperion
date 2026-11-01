@@ -63,7 +63,8 @@ use hyperion_sim::units::{
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) use self::alerts::{
-    AlertsAsked, acknowledge_refusal, contact_dto, observer, open_contacts_refusal,
+    AlertsAsked, acknowledge_refusal, census_dto, contact_dto, observer, open_contacts_refusal,
+    pending_census,
 };
 pub(crate) use self::events::{EventsRequest, body_events};
 pub(crate) use self::extinction::{

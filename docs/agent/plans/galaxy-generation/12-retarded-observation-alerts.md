@@ -692,7 +692,8 @@ and receives the same `contact` at `resolved` with the pinned host; a JSON-level
   the JSON assertion, and a socket test of a subscription's contacts, its observer, an
   acknowledgement and each refusal. Acceptance: `just ci`.
 - **P12.T9.b The integration test** (split on 2026-10-31). The pinned nova's bearing, then its host
-  resolved, as above. It waits on T8.b's scans and P11.T9.b's novae.
+  resolved, as above. It waits on T8.b's scans and P11.T9.b's novae. Built with T8.b on a pinned
+  supernova while the novae are not walked (P12.T8.b as built).
 
 ### P12.T10 UX guide edits
 
@@ -2954,3 +2955,20 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `SymbolShape` is a four-point star whose waist is at `TRANSIENT_WAIST_SHARE`. Rays are drawn
     only in observed mode, from the drawn observer; a resolved host's star is drawn in both modes.
   - _Pending._ The by-eye check against the pinned nova waits on T8.b–c and P12.T9.b.
+- **P12.T8.b and P12.T9.b as built (lane `p12-t8a`, 2026-11-01; `PROTOCOL_VERSION` 3).** Built.
+  - _Names._ `alerts/{scan,service}.rs`: `AlertScans` (`AppState::alert_scans`; `interactive`,
+    `background`), keyed by `ScanKey` in `--alert-cache` (32 MiB); `ScanSpec`, `ScanResult`;
+    `AlertSchedule::merge_late`, `ScanRequest::starts_schedule`.
+  - _For T8.c._ The topic already records each due `Detect` and `Resolve` as a sighting and pushes
+    the changed contacts with the census. Left: clears, and telling the universe's other
+    subscriptions.
+  - _Wire._ The census adds `unwalked` and an optional `expected_hosts`, no bump: no build had
+    sent one. Each class opens `pending`.
+  - _Leans (2026-11-01)._ The cache holds walks, not schedules, keyed by galaxy, not universe.
+    Feature gas at the epoch, so a light is the same in every scan. Local events from grid rows
+    within 10 ly. The centre is `unwalked`: no global list in the server.
+  - _Lean (2026-11-01)._ A background class whose sphere holds over 2²⁰ cells is not walked and
+    reads `over_limit`.
+  - _T9.b on a supernova (lean, 2026-11-01)._ The novae are not walked (P11.T9), so the test pins
+    seed 9's IIP at +874 yr in core-collapse cell [-3, 48, 0]. Not built: the `awd_scan_cold`
+    bench (no accreting white dwarfs).
