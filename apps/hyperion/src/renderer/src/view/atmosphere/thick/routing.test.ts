@@ -1,7 +1,8 @@
 /**
- * The thick bake's router (plan R08, R08.T14.c and R08.T14.d.4; Design note 9's routing): a
- * `thickScattering` world routed within the range its passing gates cover, and the polarisation
- * correction asked of every world with air once routed.
+ * The thick bake's router (plan R08, R08.T14.c, R08.T14.d.4 and R08.T15.b.2; Design note 9's
+ * routing): a `thickScattering` world routed within the range its passing gates cover, a `cloudDeck`
+ * world by its floor's range, none yet, and the polarisation correction asked of every world with
+ * air once routed.
  */
 import { describe, expect, it } from "vitest";
 
@@ -12,6 +13,9 @@ import { type AtmosphereRegime, CLEAR_COVER, classifyRegime, regimeChannels } fr
 import {
   CORRECTION_ROUTED,
   correctionRouted,
+  DECK_ROUTE_RANGE,
+  deckRouted,
+  type DeckRouteRange,
   THICK_ROUTE_RANGE,
   thickBakeRouted,
   type ThickRouteRange,
@@ -118,6 +122,75 @@ describe("thickBakeRouted (R08.T14.d.4)", () => {
     expect([
       withinRouteRange(earth, THICK_ROUTE_RANGE),
       withinRouteRange(deeper, THICK_ROUTE_RANGE),
+    ]).toEqual([true, false]);
+  });
+});
+
+describe("deckRouted (R08.T15.b.2)", () => {
+  // R05's Earth's air, as a deck's medium: the route reads the medium's channels alone.
+  const air = cases.EARTH_CASE.medium;
+  const deck: AtmosphereRegime = { kind: "cloudDeck", deckAltitudeM: 5_000 };
+  /** A range wide enough for any medium: a test's opening, never the product's. */
+  const open: ThickRouteRange = {
+    mostOpticalDepth: Number.POSITIVE_INFINITY,
+    leastSingleScatteringAlbedo: 0,
+    mostAsymmetry: 1,
+    mostGroundAlbedo: 1,
+    mostForwardDepth: Number.POSITIVE_INFINITY,
+    mostAbsorbedDepth: Number.POSITIVE_INFINITY,
+  };
+  const both: DeckRouteRange = { ground: open, envelope: open };
+
+  it("routes nothing in the product: no deck gate passes", () => {
+    expect([
+      DECK_ROUTE_RANGE,
+      REGIMES.flatMap((regime) => [deckRouted(regime, air, false), deckRouted(regime, air, true)]),
+    ]).toEqual([null, [false, false, false, false, false, false]]);
+  });
+
+  it("routes cloudDeck alone under a test's open range, never thin nor thickScattering", () => {
+    expect(REGIMES.map((regime) => deckRouted(regime, air, false, both))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("routes a deck over a surface and an envelope each by its own floor's range", () => {
+    const grounds: DeckRouteRange = { ground: open, envelope: null };
+    const envelopes: DeckRouteRange = { ground: null, envelope: open };
+    expect([
+      [deckRouted(deck, air, false, grounds), deckRouted(deck, air, true, grounds)],
+      [deckRouted(deck, air, false, envelopes), deckRouted(deck, air, true, envelopes)],
+    ]).toEqual([
+      [true, false],
+      [false, true],
+    ]);
+  });
+
+  it("routes no split at the ground, where no deck stands", () => {
+    const atGround: AtmosphereRegime = { kind: "cloudDeck", deckAltitudeM: 0 };
+    expect([deckRouted(atGround, air, false, both), deckRouted(atGround, air, true, both)]).toEqual(
+      [false, false],
+    );
+  });
+
+  it("routes a medium only within its floor's range", () => {
+    const shallow: DeckRouteRange = { ground: THICK_ROUTE_RANGE, envelope: THICK_ROUTE_RANGE };
+    const deeper = {
+      ...air,
+      terms: air.terms.map((term) => ({
+        ...term,
+        scattering: [
+          term.scattering[0] * 4,
+          term.scattering[1] * 4,
+          term.scattering[2] * 4,
+        ] as const,
+      })),
+    };
+    expect([
+      deckRouted(deck, air, false, shallow),
+      deckRouted(deck, deeper, false, shallow),
     ]).toEqual([true, false]);
   });
 });

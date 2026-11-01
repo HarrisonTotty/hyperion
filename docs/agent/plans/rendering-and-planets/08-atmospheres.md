@@ -24202,3 +24202,15 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     absorber terms.
   - Left undone: the bake lights formed for a share's bins alone (`absorbers.ts`; the generated
     Earth's 1.07 s a worker), and a cost-aware share of the bins.
+- **Deviations in T15.b.2, as built** (2026-11-01; lane `r08-t15b2`; main's ruling of 2026-11-01 on
+  the Venus-class references; what later tasks consume; measurements in the lane's outbox).
+  - _The guard_ (`thick/polarisationBake.test.ts`): the 16-stream vector solve against its scalar
+    on the Venus-class column at albedo 0.15, asserted within 1% at the ground's sky, J below the
+    cloud base and the top's m = 0. A changed column or matrix that fails it refuses Venus's
+    scalar gate.
+  - _The route_ (`thick/routing.ts`): `deckRouted(regime, medium, envelope, range?)` beside
+    `thickBakeRouted`, over `DeckRouteRange`, one `ThickRouteRange | null` a `DeckFloor`, on the
+    whole medium's channels. `DECK_ROUTE_RANGE` is `null` (lean, 2026-11-01): nothing routes a deck.
+    T16.a.2 opens `envelope` on `giant-deck`'s envelope variant alone.
+  - `AtmosphereCacheOptions.routes` takes a third argument, `envelope`. Its default is
+    `thickBakeRouted || deckRouted`, so a routed `cloudDeck` body asks `deck-bake`.

@@ -5,7 +5,9 @@
  * `thickScattering` world only within the range its passing gates cover ({@link THICK_ROUTE_RANGE};
  * main's rule on routing by the depth range the passing cases cover,
  * `decision-r08-t13c2-classes.md` §6). Elsewhere a thick world is drawn by the analytic term under
- * `ATMOSPHERE: APPROXIMATE`. Tests route by injection (`AtmosphereCache`'s `routes`).
+ * `ATMOSPHERE: APPROXIMATE`. A `cloudDeck` world routes to its deck's bake only within the range its
+ * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2), which none does yet. Tests route
+ * by injection (`AtmosphereCache`'s `routes`).
  *
  * And whether it asks a world's polarisation correction (R08.T14.f; Design note 10): turned on with
  * the route ({@link CORRECTION_ROUTED}), for thin worlds and routed thick worlds alone (main, with
@@ -15,6 +17,7 @@
 
 import type { AtmosphereMedium } from "../medium";
 import { correctionBySources } from "./columnLayout";
+import type { DeckFloor } from "./deck";
 import { type AtmosphereRegime, regimeChannels } from "./regime";
 import type { SpectralColumn } from "./spectralColumn";
 
@@ -80,7 +83,7 @@ export function withinRouteRange(medium: AtmosphereMedium, range: ThickRouteRang
 /**
  * Whether a body routed `regime` takes its thick bake (Design note 9's routing): only
  * `thickScattering`, and only where its medium lies within `range`. `thin` takes none, and
- * `cloudDeck`'s bake is R08.T15's deck split, which this route does not make.
+ * `cloudDeck`'s bake is R08.T15's deck split, which {@link deckRouted} routes.
  *
  * @param range - The range its gates pass over: {@link THICK_ROUTE_RANGE}, or `null` for none.
  */
@@ -98,6 +101,59 @@ export function thickBakeRouted(
     case "thickScattering":
       routed = range !== null && withinRouteRange(medium, range);
       break;
+  }
+  return routed;
+}
+
+/**
+ * The ranges over which the cloud-deck split's gates pass (R08.T15.b.2; Design note 9's routing), by
+ * the split's floor (`thick/deck.ts`'s `DeckFloor`), each over the whole medium's channels as
+ * {@link withinRouteRange} reads them, or `null` where that floor routes nothing:
+ *
+ * - `ground`, a deck over a surface (Venus-class), once both of R08.T15's gates pass: above the
+ *   deck, T15.a.2's `giant-deck`, and below it, T15.b.2's Venus-class cases;
+ * - `envelope`, a gas envelope split at its floor, which has no view from below, on `giant-deck`'s
+ *   envelope variant alone (`reference/vectorGate.json`'s `deck.asAnEnvelope`; R08.T16.a.2's
+ *   opening, research's amendment of 2026-11-01), never on Venus's gate.
+ */
+export type DeckRouteRange = Readonly<Record<DeckFloor, ThickRouteRange | null>>;
+
+/**
+ * The range the cloud-deck split's passing gates cover (R08.T15.b.2): none. No deck case passes:
+ * the Venus-class cases' scalar gate refuses nearly every value below the deck at their references'
+ * 1,024 samples, and `giant-deck`'s envelope variant refuses all 30 of its gated values (lean,
+ * 2026-11-01: a deck over a surface routes only once both of R08.T15's gates pass, as the plan says,
+ * and a gas envelope's opening is R08.T16.a.2's, through this hook). A `cloudDeck` world stays
+ * drawn by the analytic term under `ATMOSPHERE: APPROXIMATE`, its deck's bake unasked.
+ */
+export const DECK_ROUTE_RANGE: DeckRouteRange | null = null;
+
+/**
+ * Whether a body routed `regime` takes its deck's bake (Design note 9's split; the atmosphere
+ * cache's deck path, `thick/deck.ts`'s `bakeDeck`): only `cloudDeck`, at a split above the ground,
+ * and only where `range` opens its floor and its medium lies within that floor's range. `thin` and
+ * `thickScattering` take none ({@link thickBakeRouted} routes the latter).
+ *
+ * @param envelope - Whether the body's cover is a gas envelope's, which splits at its floor.
+ * @param range - The ranges its gates pass over: {@link DECK_ROUTE_RANGE}, or a test's.
+ */
+export function deckRouted(
+  regime: AtmosphereRegime,
+  medium: AtmosphereMedium,
+  envelope: boolean,
+  range: DeckRouteRange | null = DECK_ROUTE_RANGE,
+): boolean {
+  let routed: boolean;
+  switch (regime.kind) {
+    case "thin":
+    case "thickScattering":
+      routed = false;
+      break;
+    case "cloudDeck": {
+      const bounds = range?.[envelope ? "envelope" : "ground"] ?? null;
+      routed = regime.deckAltitudeM > 0 && bounds !== null && withinRouteRange(medium, bounds);
+      break;
+    }
   }
   return routed;
 }

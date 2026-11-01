@@ -437,6 +437,12 @@ describe("the deck rule", () => {
     );
   });
 
+  it("does not split a body at a τ 30 deck under a cloud fraction just below 1 (R08.T15.b.2)", () => {
+    expect(classifyRegime(venus, cover(0.999, [deck(30, 48_000, 70_000)])).kind).toBe(
+      "thickScattering",
+    );
+  });
+
   it("splits a body at a τ 30 deck under a cloud fraction of 1, at the deck's top", () => {
     expect(classifyRegime(venus, cover(1, [deck(30, 48_000, 70_000)]))).toEqual({
       kind: "cloudDeck",
@@ -450,6 +456,17 @@ describe("the deck rule", () => {
       kind: "cloudDeck",
       deckAltitudeM: 70_000,
     });
+  });
+
+  it("leaves the deeper of two such decks in the medium below the split (R08.T15.b.2)", () => {
+    const deeper = deck(3_000, 10_000, 15_000);
+    const shallower = deck(30, 48_000, 70_000);
+    const regime = classifyRegime(venus, cover(1, [deeper, shallower]));
+    expect([
+      regime.kind,
+      regime.kind === "cloudDeck" && deeper.topAltitudeM <= regime.deckAltitudeM,
+      regime.kind === "cloudDeck" && shallower.topAltitudeM === regime.deckAltitudeM,
+    ]).toEqual(["cloudDeck", true, true]);
   });
 
   it("does not split at a deck of exactly τ 10", () => {

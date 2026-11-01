@@ -1543,6 +1543,26 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]).toEqual([{ kind: "cloudDeck", deckAltitudeM: 5_000 }, 0, 0, R05_EARTH_REFERENCE]);
   });
 
+  it("asks none under the product's route, which routes no deck while no deck gate passes (R08.T15.b.2)", () => {
+    const h = harness(undefined, "product");
+    note(
+      h,
+      [
+        kept(A, { kind: "medium", built, labels: [], cover: COVER }),
+        kept(bodyId(2), { kind: "medium", built, labels: [], cover: { ...COVER, envelope: true } }),
+      ],
+      0,
+      null,
+    );
+    expect([
+      h.cache.entryOf(A)?.regime?.kind,
+      h.cache.entryOf(bodyId(2))?.regime?.kind,
+      h.builder.decks.length,
+      h.builder.bakes.length,
+      madeAt(h, 0).built.medium,
+    ]).toEqual(["cloudDeck", "cloudDeck", 0, 0, R05_EARTH_REFERENCE]);
+  });
+
   it("draws a routed one on its upper medium, asks its deck's bake on its own figure, and gives its tables the deck and the correction over it", async () => {
     const h = harness(undefined, routedDeck);
     const view = h.cache.openView();

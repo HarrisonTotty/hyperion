@@ -127,14 +127,15 @@
  * the body is drawn by the full passes at every distance, as before.
  *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
- * `cloudDeck` and which the router routes (`routes`, which routes no `cloudDeck` until R08.T15.b.2)
- * is drawn over its deck: its tables are made of its upper medium on the deck's datum
- * (`thick/deckRead.ts`'s `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick
- * bake's place, every band in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own
- * figure, its split the regime's `deckAltitudeM` over a floor of the ground, or of an envelope where
- * the body's cover is one's, and given to its tables when it lands (`AtmosphereTables`'
- * `setDeckTables`, with the correction over the deck the same job bakes). Its labels and its
- * failures are a thick bake's; it asks no correction of its own.
+ * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
+ * routes none while no deck gate passes: `DECK_ROUTE_RANGE`, R08.T15.b.2) is drawn over its deck:
+ * its tables are made of its upper medium on the deck's datum (`thick/deckRead.ts`'s
+ * `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick bake's place, every band
+ * in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own figure, its split the regime's
+ * `deckAltitudeM` over a floor of the ground, or of an envelope where the body's cover is one's, and
+ * given to its tables when it lands (`AtmosphereTables`' `setDeckTables`, with the correction over
+ * the deck the same job bakes). Its labels and its failures are a thick bake's; it asks no
+ * correction of its own.
  */
 
 import type {
@@ -214,6 +215,7 @@ import {
 } from "./thick/regime";
 import {
   correctionRouted,
+  deckRouted,
   discTableRouted,
   thickBakeRouted,
   TWILIGHT_REASON,
@@ -494,11 +496,17 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   /** How the busy re-asks wait; `setTimeout` if absent. */
   readonly schedule?: AtmosphereSchedule;
   /**
-   * Whether a body drawn in `regime` from `medium` takes its thick bake (R08.T14.c):
-   * `thick/routing.ts`'s `thickBakeRouted` if absent, which routes a `thickScattering` world within
-   * the range its gates pass over (R08.T14.d.4); a test's routing otherwise.
+   * Whether a body drawn in `regime` from `medium`, under a gas envelope's cover where `envelope`,
+   * takes its thick bake (R08.T14.c) or its deck's (R08.T15.b.2): `thick/routing.ts`'s
+   * `thickBakeRouted` or `deckRouted` if absent, which route a `thickScattering` world within the
+   * range its gates pass over (R08.T14.d.4) and a `cloudDeck` world within its deck gates' range,
+   * none yet (`DECK_ROUTE_RANGE`); a test's routing otherwise.
    */
-  readonly routes?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+  readonly routes?: (
+    regime: AtmosphereRegime,
+    medium: AtmosphereMedium,
+    envelope: boolean,
+  ) => boolean;
   /**
    * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
    * `thick/routing.ts`'s `correctionRouted` if absent, every world with air since R08.T14.d.4's
@@ -1167,7 +1175,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #builder: AtmosphereBuilder;
   readonly #tables: AtmosphereTablesFactory<T>;
   readonly #schedule: AtmosphereSchedule;
-  readonly #routes: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+  readonly #routes: (
+    regime: AtmosphereRegime,
+    medium: AtmosphereMedium,
+    envelope: boolean,
+  ) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
   readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
@@ -1183,7 +1195,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#builder = opts.builder;
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
-    this.#routes = opts.routes ?? ((regime, medium): boolean => thickBakeRouted(regime, medium));
+    this.#routes =
+      opts.routes ??
+      ((regime, medium, envelope): boolean =>
+        thickBakeRouted(regime, medium) || deckRouted(regime, medium, envelope));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
     this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
   }
@@ -1710,7 +1725,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           tables !== null &&
           entry.built !== null &&
           entry.regime !== null &&
-          this.#routes(entry.regime, entry.built.medium)
+          this.#routes(entry.regime, entry.built.medium, entry.envelope)
         ) {
           this.#bake(held, entry, entry.built, tables);
         }
@@ -1786,7 +1801,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       regime === null ||
       regime.kind !== "cloudDeck" ||
       !(regime.deckAltitudeM > 0) ||
-      !this.#routes(regime, medium)
+      !this.#routes(regime, medium, entry.envelope)
     ) {
       return null;
     }
@@ -2225,7 +2240,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     if (built.sources === undefined) {
       return 0;
     }
-    const routed = entry.regime !== null && this.#routes(entry.regime, built.medium);
+    const routed =
+      entry.regime !== null && this.#routes(entry.regime, built.medium, entry.envelope);
     let corrected = false;
     if (!routed) {
       try {
@@ -2260,7 +2276,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     if (
       entry.regime !== null &&
       entry.regime.kind !== "thin" &&
-      !this.#routes(entry.regime, built.medium)
+      !this.#routes(entry.regime, built.medium, entry.envelope)
     ) {
       return false;
     }
