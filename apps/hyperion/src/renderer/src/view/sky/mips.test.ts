@@ -32,6 +32,33 @@ function unevenFace(sizePx: number): Float32Array {
   return face;
 }
 
+/** The solid angle of the face region from (0, 0) to (a, b), sr (`cube.ts`' own). */
+function cornerAreaSr(a: number, b: number): number {
+  return Math.atan2(a * b, Math.sqrt(a * a + b * b + 1));
+}
+
+/** Each texel's solid angle by its four corners, each corner's area found afresh. */
+function fourCornerAnglesSr(sizePx: number): Float64Array {
+  const area = cornerAreaSr;
+  const edge = (i: number): number => (2 * i) / sizePx - 1;
+  const angles = new Float64Array(sizePx * sizePx);
+  for (let row = 0; row < sizePx; row += 1) {
+    for (let column = 0; column < sizePx; column += 1) {
+      const [x0, x1, y0, y1] = [edge(column), edge(column + 1), edge(row), edge(row + 1)];
+      angles[row * sizePx + column] = area(x0, y0) - area(x0, y1) - area(x1, y0) + area(x1, y1);
+    }
+  }
+  return angles;
+}
+
+describe("the texels' solid angles (the owner's report)", () => {
+  it("are the four-corner formula's bit for bit, each corner's area found once", () => {
+    for (const size of [1, 2, 3, 64, 257]) {
+      expect(texelSolidAnglesSr(size)).toEqual(fourCornerAnglesSr(size));
+    }
+  });
+});
+
 describe("the cube's levels", () => {
   it("steps 3,072 down by halves to 3 and then 3 × 3 to 1", () => {
     const sizes = mipSizes(3_072);

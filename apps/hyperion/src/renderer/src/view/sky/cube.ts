@@ -109,15 +109,22 @@ function cornerArea(a: number, b: number): number {
 export function texelSolidAnglesSr(sizePx: number): Float64Array {
   const edges = Array.from({ length: sizePx + 1 }, (_, i) => (2 * i) / sizePx - 1);
   const angles = new Float64Array(sizePx * sizePx);
+  // Each corner's A once, a row of them at a time, where each texel took its four afresh: the
+  // same values summed in the same order, a quarter of the arctangents (the owner's report,
+  // 2026-11-01: the high cube's 2,048² faces held the main thread some 2 s on the pod at its
+  // first bake).
+  let above = edges.map((x) => cornerArea(x, edges[0] ?? 0));
   for (let row = 0; row < sizePx; row += 1) {
-    const y0 = edges[row] ?? 0;
     const y1 = edges[row + 1] ?? 0;
+    const below = edges.map((x) => cornerArea(x, y1));
     for (let column = 0; column < sizePx; column += 1) {
-      const x0 = edges[column] ?? 0;
-      const x1 = edges[column + 1] ?? 0;
       angles[row * sizePx + column] =
-        cornerArea(x0, y0) - cornerArea(x0, y1) - cornerArea(x1, y0) + cornerArea(x1, y1);
+        (above[column] ?? 0) -
+        (below[column] ?? 0) -
+        (above[column + 1] ?? 0) +
+        (below[column + 1] ?? 0);
     }
+    above = below;
   }
   return angles;
 }
