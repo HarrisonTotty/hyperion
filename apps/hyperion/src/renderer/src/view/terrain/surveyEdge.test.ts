@@ -1,5 +1,5 @@
 import type { CoverDto } from "@hyperion/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
@@ -212,6 +212,24 @@ describe("the survey edge's mark (R10.T10.c)", () => {
       const p = project(footM, camera, VIEWPORT);
       expect(Math.hypot(p.xPx - mark.xPx, p.yPx - mark.yPx)).toBeGreaterThanOrEqual(0.5 * REM_PX);
     }
+  });
+
+  it("makes a coverage's edge once, and draws every later frame of it the same from it", () => {
+    const coverage = surveyed([0, 16, 16], [0, 17, 16], [0, 3, 30]);
+    const read = vi.spyOn(coverage, "maskTexels");
+    const near = viewOf(coverage, 200_000);
+    const first = surveyEdgeMark(near.view, near.camera, VIEWPORT, OPTIONS);
+    expect(read).toHaveBeenCalled();
+    read.mockClear();
+    // Later frames, from the same height and from farther off, read the coverage's cells no more.
+    expect(surveyEdgeMark(near.view, near.camera, VIEWPORT, OPTIONS)).toEqual(first);
+    const far = viewOf(coverage, 900_000);
+    const farMark = surveyEdgeMark(far.view, far.camera, VIEWPORT, OPTIONS);
+    expect(read).not.toHaveBeenCalled();
+    // And each is the frame a coverage of the same cells, never drawn before, gives.
+    const fresh = surveyed([0, 16, 16], [0, 17, 16], [0, 3, 30]);
+    const again = viewOf(fresh, 900_000);
+    expect(surveyEdgeMark(again.view, again.camera, VIEWPORT, OPTIONS)).toEqual(farMark);
   });
 
   it("draws no edge with no survey", () => {

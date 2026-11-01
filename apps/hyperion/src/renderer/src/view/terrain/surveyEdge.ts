@@ -271,6 +271,28 @@ function runsOf(sides: ReadonlyArray<DirectedSide>): DirectedSide[][] {
   return runs;
 }
 
+/**
+ * Each coverage's edge as its runs ({@link runsOf} of its directed sides), made at the first frame
+ * that draws it and kept while the coverage lives: a coverage never changes, and its edge needs no
+ * camera, so that a frame places the runs alone (the owner's report, 2026-11-01: the edge of a body
+ * surveyed whole was made again in every frame of every view).
+ */
+const EDGE_RUNS = new WeakMap<CoverageView, ReadonlyArray<ReadonlyArray<DirectedSide>>>();
+
+/** The runs of `coverage`'s edge, made once ({@link EDGE_RUNS}). */
+function edgeRunsOf(coverage: CoverageView): ReadonlyArray<ReadonlyArray<DirectedSide>> {
+  const held = EDGE_RUNS.get(coverage);
+  if (held !== undefined) {
+    return held;
+  }
+  const cells = 2 ** coverage.level;
+  const runs = runsOf(
+    FACES.flatMap((face) => surveyEdges(coverage, face).map((edge) => directed(edge, cells))),
+  );
+  EDGE_RUNS.set(coverage, runs);
+  return runs;
+}
+
 /** A point of a side on the ground. */
 interface EdgePoint {
   /** Its place along the side, 0 at its start to 1 at its end. */
@@ -426,9 +448,6 @@ export function surveyEdgeMark(
     const { xPx, yPx } = project(fromCameraM, camera, viewport);
     return { xPx, yPx };
   };
-  const sides = FACES.flatMap((face) =>
-    surveyEdges(coverage, face).map((edge) => directed(edge, cells)),
-  );
   const line: number[] = [];
   const ticks: number[] = [];
   const remPx = options.remPx;
@@ -595,7 +614,7 @@ export function surveyEdgeMark(
     }
   };
 
-  for (const run of runsOf(sides)) {
+  for (const run of edgeRunsOf(coverage)) {
     gap();
     for (const side of run) {
       const first = pointAt(side, 0);

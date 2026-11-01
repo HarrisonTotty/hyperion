@@ -22,7 +22,7 @@ import type { TextureSpec } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { stToUv } from "./cube";
-import { type Edge, EDGES, edgeNeighbour, type Face, type PatchKey } from "./patchKey";
+import { type Edge, EDGES, edgeNeighbour, type Face, type PatchKey, unreachable } from "./patchKey";
 import type { FieldBlockAnswer } from "./workers/messages";
 
 /** The shallowest coarse-field level R09 serves (`SurfaceHeaderDto.level`). */
@@ -368,6 +368,21 @@ export interface SurveyEdge {
   readonly side: Edge;
 }
 
+/** The step in a face's mask index to the neighbour across `side`, on a face of `n` cells a side. */
+function inFaceStep(side: Edge, n: number): number {
+  switch (side) {
+    case "UMin":
+      return -1;
+    case "UMax":
+      return 1;
+    case "VMin":
+      return -n;
+    case "VMax":
+      return n;
+  }
+  return unreachable(side);
+}
+
 /**
  * The survey's edge on `face` (R10.T10.c): each side of each surveyed cell of the face whose
  * neighbour across it is not surveyed, margin cells counted unsurveyed, in the order of the cells,
@@ -377,22 +392,44 @@ export interface SurveyEdge {
  * Each piece is listed once, by the face of its surveyed cell, so that the six faces' lists are
  * the whole edge, a piece on a face's edge included, its unsurveyed side on the neighbouring face.
  * Provides' `surveyEdges(face, level)`: the level is the coverage's own.
+ *
+ * A neighbour on the same face is read by its index in the mask, and only a cell on the face's
+ * border steps across it through `edgeNeighbour`, so that a whole body surveyed at level 8, six
+ * faces of 65,536 cells, takes a few milliseconds where a step through the fold for each of its
+ * 1.6 million sides took some 100 ms (the owner's report, 2026-11-01: VIEW drew 1 fps or lower,
+ * the edge made again every frame). The edge is the same, in the same order.
  */
 export function surveyEdges(coverage: CoverageView, face: Face): ReadonlyArray<SurveyEdge> {
   const { level } = coverage;
   const n = 2 ** level;
   const texels = coverage.maskTexels();
-  const surveyed = (cell: PatchKey): boolean =>
-    (texels[(cell.face * n + cell.j) * n + cell.i] ?? 0) !== 0;
+  const surveyedAt = (index: number): boolean => (texels[index] ?? 0) !== 0;
+  const surveyed = (cell: PatchKey): boolean => surveyedAt((cell.face * n + cell.j) * n + cell.i);
   const edges: SurveyEdge[] = [];
   for (let j = 0; j < n; j += 1) {
+    const row = (face * n + j) * n;
     for (let i = 0; i < n; i += 1) {
-      const cell: PatchKey = { face, level, i, j };
-      if (!surveyed(cell)) {
+      const index = row + i;
+      if (!surveyedAt(index)) {
         continue;
       }
+      // Across each side in `EDGES`' order: towards i − 1, i + 1, j − 1 and j + 1.
+      const border = i === 0 || j === 0 || i === n - 1 || j === n - 1;
+      if (
+        !border &&
+        surveyedAt(index - 1) &&
+        surveyedAt(index + 1) &&
+        surveyedAt(index - n) &&
+        surveyedAt(index + n)
+      ) {
+        continue;
+      }
+      const cell: PatchKey = { face, level, i, j };
       for (const side of EDGES) {
-        if (!surveyed(edgeNeighbour(cell, side))) {
+        const across = border
+          ? surveyed(edgeNeighbour(cell, side))
+          : surveyedAt(index + inFaceStep(side, n));
+        if (!across) {
           edges.push({ cell, side });
         }
       }

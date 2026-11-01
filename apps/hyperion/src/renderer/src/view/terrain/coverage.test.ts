@@ -269,7 +269,58 @@ describe("the survey's edge (R10.T10.c)", () => {
     const whole = merged(CoverageView.empty(5), cover([0, fieldCellCount(5), 30]), 1);
     expect(FACES.flatMap((face) => surveyEdges(whole, face))).toEqual([]);
   });
+
+  it("is the edge a step through the fold for every side gives, side for side, in its order", () => {
+    // Runs of cells over every face, the borders and the cube's corners among them, from a fixed
+    // linear congruential sequence.
+    let state = 12_345;
+    const next = (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2 ** 31;
+      return state / 2 ** 31;
+    };
+    const count = fieldCellCount(6);
+    const ranges: Array<readonly [number, number, number]> = [];
+    for (let start = 0; start < count;) {
+      const end = Math.min(count, start + 1 + Math.floor(next() * 200));
+      if (next() < 0.5) {
+        ranges.push([start, end, 8]);
+      }
+      start = end;
+    }
+    const random = merged(CoverageView.empty(6), cover(...ranges), 1);
+    const whole = merged(CoverageView.empty(6), cover([0, count, 8]), 1);
+    for (const coverage of [random, whole, view]) {
+      for (const face of FACES) {
+        expect(surveyEdges(coverage, face)).toEqual(throughTheFold(coverage, face));
+      }
+    }
+    expect(FACES.flatMap((face) => surveyEdges(random, face)).length).toBeGreaterThan(1_000);
+  });
 });
+
+/**
+ * The edge as it was made before the owner's report (2026-11-01), every neighbour found by
+ * `edgeNeighbour`, which the in-face reads must give side for side, in the same order.
+ */
+function throughTheFold(coverage: CoverageView, face: Face): SurveyEdge[] {
+  const n = 2 ** coverage.level;
+  const texels = coverage.maskTexels();
+  const at = (c: PatchKey): boolean => (texels[(c.face * n + c.j) * n + c.i] ?? 0) !== 0;
+  const edges: SurveyEdge[] = [];
+  for (let j = 0; j < n; j += 1) {
+    for (let i = 0; i < n; i += 1) {
+      const c: PatchKey = { face, level: coverage.level, i, j };
+      if (at(c)) {
+        for (const side of EDGES) {
+          if (!at(edgeNeighbour(c, side))) {
+            edges.push({ cell: c, side });
+          }
+        }
+      }
+    }
+  }
+  return edges;
+}
 
 /** The texel of a level-5 mask that holds cell `index`: face, then row, then column. */
 function level5TexelOf(index: number): number {
