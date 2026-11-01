@@ -1409,6 +1409,20 @@ mod tests {
                                 fits, track,
                                 "{mass} M☉, {comp:?}, attempt {attempt} of member {index}"
                             );
+                            // A white dwarf's track never judges it on its pair's speed, which
+                            // its attempt leaves undrawn.
+                            if i % 4 == 0 {
+                                let unpaired = remnant_fits(
+                                    ClassKind::WhiteDwarf,
+                                    mass,
+                                    &comp,
+                                    address,
+                                    model.age(),
+                                    (v_eff, 0.0),
+                                    rules,
+                                );
+                                assert_eq!(unpaired, track, "{mass} M☉, attempt {attempt}");
+                            }
                             kept += u32::from(fits);
                             refused += u32::from(!fits);
                         }

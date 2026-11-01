@@ -229,7 +229,6 @@ pub fn draw_member(
         mass_stream.seek(ATTEMPT_WORDS * u64::from(attempt));
         let mass = imf.quantile_in(lo, hi, mass_stream.uniform());
         let mark = mass_stream.mark();
-        let systemic = systemic_speed(&mut mass_stream);
         let keep = match class.kind {
             ClassKind::Living => mark.is_below(Threshold::from_probability(depletion(mass, alpha))),
             ClassKind::Tail => {
@@ -237,6 +236,14 @@ pub fn draw_member(
                 kept >= 1.0 || mark.is_below(Threshold::from_probability(1.0 - kept))
             }
             ClassKind::WhiteDwarf | ClassKind::NeutronStar | ClassKind::BlackHole => {
+                // Only a low-mode kick is judged on the pair's speed, and a white dwarf's never
+                // takes the low mode, so its attempt leaves the speed undrawn, as a living star's
+                // does: each attempt seeks its own words.
+                let systemic = if class.kind == ClassKind::WhiteDwarf {
+                    0.0
+                } else {
+                    systemic_speed(&mut mass_stream)
+                };
                 remnant_attempt_fits(
                     galaxy,
                     model,

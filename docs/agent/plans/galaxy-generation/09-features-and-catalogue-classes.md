@@ -5497,3 +5497,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   bit).** Above the ceiling a white dwarf reads its companion-stripped mark alone, through
   `sse::is_companion_stripped_by`, which `is_companion_stripped_under` (private again) now calls.
   It builds its whole draws only in the band.
+- **P09.T10 perf, the pair's speed drawn only for the low mode (lane `galaxy-centre-core`,
+  2026-11-01; bit for bit).** A member's attempt draws its pair's systemic speed only for a
+  neutron-star or black-hole class, the only ones whose low-mode kick reads it. Each attempt seeks
+  its own words, so nothing else moves. The 50 ly globular-core query reaches 19.8 ms warm under
+  every 26 hold (20 ms target).
