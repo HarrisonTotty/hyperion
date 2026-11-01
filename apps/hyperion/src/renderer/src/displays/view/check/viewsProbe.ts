@@ -18,6 +18,7 @@
  */
 
 import type {
+  InspectionTimingPass,
   ViewsCheckCanvas,
   ViewsCheckPhaseName,
   ViewsCheckPhaseRecord,
@@ -414,6 +415,45 @@ export class ViewsProbe implements EngineProbe {
       droppedResolves,
       unattributedGpuMs: this.#unattributedMs(made),
     };
+  }
+
+  /**
+   * Each pass label's GPU time in each animation frame stamped from `startMs` up to `endMs` that
+   * made a resolve and whose resolves all reported, ms, every view's and target's passes of the
+   * label in the frame summed, 0 in a frame without one: the frames of
+   * {@link ViewsProbe.window}'s `frameGpuMs`, in the same order, labels in the order first seen (the
+   * inspection run's frame profile; the owner's report, 2026-11-01).
+   */
+  passTimes(startMs: number, endMs: number): ReadonlyArray<InspectionTimingPass> {
+    const frames = [...this.#frames.values()]
+      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
+      .toSorted((a, b) => a.atMs - b.atMs);
+    const byLabel = new Map<string, number[]>();
+    let timed = 0;
+    for (const frame of frames) {
+      const keys = [...frame.views.values()].flatMap((part) => part.resolves);
+      const resolves = keys.map((key) => this.#times.get(key));
+      if (keys.length === 0 || resolves.some((times) => times === undefined)) {
+        continue;
+      }
+      for (const times of resolves) {
+        for (const pass of times?.passes ?? []) {
+          let ms = byLabel.get(pass.label);
+          if (ms === undefined) {
+            ms = Array.from({ length: timed + 1 }, () => 0);
+            byLabel.set(pass.label, ms);
+          }
+          ms[timed] = (ms[timed] ?? 0) + pass.ns / 1e6;
+        }
+      }
+      timed += 1;
+      for (const ms of byLabel.values()) {
+        while (ms.length < timed) {
+          ms.push(0);
+        }
+      }
+    }
+    return [...byLabel].map(([label, ms]) => ({ label, ms }));
   }
 
   #attach(engine: RenderEngine): RenderEngine {

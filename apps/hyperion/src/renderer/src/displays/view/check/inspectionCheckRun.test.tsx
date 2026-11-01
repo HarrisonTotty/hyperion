@@ -63,6 +63,7 @@ describe("the inspection run (the owner's request)", () => {
         sleep: () => Promise.resolve(),
         signal: new AbortController().signal,
         timing: INSPECTION_CHECK_TIMING,
+        profile: null,
       }),
     ).rejects.toThrow("views check: the server lists no universe 3504954ff4feabf4");
     expect(openSystem).not.toHaveBeenCalled();
@@ -83,9 +84,40 @@ describe("the inspection run (the owner's request)", () => {
           closeGround: null,
         }),
       new AbortController().signal,
+      null,
     );
 
     expect(end.mock.calls).toEqual([[{ status: "pass" }]]);
+  });
+
+  it("writes its frame profile's timing file before it ends passed (the owner's report)", async () => {
+    const order: string[] = [];
+    await recordInspectionCheck(
+      {
+        end: (outcome) => {
+          order.push(`end ${outcome.status}`);
+          return Promise.resolve();
+        },
+      },
+      () =>
+        Promise.resolve({
+          label: "a",
+          frame: null,
+          exposure: null,
+          statements: [],
+          ground: [],
+          closeGround: null,
+        }),
+      new AbortController().signal,
+      {
+        write: () => {
+          order.push("write timing");
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(order).toEqual(["write timing", "end pass"]);
   });
 
   it("ends failed with the reason the run threw", async () => {
@@ -96,6 +128,7 @@ describe("the inspection run (the owner's request)", () => {
       { end },
       () => Promise.reject(new Error("views check: VIEW BODY was held back")),
       new AbortController().signal,
+      null,
     );
 
     expect(end.mock.calls).toEqual([

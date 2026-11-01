@@ -114,6 +114,41 @@ describe("the views probe", () => {
     expect(probe.timer()).toBe("quantized");
   });
 
+  it("gives each pass label's time in each frame timed in full, 0 where a frame has none (the owner's report)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const instrument = engine.createView(document.createElement("canvas"), "instrument-1");
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 100, heightPx: 50 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("discs"));
+      primary.render(frame("tonemap"));
+      instrument.render(frame("view:wireframe"));
+    });
+    inFrame(page, 116, () => {
+      primary.render(frame("tonemap"));
+    });
+    timed.deliver((name) => (name === "instrument-1" ? 0.5 : 1));
+    // A frame whose resolve never reports is left out, as the window's GPU times leave it.
+    inFrame(page, 133, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(probe.passTimes(0, 200)).toEqual([
+      { label: "view:hdr", ms: [1, 0] },
+      { label: "view", ms: [1, 1] },
+      { label: "instrument-1", ms: [0.5, 0] },
+    ]);
+    expect(probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs).toEqual([
+      2.5, 1,
+    ]);
+  });
+
   it("counts a resolve that never reports as a drop, and leaves its frame untimed", async () => {
     const { probe, page, engine } = await probed();
     const primary = engine.createView(document.createElement("canvas"), "view");

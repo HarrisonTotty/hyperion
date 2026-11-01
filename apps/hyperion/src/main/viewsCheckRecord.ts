@@ -1,8 +1,9 @@
 /**
  * The check of what the several-views check's renderer sends the main process (plan R07, T20):
  * its record, which the IPC handler treats as `unknown` until it passes; and the terrain run's
- * (plan R10, R10.T16.d), the hand-over check's (R10.T10.g) and the atmosphere run's (plan R08,
- * R08.T10.b), checked the same way.
+ * (plan R10, R10.T16.d), the hand-over check's (R10.T10.g), the atmosphere run's (plan R08,
+ * R08.T10.b) and the inspection run's frame profile (the owner's report, 2026-11-01), checked the
+ * same way.
  */
 
 import type {
@@ -23,6 +24,10 @@ import type {
   HandoverSharedMeans,
   HandoverSwitchName,
   HandoverTexelRecord,
+  InspectionTimingPass,
+  InspectionTimingRecord,
+  InspectionTimingWindow,
+  InspectionTimingWindowName,
   TerrainCheckBytes,
   TerrainCheckFault,
   TerrainCheckLossRecord,
@@ -1189,4 +1194,105 @@ export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord
     return null;
   }
   return { timer, devicePixelRatio, canvas: size, mediaReadyMs, captures, stages, faults };
+}
+
+/** The inspection run's profiled windows (the owner's report, 2026-11-01). */
+const TIMING_WINDOWS: ReadonlyArray<InspectionTimingWindowName> = ["orbit", "close"];
+
+/** `value` as a profiled window's name, or `null`. */
+export function readTimingWindowName(value: unknown): InspectionTimingWindowName | null {
+  return TIMING_WINDOWS.find((name) => name === value) ?? null;
+}
+
+/** Times of zero or more, ms, or `null`. */
+function times(value: unknown): ReadonlyArray<number> | null {
+  const read = numbers(value);
+  return read !== null && read.every((each) => each >= 0) ? read : null;
+}
+
+/** One pass label's times over a profiled window: a label, and its times. */
+function timingPass(value: unknown): InspectionTimingPass | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { label } = value;
+  const ms = times(value["ms"]);
+  return typeof label === "string" && label.length > 0 && ms !== null ? { label, ms } : null;
+}
+
+/**
+ * One profiled window (the owner's report): its name, an end not before its start, and its times,
+ * each pass's as many as the frames timed in full, each label once.
+ */
+function timingWindow(value: unknown): InspectionTimingWindow | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const name = readTimingWindowName(value["name"]);
+  const size = canvas(value["canvas"]);
+  const scales = numbers(value["scales"]);
+  const intervalsMs = times(value["intervalsMs"]);
+  const mainThreadMs = times(value["mainThreadMs"]);
+  const submitMs = times(value["submitMs"]);
+  const gpuMs = times(value["gpuMs"]);
+  const passes = listOf(value["passes"], timingPass);
+  const statements = strings(value["statements"]);
+  const { startMs, endMs, untimedFrames, position } = value;
+  if (
+    name === null ||
+    !isFiniteNumber(startMs) ||
+    !isFiniteNumber(endMs) ||
+    endMs < startMs ||
+    size === null ||
+    scales === null ||
+    intervalsMs === null ||
+    mainThreadMs === null ||
+    submitMs === null ||
+    gpuMs === null ||
+    passes === null ||
+    passes.some((pass) => pass.ms.length !== gpuMs.length) ||
+    new Set(passes.map((pass) => pass.label)).size !== passes.length ||
+    !isCount(untimedFrames) ||
+    !isTextOrNull(position) ||
+    statements === null
+  ) {
+    return null;
+  }
+  return {
+    name,
+    startMs,
+    endMs,
+    canvas: size,
+    scales,
+    intervalsMs,
+    mainThreadMs,
+    submitMs,
+    gpuMs,
+    passes,
+    untimedFrames,
+    position,
+    statements,
+  };
+}
+
+/**
+ * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
+ * `null` if it is not one: each window at most once.
+ */
+export function readInspectionTimingRecord(value: unknown): InspectionTimingRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { timer, devicePixelRatio } = value;
+  const windows = listOf(value["windows"], timingWindow);
+  if (
+    (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
+    !isFiniteNumber(devicePixelRatio) ||
+    !(devicePixelRatio > 0) ||
+    windows === null ||
+    new Set(windows.map((each) => each.name)).size !== windows.length
+  ) {
+    return null;
+  }
+  return { timer, devicePixelRatio, windows };
 }

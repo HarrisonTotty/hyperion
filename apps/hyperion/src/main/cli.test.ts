@@ -626,6 +626,35 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("takes --timing, the inspection run's frame profile (the owner's report)", () => {
+    expect(
+      parse(["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY, "--timing"])
+        .viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "inspection",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+      timing: true,
+    });
+  });
+
+  it.each([
+    [
+      ["--views-check", "--timing"],
+      "error: --timing is an option of --inspection, which was not given",
+    ],
+    [
+      ["--views-check", "--atmosphere", "--timing"],
+      "error: --timing is an option of --inspection, which was not given",
+    ],
+  ] as const)("refuses the frame profile without the inspection run %j", (args, message) => {
+    const error = refusal([...args]);
+    expect([error.exitCode, error.message]).toEqual([1, message]);
+  });
+
   it.each([
     [["--views-check", "--inspection"], "error: the inspection run needs --universe and --body"],
     [

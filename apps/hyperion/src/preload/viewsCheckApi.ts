@@ -11,6 +11,8 @@ import type {
   AtmosphereCheckRecord,
   CheckPhaseName,
   HandoverCheckRecord,
+  InspectionTimingRecord,
+  InspectionTimingWindowName,
   SpikeEnd,
   SpikeResultsPaths,
   TerrainCheckRecord,
@@ -30,6 +32,9 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
+  startProfile: "hyperion:views-check:start-profile",
+  endProfile: "hyperion:views-check:end-profile",
+  writeTimingResults: "hyperion:views-check:write-timing-results",
   capture: "hyperion:views-check:capture",
   wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
@@ -97,6 +102,19 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
         throw new Error("the main process read no whole-body field");
       }
       return text;
+    },
+    startProfile: async (name: InspectionTimingWindowName) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.startProfile, name);
+    },
+    endProfile: async (name: InspectionTimingWindowName, window: ViewsCheckWindow) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.endProfile, name, window);
+    },
+    writeTimingResults: async (record: InspectionTimingRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no timing file");
+      }
+      return paths;
     },
     capture: async (label: string) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.capture, label);

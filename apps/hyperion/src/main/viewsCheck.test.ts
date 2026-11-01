@@ -6,6 +6,7 @@ import type {
   AtmosphereCheckRecord,
   GraphicsLaunchMode,
   HandoverCheckRecord,
+  InspectionTimingRecord,
   TerrainCheckRecord,
   ViewsCheckLaunch,
   ViewsCheckRecord,
@@ -16,6 +17,12 @@ import { ATMOSPHERE_RECORD } from "./fixtures/atmosphereRecord";
 import { HANDOVER_RECORD } from "./fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import type { HandoverCheckResults } from "./handoverCheckResults";
+import {
+  INSPECTION_TIMING_TRACE_CATEGORIES,
+  type InspectionTimingResults,
+  ProfileScan,
+  type ReducedProfile,
+} from "./inspectionTiming";
 import type { TraceFigures } from "./reduceTrace";
 import { measured } from "./results";
 import {
@@ -99,6 +106,17 @@ function scanned(): WindowScan {
 
 const WINDOW: ReducedWindow = { figures: figures(), scan: scanned() };
 
+/** A profiled window's trace (the inspection run's `--timing`): one renderer task in its span. */
+function profiled(): ReducedProfile {
+  const scan = new ProfileScan();
+  scan.add({ name: "process_name", ph: "M", pid: 1, tid: 1, args: { name: "Renderer" } });
+  scan.add({ name: "thread_name", ph: "M", pid: 1, tid: 1, args: { name: "CrRendererMain" } });
+  scan.add({ name: "RunTask", ph: "X", pid: 1, tid: 1, ts: us(SPAN.startMs), dur: 4_000 });
+  return { clockOffsetUs: OFFSET_US, scan };
+}
+
+const PROFILE: ReducedProfile = profiled();
+
 function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   readonly session: ViewsCheckSession;
   readonly deps: ViewsCheckSessionDeps;
@@ -151,6 +169,9 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
     },
     tracePath: (phase) => `/profile/${phase}.json`,
     reduce: () => Promise.resolve(WINDOW),
+    profilePath: (name) => `/profile/timing-${name}.pftrace`,
+    reduceProfile: () => Promise.resolve(PROFILE),
+    timingDir: "/timing",
     removeFile: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
     capturesDir: "/captures",
     capture: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
@@ -580,6 +601,138 @@ describe("the inspection run (the owner's request)", () => {
   });
 });
 
+describe("the inspection run's frame profile (the owner's report)", () => {
+  const LAUNCH: ViewsCheckLaunch = {
+    setting: "high",
+    smoke: false,
+    out: null,
+    run: "inspection",
+    fixture: "terrain-test",
+    served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+    timing: true,
+  };
+
+  const TIMING_RECORD: InspectionTimingRecord = {
+    timer: "quantized",
+    devicePixelRatio: 1,
+    windows: [
+      {
+        name: "orbit",
+        startMs: SPAN.startMs,
+        endMs: SPAN.endMs,
+        canvas: { widthPx: 1140, heightPx: 640 },
+        scales: [1],
+        intervalsMs: [50],
+        mainThreadMs: [10, 12],
+        submitMs: [3, 4],
+        gpuMs: [40, 44],
+        passes: [{ label: "atmosphere view", ms: [30, 33] }],
+        untimedFrames: 0,
+        position: "28.9 Mm 268° +49°",
+        statements: ["ATMOSPHERE: APPROXIMATE"],
+      },
+    ],
+  };
+
+  /** A profiled inspection launch's session, its timing files kept. */
+  function timingSession(overrides: Partial<ViewsCheckSessionDeps> = {}): {
+    readonly run: ViewsCheckSession;
+    readonly deps: ViewsCheckSessionDeps;
+    readonly timed: InspectionTimingResults[];
+  } {
+    const timed: InspectionTimingResults[] = [];
+    const { session: run, deps } = session({
+      launch: LAUNCH,
+      writeTiming: (_dir, results) => {
+        timed.push(results);
+        return Promise.resolve({ json: "/timing/a.json", markdown: "/timing/a.md" });
+      },
+      ...overrides,
+    });
+    return { run, deps, timed };
+  }
+
+  it("is given ten minutes more, under target/ whatever the mode", () => {
+    expect([
+      viewsCheckWatchdogMs(LAUNCH, "vulkan"),
+      viewsCheckWatchdogMs(LAUNCH, "software"),
+    ]).toEqual([25 * 60_000, 125 * 60_000]);
+    expect(viewsCheckDirs(LAUNCH, "default").out).toBe("target/views-check/inspection");
+  });
+
+  it("traces each window with V8's CPU profiler beside the views check's own categories", () => {
+    expect(INSPECTION_TIMING_TRACE_CATEGORIES).toEqual([
+      ...VIEWS_CHECK_TRACE_CATEGORIES,
+      "disabled-by-default-v8.cpu_profiler",
+    ]);
+  });
+
+  it("traces a window, reduces it over its span, removes it, and writes the timing file", async () => {
+    const { run, deps, timed } = timingSession();
+    await run.capture("inspection-61ffd967fe000023-0100");
+    await run.startProfile("orbit");
+    await run.endProfile("orbit", SPAN);
+    await run.writeTimingResults(TIMING_RECORD);
+    run.end(0, null);
+    expect(vi.mocked(deps.tracing.startRecording).mock.calls[0]?.[0]).toMatchObject({
+      included_categories: [...INSPECTION_TIMING_TRACE_CATEGORIES],
+    });
+    expect(deps.tracing.stopRecording).toHaveBeenCalledWith("/profile/timing-orbit.pftrace");
+    expect(deps.removeFile).toHaveBeenCalledWith("/profile/timing-orbit.pftrace");
+    const window = timed[0]?.windows[0];
+    expect(window?.trace.value?.threads.map((thread) => [thread.thread, thread.busyMs])).toEqual([
+      ["CrRendererMain", 4],
+    ]);
+    expect(window?.passes.map((pass) => [pass.label, pass.medianMs])).toEqual([
+      ["atmosphere view", 30],
+    ]);
+    expect(timed[0]?.run.served?.body).toBe("61ffd967fe000023.0100");
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("records a window whose trace does not reduce as missing, with why", async () => {
+    const { run, timed } = timingSession({
+      reduceProfile: () => Promise.reject(new Error("the trace was cut short")),
+    });
+    await run.startProfile("orbit");
+    await run.endProfile("orbit", SPAN);
+    await run.writeTimingResults(TIMING_RECORD);
+    expect(timed[0]?.windows[0]?.trace).toEqual({
+      value: null,
+      reason: "the trace did not reduce: the trace was cut short",
+    });
+  });
+
+  it("refuses a second window while one records, and a window of a launch that profiles nothing", async () => {
+    const { run } = timingSession();
+    await run.startProfile("orbit");
+    await expect(run.startProfile("close")).rejects.toThrow(/still recording/);
+    await expect(run.endProfile("close", SPAN)).rejects.toThrow(/not the profile recording/);
+    const { session: plain } = session({
+      launch: {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "inspection",
+        fixture: "terrain-test",
+        served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      },
+    });
+    await expect(plain.startProfile("orbit")).rejects.toThrow(/profiles no frame/);
+  });
+
+  it("fails a run that ends with its capture saved but no timing file written", async () => {
+    const lines: string[] = [];
+    const { run, deps } = timingSession({ log: (line) => lines.push(line) });
+    await run.capture("inspection-61ffd967fe000023-0100");
+    run.end(0, null);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the inspection run ended with no timing file written",
+    );
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
 describe("the views check's session on a terrain launch (R10.T16.d)", () => {
   it("takes no trace of a phase, and captures the page at its end", async () => {
     const { session: run, deps } = terrainSession();
@@ -979,7 +1132,10 @@ describe("an atmosphere run's session (R08.T10.b)", () => {
 describe("the views check's handlers", () => {
   type Listener = (event: { own: boolean }, ...args: unknown[]) => Promise<unknown>;
 
-  function handlers(run: ViewsCheckRunKind = "several-views"): {
+  function handlers(
+    run: ViewsCheckRunKind = "several-views",
+    timing = false,
+  ): {
     readonly call: (channel: string, own: boolean, ...args: unknown[]) => Promise<unknown>;
     readonly calls: string[];
   } {
@@ -1019,6 +1175,18 @@ describe("the views check's handlers", () => {
           calls.push("write atmosphere");
           return Promise.resolve({ json: "a", markdown: "b" });
         },
+        startProfile: (name) => {
+          calls.push(`start profile ${name}`);
+          return Promise.resolve();
+        },
+        endProfile: (name) => {
+          calls.push(`end profile ${name}`);
+          return Promise.resolve();
+        },
+        writeTimingResults: () => {
+          calls.push("write timing");
+          return Promise.resolve({ json: "a", markdown: "b" });
+        },
         capture: (label) => {
           calls.push(`capture ${label}`);
           return Promise.resolve();
@@ -1032,6 +1200,7 @@ describe("the views check's handlers", () => {
         },
       },
       run,
+      timing,
     });
     return {
       call: (channel, own, ...args) => {
@@ -1094,6 +1263,82 @@ describe("the views check's handlers", () => {
   ] as const)("refuse %s", async (_what, channel, own, args, error) => {
     const { call, calls } = handlers();
     await expect(call(channel, own, ...args)).rejects.toThrow(error);
+    expect(calls).toEqual([]);
+  });
+
+  it("carry out the frame profile's operations on an inspection launch with --timing", async () => {
+    const { call, calls } = handlers("inspection", true);
+    await call(VIEWS_CHECK_CHANNELS.startProfile, true, "orbit");
+    await call(VIEWS_CHECK_CHANNELS.endProfile, true, "orbit", SPAN);
+    await call(VIEWS_CHECK_CHANNELS.writeTimingResults, true, {
+      timer: "absent",
+      devicePixelRatio: 1,
+      windows: [],
+    });
+    expect(calls).toEqual(["start profile orbit", "end profile orbit", "write timing"]);
+  });
+
+  it.each([
+    ["an inspection launch without --timing", "inspection", false],
+    ["an atmosphere launch", "atmosphere", true],
+    ["T20's launch", "several-views", true],
+  ] as const)("refuse the frame profile's operations on %s", async (_what, run, timing) => {
+    const { call, calls } = handlers(run, timing);
+    await expect(call(VIEWS_CHECK_CHANNELS.startProfile, true, "orbit")).rejects.toThrow(
+      /not a profiled window/,
+    );
+    await expect(call(VIEWS_CHECK_CHANNELS.endProfile, true, "orbit", SPAN)).rejects.toThrow(
+      /not a profiled window/,
+    );
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeTimingResults, true, {
+        timer: "absent",
+        devicePixelRatio: 1,
+        windows: [],
+      }),
+    ).rejects.toThrow(/timing record/);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ["a window that is not one", VIEWS_CHECK_CHANNELS.startProfile, ["descent"], /profiled window/],
+    [
+      "a window's span that ends before it starts",
+      VIEWS_CHECK_CHANNELS.endProfile,
+      ["close", { startMs: 2, endMs: 1 }],
+      /its span/,
+    ],
+    [
+      "a timing record whose pass times are not one a frame",
+      VIEWS_CHECK_CHANNELS.writeTimingResults,
+      [
+        {
+          timer: "full",
+          devicePixelRatio: 1,
+          windows: [
+            {
+              name: "orbit",
+              startMs: 0,
+              endMs: 1,
+              canvas: { widthPx: 1, heightPx: 1 },
+              scales: [],
+              intervalsMs: [],
+              mainThreadMs: [],
+              submitMs: [],
+              gpuMs: [1, 2],
+              passes: [{ label: "sky", ms: [1] }],
+              untimedFrames: 0,
+              position: null,
+              statements: [],
+            },
+          ],
+        },
+      ],
+      /timing record/,
+    ],
+  ] as const)("refuse %s on a profiled launch", async (_what, channel, args, error) => {
+    const { call, calls } = handlers("inspection", true);
+    await expect(call(channel, true, ...args)).rejects.toThrow(error);
     expect(calls).toEqual([]);
   });
 

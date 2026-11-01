@@ -20,10 +20,12 @@ import {
   recordInspectionCheck,
   runInspectionCheck,
 } from "./inspectionCheckRun";
+import { INSPECTION_PROFILE_TIMING, InspectionProfiler } from "./inspectionProfile";
 import {
   atmosphereCheckTimingOf,
   handoverCheckTimingOf,
   inspectionCheckTimingOf,
+  inspectionProfileTimingOf,
   terrainCheckTimingOf,
   viewsCheckTimingOf,
 } from "./softwareTiming";
@@ -173,6 +175,19 @@ export function ViewsCheckRunner({
         break;
       case "inspection": {
         const { served } = run;
+        // The frame profile, on an `--inspection --timing` launch alone (the owner's report).
+        const profile =
+          api.launch.timing === true
+            ? new InspectionProfiler({
+                api,
+                views: probe,
+                markWindow: shared.markWindow,
+                nowMs: shared.nowMs,
+                sleep: shared.sleep,
+                devicePixelRatio: shared.devicePixelRatio,
+                timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
+              })
+            : null;
         ended = recordInspectionCheck(
           api,
           () =>
@@ -186,8 +201,10 @@ export function ViewsCheckRunner({
                 openSystemRef.current(target);
               },
               timing: inspectionCheckTimingOf(INSPECTION_CHECK_TIMING, launchMode),
+              profile,
             }),
           controller.signal,
+          profile,
         );
         break;
       }

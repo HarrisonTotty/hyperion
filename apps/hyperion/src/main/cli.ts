@@ -76,7 +76,9 @@
  * `--universe` names opened on `GALAXY`, the system of the body `--body` names opened on `SYSTEM`,
  * the body opened in `VIEW` through the orbit map's `VIEW BODY` and its photorealistic inspection
  * captured; it needs both, and is refused without `--views-check` and beside `--terrain` or
- * `--atmosphere`.
+ * `--atmosphere`. With `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
+ * its frame from orbit and closed in, per pass and per thread, into
+ * `target/views-check/timing/`; `--timing` is refused without `--inspection`.
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -310,6 +312,12 @@ export function buildCommand(version: string): Command {
         "the check's inspection run (the owner's request): --body opened from SYSTEM through VIEW BODY, captured",
       ),
     )
+    .addOption(
+      new Option(
+        "--timing",
+        "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit and close in",
+      ),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -429,6 +437,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["inspection"] === true && options["viewsCheck"] !== true) {
     command.error("error: --inspection is an option of --views-check, which was not given");
+  }
+  if (options["timing"] === true && options["inspection"] !== true) {
+    command.error("error: --timing is an option of --inspection, which was not given");
   }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
@@ -582,6 +593,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...(typeof whole === "string" ? { wholeField: whole } : {}),
     // Both or neither, which `viewsCheckServedRefusal` holds the launch to.
     ...servedOf(options),
+    // Refused without `--inspection` before this is reached.
+    ...(options["timing"] === true ? { timing: true } : {}),
   };
 }
 

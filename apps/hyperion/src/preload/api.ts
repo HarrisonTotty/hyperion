@@ -996,6 +996,13 @@ export interface ViewsCheckLaunch {
    * Present only on a `--terrain --whole` launch, whose `fixture` is `terrain-test-whole`.
    */
   readonly wholeField?: string;
+  /**
+   * The inspection run's frame profile (`--timing`; the owner's report, 2026-11-01): present, and
+   * `true`, only on an `--inspection` launch that asks for it, whose run then measures a window of
+   * frames from orbit and another closed in ({@link InspectionTimingRecord}) and writes them under
+   * `target/views-check/timing/`; absent on every other launch.
+   */
+  readonly timing?: true;
 }
 
 /**
@@ -1861,6 +1868,60 @@ export interface AtmosphereCheckRecord {
 }
 
 /**
+ * The inspection run's profiled windows (the owner's report, 2026-11-01): from orbit, as the first
+ * capture is taken, and closed in, as the close capture is.
+ */
+export type InspectionTimingWindowName = "orbit" | "close";
+
+/** One pass label's GPU time in a profiled window. */
+export interface InspectionTimingPass {
+  /** The pass's label, as R01's pass timer reports it (`sky`, `atmosphere view`, `tonemap`). */
+  readonly label: string;
+  /**
+   * Its time in each frame of the window whose passes were all timed, ms, in the frames' order,
+   * every pass of the label in the frame summed and 0 in a frame that has none.
+   */
+  readonly ms: ReadonlyArray<number>;
+}
+
+/** What the renderer measured over one profiled window of the inspection run. */
+export interface InspectionTimingWindow {
+  readonly name: InspectionTimingWindowName;
+  /** The window on the page's clock, `performance.now()` ms, which the trace is clipped to. */
+  readonly startMs: number;
+  readonly endMs: number;
+  /** The primary's canvas as the window ended, px (the presented size). */
+  readonly canvas: ViewsCheckCanvas;
+  /** The primary's internal scale in force at the window's start, then each change in it. */
+  readonly scales: ReadonlyArray<number>;
+  /** The intervals between the primary's draws, ms. */
+  readonly intervalsMs: ReadonlyArray<number>;
+  /** Each animation frame's callbacks on the main thread, ms: every view's encoding among them. */
+  readonly mainThreadMs: ReadonlyArray<number>;
+  /** The primary's renders' encoding and submission in each of its draws, ms. */
+  readonly submitMs: ReadonlyArray<number>;
+  /** Each frame's GPU time, every view's and target's passes, ms, of the frames timed in full. */
+  readonly gpuMs: ReadonlyArray<number>;
+  /** The frames timed in full's passes by label, in order of first appearance. */
+  readonly passes: ReadonlyArray<InspectionTimingPass>;
+  /** Frames with a resolve whose times never arrived, left out of `gpuMs` and `passes`. */
+  readonly untimedFrames: number;
+  /** The primary's `POSITION` line as the window ended, or `null`. */
+  readonly position: string | null;
+  /** The primary's statements as the window ended (`ATMOSPHERE: APPROXIMATE`, `TERRAIN: …`). */
+  readonly statements: ReadonlyArray<string>;
+}
+
+/** What the inspection run's renderer reports of its frame profile, for its timing file. */
+export interface InspectionTimingRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  /** The windows, in the order measured. */
+  readonly windows: ReadonlyArray<InspectionTimingWindow>;
+}
+
+/**
  * The views check's narrow functions (plan R07, T20), present only when the client was launched
  * with `--views-check`; the main process checks each call's sender and arguments.
  */
@@ -1905,6 +1966,23 @@ export interface ViewsCheckApi {
    *   be read or is no terrain golden, each naming the remedy, or where the answer is no text.
    */
   wholeField(): Promise<string>;
+  /**
+   * Starts a profiled window of the inspection run's frame (`--timing`; the owner's report): a
+   * trace with V8's CPU profiler on every thread. Refused on any other launch, and while another
+   * window records.
+   */
+  startProfile(name: InspectionTimingWindowName): Promise<void>;
+  /**
+   * Ends it: stops the trace and reduces it over the measured `window` (marked in the trace by a
+   * `performance.measure` span) to each thread's busy time, its GC and its hottest functions.
+   */
+  endProfile(name: InspectionTimingWindowName, window: ViewsCheckWindow): Promise<void>;
+  /**
+   * Writes the inspection run's timing file and its summary from its renderer's record, with the
+   * windows' traces, under `target/views-check/timing/`; refused on any launch but an
+   * `--inspection --timing` one, which ends with 1 unless it was written.
+   */
+  writeTimingResults(record: InspectionTimingRecord): Promise<SpikeResultsPaths>;
   /**
    * Saves a picture of the page under the run's captures, named for the phase recording and
    * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment

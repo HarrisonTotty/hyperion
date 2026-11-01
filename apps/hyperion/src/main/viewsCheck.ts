@@ -30,7 +30,11 @@
  *
  * An `--inspection` launch (the owner's request, 2026-11-01) opens a served body from `SYSTEM` in
  * `VIEW`'s body inspection and captures it: no phases and no record, every writer refused; it ends
- * with 1 unless its capture was saved.
+ * with 1 unless its capture was saved. With `--timing` (the owner's report, 2026-11-01) it also
+ * profiles a window of frames from orbit and another closed in, each a trace with V8's CPU profiler
+ * (`inspectionTiming.ts`), and writes them through a writer of its own, under
+ * `target/views-check/timing/`; it then ends with 1 unless that file was written too. The profile's
+ * channels are refused on every other launch.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
@@ -40,6 +44,8 @@ import type {
   CheckPhaseName,
   GraphicsLaunchMode,
   HandoverCheckRecord,
+  InspectionTimingRecord,
+  InspectionTimingWindowName,
   SpikeResultsPaths,
   TerrainCheckPhaseName,
   TerrainCheckRecord,
@@ -62,6 +68,15 @@ import {
   writeHandoverResults,
 } from "./handoverCheckResults";
 import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
+import {
+  buildInspectionTimingResults,
+  inspectionTimingTraceConfig,
+  type InspectionTimingResults,
+  profileFigures,
+  type ProfileTraceFigures,
+  type ReducedProfile,
+  writeInspectionTimingResults,
+} from "./inspectionTiming";
 import { type Measured, measured, missing } from "./measured";
 import {
   readTraceFileEvents,
@@ -81,7 +96,9 @@ import {
   isCaptureLabel,
   readAtmosphereCheckRecord,
   readHandoverCheckRecord,
+  readInspectionTimingRecord,
   readTerrainCheckRecord,
+  readTimingWindowName,
   readViewsCheckRecord,
 } from "./viewsCheckRecord";
 import {
@@ -104,6 +121,9 @@ export const VIEWS_CHECK_CHANNELS = {
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
+  startProfile: "hyperion:views-check:start-profile",
+  endProfile: "hyperion:views-check:end-profile",
+  writeTimingResults: "hyperion:views-check:write-timing-results",
   capture: "hyperion:views-check:capture",
   wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
@@ -175,6 +195,13 @@ export function viewsCheckDirs(
 }
 
 /**
+ * Where the inspection run's frame profile (`--timing`; the owner's report, 2026-11-01) writes its
+ * timing file, from the repository's root: under `target/`, never `docs/measurements/`, since a
+ * profile is no measurement held to a budget and its file names its machine.
+ */
+export const INSPECTION_TIMING_DIR = "target/views-check/timing";
+
+/**
  * How long a views check may take before the main process ends it with status 3: T20's smoke 4
  * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
  * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
@@ -184,7 +211,8 @@ export function viewsCheckDirs(
  * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
  * awaited and a flight to eight air fixtures and the seat's night, 8 and 15; the inspection run's,
  * one body opened, its first photorealistic frames, its atmosphere and its surveyed ground awaited,
- * and a close look flown to and its terrain streamed, 8 and 15. Each is
+ * and a close look flown to and its terrain streamed, 8 and 15, and 10 more with its frame profile
+ * (`--timing`; the owner's report), whose two windows each last up to two minutes. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -206,7 +234,8 @@ export function viewsCheckWatchdogMs(
       ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
       break;
     case "inspection":
-      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
+      // A profile's two windows, each at most two minutes and a trace's reduction, 10 more.
+      ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.timing === true ? 10 * 60_000 : 0);
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
@@ -415,6 +444,12 @@ export interface ViewsCheckSessionDeps {
   /** Where a phase's trace is written. */
   readonly tracePath: (phase: ViewsCheckPhaseName) => string;
   readonly reduce: (path: string) => Promise<ReducedWindow>;
+  /** Where a profiled window's trace is written (the inspection run's `--timing`). */
+  readonly profilePath: (name: InspectionTimingWindowName) => string;
+  /** Reads a profiled window's trace: `inspectionTiming.ts`' `reduceProfileFile`. */
+  readonly reduceProfile: (path: string) => Promise<ReducedProfile>;
+  /** Where the inspection run's timing file goes ({@link INSPECTION_TIMING_DIR}, resolved). */
+  readonly timingDir: string;
   readonly removeFile: (path: string) => Promise<void>;
   /** Where the captures go, or `null` for none. */
   readonly capturesDir: string | null;
@@ -451,6 +486,11 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: AtmosphereCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes the inspection run's timing file: `writeInspectionTimingResults` by default. */
+  readonly writeTiming?: (
+    dir: string,
+    results: InspectionTimingResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
 }
@@ -484,6 +524,12 @@ export class ViewsCheckSession {
   #handoverResults: HandoverCheckResults | null = null;
   /** An atmosphere run's results once written, judged (R08.T10.b). */
   #atmosphereResults: AtmosphereCheckResults | null = null;
+  /** The profiled window recording, the inspection run's (`--timing`), or `null`. */
+  #profiling: InspectionTimingWindowName | null = null;
+  /** Each profiled window's trace once reduced, or why it could not be. */
+  readonly #profiles = new Map<InspectionTimingWindowName, Measured<ProfileTraceFigures>>();
+  /** Whether the inspection run's timing file was written. */
+  #timingWritten = false;
   #rightWayUp: Measured<"yes" | "no">;
   #passTimerDrops = 0;
   #untimedPasses = 0;
@@ -531,8 +577,10 @@ export class ViewsCheckSession {
    * @throws Error if another phase's window is still recording.
    */
   async startPhase(name: CheckPhaseName): Promise<void> {
-    if (this.#recording !== null) {
-      throw new Error(`the trace of ${this.#recording} is still recording`);
+    if (this.#recording !== null || this.#profiling !== null) {
+      throw new Error(
+        `the trace of ${this.#recording ?? this.#profiling ?? ""} is still recording`,
+      );
     }
     this.#recording = name;
     if (isTerrainPhase(name)) {
@@ -615,6 +663,82 @@ export class ViewsCheckSession {
         this.#deps.log(`views check: the trace ${path} was not removed: ${String(error)}`);
       });
     }
+  }
+
+  /**
+   * Starts a profiled window of the inspection run's frame (`--timing`): a trace of
+   * `inspectionTiming.ts`' categories, V8's CPU profiler among them.
+   *
+   * @throws Error if the launch profiles nothing, or a phase or another window is recording.
+   */
+  async startProfile(name: InspectionTimingWindowName): Promise<void> {
+    if (this.#deps.launch.timing !== true) {
+      throw new Error("the launch profiles no frame");
+    }
+    if (this.#recording !== null || this.#profiling !== null) {
+      throw new Error(
+        `the trace of ${this.#recording ?? this.#profiling ?? ""} is still recording`,
+      );
+    }
+    this.#profiling = name;
+    try {
+      await this.#deps.tracing.startRecording(inspectionTimingTraceConfig());
+    } catch (error: unknown) {
+      this.#profiling = null;
+      throw new Error(`the profile of ${name} did not start`, { cause: error });
+    }
+  }
+
+  /**
+   * Ends a profiled window: its trace stopped, reduced over the measured `window` and removed; a
+   * trace that does not reduce is recorded as missing, with why.
+   *
+   * @throws Error if `name` is not the window recording.
+   */
+  async endProfile(name: InspectionTimingWindowName, window: ViewsCheckWindow): Promise<void> {
+    if (this.#profiling !== name) {
+      throw new Error(`${name} is not the profile recording`);
+    }
+    this.#profiling = null;
+    const path = await this.#deps.tracing.stopRecording(this.#deps.profilePath(name));
+    try {
+      this.#profiles.set(name, profileFigures(await this.#deps.reduceProfile(path), window));
+    } catch (error: unknown) {
+      this.#profiles.set(
+        name,
+        missing(
+          `the trace did not reduce: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    } finally {
+      await this.#deps.removeFile(path).catch((error: unknown) => {
+        this.#deps.log(`views check: the trace ${path} was not removed: ${String(error)}`);
+      });
+    }
+  }
+
+  /**
+   * Builds the inspection run's timing file from its renderer's record and the windows' traces,
+   * and writes it.
+   *
+   * @throws Error if the launch profiles nothing.
+   */
+  async writeTimingResults(record: InspectionTimingRecord): Promise<SpikeResultsPaths> {
+    if (this.#deps.launch.timing !== true) {
+      throw new Error("the launch profiles no frame");
+    }
+    const run = await this.#run;
+    const results = buildInspectionTimingResults({
+      run: { ...run, window: this.#deps.windowSize() },
+      served: this.#deps.launch.served ?? null,
+      record,
+      traces: this.#profiles,
+    });
+    const write = this.#deps.writeTiming ?? writeInspectionTimingResults;
+    const paths = await write(this.#deps.timingDir, results);
+    this.#timingWritten = true;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
   }
 
   /** Saves the page as `<name>.png` among the captures, if the run keeps any; never rejects. */
@@ -808,7 +932,11 @@ export class ViewsCheckSession {
           break;
         }
         case "inspection":
-          failure = this.#captured ? null : "the inspection run ended with no capture saved";
+          failure = !this.#captured
+            ? "the inspection run ended with no capture saved"
+            : this.#deps.launch.timing === true && !this.#timingWritten
+              ? "the inspection run ended with no timing file written"
+              : null;
           break;
       }
     }
@@ -852,6 +980,9 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
     | "writeTerrainResults"
     | "writeHandoverResults"
     | "writeAtmosphereResults"
+    | "startProfile"
+    | "endProfile"
+    | "writeTimingResults"
     | "capture"
     | "wholeField"
     | "end"
@@ -862,6 +993,11 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
    * every other run's.
    */
   readonly run: ViewsCheckRunKind;
+  /**
+   * Whether the launch profiles the inspection run's frame (`ViewsCheckLaunch.timing`): its
+   * profile's channels are refused on every other launch.
+   */
+  readonly timing: boolean;
 }
 
 const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
@@ -1011,6 +1147,36 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       );
     }
     return deps.session.writeAtmosphereResults(record);
+  });
+  // The inspection run's frame profile alone (the owner's report, 2026-11-01).
+  const profiles = deps.run === "inspection" && deps.timing;
+  guarded(VIEWS_CHECK_CHANNELS.startProfile, async ([value]) => {
+    const name = profiles ? readTimingWindowName(value) : null;
+    if (name === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.startProfile} refused: not a profiled window of the launch`,
+      );
+    }
+    await deps.session.startProfile(name);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.endProfile, async ([value, span]) => {
+    const name = profiles ? readTimingWindowName(value) : null;
+    const window = readWindow(span);
+    if (name === null || window === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.endProfile} refused: not a profiled window of the launch and its span`,
+      );
+    }
+    await deps.session.endProfile(name, window);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTimingResults, async ([value]) => {
+    const record = profiles ? readInspectionTimingRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTimingResults} refused: not the inspection run's timing record`,
+      );
+    }
+    return deps.session.writeTimingResults(record);
   });
   guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
     if (deps.run === "several-views" || !isCaptureLabel(value)) {

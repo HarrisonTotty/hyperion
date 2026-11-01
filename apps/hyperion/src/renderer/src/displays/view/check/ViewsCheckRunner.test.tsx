@@ -32,6 +32,9 @@ function checkApi(): ViewsCheckApi & {
     writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    startProfile: () => Promise.resolve(),
+    endProfile: () => Promise.resolve(),
+    writeTimingResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
     wholeField: () => Promise.reject(new Error("no whole-body field")),
     writeResults: vi.fn<ViewsCheckApi["writeResults"]>(() =>

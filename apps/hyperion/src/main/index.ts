@@ -36,6 +36,7 @@ import {
   SAFE_MODE_SWITCH,
   SOFTWARE_MODE_SWITCH,
 } from "./graphics/switches";
+import { reduceProfileFile } from "./inspectionTiming";
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
 import {
@@ -49,6 +50,7 @@ import { LoadSampler } from "./sizesResults";
 import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
 import { SpikeSession } from "./spikeSession";
 import {
+  INSPECTION_TIMING_DIR,
   reduceWindowFile,
   registerViewsCheckHandlers,
   viewsCheckDirs,
@@ -479,6 +481,9 @@ function startViewsCheckSession(
     tracing: contentTracing,
     tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.pftrace`),
     reduce: reduceWindowFile,
+    profilePath: (name) => join(app.getPath("userData"), `views-check-profile-${name}.pftrace`),
+    reduceProfile: reduceProfileFile,
+    timingDir: resolve(repo, INSPECTION_TIMING_DIR),
     removeFile: (path) => rm(path, { force: true }),
     capturesDir: resolve(repo, dirs.captures, `captures-${stamp}`),
     // From the repository's root with forward slashes, the same on every platform.
@@ -506,6 +511,7 @@ function startViewsCheckSession(
     isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
     session: checkSession,
     run: launch.run,
+    timing: launch.timing === true,
   });
   window.webContents.on("console-message", (details) => {
     checkSession.consoleMessage(details.message);

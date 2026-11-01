@@ -9,7 +9,7 @@
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                  | --atmosphere
-#                  | --inspection --universe <ID> --body <ID>]
+#                  | --inspection --universe <ID> --body <ID> [--timing]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -80,6 +80,15 @@
 # target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
 # when a step does not take effect, VIEW BODY is held back, or a fault line stands on a capture.
 #
+# --inspection --timing profiles the inspection's frame too (the owner's report, 2026-11-01): from
+# orbit, as the first capture is taken, and closed in, as the close capture is, each window 30 of
+# the primary's draws or what 30 s gives, a trace with V8's CPU profiler on every thread around it.
+# It writes <date>-<machine>-<setting>-inspection-timing.json and .md under
+# target/views-check/timing/: the frame's intervals, the main thread's time, the GPU's by pass
+# (where the adapter has timestamp-query) and each thread's busy time, GC and hottest functions.
+# A profile is not judged; the launch exits 1 when its file is not written. With no --setting it
+# makes two launches, high then low, as --terrain does.
+#
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and
 # implying --hidden. It is the check-only software mode, a test-tool exception to R01 Design note 8
@@ -118,6 +127,7 @@ served=0
 atmosphere=0
 inspection=0
 whole=0
+timing=0
 setting=""
 check_args=()
 while [[ $# -gt 0 ]]; do
@@ -130,6 +140,7 @@ while [[ $# -gt 0 ]]; do
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
         --inspection) inspection=1; check_args+=("$1"); shift ;;
         --whole) whole=1; shift ;;
+        --timing) timing=1; check_args+=("$1"); shift ;;
         --universe) served=1; check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
@@ -161,12 +172,13 @@ if [[ $whole -eq 1 ]]; then
     check_args+=(--whole "$whole_field")
 fi
 
-# The settings to launch: the one given, or for the terrain or the atmosphere run with none, high
-# then low (a setting holds for a launch); T20's run with none takes the client's default, high.
+# The settings to launch: the one given, or for the terrain or the atmosphere run or the inspection's
+# profile with none, high then low (a setting holds for a launch); T20's run with none takes the
+# client's default, high, as the inspection run does.
 settings=()
 if [[ -n "$setting" ]]; then
     settings=("$setting")
-elif [[ $terrain -eq 1 || $atmosphere -eq 1 ]]; then
+elif [[ $terrain -eq 1 || $atmosphere -eq 1 || ($inspection -eq 1 && $timing -eq 1) ]]; then
     settings=(high low)
 else
     settings=("")
@@ -215,14 +227,15 @@ if [[ $hidden -eq 1 ]]; then
 fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
-# 15); the inspection run's 10 and 17, above its (8 and 15). Given two, the client refuses the
-# launch at once, so the first run's limit here stands.
+# 15); the inspection run's 10 and 17, above its (8 and 15), and 10 minutes more with its profile,
+# as its watchdog has. Given two, the client refuses the launch at once, so the first run's limit
+# here stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
 elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 1200 ))
 elif [[ $inspection -eq 1 ]]; then
-    limit=$(( smoke == 1 ? 600 : 1020 ))
+    limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 600 : 0) ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

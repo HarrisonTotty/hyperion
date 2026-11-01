@@ -290,6 +290,26 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     ]).toEqual([["low"], true]);
   });
 
+  it("makes two launches of the inspection's frame profile, high then low, for --timing (the owner's report)", () => {
+    const run = runScriptWith(
+      ["--software", "--inspection", "--universe", "u", "--body", "b", "--timing"],
+      {},
+    );
+    expect([
+      run.status,
+      run.launches.map((launch) => valueOf(launch, "--setting")),
+      run.launches.every((launch) =>
+        ["--views-check", "--inspection", "--timing"].every((flag) => launch.includes(flag)),
+      ),
+      /each launch's limit (\d+) s/u.exec(run.output)?.[1],
+    ]).toEqual([0, ["high", "low"], true, "8100"]);
+  });
+
+  it("keeps the inspection run's one launch, at the client's default, without --timing", () => {
+    const run = runScript(["--inspection", "--universe", "u", "--body", "b"]);
+    expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual([null]);
+  });
+
   it("makes one launch at the setting given", () => {
     const run = runScript(["--terrain", "--setting", "low"]);
     expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual(["low"]);

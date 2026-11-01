@@ -35,6 +35,10 @@
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
  * (with its reason), or where the primary's label block shows a fault line as it is captured, or as
  * it is captured maximized.
+ *
+ * With the frame profile (`--timing`; the owner's report, 2026-11-01) a window of frames is
+ * measured as the first capture is taken, from orbit, and another as the close capture is
+ * (`inspectionProfile.ts`), and the main process writes them once the run has passed.
  */
 
 import {
@@ -66,6 +70,7 @@ import {
   type PrimaryPlate,
   rateStepOfCameraLine,
 } from "./atmosphereCheckRun";
+import type { InspectionProfiler, ProfiledPlate } from "./inspectionProfile";
 import { viewDriver } from "./viewsCheckRun";
 import type { ViewsProbe } from "./viewsProbe";
 
@@ -149,6 +154,11 @@ export interface InspectionCheckDeps {
   /** Stops the run: before its next step, wait or call it throws `STOPPED` (`viewsCheckRun.ts`). */
   readonly signal: AbortSignal;
   readonly timing: InspectionCheckTiming;
+  /**
+   * The frame profile's windows (`--timing`; the owner's report), measured from orbit and closed
+   * in; `null` on a launch without it.
+   */
+  readonly profile: Pick<InspectionProfiler, "measure"> | null;
 }
 
 /** What the run captured, and what the primary's label block said as it was, for its tests. */
@@ -448,6 +458,11 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   const label = inspectionCaptureLabel(served.body);
   stopped();
   await deps.api.capture(label);
+  const profiledPlate = (): ProfiledPlate => {
+    const now = plate();
+    return { position: now.line("POSITION"), statements: now.statements };
+  };
+  await deps.profile?.measure("orbit", profiledPlate);
   // MAXIMIZE VIEW by its key, as an operator turns it on, captured, and off again.
   const maximized = (): boolean =>
     document.querySelector(".view__side")?.hasAttribute("hidden") === true;
@@ -570,6 +585,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   const closeGround = ground();
   stopped();
   await deps.api.capture(`${label}-close`);
+  await deps.profile?.measure("close", profiledPlate);
   return { ...orbit, closeGround };
 }
 
@@ -577,19 +593,25 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
 export type InspectionCheckEnding = Pick<ViewsCheckApi, "end">;
 
 /**
- * Runs `run` and ends the check with its outcome: passed once its capture is taken, or failed with
- * the reason it threw; nothing at all once `signal` has stopped it.
+ * Runs `run` and ends the check with its outcome: passed once its capture is taken, and with the
+ * frame profile once its timing file is written, or failed with the reason it threw; nothing at all
+ * once `signal` has stopped it.
+ *
+ * @param profile - The frame profile whose windows the run measured, written before the end;
+ *   `null` on a launch without it.
  */
 export async function recordInspectionCheck(
   api: InspectionCheckEnding,
   run: () => Promise<InspectionCapture>,
   signal: AbortSignal,
+  profile: Pick<InspectionProfiler, "write"> | null,
 ): Promise<void> {
   try {
     await run();
     if (signal.aborted) {
       return;
     }
+    await profile?.write();
     await api.end({ status: "pass" });
   } catch (error: unknown) {
     if (signal.aborted) {

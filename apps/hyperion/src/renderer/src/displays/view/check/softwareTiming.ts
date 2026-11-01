@@ -14,6 +14,7 @@ import type { GraphicsLaunchMode } from "../../../../../preload/api";
 import type { AtmosphereCheckTiming } from "./atmosphereCheckRun";
 import type { HandoverCheckTiming } from "./handoverCheckRun";
 import type { InspectionCheckTiming } from "./inspectionCheckRun";
+import type { InspectionProfileTiming } from "./inspectionProfile";
 import type { TerrainCheckTiming } from "./terrainCheckRun";
 import type { ViewsCheckTiming } from "./viewsCheckRun";
 
@@ -106,5 +107,19 @@ export function inspectionCheckTimingOf(
         settleMaxMs: stretched(timing.settleMaxMs),
         groundWaitMs: stretched(timing.groundWaitMs),
       }
+    : timing;
+}
+
+/**
+ * The frame profile's timing for a launch (`--timing`; the owner's report, 2026-11-01): a window's
+ * longest wait for its draws, and for their pass times, stretched in the software mode; its count
+ * of draws, the window itself, never.
+ */
+export function inspectionProfileTimingOf(
+  timing: InspectionProfileTiming,
+  launchMode: GraphicsLaunchMode,
+): InspectionProfileTiming {
+  return launchMode === "software"
+    ? { ...timing, maxMs: stretched(timing.maxMs), settleMs: stretched(timing.settleMs) }
     : timing;
 }

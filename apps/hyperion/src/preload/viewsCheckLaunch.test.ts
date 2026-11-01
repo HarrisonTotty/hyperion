@@ -112,6 +112,21 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...launch, fixture: "terrain-test-weathered" })).toBeNull();
   });
 
+  it("carries the inspection run's frame profile, on the inspection run alone (the owner's report)", () => {
+    const launch: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    expect(readViewsCheckLaunch({ ...launch, timing: false })).toBeNull();
+    expect(
+      readViewsCheckLaunch({ ...launch, run: "handover", fixture: "terrain-test" }),
+    ).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, timing: true })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });
