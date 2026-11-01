@@ -18,7 +18,7 @@ import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
-import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
+import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT, subPatchOf } from "./gpu/uniforms";
 import {
   LOOKAHEAD_SAMPLES,
   LOOKAHEAD_SLOW_EVERY,
@@ -84,6 +84,9 @@ import {
   type TerrainLayers,
 } from "./workers/messages";
 import type { RefinedDraft, RefineRequest } from "./workers/pool";
+
+/** An instance record's words (`gpu/uniforms.ts`' `INSTANCE_RECORD_BYTES`). */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
@@ -295,7 +298,7 @@ function writtenSlots(engine: CountingRenderEngine, buffer = "terrain instances"
   const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const slots: number[] = [];
   for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
-    slots.push(u[i * 8 + 3] ?? -1);
+    slots.push(u[i * WORDS + 3] ?? -1);
   }
   return slots;
 }
@@ -366,8 +369,29 @@ describe("the terrain pass", () => {
       .filter(({ drawn }) => drawn.standIn && drawn.patch.key.level === 1);
     expect(standIns.length).toBeGreaterThan(0);
     for (const { i } of standIns) {
-      expect([f[i * 8 + 4], f[i * 8 + 5]]).toEqual(levelOne.map((m) => Math.fround(m)));
+      expect([f[i * WORDS + 4], f[i * WORDS + 5]]).toEqual(levelOne.map((m) => Math.fround(m)));
     }
+  });
+
+  it("writes each part a stand-in draws as its slot, with the part's word, and a whole patch's with none", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      pool().deliver(pass, { face, level: 0, i: 0, j: 0 });
+    }
+    const frame = pass.frame(inputAt(view));
+    const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+    const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+    const written = frame.drawSet.patches.map(({ patch, within }, i) => [
+      u[i * WORDS + 3] === patch.slot,
+      u[i * WORDS + 8],
+      within === null ? 0 : subPatchOf(patch.key, within),
+    ]);
+    // Only the roots are resident: every selected patch is a root's part.
+    expect(frame.drawSet.patches.every(({ within }) => within !== null)).toBe(true);
+    expect(written.every(([slot, word, wanted]) => slot === true && word === wanted)).toBe(true);
+    expect(written.some(([, word]) => word !== 0)).toBe(true);
   });
 
   it("makes no GPU object after warm-up, frame after frame", async () => {
@@ -915,7 +939,7 @@ function writtenBands(
   const f = new Float32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const bands = new Map<string, [number, number]>();
   drawSet.patches.forEach((drawn, i) => {
-    bands.set(drawn.keyString, [f[i * 8 + 4] ?? Number.NaN, f[i * 8 + 5] ?? Number.NaN]);
+    bands.set(drawn.keyString, [f[i * WORDS + 4] ?? Number.NaN, f[i * WORDS + 5] ?? Number.NaN]);
   });
   return bands;
 }
@@ -1092,8 +1116,8 @@ function writtenParents(engine: CountingRenderEngine): Array<readonly [number, n
   const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const parents: Array<readonly [number, number]> = [];
   for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
-    const quadrant = u[i * 8 + 7];
-    parents.push([u[i * 8 + 6] ?? -1, quadrant === undefined ? -1 : quadrant & 3]);
+    const quadrant = u[i * WORDS + 7];
+    parents.push([u[i * WORDS + 6] ?? -1, quadrant === undefined ? -1 : quadrant & 3]);
   }
   return parents;
 }

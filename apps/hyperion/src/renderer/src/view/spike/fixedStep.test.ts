@@ -302,7 +302,7 @@ function standInScene(): Parameters<typeof coarseStandIns> {
     { face: 3, level: 13, i: 0, j: 0 },
     { face: 4, level: 14, i: 0, j: 0 },
   ]);
-  // The resident patch the face-2 root covers lies nearest the camera.
+  // The resident patch beside those the face-2 root stands in for lies nearest the camera.
   const resident = patchKeyString(faceTwo[0]);
   const selection: Selection = {
     ...unitBoxes,
@@ -348,9 +348,10 @@ describe("the coarse stand-ins (decision-r05-high-bound.md, F4)", () => {
     expect(coarseStandIns(...standInScene()).returns).toBe(1);
   });
 
-  it("takes the largest ρ a stand-in draws over every patch it covers, a resident one included", () => {
-    // The root's error at the resident patch, 99 m away, the nearest it covers.
-    expect(coarseStandIns(...standInScene()).rhoPx).toBeCloseTo(standInRhoPx(0, 99), 9);
+  it("takes the largest ρ a stand-in draws over the patches it stands in for, not a resident one beside them", () => {
+    // The root's error at the patches it stands in for, 999 m away: the resident patch beside
+    // them, 99 m away, draws itself (the seamless lane's sub-patches).
+    expect(coarseStandIns(...standInScene()).rhoPx).toBeCloseTo(standInRhoPx(0), 9);
   });
 
   it("takes the returns' largest ρ from the stand-ins over them alone", () => {

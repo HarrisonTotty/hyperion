@@ -58,9 +58,15 @@ fn unitDifference(p0 : vec3f, delta : vec3f) -> vec3f {
 
 // d − d₀, the vertex direction's difference from the patch centre's.
 fn directionDifference(rec : SlotRecord, x : u32, y : u32) -> vec3f {
+  return directionDifferenceAt(rec, vec2f(f32(x), f32(y)));
+}
+
+// d − d₀ at the place `at` of the patch's grid, in quads from its corner, whole or not: a vertex's
+// own at a whole place, so that `directionDifference` is this, bit for bit.
+fn directionDifferenceAt(rec : SlotRecord, at : vec2f) -> vec3f {
   let straddles = rec.straddles != 0u;
-  let du = warpDifference(rec.s0, (f32(x) - 32.0) * rec.step, straddles);
-  let dv = warpDifference(rec.t0, (f32(y) - 32.0) * rec.step, straddles);
+  let du = warpDifference(rec.s0, (at.x - 32.0) * rec.step, straddles);
+  let dv = warpDifference(rec.t0, (at.y - 32.0) * rec.step, straddles);
   let n0 = rec.axisA + rec.u0 * rec.axisE1 + rec.v0 * rec.axisE2;
   let delta = du * rec.axisE1 + dv * rec.axisE2;
   return unitDifference(n0, delta);

@@ -85,6 +85,12 @@ fn survey_cell_line(slot : u32, c : u32) -> bool {
   return c % (1u << code) == 0u;
 }
 
+// `survey_cell_line` at the place `c` of `slot`'s patch's grid, whole or not (a sub-patch's
+// column or row, `terrainPatch.wgsl`'s `sourceGridOf`): no line between the patch's vertices.
+fn survey_cell_line_at(slot : u32, c : f32) -> bool {
+  return c == floor(c) && survey_cell_line(slot, u32(c));
+}
+
 // Whether a fragment of `slot`'s patch at `patch_uv` ((x, y) ÷ 64) in the lit mesh's part `kind`
 // is drawn at the survey's edge: the grid's on surveyed ground; a skirt's foot strip, hanging from
 // the terrain's edge to the datum and below it, by the surveyed side; its head strip, rising from
@@ -145,12 +151,12 @@ fn lit_place(grid : vec3f, instance : u32) -> LitPlace {
       height = max(v.heightM, 0.0);
     }
     case LIT_COLUMN_FIN: {
-      if (survey_cell_line(v.slot, u32(grid.x))) {
+      if (survey_cell_line_at(v.slot, v.patchUv.x * 64.0)) {
         height = 0.0;
       }
     }
     case LIT_ROW_FIN: {
-      if (survey_cell_line(v.slot, u32(grid.y))) {
+      if (survey_cell_line_at(v.slot, v.patchUv.y * 64.0)) {
         height = 0.0;
       }
     }

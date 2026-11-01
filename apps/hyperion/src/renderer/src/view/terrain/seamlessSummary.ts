@@ -50,6 +50,13 @@ export interface SeamEvent {
   readonly levelJump: number;
   /** The largest on-screen move, pixels; −1 where nothing was measured (an appearance). */
   readonly maxPx: number;
+  /**
+   * The finer side's largest on-screen distance from its own morph target, its surface at k = 1,
+   * pixels: the part of a level change the morph left showing, which CDLOD hides at a band's end;
+   * the rest of {@link SeamEvent.maxPx} is the two bakes disagreeing at the coarser level (a
+   * rebake landed on one side and not yet on the other). −1 where nothing was measured.
+   */
+  readonly levelPx: number;
   /** The largest turn of the shading normal, degrees; −1 where nothing was measured. */
   readonly maxNormalDeg: number;
   /** The least CDLOD morph factor k over the finer side's measured vertices. */
@@ -67,7 +74,7 @@ export interface SeamChainLink {
   readonly drawnBefore: boolean;
 }
 
-/** A frame whose drawn set fell below half the frame before's, with what was missing. */
+/** A frame whose drawn set fell below half the frame before's ({@link isDrawnHalving}). */
 export interface SeamCollapse {
   readonly tS: number;
   readonly before: number;
@@ -138,13 +145,32 @@ export interface SeamSummary {
     readonly max: number | null;
     readonly count: number;
   };
-  /** Frames whose drawn count fell below half the frame before's (of more than 20). */
+  /**
+   * Frames whose drawn ground collapsed: the drawn count below half the frame before's (of more
+   * than 20) while the selection held at least half of its own ({@link isCollapse}).
+   */
   readonly collapses: number;
+  /**
+   * Frames whose drawn count fell below half the frame before's, whatever the selection did
+   * ({@link isDrawnHalving}): the collapses, and the selection shrinking, as where the survey
+   * leaves the view.
+   */
+  readonly drawnHalvings: number;
+  /**
+   * Frames at which the selection halved or doubled (of more than 20 patches) and came back within
+   * two frames ({@link isFlicker}): a selection that cycles.
+   */
+  readonly flickers: number;
   /** Refines and coarsens of {@link JUMP_LEVELS} levels or more, and their largest move, pixels. */
   readonly jumps: number;
   readonly jumpMaxPx: number;
   /** The largest coarsen's move, pixels; 0 with none. */
   readonly largestCoarsenPx: number;
+  /**
+   * The largest coarsen's level part ({@link SeamEvent.levelPx}), pixels: its move less what its two
+   * bakes disagree by; 0 with none.
+   */
+  readonly largestCoarsenLevelPx: number;
   readonly selectedEvicted: number;
   readonly refusedBakes: number;
   /** Pops a second over the span from the first draw. */
@@ -192,8 +218,35 @@ export function isPop(event: SeamEvent): boolean {
 }
 
 /** Whether frame `after` holds fewer than half of `before`'s drawn patches, of more than 20. */
-export function isCollapse(before: SeamFrame, after: SeamFrame): boolean {
+export function isDrawnHalving(before: SeamFrame, after: SeamFrame): boolean {
   return before.drawn > 20 && after.drawn < 0.5 * before.drawn;
+}
+
+/**
+ * Whether the drawn ground collapsed from frame `before` to `after`: its drawn count halved
+ * ({@link isDrawnHalving}) while the selection kept at least half of its own, so that coarser
+ * patches drew what finer ones had.
+ */
+export function isCollapse(before: SeamFrame, after: SeamFrame): boolean {
+  return isDrawnHalving(before, after) && after.selected >= 0.5 * before.selected;
+}
+
+/**
+ * Whether the selection flickers at frame `n` of `frames`: of more than 20 patches on the larger
+ * side, it halved or doubled from frame n − 1 and was back past half of n − 1's within two frames.
+ */
+export function isFlicker(frames: ReadonlyArray<SeamFrame>, n: number): boolean {
+  const was = frames[n - 1]?.selected;
+  const now = frames[n]?.selected;
+  if (was === undefined || now === undefined || Math.max(was, now) <= 20) {
+    return false;
+  }
+  const back = (next: number | undefined): boolean =>
+    next !== undefined && (now < was ? next > 0.5 * was : next < 2 * was);
+  return (
+    (now < 0.5 * was || now > 2 * was) &&
+    (back(frames[n + 1]?.selected) || back(frames[n + 2]?.selected))
+  );
 }
 
 /** The figures of `run` ({@link SeamSummary}). */
@@ -203,6 +256,8 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
   const last = frames.at(-1);
   const spanS = first === undefined || last === undefined ? 0 : last.tS - first.tS;
   let collapses = 0;
+  let drawnHalvings = 0;
+  let flickers = 0;
   let bandStepCount = 0;
   let bandOver5 = 0;
   let bandMax = 0;
@@ -213,6 +268,8 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
       continue;
     }
     collapses += isCollapse(before, after) ? 1 : 0;
+    drawnHalvings += isDrawnHalving(before, after) ? 1 : 0;
+    flickers += isFlicker(frames, n) ? 1 : 0;
     const a = Math.max(1, before.limitExcess);
     const b = Math.max(1, after.limitExcess);
     if (a !== b) {
@@ -227,6 +284,7 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
     (e) => (e.kind === "refine" || e.kind === "coarsen") && e.levelJump >= JUMP_LEVELS,
   );
   const refines = measured.filter((e) => e.kind === "refine");
+  const coarsens = measured.filter((e) => e.kind === "coarsen");
   const normals = events.filter((e) => e.maxNormalDeg >= 0).map((e) => e.maxNormalDeg);
   const drawnFromS = run.firstDrawS ?? last?.tS ?? 0;
   const drawnSpanS = (last?.tS ?? 0) - drawnFromS;
@@ -245,9 +303,12 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
       count: latencies.length,
     },
     collapses,
+    drawnHalvings,
+    flickers,
     jumps: jumps.length,
     jumpMaxPx: maxOf(jumps.map((e) => e.maxPx)),
-    largestCoarsenPx: maxOf(measured.filter((e) => e.kind === "coarsen").map((e) => e.maxPx)),
+    largestCoarsenPx: maxOf(coarsens.map((e) => e.maxPx)),
+    largestCoarsenLevelPx: maxOf(coarsens.map((e) => e.levelPx)),
     selectedEvicted: run.selectedEvicted,
     refusedBakes: run.refusedBakes,
     popsPerS: drawnSpanS > 0 ? pops / drawnSpanS : 0,

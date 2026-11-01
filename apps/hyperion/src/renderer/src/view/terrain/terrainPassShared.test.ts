@@ -63,6 +63,9 @@ import {
   type TerrainLayers,
 } from "./workers/messages";
 
+/** An instance record's words (`gpu/uniforms.ts`' `INSTANCE_RECORD_BYTES`). */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
+
 const PLANET: PlanetGeometry = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
 /** The primary's and an instrument's IDs, as `VIEW` gives them. */
@@ -289,7 +292,10 @@ function records(
   const f = new Float32Array(bytes);
   const out: Array<{ readonly slot: number; readonly morph: readonly [number, number] }> = [];
   for (let n = 0; n < u.length / (INSTANCE_RECORD_BYTES / 4); n += 1) {
-    out.push({ slot: u[n * 8 + 3] ?? -1, morph: [f[n * 8 + 4] ?? 0, f[n * 8 + 5] ?? 0] });
+    out.push({
+      slot: u[n * WORDS + 3] ?? -1,
+      morph: [f[n * WORDS + 4] ?? 0, f[n * WORDS + 5] ?? 0],
+    });
   }
   return out;
 }
@@ -1396,6 +1402,26 @@ describe("each view's selection margin for its motion (R10.T16; the batch review
     expect(inputs.at(-1)?.views[0]?.frustumMarginRad).toBeLessThan(MAX_FRUSTUM_MARGIN_RAD / 4);
   });
 
+  it("takes no nearer ground for its move than the camera's height above the drawn ground", async () => {
+    // 5 km over a body's flat bakes, the roots' children not yet baked: their boxes, over their
+    // level's range, hold the camera, so the selection's nearest ground is a finest patch.
+    const inputs: SelectionInput[] = [];
+    const made = await sharedPass("high", {
+      planet: SPHERE,
+      source: BODY,
+      frustumMargin: "motion",
+      onSelect: (input) => inputs.push(input),
+    });
+    made.lane().layers = layers();
+    const at = low(0);
+    made.pass.step({ views: [passView(PRIMARY, at)], grounded: [] });
+    made.lane().bakeDemand(made.pass);
+    made.pass.step({ views: [passView(PRIMARY, at)], grounded: [] });
+    const moved = { ...at, cameraM: add(at.cameraM, vec3(0, 10, 0)) };
+    made.pass.step({ views: [passView(PRIMARY, moved)], grounded: [] });
+    expect(inputs.at(-1)?.views[0]?.frustumMarginRad).toBeCloseTo(PIXEL_RAD + 10 / 5_000, 6);
+  });
+
   it("opens a session's pass's views by their motion, and the spike's frame by none", async () => {
     const inputs: SelectionInput[] = [];
     const spike: SelectionInput[] = [];
@@ -1718,15 +1744,22 @@ function vertexOf(from: PatchKey, x: number, y: number, to: PatchKey): readonly 
   return [xt, yt];
 }
 
-/** A drawn patch as a view's instance record gives it: its band and its morph holds. */
+/**
+ * A drawn patch as a view's instance record gives it: the area it draws, a sub-patch's its missing
+ * patch's, the level it is drawn at, its band and its morph holds.
+ */
 interface DrawnRecord {
   readonly key: PatchKey;
   readonly keyString: string;
+  readonly drawnLevel: number;
   readonly bandM: readonly [number, number];
   readonly holds: number;
 }
 
-/** The drawn patches view `id` (bit `bit` of the masks) drew at its last frame, by key string. */
+/**
+ * The drawn patches view `id` (bit `bit` of the masks) drew at its last frame, by the key string of
+ * the area each draws.
+ */
 function drawnRecords(made: Made, id: ViewId, bit: number): Map<string, DrawnRecord> {
   const drawSet = made.pass.lastStep?.drawSet;
   if (drawSet === undefined) {
@@ -1738,7 +1771,7 @@ function drawnRecords(made: Made, id: ViewId, bit: number): Map<string, DrawnRec
   const words = INSTANCE_RECORD_BYTES / 4;
   const out = new Map<string, DrawnRecord>();
   let n = 0;
-  drawSet.patches.forEach(({ keyString, patch }, index) => {
+  drawSet.patches.forEach(({ keyString, patch, within }, index) => {
     if (((drawSet.views[index] ?? 0) & (1 << bit)) === 0) {
       return;
     }
@@ -1747,9 +1780,11 @@ function drawnRecords(made: Made, id: ViewId, bit: number): Map<string, DrawnRec
       throw new Error(`record ${n} of ${id} is not ${keyString}'s`);
     }
     n += 1;
-    out.set(keyString, {
-      key: patch.key,
-      keyString,
+    const key = within ?? patch.key;
+    out.set(patchKeyString(key), {
+      key,
+      keyString: patchKeyString(key),
+      drawnLevel: patch.key.level,
       bandM: [f[at + 4] ?? Number.NaN, f[at + 5] ?? Number.NaN],
       // The quadrant word's bits above its two.
       holds: (u[at + 7] ?? 0) >>> 2,
@@ -1763,23 +1798,27 @@ function drawnRecords(made: Made, id: ViewId, bit: number): Map<string, DrawnRec
 
 /** What {@link morphSeams} found in one view. */
 interface MorphSeams {
-  /** Edges between a drawn patch and a drawn one a level coarser, counted from the fine side. */
+  /**
+   * Edges between a drawn patch and one drawn coarser, its area of its level or a level coarser,
+   * counted once.
+   */
   readonly edges: number;
   /** The coarse sides of those edges and of the corners below, by key string. */
   readonly coarseSides: ReadonlySet<string>;
   /** Each coarse–fine edge or corner whose fine side is not at k = 1 or coarse side not at 0. */
   readonly breaches: string[];
-  /** Each vertex two drawn patches of one level share at which their morph factors differ. */
+  /** Each vertex two patches drawn at one level share at which their morph factors differ. */
   readonly parted: string[];
 }
 
 /**
  * The seams between the drawn patches in view `id` (bit `bit`, camera `view`) at its last frame,
  * by the shader's morph factor at the flat bakes' vertices (height 0), the holds its records carry
- * applied (`coarseFineMorph`). At each edge and corner a drawn patch shares with one a level
- * coarser, the fine side's vertices must be at k = 1, and the coarse side's at the fine side's even
- * ones at k = 0, so that both lie on the coarse level's surface; and two drawn patches of one level
- * must agree at every vertex they share.
+ * applied (`coarseFineMorph`). At each edge and corner a drawn patch shares with one drawn coarser
+ * (a level coarser, or of its own area's level but a sub-patch of a coarser one), the fine side's
+ * vertices must be at k = 1, and the coarse side's at the fine side's even ones at k = 0, so that
+ * both lie on the coarse level's surface; and two patches drawn at one level must agree at every
+ * vertex they share.
  */
 function morphSeams(
   made: Made,
@@ -1835,24 +1874,86 @@ function morphSeams(
   const coarseSides = new Set<string>();
   const breaches: string[] = [];
   const parted: string[] = [];
+  // Where `fine` is drawn finer than `coarse`, whose area is its own's or its parent's: the seam at
+  // `vertices` of the one of the two areas of `fine`'s level, `of` (`fine`, or `coarse` where the
+  // finer-drawn side's area is the coarser one), from the coarse side's.
+  const seam = (
+    fine: DrawnRecord,
+    coarse: DrawnRecord,
+    vertices: ReadonlyArray<readonly [number, number]>,
+    what: string,
+  ): void => {
+    coarseSides.add(coarse.keyString);
+    const breach =
+      fine.key.level >= coarse.key.level
+        ? breachOf(fine, coarse, vertices)
+        : reversedBreachOf(fine, coarse, vertices);
+    if (breach !== null) {
+      breaches.push(`${breach} (${what})`);
+    }
+  };
+  // `breachOf` where the finer-drawn side `fine` has the coarser area: `vertices` are `coarse`'s,
+  // at every one of which `coarse` must be at k = 0, and `fine` at 1 at its even ones.
+  const reversedBreachOf = (
+    fine: DrawnRecord,
+    coarse: DrawnRecord,
+    vertices: ReadonlyArray<readonly [number, number]>,
+  ): string | null => {
+    let fineMin = 1;
+    let coarseMax = 0;
+    for (const [x, y] of vertices) {
+      coarseMax = Math.max(coarseMax, kAt(coarse, x, y));
+      if (x % 2 === 0 && y % 2 === 0) {
+        const [xf, yf] = vertexOf(coarse.key, x, y, fine.key);
+        fineMin = Math.min(fineMin, kAt(fine, xf, yf));
+      }
+    }
+    return fineMin === 1 && coarseMax === 0
+      ? null
+      : `${fine.keyString} beside ${coarse.keyString}: fine k ≥ ${fineMin.toFixed(3)}, coarse k ≤ ${coarseMax.toFixed(3)}`;
+  };
+  // `a`'s seam at `vertices` with `b`, of `a`'s area's level (`sameArea`) or its parent's.
+  const pair = (
+    a: DrawnRecord,
+    b: DrawnRecord,
+    vertices: ReadonlyArray<readonly [number, number]>,
+    sameArea: boolean,
+    what: string,
+  ): boolean => {
+    if (b.drawnLevel < a.drawnLevel) {
+      seam(a, b, vertices, what);
+      return true;
+    }
+    if (b.drawnLevel > a.drawnLevel) {
+      // Seen from `b`'s side where its area is `a`'s level; here where it is coarser.
+      if (!sameArea) {
+        seam(b, a, vertices, what);
+        return true;
+      }
+      return false;
+    }
+    parted.push(
+      ...partedAt(
+        a,
+        b,
+        sameArea ? vertices : vertices.filter(([x, y]) => x % 2 === 0 && y % 2 === 0),
+      ),
+    );
+    return false;
+  };
   for (const fine of drawn.values()) {
     const across = new Set<string>();
     for (const edge of EDGES) {
       const neighbour = edgeNeighbour(fine.key, edge);
       const same = drawnAt(neighbour);
-      if (same !== undefined) {
-        parted.push(...partedAt(fine, same, edgeVertices(edge)));
+      if (same !== undefined && pair(fine, same, edgeVertices(edge), true, edge)) {
+        edges += 1;
+        across.add(same.keyString);
       }
       const coarse = drawnAt(parentKey(neighbour));
-      if (coarse === undefined) {
-        continue;
-      }
-      edges += 1;
-      across.add(coarse.keyString);
-      coarseSides.add(coarse.keyString);
-      const breach = breachOf(fine, coarse, edgeVertices(edge));
-      if (breach !== null) {
-        breaches.push(`${breach} (${edge})`);
+      if (coarse !== undefined && pair(fine, coarse, edgeVertices(edge), false, edge)) {
+        edges += 1;
+        across.add(coarse.keyString);
       }
     }
     cornerNeighbours(fine.key).forEach((diagonal, c) => {
@@ -1860,18 +1961,14 @@ function morphSeams(
       if (diagonal === null || vertex === undefined) {
         return;
       }
+      const what = `corner ${vertex.join(", ")}`;
       const same = drawnAt(diagonal);
-      if (same !== undefined) {
-        parted.push(...partedAt(fine, same, [vertex]));
+      if (same !== undefined && !across.has(same.keyString)) {
+        pair(fine, same, [vertex], true, what);
       }
       const coarse = drawnAt(parentKey(diagonal));
-      if (coarse === undefined || across.has(coarse.keyString)) {
-        return;
-      }
-      coarseSides.add(coarse.keyString);
-      const breach = breachOf(fine, coarse, [vertex]);
-      if (breach !== null) {
-        breaches.push(`${breach} (corner ${vertex.join(", ")})`);
+      if (coarse !== undefined && !across.has(coarse.keyString)) {
+        pair(fine, coarse, [vertex], false, what);
       }
     });
   }
@@ -2038,8 +2135,9 @@ describe("the morph at every coarse–fine edge in each view of a shared pass (R
 
   it("keeps the fine side at k = 1 and the coarse side at k = 0 beside a parent standing in for a patch not baked, for the primary alone", async () => {
     const views = [passView(PRIMARY, pose)];
-    // The drawn patch nearest the camera, not baked, so that its parent stands in beside its
-    // neighbours, which are short of their bands' end there (k 0.23 to 0.36 at the shared edges).
+    // The drawn patch nearest the camera, not baked, so that its parent stands in over its area
+    // alone beside its siblings and neighbours, which are short of their bands' end there (k 0.27
+    // to 0.45 at the shared edges).
     const reference = (await settledDrawn(views)).made.pass.lastStep?.drawSet.patches ?? [];
     const centreDistanceM = (key: PatchKey): number => {
       const [px, py, pz] = surfacePoint(PLANET.figure, vertexDir(key, 32, 32), 0);
@@ -2057,10 +2155,13 @@ describe("the morph at every coarse–fine edge in each view of a shared pass (R
     expect({
       standingIn: (drawn?.standingIn ?? 0) > 0,
       drawsTheStandIn: drawn?.patches.some(
-        ({ keyString }) => keyString === patchKeyString(standIn),
+        ({ keyString, within }) =>
+          keyString === patchKeyString(standIn) &&
+          within !== null &&
+          patchKeyString(within) === patchKeyString(withheld),
       ),
       standInIsCoarseSide: morphSeams(made, PRIMARY, 0, pose).coarseSides.has(
-        patchKeyString(standIn),
+        patchKeyString(withheld),
       ),
       // The control: the bands alone leave the fine side short of k = 1 beside the stand-in.
       breaksByBandsAlone: morphSeams(made, PRIMARY, 0, pose, "bands alone").breaches.length > 0,

@@ -78,7 +78,14 @@ fn horizon_face_of(rec : SlotRecord) -> u32 {
 // and its step, linear across a quad, so that a fragment's are its own: to f32's spacing, which
 // past level 18 is coarser than a vertex step and moves the azimuth by under 10⁻⁷ rad.
 fn horizon_face_st(rec : SlotRecord, x : u32, y : u32) -> vec2f {
-  return vec2f(rec.s0, rec.t0) + (vec2f(f32(x), f32(y)) - vec2f(32.0)) * rec.step;
+  return horizon_face_st_at(rec, vec2f(f32(x), f32(y)));
+}
+
+// The cell coordinates (s, t) of the place `at` of the patch's grid, in quads from its corner,
+// whole or not (a sub-patch's vertex, `terrainPatch.wgsl`'s `sourceGridOf`): a vertex's own at a
+// whole place, bit for bit.
+fn horizon_face_st_at(rec : SlotRecord, at : vec2f) -> vec2f {
+  return vec2f(rec.s0, rec.t0) + (at - vec2f(32.0)) * rec.step;
 }
 
 // du/ds of S2's quadratic warp at s: 8s ÷ 3 for s at least ½, 8 (1 − s) ÷ 3 below.

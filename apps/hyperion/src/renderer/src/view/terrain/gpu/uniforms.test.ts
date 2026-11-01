@@ -11,12 +11,18 @@ import {
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   MAX_CONTACTS,
+  MAX_SUB_PATCH_LEVELS,
   NO_PARENT_SLOT,
   parentQuadrant,
   patchTerms,
   SLOT_RECORD_BYTES,
+  subPatchOf,
+  subPatchWord,
   writeSlotRecord,
 } from "./uniforms";
+
+/** An instance record's words. */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
 
 /** WGS 84, the test planet's figure (NIMA TR8350.2): a and c = a (1 − 1 ÷ 298.257223563). */
 const WGS84 = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_378_137 * (1 - 1 / 298.257223563) };
@@ -127,7 +133,7 @@ describe("an instance record", () => {
     records.push(2, vec3(0, 0, 0), 0, 1, 9, 1);
     const u = new Uint32Array(records.buffer);
     expect([u[6], u[7]]).toEqual([NO_PARENT_SLOT, 0]);
-    expect([u[8 + 6], u[8 + 7]]).toEqual([9, 1]);
+    expect([u[WORDS + 6], u[WORDS + 7]]).toEqual([9, 1]);
     expect(NO_PARENT_SLOT).toBe(0xffff_ffff);
   });
 
@@ -150,11 +156,51 @@ describe("an instance record", () => {
     records.push(1, vec3(0, 0, 0), 0, 1, 9, 3, MAX_MORPH_HOLDS);
     records.pushXyz(2, 0, 0, 0, 0, 1, 9, 2, 0b1_0000_0001);
     const u = new Uint32Array(records.buffer);
-    expect([u[7], u[8 + 7], records.bytes().byteLength]).toEqual([
+    expect([u[7], u[WORDS + 7], records.bytes().byteLength]).toEqual([
       0x3_ffff,
       (0b1_0000_0001 << 2) | 2,
       2 * INSTANCE_RECORD_BYTES,
     ]);
+  });
+
+  it("carries the sub-patch it draws of its slot's patch, 0 for the whole patch", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1, 9, 2, 5, subPatchWord(3, 5, 6));
+    const u = new Uint32Array(records.buffer);
+    expect([u.slice(8, 12), u.slice(WORDS + 8, WORDS + 12)].map((w) => Array.from(w))).toEqual([
+      [0, 0, 0, 0],
+      [3 | (5 << 5) | (6 << 18), 0, 0, 0],
+    ]);
+  });
+
+  it("packs a sub-patch's levels and place, its patch's descendant's less its patch's", () => {
+    const patch = { face: 4, level: 7, i: 21, j: 90 } as const;
+    expect([
+      subPatchWord(0, 0, 0),
+      subPatchWord(MAX_SUB_PATCH_LEVELS, 8191, 8191),
+      subPatchOf(patch, { face: 4, level: 9, i: 21 * 4 + 3, j: 90 * 4 + 1 }),
+    ]).toEqual([0, 13 | (8191 << 5) | (8191 << 18), 2 | (3 << 5) | (1 << 18)]);
+  });
+
+  it("refuses a sub-patch too deep, outside its patch or on another face", () => {
+    const patch = { face: 4, level: 7, i: 21, j: 90 } as const;
+    expect(
+      [
+        () => subPatchWord(MAX_SUB_PATCH_LEVELS + 1, 0, 0),
+        () => subPatchWord(2, 4, 0),
+        () => subPatchWord(2, 0, -1),
+        () => subPatchOf(patch, { face: 4, level: 8, i: 44, j: 180 }),
+        () => subPatchOf(patch, { face: 3, level: 8, i: 42, j: 180 }),
+      ].map((call) => {
+        try {
+          call();
+          return "made";
+        } catch (error: unknown) {
+          return error instanceof RangeError ? "refused" : "threw";
+        }
+      }),
+    ).toEqual(["refused", "refused", "refused", "refused", "refused"]);
   });
 
   it("refuses morph holds past 16 bits", () => {

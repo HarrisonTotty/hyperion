@@ -32,6 +32,17 @@ describe("the morph holds of a draw set (R10.T8.c; decision-r10-t16-leans §9)",
     expect([...coarseFineHolds(block)]).toEqual([0, 0, 0, 0]);
   });
 
+  it("hold a sub-patch as the level it is drawn at, beside patches of its own area's level", () => {
+    // (0, 0) at level 2 is drawn as a part of its level-1 parent: beside it, (1, 0) along its edge
+    // x = 64, (0, 1) along its edge y = 64 and (1, 1) at its corner (64, 64) are the finer side.
+    const keys = [on2(2, 0, 0), on2(2, 1, 0), on2(2, 1, 1), on2(2, 0, 1)];
+    const holds = new CoarseFineHolds(4);
+    expect([[...holds.update(keys, [1, 2, 2, 2])], [...holds.update(keys)]]).toEqual([
+      [U_MAX | V_MAX | CORNER_64_64, toParent(U_MIN), toParent(CORNER_00), toParent(V_MIN)],
+      [0, 0, 0, 0],
+    ]);
+  });
+
   it("hold a coarse patch's vertices at k = 0 and its finer neighbours' at k = 1 where they meet, edges and corners", () => {
     // Face 2 at level 1 with its patch (1, 0) split: (0, 0) meets two of the children along its
     // edge x = 64, (1, 1) two along its edge y = 0, and (0, 1) one at its corner (64, 0) alone.

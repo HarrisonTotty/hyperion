@@ -55,10 +55,56 @@ export const SLOT_RECORD_BYTES = 112;
  *   parentQuadrant : u32,   // bits 0 and 1 the patch's quadrant in its parent (i & 1, j & 1);
  *                           // bits 2 to 17 its morph holds at its coarse–fine edges and corners
  *                           // (`coarseFineHolds.ts`; R10.T8.c)
+ *   sub : vec4u,            // x the sub-patch it draws of its slot's patch, or 0 for the whole
+ *                           // patch ({@link subPatchWord}); y, z and w 0
  * }
  * ```
  */
-export const INSTANCE_RECORD_BYTES = 32;
+export const INSTANCE_RECORD_BYTES = 48;
+
+/**
+ * The most levels a sub-patch instance lies below the patch whose slot it draws
+ * ({@link subPatchWord}): its (i, j) take 13 bits each.
+ */
+export const MAX_SUB_PATCH_LEVELS = 13;
+
+/**
+ * The instance record's sub-patch word (the seamless lane, the owner's priority, 2026-11-01): an
+ * instance drawing the part of its slot's patch under a missing selected patch `levels` deeper, at
+ * (`i`, `j`) of that patch's 2^levels × 2^levels parts (the missing patch's i and j less the slot
+ * patch's, shifted up by `levels`), on the slot patch's own surface; 0 for the whole patch. Bits 0
+ * to 4 hold `levels`, 5 to 17 `i` and 18 to 30 `j` (`shaders/terrainPatch.wgsl`'s
+ * `sourceGridOf`).
+ *
+ * @throws RangeError for `levels` outside 0 to {@link MAX_SUB_PATCH_LEVELS}, or an `i` or `j` that
+ *   is not a whole number below 2^levels.
+ */
+export function subPatchWord(levels: number, i: number, j: number): number {
+  const side = 2 ** levels;
+  if (!Number.isInteger(levels) || levels < 0 || levels > MAX_SUB_PATCH_LEVELS) {
+    throw new RangeError(`a sub-patch ${levels} levels down is not 0 to ${MAX_SUB_PATCH_LEVELS}`);
+  }
+  if (!Number.isInteger(i) || !Number.isInteger(j) || i < 0 || j < 0 || i >= side || j >= side) {
+    throw new RangeError(`sub-patch (${i}, ${j}) is not one of ${side} × ${side}`);
+  }
+  return (levels | (i << 5) | (j << 18)) >>> 0;
+}
+
+/**
+ * The sub-patch word ({@link subPatchWord}) of the part of `patch` under `within`, a descendant of
+ * it on its face.
+ *
+ * @throws RangeError for a `within` that is not a descendant of `patch` within
+ *   {@link MAX_SUB_PATCH_LEVELS} levels.
+ */
+export function subPatchOf(patch: PatchKey, within: PatchKey): number {
+  const levels = within.level - patch.level;
+  const side = 2 ** levels;
+  if (within.face !== patch.face) {
+    throw new RangeError(`a sub-patch on face ${within.face} of a patch on face ${patch.face}`);
+  }
+  return subPatchWord(levels, within.i - patch.i * side, within.j - patch.j * side);
+}
 
 /**
  * The instance record's parent slot where the patch has no parent's horizon map and normals to
@@ -318,8 +364,10 @@ export class InstanceRecords {
    * @param quadrant - The patch's quadrant in that parent ({@link parentQuadrant}), 0 to 3.
    * @param holds - The patch's morph holds at its coarse–fine edges and corners
    * (`CoarseFineHolds`; R10.T8.c), 0 to {@link MAX_MORPH_HOLDS}, packed above the quadrant.
-   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant or holds that is
-   * not a whole number in its range.
+   * @param sub - The sub-patch of the slot's patch it draws ({@link subPatchWord}), or 0 for the
+   * whole patch.
+   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds or
+   * sub-patch word that is not a whole number in its range.
    */
   push(
     slot: number,
@@ -329,6 +377,7 @@ export class InstanceRecords {
     parentSlot = NO_PARENT_SLOT,
     quadrant = 0,
     holds = 0,
+    sub = 0,
   ): void {
     this.pushXyz(
       slot,
@@ -340,6 +389,7 @@ export class InstanceRecords {
       parentSlot,
       quadrant,
       holds,
+      sub,
     );
   }
 
@@ -354,6 +404,7 @@ export class InstanceRecords {
     parentSlot = NO_PARENT_SLOT,
     quadrant = 0,
     holds = 0,
+    sub = 0,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -370,6 +421,9 @@ export class InstanceRecords {
     if (!Number.isInteger(holds) || holds < 0 || holds > MAX_MORPH_HOLDS) {
       throw new RangeError(`morph holds ${holds} are not 0 to ${MAX_MORPH_HOLDS}`);
     }
+    if (!Number.isInteger(sub) || sub < 0 || sub > 0x7fff_ffff) {
+      throw new RangeError(`sub-patch word ${sub} is not 31 bits`);
+    }
     const base = this.#count * F32_WORDS_PER_INSTANCE;
     this.#f32[base] = xM;
     this.#f32[base + 1] = yM;
@@ -379,6 +433,10 @@ export class InstanceRecords {
     this.#f32[base + 5] = morphEndM;
     this.#u32[base + 6] = parentSlot;
     this.#u32[base + 7] = quadrant | (holds << QUADRANT_BITS);
+    this.#u32[base + 8] = sub;
+    this.#u32[base + 9] = 0;
+    this.#u32[base + 10] = 0;
+    this.#u32[base + 11] = 0;
     this.#count += 1;
   }
 

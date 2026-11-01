@@ -124,10 +124,11 @@ import {
   InstanceRecords,
   NO_PARENT_SLOT,
   parentQuadrant,
+  subPatchOf,
   WirePhaseRecords,
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
-import { type PlanetGeometry, planetGeometry } from "./planet";
+import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import {
   finestPatchSizeM,
   type GroundContact,
@@ -677,8 +678,12 @@ interface Device {
    * selection's draw set (R10.T8.c).
    */
   readonly holds: CoarseFineHolds;
-  /** The drawn patches' keys the holds are made from, reused from selection to selection. */
+  /**
+   * The drawn patches' areas the holds are made from, a sub-patch's its missing patch's, and the
+   * levels they are drawn at, a sub-patch's its patch's, reused from selection to selection.
+   */
   readonly drawnKeys: PatchKey[];
+  readonly drawnLevels: number[];
   readonly pool: TerrainPool;
   readonly offBaked: () => void;
   readonly offFailed: () => void;
@@ -2050,6 +2055,7 @@ export class TerrainPass {
       resolver: new DrawSetResolver(cache),
       holds: new CoarseFineHolds(layout.slots.slotCount),
       drawnKeys: [],
+      drawnLevels: [],
       pool,
       offBaked: pool.onBaked((bake) => {
         this.#store(device, bake);
@@ -2453,17 +2459,21 @@ export class TerrainPass {
 
   /**
    * `views` with each one's frustum margin under `motion` ({@link frustumMarginRad}), from its
-   * camera at the last step and its nearest selected ground, the last that a selection gave it;
-   * unchanged under `none`.
+   * camera at the last step and its nearest ground: the nearest a selection last gave it, and no
+   * nearer than the camera's height above the drawn ground beneath it; unchanged under `none`.
    *
    * @remarks
-   * After a selection that gave a view no ground, its survey's nearest stood in for it until the
-   * seamless lane (the owner's priority, 2026-11-01). With the camera over the survey and the
-   * survey out of view, that is a finest patch, which opened the margin to its most; the ground it
-   * then selected was far, whose distance closed the margin again, so that the selection gave
-   * nothing and some 300 patches by turns, frame after frame (TERRAIN TEST on high, 253.7 to
-   * 254.5 s). The last ground selected, carried, gives the margin a selection had, and an empty
-   * selection the one before it, so that it cannot cycle; the survey's nearest stands in only for a
+   * The margin's ground was the last selection's, and so fed back into the next one's, which
+   * cycled at TERRAIN TEST's survey edge (the seamless lane, the owner's priority, 2026-11-01).
+   * After a selection that gave a view no ground, its survey's nearest stood in, a finest patch
+   * with the camera over the survey and the survey out of view: that opened the margin to its most,
+   * and the ground it then selected, far, closed it again, so that the selection gave nothing and
+   * some 300 patches by turns, frame after frame (high, 253.7 to 254.5 s). A coarse patch whose box
+   * holds the camera, its range spanning the camera's height, gave the same finest patch, and the
+   * finer patches that replaced it under the opened margin a far ground (low, 252.55 to 252.8 s: 76
+   * and 187 patches by turns). The last ground selected is carried past a selection that gives
+   * none, and the drawn ground beneath the camera, from the resident bakes, floors it at a
+   * distance no box makes, so that neither feeds back; the survey's nearest stands in only for a
    * view never given ground.
    */
   #withMargins(views: ReadonlyArray<PassSelectionView>): ReadonlyArray<PassSelectionView> {
@@ -2473,15 +2483,40 @@ export class TerrainPass {
     const last = this.#selected;
     return views.map((view) => {
       const n = last?.views.findIndex((was) => was.id === view.id) ?? -1;
-      const nearestM =
+      const nearestM = Math.max(
         this.#nearestGround.get(view.id) ??
-        last?.selection.nearestSurveyByViewM[n] ??
-        Number.POSITIVE_INFINITY;
+          last?.selection.nearestSurveyByViewM[n] ??
+          Number.POSITIVE_INFINITY,
+        this.#heightAboveGroundM(view.camera.positionM),
+      );
       return {
         ...view,
         frustumMarginRad: frustumMarginRad(view, this.#stepped.get(view.id) ?? null, nearestM),
       };
     });
+  }
+
+  /**
+   * The camera's height above the drawn ground beneath it, metres, at `cameraM` from the body's
+   * centre, body-fixed: along its direction to the finest resident bake's height there; 0 where no
+   * bake is resident beneath it.
+   */
+  #heightAboveGroundM(cameraM: Vec3): number {
+    const r = norm(cameraM);
+    if (!(r > 0)) {
+      return 0;
+    }
+    const direction = { x: cameraM.x / r, y: cameraM.y / r, z: cameraM.z / r };
+    const groundHeightM = this.#heights.groundHeightAtM(direction);
+    if (groundHeightM === null) {
+      return 0;
+    }
+    const [x, y, z] = surfacePoint(
+      this.#planet.figure,
+      [direction.x, direction.y, direction.z],
+      groundHeightM,
+    );
+    return r - Math.hypot(x, y, z);
   }
 
   #select(
@@ -2588,11 +2623,14 @@ export class TerrainPass {
     // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
     // fine side at 1 (decision-r10-t16-leans §9).
     const keys = device.drawnKeys;
+    const levels = device.drawnLevels;
     keys.length = 0;
-    for (const { patch } of drawSet.patches) {
-      keys.push(patch.key);
+    levels.length = 0;
+    for (const { patch, within } of drawSet.patches) {
+      keys.push(within ?? patch.key);
+      levels.push(patch.key.level);
     }
-    device.holds.update(keys);
+    device.holds.update(keys, levels);
     const grounded = input.grounded.map((c) => ({
       positionM: { ...c.positionM },
       radiusM: c.radiusM,
@@ -2789,7 +2827,7 @@ export class TerrainPass {
           continue;
         }
         // R · origin − camera, component by component, so that a frame makes no vector a patch.
-        const { patch } = drawn;
+        const { patch, within } = drawn;
         const o = patch.originM;
         const level = patch.key.level;
         const inner = split && residents.get(drawn.keyString)?.interior === true;
@@ -2803,6 +2841,7 @@ export class TerrainPass {
           this.#parentSlotOf(device, patch.key),
           parentQuadrant(patch.key),
           holds[n] ?? 0,
+          within === null ? 0 : subPatchOf(patch.key, within),
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         if (phases !== null && wire !== undefined) {

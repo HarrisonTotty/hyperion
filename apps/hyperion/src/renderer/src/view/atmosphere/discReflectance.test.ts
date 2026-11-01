@@ -157,23 +157,27 @@ function digestOf(source: string): string {
  * beside them and leave each to the byte (the brief's cut; R08.T11.f's cost of a branch not taken).
  * Re-pinned by R08.T15.b.2, whose surface lighting reads the table below a cloud deck: with no deck
  * its eighth table is a one-texel stub, `belowDeckHeld` false, and every lookup's arithmetic is as
- * before, so that their pixels hold.
+ * before, so that their pixels hold. The mesh regime's figure and the terrain's re-pinned by the
+ * seamless lane's sub-patches (2026-11-01): the instance record's `sub`, which the figure's struct
+ * steps over, and a sub-patch's vertex on its slot's surface, a whole patch's as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f42c280bcdf436a"],
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f42c280bcdf436a"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "8386129da1b73e0c"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "1aa4f99eab8663c4"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bc5c9ada26f0f319"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
+  // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
+  // sub-patch's vertex on its slot's surface, a whole patch's as before.
   ...[
-    ["terrain-lit-baked-offsets", "ea5729c9cc03dc52"],
-    ["terrain-lit-face-differences", "1e09b82bdc268533"],
+    ["terrain-lit-baked-offsets", "2d8065f54419dfb3"],
+    ["terrain-lit-face-differences", "c782c4840177609e"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "ad72f4d0d11e9cb9"],
-    ["terrain-depth-face-differences", "99f1e21d2397fb4c"],
-    ["terrain-shadow-baked-offsets", "49480d876414b105"],
-    ["terrain-shadow-face-differences", "898a0f38a9b3528"],
+    ["terrain-depth-baked-offsets", "e7175d0f9a4f3b4c"],
+    ["terrain-depth-face-differences", "d3a9d917eade3c05"],
+    ["terrain-shadow-baked-offsets", "21e722de7f570a74"],
+    ["terrain-shadow-face-differences", "69601c6afb2d36dd"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

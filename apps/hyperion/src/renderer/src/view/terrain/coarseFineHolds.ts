@@ -28,6 +28,11 @@
  * have morphed the row anyway. A corner bit is needed beside the edge bits because the balance lets
  * a finer patch touch a coarser one at a corner alone, and the morph moves even vertices too.
  *
+ * A sub-patch, the part of a resident ancestor drawn over a missing selected patch's area alone
+ * (`cache.ts`' `DrawnPatch.within`), is held as its ancestor's level over that area: its edges and
+ * corners are the missing patch's, and its surface the ancestor's, so a neighbour of the missing
+ * patch's own level is the finer side there, held at k = 1, and the sub-patch's edge at k = 0.
+ *
  * Each drawn patch's holds are 16 bits: bits 0 to 3 hold the edges x = 0, x = 64, y = 0 and y = 64
  * of its 65 × 65 grid (`EDGES`' order: UMin, UMax, VMin, VMax) at k = 0, bits 4 to 7 its corners
  * (0, 0), (64, 0), (64, 64) and (0, 64) (`cornerNeighbours`' order) at k = 0, and bits 8 to 15 the
@@ -205,14 +210,16 @@ export class CoarseFineHolds {
   }
 
   /**
-   * Fills {@link holds}' first `keys.length` entries for the drawn patches `keys`, which do not
-   * overlap: each one's at k = 0 where a finer one of `keys` touches it, at k = 1 where a coarser
-   * one does.
+   * Fills {@link holds}' first `keys.length` entries for the drawn patches `keys`, the areas they
+   * draw, which do not overlap: each one's at k = 0 where a finer one of `keys` touches it, at
+   * k = 1 where a coarser one does, by `levels`.
    *
+   * @param levels - The level each of `keys` is drawn at, in the same order: a sub-patch's its
+   *   ancestor's, coarser than its key's; absent, or where shorter, each key's own.
    * @returns {@link holds}.
    * @throws RangeError for more patches than the capacity.
    */
-  update(keys: ReadonlyArray<PatchKey>): Uint16Array {
+  update(keys: ReadonlyArray<PatchKey>, levels?: ArrayLike<number>): Uint16Array {
     const { holds } = this;
     if (keys.length > holds.length) {
       throw new RangeError(`${keys.length} drawn patches exceed ${holds.length} holds`);
@@ -228,19 +235,30 @@ export class CoarseFineHolds {
       holds[n] = 0;
     }
     this.#coarsest = coarsest;
-    // From each patch's side, the coarser drawn patch across each edge and corner, if any: the
-    // patch's own vertices there are held at 1, and that coarser patch's at 0.
+    // From each patch's side, the drawn patch across each edge and corner of its own area's level
+    // or a coarser one, if any: where it is drawn coarser, the patch's own vertices there are held
+    // at 1 and its at 0; where finer (a sub-patch's area beside a patch drawn at it), the patch's at
+    // 0 and its at 1.
     const coarse = this.#coarse;
     for (let n = 0; n < keys.length; n += 1) {
       const key = keys[n];
       if (key === undefined) {
         continue;
       }
+      const own = levels?.[n] ?? key.level;
       for (const probe of PROBES) {
-        const at = this.#coarserBeside(key, probe);
-        if (at >= 0) {
+        const at = this.#beside(key, probe);
+        if (at < 0) {
+          continue;
+        }
+        const other = levels?.[at] ?? coarse.level;
+        if (other < own) {
           holds[n] = (holds[n] ?? 0) | (probe.bit << TO_PARENT_SHIFT);
           holds[at] = (holds[at] ?? 0) | coarseBitsAt(key, probe.x, probe.y, coarse);
+        } else if (other > own) {
+          holds[n] = (holds[n] ?? 0) | probe.bit;
+          holds[at] =
+            (holds[at] ?? 0) | (coarseBitsAt(key, probe.x, probe.y, coarse) << TO_PARENT_SHIFT);
         }
       }
     }
@@ -251,20 +269,17 @@ export class CoarseFineHolds {
   }
 
   /**
-   * The index of the drawn patch coarser than `key` covering the cell of `key`'s level a step
-   * `probe` away, its key left in `#coarse`; −1 where that cell is drawn itself, lies past a cube
-   * corner, or no drawn ancestor covers it (it is finer, or not drawn).
+   * The index of the drawn patch covering the cell of `key`'s level a step `probe` away, that cell
+   * or a coarser one, its key left in `#coarse`; −1 where the cell lies past a cube corner or no
+   * drawn patch of its level or coarser covers it (it is finer, or not drawn).
    */
-  #coarserBeside(key: PatchKey, probe: Probe): number {
+  #beside(key: PatchKey, probe: Probe): number {
     const cell = this.#cell;
     const drawn = this.#drawn;
-    if (
-      !stepCellInto(cell, key, probe.di, probe.dj) ||
-      drawn.getAt(cell.face, key.level, cell.i, cell.j) !== undefined
-    ) {
+    if (!stepCellInto(cell, key, probe.di, probe.dj)) {
       return -1;
     }
-    for (let level = key.level - 1; level >= this.#coarsest; level -= 1) {
+    for (let level = key.level; level >= this.#coarsest; level -= 1) {
       const cells = 2 ** (key.level - level);
       const i = Math.floor(cell.i / cells);
       const j = Math.floor(cell.j / cells);

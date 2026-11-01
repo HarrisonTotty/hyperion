@@ -9,12 +9,14 @@ import { craftContacts } from "../spike/fixedStep";
 import { TEST_PLANET_FIGURE } from "../spike/testPlanetFigure";
 import {
   type CacheInsert,
+  type DrawSet,
   DrawSetResolver,
   PatchCache,
   type ResidentPatch,
   resolveDrawSet,
 } from "./cache";
 import { vertexDir } from "./cube";
+import { MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
 import { finestPatchSizeM } from "./grounded";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
@@ -395,6 +397,39 @@ describe("the draw set's resolver", () => {
   });
 });
 
+/** Each drawn patch's key, the area it draws (a sub-patch's `within`) and whether it stands in. */
+function drawnAreas(draw: DrawSet): Array<[string, string, boolean]> {
+  return draw.patches.map((p) => [p.keyString, patchKeyString(p.within ?? p.patch.key), p.standIn]);
+}
+
+/** Whether one of two patches lies in or over the other. */
+function inOrOver(a: PatchKey, b: PatchKey): boolean {
+  const [coarse, fine] = a.level <= b.level ? [a, b] : [b, a];
+  const shift = fine.level - coarse.level;
+  return a.face === b.face && fine.i >> shift === coarse.i && fine.j >> shift === coarse.j;
+}
+
+/** Every pair of drawn areas one of which lies in or over the other. */
+function overlaps(draw: DrawSet): string[] {
+  const areas = draw.patches.map((p) => p.within ?? p.patch.key);
+  return areas.flatMap((a, n) =>
+    areas
+      .slice(n + 1)
+      .filter((b) => inOrOver(a, b))
+      .map((b) => `${patchKeyString(a)} and ${patchKeyString(b)}`),
+  );
+}
+
+/** `key`'s ancestors, its parent first. */
+function ancestorsOf(key: PatchKey): PatchKey[] {
+  const out: PatchKey[] = [];
+  for (let level = key.level - 1; level >= 0; level -= 1) {
+    const shift = key.level - level;
+    out.push({ face: key.face, level, i: key.i >> shift, j: key.j >> shift });
+  }
+  return out;
+}
+
 describe("the draw set", () => {
   it("draws a resident patch as itself and lists its slot", () => {
     const cache = cacheOf(6);
@@ -406,32 +441,108 @@ describe("the draw set", () => {
     expect(draw.standingIn).toBe(0);
   });
 
-  it("stands the nearest resident ancestor in for a missing patch and marks it", () => {
+  it("stands the nearest resident ancestor in for each missing patch over its area alone, marked", () => {
     const cache = cacheOf(6);
     insertAll(cache, [ROOT, A]);
     const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD]), cache);
-    expect(draw.patches.map((p) => [p.keyString, p.standIn])).toEqual([[patchKeyString(A), true]]);
-    expect(draw.standingIn).toBe(4);
-    expect(draw.missing).toBe(0);
+    expect(drawnAreas(draw)).toEqual(
+      [AA, AB, AC, AD].map((k) => [patchKeyString(A), patchKeyString(k), true]),
+    );
+    expect([...draw.slots.subarray(0, draw.count)]).toEqual(
+      Array.from({ length: 4 }, () => cache.get(patchKeyString(A))?.slot),
+    );
+    expect([draw.standingIn, draw.missing]).toEqual([4, 0]);
   });
 
-  it("draws an ancestor in place of the resident siblings it covers, never over them", () => {
+  it("draws a missing patch by its ancestor's part alone, and its resident siblings as themselves", () => {
     const cache = cacheOf(6);
     insertAll(cache, [A, AA, AB]);
-    const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD]), cache);
-    expect(draw.patches.map((p) => p.keyString)).toEqual([patchKeyString(A)]);
-    expect(draw.standingIn).toBe(4);
+    const selection = seenBy(
+      selectionOf([AA, AB, AC, AD]),
+      new Map([
+        [AA, 0b01],
+        [AB, 0b01],
+        [AC, 0b10],
+        [AD, 0b11],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect(drawnAreas(draw)).toEqual([
+      [patchKeyString(AA), patchKeyString(AA), false],
+      [patchKeyString(AB), patchKeyString(AB), false],
+      [patchKeyString(A), patchKeyString(AC), true],
+      [patchKeyString(A), patchKeyString(AD), true],
+    ]);
+    expect([...draw.views.subarray(0, draw.count)]).toEqual([0b01, 0b01, 0b10, 0b11]);
+    expect([draw.standingIn, draw.standingInViews, draw.missingViews]).toEqual([2, 0b11, 0]);
+    expect(overlaps(draw)).toEqual([]);
   });
 
-  it("is the six roots when nothing else is resident", () => {
-    const cache = cacheOf(10);
+  it("covers every seen selected patch once, by itself or a part of an ancestor, whatever is resident", () => {
+    let seed = 7;
+    const next = (n: number): number => {
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+      return (seed >>> 8) % n;
+    };
+    // A cut of face 0 to level 3, split at random, with a random part of its patches and their
+    // ancestors resident, the root always.
+    const cut = (key: PatchKey): PatchKey[] =>
+      key.level < 3 && next(3) > 0 ? childKeys(key).flatMap(cut) : [key];
+    for (let trial = 0; trial < 50; trial += 1) {
+      const selected = cut(ROOT);
+      const cache = cacheOf(85);
+      const keys = new Map(
+        [...selected, ...selected.flatMap(ancestorsOf)].map((k) => [patchKeyString(k), k]),
+      );
+      insertAll(
+        cache,
+        [...keys.values()].filter((k) => k.level === 0 || next(2) === 0),
+      );
+      const draw = resolveDrawSet(selectionOf(selected), cache);
+      expect(overlaps(draw)).toEqual([]);
+      expect(
+        drawnAreas(draw)
+          .map(([, area]) => area)
+          .toSorted(),
+      ).toEqual(selected.map(patchKeyString).toSorted());
+    }
+  });
+
+  it("stands an ancestor in whole for a patch more levels below it than a sub-patch holds", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [ROOT]);
+    const deepest = descendant(ROOT, MAX_SUB_PATCH_LEVELS + 1, 0);
+    const deep = descendant(ROOT, MAX_SUB_PATCH_LEVELS, 0);
+    expect([
+      drawnAreas(resolveDrawSet(selectionOf([deepest]), cache)),
+      drawnAreas(resolveDrawSet(selectionOf([deep]), cache)),
+    ]).toEqual([
+      [[patchKeyString(ROOT), patchKeyString(ROOT), true]],
+      [[patchKeyString(ROOT), patchKeyString(deep), true]],
+    ]);
+  });
+
+  it("stands an ancestor in whole where the selection holds more patches than the slots", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A]);
+    // Seven selected patches for six slots: three of them with nothing resident over them.
+    const elsewhere = childKeys(rootKey(1)).slice(0, 3);
+    const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD, ...elsewhere]), cache);
+    expect([drawnAreas(draw), draw.standingIn, draw.missing]).toEqual([
+      [[patchKeyString(A), patchKeyString(A), true]],
+      4,
+      3,
+    ]);
+  });
+
+  it("is the six roots' parts when nothing else is resident", () => {
+    const cache = cacheOf(24);
     insertAll(cache, FACES.map(rootKey));
     const selected = FACES.flatMap((f) => childKeys(rootKey(f)));
     const draw = resolveDrawSet(selectionOf(selected), cache);
-    expect(draw.patches.map((p) => p.keyString)).toEqual(
-      FACES.map((f) => patchKeyString(rootKey(f))),
+    expect(drawnAreas(draw)).toEqual(
+      selected.map((k) => [patchKeyString(rootKey(k.face)), patchKeyString(k), true]),
     );
-    expect(draw.patches.every((p) => p.standIn)).toBe(true);
   });
 
   it("counts selected patches with no resident ancestor as missing", () => {
@@ -472,7 +583,7 @@ describe("the draw set's views (R10.T16.b; decision-r10-t16-contracts §3)", () 
     expect([draw.standingInViews, draw.missingViews]).toEqual([0, 0]);
   });
 
-  it("gives a stand-in the union of the views it stands in for, and marks them standing in", () => {
+  it("gives each part of a stand-in the views of the patch it stands in for, and marks them standing in", () => {
     const cache = cacheOf(10);
     insertAll(cache, [A, B]);
     const selection = seenBy(
@@ -484,51 +595,81 @@ describe("the draw set's views (R10.T16.b; decision-r10-t16-contracts §3)", () 
       ]),
     );
     const draw = resolveDrawSet(selection, cache);
-    const drawn = draw.patches.map((p, n) => [p.keyString, p.standIn, draw.views[n]]);
-    expect(drawn).toEqual([
+    expect([drawnAreas(draw), [...draw.views.subarray(0, draw.count)]]).toEqual([
+      [
+        [patchKeyString(A), patchKeyString(AA), true],
+        [patchKeyString(A), patchKeyString(AB), true],
+        [patchKeyString(B), patchKeyString(B), false],
+      ],
+      [0b001, 0b100, 0b010],
+    ]);
+    expect([draw.standingInViews, draw.missingViews]).toEqual([0b101, 0]);
+  });
+
+  it("gives a stand-in drawn whole the union of the views it stands in for, below what a sub-patch holds", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [A, B]);
+    // Two patches 14 levels under A: each stood in for by A whole.
+    const [far0, far1] = [0, 1].map((n) => descendant(A, MAX_SUB_PATCH_LEVELS + 1, n));
+    if (far0 === undefined || far1 === undefined) {
+      throw new Error("no deep patches");
+    }
+    const selection = seenBy(
+      selectionOf([far0, far1, B]),
+      new Map([
+        [far0, 0b001],
+        [far1, 0b100],
+        [B, 0b010],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect(draw.patches.map((p, n) => [p.keyString, p.standIn, draw.views[n]])).toEqual([
       [patchKeyString(A), true, 0b101],
       [patchKeyString(B), false, 0b010],
     ]);
-    expect(draw.standingInViews).toBe(0b101);
-    expect(draw.missingViews).toBe(0);
+    expect([draw.standingInViews, draw.missingViews]).toEqual([0b101, 0]);
   });
 
   it("gives a coarsest chosen ancestor the views of every chosen patch it draws in place of", () => {
     const cache = cacheOf(10);
     insertAll(cache, [ROOT, A]);
+    // A patch 14 levels under the root in B's place: the root stands in for it whole.
+    const far = descendant(B, MAX_SUB_PATCH_LEVELS, 0);
     const selection = seenBy(
-      selectionOf([AA, AB, B]),
+      selectionOf([AA, AB, far]),
       new Map([
         [AA, 0b001],
         [AB, 0b100],
-        [B, 0b010],
+        [far, 0b010],
       ]),
     );
     const draw = resolveDrawSet(selection, cache);
-    // B's stand-in, the root, covers A too: A is drawn by the root, which takes its views.
+    // The root covers A's parts too: they are drawn by the root, which takes their views.
     expect(draw.patches.map((p, n) => [p.keyString, p.standIn, draw.views[n]])).toEqual([
       [patchKeyString(ROOT), true, 0b111],
     ]);
     expect(draw.standingInViews).toBe(0b111);
   });
 
-  it("gives an ancestor drawn in place of a resident patch that patch's views, standing in", () => {
+  it("gives an ancestor drawn whole in place of a resident patch that patch's views, standing in", () => {
     const cache = cacheOf(10);
     insertAll(cache, [A, AA, AB]);
+    // A patch 14 levels under A in AC's place: A stands in for it whole, over AA, AB and AD's part.
+    const far = descendant(AC, MAX_SUB_PATCH_LEVELS, 0);
     const selection = seenBy(
-      selectionOf([AA, AB, AC, AD]),
+      selectionOf([AA, AB, far, AD]),
       new Map([
         [AA, 0b01],
         [AB, 0b01],
-        [AC, 0b10],
+        [far, 0b10],
         [AD, 0b10],
       ]),
     );
     const draw = resolveDrawSet(selection, cache);
-    expect(draw.patches.map((p, n) => [p.keyString, draw.views[n]])).toEqual([
-      [patchKeyString(A), 0b11],
+    expect(draw.patches.map((p, n) => [p.keyString, p.within, draw.views[n]])).toEqual([
+      [patchKeyString(A), null, 0b11],
     ]);
-    expect(draw.standingInViews).toBe(0b11);
+    expect([draw.standingIn, draw.standingInViews]).toEqual([4, 0b11]);
   });
 
   it("marks the views of a selected patch with no resident ancestor missing, and only those", () => {

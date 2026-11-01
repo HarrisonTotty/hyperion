@@ -290,8 +290,9 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.fromCameraBf = transpose(rotation) * placed.fromCameraM;
   out.datumNormal = v.datumNormal;
   out.heightM = placed.heightM;
-  // A skirt's or a fin's vertex takes its grid vertex's (x, y), so its shadows are the grid's.
-  out.horizonSt = horizon_face_st(rec, u32(grid.x), u32(grid.y));
+  // A skirt's or a fin's vertex takes its grid vertex's (x, y), so its shadows are the grid's; a
+  // sub-patch's, its place in its slot's patch.
+  out.horizonSt = horizon_face_st_at(rec, v.patchUv * 64.0);
   out.morph = v.morph;
   out.horizonFace = horizon_face_of(rec);
   // The quadrant alone, without the morph holds above its two bits (`terrainPatch.wgsl`'s `Instance`).

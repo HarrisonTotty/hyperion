@@ -55,6 +55,9 @@ import {
   type TerrainLayers,
 } from "./workers/messages";
 
+/** An instance record's words (`gpu/uniforms.ts`' `INSTANCE_RECORD_BYTES`). */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
+
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
 const PRIMARY = PRIMARY_VIEW_ID;
@@ -318,7 +321,7 @@ function instanceSlots(engine: CountingRenderEngine): number[] {
   const u = new Uint32Array(lastWrite(engine, `terrain instances (${PRIMARY})`));
   const slots: number[] = [];
   for (let n = 0; n < u.length / (INSTANCE_RECORD_BYTES / 4); n += 1) {
-    slots.push(u[n * 8 + 3] ?? -1);
+    slots.push(u[n * WORDS + 3] ?? -1);
   }
   return slots;
 }

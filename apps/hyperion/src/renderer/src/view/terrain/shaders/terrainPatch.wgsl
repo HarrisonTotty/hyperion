@@ -24,6 +24,8 @@ const HALF_FLOAT_MAX : f32 = 65504.0;
 // decision-r10-t8a §1), the slot 0xffffffff where no parent's map is resident. Above the quadrant,
 // bits 2 to 17 of `parentQuadrant` are the patch's morph holds at its coarse–fine edges and
 // corners (`coarseFineMorph`; coarseFineHolds.ts), so every reader of the quadrant masks it.
+// `sub.x` is the part of the slot's patch the instance draws, 0 for the whole (`sourceGridOf`;
+// uniforms.ts' `subPatchWord`); everything else the instance carries is the slot's patch's.
 struct Instance {
   originM : vec3f,
   slot : u32,
@@ -31,6 +33,7 @@ struct Instance {
   morphEndM : f32,
   parentSlot : u32,
   parentQuadrant : u32,
+  sub : vec4u,
 }
 
 // uniforms.ts's CONTACT_RECORD_BYTES. The centre is camera-relative in the instance origins' frame
@@ -108,6 +111,46 @@ fn morphFactor(inst : Instance, fromCameraM : vec3f, x : u32, y : u32) -> f32 {
   return k;
 }
 
+// The place of an instance's grid vertex (x, y) in its slot's patch's grid, quads from its corner:
+// the vertex itself for an instance drawing the whole patch, and for a sub-patch, `levels` deeper
+// at (i, j) of the patch's 2^levels × 2^levels parts (bits 0 to 4, 5 to 17 and 18 to 30 of
+// `sub.x`), ((i, j) 64 + (x, y)) ÷ 2^levels, exact in f32 (the seamless lane: a missing selected
+// patch drawn on its nearest resident ancestor's surface over its own area alone).
+fn sourceGridOf(inst : Instance, x : u32, y : u32) -> vec2f {
+  let levels = inst.sub.x & 31u;
+  let part = vec2u((inst.sub.x >> 5u) & 0x1fffu, (inst.sub.x >> 18u) & 0x1fffu);
+  return vec2f(part * 64u + vec2u(x, y)) / f32(1u << levels);
+}
+
+// The slot's surface at the place `at` of its grid: its offsets, own and morph, and its heights,
+// own and morph, at the triangle's corners holding `at`, mixed by their barycentric weights. The
+// mesh splits each quad on its (0, 0)–(1, 1) diagonal (gpu/resources.ts' `patchMeshData`), so the
+// point lies on the slot's own triangles, unmorphed and morphed alike: (0, 0), (1, 0), (1, 1) where
+// the place's part of its quad has f.x ≥ f.y, else (0, 0), (0, 1), (1, 1).
+struct SurfacePoint {
+  own : vec3f,
+  morph : vec3f,
+  ownHeightM : f32,
+  morphHeightM : f32,
+}
+
+fn surfacePointAt(slot : u32, rec : SlotRecord, at : vec2f) -> SurfacePoint {
+  let q = min(vec2u(floor(at)), vec2u(VERTICES_PER_SIDE - 2u));
+  let f = at - vec2f(q);
+  let below = f.x >= f.y;
+  let mid = select(q + vec2u(0u, 1u), q + vec2u(1u, 0u), below);
+  let far = q + vec2u(1u);
+  let w0 = 1.0 - max(f.x, f.y);
+  let w1 = abs(f.x - f.y);
+  let w2 = min(f.x, f.y);
+  var p : SurfacePoint;
+  p.own = w0 * ownOffset(slot, rec, q.x, q.y) + w1 * ownOffset(slot, rec, mid.x, mid.y) + w2 * ownOffset(slot, rec, far.x, far.y);
+  p.morph = w0 * morphOffset(slot, rec, q.x, q.y) + w1 * morphOffset(slot, rec, mid.x, mid.y) + w2 * morphOffset(slot, rec, far.x, far.y);
+  p.ownHeightM = w0 * heightAt(slot, q.x, q.y, 0u) + w1 * heightAt(slot, mid.x, mid.y, 0u) + w2 * heightAt(slot, far.x, far.y, 0u);
+  p.morphHeightM = w0 * heightAt(slot, q.x, q.y, 1u) + w1 * heightAt(slot, mid.x, mid.y, 1u) + w2 * heightAt(slot, far.x, far.y, 1u);
+  return p;
+}
+
 // One vertex of a drawn patch.
 struct PatchVertex {
   // The vertex less the camera, in the frame the instance origins are in, metres.
@@ -119,7 +162,8 @@ struct PatchVertex {
   heightM : f32,
   // The datum's unit normal ν there, body-fixed: the spheroid's at the vertex's direction.
   datumNormal : vec3f,
-  // Its place in its patch, (x, y) ÷ 64.
+  // Its place in its slot's patch, (x, y) ÷ 64: a sub-patch's in the slot's patch's grid
+  // (`sourceGridOf`), which its maps are read at.
   patchUv : vec2f,
   slot : u32,
   // Its morph factor k, CDLOD's with the coarse–fine and grounded holds (`morphFactor`), which
@@ -128,7 +172,10 @@ struct PatchVertex {
 }
 
 // The vertex at `grid` (x, y and 1 for a skirt's) of instance `instance`. A skirt's vertex, and a
-// lit mesh's fin's, takes its grid vertex's (x, y), so its morph and holds are its edge vertex's.
+// lit mesh's fin's, takes its grid vertex's (x, y), so its morph and holds are its edge vertex's. A
+// sub-patch's vertex lies on its slot's patch's own triangles (`surfacePointAt`), at its place in
+// that patch's grid (`sourceGridOf`), with its morph factor from its own place and holds: its slot's
+// surface exactly at k = 0, and the slot's morphed surface at 1.
 fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   let inst = instances[instance];
   let rec = slots[inst.slot];
@@ -136,10 +183,29 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   let y = u32(grid.y);
   let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);
   let origin = draw.offsetFromCameraM + inst.originM;
-  let own = ownOffset(inst.slot, rec, x, y);
+  var own : vec3f;
+  var morph : vec3f;
+  var ownHeightM : f32;
+  var morphHeightM : f32;
+  var nu : vec3f;
+  var at = vec2f(f32(x), f32(y));
+  if ((inst.sub.x & 31u) == 0u) {
+    own = ownOffset(inst.slot, rec, x, y);
+    morph = morphOffset(inst.slot, rec, x, y);
+    ownHeightM = heightAt(inst.slot, x, y, 0u);
+    morphHeightM = heightAt(inst.slot, x, y, 1u);
+    nu = rec.nu0 + normalDifference(rec, directionDifference(rec, x, y));
+  } else {
+    at = sourceGridOf(inst, x, y);
+    let p = surfacePointAt(inst.slot, rec, at);
+    own = p.own;
+    morph = p.morph;
+    ownHeightM = p.ownHeightM;
+    morphHeightM = p.morphHeightM;
+    nu = rec.nu0 + normalDifference(rec, directionDifferenceAt(rec, at));
+  }
   let k = morphFactor(inst, origin + rotation * own, x, y);
-  var q = mix(own, morphOffset(inst.slot, rec, x, y), k);
-  let nu = rec.nu0 + normalDifference(rec, directionDifference(rec, x, y));
+  var q = mix(own, morph, k);
   if (grid.z > 0.5) {
     // A skirt hangs from its edge vertex down the spheroid's normal there.
     q = q - rec.skirtDepthM * nu;
@@ -147,9 +213,9 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   var v : PatchVertex;
   v.fromCameraM = origin + rotation * q;
   v.offsetM = q;
-  v.heightM = mix(heightAt(inst.slot, x, y, 0u), heightAt(inst.slot, x, y, 1u), k);
+  v.heightM = mix(ownHeightM, morphHeightM, k);
   v.datumNormal = nu;
-  v.patchUv = vec2f(f32(x), f32(y)) / 64.0;
+  v.patchUv = at / 64.0;
   v.slot = inst.slot;
   v.morph = k;
   return v;

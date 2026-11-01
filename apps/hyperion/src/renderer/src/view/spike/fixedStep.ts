@@ -129,9 +129,10 @@ const NO_COARSE_STAND_INS: CoarseStandIns = { count: 0, returns: 0, rhoPx: 0, re
  * floored at the near plane as selection measures it.
  *
  * @remarks
- * A stand-in covers a selected patch not yet resident, and with it any resident ones beneath it
- * (`DrawSetResolver`); outside a forced region and the balance's splits, which the streaming gate
- * does not hold, that is the patch's parent. A return is a covered patch the cache does not hold
+ * A stand-in covers a selected patch not yet resident, over that patch's area alone as a sub-patch,
+ * or whole, and with it any resident ones beneath it, where the patch lies too deep below it or the
+ * selection outnumbers the slots (`DrawSetResolver`); outside a forced region and the balance's
+ * splits, which the streaming gate does not hold, that is the patch's parent. A return is a covered patch the cache does not hold
  * now but evicted earlier (`evicted`): the coarse thrash F3 fixed. The rest are first bakes, which
  * an ideal pool lands after the frame's draw.
  *
@@ -145,8 +146,10 @@ export function coarseStandIns(
   planet: PlanetGeometry,
   view: ViewSelectionInput,
 ): CoarseStandIns {
-  // The drawn coarse stand-ins by level, each by its patchKeyIndex, with whether it covers a return.
+  // The drawn coarse stand-ins by level, each by its patchKeyIndex, with whether it covers a return,
+  // and the areas they draw by level and index, a sub-patch's its missing patch's, to their keys.
   const coarse = new Map<number, Map<number, boolean>>();
+  const areas = new Map<number, Map<number, PatchKey>>();
   for (let n = 0; n < draw.count; n += 1) {
     const drawn = draw.patches[n];
     if (drawn?.standIn === true && drawn.patch.key.level <= COARSE_STAND_IN_LEVEL) {
@@ -154,6 +157,10 @@ export function coarseStandIns(
       const level = coarse.get(key.level) ?? new Map<number, boolean>();
       level.set(patchKeyIndex(key), false);
       coarse.set(key.level, level);
+      const area = drawn.within ?? key;
+      const at = areas.get(area.level) ?? new Map<number, PatchKey>();
+      at.set(patchKeyIndex(area), key);
+      areas.set(area.level, at);
     }
   }
   if (coarse.size === 0) {
@@ -166,17 +173,22 @@ export function coarseStandIns(
     if (!patch.seen) {
       continue;
     }
-    for (let level = Math.min(key.level - 1, COARSE_STAND_IN_LEVEL); level >= 0; level -= 1) {
-      const standIns = coarse.get(level);
-      const index = ancestorIndex(key, level);
-      if (standIns?.has(index) !== true) {
+    for (let level = key.level; level >= 0; level -= 1) {
+      const standIn = areas.get(level)?.get(ancestorIndex(key, level));
+      const standIns = standIn === undefined ? undefined : coarse.get(standIn.level);
+      if (standIn === undefined || standIns === undefined) {
         continue;
       }
+      const index = patchKeyIndex(standIn);
       const distanceM = Math.max(
         distanceToBoxFromM(patch.bounds, view.camera.positionM),
         NEAR_PLANE_M,
       );
-      const drawnRhoPx = screenSpaceErrorPx(selectionErrorM(planet, level), distanceM, view);
+      const drawnRhoPx = screenSpaceErrorPx(
+        selectionErrorM(planet, standIn.level),
+        distanceM,
+        view,
+      );
       rhoPx = Math.max(rhoPx, drawnRhoPx);
       if (!cache.has(keyString) && evicted.has(keyString)) {
         standIns.set(index, true);
