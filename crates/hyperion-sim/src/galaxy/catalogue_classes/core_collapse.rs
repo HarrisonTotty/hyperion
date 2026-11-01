@@ -109,6 +109,8 @@
 //!
 //! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
+use std::cell::LazyCell;
+
 use super::grid::{CatalogueMember, ClassProcess};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
@@ -122,6 +124,7 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::ages::YOUNG_AGE_LIMIT;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::displaced::class_table::{ClassKey, ClassTable, ejects};
+use crate::galaxy::displaced::forms::{FormPoint, young_disc};
 use crate::galaxy::displaced::marks::{MARK_MASS_NODES, age_bin_years};
 use crate::galaxy::displaced::runaway::{
     Ejected, RUNAWAY_CUT_OF_V_C, RUNAWAY_MIN_SPEED, RUNAWAY_SHARE_HIGH, RunawayModel, WALKAWAY_CUT,
@@ -219,12 +222,12 @@ pub(crate) struct EjectedTerm {
 }
 
 impl EjectedTerm {
-    /// The term's weight at `point`, recent deaths per cubic light-year: its systems × its class's
-    /// form there × its largest share × its deaths per system.
+    /// The term's weight at the point `at`, recent deaths per cubic light-year: its systems × its
+    /// class's form there × its largest share × its deaths per system.
     #[must_use]
-    fn weight_at(&self, displaced: &DisplacedFields, point: &PointLy) -> f64 {
+    fn weight_at(&self, displaced: &DisplacedFields, at: &FormPoint<'_>) -> f64 {
         self.systems
-            * displaced.density(self.class, point)
+            * displaced.density_at(self.class, at)
             * self.largest_share
             * self.deaths_per_system
     }
@@ -961,16 +964,25 @@ impl ClassProcess for CoreCollapseProcess {
         let displaced = self.ejecting(galaxy);
         let picked = match displaced {
             None => mark.pick_weighted(&weights[..n], bound.value())?,
-            // From 27 the same mark picks a runaway or walkaway term after the components.
-            Some(displaced) => pick_lazily(
-                mark,
-                weights[..n].iter().copied().chain(
-                    self.ejected
-                        .iter()
-                        .map(|term| term.weight_at(displaced, &point)),
-                ),
-                bound.value(),
-            )?,
+            // From 27 the same mark picks a runaway or walkaway term after the components. The
+            // terms' forms read the point's radius and arm point, found once, when the pick first
+            // reaches a term, the same bits as each form's own: a rejected candidate reads every
+            // term, and at the centre's cell this cut a candidate's pick from 2.2 to 1.5 µs
+            // (release, pod, 16 vCPU; P09.T33.b's cost).
+            Some(displaced) => {
+                let at = LazyCell::new(|| {
+                    FormPoint::new(&point, Some(young_disc(galaxy.fields()).1.geometry()))
+                });
+                pick_lazily(
+                    mark,
+                    weights[..n].iter().copied().chain(
+                        self.ejected
+                            .iter()
+                            .map(|term| term.weight_at(displaced, &at)),
+                    ),
+                    bound.value(),
+                )?
+            }
         };
         if let (Some(displaced), Some(term)) = (displaced, picked.checked_sub(n)) {
             return self.ejected_candidate(galaxy, displaced, (id, site), &self.ejected[term]);

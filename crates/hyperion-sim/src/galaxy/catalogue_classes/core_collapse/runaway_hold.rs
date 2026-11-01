@@ -397,7 +397,7 @@ fn the_envelope_holds_over_random_points_under_every_27_hold() {
             let n = process.weights(galaxy, &point, &mut weights);
             let total = process.ejected_terms().iter().fold(
                 weights[..n].iter().fold(0.0, |sum, w| sum + w),
-                |sum, term| sum + term.weight_at(displaced, &point),
+                |sum, term| sum + term.weight_at(displaced, &FormPoint::new(&point, None)),
             );
             assert!(total <= bound, "{total} above {bound} in {cell:?}");
             tested += 1;

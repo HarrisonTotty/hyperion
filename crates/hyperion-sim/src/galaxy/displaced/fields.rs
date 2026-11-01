@@ -354,6 +354,20 @@ impl DisplacedFields {
             .map_or(0.0, |form| form.density(p))
     }
 
+    /// [`density`](Self::density), bit for bit, at the point `at` with what every form shares
+    /// there: a caller reading several classes at one point finds its radius and arm point once.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not below the table's 97 classes.
+    #[must_use]
+    pub(crate) fn density_at(&self, id: DisplacedClassId, at: &FormPoint<'_>) -> f64 {
+        self.classes[id.index()]
+            .form
+            .as_ref()
+            .map_or(0.0, |form| form.density_at(at))
+    }
+
     /// An upper bound on class `id`'s [`density`](Self::density) over `cell`, at one system's
     /// weight; 0 for a class with no form. The class's systems inside the cube multiply both
     /// through the share matrix's displaced column.
