@@ -1536,19 +1536,36 @@ describe("a Regolith class on its body's curve (R10.T10.e)", () => {
     },
   );
 
-  it("gives the classes the body's q, and keeps each class's p", () => {
-    // Plan 14's `templates.golden` at each template's own L: Mercury's 0.47980, Mars's 1.08465.
+  it("states plan 14's q on the fixtures' templates: Mercury's 0.47980, Mars's 1.08465", () => {
+    // Plan 14's `templates.golden` at each template's own L.
     expect(lawPhaseIntegral(MERCURY)[1]).toBeCloseTo(0.4798, 4);
     expect(lawPhaseIntegral(MARS)[1]).toBeCloseTo(1.0846, 3);
-    for (const body of [MERCURY, MAGMA, MARS]) {
-      const row = classRowLaw(PHASE_LAW.regolith, 1, body);
-      expect(lawPhaseIntegral(row)[1] / lawPhaseIntegral(body)[1]).toBeCloseTo(1, 12);
-      expect(geometricAlbedo({ ...row, a: [0.2, 0.2, 0.2] })).toEqual([0.2, 0.2, 0.2]);
-    }
-    // Before, the Moon's curve at s = 1 on every body: +30.5% on Mercury's, −42.3% on Mars's.
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["magma's", MAGMA],
+    ["Mars's", MARS],
+  ])("gives a class on %s template the body's q", (_, body) => {
+    const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+    expect(lawPhaseIntegral(row)[1] / lawPhaseIntegral(body)[1]).toBeCloseTo(1, 12);
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["magma's", MAGMA],
+    ["Mars's", MARS],
+  ])("keeps a class's p, A at L(0) 1, on %s template", (_, body) => {
+    const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+    expect(geometricAlbedo({ ...row, a: [0.2, 0.2, 0.2] })).toEqual([0.2, 0.2, 0.2]);
+  });
+
+  it("drew the Moon's curve at s = 1 on every body before: q +30.5% on Mercury's, −42.3% on Mars's", () => {
     const moonRow = lawPhaseIntegral(classRowLaw(PHASE_LAW.regolith, 1))[1];
-    expect(moonRow / lawPhaseIntegral(MERCURY)[1] - 1).toBeCloseTo(0.305, 3);
-    expect(moonRow / lawPhaseIntegral(MARS)[1] - 1).toBeCloseTo(-0.423, 3);
+    expect([
+      moonRow / lawPhaseIntegral(MERCURY)[1] - 1,
+      moonRow / lawPhaseIntegral(MARS)[1] - 1,
+    ]).toEqual([expect.closeTo(0.305, 3), expect.closeTo(-0.423, 3)]);
   });
 
   it("leaves TEST MOON's rows as they were, bit for bit, on its Moon's template at s = 1 (T10.g's hand-back)", () => {

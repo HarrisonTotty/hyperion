@@ -1625,11 +1625,11 @@ describe("the point's phase integral on a Mars-like world (R10.T10.e)", () => {
     expect(Math.abs(q / uniform - 1)).toBeLessThan(0.01);
   }, 60_000);
 
-  it("stands 1.7% over it with its glaciers' Lambert law, as the closed form gives, and 39% under it before", () => {
-    const map = marsLikeMap(true);
-    const laws = marsLikeLaws(map, "now");
-    const q = orientationQ(marsLikeSurface(map, laws)) / orientationQ(null);
-    // T10.e's closed form, Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ, over the body's q: each law's q its own.
+  /**
+   * T10.e's closed form, Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ, of `laws` over the map's area shares, each law's q its
+   * own, and their Σ aᵢ pᵢ; the p is `now`'s, which T10.a's scale holds at the body's p_V.
+   */
+  function closedForm(map: ClassMapTexels, laws: ReadonlyArray<PhotometricLaw>): number {
     const area = latticeShares(map).reduce<number[]>(
       (sum, shares) => shares.map((share, m) => (sum[m] ?? 0) + share),
       [],
@@ -1641,15 +1641,28 @@ describe("the point's phase integral on a Mars-like world (R10.T10.e)", () => {
       pq += ap * lawPhaseIntegral(law)[1];
       pSum += ap;
     });
-    const closed = pq / pSum / lawPhaseIntegral(MARS)[1];
-    expect(closed - 1).toBeCloseTo(0.017, 3);
-    expect(Math.abs(q / closed - 1)).toBeLessThan(5e-3);
-    // Before, the Moon's row on the dust: the closed form's q_V 0.665 of R10.T10.f's record.
-    const before = marsLikeLaws(map, "before");
-    let pqBefore = 0;
-    before.forEach((law, k) => {
-      pqBefore += (area[k + 1] ?? 0) * geometricAlbedo(law)[1] * lawPhaseIntegral(law)[1];
-    });
-    expect(pqBefore / pSum).toBeCloseTo(0.665, 2);
+    return pq / pSum;
+  }
+
+  it("meets the closed form to 0.5% with its glaciers on Lambert's row", () => {
+    const map = marsLikeMap(true);
+    const laws = marsLikeLaws(map, "now");
+    const q = orientationQ(marsLikeSurface(map, laws)) / orientationQ(null);
+    expect(Math.abs(q / (closedForm(map, laws) / lawPhaseIntegral(MARS)[1]) - 1)).toBeLessThan(
+      5e-3,
+    );
   }, 60_000);
+
+  it("stands 1.7% over the body's q with its glaciers on Lambert's row, by the closed form", () => {
+    const map = marsLikeMap(true);
+    expect(closedForm(map, marsLikeLaws(map, "now")) / lawPhaseIntegral(MARS)[1] - 1).toBeCloseTo(
+      0.017,
+      3,
+    );
+  });
+
+  it("stood at q_V 0.665 on the Moon's row before, R10.T10.f's record's closed form", () => {
+    const map = marsLikeMap(true);
+    expect(closedForm(map, marsLikeLaws(map, "before"))).toBeCloseTo(0.665, 2);
+  });
 });

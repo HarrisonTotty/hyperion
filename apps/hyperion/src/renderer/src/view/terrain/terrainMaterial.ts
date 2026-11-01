@@ -500,8 +500,12 @@ function isPhaseLawCode(code: number): code is PhaseLawCode {
  * L(0) no higher than the body's (the law's `lommelSeeligerCeiling`, set where the body's is the
  * lesser: Mars's 0.5 under the particulate rule's 1). The class keeps its A and L(0), and so its p
  * (R10.T10.a's), its figure's factor and its maturity nodes: f is tabulated against the share
- * drawn, so a class of the body's p draws the body's own law at every phase and geometry, and the
- * classes' q is the body's within their L(0) where it is below the body's. Before, every body drew
+ * drawn, so on a sphere a class of the body's p draws the body's own law at every phase and
+ * geometry, and its q is the body's wherever its L(0) is at least the body's (below it, past a
+ * template's range, where f is held, the class's own L(0) moves q: −2.0% at L(0) 0.3 on Mars's,
+ * which the particulate rule gives only above A_N 1.09). On an oblate body the figure's factor stays
+ * at the class's L(0), as the disc's and the terrain's both are, so a capped class stands
+ * k(L′) ÷ k(L(0)) under the body's law: 4.7 × 10⁻⁴ on Mars's figure. Before, every body drew
  * the Moon's curve at s = 1 on its Regolith classes, q 0.626 against Mercury's 0.480 and Mars's
  * 1.085 (R10.T10.e's finding). The Ice and Lambert rows, and a Regolith class on any other
  * template, are the law's own.
