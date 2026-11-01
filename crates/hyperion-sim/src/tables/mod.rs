@@ -154,7 +154,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_pair_light_c",
         revision: 0,
-        since_generator_version: 25,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
