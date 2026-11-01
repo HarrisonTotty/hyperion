@@ -5715,3 +5715,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     registers the centre's members). The carve-out's claims are printed, not tested: the grid's
     displaced classes weigh the whole budget and T33.b's terms its field part (pending the owner's
     ruling there). Members are tested only where a volume holds 20 features or more.
+  - _The bump's goldens_, blessed under every 26 hold with and without the weight and layer D's
+    raised pad, with the fixed donor and launch: at least `galaxy_map`,
+    `placement/displaced_prepin`, `query/range`, the sky's `census_near_sun` and `eye_cut`, and
+    the server's `density_map_face_on_128`, `systems_in_range` and `systems_in_range_briefs`.
