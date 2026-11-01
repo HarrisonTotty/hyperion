@@ -7089,7 +7089,12 @@ galaxy_sweeps`.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`,
     `stellar::binary::class_merger`; slow, `channels_hold`'s sampler test (with `--ignored`).
 - **P11.T8.d's rider, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13 §2(b)).
-  Under `MERGER_CLASS_VERSION` `NsmScanMarks::remnant_mass` is the pair's mass less the published
-  ejecta (`scan::remnant_mass_under`; GW170817's 2.74 → 2.69 M☉), and the remnant's state takes it;
-  `remnant_phase` stays the engine's rule on the total. The energy radiated in gravitational waves
-  is not taken off (its source was not read).
+  Under `MERGER_CLASS_VERSION` `NsmScanMarks::remnant_mass` is the pair's mass less its own ejecta,
+  `ejecta_mass()` (`scan::remnant_mass_under`): GW170817's for two neutron stars (2.74 → 2.69 M☉),
+  P11.T9.b's `NsbhOutflow` for a black hole, nothing where the hole swallows its star whole. The
+  marks carry the rule and compute the remnant from the same ejecta; the remnant's state takes it;
+  `remnant_phase` stays the engine's rule on the total. Under the version's rules it is still the
+  total, as T9.b's record has it. _Finding:_ the energy radiated in
+  gravitational waves is not taken off; its source was not read, and the values recalled
+  (≥ 0.04 M☉c², GWTC-1) are lower bounds. _Movers:_ `catalogue_classes/neutron_star_mergers` (its
+  remnant masses). _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`.

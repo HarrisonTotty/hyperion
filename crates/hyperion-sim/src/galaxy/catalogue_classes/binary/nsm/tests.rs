@@ -611,3 +611,18 @@ fn under_every_26_hold_every_remnant_keeps_the_pair_less_its_ejecta() {
     }
     assert!(seen >= 3, "{seen}");
 }
+
+/// Under every 26 hold the cells holding the fixture's mergers do not depend on the order they
+/// are generated in, nor on what was resolved between them.
+#[test]
+fn under_every_26_hold_the_cells_do_not_depend_on_order() {
+    let galaxy = galaxy_26();
+    let process = NeutronStarMergers::new(galaxy);
+    let cells: Vec<CatalogueCellKey> = the_galaxy().cells.iter().map(|(k, _)| *k).take(4).collect();
+    assert_order_independent(&cells, |key| {
+        let stray =
+            CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
+        let _ = placement::resolve(galaxy, SystemId::from(stray));
+        CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
+    });
+}

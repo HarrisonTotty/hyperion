@@ -260,10 +260,11 @@ impl NsmScanMarks {
 /// under `rules` (P11.T8.d's rider, at `MERGER_CLASS_VERSION`; research-leans-13 §2(b)): the
 /// total, as the engine's merger of two compact stars keeps it, under the held arm; from 26 the
 /// total less the merger's own ejecta, the class's published [`NsmScanMarks::ejecta_mass`], so that
-/// the class conserves its mass: GW170817's 2.74 M☉ leaves 2.69 for two neutron stars, and a black
+/// the class conserves its mass: GW170817's 2.74 M☉ (Abbott et al. 2017, PRL 119, 161101, Table I,
+/// the low-spin prior; recalled, not read at source) leaves 2.69 for two neutron stars, and a black
 /// hole that swallows its neutron star whole ([`NsbhOutflow`]) keeps the pair's mass. The energy
 /// the inspiral radiates in gravitational waves is not taken off: its source was not read in this
-/// build (a finding).
+/// build, and the values recalled are lower bounds (a finding).
 #[must_use]
 pub(crate) fn remnant_mass_under(
     total: SolarMasses,
