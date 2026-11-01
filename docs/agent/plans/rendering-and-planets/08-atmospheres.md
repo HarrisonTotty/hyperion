@@ -5995,7 +5995,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       precondition 5's frame and the UHD 620 host's bake time pending, the owner's runs.
       Titan-class gated 2026-11-01 on its re-traced reference: it misses, and is not routed (Risks,
       "R08.T14.d.4's Titan-class gate"); with the horizon's terms, 3 misses are left (Risks,
-      "R08.T14.d.4's horizon terms").
+      "R08.T14.d.4's horizon terms"); the estimator check keeps the route closed (Risks,
+      "R08.T14.d.4's estimator check").
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -24466,6 +24467,18 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     one, moves s90 ±5%. Alone, the terms move s90-v0 red ×1.80 and ×0.44, not the arms' 1.6 and 0.87.
   - _Not taken_: the ceiling's fallbacks (findings.txt), since the bake alone is over 5 s; the
     cot θ₀ azimuth term (0 at the horizon). _Pending, the owner's runs_: the UHD 620 host's time.
+- **R08.T14.d.4's estimator check** (2026-11-01; lane `fix-titan-route-open`, on main's rulings of
+  2026-11-01; figures and the patch in the lane's outbox). **The haze route stays closed**; no code
+  changed.
+  - Of the three ∂I ÷ ∂μ estimators, the built one conserves the curvature term's m = 0 moment
+    against 2F ÷ r worst below 100 km.
+  - _The conservative difference (Lewis and Miller's α): built, measured, not landed._ s90 red reads
+    0.39–0.50 (linear edges) or 1.38–1.50 (upwind); with the term cut above 100 km, 1.34–1.47 by
+    either estimator, so the built s90 pass rests on the term where it is past first order.
+  - Titan-class's analytic path reads disc-p60 red closer to the reference than the route does
+    (1.003 against 1.072), so ruling (1)'s condition fails there as well.
+  - Left undone, past the brief's stop: `HAZE_GATE_EXCEPTIONS`, the route, the pool's arrival
+    bench, and TEST TITAN's captures.
 - **The composite over the air's area, as built** (2026-11-01; lane `r08-t16a2`, chained; main's
   next lever after the early return; measurements in the lane's outbox).
   - _The engine_ (`engine/types.ts`, `webgpu/drawing.ts`, `webgpu/target.ts`): a target's frame may
