@@ -7,11 +7,13 @@ import {
   cellMeanSigma,
   cellSigmasAt,
   cellTransmittance,
+  CHARGED_BROADENERS,
   committedLineSpecies,
   curveRowsPa,
   DIPOLAR_BROADENERS,
   fetchPart,
   handOverK,
+  type Broadening,
   type KDistributionFile,
   type KDistributionTable,
   kDistributionAt,
@@ -757,24 +759,65 @@ describe("a table with no self width (R08.T10.d)", () => {
     );
   }, 120_000);
 
-  it("adds an ion's own share to ε, taken as H₂ and not estimated: Mg+'s table holds no width of its own", async () => {
+  it("makes an ion's lines estimated at any share of its own above 0: Mg+'s table holds no width of its own (R08.T16.a.2)", async () => {
     const [ion] = await loadKDistributions(["Mg+"], inlinePart);
     if (ion === undefined) {
       throw new Error("Mg+'s k-distribution is committed");
     }
-    const x = 1e-6;
-    const temperatureK = 4_500;
-    const found = broadeningFactor(ion, giantMixture("Mg+", x), temperatureK);
-    // Σ x r at the temperature, Mg+'s own r 1 (H₂'s, the atoms' tables' reference) and offset 0.
-    const ratioAt = (gas: string): number =>
-      (ion.broadening.get(gas) ?? Number.NaN) *
-      (296 / temperatureK) ** (ion.broadeningExponents.get(gas) ?? 0);
-    const sum = 0.85 * (1 - x) * ratioAt("H2") + 0.15 * (1 - x) * ratioAt("He") + x;
-    expect([found.estimated, found.widthlessShare / (x / sum)]).toEqual([
-      false,
-      expect.closeTo(1, 12),
-    ]);
+    const at = (x: number): Broadening => broadeningFactor(ion, giantMixture("Mg+", x), 4_500);
+    expect([
+      ion.broadening.has("self") || ion.broadening.has("Mg+"),
+      [1e-9, 1e-6, 0.5].map((x) => at(x).estimated),
+      [1e-9, 1e-6, 0.5].map((x) => at(x).widthlessShare),
+      at(0).estimated,
+    ]).toEqual([false, [true, true, true], [0, 0, 0], false]);
   }, 120_000);
+});
+
+describe("the charged broadeners (R08.T16.a.2)", () => {
+  it("are the registry's gases of kind ion: the electron, H⁻ and the cations", () => {
+    expect([...CHARGED_BROADENERS]).toEqual(
+      registry.substances.filter((s) => s.kind === "ion").map((s) => s.key),
+    );
+  });
+
+  it("make a table's lines estimated at any share of the electrons above 0, never weighing them by the bound", () => {
+    const table = toyTable({ species: "XX" });
+    const at = (x: number): Broadening =>
+      broadeningFactor(
+        table,
+        new Map([
+          ["XX", 0.01],
+          ["N2", 0.99 - x],
+          ["e-", x],
+        ]),
+        4_500,
+      );
+    expect([
+      [1e-9, 8.1e-5].map((x) => [at(x).estimated, at(x).widthlessShare]),
+      [at(0).estimated, at(0).widthlessShare],
+    ]).toEqual([
+      [
+        [true, 0],
+        [true, 0],
+      ],
+      [false, 0],
+    ]);
+  });
+
+  it("take a cation's width where its table holds one, not estimated", () => {
+    const table = toyTable({ species: "XX", broadening: { self: 1.005, "Na+": 3 } });
+    const found = broadeningFactor(
+      table,
+      new Map([
+        ["XX", 0.01],
+        ["H2", 0.98],
+        ["Na+", 0.01],
+      ]),
+      4_500,
+    );
+    expect(found.estimated).toBe(false);
+  });
 });
 
 describe("a species' own width under its own key (R08.T10.d)", () => {

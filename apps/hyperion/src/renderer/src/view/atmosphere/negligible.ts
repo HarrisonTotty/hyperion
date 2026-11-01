@@ -266,9 +266,9 @@ export interface FixedGMixVerdict {
  * means are the largest over the stored rows to the first at or past that pressure
  * (`decision-r08-approximate-plate.md` §6, item 2, 2026-10-27; R08.T10.d), which makes the cap
  * exact at the stored rows. A gas with a permanent dipole of at least H₂S's takes no such range
- * (`kDistribution.ts`'s `DIPOLAR_BROADENERS`), and keeps the species `estimated`, as does a neutral
- * atom's own share where its table holds no width of its own (`SELF_BROADENED_ATOMS`; the same
- * decision's §8, item 2).
+ * (`kDistribution.ts`'s `DIPOLAR_BROADENERS`), nor does a charged one (`CHARGED_BROADENERS`,
+ * R08.T16.a.2), and each keeps the species `estimated`, as does a neutral atom's own share where
+ * its table holds no width of its own (`SELF_BROADENED_ATOMS`; the same decision's §8, item 2).
  */
 export interface BroadenerVerdict {
   readonly test: "broadener";
