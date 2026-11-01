@@ -8006,6 +8006,22 @@ fn every_host_shade_off_its_book_is_its_own_to_the_bit() {
     assert!(checked > 2_000, "{checked}");
 }
 
+/// Lever (d) under P14.T24.h.b's adding rule, whose re-split water cloud a book holds: every body's
+/// shade of the 60-system sample read off its book is still its own, to the bit, each checked as
+/// it is built (`ShadeReads::Checked`).
+#[test]
+fn under_the_adding_rule_every_host_shade_off_its_book_is_its_own_to_the_bit() {
+    use crate::planetary::derive::photometry::area_mix::{
+        RayleighAddingRules, ShadeReads, with_rayleigh_adding, with_shade_reads,
+    };
+
+    let (read, checked) = with_rayleigh_adding(RayleighAddingRules::Added, || {
+        with_shade_reads(ShadeReads::Checked, sixty_rendered)
+    });
+    assert_eq!(read.len(), 60);
+    assert!(checked > 2_000, "{checked}");
+}
+
 /// Lever (e) over the 60-system sample: the rotation pass's and the Laplace frames' records at
 /// `parent_time` read before the passes (e1), each member as its moons' parent before its passes
 /// (e2) and each parent as its moons read it without its record (e3) are the unlevered path's,

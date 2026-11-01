@@ -1,9 +1,10 @@
-//! P14.T24.h.b's parts at the area mix, each behind its own hold at 26: a minor condensable's own
-//! cloud cover (decision-p14-t51-batch §9.4).
+//! P14.T24.h.b's parts at the area mix, each behind its own hold at 26 (decision-p14-t51-batch
+//! §9.4): a minor condensable's own cloud cover, the organic sediment under a hazy air, the Rayleigh
+//! layer added over the clear sky, and the haze as an absorbing layer with its anti-greenhouse.
 
 use hyperion_testkit::float::assert_same_bits;
 
-use super::tests::{id, partitioned, weights_of};
+use super::tests::{air, id, partitioned, weights_of};
 use super::*;
 
 /// A Titan-like partition: 1.5 bar of N₂ over a methane inventory its air cannot hold at 90–95 K,
@@ -33,8 +34,9 @@ fn the_minor_clouds_are_held_only_until_the_26_bump() {
         "the 25 → 26 bump puts P14.T24.h.b's minor clouds on the record (decision-p14-t51-batch \
          §9.4): delete `MINOR_CLOUDS_VERSION`, `MinorCloudsRules` with its `WaterShare` arm and the \
          guard that reads it in `condensable_cloud_share`, the tests' `with_minor_clouds`, its \
-         switch in `with_every_26_hold` (and the helper, if no other 26 hold is left), the \
-         `WaterShare` arms of `scattering_tests`, and this test"
+         switch in `with_every_26_hold` and in `with_scattering_held` with its callers (and the \
+         helpers, if no other 26 hold is left), the `WaterShare` arms of `scattering_tests`, and \
+         this test"
     );
     assert_eq!(MinorCloudsRules::in_force(), MinorCloudsRules::WaterShare);
     assert_eq!(
@@ -102,9 +104,10 @@ fn the_organic_sediment_is_held_only_until_the_26_bump() {
         GENERATOR_VERSION < ORGANIC_SEDIMENT_VERSION,
         "the 25 → 26 bump puts P14.T24.h.b's organic sediment on the record \
          (decision-p14-t51-batch §9.4): delete `ORGANIC_SEDIMENT_VERSION`, `OrganicSedimentRules` \
-         with its `Bare` arm and the guard that reads it in `sediment_share`, the tests' \
-         `with_organic_sediment`, its switch in `with_every_26_hold` (and the helper, if no other \
-         26 hold is left), the `Bare` arms of `scattering_tests`, and this test"
+         with its `Bare` arm and the guards that read it in `sediment_share` and \
+         `surface_mix::pass_haze`, the tests' `with_organic_sediment`, its switch in \
+         `with_every_26_hold` and in `with_scattering_held` with its callers (and the helpers, if \
+         no other 26 hold is left), the `Bare` arms of `scattering_tests`, and this test"
     );
     assert_eq!(OrganicSedimentRules::in_force(), OrganicSedimentRules::Bare);
     assert_eq!(
@@ -123,14 +126,19 @@ fn the_organic_sediment_is_held_only_until_the_26_bump() {
 
 /// Partial pressures of `fractions` by mole at a surface pressure `pressure`, Pa.
 fn partials_of(pressure: f64, fractions: &[(Gas, f64)]) -> PartialPressures {
-    PartialPressures::from_fn(|gas| {
-        Pascals::new(
-            fractions
-                .iter()
-                .find(|&&(g, _)| g == gas)
-                .map_or(0.0, |&(_, x)| x * pressure),
-        )
-    })
+    let pressures: Vec<(Gas, f64)> = fractions
+        .iter()
+        .map(|&(gas, x)| (gas, x * pressure))
+        .collect();
+    air(&pressures)
+}
+
+/// The ground's Bond albedo A beneath a conservative layer of reflectance `layer` whose total is
+/// `total` ([`rayleigh_added`] inverted): A = (Rₜ − R) ÷ [(1 − R)² + R (Rₜ − R)].
+fn beneath_rayleigh(total: f64, layer: f64) -> f64 {
+    let through = 1.0 - layer;
+    let above = total - layer;
+    above / (through * through + layer * above)
 }
 
 /// The snapshot path's haze is T24.c's τ(550) at the air's index, scaled by its column over
@@ -256,8 +264,9 @@ fn the_rayleigh_adding_is_held_only_until_the_26_bump() {
         "the 25 → 26 bump puts P14.T24.h.b's adding rule on the record (decision-p14-t51-batch \
          §9.4): delete `RAYLEIGH_ADDING_VERSION`, `RayleighAddingRules` with its `Max` arm and the \
          guards that read it in `water_cloud_albedo` and `surface_mix::floored`, the tests' \
-         `with_rayleigh_adding`, its switch in `with_every_26_hold` (and the helper, if no other 26 \
-         hold is left), the `Max` arms of `scattering_tests`, and this test"
+         `with_rayleigh_adding`, its switch in `with_every_26_hold` and in `with_scattering_held` \
+         with its callers (and the helpers, if no other 26 hold is left), the `Max` arms of \
+         `scattering_tests`, and this test"
     );
     assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
     assert_eq!(
@@ -323,8 +332,8 @@ fn the_adding_rule_takes_its_closed_form() {
 }
 
 /// Under the adding rule the reference Earth keeps NASA's 0.294 to 10⁻¹², its own Rayleigh layer
-/// (about 0.058) laid over its clear sky under its cloud, the cloud re-split to do so; under the
-/// max its cloud is T51.b's calibration to the bit. Both clouds are stated.
+/// (about 0.058) laid over its clear sky bin by bin under its cloud, the cloud re-split to do so;
+/// under the max its cloud is T51.b's calibration to the bit. Both clouds are stated.
 #[test]
 fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
     let held = water_cloud_albedo();
@@ -337,7 +346,13 @@ fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
     let (split, layer) = with_rayleigh_adding(RayleighAddingRules::Added, || {
         (water_cloud_albedo(), reference_earth_rayleigh())
     });
-    let total = under_cloud(rayleigh_added(layer, clear), cloud, split);
+    let layers = rayleigh_bins(&reference_earth_air(), EARTH_SURFACE_GRAVITY).unwrap();
+    let by_bin = layers.map(|r| under_cloud(rayleigh_added(r, clear), cloud, split));
+    let total = band_weighted(&by_bin, &sun_bands());
+    assert!(
+        (rayleigh_added(layer, clear) - reference_earth_clear_sky_added()).abs() < 2e-3,
+        "the bolometric rule and the bins' agree within 2 × 10⁻³ at Earth's thin layer"
+    );
     eprintln!(
         "the reference Earth: its layer {layer:.4}, its cloud {held:.5} → {split:.5} re-split, its \
          Bond {total:.6}"
@@ -352,23 +367,28 @@ fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
 
 /// Under the adding rule the Solar System table's airless Moon, Mercury and Ceres keep their Bond
 /// albedos to the bit and Venus its deck's 0.76; its Earth and its Mars move by their layers, each
-/// stated both ways. The plan's "the Moon and Mars move by under 0.005" is the measured Mars's,
-/// 6 mbar: the table's Mars at the passes' stand-ins holds some 0.22 bar, its layer about 0.056,
-/// and its move is pinned as it stands (a deferred finding).
+/// stated both ways and pinned as they stand. The plan's "the Moon and Mars move by under 0.005"
+/// is the measured Mars's, 6 mbar: the table's Mars at the passes' stand-ins holds some 0.22 bar,
+/// its layer about 0.056 (a deferred finding).
 #[test]
 fn under_the_adding_rule_the_table_s_airless_bodies_and_venus_keep_their_bonds() {
     use crate::planetary::derive::solar::historic_table;
     let held = historic_table();
     let added = with_rayleigh_adding(RayleighAddingRules::Added, historic_table);
+    let mut seen = Vec::new();
     for ((name, before), (_, after)) in held.iter().zip(&added) {
         let (a, b) = (before.albedo().value(), after.albedo().value());
         eprintln!("{name}: Bond {a:.4} → {b:.4} under the adding rule");
         match *name {
             "Moon" | "Mercury" | "Ceres" | "Venus" => assert_same_bits(b, a),
-            "Mars" => assert!((b - a).abs() < 0.03, "{name}: {a} → {b}"),
-            _ => {}
+            "Mars" => assert!((0.01..0.03).contains(&(b - a)), "{name}: {a} → {b}"),
+            "Earth" => assert!((b - a).abs() < 0.005, "{name}: {a} → {b}"),
+            _ => continue,
         }
+        seen.push(*name);
     }
+    seen.sort_unstable();
+    assert_eq!(seen, ["Ceres", "Earth", "Mars", "Mercury", "Moon", "Venus"]);
 }
 
 /// P14.T24.h.b's third part is held until the 25 → 26 bump: the rules in force are version 25's
@@ -380,10 +400,10 @@ fn the_haze_layer_is_held_only_until_the_26_bump() {
         GENERATOR_VERSION < HAZE_LAYER_VERSION,
         "the 25 → 26 bump puts P14.T24.h.b's haze layer on the record (decision-p14-t51-batch \
          §9.4): delete `HAZE_LAYER_VERSION`, `HazeLayerRules` with its `Clear` arm and the guards \
-         that read it in `hazed`, `anti_greenhouse_factor` and `step_anti_greenhouse`, the tests' \
-         `with_haze_layer`, its switch in `with_every_26_hold` and in `with_scattering_held` (and \
-         the helpers, if no other 26 hold is left), the `Clear` arms of `scattering_tests`, and \
-         this test"
+         that read it in `hazed`, `hazed_bins`, `anti_greenhouse_share`, `step_anti_greenhouse`, \
+         `surface_mix::pass_haze` and `escaping`'s solve, the tests' `with_haze_layer`, its switch \
+         in `with_every_26_hold` and in `with_scattering_held` with its callers (and the helpers, \
+         if no other 26 hold is left), the `Clear` arms of `scattering_tests`, and this test"
     );
     assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
     assert_eq!(
@@ -429,37 +449,72 @@ fn the_haze_layer_takes_its_closed_form() {
     assert_same_bits(haze_aggregate_at(4_000.0).1, haze_aggregate_at(780.0).1);
     let (omega, _) = haze_aggregate_at(495.0);
     assert!(omega > haze_aggregate_at(440.0).0 && omega < haze_aggregate_at(550.0).0);
-    assert!((haze_spectral_shape(550.0) - 1.0).abs() < 1e-15);
-    assert!(haze_spectral_shape(400.0) > 1.0 && haze_spectral_shape(1_000.0) < 1.0);
+    let (upper, lower) = haze_spectral_shape(550.0);
+    assert!((upper + lower - 1.0).abs() < 1e-15);
+    assert!(
+        (upper - 0.83).abs() < 0.01,
+        "the haze above 30 km at 550 nm: {upper}"
+    );
+    let whole = |nm: f64| haze_spectral_shape(nm).0 + haze_spectral_shape(nm).1;
+    assert!(whole(400.0) > 1.0 && whole(1_000.0) < 1.0);
 }
 
-/// Titan's haze about a Sun: over its dark sediment and its Rayleigh layer the haze layer's Bond
-/// albedo and the share of the light it absorbs, stated; the anti-greenhouse's factor (1 − γ ÷
-/// 2)^¼ by hand; and under `Clear`, with no haze or with no light, the disc as it is to the bit.
+/// Titan's haze about a Sun: over its dark sediment under its Rayleigh layer, bin by bin, the haze
+/// layer's Bond albedo and the share of the light its upper haze absorbs, stated; the
+/// anti-greenhouse's surface (1 − γ) `T_grey`⁴ + (γ ÷ 2) `T_base`⁴ by hand, its γ = 1 limit `T_base` ÷
+/// 2^¼ and `grey` to the bit at γ 0; and under `Clear`, with no haze or no light, the disc as it is
+/// to the bit and γ 0.
 #[test]
 fn titan_s_haze_absorbs_and_cools_its_surface() {
     use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
     let sun = HostShade::sun();
     let haze = TITAN_HAZE_OPTICAL_DEPTH;
-    let below = rayleigh_added(0.27, solid_bond(id("tholin"), &sun.bands).bond);
-    assert_same_bits(hazed(below, haze, &sun), below);
-    assert_same_bits(anti_greenhouse_factor(0.3, 0.7), 1.0);
+    let titan = partials_of(
+        TITAN_SURFACE_PRESSURE.value(),
+        &[(Gas::Nitrogen, 0.9435), (Gas::Methane, 0.0565)],
+    );
+    let ground = solid_bond(id("tholin"), &sun.bands).bond;
+    let below = rayleigh_bins(&titan, TITAN_GRAVITY)
+        .unwrap()
+        .map(|layer| rayleigh_added(layer, ground));
+    let unhazed = band_weighted(&below, &sun.bands);
+    assert_same_bits(hazed_bins(&below, haze, &sun), unhazed);
+    assert_same_bits(hazed(0.3, haze, &sun), 0.3);
+    assert_same_bits(anti_greenhouse_share(0.3, 0.7), 0.0);
+    let (grey, base) = (Kelvin::new(98.5), Kelvin::new(81.0));
+    assert_same_bits(anti_greenhouse(grey, base, 0.0).value(), grey.value());
     with_haze_layer(HazeLayerRules::Absorbing, || {
-        let total = hazed(below, haze, &sun);
+        let total = hazed_bins(&below, haze, &sun);
         let absorbed = haze_absorbed(haze, &sun);
-        let gamma = absorbed / (1.0 - total);
-        let factor = anti_greenhouse_factor(absorbed, 1.0 - total);
+        let gamma = anti_greenhouse_share(absorbed, 1.0 - total);
+        let cooled = anti_greenhouse(grey, base, gamma).value();
         eprintln!(
-            "Titan's haze over {below:.4}: Bond {total:.4}, absorbed {absorbed:.4} over black, γ \
-             {gamma:.3}, the anti-greenhouse's factor {factor:.4} ({:.1} K off 94 K)",
-            94.0 * (1.0 / factor - 1.0)
+            "Titan's haze over its ground and air ({unhazed:.4}): Bond {total:.4}, its upper haze \
+             absorbing {absorbed:.4} over black, γ {gamma:.3}; a grey {:.1} K over a base {:.1} K \
+             cools to {cooled:.1} K",
+            grey.value(),
+            base.value()
         );
         assert!((0.1..0.6).contains(&absorbed), "{absorbed}");
-        assert!((factor - math::powf(1.0 - gamma / 2.0, 0.25)).abs() < 1e-15);
-        assert!(factor < 1.0);
-        assert_same_bits(hazed(below, 0.0, &sun), below);
-        assert_same_bits(anti_greenhouse_factor(0.0, 0.7), 1.0);
-        assert_same_bits(anti_greenhouse_factor(0.3, 0.0), 1.0);
-        assert!((anti_greenhouse_factor(0.9, 0.5) - math::powf(0.5, 0.25)).abs() < 1e-15);
+        assert!((gamma - absorbed / (1.0 - total)).abs() < 1e-15);
+        let by_hand = math::powf(
+            (1.0 - gamma) * math::powf(grey.value(), 4.0)
+                + gamma / 2.0 * math::powf(base.value(), 4.0),
+            0.25,
+        );
+        assert!(
+            (cooled - by_hand).abs() < 1e-9,
+            "{cooled} against {by_hand}"
+        );
+        assert!(cooled < grey.value());
+        let limit = anti_greenhouse(grey, base, 1.0).value();
+        assert!(
+            (limit - base.value() / math::powf(2.0, 0.25)).abs() < 1e-9,
+            "{limit}"
+        );
+        assert_same_bits(hazed_bins(&below, 0.0, &sun), unhazed);
+        assert_same_bits(anti_greenhouse_share(0.0, 0.7), 0.0);
+        assert_same_bits(anti_greenhouse_share(0.3, 0.0), 0.0);
+        assert_same_bits(anti_greenhouse_share(0.9, 0.5), 1.0);
     });
 }

@@ -7536,3 +7536,27 @@ fn a_kilobar_runaway_takes_the_thick_air_closure() {
     assert!(batch.surface_temperature().value().is_finite());
     assert!(batch.surface_temperature() < inputs.hottest_host);
 }
+
+/// P14.T24.h.b's anti-greenhouse reads the share of the light a body absorbs from its equilibrium
+/// temperature, 1 − A to 10⁻¹² at every albedo and flux; 0 with no light, or a flux not finite and
+/// positive, read with no panic.
+#[test]
+fn the_absorbed_share_is_one_less_the_albedo() {
+    use super::escaping::absorbed_share;
+    use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
+    for flux in [0.01, 1.0, 3.7, 400.0] {
+        let flux = EarthFluxes::new(flux);
+        for albedo in [0.0, 0.11, 0.294, 0.35, 0.83] {
+            let t_eq = equilibrium_temperature(flux, BondAlbedo::new(albedo).unwrap());
+            let share = absorbed_share(flux, t_eq);
+            assert!(
+                (share - (1.0 - albedo)).abs() < 1e-12,
+                "{flux:?} {albedo}: {share}"
+            );
+        }
+    }
+    let t = Kelvin::new(80.0);
+    for flux in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_same_bits(absorbed_share(EarthFluxes::new(flux), t), 0.0);
+    }
+}

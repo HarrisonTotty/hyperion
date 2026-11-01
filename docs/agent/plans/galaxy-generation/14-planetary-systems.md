@@ -3029,6 +3029,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Files:_ `planetary/derive/photometry/area_mix.rs`, `planetary/derive/atmosphere.rs`,
       `planetary/derive/atmosphere/tests.rs`.
     - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+    - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits: Risks,
+      "Deviations in P14.T24.h.b, as built".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -33675,3 +33677,24 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _For 26's bump:_ P14.T53.i's census and `named` set this hold back. Under the lag its movers
     are 02000b2ca0000001.1100 and two airless trace-N₂ bodies (…0600, …0800), not count (vii):
     restate them. Goldens holding airless icy bodies move.
+- **Deviations in P14.T24.h.b, as built (lane p14-t24hb, 2026-11-01).** On P14.T49.m's tip, each
+  part behind its own hold at 26, a switch in `with_every_26_hold` and a tripwire; nothing moves
+  under them (`golden_diff.py`: no golden changed). `area_mix::with_scattering_held` sets the four
+  back for tests pinning other holds at 26 (`guard_twin`, `line_switch_tests`, `census_26_tests`).
+  - _Clouds:_ `MINOR_CLOUDS_VERSION`, `MinorCloudsRules`: a non-water condensable's cloud takes
+    `MINOR_CONDENSABLE_CLOUD_SHARE` 0.004 before its availability (`cloud_condensable`).
+  - _Sediment:_ `ORGANIC_SEDIMENT_VERSION`, `OrganicSedimentRules`: `tholin` over the regolith and
+    the `H2O` ice by `sediment_share`; `snapshot_haze_optical_depth` scales T24.c's τ by the
+    column over Titan's (lean), read once a pass (`surface_mix::pass_haze`).
+  - _Rayleigh added:_ `RAYLEIGH_ADDING_VERSION`, `RayleighAddingRules`: `rayleigh_bins` added over
+    the clear sky per bin, the cloud above (lean: Venus keeps 0.76); `floored` takes a `Disc`;
+    Earth's cloud re-split, 0.390 → 0.367 (`reference_earth_clear_sky_added`).
+  - _Haze:_ `HAZE_LAYER_VERSION`, `HazeLayerRules`: `hazed_bins`, two δ-Eddington layers split at
+    30 km by Bazzon et al.'s τ0, ω and g the optool aggregate's; the upper one's γ enters each
+    greenhouse step (`AntiGreenhouse`, `step_anti_greenhouse`) as `T_s`⁴ = (1 − γ) `T_grey`⁴ +
+    (γ ÷ 2) `T_base`⁴ (`anti_greenhouse`); `escaping::absorbed_share` gives 1 − A.
+  - _Not built:_ the envelope's own Bond albedo (the decks cost 30–42 ms a giant, so the snapshot
+    keeps T51.b's table; the section's value needs modes' ω and g, gas bands and a wire member
+    frozen at 24) and the refits of `GREENHOUSE_NITROGEN` on Titan with the haze.
+  - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
+    `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.

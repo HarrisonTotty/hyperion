@@ -906,11 +906,9 @@ pub(super) fn area_mixed(
             &hottest
         }
     };
+    let haze = pass_haze(air, inputs);
     let SurfaceMix {
-        albedo,
-        ground,
-        cloud_albedo,
-        cloud_fraction,
+        disc,
         lid,
         liquid_water,
         deck_water,
@@ -919,10 +917,10 @@ pub(super) fn area_mixed(
         present,
     } = match air.state {
         SurfaceState::GasEnvelope => SurfaceMix {
-            albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
-            ground: area_mix::giant_bond(shade, inputs.heated, inputs.class),
-            cloud_albedo: 0.0,
-            cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
+            disc: Disc::Whole {
+                albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
+                cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
+            },
             lid: None,
             liquid_water: false,
             deck_water: OpenWater::Dry,
@@ -936,10 +934,10 @@ pub(super) fn area_mixed(
                 PassClimate::Given(_) => None,
             };
             SurfaceMix {
-                albedo: area_mix::melt_bond(),
-                ground: area_mix::melt_bond(),
-                cloud_albedo: 0.0,
-                cloud_fraction: 0.0,
+                disc: Disc::Whole {
+                    albedo: area_mix::melt_bond(),
+                    cloud_fraction: 0.0,
+                },
                 lid,
                 liquid_water: false,
                 deck_water: OpenWater::Dry,
@@ -955,18 +953,13 @@ pub(super) fn area_mixed(
         | SurfaceState::Temperate
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
-        | SurfaceState::SteamEnvelope => surface_and_cloud(air, inputs, surface, shade),
+        | SurfaceState::SteamEnvelope => surface_and_cloud(air, inputs, surface, (shade, haze)),
     };
     #[cfg(test)]
     if let PassClimate::Spun(_) = surface.climate {
         spun_read::trace(lid.as_ref());
     }
-    let albedo = floored(
-        (albedo, ground, cloud_fraction, cloud_albedo),
-        air,
-        inputs,
-        shade,
-    );
+    let albedo = floored(disc, air, inputs, (shade, haze));
     let runaway_deck = match air.state {
         SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope => surface.deck,
         SurfaceState::GasEnvelope
@@ -978,7 +971,7 @@ pub(super) fn area_mixed(
     };
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
-        cloud_fraction,
+        cloud_fraction: disc.cloud_fraction(),
         runaway_deck,
         liquid_water,
         deck_water,
@@ -988,25 +981,84 @@ pub(super) fn area_mixed(
     (air, lid, maturity, cold_traps)
 }
 
-/// What a pass's area mix gives ([`area_mixed`]): its Bond albedo before its floor, its cloud
-/// fraction, the lid it took, whether its condensates list liquid water, whether it melts its
-/// water under a locked world's deck ([`Atmosphere::melts_water_under_deck`]), its maturity's
-/// outcome, its cold traps' and the state it carries to the next pass by P14.T53.e's rules 5–7
-/// ([`state_to_carry`]).
+/// What a pass's area mix gives ([`area_mixed`]): its disc before its air's layer, the lid it
+/// took, whether its condensates list liquid water, whether it melts its water under a locked
+/// world's deck ([`Atmosphere::melts_water_under_deck`]), its maturity's outcome, its cold traps'
+/// and the state it carries to the next pass by P14.T53.e's rules 5–7 ([`state_to_carry`]).
 struct SurfaceMix {
-    albedo: f64,
-    /// The surface beneath its cloud, the clear sky's: the albedo itself where there is no cloud
-    /// (P14.T24.h.b's adding rule lays the air's layer over it).
-    ground: f64,
-    /// The cloud's Bond albedo, 0 where there is none.
-    cloud_albedo: f64,
-    cloud_fraction: f64,
+    disc: Disc,
     lid: Option<CrustLid>,
     liquid_water: bool,
     deck_water: OpenWater,
     maturity: PassMaturity,
     cold_traps: PassTraps,
     present: Option<PresentClimate>,
+}
+
+/// A pass's disc as its area mix gives it, before its air's Rayleigh layer and haze ([`floored`]):
+/// its Bond albedo and its cloud fraction, and how they are made, which the layer reads
+/// (P14.T24.h.b).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Disc {
+    /// One albedo for its whole disc: a gas envelope's class, its clouds included, or a melt's.
+    Whole {
+        /// Its Bond albedo, 0 to 1.
+        albedo: f64,
+        /// Its share under cloud, 0 to 1.
+        cloud_fraction: f64,
+    },
+    /// A ground beneath a cloud, which lies above the air's Rayleigh layer.
+    Clouded {
+        /// The ground's Bond albedo, the clear sky's, 0 to 1.
+        ground: f64,
+        /// Its share under cloud, 0 to 1.
+        cloud_fraction: f64,
+        /// The cloud's Bond albedo, 0 to 1.
+        cloud_albedo: f64,
+    },
+}
+
+impl Disc {
+    /// Its Bond albedo: the whole disc's, or the area mix of its ground under its cloud
+    /// ([`area_mix::under_cloud`]).
+    #[must_use]
+    fn albedo(self) -> f64 {
+        match self {
+            Self::Whole { albedo, .. } => albedo,
+            Self::Clouded {
+                ground,
+                cloud_fraction,
+                cloud_albedo,
+            } => area_mix::under_cloud(ground, cloud_fraction, cloud_albedo),
+        }
+    }
+
+    /// Its share under cloud.
+    #[must_use]
+    const fn cloud_fraction(self) -> f64 {
+        match self {
+            Self::Whole { cloud_fraction, .. } | Self::Clouded { cloud_fraction, .. } => {
+                cloud_fraction
+            }
+        }
+    }
+}
+
+/// The snapshot haze's τ(550) of the pass of the atmosphere `air` of the body `inputs` describes
+/// ([`area_mix::snapshot_haze_optical_depth`]), which its sediment and its haze layer read
+/// (P14.T24.h.b), once a pass; 0, unread, under both their holds and for a body of no mass or
+/// radius.
+#[must_use]
+fn pass_haze(air: &Atmosphere, inputs: &AtmosphereInputs) -> f64 {
+    let read = area_mix::OrganicSedimentRules::in_force()
+        == area_mix::OrganicSedimentRules::Sediment
+        || area_mix::HazeLayerRules::in_force() == area_mix::HazeLayerRules::Absorbing;
+    match surface_gravity(inputs) {
+        Some(gravity) if read => {
+            area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host)
+        }
+        Some(_) | None => 0.0,
+    }
 }
 
 /// The mean surface temperature of an airless body of equilibrium temperature `equilibrium` over
@@ -1073,26 +1125,31 @@ fn surface_gravity(inputs: &AtmosphereInputs) -> Option<MetresPerSecondSquared> 
         .then(|| MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)))
 }
 
-/// The Bond albedo `albedo` of the atmosphere `air` of the body `inputs` describe, under the light
-/// `shade`, floored at its air's own Rayleigh layer's (P14.T24.h.a; [`area_mix::rayleigh_floor`]):
+/// The Bond albedo of the disc `disc` of the atmosphere `air` of the body `inputs` describe, under
+/// its air's own Rayleigh layer and haze, under the light and the haze's τ(550) of `lit`.
+///
+/// To 25 it is floored at its air's own Rayleigh layer's (P14.T24.h.a; [`area_mix::rayleigh_floor`]):
 /// the larger of the two on every body with a surface, a gas envelope's class albedo excepted, and
-/// `albedo` itself otherwise, or where it is not a number (which [`bond_albedo`] labels) or the
+/// the disc's own otherwise, or where it is not a number (which [`bond_albedo`] labels) or the
 /// body has no mass or radius. The floor binds only where an air is darker than its own Rayleigh
-/// layer: a max of continuous functions, continuous in the passes' map, and `albedo` to the bit
-/// wherever it is at least the floor. Under the adding rule (P14.T24.h.b's fourth part,
-/// [`area_mix::RayleighAddingRules::Added`]) the layer is laid over the clear sky's ground `ground`
-/// instead ([`area_mix::rayleigh_added`]), under its cloud of fraction `cloud` and albedo
-/// `cloud_albedo`, which lies above it (the lane's lean, 2026-10-31): a runaway's deck keeps
-/// Venus's measured 0.76 whole, where the layer laid over it would count its air twice. Under the
-/// haze layer (P14.T24.h.b's third part, [`area_mix::HazeLayerRules::Absorbing`]) a hazy air's
-/// haze lies over all of it ([`area_mix::hazed`]).
+/// layer: a max of continuous functions, continuous in the passes' map, and the disc's to the bit
+/// wherever it is at least the floor.
+///
+/// Under the adding rule (P14.T24.h.b's fourth part, [`area_mix::RayleighAddingRules::Added`]) the
+/// layer is laid over the clear sky's ground in each of the optics' bins instead
+/// ([`area_mix::rayleigh_bins`], [`area_mix::rayleigh_added`]), under its cloud, which lies above
+/// it (the lane's lean, 2026-10-31): a runaway's deck keeps Venus's measured 0.76 whole, where the
+/// layer laid over it would count its air twice. Under the haze layer (P14.T24.h.b's third part,
+/// [`area_mix::HazeLayerRules::Absorbing`]) a hazy air's haze lies over all of it, bin by bin
+/// ([`area_mix::hazed_bins`]).
 #[must_use]
 fn floored(
-    (albedo, ground, cloud, cloud_albedo): (f64, f64, f64, f64),
+    disc: Disc,
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
-    shade: &HostShade,
+    (shade, haze): (&HostShade, f64),
 ) -> f64 {
+    let albedo = disc.albedo();
     let surface = match air.state {
         SurfaceState::GasEnvelope => false,
         SurfaceState::MagmaOcean
@@ -1112,20 +1169,39 @@ fn floored(
     let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
     #[cfg(test)]
     floor_read::record(floor);
-    let layered = match area_mix::RayleighAddingRules::in_force() {
+    match area_mix::RayleighAddingRules::in_force() {
         area_mix::RayleighAddingRules::Max => {
-            if floor > albedo {
-                floor
-            } else {
-                albedo
-            }
+            let layered = if floor > albedo { floor } else { albedo };
+            area_mix::hazed(layered, haze, shade)
         }
         area_mix::RayleighAddingRules::Added => {
-            area_mix::under_cloud(area_mix::rayleigh_added(floor, ground), cloud, cloud_albedo)
+            // An air with no Rayleigh depth lays no layer: its disc, to the bit.
+            let Some(layers) = area_mix::rayleigh_bins(&air.partials, gravity) else {
+                return area_mix::hazed(albedo, haze, shade);
+            };
+            let (ground, cloud) = match disc {
+                Disc::Whole { albedo, .. } => (albedo, None),
+                Disc::Clouded {
+                    ground,
+                    cloud_fraction,
+                    cloud_albedo,
+                } => (ground, Some((cloud_fraction, cloud_albedo))),
+            };
+            let clear = layers.map(|layer| area_mix::rayleigh_added(layer, ground));
+            let clouded = |clear: f64| {
+                cloud.map_or(clear, |(fraction, albedo)| {
+                    area_mix::under_cloud(clear, fraction, albedo)
+                })
+            };
+            if area_mix::hazes(haze) {
+                area_mix::hazed_bins(&clear.map(clouded), haze, shade)
+            } else {
+                // The cloud over the light-weighted clear sky, so that a whole deck keeps its
+                // albedo to the bit.
+                clouded(area_mix::band_weighted(&clear, shade.bands()))
+            }
         }
-    };
-    let haze = area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host);
-    area_mix::hazed(layered, haze, shade)
+    }
 }
 
 /// The floor the last floored pass on a thread read (P14.T24.h.a's tests): the published pass's,
@@ -1327,12 +1403,11 @@ fn weightless(
     shade: &HostShade,
 ) -> SurfaceMix {
     let regolith = pass_regolith(surface.regolith, inputs.material, None);
-    let albedo = regolith.bond(air.state, shade.bands()).bond;
     SurfaceMix {
-        albedo,
-        ground: albedo,
-        cloud_albedo: 0.0,
-        cloud_fraction: 0.0,
+        disc: Disc::Whole {
+            albedo: regolith.bond(air.state, shade.bands()).bond,
+            cloud_fraction: 0.0,
+        },
         lid: None,
         liquid_water: false,
         deck_water: OpenWater::Dry,
@@ -1359,7 +1434,7 @@ fn surface_and_cloud(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-    shade: &HostShade,
+    (shade, haze): (&HostShade, f64),
 ) -> SurfaceMix {
     let Some(gravity) = surface_gravity(inputs) else {
         return weightless(air, inputs, surface, shade);
@@ -1407,12 +1482,14 @@ fn surface_and_cloud(
         &solved,
         (regolith.bond(air.state, shade.bands()).bond, &deposits),
         shade,
-        area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host),
+        haze,
     );
     let deck = surface.deck;
-    let cloud = area_mix::cloud_fraction((air.state, deck), &solved, shade);
-    let cloud_albedo = area_mix::cloud_albedo((air.state, deck), shade);
-    let albedo = area_mix::under_cloud(ground, cloud, cloud_albedo);
+    let disc = Disc::Clouded {
+        ground,
+        cloud_fraction: area_mix::cloud_fraction((air.state, deck), &solved, shade),
+        cloud_albedo: area_mix::cloud_albedo((air.state, deck), shade),
+    };
     let liquid_water = published
         .entry(Gas::Water.substance(), CondensatePhase::Liquid)
         .is_some();
@@ -1446,10 +1523,7 @@ fn surface_and_cloud(
         PublishedState::Hothouse => None,
     };
     SurfaceMix {
-        albedo,
-        ground,
-        cloud_albedo,
-        cloud_fraction: cloud,
+        disc,
         lid,
         liquid_water,
         deck_water,

@@ -80,13 +80,13 @@ use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
 use crate::planetary::derive::pass_record::OpenWater;
-use crate::planetary::derive::photometry::area_mix::step_anti_greenhouse;
+use crate::planetary::derive::photometry::area_mix::{HazeLayerRules, step_anti_greenhouse};
 use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
-    Kelvin, Kilograms, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
+    EarthFluxes, Kelvin, Kilograms, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
 use crate::{GENERATOR_VERSION, GeneratorVersion};
@@ -1494,16 +1494,23 @@ pub(super) fn climate_class(inputs: &AtmosphereInputs, published: PublishedState
     present_state(division_state(inputs), inputs, (published, None))
 }
 
-/// The share of the light it receives that the body `inputs` describe absorbs, 1 − A, at the
-/// albedo its pass reads: (`T_eq` ÷ `T_eq`(0))⁴, `T_eq`(0) at zero albedo under the same flux; 0
-/// with no light (P14.T24.h.b's anti-greenhouse reads it).
+/// The share of the light it receives that a body under the flux `flux` absorbs at the equilibrium
+/// temperature `equilibrium`, 1 − A, at the albedo its pass reads (P14.T24.h.b's anti-greenhouse
+/// reads it).
+///
+/// It is (`T_eq` ÷ `T_eq`(0))⁴, `T_eq`(0) at zero albedo under the same flux; 0 with no light, or
+/// a flux that is not finite and positive, which [`AtmosphereInputs`] does not exclude.
 #[must_use]
-fn absorbed_share(inputs: &AtmosphereInputs) -> f64 {
-    let black = equilibrium_temperature(inputs.flux, BondAlbedo::from_fraction(0.0)).value();
+pub(super) fn absorbed_share(flux: EarthFluxes, equilibrium: Kelvin) -> f64 {
+    let value = flux.value();
+    if !(value.is_finite() && value > 0.0) {
+        return 0.0;
+    }
+    let black = equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0)).value();
     if black <= 0.0 {
         return 0.0;
     }
-    let ratio = inputs.equilibrium.value() / black;
+    let ratio = equilibrium.value() / black;
     let square = ratio * ratio;
     square * square
 }
@@ -1571,11 +1578,20 @@ impl<'b> Solver<'_, 'b> {
         };
         #[cfg(test)]
         let evaluated = crate::planetary::chem::partition::exit_counts().evaluations;
-        let shade = surface_mix::pass_shade(self.surface, inputs);
+        // The haze's anti-greenhouse (P14.T24.h.b), whose light and absorbed share are read only
+        // under its rule: γ 0, at no cost, under its hold.
+        let haze_layer = (HazeLayerRules::in_force() == HazeLayerRules::Absorbing).then(|| {
+            (
+                surface_mix::pass_shade(self.surface, inputs),
+                absorbed_share(inputs.flux, inputs.equilibrium),
+            )
+        });
         let lit = (self.ground.gravity(), inputs.hottest_host);
-        let absorbed = absorbed_share(inputs);
-        let anti =
-            |partials: &PartialPressures| step_anti_greenhouse(partials, lit, &shade, absorbed);
+        let anti = |partials: &PartialPressures| {
+            haze_layer.as_ref().map_or(0.0, |(shade, absorbed)| {
+                step_anti_greenhouse(partials, lit, shade, *absorbed)
+            })
+        };
         let (t, partials, tau, supercritical) = partitioned_greenhouse(
             &inventory,
             (self.body.base, &anti),

@@ -1170,7 +1170,7 @@ fn the_conservative_layer_s_albedo_is_its_reflectance_over_the_sphere() {
 }
 
 /// An air given by its gases' partial pressures, Pa, the rest none.
-fn air(pressures: &[(Gas, f64)]) -> PartialPressures {
+pub(super) fn air(pressures: &[(Gas, f64)]) -> PartialPressures {
     PartialPressures::from_fn(|gas| {
         Pascals::new(
             pressures

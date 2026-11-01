@@ -2101,17 +2101,21 @@ pub(crate) fn with_organic_sediment<R>(rules: OrganicSedimentRules, run: impl Fn
 /// 2005, Nature 438, 785, from memory), at which T24.c's haze is calibrated ([`TITAN_GRAVITY`]).
 pub(crate) const TITAN_SURFACE_PRESSURE: Pascals = Pascals::new(1.467e5);
 
-/// Titan's surface gravity, m s⁻²: 1.352 (NASA's Saturnian satellite fact sheet, from memory).
-pub(crate) const TITAN_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(1.352);
+/// Titan's surface gravity, m s⁻²: 1.3543, GM ÷ R² of its 8,978.137 km³ s⁻² and 2,574.76 km (JPL's
+/// SAT441 and its physical parameters, as the moons' tests' `TITAN` fixture reads them).
+pub(crate) const TITAN_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(1.3543);
 
 /// The methane haze's τ(550) on the snapshot path of an air of partial pressures `partials` under
-/// the gravity `gravity` (P14.T24.h.b): T24.c's at the air's index
+/// the gravity `gravity` (P14.T24.h.b).
+///
+/// It is T24.c's at the air's index
 /// ([`haze_optical_depth`](crate::planetary::hooks::aerosols::haze_optical_depth) of its CH₄ and
 /// CO₂ mole fractions), which is Titan's column's, times the air's column `p_s` ÷ g over Titan's, at
-/// most 1 (the lane's lean, 2026-10-31): a thin air holds a thin haze, so that Triton's and Pluto's
-/// 1 Pa airs hold some 10⁻⁵ of Titan's, as their measured hazes, τ of order 10⁻² (from memory), are
-/// thin. None with no luminous host, whose ultraviolet makes it (`hottest_host` 0), and none for an
-/// air of no pressure or a ground of no gravity.
+/// most 1 (the lane's lean, 2026-10-31): a thin air holds a thin haze. It is a lower bound there:
+/// Triton's and Pluto's 1 Pa airs take some 5 × 10⁻⁵ and 8 × 10⁻⁵, where their measured hazes are
+/// of τ 10⁻³–10⁻² (from memory), since a haze's production is held by the ultraviolet's photons,
+/// not the column (a deferred finding). None with no luminous host, whose ultraviolet makes it
+/// (`hottest_host` 0), and none for an air of no pressure or a ground of no gravity.
 #[must_use]
 pub(crate) fn snapshot_haze_optical_depth(
     partials: &PartialPressures,
@@ -2133,7 +2137,9 @@ pub(crate) fn snapshot_haze_optical_depth(
 }
 
 /// The share of a body's solid ground the organic sediment covers under an air whose snapshot haze
-/// is `haze` ([`snapshot_haze_optical_depth`]; P14.T24.h.b's second part): its τ over Titan's
+/// is `haze` ([`snapshot_haze_optical_depth`]; P14.T24.h.b's second part).
+///
+/// It is the haze's τ over Titan's
 /// ([`TITAN_HAZE_OPTICAL_DEPTH`](crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH)), 0
 /// to 1, under [`OrganicSedimentRules::Sediment`], and none below it.
 ///
@@ -2164,11 +2170,12 @@ pub(crate) fn sediment_share(haze: f64) -> f64 {
 const SEDIMENT_ROW: &str = "tholin";
 
 /// The surface's Bond albedo beneath any cloud ([`surface_bond`]) under an air whose snapshot haze
-/// is `haze` ([`snapshot_haze_optical_depth`]), its organic sediment over its share s of its solid
-/// ground ([`sediment_share`]; P14.T24.h.b's second part): the regolith's albedo `regolith` and
-/// each `H2O` solid entry's are (1 − s) A + s `A_sed`, `A_sed` the sediment row's
-/// ([`SEDIMENT_ROW`]) under the light of `shade`, and every other entry and deposit as it is. At no
-/// sediment it is [`surface_bond`] to the bit.
+/// is `haze`, its organic sediment over its share of its solid ground (P14.T24.h.b's second part).
+///
+/// The share s is [`sediment_share`]'s of the haze ([`snapshot_haze_optical_depth`]): the
+/// regolith's albedo `regolith` and each `H2O` solid entry's are (1 − s) A + s `A_sed`, `A_sed`
+/// the sediment row's ([`SEDIMENT_ROW`]) under the light of `shade`, and every other entry and
+/// deposit as it is. At no sediment it is [`surface_bond`] to the bit.
 ///
 /// # Panics
 ///
@@ -2350,8 +2357,10 @@ pub(crate) fn with_minor_clouds<R>(rules: MinorCloudsRules, run: impl FnOnce() -
     run()
 }
 
-/// The share of the globe a cloud whose condensable is not water covers, before its availability
-/// (P14.T24.h.b): 0.004, the middle of Titan's tropospheric methane clouds' 0.2–0.6% (Bouchez and
+/// The share of the disc a cloud whose condensable is not water covers before its availability
+/// (P14.T24.h.b): 0.004.
+///
+/// It is the middle of Titan's tropospheric methane clouds' 0.2–0.6% of its disc (Bouchez and
 /// Brown 2005, ApJ 618, L53, from memory, as plan 14's task text cites it), its outbursts reaching
 /// about 10% or less (Schaller et al. 2006, Icarus 182, 224, from memory), not held here. Titan's
 /// is the one measured cloud of a minor condensable that is not water: it stands for every one,
@@ -2359,17 +2368,18 @@ pub(crate) fn with_minor_clouds<R>(rules: MinorCloudsRules, run: impl FnOnce() -
 /// a Bond albedo by under 0.002.
 pub(crate) const MINOR_CONDENSABLE_CLOUD_SHARE: f64 = 0.004;
 
-/// The share of the disc a temperate or snowball world's cloud covers before its availability, its
-/// condensable `condensable` (P14.T24.h.b's first part): a condensable that is not water's
-/// [`MINOR_CONDENSABLE_CLOUD_SHARE`] under [`MinorCloudsRules::OwnShare`], and otherwise
-/// `state`'s ([`cloud_share_of_state`]), water's 0.67, as to 25.
+/// The share of the disc a temperate or snowball world's cloud of the condensable `condensable`
+/// covers before its availability (P14.T24.h.b's first part).
+///
+/// A condensable that is not water takes [`MINOR_CONDENSABLE_CLOUD_SHARE`] under
+/// [`MinorCloudsRules::OwnShare`]; otherwise `state`'s ([`cloud_share_of_state`]), water's 0.67, as
+/// to 25.
 #[must_use]
-fn condensable_cloud_share(state: SurfaceState, condensable: Option<SubstanceId>) -> f64 {
-    match condensable {
-        Some(id) if id != water() && MinorCloudsRules::in_force() == MinorCloudsRules::OwnShare => {
-            MINOR_CONDENSABLE_CLOUD_SHARE
-        }
-        Some(_) | None => cloud_share_of_state(state),
+fn condensable_cloud_share(state: SurfaceState, condensable: SubstanceId) -> f64 {
+    if condensable != water() && MinorCloudsRules::in_force() == MinorCloudsRules::OwnShare {
+        MINOR_CONDENSABLE_CLOUD_SHARE
+    } else {
+        cloud_share_of_state(state)
     }
 }
 
@@ -2405,9 +2415,9 @@ pub(crate) fn cloud_fraction(
 /// its availability ([`cloud_condensable`]), none where it has no condensable.
 #[must_use]
 fn minor_cloud_fraction(state: SurfaceState, partition: &Partition, shade: &HostShade) -> f64 {
-    let (condensable, available) = cloud_condensable(partition, shade)
-        .map_or((None, 0.0), |(id, available)| (Some(id), available));
-    condensable_cloud_share(state, condensable) * available
+    cloud_condensable(partition, shade).map_or(0.0, |(id, available)| {
+        condensable_cloud_share(state, id) * available
+    })
 }
 
 /// The Bond albedo of the cloud of a body in the state `state` whose runaway's deck is `deck`,
@@ -2504,11 +2514,10 @@ pub(crate) fn sun_bands() -> [f64; OPTICS_BANDS] {
 /// from the registry ([`reference_earth_clear_sky`]), so that it follows the registry's rows.
 ///
 /// Under the adding rule ([`RayleighAddingRules::Added`], P14.T24.h.b) Earth's cloud is re-split:
-/// its 0.294 is the cloud over 0.67 above its clear sky under its own Rayleigh layer
-/// ([`reference_earth_rayleigh`], [`rayleigh_added`]), the clear sky's 0.33 taking its Rayleigh
-/// share, so that `A_cloud` = (0.294 − 0.33 `R_add`(R, `A_clear`)) ÷ 0.67. The 0.294 is NASA's,
-/// Earth's 2000s, whose anthropogenic aerosol and land-use brightening (IPCC AR6 WGI ch. 7's
-/// effective radiative forcings, from memory) the fit takes as the cloud's, stated.
+/// its 0.294 is the cloud over 0.67 above its clear sky under its own Rayleigh layer, bin by bin
+/// ([`reference_earth_clear_sky_added`]), the clear sky's 0.33 taking its Rayleigh share. The 0.294
+/// is NASA's, Earth's 2000s, whose anthropogenic aerosol and land-use brightening (IPCC AR6 WGI
+/// ch. 7's effective radiative forcings, from memory) the fit takes as the cloud's, stated.
 #[must_use]
 pub(crate) fn water_cloud_albedo() -> f64 {
     let earth = SurfaceState::Temperate
@@ -2517,11 +2526,24 @@ pub(crate) fn water_cloud_albedo() -> f64 {
     let cloud = SurfaceState::Temperate.cloud_fraction();
     let clear = match RayleighAddingRules::in_force() {
         RayleighAddingRules::Max => reference_earth_clear_sky(),
-        RayleighAddingRules::Added => {
-            rayleigh_added(reference_earth_rayleigh(), reference_earth_clear_sky())
-        }
+        RayleighAddingRules::Added => reference_earth_clear_sky_added(),
     };
     (earth - (1.0 - cloud) * clear) / cloud
+}
+
+/// The reference Earth's clear sky under its own Rayleigh layer about a Sun (P14.T24.h.b): in each
+/// of the optics' bins its layer ([`rayleigh_bins`] of [`reference_earth_air`] at
+/// [`EARTH_SURFACE_GRAVITY`]) over its clear sky ([`reference_earth_clear_sky`]) by the adding rule
+/// ([`rayleigh_added`]), weighted by a Sun's light.
+#[must_use]
+pub(crate) fn reference_earth_clear_sky_added() -> f64 {
+    let clear = reference_earth_clear_sky();
+    let layers =
+        rayleigh_bins(&reference_earth_air(), EARTH_SURFACE_GRAVITY).unwrap_or([0.0; OPTICS_BANDS]);
+    band_weighted(
+        &layers.map(|layer| rayleigh_added(layer, clear)),
+        &sun_bands(),
+    )
 }
 
 /// The generator version from which a body's air's Rayleigh layer is laid over its clear sky by the
@@ -2594,8 +2616,9 @@ pub(crate) fn with_rayleigh_adding<R>(rules: RayleighAddingRules, run: impl FnOn
 ///
 /// It is this rule's one hold. Below it [`HazeLayerRules::in_force`] is [`HazeLayerRules::Clear`]:
 /// no haze in the Bond albedo and no anti-greenhouse, as to 25, bit for bit. 26's bump deletes this
-/// hold, [`HazeLayerRules`] with its `Clear` arm, the guards in [`hazed`] and
-/// [`anti_greenhouse_factor`], the tests' switch and its tripwire
+/// hold, [`HazeLayerRules`] with its `Clear` arm, the guards in [`hazed_bins`],
+/// [`anti_greenhouse_share`] and [`step_anti_greenhouse`] and the one in `escaping`'s solve that
+/// builds the step's closure, the tests' switch, its line in `with_scattering_held` and its tripwire
 /// (`the_haze_layer_is_held_only_until_the_26_bump`).
 pub(crate) const HAZE_LAYER_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
@@ -2604,8 +2627,8 @@ pub(crate) const HAZE_LAYER_VERSION: GeneratorVersion = GeneratorVersion::new(26
 pub(crate) enum HazeLayerRules {
     /// Version 25's and before: no haze layer.
     Clear,
-    /// Version 26's: the haze a layer over the rest ([`hazed`]), its absorption the
-    /// anti-greenhouse ([`anti_greenhouse_factor`]).
+    /// Version 26's: the haze a layer over the rest ([`hazed_bins`]), its absorption the
+    /// anti-greenhouse ([`anti_greenhouse_share`]).
     Absorbing,
 }
 
@@ -2650,8 +2673,9 @@ pub(crate) fn with_haze_layer<R>(rules: HazeLayerRules, run: impl FnOnce() -> R)
     run()
 }
 
-/// The Titan haze aggregate's single-scattering albedo ω and asymmetry g at five wavelengths, nm:
-/// optool 1.9.14's modified mean-field aggregate (Dominik, Min and Tazaki, ascl:2104.010) of
+/// The Titan haze aggregate's single-scattering albedo ω and asymmetry g at five wavelengths, nm.
+///
+/// They are optool 1.9.14's modified mean-field aggregate (Dominik, Min and Tazaki, ascl:2104.010) of
 /// T24.c's monomers, 3,000 of 0.05 µm at a fractal dimension of 2 (Tomasko et al. 2008, as
 /// [`TITAN_HAZE_MONOMER_RADIUS`](crate::planetary::hooks::aerosols::TITAN_HAZE_MONOMER_RADIUS)
 /// takes them), at `tholin.json`'s index (Khare et al. 1984, Icarus 60, 127): ω its scattering
@@ -2661,26 +2685,29 @@ pub(crate) fn with_haze_layer<R>(rules: HazeLayerRules, run: impl FnOnce() -> R)
 /// Khare's tholin absorbs less, so the held values bound its absorption from below in the
 /// ultraviolet and from above in the near infrared.
 const TITAN_HAZE_AGGREGATE: [(f64, f64, f64); 5] = [
-    (380.0, 16.3889 / 20.1344, 0.8235),
-    (440.0, 18.0518 / 20.1923, 0.8190),
-    (550.0, 15.8321 / 16.5393, 0.8131),
-    (680.0, 11.2738 / 11.4898, 0.8078),
-    (780.0, 8.41771 / 8.51578, 0.8035),
+    (380.0, 16.3889 / 20.1344, 0.823_487),
+    (440.0, 18.0518 / 20.1923, 0.818_964),
+    (550.0, 15.8321 / 16.5393, 0.813_108),
+    (680.0, 11.2738 / 11.4898, 0.807_764),
+    (780.0, 8.41771 / 8.51578, 0.803_534),
 ];
 
-/// The haze's τ at `wavelength_nm` over its τ(550): Bazzon, Schmid and Buenzli's (2014, A&A 572,
-/// A6, App. A) fit to Tomasko et al. 2008's Titan haze, τ80 + τ30 + τ0 = 1.012 × 10⁷ λ^−2.339 +
-/// 2.029 × 10⁴ λ^−1.409 + 627.0 λ^−0.9706, λ in nm (the fit T24.c's
+/// The haze's τ above and below 30 km at `wavelength_nm`, each over its whole τ(550).
+///
+/// They are Bazzon, Schmid and Buenzli's (2014, A&A 572, A6, App. A) fit to Tomasko et al. 2008's
+/// Titan haze, τ80 + τ30 + τ0 = 1.012 × 10⁷ λ^−2.339 + 2.029 × 10⁴ λ^−1.409 + 627.0 λ^−0.9706, λ in
+/// nm (the fit T24.c's
 /// [`TITAN_HAZE_OPTICAL_DEPTH`](crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH) takes
-/// at 550 nm), extrapolated beyond its data (labelled).
+/// at 550 nm), its τ80 and τ30 above 30 km and its τ0 below, extrapolated beyond its data
+/// (labelled). The haze below 30 km lies in Titan's troposphere, which the thermal infrared does not
+/// see through, so its absorption warms the grey air as the ground's does; only the haze above it
+/// is the anti-greenhouse's ([`haze_absorbed`]). At 550 nm the upper haze is 0.83 of the whole.
 #[must_use]
-fn haze_spectral_shape(wavelength_nm: f64) -> f64 {
-    let fit = |l: f64| {
-        1.012e7 * math::powf(l, -2.339)
-            + 2.029e4 * math::powf(l, -1.409)
-            + 627.0 * math::powf(l, -0.9706)
-    };
-    fit(wavelength_nm) / fit(550.0)
+fn haze_spectral_shape(wavelength_nm: f64) -> (f64, f64) {
+    let upper = |l: f64| 1.012e7 * math::powf(l, -2.339) + 2.029e4 * math::powf(l, -1.409);
+    let lower = |l: f64| 627.0 * math::powf(l, -0.9706);
+    let whole = upper(550.0) + lower(550.0);
+    (upper(wavelength_nm) / whole, lower(wavelength_nm) / whole)
 }
 
 /// The haze aggregate's ω and g at `wavelength_nm` ([`TITAN_HAZE_AGGREGATE`]), linear in
@@ -2702,8 +2729,9 @@ fn haze_aggregate_at(wavelength_nm: f64) -> (f64, f64) {
 }
 
 /// The diffuse reflectance and transmission of a homogeneous layer of optical depth `tau`,
-/// single-scattering albedo `omega` and asymmetry `g`, over black and lit diffusely: the
-/// δ-Eddington two-stream solution, in closed form (Joseph, Wiscombe and Weinman 1976, J. Atmos.
+/// single-scattering albedo `omega` and asymmetry `g`, over black and lit diffusely.
+///
+/// It is the δ-Eddington two-stream solution, in closed form (Joseph, Wiscombe and Weinman 1976, J. Atmos.
 /// Sci. 33, 2452, δ-scaling f = g², τ′ = (1 − ωf)τ, ω′ = (1 − f)ω ÷ (1 − ωf), g′ = g ÷ (1 + g);
 /// Meador and Weaver 1980's Eddington γ₁ = [7 − ω′(4 + 3g′)] ÷ 4 and γ₂ = −[1 − ω′(4 − 3g′)] ÷ 4,
 /// with k = √(γ₁² − γ₂²): R = γ₂ sinh kτ′ ÷ (k cosh kτ′ + γ₁ sinh kτ′), T = k ÷ (k cosh kτ′ + γ₁
@@ -2732,80 +2760,145 @@ fn two_stream_layer(tau: f64, omega: f64, g: f64) -> (f64, f64) {
     (reflected, k / denominator)
 }
 
-/// The haze layer's diffuse reflectance and transmission in each of the optics' bins at its τ(550)
-/// `haze`: each bin at its midpoint wavelength ([`bin_wavelength_nm`]), the haze's τ there by its
-/// spectral shape ([`haze_spectral_shape`]) and its aggregate's ω and g ([`haze_aggregate_at`]),
-/// by [`two_stream_layer`].
+/// A haze's two layers in one of the optics' bins, each its diffuse reflectance and transmission
+/// ([`two_stream_layer`]): the haze above 30 km, the anti-greenhouse's, and the haze below it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HazeBin {
+    /// The haze above 30 km.
+    upper: (f64, f64),
+    /// The haze below 30 km, in the troposphere.
+    lower: (f64, f64),
+}
+
+/// The haze's two layers in each of the optics' bins at its τ(550) `haze`.
+///
+/// Each bin is read at its midpoint wavelength ([`bin_wavelength_nm`]), each layer's τ there by the
+/// haze's spectral shape ([`haze_spectral_shape`]) and both at the aggregate's ω and g
+/// ([`haze_aggregate_at`]), by [`two_stream_layer`].
 #[must_use]
-fn haze_layer_bins(haze: f64) -> [(f64, f64); OPTICS_BANDS] {
+fn haze_layer_bins(haze: f64) -> [HazeBin; OPTICS_BANDS] {
     core::array::from_fn(|bin| {
         let wavelength = bin_wavelength_nm(bin);
         let (omega, g) = haze_aggregate_at(wavelength);
-        two_stream_layer(haze * haze_spectral_shape(wavelength), omega, g)
+        let (upper, lower) = haze_spectral_shape(wavelength);
+        HazeBin {
+            upper: two_stream_layer(haze * upper, omega, g),
+            lower: two_stream_layer(haze * lower, omega, g),
+        }
     })
 }
 
-/// The Bond albedo of a disc of Bond albedo `below` under a haze of τ(550) `haze`
-/// ([`snapshot_haze_optical_depth`]) under the light `shade` (P14.T24.h.b's third part): the haze
-/// a layer over the rest, its air's Rayleigh layer and cloud and ground, by the adding rule in each
-/// bin, R + T² A ÷ (1 − A R), R and T the haze's ([`haze_layer_bins`]) and A the rest's,
-/// bolometric, the same in every bin (labelled), weighted by the light. `below` to the bit under
+/// The adding rule of a layer of reflectance and transmission `(reflected, through)` over a ground
+/// of albedo `below`: R + T² A ÷ (1 − A R).
+#[must_use]
+fn over(below: f64, (reflected, through): (f64, f64)) -> f64 {
+    reflected + through * through * below / (1.0 - below * reflected)
+}
+
+/// Whether a haze of τ(550) `haze` lies over its disc as a layer: under [`HazeLayerRules::Absorbing`]
+/// with a haze ([`hazed_bins`]).
+#[must_use]
+pub(crate) fn hazes(haze: f64) -> bool {
+    HazeLayerRules::in_force() == HazeLayerRules::Absorbing && haze > 0.0
+}
+
+/// The Bond albedo of a disc whose albedos in the optics' bins are `below` under a haze of τ(550)
+/// `haze` (P14.T24.h.b's third part), under the light `shade`.
+///
+/// The haze ([`snapshot_haze_optical_depth`]) is laid over the rest, its air's Rayleigh layer and
+/// cloud and ground, in each bin by the adding rule, its lower layer first and its upper over it
+/// ([`haze_layer_bins`]), weighted by the light. `below`'s own Bond albedo, weighted alike, under
 /// [`HazeLayerRules::Clear`] or with no haze.
 #[must_use]
-pub(crate) fn hazed(below: f64, haze: f64, shade: &HostShade) -> f64 {
-    if HazeLayerRules::in_force() == HazeLayerRules::Clear || haze.is_nan() || haze <= 0.0 {
-        return below;
+pub(crate) fn hazed_bins(below: &[f64; OPTICS_BANDS], haze: f64, shade: &HostShade) -> f64 {
+    if !hazes(haze) {
+        return band_weighted(below, shade.bands());
     }
-    let total = haze_layer_bins(haze).map(|(reflected, through)| {
-        reflected + through * through * below / (1.0 - below * reflected)
+    let layers = haze_layer_bins(haze);
+    let total: [f64; OPTICS_BANDS] = core::array::from_fn(|bin| {
+        let HazeBin { upper, lower } = layers[bin];
+        over(over(below[bin], lower), upper)
     });
     band_weighted(&total, shade.bands())
 }
 
-/// The share of the light the haze of τ(550) `haze` absorbs over black, under the light `shade`:
-/// 1 − R − T in each bin ([`haze_layer_bins`]), weighted by the light. A lower bound on its share
-/// over a ground that returns light through it (labelled; Titan's dark ground returns little).
+/// The Bond albedo of a disc of Bond albedo `below`, the same in every bin, under a haze of τ(550)
+/// `haze` under the light `shade` ([`hazed_bins`]); `below` to the bit under
+/// [`HazeLayerRules::Clear`] or with no haze.
+#[must_use]
+pub(crate) fn hazed(below: f64, haze: f64, shade: &HostShade) -> f64 {
+    if !hazes(haze) {
+        return below;
+    }
+    hazed_bins(&[below; OPTICS_BANDS], haze, shade)
+}
+
+/// The share of the light the haze of τ(550) `haze` absorbs above 30 km over black, under the light
+/// `shade`.
+///
+/// It is 1 − R − T of the upper layer in each bin ([`haze_layer_bins`]), weighted by the light: a
+/// lower bound on its share over a ground and an air that return light through it (labelled;
+/// Titan's dark ground returns little).
 #[must_use]
 pub(crate) fn haze_absorbed(haze: f64, shade: &HostShade) -> f64 {
     if haze.is_nan() || haze <= 0.0 {
         return 0.0;
     }
-    let absorbed = haze_layer_bins(haze).map(|(reflected, through)| 1.0 - reflected - through);
+    let absorbed = haze_layer_bins(haze).map(|bin| 1.0 - bin.upper.0 - bin.upper.1);
     band_weighted(&absorbed, shade.bands())
 }
 
-/// The anti-greenhouse's factor on a grey surface temperature (P14.T24.h.b's third part; McKay,
-/// Pollack and Courtin 1991, Science 253, 1118, not read: the pod reaches no source; the two-layer
-/// form McKay, Lorenz and Lunine 1999, Icarus 137, 56, state, from memory, derived): (1 − γ ÷ 2)^¼,
-/// γ the share of the body's absorbed sunlight its haze takes, `absorbed` ([`haze_absorbed`]) over
-/// the body's `absorbed_share`, 1 − A, held to [0, 1].
+/// The anti-greenhouse's share γ of the body's absorbed sunlight its upper haze takes (P14.T24.h.b's
+/// third part): `absorbed` ([`haze_absorbed`]) over the body's `absorbed_share`, 1 − A, held to [0,
+/// 1]; 0 under [`HazeLayerRules::Clear`], with no haze or no absorbed light.
 ///
-/// A layer high in the air that absorbs sunlight and is transparent to the thermal infrared
-/// radiates what it absorbs half up and half down, so the ground and the grey air beneath it
-/// receive (1 − γ ÷ 2) of the absorbed sunlight: σ`T_s`⁴ = (1 − γ ÷ 2)(1 + ¾τ) σ`T_eq`⁴. Titan's haze
-/// cools its surface by about 9 K so (McKay et al. 1991's figure, from memory). 1 exactly under
-/// [`HazeLayerRules::Clear`], with no haze or no absorbed light.
+/// The grey surface beneath it is [`anti_greenhouse`]'s.
 #[must_use]
-pub(crate) fn anti_greenhouse_factor(absorbed: f64, absorbed_share: f64) -> f64 {
+pub(crate) fn anti_greenhouse_share(absorbed: f64, absorbed_share: f64) -> f64 {
     if HazeLayerRules::in_force() == HazeLayerRules::Clear
         || absorbed.is_nan()
         || absorbed <= 0.0
         || absorbed_share.is_nan()
         || absorbed_share <= 0.0
     {
-        return 1.0;
+        return 0.0;
     }
     let gamma = absorbed / absorbed_share;
-    let gamma = if gamma < 1.0 { gamma } else { 1.0 };
-    math::powf(1.0 - gamma / 2.0, 0.25)
+    if gamma < 1.0 { gamma } else { 1.0 }
 }
 
-/// The anti-greenhouse's factor of a greenhouse step whose partial pressures are `partials`, on a
-/// body of surface gravity `gravity` whose hottest host is `hottest_host`, under the light `shade`,
-/// which absorbs `absorbed_share` of the light it receives (P14.T24.h.b's third part): the haze's
-/// absorption over black ([`haze_absorbed`]) at its snapshot τ ([`snapshot_haze_optical_depth`])
-/// through [`anti_greenhouse_factor`]. 1 exactly, read at no cost, under
-/// [`HazeLayerRules::Clear`].
+/// The surface of a grey air beneath a haze that takes the share `gamma` of the absorbed sunlight
+/// (P14.T24.h.b's third part): `T_s`⁴ = (1 − γ) `T_grey`⁴ + (γ ÷ 2) `T_base`⁴, `grey` the air's grey
+/// surface ([`GreenhouseCeiling`](crate::planetary::derive::atmosphere)'s) and `base` its base.
+///
+/// A layer above the grey air that absorbs sunlight and is transparent to the thermal infrared
+/// radiates what it absorbs half up and half down. The grey air below then carries a net flux of
+/// only (1 − γ) of the absorbed sunlight, and the half sent down arrives at its top, so that the
+/// two-stream grey solution gives σ`T_s`⁴ = σ`T_eq`⁴ [(1 − γ ÷ 2) + ¾τ (1 − γ)] (derived; the
+/// two-layer form of McKay, Lorenz and Lunine 1999, Icarus 137, 56, to be read: the pod reaches no
+/// source), `T_eq`(1 + ¾τ)^¼ being the grey surface: at γ = 1 the classic anti-greenhouse limit,
+/// `T_eq` ÷ 2^¼. McKay, Pollack and Courtin 1991 (Science 253, 1118, to be read) put Titan's
+/// anti-greenhouse at some 9 K (from memory). `grey` to the bit at γ = 0.
+#[must_use]
+pub(crate) fn anti_greenhouse(grey: Kelvin, base: Kelvin, gamma: f64) -> Kelvin {
+    if gamma.total_cmp(&0.0).is_le() {
+        return grey;
+    }
+    let fourth = |t: Kelvin| {
+        let square = t.value() * t.value();
+        square * square
+    };
+    let surface = (1.0 - gamma) * fourth(grey) + gamma / 2.0 * fourth(base);
+    Kelvin::new(surface.sqrt().sqrt())
+}
+
+/// The anti-greenhouse's share γ in a greenhouse step whose partial pressures are `partials`
+/// (P14.T24.h.b's third part).
+///
+/// The body's surface gravity and hottest host are `lit`, its light is `shade` and it absorbs
+/// `absorbed_share` of the light it receives: its upper haze's absorption over black
+/// ([`haze_absorbed`]) at its snapshot τ ([`snapshot_haze_optical_depth`]) through
+/// [`anti_greenhouse_share`]. 0, read at no cost, under [`HazeLayerRules::Clear`].
 #[must_use]
 pub(crate) fn step_anti_greenhouse(
     partials: &PartialPressures,
@@ -2814,19 +2907,20 @@ pub(crate) fn step_anti_greenhouse(
     absorbed_share: f64,
 ) -> f64 {
     if HazeLayerRules::in_force() == HazeLayerRules::Clear {
-        return 1.0;
+        return 0.0;
     }
     let haze = snapshot_haze_optical_depth(partials, gravity, hottest_host);
     if haze <= 0.0 {
-        return 1.0;
+        return 0.0;
     }
-    anti_greenhouse_factor(haze_absorbed(haze, shade), absorbed_share)
+    anti_greenhouse_share(haze_absorbed(haze, shade), absorbed_share)
 }
 
-/// `run`'s result with P14.T24.h.b's holds at 26 set back to their held arms on this thread (the
-/// minor clouds, the sediment, the adding rule and the haze layer), for a test that pins another hold's figures
-/// inside `with_every_26_hold` as they stood before them; each set back after, a panic in `run`
-/// included. 26's bump deletes it with them.
+/// `run`'s result with P14.T24.h.b's holds at 26 set back to their held arms on this thread.
+///
+/// The four are the minor clouds, the sediment, the adding rule and the haze layer, set back for a
+/// test that pins another hold's figures inside `with_every_26_hold` as they stood before them;
+/// each set back after, a panic in `run` included. 26's bump deletes it with them.
 #[cfg(test)]
 pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
     with_minor_clouds(MinorCloudsRules::WaterShare, || {
@@ -2839,8 +2933,9 @@ pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
 }
 
 /// The Bond albedo of a conservative layer of reflectance `layer` over black laid over a ground of
-/// Bond albedo `ground` (P14.T24.h.b's fourth part): the adding rule for two diffusely reflecting
-/// layers, R + T² A ÷ (1 − A R) with the conservative layer's transmission T = 1 − R, that is R +
+/// Bond albedo `ground` (P14.T24.h.b's fourth part).
+///
+/// It is the adding rule for two diffusely reflecting layers, R + T² A ÷ (1 − A R) with the conservative layer's transmission T = 1 − R, that is R +
 /// (1 − R)² A ÷ (1 − A R) (van de Hulst 1980, *Multiple Light Scattering*, the adding method,
 /// from memory; decision-p14-t51-batch §9.4's form): the light the ground returns, passed through
 /// the layer both ways and reflected between them. It is R at A = 0, 1 at A = 1, and at least
@@ -2849,16 +2944,6 @@ pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
 pub(crate) fn rayleigh_added(layer: f64, ground: f64) -> f64 {
     let through = 1.0 - layer;
     layer + through * through * ground / (1.0 - ground * layer)
-}
-
-/// The ground's Bond albedo A beneath a conservative layer of reflectance `layer` whose total is
-/// `total` ([`rayleigh_added`] inverted): A = (Rₜ − R) ÷ [(1 − R)² + R (Rₜ − R)].
-#[cfg(test)]
-#[must_use]
-pub(crate) fn beneath_rayleigh(total: f64, layer: f64) -> f64 {
-    let through = 1.0 - layer;
-    let above = total - layer;
-    above / (through * through + layer * above)
 }
 
 /// The reference Earth's air: 101,325 Pa of dry air, N₂, O₂ and Ar at their dry mole fractions with
@@ -2885,6 +2970,7 @@ pub(crate) fn reference_earth_air() -> PartialPressures {
 /// The reference Earth's Rayleigh layer about a Sun: [`rayleigh_floor`] of its air
 /// ([`reference_earth_air`]) at [`EARTH_SURFACE_GRAVITY`], about 0.058, which the water cloud's
 /// re-split separates ([`water_cloud_albedo`]).
+#[cfg(test)]
 #[must_use]
 pub(crate) fn reference_earth_rayleigh() -> f64 {
     rayleigh_floor_in(&reference_earth_air(), EARTH_SURFACE_GRAVITY, &sun_bands())
@@ -3104,9 +3190,20 @@ fn rayleigh_floor_in(
     gravity: MetresPerSecondSquared,
     bands: &[f64; OPTICS_BANDS],
 ) -> f64 {
+    rayleigh_bins(partials, gravity).map_or(0.0, |albedos| band_weighted(&albedos, bands))
+}
+
+/// The air's Rayleigh layer's albedo over black in each of the optics' bins ([`rayleigh_floor`]'s,
+/// before the light weighs them), of partial pressures `partials` under the surface gravity
+/// `gravity`; `None` for an air of no Rayleigh depth, or one not a number.
+#[must_use]
+pub(crate) fn rayleigh_bins(
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> Option<[f64; OPTICS_BANDS]> {
     let tau = rayleigh_optical_depth(partials, gravity);
     if tau.is_nan() || tau <= 0.0 {
-        return 0.0;
+        return None;
     }
     let mut albedos = [0.0; OPTICS_BANDS];
     for (bin, albedo) in albedos.iter_mut().enumerate().take(OPTICS_BANDS - 1) {
@@ -3117,5 +3214,5 @@ fn rayleigh_floor_in(
         );
         *albedo = conservative_spherical_albedo(tau * thinned);
     }
-    band_weighted(&albedos, bands)
+    Some(albedos)
 }
