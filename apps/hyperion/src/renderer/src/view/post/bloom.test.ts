@@ -149,6 +149,7 @@ describe("stored and injected glare", () => {
       direction: { x: 0, y: 0, z: -1 },
       angularRadiusRad: Math.sqrt(discPixels / Math.PI) * RAD_PER_PX_1080P,
       excessLuminance: [trueLuminance - HALF_FLOAT_MAX, 0, 0],
+      luminance: [trueLuminance, 0, 0],
     };
     for (const role of ["eye", "camera"] as const) {
       const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, role, RAD_PER_PX_1080P, EYE);

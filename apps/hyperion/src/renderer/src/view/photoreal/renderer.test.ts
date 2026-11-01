@@ -1296,7 +1296,30 @@ describe("the photorealistic renderer's histogram", () => {
       engine.dispatched
         .filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram)
         .map((d) => [d.pass, Array.from(d.bindings.uniforms["params"] ?? [])]),
-    ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1))]]);
+    ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1, 0))]]);
+    renderer.dispose();
+  });
+
+  it("binds this frame's glare sources, written before it, with their count (fix-view-light)", async () => {
+    const { engine, renderer } = await ready();
+    const sun = {
+      direction: vec3(0, 0, -1),
+      angularRadiusRad: 0.0047,
+      excessLuminance: [1e9, 1e9, 1e9],
+      luminance: [2e9, 2e9, 2e9],
+    } as const;
+    renderer.render(new RecordingView(), { ...frameWith([]), glareSources: [sun, sun] });
+    const histogram = engine.dispatched.find((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
+    const sourcesWrite = engine.writes.findIndex((w) => w.buffer === "test view glare sources");
+    expect([
+      Array.from(histogram?.bindings.uniforms["params"] ?? []),
+      histogram?.bindings.buffers["glareSources"]?.name,
+      sourcesWrite >= 0 && sourcesWrite < (histogram?.writesBefore ?? -1),
+    ]).toEqual([
+      Array.from(histogramParams(VIEWPORT, "average", 1, 2)),
+      "test view glare sources",
+      true,
+    ]);
     renderer.dispose();
   });
 
@@ -1373,7 +1396,7 @@ describe("the photorealistic renderer at each quality setting (R07.T17)", () => 
           .map((d) => [Array.from(d.bindings.uniforms["params"] ?? []), d.workgroups]),
       ).toEqual([
         [
-          Array.from(histogramParams(VIEWPORT, "average", stride)),
+          Array.from(histogramParams(VIEWPORT, "average", stride, 0)),
           histogramWorkgroups(VIEWPORT, stride),
         ],
       ]);

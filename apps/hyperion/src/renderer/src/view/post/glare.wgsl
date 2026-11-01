@@ -1,14 +1,16 @@
 // Veiling glare in the image's last pass (plan R07, T14.b, Design note 12): the bloom chain's
 // light above the display's range, gathered back at full resolution, and each glare source's veil
 // in closed form, in f32. A library: the tone-mapping pass (`tonemap.wgsl`) and the smoke check's
-// composite concatenate it ahead of their own source. Its TypeScript twins are `bloomChain`'s last
-// step in `bloom.ts` and `glareSourceVeilOf` in `glare.ts`.
+// composite concatenate it ahead of their own source, and the exposure histogram (`histogram.wgsl`)
+// for the veil. Its TypeScript twins are `bloomChain`'s last step in `bloom.ts` and
+// `glareSourceVeilOf` in `glare.ts`.
 
 // One glare source, as `packGlareSources` packs it: the unit direction to its centre in the
 // scene's camera-relative frame and its angular radius, rad; its excess luminance per channel in
 // the target's units and its solid angle, sr; and each narrow term's level inside the disc for a
-// term of amplitude 1 (`rectangleInsideLevel`), or -1 where the source is a point for that term;
-// the fourth is unused.
+// term of amplitude 1 (`rectangleInsideLevel`), or -1 where the source is a point for that term,
+// then the source's whole luminance through Rec. 709's weights in the target's units, which only
+// the exposure histogram reads (`histogram.wgsl`).
 struct GlareSourceGpu {
   direction : vec3f,
   angularRadius : f32,
@@ -119,13 +121,19 @@ fn glare_poisson(term : vec4f, theta : f32, rho : f32, solidAngle : f32, inside 
   return a * c * c * 2.0 * atan(numerator / (1.0 + u1 * u2));
 }
 
-// The veil a source adds at the pixel in direction `pixel`, per channel.
-fn glare_veil(source : GlareSourceGpu, pixel : vec3f, terms : GlareTerms) -> vec3f {
+// The veil a source adds at the pixel in direction `pixel` per unit of its luminance: the spread
+// function integrated over the source (`glareSourcePerUnit`).
+fn glare_per_unit(source : GlareSourceGpu, pixel : vec3f, terms : GlareTerms) -> f32 {
   let theta = glare_angle(source.direction, pixel);
   let rho = source.angularRadius;
   var perUnit = source.solidAngle * glare_broad(terms, theta);
   perUnit += glare_poisson(terms.poisson0, theta, rho, source.solidAngle, source.inside.x);
   perUnit += glare_poisson(terms.poisson1, theta, rho, source.solidAngle, source.inside.y);
   perUnit += glare_poisson(terms.poisson2, theta, rho, source.solidAngle, source.inside.z);
-  return source.excess * perUnit;
+  return perUnit;
+}
+
+// The veil a source adds at the pixel in direction `pixel`, per channel.
+fn glare_veil(source : GlareSourceGpu, pixel : vec3f, terms : GlareTerms) -> vec3f {
+  return source.excess * glare_per_unit(source, pixel, terms);
 }

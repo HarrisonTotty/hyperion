@@ -49,7 +49,9 @@ export const FULL_WINDOW: PercentileWindow = { low: 0, high: 1 };
 /**
  * The metered average luminance, cd/m²: the weighted arithmetic mean Σ nᵢ Lᵢ ÷ Σ nᵢ over the
  * counts inside `window`, with Lᵢ = 2^(bin centre) ÷ the pre-exposure and bin 0 at luminance 0
- * (Design note 11). The veil is never in it: the histogram is taken before the glare is drawn.
+ * (Design note 11). The glare sources' veil is in it, of each source's whole light, as the optic
+ * delivers it (`histogram.wgsl`); the host disc's own pixels are not, and nor is the bloom chain's
+ * light, which only moves light already counted.
  *
  * @returns 0 when the window holds no counts.
  */

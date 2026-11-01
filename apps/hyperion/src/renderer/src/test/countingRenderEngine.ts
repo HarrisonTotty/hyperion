@@ -105,6 +105,8 @@ export interface RecordedDispatch {
    * length then), which orders it among them as the queue does (R07.T8.d).
    */
   readonly framesBefore: number;
+  /** The buffer writes made before it ({@link CountingRenderEngine.writes}' length then). */
+  readonly writesBefore: number;
 }
 
 /** The names a dispatch binds, every group of its bindings together, sorted. */
@@ -704,6 +706,7 @@ export class CountingRenderEngine implements RenderEngine {
       workgroups,
       pass,
       framesBefore: this.targetFrames.length,
+      writesBefore: this.writes.length,
     });
   }
 

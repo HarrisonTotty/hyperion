@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { vec3 } from "../../geometry/vec3";
+import { perspectiveReversedInfinite, viewRotation4 } from "../camera/projection";
+import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import type { ViewRole } from "../camera/state";
 import type { BufferHandle, ComputeHandle, TextureHandle } from "../engine/types";
 import type { BufferSpec } from "../engine/memory";
+import { ev100FromAverageLuminance, exposureScale } from "../photometry/exposure";
+import { meteredLuminance } from "./autoExposure";
+import { type GlareSource, glareSourceVeilOf, glareSpreadTerms } from "./glare";
 import {
   binCentreLuminance,
   cpuHistogram,
@@ -9,14 +16,17 @@ import {
   HISTOGRAM_KERNEL,
   HISTOGRAM_RING,
   histogramBin,
+  histogramGlareUniform,
   histogramParams,
   histogramWorkgroups,
   meterClassOf,
   HistogramReader,
   type Histogram,
   type HistogramEngine,
+  type MeteredGlare,
+  meteredVeil,
 } from "./histogram";
-import { METER_CLASS, meterWeights, type MeterMode } from "./meter";
+import { METER_CLASS, meterLuma, meterWeights, type MeterMode } from "./meter";
 
 /** RGBA texels of grey `luminance` and meter class `meterClass`, one per entry. */
 function texels(entries: ReadonlyArray<readonly [number, number]>): Float32Array {
@@ -107,16 +117,191 @@ describe("cpuHistogram", () => {
   });
 });
 
+const EYE = { ageYears: 25, pigmentation: 0.5 };
+
+/** The Sun at 1 au (`sunLikeHostDisc`'s mean luminance, 1.964 × 10⁹ cd/m²), at a view direction. */
+function sunAt(direction: {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}): GlareSource {
+  const luminance = 1.964e9;
+  return {
+    direction: vec3(direction.x, direction.y, direction.z),
+    angularRadiusRad: Math.asin(6.957e8 / 1.495978707e11),
+    // The part an EV100 −10 target cannot hold, which the image spreads in closed form.
+    excessLuminance: [0.96 * luminance, 0.96 * luminance, 0.96 * luminance],
+    luminance: [luminance, luminance, luminance],
+  };
+}
+
+/** 60° across at 480 × 270 px: the Sun at 1 au 2.1 px in radius. */
+const FRAME = { widthPx: 480, heightPx: 270 };
+
+function frameGlare(
+  role: ViewRole,
+  ev100: number,
+  sources: ReadonlyArray<GlareSource>,
+): MeteredGlare {
+  return {
+    sources,
+    preExposure: exposureScale(ev100),
+    viewRotation: viewRotation4(IDENTITY_QUATERNION),
+    projection: perspectiveReversedInfinite(Math.PI / 3, FRAME.widthPx / FRAME.heightPx, 0.1),
+    terms: glareSpreadTerms(role, EYE),
+  };
+}
+
+/** The angle of texel (x, y)'s centre from the frame's centre, rad. */
+function fromCentreRad(x: number, y: number): number {
+  const s = Math.tan(Math.PI / 6);
+  const v = [
+    (((x + 0.5) / FRAME.widthPx) * 2 - 1) * s,
+    (1 - ((y + 0.5) / FRAME.heightPx) * 2) * (s / (FRAME.widthPx / FRAME.heightPx)),
+    -1,
+  ] as const;
+  return Math.acos(1 / Math.hypot(...v));
+}
+
+/**
+ * A frame of black sky with the star's disc at its centre, and a lit planet of `planetCdM2` 60 px
+ * in radius 20° to the right, or none; pre-exposed by `preExposure`.
+ */
+function starFrame(preExposure: number, planetCdM2: number | null, star: boolean): Float32Array {
+  const rho = Math.asin(6.957e8 / 1.495978707e11);
+  const rgba = new Float32Array(4 * FRAME.widthPx * FRAME.heightPx);
+  for (let y = 0; y < FRAME.heightPx; y += 1) {
+    for (let x = 0; x < FRAME.widthPx; x += 1) {
+      const at = 4 * (y * FRAME.widthPx + x);
+      if (star && fromCentreRad(x, y) < rho) {
+        rgba.set([65_504, 65_504, 65_504, METER_CLASS.hostDisc], at);
+      } else if (planetCdM2 !== null && Math.hypot(x + 0.5 - 400, y + 0.5 - 135) < 60) {
+        const value = planetCdM2 * preExposure;
+        rgba.set([value, value, value, METER_CLASS.litBody], at);
+      } else {
+        rgba.set([0, 0, 0, METER_CLASS.other], at);
+      }
+    }
+  }
+  return rgba;
+}
+
+/** The EV100 a frame pre-exposed as `glare` meters at under `mode`, the veil in it or not. */
+function meteredEv(rgba: Float32Array, mode: MeterMode, glare: MeteredGlare, veil = true): number {
+  const bins = cpuHistogram(rgba, FRAME, mode, 1, veil ? glare : undefined);
+  return ev100FromAverageLuminance(meteredLuminance({ bins, preExposure: glare.preExposure }));
+}
+
+describe("the meter with the glare sources' veil (fix-view-light)", () => {
+  const centre = vec3(0, 0, -1);
+
+  it.each(["eye", "camera"] as const)(
+    "meters a star on black within 1% of the veil summed over the frame outside its disc (%s)",
+    (role) => {
+      const glare = frameGlare(role, 15, [sunAt(centre)]);
+      const source = glare.sources[0];
+      if (source === undefined) {
+        throw new Error("no source");
+      }
+      const whole = { ...source, excessLuminance: source.luminance };
+      const rgba = starFrame(glare.preExposure, null, true);
+      let sum = 0;
+      let count = 0;
+      for (let y = 0; y < FRAME.heightPx; y += 1) {
+        for (let x = 0; x < FRAME.widthPx; x += 1) {
+          if ((rgba[4 * (y * FRAME.widthPx + x) + 3] ?? 0) === METER_CLASS.hostDisc) {
+            continue;
+          }
+          sum += meterLuma(glareSourceVeilOf(whole, fromCentreRad(x, y), glare.terms));
+          count += 1;
+        }
+      }
+      const bins = cpuHistogram(rgba, FRAME, "average", 1, glare);
+      const metered = meteredLuminance({ bins, preExposure: glare.preExposure });
+      expect(Math.abs(metered / (sum / count) - 1)).toBeLessThan(0.01);
+    },
+  );
+
+  it("weighs nothing of the disc's own rgba, whatever the veil there", () => {
+    const glare = frameGlare("eye", 15, [sunAt(centre)]);
+    const disc = new Float32Array([65_504, 65_504, 65_504, METER_CLASS.hostDisc]);
+    const size = { widthPx: 1, heightPx: 1 };
+    const one = { ...glare, projection: perspectiveReversedInfinite(1e-3, 1, 0.1) };
+    expect(meteredVeil(one, size, 0, 0)).toBeGreaterThan(1e3);
+    expect(cpuHistogram(disc, size, "average", 1, one).every((n) => n === 0)).toBe(true);
+  });
+
+  it("is the same light at every pre-exposure in range, so the meter cannot chase its own exposure", () => {
+    // The image's veil is the excess's alone, which vanishes at the exposure the whole light calls
+    // for (the Sun's disc fits in the target from EV100 about 14.9): a meter of it would hunt.
+    const evs = [13, 15, 17, 19].map((ev100) => {
+      const glare = frameGlare("eye", ev100, [sunAt(centre)]);
+      return meteredEv(starFrame(glare.preExposure, null, true), "average", glare);
+    });
+    for (const ev of evs) {
+      expect(Math.abs(ev - (evs[1] ?? 0))).toBeLessThan(0.05);
+    }
+  });
+
+  // The research's figures (research-leans-19, advice §0) are 15.0 and 15.4 for the camera, 17.8
+  // and 17.9 for the eye, from the spread function at the point form; the eye's resolved form here
+  // holds more of the core's light just beyond the limb (`glareSourceVeilOf`), a finding of
+  // +0.55 EV pinned as it stands.
+  it.each([
+    { role: "camera", alone: 14.8, withPlanet: 15.22 },
+    { role: "eye", alone: 18.35, withPlanet: 18.39 },
+  ] as const)(
+    "puts AVG at EV100 $alone with the Sun alone at the centre of a 60° frame ($role)",
+    ({ role, alone, withPlanet }) => {
+      // A planet adding 1,200 cd/m² to the frame's mean, as the research's figures take it.
+      const planet = 1200 / ((Math.PI * 60 * 60) / (FRAME.widthPx * FRAME.heightPx));
+      const glare = frameGlare(role, 15, [sunAt(centre)]);
+      const starAlone = meteredEv(starFrame(glare.preExposure, null, true), "average", glare);
+      const both = meteredEv(starFrame(glare.preExposure, planet, true), "average", glare);
+      expect([starAlone, both].map((ev) => Math.round(ev * 100) / 100)).toEqual([
+        alone,
+        withPlanet,
+      ]);
+    },
+  );
+
+  it.each(["camera", "eye"] as const)(
+    "leaves LIT at the lit planet's own EV100 as the Sun enters the frame 20° from it (%s)",
+    (role) => {
+      const planet = 1200 / ((Math.PI * 60 * 60) / (FRAME.widthPx * FRAME.heightPx));
+      const glare = frameGlare(role, 16, [sunAt(centre)]);
+      const own = meteredEv(starFrame(glare.preExposure, planet, false), "lit", glare, false);
+      const withStar = meteredEv(starFrame(glare.preExposure, planet, true), "lit", glare);
+      expect(withStar - own).toBeGreaterThan(0);
+      expect(withStar - own).toBeLessThan(0.3);
+    },
+  );
+});
+
 describe("the kernel's inputs", () => {
   it("is bit-exact with no subgroup twin", () => {
     expect(HISTOGRAM_KERNEL.readback).toBe("bit-exact");
     expect(HISTOGRAM_KERNEL.subgroup).toBeNull();
   });
 
-  it("lays out Params as weights, size, stride", () => {
-    expect([...histogramParams({ widthPx: 640, heightPx: 360 }, "lit", 2)]).toEqual([
-      0, 0, 1, 0, 640, 360, 2, 0,
+  it("lays out Params as weights, size, stride and the glare sources' count", () => {
+    expect([...histogramParams({ widthPx: 640, heightPx: 360 }, "lit", 2, 3)]).toEqual([
+      0, 0, 1, 0, 640, 360, 2, 3,
     ]);
+  });
+
+  it("lays out MeteredGlare as the view rotation, the projection and GlareTerms", () => {
+    const rotation = viewRotation4(IDENTITY_QUATERNION);
+    const projection = perspectiveReversedInfinite(Math.PI / 3, 16 / 9, 0.1);
+    const terms = glareSpreadTerms("camera", EYE);
+    const packed = histogramGlareUniform({ viewRotation: rotation, projection, terms });
+    expect([packed.length, ...packed.subarray(0, 16)]).toEqual([52, ...rotation]);
+    expect([...packed.subarray(16, 32)]).toEqual([...projection]);
+    // The camera's Lorentz tail, then its Gaussian core.
+    expect([...packed.subarray(44, 46)]).toEqual(
+      [terms.lorentz[0]?.amplitude, terms.lorentz[0]?.scaleRad].map((v) => Math.fround(v ?? 0)),
+    );
+    expect(packed[50]).toBe(Math.fround(terms.gaussian.amplitude));
   });
 
   it("covers the input with 16 × 16 workgroups", () => {
@@ -187,6 +372,13 @@ const REQUEST = {
   mode: "average",
   stride: 1,
   preExposure: 0.5,
+  glare: {
+    sources: { kind: "buffer", name: "view glare sources", bytes: 48 },
+    count: 0,
+    viewRotation: viewRotation4(IDENTITY_QUATERNION),
+    projection: perspectiveReversedInfinite(Math.PI / 3, 2, 0.1),
+    terms: glareSpreadTerms("eye", { ageYears: 25, pigmentation: 0.5 }),
+  },
 } as const;
 
 /** Lets every settled promise's callbacks run. */

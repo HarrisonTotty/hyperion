@@ -20,8 +20,9 @@
  * drawn into its depth first, so that nearer ground hides the marks behind it (R10.T16.c), the
  * symbology built once the plan is made, so that a body handed over has its datum give way over its
  * surveyed ground as its reference surface does (R10.T16.f; {@link PhotorealOverlay}). Each frame
- * that carries a meter takes the scene target's exposure histogram under it (R07.T12), read back
- * for the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
+ * that carries a meter takes the scene target's exposure histogram under it (R07.T12), the veil of
+ * its glare sources in it, read back for the view's `AutoExposure`
+ * ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
  * meters nothing, an instrument's, takes none (R07.T19.c). R08's, R10's and R11's passes join
  * when they exist. Its resources are made asynchronously, the pipelines compiled
  * before the first frame, and again after a device loss; until then {@link
@@ -810,18 +811,8 @@ export class PhotorealRenderer {
       },
     );
     this.#drawnColour = hdrColour;
-    if (frame.meter !== null) {
-      resources.histograms.measure({
-        hdrColour,
-        size: resources.size,
-        mode: frame.meter,
-        stride: settings.histogramStride,
-        preExposure: frame.exposureScale,
-      });
-    }
-    // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
-    const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
-    resources.bloom.run(hdrColour, threshold);
+    // The glare sources are written before the histogram is dispatched, which weighs their veil
+    // as the tone-mapping pass draws it.
     if (frame.glareSources.length > resources.glareCapacity) {
       this.#engine.releaseBuffer(resources.glare);
       resources.glareCapacity = frame.glareSources.length;
@@ -833,6 +824,25 @@ export class PhotorealRenderer {
       0,
       packGlareSources(frame.glareSources, frame.exposureScale, terms),
     );
+    if (frame.meter !== null) {
+      resources.histograms.measure({
+        hdrColour,
+        size: resources.size,
+        mode: frame.meter,
+        stride: settings.histogramStride,
+        preExposure: frame.exposureScale,
+        glare: {
+          sources: resources.glare,
+          count: frame.glareSources.length,
+          viewRotation,
+          projection,
+          terms,
+        },
+      });
+    }
+    // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
+    const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
+    resources.bloom.run(hdrColour, threshold);
     view.render({
       label: TONEMAP_PASS,
       viewRotation,

@@ -32,6 +32,13 @@ export interface GlareSource {
    * what its clamped texels hold, 65,504 ÷ the pre-exposure scale (Provides: "cd/m² above 65,504").
    */
   readonly excessLuminance: Rgb;
+  /**
+   * The source's whole mean luminance, per channel, cd/m²: what the meter spreads through the view's
+   * spread function (`histogram.wgsl`), whatever the pre-exposure. The image spreads only
+   * {@link GlareSource.excessLuminance} in closed form, and the part its texels hold through the
+   * bloom chain, which the meter cannot read.
+   */
+  readonly luminance: Rgb;
 }
 
 /** An eye observer of the CIE glare spread function (R06's `DEFAULT_EYE_OBSERVER` is age 25, 0.5). */
@@ -436,6 +443,24 @@ export function glareSourceVeilOf(
   thetaRad: number,
   terms: GlareSpreadTerms,
 ): Rgb {
+  const perUnit = glareSourcePerUnit(source, thetaRad, terms);
+  return [
+    source.excessLuminance[0] * perUnit,
+    source.excessLuminance[1] * perUnit,
+    source.excessLuminance[2] * perUnit,
+  ];
+}
+
+/**
+ * The veil a glare source adds at `thetaRad` from its centre per unit of its luminance, sr⁻¹ × sr:
+ * its view's spread function integrated over the source, as {@link glareSourceVeilOf} takes it,
+ * which multiplies it by the excess, and the meter by the source's whole luminance.
+ */
+export function glareSourcePerUnit(
+  source: GlareSource,
+  thetaRad: number,
+  terms: GlareSpreadTerms,
+): number {
   const rho = source.angularRadiusRad;
   const omega = glareSourceSolidAngleSr(source);
   let perUnit = omega * broadSpread(terms, thetaRad);
@@ -447,9 +472,5 @@ export function glareSourceVeilOf(
           ? term.amplitude * rectangleInsideLevel(rho, term.scaleRad)
           : poissonOverRectangle(term, thetaRad - rho, thetaRad + rho, (Math.PI * rho) / 4);
   }
-  return [
-    source.excessLuminance[0] * perUnit,
-    source.excessLuminance[1] * perUnit,
-    source.excessLuminance[2] * perUnit,
-  ];
+  return perUnit;
 }

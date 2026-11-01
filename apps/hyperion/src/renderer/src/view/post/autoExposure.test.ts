@@ -174,7 +174,7 @@ describe("the exposure", () => {
     expect(exposed).toBeLessThan(2 ** AGX_MAX_EV);
   });
 
-  it("moves under 1% when a Sun-like star and its glare enter a frame with a sunlit planet", () => {
+  it("moves under 1% when a Sun-like star's disc enters a frame with a sunlit planet", () => {
     const widthPx = 480;
     const heightPx = 270;
     const planet = 5000;
@@ -190,6 +190,7 @@ describe("the exposure", () => {
       direction: { x: 0, y: 0, z: -1 },
       angularRadiusRad: sunPx * radPerPx,
       excessLuminance: [2e9, 2e9, 2e9],
+      luminance: [2e9, 2e9, 2e9],
     };
     for (let y = 0; y < heightPx; y += 1) {
       for (let x = 0; x < widthPx; x += 1) {
@@ -200,7 +201,8 @@ describe("the exposure", () => {
           : [sky, METER_CLASS.other];
         before.push(texel);
         after.push(fromStarPx <= sunPx ? [65_504, METER_CLASS.hostDisc] : texel);
-        // The veil the tone-mapping pass draws after the histogram is taken.
+        // The veil the tone-mapping pass draws, which the histogram weighs through the frame's
+        // glare sources (fix-view-light), not through the disc's texels.
         veil += glareSourceVeil(source, Math.max(fromStarPx, sunPx) * radPerPx, "eye", {
           ageYears: 25,
           pigmentation: 0.5,
@@ -211,7 +213,8 @@ describe("the exposure", () => {
       meteredLuminance(frameHistogram(texels, "average"));
     const change = Math.abs(metered(after) / metered(before) - 1);
     expect(change).toBeLessThan(0.01);
-    // The veil, were it metered, would have moved the mean more than 4 stops (Design note 12).
+    // The veil holds over 4 stops more light than the frame without it (Design note 12): left out
+    // of the meter, it whitened the frame (the owner's observation, 2026-11-01).
     expect(Math.log2(veil / (widthPx * heightPx) / metered(before))).toBeGreaterThan(4);
   });
 

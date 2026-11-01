@@ -385,6 +385,7 @@ export class HostDiscLayer {
         direction: axis,
         angularRadiusRad: rho,
         excessLuminance: discExcessLuminanceRgb(host, this.#exposureScale),
+        luminance: rgbOfBvr(host.mean_luminance_cd_m2),
       });
     }
     return sources;

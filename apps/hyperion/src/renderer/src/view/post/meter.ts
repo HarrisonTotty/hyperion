@@ -49,3 +49,11 @@ export function meterWeights(mode: MeterMode): readonly [number, number, number,
   }
   return weights;
 }
+
+/** The weights of Rec. 709 luminance from linear red, green and blue (ITU-R BT.709-6, item 3.2). */
+export const METER_LUMA: readonly [number, number, number] = [0.2126, 0.7152, 0.0722];
+
+/** Rec. 709 luminance of a linear colour, the meter's ({@link METER_LUMA}). */
+export function meterLuma(rgb: readonly [number, number, number]): number {
+  return METER_LUMA[0] * rgb[0] + METER_LUMA[1] * rgb[1] + METER_LUMA[2] * rgb[2];
+}

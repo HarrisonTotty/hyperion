@@ -213,6 +213,7 @@ export async function checkBloom(
     })(),
     angularRadiusRad: Math.sqrt(frame.discPixels / Math.PI) * RAD_PER_PX,
     excessLuminance: [DISC_LUMINANCE - HALF_FLOAT_MAX, 0, 0],
+    luminance: [DISC_LUMINANCE, 0, 0],
   };
   const sources = engine.createBuffer({
     name: "smoke glare sources",
