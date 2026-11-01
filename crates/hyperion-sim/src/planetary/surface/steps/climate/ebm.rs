@@ -119,6 +119,8 @@ use super::ocean::{Currents, OceanGrid, OceanTransport, Returning, SeaLiquid};
 use super::partition::Turning;
 use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
+use std::collections::VecDeque;
+
 use crate::math;
 use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 use crate::planetary::derive::atmosphere::{
@@ -691,6 +693,11 @@ struct Stop {
     probe_k: Option<f64>,
     /// Where its drift stop ends it ([`drifting`]; the lane's lean, 2026-10-30).
     drift: Drift,
+    /// Whether, from version 27, the run turns to RRE(2) once a jump is rejected
+    /// ([`OrbitExtrapolationRules::ReducedRank`]): the climate's geographic runs, I13's G runs;
+    /// never the zonal search's, whose runs near a fold drift where a reduced rank extrapolation
+    /// finds no limit.
+    reduced_rank: bool,
 }
 
 /// Where a seasonal run's drift stop ends it ([`drifting`]).
@@ -715,6 +722,7 @@ const CLIMATE_STOP: Stop = Stop {
     max_orbits: MAX_ORBITS,
     probe_k: None,
     drift: Drift::Runs,
+    reduced_rank: true,
 };
 
 /// G1's stop: the climate's, or its probe stop at [`PROBE_STOP_K`] where that comes first
@@ -732,6 +740,7 @@ const SEARCH_STOP: Stop = Stop {
     max_orbits: MAX_ORBITS,
     probe_k: None,
     drift: Drift::Runs,
+    reduced_rank: false,
 };
 
 /// How far from T\* Z₀'s surface mean must lie for its drift stop to end it under
@@ -785,6 +794,192 @@ pub(super) enum Jumps {
     Never,
 }
 
+/// The generator version from which a geographic seasonal run whose jump by one ratio has been
+/// rejected extrapolates its slow modes by reduced rank extrapolation over its last marched
+/// orbits, RRE(2) (rendering plan R09, R09.T13.i's I13, its first candidate): 27.
+///
+/// Why: a rejected jump leaves a run marching. Under the server's body seed the reference Earth's
+/// G1 rejected both its jumps and marched 15 orbits; after one reject RRE(2) brings it to 11, its
+/// climate step 42.4 s to 37.0 s (pod, 2026-11-01). A run whose jumps stand keeps them, so the
+/// reference worlds' fields are 26's (the reference Earth's G1 7 orbits either way). The zonal
+/// search keeps its ratio: RRE(2) sent its runs near a fold to 160 orbits. It does not converge a
+/// run past the fold (I12): the small Earth's G1 and G2 still stop at [`MAX_ORBITS`].
+///
+/// Below it [`OrbitExtrapolationRules::in_force`] is [`OrbitExtrapolationRules::Geometric`], each
+/// point shifted by its last change times the largest point's r ÷ (1 − r) within
+/// [`JUMP_RATIO_RANGE`], and every climate is version 24's, 25's and 26's bit for bit. 27's bump
+/// deletes this hold, the `Geometric` arm, the tests' switch and its tripwire
+/// (`the_orbit_extrapolation_is_held_only_until_the_27_bump`).
+pub(crate) const ORBIT_EXTRAPOLATION_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// How a seasonal run extrapolates its slow modes (its hold, [`ORBIT_EXTRAPOLATION_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OrbitExtrapolationRules {
+    /// Version 26's and before: one geometric ratio, r within [`JUMP_RATIO_RANGE`] ([`Extrapolation`]).
+    Geometric,
+    /// Version 27's: after a reject, RRE(2) over the last [`RRE_STATES`] marched end-of-orbit
+    /// states, at any r above [`JUMP_RATIO_RANGE`]'s floor and below 1 ([`reduced_rank`]).
+    ReducedRank,
+}
+
+impl OrbitExtrapolationRules {
+    /// The rules this generator version gives: RRE(2) from [`ORBIT_EXTRAPOLATION_VERSION`], the
+    /// geometric ratio below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_orbit_extrapolation`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = ORBIT_EXTRAPOLATION_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= ORBIT_EXTRAPOLATION_VERSION {
+            Self::ReducedRank
+        } else {
+            Self::Geometric
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The orbit extrapolation's rules a test sets on its thread, `None` for the version's.
+    static ORBIT_EXTRAPOLATION_RULES: core::cell::Cell<Option<OrbitExtrapolationRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// Runs `run` with the seasonal runs extrapolating under `rules` on this thread, restoring the
+/// rules before it after, however `run` ends: the tests' switch of [`ORBIT_EXTRAPOLATION_VERSION`].
+#[cfg(test)]
+pub(crate) fn with_orbit_extrapolation<R>(
+    rules: OrbitExtrapolationRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    struct Restore(Option<OrbitExtrapolationRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ORBIT_EXTRAPOLATION_RULES.with(|held| held.set(self.0));
+        }
+    }
+    let _restore = Restore(ORBIT_EXTRAPOLATION_RULES.with(|held| held.replace(Some(rules))));
+    run()
+}
+
+/// The marched end-of-orbit states RRE(2) reads: four, the three changes between them (rendering
+/// plan R09, I13; Sidi 2017, *Vector Extrapolation Methods with Applications*, SIAM, ch. 1). With
+/// three, as two orbits after an extrapolation have, it takes RRE(1) over two changes.
+const RRE_STATES: usize = 4;
+
+/// A run's last marched orbits since its start, its last extrapolation or its last reject, for
+/// RRE(2) ([`OrbitExtrapolationRules::ReducedRank`]): the end-of-orbit states S₀ … Sₙ, S₀ the
+/// state the first of them began from, and the annual means A₁ … Aₙ, Aⱼ of the orbit from Sⱼ₋₁ to
+/// Sⱼ; at most [`RRE_STATES`] states.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Marched {
+    states: VecDeque<Vec<f64>>,
+    annuals: VecDeque<Vec<f64>>,
+}
+
+impl Marched {
+    /// Begins again from the state `state_k`.
+    fn restart(&mut self, state_k: &[f64]) {
+        self.states.clear();
+        self.annuals.clear();
+        self.states.push_back(state_k.to_vec());
+    }
+
+    /// Adds a marched orbit that ended at `state_k` with annual means `annual_k`, dropping the
+    /// oldest state and orbit past [`RRE_STATES`].
+    fn push(&mut self, state_k: &[f64], annual_k: &[f64]) {
+        self.states.push_back(state_k.to_vec());
+        self.annuals.push_back(annual_k.to_vec());
+        if self.states.len() > RRE_STATES {
+            self.states.pop_front();
+            self.annuals.pop_front();
+        }
+    }
+}
+
+/// RRE over the marched orbits `marched`: the end-of-orbit state and the annual means that the
+/// combination Σ γⱼ Sⱼ₊₁ and Σ γⱼ Aⱼ₊₁ gives, Σ γⱼ = 1, γ minimising |Σ γⱼ (Sⱼ₊₁ − Sⱼ)| over the
+/// last three changes with [`RRE_STATES`] states, or over the last two with three states or where
+/// three are degenerate (a single clean mode makes them so); `None` with fewer than three states,
+/// or where two are degenerate too.
+///
+/// Of a run whose orbit map is linear about its periodic state S\*, with its error in at most k
+/// modes, RRE(k) gives S\* exactly, and the annual means of the orbit from S\* with it, so the
+/// combination is the run's limit; the least squares takes the constraint in by
+/// γₖ = 1 − Σ γⱼ<ₖ, its normal equations solved in closed form. Every sum runs over the points in
+/// their order, in `f64` (rendering plan R09, I13's RRE(2); Sidi 2017, ch. 1).
+#[must_use]
+fn reduced_rank(marched: &Marched) -> Option<(Vec<f64>, Vec<f64>)> {
+    if marched.states.len() < 3 {
+        return None;
+    }
+    let changes: Vec<Vec<f64>> = marched
+        .states
+        .iter()
+        .zip(marched.states.iter().skip(1))
+        .map(|(from, to)| to.iter().zip(from).map(|(b, a)| b - a).collect())
+        .collect();
+    let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).fold(0.0, |sum, (x, y)| sum + x * y);
+    let less = |a: &[f64], b: &[f64]| -> Vec<f64> { a.iter().zip(b).map(|(x, y)| x - y).collect() };
+    // γ for the last k + 1 changes: c = γ₀ … γₖ₋₁ solve (WᵀW) c = −Wᵀuₖ, W's columns uⱼ − uₖ.
+    let solve = |k: usize| -> Option<Vec<f64>> {
+        let used = &changes[changes.len() - k - 1..];
+        let last = &used[k];
+        let columns: Vec<Vec<f64>> = used[..k].iter().map(|u| less(u, last)).collect();
+        let gram: Vec<Vec<f64>> = columns
+            .iter()
+            .map(|a| columns.iter().map(|b| dot(a, b)).collect())
+            .collect();
+        let rhs: Vec<f64> = columns.iter().map(|a| -dot(a, last)).collect();
+        let c = match k {
+            1 => {
+                let a = gram[0][0];
+                (a > 0.0).then(|| vec![rhs[0] / a])?
+            }
+            2 => {
+                let (a, b, d) = (gram[0][0], gram[0][1], gram[1][1]);
+                let det = a * d - b * b;
+                // Degenerate where the two columns are within 10⁻¹⁰ of parallel.
+                (det > DEGENERATE_SHARE * a * d).then(|| {
+                    vec![
+                        (rhs[0] * d - b * rhs[1]) / det,
+                        (a * rhs[1] - b * rhs[0]) / det,
+                    ]
+                })?
+            }
+            _ => unreachable!("RRE takes one or two columns"),
+        };
+        let mut gamma = c;
+        gamma.push(1.0 - gamma.iter().sum::<f64>());
+        gamma.iter().all(|g| g.is_finite()).then_some(gamma)
+    };
+    let gamma = if changes.len() >= 3 {
+        solve(2).or_else(|| solve(1))
+    } else {
+        solve(1)
+    }?;
+    let k = gamma.len() - 1;
+    let combine = |rows: &VecDeque<Vec<f64>>| -> Vec<f64> {
+        let used: Vec<&Vec<f64>> = rows.iter().skip(rows.len() - k - 1).collect();
+        (0..used[0].len())
+            .map(|i| {
+                used.iter()
+                    .zip(&gamma)
+                    .fold(0.0, |sum, (row, g)| sum + g * row[i])
+            })
+            .collect()
+    };
+    let state = combine(&marched.states);
+    let annual = combine(&marched.annuals);
+    (state.iter().chain(&annual).all(|v| v.is_finite())).then_some((state, annual))
+}
+
+/// The share of the product of its two columns' squares below which RRE(2)'s Gram determinant is
+/// taken as degenerate, the columns within about 10⁻⁵ rad of parallel: 10⁻¹⁰ (`Adopted`).
+const DEGENERATE_SHARE: f64 = 1e-10;
+
 /// The spin-up's extrapolation of one run's slow mode (decision-r09-t13i's §2.4 follow-up 4 §3,
 /// as its follow-up 6 §1 amends it; I13's remedy). After an orbit whose stop fails on its
 /// remainder, `m_n` r ÷ (1 − r) at least the stop's bound, r = `m_n` ÷ `m_n−1` in
@@ -819,6 +1014,10 @@ struct Extrapolation {
     jump_ratio: Option<f64>,
     /// The ratio that triggered the jump [`gain`](Self::gain) last found due.
     due_ratio: f64,
+    /// How it extrapolates (its hold, [`ORBIT_EXTRAPOLATION_VERSION`]).
+    rules: OrbitExtrapolationRules,
+    /// The marched orbits RRE(2) reads, under [`OrbitExtrapolationRules::ReducedRank`].
+    marched: Marched,
 }
 
 /// What a jump displaced, to restore on a reject.
@@ -848,11 +1047,12 @@ enum Review {
 }
 
 impl Extrapolation {
-    /// A run's extrapolation under `jumps`.
+    /// A run's extrapolation under its stop `stop`: RRE(2) after a reject where the stop takes it
+    /// and the rules in force give it.
     #[must_use]
-    const fn new(jumps: Jumps) -> Self {
+    fn new(stop: &Stop) -> Self {
         Self {
-            allowed: matches!(jumps, Jumps::Allowed),
+            allowed: matches!(stop.jumps, Jumps::Allowed),
             rejected: false,
             last_ratio: None,
             last_jump: None,
@@ -861,7 +1061,96 @@ impl Extrapolation {
             rejects: 0,
             jump_ratio: None,
             due_ratio: 0.0,
+            rules: if stop.reduced_rank {
+                OrbitExtrapolationRules::in_force()
+            } else {
+                OrbitExtrapolationRules::Geometric
+            },
+            marched: Marched {
+                states: VecDeque::new(),
+                annuals: VecDeque::new(),
+            },
         }
+    }
+
+    /// Whether it extrapolates by RRE(2).
+    #[must_use]
+    fn reduced(&self) -> bool {
+        self.rules == OrbitExtrapolationRules::ReducedRank
+    }
+
+    /// Notes the state `state_k` the run begins, or begins again, from: under RRE(2), the first of
+    /// its marched states.
+    fn restart(&mut self, state_k: &[f64]) {
+        if self.reduced() {
+            self.marched.restart(state_k);
+        }
+    }
+
+    /// Notes a marched orbit that ended at `state_k` with annual means `annual_k`, under RRE(2).
+    fn marched(&mut self, state_k: &[f64], annual_k: &[f64]) {
+        if self.reduced() {
+            self.marched.push(state_k, annual_k);
+        }
+    }
+
+    /// Under RRE(2), extrapolates after orbit `orbits`, whose move was `moved` and the move before
+    /// `before`, K, under the bound `bound_k`, K, where the stop fails on its remainder at the
+    /// orbit's ratio r, in (the range's floor, 1), and the marched orbits give a combination
+    /// ([`reduced_rank`]): the state `state_k` and the stored annual means `stored_k` become the
+    /// combination's, the displaced state, the orbit's annual means `annual_k` and the return
+    /// temperatures `returning` kept for a reject, as [`jump`](Self::jump) keeps them. Whether it
+    /// extrapolated.
+    fn reduce(
+        &mut self,
+        orbits: u32,
+        (moved, before): (f64, Option<f64>),
+        bound_k: f64,
+        (state_k, annual_k, stored_k): (&mut [f64], &[f64], &mut [f64]),
+        returning: Returning,
+    ) -> bool {
+        let (low, _) = JUMP_RATIO_RANGE;
+        let within = |ratio: f64| ratio > low && ratio < 1.0;
+        let ratio = before.map(|before| moved / before);
+        let earlier = core::mem::replace(&mut self.last_ratio, ratio);
+        if !self.allowed
+            || self.rejects >= MAX_REJECTS
+            || self.pending.is_some()
+            || orbits + 2 > MAX_ORBITS
+        {
+            return false;
+        }
+        let Some(ratio) = ratio.filter(|&ratio| within(ratio)) else {
+            return false;
+        };
+        if self.rejected {
+            let agreeing = earlier.is_some_and(|earlier| {
+                within(earlier) && (ratio - earlier).abs() <= JUMP_AGREEMENT
+            });
+            if !agreeing {
+                return false;
+            }
+        }
+        if moved * ratio / (1.0 - ratio) < bound_k {
+            return false;
+        }
+        let Some((state, annual)) = reduced_rank(&self.marched) else {
+            return false;
+        };
+        self.due_ratio = ratio;
+        self.pending = Some(Jumped {
+            state_k: state_k.to_vec(),
+            annual_k: annual_k.to_vec(),
+            returning,
+            move_k: moved,
+            ratio,
+        });
+        state_k.copy_from_slice(&state);
+        stored_k.copy_from_slice(&annual);
+        self.marched.restart(&state);
+        self.last_jump = Some(orbits);
+        self.last_ratio = None;
+        true
     }
 
     /// The gain r ÷ (1 − r) of a jump due after orbit `orbits`, whose move is `moved` and the move
@@ -4021,7 +4310,8 @@ impl EnergyBalance {
         // Whether the last orbit met the climate's stop and the search's (decision-r09-t13i's
         // §2.4 follow-up 6 §3): a climate reads the first, the search's secant the second.
         let mut met = (false, false);
-        let mut extrapolation = Extrapolation::new(stop.jumps);
+        let mut extrapolation = Extrapolation::new(&stop);
+        extrapolation.restart(&t);
         // G1's fresh orbits and its surface mean's fresh changes, and its probe where its run
         // ended (follow-ups 8 §1 and 9 §1).
         let mut trail = MeanTrail::default();
@@ -4092,6 +4382,9 @@ impl EnergyBalance {
                     if d > most { d } else { most }
                 })
             });
+            if moved.is_none() {
+                extrapolation.marched(&t, &annual);
+            }
             if let Some(moved) = moved {
                 history.push(moved);
                 match extrapolation.review(moved) {
@@ -4102,12 +4395,14 @@ impl EnergyBalance {
                         previous = Some(jumped.annual_k);
                         met = (false, false);
                         trail.rejected();
+                        extrapolation.restart(&t);
                         continue;
                     }
                     // The stop reads only the moves after a jump.
                     Review::Accepted => before = None,
                     Review::None => {}
                 }
+                extrapolation.marched(&t, &annual);
                 let enough = orbits >= MIN_ORBITS;
                 let jump_ratio = extrapolation.jump_ratio;
                 met = (
@@ -4146,7 +4441,23 @@ impl EnergyBalance {
                     }
                     trail.push(means.1);
                 }
-                if let (Some(gain), Some(stored)) = (
+                // From version 27 a geographic run turns to RRE(2) once a jump of one ratio has been
+                // rejected; before that, and below 27, it jumps by the ratio.
+                if extrapolation.reduced() && extrapolation.rejects > 0 {
+                    if let Some(stored) = previous.as_mut()
+                        && extrapolation.reduce(
+                            orbits,
+                            (moved, before),
+                            stop.bound_k,
+                            (&mut t, &annual, stored),
+                            returning.clone(),
+                        )
+                    {
+                        before = None;
+                        trail.jumped();
+                        continue;
+                    }
+                } else if let (Some(gain), Some(stored)) = (
                     extrapolation.gain(orbits, moved, before, stop.bound_k),
                     previous.as_mut(),
                 ) {
@@ -4296,6 +4607,7 @@ impl EnergyBalance {
                 max_orbits: orbits.unwrap_or(MAX_ORBITS),
                 probe_k: None,
                 drift: Drift::Runs,
+                reduced_rank: true,
             },
         )
         .climate
@@ -6453,6 +6765,126 @@ mod tests {
     use crate::planetary::surface::reference;
     use crate::planetary::surface::steps::{Pass, Working};
 
+    /// The orbit extrapolation's tripwire: RRE(2) is held until generator version 27, and the bump
+    /// that reaches it deletes the hold (rendering plan R09, I13).
+    #[test]
+    fn the_orbit_extrapolation_is_held_only_until_the_27_bump() {
+        assert!(
+            GENERATOR_VERSION < ORBIT_EXTRAPOLATION_VERSION,
+            "generator version {} reaches the orbit extrapolation's hold: delete \
+             `ORBIT_EXTRAPOLATION_VERSION`, `OrbitExtrapolationRules` with its `Geometric` arm, \
+             the tests' switch `with_orbit_extrapolation` with its place in `with_every_27_hold` \
+             and its uses, and this test",
+            GENERATOR_VERSION.get()
+        );
+        assert_eq!(
+            OrbitExtrapolationRules::in_force(),
+            OrbitExtrapolationRules::Geometric
+        );
+        assert_eq!(
+            with_orbit_extrapolation(
+                OrbitExtrapolationRules::ReducedRank,
+                OrbitExtrapolationRules::in_force
+            ),
+            OrbitExtrapolationRules::ReducedRank
+        );
+    }
+
+    /// One linear mode of a run: it shrinks by `ratio` an orbit from `size`, along `state` in the
+    /// end-of-orbit states and along `annual` in the annual means.
+    struct Mode {
+        ratio: f64,
+        size: f64,
+        state: Vec<f64>,
+        annual: Vec<f64>,
+    }
+
+    /// The marched orbits of a linear run about the limit `limit` and `annual`: each state
+    /// `limit + Σ size ratioʲ state` and each orbit's annual means `annual + Σ size ratioʲ⁻¹ annual`
+    /// over its `modes`, from j = 0.
+    fn linear_run(limit: &[f64], annual: &[f64], modes: &[Mode], states: usize) -> Marched {
+        let state_at = |j: i32| -> Vec<f64> {
+            (0..limit.len())
+                .map(|i| {
+                    let off: f64 = modes
+                        .iter()
+                        .map(|m| m.size * math::powi(m.ratio, j) * m.state[i])
+                        .sum();
+                    limit[i] + off
+                })
+                .collect()
+        };
+        let annual_at = |j: i32| -> Vec<f64> {
+            (0..annual.len())
+                .map(|i| {
+                    let off: f64 = modes
+                        .iter()
+                        .map(|m| m.size * math::powi(m.ratio, j) * m.annual[i])
+                        .sum();
+                    annual[i] + off
+                })
+                .collect()
+        };
+        let mut marched = Marched::default();
+        marched.restart(&state_at(0));
+        for j in 1..i32::try_from(states).unwrap() {
+            marched.push(&state_at(j), &annual_at(j - 1));
+        }
+        marched
+    }
+
+    /// RRE(2) over four marched states of a run with two linear modes finds its limit, the state
+    /// and the annual means, to rounding (Sidi 2017, ch. 1: exact for k modes at rank k).
+    #[test]
+    fn reduced_rank_finds_a_two_mode_run_s_limit() {
+        let limit = vec![288.0, 250.0, 301.5, 270.25];
+        let annual = vec![287.0, 251.0, 300.0, 271.0];
+        let modes = [
+            Mode {
+                ratio: 0.95,
+                size: 6.0,
+                state: vec![1.0, 0.5, -0.25, 0.75],
+                annual: vec![0.8, 0.4, -0.2, 0.6],
+            },
+            Mode {
+                ratio: 0.4,
+                size: -3.0,
+                state: vec![0.1, -1.0, 0.6, 0.2],
+                annual: vec![0.3, -0.7, 0.5, 0.1],
+            },
+        ];
+        let marched = linear_run(&limit, &annual, &modes, 4);
+        let (state, means) = reduced_rank(&marched).expect("four states give a combination");
+        for (got, want) in state.iter().zip(&limit).chain(means.iter().zip(&annual)) {
+            assert!((got - want).abs() < 1e-9, "{got} against {want}");
+        }
+    }
+
+    /// Where one mode leaves RRE(2)'s three changes degenerate, it takes RRE(1) over the last two,
+    /// which finds the limit; three states take RRE(1) too; fewer give none.
+    #[test]
+    fn reduced_rank_takes_rre_1_with_one_mode_or_three_states() {
+        let limit = vec![280.0, 260.0, 300.0];
+        let annual = vec![279.0, 261.0, 299.0];
+        let modes = [Mode {
+            ratio: 0.97,
+            size: 5.0,
+            state: vec![1.0, -0.5, 0.25],
+            annual: vec![0.9, -0.4, 0.2],
+        }];
+        for states in [3, 4] {
+            let marched = linear_run(&limit, &annual, &modes, states);
+            let (state, means) = reduced_rank(&marched).expect("three states or more");
+            for (got, want) in state.iter().zip(&limit).chain(means.iter().zip(&annual)) {
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "{states} states: {got} against {want}"
+                );
+            }
+        }
+        assert_eq!(reduced_rank(&linear_run(&limit, &annual, &modes, 2)), None);
+    }
+
     /// The table's floor is `f64::floor` to the bit, about zero, at the truncation's bound of
     /// 2⁵², at the table's temperatures over the spacing, and for a NaN (R09.T16).
     #[test]
@@ -7794,7 +8226,7 @@ mod tests {
     /// ratios that agree within 0.05; a smaller first fresh move accepts it.
     #[test]
     fn a_jump_whose_first_fresh_move_grows_is_rejected_and_restored_to_the_bit() {
-        let mut spin = Extrapolation::new(Jumps::Allowed);
+        let mut spin = Extrapolation::new(&CLIMATE_STOP);
         let bound = CONVERGENCE_K;
         // Not due: the remainder under the bound (0.05 at r 0.5), outside the range, with no move
         // before, not a number, at the cap.
@@ -7812,9 +8244,12 @@ mod tests {
         let gain = spin.gain(5, 0.8, Some(1.0), bound).expect("r 0.8 is due");
         assert!((gain - 4.0).abs() < 1e-12, "{gain}");
         assert!(
-            Extrapolation::new(Jumps::Never)
-                .gain(5, 0.8, Some(1.0), bound)
-                .is_none()
+            Extrapolation::new(&Stop {
+                jumps: Jumps::Never,
+                ..CLIMATE_STOP
+            })
+            .gain(5, 0.8, Some(1.0), bound)
+            .is_none()
         );
         let mut state = vec![290.0, 280.5, 270.25];
         let annual = vec![289.0, 281.0, 271.0];
@@ -7856,12 +8291,12 @@ mod tests {
         // disagree are not.
         assert!(spin.gain(7, 0.5, Some(0.6), bound).is_none());
         assert!(spin.gain(8, 0.42, Some(0.5), bound).is_some());
-        let mut other = Extrapolation::new(Jumps::Allowed);
+        let mut other = Extrapolation::new(&CLIMATE_STOP);
         other.rejected = true;
         assert!(other.gain(7, 0.5, Some(0.6), bound).is_none());
         assert!(other.gain(8, 0.3, Some(0.5), bound).is_none());
         // A shrinking first fresh move accepts it, and the run may jump again two orbits on.
-        let mut spin = Extrapolation::new(Jumps::Allowed);
+        let mut spin = Extrapolation::new(&CLIMATE_STOP);
         let gain = spin.gain(5, 0.8, Some(1.0), bound).expect("r 0.8 is due");
         spin.jump(5, 0.8, gain, (&mut state, &annual, &mut stored), returning);
         assert!(spin.gain(6, 0.8, Some(1.0), bound).is_none());
@@ -7875,7 +8310,7 @@ mod tests {
         assert!(!settled_after(0.05, Some(0.119), bound, spin.jump_ratio));
         assert!(settled_after(0.01, Some(0.012), bound, spin.jump_ratio));
         // At most two rejects: after the second the run only marches (follow-up 7 §2.2).
-        let mut capped = Extrapolation::new(Jumps::Allowed);
+        let mut capped = Extrapolation::new(&CLIMATE_STOP);
         for orbit in [5, 9] {
             capped.last_ratio = Some(0.8);
             let gain = capped.gain(orbit, 0.8, Some(1.0), bound).expect("due");

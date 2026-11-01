@@ -606,6 +606,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
 ///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo, and part 7's CH₄ deck
 ///   drawn as its methane layer.
+/// - the coarse pass's seasonal runs extrapolated by RRE(2), `ORBIT_EXTRAPOLATION_VERSION`
+///   (rendering plan R09, I13), at `OrbitExtrapolationRules::ReducedRank` through
+///   `with_orbit_extrapolation`: the climate's orbits to their stop, and so every wet world's field.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -631,7 +634,11 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::moons::tides::{
         PorousCoreRules, SurfaceHeatRules, with_porous_core, with_surface_heat,
     };
+    use crate::planetary::surface::steps::climate::{
+        OrbitExtrapolationRules, with_orbit_extrapolation,
+    };
     use crate::substance::{CarriersRules, with_carriers};
+    let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_core_share(CoreShareRules::Host, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);

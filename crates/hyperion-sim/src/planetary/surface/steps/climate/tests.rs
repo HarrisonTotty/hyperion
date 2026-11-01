@@ -2740,3 +2740,37 @@ pub(super) mod other_regimes {
         );
     }
 }
+
+/// Under the orbit extrapolation's 27 hold (rendering plan R09, I13), a geographic run whose jump by
+/// one ratio is rejected extrapolates by RRE(2), and the extrapolation stands: the small Earth's G1
+/// rejects its first jump at its third orbit. Under version 26's rules it rejects two and makes
+/// none. Its G1 lies past the geographic model's fold and stops at 40 orbits either way
+/// (R09.T13.i's I12).
+#[test]
+#[ignore = "slow: the small Earth's climate step under the 27 hold, under 150 s in the test \
+            profile"]
+fn under_the_27_hold_a_rejected_g_run_extrapolates_by_reduced_rank() {
+    use super::{OrbitExtrapolationRules, with_orbit_extrapolation};
+    use crate::planetary::surface::steps;
+    let inputs = reference::small_earth();
+    let level = hyperion_surface::field::coarse_level(inputs.radius());
+    let (field, climate) = grids(level.get());
+    let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+    let mut working = Working::initial(&pass);
+    steps::plates::run(&pass, &mut working);
+    steps::relief::run(&pass, &mut working);
+    steps::craters::run(&pass, &mut working);
+    steps::relief::run_after_craters(&pass, &mut working);
+    let diagnostics = with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, || {
+        super::run_diagnosed(&pass, &mut working)
+    });
+    let correction = diagnostics
+        .surface_means
+        .expect("the energy-balance model's surface means")
+        .correction;
+    let ebm::MeanCorrection::Searched { g1, .. } = correction else {
+        panic!("a twelve-month world's correction searches, then runs G1 and G2: {correction:?}");
+    };
+    eprintln!("G1 {g1:?}");
+    assert!(g1.rejects >= 1 && g1.jumps >= 1, "G1 {g1:?}");
+}
