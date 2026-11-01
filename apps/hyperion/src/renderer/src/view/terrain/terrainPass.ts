@@ -607,6 +607,11 @@ export interface TerrainPassObserver {
   readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
   /** Called with each patch made resident, as {@link TerrainPassOptions.onResident} is. */
   readonly onResident?: (key: PatchKey) => void;
+  /**
+   * Called with each bake the cache refused a slot (`PatchCache.insert`'s `refused`), which the
+   * pass asks for again at its next demand.
+   */
+  readonly onRefused?: (key: PatchKey) => void;
 }
 
 /** The pass's observers while it has none. */
@@ -1163,6 +1168,12 @@ export class TerrainPass {
   readonly #views = new Map<TerrainViewId, ViewState>();
   /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
   readonly #stepped = new Map<TerrainViewId, SteppedCamera>();
+  /**
+   * Each view's nearest selected ground at the last selection that gave it one
+   * ({@link SelectedView}'s `nearestM`, finite), for its motion margin after a selection that gave
+   * none.
+   */
+  readonly #nearestGround = new Map<TerrainViewId, number>();
   /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
   readonly #heights = new ResidentHeights();
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
@@ -1316,9 +1327,10 @@ export class TerrainPass {
   }
 
   /**
-   * Listens to the pass's selections and to the patches it makes resident, from the next of each
-   * on, called where its options' `onSelect` and `onResident` are (plan R10, R10.T14.c: the descent
-   * spike's metrics over a terrain session's pass, which the session makes without them).
+   * Listens to the pass's selections, to the patches it makes resident and to the bakes its cache
+   * refuses, from the next of each on, called where its options' `onSelect` and `onResident` are
+   * (plan R10, R10.T14.c: the descent spike's metrics over a terrain session's pass, which the
+   * session makes without them; the seamless probe's).
    *
    * @remarks
    * A pass with no observer calls none: its loops over them are empty.
@@ -1945,6 +1957,7 @@ export class TerrainPass {
    */
   #forgetView(id: TerrainViewId): void {
     this.#stepped.delete(id);
+    this.#nearestGround.delete(id);
     if (this.#views.delete(id)) {
       this.#device.resources.releaseView(id);
     }
@@ -1973,6 +1986,7 @@ export class TerrainPass {
       device.pool.terminate();
       this.#views.clear();
       this.#stepped.clear();
+      this.#nearestGround.clear();
       this.#heights.clear();
       try {
         device.resources.dispose();
@@ -2127,6 +2141,10 @@ export class TerrainPass {
     const keyString = patchKeyString(bake.key);
     const stored = device.cache.insert(bake);
     if (stored.kind !== "stored") {
+      const observers = this.#observers;
+      for (let n = 0; n < observers.length; n += 1) {
+        observers[n]?.onRefused?.(bake.key);
+      }
       return;
     }
     if (stored.evicted !== null) {
@@ -2435,7 +2453,18 @@ export class TerrainPass {
 
   /**
    * `views` with each one's frustum margin under `motion` ({@link frustumMarginRad}), from its
-   * camera at the last step and its nearest selected ground; unchanged under `none`.
+   * camera at the last step and its nearest selected ground, the last that a selection gave it;
+   * unchanged under `none`.
+   *
+   * @remarks
+   * After a selection that gave a view no ground, its survey's nearest stood in for it until the
+   * seamless lane (the owner's priority, 2026-11-01). With the camera over the survey and the
+   * survey out of view, that is a finest patch, which opened the margin to its most; the ground it
+   * then selected was far, whose distance closed the margin again, so that the selection gave
+   * nothing and some 300 patches by turns, frame after frame (TERRAIN TEST on high, 253.7 to
+   * 254.5 s). The last ground selected, carried, gives the margin a selection had, and an empty
+   * selection the one before it, so that it cannot cycle; the survey's nearest stands in only for a
+   * view never given ground.
    */
   #withMargins(views: ReadonlyArray<PassSelectionView>): ReadonlyArray<PassSelectionView> {
     if (this.#frustumMargin === "none") {
@@ -2444,11 +2473,10 @@ export class TerrainPass {
     const last = this.#selected;
     return views.map((view) => {
       const n = last?.views.findIndex((was) => was.id === view.id) ?? -1;
-      const was = n < 0 ? undefined : last?.views[n];
       const nearestM =
-        was !== undefined && Number.isFinite(was.nearestM)
-          ? was.nearestM
-          : (last?.selection.nearestSurveyByViewM[n] ?? Number.POSITIVE_INFINITY);
+        this.#nearestGround.get(view.id) ??
+        last?.selection.nearestSurveyByViewM[n] ??
+        Number.POSITIVE_INFINITY;
       return {
         ...view,
         frustumMarginRad: frustumMarginRad(view, this.#stepped.get(view.id) ?? null, nearestM),
@@ -2518,6 +2546,9 @@ export class TerrainPass {
             distanceToBoxM(relativeBounds(patch.bounds, view.camera.positionM)),
           );
         }
+      }
+      if (Number.isFinite(nearestM)) {
+        this.#nearestGround.set(view.id, Math.max(nearestM, patchM));
       }
       // At the view's τ, not the τ ÷ (1 + m) selection uses, raised where the budget binds.
       const state = this.#views.get(view.id);

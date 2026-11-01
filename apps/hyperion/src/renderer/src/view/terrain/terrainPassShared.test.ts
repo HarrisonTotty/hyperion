@@ -1341,6 +1341,61 @@ describe("each view's selection margin for its motion (R10.T16; the batch review
     expect(frustumMarginRad(view, moved, 10_000)).toBeCloseTo(PIXEL_RAD + 50 / 10_000, 12);
   });
 
+  it("selects the same ground two steps running past the survey's edge, the survey under the camera", async () => {
+    // A narrow view 4 km up, 3° below the horizon, flying north 400 m a step over a survey that
+    // ends 60 km north of the equator: its ground leaves the view's foot some 39 km out, while
+    // the survey's nearest, under the camera, is about 3 km. Taken for the move's ground once the
+    // selection held none, that opened the margin to its cap, which took the survey again, whose
+    // distance then closed it (TERRAIN TEST on high, 253.7 s: 0 and 300 patches by turns).
+    const radiusM = SPHERE.figure.equatorialRadiusM;
+    const edgeM = 60_000;
+    const flying = (northM: number): TerrainView => {
+      const phi = northM / radiusM;
+      const up = vec3(Math.cos(phi), 0, Math.sin(phi));
+      const north = vec3(-Math.sin(phi), 0, Math.cos(phi));
+      const pitch = (3 * Math.PI) / 180;
+      return {
+        rotation: IDENTITY_ROTATION,
+        cameraM: scale(up, radiusM + 4_000),
+        orientation: lookAlong(add(scale(north, Math.cos(pitch)), scale(up, -Math.sin(pitch))), up),
+        fovXRad: (10 * Math.PI) / 180,
+        viewport: VIEWPORT,
+      };
+    };
+    // Surveyed where a patch has a vertex of its 9 × 9 lattice on face 0 south of the edge.
+    const survey: TerrainSurveyLookup = {
+      surveyedUnder: (key) => {
+        for (let y = 0; y <= 64; y += 8) {
+          for (let x = 0; x <= 64; x += 8) {
+            const [dx, dy, dz] = vertexDir(key, x, y);
+            if (dx > Math.abs(dy) && Math.atan2(dz, Math.hypot(dx, dy)) * radiusM <= edgeM) {
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+      version: 1,
+    };
+    const inputs: SelectionInput[] = [];
+    const made = await sharedPass("high", {
+      planet: SPHERE,
+      survey,
+      frustumMargin: "motion",
+      onSelect: (input) => inputs.push(input),
+    });
+    const sizes: number[] = [];
+    for (let n = 0; n <= 66; n += 1) {
+      const step = made.pass.step({ views: [passView(PRIMARY, flying(400 * n))], grounded: [] });
+      made.lane().bakeDemand(made.pass);
+      sizes.push(step.selection.patches.size);
+    }
+    // At 25.6 km north the survey has left the view: the two steps after select nothing again, by
+    // the margin the last ground selected gave, some 36 km out, nowhere near the cap.
+    expect(sizes.slice(-3)).toEqual([0, 0, 0]);
+    expect(inputs.at(-1)?.views[0]?.frustumMarginRad).toBeLessThan(MAX_FRUSTUM_MARGIN_RAD / 4);
+  });
+
   it("opens a session's pass's views by their motion, and the spike's frame by none", async () => {
     const inputs: SelectionInput[] = [];
     const spike: SelectionInput[] = [];
