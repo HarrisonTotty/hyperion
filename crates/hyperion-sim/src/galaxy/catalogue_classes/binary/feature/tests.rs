@@ -23,6 +23,7 @@ use crate::galaxy::features::members::{
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::scan::engine_calls;
+use crate::stellar::binary::testing::MemberCells;
 
 /// The seed of the tests' Milky Way.
 const SEED: u64 = 0x1108_f000_0000_0001;
@@ -538,18 +539,18 @@ fn the_lists_hold_their_expected_hosts() {
 const MEMBER_STREAMS: u64 = 16;
 
 /// `n` of the engine's prior members of `class` near the solar circle, drawn on
-/// [`MEMBER_STREAMS`] threads and joined in stream order.
+/// [`MEMBER_STREAMS`] threads from the cells that `cells` keeps, which they share, and joined in
+/// stream order.
 fn engine_members(
-    galaxy: &Galaxy,
+    cells: &MemberCells,
     class: CarvedClass,
     n: usize,
 ) -> Vec<crate::stellar::binary::testing::ClassMember> {
-    use crate::stellar::binary::testing::brute_force_class_members_in;
     let share = n.div_ceil(16);
     let mut members = Vec::with_capacity(n + 16);
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..MEMBER_STREAMS)
-            .map(|s| scope.spawn(move || brute_force_class_members_in(galaxy, class, share, s)))
+            .map(|s| scope.spawn(move || cells.members_in(class, share, s)))
             .collect();
         for handle in handles {
             members.extend(handle.join().expect("a member draw finishes"));
@@ -679,8 +680,9 @@ fn the_listed_samplers_against_the_engine_s_members() {
         .collect();
     entries.extend(centre.iter());
     let mut report = String::new();
-    compare_accreting(galaxy, &entries, &mut report);
-    compare_xray(galaxy, &entries, &mut report);
+    let cells = MemberCells::new(galaxy);
+    compare_accreting(&cells, &entries, &mut report);
+    compare_xray(&cells, &entries, &mut report);
     compare_mergers(galaxy, &entries, &mut report);
     eprint!("{report}");
 }
@@ -690,8 +692,9 @@ fn unit(v: Vec<f64>) -> Vec<(f64, f64)> {
     v.into_iter().map(|x| (x, 1.0)).collect()
 }
 
-/// The accreting white dwarfs' marks of `entries` against the engine's members, into `report`.
-fn compare_accreting(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String) {
+/// The accreting white dwarfs' marks of `entries` against the engine's members, drawn from
+/// `cells`, into `report`.
+fn compare_accreting(cells: &MemberCells, entries: &[&ListedBinary], report: &mut String) {
     for (side, carved) in [
         (AwdSide::Fast, CarvedClass::AccretingWdFast),
         (AwdSide::Slow, CarvedClass::AccretingWdSlow),
@@ -703,7 +706,7 @@ fn compare_accreting(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut St
                 _ => None,
             })
             .collect();
-        let engine = engine_members(galaxy, carved, 300);
+        let engine = engine_members(cells, carved, 300);
         let marks: [AwdMarkOf; 5] = [
             (
                 "white dwarf mass",
@@ -757,8 +760,9 @@ fn compare_accreting(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut St
     }
 }
 
-/// The X-ray binaries' marks of `entries` against the engine's members, into `report`.
-fn compare_xray(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String) {
+/// The X-ray binaries' marks of `entries` against the engine's members, drawn from `cells`, into
+/// `report`.
+fn compare_xray(cells: &MemberCells, entries: &[&ListedBinary], report: &mut String) {
     let listed: Vec<&XrbEntry> = entries
         .iter()
         .filter_map(|e| match e {
@@ -766,7 +770,7 @@ fn compare_xray(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String)
             _ => None,
         })
         .collect();
-    let engine = engine_members(galaxy, CarvedClass::XrayBinary, 200);
+    let engine = engine_members(cells, CarvedClass::XrayBinary, 200);
     let marks: [XrbMarkOf; 4] = [
         (
             "log accretor mass",

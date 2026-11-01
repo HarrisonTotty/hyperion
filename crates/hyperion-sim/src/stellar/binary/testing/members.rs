@@ -20,6 +20,8 @@ use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
 use crate::tables::binary::{AwdDonorKind, CLASS_SHARES, XrbHostKind};
 use crate::units::{MetresPerSecond, Seconds, SolarMasses, SolarMassesPerYear, Years};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::Mix;
 
@@ -291,7 +293,8 @@ pub fn brute_force_class_members(
 }
 
 /// [`brute_force_class_members`] on the cells of stream `stream`, so that a test can split the
-/// sampling between threads, each with its own stream, and join the members in stream order.
+/// sampling between threads, each with its own stream, and join the members in stream order:
+/// [`MemberCells::members_in`] of a cache of its own.
 ///
 /// Each layer with a share s of the class's hosts contributes `round(n s)` members, from random
 /// cells within 4,000 ly along x and 2,000 ly along y of the point 26,000 ly out along +y, up to
@@ -308,39 +311,134 @@ pub fn brute_force_class_members_in(
     n: usize,
     stream: u64,
 ) -> Vec<ClassMember> {
-    let row = CLASS_SHARES.row(class);
-    let mut members = Vec::with_capacity(n + 8);
-    let mut cell = Vec::new();
-    for (index, band) in (0_u64..).zip(MassBand::ALL) {
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            clippy::cast_precision_loss,
-            reason = "a member count, rounded, of a test's few thousand"
-        )]
-        let wanted = (n as f64 * row.layer_share(band)).round() as usize;
-        if wanted == 0 {
-            continue;
-        }
-        let layer = Layer::from(band);
-        let mut mix = Mix(0x0b17_08a0 ^ (stream << 8) ^ index);
-        let size = i32::try_from(layer.cell_size_ly()).expect("a small cell size");
-        let (along, across) = ((4_000 / size).max(1), (2_000 / size).max(1));
-        let start = members.len();
-        while members.len() - start < wanted {
-            let key = CellKey::new(
-                layer,
-                [mix.within(along), 26_000 / size + mix.within(across), 0],
-            )
-            .expect("a cell of the grid");
-            generate_cell(galaxy, key, &mut cell);
-            for record in cell.iter().take(8) {
-                members_of(galaxy, record, &[class], &mut members);
-            }
-        }
-        members.truncate(start + wanted);
+    MemberCells::new(galaxy).members_in(class, n, stream)
+}
+
+/// The carved classes a cell's members are kept of ([`MemberCells`]): every one, each at its
+/// [`kept_index`].
+const KEPT_CLASSES: [CarvedClass; 5] = [
+    CarvedClass::AccretingWdFast,
+    CarvedClass::AccretingWdSlow,
+    CarvedClass::XrayBinary,
+    CarvedClass::StellarMerger,
+    CarvedClass::NeutronStarMerger,
+];
+
+/// Where `class` sits in [`KEPT_CLASSES`]. The `match` is exhaustive, so a class added to
+/// [`CarvedClass`] fails to compile here until it is placed, and a place [`KEPT_CLASSES`] lacks
+/// fails [`MemberCells::members_in`] at once, where a draw from cells that keep none of the class
+/// would never end.
+const fn kept_index(class: CarvedClass) -> usize {
+    match class {
+        CarvedClass::AccretingWdFast => 0,
+        CarvedClass::AccretingWdSlow => 1,
+        CarvedClass::XrayBinary => 2,
+        CarvedClass::StellarMerger => 3,
+        CarvedClass::NeutronStarMerger => 4,
     }
-    members
+}
+
+/// The prior members of the cells that the draws of [`brute_force_class_members_in`] have opened
+/// in one galaxy, each cell's members of every carved class found and kept, so that draws sharing
+/// it, of any class and stream and on any threads, run each cell through the engine once (twice
+/// at most where two draws first open it together).
+///
+/// A draw takes its cells at random from a box of each layer: 251 by 125 cells of layer C, 125 by
+/// 63 of D and 63 by 31 of E. So a draw of a rare class opens each cell many times: the fast
+/// accreting white dwarfs, about one in 2 × 10⁵ of layer C's first eight records under every 27
+/// hold (2026-11-01), open about 4 × 10⁵ cells a stream for its 14 of 300, each of the box's
+/// 31,375 some twelve times, and the sixteen streams of P11.T8.f's test some two hundred. A cell's members are its records' first attempts run through the engine, a function of
+/// the galaxy and the cell alone, so a draw from the kept cells is the draw without them, member
+/// for member, whatever else they hold and in whatever order they were filled.
+///
+/// It grows with the cells opened, holding the members alone: about one cell in a hundred of
+/// layer C has one.
+#[derive(Debug)]
+pub struct MemberCells<'a> {
+    galaxy: &'a Galaxy,
+    kept: Mutex<BTreeMap<CellKey, Arc<[ClassMember]>>>,
+}
+
+impl<'a> MemberCells<'a> {
+    /// No cells yet, of `galaxy`.
+    #[must_use]
+    pub const fn new(galaxy: &'a Galaxy) -> Self {
+        Self {
+            galaxy,
+            kept: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// [`brute_force_class_members_in`] of the galaxy, `n` members of `class` on the cells of
+    /// stream `stream`, from the kept cells and those it opens, which it keeps.
+    ///
+    /// # Panics
+    ///
+    /// If [`KEPT_CLASSES`] lacks `class`, which a cell would then hold none of. Never else: the
+    /// layers' cells are a few light-years to 128 ly, and the cells it opens lie inside the root
+    /// cube.
+    #[must_use]
+    pub fn members_in(&self, class: CarvedClass, n: usize, stream: u64) -> Vec<ClassMember> {
+        assert_eq!(
+            KEPT_CLASSES.get(kept_index(class)),
+            Some(&class),
+            "a cell keeps the members of every carved class"
+        );
+        let row = CLASS_SHARES.row(class);
+        let mut members = Vec::with_capacity(n + 8);
+        for (index, band) in (0_u64..).zip(MassBand::ALL) {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss,
+                reason = "a member count, rounded, of a test's few thousand"
+            )]
+            let wanted = (n as f64 * row.layer_share(band)).round() as usize;
+            if wanted == 0 {
+                continue;
+            }
+            let layer = Layer::from(band);
+            let mut mix = Mix(0x0b17_08a0 ^ (stream << 8) ^ index);
+            let size = i32::try_from(layer.cell_size_ly()).expect("a small cell size");
+            let (along, across) = ((4_000 / size).max(1), (2_000 / size).max(1));
+            let start = members.len();
+            while members.len() - start < wanted {
+                let key = CellKey::new(
+                    layer,
+                    [mix.within(along), 26_000 / size + mix.within(across), 0],
+                )
+                .expect("a cell of the grid");
+                let cell = self.cell(key);
+                members.extend(cell.iter().filter(|m| m.class == class).cloned());
+            }
+            members.truncate(start + wanted);
+        }
+        members
+    }
+
+    /// The members of every carved class among the first eight records of cell `key`, in record
+    /// and pair order: kept, or found and kept. The engine runs outside the lock, so two draws
+    /// opening one cell at once may both run it; the first kept is the one both return, and the
+    /// two are the same.
+    #[must_use]
+    fn cell(&self, key: CellKey) -> Arc<[ClassMember]> {
+        let kept = self.kept().get(&key).map(Arc::clone);
+        if let Some(cell) = kept {
+            return cell;
+        }
+        let mut records = Vec::new();
+        generate_cell(self.galaxy, key, &mut records);
+        let mut found = Vec::new();
+        for record in records.iter().take(8) {
+            members_of(self.galaxy, record, &KEPT_CLASSES, &mut found);
+        }
+        Arc::clone(self.kept().entry(key).or_insert_with(|| found.into()))
+    }
+
+    /// The kept cells, locked.
+    fn kept(&self) -> MutexGuard<'_, BTreeMap<CellKey, Arc<[ClassMember]>>> {
+        self.kept.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// Where a census draws its grid records ([`class_census_in`]): the cells of its layer that meet a
@@ -854,6 +952,103 @@ mod tests {
             }
         }
         assert!(owner.iter().all(Option::is_some));
+    }
+
+    /// The walk of [`brute_force_class_members_in`] as it was before [`MemberCells`]: each cell it
+    /// meets opened and its records run through the engine, every time.
+    fn opening_every_cell(
+        galaxy: &Galaxy,
+        class: CarvedClass,
+        n: usize,
+        stream: u64,
+    ) -> Vec<ClassMember> {
+        let row = CLASS_SHARES.row(class);
+        let mut members = Vec::with_capacity(n + 8);
+        let mut cell = Vec::new();
+        for (index, band) in (0_u64..).zip(MassBand::ALL) {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss,
+                reason = "a member count, rounded, of a test's few"
+            )]
+            let wanted = (n as f64 * row.layer_share(band)).round() as usize;
+            if wanted == 0 {
+                continue;
+            }
+            let layer = Layer::from(band);
+            let mut mix = Mix(0x0b17_08a0 ^ (stream << 8) ^ index);
+            let size = i32::try_from(layer.cell_size_ly()).unwrap();
+            let (along, across) = ((4_000 / size).max(1), (2_000 / size).max(1));
+            let start = members.len();
+            while members.len() - start < wanted {
+                let key = CellKey::new(
+                    layer,
+                    [mix.within(along), 26_000 / size + mix.within(across), 0],
+                )
+                .unwrap();
+                generate_cell(galaxy, key, &mut cell);
+                for record in cell.iter().take(8) {
+                    members_of(galaxy, record, &[class], &mut members);
+                }
+            }
+            members.truncate(start + wanted);
+        }
+        members
+    }
+
+    /// A draw from kept cells is the draw that opens every cell it meets, member for member: a
+    /// draw of one slow accreting white dwarf fills some cells, and draws of two on the same
+    /// stream, which meets those cells again first, and of one on another stream read them; and a
+    /// kept cell's members of each carved class are that class's alone.
+    #[test]
+    #[ignore = "slow: some thousands of grid pairs run through the binary engine, twice"]
+    fn a_draw_from_kept_cells_is_the_draw_that_opens_every_cell() {
+        let galaxy = Galaxy::from_params(
+            crate::rng::Seed::new(0x0b17_08a0),
+            crate::galaxy::params::GalaxyParams::milky_way_like(),
+        )
+        .unwrap();
+        let class = CarvedClass::AccretingWdSlow;
+        let cells = MemberCells::new(&galaxy);
+        let first = cells.members_in(class, 1, 0);
+        let kept = cells.kept().len();
+        for (n, stream) in [(2, 0), (1, 1)] {
+            let members = cells.members_in(class, n, stream);
+            assert!(!members.is_empty(), "{n} on stream {stream}");
+            assert_eq!(
+                members,
+                opening_every_cell(&galaxy, class, n, stream),
+                "{n} on stream {stream}"
+            );
+        }
+        assert_eq!(first, opening_every_cell(&galaxy, class, 1, 0));
+        assert!(
+            cells.kept().len() > kept,
+            "the later draws open cells of their own"
+        );
+        // A kept cell serves a draw of any class: its members of each are those a draw of that
+        // class alone finds, in their order, in the cells that hold one and in some that hold none.
+        let keys: Vec<CellKey> = {
+            let kept = cells.kept();
+            let holding = kept.iter().filter(|(_, m)| !m.is_empty()).map(|(k, _)| *k);
+            holding.chain(kept.keys().take(8).copied()).collect()
+        };
+        assert!(keys.len() > 8, "some kept cell holds a member");
+        let mut records = Vec::new();
+        for key in keys {
+            let cell = cells.cell(key);
+            generate_cell(&galaxy, key, &mut records);
+            for class in KEPT_CLASSES {
+                let mut alone = Vec::new();
+                for record in records.iter().take(8) {
+                    members_of(&galaxy, record, &[class], &mut alone);
+                }
+                let kept: Vec<ClassMember> =
+                    cell.iter().filter(|m| m.class == class).cloned().collect();
+                assert_eq!(kept, alone, "{key:?} {class:?}");
+            }
+        }
     }
 
     /// A site's cells cover its box in each layer, its first cell the one that holds its low
