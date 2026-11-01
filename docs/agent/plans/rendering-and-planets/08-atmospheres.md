@@ -24492,3 +24492,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     ray march: a build without its dispatch took 0.53 and 0.60 s, and one without the composite
     0.75 and 0.87 s beside it. Its far-limb footprint marches up to ten rays a limb texel. The next
     lever for a giant beyond 10⁹ m is its disc table (R08.T16.b.2), once its gate opens.
+- **An aerosol mode's τ over the whole sky** (the owner's report, 2026-11-01: atmospheres opaque;
+  lane `fix-atmosphere-opaque`): `assemble.ts`'s `modesOf` gives each mode's term its record τ(550)
+  times its `coverage`, as `bodyCoverOf` and an envelope's floor already took it; a mode of
+  coverage 0 takes no term. `ATMOSPHERE_OPTICS_VERSION` is 6. A uniform medium still veils a broken
+  deck's clear share, which R11's coverage field draws (Design note 10 there).
