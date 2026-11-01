@@ -496,9 +496,16 @@ export class AutoExposure {
     const metering = this.metering;
     const control = this.#control;
     if (this.#opensAtMeter && metering.kind === "metered") {
-      // Opened at the first metered value, as `ENABLE` sets it, not walked to it.
+      // Opened at the first metered value, as `ENABLE` sets it, not walked to it: a cut's first
+      // reading, so that a clipped one is a bound the next readings snap past, and one inside the
+      // range ends the cut, AUTO smoothing from there.
       this.#opensAtMeter = false;
-      this.#control = { kind: "auto", ev100: metering.ev100 };
+      this.#cut = true;
+      this.#control = {
+        kind: "auto",
+        ev100:
+          range === null ? metering.ev100 : this.#snapped(metering.ev100, metering.ev100, range),
+      };
     } else if (control.kind !== "manual") {
       // `AUTO` follows the value, and a system inhibit resumes from where it was held and smooths
       // from there, or takes the new cause; an operator's inhibit is untouched (R02's

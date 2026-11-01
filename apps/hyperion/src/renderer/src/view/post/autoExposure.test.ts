@@ -459,6 +459,22 @@ describe("an exposure that opens at its meter (the owner's request)", () => {
     ]);
   });
 
+  it("takes a clipped first reading as a bound, and snaps past it at the next (fix-view-light)", () => {
+    const exposure = new AutoExposure({
+      source: SOURCE,
+      program: VIEW_CAMERA,
+      control: { kind: "manual", triple: programTriple(VIEW_CAMERA, -14) },
+      meter: "average",
+      opensAtMeter: true,
+    });
+    exposure.noteImage(true);
+    const [bound = 0, landed = 0] = afterEachHistogram(exposure, SUNLIT, 1, 2);
+    expect([bound < settledEv(SUNLIT) - 1, Math.abs(landed - settledEv(SUNLIT)) < 0.25]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
   it("smooths as AUTO does from then on", () => {
     const exposure = opening();
     exposure.step(histogram([[120, 10]]), 1 / 60);
