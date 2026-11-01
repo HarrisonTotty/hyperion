@@ -1682,6 +1682,8 @@ tables must keep that under one in ten, which a test counts.
   every supernova entry's index unchanged. At the centre the list's index is 16 bits (T8.e.b), so
   T8.f lists the classes there at that limit and wires `check_feature_list_headroom` beside
   `check_index_headroom` in `crates/hyperion-server/src/compute/galaxies.rs`.
+  _As built (lane `p11-t8f`, 2026-11-01; at version 24, held at 27): see Risks, "Deviations in
+  P11.T8.f, as built"._
 
 Files: `galaxy/catalogue_classes/binary/{mod,awd,xrb,merger,nsm,feature}.rs`,
 `galaxy/catalogue_classes/mod.rs` (the new `ClassId`), `stellar/binary/scan.rs`,
@@ -7179,3 +7181,42 @@ galaxy_sweeps`.
     about 0.3% of layer D beside T7's.
   - _Acceptance:_ `cargo test -p hyperion-sim binary::ia`, `stellar::rules::ia_hold` and
     `tables::binary`; slow, the two `ia_hold::slow` tests (`just test-slow`).
+- **Deviations in P11.T8.f, as built** (lane `p11-t8f`, 2026-11-01; at version 24 behind
+  `FEATURE_BINARIES_VERSION` = 27; `golden_diff.py` extended only, `rng/tags.golden` gaining
+  `member.recycled`).
+  - _The hold._ `GalaxyRules::feature_binaries` (`FeatureBinariesRules`), `every_27_hold()`, the
+    tripwire `the_feature_binaries_are_held_only_until_the_27_bump`. At 27 the goldens
+    `accreting_white_dwarf_golden`, `xray_binary_golden`, `stellar_merger_golden`,
+    `neutron_star_merger_golden` and `binary_events_golden` move (the catalogue's give-up).
+  - _Hosts._ `catalogue_classes::binary::{BinaryHost, HostPlace, ListedHost, ListedBinary}`. Every
+    class's scan marks carry `host()`; `id()` is now a `SystemId` and `component()` an `Option`.
+    `candidate_of(galaxy, &scan)` and `{awd,xrb,merger,nsm}_marks_at` draw at either host; the
+    catalogue's draws are unchanged.
+  - _Counts (lean, 2026-11-01)._ A feature's hosts are its member systems × m̄_f × the class's
+    rate in its population, a globular's systems its present mass ÷ its population's mean system
+    mass, weighted by its bands. The X-ray binaries use `XrayBinaries::hosts_per_formed_mass`
+    (T8.b's sides), and a globular's are `ClusterModel::xray_binaries`, the only class P09.T9.e's
+    law covers. The catalogue keeps `catalogue_share`, all but `features_share`, which leaves out
+    the halo's discrete share.
+  - _Members._ The API is `FeatureLevelList::{binary_entry, binary_entries}` and
+    `MemberRecord::{listed_class, recycled, marked_attempt, max_separation}`. A listed or marked
+    member's stars and brief come from its own pair.
+  - _Multiplicity (lean)._ `members::hard_soft_separation` is G M ÷ σ(r)², the plan's words; that is
+    4× Heggie's kT boundary, for the owner. From 27, `carve::redraws` (was `grid_redraws`) redraws
+    a feature member's carved pair. A forced multiple left single is not redrawn (T2.b's point).
+  - _Fractions._ An open cluster's are `counts::open_cluster_binary_fraction`, MF × the period law
+    inside the boundary at r_h; a globular's stay 5% and 1%.
+  - _Recycled marks (lean)._ `member.recycled` marks millisecond pulsars and blue stragglers; a
+    marked member takes the first of `RedrawAttempt::marked` 8–255 (`SystemStars::generate_at`)
+    that bears its mark out (`BLUE_STRAGGLER_SEPARATION` 0.03 au, ours), else is unmarked. The X-ray
+    binaries' mark is the list's `XRAY_BINARY` class.
+  - _Centre._ `centre::binaries::CentreBinaries` follows the recent classes: primaries formed × m̄_f
+    × the nuclear disc's rate (companions counted, ruling 144.4's lean). Its members'
+    `CentreMemberRecord` class is the episode's: P09.T37 reads the entry for their stars.
+  - _Server._ `check_feature_list_headroom` runs at every version (`ComputeError::UnplayableCentre`),
+    some 65 ms a galaxy build.
+  - _Not built._ P09.T38 (not on the tip); the neutron-star mergers' χ² (the lists expect under
+    one); ruling 140.5's M4 re-check.
+  - _For P15.T10.b._ Listed candidates are thinned by their members' ages: the nurseries keep none,
+    the young open clusters about half. The lists read the galaxy's share table and samplers
+    (`GalaxyRules::binary_tables`), independently of `feature_binaries`.

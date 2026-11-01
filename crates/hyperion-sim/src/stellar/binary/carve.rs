@@ -33,7 +33,22 @@ pub(crate) fn redraws(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityC
         (SystemOrigin::FeatureMember { .. }, MultiplicityContext::ForcedMultiple { .. }) => {
             galaxy.rules().feature_binaries == FeatureBinariesRules::Listed
         }
-        _ => false,
+        (
+            SystemOrigin::Grid(_),
+            MultiplicityContext::ForcedSingle | MultiplicityContext::ForcedMultiple { .. },
+        )
+        | (
+            SystemOrigin::FeatureMember { .. },
+            MultiplicityContext::Free | MultiplicityContext::ForcedSingle,
+        )
+        | (
+            SystemOrigin::CentreMember { .. }
+            | SystemOrigin::GlobalListMember { .. }
+            | SystemOrigin::CatalogueSystem(_),
+            MultiplicityContext::Free
+            | MultiplicityContext::ForcedSingle
+            | MultiplicityContext::ForcedMultiple { .. },
+        ) => false,
     }
 }
 

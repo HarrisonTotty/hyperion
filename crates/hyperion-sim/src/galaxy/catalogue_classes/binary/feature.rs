@@ -343,18 +343,31 @@ pub(crate) fn catalogue_share(galaxy: &Galaxy, row: &ClassShareRow, component: &
     }
 }
 
-/// The share of a carved class's hosts in `component` that sit in features: plan 09's share φ of
-/// the component's systems in each band inside features (for a sub-disc of the old thin disc its
-/// own, as `FeatureShares::component_field_factor` reads it), weighted by the share of the class's
-/// hosts whose primary lies in the band ([`ClassShareRow::layer_share`]).
+/// The share of a carved class's hosts in `component` that sit in catalogue features, whose
+/// lists hold them: plan 09's share φ of the component's systems in each band inside features (for
+/// a sub-disc of the old thin disc its own, as `FeatureShares::component_field_factor` reads it;
+/// for the halo its globulars' alone, its discrete share being plan 10's streams' and dwarf
+/// cores'), weighted by the share of the class's hosts whose primary lies in the band
+/// ([`ClassShareRow::layer_share`]).
 #[must_use]
 pub(crate) fn features_share(galaxy: &Galaxy, row: &ClassShareRow, component: &Component) -> f64 {
     let shares = galaxy.feature_shares();
     let population = component.population();
     MassBand::ALL.iter().fold(0.0, |sum, &band| {
-        let phi = match component.sub_disc() {
-            Some(sub_disc) => shares.phi_sub_disc(sub_disc) + shares.phi_globular(population, band),
-            None => shares.phi(population, band),
+        let phi = match (component.sub_disc(), population) {
+            (Some(sub_disc), _) => {
+                shares.phi_sub_disc(sub_disc) + shares.phi_globular(population, band)
+            }
+            (None, Population::Halo) => shares.phi_globular(population, band),
+            (
+                None,
+                Population::YoungThinDisc
+                | Population::OldThinDisc
+                | Population::ThickDisc
+                | Population::Bulge
+                | Population::LongBar
+                | Population::NuclearDisc,
+            ) => shares.phi(population, band),
         };
         sum + row.layer_share(band) * phi
     })
@@ -382,8 +395,8 @@ fn carved_of(class: ClassId) -> Option<CarvedClass> {
     }
 }
 
-/// Whether `class` is one of plan 11's binary classes, which a list holds through
-/// [`listed_entry`].
+/// Whether `class` is one of plan 11's binary classes, whose entries a feature's list draws
+/// through the class's own sampler and scan marks (P11.T8.f).
 #[must_use]
 pub fn is_listed_binary(class: ClassId) -> bool {
     carved_of(class).is_some()
@@ -419,13 +432,48 @@ pub(crate) fn hosts_per_formed_mass(
     }
 }
 
+/// The expected hosts of plan 11's binary class `class` in a globular of present mass `mass` whose
+/// members are of `population` ([`FeatureBinaries`]): its systems, the mass over the population's
+/// mean system mass, times the galaxy's mass formed per system, the class's rate and its bands'
+/// globular weights.
+///
+/// # Panics
+///
+/// If `class` is not one of plan 11's binary classes.
+#[must_use]
+pub(crate) fn globular_hosts(
+    galaxy: &Galaxy,
+    class: ClassId,
+    population: Population,
+    mass: SolarMasses,
+) -> f64 {
+    let row = galaxy
+        .rules()
+        .binary_tables
+        .class_shares()
+        .row(carved_of(class).expect("a listed class is plan 11's"));
+    let weights = galaxy.feature_shares().globular_band_weights();
+    let band_weight = MassBand::ALL.iter().fold(0.0, |sum, &band| {
+        sum + row.layer_share(band) * weights[band.index()]
+    });
+    mass.value() / galaxy.mean_system_mass(population).value()
+        * galaxy.mean_formed_mass().value()
+        * hosts_per_formed_mass(galaxy, class, population)
+        * band_weight
+}
+
 /// A catalogue feature's hosts of plan 11's binary classes on its list (P11.T8.f; module
 /// documentation): each class's expected hosts and what its entries share with the feature.
 ///
-/// A class's hosts are the feature's budget, the stellar mass its members formed with less what
-/// disruption has taken, times its hosts per solar mass formed in the members' population
-/// ([`hosts_per_formed_mass`]); a globular's X-ray binaries are plan 09's encounter-rate law
-/// (P09.T9.e, [`ClusterModel::xray_binaries`]) in their place.
+/// A class's hosts are the feature's budget, its member systems times the galaxy's mass formed per
+/// system (the share matrix's `r m̄_f` of a system, P11.T7), times the class's hosts per solar mass
+/// formed in the members' population ([`hosts_per_formed_mass`]): so that the features hold
+/// exactly what the catalogue gives up for them ([`features_share`]). A nursery's or an open
+/// cluster's systems are the stellar mass its members formed with, less what disruption has taken,
+/// over that mass per system; a globular's, its present mass over its population's mean system
+/// mass, as plan 09's φ counts them, and each class weighs its bands by the globulars' band weights
+/// (`FeatureShares::globular_band_weights`). A globular's X-ray binaries are plan 09's
+/// encounter-rate law (P09.T9.e, [`ClusterModel::xray_binaries`]) in their place.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FeatureBinaries {
     feature: FeatureRef,
@@ -458,17 +506,18 @@ impl FeatureBinaries {
     #[must_use]
     fn of(galaxy: &Galaxy, stars: &FeatureStars) -> Self {
         let population = stars.population();
-        let formed = stars.formed().value();
-        let globular = stars
-            .is_globular()
+        let globular = stars.is_globular();
+        let model = globular
             .then(|| ClusterModel::from_record(galaxy, stars.feature()))
             .flatten();
+        let formed = stars.formed();
         let classes = LISTED_CLASSES
             .iter()
             .map(|&class| {
-                let expected = match &globular {
+                let expected = match &model {
                     Some(model) if class == ClassId::XRAY_BINARY => model.xray_binaries(),
-                    _ => formed * hosts_per_formed_mass(galaxy, class, population),
+                    Some(_) => globular_hosts(galaxy, class, population, formed),
+                    None => formed.value() * hosts_per_formed_mass(galaxy, class, population),
                 };
                 (class, expected)
             })
@@ -568,6 +617,10 @@ impl ListedBinary {
     }
 
     /// Its carved class, which its timeline's [`carved_class`] is.
+    ///
+    /// # Panics
+    ///
+    /// Never: a listed binary is of one of plan 11's five classes.
     #[must_use]
     pub fn carved(&self) -> CarvedClass {
         carved_of(self.class()).expect("a listed binary is of plan 11's classes")

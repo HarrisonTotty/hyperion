@@ -11,9 +11,9 @@
 //! [`AccretingWdSlow`]), the X-ray binaries (P11.T8.b, [`XrayBinaries`]), and the stellar mergers
 //! (P11.T8.c, [`StellarMergers`]) and the neutron-star mergers (P11.T8.d, [`NeutronStarMergers`]),
 //! which thin on [`ClassHosts`]. From generator version 27 the same classes are listed inside
-//! features too (P11.T8.f, [`feature`]): a candidate is drawn at a [`BinaryHost`], a catalogue
-//! cell's site or a feature's list entry, and the catalogue gives up the features' share of its
-//! hosts.
+//! features too (P11.T8.f, the crate's `feature` module): a candidate is drawn at a [`BinaryHost`],
+//! a catalogue cell's site or a feature's list entry ([`ListedBinary`]), and the catalogue gives
+//! up the features' share of its hosts.
 //!
 //! # The fitted tables' hold
 //!
@@ -47,7 +47,7 @@ pub use awd::{
     AwdProcess, AwdSide, GIANT_DONOR_CORE_MASS, GIANT_DONOR_TEMPERATURE_K,
     HELIUM_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, OXYGEN_NEON_MIN_MASS,
 };
-pub use feature::{BinaryHost, HostPlace, ListedHost};
+pub use feature::{BinaryHost, HostPlace, ListedBinary, ListedHost, is_listed_binary};
 pub use hosts::{ClassHosts, HostComponent};
 pub(crate) use merger::{
     MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION, MergerChannelRules, MergerClassRules,

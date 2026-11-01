@@ -276,6 +276,7 @@ impl StellarMergers {
 
     /// The class's test on `candidate`: its timeline from its marks, kept if [`carved_class`]
     /// gives the class.
+    #[must_use]
     pub(crate) fn test(candidate: MergerCandidate) -> Option<MergerEntry> {
         let MergerCandidate {
             scan,
@@ -471,8 +472,10 @@ pub struct MergerEntry {
 }
 
 impl MergerEntry {
-    /// The record of the entry's system, of origin [`SystemOrigin::CatalogueSystem`] of the class,
-    /// at its site at the epoch.
+    /// The record of the entry's system, of origin
+    /// [`SystemOrigin::CatalogueSystem`](crate::galaxy::placement::SystemOrigin::CatalogueSystem)
+    /// of the class, at its site at the epoch; for a feature's list entry (P11.T8.f), of its
+    /// feature's or the galactic centre's member origin, at its list position.
     #[must_use]
     pub const fn record(&self) -> &SystemRecord {
         &self.record

@@ -30,6 +30,7 @@ use crate::galaxy::placement::SystemOrigin;
 use crate::id::{CentreMemberId, MemberSlot, SystemId};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::units::Years;
+use crate::units::consts::METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND;
 
 use super::CentreModel;
 use super::classes::age_components;
@@ -110,7 +111,10 @@ impl CentreBinaries {
             .mark()
             .pick_weighted(&weights, total)?;
         let component = components[picked];
-        let class_of = centre_class(model, u8::try_from(picked).ok()?)?;
+        let class_of = centre_class(
+            model,
+            u8::try_from(picked).expect("one of the centre's six episodes"),
+        )?;
         let at = position(model, &component, key, seed);
         let mut velocity = Stream::open(seed, tags::CENTRE_VELOCITY, key);
         let velocity_km_s = model.distribution(class_of.tracer).draw_velocity(
@@ -120,7 +124,9 @@ impl CentreBinaries {
         )?;
         let position = galactic(at);
         let composition = centre_composition();
-        let velocity = crate::coords::GalacticVelocity::new(velocity_km_s.map(|c| c * 1e3));
+        let velocity = crate::coords::GalacticVelocity::new(
+            velocity_km_s.map(|c| c * METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND),
+        );
         let host = ListedHost::new(
             Population::NuclearDisc,
             (

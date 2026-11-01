@@ -875,8 +875,10 @@ pub struct XrbEntry {
 }
 
 impl XrbEntry {
-    /// The record of the entry's system, of origin [`SystemOrigin::CatalogueSystem`] of the class,
-    /// at its position at the epoch.
+    /// The record of the entry's system, of origin
+    /// [`SystemOrigin::CatalogueSystem`](crate::galaxy::placement::SystemOrigin::CatalogueSystem)
+    /// of the class, at its position at the epoch; for a feature's list entry (P11.T8.f), of its
+    /// feature's or the galactic centre's member origin, at its list position.
     #[must_use]
     pub const fn record(&self) -> &SystemRecord {
         &self.record

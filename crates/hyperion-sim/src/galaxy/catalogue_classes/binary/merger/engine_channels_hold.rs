@@ -66,10 +66,13 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
-/// The fixture under every 27 hold but this one: the held arm, version 26's channels.
+/// The fixture under every 27 hold but this one: the held arm, version 26's channels, with P11.T8.f's
+/// hold set back too, whose catalogue gives up the features' share of its hosts.
 fn held() -> Galaxy {
     galaxy().clone().with_rules(GalaxyRules {
         merger_channels: MergerChannelRules::ContactAndEvolved,
+        feature_binaries:
+            crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules::Unlisted,
         ..GalaxyRules::every_27_hold()
     })
 }

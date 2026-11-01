@@ -4,6 +4,7 @@
 use std::fmt::Write as _;
 
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::order::assert_order_independent;
 use std::sync::OnceLock;
 
 use super::*;
@@ -14,7 +15,7 @@ use crate::galaxy::ages::SubDisc;
 use crate::galaxy::catalogue_classes::binary::{AccretingWdFast, AccretingWdSlow};
 use crate::galaxy::catalogue_classes::testing::assert_complementary;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell};
-use crate::galaxy::features::catalogue::FeatureCatalogue;
+use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks};
 use crate::galaxy::features::ids::FeatureProcess;
 use crate::galaxy::features::members::{
     FeatureInterior, FeatureLevelList, MemberRecord, NoInteriorCache, resolve_member,
@@ -524,39 +525,467 @@ fn the_lists_hold_their_expected_hosts() {
     eprint!("{report}");
 }
 
-/// PROBE (removed before commit): how often a close pair near a 12 Gyr turn-off leaves a star
-/// above it.
-#[test]
-#[ignore = "probe"]
-fn probe_blue_stragglers() {
-    use crate::stellar::sse::turn_off_mass;
-    let galaxy = crate::stellar::binary::carve::testing::galaxy();
-    let composition = Composition::from_fe_h(Dex::new(-0.72), HeliumExcess::ZERO);
-    let age = 1.2e10;
-    let m_to = turn_off_mass(Years::new(age), &composition).value();
-    for au in [0.03, 0.1, 0.3, 1.0] {
-        let (mut n, mut above) = (0, 0);
-        for i in 0..600_u32 {
-            let mass = m_to * (0.7 + 0.3 * f64::from(i % 61) / 61.0);
-            let record = crate::stellar::binary::carve::testing::record(&galaxy, i, mass, age);
-            let stars = SystemStars::generate_with(
-                &galaxy,
-                &record,
-                &composition,
-                crate::stellar::multiplicity::MultiplicityContext::ForcedMultiple {
-                    max_separation: Some(crate::units::Metres::new(au * 1.495_978_707e11)),
-                },
-            );
-            n += 1;
-            let Some(state) = stars.state_at(crate::time::UniverseTime::EPOCH) else {
-                continue;
-            };
-            if state.stars().iter().any(|s| {
-                s.phase() == crate::stellar::Phase::MainSequence && s.mass().value() > m_to * 1.02
-            }) {
-                above += 1;
-            }
+/// The streams a draw of the engine's members is split between: sixteen, whatever the cores, as
+/// the integration tests' (`tests/common/binaries.rs`).
+const MEMBER_STREAMS: u64 = 16;
+
+/// `n` of the engine's prior members of `class` near the solar circle, drawn on
+/// [`MEMBER_STREAMS`] threads and joined in stream order.
+fn engine_members(
+    galaxy: &Galaxy,
+    class: CarvedClass,
+    n: usize,
+) -> Vec<crate::stellar::binary::testing::ClassMember> {
+    use crate::stellar::binary::testing::brute_force_class_members_in;
+    let share = n.div_ceil(16);
+    let mut members = Vec::with_capacity(n + 16);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..MEMBER_STREAMS)
+            .map(|s| scope.spawn(move || brute_force_class_members_in(galaxy, class, share, s)))
+            .collect();
+        for handle in handles {
+            members.extend(handle.join().expect("a member draw finishes"));
         }
-        eprintln!("m_to {m_to:.3}: {au} au: {above} of {n} above the turn-off");
+    });
+    members.truncate(n);
+    members
+}
+
+/// `n` of the engine's stellar mergers near the solar circle, each with its weight, drawn on
+/// [`MEMBER_STREAMS`] threads.
+fn engine_mergers(galaxy: &Galaxy, n: usize) -> Vec<(f64, f64, f64, f64)> {
+    use crate::stellar::binary::testing::brute_force_merger_members_in;
+    let share = n.div_ceil(16);
+    let mut members = Vec::with_capacity(n + 16);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..MEMBER_STREAMS)
+            .map(|s| {
+                scope.spawn(move || {
+                    brute_force_merger_members_in(galaxy, CarvedClass::StellarMerger, share, s)
+                })
+            })
+            .collect();
+        for handle in handles {
+            members.extend(handle.join().expect("a merger draw finishes"));
+        }
+    });
+    members.truncate(n);
+    members
+        .iter()
+        .map(|m| {
+            let [a, b] = m.before().stars().map(|s| s.mass().value());
+            let (heavy, light) = (a.max(b), a.min(b));
+            (
+                crate::math::log10(a + b),
+                light / heavy,
+                crate::math::log10(m.record().primary_initial_mass().value()),
+                m.weight(),
+            )
+        })
+        .collect()
+}
+
+/// The chi-square per degree of freedom of `observed`, each value with its weight, against
+/// `expected`'s deciles, the weighted counts scaled to the members' effective number (Σw)² ÷ Σw²,
+/// and that number; `None` with fewer than 50 expected values or 10 observed.
+fn decile_chi_square(expected: &[f64], observed: &[(f64, f64)]) -> Option<(f64, f64)> {
+    let mut sorted: Vec<f64> = expected.iter().copied().filter(|v| v.is_finite()).collect();
+    let observed: Vec<(f64, f64)> = observed
+        .iter()
+        .copied()
+        .filter(|(v, _)| v.is_finite())
+        .collect();
+    if sorted.len() < 50 || observed.len() < 10 {
+        return None;
     }
+    sorted.sort_by(f64::total_cmp);
+    let edges: Vec<f64> = (1..10).map(|k| sorted[k * sorted.len() / 10]).collect();
+    let mut weights = [0.0_f64; 10];
+    for &(v, w) in &observed {
+        weights[edges.partition_point(|&e| e <= v)] += w;
+    }
+    let total: f64 = observed.iter().map(|(_, w)| w).sum();
+    let squares: f64 = observed.iter().map(|(_, w)| w * w).sum();
+    let effective = total * total / squares;
+    let each = effective / 10.0;
+    let statistic: f64 = weights
+        .iter()
+        .map(|w| {
+            let o = w / total * effective;
+            (o - each) * (o - each) / each
+        })
+        .sum();
+    Some((statistic / 9.0, effective))
+}
+
+/// A mark of an accreting white dwarf: its name, and its value of a listed entry and of an engine
+/// member.
+type AwdMarkOf = (
+    &'static str,
+    fn(&AwdEntry) -> f64,
+    fn(&crate::stellar::binary::testing::AccretingMarks) -> f64,
+);
+
+/// A mark of an X-ray binary: its name, and its value of a listed entry and of an engine member.
+type XrbMarkOf = (
+    &'static str,
+    fn(&XrbEntry) -> f64,
+    fn(&crate::stellar::binary::testing::XrayMarks) -> f64,
+);
+
+/// The scratch tables' tolerance, as P11.T8.a's and T8.c's: each mark's chi-square per degree of
+/// freedom under 290, which refuses only a mark whose engine members all but fall into one tenth of
+/// the listed entries' law. P15.T10.b's fit must bring every mark under the 99.9% point, about 3.1
+/// at nine degrees of freedom; a mark over it is a finding, not a failure.
+const SCRATCH_CHI_SQUARE_PER_DOF: f64 = 290.0;
+
+/// The classes' samplers as they draw inside features (P11.T8.f), under every 27 hold, against the
+/// engine's members of each class near the solar circle (`brute_force_class_members`): every mark
+/// both define, the engine's members binned in the listed entries' deciles, by chi-square per
+/// degree of freedom, printed for the record, each under the scratch tables' tolerance: 290 for the
+/// accreting white dwarfs and the mergers, and 0.97 of the members compared for the X-ray binaries,
+/// as P11.T8.b's test holds them. The
+/// listed entries are the walk's features' and the centre's; the neutron-star mergers, of which the
+/// lists expect under one, are not compared.
+#[test]
+#[ignore = "slow: thousands of grid pairs run through the binary engine"]
+fn the_listed_samplers_against_the_engine_s_members() {
+    let galaxy = listed();
+    let mut entries: Vec<&ListedBinary> = the_entries().iter().map(|(_, _, e)| e).collect();
+    let model = galaxy.centre().unwrap();
+    let recent = crate::galaxy::features::centre::recent::CentreRecent::new(
+        galaxy,
+        model,
+        crate::galaxy::features::centre::events::victims::victim_count(galaxy).unwrap(),
+    );
+    let centre: Vec<ListedBinary> = recent
+        .list(galaxy)
+        .entries()
+        .filter(|e| e.class() == ClassId::STELLAR_MERGER || e.class() == ClassId::XRAY_BINARY)
+        .filter_map(|e| {
+            recent
+                .binaries()
+                .entry(galaxy, model, e.class(), e.index())
+                .map(|(entry, _)| entry)
+        })
+        .collect();
+    entries.extend(centre.iter());
+    let mut report = String::new();
+    compare_accreting(galaxy, &entries, &mut report);
+    compare_xray(galaxy, &entries, &mut report);
+    compare_mergers(galaxy, &entries, &mut report);
+    eprint!("{report}");
+}
+
+/// Values of one mark, each with a weight of one.
+fn unit(v: Vec<f64>) -> Vec<(f64, f64)> {
+    v.into_iter().map(|x| (x, 1.0)).collect()
+}
+
+/// The accreting white dwarfs' marks of `entries` against the engine's members, into `report`.
+fn compare_accreting(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String) {
+    for (side, carved) in [
+        (AwdSide::Fast, CarvedClass::AccretingWdFast),
+        (AwdSide::Slow, CarvedClass::AccretingWdSlow),
+    ] {
+        let listed: Vec<&AwdEntry> = entries
+            .iter()
+            .filter_map(|e| match e {
+                ListedBinary::AccretingWd(entry) if entry.scan().side() == side => Some(entry),
+                _ => None,
+            })
+            .collect();
+        let engine = engine_members(galaxy, carved, 300);
+        let marks: [AwdMarkOf; 5] = [
+            (
+                "white dwarf mass",
+                |e| e.scan().white_dwarf_mass().value(),
+                |m| m.white_dwarf_mass.value(),
+            ),
+            (
+                "log donor mass",
+                |e| crate::math::log10(e.binary().donor().mass().value()),
+                |m| crate::math::log10(m.donor_mass.value()),
+            ),
+            (
+                "log period",
+                |e| crate::math::log10(e.binary().orbit().period().value() / 3_600.0),
+                |m| {
+                    m.period
+                        .map_or(f64::NAN, |p| crate::math::log10(p.value() / 3_600.0))
+                },
+            ),
+            (
+                "log rate",
+                |e| crate::math::log10(e.scan().transfer_rate().value()),
+                |m| crate::math::log10(m.transfer_rate.value()),
+            ),
+            (
+                "log recurrence",
+                |e| crate::math::log10(e.scan().recurrence().value()),
+                |m| crate::math::log10(m.recurrence.value()),
+            ),
+        ];
+        for (name, listed_of, engine_of) in marks {
+            let expected: Vec<f64> = listed.iter().map(|e| listed_of(e)).collect();
+            let observed = unit(
+                engine
+                    .iter()
+                    .filter_map(|m| m.accreting().map(engine_of))
+                    .collect(),
+            );
+            let (per_dof, n) = decile_chi_square(&expected, &observed).unwrap();
+            writeln!(
+                report,
+                "{carved:?} {name}: χ²/dof {per_dof:.1} ({n:.0} of {} listed)",
+                listed.len()
+            )
+            .unwrap();
+            assert!(
+                per_dof < SCRATCH_CHI_SQUARE_PER_DOF,
+                "{carved:?} {name}: {per_dof}"
+            );
+        }
+    }
+}
+
+/// The X-ray binaries' marks of `entries` against the engine's members, into `report`.
+fn compare_xray(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String) {
+    let listed: Vec<&XrbEntry> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ListedBinary::XrayBinary(entry) => Some(entry),
+            _ => None,
+        })
+        .collect();
+    let engine = engine_members(galaxy, CarvedClass::XrayBinary, 200);
+    let marks: [XrbMarkOf; 4] = [
+        (
+            "log accretor mass",
+            |e| crate::math::log10(e.scan().accretor_mass().value()),
+            |m| crate::math::log10(m.accretor_mass.value()),
+        ),
+        (
+            "log period",
+            |e| crate::math::log10(e.scan().period().value() / 86_400.0),
+            |m| {
+                m.period
+                    .map_or(f64::NAN, |p| crate::math::log10(p.value() / 86_400.0))
+            },
+        ),
+        (
+            "log donor mass",
+            |e| crate::math::log10(e.binary().donor().mass().value()),
+            |m| crate::math::log10(m.donor_mass.value()),
+        ),
+        (
+            "log rate",
+            |e| {
+                e.scan()
+                    .transfer_rate()
+                    .map_or(f64::NAN, |r| crate::math::log10(r.value()))
+            },
+            |m| {
+                m.transfer_rate
+                    .map_or(f64::NAN, |r| crate::math::log10(r.value()))
+            },
+        ),
+    ];
+    for (name, listed_of, engine_of) in marks {
+        let expected: Vec<f64> = listed.iter().map(|e| listed_of(e)).collect();
+        let observed = unit(
+            engine
+                .iter()
+                .filter_map(|m| m.xray().map(engine_of))
+                .collect(),
+        );
+        let Some((per_dof, n)) = decile_chi_square(&expected, &observed) else {
+            writeln!(report, "XrayBinary {name}: too few to compare").unwrap();
+            continue;
+        };
+        writeln!(
+            report,
+            "XrayBinary {name}: χ²/dof {per_dof:.1} ({n:.0} of {} listed)",
+            listed.len()
+        )
+        .unwrap();
+        assert!(per_dof < 0.97 * n, "XrayBinary {name}: {per_dof} of {n}");
+    }
+}
+
+/// The stellar mergers' marks of `entries` against the engine's weighted mergers, into `report`.
+fn compare_mergers(galaxy: &Galaxy, entries: &[&ListedBinary], report: &mut String) {
+    let log = crate::math::log10;
+    let listed: Vec<(f64, f64, f64)> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ListedBinary::StellarMerger(entry) => {
+                let scan = entry.scan();
+                let (m1, m2) = (scan.primary_mass().value(), scan.secondary_mass().value());
+                Some((log(m1 + m2), m2 / m1, log(m1)))
+            }
+            _ => None,
+        })
+        .collect();
+    let engine = engine_mergers(galaxy, 1_000);
+    for (name, i) in [
+        ("log total mass", 0),
+        ("mass ratio", 1),
+        ("log primary mass", 2),
+    ] {
+        let pick = |t: (f64, f64, f64)| [t.0, t.1, t.2][i];
+        let expected: Vec<f64> = listed.iter().map(|&t| pick(t)).collect();
+        let observed: Vec<(f64, f64)> = engine
+            .iter()
+            .map(|&(a, b, c, w)| (pick((a, b, c)), w))
+            .collect();
+        let Some((per_dof, n)) = decile_chi_square(&expected, &observed) else {
+            writeln!(
+                report,
+                "StellarMerger {name}: too few to compare ({} listed)",
+                listed.len()
+            )
+            .unwrap();
+            continue;
+        };
+        writeln!(
+            report,
+            "StellarMerger {name}: χ²/dof {per_dof:.1} (effective {n:.0}, {} listed)",
+            listed.len()
+        )
+        .unwrap();
+        assert!(
+            per_dof < SCRATCH_CHI_SQUARE_PER_DOF,
+            "StellarMerger {name}: {per_dof}"
+        );
+    }
+}
+
+/// The globulars hold what the catalogue gives up for them: for the bulge, the thick disc and the
+/// halo, the globulars' expected hosts of each class in closed form, their expected mass over the
+/// population's mean system mass (plan 09's φ, as P09.T6's budget test counts their members) times
+/// the mass formed per system, the class's rate and its bands' weights, equal the hosts the
+/// catalogue's components give up for them ([`features_share`]) to 10⁻⁶; and each walked
+/// globular's list expects its own share of them, its mass's. The X-ray binaries, whose globular
+/// count is P09.T9.e's encounter law, are left out.
+#[test]
+fn the_globulars_hold_what_the_catalogue_gives_up_for_them() {
+    let galaxy = listed();
+    let shares = galaxy.feature_shares();
+    let (bulge, thick, halo) = shares.globulars().population_masses();
+    let per_system = galaxy.mean_formed_mass().value();
+    let weights = shares.globular_band_weights();
+    for row in galaxy.rules().binary_tables.class_shares().rows() {
+        if row.class() == CarvedClass::XrayBinary {
+            continue;
+        }
+        let band_weight: f64 = MassBand::ALL
+            .iter()
+            .map(|&b| row.layer_share(b) * weights[b.index()])
+            .sum();
+        for (population, mass) in [
+            (Population::Bulge, bulge),
+            (Population::ThickDisc, thick),
+            (Population::Halo, halo),
+        ] {
+            let rate = row.hosts_per_formed_mass(population);
+            let held = mass / galaxy.mean_system_mass(population).value()
+                * per_system
+                * rate
+                * band_weight;
+            let given: f64 = galaxy
+                .fields()
+                .components()
+                .iter()
+                .filter(|c| c.population() == population)
+                .map(|c| {
+                    c.count_with_unborn()
+                        * c.ages().born_fraction()
+                        * rate
+                        * per_system
+                        * features_share(galaxy, row, c)
+                })
+                .sum();
+            assert!(
+                (held / given - 1.0).abs() < 1e-6,
+                "{:?} {population:?}: held {held:e}, given up {given:e}",
+                row.class()
+            );
+        }
+    }
+    // Each walked globular's list: its mass's share of them.
+    for feature in FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular).take(20) {
+        let Some(binaries) = FeatureBinaries::of_feature(galaxy, &feature, None) else {
+            continue;
+        };
+        let FeatureMarks::Globular(marks) = feature.marks() else {
+            unreachable!("a globular's marks")
+        };
+        let population = binaries.host().population();
+        for &(class, expected) in binaries.expected() {
+            if class == ClassId::XRAY_BINARY {
+                continue;
+            }
+            let row = galaxy
+                .rules()
+                .binary_tables
+                .class_shares()
+                .row(carved_of(class).unwrap());
+            let band_weight: f64 = MassBand::ALL
+                .iter()
+                .map(|&b| row.layer_share(b) * weights[b.index()])
+                .sum();
+            let want = marks.mass().value() / galaxy.mean_system_mass(population).value()
+                * per_system
+                * row.hosts_per_formed_mass(population)
+                * band_weight;
+            assert!(
+                (expected / want - 1.0).abs() < 1e-12,
+                "{class}: {expected} {want}"
+            );
+        }
+    }
+}
+
+/// No catalogue feature's list comes near its 13-bit index: over every globular of the walk, the
+/// fullest list's expected entries, plan 09's and plan 11's, keep eight standard deviations under
+/// 8,192 by a wide margin, ω Centauri's mass included (printed).
+#[test]
+fn the_fullest_globular_s_list_fits_its_index() {
+    use crate::galaxy::features::members::level_list::{fits_list_index, registered_classes};
+    let galaxy = listed();
+    let (mut fullest, mut heaviest) = (0.0_f64, 0.0_f64);
+    for feature in FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular) {
+        let expected: f64 = registered_classes(galaxy, &feature)
+            .iter()
+            .map(ListClass::expected)
+            .sum();
+        if let FeatureMarks::Globular(marks) = feature.marks() {
+            heaviest = heaviest.max(marks.mass().value());
+        }
+        fullest = fullest.max(expected);
+    }
+    // ω Centauri's 3.94 × 10⁶ M☉ (Baumgardt and Hilker) at the halo's rates, the walk's heaviest
+    // scaled.
+    eprintln!(
+        "fullest globular list {fullest:.1} expected entries; heaviest globular {heaviest:.3e} M☉"
+    );
+    assert!(fits_list_index(fullest * 4.0, 8_192), "{fullest}");
+    assert!(fullest > 10.0, "{fullest}");
+}
+
+/// The listed entries are a pure function of their IDs: drawn in either order, each feature's
+/// binary entries are the same, bit for bit.
+#[test]
+fn the_listed_entries_are_order_independent() {
+    let galaxy = listed();
+    let keys: Vec<(FeatureRecord, u16)> = the_entries()
+        .iter()
+        .step_by(37)
+        .map(|(f, i, _)| (*f, *i))
+        .collect();
+    assert!(keys.len() > 20, "{}", keys.len());
+    assert_order_independent(&keys, |(feature, index)| {
+        FeatureLevelList::of(galaxy, feature).binary_entry(galaxy, *index)
+    });
 }

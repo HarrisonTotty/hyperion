@@ -19,7 +19,8 @@
 //! - **Candidate.** Candidate `i`'s streams are keyed by its [`FeatureMemberId`]: three uniforms on
 //!   `member.position` put it in its cell ([`CellProposal::place`]), one mark on `member.accept`
 //!   picks its class under the bound there or rejects it ([`MemberClassTable::pick`]), and an
-//!   accepted candidate is drawn by [`draw_member`].
+//!   accepted candidate is drawn by [`draw_member`](super::draw_member) (from generator version
+//!   27 with its recycled-object mark, P11.T8.f).
 //! - **Claim.** From generator version 26 a band-E member that the feature's list holds, a recent
 //!   death or a luminous blue variable (`members::recent`'s `claimed_by`; plan 09, P09.T36.a), is
 //!   no member of the cells, as a thinned candidate is not: the list's or the cells', never both.
@@ -510,10 +511,10 @@ pub(crate) fn recycled_shares(
             0.0
         }
     };
-    RecycledShares {
-        pulsars: share(table.millisecond_pulsars(model), neutron_stars),
-        blue_stragglers: share(model.blue_stragglers(), at_turn_off),
-    }
+    RecycledShares::new(
+        share(table.millisecond_pulsars(model), neutron_stars),
+        share(model.blue_stragglers(), at_turn_off),
+    )
 }
 
 /// The count of a cell whose candidate 0 is `first` and whose mean is `mean`.

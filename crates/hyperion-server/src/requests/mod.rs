@@ -1761,6 +1761,19 @@ mod tests {
                 .starts_with("this universe cannot be generated: layer A's densest cell"),
             "{unplayable:?}"
         );
+        // So is a centre whose feature-level list cannot number plan 11's carved classes.
+        let too_full = RequestError::from(ComputeError::from(
+            hyperion_sim::galaxy::features::members::ExceedFeatureListError::CentreListTooFull {
+                candidates: 70_000.0,
+            },
+        ));
+        assert_eq!(too_full.code, ErrorCode::Internal);
+        assert!(
+            too_full.message.starts_with(
+                "this universe cannot be generated: the galactic centre's feature-level list"
+            ),
+            "{too_full:?}"
+        );
     }
 
     #[tokio::test]

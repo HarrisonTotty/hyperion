@@ -29,7 +29,7 @@
 //!   companions inside the cluster's hard–soft boundary at their radius
 //!   ([`hard_soft_separation`]), single classes none, and the members plan 09 marks as recycled
 //!   objects (P09.T9.e) on `member.recycled` draw theirs conditionally on the mark
-//!   ([`draw_member_marked`], [`RecycledMark`]): a millisecond pulsar's or a blue straggler's.
+//!   (`draw_member_marked`, [`RecycledMark`]): a millisecond pulsar's or a blue straggler's.
 //!   The X-ray binaries' mark is borne by the X-ray binary class on the cluster's list, whose
 //!   count in a globular is the same encounter-rate law.
 //! - **Velocity**: the cluster's bulk motion plus an isotropic normal of `σ(r) g(m) ÷ g(m_TO)`,
@@ -48,7 +48,7 @@ use crate::math;
 use crate::rng::{ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::Phase;
-use crate::stellar::binary::{Component, pulsar_at};
+use crate::stellar::binary::{Component, is_millisecond_pulsar, pulsar_at};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{
     MARKED_ATTEMPTS, MultiplicityContext, RedrawAttempt, StarIndex,
@@ -226,6 +226,13 @@ impl MemberRecord {
         self.recycled
     }
 
+    /// The redraw attempt of its companions its conditional draw kept, for a member whose
+    /// recycled-object mark they bear out (P11.T8.f); `None` otherwise.
+    #[must_use]
+    pub const fn marked_attempt(&self) -> Option<RedrawAttempt> {
+        self.marked_attempt
+    }
+
     /// The widest semi-major axis its orbits may have: its cluster's hard–soft boundary for a
     /// binary or marked member from generator version 27, `None` otherwise.
     #[must_use]
@@ -302,7 +309,8 @@ impl MemberRecord {
 
 /// The member of `class` at `position` with the ID `id` of `feature`, whose model is `model` and
 /// bulk velocity `bulk`, or `None` if its conditional draw exhausts [`MAX_ATTEMPTS`] (module
-/// documentation), with no recycled-object mark ([`draw_member_marked`]).
+/// documentation), with no recycled-object mark (a cluster's interior marks its members through
+/// the crate's `draw_member_marked`, from generator version 27).
 ///
 /// # Panics
 ///
@@ -332,19 +340,51 @@ pub fn draw_member(
 /// its millisecond pulsars over its expected neutron stars, and its blue stragglers over its
 /// expected binaries at the turn-off, the living binaries of the band the turn-off cuts.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct RecycledShares {
+pub(crate) struct RecycledShares {
     /// The share of a neutron-star class marked millisecond pulsars, in [0, 1].
-    pub pulsars: f64,
+    pulsars: f64,
     /// The share of a binary class at the turn-off marked blue stragglers, in [0, 1].
-    pub blue_stragglers: f64,
+    blue_stragglers: f64,
 }
 
 impl RecycledShares {
     /// No mark.
-    pub const NONE: Self = Self {
+    pub(crate) const NONE: Self = Self {
         pulsars: 0.0,
         blue_stragglers: 0.0,
     };
+
+    /// The shares `pulsars` of a cluster's neutron stars and `blue_stragglers` of its binaries at
+    /// the turn-off.
+    ///
+    /// # Panics
+    ///
+    /// If either is outside [0, 1].
+    #[must_use]
+    pub(crate) fn new(pulsars: f64, blue_stragglers: f64) -> Self {
+        assert!(
+            (0.0..=1.0).contains(&pulsars) && (0.0..=1.0).contains(&blue_stragglers),
+            "recycled shares of {pulsars} and {blue_stragglers}"
+        );
+        Self {
+            pulsars,
+            blue_stragglers,
+        }
+    }
+
+    /// The share of a neutron-star class marked millisecond pulsars.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn pulsars(&self) -> f64 {
+        self.pulsars
+    }
+
+    /// The share of a binary class at the turn-off marked blue stragglers.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn blue_stragglers(&self) -> f64 {
+        self.blue_stragglers
+    }
 
     /// The mark a member of `class` may bear and the share of its class that bears it.
     #[must_use]
@@ -382,7 +422,7 @@ pub(crate) fn is_at_the_turn_off(class: &MemberClass) -> bool {
 ///
 /// In debug builds, if the draw exhausts its attempts.
 #[must_use]
-pub fn draw_member_marked(
+pub(crate) fn draw_member_marked(
     galaxy: &Galaxy,
     feature: &FeatureRecord,
     model: &ClusterModel,
@@ -463,6 +503,23 @@ pub fn draw_member_marked(
     let velocity = member_velocity(galaxy, feature, model, class, position, key, bulk);
     let ctx = MultiplicityContext::ForcedMultiple { max_separation };
     let marked_attempt = bearing_attempt(galaxy, &record, &composition, ctx, marked);
+    // A mark that none of its attempts bears out is not borne: the member is its class's, its
+    // separation its class's boundary or none.
+    let (recycled, max_separation) = if marked_attempt.is_some() {
+        (marked, max_separation)
+    } else {
+        (
+            RecycledMark::Unmarked,
+            mark_and_boundary(
+                galaxy,
+                (feature, model),
+                (class, RecycledShares::NONE),
+                position,
+                key,
+            )
+            .1,
+        )
+    };
     Some(MemberRecord {
         record,
         class: *class,
@@ -472,11 +529,7 @@ pub fn draw_member_marked(
         listed: None,
         marked_attempt,
         max_separation,
-        recycled: if marked_attempt.is_some() {
-            marked
-        } else {
-            RecycledMark::Unmarked
-        },
+        recycled,
     })
 }
 
@@ -643,9 +696,10 @@ pub fn hard_soft_separation(model: &ClusterModel, radius: LightYears, mass: Sola
     Metres::new(GravitationalParameter::from_solar_masses(mass).value() / (sigma * sigma))
 }
 
-/// Whether `stars`, those of `record`, have recycled its primary, a neutron star, into a radio
-/// pulsar at the epoch in a pair the binary engine ran, and hold no carved pair: what a member
-/// marked a millisecond pulsar keeps an attempt by (P11.T8.f).
+/// Whether `stars`, those of `record`, have recycled its primary, a neutron star, into a millisecond
+/// pulsar at the epoch ([`is_millisecond_pulsar`]: under 30 ms and above the death line) in a pair
+/// the binary engine ran, and hold no carved pair: what a member marked a millisecond pulsar keeps
+/// an attempt by (P11.T8.f).
 #[must_use]
 fn recycles(galaxy: &Galaxy, record: &SystemRecord, stars: &SystemStars) -> bool {
     if stars.carved_pair().is_some() {
@@ -660,7 +714,7 @@ fn recycles(galaxy: &Galaxy, record: &SystemRecord, stars: &SystemStars) -> bool
                 &draws,
                 record.age_at_epoch(),
             )
-            .is_some_and(|pulsar| pulsar.recycled() && pulsar.state().is_radio_alive())
+            .is_some_and(|pulsar| pulsar.recycled() && is_millisecond_pulsar(pulsar.state()))
     })
 }
 

@@ -141,7 +141,12 @@ fn the_centre_s_binary_entries_resolve_and_are_their_classes() {
                 );
                 entries.push(entry);
             }
-            None => assert!(resolved.is_err(), "{:?}", e.index()),
+            None => assert_eq!(
+                resolved,
+                Err(crate::galaxy::placement::ResolveSystemError::NoSuchSystem),
+                "{:?}",
+                e.index()
+            ),
         }
     }
     let checked = assert_complementary(

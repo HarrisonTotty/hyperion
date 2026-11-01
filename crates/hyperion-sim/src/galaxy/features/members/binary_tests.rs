@@ -5,12 +5,12 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
+use hyperion_testkit::order::assert_order_independent;
+
 use super::placement::recycled_shares;
 use super::*;
 use crate::Seed;
-use crate::galaxy::catalogue_classes::binary::feature::{
-    FeatureBinariesRules, hosts_per_formed_mass,
-};
+use crate::galaxy::catalogue_classes::binary::feature::{FeatureBinariesRules, globular_hosts};
 use crate::galaxy::features::FeatureProcess;
 use crate::galaxy::features::catalogue::FeatureCatalogue;
 use crate::galaxy::features::interior::MemberClassTable;
@@ -145,7 +145,7 @@ fn forty_seven_tucanae_s_marked_pulsars_are_recycled_and_none_young() {
     let pulsars = table.millisecond_pulsars(&model);
     let neutron_stars = table.expected_of(ClassKind::NeutronStar);
     assert!(
-        (shares.pulsars - pulsars / neutron_stars).abs() < 1e-12 && shares.pulsars > 0.0,
+        (shares.pulsars() - pulsars / neutron_stars).abs() < 1e-12 && shares.pulsars() > 0.0,
         "{shares:?}"
     );
     let mut report = String::new();
@@ -153,14 +153,15 @@ fn forty_seven_tucanae_s_marked_pulsars_are_recycled_and_none_young() {
         report,
         "47 Tuc: {pulsars:.1} pulsars among {neutron_stars:.0} neutron stars (share {:.4}), \
          {:.1} blue stragglers (share {:.4}), Γ {:.3}",
-        shares.pulsars,
+        shares.pulsars(),
         model.blue_stragglers(),
-        shares.blue_stragglers,
+        shares.blue_stragglers(),
         model.encounter_rate()
     )
     .unwrap();
-    // The list's hosts of each class: the budget, its present mass, times the class's rate in the
-    // halo, and the X-ray binaries' encounter-rate law in their place.
+    // The list's hosts of each class: its systems, its present mass over the halo's mean system
+    // mass, at the mass formed per system and the class's rate, and the X-ray binaries'
+    // encounter-rate law in their place.
     for class in [
         ClassId::ACCRETING_WHITE_DWARF,
         ClassId::ACCRETING_WHITE_DWARF_SLOW,
@@ -171,7 +172,7 @@ fn forty_seven_tucanae_s_marked_pulsars_are_recycled_and_none_young() {
         let expected = if class == ClassId::XRAY_BINARY {
             model.xray_binaries()
         } else {
-            model.mass().value() * hosts_per_formed_mass(galaxy, class, model.population())
+            globular_hosts(galaxy, class, model.population(), model.mass())
         };
         writeln!(report, "  {class}: {expected:.4}").unwrap();
     }
@@ -246,7 +247,7 @@ fn forty_seven_tucanae_s_marked_stragglers_lie_above_the_turn_off() {
     let galaxy = milky_way(false);
     let (feature, model, table) = tucanae(galaxy);
     let shares = recycled_shares(galaxy, &model, &table);
-    assert!(shares.blue_stragglers > 0.0, "{shares:?}");
+    assert!(shares.blue_stragglers() > 0.0, "{shares:?}");
     let classes: Vec<MemberClass> = MassBand::ALL
         .iter()
         .flat_map(|&band| table.classes(band))
@@ -419,4 +420,51 @@ fn an_open_cluster_s_binaries_are_its_hard_pairs() {
             of(Multiplicity::Binary) / (of(Multiplicity::Single) + of(Multiplicity::Binary));
         assert!((share - want).abs() < 1e-9, "{generation:?}: {share}");
     }
+}
+
+/// From version 27 a marked member's brief is its stars': plan 06's brief model takes its paired
+/// route from the attempt its conditional draw kept, so that the range row and the system summary
+/// read one system. Its draw is a pure function of its ID, in whichever order members are drawn.
+#[test]
+fn a_marked_member_s_brief_is_its_stars_and_its_draw_its_id_s() {
+    use crate::stellar::brief::{BriefModel, BriefRoute};
+    let galaxy = milky_way(false);
+    let (feature, model, table) = tucanae(galaxy);
+    let shares = recycled_shares(galaxy, &model, &table);
+    let class = *table
+        .classes(MassBand::E)
+        .find(|(c, _)| c.kind == ClassKind::NeutronStar)
+        .unwrap()
+        .0;
+    let marked: Vec<MemberRecord> = members(galaxy, (&feature, &model), &class, shares, 600)
+        .into_iter()
+        .filter(|m| m.marked_attempt().is_some())
+        .take(4)
+        .collect();
+    assert_ne!(marked.len(), 0);
+    for member in &marked {
+        let brief = BriefModel::of_member(galaxy, member);
+        let stars = member.stars(galaxy);
+        assert_eq!(brief.route(), BriefRoute::Paired);
+        assert_eq!(brief.star_count(), stars.star_count());
+        assert_eq!(
+            brief.brief_at(UniverseTime::EPOCH),
+            stars.brief_at(UniverseTime::EPOCH)
+        );
+    }
+    let position = at(&feature, [1.0, 0.0, 0.0]);
+    let ids: Vec<FeatureMemberId> = (0..60)
+        .map(|i| member_id(&feature, MassBand::E, i))
+        .collect();
+    assert_order_independent(&ids, |&id| {
+        draw_member_marked(
+            galaxy,
+            &feature,
+            &model,
+            (&class, shares),
+            &position,
+            id,
+            GalacticVelocity::new([0.0; 3]),
+        )
+    });
 }

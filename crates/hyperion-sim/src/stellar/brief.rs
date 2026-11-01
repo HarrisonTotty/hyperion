@@ -334,12 +334,25 @@ impl BriefModel {
     /// [`BriefModel::new`] would read a grid system's metallicity draw, which a member has no
     /// density component for.
     ///
+    /// A member whose stars are not its context's draw, an entry of plan 11's binary classes on
+    /// its feature's list or a member whose recycled-object mark its companions bear out (P11.T8.f,
+    /// from generator version 27), takes its paired route from those stars, so that its brief
+    /// and its stars are one system.
+    ///
     /// # Panics
     ///
     /// As [`MemberRecord::stars`] does, and as [`BriefModel::new`] if a committed pair-light table
     /// cannot be read.
     #[must_use]
     pub fn of_member(galaxy: &Galaxy, member: &MemberRecord) -> Self {
+        if member.listed_class().is_some() || member.marked_attempt().is_some() {
+            let stars = member.stars(galaxy);
+            return Self {
+                star_count: stars.star_count(),
+                primary: Primary::Paired(Box::new(stars)),
+                rules: galaxy.rules().stellar,
+            };
+        }
         Self::build(
             galaxy,
             member.record(),
