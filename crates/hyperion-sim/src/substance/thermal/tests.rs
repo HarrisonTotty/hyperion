@@ -1031,47 +1031,6 @@ fn under_pore_gas(key: &str, t: f64, air: LidAir, pores: &Pores) -> RegolithIner
     .unwrap_or_else(|e| panic!("{key} at {t} K: {e}"))
 }
 
-/// P14.T49.l is held until the 25 → 26 bump: the rules in force are P14.T49.j's vacuum, and the
-/// tests' switch and 26's helper reach the pore gas.
-#[test]
-fn the_pore_gas_is_held_only_until_the_26_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < PORE_GAS_VERSION,
-        "the 25 → 26 bump puts P14.T49.l's pore gas and outer-system ice on the record: delete \
-         `PORE_GAS_VERSION`, `RegolithInertiaRules` with its `Vacuum` arm and the rules of \
-         `reference_regolith_thermal_inertia_under` (its pores then always read), \
-         `GroundInertia::under`'s guard, the tests' `with_regolith_inertia`, its switch in \
-         `with_every_26_hold` (and the helper, if no other 26 hold is left), and this test; give \
-         `RegolithForm::reference` the lid's air (`LidAir`), its airless water-ice form the outer \
-         system's"
-    );
-    assert_eq!(
-        RegolithInertiaRules::in_force(),
-        RegolithInertiaRules::Vacuum
-    );
-    assert_eq!(
-        with_regolith_inertia(
-            RegolithInertiaRules::PoreGas,
-            RegolithInertiaRules::in_force
-        ),
-        RegolithInertiaRules::PoreGas
-    );
-    assert_eq!(
-        crate::planetary::testing::with_every_26_hold(RegolithInertiaRules::in_force),
-        RegolithInertiaRules::PoreGas
-    );
-    assert_eq!(
-        crate::planetary::testing::with_every_26_hold(|| {
-            with_regolith_inertia(RegolithInertiaRules::Vacuum, RegolithInertiaRules::in_force)
-        }),
-        RegolithInertiaRules::Vacuum
-    );
-    assert_eq!(
-        RegolithInertiaRules::in_force(),
-        RegolithInertiaRules::Vacuum
-    );
-}
-
 /// Every part of `a` is `b`'s, bit for bit.
 fn assert_same_parts(a: &RegolithInertia, b: &RegolithInertia) {
     let parts = |x: &RegolithInertia| {

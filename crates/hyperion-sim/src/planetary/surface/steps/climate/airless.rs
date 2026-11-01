@@ -2375,11 +2375,22 @@ mod tests {
     }
 
     /// P14.T54.a (decision-p14-t54a-passes §3.5): inputs built by hand take P14.T49.j's law at
-    /// their lid at their equilibrium temperature, as the record takes its ground's, and inputs
-    /// that carry a record's Γ take it. The thin-aired reference Mars's `T_eq` lies below its
-    /// mean.
+    /// their lid at their equilibrium temperature under the vacuum, the pore gas's oracle, as the
+    /// record takes its ground's, and inputs that carry a record's Γ take it. The thin-aired
+    /// reference Mars's `T_eq` lies below its mean.
     #[test]
     fn hand_built_inputs_take_the_law_at_their_equilibrium_temperature() {
+        use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+
+        with_regolith_inertia(
+            RegolithInertiaRules::Vacuum,
+            hand_built_inputs_at_the_vacuum,
+        );
+    }
+
+    /// [`hand_built_inputs_take_the_law_at_their_equilibrium_temperature`]'s body, under the
+    /// vacuum.
+    fn hand_built_inputs_at_the_vacuum() {
         use hyperion_testkit::float::assert_same_bits;
 
         use crate::substance::thermal::reference_regolith_thermal_inertia;
@@ -2413,7 +2424,7 @@ mod tests {
         assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);
     }
 
-    /// Under P14.T49.l's pore gas (`with_regolith_inertia`, one of `with_every_26_hold`'s), R09's
+    /// Under P14.T49.l's pore gas, against the vacuum, its oracle (`with_regolith_inertia`), R09's
     /// reference worlds built by hand read the arm's Γ: the thin-aired Mars through the CO₂ in its
     /// pores, and the airless Europa through the outer system's ice; the Moon's and Ceres's
     /// silicate lids, airless, hold to the bit, and the Earths read their air's Γ, which their
@@ -2438,10 +2449,10 @@ mod tests {
         ];
         let mut moved = Vec::new();
         for (name, inputs) in &worlds {
-            let held = Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s;
-            let aired = with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
+            let held = with_regolith_inertia(RegolithInertiaRules::Vacuum, || {
                 Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s
             });
+            let aired = Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s;
             let radiative = inputs.climate().model == ClimateModelKind::RadiativeEquilibrium;
             eprintln!(
                 "{name}: Γ {held:.3} held, {aired:.3} under the pore gas; radiative {radiative}"

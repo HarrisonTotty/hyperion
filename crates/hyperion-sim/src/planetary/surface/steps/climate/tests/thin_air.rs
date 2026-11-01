@@ -550,11 +550,18 @@ fn polar_night_condensation_w_m2(book: &Book, column: usize, latent: f64) -> f64
 /// mean raised to 250 K, where β is held at 1, converges within the orbits' cap, and each pole's
 /// polar-night condensation, surface and snow together, lies within 10% of the slab-free column's
 /// (the ruling's prototype: −7.8%). The slab-free column is the same Mars at 200 K, where β is 0.
+/// The three are solved under P14.T49.j's vacuum law (the tests' oracle of P14.T49.l's pore gas),
+/// as the ruling's comparison was made: under the pore gas the two Mars' grounds read their own
+/// temperatures' Γ, which moves the north pole's figure to −11.7%, not the slab's (`findings.txt`).
 #[test]
 fn a_saturated_slab_converges_and_condenses_a_polar_night_as_the_slab_free_column() {
-    let (saturated, saturated_book) = run_booked(&mars_at(250.0));
-    let (free, free_book) = run_booked(&mars_at(200.0));
-    let (reference_run, reference_book) = run_booked(&reference::mars_like());
+    use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+    let run = |inputs: &CoarseInputs| {
+        with_regolith_inertia(RegolithInertiaRules::Vacuum, || run_booked(inputs))
+    };
+    let (saturated, saturated_book) = run(&mars_at(250.0));
+    let (free, free_book) = run(&mars_at(200.0));
+    let (reference_run, reference_book) = run(&reference::mars_like());
     // Each orbit's move and the site that moved most (decision-r09-t13h-scope §4).
     for (orbit, (moved, site)) in saturated_book.moves().iter().enumerate() {
         let points = saturated.grid.points();

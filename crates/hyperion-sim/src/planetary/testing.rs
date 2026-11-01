@@ -411,9 +411,6 @@ impl Error for SampleContextsError {
 ///
 /// The holds at 26:
 ///
-/// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
-///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
-///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -421,10 +418,6 @@ impl Error for SampleContextsError {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    let run = move || {
-        use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
-        with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
-    };
     run()
 }
 

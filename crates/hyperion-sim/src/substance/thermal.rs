@@ -61,7 +61,7 @@
 //! 102, 6535; Piqueux and Christensen 2009, JGR 114, E09005; neither re-read), so the law
 //! under-reads a regolith under air, Mars's among them. The temperature is the caller's.
 //!
-//! # The pore gas, and the outer system's ice (P14.T49.l, held at 26)
+//! # The pore gas, and the outer system's ice (P14.T49.l, from generator version 26)
 //!
 //! [`regolith_thermal_inertia_with_pores`] adds to `k_eff` the conduction through the gas in the
 //! pores ([`Pores`], [`PoreGas`]), in parallel with the contact and radiative terms, so that a
@@ -92,8 +92,8 @@
 //! constants of the gas's most abundant species, as the condensates' fall speed reads it
 //! ([`condense`](crate::planetary::chem::condense)).
 //!
-//! Behind the same hold, `PORE_GAS_VERSION` ([`RegolithInertiaRules`]), the water-ice reference
-//! form of an airless lid is the outer system's fluffy amorphous ice
+//! From the same version, under [`RegolithInertiaRules::PoreGas`], the water-ice reference form of
+//! an airless lid is the outer system's fluffy amorphous ice
 //! ([`RegolithForm::reference_under`], [`LidAir`]): 67P's porosity, its pebbles' size and amorphous
 //! ice's conductivity in place of the crystal's, so that its radiative term carries the
 //! temperature from the trans-Neptunian objects' inertia of a few SI units to Ganymede's tens. A
@@ -131,11 +131,11 @@ use hyperion_surface::material::{MaterialClass, ShearLayer, form_row};
 
 use super::condensed::CondensedPhase;
 use super::{Basis, MOLAR_GAS_CONSTANT, Source, Substance, SubstanceId, ids};
+use crate::math;
 use crate::planetary::chem::condense::{CollisionConstants, collision_integral};
 use crate::planetary::hooks::surface::REGOLITH_EMISSIVITY;
 use crate::units::consts::{BOLTZMANN_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Metres, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 mod rows;
 #[cfg(test)]
@@ -780,7 +780,7 @@ const ICE_CONTACT_SOURCES: [Source; 2] = [
 
 /// The outer system's icy regolith's porosity (P14.T49.l): 0.80, the middle of comet 67P's
 /// "75–85%" from CONSERT's permittivity of its nucleus (Kofman et al. 2015, Science 349, aab0639,
-/// read by P14.T49.j), as fluffy ice: under the hold, the porosity of an airless lid's water-ice
+/// read by P14.T49.j), as fluffy ice: from 26, the porosity of an airless lid's water-ice
 /// reference form ([`LidAir::Airless`]); Europa's crystalline regolith's 0.64
 /// ([`ICY_REGOLITH_POROSITY`]) stays below it, and a lid under an air, Titan's among them, keeps
 /// it.
@@ -900,8 +900,7 @@ pub enum LidAir {
 
 /// The grain material and reference layer of `family`'s form under `rules` on a lid under `air`,
 /// `None` for a family with none: under [`RegolithInertiaRules::PoreGas`] an airless lid's
-/// water-ice form is the outer system's ([`OUTER_ICE_MATERIAL`]), and every other is the one below
-/// the hold.
+/// water-ice form is the outer system's ([`OUTER_ICE_MATERIAL`]), and every other is P14.T49.j's.
 #[must_use]
 const fn family_form(
     family: MechanicsFamily,
@@ -1492,7 +1491,7 @@ pub fn regolith_thermal_inertia_with_pores(
 
 /// The thermal inertia of the substance `id` as a dry regolith in vacuum of its family's
 /// reference form ([`RegolithForm::reference`]) at `temperature`: the law at a crust's lid, as
-/// P14.T54.a passes it to P14.T24.a, below P14.T49.l's hold.
+/// P14.T54.a passed it to P14.T24.a to version 25, under P14.T49.j's law.
 ///
 /// # Errors
 ///
@@ -1515,8 +1514,8 @@ pub fn reference_regolith_thermal_inertia(
 
 /// The thermal inertia of the substance `id` at its family's reference form under `rules` on a lid
 /// under `air` ([`RegolithForm::reference_under`]), its pores holding `pores`, at `temperature`:
-/// the law at a crust's lid, the one choke point of P14.T49.l's hold, which a ground's inertia
-/// reads at the rules in force.
+/// the law at a crust's lid, the one choke point of P14.T49.l, which a ground's inertia reads at
+/// the rules in force.
 ///
 /// Under [`RegolithInertiaRules::Vacuum`] it is [`reference_regolith_thermal_inertia`] to the bit,
 /// its pores taken as empty whatever `pores` holds, as P14.T49.j's law has none; under
@@ -1576,17 +1575,8 @@ pub fn reference_regolith_thermal_inertia_under(
     }
 }
 
-/// The generator version from which a regolith's inertia takes the gas in its pores and the outer
-/// system's ice form: 26, the planetary bump after 25's (P14.T49.l; main, 2026-10-31).
-///
-/// It is P14.T49.l's one hold. Below it [`RegolithInertiaRules::in_force`] is
-/// [`RegolithInertiaRules::Vacuum`]: every ground reads P14.T49.j's law, and every figure is
-/// version 24's and 25's bit for bit. 26's bump deletes this hold, [`RegolithInertiaRules`] with
-/// its `Vacuum` arm, [`reference_regolith_thermal_inertia_under`]'s rules, the tests' switch and its
-/// tripwire (`the_pore_gas_is_held_only_until_the_26_bump`).
-pub(crate) const PORE_GAS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Which law of a regolith's inertia a ground reads (P14.T49.l's hold, `PORE_GAS_VERSION`).
+/// Which law of a regolith's inertia a ground reads (P14.T49.l): the pore gas from generator
+/// version 26, and in the tests the vacuum too, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RegolithInertiaRules {
     /// Version 25's and before: P14.T49.j's law, a dry regolith in vacuum at every pressure, its
@@ -1599,33 +1589,27 @@ pub enum RegolithInertiaRules {
 }
 
 impl RegolithInertiaRules {
-    /// The rules this generator version gives: the pore gas from [`PORE_GAS_VERSION`], the vacuum
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_regolith_inertia`]).
+    /// The rules in force: the pore gas; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_regolith_inertia`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = REGOLITH_INERTIA_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= PORE_GAS_VERSION {
-            Self::PoreGas
-        } else {
-            Self::Vacuum
-        }
+        Self::PoreGas
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The regolith inertia's rules a test sets on its thread, `None` for the version's.
+    /// The regolith inertia's rules a test sets on its thread, `None` for the pore gas.
     static REGOLITH_INERTIA_RULES: core::cell::Cell<Option<RegolithInertiaRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the regolith inertia's rules `rules` on this thread, for the tests to reach
-/// the pore gas ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
+/// `run`'s result with the regolith inertia's rules `rules` on this thread, the vacuum the tests'
+/// oracle; the pore gas is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_regolith_inertia<R>(rules: RegolithInertiaRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.

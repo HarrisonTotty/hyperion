@@ -3767,14 +3767,18 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
 /// (decision-pre-23-review item 7; P14.T49.l).
 #[test]
 fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
+    use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+    // P14.T49.j's law, the pore gas's oracle: a dry regolith in vacuum.
     let at = |lid: CrustLithology, material: SurfaceMaterial, t: f64| {
-        ground_inertia(
-            Some(lid),
-            material,
-            Kelvin::new(t),
-            LidAir::Airless,
-            &Pores::Vacuum,
-        )
+        with_regolith_inertia(RegolithInertiaRules::Vacuum, || {
+            ground_inertia(
+                Some(lid),
+                material,
+                Kelvin::new(t),
+                LidAir::Airless,
+                &Pores::Vacuum,
+            )
+        })
     };
     let law = |lid: CrustLithology, t: f64| {
         reference_regolith_thermal_inertia(lid.substance(), Kelvin::new(t))
@@ -3856,8 +3860,9 @@ fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
 /// Under P14.T49.l's pore gas (`with_regolith_inertia`), a ground reads its column's air
 /// ([`pores_of`]): the table's Mars's `basalt_fe` lid under its own CO₂, and Titan's water-ice lid
 /// under its nitrogen at P14.T49.j's form, its lid being under an air ([`lid_air`]), above the
-/// outer system's airless ice's, each at its equilibrium temperature, the law labelled; below the
-/// hold the pores change nothing, to the bit; and the record's conditions, given the lid, read the
+/// outer system's airless ice's, each at its equilibrium temperature, the law labelled; under the
+/// vacuum, the tests' oracle, the pores change nothing, to the bit; and the record's conditions,
+/// given the lid, read the
 /// ground under their own column's pores at their inventory's air (the passes' step reads the
 /// same, `under_the_pore_gas_the_passes_climate_is_the_record_s_range`). The table's Mars holds a
 /// thicker air than today's (its figures are printed); P14.T49.l's windows are asserted at today's
@@ -3885,13 +3890,16 @@ fn under_the_pore_gas_a_ground_reads_its_column_s_air() {
         );
         assert_eq!(air, LidAir::UnderAir, "{name}'s lid lies under its air");
         let t = inputs.equilibrium_temperature;
-        let held = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
-        assert_eq!(held.under(t, air, || pores), held, "{name}");
-        assert_eq!(
-            ground_inertia(Some(lid), inputs.material, t, air, &pores),
-            held,
-            "{name}"
-        );
+        let held = with_regolith_inertia(RegolithInertiaRules::Vacuum, || {
+            let held = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
+            assert_eq!(held.under(t, air, || pores), held, "{name}");
+            assert_eq!(
+                ground_inertia(Some(lid), inputs.material, t, air, &pores),
+                held,
+                "{name}"
+            );
+            held
+        });
         let (aired, airless, conditions) =
             with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
                 let ground = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
