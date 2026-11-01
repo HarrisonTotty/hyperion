@@ -355,14 +355,14 @@ pub(crate) fn tabulated_fit(
             if mass < table.white_dwarf_ceiling.value() {
                 return kept();
             }
-            let draws = draws();
             // Above the ceiling the star's companion-stripped mark says which capture window it
             // can open: a white dwarf of an unstripped star is kept below its own ceiling, and one
             // above the window's start is refused.
             // The mark as the star's track reads it, a lookup at 26 with the stripping table's
             // helium axis.
             let m0 = track_mass_of(SolarMasses::new(mass));
-            let stripped = sse::is_companion_stripped_under(m0, composition, &draws, rules);
+            let mark = StarDraws::stripped_for_attempt(universe, BodyId::new(system, 0), attempt);
+            let stripped = sse::is_companion_stripped_by(mark, m0, composition, rules);
             if !stripped && mass < table.unstripped_white_dwarf_ceiling.value() {
                 return kept();
             }
@@ -393,7 +393,7 @@ pub(crate) fn tabulated_fit(
             // In the band between, the mass its main sequence ends with decides, found from its
             // main sequence alone, a fifth of its track.
             let options = TrackOptions::default().with_rules(rules);
-            if sse::main_sequence_end_mass(m0, composition, &draws, options).value() < start {
+            if sse::main_sequence_end_mass(m0, composition, &draws(), options).value() < start {
                 kept()
             } else {
                 Some(false)
@@ -1010,7 +1010,7 @@ mod tests {
                         while mass < top {
                             let m0 = track_mass_of(SolarMasses::new(mass));
                             assert_eq!(
-                                sse::is_companion_stripped_under(m0, &comp, &draws, rules),
+                                sse::is_companion_stripped_by(draws.stripped(), m0, &comp, rules),
                                 window == COMPANION_STRIPPED_WINDOW
                             );
                             let end = sse::main_sequence_end_mass(m0, &comp, &draws, options);

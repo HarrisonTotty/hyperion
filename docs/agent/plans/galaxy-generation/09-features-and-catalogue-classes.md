@@ -5493,3 +5493,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   that sum, in place of a `BTreeMap` by radius. One key has one radius to the bit, which a debug
   assertion checks. It also keeps each band's cusp slope. `MemberClassTable::bound_memo` now takes
   the grid, and `NestedGrid::corner_key` and `corner_squares_max` are new.
+- **P09.T10 perf, the white dwarfs' mark alone (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** Above the ceiling a white dwarf reads its companion-stripped mark alone, through
+  `sse::is_companion_stripped_by`, which `is_companion_stripped_under` (private again) now calls.
+  It builds its whole draws only in the band.

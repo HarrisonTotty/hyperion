@@ -1517,15 +1517,27 @@ pub(crate) fn is_companion_stripped(
 /// [`is_companion_stripped`] for a track built under the stellar stage's `rules`: the share's
 /// exact path, which a star with a helium excess takes, builds its own track under them.
 #[must_use]
-pub(crate) fn is_companion_stripped_under(
+fn is_companion_stripped_under(
     m0: SolarMasses,
     comp: &Composition,
     draws: &StarDraws,
     rules: StellarRules,
 ) -> bool {
+    is_companion_stripped_by(draws.stripped(), m0, comp, rules)
+}
+
+/// [`is_companion_stripped_under`] of the companion-stripped mark `mark` alone, for a caller that
+/// reads no other draw (`StarDraws::stripped_for_attempt`; P09.T10's white-dwarf members).
+#[must_use]
+pub(crate) fn is_companion_stripped_by(
+    mark: crate::rng::Mark,
+    m0: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> bool {
     let (lo, hi) = crate::stellar::fates::STRIPPED_WINDOW;
     (lo..=hi).contains(&m0.value())
-        && crate::galaxy::displaced::binarity::is_stripped_under(draws.stripped(), m0, comp, rules)
+        && crate::galaxy::displaced::binarity::is_stripped_under(mark, m0, comp, rules)
 }
 
 /// The state at `age` of a star of initial mass `m0`, `comp` and `draws` under `options`, if its
