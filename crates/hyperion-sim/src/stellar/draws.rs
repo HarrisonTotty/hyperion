@@ -461,6 +461,30 @@ impl StarDraws {
         })
     }
 
+    /// The low kick mode's three normals alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
+    /// [`kick_low`](StarDraws::kick_low), bit for bit, from its one stream, for a caller that reads
+    /// no other draw (P09.T10's white-dwarf members, whose kick's speed is all they read).
+    #[must_use]
+    pub(crate) fn kick_low_for_attempt(
+        seed: Seed,
+        star: BodyId,
+        attempt: u32,
+    ) -> [StandardNormal; 3] {
+        let mut stream = Stream::open(seed, tags::STAR_KICK_LOW, ObjectKey::from(star));
+        stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
+        StandardNormal::draw_array(&mut stream)
+    }
+
+    /// The companion-stripped mark alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
+    /// [`stripped`](StarDraws::stripped), bit for bit, from its one stream, for a caller that reads
+    /// no other draw (P09.T10's neutron-star members refused by their mark).
+    #[must_use]
+    pub(crate) fn stripped_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> Mark {
+        let mut stream = Stream::open(seed, tags::STAR_STRIPPED, ObjectKey::from(star));
+        stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
+        stream.mark()
+    }
+
     /// Draws from explicit variates, for quadratures and tests that need no ID.
     #[must_use]
     pub const fn from_parts(parts: StarDrawsParts) -> Self {
@@ -660,6 +684,27 @@ mod tests {
                     assert_same_bits(
                         StarDraws::eta_for_attempt(seed, star, attempt).value(),
                         StarDraws::for_attempt(seed, star, attempt).eta().value(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The low kick mode's normals and the companion-stripped mark alone are the full draws', bit
+    /// for bit (P09.T10's white-dwarf and neutron-star members).
+    #[test]
+    fn the_kick_low_and_stripped_draws_alone_are_the_full_draws() {
+        for seed in [Seed::new(0x5eed), Seed::new(0x0065_7461)] {
+            for star in bodies() {
+                for attempt in [0, 1, 7] {
+                    let full = StarDraws::for_attempt(seed, star, attempt);
+                    let low = StarDraws::kick_low_for_attempt(seed, star, attempt);
+                    for (alone, all) in low.iter().zip(full.kick_low()) {
+                        assert_same_bits(alone.value(), all.value());
+                    }
+                    assert_eq!(
+                        StarDraws::stripped_for_attempt(seed, star, attempt),
+                        full.stripped()
                     );
                 }
             }

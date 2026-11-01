@@ -343,14 +343,18 @@ pub(crate) fn tabulated_fit(
     match kind {
         ClassKind::WhiteDwarf => {
             let table = model.remnant_table(rules);
-            let draws = draws();
+            // The kick's speed reads the low mode's normals alone, one stream of the attempt's
+            // twenty-odd: most of a decided white dwarf's cost (P09.T10, a pod of 16 vCPU).
             let kept = || {
-                let kick = StandardKickLaw::under(rules).white_dwarf_kick(&draws);
-                (KilometresPerSecond::from(kick.speed()).value() < v_eff).then_some(true)
+                let low =
+                    StarDraws::kick_low_for_attempt(universe, BodyId::new(system, 0), attempt);
+                let speed = StandardKickLaw::under(rules).white_dwarf_kick_speed(&low);
+                (KilometresPerSecond::from(speed).value() < v_eff).then_some(true)
             };
             if mass < table.white_dwarf_ceiling.value() {
                 return kept();
             }
+            let draws = draws();
             // Above the ceiling the star's companion-stripped mark says which capture window it
             // can open: a white dwarf of an unstripped star is kept below its own ceiling, and one
             // above the window's start is refused.
@@ -405,12 +409,13 @@ pub(crate) fn tabulated_fit(
                 return None;
             }
             let m0 = track_mass_of(SolarMasses::new(mass));
-            let draws = draws();
-            let stripped = binarity::is_stripped_under(draws.stripped(), m0, composition, rules);
+            let mark = StarDraws::stripped_for_attempt(universe, BodyId::new(system, 0), attempt);
+            let stripped = binarity::is_stripped_under(mark, m0, composition, rules);
             // A stripped star keeps the low mode only below its carbon–oxygen core's floor.
             if !stripped || mass >= model.co_core_floor(rules).value() {
                 return Some(false);
             }
+            let draws = draws();
             if mass >= CO_CORE_SEARCH_TOP {
                 return None;
             }

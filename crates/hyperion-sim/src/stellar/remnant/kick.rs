@@ -614,16 +614,14 @@ impl StandardKickLaw {
         &self.table
     }
 
-    /// The natal kick of a white dwarf left by the loss of an envelope, from the star's `draws`:
-    /// what [`natal_kick`](Self::natal_kick) gives every such death, whatever its progenitor, a
-    /// Maxwellian of [`KickLawParams::wd_sigma_km_s`] (plan 09's tabulated remnants, P09.T10).
+    /// The speed of the natal kick of a white dwarf left by the loss of an envelope, from the
+    /// low mode's normals `low` of the star's draws alone (`StarDraws::kick_low_for_attempt`): what
+    /// [`natal_kick`](Self::natal_kick) gives every such death, whatever its progenitor, a
+    /// Maxwellian of [`KickLawParams::wd_sigma_km_s`], bit for bit (plan 09's tabulated remnants,
+    /// P09.T10).
     #[must_use]
-    pub(crate) fn white_dwarf_kick(&self, draws: &StarDraws) -> NatalKick {
-        maxwellian(
-            self.params.wd_sigma_km_s,
-            &KickDraws::of(draws),
-            KickMode::WhiteDwarf,
-        )
+    pub(crate) fn white_dwarf_kick_speed(&self, low: &[StandardNormal; 3]) -> MetresPerSecond {
+        maxwellian_speed(self.params.wd_sigma_km_s, low.map(StandardNormal::value))
     }
 
     /// The ordinary mode's speed, km/s, of a remnant of `remnant` M☉ from a core of `co_core`:
@@ -809,13 +807,15 @@ impl KickLaw for StandardKickLaw {
 #[must_use]
 fn maxwellian(sigma_km_s: f64, draws: &KickDraws, mode: KickMode) -> NatalKick {
     let z = draws.low.map(StandardNormal::value);
-    let norm = math::hypot(math::hypot(z[0], z[1]), z[2]);
     let direction = UnitVector::from_components(z).unwrap_or(draws.direction);
-    NatalKick::new(
-        MetresPerSecond::from(KilometresPerSecond::new(sigma_km_s * norm)),
-        direction,
-        mode,
-    )
+    NatalKick::new(maxwellian_speed(sigma_km_s, z), direction, mode)
+}
+
+/// The speed of [`maxwellian`]'s kick of σ `sigma_km_s` (km/s) on the normals `z`: σ |z|.
+#[must_use]
+fn maxwellian_speed(sigma_km_s: f64, z: [f64; 3]) -> MetresPerSecond {
+    let norm = math::hypot(math::hypot(z[0], z[1]), z[2]);
+    MetresPerSecond::from(KilometresPerSecond::new(sigma_km_s * norm))
 }
 
 #[cfg(test)]

@@ -5478,3 +5478,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `largest_main_sequence_loss`. Between the ceilings and the refusals, a white dwarf is kept below
   the start of its window at its own composition and refused where its track mass less the loss is
   past it. Elsewhere the track decides.
+- **P09.T10 perf, the decided remnants' draws (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** `StarDraws::kick_low_for_attempt` and `StarDraws::stripped_for_attempt` read one stream
+  each. A white dwarf below the ceiling reads only its kick's speed, through
+  `StandardKickLaw::white_dwarf_kick_speed` (which replaces `white_dwarf_kick`; `maxwellian` takes
+  its speed from `maxwellian_speed`). A neutron star refused by its mark reads only the mark.
