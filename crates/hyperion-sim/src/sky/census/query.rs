@@ -14,7 +14,7 @@ use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
 use crate::galaxy::query::{
     QuerySphere, SystemSource, cells_in_shell_slab, count_cells_in_sphere, pad_for, pad_speed,
-    sphere_slabs,
+    pad_speed_in, sphere_slabs,
 };
 use crate::id::{Layer, SystemId};
 use crate::math;
@@ -1585,6 +1585,15 @@ pub fn census_plan(
     query: &SkyQuery,
     cache: &mut NoiseCache,
 ) -> CensusPlan {
+    // The census pads by `pad_speed`, which holds no galaxy, until the 27 bump raises layer D's
+    // there: a galaxy whose survivors have weight would lose those its sphere's pad leaves out.
+    debug_assert!(
+        Layer::ALL
+            .into_iter()
+            .all(|layer| pad_speed_in(galaxy, layer) == pad_speed(layer)),
+        "the sky census pads layer D at plan 03's speed until the 27 bump raises `pad_speed`: a \
+         galaxy whose hypervelocity survivors have weight is censused only after it (P09.T34.b)"
+    );
     let observer = query.observer();
     let caps = match (
         &query.forced_caps,

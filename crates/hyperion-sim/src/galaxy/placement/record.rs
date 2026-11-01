@@ -648,7 +648,9 @@ impl SystemRecord {
     /// 08, P08.T12.c): a retained record's and a displaced remnant's is its birth source's
     /// reference composition, the class table's, at which the table weighed its class (its fate
     /// and its kick's speed bin, Design notes 17 and 18), so that its own star dies as its class
-    /// says; `None` for every other record, whose metallicity is drawn.
+    /// says, and a hypervelocity survivor's its birth component's source's, at which its marks
+    /// made it a white dwarf before its launch (plan 09, P09.T34.b); `None` for every other record,
+    /// whose metallicity is drawn.
     #[must_use]
     pub(crate) fn progenitor_composition(&self, galaxy: &Galaxy) -> Option<Composition> {
         super::marks::progenitor_composition(galaxy, self)

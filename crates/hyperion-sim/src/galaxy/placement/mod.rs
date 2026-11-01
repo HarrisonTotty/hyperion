@@ -30,6 +30,8 @@ mod cell;
 mod displaced_hold;
 mod generate;
 mod headroom;
+#[cfg(test)]
+mod hypervelocity_hold;
 mod layers;
 mod marks;
 #[cfg(test)]
@@ -53,7 +55,7 @@ pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
-pub(crate) use marks::{ballistic_motion, is_ballistic};
+pub(crate) use marks::{ballistic_motion, is_ballistic, survivor_flight};
 pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::{resolve, resolve_list_member_with, resolve_with};
 

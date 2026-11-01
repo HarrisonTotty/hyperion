@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn the_search_pads_as_the_walk_does() {
         use crate::galaxy::params::GalaxyParams;
-        use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed};
+        use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed_in};
         use crate::rng::Seed;
 
         let galaxy = Galaxy::from_params(
@@ -548,7 +548,8 @@ mod tests {
                 let pad = kepler_pad_for(&galaxy, layer, &ship, radius, t);
                 assert_eq!(curved, QuerySphere::new(ship, radius, t, pad).unwrap());
                 // Never narrower: the Kepler pad is at least the straight lines'.
-                let straight = QuerySphere::new(ship, radius, t, pad_for(t, pad_speed(layer)));
+                let straight =
+                    QuerySphere::new(ship, radius, t, pad_for(t, pad_speed_in(&galaxy, layer)));
                 let (a, b) = (straight.unwrap().padded_radius(), curved.padded_radius());
                 assert!(b.value() >= a.value(), "{layer:?} at {years} yr");
                 if b.value() > a.value() {

@@ -5,7 +5,8 @@
 //!
 //! Remnants of the thin disc take 56 classes, eight speed bins by seven age bins; the thick disc,
 //! the halo, the bulge, the bar and the nuclear disc eight speed bins each; and the hypervelocity
-//! survivors one more, registered at zero weight (Design note 25): 97 in all, in that order
+//! survivors one more, registered at zero weight (Design note 25) and weighted from generator
+//! version 27 by their own count ([`Survivors`], plan 09's P09.T34.b): 97 in all, in that order
 //! ([`ClassKey::id`]). Runaways and walkaways join the thin disc's and the nuclear disc's classes of
 //! their speed and time since ejection as further kinds ([`runaway`](super::runaway)).
 //!
@@ -55,6 +56,7 @@ use super::runaway::{
     ENCOUNTER_MAX_AGE, Ejected, RELEASE_Q_RANGE, RELEASING_MIN_MASS, RunawayModel,
     WALKAWAY_CALIBRATION_MASS, WALKAWAY_PRESENT_SHARE, gl16,
 };
+use super::survivors::Survivors;
 use super::{
     AGE_BINS, AgeBin, BirthSource, DisplacedClassId, DisplacedKind, GalaxyScales, SPEED_BINS,
     SPEED_EDGES, SpeedBin,
@@ -132,7 +134,8 @@ pub(crate) fn ejects(source: BirthSource) -> bool {
     matches!(source, BirthSource::ThinDisc | BirthSource::NuclearDisc)
 }
 
-/// The hypervelocity survivors' class, registered at zero weight (Design note 25).
+/// The hypervelocity survivors' class, registered at zero weight (Design note 25) and weighted
+/// from generator version 27 by its own count, [`ClassTable::survivors`] (plan 09, P09.T34.b).
 ///
 /// # Panics
 ///
@@ -188,12 +191,14 @@ pub const SURVIVOR_POPULATIONS: [SurvivorPopulation; 2] = [
 ];
 
 /// The Milky Way's Type Ia rate, per year: 0.54 ± 0.12 per century (Li et al. 2011, MNRAS 412,
-/// 1473, Table 11). Plan 09's P09.T34 replaces it with the galaxy's own when it gives the class
-/// weight.
+/// 1473, Table 11). The class's weight takes the galaxy's own instead (plan 09, P09.T34.b,
+/// [`Survivors::rate_per_year`]); this stays the reference of [`ClassTable::hypervelocity_count`].
 pub const MILKY_WAY_IA_RATE_PER_YEAR: f64 = 0.0054;
 
 /// The odds of each of [`SURVIVOR_POPULATIONS`] among the survivors inside the cube: `shareᵢ ÷
-/// v_eff,ᵢ`, normalised (the speed mark's first draw, ruling 128.1).
+/// v_eff,ᵢ`, normalised (ruling 128.1). The weighted class draws its members' populations by its
+/// own counts instead, which leave out the Type Ia class's interval ([`Survivors::count`], plan
+/// 09's P09.T34.b).
 #[must_use]
 pub fn survivor_odds() -> [f64; 2] {
     let raw = SURVIVOR_POPULATIONS.map(|p| p.share / p.effective_speed_km_s());
@@ -670,6 +675,9 @@ pub struct ClassTable {
     /// [`MassBand::index`], the share of its budget that stays in the field ([`field_stays`]);
     /// `None` before it, where the field is the budget.
     field: Option<Vec<[f64; BANDS]>>,
+    /// From generator version 27 (plan 09, P09.T34.b), the hypervelocity survivors, the class's
+    /// count; `None` before it, where the class has no weight.
+    survivors: Option<Survivors>,
 }
 
 /// The log-mean speed of kicks in bin `s`, in units of the speed scale.
@@ -1348,10 +1356,7 @@ impl ClassTable {
     pub fn build(galaxy: &Galaxy, forms: &FormTable) -> Self {
         let scales = GalaxyScales::new(galaxy.params(), galaxy.potential());
         let mf = galaxy.mass_function();
-        let nodes = [
-            MassNodes::of(MassBand::D, mf),
-            MassNodes::of(MassBand::E, mf),
-        ];
+        let nodes = [MassBand::D, MassBand::E].map(|band| MassNodes::of(band, mf));
         let fields = galaxy.fields();
         let members = members_of(galaxy);
         let (mut sources, kicks, kick_of) = source_entries(galaxy, &members, &scales, &nodes);
@@ -1448,18 +1453,27 @@ impl ClassTable {
             components,
             classes,
             field,
+            survivors: Survivors::where_weighted(galaxy, forms),
         }
     }
 
-    /// The hypervelocity class's count inside the cube once it is given weight, at the Milky Way's
-    /// Type Ia rate, by survivor population ([`survivors_inside`]); the class itself stays at zero
-    /// weight until P09.T34 (Design note 25).
+    /// The hypervelocity class's count inside the cube at the Milky Way's Type Ia rate, by survivor
+    /// population ([`survivors_inside`]): Design note 25's reference figure. The class's own count,
+    /// from generator version 27, is [`survivors`](Self::survivors)' (plan 09, P09.T34.b).
     #[must_use]
     pub fn hypervelocity_count(&self, forms: &FormTable) -> [f64; 2] {
         survivors_inside(
             MILKY_WAY_IA_RATE_PER_YEAR,
             forms.rows().hypervelocity_mean_exit_ly,
         )
+    }
+
+    /// The hypervelocity survivors, from generator version 27 (plan 09, P09.T34.b): the class's
+    /// count and what its members' flights are drawn from. `None` below it, where the class has
+    /// no weight.
+    #[must_use]
+    pub fn survivors(&self) -> Option<&Survivors> {
+        self.survivors.as_ref()
     }
 
     /// The runaway model the table was built with, its walkaway scale W solved for the galaxy
@@ -1515,6 +1529,10 @@ impl ClassTable {
                 .flat_map(|class| class.marks.iter())
                 .map(ConditionalMarks::heap_bytes)
                 .sum::<usize>()
+            + self
+                .survivors
+                .as_ref()
+                .map_or(0, |survivors| size_of_val(survivors.births_per_year()))
     }
 
     /// The galaxy's scales the table was built at.
@@ -1586,20 +1604,26 @@ impl ClassTable {
         band_slot(band).map_or(1.0, |b| self.components[c.index()].alive[b])
     }
 
-    /// Class `id`'s weight in `band`, a share of its source's `band` budget (Design note 15).
+    /// Class `id`'s weight in `band`, a share of its source's `band` budget (Design note 15): 0 for
+    /// the hypervelocity class, which has no source, and whose count is its own
+    /// ([`class_count`](Self::class_count)).
     #[must_use]
     pub fn class_weight(&self, band: MassBand, id: DisplacedClassId) -> f64 {
         self.classes[id.index()].weight(band)
     }
 
     /// Class `id`'s expected systems in `band` over the whole galaxy: its weight times its
-    /// source's band budget.
+    /// source's band budget, or for the hypervelocity class in layer D its survivors inside the
+    /// cube from generator version 27 ([`Survivors::total`], plan 09, P09.T34.b).
     #[must_use]
     pub fn class_count(&self, band: MassBand, id: DisplacedClassId) -> f64 {
         let class = &self.classes[id.index()];
         match (class.key.source(), band_slot(band)) {
             (Some(source), Some(b)) => {
                 class.weight[b] * self.sources[source_index(source)].budget[b]
+            }
+            (None, Some(_)) if band == MassBand::D => {
+                self.survivors.as_ref().map_or(0.0, Survivors::total)
             }
             (None, _) | (_, None) => 0.0,
         }

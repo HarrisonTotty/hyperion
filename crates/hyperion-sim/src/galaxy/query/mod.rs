@@ -32,8 +32,8 @@ pub use census::decide_census;
 pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
 pub use motion::{
-    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, kepler_pad_for,
-    pad_for, pad_speed, position_at,
+    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, escape_cut_holds_in, hit_at,
+    kepler_pad_for, pad_for, pad_speed, pad_speed_in, position_at,
 };
 pub(crate) use motion::{drifted, walk_pad};
 pub use parts::{SourceHits, WalkedCells};

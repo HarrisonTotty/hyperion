@@ -43,6 +43,7 @@ pub mod marks;
 pub mod runaway;
 pub mod scales;
 pub mod site;
+pub mod survivors;
 
 pub use fields::{DisplacedClass, DisplacedFields, DisplacedForm};
 pub use scales::GalaxyScales;

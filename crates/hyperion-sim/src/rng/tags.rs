@@ -555,25 +555,30 @@ domain_tags! {
     DISPLACED_KIND: System = "displaced.kind";
 
     /// A displaced or layer-E record's initial mass from its class's conditional table: one
-    /// uniform per attempt (P08.T12.c).
+    /// uniform per attempt (P08.T12.c); a hypervelocity survivor's from layer D's mass function,
+    /// one uniform per draw until its fate is a white dwarf (P09.T34.b).
     DISPLACED_MASS: System = "displaced.mass";
 
     /// A displaced or retained record's time since death, and its birth component: one uniform
     /// each per attempt (P08.T12.c).
     DISPLACED_DEATH: System = "displaced.death";
 
-    /// A displaced record's formation radius in the mixed age bins: one uniform (P08.T12.c).
+    /// A displaced record's formation radius in the mixed age bins: one uniform (P08.T12.c); a
+    /// hypervelocity survivor's birth component, by the components' Type Ia rates: one mark
+    /// (P09.T34.b).
     DISPLACED_BIRTH: System = "displaced.birth";
 
     /// The speed bin an unbound record's kick is drawn in, for the fastest classes: one mark
-    /// (P08.T12.c).
+    /// (P08.T12.c); a hypervelocity survivor's population, slow or fast: one mark (P09.T34.b).
     DISPLACED_ORIGIN_BIN: System = "displaced.origin_bin";
 
     /// A ballistic runaway or walkaway's ejection: its speed's rank in its speed bin, word 0, and
-    /// the kick's azimuth, word 1 (P08.T12.d).
+    /// the kick's azimuth, word 1 (P08.T12.d); a hypervelocity survivor's launch speed's rank in
+    /// its population, word 0 (P09.T34.b).
     RUNAWAY_SPEED: System = "runaway.speed";
 
-    /// A runaway or walkaway's ejection age, among the quadrature's: one mark (P08.T12.c).
+    /// A runaway or walkaway's ejection age, among the quadrature's: one mark (P08.T12.c); a
+    /// hypervelocity survivor's time since launch: one uniform (P09.T34.b).
     RUNAWAY_EJECTION: System = "runaway.ejection";
 
     /// A lesser halo progenitor's kinematics (P08.T3): its anisotropy β, uniform on 0.3–0.7, word

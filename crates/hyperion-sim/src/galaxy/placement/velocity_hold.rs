@@ -22,7 +22,7 @@ use crate::galaxy::displaced::{
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, draw, is_exempt};
-use crate::galaxy::query::{PAD_SPEED, epoch_velocity, escape_cut_holds, pad_speed};
+use crate::galaxy::query::{PAD_SPEED, epoch_velocity, escape_cut_holds_in, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
@@ -472,27 +472,40 @@ fn an_exempt_class_is_cut_at_its_layer_s_pad_speed() {
 
 /// Every class exempt from the escape cut with weight in a band belongs to a layer where the cut
 /// does not hold, that is padded at `UNBOUND_PAD_SPEED` (Design note 7; from the class table
-/// alone).
+/// alone): under every 26 hold, layer E alone.
 #[test]
 fn every_exempt_class_is_padded() {
-    let fields = displaced()
+    let exempt = exempt_classes_padded(displaced());
+    assert_ne!(exempt, []);
+    assert!(
+        exempt.iter().all(|&(_, layer)| layer == Layer::E),
+        "{exempt:?}"
+    );
+}
+
+/// The classes exempt from the escape cut with weight in `galaxy`'s layers D and E, with their
+/// layers, each asserted to be in a layer of the galaxy where the cut does not hold
+/// ([`escape_cut_holds_in`]): [`every_exempt_class_is_padded`]'s check, which plan 09's P09.T34.b
+/// runs again with the hypervelocity survivors' weight.
+pub(super) fn exempt_classes_padded(galaxy: &Galaxy) -> Vec<(ClassKey, Layer)> {
+    let fields = galaxy
         .fields()
         .displaced()
         .expect("the classes are installed");
-    let mut exempt = 0;
+    let mut exempt = Vec::new();
     for (band, layer) in [(MassBand::D, Layer::D), (MassBand::E, Layer::E)] {
         for &class in fields.order(band) {
-            if is_exempt(fields.class(class).key()) {
+            let key = fields.class(class).key();
+            if is_exempt(key) {
                 assert!(
-                    !escape_cut_holds(layer),
-                    "{:?} is exempt with weight in layer {layer:?}",
-                    fields.class(class).key()
+                    !escape_cut_holds_in(galaxy, layer),
+                    "{key:?} is exempt with weight in layer {layer:?}"
                 );
-                exempt += 1;
+                exempt.push((key, layer));
             }
         }
     }
-    assert!(exempt > 0);
+    exempt
 }
 
 /// `no_record_reaches_its_layers_pad_speed`: 10⁵ members of each class with weight in layer D or

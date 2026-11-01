@@ -10,6 +10,11 @@
 //! - **Layer D or E, a displaced class.** Its kind (remnant, runaway, walkaway) on
 //!   `displaced.kind` from the class's [`ConditionalMarks`], its initial mass on `displaced.mass`,
 //!   and its birth component at that mass on `displaced.birth`.
+//! - **Layer D, the hypervelocity survivors** (from generator version 27, plan 09's P09.T34.b): a
+//!   double detonation's donor white dwarf. Its birth component by the components' Type Ia rates
+//!   on `displaced.birth`, its initial mass from layer D's mass function on `displaced.mass`, and
+//!   its flight ([`Survivors::flight`]). Its progenitor is dead at `Z_ref` before its launch, as a
+//!   remnant's is before its death below (lean, 2026-11-01).
 //! - **Layer D, a field component of a source that ejects runaways** (the thin disc and the
 //!   nuclear disc): plan 03's mass and age, and the runaway reduction. A living star is rejected
 //!   with the probability that it is a runaway or a walkaway already ejected (on `displaced.kind`),
@@ -41,6 +46,7 @@
 //!
 //! [`StayMarks`]: crate::galaxy::displaced::marks::StayMarks
 //! [`ConditionalMarks`]: crate::galaxy::displaced::marks::ConditionalMarks
+//! [`Survivors::flight`]: crate::galaxy::displaced::survivors::Survivors::flight
 //! [`draw_metallicity`]: crate::stellar::system::draw_metallicity
 
 #[cfg(test)]
@@ -58,6 +64,7 @@ use crate::galaxy::displaced::marks::{
     time_since_death,
 };
 use crate::galaxy::displaced::runaway::Ejected;
+use crate::galaxy::displaced::survivors::SurvivorFlight;
 use crate::galaxy::displaced::{
     BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
 };
@@ -452,9 +459,12 @@ fn displaced_marks(
 ) -> DrawnMarks {
     let table = displaced.class_table();
     let key = displaced.class(class).key();
+    if key == ClassKey::Hypervelocity {
+        return survivor_marks(galaxy, table, id, class);
+    }
     let source = key
         .source()
-        .expect("only the hypervelocity survivors have no source, and they have no weight");
+        .expect("only the hypervelocity survivors have no source");
     let marks = table.marks(band, class);
     let kind = MARK_KINDS[pick(
         stream(galaxy, tags::DISPLACED_KIND, id).mark(),
@@ -537,6 +547,98 @@ fn displaced_marks(
         attempt: 0,
         metallicity_age_years: Some(metallicity_age),
         lifetime: Some(life),
+    }
+}
+
+/// The draws of a survivor's initial mass that may leave no white dwarf before it takes layer D's
+/// least: only the top of layer D's masses, whose electron-capture fate leaves a neutron star,
+/// does, so a record seldom draws a second.
+const SURVIVOR_MASS_ATTEMPTS: usize = 8;
+
+/// A hypervelocity survivor's marks (module documentation): its birth component on
+/// `displaced.birth`, its initial mass on `displaced.mass`, and its age on `displaced.death`, its
+/// progenitor dead at its source's reference composition at least its flight's time since launch
+/// before the epoch.
+///
+/// The record is the donor white dwarf of a double detonation, of layer D's initial masses, which
+/// the stellar stage's initial-final relation makes white dwarfs of about 0.7–1.2 M☉ (lean,
+/// 2026-11-01). Those are the fast population's donors. The slow population's speeds are those of
+/// donors of about 0.5 M☉ or less, helium or hybrid white dwarfs of progenitors below layer D's
+/// masses, which the class's layer does not hold. A mass whose fate is no white dwarf is drawn
+/// again, on the stream's next words, up to [`SURVIVOR_MASS_ATTEMPTS`] draws, and then the band's
+/// least is taken.
+#[must_use]
+fn survivor_marks(
+    galaxy: &Galaxy,
+    table: &ClassTable,
+    id: SystemId,
+    class: DisplacedClassId,
+) -> DrawnMarks {
+    let survivors = table
+        .survivors()
+        .expect("a survivor is placed only where its class has weight");
+    let index = pick(
+        stream(galaxy, tags::DISPLACED_BIRTH, id).mark(),
+        survivors.births_per_year(),
+    );
+    let component = galaxy
+        .fields()
+        .component_id(index)
+        .expect("the births are the galaxy's components'");
+    let z_ref = table.reference_composition(table.component_source(component));
+    let nodes = table.nodes(MassBand::D);
+    let density = PiecewiseLinear::new(nodes.masses(), nodes.pdf())
+        .expect("layer D's mass function has weight at its nodes");
+    let mut masses = stream(galaxy, tags::DISPLACED_MASS, id);
+    let draws = draws_of(galaxy, id);
+    let progenitor = |mass: SolarMasses| Progenitor {
+        mass,
+        component,
+        fate: fate(galaxy, mass, &z_ref, &draws),
+    };
+    let star = (0..SURVIVOR_MASS_ATTEMPTS)
+        .map(|_| progenitor(SolarMasses::new(density.sample(&mut masses))))
+        .find(|star| star.fate.remnant.kind() == RemnantKind::WhiteDwarf)
+        .unwrap_or_else(|| progenitor(SolarMasses::new(nodes.masses()[0])));
+    let mass = star.mass;
+    let since = survivors.flight(galaxy.seed(), id).since_launch();
+    let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
+    let (age, life) = dead_age(galaxy, &star, (since, None), u);
+    DrawnMarks {
+        component,
+        mass,
+        age,
+        placement: PlacementClass::Displaced {
+            class,
+            kind: DisplacedKind::HypervelocitySurvivor,
+        },
+        attempt: 0,
+        metallicity_age_years: None,
+        lifetime: Some(life),
+    }
+}
+
+/// A hypervelocity survivor's flight (plan 09, P09.T34.b): its population, launch speed and time
+/// since launch, as its marks drew them; `None` for every other record.
+#[must_use]
+pub(crate) fn survivor_flight(galaxy: &Galaxy, record: &SystemRecord) -> Option<SurvivorFlight> {
+    let displaced = galaxy.fields().displaced()?;
+    match record.placement_class() {
+        PlacementClass::Displaced {
+            kind: DisplacedKind::HypervelocitySurvivor,
+            ..
+        } => Some(
+            displaced
+                .class_table()
+                .survivors()?
+                .flight(galaxy.seed(), record.id()),
+        ),
+        PlacementClass::Alive
+        | PlacementClass::Retained { .. }
+        | PlacementClass::Displaced {
+            kind: DisplacedKind::Remnant | DisplacedKind::Runaway | DisplacedKind::Walkaway,
+            ..
+        } => None,
     }
 }
 
@@ -727,7 +829,7 @@ pub(super) fn formation_site(galaxy: &Galaxy, record: &SystemRecord) -> PointLy 
 }
 
 /// [`SystemRecord::progenitor_composition`]: a retained record's or a displaced remnant's birth
-/// source's reference composition.
+/// source's reference composition, or a hypervelocity survivor's birth component's source's.
 pub(super) fn progenitor_composition(
     galaxy: &Galaxy,
     record: &SystemRecord,
@@ -735,15 +837,18 @@ pub(super) fn progenitor_composition(
     let displaced = galaxy.fields().displaced()?;
     let table = displaced.class_table();
     let source = match record.placement_class() {
-        PlacementClass::Retained { .. } => table.component_source(record.component()?),
+        PlacementClass::Retained { .. }
+        | PlacementClass::Displaced {
+            kind: DisplacedKind::HypervelocitySurvivor,
+            ..
+        } => table.component_source(record.component()?),
         PlacementClass::Displaced {
             class,
             kind: DisplacedKind::Remnant,
         } => displaced.class(class).key().source()?,
         PlacementClass::Alive
         | PlacementClass::Displaced {
-            kind:
-                DisplacedKind::Runaway | DisplacedKind::Walkaway | DisplacedKind::HypervelocitySurvivor,
+            kind: DisplacedKind::Runaway | DisplacedKind::Walkaway,
             ..
         } => return None,
     };

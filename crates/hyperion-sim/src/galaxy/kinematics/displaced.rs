@@ -15,12 +15,17 @@
 //!   cylindrical axes, on `system.velocity` as the field's are drawn. In the first-excursion bins
 //!   (0.3–8 `R_d ÷ v_c`) the vertical component takes the sign of z with the class's `outbound`
 //!   share, so a fast pulsar high above the disc is also moving away from it.
+//! - **The hypervelocity survivors** (from generator version 27, plan 09's P09.T34.b): their
+//!   launch speed ([`Survivors::flight`]) straight away from the galactic centre, on the straight
+//!   line `HYPERVELOCITY`'s form is the density of, and nothing drawn on `system.velocity`.
 //!
 //! The escape cut of Design note 7 holds every class but the fastest of each age bin, which hold
-//! the unbound (Design note 23): those are cut at their record's layer's
-//! [`pad_speed`](crate::galaxy::query::pad_speed) instead. A Gaussian draw at or above its cut is
-//! drawn again on the next words, and the last scaled to 0.99 of the cut; a ballistic velocity,
-//! which no draw makes, is scaled.
+//! the unbound (Design note 23), and the survivors: those are cut at their record's layer's
+//! [`pad_speed_in`](crate::galaxy::query::pad_speed_in) instead. A Gaussian draw at or above its cut is
+//! drawn again on the next words, and the last scaled to 0.99 of the cut; a ballistic velocity or
+//! a survivor's, which no draw makes, is scaled.
+//!
+//! [`Survivors::flight`]: crate::galaxy::displaced::survivors::Survivors::flight
 
 use super::EllipsoidAxes;
 use super::draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, WORDS_PER_ATTEMPT, basis, norm, scaled_to};
@@ -29,8 +34,8 @@ use crate::galaxy::displaced::SPEED_EDGES;
 use crate::galaxy::displaced::class_table::ClassKey;
 use crate::galaxy::displaced::runaway::{Ejected, RUNAWAY_CUT_OF_V_C, WALKAWAY_CUT};
 use crate::galaxy::displaced::{DisplacedClassId, DisplacedFields, DisplacedKind, SPEED_BINS};
-use crate::galaxy::placement::{SystemRecord, ballistic_motion};
-use crate::galaxy::query::{PAD_SPEED, pad_speed};
+use crate::galaxy::placement::{SystemRecord, ballistic_motion, survivor_flight};
+use crate::galaxy::query::{PAD_SPEED, pad_speed_in};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
@@ -72,8 +77,7 @@ pub(crate) fn is_exempt(key: ClassKey) -> bool {
 ///
 /// # Panics
 ///
-/// If `galaxy` has no kinematic tables, or the class has no row of kinematics (the hypervelocity
-/// survivors, which have no weight).
+/// If `galaxy` has no kinematic tables.
 #[must_use]
 pub(super) fn draw_displaced(
     galaxy: &Galaxy,
@@ -87,9 +91,12 @@ pub(super) fn draw_displaced(
         "velocities need the kinematic tables, which Galaxy::with_full_potential builds"
     );
     let key = displaced.class(class).key();
+    if key == ClassKey::Hypervelocity {
+        return outward(galaxy, record, &PointLy::from(record.epoch_position()));
+    }
     let source = key
         .source()
-        .expect("only the hypervelocity survivors have no source, and they have no weight");
+        .expect("only the hypervelocity survivors have no source");
     let v_ref = displaced.class_table().speed_scale(source).value();
     let ballistic = ballistic_motion(galaxy, record).map(|(height, since)| {
         let (speed, azimuth) = kick(galaxy, displaced, record, (key, kind), v_ref);
@@ -107,6 +114,32 @@ pub(super) fn draw_displaced(
         (record.epoch_position(), record.layer()),
         ballistic,
         stream,
+    )
+}
+
+/// A hypervelocity survivor's velocity at `p`, its epoch position: its launch speed straight away
+/// from the galactic centre (lean, 2026-11-01; along +z at the centre itself), held below its
+/// layer's pad speed, which its 2,500 km/s at most is under.
+///
+/// That is the far field of `HYPERVELOCITY`'s convolution, whose sites are the old stars'. Near
+/// the disc a survivor's own line, from its launch site, can lie well off the radial; drawing that
+/// site is the exact law.
+#[must_use]
+fn outward(galaxy: &Galaxy, record: &SystemRecord, p: &PointLy) -> VelocityDraw {
+    let speed = survivor_flight(galaxy, record)
+        .expect("a member of the hypervelocity class has its flight")
+        .speed()
+        .value();
+    let r = norm([p.x, p.y, p.z]);
+    let direction = if r > 0.0 {
+        [p.x / r, p.y / r, p.z / r]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
+    scaled_to(
+        direction.map(|c| c * speed),
+        pad_speed_in(galaxy, record.layer()).value(),
+        1,
     )
 }
 
@@ -134,7 +167,8 @@ pub(crate) struct BallisticKick {
 ///
 /// # Panics
 ///
-/// If the class has no row of kinematics (the hypervelocity survivors, which have no weight).
+/// If the class has no row of kinematics (the hypervelocity survivors, which move by their flight
+/// in [`draw_displaced`]).
 #[must_use]
 pub(crate) fn class_velocity(
     galaxy: &Galaxy,
@@ -149,12 +183,12 @@ pub(crate) fn class_velocity(
     let table = displaced.class_table();
     let source = key
         .source()
-        .expect("only the hypervelocity survivors have no source, and they have no weight");
+        .expect("only the hypervelocity survivors have no source");
     let v_ref = table.speed_scale(source).value();
     let p = PointLy::from(position);
     let axes = basis(position, &p, EllipsoidAxes::Cylindrical);
     let cut = if is_exempt(key) {
-        pad_speed(layer).value()
+        pad_speed_in(galaxy, layer).value()
     } else {
         let r_cyl = math::hypot(p.x, p.y);
         let escape = galaxy
@@ -277,13 +311,13 @@ fn kick(
         DisplacedKind::Runaway => Ejected::Runaway,
         DisplacedKind::Walkaway => Ejected::Walkaway,
         DisplacedKind::HypervelocitySurvivor => {
-            unreachable!("the hypervelocity survivors have no weight, and no ballistic class")
+            unreachable!("the hypervelocity survivors move by their flight, in no ballistic class")
         }
     };
     let speed_bin = match key {
         ClassKey::Thin { speed, .. } | ClassKey::Old { speed, .. } => speed,
         ClassKey::Hypervelocity => {
-            unreachable!("the hypervelocity survivors have no weight, and no ballistic class")
+            unreachable!("the hypervelocity survivors move by their flight, in no ballistic class")
         }
     };
     let mut stream = Stream::open(
