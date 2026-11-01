@@ -108,13 +108,39 @@ describe("a look's geometry", () => {
       const north = normalise(
         sub(vec3(0, 0, 1), scale(geometry.surveyNormal, geometry.surveyNormal.z)),
       );
-      // At i from the star along −x, to the star's 10⁻⁵ rad of parallax across the moon's radius.
+      // At i from the star along −x, to the star's 10⁻⁵ rad of parallax across the moon's radius,
+      // which tilts the plane out of the x–y plane by its own part along z, under 10⁻⁷ rad.
       const far = vec3(-Math.cos(each.incidenceRad), Math.sin(each.incidenceRad), 0);
       expect([
         normal.z,
         norm(sub(normal, far)),
         norm(sub(rotateToBody(geometry.rotation, north), vec3(0, 0, 1))),
-      ]).toEqual([expect.closeTo(0, 12), expect.closeTo(0, 4), expect.closeTo(0, 12)]);
+      ]).toEqual([expect.closeTo(0, 7), expect.closeTo(0, 4), expect.closeTo(0, 7)]);
+    },
+  );
+
+  it.each(HANDOVER_LOOKS.map((each) => [each.name, each] as const))(
+    "sees %s at its own angles from a star far out of the x–y plane, as a served world's is",
+    (_name, each) => {
+      // A served world's star where the server's scene puts it: 65° out of the plane, as the wet
+      // world's was (R10.T15.b.2's runs, whose looks stood at 66° and 72° for their 15° and 45°).
+      const elevation = 65 * DEG;
+      const auM = 149_597_870_700;
+      const input = {
+        ...INPUT,
+        towardStarM: vec3(
+          -auM * Math.cos(elevation) * Math.cos(0.4),
+          -auM * Math.cos(elevation) * Math.sin(0.4),
+          auM * Math.sin(elevation),
+        ),
+      };
+      const geometry = lookGeometry(each, input);
+      const angles = lookAnglesRad(geometry, cameraOnLineM(geometry, 1));
+      expect([angles.incidenceRad / DEG, angles.emissionRad / DEG, angles.phaseRad / DEG]).toEqual([
+        expect.closeTo(each.incidenceRad / DEG, 6),
+        expect.closeTo(each.emissionRad / DEG, 6),
+        expect.closeTo((each.incidenceRad + each.emissionRad) / DEG, 4),
+      ]);
     },
   );
 

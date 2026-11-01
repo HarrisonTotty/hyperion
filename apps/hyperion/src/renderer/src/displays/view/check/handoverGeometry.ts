@@ -10,9 +10,13 @@
  *   in one plane, so that the phase is α = i + e: (15°, 15°) and (45°, 45°), judged (T10.e's 30°
  *   and 90°, the normal bisecting), and (78°, 12°), the terminator's, recorded.
  * - **The rotation** ({@link lookGeometry}): the body is held still (its rotation fixed for the
- *   look) so that its survey's middle's datum normal points at i from the star in the plane of the
- *   galactic x and y axes, and the body's north at that point along galactic +z. The star lies
- *   along −x from the body (the kept scenes' star at the barycentre, the body 1 au along +x).
+ *   look) so that its survey's middle's datum normal points at i from the star, in the plane of the
+ *   star's direction and its north, and the body's north at that point along the star's north:
+ *   galactic +z less its part along the star. `TERRAIN TEST`'s star lies along −x from the body
+ *   (the kept scenes' star at the barycentre, the body 1 au along +x), so that its plane is the
+ *   galactic x–y plane and its north +z; a served world's star lies where the server's scene puts
+ *   it, out of that plane (R10.T15.b.2's runs: about 65° on the wet world, where the plane's looks
+ *   stood at 66° and 72° of incidence for their 15° and 45°).
  * - **The camera's line** ({@link limbRatioAt}): on the line to the body's centre, looking at the
  *   centre, from {@link HandoverApproach.startRatio} times the hand-over range (the camera's
  *   distance to the limb, as `handsOver` measures it) closing at {@link HandoverApproach.ratePerS} of
@@ -279,14 +283,26 @@ export function eyeOnLineM(geometry: LookGeometry, limbRatio: number, eyePointM:
 /** Bisection steps for the camera's direction: far below a nanoradian over a bracket under π. */
 const BISECTION_STEPS = 64;
 
-/** `v`'s direction in the plane of the galactic x and y axes. */
-function inPlane(v: Vec3): Vec3 {
-  return normalise(vec3(v.x, v.y, 0));
+/** The galactic +x, the look's north beside a star at a galactic pole. */
+const GALACTIC_X = vec3(1, 0, 0);
+
+/** Beyond this |cos| of a star's angle from galactic +z, its north is taken from +x instead. */
+const POLE_COS = 1 - 1e-9;
+
+/**
+ * The look's north beside a star along the unit `sun`: galactic +z less its part along `sun`, the
+ * star's own north, or +x so taken for a star at a galactic pole.
+ */
+function northBeside(sun: Vec3): Vec3 {
+  const along = dot(GALACTIC_Z, sun);
+  const up = Math.abs(along) < POLE_COS ? GALACTIC_Z : GALACTIC_X;
+  return normalise(sub(up, scale(sun, dot(up, sun))));
 }
 
 /**
  * The look's geometry: the rotation that puts the survey's middle's datum normal at the look's
- * incidence in the galactic x–y plane and its north along +z, and the direction of the camera's
+ * incidence from the star, in the plane of the star and its north ({@link northBeside}), and its
+ * north along the star's north, and the direction of the camera's
  * line from which, at the hand-over range, the camera sees the survey's middle at the look's
  * emission, beyond the normal from the star (see the module's remarks).
  *
@@ -305,18 +321,20 @@ export function lookGeometry(look: HandoverLook, input: LookGeometryInput): Look
   const surveyPointM = datumPointM(input.surveyMiddle, figure);
   const surveyNormal = datumNormal(surveyPointM, figure);
   // The body-fixed frame at the survey's middle (its normal, north and east) taken to the look's
-  // (the normal at i from the sun in the x–y plane, galactic +z, and their cross product).
+  // (the normal at i from the sun in the plane of the sun and its north, that north, and their
+  // cross product).
   const e1 = surveyNormal;
   const e2 = normalise(sub(GALACTIC_Z, scale(e1, dot(GALACTIC_Z, e1))));
   const e3 = cross(e1, e2);
   const turnFor = (sun: Vec3): Rotation3 => {
-    // In the plane of x and y, a right angle from the sun: +y for a star along −x.
-    const side = normalise(cross(sun, GALACTIC_Z));
+    // Beside the sun, a right angle from it and from its north: +y for a star along −x.
+    const north = northBeside(sun);
+    const side = normalise(cross(sun, north));
     const f1 = add(
       scale(sun, Math.cos(look.incidenceRad)),
       scale(side, Math.sin(look.incidenceRad)),
     );
-    const f2 = GALACTIC_Z;
+    const f2 = north;
     const f3 = cross(f1, f2);
     const row = (k: "x" | "y" | "z"): Vec3 =>
       vec3(
@@ -326,14 +344,14 @@ export function lookGeometry(look: HandoverLook, input: LookGeometryInput): Look
       );
     return rotation3FromRows([row("x"), row("y"), row("z")]);
   };
-  // The sun as the survey's middle sees it, in the x–y plane: from the centre first, then from the
-  // middle the turn puts out there, R ÷ 1 au off it (1 × 10⁻⁵ rad); twice is exact to 10⁻¹⁰.
-  let sun = inPlane(input.towardStarM);
+  // The sun as the survey's middle sees it: from the centre first, then from the middle the turn
+  // puts out there, R ÷ 1 au off it (1 × 10⁻⁵ rad); twice is exact to 10⁻¹⁰.
+  let sun = normalise(input.towardStarM);
   for (let pass = 0; pass < 2; pass += 1) {
-    sun = inPlane(sub(input.towardStarM, rotateToBody(turnFor(sun), surveyPointM)));
+    sun = normalise(sub(input.towardStarM, rotateToBody(turnFor(sun), surveyPointM)));
   }
   const rotation = turnFor(sun);
-  const side = normalise(cross(sun, GALACTIC_Z));
+  const side = normalise(cross(sun, northBeside(sun)));
   const at = (thetaRad: number): LookGeometry => ({
     rotation,
     pole: rotateToBody(rotation, GALACTIC_Z),
