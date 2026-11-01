@@ -738,9 +738,10 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass
 /// under every 27 hold and under the 26 arm, as measured (2026-11-01, re-measured once every 27
-/// hold took P15.T11.b's orphan streams, whose galaxy draws this reference; at an effective 73 the
+/// hold took P15.T11.b's orphan streams, whose galaxy draws this reference, and again once it took
+/// P11.T4's neutron-star accretion and P11.T6's Type Ia explosion together; at an effective 73 the
 /// 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins; at generator version 25, measured
-/// again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit. The dynamical channel takes
+/// again with both), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit. The dynamical channel takes
 /// the mass ratio's from 171 to 66 (166 to 62 at 24); the masses' stay high, the engine holding 13%
 /// of its primaries in layers D and E against the class's 1.3% and (at 24) its giant-branch donors
 /// heavier (median 1.69 M☉) than the class's at the turn-off.
