@@ -178,7 +178,12 @@ import {
 import {
   choleskyLower,
   factorDense,
-  realEigen,
+  type RealSchurForm,
+  realSchurForm,
+  refinedShiftedSolve,
+  schurEigensystem,
+  type ShiftedSolveScratch,
+  shiftedSolveScratch,
   solveDense,
   solveLower,
   solveLowerTransposed,
@@ -604,7 +609,17 @@ export interface PolarisedProblem {
    */
   readonly fieldInterfaces?: ArrayLike<number>;
   readonly userDown?: boolean;
+  /**
+   * How a nonsymmetric layer's particular solution is solved: on the real Schur form of its
+   * (−P)(−Q), refined once against the product, O(n²) a beam (R08.T14.e's lever), when absent; or by
+   * elimination of the shifted product, O(n³), the path R08.T14.e built, kept as the Schur form's
+   * oracle.
+   */
+  readonly particular?: ParticularMethod;
 }
+
+/** How the vector mode's nonsymmetric layers' particular solution is solved ({@link PolarisedProblem.particular}). */
+export type ParticularMethod = "schur" | "elimination";
 
 /** One mode's Stokes intensities for one beam, at every interface. */
 export interface StokesModeIntensities {
@@ -749,7 +764,13 @@ type LayerModePath =
       readonly diffMap: Float64Array;
       readonly inverseMap: Float64Array;
     }
-  | { readonly kind: "nonsymmetric"; readonly product: Float64Array; readonly negP: Float64Array };
+  | {
+      readonly kind: "nonsymmetric";
+      readonly product: Float64Array;
+      readonly negP: Float64Array;
+      /** The product's real Schur form, its eigensolve's, which the particular solution takes. */
+      readonly schur: RealSchurForm;
+    };
 
 /** Row a's node and component: a = i C + c. */
 function nodeOf(a: number, components: number): number {
@@ -1049,7 +1070,8 @@ function vectorLayerMode(
     // The nonsymmetric path on (−P)(−Q), whose eigenvectors z give X = D z and, with w = (−P)⁻¹z,
     // G⁺ = (D ÷ 2)(z − k w) and G_J⁻ = (D ÷ 2)(z + k w).
     const product = multiply(negP, negQ, n);
-    const eigen = realEigen(product, n);
+    const schur = realSchurForm(product, n);
+    const eigen = schurEigensystem(schur, n);
     const negPLu = factorDense(negP, n);
     const wRe = new Float64Array(n);
     const wIm = new Float64Array(n);
@@ -1101,7 +1123,7 @@ function vectorLayerMode(
         largestShare = Math.max(largestShare, li / modulus);
       }
     }
-    path = { kind: "nonsymmetric", product, negP };
+    path = { kind: "nonsymmetric", product, negP, schur };
   }
   return {
     layer,
@@ -1516,10 +1538,13 @@ interface VectorScratch {
   readonly down: Float64Array;
   readonly userUp: Float64Array;
   readonly userDown: Float64Array;
+  /** The Schur form's solve's own (`linearAlgebra.ts`'s `refinedShiftedSolve`). */
+  readonly schur: ShiftedSolveScratch;
 }
 
 function vectorScratch(n: number, width: number): VectorScratch {
   return {
+    schur: shiftedSolveScratch(n),
     sourceUp: new Float64Array(n),
     sourceDown: new Float64Array(n),
     q: new Float64Array(n),
@@ -1591,6 +1616,7 @@ function vectorParticularInto(
   quadrature: DoubleGaussQuadrature,
   slant: number,
   scratch: VectorScratch,
+  method: ParticularMethod,
 ): void {
   const n = lm.size;
   const { components } = lm;
@@ -1632,12 +1658,8 @@ function vectorParticularInto(
       break;
     }
     case "nonsymmetric": {
-      const { product, negP } = path;
+      const { product, negP, schur } = path;
       // ((−P)(−Q) − λ²) z = (−P) q − λ p; Zs = D z; Zd = D (q − (−Q) z) ÷ λ.
-      const shifted = Float64Array.from(product);
-      for (let i = 0; i < n; i += 1) {
-        shifted[i * n + i] = at(shifted, i * n + i) - slant * slant;
-      }
       const z = scratch.solved;
       for (let i = 0; i < n; i += 1) {
         let s = 0;
@@ -1646,7 +1668,19 @@ function vectorParticularInto(
         }
         z[i] = s - slant * at(p, i);
       }
-      solveDense(factorDense(shifted, n), z);
+      switch (method) {
+        case "schur":
+          refinedShiftedSolve(product, schur, n, slant * slant, z, scratch.schur);
+          break;
+        case "elimination": {
+          const shifted = Float64Array.from(product);
+          for (let i = 0; i < n; i += 1) {
+            shifted[i * n + i] = at(shifted, i * n + i) - slant * slant;
+          }
+          solveDense(factorDense(shifted, n), z);
+          break;
+        }
+      }
       for (let i = 0; i < n; i += 1) {
         let s = 0;
         for (let j = 0; j < n; j += 1) {
@@ -1695,6 +1729,8 @@ interface VectorModeContext {
   readonly userComponents: number;
   /** The fields the solve makes. */
   readonly fields: SolveFields;
+  /** How the nonsymmetric layers' particular solution is solved. */
+  readonly particular: ParticularMethod;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
@@ -1785,6 +1821,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
       ground,
       Math.min(userComponents, components),
       fields,
+      problem.particular ?? "schur",
     );
     const complexLayers = context.layerModes.flatMap((lm, p) => (lm.complexPairs > 0 ? [p] : []));
     eigen.push({
@@ -1872,6 +1909,7 @@ function vectorModeContext(
   ground: GroundModeTerms | undefined,
   userComponents: number,
   fields: SolveFields,
+  particular: ParticularMethod,
 ): VectorModeContext {
   const lmax = quadrature.streams - 1;
   const count = quadrature.nodes.length;
@@ -1922,6 +1960,7 @@ function vectorModeContext(
     ground,
     userComponents,
     fields,
+    particular,
   };
 }
 
@@ -2104,7 +2143,7 @@ function vectorBeamParticularsInto(
       made[p] = own ? 1 : 0;
     }
     beamSourceInto(lm, quadrature, functions.nodes, beamZero, scratch.sourceUp, scratch.sourceDown);
-    vectorParticularInto(lm, quadrature, lambda, scratch);
+    vectorParticularInto(lm, quadrature, lambda, scratch, context.particular);
     const zUp = scratch.up;
     const zDown = scratch.down;
     const through = at(throughs, p);

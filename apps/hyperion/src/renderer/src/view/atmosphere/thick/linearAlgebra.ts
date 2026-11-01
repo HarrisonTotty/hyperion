@@ -431,6 +431,60 @@ export function solveBandColumns(lu: BandLu, b: Float64Array, columns: number): 
   }
 }
 
+/** The scratch of a {@link refinedShiftedSolve}: three of n entries, any values. */
+export interface ShiftedSolveScratch {
+  readonly saved: Float64Array;
+  readonly residual: Float64Array;
+  readonly work: Float64Array;
+}
+
+/** A {@link refinedShiftedSolve}'s scratch for order n. */
+export function shiftedSolveScratch(n: number): ShiftedSolveScratch {
+  return {
+    saved: new Float64Array(n),
+    residual: new Float64Array(n),
+    work: new Float64Array(n),
+  };
+}
+
+/**
+ * Solves (A − s 1) x = b in place on A's real Schur form, then refines x once against A itself
+ * (Golub and Van Loan 2013, §3.5.3: r = b − (A − s 1) x, and x + (A − s 1)⁻¹ r on the same form):
+ * the form's own backward error, which {@link realEigen}'s relaxed deflation can leave near 10⁻¹³
+ * of ‖A‖, is taken out, and the residual is about elimination's (R08.T14.e's records). 6n² a
+ * right-hand side.
+ *
+ * @param a - A, n × n row-major, whose form `schur` is.
+ * @throws RangeError if `a` is not n × n, or `b` or the scratch does not hold n entries.
+ * @throws Error as {@link solveShiftedSchur}.
+ */
+export function refinedShiftedSolve(
+  a: Float64Array,
+  schur: RealSchurForm,
+  n: number,
+  shift: number,
+  b: Float64Array,
+  scratch: ShiftedSolveScratch,
+): void {
+  requireSquare(a, n);
+  const { saved, residual, work } = scratch;
+  requireLength(saved, n);
+  requireLength(residual, n);
+  saved.set(b);
+  solveShiftedSchur(schur, n, shift, b, work);
+  for (let i = 0; i < n; i += 1) {
+    let sum = at(saved, i) + shift * at(b, i);
+    for (let j = 0; j < n; j += 1) {
+      sum -= at(a, i * n + j) * at(b, j);
+    }
+    residual[i] = sum;
+  }
+  solveShiftedSchur(schur, n, shift, residual, work);
+  for (let i = 0; i < n; i += 1) {
+    b[i] = at(b, i) + at(residual, i);
+  }
+}
+
 /** A dense matrix factorised by {@link factorDense}: P A = L U, with its row interchanges. */
 export interface DenseLu {
   /** n, its order. */
@@ -589,6 +643,33 @@ const CLUSTER_SWEEPS = 30;
  *   window, or if an entry is not finite.
  */
 export function realEigen(a: Float64Array, n: number): RealEigensystem {
+  return schurEigensystem(realSchurForm(a, n), n);
+}
+
+/**
+ * A real matrix's real Schur form A = Z T Zᵀ, as {@link realEigen} forms it (plan R08, R08.T14.e's
+ * lever: the vector mode's particular solution on it): T quasi-upper-triangular, Z orthogonal.
+ */
+export interface RealSchurForm {
+  /**
+   * T, n × n row-major: its 2 × 2 diagonal blocks those of complex pairs, each pair of real
+   * eigenvalues split by a rotation; what lies below its first subdiagonal, and on it outside a
+   * pair's block, is 0, or to be read as 0.
+   */
+  readonly t: Float64Array;
+  /** Z, n × n row-major: the transformations accumulated. */
+  readonly z: Float64Array;
+}
+
+/**
+ * The real Schur form of a real matrix ({@link realEigen}'s remarks: Householder reduction to upper
+ * Hessenberg form, the Francis double-shift QR iteration, each real pair's block split).
+ *
+ * @param a - The n × n matrix, row-major; not modified.
+ * @throws RangeError if `a` does not hold n × n entries.
+ * @throws Error as {@link realEigen}.
+ */
+export function realSchurForm(a: Float64Array, n: number): RealSchurForm {
   requireSquare(a, n);
   if (!a.every(Number.isFinite)) {
     throw new Error("the matrix has an entry that is not finite");
@@ -600,7 +681,95 @@ export function realEigen(a: Float64Array, n: number): RealEigensystem {
   }
   hessenbergReduce(h, z, n);
   realSchur(h, z, n);
-  return schurEigenvectors(h, z, n);
+  return { t: h, z };
+}
+
+/**
+ * The eigenvalues and eigenvectors of a matrix from its real Schur form ({@link realEigen}'s, to the
+ * bit, the form left as it was).
+ */
+export function schurEigensystem(schur: RealSchurForm, n: number): RealEigensystem {
+  return schurEigenvectors(schur.t, schur.z, n);
+}
+
+/**
+ * Solves (A − s 1) x = b in place on A's real Schur form (Golub and Van Loan 2013, §7.6's back
+ * substitution on a quasi-triangular matrix): y = Zᵀ b, (T − s 1) w = y by blocks from the last, a
+ * complex pair's 2 × 2 by elimination with partial pivoting, and x = Z w. O(n²) for each right-hand
+ * side, where elimination of A − s 1 itself is O(n³).
+ *
+ * @param scratch - n entries the solve takes for y and w; any values.
+ * @throws RangeError if `b` or `scratch` does not hold n entries.
+ * @throws Error if a diagonal block of T − s 1 is singular: s is an eigenvalue of A.
+ */
+export function solveShiftedSchur(
+  schur: RealSchurForm,
+  n: number,
+  shift: number,
+  b: Float64Array,
+  scratch: Float64Array,
+): void {
+  requireLength(b, n);
+  requireLength(scratch, n);
+  const { t, z } = schur;
+  const y = scratch;
+  for (let i = 0; i < n; i += 1) {
+    let sum = 0;
+    for (let j = 0; j < n; j += 1) {
+      sum += at(z, j * n + i) * at(b, j);
+    }
+    y[i] = sum;
+  }
+  let i = n - 1;
+  while (i >= 0) {
+    if (i > 0 && at(t, i * n + i - 1) !== 0) {
+      // Rows i − 1 and i: the pair's block, the solved entries past it moved to the right.
+      let r0 = at(y, i - 1);
+      let r1 = at(y, i);
+      for (let j = i + 1; j < n; j += 1) {
+        r0 -= at(t, (i - 1) * n + j) * at(y, j);
+        r1 -= at(t, i * n + j) * at(y, j);
+      }
+      let a00 = at(t, (i - 1) * n + i - 1) - shift;
+      let a01 = at(t, (i - 1) * n + i);
+      let a10 = at(t, i * n + i - 1);
+      let a11 = at(t, i * n + i) - shift;
+      if (Math.abs(a10) > Math.abs(a00)) {
+        [a00, a01, a10, a11] = [a10, a11, a00, a01];
+        [r0, r1] = [r1, r0];
+      }
+      if (a00 === 0) {
+        throw new Error(`the shifted Schur form is singular at block ${i - 1}`);
+      }
+      const multiplier = a10 / a00;
+      const pivot = a11 - multiplier * a01;
+      if (pivot === 0) {
+        throw new Error(`the shifted Schur form is singular at block ${i - 1}`);
+      }
+      const second = (r1 - multiplier * r0) / pivot;
+      y[i] = second;
+      y[i - 1] = (r0 - a01 * second) / a00;
+      i -= 2;
+      continue;
+    }
+    let sum = at(y, i);
+    for (let j = i + 1; j < n; j += 1) {
+      sum -= at(t, i * n + j) * at(y, j);
+    }
+    const diagonal = at(t, i * n + i) - shift;
+    if (diagonal === 0) {
+      throw new Error(`the shifted Schur form is singular at ${i}`);
+    }
+    y[i] = sum / diagonal;
+    i -= 1;
+  }
+  for (let r = 0; r < n; r += 1) {
+    let sum = 0;
+    for (let j = 0; j < n; j += 1) {
+      sum += at(z, r * n + j) * at(y, j);
+    }
+    b[r] = sum;
+  }
 }
 
 /** Reduces h to upper Hessenberg form in place by Householder reflections, accumulated into z. */

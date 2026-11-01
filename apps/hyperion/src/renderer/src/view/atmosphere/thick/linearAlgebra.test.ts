@@ -9,10 +9,15 @@ import {
   factorDense,
   realEigen,
   type RealEigensystem,
+  realSchurForm,
+  refinedShiftedSolve,
+  schurEigensystem,
+  shiftedSolveScratch,
   solveBand,
   solveBandColumns,
   solveDense,
   solveLower,
+  solveShiftedSchur,
   solveLowerTransposed,
   symmetricEigen,
 } from "./linearAlgebra";
@@ -462,6 +467,50 @@ describe("dense elimination with partial pivoting", () => {
 });
 
 describe("the real nonsymmetric eigenproblem", () => {
+  it("solves (A − s 1) x = b on A's Schur form as elimination does, to 10⁻¹³, two complex pairs among the blocks (R08.T14.e)", () => {
+    const n = 7;
+    const lambda = new Float64Array(n * n);
+    lambda[0] = 3;
+    lambda[1 * n + 1] = -1.5;
+    lambda[2 * n + 2] = 0.25;
+    for (const [k, re, im] of [
+      [3, 1.2, 0.8],
+      [5, -0.4, 2.5],
+    ] as const) {
+      lambda[k * n + k] = re;
+      lambda[(k + 1) * n + k + 1] = re;
+      lambda[k * n + k + 1] = im;
+      lambda[(k + 1) * n + k] = -im;
+    }
+    const s = nonsymmetric(n);
+    const a = matrixProduct(matrixProduct(s, lambda, n), inverse(s, n), n);
+    const schur = realSchurForm(a, n);
+    // The eigensystem from the form is realEigen's to the bit, the form left as it was.
+    expect(schurEigensystem(schur, n)).toEqual(realEigen(a, n));
+    for (const shift of [0.7, -2.2, 9]) {
+      const b = Float64Array.from({ length: n }, (_, i) => Math.cos(1.3 * i) - 0.2);
+      const shifted = Float64Array.from(a, (value, k) =>
+        Math.floor(k / n) === k % n ? value - shift : value,
+      );
+      const expected = Float64Array.from(b);
+      solveDense(factorDense(shifted, n), expected);
+      const refined = Float64Array.from(b);
+      solveShiftedSchur(schur, n, shift, b, new Float64Array(n));
+      refinedShiftedSolve(a, schur, n, shift, refined, shiftedSolveScratch(n));
+      const largest = Math.max(...Array.from(expected, Math.abs));
+      b.forEach((value, i) => {
+        expect(Math.abs(value - entry(expected, i))).toBeLessThan(1e-13 * largest);
+        expect(Math.abs(entry(refined, i) - entry(expected, i))).toBeLessThan(1e-14 * largest);
+      });
+    }
+    expect(() => {
+      solveShiftedSchur(schur, n, 3, new Float64Array(n), new Float64Array(n));
+    }).not.toThrow();
+    expect(() => {
+      solveShiftedSchur(schur, n, 0, new Float64Array(n - 1), new Float64Array(n));
+    }).toThrow(RangeError);
+  });
+
   it("finds the eigenvalues S Λ S⁻¹ was built with, two complex pairs among them", () => {
     // Λ: 3, −1.5, 0.25 and the blocks [[a, b], [−b, a]], eigenvalues a ± bi.
     const n = 7;

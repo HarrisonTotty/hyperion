@@ -1095,6 +1095,40 @@ describe("layering, one factorisation and V", () => {
     });
   });
 
+  it("solves the nonsymmetric layers' particular solution on their Schur form as by elimination, to 10⁻¹² of each field's largest (R08.T14.e)", () => {
+    for (const streams of [8, 16]) {
+      const common = {
+        layers: [
+          { opticalDepth: 0.4, singleScatteringAlbedo: 1, moments: rayleigh(0.03) },
+          { opticalDepth: 1.2, singleScatteringAlbedo: 0.9, moments: sphere },
+          { opticalDepth: 0.6, singleScatteringAlbedo: 0.99, moments: sphere },
+        ],
+        groundAlbedo: 0.15,
+        beamCosines: [0.1, 0.35, 0.6, 1],
+        userCosines: [0.2, 0.55, 0.9],
+        maxMode: 3,
+        streams,
+      };
+      const schur = solvePolarised(common);
+      const elimination = solvePolarised({ ...common, particular: "elimination" });
+      expect(schur.eigen.some((record) => record.nonsymmetricLayers > 0)).toBe(true);
+      let worst = 0;
+      elimination.beams.forEach((beam, b) => {
+        beam.modes.forEach((mode, m) => {
+          const other = beamOf(schur, b).modes[m];
+          for (const key of ["quadratureUp", "quadratureDown", "userUp", "userDown"] as const) {
+            // A field of zeros (V where nothing makes it) is held to its zeros.
+            const largest = Math.max(Number.MIN_VALUE, ...Array.from(mode[key], Math.abs));
+            mode[key].forEach((value, i) => {
+              worst = Math.max(worst, Math.abs(entry(other?.[key] ?? [], i) - value) / largest);
+            });
+          }
+        });
+      });
+      expect(worst).toBeLessThan(1e-12);
+    }
+  });
+
   it("gives a fixed column every field to the bits it gave before the correction's levers (R08.T14.e)", async () => {
     // Air at ω 1, a sphere's cloud whose b₂ takes the nonsymmetric path past m = 0, a depolariser,
     // one that absorbs alone, a beam at the depolariser's eigenvalue's reciprocal, one below the
@@ -1123,6 +1157,7 @@ describe("layering, one factorisation and V", () => {
     const beamCosines = [-0.05, 0.15, 1 / rate, 0.6, 1];
     const heights = Float64Array.from({ length: 5 }, (_, k) => 40_000 * (1 - k / 4));
     const depths = Float64Array.from(layers, (layer) => layer.opticalDepth);
+    // By elimination, the path R08.T14.e built: the Schur form's own test holds it to that path.
     const solution = solvePolarised({
       layers,
       groundAlbedo: 0.25,
@@ -1131,6 +1166,7 @@ describe("layering, one factorisation and V", () => {
       maxMode: 2,
       streams: 8,
       beamPaths: beamCosines.map((mu0) => sphericalBeamPath(6_371_000, heights, depths, mu0)),
+      particular: "elimination",
     });
     expect(solution.eigen.some((record) => record.nonsymmetricLayers > 0)).toBe(true);
     expect(await bitsOf(solution)).toBe(
