@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
+import type { GeometryOverride } from "../../../../preload/api";
 import {
   GEOMETRY_BEFORE_R14,
+  geometryOf,
+  type GeometrySettings,
   QUALITY_SETTINGS,
   SETTINGS,
   TERRAIN_SETTINGS,
@@ -139,5 +142,18 @@ describe("the geometry's settings (plan R14)", () => {
       casterStrideCap: 1,
       overlayDepth: "redraw",
     });
+  });
+
+  it("takes a launch's override over the setting's, field by field, the override's fields the settings' own (Design note 17)", () => {
+    expectTypeOf<GeometryOverride>().toEqualTypeOf<Partial<GeometrySettings>>();
+    expect([
+      geometryOf("low", { clusterPath: false }),
+      geometryOf("high", { casterStrideCap: 1, overlayDepth: "redraw" }),
+      geometryOf("high", {}),
+    ]).toEqual([
+      { ...SETTINGS.low.geometry, clusterPath: false },
+      { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
+      SETTINGS.high.geometry,
+    ]);
   });
 });

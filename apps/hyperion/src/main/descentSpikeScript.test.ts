@@ -221,4 +221,23 @@ describe.runIf(process.platform === "linux")("the descent spike's script", () =>
     expect(run.output).not.toContain("software mode");
     expect(readdirSync(join(run.runs, "gpu-cache"))).toEqual(["GPUCache"]);
   });
+
+  it("launches a hidden run with no display on headless Ozone at the software mode's screen size, on the adapter it finds", () => {
+    for (const args of [["--smoke"], ["--hidden"]]) {
+      const run = runScript(args, { env: { DISPLAY: "", WAYLAND_DISPLAY: "" } });
+      expect(run.status).toBe(0);
+      const launch = run.launch ?? [];
+      expect(launch.slice(0, 2)).toEqual([
+        "--ozone-platform=headless",
+        "--ozone-override-screen-size=1920,1080",
+      ]);
+      for (const word of ["--hyperion-graphics-software", "--use-webgpu-adapter=swiftshader"]) {
+        expect(launch).not.toContain(word);
+      }
+    }
+    // A shown run with no display is left to fail as it did: nothing to show it on.
+    expect(runScript([], { env: { DISPLAY: "", WAYLAND_DISPLAY: "" } }).launch?.[0]).not.toBe(
+      "--ozone-platform=headless",
+    );
+  });
 });

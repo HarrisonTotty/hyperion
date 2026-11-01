@@ -15,7 +15,9 @@
 # R10.T15.b), --sizes on|off (R10.T14.b: a generated world's cache sizes measured, off by
 # default; refused on the test planet), and --horizon on|off (R10.T15.b: the lit patches' horizon
 # map, on by default; off is the A/B whose run beside an ordinary --sizes on run gives the map's
-# share of the height workers' bake time; refused on the test planet and with --style wireframe).
+# share of the height workers' bake time; refused on the test planet and with --style wireframe),
+# and --geometry <field>=<value>[,...] (plan R14, Design note 17: how a generated world's terrain
+# draws its geometry, over the setting's; clusterPath=false is the way back, as before plan R14).
 #
 # --world test-planet, the default, flies R05's test planet. --world terrain-test flies TERRAIN
 # TEST's moon over a generated world's terrain: its field is served in the page by TERRAIN TEST's
@@ -43,7 +45,12 @@
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
 # cache; otherwise the cache kept from the last run (in target/descent-spike/gpu-cache) is copied
 # into the run's profile and kept again after it, so that cold and warm caches are run apart.
-# --hidden never shows the window (offscreen rendering), as --smoke never does.
+# --hidden never shows the window (offscreen rendering), as --smoke never does. Such a run on Linux
+# with no display (DISPLAY and WAYLAND_DISPLAY unset or empty), a pod's or a CI machine's, takes
+# headless Ozone and its screen size, --ozone-platform=headless and
+# --ozone-override-screen-size=1920,1080, the views check's software mode's (`viewsCheck.sh`), so
+# that Electron starts with no X server; with a GPU it draws there, and without one --software gives
+# it SwiftShader. A run with a display is unchanged.
 #
 # --software runs the spike hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and no display,
 # as a pod has (the check-only software mode, plan R01, R01.T16; main's ruling of 2026-11-01 for the
@@ -239,6 +246,11 @@ if [[ $software -eq 1 ]]; then
     env_run+=(DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent)
     switches=("${adapter_switches[@]}" "${headless_switches[@]}" --hyperion-graphics-software
         --ozone-override-screen-size=1920,1080 --disable-gpu-watchdog)
+elif [[ ( $hidden -eq 1 || $smoke -eq 1 ) && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" \
+    && "$(uname -s)" == Linux ]]; then
+    # No display to draw on and none needed: headless Ozone, which would otherwise hold the window
+    # at the client's 1024 x 640 minimum, at the software mode's screen size.
+    switches=(--ozone-platform=headless --ozone-override-screen-size=1920,1080)
 elif [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
     # As the `client` recipe does: on Wayland the client would relaunch itself through XWayland,
     # and this script would take the first process's exit for the run's.

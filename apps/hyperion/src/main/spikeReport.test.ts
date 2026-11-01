@@ -138,6 +138,33 @@ describe("the spike report's check", () => {
     expect(readDescentSpikeReport(broken(smallReport()))).toBeNull();
   });
 
+  it("passes a generated world's geometry through, and refuses a report whose geometry is malformed (plan R14, R14.T1.f)", () => {
+    const geometry = {
+      settings: {
+        clusterPath: false,
+        casterDepthCull: false,
+        casterStrideCap: 1,
+        overlayDepth: "redraw",
+      },
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 1, p50: 0, max: 0 },
+          edgePatches: { frames: 1, p50: 40, max: 40 },
+          drawnTriangles: { frames: 1, p50: 430_080, max: 430_080 },
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    } as const;
+    const withGeometry = { ...smallReport(), geometry };
+    expect([
+      readDescentSpikeReport(withGeometry),
+      readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, segments: [{}] } }),
+      readDescentSpikeReport({ ...withGeometry, geometry: { settings: geometry.settings } }),
+    ]).toEqual([withGeometry, null, null]);
+  });
+
   it("passes a report with well-formed measured sizes through unchanged (R10.T14.b)", () => {
     const report: DescentSpikeReport = { ...smallReport(), sizes: sizesReportOf() };
     expect(readDescentSpikeReport(report)).toEqual(report);

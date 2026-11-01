@@ -38,6 +38,7 @@ import {
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
+import type { SpikeGeometrySample } from "./spikeRun";
 import type { SpikeSizes } from "./spikeSizes";
 import {
   type RecordedDescent,
@@ -83,6 +84,8 @@ export interface ControllerFrame {
   readonly passesSubmitted: number | null;
   readonly patchesHard: number;
   readonly streaming: boolean;
+  /** A generated world's terrain geometry (`SpikeFrameSample`'s, plan R14); absent elsewhere. */
+  readonly geometry?: SpikeGeometrySample | null;
 }
 
 /** The capture's span controls and its result (`GpuCapture`'s). */

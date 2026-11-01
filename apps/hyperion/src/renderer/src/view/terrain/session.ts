@@ -124,7 +124,7 @@ import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/m
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
-import type { QualitySetting, TerrainSettings } from "../quality/qualitySetting";
+import type { GeometrySettings, QualitySetting, TerrainSettings } from "../quality/qualitySetting";
 import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
 import {
   TERRAIN_COMPUTATION_FAILED,
@@ -243,6 +243,11 @@ export interface TerrainSessionOptions {
    * fake clock; absent, its passes look ahead of nothing.
    */
   readonly lookaheadClockMs?: () => number;
+  /**
+   * How its passes draw their geometry (plan R14; `TerrainPassOptions.geometry`): a launch's
+   * override over its setting's (`--geometry`, Design note 17); absent, its setting's.
+   */
+  readonly geometry?: GeometrySettings;
 }
 
 /**
@@ -831,6 +836,8 @@ export class TerrainSession {
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #horizonMap: HorizonLayerSetting;
   readonly #lookaheadClockMs: (() => number) | null;
+  /** Its passes' geometry (plan R14), `null` for their setting's. */
+  readonly #geometry: GeometrySettings | null;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -854,6 +861,7 @@ export class TerrainSession {
       );
     this.#horizonMap = options.horizonMap ?? "baked";
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
+    this.#geometry = options.geometry ?? null;
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -1715,6 +1723,7 @@ export class TerrainSession {
         frustumMargin: "motion",
         // Its bakes asked ahead of each view's motion too (R10.T14.b).
         ...(this.#lookaheadClockMs === null ? {} : { lookaheadClockMs: this.#lookaheadClockMs }),
+        ...(this.#geometry === null ? {} : { geometry: this.#geometry }),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

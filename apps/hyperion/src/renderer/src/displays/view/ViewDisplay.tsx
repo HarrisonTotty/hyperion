@@ -134,7 +134,13 @@ import {
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
 import { renderViewport } from "../../view/photoreal/internalScale";
-import { QUALITY_NAMES, type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
+import type { GeometryOverride } from "../../../../preload/api";
+import {
+  geometryOf,
+  QUALITY_NAMES,
+  type QualitySetting,
+  SETTINGS,
+} from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -373,6 +379,11 @@ interface ViewDisplayProps {
    * (plan R10, R10.T6.a); none by default.
    */
   readonly performanceThreads?: number | null | undefined;
+  /**
+   * The launch's geometry override, `window.hyperion.geometry` (`--geometry`, plan R14, Design note
+   * 17): the terrain's passes draw the setting's geometry with it over; none by default.
+   */
+  readonly geometry?: GeometryOverride | undefined;
   /**
    * Starts one of the terrain session's height workers (plan R10, R10.T16.a), stable in identity:
    * the renderer's module worker by default (`browserHeightWorker`), a fake in a test.
@@ -2699,6 +2710,7 @@ function ViewPanels({
   setting = "high",
   platform = "linux",
   performanceThreads = null,
+  geometry: override,
   heightWorkers = browserHeightWorker,
   sceneOptions = SCENE_OPTIONS,
   watchTerrain,
@@ -2791,6 +2803,11 @@ function ViewPanels({
         }
       : interimAt(universe, server.place, server.model.clock.time),
   );
+  // The launch's geometry over the setting's (plan R14), one value while both stay.
+  const terrainGeometry = useMemo(
+    () => (override === undefined ? undefined : geometryOf(setting, override)),
+    [setting, override],
+  );
   // The terrain session of the stage's source, above the stage so that a new scene of the same
   // source keeps its fields (R10.T16.a): the server's scene's over the link, a kept scene's over
   // its terrain fixture, and none for any other kept scene.
@@ -2813,6 +2830,7 @@ function ViewPanels({
     createWorker: heightWorkers,
     performanceThreads,
     setting,
+    geometry: terrainGeometry,
   });
   // The atmosphere cache of the stage's device (R08.T10.b), which asks a server scene's bodies'
   // records through the share; a kept scene's bodies bring their own settings.

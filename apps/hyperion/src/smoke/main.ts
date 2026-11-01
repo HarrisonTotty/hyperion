@@ -20,7 +20,10 @@
  * allowances k times, a whole number from 1 to {@link SMOKE_WATCHDOG_SCALE_MAX}, for a machine
  * much slower than the development one (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`).
  * `--smoke-captures=<dir>` asks the page for R05.T12.c's atmosphere comparison frames, which are
- * saved there as PNGs, for a person to look at.
+ * saved there as PNGs, for a person to look at. `--smoke-geometry=<field>=<value>[,…]` is the page's
+ * lit terrain's geometry over its setting's (plan R14, Design note 17;
+ * `preload/geometryLaunch.ts`), checked here, a setup error where it is not one, and handed to the
+ * page as `geometry-<field>` (`renderer/src/smoke/geometry.ts`).
  *
  * `--smoke-transfer=<ws URL>` runs R03.T15's transfer check instead (plan R10, R10.T15.b;
  * `smoke/transfer.ts` on the page): `--smoke-transfer-universe=<ID>`'s
@@ -72,6 +75,7 @@ import {
   refusalLine,
   withGpuExits,
 } from "./childWindow";
+import { parseGeometryOverride } from "../preload/geometryLaunch";
 import { startSoak } from "./soak";
 
 /** The value of `--<name>=value` on the command line, or `fallback`. */
@@ -100,6 +104,8 @@ const video = argument("smoke-video", "");
 const capturePath = argument("smoke-capture", "");
 /** Where R05.T12.c's comparison frames are saved, or "" for none. */
 const capturesDir = argument("smoke-captures", "");
+/** The page's geometry override as given (plan R14), or "" for its settings' own. */
+const geometryText = argument("smoke-geometry", "");
 /** R07.T21's child-window run's length in seconds; 0 runs the checks. */
 const childSeconds = Number(argument("smoke-child", "0"));
 /** Whether the child is offscreen on the main display: the harness's proof on one display. */
@@ -445,6 +451,15 @@ void app
               childHidden: childHidden ? "1" : "0",
             }),
         captures: capturesDir === "" ? "0" : "1",
+        // Throws, a setup error, for one that is not an override.
+        ...(geometryText === ""
+          ? {}
+          : Object.fromEntries(
+              Object.entries(parseGeometryOverride(geometryText)).map(([field, value]) => [
+                `geometry-${field}`,
+                String(value),
+              ]),
+            )),
         ...(video === "" ? {} : { video: pathToFileURL(video).href }),
         ...(transferUrl === null
           ? {}

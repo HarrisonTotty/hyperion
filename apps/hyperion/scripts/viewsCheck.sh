@@ -7,11 +7,15 @@
 # summary. No server is needed.
 #
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
+#                 [--geometry <field>=<value>[,...]]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID> [--timing]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
+# --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
+# setting's (plan R14, Design note 17; clusterPath=false is the way back), so that a before and an
+# after run come from one build; the client states it on the run's first line.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
 # so such a run proves the harness, not T20's criterion. --smoke runs short windows, hidden, and
 # writes under target/views-check/; a full run writes under docs/measurements/several-views/

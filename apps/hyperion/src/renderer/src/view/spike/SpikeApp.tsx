@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 
-import type { GraphicsApi, SpikeApi } from "../../../../preload/api";
+import type { GeometryOverride, GraphicsApi, SpikeApi } from "../../../../preload/api";
 import { StatusLine } from "../../components/StatusLine";
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
 import { GraphicsStatusProvider } from "../engine/GraphicsStatusProvider";
 import { navigatorGpu } from "../engine/status";
-import type { TerrainVariant } from "../quality/qualitySetting";
+import { geometryOf, type TerrainVariant } from "../quality/qualitySetting";
 import type { MeasureDescent } from "./bodyDescent";
 import { GpuCapture } from "./capture";
 import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
@@ -49,6 +49,11 @@ export interface SpikeAppProps {
    * (`--world served`, plan R10, R10.T15.b); unread over every other world.
    */
   readonly serverUrl: string;
+  /**
+   * The launch's geometry override, `window.hyperion.geometry` (`--geometry`, plan R14): a
+   * generated world's passes draw the setting's geometry with it over; none by default.
+   */
+  readonly geometry?: GeometryOverride | undefined;
 }
 
 /** The run's measured engine, its control and its listeners, made once. */
@@ -173,9 +178,15 @@ export function SpikeApp({
   loadEngine,
   measure,
   serverUrl,
+  geometry,
 }: SpikeAppProps) {
   // Made once, with the engine's loader given at the first render: the run's is its launch's.
   const [harness] = useState(() => makeHarness(spike, loadEngine));
+  // The launch's geometry over the setting's (`--geometry`, plan R14), made once: a new object would
+  // make the terrain session anew.
+  const [geometrySettings] = useState(() =>
+    geometry === undefined ? undefined : geometryOf(spike.launch.setting, geometry),
+  );
   const { launch } = spike;
   // A launch that can have no view asks for no adapter (`useViewEngine`), so nothing else would
   // end its run: the safe mode and a renderer without WebGPU end it as failed at once.
@@ -207,6 +218,7 @@ export function SpikeApp({
     sizes: harness.sizes ?? undefined,
     // The A/B's lit bakes skip the horizon map (`--horizon off`, R10.T15.b).
     horizonMap: launch.horizon === "off" ? ("skipped" as const) : undefined,
+    geometry: geometrySettings,
   };
   return (
     <GraphicsStatusProvider graphics={graphics} gpu={navigatorGpu()}>

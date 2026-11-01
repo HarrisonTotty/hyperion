@@ -48,6 +48,7 @@ import { lookAlong, rotate } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { occluderRadius } from "../view/depth/depth";
+import type { KernelPair } from "../view/engine/kernels";
 import type { RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
@@ -105,6 +106,8 @@ import {
   poseOver,
   VIEWPORT,
 } from "./surveyEdge";
+import { BROKEN_CULL_KERNEL, type SmokeFixture } from "./catalogue";
+import { smokeGeometry } from "./geometry";
 
 /** The passes' cache budget, 32 MiB: a few hundred lit slots, as the survey-edge check takes. */
 const CACHE_BYTES = 2 ** 25;
@@ -464,6 +467,7 @@ export async function checkTerrainFrame(
   engine: RenderEngine,
   checks: Checks,
   captures = false,
+  fixture: SmokeFixture = "none",
 ): Promise<CapturedImage[]> {
   const images: CapturedImage[] = [];
   const field = moonLikeFixture("first");
@@ -481,15 +485,20 @@ export async function checkTerrainFrame(
     mask.survey(change);
   });
   const passes: TerrainPass[] = [];
-  const makePass = async (lay: ((bake: BakedPatch) => BakedPatch) | null): Promise<TerrainPass> => {
+  const makePass = async (
+    lay: ((bake: BakedPatch) => BakedPatch) | null,
+    clusterCullKernel?: KernelPair,
+  ): Promise<TerrainPass> => {
     const pass = new TerrainPass({
       engine,
       setting: "low",
       terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("low"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
       createPool: (bake) => (lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
+      ...(clusterCullKernel === undefined ? {} : { clusterCullKernel }),
     });
     passes.push(pass);
     await pass.ready();
@@ -573,6 +582,29 @@ export async function checkTerrainFrame(
       withRelief.done && patches.interior > 0 && new Set(digests).size === 1,
       `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} on the cluster path, ${digests[1] ?? ""} by the way back, ${digests[2] ?? ""} on the path again`,
     );
+
+    // The fallback (plan R14, Design notes 16 and 17), under `--fixture=broken-wgsl` alone: a pass
+    // whose cull kernel its compiler refuses draws today's path, the frame the way back draws, and
+    // states the refusal.
+    if (fixture === "broken-wgsl") {
+      const refused = await makePass(null, BROKEN_CULL_KERNEL);
+      const settledRefused = await settled(refused, mask, pose);
+      const frameBy = async (geometry: GeometrySettings): Promise<Float32Array> => {
+        refused.setGeometry(geometry);
+        const frame = liveFrame(refused, mask, pose, performance.now());
+        return drawn(engine, pose, [
+          { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
+        ]);
+      };
+      const asked = bytesDigest(await frameBy(SETTINGS.low.geometry));
+      const back = bytesDigest(await frameBy(GEOMETRY_BEFORE_R14));
+      const refusal = refused.clusterRefusal ?? "none";
+      checks.check(
+        "R14.T1.f a refused cull kernel draws today's path, the way back's frame byte for byte, and states its refusal",
+        settledRefused.done && asked === back && refusal.startsWith(BROKEN_CULL_KERNEL.name),
+        `the cluster path asked ${asked}, the way back ${back}, the first pass's way back ${digests[1] ?? ""}; ${refusal}`,
+      );
+    }
 
     // On the datum: each surface alone, through the same live path.
     const datum = await makePass(onTheDatum);

@@ -76,6 +76,7 @@
 import type { Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows, rotationRows } from "../camera/quaternion";
 import type { ViewId } from "../camera/state";
+import type { KernelPair } from "../engine/kernels";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { BucketDrawBase, ClusterBuckets } from "../clusters/buckets";
 import { CLUSTER_CULL_KERNEL, receiversRefuse } from "../clusters/cull";
@@ -223,6 +224,11 @@ export type TerrainViewId = ViewId | typeof DEFAULT_TERRAIN_VIEW;
  * after the step that selected for it, finds its leading edge selected.
  */
 export type TerrainFrustumMargin = "none" | "motion";
+
+/** A cluster path's refusal (Design note 16): what was refused, and why. */
+function refusalOf(name: string, reason: unknown): string {
+  return `${name} refused: ${reason instanceof Error ? reason.message : String(reason)}`;
+}
 
 /** The label of the cluster cull's dispatch in `PassTimes` (plan R14, R14.T1.b). */
 export const TERRAIN_CLUSTER_CULL_LABEL = "terrain cluster cull";
@@ -666,6 +672,12 @@ export interface TerrainPassOptions {
    * or the way back; absent, its setting's (`SETTINGS[setting].geometry`).
    */
   readonly geometry?: GeometrySettings;
+  /**
+   * The cluster cull's kernel (plan R14, R14.T1.b): `CLUSTER_CULL_KERNEL` where absent. The smoke's
+   * `--fixture=broken-wgsl` gives one that does not compile, whose refusal the pass falls back from
+   * to today's path, stating it ({@link TerrainPass.clusterRefusal}; Design note 16).
+   */
+  readonly clusterCullKernel?: KernelPair;
 }
 
 /**
@@ -1312,6 +1324,10 @@ export class TerrainPass {
   #geometry: GeometrySettings;
   /** Whether each view's cluster counters are sampled ({@link TerrainPass.measureClusters}). */
   #measuring = false;
+  /** The cluster cull's kernel ({@link TerrainPassOptions.clusterCullKernel}). */
+  readonly #cullKernel: KernelPair;
+  /** Why the cluster path was refused on the current device, `null` while it stands. */
+  #clusterRefusal: string | null = null;
   /** Each view's own frame state, by its name. */
   readonly #views = new Map<TerrainViewId, ViewState>();
   /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
@@ -1367,6 +1383,7 @@ export class TerrainPass {
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
     this.#geometry = options.geometry ?? SETTINGS[options.setting].geometry;
+    this.#cullKernel = options.clusterCullKernel ?? CLUSTER_CULL_KERNEL;
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
       this.#shadows =
@@ -1408,6 +1425,16 @@ export class TerrainPass {
    */
   setGeometry(geometry: GeometrySettings): void {
     this.#geometry = geometry;
+  }
+
+  /**
+   * Why the cluster path was refused on the current device (plan R14, Design note 16): the cull's
+   * kernel or a cluster material its compiler refused, named with the refusal; `null` while the
+   * path stands or before it is made. While refused, the interior patches cast by the lit mesh and
+   * the overlay redraws its depth, today's path, from the next frame on; a restore makes it again.
+   */
+  get clusterRefusal(): string | null {
+    return this.#clusterRefusal;
   }
 
   /**
@@ -1717,7 +1744,7 @@ export class TerrainPass {
   async #readyClusters(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
     // A refusal thrown at the call, as a lost device's, settles as one rejected.
     const [kernel, depth] = await Promise.allSettled([
-      (async () => this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL))(),
+      (async () => this.#engine.createComputeAsync(this.#cullKernel))(),
       (async () => this.#materialOf("depth-cluster", device, path))(),
     ]);
     const taken =
@@ -1730,6 +1757,7 @@ export class TerrainPass {
     if (taken) {
       device.cullKernel = kernel.value;
       device.clusterDepthMaterial = depth.value;
+      this.#clusterRefusal = null;
       return;
     }
     // Neither is kept where either was refused: the one made is released.
@@ -1739,12 +1767,16 @@ export class TerrainPass {
     if (depth.status === "fulfilled") {
       this.#releaseOwn(depth.value);
     }
-    for (const outcome of [kernel, depth]) {
+    for (const [outcome, name] of [
+      [kernel, this.#cullKernel.name],
+      [depth, "the cluster depth"],
+    ] as const) {
       if (
         outcome.status === "rejected" &&
         !this.#superseded(device) &&
         !(outcome.reason instanceof EngineUnavailable)
       ) {
+        this.#clusterRefusal ??= refusalOf(name, outcome.reason);
         console.error(
           "the terrain's cluster path failed: its interior patches cast by the lit mesh",
           outcome.reason,
@@ -1767,6 +1799,7 @@ export class TerrainPass {
       }
     } catch (error: unknown) {
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        this.#clusterRefusal ??= refusalOf("the cluster caster", error);
         console.error(
           "the terrain's cluster casters failed: its interior patches cast by the lit mesh",
           error,
@@ -2401,6 +2434,8 @@ export class TerrainPass {
     this.#releaseDevice(old);
     this.#heights.clear();
     this.#device = this.#makeDevice(old.resources);
+    // The new device's cluster path is made again, and refused again only if its compiler says so.
+    this.#clusterRefusal = null;
     // Each view's records sized to the new layout's slots, its debounce kept; its cascades'
     // centres dropped, since the pass is remade (decision-r10-t9-split, ruling 7 amended).
     for (const [id, state] of this.#views) {

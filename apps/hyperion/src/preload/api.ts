@@ -200,10 +200,33 @@ export interface HyperionApi {
     readonly chrome: string;
     readonly node: string;
   };
+  /**
+   * The launch's development override of how the terrain's geometry is drawn (`--geometry`, plan
+   * R14, Design note 17), applied over its setting's: present only on a `--descent-spike` or
+   * `--views-check` launch that gave it.
+   */
+  readonly geometry?: GeometryOverride;
   /** The descent spike's functions, present only on a `--descent-spike` launch. */
   readonly spike?: SpikeApi;
   /** The several-views check's functions, present only on a `--views-check` launch (R07.T20). */
   readonly viewsCheck?: ViewsCheckApi;
+}
+
+/**
+ * A launch's override of the view's geometry settings (`--geometry <field>=<value>[,…]`, plan R14,
+ * Design note 17): each field it names replaces the setting's, so that the owner's before and after
+ * runs come from one build. Its fields are the renderer's `GeometrySettings`' (`qualitySetting.ts`,
+ * which holds the two equal).
+ */
+export interface GeometryOverride {
+  /** Whether the terrain draws through plan R14's cluster path; `false` is the way back. */
+  readonly clusterPath?: boolean;
+  /** R14.T1.c: casters culled by the view depths their receivers sample. */
+  readonly casterDepthCull?: boolean;
+  /** R14.T1.d: the coarsest stride a caster may take at its cascade's texel. */
+  readonly casterStrideCap?: 1 | 2 | 4 | 8;
+  /** R14.T1.e: where the symbology's pass takes the terrain's depth. */
+  readonly overlayDepth?: "redraw" | "scene-depth" | "cluster";
 }
 
 declare global {
@@ -969,6 +992,42 @@ export interface DescentSpikeReport {
    * whose report is as before.
    */
   readonly sizes?: SpikeSizesReport;
+  /**
+   * The main view's terrain geometry a frame by segment over a generated world (plan R14, R14.T1.f;
+   * results version 7): absent over the test planet, whose spike shading has no cluster path.
+   */
+  readonly geometry?: SpikeGeometryReport;
+}
+
+/** One count's figures over a segment's frames that had it (plan R14, R14.T1.f). */
+export interface SpikeCountFigures {
+  /** The frames that had the count. */
+  readonly frames: number;
+  /** Its median and its largest over them. */
+  readonly p50: number;
+  readonly max: number;
+}
+
+/**
+ * One segment's terrain geometry a frame on the main view's lit pass (plan R14, R14.T1.f;
+ * `TerrainPass.counts`): its interior and edge patches, its drawn triangles, its four cascades'
+ * caster triangles summed and its overlay depth's triangles, each `null` where no frame of the
+ * segment had it (no cascades on low, no counters back yet).
+ */
+export interface SpikeGeometrySegment {
+  readonly segment: string;
+  readonly interiorPatches: SpikeCountFigures | null;
+  readonly edgePatches: SpikeCountFigures | null;
+  readonly drawnTriangles: SpikeCountFigures | null;
+  readonly casterTriangles: SpikeCountFigures | null;
+  readonly overlayTriangles: SpikeCountFigures | null;
+}
+
+/** A generated world's run's terrain geometry (plan R14, R14.T1.f; {@link SpikeGeometrySegment}). */
+export interface SpikeGeometryReport {
+  /** How the main view's pass drew its geometry: its setting's, or the launch's override over. */
+  readonly settings: Required<GeometryOverride>;
+  readonly segments: ReadonlyArray<SpikeGeometrySegment>;
 }
 
 /** The several-views check's options as the command line gave them (plan R07, T20). */

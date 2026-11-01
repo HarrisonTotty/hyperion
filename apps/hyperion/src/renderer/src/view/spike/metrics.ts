@@ -14,6 +14,8 @@
 
 import type {
   DescentSpikeReport,
+  SpikeCountFigures,
+  SpikeGeometryReport,
   SpikeLatePipeline,
   SpikePassRow,
   SpikeSegmentSpan,
@@ -22,6 +24,8 @@ import type {
 import type { GpuTimer } from "../engine/status";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes } from "../engine/types";
+import type { GeometrySettings } from "../quality/qualitySetting";
+import type { SpikeGeometrySample } from "./spikeRun";
 
 /** The `performance.measure` name prefix of a segment's span, which marks it in the trace. */
 export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
@@ -57,6 +61,11 @@ export interface FrameSample {
   readonly patchesCalibrated: number;
   /** Whether `TERRAIN: STREAMING` shows. */
   readonly streaming: boolean;
+  /**
+   * A generated world's terrain geometry this frame (plan R14, R14.T1.f); `null` or absent over the
+   * test planet.
+   */
+  readonly geometry?: SpikeGeometrySample | null;
 }
 
 /** A patch event's kind (Design note 18: requested, baked, made resident). */
@@ -120,6 +129,29 @@ interface SegmentTally {
   streamingS: number;
 }
 
+/** A segment's geometry counts, a value a frame that had each (plan R14, R14.T1.f). */
+interface GeometryTally {
+  readonly interiorPatches: number[];
+  readonly edgePatches: number[];
+  readonly drawnTriangles: number[];
+  readonly casterTriangles: number[];
+  readonly overlayTriangles: number[];
+}
+
+/** The median and the largest of `values`, with their count; `null` for none. */
+function countFigures(values: ReadonlyArray<number>): SpikeCountFigures | null {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = values.toSorted((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const p50 =
+    sorted.length % 2 === 1
+      ? (sorted[mid] ?? 0)
+      : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  return { frames: sorted.length, p50, max: sorted.at(-1) ?? 0 };
+}
+
 /** Gathers a run's figures, frame by frame, into a {@link SpikeMetricsReport}. */
 export class SpikeMetrics {
   readonly #options: SpikeMetricsOptions;
@@ -133,6 +165,9 @@ export class SpikeMetrics {
   readonly #reportedResolves: number[] = [];
   readonly #passes = new Map<string, Array<number | null>>();
   readonly #segments = new Map<string, SegmentTally>();
+  /** Each segment's geometry counts (plan R14), and the geometry the last frame's pass drew with. */
+  readonly #geometry = new Map<string, GeometryTally>();
+  #geometrySettings: GeometrySettings | null = null;
   #lastRafMs: number | undefined;
   #lastScriptS: number | undefined;
   #timer: GpuTimer = "absent";
@@ -185,6 +220,7 @@ export class SpikeMetrics {
       tally.patchesHard += sample.patchesHard;
       tally.patchesCalibrated += sample.patchesCalibrated;
     }
+    this.#takeGeometry(sample);
     if (sample.streaming && this.#lastScriptS !== undefined) {
       this.#addStreaming(this.#lastScriptS, sample.scriptTimeS);
     }
@@ -279,6 +315,62 @@ export class SpikeMetrics {
     }
   }
 
+  /** Takes a frame's geometry counts into its segment's tally (plan R14, R14.T1.f). */
+  #takeGeometry(sample: FrameSample): void {
+    const geometry = sample.geometry ?? null;
+    if (geometry === null) {
+      return;
+    }
+    this.#geometrySettings = geometry.settings;
+    const name = this.segmentAt(sample.scriptTimeS);
+    const counts = geometry.counts;
+    if (name === undefined || counts === null) {
+      return;
+    }
+    let tally = this.#geometry.get(name);
+    if (tally === undefined) {
+      tally = {
+        interiorPatches: [],
+        edgePatches: [],
+        drawnTriangles: [],
+        casterTriangles: [],
+        overlayTriangles: [],
+      };
+      this.#geometry.set(name, tally);
+    }
+    tally.interiorPatches.push(counts.patches.interior);
+    tally.edgePatches.push(counts.patches.edge);
+    tally.drawnTriangles.push(counts.drawnTriangles);
+    if (counts.casterTriangles !== null) {
+      tally.casterTriangles.push(counts.casterTriangles.reduce((sum, n) => sum + n, 0));
+    }
+    if (counts.overlayTriangles !== null) {
+      tally.overlayTriangles.push(counts.overlayTriangles);
+    }
+  }
+
+  /** The run's geometry by segment, or `null` where no frame was a generated world's. */
+  #geometryReport(): SpikeGeometryReport | null {
+    const settings = this.#geometrySettings;
+    if (settings === null) {
+      return null;
+    }
+    return {
+      settings: { ...settings },
+      segments: this.#options.segments.map(({ name }) => {
+        const tally = this.#geometry.get(name);
+        return {
+          segment: name,
+          interiorPatches: countFigures(tally?.interiorPatches ?? []),
+          edgePatches: countFigures(tally?.edgePatches ?? []),
+          drawnTriangles: countFigures(tally?.drawnTriangles ?? []),
+          casterTriangles: countFigures(tally?.casterTriangles ?? []),
+          overlayTriangles: countFigures(tally?.overlayTriangles ?? []),
+        };
+      }),
+    };
+  }
+
   /** Shares the streaming interval `[fromS, toS)` among the segments it overlaps. */
   #addStreaming(fromS: number, toS: number): void {
     for (const { name, startS, endS } of this.#options.segments) {
@@ -316,6 +408,7 @@ export class SpikeMetrics {
         };
       },
     );
+    const geometry = this.#geometryReport();
     return {
       warmupS: this.#options.warmupS,
       segments: this.#options.segments,
@@ -340,6 +433,7 @@ export class SpikeMetrics {
       latePipelines: extra.latePipelines,
       adapterPeakBytes: extra.adapterPeakBytes,
       canvas: extra.canvas,
+      ...(geometry === null ? {} : { geometry }),
     };
   }
 }

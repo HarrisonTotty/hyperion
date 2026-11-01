@@ -2335,10 +2335,7 @@ describe("the schema check", () => {
     const v1: unknown = JSON.parse(
       JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
     );
-    expect(validateResults(v1)).toEqual([
-      `version is not ${RESULTS_VERSION}`,
-      "memory.series is missing",
-    ]);
+    expect(validateResults(v1)).toEqual(["version is not 6 or 7", "memory.series is missing"]);
   });
 
   it.each<readonly [string, Readonly<Record<string, unknown>>, string]>([
@@ -2675,10 +2672,66 @@ describe("the schema check", () => {
 
   it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(6);
+    expect(RESULTS_VERSION).toBe(7);
     expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
-      "version is not 6",
+      "version is not 6 or 7",
     ]);
+  });
+
+  it("reads a version 6 file, which holds no geometry, and a version 7 file's geometry block (plan R14, R14.T1.f)", () => {
+    const geometry = {
+      settings: {
+        clusterPath: true,
+        casterDepthCull: true,
+        casterStrideCap: 8,
+        overlayDepth: "cluster",
+      },
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 59, max: 61 },
+          edgePatches: { frames: 3, p50: 33, max: 33 },
+          drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+          casterTriangles: null,
+          overlayTriangles: { frames: 2, p50: 600_000.5, max: 610_001 },
+        },
+      ],
+    } as const;
+    const results = buildResults({
+      run: runOf(),
+      report: { ...reportOf(), geometry },
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const file: unknown = JSON.parse(JSON.stringify(results));
+    const { geometry: _geometry, ...withoutGeometry } = results;
+    expect([
+      results.version,
+      results.geometry,
+      validateResults(file),
+      validateResults(JSON.parse(JSON.stringify({ ...withoutGeometry, version: 6 }))),
+      validateResults(JSON.parse(JSON.stringify({ ...results, version: 6 }))),
+      validateResults(
+        JSON.parse(
+          JSON.stringify({
+            ...results,
+            geometry: { ...geometry, settings: { ...geometry.settings, casterStrideCap: 3 } },
+          }),
+        ),
+      ),
+    ]).toEqual([
+      7,
+      geometry,
+      [],
+      [],
+      ["geometry is a version 7 file's, not this version's"],
+      ["geometry is not the settings and each segment's counts, every figure of its kind"],
+    ]);
+    const markdown = summaryMarkdown(results);
+    expect(markdown).toContain("## Geometry (plan R14)");
+    expect(markdown).toContain(
+      "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | — | 600,001 (610,001) |",
+    );
   });
 
   it("refuses a boundary count other than the windows less one", () => {

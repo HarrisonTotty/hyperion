@@ -17,7 +17,13 @@ import {
   shell,
 } from "electron";
 
-import type { QualitySettingName, SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
+import type {
+  GeometryOverride,
+  QualitySettingName,
+  SpikeLaunch,
+  ViewsCheckLaunch,
+} from "../preload/api";
+import { geometrySwitch, geometryText } from "../preload/geometryLaunch";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { performanceThreadsSwitch } from "../preload/machineLaunch";
 import { qualitySwitch } from "../preload/qualityLaunch";
@@ -96,6 +102,8 @@ interface SpikeWindow {
   readonly launch: SpikeLaunch;
   /** A hidden run never shows its window and renders offscreen (`--smoke`, or the recipe's `--hidden`). */
   readonly hidden: boolean;
+  /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
+  readonly geometry: GeometryOverride | undefined;
 }
 
 /** The variable by which `just descent-spike --hidden` keeps a full run's window hidden. */
@@ -128,6 +136,8 @@ interface ViewsCheckWindowRun {
   readonly launch: ViewsCheckLaunch;
   /** A hidden run never shows its window and renders offscreen (`--smoke`, or the recipe's `--hidden`). */
   readonly hidden: boolean;
+  /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
+  readonly geometry: GeometryOverride | undefined;
 }
 
 function createWindow(
@@ -169,6 +179,7 @@ function createWindow(
         performanceThreadsSwitch(machinePerformanceThreads()),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
+        ...(run?.geometry === undefined ? [] : [geometrySwitch(run.geometry)]),
       ],
       // A hidden spike run renders offscreen, as the smoke harness's does: a hidden window on a
       // hardware adapter draws nothing otherwise, and headless Ozone's GPU process exits there.
@@ -245,6 +256,16 @@ function pageUrl(): string {
 /** Writes one line of a spike run's or a views check's log to stdout, where the recipe reads it. */
 function logLine(line: string): void {
   process.stdout.write(`${line}\n`);
+}
+
+/**
+ * States a run's geometry override on its first line (plan R14, Design note 17), so that a before
+ * and an after run of one build say which each drew; nothing for the setting's own geometry.
+ */
+function logGeometry(run: string, geometry: GeometryOverride | undefined): void {
+  if (geometry !== undefined) {
+    logLine(`${run}: geometry ${geometryText(geometry)} over the setting's`);
+  }
 }
 
 /**
@@ -611,16 +632,23 @@ async function main(): Promise<void> {
   const spike = args.spike;
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
-    const window = createWindow(serverUrl, graphics, args.setting, { launch: spike, hidden });
+    logGeometry("descent spike", args.geometry);
+    const window = createWindow(serverUrl, graphics, args.setting, {
+      launch: spike,
+      hidden,
+      geometry: args.geometry,
+    });
     startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
     return;
   }
   const viewsCheck = args.viewsCheck;
   if (viewsCheck !== undefined) {
     const hidden = viewsCheck.smoke || process.env[VIEWS_CHECK_HIDDEN_ENV] === "1";
+    logGeometry("views check", args.geometry);
     const window = createWindow(serverUrl, graphics, args.setting, null, {
       launch: viewsCheck,
       hidden,
+      geometry: args.geometry,
     });
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;

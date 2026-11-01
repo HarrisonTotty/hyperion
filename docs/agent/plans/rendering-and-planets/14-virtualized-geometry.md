@@ -1266,6 +1266,7 @@ the research's figures.
   plan's T1 the lane's commits leave out, if any: `GeometrySettings` with each lever's field, the
   `geometry-clusters` category and the catalogue entries; the way back made runnable (Design note
   17); the counters through a `bit-exact` reduction; records inline. _Acceptance:_ T1.b's.
+  - _Built_ (02fea32 and this lane's two commits): records at the end of Risks.
 
 T1's NOT RUN: the owner's RTX 3080 and Mac runs of `just views-check --terrain --whole --hidden`,
 both settings, and `diag-frame-cost`'s profile command, before and after: fps at 1920 × 1080 and GPU
@@ -1865,3 +1866,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - From the interim: strips 16 / 8 / 4 / 2; `TerrainViewFrame.draws`; interior by the survey mask;
     `@invariant` first; no tie pixel in any compared frame; in-run A/B over cross-build compares; the
     list base as a `u32` uniform below 2²⁴; 7 storage bindings in the cluster vertex stage.
+- **R14.T1.f** (geometry-clusters-2): what T1's lane left, built.
+  - `--geometry <field>=<value>[,…]` on `views-check` and `descent-spike` alone
+    (`preload/geometryLaunch.ts`, `HyperionApi.geometry`, `qualitySetting.ts`' `geometryOf`,
+    `TerrainSessionOptions.geometry`), stated on the run's first line. The smoke page's form is
+    `just test-render --geometry=…` (`--smoke-geometry`, `smoke/geometry.ts`), over its lit passes'
+    settings.
+  - The refused-kernel fallback: `TerrainPassOptions.clusterCullKernel` (the fixture's seam) and
+    `TerrainPass.clusterRefusal`, the fault stated on the pass and the console, with no operator
+    annunciation (lean, 2026-11-01: no guide row). Part 7 checks it under `--fixture=broken-wgsl`
+    (`BROKEN_CULL_KERNEL`).
+  - The counting harness: `clusters/clusterCounts.ts` and `scripts/clusterCounts.mjs`, T1.a–e's
+    rules. Its frame totals on high above 1 km are 20.9–30.7 M today and 11.2–15.6 M on the path.
+  - The spike's counters: results version 7 adds `geometry` (`main/geometryResults.ts`,
+    `DescentSpikeReport.geometry`), and version 6 is still read (`RESULTS_VERSIONS_READ`);
+    `tools/gpu-replay` stays at 6. `descentSpike.sh` gives a hidden run with no display headless
+    Ozone (main's message).
+  - The bounds test uses the Earth-like and Moon-like worker fixtures; Mars-like has no field
+    fixture.
+  - Timed passes: 5 a lit view-frame on high (the cull and four casters), 6 measured, no resolve.

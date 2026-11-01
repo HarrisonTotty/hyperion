@@ -20,6 +20,7 @@ import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
+import type { GeometryOverride } from "../../../../preload/api";
 import type { Stride } from "../clusters/templates";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
@@ -94,6 +95,14 @@ export interface GeometrySettings {
    * Unread by the way back, which redraws.
    */
   readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
+}
+
+/**
+ * `setting`'s geometry with a launch's development override over it (`--geometry`, plan R14,
+ * Design note 17): each field the override gives replaces the setting's.
+ */
+export function geometryOf(setting: QualitySetting, override: GeometryOverride): GeometrySettings {
+  return { ...SETTINGS[setting].geometry, ...override };
 }
 
 /** The way back (plan R14): the terrain's geometry as it was drawn before plan R14. */

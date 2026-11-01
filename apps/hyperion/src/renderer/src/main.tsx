@@ -50,6 +50,7 @@ createRoot(container).render(
           spike={spike}
           graphics={window.hyperion.graphics}
           serverUrl={window.hyperion.serverUrl}
+          geometry={window.hyperion.geometry}
         />
       </Suspense>
     )}

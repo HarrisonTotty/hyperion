@@ -6,7 +6,7 @@
 # a property failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
-#                 [--drop-adapter-switches] [--captures=DIR]
+#                 [--drop-adapter-switches] [--captures=DIR] [--geometry=FIELD=VALUE[,...]]
 #
 # The page's groups are in fourteen parts (`src/renderer/src/smoke/page.ts`), each a run of its
 # own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and
@@ -58,6 +58,10 @@
 # development one (`src/smoke/result.ts`'s `SMOKE_WATCHDOG_SCALE_MAX`); a run with k ≠ 1 says so on
 # its first line.
 #
+# --geometry=FIELD=VALUE[,...] draws the page's lit terrain passes with those fields of their geometry
+# over their setting's (plan R14, Design note 17; clusterPath=false is the way back), said on the
+# run's first line; the checks that draw a frame both ways set each side's themselves.
+#
 # --drop-adapter-switches removes only `--enable-unsafe-webgpu` and `--use-webgpu-adapter`, keeping
 # the headless Ozone, ANGLE and Vulkan switches, so that Electron starts and finds no adapter.
 #
@@ -85,6 +89,7 @@ variants=()
 parts=()
 fixture=none
 captures=()
+geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
@@ -92,6 +97,7 @@ for arg in "$@"; do
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
+        --geometry=*) geometry=("--smoke-geometry=${arg#--geometry=}") ;;
         *) echo "testRender.sh: unknown argument $arg" >&2; exit 2 ;;
     esac
 done
@@ -119,6 +125,9 @@ case "$scale" in
 esac
 if [[ "$scale" != 1 ]]; then
     echo "testRender.sh: every watchdog stretched $scale times (HYPERION_SMOKE_WATCHDOG_SCALE)"
+fi
+if [[ ${#geometry[@]} -gt 0 ]]; then
+    echo "testRender.sh: the lit terrain's geometry ${geometry[0]#--smoke-geometry=} over each setting's"
 fi
 
 # Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).
@@ -199,7 +208,7 @@ for part in "${parts[@]}"; do
             ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
             "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
             --smoke-part="$part" --smoke-fixture="$fixture" --smoke-watchdog-scale="$scale" \
-            ${captures[@]+"${captures[@]}"} \
+            ${captures[@]+"${captures[@]}"} ${geometry[@]+"${geometry[@]}"} \
             >"$logs/$i.log" 2>&1 &
         groups[i]=$!
     done

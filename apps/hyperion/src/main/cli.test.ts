@@ -756,3 +756,53 @@ describe("userArgs", () => {
     ]);
   });
 });
+
+describe("the geometry override (plan R14, Design note 17)", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it("takes --geometry on a spike's and a check's launch, its fields over the setting's", () => {
+    expect([
+      parse(["--descent-spike", "--geometry", "clusterPath=false"]).geometry,
+      parse([
+        "--views-check",
+        "--terrain",
+        "--geometry=casterStrideCap=1,overlayDepth=redraw,casterDepthCull=false",
+      ]).geometry,
+      parse(["--descent-spike"]).geometry,
+      parse(["--views-check"]).geometry,
+    ]).toEqual([
+      { clusterPath: false },
+      { casterStrideCap: 1, overlayDepth: "redraw", casterDepthCull: false },
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("refuses --geometry on an ordinary launch, as an option of the spike and the check", () => {
+    const error = refusal(["--geometry", "clusterPath=false"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --geometry is an option of --descent-spike or --views-check, neither of which was given",
+    ]);
+  });
+
+  it.each([
+    ["clusterpath=false", "is not <field>=<value>"],
+    ["clusterPath", "is not <field>=<value>"],
+    ["clusterPath=no", 'clusterPath is true or false, not "no"'],
+    ["casterStrideCap=3", 'casterStrideCap is 1, 2, 4 or 8, not "3"'],
+    ["overlayDepth=scene", "overlayDepth is redraw, scene-depth or cluster"],
+    ["clusterPath=true,clusterPath=false", "clusterPath is given twice"],
+    ["", "is not <field>=<value>"],
+  ])("refuses --geometry %j as a usage error", (value, reason) => {
+    const error = refusal(["--descent-spike", "--geometry", value]);
+    expect([error.code, error.message.includes(reason)]).toEqual([
+      "commander.invalidArgument",
+      true,
+    ]);
+  });
+});

@@ -18,7 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { ServerLink } from "../../lib/serverLink";
 import type { SceneSurfaceEvent, SceneView } from "../../lib/scene/useScene";
 import type { ViewId } from "../../view/camera/state";
-import type { QualitySetting } from "../../view/quality/qualitySetting";
+import type { GeometrySettings, QualitySetting } from "../../view/quality/qualitySetting";
 import type { TerrainFault } from "../../view/terrain/annunciation";
 import type { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
@@ -152,6 +152,11 @@ export interface TerrainSessionInput {
    * where absent; skipped for the descent spike's A/B (plan R10, R10.T15.b). A change makes it anew.
    */
   readonly horizonMap?: HorizonLayerSetting | undefined;
+  /**
+   * How its passes draw their geometry (`TerrainSessionOptions.geometry`, plan R14): a launch's
+   * override over the setting's; the setting's where absent. A change makes it anew.
+   */
+  readonly geometry?: GeometrySettings | undefined;
 }
 
 /** The session the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -206,8 +211,16 @@ function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
  * caller unmounts.
  */
 export function useTerrainSession(input: TerrainSessionInput): TerrainSession | null {
-  const { engineState, source, createWorker, workers, performanceThreads, setting, horizonMap } =
-    input;
+  const {
+    engineState,
+    source,
+    createWorker,
+    workers,
+    performanceThreads,
+    setting,
+    horizonMap,
+    geometry,
+  } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
   const requests = source?.kind === "server" ? source.requests : null;
@@ -231,6 +244,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       ...(workers === undefined ? {} : { workers }),
       ...(performanceThreads === undefined ? {} : { performanceThreads }),
       ...(horizonMap === undefined ? {} : { horizonMap }),
+      ...(geometry === undefined ? {} : { geometry }),
     };
     if (universe !== null && requests !== null) {
       const made = new TerrainSession({
@@ -283,6 +297,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
     performanceThreads,
     setting,
     horizonMap,
+    geometry,
     holder,
   ]);
 

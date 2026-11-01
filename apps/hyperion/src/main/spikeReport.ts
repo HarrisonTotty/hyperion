@@ -12,6 +12,7 @@ import type {
   SpikeStreamingSegment,
   SpikeTraceWindow,
 } from "../preload/api";
+import { readGeometryReport } from "./geometryResults";
 import { isSpikeSizesReport, sizesReportProblems } from "./sizesSchema";
 
 type Rec = Readonly<Record<string, unknown>>;
@@ -250,6 +251,10 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   // The measured sizes (R10.T14.b) are checked whole and strictly: an object with exactly its
   // fields, every figure of its kind; a malformed block is left out.
   const sizes = given !== undefined && isSpikeSizesReport(given) ? given : undefined;
+  // A generated world's geometry by segment (plan R14), checked whole; a malformed one refuses the
+  // report.
+  const geometry =
+    value["geometry"] === undefined ? undefined : readGeometryReport(value["geometry"]);
   const terrainOk =
     terrain === undefined ||
     (isRecord(terrain) &&
@@ -282,7 +287,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     !isRecord(canvas) ||
     !isCount(canvas["widthPx"]) ||
     !isCount(canvas["heightPx"]) ||
-    !terrainOk
+    !terrainOk ||
+    geometry === null
   ) {
     return null;
   }
@@ -315,6 +321,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
       ? { terrain: { vertexPath: terrain["vertexPath"], normals: terrain["normals"] } }
       : {}),
     ...(sizes === undefined ? {} : { sizes }),
+    ...(geometry === undefined ? {} : { geometry }),
   };
 }
 

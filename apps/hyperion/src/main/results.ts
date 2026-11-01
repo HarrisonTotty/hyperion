@@ -45,6 +45,7 @@ import type { ProcessMetric } from "electron";
 
 import type {
   DescentSpikeReport,
+  SpikeGeometryReport,
   GraphicsLaunchMode,
   SpikeLaunch,
   SpikePassRow,
@@ -72,6 +73,7 @@ import {
   sizesResultsProblems,
   sizesSummaryLines,
 } from "./sizesResults";
+import { geometryResultsProblems, geometrySummaryLines } from "./geometryResults";
 import {
   type EngineFigures,
   FULL_BUFFER_PERCENT,
@@ -109,8 +111,15 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * both against their estimates' sum, and adds `gpu.rows`, each pass row's per-frame sum against
  * its estimate. It also records `run.machine.loadAverage` as a `Measured`, none with the reason on
  * Windows, where version 5 wrote zeros (R05.T20, decision-cross-platform-server.md item 6).
+ * Version 7 (plan R14, R14.T1.f) adds the `geometry` block over a generated world, its main view's
+ * lit pass's geometry settings and counts by segment (`geometryResults.ts`); a version 6 file, R05's
+ * recorded runs' and the native replay's, which holds none, is still read
+ * ({@link RESULTS_VERSIONS_READ}).
  */
-export const RESULTS_VERSION = 6;
+export const RESULTS_VERSION = 7;
+
+/** The versions {@link validateResults} reads: version 7's, and version 6's without its geometry. */
+export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, RESULTS_VERSION];
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -869,7 +878,7 @@ export interface PassFigures {
 /** The results file of one run. */
 export interface DescentResults {
   readonly schema: typeof RESULTS_SCHEMA;
-  readonly version: typeof RESULTS_VERSION;
+  readonly version: 6 | typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
     readonly machine: RecordedMachine;
@@ -1003,6 +1012,11 @@ export interface DescentResults {
    * every other run's file, which reads as before; the schema's version stays 6.
    */
   readonly sizes?: SizesResults;
+  /**
+   * A generated world's main view's lit pass's geometry by segment (plan R14, R14.T1.f;
+   * `geometryResults.ts`): version 7's, absent over the test planet and from every version 6 file.
+   */
+  readonly geometry?: SpikeGeometryReport;
 }
 
 /** Everything a results file is built from. */
@@ -1704,6 +1718,7 @@ export function buildResults(input: ResultsInput): DescentResults {
     },
     criteria: { whole, segments: segmentCriteria, overall },
     ...(sizes === undefined ? {} : { sizes }),
+    ...(report.geometry === undefined ? {} : { geometry: report.geometry }),
   };
 }
 
@@ -1843,8 +1858,11 @@ export function validateResults(value: unknown): string[] {
   if (value["schema"] !== RESULTS_SCHEMA) {
     problems.push(`schema is not ${RESULTS_SCHEMA}`);
   }
-  if (value["version"] !== RESULTS_VERSION) {
-    problems.push(`version is not ${RESULTS_VERSION}`);
+  if (
+    !RESULTS_VERSIONS_READ.includes(Number(value["version"])) ||
+    typeof value["version"] !== "number"
+  ) {
+    problems.push(`version is not ${RESULTS_VERSIONS_READ.join(" or ")}`);
   }
   const run = value["run"];
   if (isRecord(run)) {
@@ -1903,6 +1921,8 @@ export function validateResults(value: unknown): string[] {
   if (value["sizes"] !== undefined) {
     problems.push(...sizesResultsProblems(value["sizes"]));
   }
+  // A generated world's geometry (plan R14), in a version 7 file alone.
+  problems.push(...geometryResultsProblems(value["geometry"], value["version"]));
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
 }
@@ -2986,6 +3006,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${untimedPassesText(results.gpu.untimedPasses)}.`,
     "",
     ...(results.sizes === undefined ? [] : sizesSummaryLines(results.sizes, run.setting)),
+    ...(results.geometry === undefined ? [] : geometrySummaryLines(results.geometry)),
   ].join("\n");
 }
 

@@ -45,6 +45,11 @@
  * It is refused with the test planet, whose bakes make no horizon map, and with `--style wireframe`,
  * whose bakes skip it already. On, the launch holds no `horizon`, as `--sizes off` holds no `sizes`.
  *
+ * `--geometry <field>=<value>[,…]` overrides how the terrain's geometry is drawn over the setting's
+ * (plan R14, Design note 17; `preload/geometryLaunch.ts`), on a `--descent-spike` or
+ * `--views-check` launch alone, so that the owner's before and after runs come from one build:
+ * `clusterPath=false` draws the way back, as before plan R14.
+ *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
  * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
@@ -87,7 +92,8 @@
 
 import { Command, InvalidArgumentError, Option } from "commander";
 
-import type { QualitySettingName, ServedWorldNames } from "../preload/api";
+import type { GeometryOverride, QualitySettingName, ServedWorldNames } from "../preload/api";
+import { geometryText, parseGeometryOverride } from "../preload/geometryLaunch";
 import {
   DEFAULT_SPIKE_SEED,
   isBodyIdText,
@@ -125,6 +131,11 @@ export interface ClientArgs {
   readonly spike?: SpikeLaunch;
   /** The several-views check's options when `--views-check` is given, else `undefined`. */
   readonly viewsCheck?: ViewsCheckLaunch;
+  /**
+   * The spike's or the check's geometry override (`--geometry`, plan R14, Design note 17), applied
+   * over its setting's, when given, else `undefined`.
+   */
+  readonly geometry?: GeometryOverride;
 }
 
 /** The spike's options other than the flag itself, by their commander attribute names. */
@@ -146,10 +157,11 @@ const SPIKE_OPTIONS = [
   "horizon",
   "universe",
   "body",
+  "geometry",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
-const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out", "universe", "body"] as const;
+const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out", "universe", "body", "geometry"] as const;
 
 /** Reads a `--seed` value: a u64 in decimal. */
 export function parseSeed(value: string): string {
@@ -182,6 +194,18 @@ export function parseBody(value: string): string {
     throw new InvalidArgumentError("expected a body's ID, such as 61ffd967fe000023.0100");
   }
   return value;
+}
+
+/**
+ * Reads a `--geometry` value, `<field>=<value>[,…]` over the setting's geometry (plan R14), in its
+ * canonical form.
+ */
+export function parseGeometry(value: string): string {
+  try {
+    return geometryText(parseGeometryOverride(value));
+  } catch (error: unknown) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /** Reads a directory argument: any non-empty path. */
@@ -379,6 +403,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--geometry <OVERRIDES>",
+        "the spike's or the check's geometry over its setting's (plan R14): <field>=<value>[,…]",
+      ).argParser(parseGeometry),
+    )
+    .addOption(
+      new Option(
         "--horizon <ON>",
         "bake the horizon map with a generated world's lit patches (default on)",
       ).choices(["on", "off"]),
@@ -457,7 +487,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     if (servedRefusal !== null) {
       command.error(`error: ${servedRefusal}`);
     }
-    return { address, port, setting: viewsCheck.setting, viewsCheck };
+    return { address, port, setting: viewsCheck.setting, viewsCheck, ...geometryOf(options) };
   }
   if (options["descentSpike"] !== true) {
     // The setting is the consoles' too (R07.T17); the spike's other options are its own.
@@ -479,7 +509,15 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (refusal !== null) {
     command.error(`error: ${refusal}`);
   }
-  return { address, port, setting: spike.setting, spike };
+  return { address, port, setting: spike.setting, spike, ...geometryOf(options) };
+}
+
+/** The `--geometry` override given, else nothing (commander has parsed it). */
+function geometryOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly geometry: GeometryOverride } | Record<string, never> {
+  const geometry = options["geometry"];
+  return typeof geometry === "string" ? { geometry: parseGeometryOverride(geometry) } : {};
 }
 
 /** The `--setting` given, `high` without one (commander has checked its choices). */

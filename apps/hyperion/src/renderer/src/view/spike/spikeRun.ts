@@ -61,6 +61,7 @@ import {
 import { HillaireAtmosphere, TABLE_SIZES } from "../atmosphere/hillaire";
 import { controlEv100 } from "../photometry/exposure";
 import {
+  type GeometrySettings,
   type QualitySetting,
   TERRAIN_SETTINGS,
   terrainSettingsFor,
@@ -78,6 +79,7 @@ import type { PatchRequest, Selection, SelectionInput } from "../terrain/select"
 import { sceneContacts, type TerrainSession } from "../terrain/session";
 import {
   TerrainPass,
+  type TerrainGeometryCounts,
   type TerrainPassObserver,
   type TerrainPool,
   type TerrainPoolFactory,
@@ -357,6 +359,30 @@ export interface SpikeFrameSample {
   readonly patchesHard: number;
   /** Whether `TERRAIN: STREAMING` shows: over a generated world, the drawn frame's annunciation. */
   readonly streaming: boolean;
+  /**
+   * Over a generated world, how its lit pass draws its geometry and the main view's counts at its
+   * last draw (plan R14, R14.T1.f; `TerrainPass.counts`), its cluster counters on, `null` where the
+   * pass holds no draw of the view; `null` over the test planet, whose spike shading has none.
+   */
+  readonly geometry: SpikeGeometrySample | null;
+}
+
+/** A generated world's frame's terrain geometry (`SpikeFrameSample.geometry`, plan R14). */
+export interface SpikeGeometrySample {
+  readonly settings: GeometrySettings;
+  readonly counts: TerrainGeometryCounts | null;
+}
+
+/**
+ * How `pass` draws its geometry and the main view's counts at its last draw (plan R14, R14.T1.f),
+ * its cluster counters turned on from the first: `null` with no pass yet.
+ */
+function litCounts(pass: SpikeTerrainPass | null): SpikeGeometrySample | null {
+  if (pass === null) {
+    return null;
+  }
+  pass.measureClusters(true);
+  return { settings: pass.geometry, counts: pass.counts(SPIKE_MAIN_VIEW_ID) };
 }
 
 /** Listeners of the run, for T13.c's metrics. */
@@ -482,7 +508,12 @@ const NO_TERRAIN_READING: SpikeTerrainReading = {
 
 /** What the run over a generated world reads of a terrain session's pass. */
 export interface SpikeTerrainPass
-  extends FrameTerrainPass, Pick<TerrainPass, "lastStep" | "planet" | "observe"> {}
+  extends
+    FrameTerrainPass,
+    Pick<TerrainPass, "lastStep" | "planet" | "observe" | "counts" | "measureClusters"> {
+  /** How it draws its geometry (plan R14), every field, which the run's report states. */
+  readonly geometry: GeometrySettings;
+}
 
 /**
  * What the run over a generated world reads of its terrain session (`TerrainSession`, or a test's
@@ -1030,6 +1061,7 @@ export class SpikeRun {
       passesSubmitted: 5,
       patchesHard: selection.patches.size,
       streaming: frame.conditions.streaming,
+      geometry: null,
     });
     return {
       tS,
@@ -1202,6 +1234,7 @@ export class SpikeRun {
       passesSubmitted: null,
       patchesHard: terrain.selected,
       streaming: annunciation === "TERRAIN: STREAMING",
+      geometry: litCounts(session.pass(world.body)),
     });
     return {
       tS,

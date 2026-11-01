@@ -7,7 +7,7 @@
  * other casters' draws, and no pass at w = 0, over a scripted pool and R01's counting engine.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { instrumentViewId, PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3 } from "../../geometry/vec3";
@@ -21,7 +21,7 @@ import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { DepthLayerPass, DrawItem, MaterialHandle, MeshHandle } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
-import { cascadeKeeps, cullTwin } from "../clusters/cull";
+import { cascadeKeeps, CLUSTER_CULL_KERNEL, cullTwin } from "../clusters/cull";
 import { type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import type { ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
@@ -56,6 +56,7 @@ import {
   meanRadiusM,
   morphRangeM,
   TerrainPass,
+  type TerrainPassOptions,
   type TerrainPassView,
   type TerrainPool,
   type TerrainView,
@@ -272,6 +273,7 @@ async function litPass(
   setting: "high" | "low" = "high",
   given?: CountingRenderEngine,
   reliefM: () => number | null = () => 8_000,
+  extra: Pick<TerrainPassOptions, "clusterCullKernel"> = {},
 ): Promise<Made> {
   const engine =
     given ??
@@ -293,6 +295,7 @@ async function litPass(
     },
     shadows,
     reliefM,
+    ...extra,
   });
   await pass.ready();
   return {
@@ -1183,6 +1186,33 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [15, 0, 3],
       [18, 0, 6],
     ]);
+  });
+
+  it("falls back to today's path where its cull kernel is refused, and states the refusal (R14.T1.f; Design note 16)", async () => {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    const broken = { ...CLUSTER_CULL_KERNEL, name: "broken cluster cull" };
+    const compile = engine.createComputeAsync.bind(engine);
+    vi.spyOn(engine, "createComputeAsync").mockImplementation((pair) =>
+      pair === broken ? Promise.reject(new Error("the WGSL does not compile")) : compile(pair),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const made = await litPass("high", engine, () => 8_000, { clusterCullKernel: broken });
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const cast = cascadesOf(frame);
+    expect([
+      made.pass.clusterRefusal,
+      cast.clustered,
+      cast.litMeshCasters.some((count) => count > 0),
+      frame.overlayDepth,
+      made.engine.dispatched.filter((d) => d.pass === TERRAIN_CLUSTER_CULL_LABEL).length,
+    ]).toEqual(["broken cluster cull refused: the WGSL does not compile", false, true, null, 0]);
+    // A pass whose kernel compiles states nothing.
+    expect((await clusteredPass()).pass.clusterRefusal).toBeNull();
   });
 
   it("gives two views of one pass each their own four passes, of their own records", async () => {

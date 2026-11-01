@@ -73,6 +73,7 @@ import type { CapturedImage } from "./atmosphere";
 import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
 import { captureOf, captureScale, maskOf, stopsApart } from "./leverCaptures";
 import { MOON_LIKE } from "./litTerrain";
+import { smokeGeometry } from "./geometry";
 
 /** Each view's frame, pixels. */
 const FRAME = { widthPx: 64, heightPx: 48 } as const;
@@ -338,6 +339,7 @@ export async function checkSharedPass(
       engine,
       setting: "low",
       terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("low"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
       createPool: (bake) => pool.lane(bake),
@@ -798,6 +800,7 @@ export async function checkShadowCascades(
       engine,
       setting: "high",
       terrain: { ...TERRAIN_SETTINGS.high, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("high"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
       createPool: (bake) => pool.lane(bake),

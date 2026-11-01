@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { PassTimes } from "../engine/types";
+import { SETTINGS } from "../quality/qualitySetting";
 import {
   type FrameSample,
   SpikeMetrics,
   type SpikeMetricsOptions,
   TIMED_PASSES_A_FRAME,
 } from "./metrics";
+import type { SpikeGeometrySample } from "./spikeRun";
 
 const OPTIONS: SpikeMetricsOptions = {
   warmupS: 10,
@@ -257,5 +259,53 @@ describe("the spike's metrics", () => {
       canvas: { widthPx: 1280, heightPx: 720 },
       latePipelines: [],
     });
+  });
+
+  it("gives a generated world's geometry by segment, each count's median and largest, null where no frame had it (plan R14, R14.T1.f)", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    const settings = SETTINGS.low.geometry;
+    const counts = (
+      interior: number,
+      drawnTriangles: number,
+      overlayTriangles: number | null,
+    ): SpikeGeometrySample => ({
+      settings,
+      counts: {
+        patches: { interior, edge: 2 },
+        drawnTriangles,
+        casterTriangles: null,
+        overlayTriangles,
+      },
+    });
+    metrics.frame(sample(1, 0, { geometry: counts(10, 100, null) }));
+    metrics.frame(sample(2, 0.5, { geometry: counts(12, 300, 90) }));
+    metrics.frame(sample(3, 1, { geometry: counts(11, 200, 80) }));
+    metrics.frame(sample(4, 2.5, { geometry: { settings, counts: null } }));
+    const geometry = metrics.report(EXTRA).geometry;
+    expect(geometry).toEqual({
+      settings,
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 11, max: 12 },
+          edgePatches: { frames: 3, p50: 2, max: 2 },
+          drawnTriangles: { frames: 3, p50: 200, max: 300 },
+          casterTriangles: null,
+          overlayTriangles: { frames: 2, p50: 85, max: 90 },
+        },
+        {
+          segment: "descent arc",
+          interiorPatches: null,
+          edgePatches: null,
+          drawnTriangles: null,
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    });
+    // The test planet's frames carry none, and its report no geometry.
+    const planet = new SpikeMetrics(OPTIONS);
+    planet.frame(sample(1, 0));
+    expect(planet.report(EXTRA).geometry).toBeUndefined();
   });
 });

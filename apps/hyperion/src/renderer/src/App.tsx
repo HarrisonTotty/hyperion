@@ -41,7 +41,7 @@ import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
-import type { ServedWorldNames, ViewsCheckLaunch } from "../../preload/api";
+import type { GeometryOverride, ServedWorldNames, ViewsCheckLaunch } from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -63,6 +63,8 @@ interface DisplayInputs {
    * height workers' count reads.
    */
   readonly performanceThreads: number | null;
+  /** The launch's geometry override (`--geometry`, plan R14), which `VIEW`'s terrain draws with. */
+  readonly geometry: GeometryOverride | undefined;
 }
 
 /**
@@ -210,6 +212,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           setting={inputs.setting}
           platform={inputs.platform}
           performanceThreads={inputs.performanceThreads}
+          geometry={inputs.geometry}
         />
       );
       break;
@@ -376,6 +379,7 @@ export function App() {
     setting: window.hyperion.setting,
     platform: window.hyperion.platform,
     performanceThreads: window.hyperion.performanceThreads,
+    geometry: window.hyperion.geometry,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

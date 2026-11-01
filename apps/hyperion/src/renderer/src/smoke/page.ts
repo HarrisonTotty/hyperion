@@ -584,10 +584,11 @@ async function run(
     checkClassCurveSeam(engine, checks),
   );
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
-  // With the captures, R14's levers' frames: R14.T1.a's here, R14.T1.d's with the cascades.
+  // With the captures, R14's levers' frames: R14.T1.a's here, R14.T1.d's with the cascades; under
+  // `--fixture=broken-wgsl`, R14.T1.f's fallback from a refused cull kernel too.
   let images: CapturedImage[] = [];
   await group(7, "R10.T16 the frame", async () => {
-    images = [...images, ...(await checkTerrainFrame(engine, checks, captures))];
+    images = [...images, ...(await checkTerrainFrame(engine, checks, captures, fixture))];
   });
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import type { GpuProcessGoneReport, HyperionApi } from "./api";
+import { geometryFromArgv } from "./geometryLaunch";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
 import { performanceThreadsFromArgv } from "./machineLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
@@ -9,6 +10,7 @@ import { spikeMember } from "./spikeApi";
 import { viewsCheckMember } from "./viewsCheckApi";
 
 const graphicsLaunch = graphicsLaunchFromArgv(process.argv, process.platform);
+const geometry = geometryFromArgv(process.argv);
 
 const api: HyperionApi = {
   platform: process.platform,
@@ -28,6 +30,8 @@ const api: HyperionApi = {
     chrome: process.versions.chrome,
     node: process.versions.node,
   },
+  // Only a spike's or a check's launch that gave `--geometry` has an override (plan R14).
+  ...(geometry === null ? {} : { geometry }),
   // Only a `--descent-spike` launch has the spike's functions (R05.T13.c).
   ...spikeMember(process.argv, {
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),

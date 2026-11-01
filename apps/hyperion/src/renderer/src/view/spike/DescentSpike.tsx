@@ -34,7 +34,7 @@ import { type CameraTarget, newCameraState, type RenderStyle } from "../camera/s
 import type { ViewSize } from "../engine/types";
 import { hostLights, lightingState, sceneHostDiscs } from "../lighting/hostLights";
 import { styleName } from "../photoreal/style";
-import type { QualitySetting, TerrainVariant } from "../quality/qualitySetting";
+import type { GeometrySettings, QualitySetting, TerrainVariant } from "../quality/qualitySetting";
 import { cameraSceneOf, type ViewScene } from "../scene/model";
 import { TERRAIN_TEST_SCRIPT, terrainSceneFixture } from "../scenes/terrainScene";
 import type { FieldFailure } from "../terrain/coarseFieldStore";
@@ -176,6 +176,12 @@ export interface DescentSpikeProps {
    * share of the height workers' bake time (`--sizes on` times their bakes).
    */
   readonly horizonMap?: HorizonLayerSetting | undefined;
+  /**
+   * How a generated world's passes draw their geometry (plan R14): the launch's `--geometry` over
+   * the setting's (Design note 17); the setting's unless given. The test planet's spike shading
+   * takes none.
+   */
+  readonly geometry?: GeometrySettings | undefined;
 }
 
 type Preparation =
@@ -501,6 +507,7 @@ export function DescentSpike({
   listeners,
   sizes: measured,
   horizonMap,
+  geometry,
 }: DescentSpikeProps) {
   const id = useId();
   // The variant by its fields, so that a new object of the same variant does not restart the run.
@@ -527,6 +534,7 @@ export function DescentSpike({
     // The session compiles its passes' materials at this setting as it is made (R10.T14.d).
     setting,
     horizonMap,
+    geometry,
   });
   const terrainFaults = useTerrainFaults(session);
   const [preparation, setPreparation] = useState<Preparation>({ kind: "measuring" });
