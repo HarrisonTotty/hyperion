@@ -3,7 +3,6 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
-  type RefObject,
   useCallback,
   useEffect,
   useId,
@@ -441,8 +440,8 @@ interface ViewStageProps {
    * until its key `9` shows the whole block (the owner's request, 2026-11-01).
    */
   readonly labelFolded: boolean;
-  /** `MAXIMIZE VIEW`'s button, which takes the focus from a panel it hides where no canvas stands. */
-  readonly maximizeRef: RefObject<HTMLButtonElement | null>;
+  /** Turns `MAXIMIZE VIEW` on, its label block folded, or off: its toggle's press. */
+  readonly onMaximize: () => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
@@ -801,7 +800,7 @@ function ViewStage({
   onPlacePage,
   maximized,
   labelFolded,
-  maximizeRef,
+  onMaximize,
   stars,
   countLine,
   universe,
@@ -1932,13 +1931,14 @@ function ViewStage({
   // keys go on acting on that view, or where none stands to MAXIMIZE VIEW's button, never to the
   // page (the owner's request, 2026-11-01).
   const sideRef = useRef<HTMLDivElement | null>(null);
+  const maximizeRef = useRef<HTMLButtonElement | null>(null);
   const controlsCanvas = operatedView === null ? canvas : operatedView.slot.canvas;
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (maximized && active !== null && sideRef.current?.contains(active) === true) {
       (controlsCanvas ?? maximizeRef.current)?.focus();
     }
-  }, [maximized, controlsCanvas, maximizeRef]);
+  }, [maximized, controlsCanvas]);
 
   // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
   // panel heads the second column and stands in every engine state, so that nothing under it moves
@@ -2183,13 +2183,32 @@ function ViewStage({
                 />
               )}
             </ViewCanvas>
-            <KeyLegend id={legendId} modifier={modifier} />
           </>
         ) : (
           <div className="view__unavailable">
             <StatusLine text={engineLine.text} standing={engineLine.standing} />
           </div>
         )}
+        {/*
+         * The view's foot: its key legend, beside it at the row's end MAXIMIZE VIEW, in one place in
+         * either state and at every size, so that the SCENE bar never takes a row for it (the
+         * owner's request, 2026-11-01).
+         */}
+        <div className="view__foot">
+          <div className="view__foot-lines">
+            {engineLine === null ? <KeyLegend id={legendId} modifier={modifier} /> : null}
+          </div>
+          <button
+            ref={maximizeRef}
+            type="button"
+            className="control view__maximize"
+            aria-pressed={maximized}
+            aria-keyshortcuts={MAXIMIZE_KEY}
+            onClick={onMaximize}
+          >
+            <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
+          </button>
+        </div>
         {maximizedPart}
       </div>
       <div
@@ -2519,7 +2538,6 @@ function ViewPanels({
   // primary's label block folded to its summary, as each time it is turned on, or whole.
   const [maximize, setMaximize] = useState<Maximize>("off");
   const maximized = maximize !== "off";
-  const maximizeRef = useRef<HTMLButtonElement | null>(null);
   // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
   // label block's only while it is on.
   useEffect(() => {
@@ -2738,18 +2756,6 @@ function ViewPanels({
             ))}
           </div>
         )}
-        <button
-          ref={maximizeRef}
-          type="button"
-          className="control view-display__maximize"
-          aria-pressed={maximized}
-          aria-keyshortcuts={MAXIMIZE_KEY}
-          onClick={() => {
-            setMaximize(toggledMaximize);
-          }}
-        >
-          <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
-        </button>
       </div>
       <ViewStage
         // Each opening of the body inspection is a new scene, its camera framed afresh.
@@ -2774,7 +2780,9 @@ function ViewPanels({
         onPlacePage={setPlacePage}
         maximized={maximized}
         labelFolded={maximize === "folded"}
-        maximizeRef={maximizeRef}
+        onMaximize={() => {
+          setMaximize(toggledMaximize);
+        }}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}
@@ -2833,7 +2841,7 @@ function ViewPanels({
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.
  *
- * `MAXIMIZE VIEW`, its button at the scene bar's end and its key `6`, is an interim layout until
+ * `MAXIMIZE VIEW`, its toggle at the end of the key legend's row and its key `6`, is an interim layout until
  * the panels are designed again (the owner's request, 2026-11-01). On, the stage takes the
  * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
  * restores them as they were; the scene bar and the header strip stay; the primary's label block

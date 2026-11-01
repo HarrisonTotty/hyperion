@@ -558,11 +558,35 @@ describe("VIEW's layouts with MAXIMIZE VIEW (the owner's request, 2026-11-01)", 
 
   it("marks MAXIMIZE VIEW on with the pressed toggle's 2px --accent rule under it", () => {
     expect([
-      stylesheetRule(".view-display__maximize"),
-      stylesheetRule('.view-display__maximize[aria-pressed="true"]'),
+      stylesheetRule(".view__maximize"),
+      stylesheetRule('.view__maximize[aria-pressed="true"]'),
     ]).toEqual([
       expect.stringContaining("border-bottom: 2px solid transparent;"),
       expect.stringContaining("border-bottom-color: var(--accent);"),
+    ]);
+  });
+
+  it.each([
+    ["1920 × 1080", FULL_VIEW_PX],
+    ["1280 × 720", COMPACT_VIEW_PX],
+  ] as const)(
+    "stands its toggle at the view's foot at %s, not in the SCENE bar",
+    async (_size, px) => {
+      const view = await setup(px);
+      const off = maximizeButton().closest(".view__foot") !== null;
+      await pressMaximize(view);
+      expect([
+        off,
+        maximizeButton().closest(".view__foot") !== null,
+        maximizeButton().closest(".view-display__bar"),
+      ]).toEqual([true, true, null]);
+    },
+  );
+
+  it("lets the key legend wrap beside the toggle, which keeps its width", () => {
+    expect([stylesheetRule(".view__foot-lines"), stylesheetRule(".view__maximize")]).toEqual([
+      expect.stringContaining("min-width: 0;"),
+      expect.stringContaining("flex: none;"),
     ]);
   });
 

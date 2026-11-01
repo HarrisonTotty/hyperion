@@ -4272,22 +4272,6 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 /*
- * MAXIMIZE VIEW at the bar's end, in one place whether it is on or off, since the bar stays when
- * the panels go (the owner's request, 2026-11-01).
- */
-.view-display__maximize {
-  margin-inline-start: auto;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  white-space: nowrap;
-}
-
-/* On, its 2px --accent rule under it, as every pressed toggle has, beside its aria-pressed. */
-.view-display__maximize[aria-pressed="true"] {
-  border-bottom-color: var(--accent);
-}
-
-/*
  * The stage beside its side column (R07.T19.b; decision-r07-t19-layout, item 1): in the full
  * layout two columns, 26rem and 20rem; in the compact one a single 26rem column.
  */
@@ -4355,6 +4339,34 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   color: var(--text-muted);
   font-size: 0.875rem;
   letter-spacing: 0.1em;
+}
+
+/*
+ * The view's foot (the owner's request, 2026-11-01): the key legend, taking the row's room and
+ * wrapping beside MAXIMIZE VIEW where the stage is narrow, and the toggle at the row's end, in one
+ * place whether it is on or off and at every size, so that the SCENE bar never takes a row for it.
+ */
+.view__foot {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.view__foot-lines {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.view__maximize {
+  flex: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+/* On, its 2px --accent rule under it, as every pressed toggle has, beside its aria-pressed. */
+.view__maximize[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
 }
 
 /*
