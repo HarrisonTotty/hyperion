@@ -12,9 +12,12 @@ import { phaseTable } from "../medium";
 import { mieSphere } from "../mie";
 import { PHASE_TABLE_MU, PHASE_TABLE_U, sphereScatteringMatrix } from "../sizeDistribution";
 import { phaseTableMoment } from "../forwardPeak";
+import { bitsOf } from "../../../test/bits";
 import {
+  doubleGaussQuadrature,
   groundCosinesOf,
   type GroundReflectance,
+  homogeneousSolution,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
   solveDiscreteOrdinates,
@@ -44,6 +47,20 @@ function entry(values: ArrayLike<number>, i: number): number {
     throw new Error(`no entry ${i}`);
   }
   return value;
+}
+
+/**
+ * Henyey–Greenstein's χ_l = g^l, l < count, by repeated products, which are the same bits on every
+ * platform, where `**` need not be (`lib/pinnedMathPaths.test.ts`).
+ */
+function powersOf(g: number, count: number): Float64Array {
+  const out = new Float64Array(count);
+  let power = 1;
+  for (let l = 0; l < count; l += 1) {
+    out[l] = power;
+    power *= g;
+  }
+  return out;
 }
 
 /** A solution's one beam, or a test failure. */
@@ -1011,6 +1028,84 @@ describe("layering, one factorisation and V", () => {
       expect(entry(b, 3)).toBe(0);
     }
   });
+
+  it("solves I alone at the user cosines to the bits of the whole solve, the rest NaN (R08.T14.e)", () => {
+    const layers = [
+      { opticalDepth: 0.4, singleScatteringAlbedo: 1, moments: rayleigh(0.03) },
+      { opticalDepth: 1.2, singleScatteringAlbedo: 0.9, moments: sphere },
+    ];
+    const common = {
+      layers,
+      groundAlbedo: 0.1,
+      beamCosines: [0.12, 0.5, 0.93],
+      userCosines: [0.3, 0.8],
+      maxMode: 2,
+      streams: 8,
+    };
+    const whole = solvePolarised(common);
+    const alone = solvePolarised({ ...common, userComponents: 1 });
+    expect(whole.circular).toBe(true);
+    whole.beams.forEach((beam, b) => {
+      const kept = beamOf(alone, b);
+      expect(kept.fluxes).toEqual(beam.fluxes);
+      beam.modes.forEach((mode, m) => {
+        const keptMode = kept.modes[m];
+        expect(keptMode?.quadratureUp).toEqual(mode.quadratureUp);
+        expect(keptMode?.quadratureDown).toEqual(mode.quadratureDown);
+        for (const key of ["userUp", "userDown"] as const) {
+          mode[key].forEach((value, x) => {
+            const keptValue = entry(keptMode?.[key] ?? [], x);
+            expect(
+              x % mode.components === 0 ? Object.is(keptValue, value) : Number.isNaN(keptValue),
+            ).toBe(true);
+          });
+        }
+      });
+    });
+  });
+
+  it("gives a fixed column every field to the bits it gave before the correction's levers (R08.T14.e)", async () => {
+    // Air at ω 1, a sphere's cloud whose b₂ takes the nonsymmetric path past m = 0, a depolariser,
+    // one that absorbs alone, a beam at the depolariser's eigenvalue's reciprocal, one below the
+    // horizontal on its spherical path, and a Lambertian ground.
+    const depolariser: OrdinateLayer = {
+      opticalDepth: 0.9,
+      singleScatteringAlbedo: 0.85,
+      moments: powersOf(0.6, 17),
+    };
+    const layers: PolarisedLayer[] = [
+      { opticalDepth: 0.3, singleScatteringAlbedo: 1, moments: rayleigh(0.03) },
+      { opticalDepth: 1.1, singleScatteringAlbedo: 0.95, moments: sphere },
+      {
+        opticalDepth: depolariser.opticalDepth,
+        singleScatteringAlbedo: depolariser.singleScatteringAlbedo,
+        moments: depolarisingMoments(16, depolariser.moments),
+      },
+      { opticalDepth: 0.2, singleScatteringAlbedo: 0, moments: rayleigh(0) },
+    ];
+    const quadrature = doubleGaussQuadrature(8);
+    const rates = homogeneousSolution(depolariser, 1, quadrature).decayRates;
+    const rate = Array.from(rates).find((k) => k > 1.5 && k < 4);
+    if (rate === undefined) {
+      throw new Error("no decay rate between 1.5 and 4");
+    }
+    const beamCosines = [-0.05, 0.15, 1 / rate, 0.6, 1];
+    const heights = Float64Array.from({ length: 5 }, (_, k) => 40_000 * (1 - k / 4));
+    const depths = Float64Array.from(layers, (layer) => layer.opticalDepth);
+    const solution = solvePolarised({
+      layers,
+      groundAlbedo: 0.25,
+      beamCosines,
+      userCosines: [0.15, 0.5, 0.95],
+      maxMode: 2,
+      streams: 8,
+      beamPaths: beamCosines.map((mu0) => sphericalBeamPath(6_371_000, heights, depths, mu0)),
+    });
+    expect(solution.eigen.some((record) => record.nonsymmetricLayers > 0)).toBe(true);
+    expect(await bitsOf(solution)).toBe(
+      "1695a836f8ac3b22964c790a2516959b69bfd3a24772a4909cef88be5f9afae1",
+    );
+  });
 });
 
 // Measured 2026-10-29: Q, U and V up at the ground's nodes 2.0 × 10⁻¹⁶ of I; the split against the
@@ -1181,6 +1276,12 @@ describe("the refusals", () => {
 
   it("solves the problem the refusals vary", () => {
     expect(() => solvePolarised(good)).not.toThrow();
+  });
+
+  it("refuses user components outside 1 to 4 or not whole", () => {
+    for (const userComponents of [0, 5, 1.5]) {
+      expect(() => solvePolarised({ ...good, userComponents })).toThrow(RangeError);
+    }
   });
 
   it("refuses a stream count that is odd or too small, a mode past NSTR − 1, and no layers", () => {

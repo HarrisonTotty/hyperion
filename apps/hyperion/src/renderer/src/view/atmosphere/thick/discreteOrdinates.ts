@@ -1047,6 +1047,20 @@ export function solveLayerStack(stack: LayerStack, rightHandSide: Float64Array):
   return rightHandSide;
 }
 
+/**
+ * Solves a {@link LayerStack}'s problem in place for `columns` right-hand sides together, row-major
+ * as {@link layerStackRightHandSideInto} writes them (`linearAlgebra.ts`'s `solveBandColumns`): each
+ * column is {@link solveLayerStack}'s of it alone, to the bit.
+ */
+export function solveLayerStackColumns(
+  stack: LayerStack,
+  rightHandSides: Float64Array,
+  columns: number,
+): Float64Array {
+  solveBandColumns(stack.lu, rightHandSides, columns);
+  return rightHandSides;
+}
+
 function faceAt(faces: ReadonlyArray<LayerFaces>, p: number): LayerFaces {
   const face = faces[p];
   if (face === undefined) {
@@ -1657,7 +1671,7 @@ function solveBeamModes(
       throw new Error(`beam ${solve.beam.index} has no exponentials`);
     }
     beamParticularsInto(context, solve.beam, solve.slantFactor, beamLegendre, own, scratch, parts);
-    rightHandSideInto(
+    layerStackRightHandSideInto(
       stack,
       parts,
       beamGroundSource(context, solve.beam),
@@ -1667,7 +1681,7 @@ function solveBeamModes(
     );
     return parts;
   });
-  solveBandColumns(stack.lu, rightHandSides, columns);
+  solveLayerStackColumns(stack, rightHandSides, columns);
   const coefficients = new Float64Array(rows);
   const fields = solves.map((solve, j): ModeIntensities => {
     for (let r = 0; r < rows; r += 1) {
@@ -1860,33 +1874,38 @@ function beamGroundUserUp(context: ModeContext, beam: PreparedBeam): GroundUserU
   };
 }
 
-/** Each layer's particular solution at its faces and its user streams' share of it, one source's. */
-interface ModeParticulars {
+/**
+ * Each layer's particular solution at its faces and its user streams' share of it, for one source
+ * of one mode (R08.T14.b: flat, for a mode's sources solved together), n the streams a hemisphere
+ * and W the user streams' entries a layer (U, times the Stokes components for a vector mode).
+ */
+export interface ModeParticulars {
   /** Per layer p, at its top, 2n at `p × 2n`: the upward streams then the downward. */
   readonly top: Float64Array;
   /** The same at its bottom. */
   readonly bottom: Float64Array;
-  /** Per layer p, its source integrated along each upward user stream to its top, U at `p × U`. */
+  /** Per layer p, its source integrated along each upward user stream to its top, W at `p × W`. */
   readonly userUp: Float64Array;
   /** The same along each downward user stream to its bottom. */
   readonly userDown: Float64Array;
 }
 
-/** A source's particular solutions, every one 0. */
-function modeParticulars(layerCount: number, span: number, users: number): ModeParticulars {
+/** A source's particular solutions, every one 0: L layers, 2n a face and W a layer's user entries. */
+export function modeParticulars(layerCount: number, span: number, width: number): ModeParticulars {
   return {
     top: new Float64Array(layerCount * span),
     bottom: new Float64Array(layerCount * span),
-    userUp: new Float64Array(layerCount * users),
-    userDown: new Float64Array(layerCount * users),
+    userUp: new Float64Array(layerCount * width),
+    userDown: new Float64Array(layerCount * width),
   };
 }
 
 /**
- * Writes one source's right-hand side of the stack's problem as column `column` of `columns` in
- * `out` (row-major): {@link layerStackRightHandSide}'s of the same particular solutions, to the bit.
+ * Writes one source's right-hand side of a {@link LayerStack}'s problem as column `column` of
+ * `columns` in `out` (row-major, as {@link solveLayerStackColumns} takes it):
+ * {@link layerStackRightHandSide}'s of the same particular solutions, to the bit.
  */
-function rightHandSideInto(
+export function layerStackRightHandSideInto(
   stack: LayerStack,
   particulars: ModeParticulars,
   groundSource: Float64Array | undefined,
@@ -2166,8 +2185,8 @@ function solveThermalMode(
       ? Float64Array.from({ length: n }, (_, i) => emissionAt(groundNodes, i))
       : undefined;
   const coefficients = new Float64Array(span * layerCount);
-  rightHandSideInto(context.stack, particulars, groundSource, coefficients, 0, 1);
-  solveBandColumns(context.stack.lu, coefficients, 1);
+  layerStackRightHandSideInto(context.stack, particulars, groundSource, coefficients, 0, 1);
+  solveLayerStackColumns(context.stack, coefficients, 1);
   return modeField(context, particulars, coefficients, (quadratureDown, userUp) => {
     const downAt = (j: number): number => at(quadratureDown, layerCount * n + j);
     for (let u = 0; u < users; u += 1) {

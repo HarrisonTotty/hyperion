@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { bitsOf } from "../../../test/bits";
 import { gaussLegendre } from "../irradianceQuadrature";
 import {
   type BeamSolution,
@@ -425,16 +426,16 @@ describe("layering (d) and one factorisation (e)", () => {
     beamCosines.forEach((mu0, b) => {
       const alone = beamAt(solveDiscreteOrdinates({ ...base, beamCosines: [mu0] }), 0);
       const among = beamAt(together, b);
-      expect(bitsOf(among.fluxes)).toEqual(bitsOf(alone.fluxes));
+      expect(bytesOf(among.fluxes)).toEqual(bytesOf(alone.fluxes));
       among.modes.forEach((mode, m) => {
-        expect(bitsOf(mode)).toEqual(bitsOf(alone.modes[m] ?? mode));
+        expect(bytesOf(mode)).toEqual(bytesOf(alone.modes[m] ?? mode));
       });
     });
   });
 });
 
 /** Every typed array of `value`, by key, as its bytes: two equal are equal to the bit. */
-function bitsOf(value: object): Record<string, Uint8Array> {
+function bytesOf(value: object): Record<string, Uint8Array> {
   const out: Record<string, Uint8Array> = {};
   for (const [key, field] of Object.entries(value)) {
     if (field instanceof Float64Array) {
@@ -1286,21 +1287,8 @@ function powersOf(g: number): Float64Array {
   return out;
 }
 
-/** FNV-1a and a golden-ratio multiply over every byte of `arrays`: equal digests, equal bits. */
-function digestOf(arrays: ReadonlyArray<Float64Array>): string {
-  let fnv = 0x811c9dc5;
-  let golden = 0x2545f491;
-  for (const values of arrays) {
-    for (const byte of new Uint8Array(values.buffer, values.byteOffset, values.byteLength)) {
-      fnv = Math.imul(fnv ^ byte, 0x01000193) >>> 0;
-      golden = Math.imul(golden ^ byte, 0x9e3779b1) >>> 0;
-    }
-  }
-  return `${fnv.toString(16).padStart(8, "0")}${golden.toString(16).padStart(8, "0")}`;
-}
-
 describe("a solve's bits (R08.T14.b)", () => {
-  it("gives a fixed column every field to the bits it gave before the bake's levers", () => {
+  it("gives a fixed column every field to the bits it gave before the bake's levers", async () => {
     // A conservative layer, one that absorbs alone, forward peaks, a beam at an eigenvalue's
     // reciprocal, one below the horizontal on its spherical path, a Lambertian ground and an
     // emitting column: every path of the solve, pinned to R08.T14.a's arithmetic.
@@ -1334,18 +1322,9 @@ describe("a solve's bits (R08.T14.b)", () => {
       beamPaths: beamCosines.map((mu0) => sphericalBeamPath(6_371_000, heights, depths, mu0)),
       thermal: { interfacePlanck: [0.1, 0.2, 0.4, 0.5, 0.9, 1.1, 1.4], groundPlanck: 1.6 },
     });
-    const arrays: Float64Array[] = [solution.interfaceDepths];
-    const { thermal } = solution;
-    for (const { fluxes, modes } of [
-      ...solution.beams,
-      ...(thermal === undefined ? [] : [{ fluxes: thermal.fluxes, modes: [thermal.mode] }]),
-    ]) {
-      arrays.push(fluxes.direct, fluxes.diffuseDown, fluxes.diffuseUp, fluxes.meanIntensity);
-      for (const mode of modes) {
-        arrays.push(mode.quadratureUp, mode.quadratureDown, mode.userUp, mode.userDown);
-      }
-    }
-    expect(arrays).toHaveLength(1 + 5 * (4 + 4 * 4) + 4 + 4);
-    expect(digestOf(arrays)).toBe("bc28397ba9670299");
+    expect(solution.thermal).toBeDefined();
+    expect(await bitsOf(solution)).toBe(
+      "d9da446ba8e60802a6053a0b589a755e0ae84505d5b07ffe352e4e28557ade58",
+    );
   });
 });

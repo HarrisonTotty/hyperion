@@ -152,13 +152,15 @@ import {
   type GroundReflectance,
   type InterfaceFluxes,
   type LayerFaces,
-  layerStackRightHandSide,
+  layerStackRightHandSideInto,
+  type ModeParticulars,
+  modeParticulars,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
   planeParallelBeam,
   RESONANCE_HALF_WIDTH,
   solveDiscreteOrdinates,
-  solveLayerStack,
+  solveLayerStackColumns,
   type StreamDirection,
 } from "./discreteOrdinates";
 import { EXP_SUM_OPTIONS, type ExpSumOptions } from "./expSum";
@@ -587,6 +589,12 @@ export interface PolarisedProblem {
    * remarks: with b₂ = 0 everywhere V stays 0).
    */
   readonly circular?: boolean;
+  /**
+   * The Stokes components solved at the user cosines, from I (R08.T14.e's lever: the correction
+   * reads I alone there), in [1, 4]; all a mode carries when absent. The others hold NaN in
+   * `userUp` and `userDown`; the nodes always carry every component.
+   */
+  readonly userComponents?: number;
 }
 
 /** One mode's Stokes intensities for one beam, at every interface. */
@@ -1320,7 +1328,8 @@ interface ModeFunctions {
 /**
  * The source (ω ÷ 2) Σ_l (2l + 1) P_l(±μ_u) B_l H_l of quadrature intensities (I⁺, I⁻), H_l =
  * Σ_j w_j (P_l(μ_j) I⁺_j + P_l(−μ_j) I⁻_j), at each user cosine upward and downward, U × C each:
- * the layer-mode's {@link userSourceMatrix} applied to them.
+ * the layer-mode's {@link userSourceMatrix} applied to them, its first `keep` components at each
+ * user cosine alone (the rest left as they stand).
  */
 function userSourceVector(
   lm: VectorLayerMode,
@@ -1328,6 +1337,7 @@ function userSourceVector(
   intensityDown: Float64Array,
   outUp: Float64Array,
   outDown: Float64Array,
+  keep: number,
 ): void {
   const n = lm.size;
   const columns = 2 * n;
@@ -1336,6 +1346,9 @@ function userSourceVector(
   for (let direction = 0; direction < 2; direction += 1) {
     const out = direction === 0 ? outUp : outDown;
     for (let x = 0; x < width; x += 1) {
+      if (x % lm.components >= keep) {
+        continue;
+      }
       const row = (direction * width + x) * columns;
       let sum = 0;
       for (let a = 0; a < n; a += 1) {
@@ -1354,7 +1367,15 @@ interface VectorUserTransfer {
   readonly attenuation: Float64Array;
 }
 
-function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): VectorUserTransfer {
+/**
+ * A vector layer's {@link VectorUserTransfer}, its first `keep` components at each user cosine alone:
+ * the rest are 0, for a solve that keeps those components alone (`PolarisedProblem.userComponents`).
+ */
+function vectorUserTransfer(
+  lm: VectorLayerMode,
+  userCosines: Float64Array,
+  keep: number,
+): VectorUserTransfer {
   const n = lm.size;
   const { components } = lm;
   const users = userCosines.length;
@@ -1378,19 +1399,19 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
         vectorUp[a] = one;
         vectorDown[a] = one;
       }
-      userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe);
+      userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe, keep);
       const constantUp = Float64Array.from(sourceUpRe);
       const constantDown = Float64Array.from(sourceDownRe);
       for (let a = 0; a < n; a += 1) {
         vectorUp[a] = at(lm.linear, a);
         vectorDown[a] = -at(lm.linear, a);
       }
-      userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe);
+      userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe, keep);
       for (let u = 0; u < users; u += 1) {
         const mu = at(userCosines, u);
         const passed = -expm1(-depth / mu);
         const e = at(attenuation, u);
-        for (let c = 0; c < components; c += 1) {
+        for (let c = 0; c < keep; c += 1) {
           const x = u * components + c;
           up[decaying * width + x] = at(constantUp, x) * passed;
           down[decaying * width + x] = at(constantDown, x) * passed;
@@ -1410,13 +1431,13 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
       vectorUp[a] = at(lm.upRe, s * n + a);
       vectorDown[a] = deltaSign(a % components) * at(lm.downRe, s * n + a);
     }
-    userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe);
+    userSourceVector(lm, vectorUp, vectorDown, sourceUpRe, sourceDownRe, keep);
     if (ki !== 0) {
       for (let a = 0; a < n; a += 1) {
         vectorUp[a] = at(lm.upIm, s * n + a);
         vectorDown[a] = deltaSign(a % components) * at(lm.downIm, s * n + a);
       }
-      userSourceVector(lm, vectorUp, vectorDown, sourceUpIm, sourceDownIm);
+      userSourceVector(lm, vectorUp, vectorDown, sourceUpIm, sourceDownIm, keep);
     }
     for (let u = 0; u < users; u += 1) {
       const mu = at(userCosines, u);
@@ -1438,7 +1459,7 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
         againstRe = inverse * against[0];
         againstIm = inverse * against[1];
       }
-      for (let c = 0; c < components; c += 1) {
+      for (let c = 0; c < keep; c += 1) {
         const x = u * components + c;
         const sign = deltaSign(c);
         const jUr = at(sourceUpRe, x);
@@ -1469,30 +1490,60 @@ function vectorUserTransfer(lm: VectorLayerMode, userCosines: Float64Array): Vec
 // ---------------------------------------------------------------------------------------------
 // The beam's particular solution.
 
-/** The beam's particular solution per unit transmission at the layer's top: Z⁺ and Z⁻, n each. */
-interface VectorParticular {
+/**
+ * The scratch of one vector layer's particular solution at one mode, n = N C long (the user sources
+ * U C), reused layer by layer and beam by beam (R08.T14.e's lever): `up` and `down` hold Z⁺ and Z⁻
+ * per unit transmission at the layer's top once {@link vectorParticularInto} returns.
+ */
+interface VectorScratch {
+  readonly sourceUp: Float64Array;
+  readonly sourceDown: Float64Array;
+  readonly q: Float64Array;
+  readonly p: Float64Array;
+  readonly sum: Float64Array;
+  readonly diff: Float64Array;
+  readonly solved: Float64Array;
   readonly up: Float64Array;
   readonly down: Float64Array;
+  readonly userUp: Float64Array;
+  readonly userDown: Float64Array;
+}
+
+function vectorScratch(n: number, width: number): VectorScratch {
+  return {
+    sourceUp: new Float64Array(n),
+    sourceDown: new Float64Array(n),
+    q: new Float64Array(n),
+    p: new Float64Array(n),
+    sum: new Float64Array(n),
+    diff: new Float64Array(n),
+    solved: new Float64Array(n),
+    up: new Float64Array(n),
+    down: new Float64Array(n),
+    userUp: new Float64Array(width),
+    userDown: new Float64Array(width),
+  };
 }
 
 /**
- * The beam source's coefficients X⁺ and X⁻ at the nodes per unit transmission:
- * (2 − δ_m0)(ω ÷ 4π) Σ_l (2l + 1) P_l(±μ_i) B_l P_l(−μ₀) e₁.
+ * The beam source's coefficients X⁺ and X⁻ at the nodes per unit transmission, into `up` and
+ * `down`: (2 − δ_m0)(ω ÷ 4π) Σ_l (2l + 1) P_l(±μ_i) B_l P_l(−μ₀) e₁.
  */
-function beamSource(
+function beamSourceInto(
   lm: VectorLayerMode,
   quadrature: DoubleGaussQuadrature,
   nodes: GsfTable,
   beamZero: Float64Array,
-): { readonly up: Float64Array; readonly down: Float64Array } {
+  up: Float64Array,
+  down: Float64Array,
+): void {
   const { components } = lm;
   const count = quadrature.nodes.length;
-  const n = lm.size;
   const lmax = quadrature.streams - 1;
   const m = lm.mode;
   const strength = (lm.layer.omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
-  const up = new Float64Array(n);
-  const down = new Float64Array(n);
+  up.fill(0);
+  down.fill(0);
   for (let l = m; l <= lmax; l += 1) {
     const sign = (l + m) % 2 === 0 ? 1 : -1;
     // B_l P_l(−μ₀) e₁ = d^l_m0(−μ₀) (a₁, b₁, 0, 0), d^l_m0(−μ₀) = (−1)^{l+m} d^l_m0(μ₀).
@@ -1518,34 +1569,31 @@ function beamSource(
       }
     }
   }
-  return { up, down };
 }
 
 /**
  * Z^± for the beam's source (the module's remarks): ((α − β)(α + β) − λ²) Zs =
  * −(α − β) M⁻¹ Xs − λ M⁻¹ Xd with Xs = X⁺ + Δ X⁻ and Xd = X⁺ − Δ X⁻, by the scalar solver's
- * eigenbasis on the symmetric path and by elimination on the nonsymmetric one.
+ * eigenbasis on the symmetric path and by elimination on the nonsymmetric one: from X± in
+ * `scratch.sourceUp` and `sourceDown` ({@link beamSourceInto}'s) into `scratch.up` and `down`.
  */
-function vectorParticular(
+function vectorParticularInto(
   lm: VectorLayerMode,
   quadrature: DoubleGaussQuadrature,
-  source: { readonly up: Float64Array; readonly down: Float64Array },
   slant: number,
-): VectorParticular {
+  scratch: VectorScratch,
+): void {
   const n = lm.size;
   const { components } = lm;
-  const q = new Float64Array(n);
-  const p = new Float64Array(n);
+  const { sourceUp, sourceDown, q, p, sum, diff, up, down } = scratch;
   for (let a = 0; a < n; a += 1) {
     const i = nodeOf(a, components);
     const factor = Math.sqrt(at(quadrature.weights, i) / at(quadrature.nodes, i));
-    const mirrored = deltaSign(a % components) * at(source.down, a);
-    q[a] = factor * (at(source.up, a) + mirrored);
-    p[a] = factor * (at(source.up, a) - mirrored);
+    const mirrored = deltaSign(a % components) * at(sourceDown, a);
+    q[a] = factor * (at(sourceUp, a) + mirrored);
+    p[a] = factor * (at(sourceUp, a) - mirrored);
   }
   const { scale } = lm;
-  const sum = new Float64Array(n);
-  const diff = new Float64Array(n);
   const { path } = lm;
   switch (path.kind) {
     case "symmetric": {
@@ -1553,7 +1601,7 @@ function vectorParticular(
       // p) ÷ (k² − λ²), Zs = D L Y c and Zd = −λ D L⁻ᵀ Y c + D L⁻ᵀ L⁻¹ p.
       const { decayRatesSquared, qMap, pMap, sumMap, diffMap, inverseMap } = path;
       const lambda2 = slant * slant;
-      const coefficients = new Float64Array(n);
+      const coefficients = scratch.solved;
       for (let k = 0; k < n; k += 1) {
         let s = 0;
         for (let i = 0; i < n; i += 1) {
@@ -1581,7 +1629,7 @@ function vectorParticular(
       for (let i = 0; i < n; i += 1) {
         shifted[i * n + i] = at(shifted, i * n + i) - slant * slant;
       }
-      const z = new Float64Array(n);
+      const z = scratch.solved;
       for (let i = 0; i < n; i += 1) {
         let s = 0;
         for (let j = 0; j < n; j += 1) {
@@ -1601,13 +1649,10 @@ function vectorParticular(
       break;
     }
   }
-  const up = new Float64Array(n);
-  const down = new Float64Array(n);
   for (let a = 0; a < n; a += 1) {
     up[a] = (at(sum, a) + at(diff, a)) / 2;
     down[a] = (deltaSign(a % components) * (at(sum, a) - at(diff, a))) / 2;
   }
-  return { up, down };
 }
 
 /** Whether layer `lm`'s slant factor lies within the resonance window of one of its rates. */
@@ -1637,6 +1682,8 @@ interface VectorModeContext {
   readonly groundAlbedo: number;
   /** A ground other than Lambertian at this mode, on the I rows, or `undefined`. */
   readonly ground: GroundModeTerms | undefined;
+  /** The components kept at the user cosines, from I: at most `components`. */
+  readonly userComponents: number;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
@@ -1703,7 +1750,12 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
   layers.forEach((layer, p) => {
     interfaceDepths[p + 1] = at(interfaceDepths, p) + layer.opticalDepth;
   });
+  const userComponents = problem.userComponents ?? 4;
+  if (!(Number.isInteger(userComponents) && userComponents >= 1 && userComponents <= 4)) {
+    throw new RangeError(`the user cosines carry 1 to 4 components, not ${userComponents}`);
+  }
   const perBeam: StokesModeIntensities[][] = beams.map(() => []);
+  const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   const eigen: ModeEigenRecord[] = [];
   for (let m = 0; m <= problem.maxMode; m += 1) {
     const components = componentsOf(m, circular);
@@ -1719,6 +1771,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
       userCosines,
       problem.groundAlbedo,
       ground,
+      Math.min(userComponents, components),
     );
     const complexLayers = context.layerModes.flatMap((lm, p) => (lm.complexPairs > 0 ? [p] : []));
     eigen.push({
@@ -1732,8 +1785,8 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
         Math.max(0, ...context.layerModes.map((lm) => lm.imaginaryShares[1])),
       ],
     });
-    beams.forEach((beam, b) => {
-      perBeam[b]?.push(solveVectorBeamMode(context, beam));
+    solveVectorBeamModes(context, beams, exponentials).forEach((mode, b) => {
+      perBeam[b]?.push(mode);
     });
   }
   const solved = beams.map((beam, b): PolarisedBeamSolution => {
@@ -1804,6 +1857,7 @@ function vectorModeContext(
   userCosines: Float64Array,
   groundAlbedo: number,
   ground: GroundModeTerms | undefined,
+  userComponents: number,
 ): VectorModeContext {
   const lmax = quadrature.streams - 1;
   const count = quadrature.nodes.length;
@@ -1816,7 +1870,7 @@ function vectorModeContext(
     vectorLayerMode(layer, m, components, quadrature, functions),
   );
   const faces = layerModes.map(vectorFaces);
-  const transfers = layerModes.map((lm) => vectorUserTransfer(lm, userCosines));
+  const transfers = layerModes.map((lm) => vectorUserTransfer(lm, userCosines, userComponents));
   let reflection: Float64Array | undefined;
   if (m === 0 && groundAlbedo > 0) {
     // Lambertian and depolarising: I⁺ = 2A Σ_j w_j μ_j I⁻_j on the I rows alone.
@@ -1852,107 +1906,222 @@ function vectorModeContext(
     userCosines,
     groundAlbedo,
     ground,
+    userComponents,
   };
 }
 
-/** One beam's mode, solved once or, where a layer's λ is resonant, shifted both ways and averaged. */
-function solveVectorBeamMode(
+/** One solve of a mode for a beam: its own slant factors, or one side's shifted about a resonance. */
+interface VectorBeamSolve {
+  readonly beam: PreparedBeam;
+  readonly slantFactor: Float64Array;
+}
+
+/**
+ * A beam's exponentials through each layer, the same at every mode (R08.T14.e's lever, as the scalar
+ * solver keeps its own): e^{−λ_p Δ_p}, and per user cosine φ(λ_p + 1 ÷ μ_u, Δ_p) and
+ * ψ(λ_p, 1 ÷ μ_u, Δ_p) at `p × U + u`, made at the beam's first solve of the layer at its own slant
+ * factor and read at the rest, the same calls' results to the bit.
+ */
+interface BeamExponentials {
+  /** Whether layer p's are made. */
+  readonly made: Uint8Array;
+  readonly through: Float64Array;
+  readonly along: Float64Array;
+  readonly against: Float64Array;
+}
+
+function beamExponentials(layerCount: number, users: number): BeamExponentials {
+  return {
+    made: new Uint8Array(layerCount),
+    through: new Float64Array(layerCount),
+    along: new Float64Array(layerCount * users),
+    against: new Float64Array(layerCount * users),
+  };
+}
+
+/**
+ * Every beam's mode on the mode's one factorisation: each beam solved once, or, where a layer's λ
+ * is resonant, shifted both ways and averaged, and every solve's right-hand side taken in one pass
+ * over the factors (`discreteOrdinates.ts`'s `solveLayerStackColumns`), each to the bit of its own
+ * solve.
+ */
+function solveVectorBeamModes(
   context: VectorModeContext,
-  beam: PreparedBeam,
-): StokesModeIntensities {
-  const resonant = context.layerModes.map(
-    (lm, p) =>
-      at(beam.topTransmission, p) > 0 &&
-      lm.layer.omega > 0 &&
-      isResonant(lm, at(beam.slantFactor, p)),
-  );
-  if (!resonant.includes(true)) {
-    return solveVectorBeamModeAt(context, beam, beam.slantFactor);
-  }
-  const shifted = (sign: number): Float64Array =>
-    beam.slantFactor.map((lambda, p) =>
-      resonant[p] === true ? lambda * (1 + sign * 2 * RESONANCE_HALF_WIDTH) : lambda,
+  beams: ReadonlyArray<PreparedBeam>,
+  exponentials: ReadonlyArray<BeamExponentials>,
+): StokesModeIntensities[] {
+  const { m, components, quadrature, layerModes, stack, functions, userCosines } = context;
+  const n = quadrature.nodes.length * components;
+  const span = 2 * n;
+  const width = userCosines.length * components;
+  const layerCount = layerModes.length;
+  const lmax = quadrature.streams - 1;
+  const solves: VectorBeamSolve[] = [];
+  const firstSolve: number[] = [];
+  const resonantBeam: boolean[] = [];
+  for (const beam of beams) {
+    const resonant = layerModes.map(
+      (lm, p) =>
+        at(beam.topTransmission, p) > 0 &&
+        lm.layer.omega > 0 &&
+        isResonant(lm, at(beam.slantFactor, p)),
     );
-  const below = solveVectorBeamModeAt(context, beam, shifted(-1));
-  const above = solveVectorBeamModeAt(context, beam, shifted(1));
+    firstSolve.push(solves.length);
+    if (!resonant.includes(true)) {
+      solves.push({ beam, slantFactor: beam.slantFactor });
+      resonantBeam.push(false);
+      continue;
+    }
+    const shifted = (sign: number): Float64Array =>
+      beam.slantFactor.map((lambda, p) =>
+        resonant[p] === true ? lambda * (1 + sign * 2 * RESONANCE_HALF_WIDTH) : lambda,
+      );
+    solves.push({ beam, slantFactor: shifted(-1) }, { beam, slantFactor: shifted(1) });
+    resonantBeam.push(true);
+  }
+  const columns = solves.length;
+  if (columns === 0) {
+    return [];
+  }
+  const rows = span * layerCount;
+  const rightHandSides = new Float64Array(rows * columns);
+  const scratch = vectorScratch(n, width);
+  const beamZero = new Float64Array(lmax + 1);
+  const particulars = solves.map((solve, j): ModeParticulars => {
+    const own = exponentials[solve.beam.index];
+    if (own === undefined) {
+      throw new Error(`beam ${solve.beam.index} has no exponentials`);
+    }
+    wignerInto(m, 0, lmax, solve.beam.cosine, beamZero, 0, 1);
+    const userBeam = gsfBeamAtUsers(functions.users, beamZero, m, lmax);
+    const parts = modeParticulars(layerCount, span, width);
+    vectorBeamParticularsInto(context, solve, beamZero, userBeam, own, scratch, parts);
+    layerStackRightHandSideInto(
+      stack,
+      parts,
+      vectorGroundSource(context, solve.beam),
+      rightHandSides,
+      j,
+      columns,
+    );
+    return parts;
+  });
+  solveLayerStackColumns(stack, rightHandSides, columns);
+  const coefficients = new Float64Array(rows);
+  const fields = solves.map((solve, j): StokesModeIntensities => {
+    for (let r = 0; r < rows; r += 1) {
+      coefficients[r] = at(rightHandSides, r * columns + j);
+    }
+    const parts = particulars[j];
+    if (parts === undefined) {
+      throw new Error(`solve ${j} has no particular solutions`);
+    }
+    return vectorModeField(context, solve.beam, parts, coefficients);
+  });
   const mean = (x: Float64Array, y: Float64Array): Float64Array =>
     x.map((value, i) => (value + at(y, i)) / 2);
-  return {
-    mode: below.mode,
-    components: below.components,
-    quadratureUp: mean(below.quadratureUp, above.quadratureUp),
-    quadratureDown: mean(below.quadratureDown, above.quadratureDown),
-    userUp: mean(below.userUp, above.userUp),
-    userDown: mean(below.userDown, above.userDown),
-  };
+  return beams.map((_, b): StokesModeIntensities => {
+    const first = fields[firstSolve[b] ?? -1];
+    if (first === undefined) {
+      throw new Error(`beam ${b} has no solve`);
+    }
+    if (resonantBeam[b] !== true) {
+      return first;
+    }
+    const above = fields[(firstSolve[b] ?? -1) + 1];
+    if (above === undefined) {
+      throw new Error(`beam ${b} has no second solve`);
+    }
+    return {
+      mode: first.mode,
+      components: first.components,
+      quadratureUp: mean(first.quadratureUp, above.quadratureUp),
+      quadratureDown: mean(first.quadratureDown, above.quadratureDown),
+      userUp: mean(first.userUp, above.userUp),
+      userDown: mean(first.userDown, above.userDown),
+    };
+  });
 }
 
-function solveVectorBeamModeAt(
+/**
+ * A beam's particular solutions in every layer at a solve's slant factors, into `out` (zeros where
+ * the beam does not reach or the layer does not scatter), with the source they and the beam itself
+ * give the user streams' kept components; its exponentials from `exponentials` where a layer's slant
+ * factor is the beam's own.
+ */
+function vectorBeamParticularsInto(
   context: VectorModeContext,
-  beam: PreparedBeam,
-  slantFactor: Float64Array,
-): StokesModeIntensities {
-  const { m, components, quadrature, layerModes, faces, transfers, stack, functions } = context;
-  const { userCosines, groundAlbedo, ground } = context;
-  const count = quadrature.nodes.length;
-  const n = count * components;
+  solve: VectorBeamSolve,
+  beamZero: Float64Array,
+  userBeam: UserBeam,
+  exponentials: BeamExponentials,
+  scratch: VectorScratch,
+  out: ModeParticulars,
+): void {
+  const { components, quadrature, layerModes, functions, userCosines, userComponents } = context;
+  const { beam, slantFactor } = solve;
+  const n = quadrature.nodes.length * components;
   const span = 2 * n;
   const users = userCosines.length;
   const width = users * components;
-  const layerCount = layerModes.length;
-  const lmax = quadrature.streams - 1;
-  const beamZero = new Float64Array(lmax + 1);
-  wignerInto(m, 0, lmax, beam.cosine, beamZero, 0, 1);
-
-  const particularTop: Float64Array[] = [];
-  const particularBottom: Float64Array[] = [];
-  const particularUserUp: Float64Array[] = [];
-  const particularUserDown: Float64Array[] = [];
-  const sourceUp = new Float64Array(width);
-  const sourceDown = new Float64Array(width);
-  const userBeam = gsfBeamAtUsers(functions.users, beamZero, m, lmax);
+  const { made, through: throughs, along: alongs, against: againsts } = exponentials;
   layerModes.forEach((lm, p) => {
-    const top = new Float64Array(span);
-    const bottom = new Float64Array(span);
-    const userUp = new Float64Array(width);
-    const userDown = new Float64Array(width);
     const transmission = at(beam.topTransmission, p);
     const lambda = at(slantFactor, p);
     const { omega, opticalDepth: depth } = lm.layer;
-    if (transmission > 0 && omega > 0) {
-      const source = beamSource(lm, quadrature, functions.nodes, beamZero);
-      const z = vectorParticular(lm, quadrature, source, lambda);
-      const through = exp(-lambda * depth);
-      for (let a = 0; a < n; a += 1) {
-        top[a] = transmission * at(z.up, a);
-        top[n + a] = transmission * at(z.down, a);
-        bottom[a] = transmission * through * at(z.up, a);
-        bottom[n + a] = transmission * through * at(z.down, a);
-      }
-      // The source at the user cosines: the scattered particular solution and the beam itself.
-      userSourceVector(lm, z.up, z.down, sourceUp, sourceDown);
-      addBeamAtUsers(lm, userBeam, users, sourceUp, sourceDown);
+    if (!(transmission > 0 && omega > 0)) {
+      return;
+    }
+    const row = p * users;
+    const own = lambda === at(beam.slantFactor, p);
+    if (!own || made[p] === 0) {
+      throughs[p] = exp(-lambda * depth);
       for (let u = 0; u < users; u += 1) {
         const inverse = 1 / at(userCosines, u);
-        const along = transmission * inverse * phi(lambda + inverse, depth);
-        const against = transmission * inverse * psi(lambda, inverse, depth);
-        for (let c = 0; c < components; c += 1) {
-          const x = u * components + c;
-          userUp[x] = at(sourceUp, x) * along;
-          userDown[x] = at(sourceDown, x) * against;
-        }
+        alongs[row + u] = phi(lambda + inverse, depth);
+        againsts[row + u] = psi(lambda, inverse, depth);
+      }
+      // A shifted solve's are its own: the next solve at the beam's slant makes the layer's anew.
+      made[p] = own ? 1 : 0;
+    }
+    beamSourceInto(lm, quadrature, functions.nodes, beamZero, scratch.sourceUp, scratch.sourceDown);
+    vectorParticularInto(lm, quadrature, lambda, scratch);
+    const zUp = scratch.up;
+    const zDown = scratch.down;
+    const through = at(throughs, p);
+    const face = p * span;
+    for (let a = 0; a < n; a += 1) {
+      out.top[face + a] = transmission * at(zUp, a);
+      out.top[face + n + a] = transmission * at(zDown, a);
+      out.bottom[face + a] = transmission * through * at(zUp, a);
+      out.bottom[face + n + a] = transmission * through * at(zDown, a);
+    }
+    // The source at the user cosines: the scattered particular solution and the beam itself.
+    const { userUp: sourceUp, userDown: sourceDown } = scratch;
+    userSourceVector(lm, zUp, zDown, sourceUp, sourceDown, userComponents);
+    addBeamAtUsers(lm, userBeam, users, sourceUp, sourceDown, userComponents);
+    for (let u = 0; u < users; u += 1) {
+      const inverse = 1 / at(userCosines, u);
+      const along = transmission * inverse * at(alongs, row + u);
+      const against = transmission * inverse * at(againsts, row + u);
+      for (let c = 0; c < userComponents; c += 1) {
+        const x = u * components + c;
+        out.userUp[p * width + x] = at(sourceUp, x) * along;
+        out.userDown[p * width + x] = at(sourceDown, x) * against;
       }
     }
-    particularTop.push(top);
-    particularBottom.push(bottom);
-    particularUserUp.push(userUp);
-    particularUserDown.push(userDown);
   });
+}
 
-  const groundBeam =
-    m === 0 && groundAlbedo > 0
-      ? (groundAlbedo / Math.PI) * beam.cosine * beam.groundTransmission
-      : 0;
+/** The ground's I at the nodes for a beam, its reflection of the direct beam; `undefined` for none. */
+function vectorGroundSource(
+  context: VectorModeContext,
+  beam: PreparedBeam,
+): Float64Array | undefined {
+  const { components, quadrature, ground } = context;
+  const count = quadrature.nodes.length;
+  const n = count * components;
+  const groundBeam = vectorLambertianBeam(context, beam);
   let groundSource: Float64Array | undefined;
   if (groundBeam > 0) {
     groundSource = new Float64Array(n);
@@ -1968,25 +2137,52 @@ function solveVectorBeamModeAt(
       groundSource[i * components] = at(reflectedBeam, i) * beam.cosine * beam.groundTransmission;
     }
   }
-  const coefficients = solveLayerStack(
-    stack,
-    layerStackRightHandSide(stack, particularTop, particularBottom, groundSource),
-  );
+  return groundSource;
+}
 
+/** A Lambertian ground's reflection of the direct beam at mode 0, (A ÷ π) μ₀ T_L; 0 past it. */
+function vectorLambertianBeam(context: VectorModeContext, beam: PreparedBeam): number {
+  const { m, groundAlbedo } = context;
+  return m === 0 && groundAlbedo > 0
+    ? (groundAlbedo / Math.PI) * beam.cosine * beam.groundTransmission
+    : 0;
+}
+
+/**
+ * One beam's Stokes mode from its particular solutions and the stack's solved coefficients, layer
+ * p's solution s at `2n p + s`: the intensities at the nodes at every interface, and those at the
+ * user cosines, their kept components alone (the rest NaN), integrated down from the top and up
+ * from the ground.
+ */
+function vectorModeField(
+  context: VectorModeContext,
+  beam: PreparedBeam,
+  particulars: ModeParticulars,
+  coefficients: Float64Array,
+): StokesModeIntensities {
+  const { m, components, quadrature, layerModes, faces, transfers, userCosines } = context;
+  const { groundAlbedo, ground, userComponents } = context;
+  const count = quadrature.nodes.length;
+  const n = count * components;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const width = users * components;
+  const layerCount = layerModes.length;
   const quadratureUp = new Float64Array((layerCount + 1) * n);
   const quadratureDown = new Float64Array((layerCount + 1) * n);
   for (let k = 0; k <= layerCount; k += 1) {
     const p = Math.min(k, layerCount - 1);
     const face = faces[p];
-    const part = (k < layerCount ? particularTop : particularBottom)[p];
-    if (face === undefined || part === undefined) {
+    if (face === undefined) {
       throw new Error(`layer ${p} has no faces`);
     }
     const values = k < layerCount ? face.top : face.bottom;
+    const part = k < layerCount ? particulars.top : particulars.bottom;
+    const offset = span * p;
     for (let r = 0; r < span; r += 1) {
-      let sum = at(part, r);
+      let sum = at(part, offset + r);
       for (let s = 0; s < span; s += 1) {
-        sum += at(values, r * span + s) * at(coefficients, span * p + s);
+        sum += at(values, r * span + s) * at(coefficients, offset + s);
       }
       if (r < n) {
         quadratureUp[k * n + r] = sum;
@@ -1996,19 +2192,29 @@ function solveVectorBeamModeAt(
     }
   }
 
+  // The components not kept are NaN, so that no reader takes them for intensities.
   const userUp = new Float64Array((layerCount + 1) * width);
   const userDown = new Float64Array((layerCount + 1) * width);
+  if (userComponents < components) {
+    userUp.fill(Number.NaN);
+    userDown.fill(Number.NaN);
+    for (let u = 0; u < users; u += 1) {
+      for (let c = 0; c < userComponents; c += 1) {
+        userDown[u * components + c] = 0;
+        userUp[layerCount * width + u * components + c] = 0;
+      }
+    }
+  }
   for (let p = 0; p < layerCount; p += 1) {
     const transfer = transfers[p];
-    const part = particularUserDown[p];
-    if (transfer === undefined || part === undefined) {
+    if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);
     }
     for (let u = 0; u < users; u += 1) {
       const e = at(transfer.attenuation, u);
-      for (let c = 0; c < components; c += 1) {
+      for (let c = 0; c < userComponents; c += 1) {
         const x = u * components + c;
-        let value = at(userDown, p * width + x) * e + at(part, x);
+        let value = at(userDown, p * width + x) * e + at(particulars.userDown, p * width + x);
         for (let s = 0; s < span; s += 1) {
           value += at(coefficients, span * p + s) * at(transfer.down, s * width + x);
         }
@@ -2024,10 +2230,12 @@ function solveVectorBeamModeAt(
         at(quadrature.nodes, j) *
         at(quadratureDown, layerCount * n + j * components);
     }
+    const groundBeam = vectorLambertianBeam(context, beam);
     for (let u = 0; u < users; u += 1) {
       userUp[layerCount * width + u * components] = 2 * groundAlbedo * flux + groundBeam;
     }
   }
+  const reflectedBeam = ground?.beams[beam.index];
   if (ground !== undefined && reflectedBeam !== undefined) {
     for (let u = 0; u < users; u += 1) {
       let value = at(reflectedBeam, count + u) * beam.cosine * beam.groundTransmission;
@@ -2040,15 +2248,14 @@ function solveVectorBeamModeAt(
   }
   for (let p = layerCount - 1; p >= 0; p -= 1) {
     const transfer = transfers[p];
-    const part = particularUserUp[p];
-    if (transfer === undefined || part === undefined) {
+    if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);
     }
     for (let u = 0; u < users; u += 1) {
       const e = at(transfer.attenuation, u);
-      for (let c = 0; c < components; c += 1) {
+      for (let c = 0; c < userComponents; c += 1) {
         const x = u * components + c;
-        let value = at(userUp, (p + 1) * width + x) * e + at(part, x);
+        let value = at(userUp, (p + 1) * width + x) * e + at(particulars.userUp, p * width + x);
         for (let s = 0; s < span; s += 1) {
           value += at(coefficients, span * p + s) * at(transfer.up, s * width + x);
         }
@@ -2088,6 +2295,7 @@ function addBeamAtUsers(
   users: number,
   sourceUp: Float64Array,
   sourceDown: Float64Array,
+  keep: number,
 ): void {
   const { components, mode: m } = lm;
   const strength = (lm.layer.omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
@@ -2107,10 +2315,12 @@ function addBeamAtUsers(
       const t = at(table.odd, l * table.count + u);
       const base = u * components;
       sourceUp[base] = at(sourceUp, base) + p * vi;
-      sourceUp[base + 1] = at(sourceUp, base + 1) + r * vq;
       sourceDown[base] = at(sourceDown, base) + sign * p * vi;
-      sourceDown[base + 1] = at(sourceDown, base + 1) + sign * r * vq;
-      if (components > 2) {
+      if (keep > 1) {
+        sourceUp[base + 1] = at(sourceUp, base + 1) + r * vq;
+        sourceDown[base + 1] = at(sourceDown, base + 1) + sign * r * vq;
+      }
+      if (components > 2 && keep > 2) {
         sourceUp[base + 2] = at(sourceUp, base + 2) - t * vq;
         sourceDown[base + 2] = at(sourceDown, base + 2) + sign * t * vq;
       }
@@ -2633,7 +2843,8 @@ function solvePoint(
   };
   return {
     scalar: solveDiscreteOrdinates({ ...common, layers: scalarLayers }),
-    vector: solvePolarised({ ...common, layers: vectorLayers }),
+    // The sources read the vector field's I alone at the user cosines (`addPointSources`).
+    vector: solvePolarised({ ...common, layers: vectorLayers, userComponents: 1 }),
     scaledBeams,
     kernelBeams,
   };
