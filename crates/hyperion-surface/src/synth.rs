@@ -29,12 +29,14 @@ pub mod interp;
 pub mod levels;
 pub mod relief;
 
+use std::borrow::Cow;
+
 use hyperion_base::math;
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Metres, SquareMetres};
 
 use crate::cube::{MAX_LEVEL, PatchKey};
-use crate::field::{FieldView, SynthesisCell};
+use crate::field::{FieldHeader, FieldView, SynthesisCell};
 use crate::height::HeightSample;
 use crate::noise::LatticeCache;
 use crate::num;
@@ -60,10 +62,34 @@ pub(crate) const BAND_LEVELS: usize = MAX_LEVEL as usize + 1;
 /// structural octaves, the channels, the small craters' octaves, the coarse craters' rims and each
 /// level's set and bounds.
 /// Building one takes about 1 to 10 ms (the craters' octaves and the bounds' sampled profiles,
-/// most on a screened body), so a caller builds one per body and view, not per query.
+/// most on a screened body), so a caller builds one per body and view, not per query; a client's
+/// height worker, whose view grows block by block, keeps the part made from the header and the
+/// seed for the life of the body's field instead.
 #[derive(Debug)]
 pub struct Synthesiser<'a, F> {
     field: &'a F,
+    parts: Cow<'a, SynthesisParts>,
+}
+
+// By hand, since a derive would bound it on `F: Clone`, which no view need be.
+impl<F> Clone for Synthesiser<'_, F> {
+    fn clone(&self) -> Self {
+        Self {
+            field: self.field,
+            parts: self.parts.clone(),
+        }
+    }
+}
+
+/// What a [`Synthesiser`] holds besides its view: the body's contributions, every one a function
+/// of the field's header and the body's detail seed alone, which no block of a field changes.
+///
+/// A client's height worker keeps a body's for the life of its field, so that each query's
+/// synthesiser over the field as it then is ([`Synthesiser::with_parts`]) skips their build: 17.6
+/// ms of every bake on `bake/patch_65`'s Earth-like world, 9.7 ms on its Moon-like world (the
+/// bounds' crater marks four fifths of it; natively, one thread, pod, 2026-11-01).
+#[derive(Debug, Clone)]
+pub(crate) struct SynthesisParts {
     seed: DetailSeed,
     relief: Relief,
     channels: Channels,
@@ -72,18 +98,30 @@ pub struct Synthesiser<'a, F> {
     bounds: LevelBounds,
 }
 
-// By hand, since a derive would bound it on `F: Clone`, which no view need be.
-impl<F> Clone for Synthesiser<'_, F> {
-    fn clone(&self) -> Self {
+impl SynthesisParts {
+    /// The parts of a synthesiser over a field of `header` with the body's detail seed `seed`.
+    ///
+    /// # Panics
+    ///
+    /// As [`CraterOctaves::new`], which no header a field holds reaches.
+    #[must_use]
+    pub(crate) fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
+        let craters = SmallCraters::new(header, seed);
+        let bounds = LevelBounds::of(header, craters.octaves());
         Self {
-            field: self.field,
-            seed: self.seed,
-            relief: self.relief.clone(),
-            channels: self.channels,
-            craters: self.craters.clone(),
-            rims: self.rims,
-            bounds: self.bounds.clone(),
+            seed,
+            relief: Relief::new(header, seed),
+            channels: Channels::new(header, seed),
+            craters,
+            rims: CoarseRims::new(header),
+            bounds,
         }
+    }
+
+    /// The body's detail seed they were made with.
+    #[must_use]
+    pub(crate) const fn seed(&self) -> DetailSeed {
+        self.seed
     }
 }
 
@@ -113,17 +151,20 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// As [`CraterOctaves::new`], which no header a field holds reaches.
     #[must_use]
     pub fn new(field: &'a F, seed: DetailSeed) -> Self {
-        let header = field.header();
-        let craters = SmallCraters::new(header, seed);
-        let bounds = LevelBounds::of(header, craters.octaves());
         Self {
             field,
-            seed,
-            relief: Relief::new(header, seed),
-            channels: Channels::new(header, seed),
-            craters,
-            rims: CoarseRims::new(header),
-            bounds,
+            parts: Cow::Owned(SynthesisParts::new(field.header(), seed)),
+        }
+    }
+
+    /// The synthesis over `field` from `parts`, which [`SynthesisParts::new`] made from `field`'s
+    /// header, or from a header the field's own is the same as: [`new`](Self::new)'s with
+    /// `parts`' seed, bit for bit, without their build.
+    #[must_use]
+    pub(crate) const fn with_parts(field: &'a F, parts: &'a SynthesisParts) -> Self {
+        Self {
+            field,
+            parts: Cow::Borrowed(parts),
         }
     }
 
@@ -135,50 +176,50 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
     /// The body's detail seed.
     #[must_use]
-    pub const fn seed(&self) -> DetailSeed {
-        self.seed
+    pub fn seed(&self) -> DetailSeed {
+        self.parts.seed
     }
 
     /// The body's structural octaves.
     #[must_use]
-    pub const fn relief(&self) -> &Relief {
-        &self.relief
+    pub fn relief(&self) -> &Relief {
+        &self.parts.relief
     }
 
     /// The body's channels.
     #[must_use]
-    pub const fn channels(&self) -> &Channels {
-        &self.channels
+    pub fn channels(&self) -> &Channels {
+        &self.parts.channels
     }
 
     /// The body's small craters.
     #[must_use]
-    pub const fn craters(&self) -> &SmallCraters {
-        &self.craters
+    pub fn craters(&self) -> &SmallCraters {
+        &self.parts.craters
     }
 
     /// The body's coarse craters' rims, which sharpen the field's listed craters.
     #[must_use]
-    pub const fn rims(&self) -> &CoarseRims {
-        &self.rims
+    pub fn rims(&self) -> &CoarseRims {
+        &self.parts.rims
     }
 
     /// The body's level sets and bounds.
     #[must_use]
-    pub const fn bounds(&self) -> &LevelBounds {
-        &self.bounds
+    pub fn bounds(&self) -> &LevelBounds {
+        &self.parts.bounds
     }
 
     /// The contributions `level` evaluates ([`LevelBounds::set`]).
     #[must_use]
     pub fn level_set(&self, level: BandLevel) -> &LevelSet {
-        self.bounds.set(level)
+        self.parts.bounds.set(level)
     }
 
     /// The level bound at `level`, metres ([`level_bound_m`], from the bounds it holds).
     #[must_use]
     pub fn level_bound_m(&self, level: BandLevel) -> f64 {
-        self.bounds.bound_m(level)
+        self.parts.bounds.bound_m(level)
     }
 
     /// The height at the unit direction `dir` (body-fixed) at `level`, above the field's spheroid
@@ -299,7 +340,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         if parts.channels.height_m < 0.0 {
             let (coarse, record) = self.cell_at(dir)?;
             if !record.is_under_water() && !record.epoch_incision.is_epoch() {
-                let floor = self.channels.floor_at(self.field, coarse, dir, cache)?;
+                let floor = self
+                    .parts
+                    .channels
+                    .floor_at(self.field, coarse, dir, cache)?;
                 let floor_m =
                     floor.map_or_else(|| self.field.header().sea_level().value(), |f| f.height_m);
                 if sample.height_m < floor_m {
@@ -339,34 +383,44 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         level: BandLevel,
     ) -> Result<Contributions, QueryHeightError> {
         let field = self.field;
-        let set = self.bounds.set(level);
+        let set = self.parts.bounds.set(level);
         // The base elevation and the relief's styles in one fused pass where the relief reads its
         // styles, each value's bits those of its own interpolation, through a bake's memo of their
         // control points from its cover on (R09.T8's follow-up; the measurement is at
         // `interp::ControlMemo`).
         let (base, relief) = match set.relief_through() {
-            Some(through) if self.relief.evaluates(through) => {
+            Some(through) if self.parts.relief.evaluates(through) => {
                 let header = field.header();
-                let (base, style) = match cache.controls.memo_for(self.channels.id()) {
+                let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
                     Some(memo) => relief::base_and_style(field, dir, memo)?,
                     None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
                 };
-                let relief =
-                    self.relief
-                        .at_in_style(header, dir, through, &style, cache.lattice_mut());
+                let relief = self.parts.relief.at_in_style(
+                    header,
+                    dir,
+                    through,
+                    &style,
+                    cache.lattice_mut(),
+                );
                 (base, relief)
             }
             Some(_) | None => (interp::base_elevation(field, dir)?, NOTHING),
         };
         let channels = match set.channels_through() {
-            Some(through) => self.channels.incision_at(field, dir, through, cache)?,
+            Some(through) => self
+                .parts
+                .channels
+                .incision_at(field, dir, through, cache)?,
             None => NOTHING,
         };
         let craters = match set.craters_through() {
-            Some(through) => self.craters.at(dir, level, through, &mut cache.craters),
+            Some(through) => self
+                .parts
+                .craters
+                .at(dir, level, through, &mut cache.craters),
             None => NOTHING,
         };
-        let rims = self.rims.at(field, dir, level)?;
+        let rims = self.parts.rims.at(field, dir, level)?;
         Ok(Contributions {
             base,
             relief,
@@ -392,15 +446,15 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         parent: BandLevel,
     ) -> Result<Option<(Contributions, Contributions)>, QueryHeightError> {
         let field = self.field;
-        let (set, up) = (self.bounds.set(level), self.bounds.set(parent));
-        let evaluated = |through: Option<u8>| through.filter(|&t| self.relief.evaluates(t));
+        let (set, up) = (self.parts.bounds.set(level), self.parts.bounds.set(parent));
+        let evaluated = |through: Option<u8>| through.filter(|&t| self.parts.relief.evaluates(t));
         let ((base, relief), (up_base, up_relief)) = match (
             evaluated(set.relief_through()),
             evaluated(up.relief_through()),
         ) {
             (Some(through), up_through) => {
                 let header = field.header();
-                let (base, style) = match cache.controls.memo_for(self.channels.id()) {
+                let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
                     Some(memo) => relief::base_and_style(field, dir, memo)?,
                     None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
                 };
@@ -408,6 +462,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 match up_through {
                     Some(up_through) if up_through <= through => {
                         let (relief, up_relief) = self
+                            .parts
                             .relief
                             .at_in_style_pair(header, dir, through, up_through, &style, lattice);
                         ((base, relief), (base, up_relief))
@@ -415,6 +470,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                     Some(_) => return Ok(None),
                     None => {
                         let relief = self
+                            .parts
                             .relief
                             .at_in_style(header, dir, through, &style, lattice);
                         // The parent's base as the point query takes it there, alone.
@@ -433,23 +489,29 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         };
         let (channels, up_channels) = match (set.channels_through(), up.channels_through()) {
             (Some(through), Some(up_through)) if up_through <= through => self
+                .parts
                 .channels
                 .incision_pair_at(field, dir, through, up_through, cache)?,
             (Some(through), None) => (
-                self.channels.incision_at(field, dir, through, cache)?,
+                self.parts
+                    .channels
+                    .incision_at(field, dir, through, cache)?,
                 NOTHING,
             ),
             (None, None) => (NOTHING, NOTHING),
             (Some(_) | None, Some(_)) => return Ok(None),
         };
         let mut craters_at = |level: BandLevel, through: Option<u8>| match through {
-            Some(through) => self.craters.at(dir, level, through, &mut cache.craters),
+            Some(through) => self
+                .parts
+                .craters
+                .at(dir, level, through, &mut cache.craters),
             None => NOTHING,
         };
         let craters = craters_at(level, set.craters_through());
         let up_craters = craters_at(parent, up.craters_through());
-        let rims = self.rims.at(field, dir, level)?;
-        let up_rims = self.rims.at(field, dir, parent)?;
+        let rims = self.parts.rims.at(field, dir, level)?;
+        let up_rims = self.parts.rims.at(field, dir, parent)?;
         Ok(Some((
             Contributions {
                 base,
@@ -512,7 +574,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         cell: PatchKey,
         finer_than: Metres,
     ) -> Option<UnresolvedVariance> {
-        unresolved_with(self.field, self.craters.octaves(), cell, finer_than)
+        unresolved_with(self.field, self.parts.craters.octaves(), cell, finer_than)
     }
 
     /// The structure function of `cell`'s ground in wavelengths shorter than `finer_than` at a
@@ -530,7 +592,13 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         finer_than: Metres,
         lag: Metres,
     ) -> Option<SquareMetres> {
-        structure_with(self.field, self.craters.octaves(), cell, finer_than, lag)
+        structure_with(
+            self.field,
+            self.parts.craters.octaves(),
+            cell,
+            finer_than,
+            lag,
+        )
     }
 
     /// The RMS of `cell`'s ground unresolved at `resolution` ([`unresolved_rms`], from the small
@@ -571,7 +639,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         omitted_variance_in(
             self.field,
             set,
-            self.craters.octaves().omitted_variance(set),
+            self.parts.craters.octaves().omitted_variance(set),
             cell,
         )
     }
@@ -599,7 +667,11 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         let cuts = levels::LevelCuts::of(field.header(), set);
         let relief = relief::relief_structure_from(field, cell, cuts.relief_degree, lag)?;
         let channels = channels::channel_structure_function(field, cell, cuts.channels, lag)?;
-        let craters = self.craters.octaves().omitted_structure_function(set, lag);
+        let craters = self
+            .parts
+            .craters
+            .octaves()
+            .omitted_structure_function(set, lag);
         let rims = craters::rims::rims_structure_function(field, cell, cuts.rims, lag)?;
         Some(relief + channels + craters + rims)
     }

@@ -1080,6 +1080,27 @@ fn worker_bake_is_bake_terrain_over_the_field_with_its_unsurveyed_cells() {
 }
 
 #[test]
+fn worker_bakes_under_another_seed_are_that_seed_s_synthesis() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let field = f.field();
+    let other = DetailSeed::new(0x0074_6865_7273_6565);
+    let key = probes()[0].1;
+    // The body's kept parts are made again for each change of seed, and kept between.
+    for seed in [SEED, other, other, SEED] {
+        let synth = Synthesiser::new(&field, seed);
+        let alone = bake_terrain(&synth, &mut SynthCache::new(), key, &DOUBLE, &[]).unwrap();
+        let bake = fields.bake(f.body, seed, key, &DOUBLE).unwrap();
+        assert_eq!(bake.terrain(), &alone, "{seed:?}");
+    }
+    assert_ne!(
+        fields.bake(f.body, SEED, key, &DOUBLE).unwrap(),
+        fields.bake(f.body, other, key, &DOUBLE).unwrap(),
+        "the seed draws the bands below the coarse cell"
+    );
+}
+
+#[test]
 fn worker_bake_and_queries_need_the_body_s_field() {
     let f = fixture();
     let mut fields = f.worker();

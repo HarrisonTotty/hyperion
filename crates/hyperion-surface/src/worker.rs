@@ -57,9 +57,12 @@
 //!
 //! # The synthesis
 //!
-//! Each query builds the body's [`Synthesiser`] over its field afresh (1 to 10 ms, R09's figure),
-//! since a synthesiser borrows the field, which the next block changes; a ground readout builds one
-//! for all of its parts, the line of sight, the readings and the material. The [`SynthCache`] is the
+//! Each query builds the body's [`Synthesiser`] over its field as it then is, since a synthesiser
+//! borrows the field, which the next block changes, from the parts the body keeps for the query's
+//! seed: the octaves, craters, rims and level bounds, functions of the header and the seed alone,
+//! made on the first query with that seed (17.6 ms a query on `bake/patch_65`'s Earth-like world
+//! before they were kept, natively, one thread, pod, 2026-11-01). A ground readout builds one for
+//! all of its parts, the line of sight, the readings and the material. The [`SynthCache`] is the
 //! body's, from its field's start to its release: [`SynthCache`]'s rule lets one cache serve views
 //! whose held cells only grow, as a body's field does. The body's detail seed is each query's
 //! argument, the client's from the body's record (R09.T1.b); the field carries none. No answer
@@ -123,7 +126,8 @@ use crate::reading::{
 };
 use crate::synth::craters::CraterOctaves;
 use crate::synth::{
-    BandLevel, LevelBounds, QueryHeightError, SynthCache, Synthesiser, omitted_variance_in,
+    BandLevel, LevelBounds, QueryHeightError, SynthCache, SynthesisParts, Synthesiser,
+    omitted_variance_in,
 };
 use crate::wire::{DecodeBlockError, DecodedBlock, decode_block};
 
@@ -161,6 +165,26 @@ struct BodyField {
     /// What the body's albedo nodes are made from, kept from the field's start to its release: a
     /// function of the header alone, which a block never changes.
     nodes: NodeCache,
+    /// The synthesis's parts for the detail seed last asked ([`BodyField::synthesiser`]), made on
+    /// the first query with it: a function of the header and the seed alone, which a block never
+    /// changes, so that each query's synthesiser over the field as it then is skips their build.
+    parts: Option<SynthesisParts>,
+}
+
+impl BodyField {
+    /// The synthesis over the field as it is held, with the body's detail seed `seed`, and the
+    /// body's cache: [`Synthesiser::new`]'s, bit for bit, from the parts kept for `seed`, which are
+    /// made again only for another seed.
+    fn synthesiser(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (Synthesiser<'_, PartialField>, &mut SynthCache) {
+        if self.parts.as_ref().is_none_or(|parts| parts.seed() != seed) {
+            self.parts = Some(SynthesisParts::new(self.field.header(), seed));
+        }
+        let parts = self.parts.as_ref().expect("the parts are made above");
+        (Synthesiser::with_parts(&self.field, parts), &mut self.cache)
+    }
 }
 
 /// What a body's field keeps for its materials' albedo nodes ([`WorkerFields::maturity_nodes`];
@@ -1464,6 +1488,7 @@ impl WorkerFields {
             elevation_mm: None,
             cache: SynthCache::new(),
             nodes: NodeCache::default(),
+            parts: None,
         };
         held.hold_elevations(&block);
         held.survey_sigma(&change);
@@ -1613,10 +1638,9 @@ impl WorkerFields {
         key: PatchKey,
         opts: &TerrainBakeOptions,
     ) -> Result<BodyBake, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
-        let synth = Synthesiser::new(&*field, seed);
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
         let terrain = bake_terrain(&synth, cache, key, opts, &[])?;
-        let coarse = field.header().level().get();
+        let coarse = synth.field().header().level().get();
         let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
         let mask = terrain.layers().survey_mask();
         let cells: BTreeSet<u32> = (0..=quads)
@@ -1655,8 +1679,7 @@ impl WorkerFields {
         at: FaceUv,
         slope_baseline: Metres,
     ) -> Result<Option<SurveyedReading>, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
-        let synth = Synthesiser::new(&*field, seed);
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
         Ok(surveyed_reading(&synth, cache, at, slope_baseline)?)
     }
 
@@ -1680,8 +1703,7 @@ impl WorkerFields {
         direction: &[f64; 3],
         max: Metres,
     ) -> Result<LineOfSight, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
-        let synth = Synthesiser::new(&*field, seed);
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
         Ok(slant_range(&synth, cache, origin_m, direction, max)?)
     }
 
@@ -1708,11 +1730,11 @@ impl WorkerFields {
         seed: DetailSeed,
         at: FaceUv,
     ) -> Result<Option<SurveyedMaterial>, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
-        if !field.is_surveyed(field_cell(field, at)) {
+        let held = self.held(body)?;
+        if !held.field.is_surveyed(field_cell(&held.field, at)) {
             return Ok(None);
         }
-        let synth = Synthesiser::new(&*field, seed);
+        let (synth, cache) = held.synthesiser(seed);
         Ok(Some(surveyed_material(&synth, cache, at)?))
     }
 
@@ -1731,9 +1753,7 @@ impl WorkerFields {
     ///   [`CAPACITY_SLOPE_BASELINE`] (the reading's own where the query's baseline is it), and the
     ///   pad friction, at the month's temperature where it depends on it.
     ///
-    /// Every part is the separate query's to the bit. One [`Synthesiser`] serves them all, built
-    /// once (1 to 10 ms, R09's figure): one where `slant_range`, `reading` and `material` asked
-    /// apart build three.
+    /// Every part is the separate query's to the bit. One [`Synthesiser`] serves them all.
     ///
     /// # Errors
     ///
@@ -1751,8 +1771,7 @@ impl WorkerFields {
         seed: DetailSeed,
         query: &GroundReadoutQuery,
     ) -> Result<GroundReadout, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
-        let synth = Synthesiser::new(&*field, seed);
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
         let sight = match slant_range(&synth, cache, &query.origin_m, &query.direction, query.max)?
         {
             LineOfSight::Ground(sight) => sight,
@@ -1880,7 +1899,8 @@ impl WorkerFields {
         body: BodyRef,
         seed: DetailSeed,
     ) -> Result<ClassMap, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        let field = synth.field();
         let header = field.header();
         let level = header.level().get();
         // The texels' maturity, against `m_body`, where the header carries a maturity and a rate.
@@ -1888,7 +1908,6 @@ impl WorkerFields {
             .maturity()
             .filter(|_| header.weathering_rate().is_some());
         let band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
-        let synth = Synthesiser::new(&*field, seed);
         let texel_count = 6_u32 << (2 * u32::from(CLASS_MAP_LEVEL));
         let mut readings = Vec::new();
         let mut complete = true;
@@ -1993,11 +2012,11 @@ impl WorkerFields {
         body: BodyRef,
         seed: DetailSeed,
     ) -> Result<NormalMap, QueryBodyError> {
-        let BodyField { field, cache, .. } = self.held(body)?;
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        let field = synth.field();
         let level = field.header().level();
         let band_level = band(normal_map_band(level.get()));
         let figure = field.header().figure();
-        let synth = Synthesiser::new(&*field, seed);
         let mut cells = Vec::new();
         let mut pairs = Vec::new();
         let mut complete = true;
