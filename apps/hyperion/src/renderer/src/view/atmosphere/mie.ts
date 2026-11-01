@@ -168,6 +168,18 @@ export function logarithmicDerivatives(
   }
   const re = new Float64Array(nMax + 1);
   const im = new Float64Array(nMax + 1);
+  derivativesInto(zRe, zIm, nMax, re, im);
+  return { re, im };
+}
+
+/** {@link logarithmicDerivatives}' Dₙ written into `re` and `im` at n = 0 … `nMax`, its checks made. */
+function derivativesInto(
+  zRe: number,
+  zIm: number,
+  nMax: number,
+  re: Float64Array,
+  im: Float64Array,
+): void {
   // w = 1 ÷ z.
   const zNorm = zRe * zRe + zIm * zIm;
   const wRe = zRe / zNorm;
@@ -189,7 +201,6 @@ export function logarithmicDerivatives(
     re[n - 1] = dRe;
     im[n - 1] = dIm;
   }
-  return { re, im };
 }
 
 /** A complex number, as the continued fraction and each Mie coefficient return it. */
@@ -284,11 +295,22 @@ function psi1(x: number): number {
  *   [{@link MIE_MIN_SIZE_PARAMETER}, {@link MIE_MAX_SIZE_PARAMETER}].
  * @param index - The sphere's index relative to the medium.
  * @param mu - The cosines of the scattering angles, each in [−1, 1]; may be empty.
+ * @param scratch - Working arrays to sum the series in ({@link mieScratch}), for a caller that sums
+ *   many spheres in turn; the sphere's own, allocated to its length, by default.
  * @throws RangeError if the size parameter, the index or a cosine is outside its range.
  */
-export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float64Array): MieResult {
-  const coefficients = mieCoefficients(sizeParameter, index);
-  const { aRe, aIm, bRe, bIm } = coefficients;
+export function mieSphere(
+  sizeParameter: number,
+  index: ComplexIndex,
+  mu: Float64Array,
+  scratch?: MieScratch,
+): MieResult {
+  checkSphere(sizeParameter, index);
+  const terms = mieTermCount(sizeParameter);
+  const work = scratch ?? sizedScratch(terms);
+  growScratch(work, terms);
+  coefficientsInto(sizeParameter, index, terms, work);
+  const { aRe, aIm, bRe, bIm } = work;
   const x = sizeParameter;
   let extinctionSum = 0;
   let scatteringSum = 0;
@@ -297,7 +319,7 @@ export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float6
   let aPrevIm = 0;
   let bPrevRe = 0;
   let bPrevIm = 0;
-  for (let n = 1; n <= aRe.length; n += 1) {
+  for (let n = 1; n <= terms; n += 1) {
     const a1 = aRe[n - 1] ?? 0;
     const a2 = aIm[n - 1] ?? 0;
     const b1 = bRe[n - 1] ?? 0;
@@ -315,7 +337,7 @@ export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float6
     bPrevRe = b1;
     bPrevIm = b2;
   }
-  const { s1, s2 } = mieAmplitudes(coefficients, mu);
+  const { s1, s2 } = amplitudesOf(work, terms, mu);
   const xSquared = x * x;
   const qSca = (2 / xSquared) * scatteringSum;
   return {
@@ -339,6 +361,61 @@ export interface MieCoefficients {
 }
 
 /**
+ * Working arrays for {@link mieSphere}'s series, grown to the longest it has summed: a caller that
+ * sums many spheres in turn gives each the same, so that none allocates its own (plan R08,
+ * R08.T16.b.2's lever; the arrays were most of a giant's Mie time).
+ *
+ * @remarks
+ * One sphere's at a time: each call overwrites them, and only their first N_stop entries (N_stop + 1
+ * of Dₙ) are that sphere's.
+ */
+export interface MieScratch {
+  /** Re Dₙ(mx) at index n. */
+  logRe: Float64Array;
+  /** Im Dₙ(mx) at index n. */
+  logIm: Float64Array;
+  /** Re aₙ at entry n − 1. */
+  aRe: Float64Array;
+  /** Im aₙ at entry n − 1. */
+  aIm: Float64Array;
+  /** Re bₙ at entry n − 1. */
+  bRe: Float64Array;
+  /** Im bₙ at entry n − 1. */
+  bIm: Float64Array;
+}
+
+/** Empty working arrays for {@link mieSphere}, which grow at their first use. */
+export function mieScratch(): MieScratch {
+  return sizedScratch(0);
+}
+
+/** Working arrays of exactly `terms` terms. */
+function sizedScratch(terms: number): MieScratch {
+  return {
+    logRe: new Float64Array(terms + 1),
+    logIm: new Float64Array(terms + 1),
+    aRe: new Float64Array(terms),
+    aIm: new Float64Array(terms),
+    bRe: new Float64Array(terms),
+    bIm: new Float64Array(terms),
+  };
+}
+
+/** Grows `scratch` to hold `terms` terms, at least doubling, so that a run of sizes grows it rarely. */
+function growScratch(scratch: MieScratch, terms: number): void {
+  if (scratch.aRe.length >= terms) {
+    return;
+  }
+  const grown = sizedScratch(Math.max(terms, 2 * scratch.aRe.length));
+  scratch.logRe = grown.logRe;
+  scratch.logIm = grown.logIm;
+  scratch.aRe = grown.aRe;
+  scratch.aIm = grown.aIm;
+  scratch.bRe = grown.bRe;
+  scratch.bIm = grown.bIm;
+}
+
+/**
  * A sphere's Mie coefficients aₙ and bₙ to {@link mieTermCount} terms, as {@link mieSphere} sums
  * them (Wiscombe's (16), with the same recurrences): R08.T5.c's aggregates replace them by their
  * mean-field coefficients and sum the amplitudes with {@link mieAmplitudes}.
@@ -347,6 +424,15 @@ export interface MieCoefficients {
  * @throws RangeError if the size parameter or the index is outside its range.
  */
 export function mieCoefficients(sizeParameter: number, index: ComplexIndex): MieCoefficients {
+  checkSphere(sizeParameter, index);
+  const terms = mieTermCount(sizeParameter);
+  const work = sizedScratch(terms);
+  coefficientsInto(sizeParameter, index, terms, work);
+  return { aRe: work.aRe, aIm: work.aIm, bRe: work.bRe, bIm: work.bIm };
+}
+
+/** Throws unless the size parameter and the index are in {@link mieCoefficients}' ranges. */
+function checkSphere(sizeParameter: number, index: ComplexIndex): void {
   const x = sizeParameter;
   if (!(x >= MIE_MIN_SIZE_PARAMETER && x <= MIE_MAX_SIZE_PARAMETER)) {
     throw new RangeError(
@@ -358,27 +444,33 @@ export function mieCoefficients(sizeParameter: number, index: ComplexIndex): Mie
       `refractive index ${index.n} + ${index.k}i needs a finite n > 0 and a finite k ≥ 0`,
     );
   }
-  const terms = mieTermCount(x);
+}
+
+/**
+ * The first `terms` coefficients aₙ and bₙ written into `out`, which holds them ({@link growScratch}),
+ * the sphere checked.
+ */
+function coefficientsInto(
+  sizeParameter: number,
+  index: ComplexIndex,
+  terms: number,
+  out: MieScratch,
+): void {
+  const x = sizeParameter;
   const mRe = index.n;
   const mIm = -index.k;
   const mNorm = mRe * mRe + mIm * mIm;
   const mInvRe = mRe / mNorm;
   const mInvIm = -mIm / mNorm;
-  const logD = logarithmicDerivatives(mRe * x, mIm * x, terms);
-  const out = {
-    aRe: new Float64Array(terms),
-    aIm: new Float64Array(terms),
-    bRe: new Float64Array(terms),
-    bIm: new Float64Array(terms),
-  };
+  derivativesInto(mRe * x, mIm * x, terms, out.logRe, out.logIm);
   const xInv = 1 / x;
   let psiPrevious = sin(x);
   let chiPrevious = cos(x);
   let psi = psi1(x);
   let chi = chiPrevious * xInv + psiPrevious;
   for (let n = 1; n <= terms; n += 1) {
-    const dRe = logD.re[n] ?? 0;
-    const dIm = logD.im[n] ?? 0;
+    const dRe = out.logRe[n] ?? 0;
+    const dIm = out.logIm[n] ?? 0;
     const nOverX = n * xInv;
     const a = coefficient(
       dRe * mInvRe - dIm * mInvIm + nOverX,
@@ -407,7 +499,6 @@ export function mieCoefficients(sizeParameter: number, index: ComplexIndex): Mie
     psi = psiNext;
     chi = chiNext;
   }
-  return out;
 }
 
 /**
@@ -427,12 +518,28 @@ export function mieAmplitudes(
   if (aIm.length !== terms || bRe.length !== terms || bIm.length !== terms) {
     throw new RangeError("the coefficient arrays must have one entry per term");
   }
+  return amplitudesOf(coefficients, terms, mu);
+}
+
+/** A sphere's amplitudes at no angles: shared, since an array of no entries holds nothing to change. */
+const NO_AMPLITUDES = new Float64Array(0);
+
+/** {@link mieAmplitudes}' sums over the first `terms` coefficients, the cosines checked here. */
+function amplitudesOf(
+  coefficients: MieCoefficients,
+  terms: number,
+  mu: Float64Array,
+): { readonly s1: Float64Array; readonly s2: Float64Array } {
+  const { aRe, aIm, bRe, bIm } = coefficients;
   for (const cosine of mu) {
     if (!(cosine >= -1 && cosine <= 1)) {
       throw new RangeError(`scattering-angle cosine ${cosine} is outside [−1, 1]`);
     }
   }
   const angles = mu.length;
+  if (angles === 0) {
+    return { s1: NO_AMPLITUDES, s2: NO_AMPLITUDES };
+  }
   const s1 = new Float64Array(2 * angles);
   const s2 = new Float64Array(2 * angles);
   const piPrevious = new Float64Array(angles);

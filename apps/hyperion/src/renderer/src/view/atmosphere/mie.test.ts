@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { bitsOf } from "../../test/bits";
 import { gaussLegendre } from "../lighting/quadrature";
 import {
   type ComplexIndex,
@@ -9,6 +10,7 @@ import {
   type MieResult,
   mieAmplitudes,
   mieCoefficients,
+  mieScratch,
   mieSphere,
   mieTermCount,
 } from "./mie";
@@ -950,5 +952,26 @@ describe("the coefficients and amplitudes T5.c's aggregates read", () => {
     expect(() => mieAmplitudes({ ...c, bIm: c.bIm.subarray(1) }, Float64Array.from([0]))).toThrow(
       RangeError,
     );
+  });
+});
+
+describe("mieSphere's working arrays (R08.T16.b.2's lever)", () => {
+  it("sums a sphere in arrays others have used, longer or shorter, to the bits of its own", async () => {
+    const index = { n: 1.7, k: 0.02 };
+    const mu = Float64Array.from([1, 0.3, -0.7]);
+    const scratch = mieScratch();
+    // Grown at the first two, then reused by shorter series; every entry spoilt before each.
+    const pairs = [5, 80, 0.3, 40].map((x) => {
+      const { logRe, logIm, aRe, aIm, bRe, bIm } = scratch;
+      for (const values of [logRe, logIm, aRe, aIm, bRe, bIm]) {
+        values.fill(Number.NaN);
+      }
+      return [mieSphere(x, index, mu, scratch), mieSphere(x, index, mu)] as const;
+    });
+    const digests = await Promise.all(pairs.flat().map(async (result) => bitsOf(result)));
+    for (let i = 0; i < digests.length; i += 2) {
+      expect(digests[i]).toBe(digests[i + 1]);
+    }
+    expect(scratch.aRe.length).toBe(mieTermCount(80));
   });
 });

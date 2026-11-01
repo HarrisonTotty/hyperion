@@ -71,7 +71,13 @@ import {
   geometricMatrixSums,
   geometricSphere,
 } from "./geometricOptics";
-import { type ComplexIndex, MIE_MIN_SIZE_PARAMETER, mieSphere, type MieResult } from "./mie";
+import {
+  type ComplexIndex,
+  MIE_MIN_SIZE_PARAMETER,
+  mieScratch,
+  mieSphere,
+  type MieResult,
+} from "./mie";
 import { cos, exp, log, log1p, pow } from "../../lib/pinnedMath";
 
 /**
@@ -733,6 +739,7 @@ function sumNodes(
   let scaG = 0;
   let area = 0;
   const wavenumber = (2 * Math.PI) / wavelengthUm;
+  const scratch = mieScratch();
   for (let i = 0; i < quadrature.radiiUm.length; i += 1) {
     const x = wavenumber * (quadrature.radiiUm[i] ?? 0);
     const w = quadrature.areaWeights[i] ?? 0;
@@ -750,7 +757,7 @@ function sumNodes(
       }
       continue;
     }
-    const result = mieSphere(x, index, matrix === undefined ? NO_ANGLES : mu);
+    const result = mieSphere(x, index, matrix === undefined ? NO_ANGLES : mu, scratch);
     area += w;
     ext += w * result.qExt;
     sca += w * result.qSca;
