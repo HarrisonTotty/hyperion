@@ -42,36 +42,6 @@ fn decked_of(inputs: &SurfaceInputs<'_>) -> Decked {
     )
 }
 
-/// P14.T24.j is held until the 25 → 26 bump: the rules in force are version 25's, no locked
-/// world's column changes, and the tests' switch reaches the deck.
-#[test]
-fn the_locked_climate_is_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < LOCKED_CLIMATE_VERSION,
-        "the 25 → 26 bump puts P14.T24.j's substellar deck on the record (main, 2026-10-30): \
-         delete `LOCKED_CLIMATE_VERSION`, `LockedClimateRules` with its `Held` arm and the arms \
-         that read it (`domain_of`'s guard, `reference::locked_earth_like`'s held form and its \
-         test's loop), the tests' `with_locked_climate`, its switch in `with_every_26_hold` \
-         (and the helper, if no other 26 hold is left), and this test"
-    );
-    assert_eq!(LockedClimateRules::in_force(), LockedClimateRules::Held);
-    assert_eq!(
-        with_locked_climate(LockedClimateRules::Deck, LockedClimateRules::in_force),
-        LockedClimateRules::Deck
-    );
-    assert_eq!(LockedClimateRules::in_force(), LockedClimateRules::Held);
-    // Held, the table's Earth under the lock keeps its column, and its conditions, to the bit.
-    let earth = historic("Earth");
-    let inputs = inputs_of(&earth, locked_spin());
-    assert!(
-        inputs.holds_liquid_water,
-        "the table's Earth holds liquid water"
-    );
-    let decked = decked_of(&inputs);
-    assert_same_bits(decked.weight, 0.0);
-    assert_eq!(decked.column, Surface::of(&inputs).unwrap().column);
-}
-
 /// The deck's albedo and the locked greenhouse's share are Yang et al. 2013's at each row of
 /// their Table 1, to the bit, linear between, and held beyond.
 #[test]
@@ -175,12 +145,12 @@ fn no_deck_lies_on_a_rotator_a_dry_world_or_a_frozen_one() {
         })
     };
     let deck = |inputs: &SurfaceInputs<'_>| {
-        with_locked_climate(LockedClimateRules::Deck, || {
+        {
             (
                 decked_of(inputs),
                 SurfaceConditions::derive(inputs).unwrap(),
             )
-        })
+        }
     };
     let rotator = inputs_of(&earth, spin_of("Earth"));
     let dry = SurfaceInputs {
@@ -213,12 +183,12 @@ fn no_deck_lies_on_a_rotator_a_dry_world_or_a_frozen_one() {
     let floor = night_floor(inputs.heat_flow);
     let ground =
         GroundInertia::at_equilibrium(inputs.lid, inputs.material, inputs.equilibrium_temperature);
-    let decked = with_locked_climate(LockedClimateRules::Deck, || {
+    let decked = {
         assert_same_bits(domain_weight(&frozen, &body), 1.0);
         under_deck(&frozen, &body, |column| {
             climate_of(column, &inputs.spin, inputs.ocean_weight, ground, floor)
         })
-    });
+    };
     assert_same_bits(decked.weight, 0.0);
     assert_eq!(decked.column, frozen);
     let melting = ice_ih_melting_temperature(frozen.surface_pressure);
@@ -240,12 +210,12 @@ fn the_table_s_earth_under_the_lock_takes_the_whole_deck() {
     let held = with_locked_climate(LockedClimateRules::Held, || {
         SurfaceConditions::derive(&inputs).unwrap()
     });
-    let (decked, conditions) = with_locked_climate(LockedClimateRules::Deck, || {
+    let (decked, conditions) = {
         (
             decked_of(&inputs),
             SurfaceConditions::derive(&inputs).unwrap(),
         )
-    });
+    };
     let melting = ice_ih_melting_temperature(decked.column.surface_pressure);
     eprintln!(
         "the table's Earth locked: held {:.3} K, {:.3} K day–night, {:.3} K equator–pole; deck \
@@ -310,7 +280,7 @@ fn a_deck_that_would_freeze_its_sea_stops_at_the_open_water_s_edge() {
         |column: &Column| climate_of(column, &inputs.spin, inputs.ocean_weight, ground, floor);
     let melting = ice_ih_melting_temperature(column.surface_pressure);
     let mut partial = 0;
-    with_locked_climate(LockedClimateRules::Deck, || {
+    {
         for cooled in 0..60 {
             let cold = Column {
                 surface_temperature: Kelvin::new(
@@ -336,7 +306,7 @@ fn a_deck_that_would_freeze_its_sea_stops_at_the_open_water_s_edge() {
                 assert_same_bits(open, 1.0);
             }
         }
-    });
+    };
     assert!(partial >= 2, "{partial} columns at the open water's edge");
 }
 
@@ -372,7 +342,7 @@ fn the_passes_steps_read_the_record_s_deck() {
         )
     };
     let held = with_locked_climate(LockedClimateRules::Held, || step(true));
-    with_locked_climate(LockedClimateRules::Deck, || {
+    {
         let conditions = SurfaceConditions::derive(&inputs).unwrap();
         let (cold, warm) = conditions.climate_range();
         let decked = step(true);
@@ -391,7 +361,7 @@ fn the_passes_steps_read_the_record_s_deck() {
         ] {
             assert_same_bits(a.value(), b.value());
         }
-    });
+    };
 }
 
 /// A pass's context carries its open water to the next only where a deck reads it: under the
@@ -405,13 +375,13 @@ fn the_context_carries_open_water_only_where_a_deck_reads_it() {
     let p = Pascals::new(1e5);
     let reads = |spin: &SeasonalSpin, flux, p| reads_open_water(spin, radius, flux, p);
     assert!(!reads(&locked_spin(), flux, p), "under the hold");
-    with_locked_climate(LockedClimateRules::Deck, || {
+    {
         assert!(reads(&locked_spin(), flux, p));
         assert!(!reads(&spin_of("Earth"), flux, p), "a rotator");
         assert!(!reads(&locked_spin(), flux, Pascals::ZERO), "no air");
         let faint = WattsPerSquareMetre::new(700.0);
         assert!(!reads(&locked_spin(), faint, p), "too faint");
-    });
+    };
     let none = PassContext::NONE;
     assert_eq!(none.key().open_water, OpenWater::Dry);
     assert!(!none.holds_liquid_water());

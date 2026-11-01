@@ -425,9 +425,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds at 26:
 ///
-/// - the substellar deck of a world locked 1:1, `LOCKED_CLIMATE_VERSION` (P14.T24.j), at
-///   `LockedClimateRules::Deck` through `with_locked_climate`: its column's deck albedo and locked
-///   greenhouse over open water, which its record and its passes' steps read;
 /// - a molten body's surface on its published air, `MELT_OXYGEN_VERSION` (P14.T53.g), at
 ///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 /// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
@@ -459,7 +456,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
-    use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
@@ -475,7 +471,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
     };
-    with_locked_climate(LockedClimateRules::Deck, run)
+    run()
 }
 
 /// `run`'s result with every 26 hold ([`with_every_26_hold`]) and those retargeted from 26 to 27

@@ -1,5 +1,4 @@
-//! A world locked 1:1's substellar cloud deck (plan 14, P14.T24.j), behind its hold at generator
-//! version 26 ([`LOCKED_CLIMATE_VERSION`]).
+//! A world locked 1:1's substellar cloud deck (plan 14, P14.T24.j), from generator version 26.
 //!
 //! On a world locked 1:1 to its seasonal host with open water under its substellar point, the
 //! dayside's convergence and convection build a thick deck of cloud there, whose albedo rises with
@@ -45,32 +44,23 @@ use crate::math;
 use crate::substance::phase::ice_ih_melting_temperature;
 use crate::units::consts::{EARTH_RADIUS_M, SECONDS_PER_DAY, STEFAN_BOLTZMANN};
 use crate::units::{Kelvin, Metres, Pascals, Seconds, WattsPerSquareMetre};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
 
-/// The generator version from which a world locked 1:1 takes the substellar deck: 26, the
-/// planetary bump after 25's (main, 2026-10-30).
-///
-/// It is P14.T24.j's one hold. Below it [`LockedClimateRules::in_force`] is
-/// [`LockedClimateRules::Held`]: no column changes and every figure is version 24's and 25's bit
-/// for bit. 26's bump deletes this hold, [`LockedClimateRules`] with its `Held` arm, the tests'
-/// switch and its tripwire (`the_locked_climate_is_held_only_until_the_26_bump`).
-pub(crate) const LOCKED_CLIMATE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T24.j's substellar deck is in force (its hold, [`LOCKED_CLIMATE_VERSION`]).
+/// Whether P14.T24.j's substellar deck is in force: from generator version 26, and in the tests
+/// its held arm, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum LockedClimateRules {
-    /// Version 25's and before: a locked world's column is a rotator's, T13.c's mean.
+    /// Version 25's and before: a locked world's column is a rotator's, T13.c's mean, the tests'
+    /// oracle ([`with_locked_climate`]).
     Held,
     /// Version 26's: the deck on a locked world with open water ([`under_deck`]).
     Deck,
 }
 
 impl LockedClimateRules {
-    /// The rules this generator version gives: the deck from [`LOCKED_CLIMATE_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// The rules in force: the deck; in the tests, the rules a test's switch sets on its thread
     /// ([`with_locked_climate`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
@@ -78,24 +68,19 @@ impl LockedClimateRules {
         if let Some(rules) = RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= LOCKED_CLIMATE_VERSION {
-            Self::Deck
-        } else {
-            Self::Held
-        }
+        Self::Deck
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The locked climate's rules a test sets on its thread, `None` for the version's.
+    /// The locked climate's rules a test sets on its thread, `None` for the deck.
     static RULES: core::cell::Cell<Option<LockedClimateRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the locked climate's rules `rules` on this thread, for the tests to reach
-/// the deck ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
+/// `run`'s result with the locked climate's rules `rules` on this thread, the held arm the tests'
+/// oracle; the deck is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_locked_climate<R>(rules: LockedClimateRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.

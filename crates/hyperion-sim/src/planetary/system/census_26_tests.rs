@@ -2,7 +2,7 @@
 //! 26 hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
 //! the three airless planets over a hot ice bulk (P14.T56.g's planet lag), the 29 runaways over a
 //! sea (`SEA_DECK_VERSION`) and the two hot `Snowball`s a locked world's deck set off
-//! (`LOCKED_CLIMATE_VERSION`), each body generated afresh in its system, as the census walks it;
+//! (P14.T24.j's deck), each body generated afresh in its system, as the census walks it;
 //! and the Solar System table, unchanged to the bit by the eyeball's rule and the dry deck.
 //!
 //! The bodies are named by their system's rank in the census's sample and their ID. The tests are
