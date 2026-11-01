@@ -186,15 +186,14 @@ describe("the view's label block", () => {
       ).toBe("2");
     });
 
-    it("stands them as the folds held above it say, and tells those folds of a press", async () => {
-      const user = userEvent.setup();
-      const toggled: string[] = [];
+    /** The block with the note and its two reasons, its folds given, which note each press. */
+    function renderHeld(opened: ReadonlySet<string>, toggled: string[] = []): void {
       render(
         <ViewLabelBlock
           lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
           statements={statements}
           folds={{
-            opened: new Set(["ATMOSPHERE: APPROXIMATE"]),
+            opened,
             toggle: (note) => {
               toggled.push(note);
             },
@@ -203,7 +202,18 @@ describe("the view's label block", () => {
           faults={[]}
         />,
       );
+    }
+
+    it("stands them opened where the folds held above it say so", () => {
+      renderHeld(new Set(["ATMOSPHERE: APPROXIMATE"]));
+
       expect(reasonsShown()).toEqual([true, true]);
+    });
+
+    it("tells the folds held above it of a press, naming the note", async () => {
+      const user = userEvent.setup();
+      const toggled: string[] = [];
+      renderHeld(new Set(), toggled);
 
       await user.click(screen.getByRole("button", { name: "2 REASONS" }));
 

@@ -1162,7 +1162,7 @@ describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () =
     ).toBe(panel.getByText(thick));
   });
 
-  it("stands its reasons opened as its slot holds them, as it returns from a hold as it was", () => {
+  it("stands its reasons opened as its slot's folds hold them", () => {
     renderInstrument([water, thick], [note, { text: water, standing: "sentence" }], {
       opened: new Set([note]),
       toggle: () => undefined,

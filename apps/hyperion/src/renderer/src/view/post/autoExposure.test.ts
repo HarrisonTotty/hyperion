@@ -453,16 +453,24 @@ describe("an exposure that opens at its meter (the owner's request)", () => {
     ]);
   });
 
-  it("smooths as AUTO does from then on, and INHIBIT holds it", () => {
+  it("smooths as AUTO does from then on", () => {
     const exposure = opening();
     exposure.step(histogram([[120, 10]]), 1 / 60);
-    const opened = exposure.control;
+    const opened = controlEv100(exposure.control);
 
     const stepped = exposure.step(histogram([[100, 10]]), 1 / 60).ev100;
-    expect(stepped).toBeLessThan(controlEv100(opened));
-    expect(stepped).toBeGreaterThan(exposure.meteredEv100 ?? Number.NEGATIVE_INFINITY);
-    expect(exposure.apply(inhibit(exposure.control))).toBe(true);
-    expect(exposure.step(histogram([[120, 10]]), 1 / 60).ev100).toBe(stepped);
+
+    // Darker by a step toward the darker meter, not at it.
+    const metered = exposure.meteredEv100 ?? Number.NEGATIVE_INFINITY;
+    expect([opened - stepped > 0, stepped - metered > 0]).toEqual([true, true]);
+  });
+
+  it("is held by INHIBIT once opened, as AUTO is", () => {
+    const exposure = opening();
+    const opened = exposure.step(histogram([[120, 10]]), 1 / 60).ev100;
+    exposure.apply(inhibit(exposure.control));
+
+    expect(exposure.step(histogram([[100, 10]]), 1 / 60).ev100).toBe(opened);
   });
 
   it("leaves an operator's command, given before the first metering, to decide", () => {

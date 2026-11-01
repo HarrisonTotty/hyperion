@@ -3,7 +3,7 @@
  * drawn photorealistically as a kept scene of its served records, and closed back to the scene
  * shown before.
  */
-import { galacticPositionFromLy, type SurfaceRevisionDto } from "@hyperion/protocol";
+import { galacticPositionFromLy } from "@hyperion/protocol";
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
 import { aUniverse } from "../../test/galaxyFixtures";
 import { FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "../../test/planetaryFixture";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
+import { answerServedField } from "../../test/servedHandoverFixtures";
 import {
   DEFAULT_MAN_EV100,
   ev100FromAverageLuminance,
@@ -28,7 +29,6 @@ import {
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
-import type { TerrainSession } from "../../view/terrain/session";
 import { type InspectionOpening, inspectionOption } from "./ViewSceneProvider";
 
 afterEach(() => {
@@ -41,8 +41,13 @@ const DESIGNATION = "H7K 4C0RFZ D-7";
 /** The survey of the slice's Earth as the server records it: its third pass. */
 const RECORDED: InspectionSurvey = { kind: "recorded", body: FIXTURE_EARTH, level: 8, revision: 3 };
 
-/** The slice's Earth's inspection, opened once, as `SYSTEM`'s `VIEW BODY` opens it. */
-function earthOpening(survey: InspectionSurvey = RECORDED): InspectionOpening {
+/**
+ * The slice's Earth's inspection, opened once, as `SYSTEM`'s `VIEW BODY` opens it, its survey
+ * `survey` (recorded at once unless given).
+ */
+function earthOpening(
+  survey: Promise<InspectionSurvey> = Promise.resolve(RECORDED),
+): InspectionOpening {
   const result = toSystemBodiesModel(sliceBodies(), DESIGNATION);
   if (result.kind !== "ok") {
     throw new Error(`the slice's answer is unusable: ${result.fault}`);
@@ -62,21 +67,40 @@ function earthOpening(survey: InspectionSurvey = RECORDED): InspectionOpening {
       time: { seconds: 3_600, nanos: 0 },
     }),
     sequence: 1,
-    survey: Promise.resolve(survey),
+    survey,
+  };
+}
+
+/** A survey the test settles, as the server answers it. */
+function surveyed(): {
+  readonly survey: Promise<InspectionSurvey>;
+  readonly settle: (outcome: InspectionSurvey) => void;
+} {
+  let settleSurvey: ((outcome: InspectionSurvey) => void) | null = null;
+  const survey = new Promise<InspectionSurvey>((resolve) => {
+    settleSurvey = resolve;
+  });
+  return {
+    survey,
+    settle: (outcome) => {
+      if (settleSurvey === null) {
+        throw new Error("the survey's promise is made at once");
+      }
+      settleSurvey(outcome);
+    },
   };
 }
 
 /** `VIEW` mounted on the Earth's inspection, its engine made and its first frames drawn. */
 async function inspecting(
-  watchTerrain?: (session: TerrainSession) => () => void,
+  opening: InspectionOpening = earthOpening(),
 ): Promise<ViewDisplayHarness> {
   const fake = timedEngineSource();
   const view = renderViewDisplay({
     store: await nominalStore(),
     source: fake.source,
     engines: fake.engines,
-    inspection: earthOpening(),
-    ...(watchTerrain === undefined ? {} : { watchTerrain }),
+    inspection: opening,
   });
   await settle();
   // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
@@ -107,6 +131,32 @@ async function readingsOver(view: ViewDisplayHarness, count: number): Promise<st
 
 function sceneButton(name: string): HTMLElement {
   return within(screen.getByRole("group", { name: "Scene" })).getByRole("button", { name });
+}
+
+/** The revisions the Earth's field is asked at, `null` for the whole field. */
+function earthFieldAsks(view: ViewDisplayHarness): ReadonlyArray<number | null> {
+  return view.socket
+    .requestsOfKind("surface_field")
+    .filter((request) => request.body.body === FIXTURE_EARTH)
+    .map((request) => request.body.have_revision);
+}
+
+/** The Earth's inspection with its field answered at revision 1 before its survey settles. */
+async function fieldHeldBeforeSurvey(
+  outcome: InspectionSurvey,
+): Promise<ReadonlyArray<number | null>> {
+  const { survey, settle: settleSurvey } = surveyed();
+  const view = await inspecting(earthOpening(survey));
+  await openUniverse(view);
+  view.advance(600);
+  await settle();
+  answerServedField(view.socket, FIXTURE_EARTH, 64);
+  await settle();
+  settleSurvey(outcome);
+  await settle();
+  view.advance(300);
+  await settle();
+  return earthFieldAsks(view);
 }
 
 describe("VIEW's body inspection (the owner's request)", () => {
@@ -142,16 +192,14 @@ describe("VIEW's body inspection (the owner's request)", () => {
     ).toBe(true);
   });
 
-  it("tells its terrain session the revision of its body's survey once the server records it", async () => {
-    const noted: Array<ReadonlyArray<SurfaceRevisionDto>> = [];
-    await inspecting((session) => {
-      vi.spyOn(session, "noteSurfaceRevisions").mockImplementation((revisions) => {
-        noted.push(revisions);
-      });
-      return () => undefined;
-    });
+  it("asks its body's newly surveyed cells once its survey is recorded", async () => {
+    expect(await fieldHeldBeforeSurvey(RECORDED)).toEqual([null, 1]);
+  });
 
-    expect(noted).toEqual([[{ body: FIXTURE_EARTH, revision: 3 }]]);
+  it("asks nothing more of its body's field where its survey is refused", async () => {
+    expect(
+      await fieldHeldBeforeSurvey({ kind: "refused", body: FIXTURE_EARTH, reason: "none" }),
+    ).toEqual([null]);
   });
 
   it("opens exposed for its body, AUTO at its image's first metered value at once", async () => {
