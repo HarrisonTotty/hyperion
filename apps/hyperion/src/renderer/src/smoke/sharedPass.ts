@@ -374,7 +374,15 @@ export async function checkSharedPass(
       weight: 0.25,
     };
 
-    // Three passes made, drawn and disposed: the tally where it stood before the first.
+    // Three passes made, drawn and disposed: the tally where it stood before the first, but for the
+    // engine's own pass timer, which its first timed pass makes for the engine's life (the cluster
+    // path's cull is one, plan R14).
+    let timerBytes = 0;
+    const offTimer = engine.onAllocation((event) => {
+      if (event.kind !== "uploaded" && event.category === "other" && isPassTimer(event.name)) {
+        timerBytes += event.kind === "created" ? event.bytes : -event.bytes;
+      }
+    });
     const before = CATEGORIES.map((c) => tally.liveBytes(c));
     for (let n = 0; n < 3; n += 1) {
       const pass = makePass();
@@ -384,14 +392,15 @@ export async function checkSharedPass(
       await stream(pass, [primary], 2_000);
       pass.dispose();
     }
-    const after = CATEGORIES.map((c) => tally.liveBytes(c));
+    offTimer();
+    const after = CATEGORIES.map((c) => tally.liveBytes(c) - (c === "other" ? timerBytes : 0));
     // The passes did hold their caches and frame buffers while they lived.
     const heldCache = tally.peakBytes("height-cache");
     const heldOther = tally.peakBytes("other");
     checks.check(
       "R10.T16.b a pass made, drawn and disposed three times leaves the allocation tally where it stood",
       after.every((bytes, n) => bytes === before[n]) && heldCache > 0 && heldOther > 0,
-      `${CATEGORIES.map((c, n) => `${c} ${String(before[n])} → ${String(after[n])} B`).join(", ")}; peaks while they lived: height-cache ${String(heldCache)} B, other ${String(heldOther)} B`,
+      `${CATEGORIES.map((c, n) => `${c} ${String(before[n])} → ${String(after[n])} B`).join(", ")}, the engine's pass timer's ${String(timerBytes)} B apart; peaks while they lived: height-cache ${String(heldCache)} B, other ${String(heldOther)} B`,
     );
 
     // Two views of one pass.
@@ -482,9 +491,9 @@ const CASCADES_STREAM_MS = 25_000;
 
 /**
  * Streams `passView` until its draw set holds every selected patch and no draft waits for its
- * normals (`TerrainPass.refining`), or for
- * {@link CASCADES_STREAM_MS}, drawing without the cascades so that SwiftShader rasterises their
- * 2,048² layers only for the frames that need them; and steps it once more. Whether it settled.
+ * normals (`TerrainPass.refining`), or for {@link CASCADES_STREAM_MS}, drawing without the cascades
+ * so that SwiftShader rasterises their 2,048² layers only for the frames that need them; and steps
+ * it once more. Whether it settled.
  */
 async function streamedFor(
   made: TerrainPass,
@@ -570,6 +579,14 @@ async function texelsOf(
   } finally {
     target.dispose();
   }
+}
+
+/**
+ * Whether an allocation is the engine's pass timer's (`webgpu/timing.ts`): its query set and its
+ * resolve and read-back pairs, made at the first timed pass and kept for the engine's life.
+ */
+function isPassTimer(name: string): boolean {
+  return name === "pass times" || name.startsWith("pass times ");
 }
 
 /** The sum of `values`. */
