@@ -508,21 +508,23 @@ function instancesOf(
   return drawn;
 }
 
-/** The survey masks the lit mesh reads (`packSurveyMask`), made once a bake. */
-const PACKED_MASKS = new WeakMap<BakedPatch, Uint8Array | null>();
+/** The survey masks a run's bakes give the lit mesh (`packSurveyMask`), each made once. */
+class SurveyMasks {
+  readonly #packed = new WeakMap<BakedPatch, Uint8Array | null>();
 
-/** Whether (u, v) of `held`'s quads lies on surveyed ground, as the lit mesh has it (`surveyedAt`). */
-function surveyedOn(held: Held, u: number, v: number): boolean {
-  let packed = PACKED_MASKS.get(held.bake);
-  if (packed === undefined) {
-    const layers = held.bake.layers;
-    packed =
-      layers === null
-        ? null
-        : packSurveyMask(layers.surveyMask, surveyCellCode(held.key.level, layers.fieldLevel));
-    PACKED_MASKS.set(held.bake, packed);
+  /** Whether (u, v) of `held`'s quads lies on surveyed ground, as the lit mesh has it (`surveyedAt`). */
+  surveyed(held: Held, u: number, v: number): boolean {
+    let packed = this.#packed.get(held.bake);
+    if (packed === undefined) {
+      const layers = held.bake.layers;
+      packed =
+        layers === null
+          ? null
+          : packSurveyMask(layers.surveyMask, surveyCellCode(held.key.level, layers.fieldLevel));
+      this.#packed.set(held.bake, packed);
+    }
+    return packed === null || surveyedAt(packed, u, v);
   }
-  return packed === null || surveyedAt(packed, u, v);
 }
 
 /** `held`'s own height (`which` 0) or morph target (1) at its vertex (x, y). */
@@ -562,11 +564,13 @@ function morphedNormal(
 class DrawnSurfaces {
   readonly #figure: BodyFigure;
   readonly #cam: Camera;
+  readonly #masks: SurveyMasks;
   readonly #made = new Map<DrawnInstance, Float64Array>();
 
-  constructor(figure: BodyFigure, cam: Camera) {
+  constructor(figure: BodyFigure, cam: Camera, masks: SurveyMasks) {
     this.#figure = figure;
     this.#cam = cam;
+    this.#masks = masks;
   }
 
   /**
@@ -585,12 +589,12 @@ class DrawnSurfaces {
       const s = 2 ** inst.levels;
       const u = (inst.partI * QUADS + x) / s;
       const v = (inst.partJ * QUADS + y) / s;
-      const surveyed = surveyedOn(inst.held, u, v);
+      const surveyed = this.#masks.surveyed(inst.held, u, v);
       let own = surveyed ? sampleOn(heightOf(inst.held, 0), u, v) : 0;
       let morph = surveyed ? sampleOn(heightOf(inst.held, 1), u, v) : 0;
       if (inst.rebakeFade > 0) {
         const older = inst.older;
-        const drawn = older !== null && surveyedOn(older, u, v);
+        const drawn = older !== null && this.#masks.surveyed(older, u, v);
         own += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 0), u, v) : 0) - own);
         morph += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 1), u, v) : 0) - morph);
       }
@@ -620,13 +624,13 @@ class DrawnSurfaces {
     const s = 2 ** inst.levels;
     const su = (inst.partI * QUADS + u) / s;
     const sv = (inst.partJ * QUADS + v) / s;
-    if (!surveyedOn(inst.held, su, sv)) {
+    if (!this.#masks.surveyed(inst.held, su, sv)) {
       return { h, normal: datum };
     }
     let normal = morphedNormal(inst.held, inst, su, sv, k);
     if (normal !== null && inst.rebakeFade > 0) {
       const older =
-        inst.older !== null && surveyedOn(inst.older, su, sv)
+        inst.older !== null && this.#masks.surveyed(inst.older, su, sv)
           ? morphedNormal(inst.older, inst, su, sv, k)
           : datum;
       normal = older === null ? normal : mixed(normal, older, inst.rebakeFade);
@@ -692,7 +696,7 @@ function coverOf(
   return null;
 }
 
-/** Where `rel`, from `cam`'s camera, falls in its viewport, in front of it; `null` off screen. */
+/** Whether `rel`, from `cam`'s camera, falls in its viewport, in front of it. */
 function onScreen(cam: Camera, rel: Vec3): boolean {
   const { widthPx, heightPx } = cam.view.viewport;
   const at = project(
@@ -718,17 +722,18 @@ function frameLines(): number[] {
  * from camera `cam` (the frame's), over the instances of `now` whose bake or words changed: at
  * each of their measured vertices on screen, the drawn surface's move along the datum's normal and
  * its shading normal's turn against the instance over that ground before, or the datum's where
- * nothing was and camera `camBefore` saw it; `null` where nothing changed.
+ * nothing was and camera `camBefore` saw it; `null` where nothing changed. `masks` is the run's.
  */
 function frameChangeOf(
   figure: BodyFigure,
+  masks: SurveyMasks,
   cam: Camera,
   camBefore: Camera,
   before: ReadonlyMap<string, DrawnInstance>,
   now: ReadonlyMap<string, DrawnInstance>,
   tS: number,
 ): SeamFrameChange | null {
-  const surfaces = new DrawnSurfaces(figure, cam);
+  const surfaces = new DrawnSurfaces(figure, cam, masks);
   const ancestors = ancestorsOf(before);
   const lines = frameLines();
   const pxPerRad = cam.view.viewport.widthPx / 2 / Math.tan(cam.view.fovXRad / 2);
@@ -947,6 +952,7 @@ async function play(options: ProbeOptions): Promise<Played> {
   // The bake each slot holds, an older bake's kept in its retired slot until the slot is reused.
   const slots = new Map<number, Held>();
   const frameChanges: SeamFrameChange[] = [];
+  const masks = new SurveyMasks();
   let drawnBefore = new Map<string, DrawnInstance>();
   const firstDemandS = new Map<string, number>();
   const rebaked: Array<{ readonly old: Held; readonly now: Held }> = [];
@@ -1081,6 +1087,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       if (drawingPass !== null && camNow !== null && camBefore !== null && drawnBefore.size > 0) {
         const change = frameChangeOf(
           drawingPass.planet.figure,
+          masks,
           camNow,
           camBefore,
           drawnBefore,
