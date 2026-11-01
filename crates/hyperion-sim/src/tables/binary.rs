@@ -757,7 +757,7 @@ const IDENTITY_RANKS: [f64; 17] = [
 ];
 
 /// The scratch sampler of the stellar mergers (P11.T8.c; Design notes 10 and 13): [`MergerMark`]'s
-/// three marks and [`MergerPick`]'s one choice, the primary's layer.
+/// marks and [`MergerPick`]'s choices.
 ///
 /// Hand-made, the figures recalled and not read at source in this build (the literature could not
 /// be reached), and the same in every population; P15.T10.b refits it against the engine's own

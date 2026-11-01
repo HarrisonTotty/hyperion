@@ -5,8 +5,8 @@
 //! arm verbatim (`channels_hold.rs` holds it, its chi-square pins among its tests); these hold the
 //! new arm, under every 27 hold.
 //!
-//! - The tripwire; every 27 hold is every 26 hold but this one; the held arm's cells are every 26
-//!   hold's; and each of the three channels' share against its weight (χ², α = 10⁻³).
+//! - The tripwire; the held arm's cells are every 26 hold's, its first entries pinned bit for bit;
+//!   and each of the three channels' share against its weight (χ², α = 10⁻³).
 //! - Every dynamical main-sequence pair is a low-mass donor on its main sequence at its lobe
 //!   beside a lighter companion on its main sequence inside its own, detached before T; the
 //!   engine, built at T on the pair rebuilt from the entry, merges it dynamically from a detached
@@ -22,7 +22,9 @@
 //!
 //! No value moves at 24–26: the field is read only under the 26 arm's channels
 //! (`MergerClassRules::Channels`), and below 27 it takes the held arm, whose words are version
-//! 26's (`channels_hold`'s pins and the class's goldens hold them).
+//! 26's. The class's golden runs at 24, under `MergerClassRules::ContactOnly`, so the held arm's
+//! bits are pinned here (`the_held_arm_s_first_entries_are_pinned`) and by `channels_hold`'s slow
+//! chi-square pins; the 27 bump deletes the pin with the hold.
 
 use std::sync::OnceLock;
 
@@ -109,8 +111,8 @@ fn all_entries() -> impl Iterator<Item = &'static MergerEntry> {
 }
 
 /// The version's class keeps the held arm, every version below 27 does, and 27 and every 27 hold
-/// take the dynamical main sequence; every 27 hold is every 26 hold but this one. The tripwire:
-/// the bump to 27 deletes this hold.
+/// take the dynamical main sequence, beside the 26 arm's channels. The tripwire: the bump to 27
+/// deletes this hold.
 #[test]
 fn the_merger_channels_are_held_only_until_the_27_bump() {
     assert!(
@@ -134,32 +136,116 @@ fn the_merger_channels_are_held_only_until_the_27_bump() {
         MergerChannelRules::WithDynamical
     );
     assert_eq!(
-        GalaxyRules {
-            merger_channels: MergerChannelRules::ContactAndEvolved,
-            ..GalaxyRules::every_27_hold()
-        },
-        GalaxyRules::every_26_hold()
+        GalaxyRules::every_27_hold().merger_class,
+        MergerClassRules::Channels
     );
 }
 
-/// Under the held arm the class's cells are every 26 hold's, bit for bit: the field alone turns
-/// the new arm on.
-#[test]
-fn the_held_arm_s_cells_are_every_26_hold_s() {
-    let every_26 = Galaxy::from_params_with_rules(
+/// The fixture built under every 26 hold, with its kinematic tables.
+fn every_26() -> Galaxy {
+    Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
         GalaxyRules::every_26_hold(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
-    .with_full_potential();
-    let held = held();
+    .with_full_potential()
+}
+
+/// Under the held arm the class's cells are every 26 hold's, bit for bit: the field alone turns
+/// the new arm on. A later hold at 27 that moves the class's cells sets itself back in [`held`]
+/// too.
+#[test]
+fn the_held_arm_s_cells_are_every_26_hold_s() {
+    let (every_26, held) = (every_26(), held());
     for key in sample_cells().into_iter().take(2) {
         let [a, b] = [&every_26, &held]
             .map(|g| CatalogueClassCell::generate(g, &StellarMergers::new(g), key).into_entries());
         assert_ne!(a.len(), 0, "{key:?}");
         assert_eq!(a, b, "{key:?}");
     }
+}
+
+/// The held arm's first entries of a solar-circle cell under every 26 hold, as measured
+/// (2026-11-01): each one's channel and the bits of its primary's and secondary's initial masses
+/// and of its merger time, seconds since the epoch.
+const HELD_FIRST_ENTRIES: [(MergerChannel, u64, u64, u64); 8] = [
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff2_c25d_4d48_5d82,
+        0x3fe7_aaf9_b646_14bc,
+        0xc298_70b7_839b_028f,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff2_2722_3223_5184,
+        0x3fcb_5f31_9aaf_796b,
+        0xc25a_f7f1_157e_b790,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff3_0fd5_5369_c739,
+        0x3fc8_21b4_687d_b6ef,
+        0xc298_a124_13cf_5a41,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ffb_3e63_0992_4327,
+        0x3fcc_0727_cc89_5464,
+        0xc28d_4b78_4c23_9bfe,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff0_bdea_f038_a193,
+        0x3fca_5696_21f4_73d0,
+        0xc29d_d1ca_5a74_c796,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff0_6873_96a6_8215,
+        0x3fc8_9a91_7e6e_c908,
+        0xc292_89d5_a72e_ceee,
+    ),
+    (
+        MergerChannel::Contact,
+        0x3fe6_5830_23d9_8fe5,
+        0x3fba_057b_074f_10ca,
+        0xc281_21d6_cc06_48b4,
+    ),
+    (
+        MergerChannel::EvolvedDonor,
+        0x3ff0_d629_46ae_65d5,
+        0x3fce_a150_1d53_b44a,
+        0xc295_1c95_e69d_1848,
+    ),
+];
+
+/// Every 26 hold's first entries of the cell along +y at the solar circle are pinned bit for bit:
+/// the held arm's words, which the class's golden (at 24, contact pairs only) never reaches.
+#[test]
+fn the_held_arm_s_first_entries_are_pinned() {
+    use hyperion_testkit::float::bits;
+    let galaxy = every_26();
+    let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [0, 6, 0]).unwrap();
+    let cell = CatalogueClassCell::generate(&galaxy, &StellarMergers::new(&galaxy), key);
+    let first: Vec<(MergerChannel, u64, u64, u64)> = cell
+        .entries()
+        .iter()
+        .take(HELD_FIRST_ENTRIES.len())
+        .map(|e| {
+            let scan = e.value().scan();
+            (
+                scan.channel(),
+                bits(scan.primary_mass().value()),
+                bits(scan.secondary_mass().value()),
+                bits(scan.merger_time().since_epoch().as_seconds_f64()),
+            )
+        })
+        .collect();
+    for (channel, m1, m2, t) in &first {
+        println!("(MergerChannel::{channel:?}, {m1:#018x}, {m2:#018x}, {t:#018x})");
+    }
+    assert_eq!(first, HELD_FIRST_ENTRIES);
 }
 
 /// Each channel's share of the entries is its weight, by χ² at α = 10⁻³: the channel's word is the
@@ -210,13 +296,23 @@ fn every_dynamical_pair_merges_as_the_engine_merges_it() {
         let (md, mc) = (donor.mass().value(), companion.mass().value());
         assert_eq!(donor.phase(), Phase::MainSequence);
         assert_eq!(companion.phase(), Phase::MainSequence);
-        assert!(md < 0.7 && mc <= md, "{md} and {mc}");
+        assert!(
+            md < 0.7 && mc <= md,
+            "{:?}: {md} and {mc}",
+            entry.scan().id()
+        );
         assert_eq!(pair.before(), SegmentKind::Detached);
         let a = pair.orbit().semi_major_axis();
         let lobe = roche_lobe_radius(md / mc, a).value();
-        assert!((donor.radius().value() * SOLAR_RADIUS_M / lobe - 1.0).abs() < 1e-12);
+        let fill = donor.radius().value() * SOLAR_RADIUS_M / lobe;
+        assert!(
+            (fill - 1.0).abs() < 1e-12,
+            "{:?}: {fill}",
+            entry.scan().id()
+        );
         let own = roche_lobe_radius(mc / md, a).value();
-        assert!(companion.radius().value() * SOLAR_RADIUS_M < own);
+        let inside = companion.radius().value() * SOLAR_RADIUS_M / own;
+        assert!(inside < 1.0, "{:?}: {inside}", entry.scan().id());
         let t = entry.scan().merger_age();
         let before = entry
             .timeline()
@@ -266,11 +362,13 @@ fn every_dynamical_pair_merges_as_the_engine_merges_it() {
     assert!(checked > 50, "{checked}");
 }
 
-/// Every evolved donor's companion lies inside its donor's kind's mark: a gap donor's below 0.25
-/// of it, a helium-burning donor's below a third, an asymptotic-giant-branch donor's and a giant
-/// branch's anywhere in 0.05–1.
+/// Every evolved donor's companion lies inside its donor's kind's mark's limits: a gap donor's
+/// below 0.25 of it, a helium-burning donor's below a third, an asymptotic-giant-branch donor's and
+/// a giant branch's anywhere in 0.05–1 (the scan's own unstable ratio holds the first two under
+/// either arm; `scan::merger`'s `an_evolved_companion_s_mark_follows_its_donor_s_kind_from_27`
+/// holds which mark each kind takes).
 #[test]
-fn every_evolved_companion_takes_its_donor_s_kind_s_mark() {
+fn every_evolved_companion_lies_inside_its_donor_s_kind_s_mark() {
     let mut kinds = [0_u32; 5];
     for entry in all_entries() {
         if entry.scan().channel() != MergerChannel::EvolvedDonor {
@@ -291,7 +389,8 @@ fn every_evolved_companion_takes_its_donor_s_kind_s_mark() {
         ][k];
         let (lo, hi) = MERGER_SAMPLER.mark(mark).limits();
         let q = entry.scan().secondary_mass().value() / entry.scan().primary_mass().value();
-        let floor = 0.1 / entry.scan().primary_mass().value();
+        let floor =
+            crate::stellar::sse::MIN_INITIAL_MASS.value() / entry.scan().primary_mass().value();
         assert!(
             q <= hi + 1e-12 && q >= lo.min(floor) - 1e-12,
             "{:?}: {donor:?}, q {q}",
@@ -382,6 +481,8 @@ fn the_27_cells_do_not_depend_on_order() {
     assert_order_independent(&cells, |key| {
         let stray =
             CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
+        // Whether the stray ID names a system is beside the point: only asking it could disturb
+        // what follows.
         let _ = crate::galaxy::placement::resolve(galaxy, SystemId::from(stray));
         CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
     });

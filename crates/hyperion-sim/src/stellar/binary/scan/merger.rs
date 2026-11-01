@@ -229,16 +229,6 @@ impl MergerScanMarks {
         }
     }
 
-    /// For an evolved donor, the separation on which it fills its Roche lobe at T, on which its
-    /// common envelope merges the pair; `None` for any other channel.
-    #[must_use]
-    pub const fn evolved_separation(&self) -> Option<Metres> {
-        match self.drawn {
-            Drawn::Contact | Drawn::DynamicalMainSequence { .. } => None,
-            Drawn::EvolvedDonor { separation } => Some(separation),
-        }
-    }
-
     /// For a donor at its lobe, evolved or (from 27) a dynamical main-sequence donor, the
     /// separation on which it fills its Roche lobe at T, on which the engine's onset merges the
     /// pair; `None` for a contact pair.
@@ -373,7 +363,7 @@ pub fn merger_scan_marks(
                     &mut stream,
                 )?,
                 MergerChannel::EvolvedDonor => {
-                    evolved_pair(galaxy, &composition, &draws, (at, channels), &mut stream)?
+                    evolved_pair(galaxy, &composition, &draws, at, channels, &mut stream)?
                 }
                 MergerChannel::DynamicalMainSequence => {
                     dynamical_pair(galaxy, &composition, &draws, at, &mut stream)?
@@ -499,15 +489,14 @@ const LIVING_BRACKET_DEX: f64 = 0.15;
 /// release build).
 const LIVING_BISECTIONS: u32 = 10;
 
-/// An evolved donor and its companion at the merger (`at`: the system's age at the epoch and at
-/// T, and the channels' rules), drawn on `stream` (the pair's words, after the channel's): the
-/// donor's layer among those
-/// with stars past their main sequence and living at T, its mass in the galaxy's mass function
-/// between the turn-off then and the heaviest mass whose death, plan 06's fate of its own draws,
-/// comes after T ([`heaviest_living`]); then its state at T, and the companion's mass by its
-/// donor's mark ([`companion_ratio_mark`]) inside the ratio the engine's stability test finds
-/// unstable for that donor (`class_merger::unstable_companion_ratio`), on its main sequence at T;
-/// the circular orbit on
+/// An evolved donor and its companion at the merger, drawn on `stream` (the pair's words, after
+/// the channel's), with `at` the system's age at the epoch and at T and `channels` the channels'
+/// rules: the donor's layer among those with stars past their main sequence and living at T, its
+/// mass in the galaxy's mass function between the turn-off then and the heaviest mass whose death,
+/// plan 06's fate of its own draws, comes after T ([`heaviest_living`]); then its state at T, and
+/// the companion's mass by its donor's mark under `channels` ([`companion_ratio_mark`]) inside the
+/// ratio the engine's stability test finds unstable for that donor
+/// (`class_merger::unstable_companion_ratio`), on its main sequence at T; the circular orbit on
 /// which the donor fills its Roche lobe (Eggleton 1983). `None` unless the donor is in one of
 /// [`EVOLVED_PHASES`] at T, the companion on its main sequence, and the engine's onset of
 /// transfer, its stability test and common envelope (`class_merger`), merges them into one star.
@@ -515,7 +504,8 @@ fn evolved_pair(
     galaxy: &Galaxy,
     composition: &Composition,
     draws: &[StarDraws; 2],
-    ((age_at_epoch, merger_age), channels): ((Years, Years), MergerChannelRules),
+    (age_at_epoch, merger_age): (Years, Years),
+    channels: MergerChannelRules,
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
@@ -601,7 +591,8 @@ const fn companion_ratio_mark(rules: MergerChannelRules, donor: Phase) -> Merger
             Phase::HertzsprungGap => MergerMark::GapMassRatio,
             Phase::CoreHeliumBurning => MergerMark::HeliumBurningMassRatio,
             Phase::EarlyAgb | Phase::ThermallyPulsingAgb => MergerMark::AgbMassRatio,
-            // An evolved donor is in `EVOLVED_PHASES`; any other phase is refused before.
+            // A giant-branch donor keeps the evolved mark; an evolved donor is in
+            // `EVOLVED_PHASES`, so the other phases are refused before they reach here.
             Phase::FirstGiantBranch
             | Phase::Protostar
             | Phase::PreMainSequence
@@ -678,10 +669,10 @@ fn dynamical_pair(
 }
 
 /// The engine's input for a donor's pair at its lobe, evolved or (from 27) a dynamical
-/// main-sequence donor, of initial `masses` and states at T `stars`, on
-/// the circular orbit of `separation` about their masses then, with zero angles, at `composition`
-/// with the stars' `draws`, the system `age_at_epoch` old at the epoch, under the stellar `rules`:
-/// the one input both the scan's test and the candidate's star read.
+/// main-sequence donor, of initial `masses` and states at T `stars`, on the circular orbit of
+/// `separation` about their masses then, with zero angles, at `composition` with the stars'
+/// `draws`, the system `age_at_epoch` old at the epoch, under the stellar `rules`: the one input
+/// both the scan's test and the candidate's star read.
 ///
 /// # Panics
 ///
@@ -816,4 +807,35 @@ pub fn scan_merger_cell(
             .expect("a count held under 2^24 numbers every candidate");
         merger_scan_marks(galaxy, process, &key, id, bound)
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Under the held arm every evolved donor's companion takes the one evolved mark; from 27 a gap
+    /// donor's the gap's, a helium-burning donor's its own, an asymptotic-giant-branch donor's the
+    /// AGB's and a giant branch's the evolved mark.
+    #[test]
+    fn an_evolved_companion_s_mark_follows_its_donor_s_kind_from_27() {
+        let by_kind = [
+            MergerMark::GapMassRatio,
+            MergerMark::EvolvedMassRatio,
+            MergerMark::HeliumBurningMassRatio,
+            MergerMark::AgbMassRatio,
+            MergerMark::AgbMassRatio,
+        ];
+        for (phase, mark) in EVOLVED_PHASES.into_iter().zip(by_kind) {
+            assert_eq!(
+                companion_ratio_mark(MergerChannelRules::ContactAndEvolved, phase),
+                MergerMark::EvolvedMassRatio,
+                "{phase:?}"
+            );
+            assert_eq!(
+                companion_ratio_mark(MergerChannelRules::WithDynamical, phase),
+                mark,
+                "{phase:?}"
+            );
+        }
+    }
 }
