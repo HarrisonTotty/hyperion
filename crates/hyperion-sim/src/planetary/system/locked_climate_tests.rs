@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::audit_tests::{AuditCase, AuditSet, audit_walk};
 use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
-use crate::planetary::hooks::surface::deck::{self};
+use crate::planetary::hooks::surface::deck::{self, LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::regime::Forcing;
 use crate::rng::Seed;
 use crate::substance::phase::ice_ih_melting_temperature;
@@ -193,7 +193,9 @@ fn moved_between(a: &[CensusBody], b: &[CensusBody]) -> Vec<String> {
 /// three (s187, s243, s363) among them.
 #[test]
 fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
-    let held = census_of(MOVED_SYSTEMS, Goldens::Skipped);
+    let held = with_locked_climate(LockedClimateRules::Held, || {
+        census_of(MOVED_SYSTEMS, Goldens::Skipped)
+    });
     let deck = census_of(MOVED_SYSTEMS, Goldens::Skipped);
     let again = census_of(MOVED_SYSTEMS, Goldens::Skipped);
     assert_eq!(
@@ -237,7 +239,7 @@ fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
 #[ignore = "a measurement for the 26 bless, run by name: the 400 sample systems, walked twice"]
 fn under_every_26_hold_only_the_locked_worlds_under_their_deck_move_over_the_400() {
     let start = Instant::now();
-    let held = census();
+    let held = with_locked_climate(LockedClimateRules::Held, census);
     let walk_held = start.elapsed();
     let start = Instant::now();
     let deck = census();

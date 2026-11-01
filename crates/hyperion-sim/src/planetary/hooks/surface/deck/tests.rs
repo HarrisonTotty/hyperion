@@ -374,7 +374,10 @@ fn the_context_carries_open_water_only_where_a_deck_reads_it() {
     let (radius, flux) = (inputs.radius, inputs.stellar_flux);
     let p = Pascals::new(1e5);
     let reads = |spin: &SeasonalSpin, flux, p| reads_open_water(spin, radius, flux, p);
-    assert!(!reads(&locked_spin(), flux, p), "under the hold");
+    assert!(
+        !with_locked_climate(LockedClimateRules::Held, || reads(&locked_spin(), flux, p)),
+        "under the hold"
+    );
     {
         assert!(reads(&locked_spin(), flux, p));
         assert!(!reads(&spin_of("Earth"), flux, p), "a rotator");
