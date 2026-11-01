@@ -3,7 +3,8 @@
 //! stars the giants' bolometric correction only under the rules that turn A4's arm on, chosen at
 //! one choke point, `photometry::absolute_magnitude_v_under`. Each test turns this hold's arm on
 //! alone ([`a4_rules`]), so that the other 26 holds move nothing it holds equal, except the plan's
-//! figures, which are asserted under `every_26_hold`.
+//! figures: the generated white dwarfs' under every 25 hold and this arm ([`a4_alone`]), the
+//! others under `every_26_hold`.
 //!
 //! - **D3.** The version's rules keep A4's interim: no white dwarf has a V, and every living star
 //!   reads the dwarf table.
@@ -67,6 +68,15 @@ const fn a4_rules() -> StellarRules {
     }
 }
 
+/// Every 25 hold with this one's arm turned on: A4 alone against every 25 hold, the other 26 holds
+/// left held.
+const fn a4_alone() -> StellarRules {
+    StellarRules {
+        v_magnitude: VMagnitudeRules::A4,
+        ..StellarRules::every_25_hold()
+    }
+}
+
 /// Every 26 hold with this one's arm turned back off: what `every_26_hold` is without A4.
 const fn every_26_but_a4() -> StellarRules {
     StellarRules {
@@ -96,10 +106,19 @@ fn a4_galaxy() -> &'static Galaxy {
     })
 }
 
-/// [`held`]'s galaxy under every 26 hold.
-fn every_26_galaxy() -> &'static Galaxy {
+/// [`held`]'s galaxy under every 25 hold and [`a4_alone`].
+///
+/// `Galaxy::with_rules` cannot turn on the galaxy's 26 holds that are read where a galaxy is built
+/// (the field share and the carve-out), and the test pins A4's effect alone, every other 26 hold
+/// held back.
+fn a4_alone_galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| held().clone().with_rules(GalaxyRules::every_26_hold()))
+    GALAXY.get_or_init(|| {
+        held().clone().with_rules(GalaxyRules {
+            stellar: a4_alone(),
+            ..GalaxyRules::every_25_hold()
+        })
+    })
 }
 
 /// Twenty records of each of three cells of every layer by the Sun.
@@ -210,15 +229,15 @@ fn the_version_s_rules_keep_the_interim() {
     );
 }
 
-/// The plan's first figure, under every 26 hold: a generated white dwarf has a V, the Montreal
-/// grid's at its state, and is not dark; under the version's rules it has none.
+/// The plan's first figure, under every 25 hold and A4's arm: a generated white dwarf has a V,
+/// the Montreal grid's at its state, and is not dark; under the version's rules it has none.
 #[test]
 fn a_generated_white_dwarf_has_its_montreal_v() {
-    let rules = StellarRules::every_26_hold();
+    let rules = a4_alone();
     let mut seen = 0;
     for record in records() {
         let summary =
-            SystemStars::generate(every_26_galaxy(), record).summary_at(UniverseTime::EPOCH);
+            SystemStars::generate(a4_alone_galaxy(), record).summary_at(UniverseTime::EPOCH);
         for star in summary.stars() {
             let state = star.state();
             if !is_white_dwarf(state.phase()) {
