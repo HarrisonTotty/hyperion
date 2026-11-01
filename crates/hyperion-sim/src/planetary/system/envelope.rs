@@ -19,9 +19,10 @@
 //! law; the envelope's effective temperature (`T_eq`⁴ + `T_int`⁴)^¼ with that `T_int`
 //! (decision-p14-t24d-profile §3.5), which P14.T50.b's helium rain reads; P14.T50.b's abundances,
 //! from generator version 26 at the body's formation draws (P14.T50.d, behind
-//! `FORMATION_DRAWS_VERSION`); and P14.T52.d's atmosphere on [`GreyProfile::ADOPTED`]. Any refusal
-//! leaves the section not modelled, and the record keeps no reason ([`DeriveEnvelopeError`] is the
-//! census's, and the testing helper's).
+//! `FORMATION_DRAWS_VERSION`); and P14.T52.d's atmosphere on the grey profile in force
+//! (`GreyProfile::ADOPTED` to 26, κ₁ refitted from 27). Any refusal leaves the section not
+//! modelled, and the record keeps no reason ([`DeriveEnvelopeError`] is the census's, and the
+//! testing helper's).
 
 use std::error::Error;
 use std::fmt;

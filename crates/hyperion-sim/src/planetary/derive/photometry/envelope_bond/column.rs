@@ -12,10 +12,11 @@
 //!   in equilibrium, CO + 3 H₂ ⇌ CH₄ + H₂O and N₂ + 3 H₂ ⇌ 2 NH₃ (P14.T49.d's constants), not
 //!   quenched as P14.T52.b's are (labelled); oxygen's silicate share, three atoms to each silicon,
 //!   is taken from the water; every other element is its atom's gas, sulphur H₂S and chlorine HCl.
-//! - **The profile**: Guillot's grey profile of P14.T24.d ([`GreyProfile::ADOPTED`]) to its join,
-//!   where its gradient reaches the dry adiabat's (by [`JOIN_BISECTIONS`] bisections in ln p), and
-//!   below it the adiabat stepped in ln p by [`ADIABAT_STEP_LN_P`], `c_p` of the gas's H₂, He, CH₄,
-//!   H₂O, NH₃ and CO at each step's midpoint, its temperature the power law between steps.
+//! - **The profile**: Guillot's grey profile of P14.T24.d (`GreyProfile::in_force`,
+//!   [`GreyProfile::ADOPTED`] but κ₁) to its join, where its gradient reaches the dry adiabat's (by
+//!   [`JOIN_BISECTIONS`] bisections in ln p), and below it the adiabat stepped in ln p by
+//!   [`ADIABAT_STEP_LN_P`], `c_p` of the gas's H₂, He, CH₄, H₂O, NH₃ and CO at each step's
+//!   midpoint, its temperature the power law between steps.
 //! - **The decks** ([`CANDIDATES`], in their condensation order): each row's law aloft, its base
 //!   the deepest level above 100 bar at which its vapour saturates on the profile (bisected in ln
 //!   p), each later deck read in the gas the earlier leave (a deck's limiting vapour gone above it,

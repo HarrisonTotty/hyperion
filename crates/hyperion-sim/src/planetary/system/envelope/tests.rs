@@ -29,8 +29,7 @@ use crate::planetary::hooks::envelope_atmosphere::{
     with_dayside_decks,
 };
 use crate::planetary::hooks::structure::envelope::{
-    ADIABAT_BOTTOM, MEAN_REDISTRIBUTION, OPACITY_RATIO, OPTICAL_DEPTH_EXPONENT,
-    THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
+    ADIABAT_BOTTOM, GreyProfile, MEAN_REDISTRIBUTION, OPACITY_RATIO, OPTICAL_DEPTH_EXPONENT,
 };
 use crate::planetary::hooks::surface::HourCosines;
 use crate::planetary::label;
@@ -201,8 +200,8 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
 }
 
 /// Asserts what every `Ok` envelope holds (the design's §4 item 1), the envelope `envelope` of the
-/// body `at` whose inputs were `of`: no supercritical condensable; the adopted grey profile (κ₁
-/// 2.87 × 10⁻³ m² kg⁻¹, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
+/// body `at` whose inputs were `of`: no supercritical condensable; the grey profile in force (κ₁
+/// 2.87 × 10⁻³ m² kg⁻¹ to 26 and 2.92 × 10⁻³ from 27, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
 /// so that the wire's `T_irr`⁴ = `T_eq`⁴ ÷ f) to 10⁻¹²; a finite join, the adiabat's nodes
 /// ascending from it to at least the larger of 100 bar and e^0.3 times its pressure; the 1-bar
 /// composition summing to 1 to 10⁻⁹, largest first, each at least 10⁻¹²; every mode covering the
@@ -210,16 +209,21 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
 /// material and naming none; each deck's condensate once; the hazes' τ their modes' sum to the
 /// bit; and the abundances' He/H its input's times its rain's depletion, to the bit.
 fn check_envelope(at: &str, envelope: &Envelope, of: &EnvelopeOf) {
+    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
     assert_eq!(envelope.supercritical(), None, "{at}");
     let atmosphere = envelope.atmosphere();
     let profile = atmosphere.profile();
     let grey = profile.grey();
     assert_same_bits(
         grey.thermal_opacity_m2_per_kg(),
-        THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
+        GreyProfile::in_force().thermal_opacity_m2_per_kg(),
     );
+    let kappa = match EnvelopeBondRules::in_force() {
+        EnvelopeBondRules::ClassTable => 2.87e-3,
+        EnvelopeBondRules::Own => 2.92e-3,
+    };
     assert!(
-        (grey.thermal_opacity_m2_per_kg() - 2.87e-3).abs() < 5e-6,
+        (grey.thermal_opacity_m2_per_kg() - kappa).abs() < 5e-6,
         "{at}"
     );
     assert_same_bits(grey.optical_depth_exponent(), OPTICAL_DEPTH_EXPONENT);
