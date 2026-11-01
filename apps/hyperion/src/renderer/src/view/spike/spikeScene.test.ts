@@ -291,23 +291,24 @@ describe("the scene over TERRAIN TEST's moon (R10.T14.c)", () => {
     );
   });
 
-  it("stands the sun in the moon's equator over the site's meridian at the end", () => {
+  it("stands the sun on the great circle through the site at the end and the track's start, lighting both", () => {
     const end = profile.durationS;
-    const rotation = world.rotationAt(end);
-    const pole = rotateToBody(rotation, { x: 0, y: 0, z: 1 });
-    const siteBody = rotateToBody(rotation, profile.poseAt(end).groundPointM);
+    const siteBody = rotateToBody(world.rotationAt(end), profile.siteDir);
+    const startBody = rotateToBody(world.rotationAt(0), profile.poseAt(0).groundDir);
     const sun = sunDirectionBody(profile, world);
     expect(norm(sun)).toBeCloseTo(1, 14);
-    expect(dot(sun, pole)).toBeCloseTo(0, 14);
-    // In the plane of the pole and the site, on the site's side.
-    expect(dot(sun, normalise(cross(pole, siteBody)))).toBeCloseTo(0, 14);
-    expect(dot(sun, siteBody)).toBeGreaterThan(0);
-    // So the site sees it 90° less its latitude above the horizon, about 62°.
-    const g = profile.poseAt(end).groundDir;
-    const up = normalise(
-      rotateToBody(rotation, vecOf(spheroidNormal(world.figure, [g.x, g.y, g.z]))),
-    );
-    expect((Math.asin(dot(up, sun)) * 180) / Math.PI).toBeGreaterThan(61);
+    expect(dot(sun, normalise(cross(siteBody, startBody)))).toBeCloseTo(0, 14);
+    // On the arc between them, nearer the site: T13.b's noon over the site left the start at −35°
+    // (the owner's request; `siteLight.ts`).
+    const elevationDeg = (t: number, dir: Vec3): number => {
+      const up = rotateToBody(
+        world.rotationAt(t),
+        vecOf(spheroidNormal(world.figure, [dir.x, dir.y, dir.z])),
+      );
+      return (Math.asin(dot(normalise(up), sun)) * 180) / Math.PI;
+    };
+    expect(Math.round(elevationDeg(end, profile.poseAt(end).groundDir))).toBe(20);
+    expect(Math.round(elevationDeg(0, profile.poseAt(0).groundDir))).toBe(10);
   });
 
   it("stands a served world at its own distance from a star of its own radius (R10.T15.b)", () => {

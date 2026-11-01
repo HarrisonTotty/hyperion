@@ -12,7 +12,7 @@ import {
   terrainSystem,
   terrainTestGolden,
 } from "../scenes/terrainScene";
-import { norm } from "../../geometry/vec3";
+import { norm, normalise } from "../../geometry/vec3";
 import { timeAfter } from "../../lib/scene/lightTime";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { sceneModelOf, stateNearEarth } from "../../test/sceneFixture";
@@ -117,6 +117,10 @@ describe("a served world (R10.T15.b)", () => {
     expect(world.figure).toBe(served.figure);
     expect(world.appearance).toBe(served.appearance);
     expect(world.hostDiscs).toBe(discs);
+  });
+
+  it("is lit from its star's centre at the push, along the scene's axes", () => {
+    expect(world.starDirection).toEqual(normalise(served.towardStarM));
   });
 
   it("carries no detail seed, which its session asks the server for", () => {

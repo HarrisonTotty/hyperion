@@ -16,7 +16,9 @@
  * touchdown, an equinox at local noon, so that the site is lit at every latitude the seed can
  * draw: T13.a draws the parametric latitude within ±60°, whose geodetic latitude on WGS 84 is at
  * most 60.083°, so the Sun stands 29.9° or more above the horizon. The script's day exposure
- * (Design note 17) holds at the end of the run, where the streaming load is highest.
+ * (Design note 17) holds at the end of the run, where the streaming load is highest. Over
+ * `TERRAIN TEST`'s moon the star stands on the track's great circle instead, and a served world is
+ * lit by its own, its site drawn where it stands 20–45° high (`siteLight.ts`; the owner's request).
  *
  * Altitudes are T13.a's: above the site's terrain, measured once before the run through the
  * surface query (`surfaceQuery.ts`), with the low pass above a true bound of the terrain under its
@@ -57,6 +59,7 @@ import { type BodyFigure, planetGeometry, spheroidNormal } from "../terrain/plan
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import type { DescentPose, DescentProfile } from "./descentProfile";
 import { timeAfter } from "../../lib/scene/lightTime";
+import { keptStarDirection } from "./siteLight";
 import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD } from "./spikeWorld";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
@@ -263,17 +266,25 @@ function poleAt(world: SpikeWorld, tS: number): Vec3 {
 }
 
 /**
- * The unit direction to the star in the body's non-rotating axes: in its equatorial plane, over
- * the landing site's meridian at the end of the script.
+ * The unit direction to the star in the body's non-rotating axes: a served world's own
+ * (`SpikeWorld.starDirection`); over the test planet in its equatorial plane, over the landing
+ * site's meridian at the end of the script; over any other kept world on the track's great circle,
+ * so that its start is lit too (`siteLight.ts`' `keptStarDirection`; the owner's request).
  *
  * @remarks
- * The site less its part along the pole. The test planet's pole is +z exactly, so that this is its
- * site's x and y with z = 0, bit for bit.
+ * The test planet's is the site less its part along the pole. Its pole is +z exactly, so that this
+ * is its site's x and y with z = 0, bit for bit.
  */
 export function sunDirectionBody(
   profile: DescentProfile,
   world: SpikeWorld = TEST_PLANET_WORLD,
 ): Vec3 {
+  if (world.starDirection !== undefined) {
+    return world.starDirection;
+  }
+  if (world.name !== "test-planet") {
+    return keptStarDirection(profile, world);
+  }
   const end = profile.durationS;
   const site = rotateToBody(world.rotationAt(end), profile.poseAt(end).groundPointM);
   const pole = poleAt(world, end);

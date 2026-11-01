@@ -19,10 +19,10 @@
  * - **A served world** ({@link servedSpikeWorld}) is a body as the server's scene draws it
  *   (`servedBody.ts`, through `fromServer.ts`): its and its star's IDs and designations, its kind,
  *   figure with its pole, Hill radius at pericentre and appearance, its star's radius and distance,
- *   and the host discs the server's sky gives its system. Its rotation is its rotation section's
- *   law at the scene's time when it was read plus the script's seconds, the spike's clock running at
- *   one second a second. It carries no detail seed: the session asks `body_detail` for it, as
- *   `VIEW`'s does over the server's scene.
+ *   and the host discs the server's sky gives its system, and its star's direction at the push,
+ *   which lights it. Its rotation is its rotation section's law at the scene's time when it was read
+ *   plus the script's seconds, the spike's clock running at one second a second. It carries no
+ *   detail seed: the session asks `body_detail` for it, as `VIEW`'s does over the server's scene.
  */
 
 import type {
@@ -36,7 +36,7 @@ import type {
 import type { SpikeWorldName as LaunchWorldName } from "../../../../preload/api";
 import type { TerrainSessionSource } from "../../displays/view/useTerrainSession";
 import type { ConnectionStatus } from "../../lib/connection";
-import { norm } from "../../geometry/vec3";
+import { norm, normalise, type Vec3 } from "../../geometry/vec3";
 import { timeAfter } from "../../lib/scene/lightTime";
 import type { WireAppearance } from "../appearance/fromWire";
 import type { Rotation3 } from "../coords/rotation";
@@ -93,6 +93,12 @@ export interface SpikeWorld {
    */
   readonly starDistanceM?: number;
   readonly starRadiusM?: number;
+  /**
+   * The star's unit direction from the body's centre in the body's non-rotating axes, a served
+   * world's (its centre's from the body's at the push), by which its site is drawn lit
+   * (`siteLight.ts`); absent for the kept worlds, whose star the spike places (`sunDirectionBody`).
+   */
+  readonly starDirection?: Vec3;
   /**
    * The scene's time at the script's start, a served world's (the push it was read at), from which
    * its scene's clock counts the script's seconds; absent for the kept worlds, whose clock starts at
@@ -199,6 +205,8 @@ export function servedSpikeWorld(
     hostDiscs,
     starDistanceM: norm(served.towardStarM),
     starRadiusM: served.star.radiusM,
+    // The scene's axes are the body's non-rotating ones, translated (`ServedBody.towardStarM`).
+    starDirection: normalise(served.towardStarM),
     epoch,
   };
 }

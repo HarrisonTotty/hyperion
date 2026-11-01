@@ -1069,6 +1069,14 @@ export class DescentProfile {
     return this.#siteDir;
   }
 
+  /**
+   * The track's arc from its start to the site, rad: its length over the sphere it is laid out on,
+   * (a + c) ÷ 2, past π on a body smaller than about 1,420 km in radius.
+   */
+  get trackArcRad(): number {
+    return this.#trackM / this.#arcRadiusM;
+  }
+
   /** The segment under way at `tS`, clamped to the script. */
   segmentAt(tS: number): DescentSegment {
     let i = 0;

@@ -1,8 +1,9 @@
 import type { BodyIdHex, RecordSectionDto } from "@hyperion/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { add, normalise, scale, sub, vec3 } from "../../geometry/vec3";
 import { viewId } from "../camera/state";
+import { rotateToBody } from "../coords/rotation";
 import { terrainTestGolden } from "../scenes/terrainScene";
 import type { FieldFailure } from "../terrain/coarseFieldStore";
 import { CoverageView, fieldCellIndex } from "../terrain/coverage";
@@ -42,8 +43,14 @@ import {
 } from "./bodyDescent";
 import { patchKeyAt, stretchKeys } from "./demandRecord";
 import { DescentProfile, DescentUnclearable, trackStretches } from "./descentProfile";
+import {
+  descentStarOf,
+  downStarAzimuthRad,
+  litSiteCandidates,
+  starElevationRad,
+} from "./siteLight";
 import { DescentRefused, SPIKE_VIEW_NAMES } from "./spikeRun";
-import { terrainTestWorld } from "./spikeWorld";
+import { type SpikeWorld, terrainTestWorld } from "./spikeWorld";
 
 const golden = terrainTestGolden();
 const world = terrainTestWorld();
@@ -776,6 +783,69 @@ describe("a served world's field (R10.T15.b)", () => {
     await expect(
       measureWorldDescent(session, planet, 7n, new AbortController().signal),
     ).rejects.toThrow("the test planet has no field");
+  });
+});
+
+/**
+ * A served world over the fixture's moon lit by a star `elevationDeg` above the fixture's first
+ * candidate's centre at the script's start, from its north (the owner's request).
+ */
+function servedLitFrom(elevationDeg: number): SpikeWorld {
+  const [first] = CANDIDATES;
+  if (first === undefined) {
+    throw new Error("the fixture has candidates");
+  }
+  const [x, y, z] = vertexDir(first, 32, 32);
+  const up = vec3(x, y, z);
+  const north = normalise(sub(vec3(0, 0, 1), scale(up, z)));
+  const e = (elevationDeg * Math.PI) / 180;
+  const star = add(scale(up, Math.sin(e)), scale(north, Math.cos(e)));
+  return {
+    ...world,
+    name: "served",
+    starDirection: normalise(rotateToBody(world.rotationAt(0), star)),
+  };
+}
+
+describe("a served world's site, lit by its own star (the owner's request)", () => {
+  it("is drawn among the candidates its star stands 20° to 45° above, approached away from it", async () => {
+    const served = servedLitFrom(21);
+    const measured = await measureBodyDescent(new StubSession(), served, 7n, {
+      viewId: VIEW,
+      timeoutMs: 1_000,
+      ...fakeClock(),
+    });
+    const datum = new DescentProfile(served.figure, measured.site.site);
+    const star = descentStarOf(served, datum);
+    if (star === null) {
+      throw new Error("a served world has a star");
+    }
+    const lit = litSiteCandidates(CANDIDATES, star);
+    expect(lit.length).toBeGreaterThan(0);
+    expect(lit.length).toBeLessThan(CANDIDATES.length);
+    expect(lit.some((cell) => sameKey(cell, measured.site.cell))).toBe(true);
+    const [dx, dy, dz] = measured.site.dir;
+    expect(measured.site.site.azimuthRad).toBe(downStarAzimuthRad(vec3(dx, dy, dz), star.atStart));
+    const elevationsDeg = [star.atStart, star.atEnd].map(
+      (at) => (starElevationRad(served.figure, measured.profile.siteDir, at) * 180) / Math.PI,
+    );
+    expect(elevationsDeg.every((deg) => deg >= 20 && deg <= 45)).toBe(true);
+  });
+
+  it("refuses where its star lights none of the survey's sites through the descent, baking nothing", async () => {
+    const session = new StubSession();
+    const error = await rejectionOf(
+      measureBodyDescent(session, servedLitFrom(-30), 7n, {
+        viewId: VIEW,
+        timeoutMs: 1_000,
+        ...fakeClock(),
+      }),
+    );
+    expect([error.name, error.message]).toEqual([
+      "NoLandingSite",
+      `no landing site on ${golden.body}: its survey holds no site its star stands 20° to 45° above through the descent`,
+    ]);
+    expect(session.lanes).toEqual([]);
   });
 });
 

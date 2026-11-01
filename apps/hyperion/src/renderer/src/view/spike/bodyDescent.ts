@@ -13,7 +13,9 @@
  *   cells whose whole 3 × 3 block is surveyed, edge and corner neighbours both ({@link
  *   siteCandidates}), so that the track's last 18 km, the low pass and the slowdown, stay over
  *   surveyed ground (decision-r10-t14c-leans §4, "The site"); snapped to the centre vertex of the
- *   finest patch holding the drawn point.
+ *   finest patch holding the drawn point. Over a served world, lit by its own star, only among the
+ *   cells it lights through the descent, and approached away from it (`siteLight.ts`; the owner's
+ *   request).
  * - **The site's height** is that vertex's own-level height in the workers' bake of the patch:
  *   the drawn ground, the client's `ground_at` to `f32`, on whose triangles the vertex lies, as
  *   the test planet's was T4.c's collision interpolant (decision-r05-descent-clearance.md). Not
@@ -92,6 +94,12 @@ import {
   SPIKE_FOV_X_RAD,
   SPIKE_MAIN_VIEW_ID,
 } from "./spikeRun";
+import {
+  descentStarOf,
+  litBodySite,
+  litSiteCandidates,
+  SITE_STAR_ELEVATION_DEG,
+} from "./siteLight";
 import { contactRule, spikeCameraAt, spikeScene } from "./spikeScene";
 import type { SpikeWorld } from "./spikeWorld";
 
@@ -286,6 +294,9 @@ const READING_REACH_M = 2000;
 /** Vertices along a patch's side, and the centre vertex's index. */
 const VERTICES = PATCH_QUADS + 1;
 const CENTRE = PATCH_QUADS / 2;
+
+/** A site for the profile whose duration and track any site gives: the script's are the table's. */
+const DATUM_SITE: LandingSite = { latitudeRad: 0, longitudeRad: 0, azimuthRad: 0 };
 
 /** The measuring view's presented size, device px: 1080p, as T13.b's high setting runs. */
 const MEASURING_VIEW_PX = { widthPx: 1920, heightPx: 1080 } as const;
@@ -875,8 +886,9 @@ async function siteReadingOf(
  * ({@link holdBodyField}): the site inside the survey, its height, each stretch's floor, the
  * profile flown over them with its contact rule, and the site's reading.
  *
- * @throws {@link NoLandingSite} where the survey holds no cell whose whole 3 × 3 block is surveyed (or the site's vertex is
- *   off it), {@link DescentRefused} where every candidate site's floors refuse the profile, and
+ * @throws {@link NoLandingSite} where the survey holds no cell whose whole 3 × 3 block is surveyed
+ *   (or the site's vertex is off it), or over a served world none its star lights through the
+ *   descent, {@link DescentRefused} where every candidate site's floors refuse the profile, and
  *   Error where the field is not held, the session is disposed or a bake fails or times out, or
  *   with the abort's reason once `options.signal` aborts; its lane is terminated whatever the end.
  */
@@ -894,9 +906,18 @@ export async function measureBodyDescent(
   const { coverage, header, levels, detailSeed } = held.value;
   const planet = planetGeometry(world.figure, levels);
   const ceilingM = offSurveyCeilingM(planet, header);
-  const candidates = siteCandidates(coverage);
-  if (candidates.length === 0) {
+  const surveyed = siteCandidates(coverage);
+  if (surveyed.length === 0) {
     throw new NoLandingSite(body, "its survey holds no cell whose whole 3 × 3 block is surveyed");
+  }
+  // A served world's site is drawn where its own star lights the descent (the owner's request).
+  const star = descentStarOf(world, new DescentProfile(world.figure, DATUM_SITE));
+  const candidates = star === null ? surveyed : litSiteCandidates(surveyed, star);
+  if (candidates.length === 0) {
+    throw new NoLandingSite(
+      body,
+      `its survey holds no site its star stands ${String(SITE_STAR_ELEVATION_DEG.lowest)}° to ${String(SITE_STAR_ELEVATION_DEG.highest)}° above through the descent`,
+    );
   }
   const lane = session.lane(floorBakeSettings(body, detailSeed));
   if (lane === null) {
@@ -908,10 +929,11 @@ export async function measureBodyDescent(
 
   /** Flies attempt `attempt`'s site, or the next candidate's where its floors refuse it. */
   const fly = async (attempt: number): Promise<BodyDescent> => {
-    const site = bodySiteOf(candidates, seed, attempt, planet.finestLevel);
-    if (site === null) {
+    const drawn = bodySiteOf(candidates, seed, attempt, planet.finestLevel);
+    if (drawn === null) {
       throw new NoLandingSite(body, "its survey holds no cell whose whole 3 × 3 block is surveyed");
     }
+    const site = star === null ? drawn : litBodySite(drawn, star);
     const siteKey = patchKeyString(site.key);
     // The ground track and the stretches do not depend on the terrain: the bare datum's profile
     // gives them.
