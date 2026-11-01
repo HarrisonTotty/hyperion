@@ -26,7 +26,7 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
-import { ONE_PHOTOREALISTIC_VIEW } from "../../view/budget/viewBudget";
+import { IMAGE_DETAIL_LIMITED, ONE_PHOTOREALISTIC_VIEW } from "../../view/budget/viewBudget";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../view/engine/status";
 import type {
@@ -519,6 +519,19 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
     await closeInstrument(view, "INSTRUMENT 1");
     runFrames(view, 10, () => 5);
     expect([(lowered?.widthPx ?? 0) < FULL.widthPx, sceneTargetSize(view)]).toEqual([true, FULL]);
+  });
+
+  it("states IMAGE: DETAIL LIMITED while the controller holds the primary below its max, and not once they close (the owner's report)", async () => {
+    const view = await setup({ store: await nominalStore(["timestamp-query"]) });
+    await photorealControls(view);
+    await openInstrument(view, "INSTRUMENT 1");
+    runFrames(view, 40, () => 5);
+    view.advance(300);
+    expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
+    await closeInstrument(view, "INSTRUMENT 1");
+    runFrames(view, 10, () => 5);
+    view.advance(300);
+    expect(screen.queryByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeNull();
   });
 
   it("counts an instrument's pass times in the primary's frame", async () => {

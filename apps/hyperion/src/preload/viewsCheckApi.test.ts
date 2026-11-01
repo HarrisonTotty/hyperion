@@ -125,6 +125,33 @@ describe("the preload's views-check functions", () => {
     ]);
   });
 
+  it("send the inspection run's frame profile on its own channels (the owner's report)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi(LAUNCH, { invoke });
+    const record = { timer: "absent", devicePixelRatio: 1, windows: [] } as const;
+    await api.startProfile("orbit");
+    await api.endProfile("orbit", { startMs: 1, endMs: 2 });
+    expect(await api.writeTimingResults(record)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.startProfile, "orbit"],
+      [VIEWS_CHECK_CHANNEL_NAMES.endProfile, "orbit", { startMs: 1, endMs: 2 }],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults, record],
+    ]);
+  });
+
+  it("refuses a timing file's answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(
+      api.writeTimingResults({ timer: "absent", devicePixelRatio: 1, windows: [] }),
+    ).rejects.toThrow("the main process wrote no timing file");
+  });
+
   it("refuses an atmosphere results answer of the wrong shape", async () => {
     const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
     await expect(api.writeAtmosphereResults(ATMOSPHERE_RECORD)).rejects.toThrow(

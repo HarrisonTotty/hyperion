@@ -21,7 +21,7 @@
  * 2026-11-01), holding its GPU time to {@link GPU_FRAME_SHARE} of {@link FLOOR_RATE_HZ}'s period,
  * and its image never drawn below the low setting's look, {@link LOW_LOOK_ROWS_PX} rows; once it
  * steps, its air is drawn at the low setting's sizes too (`BudgetedScale.airStepped`), and its
- * label block states {@link IMAGE_DETAIL_LIMITED} while its scale is below 1. A wireframe view draws
+ * label block states {@link IMAGE_DETAIL_LIMITED} while its scale is below 1 or its air stepped. A wireframe view draws
  * straight to its canvas (R02 Design note 12) and has no internal scale: it renders at 1. The
  * outputs are data that R12's runs record.
  */
@@ -107,9 +107,10 @@ export const LOW_LOOK_ROWS_PX = 720;
 
 /**
  * The label block's statement while a photorealistic primary's image is drawn below its quality
- * setting's resolution (the guide's `IMAGE: DETAIL LIMITED`, an annunciation as
- * `TERRAIN: DETAIL LIMITED` is): its frames run long and its scale has stepped down to keep their
- * rate, or instruments are open and the resolution controller holds it there (Design note 14).
+ * setting's resolution or air detail (the guide's `IMAGE: DETAIL LIMITED`, an annunciation as
+ * `TERRAIN: DETAIL LIMITED` is): its frames take too long to keep {@link FLOOR_RATE_HZ} a second
+ * and its frame-rate floor has stepped its scale or its air down to keep their rate, or instruments
+ * are open and the resolution controller holds its scale there (Design note 14).
  */
 export const IMAGE_DETAIL_LIMITED = "IMAGE: DETAIL LIMITED";
 

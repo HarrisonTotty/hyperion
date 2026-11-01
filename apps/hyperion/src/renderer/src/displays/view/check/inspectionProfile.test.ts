@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ViewsCheckWindow } from "../../../../../preload/api";
+import { TABLE_SIZES } from "../../../view/atmosphere/hillaire";
+import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import { SOFTWARE_WAIT_FACTOR, inspectionProfileTimingOf } from "./softwareTiming";
 import {
   INSPECTION_PROFILE_TIMING,
@@ -121,6 +123,29 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     const { profile, marked } = profiler(5_000);
     await profile.measure("close", PLATE);
     expect(marked).toEqual([{ startMs: 1_000, endMs: 1_000 + INSPECTION_PROFILE_TIMING.maxMs }]);
+  });
+
+  it("ends a window whose step throws, its trace stopped and nothing measured", async () => {
+    const { profile, calls } = profiler(100);
+    await expect(
+      profile.measure("orbit", () => {
+        throw new Error("views check: the primary's label block is not shown");
+      }),
+    ).rejects.toThrow(/label block/);
+    expect([calls, profile.windows]).toEqual([
+      ["start orbit at 1000", "end orbit 1000–4000 at 4000"],
+      [],
+    ]);
+  });
+
+  it("reads the march's samples at the low setting's while IMAGE: DETAIL LIMITED stands", async () => {
+    const { profile } = profiler(100);
+    await profile.measure("orbit", () => ({ position: null, statements: [IMAGE_DETAIL_LIMITED] }));
+    await profile.measure("close", PLATE);
+    expect(profile.windows.map((each) => each.marchSamples)).toEqual([
+      TABLE_SIZES.low.rayMarchSamples,
+      TABLE_SIZES.high.rayMarchSamples,
+    ]);
   });
 
   it("writes every window measured, in order, with the pass timer's kind", async () => {

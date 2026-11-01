@@ -89,7 +89,8 @@ export class InspectionProfiler {
    * {@link InspectionProfileTiming.maxMs}, and the views probe's figures over it.
    *
    * @param plate - What the primary's label block says as the window ends.
-   * @throws Error as the main process refuses a window, or as a wait is stopped.
+   * @throws Error as the main process refuses a window, or as a wait or `plate` throws, the window
+   *   then ended with its trace and nothing measured.
    */
   async measure(name: InspectionTimingWindowName, plate: () => ProfiledPlate): Promise<void> {
     const { api, views, timing } = this.#deps;
@@ -104,14 +105,29 @@ export class InspectionProfiler {
         await waited();
       }
     };
-    await waited();
-    const endMs = this.#deps.nowMs();
-    const span = { startMs, endMs };
-    this.#deps.markWindow(span);
-    const said = plate();
-    // The last frames' pass times resolve a frame or more late.
-    await this.#deps.sleep(timing.settleMs);
-    await api.endProfile(name, span);
+    let ending = false;
+    let endMs: number;
+    let said: ProfiledPlate;
+    try {
+      await waited();
+      endMs = this.#deps.nowMs();
+      this.#deps.markWindow({ startMs, endMs });
+      said = plate();
+      // The last frames' pass times resolve a frame or more late.
+      await this.#deps.sleep(timing.settleMs);
+      ending = true;
+      await api.endProfile(name, { startMs, endMs });
+    } catch (error: unknown) {
+      // A window a step stopped is ended, its trace stopped and dropped, and measures nothing.
+      if (!ending) {
+        await api
+          .endProfile(name, { startMs, endMs: this.#deps.nowMs() })
+          .catch((cause: unknown) => {
+            console.error(`views check: the profile of ${name} could not be ended:`, cause);
+          });
+      }
+      throw error;
+    }
     const figures = views.window(startMs, endMs, [
       { name: PRIMARY_VIEW_NAME, style: "photorealistic" },
     ]);

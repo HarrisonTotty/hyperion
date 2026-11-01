@@ -6,6 +6,7 @@ import { SETTINGS } from "../quality/qualitySetting";
 import {
   BudgetedScale,
   CALM_FRAMES,
+  CALM_INTERVAL_SHARE,
   CALM_SHARE,
   drawsInFrame,
   PENDING_PRIMARY_FRAMES,
@@ -263,6 +264,34 @@ describe("BudgetedScale", () => {
       scale.update(floor, [0.3 * gpuBudgetMs], 16.7);
     }
     expect(scale.airStepped).toBe(false);
+  });
+
+  it("brings a floor's air back by its frames' intervals while the timer is absent", () => {
+    const floor = viewBudgets(
+      [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
+      "high",
+      1080,
+    ).get(PRIMARY);
+    if (floor === undefined || floor.control === null) {
+      throw new Error("the primary alone on high should have its floor");
+    }
+    const periodMs = floor.control.target.periodMs;
+    const scale = new BudgetedScale();
+    // Frames that miss the floor's period by half again step it down.
+    for (let frame = 0; frame < 20; frame += 1) {
+      scale.update(floor, undefined, 2 * periodMs);
+    }
+    expect(scale.airStepped).toBe(true);
+    // At a 60 Hz display's every vsync, under 0.6 of the floor's period, the scale climbs back and
+    // the air returns after its calm run; at the floor's own 30 Hz it would not.
+    let frames = 0;
+    while (scale.airStepped && frames < 5_000) {
+      scale.update(floor, undefined, 16.7);
+      frames += 1;
+    }
+    expect([scale.airStepped, scale.controller?.scale]).toEqual([false, max]);
+    expect(16.7).toBeLessThanOrEqual(CALM_INTERVAL_SHARE * periodMs);
+    expect(periodMs).toBeGreaterThan(CALM_INTERVAL_SHARE * periodMs);
   });
 
   it("gives a wireframe primary its budget's scale, 1", () => {

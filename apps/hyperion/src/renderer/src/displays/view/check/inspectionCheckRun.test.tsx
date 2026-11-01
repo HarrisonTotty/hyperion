@@ -1,7 +1,7 @@
 import { RequestClient } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
-import type { InspectionTimingWindow } from "../../../../../preload/api";
+import type { InspectionTimingWindow, SpikeEnd } from "../../../../../preload/api";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import {
   closeRateStep,
@@ -169,6 +169,32 @@ describe("the inspection run (the owner's request)", () => {
     );
 
     expect(order).toEqual(["write timing", "end fail"]);
+  });
+
+  it("ends failed with why where its timing file could not be written", async () => {
+    const end = vi.fn<(outcome: SpikeEnd) => Promise<void>>(() => Promise.resolve());
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await recordInspectionCheck(
+      { end },
+      () =>
+        Promise.resolve({
+          label: "a",
+          frame: null,
+          exposure: null,
+          statements: [],
+          ground: [],
+          closeGround: null,
+        }),
+      new AbortController().signal,
+      {
+        windows: [WINDOW],
+        write: () => Promise.reject(new Error("the main process wrote no timing file")),
+      },
+    );
+
+    expect(end.mock.calls).toEqual([
+      [{ status: "fail", reason: "the main process wrote no timing file" }],
+    ]);
   });
 
   it("writes no timing file where it measured no window", async () => {
