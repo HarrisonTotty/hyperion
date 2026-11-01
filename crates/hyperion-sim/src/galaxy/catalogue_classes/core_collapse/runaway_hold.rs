@@ -157,7 +157,10 @@ fn the_runaway_deaths_are_held_only_until_the_27_bump() {
 }
 
 /// Under the held arm the class's process and cells are every 26 hold's, bit for bit: the field
-/// alone turns the new arm on.
+/// alone turns the new arm on. P15.T10.b's fitted share rows, another hold at 27, put some of the
+/// accreting white dwarfs' and X-ray binaries' hosts in layer E, which moves the young field's
+/// band-E shares the class reads, so they are set back with it (land-pod, 2026-11-01: the test
+/// failed so on hold/after-25 at 24 too).
 #[test]
 fn the_held_arm_is_every_26_hold_s() {
     let every_26 = Galaxy::from_params_with_rules(
@@ -167,10 +170,17 @@ fn the_held_arm_is_every_26_hold_s() {
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
     .with_full_potential();
-    let held = galaxy().clone().with_rules(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
-    });
+    let held = Galaxy::from_params_with_rules(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules {
+            runaway_deaths: RunawayDeathsRules::FieldOnly,
+            binary_tables: GalaxyRules::every_26_hold().binary_tables,
+            ..GalaxyRules::every_27_hold()
+        },
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral")
+    .with_full_potential();
     let process = CoreCollapseProcess::new(&every_26);
     assert_eq!(process, CoreCollapseProcess::new(&held));
     assert_eq!(process.ejected_terms(), []);
