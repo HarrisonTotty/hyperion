@@ -51,8 +51,8 @@
 # the seat on TEST EARTH's night side once AUTO has settled, then a scripted free-camera flight, a
 # climb towards TEST MOON first, to a few radii of each air fixture, TEST EARTH O3 SLAB, TEST MARS,
 # TEST SATURN, the four under cloud or haze (TEST VENUS, TEST VENUS 5.80 MPa, TEST TITAN and
-# TEST SATURN NH3 ICE DECK) and TEST EARTH, each captured (a smoke flies the climb and TEST EARTH O3
-# SLAB alone).
+# TEST SATURN NH3 ICE DECK), TEST JUPITER at four ranges from 9.5e8 m to 1.5e8 m, and TEST EARTH,
+# each captured (a smoke flies the climb and TEST EARTH O3 SLAB alone).
 # Both settings by default, as --terrain; it writes
 # <date>-<machine>-<setting>-atmosphere.json and .md
 # under target/views-check/atmosphere/ for a smoke and docs/measurements/atmosphere-flight/

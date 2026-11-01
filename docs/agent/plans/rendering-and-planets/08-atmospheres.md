@@ -6113,6 +6113,8 @@ Acceptance: `pnpm test`.
 
   _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built"). _The volatile decks'
   optics, T16.a.2's blocker, built 2026-10-31_ (Risks, "The volatile decks' optics, as built").
+  _T16.a.2 built 2026-11-01, its route closed until `giant-deck`'s re-trace passes_ (Risks,
+  "Deviations in T16.a.2, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -24261,3 +24263,37 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line.
     `TEST VENUS` draws `ATMOSPHERE: APPROXIMATE` by the thin method, as nothing routes. The tour
     has no descent through its deck. Its looks and frame times are pending: the owner's RTX run.
+- **Deviations in T16.a.2, as built** (2026-11-01; lane `r08-t16a2`; what T16.b.2 and the re-trace's
+  landing consume; measurements in the lane's outbox).
+  - _The route_ (`thick/routing.ts`): `ENVELOPE_GATE_TALLIES`, held to `vectorGate.json`'s
+    `deck.asAnEnvelope.tallies.images`; `deckGatePasses` (every image a pass, none a miss; lean,
+    2026-11-01); `DECK_ROUTE_RANGE = deckRouteRangeOf(ENVELOPE_GATE_TALLIES)`, `null` while all 30
+    values are refused. When the re-trace lands, re-record the tallies there and the route opens.
+  - _The envelope's range_ (lean, 2026-11-01; a question to main): `ENVELOPE_ROUTE_RANGE`, giant-deck's
+    envelope variant's own channels, read on the medium above the split (`deckRouted` reads an
+    envelope's upper medium, a deck over a surface its whole). The hand and generated Jupiters lie
+    outside it (the chromophore's τ (1 − ω̄) 0.065–0.49, blue τ 17), so a pass alone routes neither.
+  - _The drawing_: `opticsJobs.ts`'s `OPTICS_ASSEMBLY` (`envelopes: true`) for every worker's
+    assembly and line species. `ToDraw.envelope` is a record's `DrawnMedium.envelope !== undefined`.
+    Unrouted, a giant is drawn by the analytic term under `ATMOSPHERE: APPROXIMATE`, `THICK_REASON`.
+  - _A closed envelope above its floor_ (lean, 2026-11-01): its tables are made of `deckBuiltOf`'s
+    medium above the floor, over a black ground, with no deck bake. Over the whole column Ψ_ms
+    diverges (the hand Jupiter's 3.9 × 10⁵⁰, past `rgba16float`; 0.77 above its floor;
+    `envelopeTables.test.ts`). `deckBuiltOf` now takes the temperature's levels from the split.
+  - _No disc table for an envelope_ (lean, 2026-11-01): `#disc` asks none, so the full passes draw
+    it at every distance until T16.b.2 checks its disc at 10⁹ m and lifts the exclusion.
+  - _The hand Jupiter in the view_: `KeptBodyAtmosphere` gains `record` (`detail`), built through
+    the optics pool as a server body's reply. `ATMOSPHERE TEST`'s `TEST JUPITER`
+    (`ATMOSPHERE_JUPITER`, `legsOn(7)`) loads `test/giantFixtures.ts`'s `handJupiterRecord` lazily
+    (lean: a test fixture in a kept test scene). It is drawn black on its floor's level surface,
+    71,310.9 × 66,697.1 km, which its tables take.
+  - _The views check_: tour steps of kind `range`; `JUPITER_CAPTURE_RANGES_M` (9.5 × 10⁸, 5 × 10⁸,
+    2.2 × 10⁸, 1.5 × 10⁸ m), labels `fixture-test-jupiter-<km>-km`. Each fixture's capture waits
+    for no `ATMOSPHERE: PENDING`.
+  - _Charged partners_ (research-r08-t16a-widths, Q1 (b)): `CHARGED_BROADENERS`, the registry's
+    `ion` kind, unbounded in `broadeningFactor`. This amends decision-r08-approximate-plate §8.1,
+    item 2. Labels move; no medium does.
+  - _Open_ (a question to main): a served giant's disc stands on its wire's 1-bar figure, its R07
+    photometry under the medium's air above 1 bar, while `TEST JUPITER` stands on its datum.
+  - _Pending, the owner's RTX run_: an envelope's routed frame against
+    `decision-r08-t11-frame.md`'s 16.67 ms, before the route opens; the views check's looks.
