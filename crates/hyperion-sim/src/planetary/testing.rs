@@ -500,9 +500,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
-/// - a body's bulk iron with its solids' minor oxides, `MINOR_OXIDES_VERSION` (P14.T51.k), at
-///   `MinorOxidesRules::Chondritic` through `with_minor_oxides`: the mantle `FeO` and the
-///   secondary crust that read it.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -524,7 +521,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
         with_organic_sediment, with_rayleigh_adding,
     };
-    use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -573,8 +569,28 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || with_minor_oxides(MinorOxidesRules::Chondritic, run);
     with_locked_climate(LockedClimateRules::Deck, run)
+}
+
+/// `run`'s result with every landed hold at generator version 27 in force on this thread, for a
+/// test that asserts a 27 figure: every 26 hold ([`with_every_26_hold`]) and those at 27, each with
+/// its switch, which sets its rules back as it returns, a panic in `run` included. A test may set
+/// one hold back inside it to compare 27 with and without it.
+///
+/// The holds at 27:
+///
+/// - a body's bulk iron with its solids' minor oxides and following its core,
+///   `MINOR_OXIDES_VERSION` (P14.T51.k), at `MinorOxidesRules::Chondritic` through
+///   `with_minor_oxides`: the mantle `FeO` and the secondary crust that read it.
+///
+/// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
+/// it is generated, so a test generates afresh inside it. A later hold at 27 adds its switch
+/// here; 26's bump, which deletes [`with_every_26_hold`], leaves this helper its 27 switches alone,
+/// and 27's bump deletes it with its holds.
+#[cfg(test)]
+pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
+    with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 
 #[cfg(test)]

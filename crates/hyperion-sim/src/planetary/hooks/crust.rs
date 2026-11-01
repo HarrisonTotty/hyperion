@@ -662,23 +662,27 @@ pub fn ordinary_chondrite(delta_iw: Dex) -> CrustLithology {
     }
 }
 
-/// The generator version from which a body's bulk iron counts its solids' minor oxides
-/// (P14.T51.k; decision-pre-23-review §5, item 8): 26, the planetary bump after 25's.
+/// The generator version from which a body's bulk iron counts its solids' minor oxides and
+/// follows its core (P14.T51.k; decision-pre-23-review §5, item 8): 27. It does not ride 26: the
+/// minor oxides alone left an Earth's core more iron than the body holds, its mantle clamped to no
+/// `FeO`, until the bulk iron followed the core ([`BULK_IRON_CORE_SLOPE`]).
 ///
 /// It is P14.T51.k's one hold. Below it [`MinorOxidesRules::in_force`] is
 /// [`MinorOxidesRules::Held`]: [`bulk_iron_mass_fraction`] counts the solids as Fe, `MgO` and
-/// `SiO₂` alone, and every figure is version 24's and 25's bit for bit. 26's bump deletes this
-/// hold, [`MinorOxidesRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_minor_oxides_are_held_only_until_the_26_bump`).
-pub(crate) const MINOR_OXIDES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// `SiO₂` alone, a body's bulk iron is its host's, and every figure is version 24's, 25's and 26's
+/// bit for bit. 27's bump deletes this hold, [`MinorOxidesRules`] with its `Held` arm, the tests'
+/// switch and its tripwire (`the_minor_oxides_are_held_only_until_the_27_bump`).
+pub(crate) const MINOR_OXIDES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether a body's bulk iron counts its solids' minor oxides (its hold,
 /// [`MINOR_OXIDES_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MinorOxidesRules {
-    /// Version 25's and before: the solids are Fe, `MgO` and `SiO₂` alone.
+    /// Version 26's and before: the solids are Fe, `MgO` and `SiO₂` alone, and a body's bulk iron
+    /// is its host's.
     Held,
-    /// Version 26's: the solids also carry [`MINOR_SOLIDS`] at their chondritic ratios.
+    /// Version 27's: the solids also carry [`MINOR_SOLIDS`] at their chondritic ratios, and a
+    /// body's bulk iron follows its core ([`BULK_IRON_CORE_SLOPE`]).
     Chondritic,
 }
 
@@ -709,7 +713,7 @@ thread_local! {
 
 /// `run`'s result with the minor oxides' rules `rules` on this thread, for the tests to reach
 /// P14.T51.k ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
+/// 27's bump deletes it with the hold.
 #[cfg(test)]
 pub(crate) fn with_minor_oxides<R>(rules: MinorOxidesRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -723,7 +727,7 @@ pub(crate) fn with_minor_oxides<R>(rules: MinorOxidesRules, run: impl FnOnce() -
     run()
 }
 
-/// The solids' minor elements from version 26 ([`MINOR_OXIDES_VERSION`]), each with the oxygen
+/// The solids' minor elements from version 27 ([`MINOR_OXIDES_VERSION`]), each with the oxygen
 /// atoms it carries: calcium as `CaO`, aluminium as `Al₂O₃` and sodium as `Na₂O`, the rock's, and
 /// nickel and sulphur as the elements, the core's ([`CORE_IRON_FRACTION`]'s "nickel and light
 /// elements").
@@ -748,14 +752,15 @@ const MINOR_SOLIDS: [(Element, f64); 5] = [
 /// F = Fe/(Mg + Si) the protosolar ratio (Lodders 2010) times 10^(−\[α/Fe\]), since no host
 /// Fe/(Mg + Si) is drawn (P14.T50.a): `w_Fe` = n `M_Fe` ÷ (r `M_MgO` + `M_SiO₂` + n `M_Fe`).
 ///
-/// Below version 26 (P14.T51.k's hold, `MINOR_OXIDES_VERSION`) the solids are counted as these
+/// Below version 27 (P14.T51.k's hold, `MINOR_OXIDES_VERSION`) the solids are counted as these
 /// three alone, with every iron as metal, so that the bulk Earth's 32 wt% (31.4 at the Sun's
-/// ratios) is its iron's whether in its core or its mantle. From 26 they also carry their minor
+/// ratios) is its iron's whether in its core or its mantle. From 27 they also carry their minor
 /// solids, `CaO`, `Al₂O₃` and `Na₂O` in the rock and Ni and S in the core, each element X at
 /// X/(Mg + Si) its protosolar ratio times (1 + r), times 10^(−\[α/Fe\]) unless it is an α element
 /// ([`ALPHA_ELEMENTS`]: Ca and S keep their ratio to Mg and Si, while Al, Na and Ni follow iron),
-/// as P14.T51.k gives it: 26.8 wt% at the Sun's ratios. The core's share of the solids is not
-/// read here, and does not move.
+/// as P14.T51.k gives it: 26.8 wt% at the Sun's ratios. It is the host's solids' iron: the core's
+/// share of the solids is not read here, and does not move. A body's own bulk iron follows its
+/// core from 27 ([`mantle_iron_oxide_mass_fraction`]).
 #[must_use]
 pub fn bulk_iron_mass_fraction(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> f64 {
     match MinorOxidesRules::in_force() {
@@ -766,7 +771,7 @@ pub fn bulk_iron_mass_fraction(host_magnesium_to_silicon: f64, alpha_fe: Dex) ->
     }
 }
 
-/// [`bulk_iron_mass_fraction`] with the solids Fe, `MgO` and `SiO₂` alone, version 25's and
+/// [`bulk_iron_mass_fraction`] with the solids Fe, `MgO` and `SiO₂` alone, version 26's and
 /// before.
 #[must_use]
 fn bulk_iron_of_three_solids(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> f64 {
@@ -780,7 +785,7 @@ fn bulk_iron_of_three_solids(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> f
     n * m_fe / (r * m_mgo + m_sio2 + n * m_fe)
 }
 
-/// [`bulk_iron_mass_fraction`] with the solids' [`MINOR_SOLIDS`] counted, version 26's.
+/// [`bulk_iron_mass_fraction`] with the solids' [`MINOR_SOLIDS`] counted, version 27's.
 #[must_use]
 fn bulk_iron_with_minor_solids(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> f64 {
     let a = |e: Element| math::exp10(e.protosolar_log_abundance().value());
@@ -821,6 +826,30 @@ fn oxide_weights() -> (f64, f64, f64) {
     )
 }
 
+/// How a body's bulk iron rises with its core's share of its solids from version 27 (P14.T51.k's
+/// hold, `MINOR_OXIDES_VERSION`): η, in its host's iron ([`bulk_iron_mass_fraction`]) times
+/// 1 + η (`f_core` − `f₀`), `f₀` [`BULK_IRON_CORE_PIVOT`]; 1.460 (lean, 2026-11-01).
+///
+/// The planets' bulk iron is not their host's alone. Earth's Fe/(Mg + Si) by atoms is 1.155 times
+/// the Sun's (McDonough 2003, Treatise on Geochemistry 2, 547: Fe 32.0, Mg 15.4 and Si 16.1 wt%;
+/// not read here), while Mars's is near chondritic (Dreibus and Wänke 1985), and no bulk iron read
+/// from the host alone gives both their mantles. The core's share, from the body's radius, is the
+/// one measure of its own iron that the crust reads. η and `f₀` are fixed by two anchors at the
+/// Sun's Mg/Si and \[α/Fe\] 0: an Earth (core 0.325) with the bulk silicate Earth's 8.05 wt% `FeO`
+/// (McDonough and Sun 1995, as [`IRON_RICH_MANTLE_FEO`] cites it) and a Mars (0.204) with its ruled
+/// band's middle, 15.8 wt%, between Khan et al.'s (2022) 13.7 ± 0.4 and Dreibus and Wänke's (1985)
+/// 17.9. At the Sun's 26.8 wt%, d`w_Fe`/d`f_core` is 0.39 against the core's 0.85
+/// ([`CORE_IRON_FRACTION`]): about half of the core's spread between Mars and Earth is bulk iron,
+/// and the rest is iron that redox moved between mantle and core.
+pub const BULK_IRON_CORE_SLOPE: f64 = 1.460;
+
+/// The core share `f₀` at which a body's bulk iron is its host's, in [`BULK_IRON_CORE_SLOPE`]'s
+/// factor from version 27: 0.1955, fixed with η by its two anchors (lean, 2026-11-01).
+///
+/// The factor is 0.714 at a core share of 0, and positive on [0, 1). At the Sun's ratios a
+/// mantle's `FeO` falls to the clamp's 0 at a core share of 0.417, so a Mercury keeps none.
+pub const BULK_IRON_CORE_PIVOT: f64 = 0.1955;
+
 /// `FeO`'s mass over its iron's, 1.2865: (`M_Fe` + `M_O`) ÷ `M_Fe` from the standard atomic weights.
 #[must_use]
 fn iron_oxide_per_iron() -> f64 {
@@ -832,8 +861,13 @@ fn iron_oxide_per_iron() -> f64 {
 /// (`f_core` = iron ÷ (iron + rock), in [0, 1)), about a host of Mg/Si
 /// `host_magnesium_to_silicon` and \[α/Fe\] `alpha_fe`, by mass balance:
 /// 1.2865 × max(0, `w_Fe` − `f_core` × [`CORE_IRON_FRACTION`]) ÷ (1 − `f_core`), with `w_Fe` the
-/// bulk iron fraction ([`bulk_iron_mass_fraction`]); 0 for a core share of 1 or more, or NaN,
-/// a body of no mantle.
+/// body's bulk iron fraction; 0 for a core share of 1 or more, or NaN, a body of no mantle.
+///
+/// Below version 27 (P14.T51.k's hold, `MINOR_OXIDES_VERSION`) `w_Fe` is its host's
+/// ([`bulk_iron_mass_fraction`]). From 27 it is its host's times 1 + η (`f_core` − `f₀`), η
+/// [`BULK_IRON_CORE_SLOPE`] and `f₀` [`BULK_IRON_CORE_PIVOT`], so that a body's iron follows its
+/// core: at the Sun's ratios an Earth (0.325) has 8.05 wt% `FeO`, a Mars (0.204) 15.80, and a
+/// body of the generated Venus's core (0.288) 10.69.
 ///
 /// # Examples
 ///
@@ -857,7 +891,13 @@ pub fn mantle_iron_oxide_mass_fraction(
     if core_share.is_nan() || core_share >= 1.0 {
         return 0.0;
     }
-    let bulk = bulk_iron_mass_fraction(host_magnesium_to_silicon, alpha_fe);
+    let host = bulk_iron_mass_fraction(host_magnesium_to_silicon, alpha_fe);
+    let bulk = match MinorOxidesRules::in_force() {
+        MinorOxidesRules::Held => host,
+        MinorOxidesRules::Chondritic => {
+            host * (1.0 + BULK_IRON_CORE_SLOPE * (core_share - BULK_IRON_CORE_PIVOT))
+        }
+    };
     let mantle_iron = bulk - core_share * CORE_IRON_FRACTION;
     let mantle_iron = if mantle_iron > 0.0 { mantle_iron } else { 0.0 };
     iron_oxide_per_iron() * mantle_iron / (1.0 - core_share)

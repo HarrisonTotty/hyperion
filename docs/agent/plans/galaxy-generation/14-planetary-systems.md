@@ -7541,7 +7541,7 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     and Wänke 1985); Venus below the 12 wt% edge (Venera's 7.7–9.3).
   - _Files:_ `planetary/hooks/crust.rs` and its tests; `tests/golden/planetary/crust.golden`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::crust`.
-  - _Built_ 2026-11-01, held at 26 (`MINOR_OXIDES_VERSION`): Risks, "Deviations in P14.T51.k,
+  - _Built_ 2026-11-01, held at 27 (`MINOR_OXIDES_VERSION`): Risks, "Deviations in P14.T51.k,
     as built".
 - **P14.T51.l The passes' superlinear bracketed root** (a later planetary bump, the first after
   24; amends P14.T51.h; after P14.T54.b; decision-p14-t54a-passes §C.5's deferred finding;
@@ -33781,17 +33781,25 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   (`hooks::crust::MINOR_OXIDES_VERSION`; `MinorOxidesRules::{Held, Chondritic}`,
   `with_minor_oxides`, a line in `with_every_26_hold`). Nothing moves at 24 or 25; no contract or
   signature changes, and no core fraction moves (`the_minor_oxides_move_no_core_fraction`).
+- **Deviations in P14.T51.k, as built (`p14-t51k`, `fix-p14-t51k-bulk-iron`, 2026-11-01).** Held
+  at 27 (`hooks::crust::MINOR_OXIDES_VERSION`; `MinorOxidesRules::{Held, Chondritic}`,
+  `with_minor_oxides`, the one line of a new `with_every_27_hold`, which wraps
+  `with_every_26_hold`). Nothing moves at 24, 25 or 26; no contract or signature changes, and no
+  core fraction moves (`the_minor_oxides_move_no_core_fraction`).
   - _The arm:_ `MINOR_SOLIDS`, Ca, Al and Na as `CaO`, `Al₂O₃` and `Na₂O` and Ni and S as the
     elements, at the registry's protosolar ratios to Mg + Si; Ca and S (α) keep them, Al, Na and Ni
-    follow iron's 10^(−[α/Fe]). At the Sun's ratios the bulk iron falls from 31.4 to 26.8 wt%:
-    Mars (core 0.204) 15.3 wt% `FeO`, the generated Venus (0.288) 4.1 wt% and `basalt`.
-  - _Earth's check (lean, 2026-11-01):_ not met. No bulk iron read from the host alone gives both
-    Earth's 8.05 ± 1 (31.3–32.4 wt% iron at the core's 0.85) and Mars's 13.7–17.9 (25.8–28.4).
-    Earth's mantle `FeO` clamps to 0, and its lid stays `basalt`. It is pinned as it stands; a
-    body-specific bulk iron is the owner's ruling.
-  - _For 26's bump:_ delete what `the_minor_oxides_are_held_only_until_the_26_bump` lists, restate
+    follow iron's 10^(−[α/Fe]). The host's bulk iron at the Sun's ratios falls from 31.4 to 26.8
+    wt%.
+  - _The core's factor (lean, 2026-11-01):_ in `mantle_iron_oxide_mass_fraction`'s `Chondritic`
+    arm a body's bulk iron is its host's times 1 + η (f_core − f₀), `BULK_IRON_CORE_SLOPE` η =
+    1.460 and `BULK_IRON_CORE_PIVOT` f₀ = 0.1955, fixed on an Earth (0.325) at 8.05 wt% `FeO` and
+    a Mars (0.204) at 15.8. It replaces the lean that pinned Earth at 0. At the Sun's ratios:
+    Earth 8.05, Mars 15.80, the generated Mars 15.13, the generated Venus 10.69 (`basalt`),
+    Venus's fixture 9.87; the clamp starts at f = 0.417.
+  - _For 27's bump:_ delete what `the_minor_oxides_are_held_only_until_the_27_bump` lists, restate
     `an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt` and the held half of
-    `the_generated_venus_takes_basalt_under_26`, and re-bless the movers of the hold alone (measured
-    with it in force on 24's rules): `planetary/surface_conditions_published`, whose
-    02000b2ca0000000.0300 alone moves (158.5 → 59.5 kPa). `crust.golden`, `planetary/systems`, the
-    surface and photometry goldens, and the server's do not move.
+    `the_generated_venus_takes_basalt_under_27`, and re-bless the hold's movers (measured with it
+    in force on 24's rules): `planetary/surface_conditions_published` (02000b2ca0000000.0300 alone)
+    and `planetary/systems/subgiant` (e181's buried secondary `basalt` → `basalt_fe`, in both
+    sections). `crust.golden`, the other systems, the surface and photometry goldens, and the
+    server's do not move.

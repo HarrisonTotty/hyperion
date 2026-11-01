@@ -361,7 +361,7 @@ fn mars_has_an_iron_rich_basalt_lid_over_a_buried_ultramafic_crust() {
     assert_eq!(crust.redox(), RedoxClass::Intermediate);
 }
 
-/// Below 26, an Earth's and a Mars's mass balance put their mantles either side of the iron-rich
+/// Below 27, an Earth's and a Mars's mass balance put their mantles either side of the iron-rich
 /// edge: an Earth's 7.3 wt% beside the bulk silicate Earth's 8.05, and a Mars's 22.8 wt% beside
 /// Dreibus and Wänke's 17.9 and Khan et al.'s (2022) 13.7 (plan 14's record of P14.T51.c).
 #[test]
@@ -381,20 +381,20 @@ fn an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt() {
     });
 }
 
-/// P14.T51.k is held until the 25 → 26 bump: the rules in force are the three solids', and the
-/// tests' switch and 26's helper reach the minor oxides.
+/// P14.T51.k is held until the 26 → 27 bump: the rules in force are the three solids', the tests'
+/// switch and 27's helper reach the minor oxides, and 26's helper does not.
 #[test]
-fn the_minor_oxides_are_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_minor_oxides_are_held_only_until_the_27_bump() {
+    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
     assert!(
         GENERATOR_VERSION < MINOR_OXIDES_VERSION,
-        "the 25 → 26 bump puts P14.T51.k's minor oxides in a body's bulk iron: delete \
-         `MINOR_OXIDES_VERSION`, `MinorOxidesRules` with its `Held` arm, its match in \
-         `bulk_iron_mass_fraction` and `bulk_iron_of_three_solids`, the tests' \
-         `with_minor_oxides`, its switch in `with_every_26_hold` (and the helper, if no other 26 \
-         hold is left), and this test; restate \
-         `an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt` and the generated \
-         Venus's held half, and re-bless the movers plan 14's record of P14.T51.k lists"
+        "the 26 → 27 bump puts P14.T51.k's minor oxides and its core's factor in a body's bulk \
+         iron: delete `MINOR_OXIDES_VERSION`, `MinorOxidesRules` with its `Held` arm, its matches \
+         in `bulk_iron_mass_fraction` and `mantle_iron_oxide_mass_fraction`, \
+         `bulk_iron_of_three_solids`, the tests' `with_minor_oxides`, its switch in \
+         `with_every_27_hold` (and the helper, if no other 27 hold is left), and this test; \
+         restate `an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt` and the \
+         generated Venus's held half, and re-bless the movers plan 14's record of P14.T51.k lists"
     );
     assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
     assert_eq!(
@@ -402,11 +402,15 @@ fn the_minor_oxides_are_held_only_until_the_26_bump() {
         MinorOxidesRules::Chondritic
     );
     assert_eq!(
-        with_every_26_hold(MinorOxidesRules::in_force),
+        with_every_27_hold(MinorOxidesRules::in_force),
         MinorOxidesRules::Chondritic
     );
     assert_eq!(
-        with_every_26_hold(|| {
+        with_every_26_hold(MinorOxidesRules::in_force),
+        MinorOxidesRules::Held
+    );
+    assert_eq!(
+        with_every_27_hold(|| {
             with_minor_oxides(MinorOxidesRules::Held, MinorOxidesRules::in_force)
         }),
         MinorOxidesRules::Held
@@ -414,28 +418,27 @@ fn the_minor_oxides_are_held_only_until_the_26_bump() {
     assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
 }
 
-/// Under every 26 hold the solids carry their minor oxides (P14.T51.k): the bulk iron at the Sun's
-/// ratios falls from 31.4 to 26.8 wt%, the ruling's about 28, and a Mars's mantle (its core 0.204)
-/// comes inside its measures, 13.7 ± 0.4 wt% (Khan et al. 2022) to 17.9 (Dreibus and Wänke 1985).
-///
-/// An Earth's (its core 0.325) does not reach the bulk silicate Earth's 8.05 ± 1 wt%, which the
-/// ruling also asks: no bulk iron read from the host alone can give both, since at the core's 85
-/// wt% iron ([`CORE_IRON_FRACTION`]) an Earth's 8.05 ± 1 needs 31.3–32.4 wt% of it and a Mars's
-/// 13.7–17.9 needs 25.8–28.4. An Earth's core holds 27.6 wt% of its solids as iron, more than the
-/// 26.8, so its mantle's `FeO` is pinned here as it stands, the clamp's 0 (plan 14's record of
-/// P14.T51.k, a lean); its secondary crust stays `basalt`.
+/// Under every 27 hold the solids carry their minor oxides and a body's bulk iron follows its core
+/// (P14.T51.k): the host's iron at the Sun's ratios falls from 31.4 to 26.8 wt%, the ruling's
+/// about 28; an Earth's mantle (its core 0.325) holds the bulk silicate Earth's 8.05 ± 1 wt%
+/// (McDonough and Sun 1995), and a Mars's (0.204) comes inside its measures, 13.7 ± 0.4 wt% (Khan
+/// et al. 2022) to 17.9 (Dreibus and Wänke 1985), above the edge. Venus's fixture (0.30) lies
+/// below the edge.
 #[test]
-fn under_26_the_minor_oxides_put_a_mars_s_mantle_inside_its_measures() {
-    use crate::planetary::testing::with_every_26_hold;
-    with_every_26_hold(|| {
+fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
         let solar = solar_magnesium_to_silicon();
+        let feo = |core: f64| mantle_iron_oxide_mass_fraction(core, solar, Dex::new(0.0));
         let bulk = bulk_iron_mass_fraction(solar, Dex::new(0.0));
         assert!((0.26..0.28).contains(&bulk), "{bulk}");
-        let mars = mantle_iron_oxide_mass_fraction(0.204, solar, Dex::new(0.0));
-        assert!((0.137..=0.179).contains(&mars), "{mars}");
-        assert!(mars > IRON_RICH_MANTLE_FEO);
-        let earth_feo = mantle_iron_oxide_mass_fraction(0.325, solar, Dex::new(0.0));
-        assert_same_bits(earth_feo, 0.0);
+        let earth_feo = feo(0.325);
+        assert!((0.070_5..=0.090_5).contains(&earth_feo), "{earth_feo}");
+        let mars_feo = feo(0.204);
+        assert!((0.137..=0.179).contains(&mars_feo), "{mars_feo}");
+        assert!(mars_feo > IRON_RICH_MANTLE_FEO);
+        let venus_feo = feo(0.30);
+        assert!(venus_feo < IRON_RICH_MANTLE_FEO, "{venus_feo}");
         // The held arm's iron is the same atoms over fewer solids.
         let held = with_minor_oxides(MinorOxidesRules::Held, || {
             bulk_iron_mass_fraction(solar, Dex::new(0.0))
@@ -447,17 +450,102 @@ fn under_26_the_minor_oxides_put_a_mars_s_mantle_inside_its_measures() {
         let surface = table_conditions("Earth");
         let crust = CrustComposition::derive(&earth(&surface)).unwrap();
         assert_eq!(key(crust.secondary()), "basalt");
+        let surface = table_conditions("Venus");
+        let crust = CrustComposition::derive(&venus(&surface)).unwrap();
+        assert_eq!(key(crust.secondary()), "basalt");
+    });
+}
+
+/// The core's factor's two constants are its two anchors' (P14.T51.k's lean): an Earth (core
+/// 0.325) at the bulk silicate Earth's 8.05 wt% `FeO` and a Mars (0.204) at its band's middle,
+/// 15.8, at the Sun's ratios, solved for η and `f₀`, give [`BULK_IRON_CORE_SLOPE`] and
+/// [`BULK_IRON_CORE_PIVOT`] within 10⁻³.
+#[test]
+fn the_core_s_factor_is_fixed_by_an_earth_and_a_mars() {
+    use crate::planetary::testing::with_every_27_hold;
+    let host =
+        with_every_27_hold(|| bulk_iron_mass_fraction(solar_magnesium_to_silicon(), Dex::new(0.0)));
+    // The bulk iron a core share and a mantle `FeO` need: w = f × 0.85 + FeO (1 − f) ÷ 1.2865.
+    let needs = |core: f64, feo: f64| {
+        core * CORE_IRON_FRACTION + feo * (1.0 - core) / iron_oxide_per_iron()
+    };
+    let (earth, mars) = ((0.325, 0.080_5), (0.204, 0.158));
+    let (earth_bulk, mars_bulk) = (needs(earth.0, earth.1), needs(mars.0, mars.1));
+    // host × (1 + η (f − f₀)) is linear in f: its slope gives η, and its value at Mars's core f₀.
+    let eta = (earth_bulk - mars_bulk) / (host * (earth.0 - mars.0));
+    let pivot = mars.0 - (mars_bulk / host - 1.0) / eta;
+    assert!((eta - BULK_IRON_CORE_SLOPE).abs() < 1e-3, "{eta}");
+    assert!((pivot - BULK_IRON_CORE_PIVOT).abs() < 1e-3, "{pivot}");
+    // d`w_Fe`/d`f_core` = 0.39, against the core's 0.85, and the factor is 0.714 at no core.
+    assert!((host * BULK_IRON_CORE_SLOPE - 0.39).abs() < 0.005);
+    let factor_at_no_core = 1.0 - BULK_IRON_CORE_SLOPE * BULK_IRON_CORE_PIVOT;
+    assert!(
+        (factor_at_no_core - 0.714).abs() < 0.001,
+        "{factor_at_no_core}"
+    );
+}
+
+/// Under every 27 hold the mantle's `FeO` is finite, lies in [0, 0.35] and never rises with the
+/// core share, over cores of 0 to 0.95, host Mg/Si of 0.7 to 1.5 and \[α/Fe\] of −0.2 to +0.5.
+#[test]
+fn under_27_the_mantle_s_feo_is_bounded_and_falls_with_the_core() {
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        for ratio in [0.7, 0.9, 1.1, 1.3, 1.5] {
+            for alpha in [-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5] {
+                let mut previous = f64::INFINITY;
+                for step in 0..20_u8 {
+                    let core = 0.05 * f64::from(step);
+                    let feo = mantle_iron_oxide_mass_fraction(core, ratio, Dex::new(alpha));
+                    assert!(feo.is_finite(), "{core} {ratio} {alpha}");
+                    assert!(
+                        (0.0..=0.35).contains(&feo),
+                        "{feo} at {core} {ratio} {alpha}"
+                    );
+                    assert!(
+                        feo <= previous,
+                        "{feo} above {previous} at {core} {ratio} {alpha}"
+                    );
+                    previous = feo;
+                }
+            }
+        }
+    });
+}
+
+/// The Solar System table's generated Mars (its derived core, 0.216 of its solids) holds a mantle
+/// inside its measures under every 27 hold, 13.7–17.9 wt% `FeO`, and keeps its `basalt_fe` lid.
+#[test]
+fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
+    use crate::planetary::derive::solar::historic;
+    use crate::planetary::testing::with_every_27_hold;
+    let fractions = historic("Mars").fractions();
+    let core = core_share(&fractions);
+    assert!((0.21..0.222).contains(&core), "{core}");
+    let surface = table_conditions("Mars");
+    let generated = CrustCompositionInputs {
+        fractions,
+        ..mars(&surface)
+    };
+    with_every_27_hold(|| {
+        let feo =
+            mantle_iron_oxide_mass_fraction(core, solar_magnesium_to_silicon(), Dex::new(0.0));
+        assert!((0.137..=0.179).contains(&feo), "{feo}");
+        let crust = CrustComposition::derive(&generated).unwrap();
+        assert_eq!(crust.lid(), LidCrust::Secondary);
+        assert_eq!(key(crust.secondary()), "basalt_fe");
+        assert_eq!(key(Some(crust.provinces())), "basalt_fe");
     });
 }
 
 /// The Solar System table's generated Venus (its derived core, 0.288 of its solids, below
-/// Venus's fixture's 0.30) takes `basalt_fe` below 26, its mantle at 12.5 wt% `FeO` just above
-/// the edge, and `basalt` under every 26 hold, below the edge as Venera's 7.7–9.3 wt% basalts
-/// favour (decision-pre-23-review §8).
+/// Venus's fixture's 0.30) takes `basalt_fe` below 27, its mantle at 12.5 wt% `FeO` just above
+/// the edge, and `basalt` under every 27 hold, at 6–12 wt%, below the edge as Venera's 7.7–9.3
+/// wt% basalts favour (decision-pre-23-review §8).
 #[test]
-fn the_generated_venus_takes_basalt_under_26() {
+fn the_generated_venus_takes_basalt_under_27() {
     use crate::planetary::derive::solar::historic;
-    use crate::planetary::testing::with_every_26_hold;
+    use crate::planetary::testing::with_every_27_hold;
     let fractions = historic("Venus").fractions();
     let core = core_share(&fractions);
     assert!((0.285..0.292).contains(&core), "{core}");
@@ -471,9 +559,9 @@ fn the_generated_venus_takes_basalt_under_26() {
     assert!((IRON_RICH_MANTLE_FEO..0.13).contains(&held), "{held}");
     let crust = CrustComposition::derive(&generated).unwrap();
     assert_eq!(key(crust.secondary()), "basalt_fe");
-    with_every_26_hold(|| {
+    with_every_27_hold(|| {
         let feo = mantle_iron_oxide_mass_fraction(core, solar, Dex::new(0.0));
-        assert!(feo < IRON_RICH_MANTLE_FEO, "{feo}");
+        assert!((0.06..IRON_RICH_MANTLE_FEO).contains(&feo), "{feo}");
         let crust = CrustComposition::derive(&generated).unwrap();
         assert_eq!(
             keys(&crust),
@@ -483,12 +571,12 @@ fn the_generated_venus_takes_basalt_under_26() {
 }
 
 /// The minor oxides move no body's core: the Solar System table's mass fractions are the same to
-/// the bit under every 26 hold with and without them.
+/// the bit under every 27 hold with and without them.
 #[test]
 fn the_minor_oxides_move_no_core_fraction() {
     use crate::planetary::derive::solar::historic_table;
-    use crate::planetary::testing::with_every_26_hold;
-    let table = |rules| with_every_26_hold(|| with_minor_oxides(rules, historic_table));
+    use crate::planetary::testing::with_every_27_hold;
+    let table = |rules| with_every_27_hold(|| with_minor_oxides(rules, historic_table));
     let (held, chondritic) = (
         table(MinorOxidesRules::Held),
         table(MinorOxidesRules::Chondritic),
