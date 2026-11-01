@@ -1,18 +1,20 @@
 /**
  * The thick bake's router (plan R08, R08.T14.c, R08.T14.d.4 and R08.T15.b.2; Design note 9's
- * routing): a `thickScattering` world routed within the range its passing gates cover, a `cloudDeck`
+ * routing): a `thickScattering` world routed within the range its passing gates cover, a Titan-class
+ * haze's opened by `titan-class`'s gate alone once its recorded verdict passes, a `cloudDeck`
  * world by its floor's range, none yet, a gas envelope's opened by `giant-deck`'s envelope variant
  * alone once its recorded verdict passes (R08.T16.a.2), and the polarisation correction asked of
  * every world with air once routed.
  */
 import { describe, expect, it } from "vitest";
 
+import { venusClassMedium } from "../../../test/atmosphereFixtures";
 import { detailOf, recordInput } from "../../../test/atmosphereRecords";
 import { handJupiterDetail } from "../../../test/giantFixtures";
 import { assembleMedium } from "../assemble";
 import { R05_EARTH_REFERENCE } from "../earth";
 import * as cases from "../reference/cases";
-import { giantDeckReferenceCase } from "../reference/thickCases";
+import { giantDeckReferenceCase, titanClassReferenceCase } from "../reference/thickCases";
 import committedGate from "../reference/vectorGate.json" with { type: "json" };
 import type { AtmosphereMedium } from "../medium";
 import { spectralColumnOf } from "./columnLayout";
@@ -25,6 +27,7 @@ import {
   regimeChannels,
 } from "./regime";
 import {
+  BELOW_THE_HORIZON_IMAGES,
   CORRECTION_ROUTED,
   correctionRouted,
   DECK_ROUTE_RANGE,
@@ -35,8 +38,13 @@ import {
   ENVELOPE_GATE_TALLIES,
   ENVELOPE_ROUTE_RANGE,
   type GateImageTally,
+  HAZE_GATE_TALLIES,
+  HAZE_ROUTE_RANGE,
+  hazeGatePasses,
   THICK_ROUTE_RANGE,
+  THICK_ROUTE_RANGES,
   thickBakeRouted,
+  thickRouteRangesOf,
   type ThickRouteRange,
   withinRouteRange,
 } from "./routing";
@@ -87,7 +95,7 @@ describe("thickBakeRouted (R08.T14.d.4)", () => {
     const earth = cases.EARTH_CASE.medium;
     expect([
       REGIMES.map((regime) => thickBakeRouted(regime, earth)),
-      REGIMES.map((regime) => thickBakeRouted(regime, earth, null)),
+      REGIMES.map((regime) => thickBakeRouted(regime, earth, [])),
     ]).toEqual([
       [false, true, false],
       [false, false, false],
@@ -331,6 +339,107 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
       regimeChannels(upper).map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
     ]).toEqual(["cloudDeck", false, [true, true, true]]);
   }, 180_000);
+});
+
+/** `titan-class`, and the regime it routes under a clear sky, how its gate reads it. */
+function titan(): { readonly medium: AtmosphereMedium; readonly regime: AtmosphereRegime } {
+  const { medium } = titanClassReferenceCase();
+  return { medium, regime: classifyRegime(medium, CLEAR_COVER) };
+}
+
+describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
+  /**
+   * Every image of the gate above the horizon passing, one value of each refused, and those below
+   * it refused throughout: a fixture verdict.
+   */
+  const passing: ReadonlyArray<GateImageTally> = HAZE_GATE_TALLIES.map((image) =>
+    BELOW_THE_HORIZON_IMAGES.includes(image.image)
+      ? tallied(image, 0, 0, image.comparisons)
+      : tallied(image, image.comparisons - 1, 0, 1),
+  );
+
+  it("holds the recorded verdict to vectorGate.json's titanClass, image by image", () => {
+    expect(HAZE_GATE_TALLIES).toEqual(
+      committedGate.titanClass.routed.images.map(
+        ([image, comparisons, passes, misses, refusals]) => ({
+          image,
+          comparisons,
+          passes,
+          misses,
+          refusals,
+        }),
+      ),
+    );
+  });
+
+  it("keeps the haze's route closed on the recorded verdict: titan-class misses at the horizon, the limb and in daylight", () => {
+    expect([hazeGatePasses(HAZE_GATE_TALLIES), THICK_ROUTE_RANGES]).toEqual([
+      false,
+      [THICK_ROUTE_RANGE],
+    ]);
+  });
+
+  it("routes titan-class if and only if its gate passes", () => {
+    const { medium, regime } = titan();
+    expect([
+      regime.kind,
+      thickBakeRouted(regime, medium),
+      thickBakeRouted(regime, medium, thickRouteRangesOf(HAZE_GATE_TALLIES)),
+      thickRouteRangesOf(passing),
+      thickBakeRouted(regime, medium, thickRouteRangesOf(passing)),
+    ]).toEqual(["thickScattering", false, false, [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE], true]);
+  }, 180_000);
+
+  it("never routes a Mars- or Venus-class medium, and routes the Earth- and Saturn-class cases as before, on either verdict", () => {
+    const venus = venusClassMedium().medium;
+    const routedOn = (ranges: ReadonlyArray<ThickRouteRange>): ReadonlyArray<unknown> => [
+      ...[...PASSING, cases.MARS_CASE].map((each) =>
+        thickBakeRouted(classifyRegime(each.medium, CLEAR_COVER), each.medium, ranges),
+      ),
+      thickBakeRouted(classifyRegime(venus, CLEAR_COVER), venus, ranges),
+      thickBakeRouted({ kind: "cloudDeck", deckAltitudeM: 70_000 }, venus, ranges),
+    ];
+    expect([
+      classifyRegime(venus, CLEAR_COVER).kind,
+      routedOn(THICK_ROUTE_RANGES),
+      routedOn(thickRouteRangesOf(passing)),
+    ]).toEqual([
+      "thickScattering",
+      [true, true, true, false, false, false],
+      [true, true, true, false, false, false],
+    ]);
+  });
+
+  it("judges no image whose sun stands below the horizon, and closes on a miss at the horizon or an image refused throughout", () => {
+    const twilit = passing.map((image) =>
+      image.image === "ground-s95" ? tallied(image, 0, 3, 60) : image,
+    );
+    const horizon = passing.map((image) =>
+      image.image === "ground-s90" ? tallied(image, 62, 1, 0) : image,
+    );
+    const refused = passing.map((image) =>
+      image.image === "limb" ? tallied(image, 0, 0, 15) : image,
+    );
+    expect([
+      BELOW_THE_HORIZON_IMAGES,
+      hazeGatePasses(passing),
+      hazeGatePasses(twilit),
+      hazeGatePasses(horizon),
+      hazeGatePasses(refused),
+      hazeGatePasses([]),
+    ]).toEqual([["ground-s95"], true, true, false, false, false]);
+  });
+
+  it.each(BOUNDS)(
+    "sets the haze's %s at titan-class's extreme, rounded outward at its third figure",
+    (key, side, read) => {
+      const channels = regimeChannels(titan().medium);
+      expect(outwardSteps(HAZE_ROUTE_RANGE[key], channels.map(read), side)).toEqual([
+        expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
+      ]);
+    },
+    180_000,
+  );
 });
 
 describe("correctionRouted (R08.T14.f, R08.T14.d.4)", () => {

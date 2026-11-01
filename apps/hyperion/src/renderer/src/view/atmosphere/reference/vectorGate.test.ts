@@ -59,6 +59,14 @@
  *   sun against `sanityRanges.json`'s 2–4%. Their vector I is never gated: the Stokes mode's I
  *   weight does not converge there, and `thick/polarisationBake.test.ts`'s guard holds what the
  *   scalar reading neglects.
+ * - **`titan-class` through its route** (R08.T14.d.4; the record's `titanClass`). The case, re-traced
+ *   deep by R08.T12.h, is read as a kept case is: the `thickScattering` route `classifyRegime`
+ *   gives it under a clear sky, its whole column baked at m ≤ 2 with its correction on the twin's
+ *   body, and the route's twin over every geometry against the vector I, its tallies by image as
+ *   the deck's envelope variant's, at the cut modes too; and the ground's downwelling flux under
+ *   each aggregate against the vector flux by the tolerance test. Its verdict by image is
+ *   `thick/routing.ts`'s `HAZE_GATE_TALLIES`, which opens a Titan-class world's route only on a
+ *   pass.
  *
  * The twin's values on the route and the diagnostic, each case setting's radiance and drawn-surface
  * share (the values `thickRuns.test.ts` replaces), are the record's; every other value is c1's.
@@ -156,7 +164,14 @@ import marsReference from "./mars.reference.json" with { type: "json" };
 import { fluxReadingsOf, type RadianceKind, type ReferenceFile } from "./references";
 import committedSanity from "./sanityRanges.json" with { type: "json" };
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
-import { GIANT_DECK, thickReferenceCases, VENUS_DECK, VENUS_DECK_MODES } from "./thickCases";
+import {
+  GIANT_DECK,
+  thickReferenceCases,
+  titanClassReferenceCase,
+  VENUS_DECK,
+  VENUS_DECK_MODES,
+} from "./thickCases";
+import titanClassReference from "./titan-class.reference.json" with { type: "json" };
 import { twinBakeBody, type TwinOptions } from "./twin";
 import committed from "./vectorGate.json" with { type: "json" };
 import venus58Reference from "./venus-58bar.reference.json" with { type: "json" };
@@ -211,9 +226,10 @@ const RECORD_FILE = "./vectorGate.json";
  * R08.T15.a.2, which adds `giant-deck`'s gate through its deck (`deck`); 4 from R08.T14.d.4, which
  * adds the ground's irradiance through the route; 5 from R08.T15.b.2, which adds the Venus-class
  * cases through their deck, scalar (`deck.venusClass`); 6 from R08.T15.b.2's step 3.3, which adds
- * `giant-deck` below its split (`deck.routedBelow`).
+ * `giant-deck` below its split (`deck.routedBelow`); 7 from R08.T14.d.4's Titan-class gate, which
+ * adds `titan-class` through its route (`titanClass`).
  */
-const VECTOR_GATE_FORMAT = 6;
+const VECTOR_GATE_FORMAT = 7;
 
 /** Who writes the record, as each of its records' heads says. */
 const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
@@ -1195,8 +1211,11 @@ function venusSplit(referenceCase: ReferenceCase): DeckSplit {
   return { altitudeM: regime.deckAltitudeM, floor: "ground" };
 }
 
-/** A Venus-class case's specs: each geometry's radiance and surface share, each aggregate's flux. */
-function venusSpecs(referenceCase: ReferenceCase): TwinValueSpec[] {
+/**
+ * A thick case's specs (a Venus-class case's, `titan-class`'s): each geometry's radiance and surface
+ * share, each aggregate's flux.
+ */
+function caseSpecs(referenceCase: ReferenceCase): TwinValueSpec[] {
   const caseName = referenceCase.name;
   return [
     ...referenceCase.geometries.flatMap((g) =>
@@ -1334,7 +1353,7 @@ function venusGateBaked(caseName: VenusCaseName): {
   const split = venusSplit(referenceCase);
   const kept = bakeKeptDeck(referenceCase, lights, body, split);
   const twin = caseTwin(referenceCase, { deck: { tables: kept.tables, polarisation: null } });
-  const values = valuesOf(twin, referenceCase, venusSpecs(referenceCase));
+  const values = valuesOf(twin, referenceCase, caseSpecs(referenceCase));
   const [first] = kept.tables;
   const upper = upperMediumOf(referenceCase.medium, split.altitudeM);
   const below = packBelowDeckTable(kept.tables, kernelMedium(referenceCase.medium));
@@ -1409,23 +1428,151 @@ function committedVenusFigures(caseName: VenusCaseName): VenusFigures {
   };
 }
 
+// --- R08.T14.d.4: titan-class through its route -------------------------------------------------
+
+/** The Titan-class gate's case: R08.T12.b.2's `titan-class`, re-traced deep by R08.T12.h. */
+const TITAN_CASE = "titan-class";
+
+/** `titan-class` and its committed reference. */
+function titanGateCase(): GateCase {
+  return { referenceCase: titanClassReferenceCase(), reference: titanClassReference };
+}
+
+/** What the Titan-class section takes beside its twin's values: its bakes' own figures and cuts. */
+interface TitanFigures {
+  /** The case's tables as packed, as {@link tablesOf} gives a kept case's. */
+  readonly tables: Record<string, unknown>;
+  /** The route's tallies at each of {@link CUT_MODES}, by the record's name. */
+  readonly byModes: Record<string, unknown>;
+}
+
+/** `titan-class`'s tallies by image against the vector I, from a twin's values of its geometries. */
+function titanTalliesOf(values: TwinValues): unknown {
+  return recordImagesOf(
+    { cases: { [TITAN_CASE]: caseGateSection(titanGateCase(), values, "vector") } },
+    TITAN_CASE,
+  );
+}
+
+/**
+ * `titan-class`'s gate through its route (the module's remarks): the route's tallies by image and
+ * its ratios against the vector I, at the cut modes too, every geometry's row, the ground's
+ * downwelling flux under each aggregate against the vector flux by the tolerance test, the tables,
+ * and the downwelling values the geometries' rows do not hold.
+ */
+function titanSectionOf(values: TwinValues, figures: TitanFigures): Record<string, unknown> {
+  const gateCase = titanGateCase();
+  const { referenceCase, reference } = gateCase;
+  const { regime, path } = routeOf(referenceCase);
+  const section = caseGateSection(gateCase, values, "vector");
+  const asRecord = { cases: { [TITAN_CASE]: section } };
+  const valueOf = (aggregate: string): Rgb => downwellingOf(values, TITAN_CASE, aggregate);
+  return {
+    case: TITAN_CASE,
+    regime: regime.kind,
+    route: path,
+    radiance: "vector",
+    rule: "thick/routing.ts's hazeGatePasses: every image above the horizon passes somewhere and none misses (the deck's rule, deckGatePasses), the sun's images below the horizon TWILIGHT_REASON's",
+    routed: recordImagesOf(asRecord, TITAN_CASE),
+    routedRatios: recordRatiosOf(asRecord, TITAN_CASE),
+    routedByModes: figures.byModes,
+    geometries: sectionOf(section, "geometries"),
+    groundIrradiance: deckGroundIrradianceOf(reference, "vector", valueOf),
+    tables: figures.tables,
+    downwelling: referenceCase.aggregates.map((a) => {
+      const key = twinValueKey({
+        quantity: "downwelling",
+        setting: "case",
+        caseName: TITAN_CASE,
+        name: a.name,
+      });
+      const value = valueOf(a.name);
+      return [key, value[0], value[1], value[2]];
+    }),
+  };
+}
+
+/**
+ * `titan-class` baked through its route, by hand (the module's remarks): its bake and correction on
+ * the twin's body, the route's twin's values, and the bakes' figures, the route's tallies at the cut
+ * modes among them.
+ */
+function titanGateBaked(): { readonly values: TwinValues; readonly figures: TitanFigures } {
+  const { referenceCase } = titanGateCase();
+  const bakes = bakesOf(referenceCase);
+  const specs = caseSpecs(referenceCase);
+  const byModes = Object.fromEntries(
+    CUT_MODES.map(([name, modes]) => {
+      const cut = { ...bakes, bands: cutModes(bakes.bands, modes) };
+      return [
+        name,
+        titanTalliesOf(valuesOf(twinOn("routed", referenceCase, cut), referenceCase, specs)),
+      ];
+    }),
+  );
+  return {
+    values: valuesOf(twinOn("routed", referenceCase, bakes), referenceCase, specs),
+    figures: { tables: tablesOf(referenceCase, bakes), byModes },
+  };
+}
+
+/** The committed record's Titan-class section, read back. */
+function committedTitanSection(): unknown {
+  return Reflect.get(committed, "titanClass");
+}
+
+/**
+ * The committed Titan-class section's twin values: its geometries' rows' radiance and surface
+ * share, and its downwelling rows.
+ */
+function committedTitanValues(): Map<string, Rgb> {
+  const section = committedTitanSection();
+  return twinValuesOfRecord({
+    format: CASE_GATE_FORMAT,
+    cases: { [TITAN_CASE]: { geometries: sectionOf(section, "geometries") } },
+    twinValues: sectionOf(section, "downwelling"),
+  });
+}
+
+/**
+ * The committed Titan-class section's figures.
+ *
+ * @throws Error for a record whose section lacks them.
+ */
+function committedTitanFigures(): TitanFigures {
+  const section = committedTitanSection();
+  const tables: unknown = sectionOf(section, "tables");
+  const byModes: unknown = sectionOf(section, "routedByModes");
+  if (typeof tables !== "object" || tables === null) {
+    throw new Error("vectorGate.json's Titan-class section holds no tables");
+  }
+  if (typeof byModes !== "object" || byModes === null) {
+    throw new Error("vectorGate.json's Titan-class section holds no tallies at the cut modes");
+  }
+  return {
+    tables: Object.fromEntries(Object.entries(tables)),
+    byModes: Object.fromEntries(Object.entries(byModes)),
+  };
+}
+
 /**
  * The record of both paths' values, the route at the cut modes and each case's tables (the module's
- * remarks), each case's last two by `modes` and `tables`, and `giant-deck`'s gate through its deck,
- * `deck` (R08.T15.a.2).
+ * remarks), each case's last two by `modes` and `tables`, `giant-deck`'s gate through its deck,
+ * `deck` (R08.T15.a.2), and `titan-class`'s through its route, `titanClass` (R08.T14.d.4).
  */
 function vectorGateRecord(
   paths: Readonly<Record<PathName, TwinValues>>,
   modes: (caseName: string) => unknown,
   tables: (caseName: string) => unknown,
   deck: unknown,
+  titanClass: unknown,
 ): Record<string, unknown> {
   const routed = vectorRecordOf(paths.routed);
   const diagnostic = vectorRecordOf(paths.diagnostic);
   const uncorrected = caseGateRecord(CASES, C1_VALUES, { writer: WRITER, radiance: "vector" });
   return {
     description:
-      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); its route below the split, the table below the deck uncorrected against the vector I, and the ground's flux against the vector flux (deck.routedBelow, R08.T15.b.2); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); its route below the split, the table below the deck uncorrected against the vector I, and the ground's flux against the vector flux (deck.routedBelow, R08.T15.b.2); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2); and titan-class through its route, its whole column baked at m <= 2 with its correction, against the vector I, its tallies by image at m <= 2 and at the cut modes, with the ground's flux under each aggregate against the vector flux (titanClass, R08.T14.d.4). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
     format: VECTOR_GATE_FORMAT,
     cases: Object.fromEntries(
       CASES.map(({ referenceCase }) => {
@@ -1454,6 +1601,7 @@ function vectorGateRecord(
     routedSaturnOblateness: sectionOf(routed, "saturnOblateness"),
     twinValues: { routed: rowsOf(paths.routed), diagnostic: rowsOf(paths.diagnostic) },
     deck,
+    titanClass,
   };
 }
 
@@ -1644,7 +1792,7 @@ function committedDeckFigures(): DeckFigures {
 
 describe.skipIf(!BAKES)("R08.T14.f's vector gates, baked (by hand)", () => {
   it(
-    "bakes the four cases and their corrections, gates both paths' twins against the vector I, and writes vectorGate.json",
+    "bakes the four cases, titan-class and their corrections, gates both paths' twins against the vector I, and writes vectorGate.json",
     { timeout: LIMIT_MS.whole },
     async () => {
       const paths: Record<PathName, Map<string, Rgb>> = {
@@ -1683,11 +1831,13 @@ describe.skipIf(!BAKES)("R08.T14.f's vector gates, baked (by hand)", () => {
         venusValues.set(name, baked.values);
         venusFigures.set(name, baked.figures);
       }
+      const titan = titanGateBaked();
       const record = vectorGateRecord(
         paths,
         cutModesRecord(cuts),
         (name) => tables.get(name) ?? null,
         deckRecordOf(deckGateBaked(), venusClassSectionOf(venusValues, venusFigures)),
+        titanSectionOf(titan.values, titan.figures),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },
@@ -1716,6 +1866,18 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
     },
   );
 
+  it(
+    "holds titan-class's tallies, rows and ground's flux its own values give against its committed reference",
+    { timeout: LIMIT_MS.record },
+    () => {
+      // Through JSON, as the record is committed.
+      const formed: unknown = JSON.parse(
+        JSON.stringify(titanSectionOf(committedTitanValues(), committedTitanFigures())),
+      );
+      expect(formed).toEqual(committedTitanSection());
+    },
+  );
+
   it.skipIf(!SLOW)(
     "is the record its own values give against the committed references, byte for byte",
     { timeout: LIMIT_MS.record },
@@ -1731,6 +1893,7 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
             new Map(VENUS_CASES.map((name) => [name, committedVenusFigures(name)])),
           ),
         ),
+        titanSectionOf(committedTitanValues(), committedTitanFigures()),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },

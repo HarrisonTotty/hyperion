@@ -5993,6 +5993,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       _Built 2026-10-30_ for the worlds that pass (Risks, "R08.T14.d.4, as built"): Earth- and
       Saturn-class routed, the correction on; Mars-, Venus- and Titan-class left APPROXIMATE;
       precondition 5's frame and the UHD 620 host's bake time pending, the owner's runs.
+      Titan-class gated 2026-11-01 on its re-traced reference: it misses, and is not routed (Risks,
+      "R08.T14.d.4's Titan-class gate").
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -24378,3 +24380,26 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `deckReflectance(…, streams, known?)` takes a known reflectance's modes at the cosines it holds:
     the bake's deck takes its coupling's modes 0–2 and solves 3–7 alone.
   - `deckColumnSolve(…, fields?)`: the table below asks its altitudes' fields alone.
+- **R08.T14.d.4's Titan-class gate** (2026-11-01; lane `r08-titan-route`; tallies and bake times
+  in the lane's outbox). **It misses; nothing is routed.**
+  - _The gate_: `vectorGate.json` format 7 adds `titanClass`: the whole column baked at m ≤ 2 with
+    its correction, the route's twin over 120 geometries against the vector I, tallied by image
+    (and at the cut modes), and the ground's flux under four aggregates, all refused at their
+    counts. The record's test holds it without a bake (`thickCases.ts`'s `titanClassReferenceCase`).
+  - _The route_ (`thick/routing.ts`): `HAZE_GATE_TALLIES`, held to `titanClass.routed.images`;
+    `hazeGatePasses`, the deck's rule above the horizon (`BELOW_THE_HORIZON_IMAGES`, s95,
+    `TWILIGHT_REASON`'s; lean, 2026-11-01); `THICK_ROUTE_RANGES`, `[THICK_ROUTE_RANGE]` while it
+    misses. `thickBakeRouted`'s third parameter is now a list of ranges (`[]` routes none).
+  - _The range, closed_ (lean, 2026-11-01): `HAZE_ROUTE_RANGE`, titan-class's channels: τ ≤ 13.1,
+    ω̄ ≥ 0.914, ḡ ≤ 0.734, ground ≤ 0.3, τ ḡ ≤ 7.85, τ (1 − ω̄) ≤ 1.12. A re-blessed pass opens
+    it. `mars` lies outside by its blue alone (ḡ 0.762, ω̄ 0.829), Venus-class columns by depth.
+  - _The misses (45) and their levers_:
+    - `ground-s90`, red in all 21 views, 0.76–0.88 at every mode count: the pseudo-spherical beam
+      at the horizon, R ÷ H ≈ 120 (Loughman et al. 2004's limb error, far past its 8%).
+    - The limb at 0.3H, 3H and 10H, to 1.87 (10H red; 2.31 at m = 0, 2.33 at m ≤ 1): the bake's
+      modes (m = 3, precondition 1's second texel), and at 10H the pseudo-spherical source too.
+    - The daylit sky, mostly blue at s0–s60 (to 1.18), the disc at p60–p75 (to 1.09) and the
+      blue ground flux (+9–15%, refused), at every mode count: neither named lever, but the
+      channel's J off its wavelength in the haze's absorbing blue (T14.d.1's deferred finding).
+    - s80's forward views (a0), dim from 0.92: the aureole, as Mars's precondition 2.
+  - _Pending, the owner's RTX run_: a routed Titan's frame against 16.67 ms, once it passes.

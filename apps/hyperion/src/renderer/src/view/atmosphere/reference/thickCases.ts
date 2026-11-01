@@ -592,6 +592,9 @@ let built: ThickReferenceCases | undefined;
 /** `giant-deck` once built, for the module's life: the one {@link thickReferenceCases} holds. */
 let builtGiantDeck: ReferenceCase | undefined;
 
+/** `titan-class` once built, for the module's life: the one {@link thickReferenceCases} holds. */
+let builtTitanClass: ReferenceCase | undefined;
+
 /**
  * `giant-deck` alone (the module's remarks), built on the first call without the Venus-class
  * cases' Mie, and held: the case {@link thickReferenceCases} gives, for a reader of that case alone
@@ -600,6 +603,17 @@ let builtGiantDeck: ReferenceCase | undefined;
 export function giantDeckReferenceCase(): ReferenceCase {
   builtGiantDeck ??= giantCase();
   return builtGiantDeck;
+}
+
+/**
+ * `titan-class` alone (the module's remarks), built on the first call without the Venus-class
+ * cases' Mie, its haze's aggregate optics some 20 s (pod, 16 vCPU), and held: the case
+ * {@link thickReferenceCases} gives, for a reader of that case alone (R08.T14.d.4's Titan-class
+ * gate, `vectorGate.test.ts` and `thick/routing.test.ts`).
+ */
+export function titanClassReferenceCase(): ReferenceCase {
+  builtTitanClass ??= titanCase();
+  return builtTitanClass;
 }
 
 /**
@@ -614,7 +628,7 @@ export function thickReferenceCases(): ThickReferenceCases {
     built = {
       "venus-92bar": venusCase("venus-92bar", optics),
       "venus-58bar": venusCase("venus-58bar", optics),
-      "titan-class": titanCase(),
+      "titan-class": titanClassReferenceCase(),
       "giant-deck": giantDeckReferenceCase(),
     };
   }

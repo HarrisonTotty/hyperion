@@ -5,7 +5,9 @@
  * `thickScattering` world only within the range its passing gates cover ({@link THICK_ROUTE_RANGE};
  * main's rule on routing by the depth range the passing cases cover,
  * `decision-r08-t13c2-classes.md` §6). Elsewhere a thick world is drawn by the analytic term under
- * `ATMOSPHERE: APPROXIMATE`. A `cloudDeck` world routes to its deck's bake only within the range its
+ * `ATMOSPHERE: APPROXIMATE`. A Titan-class haze's range opens on `titan-class`'s gate alone, once
+ * its recorded verdict passes ({@link HAZE_GATE_TALLIES}, R08.T14.d.4), which it does not yet. A
+ * `cloudDeck` world routes to its deck's bake only within the range its
  * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2), which none does yet: a gas
  * envelope's opens on `giant-deck`'s envelope variant alone, once its recorded verdict passes
  * ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2). Tests route by injection (`AtmosphereCache`'s
@@ -56,10 +58,10 @@ export interface ThickRouteRange {
  * (`earth`'s red), the ground to 0.3, τ ḡ to 0.0837 and τ (1 − ω̄) to 0.0109 (`earth`'s blue). Out
  * of it stand a Mars-class dust's forward peak (ḡ 0.71–0.76, τ ḡ 0.36–0.38), which stays
  * `ATMOSPHERE: APPROXIMATE` (precondition 2, main's ruling with the split), and the Venus- and
- * Titan-class columns (τ 7–77), whose gates pass no depth until the re-traced references land.
- * Neither the absorbers' depth, which the channels leave out (only `earth`'s ozone is gated), nor
- * the radius over the scale height, on which the pseudo-spherical beam's low sun depends, is
- * bounded.
+ * Titan-class columns (τ 7–77): Venus's is a deck's (R08.T15.b.2), and Titan's has a range of its
+ * own, {@link HAZE_ROUTE_RANGE}, closed while its gate misses. Neither the absorbers' depth, which
+ * the channels leave out (only `earth`'s ozone is gated), nor the radius over the scale height, on
+ * which the pseudo-spherical beam's low sun depends, is bounded.
  */
 export const THICK_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 0.728,
@@ -85,15 +87,16 @@ export function withinRouteRange(medium: AtmosphereMedium, range: ThickRouteRang
 
 /**
  * Whether a body routed `regime` takes its thick bake (Design note 9's routing): only
- * `thickScattering`, and only where its medium lies within `range`. `thin` takes none, and
+ * `thickScattering`, and only where its medium lies within one of `ranges`. `thin` takes none, and
  * `cloudDeck`'s bake is R08.T15's deck split, which {@link deckRouted} routes.
  *
- * @param range - The range its gates pass over: {@link THICK_ROUTE_RANGE}, or `null` for none.
+ * @param ranges - The ranges its gates pass over: {@link THICK_ROUTE_RANGES}, or a test's; none
+ *   routes nothing.
  */
 export function thickBakeRouted(
   regime: AtmosphereRegime,
   medium: AtmosphereMedium,
-  range: ThickRouteRange | null = THICK_ROUTE_RANGE,
+  ranges: ReadonlyArray<ThickRouteRange> = THICK_ROUTE_RANGES,
 ): boolean {
   let routed: boolean;
   switch (regime.kind) {
@@ -102,7 +105,7 @@ export function thickBakeRouted(
       routed = false;
       break;
     case "thickScattering":
-      routed = range !== null && withinRouteRange(medium, range);
+      routed = ranges.some((range) => withinRouteRange(medium, range));
       break;
   }
   return routed;
@@ -162,6 +165,96 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
 export function deckGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean {
   return tallies.length > 0 && tallies.every((image) => image.passes > 0 && image.misses === 0);
 }
+
+/**
+ * `titan-class`'s recorded verdict by image through its route (R08.T14.d.4): `vectorGate.json`'s
+ * `titanClass.routed.images`, its whole column baked at m ≤ 2 with its correction, against the
+ * re-traced reference's vector I (R08.T12.h's), held to the file by the test. 140 of its 360 values
+ * pass, 45 miss and 175 are refused, so the route stays closed ({@link THICK_ROUTE_RANGES}):
+ *
+ * - twilight at the horizon, `ground-s90`, dim in red in all 21 of its views (0.76–0.88 of the
+ *   reference; green and blue refused), at every mode count, on a sphere some 120 scale heights in
+ *   radius (Earth's some 750), where the pseudo-spherical beam stands at its limit;
+ * - the limb, bright at 0.3H, 3H and 10H (to 1.87 of the reference at 10H, red), which the bake's
+ *   m = 2 moves most (2.33 at m ≤ 1);
+ * - the daylit sky, bright at s0–s60, mostly in blue (to 1.18), and the disc at p60 and p75 (to
+ *   1.09), at every mode count;
+ * - the forward views at s80 (a0, from 0.92), dim.
+ */
+export const HAZE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
+  { image: "ground-s0", comparisons: 12, passes: 10, misses: 2, refusals: 0 },
+  { image: "ground-s30", comparisons: 60, passes: 42, misses: 8, refusals: 10 },
+  { image: "ground-s60", comparisons: 60, passes: 35, misses: 1, refusals: 24 },
+  { image: "ground-s80", comparisons: 63, passes: 30, misses: 4, refusals: 29 },
+  { image: "ground-s90", comparisons: 63, passes: 0, misses: 21, refusals: 42 },
+  { image: "ground-s95", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+  { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p60", comparisons: 3, passes: 1, misses: 2, refusals: 0 },
+  { image: "disc-p75", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
+  { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "limb", comparisons: 15, passes: 6, misses: 6, refusals: 3 },
+  { image: "aerial", comparisons: 9, passes: 5, misses: 0, refusals: 4 },
+];
+
+/**
+ * The gate's images whose sun stands below the horizon, s95 (`reference/cases.ts`'s sphere set): a
+ * routed body's view there reads `ATMOSPHERE: APPROXIMATE` with {@link TWILIGHT_REASON}, past the
+ * pseudo-spherical model's limit (main's ruling with T14.d.2's step 3), so no haze gate is judged
+ * on them.
+ */
+export const BELOW_THE_HORIZON_IMAGES: ReadonlyArray<string> = ["ground-s95"];
+
+/**
+ * Whether a haze gate's recorded tallies pass (R08.T14.d.4; lean, 2026-11-01): the deck's rule
+ * ({@link deckGatePasses}), every image passing somewhere and none missing, over the images whose
+ * sun stands at or above the horizon ({@link BELOW_THE_HORIZON_IMAGES}).
+ */
+export function hazeGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean {
+  return deckGatePasses(tallies.filter((image) => !BELOW_THE_HORIZON_IMAGES.includes(image.image)));
+}
+
+/**
+ * The range a Titan-class haze routes over once `titan-class`'s gate passes (R08.T14.d.4; lean,
+ * 2026-11-01): the case's channels over `regimeChannels`, the range its gate covers, as
+ * {@link THICK_ROUTE_RANGE} is the kept cases'.
+ *
+ * @remarks
+ * Each bound is the case's extreme, rounded outward at its third figure (the test holds them to the
+ * case): τ to 13.07 (blue, the tholin's most of it), ω̄ from 0.9143 (blue), ḡ to 0.7332 (red),
+ * τ ḡ to 7.849 and τ (1 − ω̄) to 1.120 (blue), and the ground to 0.3. A Mars-class dust lies
+ * outside it by its blue alone (ḡ 0.762, ω̄ 0.829), and a Venus-class column by its depth.
+ */
+export const HAZE_ROUTE_RANGE: ThickRouteRange = {
+  mostOpticalDepth: 13.1,
+  leastSingleScatteringAlbedo: 0.914,
+  mostAsymmetry: 0.734,
+  mostGroundAlbedo: 0.3,
+  mostForwardDepth: 7.85,
+  mostAbsorbedDepth: 1.12,
+};
+
+/**
+ * The ranges a `thickScattering` world routes over, given `tallies`, the haze gate's recorded
+ * verdict (R08.T14.d.4): {@link THICK_ROUTE_RANGE}, and `haze` beside it where the gate passes
+ * ({@link hazeGatePasses}).
+ */
+export function thickRouteRangesOf(
+  tallies: ReadonlyArray<GateImageTally>,
+  haze: ThickRouteRange = HAZE_ROUTE_RANGE,
+): ReadonlyArray<ThickRouteRange> {
+  return hazeGatePasses(tallies) ? [THICK_ROUTE_RANGE, haze] : [THICK_ROUTE_RANGE];
+}
+
+/**
+ * The ranges a `thickScattering` world routes over (R08.T14.d.4): {@link THICK_ROUTE_RANGE} alone,
+ * since `titan-class`'s gate misses ({@link HAZE_GATE_TALLIES}). A Titan-class world stays drawn by
+ * the analytic term under `ATMOSPHERE: APPROXIMATE` with `THICK_REASON`, its bake unasked. Its
+ * opening also waits on the owner's RTX run of a routed Titan's frame against
+ * `decision-r08-t11-frame.md`'s 16.67 ms.
+ */
+export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> =
+  thickRouteRangesOf(HAZE_GATE_TALLIES);
 
 /**
  * The range a gas envelope routes over once `giant-deck`'s envelope variant passes (R08.T16.a.2;
