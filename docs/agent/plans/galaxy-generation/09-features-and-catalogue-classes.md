@@ -1568,6 +1568,10 @@ for `hello`.
   integration tests over the WebSocket for each message, including an unknown feature ID and a
   radius that fits nothing.
 
+_The catalogue classes' cell cache and the source's read-first levers built (lane
+`p09-t40-class-cells`, 2026-11-01, at `GENERATOR_VERSION` 24, no output moved): see Risks,
+"P09.T40, the classes' cost"._
+
 #### P09.T41 Client: feature marks and shells
 
 - **P09.T41.a The guide and the marks.** `docs/frontend/ux-guidelines.md` gains a fixed symbol per
@@ -5628,3 +5632,23 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `galaxy_map`, `placement/displaced_prepin`, `query/range`, the sky's `band_face_row`,
     `eye_cut` and `near_sun`, and the server's `density_map_face_on_128`, `systems_in_range` and
     `systems_in_range_briefs`.
+- **P09.T40, the classes' cost (lane `p09-t40-class-cells`, 2026-11-01, at `GENERATOR_VERSION` 24,
+  under 27's `CLASS_SOURCE_VERSION`; no output moved).**
+  - _Rule 11._ `ClassProcess::{epoch_place, reads_place_first}`: the entry's place at the epoch,
+    the site's first three words (`grid::site_stream`, which every site now reads through). The
+    accreting white dwarfs, both merger classes and the luminous blue variables give it. The source
+    builds only the candidates whose place its sphere, padded at `PAD_SPEED`, holds, and walks
+    only the cells that sphere meets.
+  - _Cache._ In `catalogue_classes`: `ClassCellSystems`, `CatalogueClassCellCache`,
+    `NoClassCellCache`, and `CachedClassSource` (from `CatalogueClassSource::with_cells`). In the
+    server: `compute::SharedClassCellCache`, 32 MiB (`DEFAULT_CLASS_CELL_CACHE_MIB`, no
+    command-line option yet), now `RangeCaches::new`'s fourth argument. `beside_the_grid` takes
+    the class cells.
+  - _Figures (pod, release, 27's rules)._ The Sun-like 50 ly query takes 413 ms cold and 5.04 ms
+    warm, against 30.3 s at T37.a. The 1 ly query takes 296 ms and 4.03 ms. The classes' cold
+    share at 50 ly is about 200 ms: the core collapses 160 ms and the X-ray binaries 33 ms. The
+    grid and the members alone take 215 ms cold.
+  - _Next levers._ The core collapses' window prefilter ("P09.T33.a as built", _Cost_), and a
+    place bound for the X-ray binaries: the site plus the recoil's flight.
+  - _Fixed._ From 27 the X-ray binaries count in layers D and E: P15.T10.b's fitted sampler draws
+    compact stars' progenitors from 3.2 M☉.
