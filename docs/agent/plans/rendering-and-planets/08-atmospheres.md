@@ -24301,3 +24301,6 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   pilot's counts in `sampleCounts.json`, and `refusals.json`'s rows follow it: 270 of its 720
   geometry values pass σ ≤ T ÷ 8, the capped day and twilight views and its four aggregates refused
   at their caps. `sanityRanges.json` holds no giant row and is unchanged.
+  - Titan's re-trace is done (2026-11-01): `titan-class.reference.json` at its pilot's counts, the
+    case rewritten with them; it refuses 241 of 768 values (the four capped aggregates' fluxes, and
+    twilight mostly in the blue), and the importance test reads 0.79–2.21 over it.

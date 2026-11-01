@@ -3166,11 +3166,10 @@ pub(crate) mod tests {
     fn atmosphere_importance_is_positive_and_lights_titans_ground_within_3_times_the_tracer() {
         // Over the whole table and past it, Ψ is finite and positive in every channel of the
         // Titan-class case; and its δ-Eddington downward flux at the ground, direct and diffuse, is
-        // within a factor 3 of
-        // the committed reference's at each aggregate's sun (R08.T12.h's pilot of the method read
-        // its own solve 1.35–2.5 times below it). It only steers, so a factor is all it needs. The
-        // committed reference is R08.T12.b.2's until the case is traced again, and its fluxes read
-        // low from their heavy tails.
+        // within a factor 3 of the committed reference's at each aggregate's sun (R08.T12.h's pilot
+        // of the method read its own solve 1.35–2.5 times below it). It only steers, so a factor is
+        // all it needs. The committed reference is R08.T12.h's deep re-trace, over which the solve
+        // reads 0.79–2.21.
         let case = AtmosphereCase::from_json(&committed_file("titan-class.case.json")).unwrap();
         let reference: super::super::ReferenceRadiances =
             serde_json::from_str(&committed_file("titan-class.reference.json")).unwrap();
