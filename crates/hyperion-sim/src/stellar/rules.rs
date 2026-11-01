@@ -100,7 +100,8 @@
 //!   whether a system that a supernova has unbound goes on showing the star it released, both
 //!   stars of the drawn hierarchy below it, from it only the stars it still holds, chosen at one
 //!   choke point, [`SystemStars::shown_at`], which the system's summary, state and brief and the
-//!   range brief's paired route read (`stellar/rules/binary_kicks_hold.rs` lists the movers).
+//!   range brief's paired route read, and under which the range brief's gate checks every pair
+//!   (`stellar/rules/binary_kicks_hold.rs` lists the movers).
 //! - [`heavy_donor`](StellarRules::heavy_donor), at [`HEAVY_DONOR_VERSION`] (plan 11, P11.T4's
 //!   fix): stable transfer from a main-sequence donor heavier than its compact accretor at its
 //!   thermal rate, and the transfer's angular momentum kept, read by the transfer's step, its

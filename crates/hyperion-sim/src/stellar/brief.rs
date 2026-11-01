@@ -85,8 +85,8 @@ use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief, SystemStars,
-    draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
+    BinaryKicksRules, GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief,
+    SystemStars, draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
     primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
@@ -630,7 +630,8 @@ impl BriefModel {
                 )
             }),
             // From version 27 a system a supernova has unbound counts the stars it shows then
-            // (P11.T10), which no other route can reach: every pair with a supernova is paired.
+            // (P11.T10). No other route reaches one: the gate checks every pair under that arm,
+            // and a pair with a supernova keeps no own models.
             Primary::Paired(stars) => stars.brief_at(t).map(|brief| match stars.shown_at(t) {
                 Shown::Drawn => brief.with_star_count(self.star_count),
                 Shown::Pair(_) | Shown::Alone => brief,
@@ -780,10 +781,13 @@ fn gate(
         && stellar.merger_mass.fitted_tables_hold()
         && stellar.ns_accretion.fitted_tables_hold()
         && stellar.heavy_donor.fitted_tables_hold();
+    // From version 27 a supernova that unbinds any pair changes what the system shows (P11.T10),
+    // so every pair is checked, as for a system the grid redraws.
+    let every_pair = redrawn || stellar.binary_kicks == BinaryKicksRules::Alone;
     let certified = attempt
         .pairs()
         .iter()
-        .filter(|pair| redrawn || pair.stars().contains(&StarIndex::PRIMARY))
+        .filter(|pair| every_pair || pair.stars().contains(&StarIndex::PRIMARY))
         .all(|pair| {
             let [a, b] = pair
                 .stars()

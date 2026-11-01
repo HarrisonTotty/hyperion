@@ -1045,3 +1045,6 @@ struct OwnDeath {
     offset_years: f64,
     death: crate::stellar::remnant::Death,
 }
+
+#[cfg(test)]
+mod agreement;

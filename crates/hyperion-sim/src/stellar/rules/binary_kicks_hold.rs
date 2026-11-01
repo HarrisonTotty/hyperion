@@ -11,16 +11,16 @@
 //!   its heavier star unbinds. Under the held arm each shows every drawn star at the epoch; under
 //!   the arm the first two show the primary alone and the third the primary's own pair on its
 //!   drawn orbit, and before the disruption each is the held arm's bit for bit.
-//! - The range brief counts the stars the summary shows, and a system no supernova has unbound
-//!   is the same under both arms.
+//! - The range brief counts the stars the summary shows, on every route under the arm, and a
+//!   system no supernova has unbound is the same under both arms.
 //!
 //! The slow agreement tests of the engine's supernovae with plan 06's kicks and plan 08's
 //! displaced objects and runaways (`binary_kick_*`, in `stellar/binary/supernova/agreement.rs`)
 //! count the released stars over 10⁴ massive systems under both arms.
 //!
 //! The movers under the arm, found by turning it on at the version (and back off) over the sim's,
-//! the server's and the fitting crate's tests and the binaries' slow censuses (2026-11-01), are
-//! listed in plan 11's Risks, "P11.T10, as built".
+//! the server's and the fitting crate's tests (2026-11-01), are listed in plan 11's Risks,
+//! "P11.T10, as built".
 
 use std::sync::OnceLock;
 
@@ -35,7 +35,7 @@ use crate::stellar::Phase;
 use crate::stellar::binary::Component;
 use crate::stellar::binary::testing::massive_records;
 use crate::stellar::brief::BriefModel;
-use crate::stellar::multiplicity::{HierarchyNode, StarIndex, SystemHierarchy};
+use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, StarIndex, SystemHierarchy};
 use crate::stellar::system::{Shown, SystemStars, disrupting_supernova};
 use crate::time::UniverseTime;
 use crate::units::Years;
@@ -63,9 +63,9 @@ const BY_THE_COMPANION: usize = 53;
 /// first such).
 const OUTER_PAIR: usize = 72;
 
-/// The system's age at which every pinned system is whole, years: 5 Myr, before each one's first
+/// The system's age at which every pinned system is whole: 5 Myr, before each one's first
 /// supernova.
-const WHOLE_AGE: f64 = 5.0e6;
+const WHOLE_AGE: Years = Years::new(5.0e6);
 
 /// The version's galaxy rules.
 fn version() -> GalaxyRules {
@@ -105,10 +105,10 @@ fn records() -> &'static [SystemRecord] {
     RECORDS_OF.get_or_init(|| massive_records(held(), RECORDS, RECORDS_SEED))
 }
 
-/// The time at which a system of the sampler is `age` years old.
-fn time_at_age(age: f64) -> UniverseTime {
+/// The time at which a system of the sampler is `age` old.
+fn time_at_age(age: Years) -> UniverseTime {
     let record = &records()[0];
-    let years = (age - record.age_at_epoch().value()).round();
+    let years = (age.value() - record.age_at_epoch().value()).round();
     #[expect(
         clippy::cast_possible_truncation,
         reason = "a whole number of years within 60 Myr of the epoch"
@@ -197,7 +197,32 @@ fn assert_shown(index: usize, shown: Shown) -> SystemStars {
         assert_eq!(star, &held_state.stars()[k], "star {k} is the held arm's");
     }
     let mass: f64 = state.stars().iter().map(|s| s.mass().value()).sum();
-    assert!((state.mass().value() - mass).abs() <= 1e-12 * mass);
+    assert!(
+        (state.mass().value() - mass).abs() <= 1e-12 * mass,
+        "the system's mass is its shown stars' sum: {state:?}"
+    );
+    // The shown hierarchy is the summary's, and its bodies index the state's stars, as the sky's
+    // census walks them.
+    let shown_hierarchy = alone.hierarchy_at(now);
+    assert_eq!(Some(shown_hierarchy.as_ref()), summary.hierarchy());
+    for (k, slot) in shown_hierarchy.stars().iter().enumerate() {
+        assert_eq!(usize::from(slot.body().body_index()), k);
+        assert!(
+            k < state.stars().len(),
+            "body {k} of {} stars",
+            state.stars().len()
+        );
+    }
+    for pair in state.pairs() {
+        assert!(
+            matches!(
+                shown_hierarchy.node(pair.node()),
+                HierarchyNode::Pair { .. }
+            ),
+            "the state's pair {:?} is a pair of the shown hierarchy",
+            pair.node()
+        );
+    }
     let brief = alone.brief_at(now).expect("the primary exists");
     assert_eq!(usize::from(brief.star_count()), kept.len());
     // The primary's summary is the held arm's: only what is shown beside it changes.
@@ -233,7 +258,7 @@ fn a_companion_its_primary_s_supernova_releases_is_left_out_from_its_release() {
     );
     assert_eq!(alone.state_at(now).expect("exists").pairs().len(), 0);
     // From the supernova's own age, not before it.
-    let age = |t: f64| time_at_age(sn.age().value() + t);
+    let age = |t: f64| time_at_age(Years::new(sn.age().value() + t));
     assert_eq!(alone.shown_at(age(-2.0)), Shown::Drawn);
     assert_eq!(alone.shown_at(age(1.0)), Shown::Alone);
 }
@@ -252,7 +277,7 @@ fn a_pair_its_companion_s_supernova_unbinds_leaves_the_primary_alone() {
 }
 
 /// A quadruple whose outer pair a supernova unbinds is left as its primary's own pair, on the
-/// drawn orbit, with that pair's state and class.
+/// drawn orbit, with that pair's state and class, the root of the shown hierarchy.
 #[test]
 fn a_quadruple_whose_outer_pair_is_unbound_shows_its_inner_pair() {
     let held = SystemStars::generate(held(), &records()[OUTER_PAIR]);
@@ -267,13 +292,14 @@ fn a_quadruple_whose_outer_pair_is_unbound_shows_its_inner_pair() {
     let state = alone.state_at(now).expect("exists");
     let held_state = held.state_at(now).expect("exists");
     assert_eq!(state.pairs().len(), 1);
-    assert_eq!(state.pairs()[0].node(), node);
+    assert_eq!(state.pairs()[0].node(), NodeIndex::ROOT);
     let kept = held_state
         .pairs()
         .iter()
         .find(|p| p.node() == node)
         .expect("the drawn inner pair");
-    assert_eq!(&state.pairs()[0], kept);
+    assert_eq!(state.pairs()[0].orbit(), kept.orbit());
+    assert_eq!(state.pairs()[0].class(), kept.class());
     let HierarchyNode::Pair { orbit, .. } = *held.hierarchy().node(node) else {
         panic!("node 1 is the inner pair");
     };
@@ -328,4 +354,28 @@ fn the_arm_is_deterministic_and_moves_only_the_unbound() {
         unbound > 5 && whole > 20,
         "{unbound} unbound, {whole} whole"
     );
+}
+
+/// Under the arm, every sampled system's range brief, whatever its route, counts the stars the
+/// system shows at the epoch: the first attempt's count for a system shown whole, and the shown
+/// count for one a supernova has unbound.
+#[test]
+fn under_the_arm_every_route_counts_the_stars_shown() {
+    let now = UniverseTime::EPOCH;
+    for record in records() {
+        let stars = SystemStars::generate(alone(), record);
+        let model = BriefModel::new(alone(), record);
+        let shown = match stars.shown_at(now) {
+            Shown::Drawn => model.star_count(),
+            Shown::Pair(_) => 2,
+            Shown::Alone => 1,
+        };
+        assert_eq!(
+            model.brief_at(now).map(|b| b.star_count()),
+            Some(shown),
+            "{:?} on the {:?} route",
+            record.id(),
+            model.route()
+        );
+    }
 }

@@ -1780,6 +1780,8 @@ are unkicked; and, for Design note 16, `SystemStars::death_time` and `natal_kick
 systems equal what plan 06 alone gives. Acceptance: `just test-slow` passes these by name
 (`binary_kick_*`).
 
+_As built (lane `p11-t10`, 2026-11-01), held at 27: see Risks, "P11.T10, as built"._
+
 ### P11.T11 System assembly
 
 Build `SystemStars::state_at`: every star's state (from a timeline where one exists, else plan 06),
@@ -7258,3 +7260,40 @@ galaxy_sweeps`.
   M☉, since most are plan 06's partial-fallback holes, 0.8 `M_CO` ≈ 2–3.5 M☉. Open: the remnant
   recipe (lean: Fryer et al. 2012's rapid model, held at 27, which decides the type too). Test
   helper: `testing::census::slab_pairs`.
+- **P11.T10, as built** (lane `p11-t10`, 2026-11-01; held at 27, nothing moves at 24–26).
+  - _The rule._ `BINARY_KICKS_VERSION` = 27 (`stellar/system.rs`, `StellarRules::binary_kicks`,
+    `BinaryKicksRules::{Paired, Alone}`). From the first supernova whose next segment is `Disrupted`
+    (`disrupting_supernova`), a system shows its primary alone if that pair holds the primary. If
+    another pair's leaves only stars 0 and 1, it shows that pair on its drawn orbit, and otherwise
+    the primary alone (lean, 2026-11-01). One choke point, `SystemStars::shown_at`, read by
+    `summary_at`, `state_at` (its pairs numbered in the shown hierarchy), `brief_at` and the range
+    brief's paired route; under the arm the brief's gate checks every pair. The sky census walks
+    `SystemStars::hierarchy_at(t)` (crate-private).
+  - _Kept as drawn (lean, 2026-11-01)._ `hierarchy()`, `stars()`, `star_count()` and so plan 14's
+    context and star positions.
+  - _Already built._ `grid_multiplicity` makes `Displaced` single. Low-mode kicks (σ 5 km/s) all
+    fall in speed bin 0, so they stay `Retained` with their companions.
+  - _Step 1's count._ Under the held arm, every system a supernova has unbound by the epoch shows
+    the star it released: 1,899 of 10⁴ prior-sampled massive systems (1,851 by the primary's pair)
+    and 628 of 10⁴ layer-E records near the Sun (570). Under the arm none does. This tree lacks
+    P11.T4.l; on it, the passed-over disruptions fall under the rule and the slow figures move.
+  - _Tests._ Fast: `stellar/rules/binary_kicks_hold.rs` (seven). Slow:
+    `stellar::binary::supernova::agreement::binary_kick_*` (nine, 16 slots; the sampler is
+    `binary::testing::massive_records`). Three figures miss and are pinned as measured (findings):
+    - the stripped share: 0.428 against 0.452;
+    - the released companions: 0.20 of `RunawayModel`'s rate;
+    - 9 of 5,134 pinned primaries not collapsing at their pin: about 8 M☉ electron-capture
+      primaries stripped by a common envelope, whose merger collapses later. An engine fault of
+      P11.T4's pin.
+  - _Recoil._ 97% of retained remnants kept bound recoil within their kick bin; the fastest is
+    115 km/s, against layer E's 3,000 km/s pad.
+  - _For the bump to 27._ It moves the goldens `sky/census_near_sun`, `sky/band_face_row` and
+    `stellar/briefs`, and the server's `systems_in_range` response, and stales `sky_binary_light_e`
+    (refit). It must also restate tests:
+    - three compare the range brief with the first attempt's count:
+      `stellar::brief::tests::every_route_is_the_full_systems_brief`,
+      `marks_hold::every_reader_of_a_constrained_primary_sees_the_kept_attempt` and
+      `stellar_briefs::briefs_are_the_full_systems_over_random_systems`;
+    - two expect every companion shown:
+      `stellar_system::{every_companion_is_its_slots_star_with_the_systems_composition_and_age,
+a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.

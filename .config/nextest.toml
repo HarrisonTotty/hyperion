@@ -402,3 +402,9 @@ priority = 60
 [[profile.slow.overrides]]
 filter = "package(hyperion-fit) & test(/^atmosphere::benchmarks::/)"
 threads-required = 4
+
+# P11.T10's agreement tests (`binary_kick_*`) run their samples in sixty-four shares on sixteen
+# threads of their own (`in_shares`), so each reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^stellar::binary::supernova::agreement::binary_kick_/)"
+threads-required = 16
