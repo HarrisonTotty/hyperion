@@ -432,6 +432,10 @@ impl ClassProcess for NeutronStarMergers {
     ) -> Option<GalacticPosition> {
         Some(site_stream(galaxy, cell, id, tags::CLASS_NSM_SITE).0)
     }
+
+    fn reads_place_first(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

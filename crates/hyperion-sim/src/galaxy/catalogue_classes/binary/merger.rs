@@ -594,6 +594,10 @@ impl ClassProcess for StellarMergers {
     ) -> Option<GalacticPosition> {
         Some(site_stream(galaxy, cell, id, tags::CLASS_MERGER_SITE).0)
     }
+
+    fn reads_place_first(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

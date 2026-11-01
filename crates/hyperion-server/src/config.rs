@@ -153,8 +153,8 @@ pub const DEFAULT_FEATURE_CACHE_MIB: usize = 16;
 pub const DEFAULT_CLUSTER_MODEL_CACHE_MIB: usize = 64;
 /// The catalogue class cell cache's budget, in MiB (plan 09, P09.T40): each class cell's places
 /// read first and other classes' members ([`ClassCellSystems`]), charged their buffers. A cold
-/// Sun-like 50 ly query under 27's rules reads 14,560 class cells, 5.5 MB (measured 2026-11-01 on
-/// the server's tests' galaxy, pod), so this holds some five such neighbourhoods' cells, and a
+/// Sun-like 50 ly query under 27's rules reads 8,720 class cells, 1.45 MB (measured 2026-11-01 on
+/// the server's tests' galaxy, pod), so this holds some twenty such neighbourhoods' cells, and a
 /// query within the classes' 4,096 ly reach of another shares most of them. It has no command-line
 /// option yet (lean, 2026-11-01).
 ///

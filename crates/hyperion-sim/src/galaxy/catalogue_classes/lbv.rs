@@ -599,6 +599,10 @@ impl ClassProcess for LbvProcess {
     ) -> Option<GalacticPosition> {
         Some(site_stream(galaxy, cell, id, tags::CLASS_LBV_SITE).0)
     }
+
+    fn reads_place_first(&self) -> bool {
+        true
+    }
 }
 
 /// What the class's test makes of a candidate, step by step.

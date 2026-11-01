@@ -21,7 +21,8 @@
 //!   tested at the sphere's time. A class that reads its candidates' place first
 //!   ([`ClassProcess::epoch_place`], the grid's rule 11) has only those built whose place lies
 //!   within the sphere padded at plan 03's [`PAD_SPEED`] (P09.T40): its members move from there
-//!   below that, so no other can reach the sphere. A member that exists
+//!   below that, so no other can reach the sphere. Its places lie in their cells, so it walks only
+//!   the cells that padded sphere meets. A member that exists
 //!   then and whose present position, the remnant's after an explosion, lies inside the unpadded
 //!   radius is a hit, with its record of origin
 //!   [`SystemOrigin::CatalogueSystem`](crate::galaxy::placement::SystemOrigin::CatalogueSystem).
@@ -293,7 +294,13 @@ impl ClassCellSystems {
             let id = key
                 .candidate_id(index, 0)
                 .expect("a cell's count is held under 2^24, so its candidates have IDs");
-            match process.epoch_place(galaxy, &key, id) {
+            let place = process.epoch_place(galaxy, &key, id);
+            debug_assert_eq!(
+                place.is_some(),
+                process.reads_place_first(),
+                "a class reads every candidate's place first or none (rule 11)"
+            );
+            match place {
                 Some(place) => places.push((index, place)),
                 None => members.extend(entry_systems(galaxy, process, id)),
             }
@@ -486,23 +493,7 @@ fn expected_hosts<P: ClassProcess>(galaxy: &Galaxy, process: &P, sphere: &QueryS
     let Some(log2) = class.cell_log2_ly() else {
         return 0.0;
     };
-    let edge = f64::from(1_u32 << log2);
-    let half = ROOT_HALF_WIDTH_LY >> log2;
-    let centre = sphere.centre().to_light_years_f64();
-    let radius = sphere.radius().value();
-    // Each axis's cells and the length of each that lies inside [c − R, c + R].
-    let spans = centre.map(|c| {
-        let (low, high) = (c - radius, c + radius);
-        let first = cell_index(low, edge).max(-half);
-        let last = cell_index(high, edge).min(half - 1);
-        (first..=last)
-            .map(|i| {
-                let start = f64::from(i) * edge;
-                (i, high.min(start + edge) - low.max(start))
-            })
-            .filter(|&(_, length)| length > 0.0)
-            .collect::<Vec<_>>()
-    });
+    let spans = cube_spans(log2, sphere.centre(), sphere.radius());
     let mut hosts = 0.0;
     for &(x, lx) in &spans[0] {
         for &(y, ly) in &spans[1] {
@@ -514,6 +505,58 @@ fn expected_hosts<P: ClassProcess>(galaxy: &Galaxy, process: &P, sphere: &QueryS
         }
     }
     hosts
+}
+
+/// Each axis's cells of `2^log2` ly that meet the cube of half-width `radius` about `centre`,
+/// clipped to the root cube, in ascending order, each with the length of it inside the cube, ly.
+#[must_use]
+fn cube_spans(log2: u32, centre: &GalacticPosition, radius: LightYears) -> [Vec<(i32, f64)>; 3] {
+    let edge = f64::from(1_u32 << log2);
+    let half = ROOT_HALF_WIDTH_LY >> log2;
+    let radius = radius.value();
+    centre.to_light_years_f64().map(|c| {
+        let (low, high) = (c - radius, c + radius);
+        let first = cell_index(low, edge).max(-half);
+        let last = cell_index(high, edge).min(half - 1);
+        (first..=last)
+            .map(|i| {
+                let start = f64::from(i) * edge;
+                (i, high.min(start + edge) - low.max(start))
+            })
+            .filter(|&(_, length)| length > 0.0)
+            .collect()
+    })
+}
+
+/// The margin on the cube a placed class's cells are walked over, ly: far above the rounding of a
+/// place's light-year coordinate, some 10⁻¹¹ ly, and below any cell's 512 ly.
+const CUBE_MARGIN_LY: f64 = 1.0;
+
+/// `class`'s cells that meet the cube of half-width `radius` about `centre`, in ascending x, then
+/// y, then z: every cell holding a point within `radius` of `centre`, and none for a class that is
+/// never placed.
+#[must_use]
+fn cells_about(
+    class: ClassId,
+    centre: &GalacticPosition,
+    radius: LightYears,
+) -> Vec<CatalogueCellKey> {
+    let Some(log2) = class.cell_log2_ly() else {
+        return Vec::new();
+    };
+    let [xs, ys, zs] = cube_spans(log2, centre, radius);
+    let mut keys = Vec::with_capacity(xs.len() * ys.len() * zs.len());
+    for &(x, _) in &xs {
+        for &(y, _) in &ys {
+            for &(z, _) in &zs {
+                keys.push(
+                    CatalogueCellKey::new(class, [x, y, z])
+                        .expect("a cell clipped to the cube is a cell of the class"),
+                );
+            }
+        }
+    }
+    keys
 }
 
 /// The cell, `edge` light-years wide, that holds the coordinate `ly`, clamped to `i32`'s range:
@@ -557,7 +600,19 @@ impl ClassVisitor for Hits<'_> {
             return;
         }
         let reach = place_reach(sphere);
-        for key in cells_in_sphere(class, sphere) {
+        // A placed class's places lie in their cells, so only the cells its padded sphere meets can
+        // hold one it reaches (the grid's rule 11); any other class's entries may lie anywhere in
+        // their reach.
+        let keys: Vec<_> = if process.reads_place_first() {
+            cells_about(
+                class,
+                sphere.centre(),
+                reach + LightYears::new(CUBE_MARGIN_LY),
+            )
+        } else {
+            cells_in_sphere(class, sphere).collect()
+        };
+        for key in keys {
             let systems = cells.systems(galaxy, key, &mut || {
                 ClassCellSystems::of(galaxy, process, key)
             });

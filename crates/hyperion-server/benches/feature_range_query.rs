@@ -92,16 +92,38 @@ impl Caches {
     /// the job, the features' members beside the grid, and from generator version 27 the
     /// catalogue classes' hosts beside them.
     fn query(&self, galaxy: &Galaxy, key: GalaxyKey, query: &RangeQuery) -> RangeResult {
+        self.query_with(galaxy, key, query, Classes::Registered)
+    }
+
+    /// `query` as [`query`](Self::query) runs it, with the catalogue classes' hosts as `classes`
+    /// says.
+    fn query_with(
+        &self,
+        galaxy: &Galaxy,
+        key: GalaxyKey,
+        query: &RangeQuery,
+        classes: Classes,
+    ) -> RangeResult {
         let mut cells = self.cells.handle(key);
         let (features, interiors) = (self.features.handle(key), self.interiors.kept(key));
         let members = FeatureMemberSource::new(&features, &interiors);
         let class_cells = self.classes.handle(key);
         let classes = CatalogueClassSource::registered_in(galaxy)
+            .filter(|_| matches!(classes, Classes::Registered))
             .map(|classes| classes.with_cells(&class_cells));
         let mut sources: Vec<&dyn SystemSource> = vec![&members];
         sources.extend(classes.as_ref().map(|classes| classes as &dyn SystemSource));
         range_query(galaxy, &mut cells, &sources, query)
     }
+}
+
+/// Whether a bench's query takes the catalogue classes' hosts.
+#[derive(Debug, Clone, Copy)]
+enum Classes {
+    /// Where the galaxy's rules register them, as a server does.
+    Registered,
+    /// Never: the grid and the members alone, for the classes' share.
+    Left,
 }
 
 /// The query of `radius_ly` about `centre` at the epoch, as the server builds one from a request
@@ -319,6 +341,16 @@ fn classes_at_27(c: &mut Criterion) {
         group.bench_function(format!("Sun-like {radius} ly, every source (warm)"), |b| {
             b.iter(|| warm.query(&galaxy, key, black_box(&query)));
         });
+        group.bench_function(
+            format!("Sun-like {radius} ly, without the classes (cold)"),
+            |b| {
+                b.iter_batched_ref(
+                    Caches::new,
+                    |caches| caches.query_with(&galaxy, key, black_box(&query), Classes::Left),
+                    BatchSize::PerIteration,
+                );
+            },
+        );
         if radius > 1.0 {
             let held = warm.classes.counters();
             println!(

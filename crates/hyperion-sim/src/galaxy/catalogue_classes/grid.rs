@@ -149,10 +149,12 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 ///     [`PAD_SPEED`] (plan 08's escape cut, which every velocity drawn from a component's law
 ///     keeps), may give that site through [`epoch_place`](Self::epoch_place): the first three
 ///     words of the site's own stream (`site_stream`), read before any other of the
-///     candidate's draws, bit for bit every member's epoch position (plan 09, P09.T40). A range
-///     query then builds only the candidates whose place lies within its sphere padded for that
-///     speed. The accreting white dwarfs, the two merger classes and the luminous blue variables
-///     give it. The supernova classes, whose entries move from their sites for up to the
+///     candidate's draws, bit for bit every member's epoch position (plan 09, P09.T40). Such a
+///     class gives a place for every candidate, inside its cell's box as every site is, and says
+///     so ([`reads_place_first`](Self::reads_place_first)). A range query then walks only the
+///     cells its sphere, padded for that speed, meets, and builds only the candidates whose place
+///     lies inside it. The accreting white dwarfs, the two merger classes and the luminous blue
+///     variables give it. The supernova classes, whose entries move from their sites for up to the
 ///     interval, and the X-ray binaries, which their recoil carries off theirs, give `None`, the
 ///     default.
 ///
@@ -315,6 +317,12 @@ pub trait ClassProcess {
         _id: CatalogueSystemId,
     ) -> Option<GalacticPosition> {
         None
+    }
+
+    /// Whether [`epoch_place`](Self::epoch_place) gives a place for every candidate (rule 11):
+    /// `false`, the default, for a class whose candidates read none first.
+    fn reads_place_first(&self) -> bool {
+        false
     }
 }
 

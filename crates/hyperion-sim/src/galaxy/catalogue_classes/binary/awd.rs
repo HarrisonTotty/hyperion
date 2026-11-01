@@ -912,6 +912,10 @@ macro_rules! awd_class_process {
             ) -> Option<GalacticPosition> {
                 Some(site_stream(galaxy, cell, id, tags::CLASS_AWD_SITE).0)
             }
+
+            fn reads_place_first(&self) -> bool {
+                true
+            }
         }
     };
 }
