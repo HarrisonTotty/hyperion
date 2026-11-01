@@ -2268,7 +2268,7 @@ fn no_light_gives_no_contrast() {
 
 /// Under its icy regolith's lag (P14.T49.m, at 26) the table's Ganymede takes T13.c's 0.35 again,
 /// and its range returns to the ruling's version-22 range, whose albedo that was, within 1.5 K at
-/// either end; nothing else in `table`, the table at 24, moves
+/// either end; nothing else in `table`, the table at 25, moves
 /// ([`the_table_s_climate_ranges_are_the_ruling_s`]'s mixture arm).
 fn ganymede_s_range_returns_under_its_lag(
     table: &[(&'static str, DerivedBody, SurfaceConditions)],

@@ -398,7 +398,7 @@ fn the_passes_build_one_field_per_run_of_equal_inputs_and_the_record_none() {
 /// stated, not asserted: the airless bodies whose air's surface pressure is exactly 0 over partial
 /// pressures above 0, which `is_collisional_air` calls collisional by 0 ≥ 0, so that they take no
 /// cold traps; and every qualifying body with an `H2O` lid, its traps on T49.i's 0.832 frost as
-/// the lid's row at 24: `f_ct` and `A_s` by species and its zonal entries. P14.T49.m's lag states
+/// the lid's row at 25: `f_ct` and `A_s` by species and its zonal entries. P14.T49.m's lag states
 /// them again under every 26 hold (`under_every_26_hold_the_icy_lids_movers_are_stated`).
 #[test]
 fn the_cold_traps_census_is_stated() {
@@ -454,7 +454,7 @@ fn the_cold_traps_census_is_stated() {
             })
             .collect();
         eprintln!(
-            "at 24, an H2O lid on T49.i's frost: {} ({:?}) regolith A {:.4}, f_x \
+            "at 25, an H2O lid on T49.i's frost: {} ({:?}) regolith A {:.4}, f_x \
              {f_x:.4}: {entries:?}",
             body.id(),
             body.kind,

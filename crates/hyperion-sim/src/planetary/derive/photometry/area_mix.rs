@@ -1565,7 +1565,7 @@ impl Regolith {
 ///
 /// It is this rule's one hold. Below it [`IcyRegolithRules::in_force`] is
 /// [`IcyRegolithRules::Frost`]: every `H2O` regolith is T49.i's fresh frost, and every value on
-/// the record is version 24's bit for bit. 26's bump deletes this hold, [`IcyRegolithRules`] with
+/// the record is version 25's bit for bit. 26's bump deletes this hold, [`IcyRegolithRules`] with
 /// its `Frost` arm, the guards that read it in [`Regolith::weathered_lid`] and
 /// [`Regolith::bond`], the tests' switch and its tripwire
 /// (`the_icy_regolith_is_held_only_until_the_26_bump`).

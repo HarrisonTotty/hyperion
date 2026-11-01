@@ -669,7 +669,7 @@ pub fn ordinary_chondrite(delta_iw: Dex) -> CrustLithology {
 ///
 /// It is P14.T51.k's one hold. Below it [`MinorOxidesRules::in_force`] is
 /// [`MinorOxidesRules::Held`]: [`bulk_iron_mass_fraction`] counts the solids as Fe, `MgO` and
-/// `SiO₂` alone, a body's bulk iron is its host's, and every figure is version 24's, 25's and 26's
+/// `SiO₂` alone, a body's bulk iron is its host's, and every figure is version 25's and 26's
 /// bit for bit. 27's bump deletes this hold, [`MinorOxidesRules`] with its `Held` arm, the tests'
 /// switch and its tripwire (`the_minor_oxides_are_held_only_until_the_27_bump`).
 pub(crate) const MINOR_OXIDES_VERSION: GeneratorVersion = GeneratorVersion::new(27);

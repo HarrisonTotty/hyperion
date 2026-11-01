@@ -115,7 +115,7 @@ fn sample_points(n: usize, key: u64) -> Vec<PointLy> {
         .collect()
 }
 
-/// P08.T12 is held until the bump to 26: the rules in force are version 24's and before, under
+/// P08.T12 is held until the bump to 26: the rules in force are version 25's and before, under
 /// which layers D and E hold the field components alone.
 #[test]
 fn the_displaced_classes_are_held_only_until_the_26_bump() {

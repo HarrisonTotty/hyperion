@@ -427,7 +427,7 @@ impl Galaxy {
         }
     }
 
-    /// The field galaxy: version 24's build verbatim, with nothing of plan 08's displaced classes.
+    /// The field galaxy: version 25's build verbatim, with nothing of plan 08's displaced classes.
     fn build_field(
         seed: Seed,
         params: GalaxyParams,

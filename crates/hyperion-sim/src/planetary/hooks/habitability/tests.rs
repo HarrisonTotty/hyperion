@@ -108,7 +108,7 @@ fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssess
     })
 }
 
-/// The table's Earth, Mars and Venus under the rules at generator version 24 and under every 26
+/// The table's Earth, Mars and Venus under the rules at generator version 25 and under every 26
 /// hold (`with_every_26_hold`), each printed with its surface pressure: Earth `Temperate` with no
 /// limit, Mars a frozen `Marginal` desert, below water's triple point exactly where its pressure
 /// is, and Venus a dry `Hostile` runaway.
@@ -116,7 +116,7 @@ fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssess
 fn earth_is_temperate_mars_marginal_and_venus_a_hostile_runaway() {
     let triple = water_triple_pressure().value();
     for (rules, assessed) in [
-        ("version 24", table_assessments()),
+        ("version 25", table_assessments()),
         ("every 26 hold", with_every_26_hold(table_assessments)),
     ] {
         for (name, inputs, assessment) in &assessed {

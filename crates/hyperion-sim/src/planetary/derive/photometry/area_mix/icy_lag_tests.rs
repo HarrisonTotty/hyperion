@@ -83,7 +83,7 @@ fn the_icy_regolith_is_held_only_until_the_26_bump() {
     assert_eq!(IcyRegolithRules::in_force(), IcyRegolithRules::Frost);
 }
 
-/// Under the frost every `H2O` regolith is T49.i's fresh frost to the bit, as at 24, whatever its
+/// Under the frost every `H2O` regolith is T49.i's fresh frost to the bit, as at 25, whatever its
 /// pass knows of its resurfacing, and the weathered area mix's `H2O` lid keeps its weathered arm.
 #[test]
 fn under_the_frost_every_h2o_regolith_is_t49i_s_frost_to_the_bit() {
@@ -306,7 +306,7 @@ fn under_the_mixture_the_measured_moons_take_their_windows() {
         assert!(
             !Regolith::weathered_lid(id("H2O"), SurfaceMaterial::Rock, airless()).is_weathered()
         );
-        // Every other row, as at 24.
+        // Every other row, as at 25.
         let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
         assert_same_bits(
             Regolith::of_material(SurfaceMaterial::Rock)

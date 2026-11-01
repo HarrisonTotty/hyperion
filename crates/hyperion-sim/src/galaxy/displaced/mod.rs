@@ -22,7 +22,7 @@
 //! P08.T12 replaces layers D and E, so it lands behind a galaxy hold (decision-galaxy-25-train §1),
 //! `DISPLACED_VERSION`: its field of the galaxy's rules, `DisplacedRules`, is matched once, where
 //! the galaxy is built. Under `DisplacedRules::FieldOnly`, every galaxy built today, the build is
-//! version 24's verbatim and installs nothing, so every reader takes the field's path unchanged.
+//! version 25's verbatim and installs nothing, so every reader takes the field's path unchanged.
 //! Under `DisplacedRules::Displaced` the build makes the class table from the field
 //! galaxy and installs the classes ([`DisplacedFields`], in the galaxy's
 //! [`Fields`](crate::galaxy::fields::Fields)) and the stay shares and class counts (in its
@@ -59,7 +59,7 @@ use crate::GeneratorVersion;
 /// new arm builds the class table from the field galaxy and installs [`DisplacedFields`] and the
 /// share matrix's stay shares and class counts, and every reader of layers D and E reads those.
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`DisplacedRules::FieldOnly`], which installs nothing, so every reader takes version 24's path
+/// [`DisplacedRules::FieldOnly`], which installs nothing, so every reader takes version 25's path
 /// verbatim and every generated value keeps its bits; the tests reach the new arm through a galaxy
 /// built under `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold,
 /// [`DisplacedRules`] with its `FieldOnly` arm, the galaxy's `displaced` field and its tripwire
@@ -69,7 +69,7 @@ pub(crate) const DISPLACED_VERSION: GeneratorVersion = GeneratorVersion::new(26)
 /// Whether layers D and E hold plan 08's displaced classes (the hold of [`DISPLACED_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum DisplacedRules {
-    /// Version 24's and before: layers D and E hold the field components alone, each at its
+    /// Version 25's and before: layers D and E hold the field components alone, each at its
     /// population's whole band share.
     FieldOnly,
     /// Version 26's: layers D and E hold the field components at their stay shares and, after

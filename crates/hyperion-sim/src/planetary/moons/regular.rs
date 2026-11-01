@@ -3497,7 +3497,7 @@ mod tests {
     }
 
     /// P14.T49.m's moons under every 26 hold (decision-p14-t54a-ganymede §1.5 and §1.8), at every
-    /// radius rank, each derived at 24 and under the icy regolith: the measured Ganymede's and
+    /// radius rank, each derived at 25 and under the icy regolith: the measured Ganymede's and
     /// Callisto's ice crusts, on the passes' stand-in (their resurfacing not known), take the lag,
     /// Ganymede's Bond albedo inside 0.32–0.38 and Callisto's pinned as it stands against 0.09–0.13
     /// (a deferred finding: Ganymede's twin in the generator's inputs), each `T_eq` and state
@@ -3603,7 +3603,7 @@ mod tests {
     /// about 9 K), a `Snowball`, the same twice. Its surface, 89.9–91.3 K, and its Bond albedo,
     /// 0.287–0.299, lie at the edges of Huygens's 94 ± 3 K (93.7 K, Fulchignoni et al. 2005, from
     /// memory) and Li et al. 2011's 0.265 ± 0.03, missing them by up to 1.1 K and 0.004 (pinned as
-    /// they stand, deferred findings). With P14.T24.h.b's holds set back it is 24's Titan under its
+    /// they stand, deferred findings). With P14.T24.h.b's holds set back it is 25's Titan under its
     /// 0.67 cloud.
     #[test]
     fn under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze() {
