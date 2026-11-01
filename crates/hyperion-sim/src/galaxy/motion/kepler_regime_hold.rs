@@ -31,7 +31,7 @@ use crate::galaxy::placement::{
 };
 use crate::galaxy::query::{
     LayerCounts, LayerSet, QuerySphere, RangeQuery, SubstellarRequest, SystemHit, cells_in_sphere,
-    count_cells_in_sphere, decide_census, expected_counts, kepler_pad_for, pad_for, pad_speed,
+    count_cells_in_sphere, decide_census, expected_counts, kepler_pad_for, pad_for, pad_speed_in,
     position_at, range_query, sphere_for_layer, walk_pad,
 };
 use crate::id::{Layer, SystemId, SystemIdKind};
@@ -263,7 +263,7 @@ fn a_catalogue_system_moves_by_its_class_near_the_black_hole() {
         assert_eq!(layer, Layer::E, "a core collapse's primary is of band E");
         let fastest = entry.value().marks().fastest_member_speed().value();
         assert!(
-            fastest < MetresPerSecond::from(pad_speed(layer)).value(),
+            fastest < MetresPerSecond::from(pad_speed_in(galaxy, layer)).value(),
             "{:?} moves at {fastest} m/s",
             entry.id()
         );
@@ -357,7 +357,7 @@ fn a_type_ia_s_members_move_by_their_class_near_the_black_hole() {
                 if member == 0 {
                     assert_eq!(layer, Layer::D, "a Type Ia's primary is of layer D");
                     let speed = system.motion().velocity_at(death).speed().value();
-                    assert!(speed < MetresPerSecond::from(pad_speed(layer)).value());
+                    assert!(speed < MetresPerSecond::from(pad_speed_in(galaxy, layer)).value());
                 } else {
                     survivors += 1;
                 }
@@ -682,7 +682,7 @@ fn census_of_the_layer(unmoving: &Galaxy, galaxy: &Galaxy, layer: Layer) {
                 "{:?} at {y} yr: {from_epoch} ly from its epoch position, beyond {room}",
                 record.id()
             );
-            if from_epoch > 0.01 + pad_for(t, pad_speed(layer)).value() {
+            if from_epoch > 0.01 + pad_for(t, pad_speed_in(galaxy, layer)).value() {
                 slot.beyond_straight += 1;
             }
         }
@@ -762,7 +762,7 @@ fn census_of_the_pad(galaxy: &Galaxy) {
                         *query.centre(),
                         query.radius(),
                         t,
-                        pad_for(t, pad_speed(layer)),
+                        pad_for(t, pad_speed_in(galaxy, layer)),
                     )
                     .expect("a built query's sphere, padded by a few light-years")
                 };
@@ -832,7 +832,7 @@ fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
                     near.retain(|r| regime_of(galaxy, r) == Regime::Kepler);
                     near
                 });
-                let reach = radius + pad_for(t, pad_speed(layer)).value() + 1e-6;
+                let reach = radius + pad_for(t, pad_speed_in(galaxy, layer)).value() + 1e-6;
                 let around = QuerySphere::new(centre, LightYears::new(reach), t, LightYears::ZERO)
                     .expect("a positive radius");
                 let mut straight = Vec::new();
@@ -850,7 +850,7 @@ fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
                     if distance <= radius {
                         want.push(SystemHit::new(*record, at, LightYears::new(distance)));
                         if apart(&centre, record.epoch_position())
-                            > radius + pad_for(t, pad_speed(layer)).value()
+                            > radius + pad_for(t, pad_speed_in(galaxy, layer)).value()
                         {
                             moved_in += 1;
                         }

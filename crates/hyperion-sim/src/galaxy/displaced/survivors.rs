@@ -335,8 +335,9 @@ mod tests {
              and every record of its cells move. Delete `HYPERVELOCITY_VERSION`, \
              `HypervelocityRules` with its `Unweighted` arm, `GalaxyRules::hypervelocity`, \
              `ClassTable`'s `Option` on its survivors and this test in the bump's own commit; \
-             raise `query::pad_speed(Layer::D)` to `UNBOUND_PAD_SPEED`, which the sky census and \
-             the server's sky read, and fold `pad_speed_in` and `escape_cut_holds_in` into it; and \
+             raise `query::pad_speed(Layer::D)` to `UNBOUND_PAD_SPEED` and fold `pad_speed_in`, \
+             `escape_cut_holds_in` and `LayerPads` (the sky query's and its cache's pads) into it; \
+             and \
              re-bless the goldens plan 09's \"P09.T34.b, as built\" lists"
         );
         assert_eq!(

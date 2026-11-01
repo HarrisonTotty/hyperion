@@ -28,7 +28,7 @@ use hyperion_sim::galaxy::placement::{
 use hyperion_sim::galaxy::query::{
     Census, CensusStop, LayerCounts, LayerSet, MassFloor, PAD_SPEED, QuerySphere, RangeQuery,
     RangeResult, SystemHit, SystemSource, cells_in_sphere, count_cells_in_sphere, decide_census,
-    expected_counts, pad_for, pad_speed, position_at, range_query,
+    expected_counts, pad_for, pad_speed_in, position_at, range_query,
 };
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::Layer;
@@ -301,7 +301,7 @@ fn a_query_at_the_edges_of_the_clock_window_still_finds_its_systems() {
         let padded_cells: u64 = [Layer::E, Layer::D, Layer::C, Layer::B, Layer::A]
             .into_iter()
             .map(|layer| {
-                let pad = pad_for(t, pad_speed(layer));
+                let pad = pad_for(t, pad_speed_in(&galaxy, layer));
                 let sphere = QuerySphere::new(centre, LightYears::new(20.0), t, pad)
                     .expect("a 20 ly sphere with a pad of a few light-years");
                 count_cells_in_sphere(layer, &sphere)
@@ -460,7 +460,7 @@ fn outer_bulge() -> GalacticPosition {
 fn census_of(galaxy: &Galaxy, query: &RangeQuery) -> Census {
     let grid = expected_counts(galaxy, query.centre(), query.radius(), query.substellar());
     decide_census(query, &grid, &LayerCounts::ZERO, |layer| {
-        let pad = pad_for(query.time(), pad_speed(layer));
+        let pad = pad_for(query.time(), pad_speed_in(galaxy, layer));
         let sphere = QuerySphere::new(*query.centre(), query.radius(), query.time(), pad)
             .expect("a built query has a finite positive radius");
         count_cells_in_sphere(layer, &sphere)

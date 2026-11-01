@@ -77,10 +77,8 @@ pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_00
 ///
 /// Plan 09 raises layer D's together with the hypervelocity survivors it places there
 /// (P09.T34.b), from generator version 27: until that bump a galaxy's own pad is
-/// [`pad_speed_in`]'s, which the range query, the frame search, the lensing walk and the displaced
-/// classes' cut read. The sky census, the server's sky and the features' and streams' reach,
-/// which hold no galaxy where they pad, read this, so the bump raises layer D's here and they
-/// follow. A feature's or a stream's members are no grid records and need no more.
+/// [`pad_speed_in`]'s, which every walk and reach reads, and the sky census and the server's sky
+/// through their query's [`LayerPads`]. This is a galaxy's of version 26 and before.
 #[must_use]
 pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
     match layer {
@@ -165,6 +163,72 @@ pub fn pad_speed_in(galaxy: &Galaxy, layer: Layer) -> KilometresPerSecond {
 #[must_use]
 pub fn escape_cut_holds_in(galaxy: &Galaxy, layer: Layer) -> bool {
     pad_speed_in(galaxy, layer).value() <= PAD_SPEED.value()
+}
+
+/// Every layer's pad speed in one galaxy, [`pad_speed_in`]'s, for a reader that pads where it
+/// holds no galaxy: the sky census, which reads its query's (`SkyQueryBuilder::pads`), and the
+/// server's sky (plan 09, P09.T34.b).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::query::{LayerPads, pad_speed};
+/// use hyperion_sim::id::Layer;
+///
+/// // Below generator version 27 a galaxy's pads are every layer's held one.
+/// let pads = LayerPads::of(&Galaxy::new(Seed::new(7)));
+/// assert_eq!(pads, LayerPads::held());
+/// assert_eq!(pads.speed(Layer::D), pad_speed(Layer::D));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayerPads {
+    /// By layer, in [`Layer::ALL`]'s order, which is their values'.
+    speeds: [KilometresPerSecond; Layer::ALL.len()],
+}
+
+impl LayerPads {
+    /// The pads of a galaxy whose hypervelocity survivors have no weight, every galaxy's to
+    /// generator version 26: [`pad_speed`]'s.
+    #[must_use]
+    pub const fn held() -> Self {
+        let mut speeds = [PAD_SPEED; Layer::ALL.len()];
+        let mut i = 0;
+        while i < Layer::ALL.len() {
+            speeds[i] = pad_speed(Layer::ALL[i]);
+            i += 1;
+        }
+        Self { speeds }
+    }
+
+    /// `galaxy`'s pads, [`pad_speed_in`]'s.
+    #[must_use]
+    pub fn of(galaxy: &Galaxy) -> Self {
+        Self {
+            speeds: Layer::ALL.map(|layer| pad_speed_in(galaxy, layer)),
+        }
+    }
+
+    /// `layer`'s pad speed.
+    #[must_use]
+    pub fn speed(&self, layer: Layer) -> KilometresPerSecond {
+        self.speeds[usize::from(layer.value())]
+    }
+
+    /// Whether every grid record of `layer` is drawn below the local escape speed, read from its
+    /// pad as [`escape_cut_holds`] is.
+    #[must_use]
+    pub fn escape_cut_holds(&self, layer: Layer) -> bool {
+        self.speed(layer).value() <= PAD_SPEED.value()
+    }
+}
+
+impl Default for LayerPads {
+    /// [`held`](Self::held)'s.
+    fn default() -> Self {
+        Self::held()
+    }
 }
 
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,

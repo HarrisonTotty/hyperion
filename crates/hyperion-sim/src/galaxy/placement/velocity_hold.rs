@@ -22,7 +22,9 @@ use crate::galaxy::displaced::{
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, draw, is_exempt};
-use crate::galaxy::query::{PAD_SPEED, epoch_velocity, escape_cut_holds_in, pad_speed};
+use crate::galaxy::query::{
+    PAD_SPEED, epoch_velocity, escape_cut_holds_in, pad_speed, pad_speed_in,
+};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
@@ -555,7 +557,8 @@ fn no_record_reaches_its_layers_pad_speed() {
                         for record in members(galaxy, (class, band), &at, &[], (MEMBERS, 0)) {
                             let v = epoch_velocity(galaxy, &record);
                             let speed = v.speed().value() / 1_000.0;
-                            assert!(speed < pad_speed(record.layer()).value(), "{key:?}");
+                            let pad = pad_speed_in(galaxy, record.layer()).value();
+                            assert!(speed < pad, "{key:?}");
                             if !exempt {
                                 assert!(speed < PAD_SPEED.value(), "{key:?}");
                                 assert!(speed < escape, "{key:?} beyond the escape speed");

@@ -50,7 +50,7 @@ use hyperion_protocol::{
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
-use hyperion_sim::galaxy::query::pad_speed;
+use hyperion_sim::galaxy::query::LayerPads;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
@@ -161,7 +161,7 @@ pub(crate) async fn answer(
         None => None,
     };
     phase("eye", started);
-    let asked_query = Arc::new(asked.query(seen, light, state.sky_caps));
+    let asked_query = Arc::new(asked.query(seen, light, state.sky_caps, LayerPads::of(&galaxy)));
     let edges = state.sky_caps.shell_edges_ly();
     // The query at the ceiling the sky is served at (rendering plan R13, R13.T2.b), which the census,
     // the band and every reply read.
@@ -590,7 +590,8 @@ impl SkyAsk {
     /// (R06.T9.g), the band `caps` marches (the standard band but in a test), and every cap forced
     /// where `caps` forces them. `seen` is the request's eye with its cut, or `None` where the
     /// request does not ask the eye. It states no synthetic ceiling: the plan states the one the
-    /// sky is served at (`compute::sky::plan`; rendering plan R13, R13.T2.b).
+    /// sky is served at (`compute::sky::plan`; rendering plan R13, R13.T2.b). Its `pads` are the
+    /// galaxy's, by which the census walks each layer (plan 09, P09.T34.b).
     ///
     /// # Panics
     ///
@@ -603,6 +604,7 @@ impl SkyAsk {
         seen: Option<Seen>,
         illumination: Arc<Illumination>,
         caps: SkyCaps,
+        pads: LayerPads,
     ) -> SkyQuery {
         let cut = match (seen.as_ref().map(|seen| seen.cut), self.camera_limit) {
             (Some(eye_cut), Some(camera)) => {
@@ -629,7 +631,8 @@ impl SkyAsk {
         }
         builder = builder
             .illumination(illumination)
-            .band_spec(caps.band_spec());
+            .band_spec(caps.band_spec())
+            .pads(pads);
         if let Some(cone) = self.cone {
             builder = builder.cone(cone);
         }
@@ -759,7 +762,11 @@ fn response(
         universe,
         time: wire_time(query.observer().time()),
         observer,
-        valid_until: wire_time(valid_until(query.observer().time(), census.listed())),
+        valid_until: wire_time(valid_until(
+            query.observer().time(),
+            census.listed(),
+            query.pads(),
+        )),
         cut_v: query.cut().value(),
         synthetic_ceiling_v: query.synthetic_ceiling().map(Magnitudes::value),
         real_limit_ly: query.synthetic_ceiling().map(|_| REAL_LIMIT_LY),
@@ -850,12 +857,17 @@ fn not_modelled(tallies: &CensusTallies) -> Vec<SkyGapDto> {
 /// on, or sooner if a listed star within [`NEAR_STAR_LY`] could move a tenth of a pixel at 1080p
 /// across 60° before then.
 ///
-/// A star's own velocity is not in the census, so each is taken at its layer's pad speed, which
-/// every grid record of the layer moves below (plan 03, `pad_speed`): the sky may be asked again
-/// early, never late.
+/// A star's own velocity is not in the census, so each is taken at its layer's pad speed in the
+/// galaxy, `pads`, which every grid record of the layer moves below (plan 03, `pad_speed`; from
+/// generator version 27 layer D's is the hypervelocity survivors', plan 09's P09.T34.b): the sky may
+/// be asked again early, never late.
 #[must_use]
-fn valid_until(t: UniverseTime, listed: &[SkyStar]) -> UniverseTime {
-    valid_until_of(t, listed.iter().map(|star| (star.distance(), star.layer())))
+fn valid_until(t: UniverseTime, listed: &[SkyStar], pads: LayerPads) -> UniverseTime {
+    valid_until_of(
+        t,
+        listed.iter().map(|star| (star.distance(), star.layer())),
+        pads,
+    )
 }
 
 /// [`valid_until`] of stars at each `(distance, layer)`.
@@ -863,12 +875,13 @@ fn valid_until(t: UniverseTime, listed: &[SkyStar]) -> UniverseTime {
 fn valid_until_of(
     t: UniverseTime,
     stars: impl IntoIterator<Item = (LightYears, Layer)>,
+    pads: LayerPads,
 ) -> UniverseTime {
     let seconds = stars
         .into_iter()
         .filter(|(distance, _)| distance.value() < NEAR_STAR_LY)
         .map(|(distance, layer)| {
-            let metres_per_second = pad_speed(layer).value() * 1_000.0;
+            let metres_per_second = pads.speed(layer).value() * 1_000.0;
             TENTH_OF_A_PIXEL_RAD * distance.value() * METRES_PER_LIGHT_YEAR / metres_per_second
         })
         .fold(VALID_FOR_S, f64::min);
@@ -1184,27 +1197,35 @@ mod tests {
         };
         let caps = SkyCaps::DERIVED;
         assert_eq!(
-            cuts(&ask(Some(eye()), Some(10.0)).query(seen(), light(), caps)),
+            cuts(&ask(Some(eye()), Some(10.0)).query(seen(), light(), caps, LayerPads::held())),
             (10.0, Some(8.5)),
             "a camera's deeper cut"
         );
         assert_eq!(
-            cuts(&ask(Some(eye()), Some(7.0)).query(seen(), light(), caps)),
+            cuts(&ask(Some(eye()), Some(7.0)).query(seen(), light(), caps, LayerPads::held())),
             (8.5, Some(8.5)),
             "a camera's shallower cut"
         );
         assert_eq!(
-            cuts(&ask(Some(eye()), None).query(seen(), light(), caps)),
+            cuts(&ask(Some(eye()), None).query(seen(), light(), caps, LayerPads::held())),
             (8.5, Some(8.5))
         );
         assert_eq!(
-            cuts(&ask(None, Some(9.0)).query(None, light(), caps)),
+            cuts(&ask(None, Some(9.0)).query(None, light(), caps, LayerPads::held())),
             (9.0, None)
         );
         let ask = ask(None, Some(9.0));
         let forced = SkyCaps::forced(LightYears::new(30.0)).unwrap();
-        assert_eq!(cuts(&ask.query(None, light(), forced)), (9.0, None));
-        assert_eq!(ask.query(None, light(), caps).n_max().get(), MAX_SKY_STARS);
+        assert_eq!(
+            cuts(&ask.query(None, light(), forced, LayerPads::held())),
+            (9.0, None)
+        );
+        assert_eq!(
+            ask.query(None, light(), caps, LayerPads::held())
+                .n_max()
+                .get(),
+            MAX_SKY_STARS
+        );
     }
 
     /// A sky's query is marched at the standard band (Design note 14) unless a test's caps ask
@@ -1216,7 +1237,8 @@ mod tests {
         for caps in [SkyCaps::DERIVED, forced] {
             assert_eq!(caps.band_spec(), BandSpec::STANDARD, "{caps:?}");
             assert_eq!(
-                ask.query(None, light(), caps).band_spec(),
+                ask.query(None, light(), caps, LayerPads::held())
+                    .band_spec(),
                 BandSpec::STANDARD,
                 "{caps:?}"
             );
@@ -1224,13 +1246,17 @@ mod tests {
         let coarse = BandSpec::new(16, 12).unwrap();
         let caps = forced.with_band_spec(coarse);
         assert_eq!(caps.band_spec(), coarse);
-        assert_eq!(ask.query(None, light(), caps).band_spec(), coarse);
+        assert_eq!(
+            ask.query(None, light(), caps, LayerPads::held())
+                .band_spec(),
+            coarse
+        );
         let coned = SkyAsk::try_from(&SkyRequest {
             cone: Some(cone([0.0, 0.0, 1.0], 2.5)),
             ..request()
         })
         .unwrap();
-        let query = coned.query(None, light(), caps);
+        let query = coned.query(None, light(), caps, LayerPads::held());
         assert_eq!(
             (query.band_spec(), query.cone_region().map(ConeRegion::spec)),
             (coarse, Some(coarse))
@@ -1293,7 +1319,7 @@ mod tests {
         };
 
         let query = ask
-            .query(None, light(), SkyCaps::DERIVED)
+            .query(None, light(), SkyCaps::DERIVED, LayerPads::held())
             .with_synthetic_ceiling(SYNTHETIC_CEILING)
             .unwrap();
         let (plan, body) = answer(&query, real.clone());
@@ -1380,15 +1406,16 @@ mod tests {
     fn a_sky_holds_a_year_unless_a_star_within_a_light_year_could_move_a_tenth_of_a_pixel() {
         let t = UniverseTime::new(3_600, 0).unwrap();
         let year = UniverseTime::new(3_600 + 31_557_600, 0).unwrap();
-        assert_eq!(valid_until(t, &[]), year);
+        let held = LayerPads::held();
+        assert_eq!(valid_until(t, &[], held), year);
         let ly = LightYears::new;
         assert_eq!(
-            valid_until_of(t, [(ly(1.0), Layer::A), (ly(40.0), Layer::E)]),
+            valid_until_of(t, [(ly(1.0), Layer::A), (ly(40.0), Layer::E)], held),
             year,
             "no star within a light-year"
         );
         let days = |stars: &[(LightYears, Layer)]| {
-            let until = valid_until_of(t, stars.iter().copied());
+            let until = valid_until_of(t, stars.iter().copied(), held);
             until.checked_since(t).unwrap().as_seconds_f64() / 86_400.0
         };
         // Half a light-year off at layer A's pad speed, 1,000 km/s: 0.1 × (60° ÷ 1,080) × 0.5 ly
@@ -1402,6 +1429,31 @@ mod tests {
             (ly(0.9), Layer::E),
         ]);
         assert!((e - a / 3.0).abs() < 1e-6, "{e}");
+        // From generator version 27 layer D holds the hypervelocity survivors and pads at
+        // 3,000 km/s as layer E does (plan 09, P09.T34.b): a layer-D star then sets layer E's
+        // time, where under the held pads it sets layer A's.
+        let weighted = LayerPads::of(
+            &Galaxy::from_params_at_version(
+                Seed::new(0x0934_b5e7),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                hyperion_sim::GeneratorVersion::new(27),
+            )
+            .unwrap(),
+        );
+        let near_d = [(ly(0.5), Layer::D)];
+        let days_in = |pads| {
+            valid_until_of(t, near_d, pads)
+                .checked_since(t)
+                .unwrap()
+                .as_seconds_f64()
+                / 86_400.0
+        };
+        assert!((days_in(held) - a).abs() < 1e-9, "{}", days_in(held));
+        assert!(
+            (days_in(weighted) - a / 3.0).abs() < 1e-6,
+            "{}",
+            days_in(weighted)
+        );
     }
 
     #[test]
@@ -1426,7 +1478,7 @@ mod tests {
         let caps = SkyCaps::forced(LightYears::new(25.0)).unwrap();
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
-        let query = asked.query(None, light(), caps);
+        let query = asked.query(None, light(), caps, LayerPads::held());
         let mut ctx = tables.march_context(&NoModifiers);
         let plan = hyperion_sim::sky::census::census_plan(
             &galaxy,
@@ -1566,7 +1618,8 @@ mod tests {
         let galaxy = Galaxy::new(Seed::new(SEED));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
-        let query = asked.query(None, light(), SkyCaps::forced(LightYears::ZERO).unwrap());
+        let forced = SkyCaps::forced(LightYears::ZERO).unwrap();
+        let query = asked.query(None, light(), forced, LayerPads::held());
         let spec = BandSpec::new(4, 12).unwrap();
         let mut texels = Vec::new();
         hyperion_sim::sky::band::band_rows(
@@ -1692,9 +1745,12 @@ mod tests {
         let harness = Harness::start(Handlers).await;
         let galaxy = Arc::new(Galaxy::new(Seed::new(SEED)));
         let key = GalaxyKey::new(SEED, hyperion_sim::GENERATOR_VERSION);
-        let query = SkyAsk::try_from(&request())
-            .unwrap()
-            .query(None, light(), SkyCaps::DERIVED);
+        let query = SkyAsk::try_from(&request()).unwrap().query(
+            None,
+            light(),
+            SkyCaps::DERIVED,
+            LayerPads::held(),
+        );
         let t = query.observer().time();
         let lit = |record: &SystemRecord| {
             !host_discs(&galaxy, &SystemStars::generate(&galaxy, record), t).is_empty()

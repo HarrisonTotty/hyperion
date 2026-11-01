@@ -5620,8 +5620,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _The pad._ Raising `pad_speed(D)` outright moved `sky/census_near_sun`'s and `sky/eye_cut`'s
     cell tallies at 24, so `query::pad_speed_in(galaxy, layer)` and `escape_cut_holds_in` (new)
     give layer D `UNBOUND_PAD_SPEED` from 27; the walks, `epoch_velocity`, lensing and the exempt
-    cut read them. The census, the server's sky and the features' reach keep `pad_speed` until
-    the bump raises it; the census debug-asserts it is not given a weighted galaxy.
+    cut read them. So do the features' and streams' reach (`band_reach`) and `widest_sphere`, by
+    the galaxy, and the sky census and the server's sky through `SkyQueryBuilder::pads`
+    (`query::LayerPads`, new; `BlockParams` carries the query's). `census_plan` debug-asserts its
+    query's pads are its galaxy's.
   - _The hold._ `GalaxyRules::hypervelocity` (`HypervelocityRules`, `HYPERVELOCITY_VERSION` 27),
     in `every_27_hold`; tripwire `the_hypervelocity_survivors_are_held_only_until_the_27_bump`;
     `Galaxy::with_rules` refuses it. The carve-out reads layer D only as each field component's

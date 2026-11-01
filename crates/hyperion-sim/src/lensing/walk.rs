@@ -17,12 +17,12 @@ use crate::galaxy::placement::{
     CellCache, CellKey, Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord,
     resolve,
 };
-#[cfg(doc)]
-use crate::galaxy::query::escape_cut_holds_in;
 use crate::galaxy::query::{
-    LayerSet, MassFloor, PAD_SPEED, QuerySphere, SubstellarRequest, SystemHit, SystemSource,
-    UNBOUND_PAD_SPEED, cells_along_segment, pad_speed_in,
+    LayerPads, LayerSet, MassFloor, PAD_SPEED, QuerySphere, SubstellarRequest, SystemHit,
+    SystemSource, UNBOUND_PAD_SPEED, cells_along_segment,
 };
+#[cfg(doc)]
+use crate::galaxy::query::{escape_cut_holds_in, pad_speed_in};
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::math;
 use crate::observe::{Drift, Observer, TraceMotionError, retarded};
@@ -1241,8 +1241,8 @@ const ENVELOPE_MARGIN: f64 = 1.02;
 struct EscapeEnvelope {
     /// The largest sampled escape speed at or beyond each of the table's radii, km/s.
     beyond: Vec<f64>,
-    /// Each layer's pad speed in the galaxy, in [`Layer::ALL`]'s order ([`pad_speed_in`]).
-    pads: [KilometresPerSecond; Layer::ALL.len()],
+    /// Each layer's pad speed in the galaxy ([`pad_speed_in`]).
+    pads: LayerPads,
 }
 
 impl EscapeEnvelope {
@@ -1275,22 +1275,14 @@ impl EscapeEnvelope {
         }
         Some(Self {
             beyond,
-            pads: Layer::ALL.map(|layer| pad_speed_in(galaxy, layer)),
+            pads: LayerPads::of(galaxy),
         })
     }
 
     /// `layer`'s pad speed in the galaxy the table is of ([`pad_speed_in`]).
-    ///
-    /// # Panics
-    ///
-    /// Never: every layer is one of [`Layer::ALL`].
     #[must_use]
     fn pad_speed(&self, layer: Layer) -> KilometresPerSecond {
-        let index = Layer::ALL
-            .iter()
-            .position(|&each| each == layer)
-            .expect("every layer is one of all");
-        self.pads[index]
+        self.pads.speed(layer)
     }
 
     /// The speed bound of a grid lens of `layer` whose epoch position is at least `radius_ly` from
@@ -1304,8 +1296,7 @@ impl EscapeEnvelope {
     #[must_use]
     fn speed_bound(&self, layer: Layer, radius_ly: f64) -> KilometresPerSecond {
         let pad = self.pad_speed(layer);
-        // `escape_cut_holds_in`, read from the table's own pads.
-        if pad.value() <= PAD_SPEED.value() {
+        if self.pads.escape_cut_holds(layer) {
             KilometresPerSecond::new(self.bound(radius_ly).min(pad.value()))
         } else {
             pad
@@ -1639,7 +1630,7 @@ mod tests {
     use crate::galaxy::Population;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{NoCache, generate_cell};
-    use crate::galaxy::query::{LayerCounts, escape_cut_holds, pad_speed};
+    use crate::galaxy::query::{LayerCounts, escape_cut_holds, pad_speed, pad_speed_in};
     use crate::observe::{Trajectory, light_time};
     use hyperion_testkit::float::assert_same_bits;
 
@@ -2285,7 +2276,7 @@ mod tests {
             beyond: (0..ENVELOPE_RADII)
                 .map(|k| 1_200.0 - 900.0 * f64::from(k) / f64::from(ENVELOPE_RADII - 1))
                 .collect(),
-            pads: Layer::ALL.map(pad_speed),
+            pads: LayerPads::held(),
         };
         let radii = [0.01, 1.0, 100.0, 26_000.0, 300_000.0];
         for layer in Layer::ALL {
@@ -2334,7 +2325,7 @@ mod tests {
         let envelope = EscapeEnvelope::of(&weighted).expect("the galaxy moves");
         let held = EscapeEnvelope {
             beyond: envelope.beyond.clone(),
-            pads: Layer::ALL.map(pad_speed),
+            pads: LayerPads::held(),
         };
         for radius_ly in [0.01, 1.0, 100.0, 26_000.0, 300_000.0] {
             assert_same_bits(
@@ -2373,7 +2364,7 @@ mod tests {
         let mut examined = 0;
         let mut cell = Vec::new();
         for layer in query.layers().iter() {
-            let beta = MetresPerSecond::from(pad_speed(layer)).value() / SPEED_OF_LIGHT;
+            let beta = MetresPerSecond::from(pad_speed_in(galaxy, layer)).value() / SPEED_OF_LIGHT;
             let pad =
                 tube_radius(&g, query, layer_mass_bound(layer), beta, 0.0, d_s_ly).value() + 10.0;
             let size = f64::from(layer.cell_size_ly());
@@ -2463,7 +2454,7 @@ mod tests {
         let g = geometry(&source_line, &query);
         let flat = EscapeEnvelope {
             beyond: vec![PAD_SPEED.value(); usize::try_from(ENVELOPE_RADII).unwrap()],
-            pads: Layer::ALL.map(pad_speed),
+            pads: LayerPads::held(),
         };
         let padded = grid_cells(&g, &query, query.layers(), Some(&flat)).unwrap();
         let cells = u64::try_from(padded.len()).unwrap();

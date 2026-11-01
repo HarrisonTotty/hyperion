@@ -35,6 +35,7 @@ use std::sync::Arc;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{CellKey, SystemRecord};
+use crate::galaxy::query::LayerPads;
 use crate::id::Layer;
 use crate::units::{Magnitudes, Years};
 
@@ -67,25 +68,41 @@ pub(crate) const BLOCK_SIDE_CELLS: i32 = 4;
 /// The cells of a [`SkyBlock`]: [`BLOCK_SIDE_CELLS`]³, one bit each of its `built` word.
 const BLOCK_CELLS: usize = 64;
 
-/// What an entry is built for (R06.T8.h): an observer's position and the cut it censuses to. A
-/// cell's key and window follow from them, so the cell stores neither.
+/// What an entry is built for (R06.T8.h): an observer's position and the cut it censuses to, and
+/// its galaxy's pad speeds (plan 09, P09.T34.b). A cell's key and window follow from them, so the
+/// cell stores neither.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlockParams {
     at: GalacticPosition,
     cut: Magnitudes,
+    pads: LayerPads,
 }
 
 impl BlockParams {
-    /// An entry built for an observer at `at` censusing to apparent V `cut`.
+    /// An entry built for an observer at `at` censusing to apparent V `cut`, in a galaxy of the
+    /// held pads ([`LayerPads::held`], every galaxy's to generator version 26).
     #[must_use]
     pub const fn new(at: GalacticPosition, cut: Magnitudes) -> Self {
-        Self { at, cut }
+        Self {
+            at,
+            cut,
+            pads: LayerPads::held(),
+        }
     }
 
-    /// The parameters `query` builds an entry at: its observer's position and its cut.
+    /// The parameters `query` builds an entry at: its observer's position, its cut and its pads.
     #[must_use]
     pub fn of(query: &SkyQuery) -> Self {
-        Self::new(*query.observer().position(), query.cut())
+        Self {
+            pads: query.pads(),
+            ..Self::new(*query.observer().position(), query.cut())
+        }
+    }
+
+    /// The galaxy's pad speeds the entry's cells' reach is bounded with.
+    #[must_use]
+    pub const fn pads(&self) -> LayerPads {
+        self.pads
     }
 
     /// The builder's position.
@@ -114,6 +131,12 @@ impl BlockParams {
                 .zip(other.at.offset_metres())
                 .all(|(a, b)| same(a, b))
             && same(self.cut.value(), other.cut.value())
+            && Layer::ALL.into_iter().all(|layer| {
+                same(
+                    self.pads.speed(layer).value(),
+                    other.pads.speed(layer).value(),
+                )
+            })
     }
 }
 

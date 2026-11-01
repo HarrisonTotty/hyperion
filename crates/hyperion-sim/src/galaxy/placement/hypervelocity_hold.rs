@@ -38,9 +38,9 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::query::{
-    PAD_SPEED, QuerySphere, RangeQuery, UNBOUND_PAD_SPEED, count_cells_in_sphere, epoch_velocity,
-    escape_cut_holds, escape_cut_holds_in, pad_for, pad_speed, pad_speed_in, position_at,
-    range_query,
+    LayerPads, PAD_SPEED, QuerySphere, RangeQuery, UNBOUND_PAD_SPEED, count_cells_in_sphere,
+    epoch_velocity, escape_cut_holds, escape_cut_holds_in, pad_for, pad_speed, pad_speed_in,
+    position_at, range_query,
 };
 use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::ShellEnvironment;
@@ -137,7 +137,8 @@ fn the_survivors_inside_the_cube_are_tens_of_thousands() {
 
 /// Layer D pads at `UNBOUND_PAD_SPEED` with the survivors' weight, and the escape cut no longer
 /// holds there; every other layer pads as before. The held arm, every 26 hold's galaxy and the
-/// version's, pads layer D at plan 03's speed, as `pad_speed` does, which the sky census reads.
+/// version's, pads layer D at plan 03's speed, as `pad_speed` does; and a galaxy's `LayerPads`
+/// are its own, which the sky census and the server's sky read from their queries.
 #[test]
 fn layer_d_pads_at_the_unbound_speed_with_the_survivors() {
     let galaxy = weighted();
@@ -156,6 +157,64 @@ fn layer_d_pads_at_the_unbound_speed_with_the_survivors() {
         }
     }
     assert_eq!(pad_speed(Layer::D), PAD_SPEED);
+    let pads = LayerPads::of(galaxy);
+    for layer in Layer::ALL {
+        assert_eq!(pads.speed(layer), pad_speed_in(galaxy, layer), "{layer:?}");
+        assert_eq!(
+            pads.escape_cut_holds(layer),
+            escape_cut_holds_in(galaxy, layer)
+        );
+        assert_eq!(
+            LayerPads::of(held).speed(layer),
+            pad_speed(layer),
+            "{layer:?}"
+        );
+    }
+    assert_eq!(LayerPads::of(held), LayerPads::held());
+    assert_eq!(LayerPads::of(&built), LayerPads::held());
+    assert_ne!(pads, LayerPads::held());
+}
+
+/// A sky census of the weighted galaxy, its query stating the galaxy's pads, walks layer D's cells
+/// padded at `UNBOUND_PAD_SPEED`: a superset of the held pads' cells, and more of them, at the
+/// epoch and at +H, by the light time to its cap; every other layer's cells are the held pads'.
+#[test]
+fn the_sky_census_walks_layer_d_by_the_galaxys_pad() {
+    use crate::observe::Observer;
+    use crate::sky::census::{SkyQuery, plan_cells};
+    use crate::units::Magnitudes;
+    use std::collections::BTreeSet;
+
+    let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
+    let [_, plus_h] = window_ends();
+    for t in [UniverseTime::EPOCH, plus_h] {
+        let cells = |pads: LayerPads, layer: Layer| -> BTreeSet<CellKey> {
+            let query = SkyQuery::builder(
+                Observer::new(sun, t).expect("an observer"),
+                Magnitudes::new(7.0),
+            )
+            .pads(pads)
+            .build()
+            .expect("a sky query")
+            .with_caps_forced(LightYears::new(400.0))
+            .expect("forced caps");
+            let caps = query.forced_caps().expect("forced caps").to_vec();
+            plan_cells(&query, caps)
+                .into_iter()
+                .filter(|key| key.layer() == layer)
+                .collect()
+        };
+        let weighted_pads = LayerPads::of(weighted());
+        for layer in [Layer::A, Layer::C, Layer::D, Layer::E] {
+            let (raised, held) = (cells(weighted_pads, layer), cells(LayerPads::held(), layer));
+            if layer == Layer::D {
+                assert!(raised.is_superset(&held), "{t}");
+                assert!(raised.len() > held.len(), "{t}: {} cells", raised.len());
+            } else {
+                assert_eq!(raised, held, "{layer:?} at {t}");
+            }
+        }
+    }
 }
 
 /// P08.T12.d's check with the class's weight: every exempt class with weight lies in a layer the

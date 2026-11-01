@@ -370,7 +370,7 @@ impl SystemSource for GlobalListSource<'_> {
                         if !layers.contains(band.layer()) {
                             continue;
                         }
-                        let reach = band_reach(radius, t, band.layer(), bound);
+                        let reach = band_reach(galaxy, radius, t, band.layer(), bound);
                         for cell in core.grid().cells_touching(&local, reach) {
                             core.members_in_cell(galaxy, band, cell, &mut core_members);
                             for (member, _) in &core_members {
@@ -431,7 +431,7 @@ fn stream_hits(
         if !layers.contains(layer) {
             continue;
         }
-        let reach = band_reach(sphere.radius(), t, layer, bound);
+        let reach = band_reach(galaxy, sphere.radius(), t, layer, bound);
         for cell in tube.cells_touching(sphere.centre(), reach) {
             stream_cell_members(galaxy, tube, shares, cell, band, members);
             let inside = members
