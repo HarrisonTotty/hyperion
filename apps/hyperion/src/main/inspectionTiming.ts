@@ -752,6 +752,14 @@ function functionsMarkdown(thread: ProfiledThread): string[] {
   return lines;
 }
 
+/** The share of the GPU's time under which the summary leaves a pass out, as the JSON keeps it. */
+const LISTED_PASS_SHARE = 0.001;
+
+/** The passes the summary lists: those of {@link LISTED_PASS_SHARE} of the GPU's time or more. */
+function listedPasses(passes: ReadonlyArray<PassFigures>): ReadonlyArray<PassFigures> {
+  return passes.filter((pass) => pass.shareOfGpu === null || pass.shareOfGpu >= LISTED_PASS_SHARE);
+}
+
 /** A window's part of the summary. */
 function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   const trace = window.trace;
@@ -780,10 +788,16 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
       : [
           "| Pass | Median (ms) | p95 (ms) | Mean (ms) | Share of GPU | Kernels | Workgroups | µs a workgroup | ns a texel a step |",
           "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-          ...window.passes.map(
+          ...listedPasses(window.passes).map(
             (pass) =>
               `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} | ${pass.kernels.length === 0 ? "—" : cell(pass.kernels.join(", "))} | ${pass.workgroupsMedian === null ? "—" : pass.workgroupsMedian.toFixed(0)} | ${pass.nsPerWorkgroup === null ? "—" : (pass.nsPerWorkgroup / 1000).toFixed(2)} | ${pass.nsPerTexelStep === null ? "—" : pass.nsPerTexelStep.toFixed(1)} |`,
           ),
+          ...(window.passes.length > listedPasses(window.passes).length
+            ? [
+                "",
+                `${String(window.passes.length - listedPasses(window.passes).length)} passes of under ${String(100 * LISTED_PASS_SHARE)}% of the GPU's time each are left out here, and listed in the JSON.`,
+              ]
+            : []),
           "",
           `The atmosphere's ray march takes ${String(window.marchSamples)} samples a ray here; its time a texel a step is a workgroup's over its ${String(MARCH_WORKGROUP_TEXELS)} texels and those samples.`,
         ]),

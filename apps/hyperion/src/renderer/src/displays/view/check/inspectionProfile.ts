@@ -41,12 +41,15 @@ export interface InspectionProfileTiming {
   readonly pollMs: number;
 }
 
-/** The profile's timing: 30 draws, or as many as 30 s gives, their times waited for 10 s at most. */
+/**
+ * The profile's timing: 30 draws, or as many as 30 s gives, their times waited for 10 s at most,
+ * looked at four times a second, so that its own looks cost the main thread under 1% of a window.
+ */
 export const INSPECTION_PROFILE_TIMING: InspectionProfileTiming = {
   draws: 30,
   maxMs: 30_000,
   settleMs: 10_000,
-  pollMs: 100,
+  pollMs: 250,
 };
 
 /** What the profile measures with. */

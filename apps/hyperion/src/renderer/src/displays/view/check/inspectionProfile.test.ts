@@ -112,7 +112,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     await profile.measure("orbit", PLATE);
     // 30 draws at 100 ms take 3 s; the trace ends once their times are in, a poll later.
     expect(marked).toEqual([{ startMs: 1_000, endMs: 4_000 }]);
-    expect(calls).toEqual(["start orbit at 1000", "end orbit 1000–4000 at 4100"]);
+    expect(calls).toEqual(["start orbit at 1000", "end orbit 1000–4000 at 4250"]);
     expect(profile.windows[0]).toMatchObject({
       name: "orbit",
       canvas: { widthPx: 1140, heightPx: 640 },
