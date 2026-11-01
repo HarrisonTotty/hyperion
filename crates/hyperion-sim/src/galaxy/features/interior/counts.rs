@@ -47,6 +47,13 @@
 //!   and 3% of band D. The peak at 10^3.5 M☉ is Oh, Kroupa and Pflamm-Altenburg's (2015, ApJ 805,
 //!   92); the amplitudes are ours (provisional): their 15% and "up to 38%" are O-star shares over a
 //!   whole population of embedded clusters, varying with the models, not the ends of `f_ej(M)`.
+//!   From generator version 27 (P09.T33.b's `RUNAWAY_DEATHS_VERSION`; research-leans-21) a
+//!   cluster of an ejecting source has lost instead, at each living mass of bands D and E, plan
+//!   08's `RunawayModel` share ejected by its age, as a runaway or a walkaway by either channel
+//!   (`ClassTable::ejected_by`), integrated over the band as its other counts are: the grid's
+//!   runaway and walkaway classes hold every living ejected star at the whole budget, a feature's
+//!   with the field's, so the cluster holds the rest. Its age takes the place of the 100 Myr step,
+//!   and the cluster's mass no longer enters.
 //! - **Tails (T9.g; ruling 139.4)**: a tail is as long as its oldest escaper has drifted and holds
 //!   what the cluster lost in that time ([`tail_window`]). Escapers drift along the tail at Küpper,
 //!   Macleod and Heggie's (2008, MNRAS 387, 1248, eq. 5's secular term) mean speed `v_drift = 2Ω
@@ -72,6 +79,9 @@
 //! A core-collapsed cluster's classes all take its cusp.
 
 use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
+use crate::galaxy::catalogue_classes::core_collapse::ejecting_table;
+use crate::galaxy::displaced::BirthSource;
+use crate::galaxy::displaced::class_table::ClassTable;
 use crate::galaxy::features::members::hard_soft_separation;
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::quad::gl_log_panels;
@@ -317,7 +327,9 @@ pub struct ClassCounts {
     pub tails: [Option<TailCount>; 5],
     /// The depleted slope over 0.2–0.8 M☉.
     pub depleted_slope: f64,
-    /// The runaway share of band E, `f_ej`, for a young cluster; 0 otherwise.
+    /// The runaway share of band E, `f_ej`, for a young cluster, 0 otherwise; from generator
+    /// version 27 the share of band E's living systems its ejected stars take (module
+    /// documentation).
     pub runaway_share: f64,
     /// Each band's living systems born, net of the runaways (module documentation).
     pub born: [f64; 5],
@@ -388,6 +400,82 @@ pub fn runaway_share(mass: SolarMasses) -> f64 {
         0.15 + 0.23 * (x - 2.5)
     } else {
         0.38 - 0.23 * (x - 3.5)
+    }
+}
+
+/// How a cluster's living counts net out its ejected stars (module documentation, T9.f).
+#[derive(Debug, Clone, Copy)]
+enum Netting<'g> {
+    /// Before generator version 27: `ejected` of band E and [`RUNAWAY_BAND_D_SHARE`] of band D in a
+    /// `young` cluster.
+    Encounters { young: bool, ejected: f64 },
+    /// From 27: `RunawayModel`'s share of `source`'s stars ejected by the cluster's `age`, mass by
+    /// mass, in bands D and E.
+    Model {
+        table: &'g ClassTable,
+        source: BirthSource,
+        age: Years,
+    },
+}
+
+impl<'g> Netting<'g> {
+    /// The netting of `model` in `galaxy`: `RunawayModel`'s where the core-collapse class follows
+    /// the runaways and walkaways, from 27 (`ejecting_table`), the encounters' before.
+    #[must_use]
+    fn of(galaxy: &'g Galaxy, model: &ClusterModel) -> Self {
+        if let Some(table) = ejecting_table(galaxy) {
+            // A cluster without a density component is a test's or a named one: the thin disc's.
+            return Self::Model {
+                table,
+                source: model
+                    .parameters()
+                    .component
+                    .map_or(BirthSource::ThinDisc, |c| table.component_source(c)),
+                age: model.age(),
+            };
+        }
+        let young = model.age().value() < RUNAWAY_AGE_LIMIT;
+        Self::Encounters {
+            young,
+            ejected: if young {
+                runaway_share(model.mass())
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// The share of `band`'s living stars of initial mass `m` the cluster keeps: 1 before 27,
+    /// whose share is the band's scalar ([`band_share`](Self::band_share)).
+    #[must_use]
+    fn kept(&self, band: MassBand, m: f64) -> f64 {
+        match *self {
+            Self::Model { table, source, age } if matches!(band, MassBand::D | MassBand::E) => {
+                1.0 - table.ejected_by(source, SolarMasses::new(m), age)
+            }
+            Self::Encounters { .. } | Self::Model { .. } => 1.0,
+        }
+    }
+
+    /// The share of `band`'s living stars the cluster keeps, whatever their mass: before 27,
+    /// `1 − f_ej` of band E and `1 − 3%` of band D in a young cluster; 1 otherwise and from 27,
+    /// whose share is each mass's ([`kept`](Self::kept)).
+    #[must_use]
+    fn band_share(&self, band: MassBand) -> f64 {
+        match (*self, band) {
+            (Self::Encounters { ejected, .. }, MassBand::E) => 1.0 - ejected,
+            (Self::Encounters { young: true, .. }, MassBand::D) => 1.0 - RUNAWAY_BAND_D_SHARE,
+            (
+                Self::Encounters { .. } | Self::Model { .. },
+                MassBand::A
+                | MassBand::B
+                | MassBand::C
+                | MassBand::D
+                | MassBand::E
+                | MassBand::BrownDwarf
+                | MassBand::RoguePlanet,
+            ) => 1.0,
+        }
     }
 }
 
@@ -485,11 +573,10 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
     let f = galaxy.mass_function();
     let m_to = model.turn_off_mass().value();
     let alpha = depleted_slope(model);
-    let young = model.age().value() < RUNAWAY_AGE_LIMIT;
-    let ejected = if young {
-        runaway_share(model.mass())
-    } else {
-        0.0
+    let netting = Netting::of(galaxy, model);
+    let mut ejected = match netting {
+        Netting::Encounters { ejected, .. } => ejected,
+        Netting::Model { .. } => 0.0,
     };
     let retention = *model.retention();
     let (ns_per_primary, _) = model.remnants_per_primary();
@@ -527,18 +614,15 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             MASS_BAND_EDGES[band.index()],
             MASS_BAND_EDGES[band.index() + 1],
         );
-        let runaway = match band {
-            MassBand::E => 1.0 - ejected,
-            MassBand::D if young => 1.0 - RUNAWAY_BAND_D_SHARE,
-            MassBand::A
-            | MassBand::B
-            | MassBand::C
-            | MassBand::D
-            | MassBand::BrownDwarf
-            | MassBand::RoguePlanet => 1.0,
-        };
+        let runaway = netting.band_share(band);
         let live_hi = hi.min(m_to);
-        let (n_live, m_live) = moments(f, lo, live_hi, |m| depletion(m, alpha));
+        let (n_live, m_live) = moments(f, lo, live_hi, |m| {
+            depletion(m, alpha) * netting.kept(band, m)
+        });
+        if let (Netting::Model { .. }, MassBand::E) = (netting, band) {
+            let (all, _) = moments(f, lo, live_hi, |m| depletion(m, alpha));
+            ejected = if all > 0.0 { 1.0 - n_live / all } else { 0.0 };
+        }
         // The mass a band's binary fraction is read at: its living stars' mean, or for a band with
         // none, its primaries' at birth.
         let fraction_mass = if n_live > 0.0 {
@@ -547,7 +631,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             let (n, m) = moments(f, lo, hi, |_| 1.0);
             if n > 0.0 { m / n } else { 0.0 }
         };
-        let (n_canon, m_canon) = moments(f, lo, live_hi, |_| 1.0);
+        let (n_canon, m_canon) = moments(f, lo, live_hi, |m| netting.kept(band, m));
         let wd_lo = lo.max(m_to);
         let wd_hi = hi.min(WHITE_DWARF_PROGENITOR_MAX);
         let (n_wd, m_wd_initial) = moments(f, wd_lo, wd_hi, |_| 1.0);
@@ -754,6 +838,88 @@ mod tests {
         let (canonical, _) = moments(f.as_ref(), lo, hi, |_| 1.0);
         let ratio = depleted / canonical;
         assert!((ratio - 0.386).abs() <= 0.01, "{ratio}");
+    }
+
+    /// P09.T9.f from 27 (research-leans-21): a young nursery of the young disc nets, at each of the
+    /// class table's mass nodes of bands D and E below its turn-off, `RunawayModel`'s share of its
+    /// stars ejected by its age, both kinds and both channels, to 10⁻¹²; so does an old open
+    /// cluster, whose every ejection has passed, past the 100 Myr step; and the counts take it:
+    /// band E's living systems fall by about its share.
+    #[test]
+    fn from_27_a_cluster_nets_the_runaway_model_s_ejected_stars() {
+        use crate::Seed;
+        use crate::galaxy::ages::SubDisc;
+        use crate::galaxy::displaced::runaway::Ejected;
+        use crate::galaxy::features::catalogue::FeatureCatalogue;
+        use crate::galaxy::features::ids::FeatureProcess;
+        use crate::galaxy::params::GalaxyParams;
+        use crate::galaxy::rules::GalaxyRules;
+
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0909_f000_0000_0027),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .unwrap();
+        let table = ejecting_table(&galaxy).expect("every 27 hold follows the runaways");
+        let models = |process: FeatureProcess| {
+            FeatureCatalogue::walk_process(&galaxy, process)
+                .filter_map(|feature| ClusterModel::from_record(&galaxy, &feature))
+                .filter(|model| model.parameters().component.is_some())
+        };
+        let nursery = models(FeatureProcess::Nursery)
+            .find(|model| model.age().value() < 1.5e7)
+            .expect("a young bound nursery");
+        let old = models(FeatureProcess::OldOpenCluster(SubDisc::First))
+            .find(|model| model.age().value() > 2e8)
+            .expect("an old open cluster");
+        for model in [&nursery, &old] {
+            let netting = Netting::of(&galaxy, model);
+            let Netting::Model { source, age, .. } = netting else {
+                panic!("from 27 a cluster reads the runaway model");
+            };
+            assert_eq!(age, model.age());
+            let runaways = table.runaway_model();
+            let m_to = model.turn_off_mass().value();
+            let mut checked = 0;
+            for band in [MassBand::D, MassBand::E] {
+                for &m in table.nodes(band).masses().iter().filter(|&&m| m < m_to) {
+                    let mass = SolarMasses::new(m);
+                    let ejected = [
+                        (Ejected::Runaway, runaways.runaway_share(mass)),
+                        (Ejected::Walkaway, runaways.walkaway_share(mass)),
+                    ]
+                    .into_iter()
+                    .fold(0.0, |sum, (kind, share)| {
+                        let before = table
+                            .ejection_ages(source, kind, mass)
+                            .into_iter()
+                            .filter(|&(t, _)| t < age)
+                            .fold(0.0, |s, (_, w)| s + w);
+                        sum + share * before
+                    });
+                    let netted = 1.0 - netting.kept(band, m);
+                    assert!(
+                        (netted - ejected).abs() <= 1e-12,
+                        "{band:?} at {m} M☉, {age:?}: {netted} netted against {ejected}"
+                    );
+                    checked += 1;
+                }
+            }
+            assert!(checked > 5, "{checked} nodes below the turn-off");
+            // An old cluster's ejections have all passed: each mass's whole lifetime share.
+            if model.age().value() > 2e8 {
+                let m = SolarMasses::new(5.0);
+                let lifetime = runaways.runaway_share(m) + runaways.walkaway_share(m);
+                assert!((1.0 - netting.kept(MassBand::D, 5.0) - lifetime).abs() <= 1e-12);
+            }
+        }
+        let counts = class_counts(&galaxy, &nursery, LightYears::new(400.0));
+        assert!(
+            (0.05..0.6).contains(&counts.runaway_share),
+            "{}",
+            counts.runaway_share
+        );
     }
 
     #[test]

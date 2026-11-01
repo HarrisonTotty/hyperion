@@ -1752,6 +1752,43 @@ impl ClassTable {
         .collect()
     }
 
+    /// The share of `source`'s stars of initial mass `m` ejected by age `age`, as a runaway or a
+    /// walkaway by either channel: each kind's lifetime share × the weight of its ejection ages
+    /// ([`ejection_ages`](Self::ejection_ages)) below `age`; 0 for a source that ejects none.
+    ///
+    /// It is what a young feature's living counts net out from generator version 27 (plan 09,
+    /// P09.T9.f; research-leans-21), since the grid's runaway and walkaway classes hold every
+    /// living ejected star at the whole budget, a feature's with the field's.
+    #[must_use]
+    pub(crate) fn ejected_by(&self, source: BirthSource, m: SolarMasses, age: Years) -> f64 {
+        if !ejects(source) {
+            return 0.0;
+        }
+        [Ejected::Runaway, Ejected::Walkaway]
+            .into_iter()
+            .fold(0.0, |sum, kind| {
+                let share = match kind {
+                    Ejected::Runaway => self.model.runaway_share(m),
+                    Ejected::Walkaway => self.model.walkaway_share(m),
+                };
+                if share <= 0.0 {
+                    return sum;
+                }
+                let before = ejection_ages(
+                    self.model,
+                    kind,
+                    m.value(),
+                    &self.sources[source_index(source)].lifetimes[1],
+                    self.nodes[1].masses(),
+                    EjectionChannel::Both,
+                )
+                .into_iter()
+                .filter(|&(t, _)| t < age.value())
+                .fold(0.0, |s, (_, w)| s + w);
+                sum + share * before
+            })
+    }
+
     /// Class `id`'s marks in `band` (D or E).
     ///
     /// # Panics
