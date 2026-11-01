@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 filler_c 0x42002cb200000000: OldThinDisc, 1 stars
 fe_h = 0x3fa66b4686dfa25f  # 0.0437871970787611
 age_at_epoch_yr = 0x41c52bef99fe56f5  # 710401843.9870287
@@ -35,7 +35,7 @@ iron = 0x3fd46896fbf3c666  # 0.3188836536856797
 rock = 0x3fe531891955c42f  # 0.6622968191933348
 water = 0x0000000000000000  # 0.0
 envelope = 0x3f93456d160b13e6  # 0.01881952712098558
-t_eq_k = 0x406cf40e70ef36dd  # 231.6267628357081
+t_eq_k = 0x406cf40e70e8ab02  # 231.62676282351464
 moons: []
 rings: []
 population: NotApplicable
@@ -75,7 +75,7 @@ moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
 geometric_albedo_b = 0x3fe9c3c80f6283ff  # 0.8051491070256133
 geometric_albedo_v = 0x3fe9c3c80f6283ff  # 0.8051491070256133
-geometric_albedo_r = 0x3fdc4a71612f2f34  # 0.442043633371884
+geometric_albedo_r = 0x3fdc4a7161365522  # 0.4420436333978889
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -83,8 +83,8 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fe9031d886c59f0  # 0.7816302933231878
-bond_ratio = 0x3ff47854424898ce  # 1.2793772305681617
+bond_albedo = 0x3fe9031d8872abcb  # 0.78163029336917
+bond_ratio = 0x3ff4785442436cbf  # 1.2793772304928976
 envelope: NotModelled
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fe7f8f445469751  # 0.7491399148027346
@@ -3336,7 +3336,7 @@ iron = 0x3fd46896fc207101  # 0.31888365384817524
 rock = 0x3fe5318919842695  # 0.6622968195308255
 water = 0x0000000000000000  # 0.0
 envelope = 0x3f93456d0d741d58  # 0.018819526620999255
-t_eq_k = 0x406cf40e78c6ba95  # 231.6267665749953
+t_eq_k = 0x406cf40e78cad5ea  # 231.62676658264473
 moons: []
 rings: []
 population: NotApplicable
@@ -3376,7 +3376,7 @@ moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
 geometric_albedo_b = 0x3fe9c3c80f6283ff  # 0.8051491070256133
 geometric_albedo_v = 0x3fe9c3c80f6283ff  # 0.8051491070256133
-geometric_albedo_r = 0x3fdc4a71694b2ac4  # 0.44204364092426496
+geometric_albedo_r = 0x3fdc4a716946aec6  # 0.442043640907951
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3384,8 +3384,8 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fe9031d8f97bf84  # 0.781630306677457
-bond_ratio = 0x3ff478543c6a80aa  # 1.2793772087098128
+bond_albedo = 0x3fe9031d8f93c891  # 0.7816303066486104
+bond_ratio = 0x3ff478543c6dbf4d  # 1.279377208757029
 envelope: NotModelled
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fe7f8f445469751  # 0.7491399148027346

@@ -1976,7 +1976,17 @@ mod tests {
             .unwrap();
         let first = Galaxy::new(Seed::new(31));
         let second = Galaxy::new(Seed::new(32));
-        let ruled = first.clone().with_rules(GalaxyRules::every_26_hold());
+        // Another galaxy of the same seed under other rules, built under them, since the field
+        // share and the carve-out are read when a galaxy is built.
+        let ruled = Galaxy::from_params_with_rules(
+            Seed::new(31),
+            GalaxyParams::from_seed(
+                Seed::new(31),
+                crate::galaxy::imf::MassFunctionKind::default(),
+            ),
+            GalaxyRules::every_26_hold(),
+        )
+        .expect("the seed's galaxy builds");
         let seen = |galaxy: &Galaxy, rows: &[ObservedSystem], cache: &mut LocalEventsCache| {
             let mut noise = NoiseCache::with_capacity(64);
             let mut ctx = AlertContext::new(&mut noise, &NoModifiers);

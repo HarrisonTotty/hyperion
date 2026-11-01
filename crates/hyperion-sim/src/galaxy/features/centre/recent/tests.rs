@@ -121,8 +121,10 @@ fn the_centre_lists_a_handful_past_its_victims() {
 
 /// The digest (`f64_digest`) of the centre's kept entries ([`the_centre_s_entries_are_pinned`]):
 /// each one's ID (high, low 32 bits), class, initial mass, age, local position, velocity, death
-/// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it.
-const CENTRE_ENTRIES_DIGEST: u64 = 0x7cab_4603_6e07_3ab0;
+/// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it. Re-pinned
+/// at generator version 25 (it was `0x7cab_4603_6e07_3ab0` at 24): the train's potential, kicks
+/// and centre move the entries.
+const CENTRE_ENTRIES_DIGEST: u64 = 0xa284_4a2c_2170_ca98;
 
 /// The centre's entries' bits, pinned before the bump, each the member its ID resolves to in any
 /// order.

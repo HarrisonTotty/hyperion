@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 z0.u = 0x3fe00bc3bec13694  # 0.501436111991739
 z0.mean_k = 0x4072087314d1b32e  # 288.5280960265544
 z0.orbits = 30 jumps = 2 rejects = 1 start = Steady converged = true searched = true held = false

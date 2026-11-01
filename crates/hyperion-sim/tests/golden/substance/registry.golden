@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 [elements]
 element 0 H
 element 1 He
@@ -1734,10 +1734,13 @@ condensed 59 S8: liquid node 3 grain_density_kg_per_m3 = 0x40991b999999999a  # 1
 condensed 59 S8: transition melting
 condensed 59 S8: transition_k = 0x407845c28f5c28f6  # 388.36
 condensed 59 S8: mechanics Salt
-condensed 60 KCl: grain density fixed
+condensed 60 KCl: grain density fixed solid, liquid by temperature
 condensed 60 KCl: solid grain_density_kg_per_m3 = 0x409f0c0000000000  # 1987.0
 condensed 60 KCl: solid grain_density_at_k = 0x4072500000000000  # 293.0
-condensed 60 KCl: liquid grain_density_kg_per_m3 none
+condensed 60 KCl: liquid node 0 at_k = 0x4090500000000000  # 1044.0
+condensed 60 KCl: liquid node 0 grain_density_kg_per_m3 = 0x4097dc930be0ded3  # 1527.1436
+condensed 60 KCl: liquid node 1 at_k = 0x409c200000000000  # 1800.0
+condensed 60 KCl: liquid node 1 grain_density_kg_per_m3 = 0x4090f947ae147ae1  # 1086.32
 condensed 60 KCl: transition melting
 condensed 60 KCl: transition_k = 0x4090500000000000  # 1044.0
 condensed 60 KCl: mechanics Salt
@@ -1755,10 +1758,13 @@ condensed 62 ZnS: liquid grain_density_kg_per_m3 none
 condensed 62 ZnS: transition melting
 condensed 62 ZnS: transition_k = 0x409ed4999999999a  # 1973.15
 condensed 62 ZnS: mechanics Silicate
-condensed 63 Na2S: grain density fixed
+condensed 63 Na2S: grain density fixed solid, liquid by temperature
 condensed 63 Na2S: solid grain_density_kg_per_m3 = 0x409d000000000000  # 1856.0
 condensed 63 Na2S: solid grain_density_at_k = 0x4072500000000000  # 293.0
-condensed 63 Na2S: liquid grain_density_kg_per_m3 none
+condensed 63 Na2S: liquid node 0 at_k = 0x4096940000000000  # 1445.0
+condensed 63 Na2S: liquid node 0 grain_density_kg_per_m3 = 0x40982acccccccccd  # 1546.7
+condensed 63 Na2S: liquid node 1 at_k = 0x409c200000000000  # 1800.0
+condensed 63 Na2S: liquid node 1 grain_density_kg_per_m3 = 0x40982acccccccccd  # 1546.7
 condensed 63 Na2S: transition melting
 condensed 63 Na2S: transition_k = 0x4096940000000000  # 1445.0
 condensed 63 Na2S: mechanics Salt

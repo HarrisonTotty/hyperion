@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 # P14.T24.c's aerosol and absorber inventory, with P14.T24.g's sulphur
 # (hyperion_sim::planetary::hooks::aerosols): the Solar System table's Earth, Venus,
 # Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at
@@ -93,22 +93,22 @@ venus absorber SO2 base = 0x415610b5664d1251  # 5784277.598454074
 venus absorber SO2 top = 0x40c58f31036fa577  # 11038.382917362016
 venus not formed: CO2 BulkGas
 mars deck H2O: Solid
-mars deck H2O base = 0x40d39a805fdd1abb  # 20074.005851055244
-mars deck H2O base temperature = 0x406f250ea57d84c1  # 249.15803789630266
-mars deck H2O top = 0x40a34ffa08e7e592  # 2471.988349196218
-mars deck H2O vapour below = 0x3f6c8b91703e4568  # 0.0034845200152139773
-mars deck H2O vapour above = 0x3ec95d3f3020da3c  # 3.023653676793927e-6
-mars deck H2O f_sed = 0x4072c7539f1484f2  # 300.4579153825317
+mars deck H2O base = 0x40d39a805fdd3c94  # 20074.005851086768
+mars deck H2O base temperature = 0x406f250ea57c36e4  # 249.15803789387348
+mars deck H2O top = 0x40a34ffa08e88aef  # 2471.988349215469
+mars deck H2O vapour below = 0x3f6c8b917020920f  # 0.003484520014369836
+mars deck H2O vapour above = 0x3ec95d3f30060f7c  # 3.0236536760503e-6
+mars deck H2O f_sed = 0x4072c7539f089aea  # 300.4579153381479
 mars mode 0 H2O: Solid crystal of deck H2O
 mars mode 0 H2O size: log-normal
-mars mode 0 H2O r_eff = 0x3f01d5bb0cf343d0  # 3.401734431352605e-5
+mars mode 0 H2O r_eff = 0x3f01d5bb0ced49d3  # 3.4017344310871945e-5
 mars mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
-mars mode 0 H2O column mass = 0x3f93423bdc51769f  # 0.018807349512249712
+mars mode 0 H2O column mass = 0x3f93423bdc4a1271  # 0.01880734951056912
 mars mode 0 H2O tau basis: GeometricLimit
-mars mode 0 H2O tau = 0x3fecd78c78934560  # 0.9013120989786039
-mars mode 0 H2O base = 0x40d39a805fdd1abb  # 20074.005851055244
-mars mode 0 H2O top = 0x40a34ffa08e7e592  # 2471.988349196218
-mars mode 0 H2O exponent = 0x4072c7539f1484f2  # 300.4579153825317
+mars mode 0 H2O tau = 0x3fecd78c7891d28d  # 0.9013120989680644
+mars mode 0 H2O base = 0x40d39a805fdd3c94  # 20074.005851086768
+mars mode 0 H2O top = 0x40a34ffa08e88aef  # 2471.988349215469
+mars mode 0 H2O exponent = 0x4072c7539f089aea  # 300.4579153381479
 mars mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
 mars not formed: CO2 BulkGas
 titan deck H2O: Solid

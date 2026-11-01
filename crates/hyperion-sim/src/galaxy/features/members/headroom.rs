@@ -64,12 +64,13 @@
 //!
 //! # As measured
 //!
-//! At `GENERATOR_VERSION` 23, against the 16-bit index, the Milky Way fixture's centre fits, at
-//! 7,145.0 candidates and 27.3 victims with 57,685.2 indices to spare at eight standard deviations
-//! (57,713.8 before the victims joined, P09.T30.b; 57,060.1 once plan 09's recent classes, 597.4
-//! candidates, joined at 24, P09.T36.b), and so do both mass functions' capped clusters, the
-//! heaviest plan 02 draws, at 18,311.6 and 12,174.9 candidates (44,537.4 and 51,499.5 to spare with
-//! the recent classes), and every one of the first 10³ of plan 02's seeds
+//! On plan 15's production rank table (P06.T19.e), against the 16-bit index, the Milky Way
+//! fixture's centre fits, at 7,144.8 candidates and 27.3 victims with 57,060.3 indices to spare at
+//! eight standard deviations with plan 09's recent classes, 597.4 candidates (57,713.8 before the
+//! victims joined, P09.T30.b, at `GENERATOR_VERSION` 23; 57,685.4 before the recent classes joined,
+//! P09.T36.b), and so do both mass functions' capped clusters, the heaviest plan 02 draws, at
+//! 18,311.3 and 12,174.7 candidates (44,537.7 and 51,499.7 to spare with the recent classes), and
+//! every one of the first 10³ of plan 02's seeds
 //! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
 //! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
 //! fallback: a refit or a new class that brings the capped forecast within a factor of two of the
@@ -582,11 +583,11 @@ mod tests {
     }
 
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
-    /// index: the default function's centre, 7,145.0 candidates, 27.3 victims and 597.4 of plan
-    /// 09's recent classes' candidates, fits with 57,060.1 indices to spare at eight standard
-    /// deviations, and Kroupa's, 6,468.0, 27.2 and 487.2, with 57,884.1, as measured at
-    /// `GENERATOR_VERSION` 23 (the recent classes' at 24, P09.T36.b) and pinned to 10⁻⁵, with the
-    /// primaries' share of `m̄_f` (module documentation) to 10⁻⁴.
+    /// index: the default function's centre, 7,144.8 candidates, 27.3 victims and 597.4 of plan
+    /// 09's recent classes' candidates, fits with 57,060.3 indices to spare at eight standard
+    /// deviations, and Kroupa's, 6,467.9, 27.2 and 487.2, with 57,884.2, as measured on plan 15's
+    /// production rank table (P06.T19.e) with the recent classes (P09.T36.b) and pinned to 10⁻⁵,
+    /// with the primaries' share of `m̄_f` (module documentation) to 10⁻⁴.
     #[test]
     fn the_milky_way_s_centre_list_fits_under_either_mass_function() {
         let galaxy = milky_way_galaxy();
@@ -600,16 +601,16 @@ mod tests {
         for (kind, candidates, at_eight, at_five, want_share) in [
             (
                 MassFunctionKind::Chabrier,
-                7_144.99,
-                57_060.14,
-                57_324.58,
+                7_144.82,
+                57_060.33,
+                57_324.76,
                 0.703_48,
             ),
             (
                 MassFunctionKind::Kroupa,
-                6_468.04,
-                57_884.08,
-                58_134.78,
+                6_467.91,
+                57_884.21,
+                58_134.89,
                 0.713_27,
             ),
         ] {
@@ -632,10 +633,11 @@ mod tests {
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre fits the 16-bit index, with 44,537.4 indices to spare under Chabrier's function and
-    /// 51,499.5 under Kroupa's at eight standard deviations, the victims and plan 09's recent
-    /// classes (1,531.0 and 917.0 candidates) counted, as measured at `GENERATOR_VERSION` 23 (the
-    /// recent classes' at 24, P09.T36.b) and pinned to 10⁻⁵ with the candidates. The cap bounds
+    /// centre fits the 16-bit index, with 44,537.7 indices to spare under Chabrier's function and
+    /// 51,499.7 under Kroupa's at eight standard deviations, the victims and plan 09's recent
+    /// classes (1,531.0 and 917.0 candidates) counted, as measured on plan 15's production rank
+    /// table (P06.T19.e) with the recent classes (P09.T36.b) and pinned to 10⁻⁵ with the
+    /// candidates. The cap bounds
     /// every drawn cluster.
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
@@ -643,14 +645,14 @@ mod tests {
             (
                 MassFunctionKind::Chabrier,
                 0x1108_e000,
-                18_311.574_542_824_812,
-                44_537.40,
+                18_311.289_883_124_58,
+                44_537.72,
             ),
             (
                 MassFunctionKind::Kroupa,
                 0x1108_e001,
-                12_174.902_962_021_803,
-                51_499.53,
+                12_174.724_793_717_964,
+                51_499.73,
             ),
         ] {
             let params = scattered(kind, 1.0);

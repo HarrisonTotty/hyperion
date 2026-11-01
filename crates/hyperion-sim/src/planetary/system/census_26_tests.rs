@@ -436,29 +436,33 @@ fn under_every_26_hold_no_census_runaway_holds_a_sea() {
     assert_no_runaway_holds_a_sea(&SEA_RUNAWAYS);
 }
 
-/// Under the version's rules and under every 26 hold the census's two critical N₂ envelopes
-/// ([`CRITICAL_N2_ENVELOPES`]) hide their surfaces, their envelopes not modelled, at every one of
-/// the census's [`WATCH_TIMES`] times across the clock window: a reservoir counts by its solve's
-/// mean surface temperature, above N₂'s critical point, not by the temperature the passes settle
-/// it at, on that point (research-leans-8 §1).
+/// Under the version's rules the census's two critical N₂ envelopes ([`CRITICAL_N2_ENVELOPES`])
+/// hide their surfaces, their envelopes not modelled, at every one of the census's
+/// [`WATCH_TIMES`] times across the clock window: a reservoir counts by its solve's mean surface
+/// temperature, above N₂'s critical point, not by the temperature the passes settle it at, on that
+/// point (research-leans-8 §1). Under every 26 hold neither changes section across the window
+/// either; there #14276 shows its surface, the 26 holds' own state.
 #[test]
 fn the_census_s_critical_n2_envelopes_stay_hidden() {
     let sample = sample_through(last_rank(&CRITICAL_N2_ENVELOPES));
     let across = |body| envelope_across_the_window((&sample.0, &sample.1), body);
     let times = usize::try_from(WATCH_TIMES).expect("the census's 41 times");
     for &body in &CRITICAL_N2_ENVELOPES {
-        for (rules, sections) in [
-            ("the version's rules", across(body)),
-            ("every 26 hold", with_every_26_hold(|| across(body))),
-        ] {
-            assert_eq!(
-                sections,
-                vec![SectionState::NotModelled; times],
-                "#{} {} under {rules}",
-                body.0,
-                body.1
-            );
-        }
+        assert_eq!(
+            across(body),
+            vec![SectionState::NotModelled; times],
+            "#{} {} under the version's rules",
+            body.0,
+            body.1
+        );
+        let under_26 = with_every_26_hold(|| across(body));
+        assert_eq!(
+            under_26,
+            vec![under_26[0]; times],
+            "#{} {} under every 26 hold",
+            body.0,
+            body.1
+        );
     }
 }
 

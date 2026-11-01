@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 m_dwarf_resonant_chain 0x02002b2ca0000000: OldThinDisc, 1 stars
 fe_h = 0xbfd77616dd319fe9  # -0.36658259964906265
 age_at_epoch_yr = 0x41bc6e084dbe6f29  # 476973133.74388367
@@ -577,7 +577,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f007f8066644193  # 3.146753879168791e-5
 surface_age_yr = 0x41bc6e084dbe6f29  # 476973133.74388367
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3ff0000000000000  # 1.0
+ice_fraction = 0x3f50624dd2f1a9fc  # 0.001
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4094294ad475dc27  # 1290.3230760970707
@@ -1173,7 +1173,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f007f7fd7ec3aad  # 3.146752259485428e-5
 surface_age_yr = 0x41bc6e0c35be6f29  # 476974133.74388367
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3ff0000000000000  # 1.0
+ice_fraction = 0x3f50624dd2f1a9fc  # 0.001
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4094294ad4565b86  # 1290.3230756276475

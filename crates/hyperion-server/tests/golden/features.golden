@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 # features in range, epoch
 {
   "type": "response",
@@ -1977,7 +1977,7 @@
     },
     "structure": {
       "type": "centre",
-      "influence_radius_ly": 10000.00000000001,
+      "influence_radius_ly": 117.35648718040974,
       "loss_cone_radius_ly": 0.00008721562968996121,
       "classes": [
         {
@@ -2559,8 +2559,8 @@
     "luminosity": {
       "quiescent_w": 3.6e+26,
       "flares_w": 0.0,
-      "tails_w": 1.6921050758532609e+28,
-      "total_w": 1.7281050758532608e+28
+      "tails_w": 2.946139006566713e+24,
+      "total_w": 3.6294613900656675e+26
     },
     "disruptions": [
       {

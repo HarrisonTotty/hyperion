@@ -33,12 +33,13 @@ const MOVERS: [&str; 3] = [
 
 /// Count (vii)'s two, the brief's movers: their record's N₂ over its ice with the switch held, and
 /// read once their record's N₂ and their derivation's total, Pa, pinned natively (x86-64) so that
-/// the WebAssembly suite checks the re-hold bit for bit.
+/// the WebAssembly suite checks the re-hold bit for bit; e101's re-pinned at generator version 25,
+/// whose rules move its coldest zone in the last bits.
 const COUNT_VII: [(&str, f64, (f64, f64)); 2] = [
     (
         "01ffeb2d20000000.e101",
         1_132.0,
-        (0.085_466_836_579_358_72, 0.103_091_058_499_514_11),
+        (0.085_466_836_810_647_39, 0.103_091_058_779_141_8),
     ),
     (
         "02002b2d1ffe0000.e103",

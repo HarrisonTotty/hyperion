@@ -365,8 +365,9 @@ fn no_globular_entry_ever_reports_a_shell() {
 /// The digest (`f64_digest`) of the new arm's entries ([`the_new_arm_s_entries_are_pinned`]):
 /// each kept entry's ID (high, low 32 bits), class, initial mass, age, offset from its feature,
 /// velocity, death and window, in walk and index order. Blessed natively on x86-64; the wasip1
-/// suite compares it.
-const ENTRIES_DIGEST: u64 = 0x2d20_df50_dbeb_fb49;
+/// suite compares it. Re-pinned at generator version 25 (it was `0x2d20_df50_dbeb_fb49` at 24): the
+/// train's potential and kicks move the entries.
+const ENTRIES_DIGEST: u64 = 0x150c_65bd_43f3_008c;
 
 /// The new arm's bits, pinned before the bump: the kept entries of the first eight nurseries in
 /// the catalogue's walk that keep any, through [`FeatureLevelList::recent_entries`], each the

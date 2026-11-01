@@ -1,4 +1,4 @@
-# generator_version = 24
+# generator_version = 25
 # P14.T52.d's visible atmospheres (hyperion_sim::planetary::hooks::envelope_atmosphere):
 # the Solar System table's four giants (protosolar host, this module's T_int, adopted grey
 # profile, starlit), a KELT-9b-like dayside (f 1/2) and an 8 M_E sub-Neptune. Per body: its
@@ -138,7 +138,8 @@ jupiter.mode[00].size = log-normal
 jupiter.mode[00].r_eff_m = 0x3e805c7e0cc00f83  # 1.219011721565962e-7
 jupiter.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[00].column_kg_m2 = 0x40a27ce136f95692  # 2366.439872543161
-jupiter.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
+jupiter.mode[00].tau_basis = Table(Sphere)
+jupiter.mode[00].tau = 0x41554e008eb565a9  # 5584898.229821601
 jupiter.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 jupiter.mode[00].top_pa = 0x414876979cee276f  # 3206447.2260178844
 jupiter.mode[00].exponent = 0x4000000000000000  # 2.0
@@ -148,7 +149,8 @@ jupiter.mode[01].size = log-normal
 jupiter.mode[01].r_eff_m = 0x3e88b239dc071d24  # 1.840009940091873e-7
 jupiter.mode[01].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[01].column_kg_m2 = 0x40519f1f8e69ea67  # 70.4863010439236
-jupiter.mode[01].tau: the mode's optics: CaTiO3 has no index file as a liquid of that variant
+jupiter.mode[01].tau_basis = Table(Sphere)
+jupiter.mode[01].tau = 0x41119621ba97235e  # 288136.4322171713
 jupiter.mode[01].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 jupiter.mode[01].top_pa = 0x413f370aba5f0bec  # 2045706.7280127956
 jupiter.mode[01].exponent = 0x4000000000000000  # 2.0
@@ -158,7 +160,8 @@ jupiter.mode[02].size = log-normal
 jupiter.mode[02].r_eff_m = 0x3e884dee882fe36f  # 1.810820472179238e-7
 jupiter.mode[02].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[02].column_kg_m2 = 0x40af9688a7c4d72f  # 4043.2669049751926
-jupiter.mode[02].tau: the mode's optics: Al2O3 has no index file as a liquid of that variant
+jupiter.mode[02].tau_basis = Table(Sphere)
+jupiter.mode[02].tau = 0x4168046602a3cc7f  # 12591920.082494972
 jupiter.mode[02].base_pa = 0x41cdae975923f962  # 995962546.281048
 jupiter.mode[02].top_pa = 0x412c149e672eba72  # 920143.2015283837
 jupiter.mode[02].exponent = 0x4000000000000000  # 2.0
@@ -168,7 +171,8 @@ jupiter.mode[03].size = log-normal
 jupiter.mode[03].r_eff_m = 0x3e8a1ff99d2161b4  # 1.9464569206668484e-7
 jupiter.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[03].column_kg_m2 = 0x40eafd265c63273a  # 55273.198777748694
-jupiter.mode[03].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
+jupiter.mode[03].tau_basis = Table(Sphere)
+jupiter.mode[03].tau = 0x41a37159b7d2bbc7  # 163097819.91158888
 jupiter.mode[03].base_pa = 0x41c8ad59bd7eaae4  # 828027770.9895902
 jupiter.mode[03].top_pa = 0x4126ff0f5deda69a  # 753543.6834537566
 jupiter.mode[03].exponent = 0x4000000000000000  # 2.0
@@ -186,7 +190,8 @@ jupiter.mode[05].size = log-normal
 jupiter.mode[05].r_eff_m = 0x3e8aee32d06c16f3  # 2.0064758406866953e-7
 jupiter.mode[05].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 jupiter.mode[05].column_kg_m2 = 0x40d8ccc3b93af21b  # 25395.058180557662
-jupiter.mode[05].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
+jupiter.mode[05].tau_basis = Table(Sphere)
+jupiter.mode[05].tau = 0x4191193376dcc00f  # 71716061.7155764
 jupiter.mode[05].base_pa = 0x41c02170b4c8d26d  # 541253993.5689217
 jupiter.mode[05].top_pa = 0x411d57dd461d3489  # 480759.31847078406
 jupiter.mode[05].exponent = 0x4000000000000000  # 2.0
@@ -422,7 +427,8 @@ saturn.mode[00].size = log-normal
 saturn.mode[00].r_eff_m = 0x3e80233ddf3723c3  # 1.2023495764141387e-7
 saturn.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[00].column_kg_m2 = 0x40722a426bfcda86  # 290.64121626635495
-saturn.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
+saturn.mode[00].tau_basis = Table(Sphere)
+saturn.mode[00].tau = 0x41244deb867ad43c  # 665333.7626558612
 saturn.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[00].top_pa = 0x417a2dd7e24cbcea  # 27450750.14373485
 saturn.mode[00].exponent = 0x4000000000000000  # 2.0
@@ -454,7 +460,8 @@ saturn.mode[03].size = log-normal
 saturn.mode[03].r_eff_m = 0x3e89b477e4d0135e  # 1.915168347522902e-7
 saturn.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[03].column_kg_m2 = 0x4093ea731d0dc918  # 1274.612415519141
-saturn.mode[03].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
+saturn.mode[03].tau_basis = Table(Sphere)
+saturn.mode[03].tau = 0x414c053595324119  # 3672683.165596139
 saturn.mode[03].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[03].top_pa = 0x41718eb21868f229  # 18410273.525621567
 saturn.mode[03].exponent = 0x4000000000000000  # 2.0
@@ -464,7 +471,8 @@ saturn.mode[04].size = log-normal
 saturn.mode[04].r_eff_m = 0x3e8a5b6f9889782b  # 1.963762310706007e-7
 saturn.mode[04].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[04].column_kg_m2 = 0x40e84079abb40135  # 49667.802209856374
-saturn.mode[04].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
+saturn.mode[04].tau_basis = Table(Sphere)
+saturn.mode[04].tau = 0x41a0d8b41ddcae7e  # 141318670.93101877
 saturn.mode[04].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 saturn.mode[04].top_pa = 0x4149b74213131b34  # 3370628.149020577
 saturn.mode[04].exponent = 0x4000000000000000  # 2.0
@@ -486,17 +494,23 @@ saturn.mode[06].top_pa = 0x4178e766b707fa2c  # 26113643.439447567
 saturn.mode[06].exponent = 0x4012000000000000  # 4.5
 saturn.mode[06].coverage = 0x3ff0000000000000  # 1.0
 saturn.mode[07] = Na2S Liquid sphere of deck Na2S
-saturn.mode[07].size: Na2S has no grain density as a liquid at 1528.0280899832828 K
+saturn.mode[07].size = log-normal
+saturn.mode[07].r_eff_m = 0x3e9aae632f5973cb  # 3.9758087608758706e-7
+saturn.mode[07].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[07].column_kg_m2 = 0x40a218d65b270715  # 2316.4186641880174
-saturn.mode[07].tau: the mode's size: Na2S has no grain density as a liquid at 1528.0280899832828 K
+saturn.mode[07].tau_basis = Table(Sphere)
+saturn.mode[07].tau = 0x415f363c4c89992c  # 8182001.195898335
 saturn.mode[07].base_pa = 0x41b013b14b0864e4  # 269726027.03278947
 saturn.mode[07].top_pa = 0x416258ce36955b62  # 9619057.705732051
 saturn.mode[07].exponent = 0x4012000000000000  # 4.5
 saturn.mode[07].coverage = 0x3ff0000000000000  # 1.0
 saturn.mode[08] = KCl Liquid sphere of deck KCl
-saturn.mode[08].size: KCl has no grain density as a liquid at 1105.142284482071 K
+saturn.mode[08].size = log-normal
+saturn.mode[08].r_eff_m = 0x3e9cb88e1f30b479  # 4.2797503780023564e-7
+saturn.mode[08].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 saturn.mode[08].column_kg_m2 = 0x4057ac60d8bd2713  # 94.6934110495752
-saturn.mode[08].tau: the mode's size: KCl has no grain density as a liquid at 1105.142284482071 K
+saturn.mode[08].tau_basis = Table(Sphere)
+saturn.mode[08].tau = 0x41121821d4d51c34  # 296456.4578442008
 saturn.mode[08].base_pa = 0x4194ddda32eda296  # 87520908.73206553
 saturn.mode[08].top_pa = 0x414876979cee276f  # 3206447.2260178844
 saturn.mode[08].exponent = 0x4012000000000000  # 4.5
@@ -801,17 +815,23 @@ uranus.mode[06].top_pa = 0x41b7146d521dcedc  # 387214674.1164377
 uranus.mode[06].exponent = 0x4012000000000000  # 4.5
 uranus.mode[06].coverage = 0x3ff0000000000000  # 1.0
 uranus.mode[07] = Na2S Liquid sphere of deck Na2S
-uranus.mode[07].size: Na2S has no grain density as a liquid at 1629.492027948516 K
+uranus.mode[07].size = log-normal
+uranus.mode[07].r_eff_m = 0x3ea111548ca0187c  # 5.086569896401969e-7
+uranus.mode[07].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 uranus.mode[07].column_kg_m2 = 0x40a7577676236731  # 2987.731370073649
-uranus.mode[07].tau: the mode's size: Na2S has no grain density as a liquid at 1629.492027948516 K
+uranus.mode[07].tau_basis = Table(Sphere)
+uranus.mode[07].tau = 0x415ee23407826e99  # 8095952.117335939
 uranus.mode[07].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 uranus.mode[07].top_pa = 0x418d19ee3980f6f9  # 61029831.18797106
 uranus.mode[07].exponent = 0x4012000000000000  # 4.5
 uranus.mode[07].coverage = 0x3ff0000000000000  # 1.0
 uranus.mode[08] = KCl Liquid sphere of deck KCl
-uranus.mode[08].size: KCl has no grain density as a liquid at 1290.176903192089 K
+uranus.mode[08].size = log-normal
+uranus.mode[08].r_eff_m = 0x3ea2c9e3a40efc88  # 5.599448017408918e-7
+uranus.mode[08].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 uranus.mode[08].column_kg_m2 = 0x40a3595205cb2722  # 2476.6602004513998
-uranus.mode[08].tau: the mode's size: KCl has no grain density as a liquid at 1290.176903192089 K
+uranus.mode[08].tau_basis = Table(Sphere)
+uranus.mode[08].tau = 0x41595d96a8dcfa78  # 6649434.638487451
 uranus.mode[08].base_pa = 0x41badc26209c6310  # 450635296.6108866
 uranus.mode[08].top_pa = 0x416e3abc7d966a0c  # 15848931.924611114
 uranus.mode[08].exponent = 0x4012000000000000  # 4.5
@@ -1148,17 +1168,23 @@ neptune.mode[06].top_pa = 0x41bacf494cdaac02  # 449792332.85418713
 neptune.mode[06].exponent = 0x4012000000000000  # 4.5
 neptune.mode[06].coverage = 0x3ff0000000000000  # 1.0
 neptune.mode[07] = Na2S Liquid sphere of deck Na2S
-neptune.mode[07].size: Na2S has no grain density as a liquid at 1579.9664791265393 K
+neptune.mode[07].size = log-normal
+neptune.mode[07].r_eff_m = 0x3ea0d6b0c52661be  # 5.018304228164697e-7
+neptune.mode[07].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 neptune.mode[07].column_kg_m2 = 0x4096964ba8485296  # 1445.5738841343314
-neptune.mode[07].tau: the mode's size: Na2S has no grain density as a liquid at 1579.9664791265393 K
+neptune.mode[07].tau_basis = Table(Sphere)
+neptune.mode[07].tau = 0x414e57bb31904d0a  # 3977078.387216215
 neptune.mode[07].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 neptune.mode[07].top_pa = 0x419014316477f74b  # 67439705.11715429
 neptune.mode[07].exponent = 0x4012000000000000  # 4.5
 neptune.mode[07].coverage = 0x3ff0000000000000  # 1.0
 neptune.mode[08] = KCl Liquid sphere of deck KCl
-neptune.mode[08].size: KCl has no grain density as a liquid at 1286.0706713737986 K
+neptune.mode[08].size = log-normal
+neptune.mode[08].r_eff_m = 0x3ea26f8bce8cd85e  # 5.494274804898973e-7
+neptune.mode[08].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 neptune.mode[08].column_kg_m2 = 0x409dc4d4c5caca46  # 1905.2077857671698
-neptune.mode[08].tau: the mode's size: KCl has no grain density as a liquid at 1286.0706713737986 K
+neptune.mode[08].tau_basis = Table(Sphere)
+neptune.mode[08].tau = 0x4153d4d5b77ea081  # 5198678.867103697
 neptune.mode[08].base_pa = 0x41bd9aabfcc66a4e  # 496675836.7750596
 neptune.mode[08].top_pa = 0x4170b3c3211d4ab6  # 17513522.069651328
 neptune.mode[08].exponent = 0x4012000000000000  # 4.5
@@ -1525,7 +1551,8 @@ sub_neptune.mode[00].size = log-normal
 sub_neptune.mode[00].r_eff_m = 0x3e8c2d61b8d27eda  # 2.0993703878524532e-7
 sub_neptune.mode[00].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[00].column_kg_m2 = 0x40d5d58af01f5f6f  # 22358.170905917355
-sub_neptune.mode[00].tau: the mode's optics: Fe has no index file as a liquid of that variant
+sub_neptune.mode[00].tau_basis = Table(Sphere)
+sub_neptune.mode[00].tau = 0x41808b35851e77cb  # 34694832.639876924
 sub_neptune.mode[00].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[00].top_pa = 0x4157691ac0a8756d  # 6136939.010281903
 sub_neptune.mode[00].exponent = 0x4000000000000000  # 2.0
@@ -1535,7 +1562,8 @@ sub_neptune.mode[01].size = log-normal
 sub_neptune.mode[01].r_eff_m = 0x3e96e574573f2857  # 3.4118155345082827e-7
 sub_neptune.mode[01].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[01].column_kg_m2 = 0x40e9dbeebe307928  # 52959.46071647323
-sub_neptune.mode[01].tau: the mode's optics: Mg2SiO4 has no index file as a liquid of that variant
+sub_neptune.mode[01].tau_basis = Table(Sphere)
+sub_neptune.mode[01].tau = 0x419f1e37b761b5f9  # 130518509.84542073
 sub_neptune.mode[01].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[01].top_pa = 0x4157691ac0a8756d  # 6136939.010281903
 sub_neptune.mode[01].exponent = 0x4000000000000000  # 2.0
@@ -1545,7 +1573,8 @@ sub_neptune.mode[02].size = log-normal
 sub_neptune.mode[02].r_eff_m = 0x3e95f946d690d91f  # 3.274341993682599e-7
 sub_neptune.mode[02].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[02].column_kg_m2 = 0x400299712120ef9d  # 2.324922808473231
-sub_neptune.mode[02].tau: the mode's optics: CaTiO3 has no index file as a liquid of that variant
+sub_neptune.mode[02].tau_basis = Table(Sphere)
+sub_neptune.mode[02].tau = 0x40b7836d455e9747  # 6019.426839744504
 sub_neptune.mode[02].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[02].top_pa = 0x4191c482baede5b0  # 74522798.7323215
 sub_neptune.mode[02].exponent = 0x4000000000000000  # 2.0
@@ -1555,7 +1584,8 @@ sub_neptune.mode[03].size = log-normal
 sub_neptune.mode[03].r_eff_m = 0x3e9506730c3e1b78  # 3.132997898825766e-7
 sub_neptune.mode[03].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[03].column_kg_m2 = 0x409383aa19c907de  # 1248.916113988023
-sub_neptune.mode[03].tau: the mode's optics: Al2O3 has no index file as a liquid of that variant
+sub_neptune.mode[03].tau_basis = Table(Sphere)
+sub_neptune.mode[03].tau = 0x41469cbc994dd2bd  # 2963833.1976874755
 sub_neptune.mode[03].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[03].top_pa = 0x4164461aa8ad53a7  # 10629333.271158053
 sub_neptune.mode[03].exponent = 0x4000000000000000  # 2.0
@@ -1565,7 +1595,8 @@ sub_neptune.mode[04].size = log-normal
 sub_neptune.mode[04].r_eff_m = 0x3e972dba44939b96  # 3.453884046114844e-7
 sub_neptune.mode[04].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[04].column_kg_m2 = 0x414086ad8b37b7ee  # 2166107.087637893
-sub_neptune.mode[04].tau: the mode's optics: MgSiO3 has no index file as a liquid of that variant
+sub_neptune.mode[04].tau_basis = Table(Sphere)
+sub_neptune.mode[04].tau = 0x41f3ad4c64581921  # 5281990213.506135
 sub_neptune.mode[04].base_pa = 0x41cdcd64fffffffa  # 999999999.9999993
 sub_neptune.mode[04].top_pa = 0x41304f2f4ba07d56  # 1068847.2954176269
 sub_neptune.mode[04].exponent = 0x4000000000000000  # 2.0
@@ -1587,9 +1618,12 @@ sub_neptune.mode[06].top_pa = 0x416fc6fc57dada2b  # 16660450.745465359
 sub_neptune.mode[06].exponent = 0x4012000000000000  # 4.5
 sub_neptune.mode[06].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[07] = Na2S Liquid sphere of deck Na2S
-sub_neptune.mode[07].size: Na2S has no grain density as a liquid at 1792.4259051825616 K
+sub_neptune.mode[07].size = log-normal
+sub_neptune.mode[07].r_eff_m = 0x3ea7469404f0e75e  # 6.936697988298419e-7
+sub_neptune.mode[07].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[07].column_kg_m2 = 0x40bcc9fa9f6869a7  # 7369.978994870943
-sub_neptune.mode[07].tau: the mode's size: Na2S has no grain density as a liquid at 1792.4259051825616 K
+sub_neptune.mode[07].tau_basis = Table(Sphere)
+sub_neptune.mode[07].tau = 0x416a90185d935f0e  # 13926594.924239662
 sub_neptune.mode[07].base_pa = 0x41a42f8704caa0ff  # 169329538.39575955
 sub_neptune.mode[07].top_pa = 0x41532c00e48b794a  # 5025795.571012804
 sub_neptune.mode[07].exponent = 0x4012000000000000  # 4.5
@@ -1606,9 +1640,12 @@ sub_neptune.mode[08].top_pa = 0x41372232b2c5e221  # 1516082.6983319598
 sub_neptune.mode[08].exponent = 0x4012000000000000  # 4.5
 sub_neptune.mode[08].coverage = 0x3ff0000000000000  # 1.0
 sub_neptune.mode[09] = KCl Liquid sphere of deck KCl
-sub_neptune.mode[09].size: KCl has no grain density as a liquid at 1177.0802516201388 K
+sub_neptune.mode[09].size = log-normal
+sub_neptune.mode[09].r_eff_m = 0x3ea9cfe56341362c  # 7.692603447657349e-7
+sub_neptune.mode[09].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 sub_neptune.mode[09].column_kg_m2 = 0x40696b99e8646813  # 203.36253757105496
-sub_neptune.mode[09].tau: the mode's size: KCl has no grain density as a liquid at 1177.0802516201388 K
+sub_neptune.mode[09].tau_basis = Table(Sphere)
+sub_neptune.mode[09].tau = 0x4116dacb817f370d  # 374450.8764618494
 sub_neptune.mode[09].base_pa = 0x418143459bbd298b  # 36202675.46736439
 sub_neptune.mode[09].top_pa = 0x4132f1ef6aedffa9  # 1241583.4176940715
 sub_neptune.mode[09].exponent = 0x4012000000000000  # 4.5
@@ -1746,7 +1783,8 @@ hot_jupiter.mode[02].size = log-normal
 hot_jupiter.mode[02].r_eff_m = 0x3e778f45389ac97b  # 8.77665355069361e-8
 hot_jupiter.mode[02].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 hot_jupiter.mode[02].column_kg_m2 = 0x404f2b2de0613e5c  # 62.33733753917906
-hot_jupiter.mode[02].tau: the mode's optics: Fe has no index file as a liquid of that variant
+hot_jupiter.mode[02].tau_basis = Table(Sphere)
+hot_jupiter.mode[02].tau = 0x4103ae25c16030fe  # 161220.71942175174
 hot_jupiter.mode[02].base_pa = 0x412284cffd23e560  # 606823.9944144897
 hot_jupiter.mode[02].top_pa = 0x40800eddcaf8cac7  # 513.8582972943194
 hot_jupiter.mode[02].exponent = 0x4000000000000000  # 2.0
@@ -1933,7 +1971,8 @@ dense_hot_jupiter.mode[01].size = log-normal
 dense_hot_jupiter.mode[01].r_eff_m = 0x3e800d1f7d7e1843  # 1.1959121936857895e-7
 dense_hot_jupiter.mode[01].v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
 dense_hot_jupiter.mode[01].column_kg_m2 = 0x40230a290252345d  # 9.519844124350294
-dense_hot_jupiter.mode[01].tau: the mode's optics: Fe has no index file as a liquid of that variant
+dense_hot_jupiter.mode[01].tau_basis = Table(Sphere)
+dense_hot_jupiter.mode[01].tau = 0x40d56cd56ce2e4fc  # 21939.334770892732
 dense_hot_jupiter.mode[01].base_pa = 0x414fad725284da2e  # 4152036.6446793294
 dense_hot_jupiter.mode[01].top_pa = 0x40aac667a6ed5dde  # 3427.20244542857
 dense_hot_jupiter.mode[01].exponent = 0x4000000000000000  # 2.0
