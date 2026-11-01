@@ -36,7 +36,7 @@ use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Metres, SquareMetres};
 
 use crate::cube::{MAX_LEVEL, PatchKey};
-use crate::field::{FieldHeader, FieldView, SynthesisCell};
+use crate::field::{BodyRef, FieldHeader, FieldView, SynthesisCell};
 use crate::height::HeightSample;
 use crate::noise::LatticeCache;
 use crate::num;
@@ -90,6 +90,8 @@ impl<F> Clone for Synthesiser<'_, F> {
 /// bounds' crater marks four fifths of it; natively, one thread, pod, 2026-11-01).
 #[derive(Debug, Clone)]
 pub(crate) struct SynthesisParts {
+    /// The body of the header they were made from, which [`Synthesiser::with_parts`] checks.
+    body: BodyRef,
     seed: DetailSeed,
     relief: Relief,
     channels: Channels,
@@ -109,6 +111,7 @@ impl SynthesisParts {
         let craters = SmallCraters::new(header, seed);
         let bounds = LevelBounds::of(header, craters.octaves());
         Self {
+            body: header.body(),
             seed,
             relief: Relief::new(header, seed),
             channels: Channels::new(header, seed),
@@ -160,8 +163,17 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// The synthesis over `field` from `parts`, which [`SynthesisParts::new`] made from `field`'s
     /// header, or from a header the field's own is the same as: [`new`](Self::new)'s with
     /// `parts`' seed, bit for bit, without their build.
+    ///
+    /// # Panics
+    ///
+    /// If `parts` were made for another body's field (a bug of the caller's).
     #[must_use]
-    pub(crate) const fn with_parts(field: &'a F, parts: &'a SynthesisParts) -> Self {
+    pub(crate) fn with_parts(field: &'a F, parts: &'a SynthesisParts) -> Self {
+        assert_eq!(
+            field.header().body(),
+            parts.body,
+            "a synthesiser's parts are its own field's body's"
+        );
         Self {
             field,
             parts: Cow::Borrowed(parts),
