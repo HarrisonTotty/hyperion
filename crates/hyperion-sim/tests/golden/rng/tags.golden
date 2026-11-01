@@ -260,3 +260,4 @@ binary.ev.luminous_red_nova (Event) = 0xaec5603effe9e8ee
 binary.ev.kilonova (Event) = 0xbdf0bafb87d6aeda
 body.envelope_formation (Body) = 0x7dfb194cd468e341
 body.resources (Body) = 0x1dba07f272057896
+binary.ia_mark (Body) = 0x5b4141255b0f37b4

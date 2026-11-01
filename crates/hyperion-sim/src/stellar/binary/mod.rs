@@ -37,6 +37,7 @@ mod common_envelope;
 mod detached;
 pub mod events;
 mod evolve;
+pub mod ia;
 mod light;
 pub mod light_curves;
 mod marks;

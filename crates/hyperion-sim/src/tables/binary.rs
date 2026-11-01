@@ -1,6 +1,13 @@
 //! Plan 11's binary tables (P11.T6–T8): their shapes are plan 11's, their contents plan 15's
 //! (P15.T9.b, P15.T10.b), which P11.T15 swaps in with a version bump.
 //!
+//! [`IA_YIELD`] (P11.T6) is the Type Ia explosion mark's yield η: the share of the binary engine's
+//! pooled Type Ia candidates that explode, by delay bin and channel. **Scratch:** a sixth
+//! everywhere (Design note 13), the observed double white dwarf merger rate being five to seven
+//! times the Type Ia rate (Maoz, Hallakoun and Badenes 2018, MNRAS 476, 2584); P15.T9.b fits it
+//! against the engine so that η times the pool's yield in each bin is the delay-time
+//! distribution's.
+//!
 //! @provisional: hand-made scratch values (plan 11, Design note 13), not written by
 //! `hyperion-fit`, so not in [`MANIFEST`](super::MANIFEST) until plan 15's task for them exists.
 //! since-generator-version: 16 (the batch that lands P11.T7)
@@ -39,8 +46,11 @@ use std::marker::PhantomData;
 use crate::galaxy::POPULATIONS;
 use crate::galaxy::Population;
 use crate::galaxy::imf::MassBand;
+pub use crate::stellar::binary::IaPoolChannel;
 use crate::stellar::binary::light_curves::XrayAccretor;
 use crate::stellar::binary::{BinaryClass, CarvedClass, HmxbKind, XrbKind};
+use crate::tables::type_ia_delay::DELAY_EDGES;
+use crate::units::Years;
 
 /// The Milky Way fixture's initial mass formed, M☉, that the scratch rates are scaled to: its
 /// components' systems (with those not yet born) times the mass formed per system.
@@ -157,6 +167,74 @@ pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
         ),
     ],
 };
+
+/// The delay bins of [`IaYieldTable`]: those of [`DELAY_EDGES`], plan 15's.
+pub const IA_DELAY_BINS: usize = DELAY_EDGES.len() - 1;
+
+/// The Type Ia explosion mark's yield (plan 11's Provides; P11.T6): η, the share of the binary
+/// engine's pooled Type Ia candidates that explode, by delay bin of [`DELAY_EDGES`] and by
+/// [`IaPoolChannel`], each in [0, 1]. Plan 11's
+/// [`IaExplosionMark`](crate::stellar::binary::ia::IaExplosionMark) reads it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IaYieldTable {
+    /// η by delay bin, then by channel: [`IaPoolChannel::Merger`], [`IaPoolChannel::Accretion`].
+    eta: [[f64; 2]; IA_DELAY_BINS],
+}
+
+impl IaYieldTable {
+    /// The table of `eta`, by delay bin of [`DELAY_EDGES`] and then by channel, the merger first.
+    ///
+    /// # Panics
+    ///
+    /// If a share is not in [0, 1]: at compile time for a constant.
+    #[must_use]
+    pub const fn new(eta: [[f64; 2]; IA_DELAY_BINS]) -> Self {
+        let mut bin = 0;
+        while bin < IA_DELAY_BINS {
+            let [merger, accretion] = eta[bin];
+            assert!(
+                merger >= 0.0 && merger <= 1.0 && accretion >= 0.0 && accretion <= 1.0,
+                "a yield is a share, in [0, 1]"
+            );
+            bin += 1;
+        }
+        Self { eta }
+    }
+
+    /// η of delay bin `bin` and `channel`.
+    ///
+    /// # Panics
+    ///
+    /// If `bin` is not under [`IA_DELAY_BINS`].
+    #[must_use]
+    pub const fn eta_in(&self, bin: usize, channel: IaPoolChannel) -> f64 {
+        self.eta[bin][match channel {
+            IaPoolChannel::Merger => 0,
+            IaPoolChannel::Accretion => 1,
+        }]
+    }
+
+    /// η of a candidate pooled `delay` after its stars formed, by `channel`: its bin of
+    /// [`DELAY_EDGES`], a delay outside the edges in the end bin on its side.
+    #[must_use]
+    pub fn eta(&self, delay: Years, channel: IaPoolChannel) -> f64 {
+        self.eta_in(ia_delay_bin(delay), channel)
+    }
+}
+
+/// The bin of [`DELAY_EDGES`] holding `delay`, the ends held: the first bin below 40 Myr, which no
+/// white dwarf reaches, and the last beyond the Hubble time.
+#[must_use]
+pub fn ia_delay_bin(delay: Years) -> usize {
+    DELAY_EDGES
+        .partition_point(|&edge| edge <= delay.value())
+        .saturating_sub(1)
+        .min(IA_DELAY_BINS - 1)
+}
+
+/// The scratch yield (module documentation; plan 11, Design note 13): a sixth in every delay bin
+/// and for both channels.
+pub const IA_YIELD: IaYieldTable = IaYieldTable::new([[1.0 / 6.0; 2]; IA_DELAY_BINS]);
 
 /// A mark's median as a function of its condition (P11.T8): its value at 17 evenly spaced nodes
 /// from the first to the last value of the condition, linear between them and held beyond.
@@ -1991,6 +2069,25 @@ mod tests {
     use crate::Seed;
     use crate::galaxy::Galaxy;
     use crate::galaxy::params::GalaxyParams;
+
+    /// P11.T6: the scratch yield is a sixth in every delay bin and for both channels, and a delay
+    /// takes the bin of `DELAY_EDGES` that holds it, the ends held.
+    #[test]
+    fn the_scratch_ia_yield_is_a_sixth_everywhere() {
+        for bin in 0..IA_DELAY_BINS {
+            for channel in [IaPoolChannel::Merger, IaPoolChannel::Accretion] {
+                assert_eq!(IA_YIELD.eta_in(bin, channel), 1.0 / 6.0);
+            }
+        }
+        assert_eq!(IA_DELAY_BINS, 24);
+        for (bin, w) in DELAY_EDGES.windows(2).enumerate() {
+            assert_eq!(ia_delay_bin(Years::new(w[0])), bin);
+            assert_eq!(ia_delay_bin(Years::new(f64::midpoint(w[0], w[1]))), bin);
+        }
+        assert_eq!(ia_delay_bin(Years::new(1.0e6)), 0);
+        assert_eq!(ia_delay_bin(Years::new(1.0e11)), IA_DELAY_BINS - 1);
+        assert_eq!(ia_delay_bin(Years::new(f64::NAN)), 0);
+    }
 
     /// The Milky Way fixture's formed mass: its components' born systems, in their fixed order,
     /// times the mass formed per system.

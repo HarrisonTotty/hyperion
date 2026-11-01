@@ -1267,6 +1267,15 @@ domain_tags! {
     /// log-normal multiple, one open uniform per resource in `Resource::ALL`'s order, words 0–10;
     /// words 11–15 are reserved (`planetary::hooks::resources::ResourceDraws`).
     BODY_RESOURCES: Body = "body.resources";
+
+    // Plan 11, P11.T6: the Type Ia explosion mark, under the name and scope the "Plan 11" heading
+    // lists. Appended here, after P14.T26's `body.resources`, because the macro's order fixes
+    // `ALL`.
+
+    /// Whether a pair's pooled Type Ia candidate explodes (P11.T6): one mark at word 64n of
+    /// attempt n, keyed by the star the pair's orbit brings in, below η of the candidate's delay
+    /// bin and channel (`stellar::binary::ia::IaExplosionMark`).
+    BINARY_IA_MARK: Body = "binary.ia_mark";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1418,6 +1427,7 @@ mod tests {
             (BINARY_ORBIT, "binary.orbit", TagScope::Body),
             (BINARY_ORIENTATION, "binary.orientation", TagScope::Body),
             (BINARY_PHASE, "binary.phase", TagScope::Body),
+            (BINARY_IA_MARK, "binary.ia_mark", TagScope::Body),
         ];
         for (tag, name, scope) in tags {
             assert_eq!(tag.name(), name);

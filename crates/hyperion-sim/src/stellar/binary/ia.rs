@@ -1,0 +1,263 @@
+//! The Type Ia explosion mark (plan 11, P11.T6; design notes 8, 9 and 13): which of the binary
+//! engine's pooled Type Ia candidates explode.
+//!
+//! The engine pools a binary's first event that could be a Type Ia supernova
+//! ([`PooledIaEvent`]: two white dwarfs merging, or an accreting white dwarf reaching ignition,
+//! sub-Chandrasekhar cases included) and carries on as if it had not exploded. The formulae make
+//! several times too many such events (Claeys et al. 2014, A&A 563, A83), so the rate is not
+//! theirs: an independent mark thins the pool to the observed one (the brainstorm's "Supernova
+//! remnants: one route, not two"). A pooled event explodes when its pair's integer draw on
+//! `binary.ia_mark` ([`tags::BINARY_IA_MARK`]), at word 64n of redraw attempt n and keyed by the
+//! star the pair's orbit brings in (`SystemHierarchy::pair_key`), falls under η of the event's
+//! delay bin and channel ([`IaYieldTable`]; the scratch [`IA_YIELD`](crate::tables::binary::IA_YIELD)
+//! until P15.T9.b fits it). An unexploded pooled event stays what the engine made it: a massive
+//! white dwarf, an R Coronae Borealis star, a hot subdwarf.
+//!
+//! The mark is a pure function of the seed, the pair's key and the attempt, and nothing else reads
+//! its stream, so it moves no other draw. The system stage reads it under P11.T6's hold
+//! ([`IaExplosionRules`]): a grid binary whose marked explosion lies at or before +H redraws, as
+//! the four binary classes do (design notes 8 and 9), since plan 09's Type Ia class holds every
+//! recent Type Ia.
+
+use super::timeline::{BinaryTimeline, PooledIaEvent};
+use crate::id::BodyId;
+use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
+use crate::stellar::multiplicity::RedrawAttempt;
+use crate::tables::binary::IaYieldTable;
+
+/// A pair's Type Ia explosion mark at one redraw attempt (plan 11's Provides): the integer draw
+/// that decides whether the pair's pooled Type Ia candidate explodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IaExplosionMark {
+    mark: Mark,
+}
+
+impl IaExplosionMark {
+    /// The mark of the pair keyed by `pair`, the star its orbit brings in
+    /// ([`SystemHierarchy::pair_key`](crate::stellar::multiplicity::SystemHierarchy::pair_key)),
+    /// at redraw attempt `attempt` in the universe of `seed`: word 64n of its `binary.ia_mark`
+    /// stream, read alone.
+    #[must_use]
+    pub fn of(seed: Seed, pair: BodyId, attempt: RedrawAttempt) -> Self {
+        let stream = Stream::open(seed, tags::BINARY_IA_MARK, ObjectKey::from(pair));
+        Self {
+            mark: Mark::from_word(stream.word_at(attempt.first_draw())),
+        }
+    }
+
+    /// Whether `event` explodes: the mark is below η of its delay bin and channel in `table`.
+    #[must_use]
+    pub fn explodes(self, event: &PooledIaEvent, table: &IaYieldTable) -> bool {
+        self.mark.is_below(Threshold::from_probability(
+            table.eta(event.age(), event.channel()),
+        ))
+    }
+}
+
+/// The pooled Type Ia candidate of `timeline` that explodes under `mark` and `table`, if it has
+/// one. Its age is the explosion's, at or before the age the timeline was run to.
+#[must_use]
+pub fn marked_explosion(
+    timeline: &BinaryTimeline,
+    mark: IaExplosionMark,
+    table: &IaYieldTable,
+) -> Option<PooledIaEvent> {
+    timeline
+        .pooled_ia()
+        .filter(|event| mark.explodes(event, table))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use hyperion_testkit::order::assert_order_independent;
+    use hyperion_testkit::stats::assert_poisson_count;
+
+    use super::super::evolve::{Engine, LiveOrbit};
+    use super::super::star::{Member, Path};
+    use super::super::tests::pair;
+    use super::super::timeline::{Context, IaPoolChannel};
+    use super::*;
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaProgenitor};
+    use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::placement::CellKey;
+    use crate::galaxy::{POPULATIONS, Population};
+    use crate::id::Layer;
+    use crate::stellar::Phase;
+    use crate::tables::binary::{IA_DELAY_BINS, IA_YIELD};
+    use crate::tables::type_ia_delay::DELAY_EDGES;
+    use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
+    use crate::units::consts::SOLAR_RADIUS_M;
+    use crate::units::{Megayears, SolarMasses, Years};
+
+    const SEED: u64 = 0x0b17_0006_0000_0001;
+
+    /// The pair key of synthetic pair `k`: its secondary in candidate `k` of a layer-D cell.
+    fn key(k: u32) -> BodyId {
+        let cell = CellKey::new(Layer::D, [0, 406, 0]).expect("a cell of the root cube");
+        BodyId::new(cell.candidate_id(k).expect("under the capacity"), 1)
+    }
+
+    /// P11.T6: attempt n's mark is word 64n of the pair's `binary.ia_mark` stream, read alone, so
+    /// it is the same whichever attempts were read before it and in whatever order.
+    #[test]
+    fn a_pair_s_mark_at_attempt_n_is_its_word_64n_read_alone() {
+        let seed = Seed::new(SEED);
+        let attempts: Vec<RedrawAttempt> = RedrawAttempt::all().collect();
+        for k in 0..16 {
+            let pair = key(k);
+            let stream = Stream::open(seed, tags::BINARY_IA_MARK, ObjectKey::from(pair));
+            for &attempt in &attempts {
+                assert_eq!(
+                    IaExplosionMark::of(seed, pair, attempt),
+                    IaExplosionMark {
+                        mark: Mark::from_word(stream.word_at(64 * u64::from(attempt.get()))),
+                    }
+                );
+            }
+            assert_order_independent(&attempts, |&attempt| {
+                IaExplosionMark::of(seed, pair, attempt)
+            });
+        }
+    }
+
+    /// P11.T6: exploded ÷ pooled is η to Poisson accuracy, in every delay bin and for both
+    /// channels, over 2,000 synthetic pooled candidates each, every one on its own pair's mark;
+    /// and with η of 0 none explodes, with η of 1 every one.
+    #[test]
+    fn exploded_over_pooled_is_eta_to_poisson_accuracy() {
+        let seed = Seed::new(SEED);
+        let per_bin = 2_000_u32;
+        let masses = [SolarMasses::new(0.8), SolarMasses::new(0.7)];
+        let (mut total, mut exploded) = (0_u32, 0_u64);
+        for bin in 0..IA_DELAY_BINS {
+            let delay = Years::new(f64::midpoint(DELAY_EDGES[bin], DELAY_EDGES[bin + 1]));
+            for channel in [IaPoolChannel::Merger, IaPoolChannel::Accretion] {
+                let event = PooledIaEvent::new(delay, channel, masses);
+                let base = total;
+                let count = (0..per_bin)
+                    .filter(|&i| {
+                        IaExplosionMark::of(seed, key(base + i), RedrawAttempt::FIRST)
+                            .explodes(&event, &IA_YIELD)
+                    })
+                    .count();
+                let count = u64::try_from(count).expect("a count");
+                let eta = IA_YIELD.eta_in(bin, channel);
+                assert_poisson_count(
+                    &format!("bin {bin} {channel:?}"),
+                    count,
+                    eta * f64::from(per_bin),
+                    1e-4,
+                );
+                total += per_bin;
+                exploded += count;
+            }
+        }
+        assert_poisson_count("every bin", exploded, f64::from(total) / 6.0, 1e-3);
+        let event = PooledIaEvent::new(Years::new(1.0e9), IaPoolChannel::Merger, masses);
+        let never = IaYieldTable::new([[0.0; 2]; IA_DELAY_BINS]);
+        let always = IaYieldTable::new([[1.0; 2]; IA_DELAY_BINS]);
+        for k in 0..500 {
+            let mark = IaExplosionMark::of(seed, key(k), RedrawAttempt::FIRST);
+            assert!(!mark.explodes(&event, &never));
+            assert!(mark.explodes(&event, &always));
+        }
+    }
+
+    /// A white dwarf of `mass` M☉ as the engine holds one formed at `birth` years: helium below
+    /// 0.45 M☉, oxygen–neon above 1.05 M☉, carbon–oxygen between.
+    fn dwarf(mass: f64, birth: f64) -> Member {
+        let phase = if mass < 0.45 {
+            Phase::HeliumWhiteDwarf
+        } else if mass > 1.05 {
+            Phase::OxygenNeonWhiteDwarf
+        } else {
+            Phase::CarbonOxygenWhiteDwarf
+        };
+        Member::Remnant {
+            phase,
+            birth,
+            origin: Megayears::ZERO,
+            mass: Path::starting(birth, mass),
+        }
+    }
+
+    /// P11.T6 with plan 09's Type Ia entry (P09.T18.b): a double white dwarf the entry draws delay
+    /// first, its two dwarfs at its separation after the common envelope from the second dwarf's
+    /// birth, run through the engine, merges at its drawn delay to 1%, and its inspiral matches
+    /// the entry's to 1%, since the entry solves the separation from Peters's (1964) time and the
+    /// engine integrates his equation; the merger is the pair's pooled candidate.
+    #[test]
+    fn plan_09_s_double_white_dwarf_merges_in_the_engine_at_its_drawn_delay() {
+        let galaxy = Galaxy::from_params(Seed::new(0x0918_0001), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture builds");
+        let delays = DelayTimeDistribution::from_galaxy(&galaxy);
+        let after = UniverseTime::EPOCH
+            .checked_sub(Span::from_julian_years(4_000_000).expect("a span"))
+            .expect("inside the clock");
+        let until = UniverseTime::EPOCH
+            .checked_add(CLOCK_WINDOW_H)
+            .expect("inside the clock");
+        let (mut checked, mut worst) = (0_u32, 0.0_f64);
+        for k in 0..4_000_u64 {
+            if checked >= 60 {
+                break;
+            }
+            let population: Population = POPULATIONS[usize::try_from(k % 7).expect("an index")];
+            let mut stream = Stream::open(
+                Seed::new(0x0b17_0006_0000_0002),
+                tags::SELFTEST_STREAM,
+                ObjectKey::galaxy_item(k),
+            );
+            let Some(p) = IaProgenitor::draw(&delays, &mut stream, population, after, until) else {
+                continue;
+            };
+            let (Some(m2), Some(a), Some(born), Some(inspiral)) = (
+                p.secondary_dwarf(),
+                p.separation_after_common_envelope(),
+                p.secondary_lifetime(),
+                p.inspiral(),
+            ) else {
+                continue;
+            };
+            let m1 = p.primary_dwarf();
+            let (start, delay) = (born.as_julian_years_f64(), p.delay().as_julian_years_f64());
+            let input = pair(m1.value(), m2.value(), 0.1, 0.0, 0.02);
+            let orbit = LiveOrbit::new(
+                start,
+                a.value() / SOLAR_RADIUS_M,
+                0.0,
+                *input.orbit().orientation(),
+                input.orbit().mean_anomaly_at_epoch(),
+            );
+            let mut engine = Engine::new(
+                Arc::new(Context::of(&input)),
+                start,
+                delay * 1.05,
+                [dwarf(m1.value(), start), dwarf(m2.value(), start)],
+                orbit,
+                None,
+            );
+            engine.run();
+            let timeline = engine.finish();
+            let merged = timeline.merger_age().expect("the dwarfs merge").value();
+            let off = (merged / delay - 1.0).abs();
+            let inspiral = inspiral.as_julian_years_f64();
+            let inspiral_off = ((merged - start) / inspiral - 1.0).abs();
+            assert!(off < 1e-2, "{k}: {merged} yr against the delay {delay}");
+            assert!(
+                inspiral_off < 1e-2,
+                "{k}: an inspiral of {} yr against the entry's {inspiral}",
+                merged - start
+            );
+            let pooled = timeline.pooled_ia().expect("a merger of two white dwarfs");
+            assert_eq!(pooled.channel(), IaPoolChannel::Merger);
+            worst = worst.max(inspiral_off);
+            checked += 1;
+        }
+        println!("{checked} entries: the engine's inspiral within {worst:.2e} of the entry's");
+        assert!(checked >= 60, "only {checked} double white dwarfs drawn");
+    }
+}
