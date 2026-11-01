@@ -156,6 +156,15 @@ impl NormalScale {
 pub enum NormalsLayer {
     /// At [`BakeOptions::normals`]' resolution, for a style that shades the ground (R10.T10).
     Baked,
+    /// At [`BakeOptions::normals`]' resolution as a draft that asks no height for them: each
+    /// vertex's [`Baked`](Self::Baked)'s bit for bit, and at [`NormalScale::Double`] each sample
+    /// between the vertices the mean of theirs about it ([`normals::draft_normals`]), the shading
+    /// of the mesh's resolution, R05 Design note 25's fallback. The high setting draws it first,
+    /// and R10's [`refine_normals`](crate::bake::refine_normals) makes the samples between later,
+    /// which [`normals::merge_between`] puts in its place: the [`Baked`](Self::Baked) bake's
+    /// normals, bit for bit (plan R10, R10.T6.a's progressive bake). At [`NormalScale::Mesh`] it
+    /// is [`Baked`](Self::Baked).
+    Drafted,
     /// None: [`PatchBake::normals`] is empty and no height is asked for them, for a style that
     /// draws no shading, as the wireframe's depth-only terrain (R10.T11), whose slot holds none.
     Skipped,
@@ -463,6 +472,9 @@ pub(crate) fn bake_with_heights<S: HeightSource>(
     let normals = match normals_layer {
         NormalsLayer::Baked => {
             normals::bake_normals(source, key, opts.normals, patch_heights.samples(), cache)?
+        }
+        NormalsLayer::Drafted => {
+            normals::draft_normals(&figure, key, opts.normals, patch_heights.samples())
         }
         NormalsLayer::Skipped => Vec::new(),
     };

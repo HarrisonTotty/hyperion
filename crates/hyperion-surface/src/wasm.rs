@@ -81,7 +81,9 @@
 //! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon,
 //!   normalsLayer, skirtM)` bakes the patch as `bakePatch` does, `weights` a `WeightsLayer`,
 //!   `horizon` a `HorizonLayer` and `normalsLayer` a `NormalsLayer`, each `Baked` (0) or
-//!   `Skipped` (1), its `normals()` empty where the normals are skipped, and returns a
+//!   `Skipped` (1), the normals also `Drafted` (2) ([`NormalsLayer::Drafted`]: the vertices'
+//!   alone asked, those between them their mean until `refineNormals` makes them), its `normals()`
+//!   empty where the normals are skipped, and returns a
 //!   `BakedTerrain`, or `undefined` where the field cannot make it yet: none is held, or a
 //!   surveyed vertex reads a cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and
 //!   R10's layers: `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry
@@ -102,6 +104,13 @@
 //!   ([`HorizonMap::is_complete`](crate::bake::HorizonMap::is_complete)); and
 //!   `horizonRefusedCells()`, a `Uint32Array` of the cell indices its far field was refused for,
 //!   rising ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)).
+//! - `refineNormals(system, body, seed, face, level, i, j, normals)` makes the normals a `Drafted`
+//!   bake of the patch at `normals`, a `NormalScale`, left between its vertices
+//!   ([`WorkerFields::refine_normals`]) and returns a `RefinedNormals`: `normals()`, a
+//!   `Float32Array` of their octahedral pairs, row by row over the double grid, each skipping the
+//!   vertices (12,416 pairs at `Double`, none at `Mesh`), the `Baked` bake's there bit for bit; and
+//!   `complete`, whether every height they read was the field's own, without which the drafted
+//!   bake is not complete either. `undefined` where the field cannot make them yet, as `bake`.
 //! - `reading(system, body, seed, face, u, v, slopeBaselineM)` returns a `Reading`
 //!   ([`SurveyedReading`]'s getters, in metres and radians), or `undefined` where the ground is
 //!   not surveyed or no field is held: the readout's `NOT SURVEYED`.
@@ -492,6 +501,8 @@ pub enum JsNormalsLayer {
     Baked = 0,
     /// [`NormalsLayer::Skipped`].
     Skipped = 1,
+    /// [`NormalsLayer::Drafted`].
+    Drafted = 2,
 }
 
 /// Whether a body's field surveys its σ by level, as the client names it (R10.T4.c's
@@ -641,6 +652,30 @@ impl FieldBlock {
     #[must_use]
     pub fn level_sigma_m(&self) -> Vec<f64> {
         self.sigma.to_vec()
+    }
+}
+
+/// The normals a drafted bake left between its vertices, made over a body's field (see the module
+/// documentation).
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct RefinedNormals {
+    refined: crate::bake::RefinedNormals,
+}
+
+#[wasm_bindgen]
+impl RefinedNormals {
+    /// The octahedral pairs between the vertices, row by row, each skipping the vertices.
+    #[must_use]
+    pub fn normals(&self) -> Vec<f32> {
+        self.refined.normals().to_vec()
+    }
+
+    /// Whether every height they read was the field's own.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.refined.is_complete()
     }
 }
 
@@ -1382,12 +1417,46 @@ impl JsSurfaceFields {
             normals: match normals_layer {
                 JsNormalsLayer::Baked => NormalsLayer::Baked,
                 JsNormalsLayer::Skipped => NormalsLayer::Skipped,
+                JsNormalsLayer::Drafted => NormalsLayer::Drafted,
             },
         };
         let answer = self
             .fields
             .bake(body_ref(system, body)?, DetailSeed::new(seed), key, &opts);
         Ok(unless_unsurveyed(answer).map(BakedTerrain::from))
+    }
+
+    /// The normals a drafted bake of the patch left between its vertices (see the module
+    /// documentation).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` naming the problem if the face, level or cell is out of range.
+    #[wasm_bindgen(js_name = refineNormals)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a flat call is the binding's cheapest shape; the TypeScript side wraps it"
+    )]
+    pub fn refine_normals(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+        face: u32,
+        level: u32,
+        i: u32,
+        j: u32,
+        normals: JsNormalScale,
+    ) -> Result<Option<RefinedNormals>, JsError> {
+        let key = patch_key(face, level, i, j)?;
+        let scale = match normals {
+            JsNormalScale::Mesh => NormalScale::Mesh,
+            JsNormalScale::Double => NormalScale::Double,
+        };
+        let answer =
+            self.fields
+                .refine_normals(body_ref(system, body)?, DetailSeed::new(seed), key, scale);
+        Ok(unless_unsurveyed(answer).map(|refined| RefinedNormals { refined }))
     }
 
     /// The reading at (`face`, `u`, `v`) on the body (see the module documentation).

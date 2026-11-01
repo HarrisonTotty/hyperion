@@ -11,9 +11,10 @@
 //! [`patch_maturity`], at each vertex with weights, after them and through the same cache), the
 //! survey mask, the patch's bound and σ, the horizon map (R10.T8.a's
 //! [`horizon`] module, from the bake's own heights and the ground beyond the patch), and R11's
-//! layers through [`BakeHook`]. Normals are at R05's
-//! [`NormalScale`](crate::patch::NormalScale), which the worker packs as `rg16float` (R05's Design
-//! note 5), or skipped with [`NormalsLayer::Skipped`] for a style that shades nothing.
+//! layers through [`BakeHook`]. Normals are at R05's [`NormalScale`], which the worker packs as
+//! `rg16float` (R05's Design note 5), or skipped with [`NormalsLayer::Skipped`] for a style that
+//! shades nothing, or drafted with [`NormalsLayer::Drafted`] at the vertices alone, the samples
+//! between them made later by [`refine_normals`] (the high setting's progressive bake).
 //!
 //! # The survey
 //!
@@ -64,7 +65,9 @@ use crate::height::HeightSample;
 use crate::material::{MAX_CLASSES, kept_omitted_rms, patch_maturity, weights_with_sample};
 use crate::num;
 pub use crate::patch::NormalsLayer;
-use crate::patch::{BakeOptions, HeightSource, PATCH_VERTICES, PatchBake, bake_with_heights};
+use crate::patch::{
+    BakeOptions, HeightSource, NormalScale, PATCH_VERTICES, PatchBake, bake_with_heights, normals,
+};
 use crate::reading::SurveyView;
 use crate::scatter::ExtraLayer;
 use crate::spheroid::Spheroid;
@@ -128,6 +131,18 @@ impl TerrainBake {
     #[must_use]
     pub fn into_parts(self) -> (PatchBake, TerrainLayers) {
         (self.patch, self.layers)
+    }
+}
+
+#[cfg(test)]
+impl TerrainBake {
+    /// A bake drafted at `scale` ([`NormalsLayer::Drafted`]) with `refined` in place: its normals
+    /// merged ([`merge_between`](normals::merge_between)) and complete where both are, which is
+    /// the [`NormalsLayer::Baked`] bake over the same view.
+    pub(crate) fn with_refined(mut self, refined: &RefinedNormals, scale: NormalScale) -> Self {
+        self.patch.normals = normals::merge_between(&self.patch.normals, refined.normals(), scale);
+        self.layers.complete = self.layers.complete && refined.is_complete();
+        self
     }
 }
 
@@ -343,6 +358,76 @@ fn sigma<F: SurveyView>(
         );
     }
     Ok(Metres::new(largest))
+}
+
+/// The normals a drafted bake of a patch left between its vertices, made after it
+/// ([`refine_normals`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefinedNormals {
+    normals: Vec<f32>,
+    complete: bool,
+}
+
+impl RefinedNormals {
+    /// The octahedral pairs of the samples between the vertices, row by row, each skipping the
+    /// vertices ([`NORMALS_BETWEEN`](crate::patch::normals::NORMALS_BETWEEN) pairs at
+    /// [`NormalScale::Double`], none at [`NormalScale::Mesh`]), which
+    /// [`merge_between`](crate::patch::normals::merge_between) puts in the draft's place.
+    #[must_use]
+    pub fn normals(&self) -> &[f32] {
+        &self.normals
+    }
+
+    /// Whether every height they read was the view's own. A drafted bake with them is
+    /// [complete](TerrainLayers::is_complete) where both are: the [`NormalsLayer::Baked`] bake's
+    /// completeness over the same view.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+
+    /// The pairs, to hand on without a copy.
+    #[must_use]
+    pub fn into_normals(self) -> Vec<f32> {
+        self.normals
+    }
+}
+
+/// The normals between `key`'s vertices at `scale` that a bake with [`NormalsLayer::Drafted`] left
+/// to be made, over the client's field `synth` reads: [`bake_terrain`]'s with
+/// [`NormalsLayer::Baked`] at each of those samples, bit for bit, so that the draft's normals with
+/// these in place ([`merge_between`](crate::patch::normals::merge_between)) are that bake's (plan
+/// R10, R10.T6.a's progressive bake). Over the same view, the draft's other arrays and layers are
+/// that bake's already. `cache` is the caller's, as [`bake_terrain`]'s.
+///
+/// # Errors
+///
+/// As [`bake_terrain`]: [`QueryHeightError::NotSurveyed`] where a surveyed sample reads a cell the
+/// view does not hold.
+///
+/// # Panics
+///
+/// If a height is not finite (a bug).
+pub fn refine_normals<F: SurveyView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    key: PatchKey,
+    scale: NormalScale,
+) -> Result<RefinedNormals, QueryHeightError> {
+    // The samples' heights alone, through the same answers as the bake's normals: no patch
+    // heights are asked, so the mask and the vertices' references are not read.
+    let ground = SurveyedGround {
+        synth,
+        mask: &[],
+        reference: RefCell::new(Vec::new()),
+        complete: Cell::new(true),
+    };
+    HeightSource::prepare_cache(&ground, cache, key);
+    let normals = normals::normals_between(&ground, key, scale, cache)?;
+    Ok(RefinedNormals {
+        normals,
+        complete: ground.complete.get(),
+    })
 }
 
 /// R10.T3's height source for R09's synthesiser, seen through a client's survey: a vertex outside

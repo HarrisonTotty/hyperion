@@ -1101,6 +1101,32 @@ fn worker_bakes_under_another_seed_are_that_seed_s_synthesis() {
 }
 
 #[test]
+fn worker_refined_normals_make_a_drafted_bake_the_baked_one() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let drafted = TerrainBakeOptions {
+        normals: NormalsLayer::Drafted,
+        ..DOUBLE
+    };
+    for (name, key, _) in probes() {
+        let baked = fields.bake(f.body, SEED, key, &DOUBLE).unwrap();
+        let draft = fields.bake(f.body, SEED, key, &drafted).unwrap();
+        let refined = fields
+            .refine_normals(f.body, SEED, key, NormalScale::Double)
+            .unwrap();
+        let (terrain, cells) = draft.into_parts();
+        let terrain = terrain.with_refined(&refined, NormalScale::Double);
+        assert_eq!(&terrain, baked.terrain(), "{name}");
+        assert_eq!(cells.as_slice(), baked.unsurveyed_cells(), "{name}");
+    }
+    let unstarted = BodyRef::new(f.body.raw_system_id(), f.body.body_index() + 1);
+    assert_eq!(
+        fields.refine_normals(unstarted, SEED, probes()[0].1, NormalScale::Double),
+        Err(QueryBodyError::NotStarted(unstarted))
+    );
+}
+
+#[test]
 fn worker_bake_and_queries_need_the_body_s_field() {
     let f = fixture();
     let mut fields = f.worker();

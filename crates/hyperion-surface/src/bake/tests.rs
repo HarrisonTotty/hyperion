@@ -20,7 +20,7 @@ use crate::material::{
     weights_at,
 };
 use crate::patch::normals::decode_octahedral;
-use crate::patch::{NormalScale, VertexPath, bake_patch};
+use crate::patch::{NormalScale, VertexPath, bake_patch, normals};
 use crate::synth::test_support::{SEED, random_cells, rim_cells, world};
 use crate::testing::{SyntheticWorld, moon_like_builder, moon_like_crater_params};
 use crate::wire::{decode_payload, encode_payload};
@@ -724,6 +724,93 @@ fn bake_without_normals_leaves_them_empty_and_the_rest_as_baked() {
             let inside_bake = bake_terrain(&synth, &mut SynthCache::new(), inside, &opts, &[]);
             assert!(inside_bake.unwrap().layers().is_complete(), "{opts:?}");
         }
+    }
+}
+
+#[test]
+fn bake_a_draft_with_its_refined_normals_is_the_baked_bake_bit_for_bit() {
+    let (w, edge, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let inside = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let mut incomplete = 0;
+    for opts in [MESH, DOUBLE] {
+        let scale = opts.patch.normals;
+        let drafted = TerrainBakeOptions {
+            normals: NormalsLayer::Drafted,
+            ..opts
+        };
+        for key in [inside, edge, edge.children()[0]] {
+            let baked = bake_terrain(&synth, &mut SynthCache::new(), key, &opts, &[]).unwrap();
+            // The draft, then its refinement, from one cache, as a worker makes them.
+            let mut cache = SynthCache::new();
+            let draft = bake_terrain(&synth, &mut cache, key, &drafted, &[]).unwrap();
+            let refined = refine_normals(&synth, &mut cache, key, scale).unwrap();
+            let fresh = refine_normals(&synth, &mut SynthCache::new(), key, scale).unwrap();
+            assert_eq!(refined, fresh, "{key:?} {scale:?}");
+            let whole = draft.clone().with_refined(&refined, scale);
+            assert_eq!(bake_bits(&whole), bake_bits(&baked), "{key:?} {scale:?}");
+            match scale {
+                // Every sample is a vertex: the draft is the bake, and nothing is left to refine.
+                NormalScale::Mesh => {
+                    assert_eq!(bake_bits(&draft), bake_bits(&baked), "{key:?}");
+                    assert_eq!(refined.normals(), [] as [f32; 0]);
+                }
+                NormalScale::Double => {
+                    let between = refined.normals().len();
+                    assert_eq!(between, 2 * normals::NORMALS_BETWEEN, "{key:?}");
+                }
+            }
+            incomplete += usize::from(!baked.layers().is_complete());
+        }
+    }
+    assert!(incomplete >= 2, "{incomplete} incomplete bakes");
+}
+
+#[test]
+fn bake_a_draft_s_normals_between_the_vertices_are_the_mean_of_theirs() {
+    let (w, _, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let inside = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let drafted = TerrainBakeOptions {
+        normals: NormalsLayer::Drafted,
+        ..DOUBLE
+    };
+    let draft = bake_terrain(&synth, &mut SynthCache::new(), inside, &drafted, &[]).unwrap();
+    let pairs = &draft.patch().normals;
+    let at = |x: usize, y: usize| {
+        let n = y * 129 + x;
+        decode_octahedral([f64::from(pairs[2 * n]), f64::from(pairs[2 * n + 1])])
+    };
+    for (x, y) in [
+        (1_usize, 0_usize),
+        (0, 1),
+        (1, 1),
+        (63, 64),
+        (127, 127),
+        (64, 37),
+    ] {
+        let corners = [
+            (x / 2, y / 2),
+            (x.div_ceil(2), y / 2),
+            (x / 2, y.div_ceil(2)),
+            (x.div_ceil(2), y.div_ceil(2)),
+        ];
+        let sum = corners
+            .iter()
+            .map(|&(vx, vy)| at(2 * vx, 2 * vy))
+            .fold([0.0; 3], |s, n| [s[0] + n[0], s[1] + n[1], s[2] + n[2]]);
+        let len = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]).sqrt();
+        let got = at(x, y);
+        let cos = (got[0] * sum[0] + got[1] * sum[1] + got[2] * sum[2]) / len;
+        // The f32 pairs' rounding alone, about 10⁻⁷ rad.
+        assert!(
+            hyperion_base::math::acos(cos.min(1.0)) < 1e-5,
+            "({x}, {y}): {cos}"
+        );
     }
 }
 

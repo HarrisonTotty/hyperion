@@ -105,7 +105,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
 
-use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity};
+use crate::bake::{
+    RefinedNormals, TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity,
+    refine_normals,
+};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
     BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index,
@@ -120,6 +123,7 @@ use crate::material::{
     weights_at,
 };
 use crate::num;
+use crate::patch::NormalScale;
 use crate::patch::normals::{encode_octahedral_f32, surface_normal};
 use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
@@ -1658,6 +1662,28 @@ impl WorkerFields {
             terrain,
             unsurveyed_cells: cells.into_iter().collect(),
         })
+    }
+
+    /// The normals between `key`'s vertices at `scale` that a bake of it with
+    /// [`NormalsLayer::Drafted`](crate::bake::NormalsLayer::Drafted) left, over `body`'s field
+    /// with the body's detail seed `seed` ([`refine_normals`]): a [`NormalsLayer::Baked`]
+    /// bake's there, bit for bit.
+    ///
+    /// [`NormalsLayer::Baked`]: crate::bake::NormalsLayer::Baked
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a surveyed sample that reads a cell the
+    /// field does not hold yet.
+    pub fn refine_normals(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        key: PatchKey,
+        scale: NormalScale,
+    ) -> Result<RefinedNormals, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        Ok(refine_normals(&synth, cache, key, scale)?)
     }
 
     /// The reading at `at` on `body`, its slope over `slope_baseline` ([`surveyed_reading`]), or
