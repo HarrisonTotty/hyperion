@@ -584,13 +584,20 @@ async function run(
     checkClassCurveSeam(engine, checks),
   );
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
-  await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
+  // With the captures, R14's levers' frames: R14.T1.a's here, R14.T1.d's with the cascades.
+  let images: CapturedImage[] = [];
+  await group(7, "R10.T16 the frame", async () => {
+    images = [...images, ...(await checkTerrainFrame(engine, checks, captures))];
+  });
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),
   );
   await group(7, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));
-  // On the page's engine, whose variant decides the cascades' capability path (R10.T9.b).
-  await group(7, "R10.T9.b the high setting's cascades", () => checkShadowCascades(engine, checks));
+  // On the page's engine, whose variant decides the cascades' capability path (R10.T9.b); with the
+  // captures, R14.T1.d's casters at stride 1 and at their texel.
+  await group(7, "R10.T9.b the high setting's cascades", async () => {
+    images = [...images, ...(await checkShadowCascades(engine, checks, captures))];
+  });
   // On an engine of its own, whose device it destroys mid-stream (R10.T16.b).
   await group(7, "R10.T16 the shared pass", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
@@ -655,7 +662,6 @@ async function run(
   await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
   await group(1, "R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
   await group(1, "R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
-  let images: CapturedImage[] = [];
   if (captures) {
     await group(1, "R05.T12.c the comparison captures", async () => {
       images = await captureAtmosphere(engine);

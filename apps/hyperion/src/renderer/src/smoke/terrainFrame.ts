@@ -56,6 +56,8 @@ import { overlaySubmission } from "../view/photoreal/overlay";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { type PhotorealOverlay, PhotorealRenderer } from "../view/photoreal/renderer";
 import { GEOMETRY_BEFORE_R14, SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import type { CapturedImage } from "./atmosphere";
+import { captureOf, captureScale, maskOf } from "./leverCaptures";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
 import {
@@ -448,8 +450,17 @@ function grazingPose(elevationRad: number, heightM: number, fovXRad: number): Po
   };
 }
 
-/** R10.T16.c's frame: see the module's remarks. */
-export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): Promise<void> {
+/**
+ * R10.T16.c's frame: see the module's remarks. With `captures`, R14.T1.a's relief frame by the way
+ * back and on the cluster path, at one exposure, and its terrain's mask, for a person to look at and
+ * for `scripts/compareCaptures.mjs`.
+ */
+export async function checkTerrainFrame(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
   const field = moonLikeFixture("first");
   const pool = new HeightWorkerPool({
     workers: 2,
@@ -534,6 +545,21 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     relief.setGeometry(SETTINGS.low.geometry);
     const levered = await reliefFrame();
     const digests = [both, unlevered, levered].map((texels) => bytesDigest(texels));
+    if (captures) {
+      // The terrain alone for its mask, and the exposure fixed by the way back's brightest terrain.
+      const alone = await drawn(engine, pose, [
+        {
+          label: bodies,
+          draws: liveFrame(relief, mask, pose, performance.now()).terrainDraws,
+        },
+      ]);
+      const exposure = captureScale(unlevered, alone);
+      images.push(
+        captureOf("r14-t1a-frame-way-back", unlevered, VIEWPORT, exposure),
+        captureOf("r14-t1a-frame-cluster-path", levered, VIEWPORT, exposure),
+        maskOf("r14-t1a-terrain-mask", alone, VIEWPORT),
+      );
+    }
     const litTriangles =
       (patches.interior * LIT_INTERIOR_INDICES + patches.edge * LIT_PATCH_INDICES) / 3;
     const unleveredTriangles = ((patches.interior + patches.edge) * LIT_PATCH_INDICES) / 3;
@@ -868,4 +894,5 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     pool.terminate();
     mask.release();
   }
+  return images;
 }

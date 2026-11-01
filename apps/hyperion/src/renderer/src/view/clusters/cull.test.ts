@@ -255,6 +255,11 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
   });
 });
 
+/** A bucket's stride, of eight templates a pass, four strides a shape. */
+function strideOf(bucket: number): number {
+  return 2 ** (bucket % 4);
+}
+
 /** Receivers between 40 m and 200 m, reaching 3 m nearer and 5 m farther, a cover below. */
 const RECEIVERS: CullReceivers = {
   depthM: [40, 200],
@@ -319,6 +324,43 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     // The kernel's allowance narrows each test by a centimetre and some ulps of the lengths.
     expect(receiversRefuse(pass, X, { x: 204.1 + RECEIVER_ROUNDING_M, y: 0, z: 0 }, 1)).toBe(true);
     expect(receiversRefuse(pass, X, { x: 204.005, y: 0, z: 0 }, 1)).toBe(false);
+  });
+
+  it("gives every cluster of an instance one stride in a pass, the coarsest within its texel, blocks and strips alike (R14.T1.d)", () => {
+    const records = Array.from({ length: 6 }, (_, n) =>
+      record({ x: 10 * n, y: 0, z: 0 }, 1 + n, n < 4 ? "terrain-block" : "terrain-skirt"),
+    );
+    const buckets = cullTwin({
+      instances: [
+        { originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b11, unitM: 0.05 },
+        { originM: { x: 0, y: 5, z: 0 }, page: 0, passMask: 0b11, unitM: 0.25 },
+      ],
+      records: (_page, cluster) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: records.length,
+      rotationColumns: [X, Y, Z],
+      // A texel of 0.2 m: stride 4 for a unit of 0.05 m, 1 for 0.25 m; the second pass capped at 2.
+      passes: [
+        cascade({ strideCap: 8, toleranceM: 0.2 }),
+        cascade({ strideCap: 2, toleranceM: 0.2 }),
+      ],
+      places: [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 100 },
+      ],
+      templates: 8,
+      viewAxis: Z,
+    });
+    const byInstance = new Map<string, Set<number>>();
+    for (const [bucket, entries] of buckets) {
+      for (const entry of entries) {
+        const key = `${String(Math.floor(bucket / 8))}:${String(Math.floor(entry / 256))}`;
+        byInstance.set(key, (byInstance.get(key) ?? new Set()).add(strideOf(bucket)));
+      }
+    }
+    expect(
+      Object.fromEntries([...byInstance].map(([key, strides]) => [key, [...strides]])),
+    ).toEqual({ "0:0": [4], "0:1": [1], "1:0": [2], "1:1": [1] });
+    expect([...buckets.keys()].toSorted((a, b) => a - b)).toEqual([0, 2, 4, 6, 8, 9, 12, 13]);
   });
 
   it("appends each kept cluster to its pass's bucket of its shape and stride, and nothing of a pass its instance may not enter", () => {

@@ -3312,6 +3312,11 @@ export class TerrainPass {
    * that samples the cascade can read a texel it writes, by the view depths the receivers sample it
    * at and the next nearer cascade's cover. The layers then differ only where no receiver samples,
    * and the frame not at all. A stand-in casts by `castsInto` alone.
+   *
+   * With `GeometrySettings.casterStrideCap` above 1 (plan R14, R14.T1.d), each interior patch casts
+   * into each cascade at the coarsest stride s, up to the cap, with s times its level's largest
+   * vertex spacing within the cascade's texel, every cluster of the patch at the one stride, so
+   * that no crack opens inside it; the skirts close the rest. The lit image moves by that bound.
    */
   #drawCasters(
     device: Device,
@@ -3416,7 +3421,14 @@ export class TerrainPass {
       const count = records.count;
       const terrain: DrawItem[] = count > 0 ? [{ ...items[index], instanceCount: count }] : [];
       if (clusters !== null) {
-        terrain.push(...clusters.buckets.drawItems(index, clusters.mesh, clusters.base, 1));
+        terrain.push(
+          ...clusters.buckets.drawItems(
+            index,
+            clusters.mesh,
+            clusters.base,
+            this.#geometry.casterStrideCap,
+          ),
+        );
       }
       return {
         label: TERRAIN_SHADOW_PASS_LABEL,
@@ -3495,9 +3507,9 @@ export class TerrainPass {
 
   /**
    * Culls view `state`'s interior patches' clusters into `set`'s cascades' buckets (plan R14,
-   * R14.T1.b and T1.c): writes each record's cull input, the cascades as the cull's passes, at
-   * stride 1 and with their receivers' cull where `casterDepthCull` is on, and the dispatch's
-   * parameters, clears the buckets and dispatches the cull, a workgroup a record, its
+   * R14.T1.b–d): writes each record's cull input, the cascades as the cull's passes, up to
+   * `casterStrideCap` and with their receivers' cull where `casterDepthCull` is on, and the
+   * dispatch's parameters, clears the buckets and dispatches the cull, a workgroup a record, its
    * submission before the caster passes'; and, behind the measurement switch, samples the
    * buckets' counts.
    */
@@ -3521,7 +3533,8 @@ export class TerrainPass {
     });
     const axes = [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)] as const;
     const viewAxis = viewAxisOf(input.view.orientation);
-    const passes = cascadeCullPasses(set, axes, viewAxis, 1, this.#geometry.casterDepthCull);
+    const { casterStrideCap, casterDepthCull } = this.#geometry;
+    const passes = cascadeCullPasses(set, axes, viewAxis, casterStrideCap, casterDepthCull);
     const { buckets } = clusters;
     packCullPasses(
       passes,

@@ -25,6 +25,7 @@ import { cascadeKeeps, cullTwin } from "../clusters/cull";
 import { type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import type { ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { STRIDES } from "../clusters/templates";
 import {
   GEOMETRY_BEFORE_R14,
   type GeometrySettings,
@@ -412,8 +413,12 @@ async function clusteredPass(): Promise<Made> {
   return made;
 }
 
-/** The high setting's geometry without T1.c's receivers' cull: T1.b's cluster path alone. */
-const CLUSTERS_ALONE: GeometrySettings = { ...SETTINGS.high.geometry, casterDepthCull: false };
+/** The high setting's geometry without T1.c's receivers' cull, at stride 1: T1.b's path alone. */
+const CLUSTERS_ALONE: GeometrySettings = {
+  ...SETTINGS.high.geometry,
+  casterDepthCull: false,
+  casterStrideCap: 1,
+};
 
 /** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
 function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
@@ -432,7 +437,7 @@ function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
       radiusM: f(20),
       depthFarM: f(24),
       toleranceM: f(16),
-      strideCap: 1,
+      strideCap: STRIDES[view.getUint32(at + 4, true)] ?? 1,
       receivers:
         f(28) === 0
           ? null
@@ -801,6 +806,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("draws each cascade's buckets after the lit mesh's casters, by the cluster caster at stride 1 (R14.T1.b)", async () => {
     const made = await clusteredPass();
+    made.pass.setGeometry(CLUSTERS_ALONE);
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const pass = cascadesOf(frame).passes[2] ?? fail();
     const buckets = pass.draws.filter((draw) => draw.mesh.name === "terrain clusters");
@@ -830,6 +836,26 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
         `terrain interior instances (${PRIMARY})`,
         2 * PASS_ENTRIES(made) + 4 * 64 * made.pass.layout.slots.slotCount,
       ],
+    ]);
+  });
+
+  it("culls each cascade up to its stride cap at its texel, and draws every stride's buckets up to the cap (R14.T1.d)", async () => {
+    const made = await clusteredPass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
+    const set = cascadesOf(frame).set;
+    const buckets = (cascadesOf(frame).passes[1] ?? fail()).draws.filter(
+      (draw) => draw.mesh.name === "terrain clusters",
+    );
+    expect([
+      passes.map((pass) => pass.strideCap),
+      passes.map((pass, k) => pass.toleranceM === Math.fround(set.cascades[k]?.texelM ?? 0)),
+      buckets.map((draw) => draw.indirect?.offsetBytes),
+    ]).toEqual([
+      [8, 8, 8, 8],
+      [true, true, true, true],
+      [0, 1, 2, 3, 4, 5, 6, 7].map((t) => (1 * 8 + t) * 20),
     ]);
   });
 

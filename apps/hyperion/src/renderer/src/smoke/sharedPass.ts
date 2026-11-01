@@ -69,7 +69,9 @@ import {
 } from "../view/terrain/terrainPass";
 import { HeightWorkerPool } from "../view/terrain/workers/pool";
 import { moonLikeFixture } from "../test/moonLikeFixture";
+import type { CapturedImage } from "./atmosphere";
 import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
+import { captureOf, captureScale, maskOf, stopsApart } from "./leverCaptures";
 import { MOON_LIKE } from "./litTerrain";
 
 /** Each view's frame, pixels. */
@@ -479,6 +481,41 @@ const CASCADES_SUN_RAD = (12 * Math.PI) / 180;
 const CASCADES_STREAM_MS = 25_000;
 
 /**
+ * Streams `passView` until its draw set holds every selected patch and no draft waits for its
+ * normals (`TerrainPass.refining`), or for
+ * {@link CASCADES_STREAM_MS}, drawing without the cascades so that SwiftShader rasterises their
+ * 2,048² layers only for the frames that need them; and steps it once more. Whether it settled.
+ */
+async function streamedFor(
+  made: TerrainPass,
+  passView: TerrainPassView,
+  light: TerrainLighting,
+): Promise<boolean> {
+  const started = performance.now();
+  let settled = false;
+  while (!settled && performance.now() - started < CASCADES_STREAM_MS) {
+    made.step({ views: [passView], grounded: [] });
+    const streaming = made.drawFor(
+      passView.id,
+      frameInput(passView.view, light, false, performance.now()),
+    );
+    // No draft waits for its normals either: the draws compared after read one slot's.
+    settled =
+      !streaming.missing &&
+      !streaming.standingIn &&
+      streaming.draws.length > 0 &&
+      made.refining === 0;
+    if (!settled) {
+      // The workers bake and the engine answers on the event loop, between the polls.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(50);
+    }
+  }
+  made.step({ views: [passView], grounded: [] });
+  return settled;
+}
+
+/**
  * The fixture's realised relief, m: the worker golden's `realised_relief_m`, 14,921.5 m (plan 10,
  * R10.T9.a's figures, S6), for the cascades' caster reach.
  */
@@ -511,10 +548,11 @@ async function texelsOf(
   name: string,
   view: TerrainView,
   draws: ReadonlyArray<DrawItem>,
+  size: { readonly widthPx: number; readonly heightPx: number } = FRAME,
 ): Promise<Float32Array> {
   const target = engine.createRenderTarget({
     name,
-    size: FRAME,
+    size,
     format: "rgba16float",
     mips: 1,
     depth: true,
@@ -524,7 +562,7 @@ async function texelsOf(
     target.render({
       label: name,
       viewRotation: viewRotation4(view.orientation),
-      projection: projection(FRAME.widthPx / FRAME.heightPx),
+      projection: projection(size.widthPx / size.heightPx),
       draws,
       postProcesses: [],
     });
@@ -558,6 +596,18 @@ function clustersOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
 /** a's sum as a share of b's, to three places. */
 function shareOf(a: ReadonlyArray<number>, b: ReadonlyArray<number>): string {
   return (sum(a) / Math.max(1, sum(b))).toFixed(3);
+}
+
+/** R14.T1.d's comparison frames: large enough that 0.5% of their terrain is some hundreds. */
+const COMPARISON = { widthPx: 320, heightPx: 180 } as const;
+
+/** Each stride's clusters of each pass, blocks and strips together, for the log. */
+function stridesOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
+  return (stats ?? [])
+    .map((each) =>
+      [0, 1, 2, 3].map((l) => (each.byTemplate[l] ?? 0) + (each.byTemplate[l + 4] ?? 0)).join("/"),
+    )
+    .join(", ");
 }
 
 /** The high setting's geometry at stride 1: its exact levers alone (plan R14, R14.T1.c). */
@@ -666,8 +716,17 @@ function againstUnshadowed(
   return { terrain, darker, brighter };
 }
 
-/** R10.T9.b's cascades on the high setting: see the module's remarks. */
-export async function checkShadowCascades(engine: RenderEngine, checks: Checks): Promise<void> {
+/**
+ * R10.T9.b's cascades on the high setting: see the module's remarks. With `captures`, R14.T1.d's
+ * frames at stride 1 and at the casters' texel and their terrain's mask, for a person to look at
+ * and for `scripts/compareCaptures.mjs`.
+ */
+export async function checkShadowCascades(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
   const unclipped = engine.capabilities.depthClipControl;
   const path = unclipped
     ? "unclipped: depth-clip-control, the casters pancaked"
@@ -742,28 +801,8 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
       weight: 1,
     };
     const light = lighting(CASCADES_SUN_RAD);
-    // Streamed without the cascades, so that SwiftShader rasterises their 2,048² layers once.
     const started = performance.now();
-    let settled = false;
-    while (!settled && performance.now() - started < CASCADES_STREAM_MS) {
-      made.step({ views: [passView], grounded: [] });
-      const streaming = made.drawFor(
-        passView.id,
-        frameInput(view, light, false, performance.now()),
-      );
-      // No draft waits for its normals either: the two draws compared below read one slot's.
-      settled =
-        !streaming.missing &&
-        !streaming.standingIn &&
-        streaming.draws.length > 0 &&
-        made.refining === 0;
-      if (!settled) {
-        // The workers bake and the engine answers on the event loop, between the polls.
-        // oxlint-disable-next-line no-await-in-loop
-        await pause(50);
-      }
-    }
-    made.step({ views: [passView], grounded: [] });
+    const settled = await streamedFor(made, passView, light);
     // The cluster path's counters sampled (plan R14, R14.T1.b), for the casters' triangles; the
     // casters culled by their receivers' depths (R14.T1.c) at stride 1.
     made.measureClusters(true);
@@ -858,6 +897,49 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         sum(culled) < sum(casting),
       `${path}; caster triangles by cascade ${culled.join(", ")} (clusters ${clustersOf(culledStats)}), ${shareOf(culled, casting)} of the cluster path's alone, ${shareOf(culled, prior)} of before R14's; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}, ${layers.filter((d, k) => d !== layersBefore[k]).length} of them differing where no receiver samples`,
     );
+    // R14.T1.d: the casters at their cascade's texel against T1.c's at stride 1, from the same
+    // selection and residents at the same exposure, at the comparison's size: bounded, not exact.
+    made.setGeometry(RECEIVERS_CULLED);
+    const exact = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const exactTexels = await texelsOf(engine, "cascades: stride 1", view, exact.draws, COMPARISON);
+    const exactStats = made.clusterStats(passView.id);
+    made.setGeometry(SETTINGS.high.geometry);
+    const strided = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const stridedTexels = await texelsOf(
+      engine,
+      "cascades: at the texel",
+      view,
+      strided.draws,
+      COMPARISON,
+    );
+    const stridedStats = made.clusterStats(passView.id);
+    const exactTriangles = casterTriangles(exact.cascades?.litMeshCasters ?? [], exactStats);
+    const stridedTriangles = casterTriangles(strided.cascades?.litMeshCasters ?? [], stridedStats);
+    const apart = stopsApart(exactTexels, stridedTexels);
+    const share = apart.within / Math.max(1, apart.terrain);
+    // Where no cluster qualifies for a stride (each patch's spacing above half of every texel it
+    // casts into, as the fixture's smooth fine levels leave its selection), the frame is stride 1's.
+    const anyStrided = (stridedStats ?? []).some((each) =>
+      each.byTemplate.some((n, t) => t % 4 !== 0 && n > 0),
+    );
+    const unmoved = bytesDigest(exactTexels) === bytesDigest(stridedTexels);
+    checks.check(
+      "R14.T1.d the casters at their cascade's texel shadow the frame within a third of a stop of stride 1's at 99.5% of its terrain texels, with fewer caster triangles where any cluster strides",
+      apart.terrain > 0.3 * COMPARISON.widthPx * COMPARISON.heightPx &&
+        share >= 0.995 &&
+        stridedStats !== null &&
+        (anyStrided ? sum(stridedTriangles) < sum(exactTriangles) : unmoved),
+      `${path}; ${anyStrided ? "clusters strided" : "no cluster qualifies for a stride, and the frame is stride 1's"}; ${String(strided.patches.interior)} interior and ${String(strided.patches.edge)} edge patches; ${String(apart.terrain)} terrain texels, ${String(apart.differing)} differing, ${(100 * share).toFixed(2)}% within a third of a stop, the rest ${String(apart.terrain - apart.within)}, the largest ${apart.largestStops.toFixed(3)} stops; caster triangles by cascade ${stridedTriangles.join(", ")}, ${shareOf(stridedTriangles, exactTriangles)} of stride 1's ${exactTriangles.join(", ")}, ${shareOf(stridedTriangles, prior)} of before R14's; clusters by stride 1/2/4/8 ${stridesOf(stridedStats)}; digests ${bytesDigest(exactTexels)}, ${bytesDigest(stridedTexels)}`,
+    );
+    if (captures) {
+      // The exposure fixed by stride 1's brightest terrain, so that the two compare as they are.
+      const scale = captureScale(exactTexels);
+      images.push(
+        captureOf("r14-t1d-casters-stride-1", exactTexels, COMPARISON, scale),
+        captureOf("r14-t1d-casters-at-texel", stridedTexels, COMPARISON, scale),
+        maskOf("r14-t1d-terrain-mask", exactTexels, COMPARISON),
+      );
+    }
     made.dispose();
     pass = null;
     shadows.dispose();
@@ -874,4 +956,5 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
     pool.terminate();
     tally.dispose();
   }
+  return images;
 }
