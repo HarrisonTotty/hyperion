@@ -23,6 +23,10 @@ base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 criterion = { version = "0.8.2", default-features = false }
 futures-util = "0.3.34"
+# The server only (rendering plan R06, R06.T11.k): the CPU pool's bulk work at a lower OS priority
+# without `unsafe`, `set_thread_priority` on Linux, macOS and Windows. Without its default `rtkit`,
+# which asks the desktop's D-Bus broker for raised priorities the pool never asks for.
+gdt-cpus = { version = "0.2606.1", default-features = false }
 # `OsEntropy` is the only user; nothing else sees its API, which changed between 0.3 and 0.4.
 getrandom = "0.4.3"
 # Pinned exactly: libm is reproducible across platforms but not across its own versions, so a bump

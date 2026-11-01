@@ -18,6 +18,8 @@ base64.workspace = true
 clap.workspace = true
 # `sink` for splitting a WebSocket into its reading and writing halves.
 futures-util = { workspace = true, features = ["sink"] }
+# The CPU pool's bulk and background jobs at a lower OS priority (rendering plan R06, R06.T11.k).
+gdt-cpus.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true

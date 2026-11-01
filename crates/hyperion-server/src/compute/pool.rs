@@ -19,13 +19,24 @@
 //!   of the bulk queue when the promotion is raised ([`CpuPool::promote`]), as an asked request
 //!   that joins a prefetched pass raises it, or goes there at once if it was raised first.
 //!
+//! Each worker, `hyperion-cpu-N`, has a twin, `hyperion-low-N`, that runs the bulk and background
+//! jobs the worker takes, at a lower OS priority it sets once when it starts
+//! ([`lower_this_thread`]): macOS's quality-of-service class utility, Linux's nice 10 and
+//! Windows's below normal (rendering plan R06, R06.T11.k). The worker runs its interactive jobs
+//! itself, at the priority it started with, and waits while its twin runs the others, so the pool
+//! still runs one job a worker at a time, taken in the same order. It is scheduling only: no job's
+//! value changes. A twin, rather than a worker that lowers its own priority for a bulk job and
+//! restores it for the next interactive one, because Linux lets an unprivileged thread raise its
+//! nice but never lower it again (`RLIMIT_NICE`, 0 by default; setpriority(2)), so the restore
+//! would fail there.
+//!
 //! Each queue is bounded by a [`Semaphore`]. A job holds a permit while it waits, and the permit
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs
 //! one request and not a worker. A job's result, or why it has none, arrives on a
 //! [`JobReceiver`], which is always sent exactly one message.
 //!
-//! Every worker checks its floating-point mode with a [`FlushProbe`] before its first job and after
-//! each job, before the reply, so that no value computed under a mode that flushes subnormals ever
+//! Every worker and twin checks its floating-point mode with a [`FlushProbe`] before its first job
+//! and after each job, before the reply, so that no value computed under a mode that flushes subnormals ever
 //! leaves it (plan R04, design note 15). A failed probe at start stops the pool from starting; a
 //! failed probe after a job faults the pool, which then refuses all work.
 //!
@@ -47,6 +58,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, oneshot};
 
+use super::thread_priority::lower_this_thread;
 use super::{CancelToken, FlushProbe, probe_flush_to_zero};
 
 /// Where a job waits for a worker.
@@ -145,12 +157,15 @@ pub enum StartPoolError {
         /// The operating system's error.
         source: io::Error,
     },
-    /// A worker's floating-point mode flushes subnormals, so the pool must not generate. Every
-    /// worker was stopped.
+    /// A worker's floating-point mode, or its twin's, flushes subnormals, so the pool must not
+    /// generate. Every worker was stopped.
     FloatingPointMode {
-        /// The failing worker's index: its thread is `hyperion-cpu-{worker}`. The lowest, if
-        /// several failed.
+        /// The failing worker's index: its thread is `hyperion-cpu-{worker}`, and its twin's
+        /// `hyperion-low-{worker}`. The lowest, if several failed.
         worker: usize,
+        /// Whether it was the twin's probe that failed, and not the worker's own: the worker's is
+        /// named where both failed.
+        twin: bool,
         /// What its probe saw.
         probe: FlushProbe,
     },
@@ -165,10 +180,23 @@ impl fmt::Display for StartPoolError {
                 Semaphore::MAX_PERMITS
             ),
             Self::SpawnWorker { .. } => f.write_str("failed to spawn a cpu worker thread"),
-            Self::FloatingPointMode { worker, probe } => write!(
+            Self::FloatingPointMode {
+                worker,
+                twin: false,
+                probe,
+            } => write!(
                 f,
                 "the floating-point mode of the cpu worker hyperion-cpu-{worker} {probe}, so the \
                  pool refuses to generate"
+            ),
+            Self::FloatingPointMode {
+                worker,
+                twin: true,
+                probe,
+            } => write!(
+                f,
+                "the floating-point mode of the cpu worker's twin hyperion-low-{worker} {probe}, so \
+                 the pool refuses to generate"
             ),
         }
     }
@@ -276,17 +304,22 @@ impl PoolCounters {
 /// pool without it only tells the workers to stop; they finish the job in hand and exit on their
 /// own, and jobs still queued then report [`JobError::ShutDown`].
 ///
-/// Each worker probes its floating-point mode ([`probe_flush_to_zero`]) before its first job and
-/// after every job, before the reply. A worker that fails at start keeps the pool from starting;
-/// one that fails after a job answers that job [`JobError::FloatingPointMode`] and faults the pool:
-/// every later submission is refused with [`SubmitJobError::Faulted`], and jobs already queued
-/// answer [`JobError::FloatingPointMode`] unrun. Nothing runs on a worker between jobs, so the two
-/// probes cover every job.
+/// Each worker runs its interactive jobs itself, and hands the bulk and background jobs it takes to
+/// its twin, a thread of its own that runs them at a lower OS priority (macOS's quality-of-service
+/// class utility, Linux's nice 10, Windows's below normal), and waits for it: the order the jobs
+/// are taken in and the one job a worker at a time are as they would be without the twins.
+///
+/// Each worker and twin probes its floating-point mode ([`probe_flush_to_zero`]) before its first
+/// job and after every job, before the reply. A thread that fails at start keeps the pool from
+/// starting; one that fails after a job answers that job [`JobError::FloatingPointMode`] and
+/// faults the pool: every later submission is refused with [`SubmitJobError::Faulted`], and jobs
+/// already queued answer [`JobError::FloatingPointMode`] unrun. Nothing runs on a worker or a twin
+/// between jobs, so the two probes cover every job.
 ///
 /// The server loads no native library today. Code that loads one must probe the loading thread
 /// (a library's constructor runs there, and threads created after it inherit its mode) and then
-/// every worker, by a job on each, before trusting the pool again, since a library may write the
-/// control register of any thread that calls into it.
+/// every worker and twin, by an interactive and a bulk job on each, before trusting the pool again,
+/// since a library may write the control register of any thread that calls into it.
 #[derive(Debug)]
 pub struct CpuPool {
     shared: Arc<Shared>,
@@ -301,8 +334,9 @@ pub struct CpuPool {
 }
 
 impl CpuPool {
-    /// Starts `workers` threads named `hyperion-cpu-N`, with room for `interactive_capacity`
-    /// queued interactive jobs and `bulk_capacity` each of bulk and background ones.
+    /// Starts `workers` threads named `hyperion-cpu-N`, each with its twin `hyperion-low-N`, with
+    /// room for `interactive_capacity` queued interactive jobs and `bulk_capacity` each of bulk and
+    /// background ones.
     ///
     /// # Errors
     ///
@@ -325,17 +359,18 @@ impl CpuPool {
     /// [`CpuPool::new`] with `probe` in place of [`probe_flush_to_zero`], so that tests can make a
     /// worker's probe fail.
     ///
-    /// Waits until every worker has probed its thread, which takes microseconds.
+    /// Waits until every worker and twin has probed its thread, which takes microseconds.
     ///
     /// # Errors
     ///
     /// As [`CpuPool::new`]; [`StartPoolError::FloatingPointMode`] when `probe` reports flushing on
-    /// any worker, naming the lowest such worker, after every worker has been stopped and joined.
+    /// any worker or twin, naming the lowest such worker, after every worker has been stopped and
+    /// joined.
     ///
     /// # Panics
     ///
-    /// If `probe` panics on a worker, which [`probe_flush_to_zero`] cannot. The other workers are
-    /// left running until the pool's shared state is dropped with them.
+    /// If `probe` panics on a worker or twin, which [`probe_flush_to_zero`] cannot. The other
+    /// workers are left running until the pool's shared state is dropped with them.
     pub fn with_probe(
         workers: NonZeroUsize,
         interactive_capacity: NonZeroUsize,
@@ -385,42 +420,50 @@ impl CpuPool {
         }
         let shared = Arc::new(Shared::new(probe, gate));
         let mut handles = Vec::with_capacity(workers.get());
-        // Bounded by the number of workers, each of which sends exactly one report.
-        let (report, reports) = mpsc::sync_channel(workers.get());
+        // Bounded by the threads, a worker and its twin for each, each of which sends exactly one
+        // report.
+        let threads = workers.get().saturating_mul(2);
+        let (report, reports) = mpsc::sync_channel(threads);
         for index in 0..workers.get() {
-            let worker_shared = Arc::clone(&shared);
-            let worker_report = report.clone();
-            let spawned = thread::Builder::new()
-                .name(format!("hyperion-cpu-{index}"))
-                .spawn(move || start_worker(index, &worker_shared, worker_report));
-            match spawned {
+            match spawn_worker(index, &shared, &report) {
                 Ok(handle) => handles.push(handle),
                 Err(source) => {
-                    // The workers already running see the flag and exit on their own.
+                    // The workers already running see the flag and exit on their own, and a twin
+                    // whose worker was not spawned finds its worker gone and exits.
                     drop(shared.stop());
                     return Err(StartPoolError::SpawnWorker { source });
                 }
             }
         }
         drop(report);
-        let mut failed: Option<(usize, FlushProbe)> = None;
-        for _ in 0..workers.get() {
-            let (index, result) = reports
+        let mut failed: Option<Probed> = None;
+        for _ in 0..threads {
+            let probed = reports
                 .recv()
-                .expect("each worker sends its report and drops its sender before working, so the channel closes early only if a probe panicked");
-            if result.flushes() && failed.is_none_or(|(lowest, _)| index < lowest) {
-                failed = Some((index, result));
+                .expect("each worker and twin sends its report and drops its sender before working, so the channel closes early only if a probe panicked");
+            if probed.probe.flushes() && failed.as_ref().is_none_or(|first| probed.precedes(first))
+            {
+                failed = Some(probed);
             }
         }
-        if let Some((worker, probe)) = failed {
+        if let Some(Probed {
+            worker,
+            twin,
+            probe,
+        }) = failed
+        {
             drop(shared.stop());
-            // The workers are idle or already gone, so these joins return at once. A worker that
-            // panicked could only have done so outside any job, and the error returned already
-            // says that the pool is unusable.
+            // The workers are idle or already gone, so these joins return at once, and each worker
+            // joins its twin before it exits. A worker that panicked could only have done so
+            // outside any job, and the error returned already says that the pool is unusable.
             for handle in handles {
                 let _ = handle.join();
             }
-            return Err(StartPoolError::FloatingPointMode { worker, probe });
+            return Err(StartPoolError::FloatingPointMode {
+                worker,
+                twin,
+                probe,
+            });
         }
         Ok(Self {
             shared,
@@ -1098,23 +1141,149 @@ impl<T> Drop for Reply<T> {
     }
 }
 
-/// A worker's life: probe the thread, report to the constructor, and work if the probe passed.
-fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<(usize, FlushProbe)>) {
-    let probe = (shared.probe)();
-    // The channel has room for every worker's report. The send fails only when the constructor
-    // has already returned because a later thread could not be spawned; the pool is then
-    // stopping, and nobody needs the report.
-    let _ = report.send((index, probe));
-    // Dropped before working, so that the constructor's wait ends even if another worker's probe
-    // panics instead of reporting.
-    drop(report);
-    if !probe.flushes() {
-        work(shared);
+/// What a worker or twin's probe found when it started, sent to the constructor.
+struct Probed {
+    /// The worker's index, its twin's too.
+    worker: usize,
+    /// Whether the twin sent it, and not the worker.
+    twin: bool,
+    probe: FlushProbe,
+}
+
+impl Probed {
+    /// Whether this is named before `other` when both fail: the lower worker first, and a worker
+    /// before its twin.
+    fn precedes(&self, other: &Self) -> bool {
+        (self.worker, self.twin) < (other.worker, other.twin)
     }
 }
 
-/// A worker's loop: take a job, run it, repeat until the pool stops.
-fn work(shared: &Shared) {
+/// Spawns worker `index` and its twin, each to send `report` its probe at start.
+///
+/// If the worker cannot be spawned, its twin, already running, finds the worker gone and exits.
+fn spawn_worker(
+    index: usize,
+    shared: &Arc<Shared>,
+    report: &mpsc::SyncSender<Probed>,
+) -> io::Result<JoinHandle<()>> {
+    // One job in hand at a time, and one word back when it is done.
+    let (hand, taken) = mpsc::sync_channel(1);
+    let (finished, done) = mpsc::sync_channel(1);
+    let twin = {
+        let (shared, report) = (Arc::clone(shared), report.clone());
+        thread::Builder::new()
+            .name(format!("hyperion-low-{index}"))
+            .spawn(move || start_twin(index, &shared, report, &taken, &finished))?
+    };
+    let twin = Twin {
+        hand,
+        done,
+        thread: twin,
+    };
+    let (shared, report) = (Arc::clone(shared), report.clone());
+    thread::Builder::new()
+        .name(format!("hyperion-cpu-{index}"))
+        .spawn(move || start_worker(index, &shared, report, twin))
+}
+
+/// A worker's life: probe the thread, report to the constructor, work if the probe passed, and
+/// then stop its twin.
+fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<Probed>, twin: Twin) {
+    let probe = (shared.probe)();
+    // The channel has room for every thread's report. The send fails only when the constructor
+    // has already returned because a later thread could not be spawned; the pool is then
+    // stopping, and nobody needs the report.
+    let _ = report.send(Probed {
+        worker: index,
+        twin: false,
+        probe,
+    });
+    // Dropped before working, so that the constructor's wait ends even if another thread's probe
+    // panics instead of reporting.
+    drop(report);
+    if !probe.flushes() {
+        work(shared, &twin);
+    }
+    twin.stop();
+}
+
+/// A twin's life: lower its priority, probe the thread, report to the constructor, and if the
+/// probe passed run each job its worker hands it, until the worker stops.
+fn start_twin(
+    index: usize,
+    shared: &Shared,
+    report: mpsc::SyncSender<Probed>,
+    taken: &mpsc::Receiver<Taken>,
+    finished: &mpsc::SyncSender<()>,
+) {
+    // Before the probe, so that the probe follows all the twin does before its first job.
+    lower_this_thread();
+    let probe = (shared.probe)();
+    // As the worker's own report.
+    let _ = report.send(Probed {
+        worker: index,
+        twin: true,
+        probe,
+    });
+    drop(report);
+    if probe.flushes() {
+        return;
+    }
+    while let Ok(job) = taken.recv() {
+        run(shared, job);
+        if finished.send(()).is_err() {
+            // The worker has stopped, and hands it nothing more.
+            break;
+        }
+    }
+}
+
+/// A worker's hold on its twin: where it hands the twin a job, and hears that the job is done.
+struct Twin {
+    hand: mpsc::SyncSender<Taken>,
+    done: mpsc::Receiver<()>,
+    thread: JoinHandle<()>,
+}
+
+impl Twin {
+    /// Runs `job` on the twin and waits until it is done.
+    ///
+    /// A twin runs every job under `catch_unwind` and exits only once its worker stops it, so it
+    /// is always there. Were it gone, the job would run here, at the worker's own priority.
+    fn run(&self, shared: &Shared, job: Taken) {
+        match self.hand.send(job) {
+            Ok(()) => {
+                // Fails only if the twin died with the job, whose dropped reply has then answered
+                // it `ShutDown`.
+                let _ = self.done.recv();
+            }
+            Err(mpsc::SendError(job)) => run(shared, job),
+        }
+    }
+
+    /// Stops the twin and joins it, passing on a panic, so that the pool's shutdown counts the
+    /// twin's panic as its worker's.
+    fn stop(self) {
+        let Self { hand, done, thread } = self;
+        // Closing its channel ends the twin's loop.
+        drop(hand);
+        drop(done);
+        if let Err(payload) = thread.join() {
+            panic::resume_unwind(payload);
+        }
+    }
+}
+
+/// A job a worker has taken from its queue, to run on it or on its twin.
+struct Taken {
+    priority: Priority,
+    enqueued: Instant,
+    admission: Admission,
+    job: Box<dyn Runnable>,
+}
+
+/// A worker's loop: take a job, run it, or have its twin run it, repeat until the pool stops.
+fn work(shared: &Shared, twin: &Twin) {
     while let Some((
         Queued {
             permit,
@@ -1133,46 +1302,69 @@ fn work(shared: &Shared) {
         {
             gate.pass();
         }
-        let span = tracing::debug_span!(
-            "job",
-            priority = priority.as_str(),
-            queue_wait_ms = millis(enqueued.elapsed()),
-            run_ms = tracing::field::Empty,
-        );
-        let _entered = span.enter();
-        let started = Instant::now();
-        // The job itself runs under its own `catch_unwind`. This one catches what is left: a panic
-        // in the drop of a job skipped unrun, or of a value nobody waits for any more. Both come
-        // after the job is counted and answered, so the worker need only go on to the next.
-        let escaped = panic::catch_unwind(AssertUnwindSafe(|| {
-            job.run(admission, &|outcome| {
-                span.record("run_ms", millis(started.elapsed()));
-                match outcome {
-                    Outcome::Panicked(message) => {
-                        tracing::error!(panic = %message, "a job panicked");
-                    }
-                    Outcome::Completed | Outcome::Cancelled | Outcome::Refused => {
-                        tracing::debug!(outcome = ?outcome, "job finished");
-                    }
-                }
-                // Probed before the job is counted, so that a requester who sees it counted also
-                // sees the pool faulted. A refused job ran nothing, and the pool is faulted already.
-                let release = match outcome {
-                    Outcome::Refused => Release::Withhold,
-                    Outcome::Completed | Outcome::Cancelled | Outcome::Panicked(_) => {
-                        shared.probe_after_job()
-                    }
-                };
-                shared.finish(outcome);
-                release
-            });
-        }));
-        if let Err(payload) = escaped {
-            tracing::error!(
-                panic = %panic_message(payload.as_ref()),
-                "a job's closure or value panicked when dropped"
-            );
+        let taken = Taken {
+            priority,
+            enqueued,
+            admission,
+            job,
+        };
+        match priority {
+            Priority::Interactive => run(shared, taken),
+            Priority::Bulk | Priority::Background => twin.run(shared, taken),
         }
+    }
+}
+
+/// Runs a taken job on the calling thread, a worker or its twin: counts it, probes the thread after
+/// it and answers it.
+fn run(
+    shared: &Shared,
+    Taken {
+        priority,
+        enqueued,
+        admission,
+        job,
+    }: Taken,
+) {
+    let span = tracing::debug_span!(
+        "job",
+        priority = priority.as_str(),
+        queue_wait_ms = millis(enqueued.elapsed()),
+        run_ms = tracing::field::Empty,
+    );
+    let _entered = span.enter();
+    let started = Instant::now();
+    // The job itself runs under its own `catch_unwind`. This one catches what is left: a panic in
+    // the drop of a job skipped unrun, or of a value nobody waits for any more. Both come after the
+    // job is counted and answered, so the thread need only go on to the next.
+    let escaped = panic::catch_unwind(AssertUnwindSafe(|| {
+        job.run(admission, &|outcome| {
+            span.record("run_ms", millis(started.elapsed()));
+            match outcome {
+                Outcome::Panicked(message) => {
+                    tracing::error!(panic = %message, "a job panicked");
+                }
+                Outcome::Completed | Outcome::Cancelled | Outcome::Refused => {
+                    tracing::debug!(outcome = ?outcome, "job finished");
+                }
+            }
+            // Probed before the job is counted, so that a requester who sees it counted also sees
+            // the pool faulted. A refused job ran nothing, and the pool is faulted already.
+            let release = match outcome {
+                Outcome::Refused => Release::Withhold,
+                Outcome::Completed | Outcome::Cancelled | Outcome::Panicked(_) => {
+                    shared.probe_after_job()
+                }
+            };
+            shared.finish(outcome);
+            release
+        });
+    }));
+    if let Err(payload) = escaped {
+        tracing::error!(
+            panic = %panic_message(payload.as_ref()),
+            "a job's closure or value panicked when dropped"
+        );
     }
 }
 
@@ -1868,13 +2060,26 @@ mod tests {
         }
     }
 
+    /// Flushes on the twin `hyperion-low-2` only.
+    fn flushes_on_twin_2() -> FlushProbe {
+        match thread::current().name() {
+            Some("hyperion-low-2") => FlushProbe::FLUSHES_OUTPUTS,
+            _ => FlushProbe::KEEPS_SUBNORMALS,
+        }
+    }
+
     #[test]
     fn a_pool_whose_probe_fails_at_start_refuses_to_start() {
         let error = probing_pool(4, flushes_on_workers_1_and_2).unwrap_err();
-        let StartPoolError::FloatingPointMode { worker, probe } = error else {
+        let StartPoolError::FloatingPointMode {
+            worker,
+            twin,
+            probe,
+        } = error
+        else {
             panic!("expected a floating-point mode error, got {error:?}");
         };
-        assert_eq!((worker, probe), (1, FlushProbe::FLUSHES_BOTH));
+        assert_eq!((worker, twin, probe), (1, false, FlushProbe::FLUSHES_BOTH));
         assert_eq!(
             error.to_string(),
             "the floating-point mode of the cpu worker hyperion-cpu-1 flushes subnormal results to \
@@ -1886,14 +2091,36 @@ mod tests {
     }
 
     #[test]
+    fn a_pool_whose_twins_probe_fails_at_start_refuses_to_start_naming_the_twin() {
+        let error = probing_pool(3, flushes_on_twin_2).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StartPoolError::FloatingPointMode {
+                    worker: 2,
+                    twin: true,
+                    probe: FlushProbe::FLUSHES_OUTPUTS,
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "the floating-point mode of the cpu worker's twin hyperion-low-2 flushes subnormal \
+             results to zero, so the pool refuses to generate"
+        );
+    }
+
+    #[test]
     fn the_real_probe_lets_the_pool_start() {
         assert!(probing_pool(2, probe_flush_to_zero).is_ok());
     }
 
-    /// Passes for its first two calls (the worker's start and its first job), then flushes.
-    fn flushes_from_the_third_call() -> FlushProbe {
+    /// Passes for its first three calls (the worker's start, its twin's, both before the pool
+    /// starts, and the worker's first job), then flushes.
+    fn flushes_from_the_fourth_call() -> FlushProbe {
         static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 3 {
             FlushProbe::KEEPS_SUBNORMALS
         } else {
             FlushProbe::FLUSHES_OUTPUTS
@@ -1902,7 +2129,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_job_after_which_the_probe_fails_answers_floating_point_mode_and_faults_the_pool() {
-        let pool = probing_pool(1, flushes_from_the_third_call).unwrap();
+        let pool = probing_pool(1, flushes_from_the_fourth_call).unwrap();
         let log = Arc::new(Mutex::new(Vec::new()));
         // The first job runs while the next two queue behind it.
         let held = hold(&pool).await;
@@ -1917,7 +2144,7 @@ mod tests {
             .submit(Priority::Bulk, CancelToken::new(), record(&log, "queued"))
             .await
             .unwrap();
-        // Its probe is the second call, which passes.
+        // Its probe is the third call, which passes.
         held.release().await;
         // The next job runs, and the probe after it fails: its value is withheld.
         assert_eq!(result(flushed).await, Err(JobError::FloatingPointMode));
@@ -1941,11 +2168,11 @@ mod tests {
         pool.shutdown().await.unwrap();
     }
 
-    /// Passes at the worker's start, then flushes (a twin of [`flushes_from_the_second_call`],
-    /// whose counter another test owns).
-    fn flushes_from_the_second_call_too() -> FlushProbe {
+    /// Passes at the worker's start and its twin's, then flushes (a copy of
+    /// [`flushes_from_the_third_call`], whose counter another test owns).
+    fn flushes_from_the_third_call_too() -> FlushProbe {
         static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
             FlushProbe::KEEPS_SUBNORMALS
         } else {
             FlushProbe::FLUSHES_BOTH
@@ -1955,7 +2182,7 @@ mod tests {
     #[tokio::test]
     async fn a_bulk_submit_waiting_when_the_pool_faults_is_refused() {
         let n = |value| NonZeroUsize::new(value).unwrap();
-        let pool = CpuPool::with_probe(n(1), n(4), n(1), flushes_from_the_second_call_too).unwrap();
+        let pool = CpuPool::with_probe(n(1), n(4), n(1), flushes_from_the_third_call_too).unwrap();
         let Held { release, done } = hold(&pool).await;
         let queued = pool
             .submit(Priority::Bulk, CancelToken::new(), |_| "queued")
@@ -1978,10 +2205,10 @@ mod tests {
         pool.shutdown().await.unwrap();
     }
 
-    /// Passes at the worker's start, then flushes.
-    fn flushes_from_the_second_call() -> FlushProbe {
+    /// Passes at the worker's start and its twin's, then flushes.
+    fn flushes_from_the_third_call() -> FlushProbe {
         static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
             FlushProbe::KEEPS_SUBNORMALS
         } else {
             FlushProbe::FLUSHES_INPUTS
@@ -1990,7 +2217,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_faulted_pool_refuses_submissions() {
-        let pool = probing_pool(1, flushes_from_the_second_call).unwrap();
+        let pool = probing_pool(1, flushes_from_the_third_call).unwrap();
         // A panicking job is probed too, and the fault outranks the panic.
         let panicking = pool
             .try_submit(Priority::Interactive, CancelToken::new(), |_| -> u32 {
@@ -2014,6 +2241,68 @@ mod tests {
             );
         }
         assert_eq!(pool.counters().panicked(), 1);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// Runs a job of `priority` on `pool` and returns what `read` read on the thread that ran it.
+    async fn read_on_the_thread_of<T: fmt::Debug + Send + 'static>(
+        pool: &CpuPool,
+        priority: Priority,
+        read: fn() -> T,
+    ) -> T {
+        let receiver = pool
+            .submit(priority, CancelToken::new(), move |_| read())
+            .await
+            .unwrap();
+        result(receiver).await.unwrap()
+    }
+
+    /// The priorities of the jobs the twin tests run one after another on one worker: each kind of
+    /// job after each other kind.
+    const ONE_AFTER_ANOTHER: [Priority; 5] = [
+        Priority::Interactive,
+        Priority::Bulk,
+        Priority::Interactive,
+        Priority::Background,
+        Priority::Interactive,
+    ];
+
+    #[tokio::test]
+    async fn bulk_and_background_jobs_run_on_the_workers_twin_and_interactive_ones_on_the_worker() {
+        let pool = pool(1, 4, 4);
+        let mut ran = Vec::new();
+        for priority in ONE_AFTER_ANOTHER {
+            ran.push(
+                read_on_the_thread_of(&pool, priority, || {
+                    thread::current().name().map(str::to_owned)
+                })
+                .await,
+            );
+        }
+        let (worker, twin) = (Some("hyperion-cpu-0"), Some("hyperion-low-0"));
+        assert_eq!(
+            ran.iter().map(Option::as_deref).collect::<Vec<_>>(),
+            [worker, twin, worker, twin, worker]
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// On Linux a bulk or background job runs at nice 10, and the interactive job after it at the
+    /// nice the worker started with: the priority an interactive job runs at is its worker's, after
+    /// any job. The workers start at the test's nice; one already above 10 is kept.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn on_linux_bulk_jobs_run_at_nice_10_and_interactive_ones_after_them_at_the_workers() {
+        use super::super::thread_priority::nice_of_this_thread;
+
+        let started = nice_of_this_thread();
+        let pool = pool(1, 4, 4);
+        let mut nices = Vec::new();
+        for priority in ONE_AFTER_ANOTHER {
+            nices.push(read_on_the_thread_of(&pool, priority, nice_of_this_thread).await);
+        }
+        let lowered = started.max(10);
+        assert_eq!(nices, [started, lowered, started, lowered, started]);
         pool.shutdown().await.unwrap();
     }
 

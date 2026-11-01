@@ -48,6 +48,7 @@ pub(crate) mod sky;
 mod sky_cells;
 mod sky_tables;
 mod systems;
+mod thread_priority;
 mod tube_tables;
 
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};

@@ -2792,6 +2792,17 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
   - **Files:** `crates/hyperion-server/benches/sky.rs` (its doc's figures), this plan.
   - **Acceptance:** the bench recorded, `just smart-ci`.
 
+- **R06.T11.k The pool's bulk work below the client (new; the owner's priority, 2026-11-01; no
+  output moves).** With VIEW open, the server held 450–540% CPU on the owner's Mac: VIEW's
+  camera-role sky runs the full cold census as bulk jobs on default-priority workers. Bulk and
+  background jobs run at a lower OS priority than interactive ones: macOS's `QOS_CLASS_UTILITY`,
+  Linux's nice 10, Windows's below normal, set through gdt-cpus (no `unsafe`).
+  - **Tests:** the thread each priority's job runs on, one after another on one worker; on Linux
+    each job's nice, an interactive job after a bulk one at the worker's own; on macOS and Windows
+    the priority a lowered thread is given; a twin's failed probe at start.
+  - **Files:** `crates/hyperion-server/src/compute/{pool,thread_priority}.rs`, the manifests.
+  - **Acceptance:** `cargo test -p hyperion-server compute::`, `just cross-clippy`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -9873,3 +9884,11 @@ CensusCost)`.
     runs): before, "Written: 1540, 10.92 MiB; made: 88, 69.07 MiB; released: 20, 30.54 MiB", the
     view's solid angles 4,194,304 B of it; after, "Written: 1679, 7.57 MiB; made: 6, 59.67 MiB;
     released: 6, 59.67 MiB", 2,099,200 B. High's profile: pending the owner's Mac.
+
+- **Deviations in T11.k, as built (2026-11-01).**
+  - Each worker `hyperion-cpu-N` hands its bulk and background jobs to a twin thread,
+    `hyperion-low-N`, lowered once at start, and waits for it, rather than lowering and restoring
+    its own priority per job: Linux never lets an unprivileged thread lower its nice again
+    (`RLIMIT_NICE` 0), so a restore would fail there (lean, 2026-11-01).
+  - `StartPoolError::FloatingPointMode` gains `twin: bool`; the pool starts and probes twice as
+    many threads.

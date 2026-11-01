@@ -63,8 +63,13 @@ fn under_a_preloaded_mode_the_probes_fail_and_the_pool_refuses_to_start() {
     assert_eq!(spawned, expected, "on a spawned thread");
     let n = |value| NonZeroUsize::new(value).unwrap();
     match CpuPool::new(n(2), n(4), n(4)) {
-        Err(StartPoolError::FloatingPointMode { worker, probe }) => {
-            assert_eq!((worker, probe), (0, expected));
+        Err(StartPoolError::FloatingPointMode {
+            worker,
+            twin,
+            probe,
+        }) => {
+            // Every thread flushes, and the first worker itself is named before its twin.
+            assert_eq!((worker, twin, probe), (0, false, expected));
         }
         other => panic!("the pool started or failed otherwise under {mode}: {other:?}"),
     }
