@@ -15,11 +15,14 @@
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
  * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, the
  *    exposure is put under `AUTO` (`ENABLE`), and once `AUTO` has settled and a few frames are drawn
- *    the page is captured as `inspection-<system>-<index>`, then again with the `STYLE` panel's
+ *    the page is captured as `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels
+ *    hidden and the stage the display's whole body, as `inspection-<system>-<index>-maximized`
+ *    (the owner's request, 2026-11-01), and with it off again; then with the `STYLE` panel's
  *    `GRID` at `OFF`, the image bare, as `inspection-<system>-<index>-grid-off`.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
- * (with its reason), or where the primary's label block shows a fault line as it is captured.
+ * (with its reason), or where the primary's label block shows a fault line as it is captured, or as
+ * it is captured maximized.
  */
 
 import {
@@ -40,6 +43,7 @@ import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { INSPECTION_SCENE_NAME } from "../../../view/scenes/inspectionScene";
 import { FOCUS_KEY, VIEW_BODY_KEY } from "../../system/OrbitMapPanel";
 import type { SystemTarget } from "../../system/systemTarget";
+import { MAXIMIZE_KEY } from "../displayKeys";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import { exposureEv100, primaryPlate, type PrimaryPlate } from "./atmosphereCheckRun";
 import { viewDriver } from "./viewsCheckRun";
@@ -103,7 +107,10 @@ export interface InspectionCheckDeps {
 
 /** What the run captured, and what the primary's label block said as it was, for its tests. */
 export interface InspectionCapture {
-  /** The capture's label, with `GRID` at `ON`; the second's adds `-grid-off`. */
+  /**
+   * The capture's label, with `GRID` at `ON`; the maximized one's adds `-maximized`, and the one
+   * with `GRID` at `OFF` `-grid-off`.
+   */
   readonly label: string;
   readonly frame: string | null;
   readonly exposure: string | null;
@@ -302,6 +309,22 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   const label = inspectionCaptureLabel(served.body);
   stopped();
   await deps.api.capture(label);
+  // MAXIMIZE VIEW by its key, as an operator turns it on, captured, and off again.
+  const maximized = (): boolean =>
+    document.querySelector(".view__side")?.hasAttribute("hidden") === true;
+  pressKey(document.body, MAXIMIZE_KEY);
+  await until("MAXIMIZE VIEW did not hide the panels", maximized);
+  await framesDrawn();
+  const saidMaximized = plate();
+  if (saidMaximized.faults.length > 0) {
+    throw new Error(
+      `views check: the maximized inspection shows faults: ${saidMaximized.faults.join("; ")}`,
+    );
+  }
+  stopped();
+  await deps.api.capture(`${label}-maximized`);
+  pressKey(document.body, MAXIMIZE_KEY);
+  await until("MAXIMIZE VIEW did not show the panels again", () => !maximized());
   const gridOff = (): HTMLButtonElement | null =>
     [...document.querySelectorAll<HTMLButtonElement>(".view-style__grid button")].find(
       (button) => button.textContent.trim() === "OFF",

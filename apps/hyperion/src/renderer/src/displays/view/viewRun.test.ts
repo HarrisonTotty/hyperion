@@ -987,8 +987,8 @@ describe("the primary's statements while MAXIMIZE VIEW is on (the owner's reques
     expect(maximizedStatements([albedo, note, water, thick])).toEqual(["STATEMENTS: 2 FOLDED"]);
   });
 
-  it("folds a server's refusal with the notes", () => {
-    expect(maximizedStatements([albedo, refused])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  it("keeps a server's refusal standing after the line, so that no body reads as airless", () => {
+    expect(maximizedStatements([albedo, refused])).toEqual(["STATEMENTS: 1 FOLDED", refused]);
   });
 
   it("keeps a request's failure standing after the line", () => {

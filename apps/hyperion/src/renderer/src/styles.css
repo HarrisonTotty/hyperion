@@ -4277,7 +4277,14 @@ select.form-field__input:not([aria-disabled="true"]):hover {
  */
 .view-display__maximize {
   margin-inline-start: auto;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   white-space: nowrap;
+}
+
+/* On, its 2px --accent rule under it, as every pressed toggle has, beside its aria-pressed. */
+.view-display__maximize[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
 }
 
 /*
@@ -4411,6 +4418,20 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 
 .view--maximized > .view__side {
   display: none;
+}
+
+/*
+ * Under the key legend while MAXIMIZE VIEW is on: its line, then the hidden panels' standing lines,
+ * each a line of its own (the owner's request, 2026-11-01).
+ */
+.view__maximized {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.view__maximized > .view-folds__standing {
+  margin: 0;
 }
 
 /* The descent spike fills the window and never scrolls: its lists scroll within themselves. */

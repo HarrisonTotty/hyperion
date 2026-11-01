@@ -38,6 +38,13 @@ describe("the inspection run (the owner's request)", () => {
     expect(CAPTURE_LABEL.test(label)).toBe(true);
   });
 
+  it("names its maximized and GRID OFF captures as a capture may be named (2026-11-01)", () => {
+    const label = inspectionCaptureLabel(BODY);
+    expect(
+      [`${label}-maximized`, `${label}-grid-off`].map((each) => CAPTURE_LABEL.test(each)),
+    ).toEqual([true, true]);
+  });
+
   it("fails naming the universe where the server lists none of that ID", async () => {
     const openSystem = vi.fn<() => void>();
     await expect(

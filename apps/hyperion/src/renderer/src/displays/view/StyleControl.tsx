@@ -7,7 +7,7 @@ import { RENDER_STYLES, STYLE_TOGGLE_KEY, styleName } from "../../view/photoreal
 import { SLOPE_BASELINES_M } from "../../view/terrain/readouts";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import { GRID_KEY } from "./displayKeys";
-import type { StyleRefusals } from "./styleRefusals";
+import { gridRowStands, type StyleRefusals } from "./styleRefusals";
 
 /**
  * The `BASELINE` row's state and its callback (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1):
@@ -222,9 +222,7 @@ export function StyleControl({
           <StatusText text={reason} />
         </p>
       )}
-      {grid === undefined ||
-      renderStyle !== "photorealistic" ||
-      byStyle.photorealistic !== null ? null : (
+      {grid === undefined || !gridRowStands(renderStyle, byStyle.photorealistic) ? null : (
         <GridRow grid={grid} />
       )}
       {baseline === undefined ? null : <BaselineRow baseline={baseline} />}

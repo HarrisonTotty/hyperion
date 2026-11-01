@@ -60,6 +60,7 @@ import {
 } from "../../view/scenes/terrainScene";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { TerrainFixture } from "./useTerrainSession";
+import { MAXIMIZE_KEY } from "./displayKeys";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { GROUND_NOTE_NAME } from "./ViewMarkList";
 import { type ViewFrameDrawn, ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
@@ -1487,6 +1488,23 @@ describe("an instrument's GROUND page in the camera panel's place (R10.T12.d; dr
     await readFor(view, 2);
     const points = sightsOver(view, 600).instruments;
     expect(points.length > 0 && points.every((point) => point === undefined)).toBe(true);
+  });
+
+  it("draws no instrument tripod while MAXIMIZE VIEW hides its GROUND page (the owner's request, 2026-11-01)", async () => {
+    const view = await onGround();
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 2);
+    const points = sightsOver(view, 600).instruments;
+    expect(points.length > 0 && points.every((point) => point === undefined)).toBe(true);
+  });
+
+  it("draws the instrument's tripod again once MAXIMIZE VIEW is off (the owner's request, 2026-11-01)", async () => {
+    const view = await onGround();
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 2);
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 4);
+    expect(sightsOver(view, 600).instruments.some((point) => point !== undefined)).toBe(true);
   });
 
   it("stops asking the instrument's readout once CAMERA is chosen again", async () => {

@@ -82,6 +82,18 @@ export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus
   return refusals;
 }
 
+/**
+ * Whether a view's `GRID` row stands, and its key acts (the owner's requests, 2026-10-31 and
+ * 2026-11-01): while its style is `PHOTOREALISTIC` and that style is offered, so that a style asked
+ * for and held back, which draws the wireframe, has no grid to set.
+ *
+ * @param photorealisticRefusal - Why the view's photorealistic style is held back
+ *   (`StyleRefusals.photorealistic`), `null` where it is offered.
+ */
+export function gridRowStands(style: RenderStyle, photorealisticRefusal: string | null): boolean {
+  return style === "photorealistic" && photorealisticRefusal === null;
+}
+
 /** The styles a view may switch to: those with no refusal. */
 export function availabilityOf(refusals: StyleRefusals): StyleAvailability {
   return {

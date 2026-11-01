@@ -89,14 +89,15 @@ import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
   availabilityOf,
+  gridRowStands,
   NO_VIEW_REFUSALS,
   type StyleRefusals,
   styleRefusals,
   withPermission,
 } from "./styleRefusals";
-import { MAXIMIZE_KEY, MAXIMIZED_KEYS, viewDisplayKey } from "./displayKeys";
+import { MAXIMIZE_KEY, maximizedKeys, viewDisplayKey } from "./displayKeys";
 import { InstrumentControls } from "./InstrumentControls";
-import { InstrumentsPanel, type InstrumentsPanelSlot } from "./InstrumentsPanel";
+import { InstrumentsPanel, type InstrumentsPanelSlot, noRoomReason } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import {
   type Instrument,
@@ -110,6 +111,7 @@ import {
   PRIMARY_NAME,
   PRIMARY_VIEW_ID,
   PRIMARY_VIEW_NAME,
+  viewDisplayName,
 } from "./viewNames";
 import { autoNotAvailable, ExposurePanel, exposureNote } from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
@@ -1496,22 +1498,21 @@ function ViewStage({
     }
     commandInstrument(each.slot.slot, action, each.availability);
   };
-  // A view's GRID, which its key sets where the view's row stands, its style PHOTOREALISTIC and
-  // offered (`StyleControl`'s rule), and nowhere else (the owner's request, 2026-11-01).
+  // A view's GRID, which its key sets where the view's row stands, and nowhere else (the owner's
+  // request, 2026-11-01).
   const toggleGrid = (view: ViewId): void => {
     const each = instrumentViews.find(
       ({ slot, standing }) => slot.id === view && standing === "stands",
     );
     if (each === undefined) {
-      if (shown.run.camera.style === "photorealistic" && refusals.photorealistic === null) {
+      // A view not drawn, an instrument held, has no row to set.
+      if (view === VIEW_ID && gridRowStands(shown.run.camera.style, refusals.photorealistic)) {
         setGrid((on) => !on);
       }
       return;
     }
-    if (
-      each.slot.shown?.run.camera.style === "photorealistic" &&
-      each.refusals.photorealistic === null
-    ) {
+    const style = each.slot.shown?.run.camera.style;
+    if (style !== undefined && gridRowStands(style, each.refusals.photorealistic)) {
       instruments.setGrid(each.slot.slot, !each.slot.grid);
     }
   };
@@ -1880,16 +1881,17 @@ function ViewStage({
       inhibitButtonRef.current?.focus();
     }
   }, [compact, focusedFold, opened, meterStands, foldButtonsRef]);
-  // The focus in a panel that MAXIMIZE VIEW hides goes to the PRIMARY view's canvas, on which the
-  // keys act, or where none stands to MAXIMIZE VIEW's button, never to the page (the owner's
-  // request, 2026-11-01).
+  // The focus in a panel that MAXIMIZE VIEW hides goes to the CONTROLS view's canvas, so that the
+  // keys go on acting on that view, or where none stands to MAXIMIZE VIEW's button, never to the
+  // page (the owner's request, 2026-11-01).
   const sideRef = useRef<HTMLDivElement | null>(null);
+  const controlsCanvas = operatedView === null ? canvas : operatedView.slot.canvas;
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (maximized && active !== null && sideRef.current?.contains(active) === true) {
-      (canvas ?? maximizeRef.current)?.focus();
+      (controlsCanvas ?? maximizeRef.current)?.focus();
     }
-  }, [maximized, canvas, maximizeRef]);
+  }, [maximized, controlsCanvas, maximizeRef]);
 
   // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
   // panel heads the second column and stands in every engine state, so that nothing under it moves
@@ -1907,8 +1909,30 @@ function ViewStage({
   const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
   // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
   const exposureStanding = autoNotAvailable(meterShown);
-  // The compact layout's row of disclosure buttons, and under it the faults and statuses of the
-  // panels folded (decision-r07-t19-layout, item 1b); the limit reasons fold with their controls.
+  // The faults and statuses that stand for the panels hidden, folded in the compact layout or every
+  // one under MAXIMIZE VIEW (decision-r07-t19-layout, item 1b); the limit reasons go with their
+  // controls.
+  const cameraStanding = noOwnShip ? (
+    <p className="view-camera__reason view-folds__standing">
+      <StatusText text={NO_OWN_SHIP} />
+    </p>
+  ) : null;
+  const styleStanding =
+    controlledFaulted && styleReason !== null ? (
+      <p className="view-style__reason view-style__reason--fault view-folds__standing">
+        <StatusText text={styleReason} />
+      </p>
+    ) : null;
+  const exposureStandingLine =
+    exposureStanding === null ? null : (
+      <p className="view-exposure__reason view-folds__standing">
+        <output>
+          <StatusText text={exposureStanding} renderPart={exposureNote} />
+        </output>
+      </p>
+    );
+  // The compact layout's row of disclosure buttons, and under it the standing lines of the panels
+  // folded.
   const foldRow = compact ? (
     <>
       <div className="view-folds">
@@ -1929,24 +1953,41 @@ function ViewStage({
           </button>
         ))}
       </div>
-      {folded("camera") && noOwnShip ? (
-        <p className="view-camera__reason view-folds__standing">
-          <StatusText text={NO_OWN_SHIP} />
-        </p>
-      ) : null}
-      {folded("style") && controlledFaulted && styleReason !== null ? (
-        <p className="view-style__reason view-style__reason--fault view-folds__standing">
-          <StatusText text={styleReason} />
-        </p>
-      ) : null}
-      {folded("exposure") && exposureStanding !== null ? (
-        <p className="view-exposure__reason view-folds__standing">
-          <output>
-            <StatusText text={exposureStanding} renderPart={exposureNote} />
-          </output>
-        </p>
-      ) : null}
+      {folded("camera") ? cameraStanding : null}
+      {folded("style") ? styleStanding : null}
+      {folded("exposure") ? exposureStandingLine : null}
     </>
+  ) : null;
+  // Under MAXIMIZE VIEW, under the key legend, what the hidden panels would show (the owner's
+  // request, 2026-11-01): the line naming its key, the CONTROLS view where it is an instrument and
+  // that view's selection; then the slots held whole for want of room, as the INSTRUMENTS panel
+  // states them folded; then every hidden panel's standing lines.
+  const heldWhole = instrumentViews
+    .filter(({ standing }) => standing === "held")
+    .map(({ slot }) => slot.name);
+  // An instrument views the primary's scene, so its selection is named among the primary's rows.
+  const controlsSelection = operatedView?.slot.selection ?? selection;
+  const selectedName =
+    controlsSelection === null
+      ? null
+      : (rows.find((row) => row.key === targetKey(controlsSelection))?.name ?? null);
+  const maximizedPart = maximized ? (
+    <div className="view__maximized">
+      <p className="view__keys">
+        {maximizedKeys(
+          controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
+          selectedName,
+        )}
+      </p>
+      {heldWhole.length === 0 ? null : (
+        <p className="view-instruments-panel__reason view-folds__standing">
+          <StatusText text={noRoomReason(heldWhole)} />
+        </p>
+      )}
+      {cameraStanding}
+      {styleStanding}
+      {exposureStandingLine}
+    </div>
   ) : null;
   const sideFolds: SideFolds = {
     cameraId: foldIds.camera,
@@ -2090,7 +2131,7 @@ function ViewStage({
             <StatusLine text={engineLine.text} standing={engineLine.standing} />
           </div>
         )}
-        {maximized ? <p className="view__keys">{MAXIMIZED_KEYS}</p> : null}
+        {maximizedPart}
       </div>
       <div
         className="view__side"
@@ -2660,9 +2701,12 @@ function ViewPanels({
  * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
  * restores them as they were; the scene bar and the header strip stay; the primary's statements
  * fold to one line (`maximizedStatements`); the instruments open stand in their slots over the
- * stage, which they are part of; and a line under the key legend names the key that shows the
- * panels again. Every key acts as before. The setting is the display's own and is kept through
- * every scene and while another display is shown.
+ * stage, which they are part of; and under the key legend a line names the key that shows the
+ * panels again, the `CONTROLS` view where it is an instrument and that view's selection, and the
+ * hidden panels' faults and statuses stand under it, as the compact layout's do under its row of
+ * disclosure buttons. Every key acts as before, and the focus in a panel hidden goes to the
+ * `CONTROLS` view's canvas. The setting is the display's own and is kept through every scene and
+ * while another display is shown.
  *
  * The `PRIMARY` view fills the stage, and the instrument views `INSTRUMENT 1` and `INSTRUMENT 2`
  * open in fixed slots over its right edge (plan R07, T19; decision-r07-t19), each with its own

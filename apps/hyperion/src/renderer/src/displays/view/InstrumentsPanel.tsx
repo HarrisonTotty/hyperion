@@ -68,7 +68,15 @@ function notOpen(closed: ReadonlyArray<InstrumentsPanelSlot>): string {
 
 /** Why slots cannot open: the stage has no room for them at this size and interface scale. */
 function noRoom(slots: ReadonlyArray<InstrumentsPanelSlot>): string {
-  return `NOT AVAILABLE: no room for ${namesOf(slots)} at this window size`;
+  return noRoomReason(slots.map((slot) => slot.name));
+}
+
+/**
+ * Why the slots `names` cannot stand: the stage has no room for them at this size and interface
+ * scale, `NOT AVAILABLE: no room for INSTRUMENT 2 at this window size`.
+ */
+export function noRoomReason(names: ReadonlyArray<string>): string {
+  return `NOT AVAILABLE: no room for ${names.join(" and ")} at this window size`;
 }
 
 interface PanelButtonProps {

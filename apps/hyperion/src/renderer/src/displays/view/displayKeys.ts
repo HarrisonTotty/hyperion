@@ -44,7 +44,24 @@ export function viewDisplayKey(press: KeyPress): ViewDisplayKey | null {
 }
 
 /**
- * The line under the key legend while `MAXIMIZE VIEW` is on, in the legend's form: where its key
- * acts, then the key and what it does, `MAXIMIZE VIEW: 6 SHOWS PANELS`.
+ * The head of the line under the key legend while `MAXIMIZE VIEW` is on, in the legend's form:
+ * where its key acts, then the key and what it does, `MAXIMIZE VIEW: 6 SHOWS PANELS`.
  */
 export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
+
+/**
+ * The line under the key legend while `MAXIMIZE VIEW` is on: {@link MAXIMIZED_KEYS}, then what the
+ * hidden panels would show of the view the keys act on, each after a middle dot: the `CONTROLS`
+ * view where it is an instrument, on which a key pressed off a canvas acts (`CONTROLS
+ * INSTRUMENT 1`), and its selection's name (`SELECTED TEST PLANET`), which the hidden list marks.
+ *
+ * @param controls - The `CONTROLS` view's name, or `null` while it is `PRIMARY`.
+ * @param selected - The name of the `CONTROLS` view's selection, or `null` with none.
+ */
+export function maximizedKeys(controls: string | null, selected: string | null): string {
+  return [
+    MAXIMIZED_KEYS,
+    ...(controls === null ? [] : [`CONTROLS ${controls}`]),
+    ...(selected === null ? [] : [`SELECTED ${selected}`]),
+  ].join(" · ");
+}

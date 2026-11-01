@@ -46,7 +46,10 @@ export interface GroundPageInput {
   readonly instrument: GroundPageInstrument | null;
   /** The page the operator chose, the display's own. */
   readonly chosen: PlacePage;
-  /** Whether the compact layout folds the camera panel's place. */
+  /**
+   * Whether the camera panel's place is hidden: folded in the compact layout, or with every side
+   * panel while `MAXIMIZE VIEW` is on (the owner's request, 2026-11-01).
+   */
   readonly folded: boolean;
 }
 
