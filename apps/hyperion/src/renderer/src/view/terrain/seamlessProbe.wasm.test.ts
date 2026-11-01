@@ -68,13 +68,19 @@ import type { WorkerLike } from "./workers/pool";
  * (`--reporter=json --outputFile.json=<file>`).
  *
  * - `SEAM_SETTING`: `high` or `low`, one setting alone; both by default.
- * - `SEAM_COST_MS` (41: R10.T6.a's one-thread bake) and `SEAM_WORKERS` (3: `defaultHeightWorkers`
- *   on the target's 16 threads).
+ * - `SEAM_COST_MS` (41: R10.T6.a's one-thread bake) and `SEAM_WORKERS` (3: R05 Design note 11's
+ *   count on the target's 16 threads, at which the research measured; `defaultHeightWorkers` gives
+ *   8 there since R05.T18).
+ * - `SEAM_DRAFT_SHARE` (1): the share of C a drafted bake takes (R10.T6.a's progressive bake), its
+ *   refinement the rest; at 1, as before, a draft takes C and its refinement nothing. The pool
+ *   reckons a draft at half a whole bake's cost (`HeightWorkerPool`'s `send`).
  * - `SEAM_FROM_S`, `SEAM_TO_S` (the script's span) and `SEAM_HZ` (60).
  * - `SEAM_STRIDE` (2): every how many vertices a change is measured at.
  * - `SEAM_TRACE_FROM_S` and `SEAM_TRACE_TO_S`: each selection between them in `meta.seamless.trace`
  *   (its margin, size, seen patches, nearest ground and levels).
  * - `SEAM_RECORD=1`: the frames, events and latencies too.
+ * - `SEAM_LOOKAHEAD=0`: the session's passes look ahead of nothing; by default they look ahead on
+ *   the fake clock, as the app's do on its own (`TerrainSessionOptions.lookaheadClockMs`; R10.T14.b).
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -98,6 +104,8 @@ const STRIDE = numberKnob("SEAM_STRIDE", 2);
 const TRACE_FROM_S = numberKnob("SEAM_TRACE_FROM_S", Number.POSITIVE_INFINITY);
 const TRACE_TO_S = numberKnob("SEAM_TRACE_TO_S", Number.NEGATIVE_INFINITY);
 const RECORD = knob("SEAM_RECORD") === "1";
+const DRAFT_SHARE = Math.min(1, Math.max(0, numberKnob("SEAM_DRAFT_SHARE", 1)));
+const LOOKAHEAD = knob("SEAM_LOOKAHEAD") !== "0";
 
 /** The settings the slow run plays: `SEAM_SETTING`'s alone, or both. */
 function settingsPlayed(): QualitySetting[] {
@@ -129,7 +137,10 @@ interface Answers {
   count: number;
 }
 
-/** A height worker on the fake clock: first in first out, a bake taking `costMs`, the rest ~0. */
+/**
+ * A height worker on the fake clock: first in first out, a bake taking `costMs`, a drafted one
+ * {@link DRAFT_SHARE} of it and its refinement the rest, everything else ~0.
+ */
 class LatencyWorker implements WorkerLike {
   readonly #fields = new WorkerFields(MODULE);
   readonly #events = new EventTarget();
@@ -149,7 +160,12 @@ class LatencyWorker implements WorkerLike {
       return;
     }
     const now = Date.now();
-    const cost = message.kind === "bake" ? this.#costMs : 0;
+    let cost = 0;
+    if (message.kind === "bake") {
+      cost = message.draft === true ? DRAFT_SHARE * this.#costMs : this.#costMs;
+    } else if (message.kind === "refine-normals") {
+      cost = (1 - DRAFT_SHARE) * this.#costMs;
+    }
     this.#busyUntilMs = Math.max(now, this.#busyUntilMs) + cost;
     setTimeout(() => {
       if (this.#terminated) {
@@ -437,6 +453,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     createWorker: () => new LatencyWorker(answers, COST_MS),
     workers: WORKERS,
     setting,
+    ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -800,6 +817,8 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     setting: run.setting,
     costMs: run.costMs,
     workers: run.workers,
+    lookahead: LOOKAHEAD,
+    draftShare: DRAFT_SHARE,
     fromS: run.fromS,
     toS: run.toS,
     handOverS: run.handOverS,
