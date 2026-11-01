@@ -1,6 +1,8 @@
 //! P14.T49.l's census over the record: the regolith's pore gas and the outer system's ice, under
 //! every 26 hold against every 26 hold with the pore gas held, over P14.T53.c's thin-air census
-//! (the 400 sample systems, the golden systems and LOOK72's systems).
+//! (the 400 sample systems, the golden systems and LOOK72's systems), with P14.T49.m's icy
+//! regolith at the frost and P14.T24.h.b's holds set back in both walks, as `line_switch_tests`'s
+//! census has them.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -10,6 +12,9 @@ use super::tests::{
     GOLDEN_SYSTEMS_SEED, ThinAirBody, golden_systems, thin_air_census, thin_air_sets,
 };
 use super::*;
+use crate::planetary::derive::photometry::area_mix::{
+    IcyRegolithRules, with_icy_regolith, with_scattering_held,
+};
 use crate::planetary::testing::with_every_26_hold;
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
@@ -31,17 +36,29 @@ struct Census {
 }
 
 /// The census under every 26 hold, the pore gas held and in force, walked once a process.
+///
+/// Both walks set P14.T49.m's icy regolith back to the frost and P14.T24.h.b's holds back
+/// (`with_scattering_held`): with the icy lag the pore gas moves 1,882 bodies (1,772 airless), and
+/// with the scattering's four 1,875, against the [`MOVED`] it moves alone. 26's bump restates
+/// this census.
 fn census() -> &'static Census {
     static CENSUS: OnceLock<Census> = OnceLock::new();
     CENSUS.get_or_init(|| {
         let sets = thin_air_sets();
+        let frost = IcyRegolithRules::Frost;
         let start = Instant::now();
         let held = with_every_26_hold(|| {
-            with_regolith_inertia(RegolithInertiaRules::Vacuum, || thin_air_census(&sets))
+            with_icy_regolith(frost, || {
+                with_scattering_held(|| {
+                    with_regolith_inertia(RegolithInertiaRules::Vacuum, || thin_air_census(&sets))
+                })
+            })
         });
         let walk_held = start.elapsed();
         let start = Instant::now();
-        let aired = with_every_26_hold(|| thin_air_census(&sets));
+        let aired = with_every_26_hold(|| {
+            with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets)))
+        });
         eprintln!(
             "the walks: the pore gas held {walk_held:?}, in force {:?}, {} bodies",
             start.elapsed(),
