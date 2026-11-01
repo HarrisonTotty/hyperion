@@ -1,32 +1,53 @@
 //! The tests of P08.T12's hold at 27, `PLACEMENT_FATES_VERSION` (plan 08, P08.T12 at 27, the
 //! redesign research-leans-19 §3 sketched): under every 27 hold a dead record's marks read its
-//! progenitor's fate from the fitted fate table where it can stand for the track's.
+//! progenitor's fate from the fitted fate table where it can stand for the track's, against the
+//! same galaxy under the hold's held arm, the exact path.
 //!
 //! - The table read's premises, over sweeps (slow, over finer ones): below `HD_FREE_MASSES` the
 //!   Humphreys–Davidson arms build the same fates, bit for bit, and the companion-stripped mark
 //!   moves no iron core's or electron capture's fate.
+//! - At the Sun-like point and about a globular's core, every dead record of layer E is dead at
+//!   its age by its exact lifetime, its time since death in its class's age bin but for the
+//!   bracket's width; the table reads most of the fates, and none whose route is not the track's.
+//! - The two arms' layer-E remnants alike there: two-sample KS tests of their initial masses and
+//!   times since death; slow, over more cells, of their remnants' masses and times since death as
+//!   the stellar stage builds them.
+//! - The same cells twice give the same records.
 //!
 //! The tripwire is here. The bump to 27 deletes the held arm, and these become tests of the
 //! version's own galaxy.
 
 use std::sync::OnceLock;
 
+use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_two_sample};
 use hyperion_testkit::threads::in_shares;
 
-use super::marks::{HD_FREE_MASSES, PLACEMENT_FATES_VERSION, PlacementFateRules, hd_free_mass};
+use super::marks::{
+    FateRead, HD_FREE_MASSES, PLACEMENT_FATES_VERSION, PlacementFateRules, draws_of, hd_free_mass,
+    table_fate,
+};
+use super::{CellKey, SystemRecord, generate_cell};
 use crate::GENERATOR_VERSION;
+use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::displaced::class_table::ClassKey;
+use crate::galaxy::displaced::marks::age_bin_years;
+use crate::galaxy::displaced::{DisplacedKind, PlacementClass};
+use crate::galaxy::features::FeatureProcess;
+use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
+use crate::galaxy::features::members::FeatureInterior;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
-use crate::id::{BodyId, SystemId};
+use crate::id::{BodyId, Layer, SystemId};
 use crate::math;
 use crate::rng::{Mark, Seed};
 use crate::stellar::draws::{StandardNormal, StarDraws};
-use crate::stellar::fates::node_draws;
+use crate::stellar::fates::{FateRoute, node_draws};
 use crate::stellar::rules::StellarRules;
-use crate::stellar::sse::{TrackOptions, fate_of};
+use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, TrackOptions, fate_of, lifetime_under};
+use crate::stellar::system::SystemStars;
 use crate::stellar::{Composition, Phase};
-use crate::units::{Dex, HeliumExcess, SolarMasses};
+use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
 
 /// The seed of the hold's Milky Way fixtures.
 const SEED: u64 = 0x0812_f000_0000_0001;
@@ -40,6 +61,24 @@ fn fitted() -> &'static Galaxy {
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
             GalaxyRules::every_27_hold(),
+        )
+        .expect("the Milky Way fixture builds")
+        .with_full_potential()
+    })
+}
+
+/// The Milky Way fixture under every 27 hold but this one, the exact path, with its kinematic
+/// tables.
+fn exact() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules {
+                placement_fates: PlacementFateRules::Exact,
+                ..GalaxyRules::every_27_hold()
+            },
         )
         .expect("the Milky Way fixture builds")
         .with_full_potential()
@@ -182,7 +221,7 @@ fn below_the_hd_free_masses_the_arms_build_the_same_fates() {
 /// The first premise over every mass the table holds, 0.741 M☉ to each step's, at metallicities
 /// 0.05 dex apart or nearer.
 #[test]
-#[ignore = "slow: some 60,000 tracks, twice"]
+#[ignore = "slow: some 77,000 fates under each arm"]
 fn below_the_hd_free_masses_the_arms_build_the_same_fates_over_every_mass() {
     let compared = hd_arms_agree(10, |cut| log_masses(0.741, cut, 160), SLOW_THREADS);
     println!("{compared} fates compared");
@@ -231,7 +270,7 @@ fn the_stripped_mark_moves_no_iron_core_or_electron_capture() {
 
 /// The second premise over a finer sweep: 400 masses, eight metallicities and five η.
 #[test]
-#[ignore = "slow: 16,000 tracks, twice"]
+#[ignore = "slow: 16,000 fates, single and stripped"]
 fn the_stripped_mark_moves_no_iron_core_or_electron_capture_over_a_finer_sweep() {
     let (compared, moved) = stripped_mark_agrees(
         &[-2.3, -1.5, -1.0, -0.5, -0.25, 0.0, 0.1, MOST_FE_H],
@@ -240,4 +279,332 @@ fn the_stripped_mark_moves_no_iron_core_or_electron_capture_over_a_finer_sweep()
     );
     println!("{compared} iron cores and electron captures the same; {moved} others moved");
     assert!(moved > 0);
+}
+
+/// The Sun-like point.
+fn sun_like() -> GalacticPosition {
+    GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube")
+}
+
+/// The core of the globular with members nearest the Sun-like point, as the server's benches
+/// choose it.
+fn globular_core(galaxy: &Galaxy) -> GalacticPosition {
+    let sun = sun_like();
+    let mut globulars: Vec<FeatureRecord> =
+        FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular).collect();
+    globulars.sort_by(|a, b| {
+        let away = |f: &FeatureRecord| f.position().distance_to(&sun).value();
+        away(a).total_cmp(&away(b))
+    });
+    *globulars
+        .iter()
+        .find_map(|feature| FeatureInterior::of(galaxy, feature))
+        .expect("the galaxy has a globular with members")
+        .feature()
+        .position()
+}
+
+/// The layer-E cells within `reach` cells of the one holding `at` on each axis.
+fn block(at: &GalacticPosition, reach: i32) -> Vec<CellKey> {
+    let [x, y, z] = CellKey::containing(Layer::E, at)
+        .expect("in the cube")
+        .gen_cell()
+        .to_array();
+    let span = -reach..=reach;
+    span.clone()
+        .flat_map(|dx| {
+            let span = span.clone();
+            span.clone().flat_map(move |dy| {
+                span.clone()
+                    .filter_map(move |dz| CellKey::new(Layer::E, [x + dx, y + dy, z + dz]).ok())
+            })
+        })
+        .collect()
+}
+
+/// Whether `record` is dead by its marks: retained, or a displaced remnant.
+fn is_dead(record: &SystemRecord) -> bool {
+    matches!(
+        record.placement_class(),
+        PlacementClass::Retained { .. }
+            | PlacementClass::Displaced {
+                kind: DisplacedKind::Remnant,
+                ..
+            }
+    )
+}
+
+/// The dead records of `cells` in `galaxy`.
+fn dead_records(galaxy: &Galaxy, cells: &[CellKey]) -> Vec<SystemRecord> {
+    let mut out = Vec::new();
+    let mut cell = Vec::new();
+    for &key in cells {
+        generate_cell(galaxy, key, &mut cell);
+        out.extend(cell.iter().filter(|r| is_dead(r)).copied());
+    }
+    out
+}
+
+/// A dead record's progenitor as its marks read it: its mass held to the tracks' heaviest, its
+/// source's reference composition and its draws at attempt 0.
+fn progenitor(galaxy: &Galaxy, record: &SystemRecord) -> (SolarMasses, Composition, StarDraws) {
+    let m = record.primary_initial_mass();
+    let m = if m > MAX_INITIAL_MASS {
+        MAX_INITIAL_MASS
+    } else {
+        m
+    };
+    let composition = record
+        .progenitor_composition(galaxy)
+        .expect("a dead record has its progenitor's composition");
+    (m, composition, draws_of(galaxy, record.id()))
+}
+
+/// A fate's route as the marks read it: the white dwarf it leaves, if any, whether an iron core
+/// collapsed, and whether anything is left.
+fn route_of(fate: &Fate) -> (Option<Phase>, bool, bool) {
+    let white_dwarf = matches!(
+        fate.phase,
+        Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+    );
+    (
+        white_dwarf.then_some(fate.phase),
+        fate.iron_core.is_some(),
+        fate.remnant.kind() != crate::stellar::remnant::RemnantKind::None,
+    )
+}
+
+/// The time since death on which a dead record of `galaxy` drew its age: its class's age bin for a
+/// thin-disc class, any for an old source's or a retained record.
+fn since_death_bin(galaxy: &Galaxy, record: &SystemRecord) -> (f64, Option<f64>) {
+    let displaced = galaxy
+        .fields()
+        .displaced()
+        .expect("the classes are installed");
+    match record.placement_class() {
+        PlacementClass::Displaced { class, .. } => match displaced.class(class).key() {
+            ClassKey::Thin { age, .. } => {
+                let (lo, hi) = age_bin_years(age, displaced.class_table().scales().tau_unit());
+                (lo.value(), hi.map(Years::value))
+            }
+            ClassKey::Old { .. } | ClassKey::Hypervelocity => (0.0, None),
+        },
+        PlacementClass::Retained { .. } | PlacementClass::Alive => (0.0, None),
+    }
+}
+
+/// What [`check_dead_records`] counts.
+#[derive(Debug, Clone, Copy, Default)]
+struct DeadRecords {
+    /// The dead records.
+    records: u32,
+    /// Those whose fate the table read.
+    table: u32,
+    /// Those whose fate the table read with a route other than the track's.
+    other_route: u32,
+    /// The largest share of its lifetime by which a record's time since death passes its bin's.
+    worst_excess: f64,
+    /// The largest share of its lifetime by which the table's bracket moved a record's death
+    /// earlier than its track's.
+    worst_shift: f64,
+}
+
+impl DeadRecords {
+    /// The counts of both.
+    fn and(self, other: Self) -> Self {
+        Self {
+            records: self.records + other.records,
+            table: self.table + other.table,
+            other_route: self.other_route + other.other_route,
+            worst_excess: self.worst_excess.max(other.worst_excess),
+            worst_shift: self.worst_shift.max(other.worst_shift),
+        }
+    }
+}
+
+/// Whether the dead `record` of the fitted fixture is dead at its age by its exact lifetime, its
+/// time since death at least its bin's least and at most its greatest and the bracket's width
+/// more, and, where the table read its fate, whether the route is the track's: its counts.
+fn check_dead_record(record: &SystemRecord) -> DeadRecords {
+    let galaxy = fitted();
+    let rules = galaxy.rules().stellar;
+    let (m, composition, draws) = progenitor(galaxy, record);
+    let life = lifetime_under(m, &composition, &draws, rules).value();
+    let since = record.age_at_epoch().value() - life;
+    let (lo, hi) = since_death_bin(galaxy, record);
+    assert!(
+        since >= lo * (1.0 - 1e-9),
+        "{:?}: {since} below {lo}",
+        record.id()
+    );
+    let read = table_fate(rules, m, &composition, &draws);
+    let excess = read.map_or(0.0, |read| read.death_bound().0.value() - life);
+    let mut counts = DeadRecords {
+        records: 1,
+        ..DeadRecords::default()
+    };
+    if let Some(hi) = hi {
+        assert!(
+            since <= hi * (1.0 + 1e-9) + excess,
+            "{:?}: {since} above {hi} and {excess}",
+            record.id()
+        );
+        counts.worst_excess = (since - hi).max(0.0) / life;
+    }
+    if let Some(FateRead::Table { route, remnant, .. }) = read {
+        let track = fate_of(
+            m,
+            &composition,
+            &draws,
+            TrackOptions::default().with_rules(rules),
+        );
+        let table_route = (
+            route.white_dwarf_phase(),
+            route == FateRoute::IronCore,
+            remnant,
+        );
+        counts.table = 1;
+        counts.worst_shift = excess / life;
+        counts.other_route = u32::from(table_route != route_of(&track));
+    }
+    counts
+}
+
+/// [`check_dead_record`] of every dead record of `cells` in the fitted fixture, on `threads`.
+fn check_dead_records(cells: &[CellKey], threads: usize) -> DeadRecords {
+    over(&dead_records(fitted(), cells), threads, check_dead_record)
+        .into_iter()
+        .fold(DeadRecords::default(), DeadRecords::and)
+}
+
+/// At the Sun-like point and about the globular's core, every dead record of layer E is dead at
+/// its age by its exact lifetime and its time since death in its class's age bin, but for the
+/// bracket's width above it; the table reads most of the fates, and every route it reads is the
+/// track's.
+#[test]
+fn every_dead_record_is_dead_at_its_age_and_every_route_read_is_the_track_s() {
+    for (name, at) in [("Sun-like", sun_like()), ("core", globular_core(fitted()))] {
+        let counts = check_dead_records(&block(&at, 1), 1);
+        println!(
+            "{name}: {} dead records, {} read from the table, {} with another route; a death at \
+             most {:.2e} of its lifetime earlier, and a time since death at most {:.2e} of it past \
+             its bin",
+            counts.records,
+            counts.table,
+            counts.other_route,
+            counts.worst_shift,
+            counts.worst_excess
+        );
+        assert!(counts.records > 50, "{name}: {counts:?}");
+        assert!(2 * counts.table > counts.records, "{name}: {counts:?}");
+        assert_eq!(counts.other_route, 0, "{name}: {counts:?}");
+    }
+}
+
+/// The initial masses and times since death, by their exact lifetimes, of the dead records of
+/// `cells` in `galaxy`.
+fn masses_and_deaths(galaxy: &Galaxy, cells: &[CellKey]) -> (Vec<f64>, Vec<f64>) {
+    let rules = galaxy.rules().stellar;
+    dead_records(galaxy, cells)
+        .iter()
+        .map(|record| {
+            let (m, composition, draws) = progenitor(galaxy, record);
+            let life = lifetime_under(m, &composition, &draws, rules).value();
+            (
+                record.primary_initial_mass().value(),
+                record.age_at_epoch().value() - life,
+            )
+        })
+        .unzip()
+}
+
+/// The two arms' dead records of layer E are alike at the Sun-like point and about the
+/// globular's core: two-sample KS tests of their initial masses and of their times since death.
+#[test]
+fn the_two_arms_dead_records_have_alike_masses_and_deaths() {
+    for (name, at) in [("Sun-like", sun_like()), ("core", globular_core(fitted()))] {
+        let cells = block(&at, 1);
+        let (mut fitted_masses, mut fitted_deaths) = masses_and_deaths(fitted(), &cells);
+        let (mut exact_masses, mut exact_deaths) = masses_and_deaths(exact(), &cells);
+        let masses = ks_two_sample(&mut fitted_masses, &mut exact_masses);
+        let deaths = ks_two_sample(&mut fitted_deaths, &mut exact_deaths);
+        println!(
+            "{name}: {} and {} dead records; masses D {:.4} (p {:.3}), deaths D {:.4} (p {:.3})",
+            fitted_masses.len(),
+            exact_masses.len(),
+            masses.statistic,
+            masses.p_value,
+            deaths.statistic,
+            deaths.p_value
+        );
+        assert_p_value(&format!("{name} initial masses"), masses.p_value, ALPHA);
+        assert_p_value(&format!("{name} times since death"), deaths.p_value, ALPHA);
+    }
+}
+
+/// The remnants' masses and times since death of the dead records of `cells` in `galaxy`, as the
+/// stellar stage builds their stars, on [`SLOW_THREADS`].
+fn remnants(galaxy: &Galaxy, cells: &[CellKey]) -> (Vec<f64>, Vec<f64>) {
+    let records = dead_records(galaxy, cells);
+    over(&records, SLOW_THREADS, |record| {
+        let stars = SystemStars::generate(galaxy, record);
+        let primary = stars.primary();
+        (
+            primary
+                .remnant()
+                .expect("a dead record's primary is a remnant")
+                .mass()
+                .value(),
+            primary
+                .remnant_age_at_epoch()
+                .expect("a dead record's primary is dead at the epoch")
+                .value(),
+        )
+    })
+    .into_iter()
+    .unzip()
+}
+
+/// The two arms' layer-E remnants alike through the stellar stage, over five cells a side at the
+/// Sun-like point and three about the globular's core: two-sample KS tests of their remnants'
+/// masses and of their times since death, and every dead record's star a remnant at the epoch.
+#[test]
+#[ignore = "slow: some 3,200 dead records' stars, twice"]
+fn the_two_arms_remnants_have_alike_masses_and_deaths_through_the_stellar_stage() {
+    for (name, at, reach) in [
+        ("Sun-like", sun_like(), 2),
+        ("core", globular_core(fitted()), 1),
+    ] {
+        let cells = block(&at, reach);
+        let (mut fitted_masses, mut fitted_deaths) = remnants(fitted(), &cells);
+        let (mut exact_masses, mut exact_deaths) = remnants(exact(), &cells);
+        let masses = ks_two_sample(&mut fitted_masses, &mut exact_masses);
+        let deaths = ks_two_sample(&mut fitted_deaths, &mut exact_deaths);
+        println!(
+            "{name}: {} and {} remnants; masses D {:.4} (p {:.3}), deaths D {:.4} (p {:.3})",
+            fitted_masses.len(),
+            exact_masses.len(),
+            masses.statistic,
+            masses.p_value,
+            deaths.statistic,
+            deaths.p_value
+        );
+        assert_p_value(&format!("{name} remnant masses"), masses.p_value, ALPHA);
+        assert_p_value(&format!("{name} times since death"), deaths.p_value, ALPHA);
+        let counts = check_dead_records(&cells, SLOW_THREADS);
+        println!("{name}: {counts:?}");
+        assert_eq!(counts.other_route, 0, "{name}: {counts:?}");
+    }
+}
+
+/// The same cells twice give the same records under the fitted arm.
+#[test]
+fn the_fitted_arm_gives_the_same_records_twice() {
+    let (mut first, mut again) = (Vec::new(), Vec::new());
+    for key in block(&sun_like(), 0) {
+        generate_cell(fitted(), key, &mut first);
+        generate_cell(fitted(), key, &mut again);
+        assert_ne!(first.len(), 0);
+        assert_eq!(format!("{first:?}"), format!("{again:?}"));
+    }
 }
