@@ -140,6 +140,26 @@ fn closed_form_kind_share(
     lifetime_share(table.runaway_model(), kind, m) * before
 }
 
+/// The oldest age at the epoch, years, a death in an interval of `span` Julian years of a star of
+/// band E's node interval `i` of `table` can have: the lifetime bracket's longest lifetime there,
+/// widened by [`LIFETIME_MARGIN`], plus the interval.
+fn oldest_death_age(table: &ClassTable, i: usize, span: f64) -> f64 {
+    let m = table.nodes(MassBand::E).masses()[i];
+    let (_, longest) = LifetimeBracket::shared()
+        .bracket(SolarMasses::new(m))
+        .unwrap();
+    longest.value() * (1.0 + LIFETIME_MARGIN) + span
+}
+
+/// The node intervals of `table`'s band E whose closed mass range holds `m`: one, or two at a
+/// node.
+fn intervals_holding(table: &ClassTable, m: SolarMasses) -> Vec<usize> {
+    let masses = table.nodes(MassBand::E).masses();
+    (0..INTERVALS)
+        .filter(|&i| (masses[i]..=masses[i + 1]).contains(&m.value()))
+        .collect()
+}
+
 /// The young thin disc's component in `galaxy`.
 fn young_disc_of(galaxy: &Galaxy) -> ComponentId {
     galaxy
@@ -257,6 +277,8 @@ fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
     let fields = galaxy.fields();
     let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
     let interval = process.interval().length().as_julian_years_f64();
+    let table = table();
+    let intervals = MassIntervals::of(galaxy, table, interval);
     let mut order = Vec::new();
     for young in process.components() {
         let component = fields.component(young.id());
@@ -280,26 +302,37 @@ fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
             }
             other => panic!("{other:?} is no young field's runaway class"),
         }
-        let young = process
-            .components()
-            .iter()
-            .find(|young| young.id() == term.component)
-            .expect("a term's component is young");
+        assert!(
+            process
+                .components()
+                .iter()
+                .any(|young| young.id() == term.component),
+            "a term's component is young"
+        );
         let budget = component.count() * galaxy.shares().share(MassBand::E, component.population());
-        let (systems, rate) = match term.kind {
-            Ejected::Runaway => (
-                budget,
-                component.ages().max_pdf_between(floor, RECENT_DEATH_AGES)
-                    * (1.0 + RATE_MARGIN)
-                    * interval,
-            ),
+        let (systems, ages) = match term.kind {
+            Ejected::Runaway => (budget, component.ages()),
             Ejected::Walkaway => (
                 galaxy.field_part(term.component, MassBand::E, budget),
-                young.deaths_per_system(),
+                galaxy.field_ages(term.component),
             ),
         };
         assert_same_bits(term.systems, systems);
-        assert_same_bits(term.deaths_per_system, rate);
+        // Its rates are its ages' below each mass interval's oldest death age, never above the
+        // densest below 100 Myr; its odds the interval's share × its share bound × its rate.
+        let densest =
+            ages.max_pdf_between(floor, RECENT_DEATH_AGES) * (1.0 + RATE_MARGIN) * interval;
+        let expected = intervals.rates(ages, interval, &term.shares);
+        assert_eq!(term.rates, expected);
+        for i in 0..INTERVALS {
+            let oldest = oldest_death_age(table, i, interval);
+            assert_same_bits(
+                term.rates.rates[i],
+                ages.max_pdf_between(floor, Years::new(oldest)) * (1.0 + RATE_MARGIN) * interval,
+            );
+            assert!(term.rates.rates[i] <= densest);
+        }
+        assert_same_bits(term.weight, term.rates.total());
         order.push((
             term.component.index(),
             term.class.index(),
@@ -359,8 +392,12 @@ fn every_class_and_kind_with_a_share_has_its_term() {
                     speed,
                     age,
                     systems: 1.0,
-                    largest_share: 1.0,
-                    deaths_per_system: 1.0,
+                    shares: [1.0; INTERVALS],
+                    rates: MassRates {
+                        rates: [1.0; INTERVALS],
+                        odds: [1.0; INTERVALS],
+                    },
+                    weight: 1.0,
                 };
                 let takes =
                     band_masses(256).any(|m| ejected_parts(table, &probe, m, &mut parts).1 > 0.0);
@@ -414,7 +451,13 @@ fn the_classes_take_the_closed_form_s_share_mass_by_mass() {
                     .filter(|t| t.component == young.id() && t.kind == kind)
                 {
                     let (count, share) = ejected_parts(table, term, m, &mut parts);
-                    assert!(share <= term.largest_share, "{m:?}: {share} over {term:?}");
+                    for i in intervals_holding(table, m) {
+                        assert!(
+                            share <= term.shares[i],
+                            "{m:?}: {share} over interval {i}'s {}",
+                            term.shares[i]
+                        );
+                    }
                     let summed = parts[..count]
                         .iter()
                         .fold(0.0, |sum, part| sum + part.share);
@@ -589,6 +632,85 @@ fn a_nursery_s_list_is_the_held_arm_s_less_its_runaways() {
     assert!(kept >= 20 && dropped >= 2, "{kept} {dropped}");
 }
 
+/// From 27 a field component's death rate is bounded by mass interval: its field ages' densest
+/// below each interval's oldest death age, the odds the interval's share of band E × that rate,
+/// summing to the component's deaths per system in the envelope; under the held arm it has none.
+/// The young disc's rate in the envelope falls to about a third of its densest below 100 Myr.
+#[test]
+fn the_field_s_death_rate_is_bounded_where_band_e_dies() {
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
+    let interval = process.interval().length().as_julian_years_f64();
+    let intervals = MassIntervals::of(galaxy, table(), interval);
+    let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
+    for young in process.components() {
+        let ages = galaxy.field_ages(young.id());
+        let by_mass = young.by_mass.expect("from 27 a component's rates by mass");
+        assert_eq!(by_mass, intervals.rates(ages, interval, &[1.0; INTERVALS]));
+        assert_same_bits(young.deaths_per_system(), by_mass.total());
+        let densest =
+            ages.max_pdf_between(floor, RECENT_DEATH_AGES) * (1.0 + RATE_MARGIN) * interval;
+        assert!(young.deaths_per_system() <= densest);
+        eprintln!(
+            "{:?}: deaths per system {:.4e} against {densest:.4e} ({:.3})",
+            young.id(),
+            young.deaths_per_system(),
+            young.deaths_per_system() / densest
+        );
+        if young.id() == young_disc_of(galaxy) {
+            assert!(young.deaths_per_system() < 0.5 * densest);
+        }
+    }
+    let held = galaxy.clone().with_rules(GalaxyRules {
+        runaway_deaths: RunawayDeathsRules::FieldOnly,
+        ..GalaxyRules::every_27_hold()
+    });
+    assert!(
+        CoreCollapseProcess::new(&held)
+            .components()
+            .iter()
+            .all(|young| young.by_mass.is_none())
+    );
+}
+
+/// The lifetime bracket, widened by [`LIFETIME_MARGIN`], bounds the lifetimes of band E's stars
+/// that the bounds by mass rest on: over 256 stars across the band, at metallicities from
+/// −1 to +0.6 dex, past the bracket's own range, and their own draws, each lifetime under every
+/// 27 hold's stellar rules lies below its interval's oldest death age less the interval.
+#[test]
+fn the_widened_bracket_bounds_band_e_s_lifetimes() {
+    let galaxy = galaxy();
+    let table = table();
+    let rules = galaxy.rules().stellar;
+    let span = CoreCollapseProcess::new(galaxy)
+        .interval()
+        .length()
+        .as_julian_years_f64();
+    let mut lcg = Lcg::new(0x0933_b006);
+    let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
+    let mut widest = 0.0_f64;
+    for n in 0..256_u64 {
+        let m = SolarMasses::new(lo * crate::math::exp(lcg.next_f64() * crate::math::ln(hi / lo)));
+        let composition =
+            Composition::from_fe_h(Dex::new(-1.0 + 1.6 * lcg.next_f64()), HeliumExcess::ZERO);
+        let system = key([0, 12, 0])
+            .candidate_id(u32::try_from(n).unwrap(), 0)
+            .unwrap();
+        let draws = StarDraws::for_star(galaxy.seed(), BodyId::new(SystemId::from(system), 0));
+        let life = lifetime_under(track_mass_of(m), &composition, &draws, rules).value();
+        let (_, longest) = LifetimeBracket::shared().bracket(m).unwrap();
+        widest = widest.max(life / longest.value());
+        for i in intervals_holding(table, m) {
+            let bound = oldest_death_age(table, i, span) - span;
+            assert!(
+                life <= bound,
+                "{m:?} at {composition:?}: {life} past {bound}"
+            );
+        }
+    }
+    eprintln!("the longest lifetime against the bracket's: {widest:.4}");
+}
+
 // 3. The envelope, the index and the speed law.
 
 /// The thinning's envelope holds: at random points of random cells, from the centre out through
@@ -642,10 +764,7 @@ fn no_cell_comes_near_the_index_under_every_27_hold() {
                 * young.deaths_per_system()
         });
         let bound = process.ejected_terms().iter().fold(field, |sum, term| {
-            sum + term.systems
-                * displaced.bound(term.class, &cube)
-                * term.largest_share
-                * term.deaths_per_system
+            sum + term.systems * displaced.bound(term.class, &cube) * term.weight
         });
         largest = largest.max(bound);
     }
@@ -994,7 +1113,8 @@ fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
 }
 
 /// The new arm's first runaway and walkaway entries of the sample cells, as measured
-/// (2026-11-01, with the runaways' terms at the whole budget; at generator version 25).
+/// (2026-11-01, with the runaways' terms at the whole budget and the bounds by mass; at generator
+/// version 25).
 const EJECTED_PIN: [[u64; 7]; 3] = [
     [
         0x4036_83f3_3563_62aa,

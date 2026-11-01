@@ -83,11 +83,12 @@
 //!   speed bin and of the age bin of the time from the ejection to the death, its runaways' and
 //!   its walkaways' apart, since speed bin 0 holds both. Its density is the class's form (P08.T12.a's
 //!   displaced fields) × the component's band-E systems, the whole budget for a runaway's and the
-//!   budget taken to the field for a walkaway's × the largest share of a star's deaths the class
-//!   can take as the kind × the largest death rate of those systems' ages; the site's mark picks
-//!   a term as it picks a component. Its candidate draws its mass from the band, thinned on its
-//!   class's share of that mass's deaths as the kind against the largest, then its ejection age
-//!   among the kind's, its speed inside the class's bin and an azimuth; its \[Fe/H\] at its
+//!   budget taken to the field for a walkaway's × the share of a star's deaths the class can take
+//!   as the kind × the death rate of those systems' ages, both bounded by mass (below); the site's
+//!   mark picks a term as it picks a component. Its candidate draws its mass by those bounds,
+//!   thinned on its class's share of that mass's deaths as the kind against its mass's bound,
+//!   then its ejection age among the kind's, its speed inside the class's bin and an azimuth; its
+//!   \[Fe/H\] at its
 //!   source's reference site, where plan 08's displaced records read theirs; its velocity by its
 //!   class's law at the site, plan 08's (Design note 22), as the grid's members of the class
 //!   move; then the death-rate thinning on its systems' ages (the budget's for a runaway, the
@@ -98,6 +99,14 @@
 //!   ejection before its death (`feature_runaway`) and the runaways' terms take the whole
 //!   budget. A walkaway travels some 103 pc at most (ibid.) and dies inside its feature's bubble,
 //!   so the features keep listing theirs and the walkaways' terms keep the field's part.
+//! - **The bounds by mass.** The field term and each class's term bound their death rates on each
+//!   of band E's 32 node intervals (`MassRates`): the age density's greatest below the oldest age
+//!   a death of those masses in the interval can have, the lifetime bracket's longest lifetime
+//!   there widened by a quarter, plus the interval; and each term its class's share as the kind
+//!   there. A candidate draws its interval by its share of the band's systems × those bounds and
+//!   its mass in it by the mass function, then thins against its interval's bounds. Below 100 Myr
+//!   the young disc's age density rises tenfold, while band E dies within some 50 Myr, so held to
+//!   its densest the field thinned away some 85% of the candidates that had paid for a lifetime.
 //!
 //! So each star's deaths split between the field term, the features and the classes at its mass
 //! exactly as the model's shares do: the field drops what the classes take and the features drop
@@ -128,11 +137,11 @@ use super::supernova::{
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
-use crate::galaxy::ages::YOUNG_AGE_LIMIT;
+use crate::galaxy::ages::{AgeDistribution, YOUNG_AGE_LIMIT};
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::displaced::class_table::{ClassKey, ClassTable, ejects};
 use crate::galaxy::displaced::forms::{FormPoint, young_disc};
-use crate::galaxy::displaced::marks::{MARK_MASS_NODES, age_bin_years};
+use crate::galaxy::displaced::marks::{LifetimeBracket, MARK_MASS_NODES, age_bin_years};
 use crate::galaxy::displaced::runaway::{
     Ejected, RUNAWAY_CUT_OF_V_C, RUNAWAY_MIN_SPEED, RUNAWAY_SHARE_HIGH, RunawayModel, WALKAWAY_CUT,
 };
@@ -141,7 +150,7 @@ use crate::galaxy::displaced::{
     SPEED_BINS, SPEED_EDGES, SpeedBin, death_in_interval_knowing,
 };
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
-use crate::galaxy::imf::MassBand;
+use crate::galaxy::imf::{MassBand, MassFunction};
 use crate::galaxy::kinematics::{BallisticKick, class_velocity, draw_on};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord, is_ballistic};
 use crate::galaxy::query::epoch_velocity;
@@ -175,6 +184,16 @@ pub const RECENT_DEATH_AGES: Years = YOUNG_AGE_LIMIT;
 /// so that a candidate's age density as computed never exceeds it.
 const RATE_MARGIN: f64 = 1.0 / 1_099_511_627_776.0;
 
+/// The widening, relative, of the lifetime bracket's longest lifetime over each of band E's node
+/// intervals when the class bounds the ages its deaths there can have (from 27, P09.T33.b): 1/4,
+/// on top of the bracket's own tenth ([`LifetimeBracket`]), since the bracket is validated over
+/// metallicities 10⁻⁴–0.03 and η within ±3, not proved, and a candidate may lie outside both.
+const LIFETIME_MARGIN: f64 = 0.25;
+
+/// Band E's node intervals, the class table's 33 mass nodes', over which the class bounds its
+/// deaths by mass from 27 (P09.T33.b).
+const INTERVALS: usize = MARK_MASS_NODES - 1;
+
 /// The generator version from which the core-collapse class follows the young field's runaways and
 /// walkaways (plan 09, P09.T33.b): the field term at its band budget keeps the deaths its ejection
 /// marks leave it, and one term per band-E runaway and walkaway class of the thin disc and the
@@ -204,6 +223,101 @@ pub(crate) enum RunawayDeathsRules {
     Ejected,
 }
 
+/// A death-rate bound by band E's node interval (from 27, P09.T33.b): over each, the bound on the
+/// deaths per system over the supernova test's interval of stars of those masses, and the
+/// interval's odds in the envelope, its share of the band's systems × that bound (× a term's share
+/// bound), which sum to the term's or the component's death rate in the envelope.
+///
+/// A star's death in the interval puts its age at the epoch below its lifetime plus the
+/// interval's length; over an interval of masses the lifetime bracket's longest lifetime, widened
+/// by [`LIFETIME_MARGIN`], bounds the lifetime, and so the greatest age density below that age
+/// bounds its death rate. Most of band E dies far younger than the young disc's 100 Myr, where the
+/// field's age density is some tenth of its largest (`RECENT_DEATH_AGES`), so a candidate drawn
+/// by these odds, its mass in its interval by the mass function, pays a lifetime only where it is
+/// likely kept.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MassRates {
+    rates: [f64; INTERVALS],
+    odds: [f64; INTERVALS],
+}
+
+impl MassRates {
+    /// The odds' sum: the death rate per system in the envelope.
+    #[must_use]
+    fn total(&self) -> f64 {
+        self.odds.iter().fold(0.0, |sum, &odds| sum + odds)
+    }
+
+    /// The interval of band E's node `masses` a mark on `stream` picks by the odds, and a mass in it
+    /// drawn by `imf` from the next uniform (two words): the last interval with odds should
+    /// rounding leave the mark past them all; `None` where no interval has odds.
+    #[must_use]
+    fn draw(
+        &self,
+        masses: &[f64; MARK_MASS_NODES],
+        imf: &dyn MassFunction,
+        stream: &mut Stream,
+    ) -> Option<(usize, SolarMasses)> {
+        let last = self.odds.iter().rposition(|&odds| odds > 0.0)?;
+        let i = stream
+            .mark()
+            .pick_weighted(&self.odds, self.total())
+            .unwrap_or(last);
+        let m = imf.quantile_in(masses[i], masses[i + 1], stream.uniform());
+        Some((i, SolarMasses::new(m)))
+    }
+}
+
+/// Band E's node intervals as the bounds by mass read them (from 27, P09.T33.b; [`MassRates`]):
+/// each interval's share of the band's systems by the galaxy's mass function, and the oldest age
+/// at the epoch a death of its masses in the interval can have, years.
+struct MassIntervals {
+    shares: [f64; INTERVALS],
+    oldest: [f64; INTERVALS],
+}
+
+impl MassIntervals {
+    /// The intervals of `table`'s band-E nodes in `galaxy`, for an interval of `span` Julian years.
+    ///
+    /// # Panics
+    ///
+    /// Never: the nodes lie in band E, where the lifetime bracket answers.
+    #[must_use]
+    fn of(galaxy: &Galaxy, table: &ClassTable, span: f64) -> Self {
+        let masses = *table.nodes(MassBand::E).masses();
+        let imf = galaxy.mass_function();
+        let band = imf.integral(masses[0], masses[INTERVALS]);
+        let shares = std::array::from_fn(|i| imf.integral(masses[i], masses[i + 1]) / band);
+        let oldest = std::array::from_fn(|i| {
+            let (_, longest) = LifetimeBracket::shared()
+                .bracket(SolarMasses::new(masses[i]))
+                .expect("band E's nodes are in the bracket's range");
+            longest.value() * (1.0 + LIFETIME_MARGIN) + span
+        });
+        Self { shares, oldest }
+    }
+
+    /// The bounds by interval of the deaths per system over the interval of `interval_years` of
+    /// stars of `ages`, each scaled by `scale[i]` in the odds: the greatest age density below the
+    /// interval's oldest age, raised by 2⁻⁴⁰, × the interval's length.
+    #[must_use]
+    fn rates(
+        &self,
+        ages: &AgeDistribution,
+        interval_years: f64,
+        scale: &[f64; INTERVALS],
+    ) -> MassRates {
+        let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
+        let rates: [f64; INTERVALS] = std::array::from_fn(|i| {
+            ages.max_pdf_between(floor, Years::new(self.oldest[i]))
+                * (1.0 + RATE_MARGIN)
+                * interval_years
+        });
+        let odds = std::array::from_fn(|i| self.shares[i] * scale[i] * rates[i]);
+        MassRates { rates, odds }
+    }
+}
+
 /// One of the runaway and walkaway terms the class follows from 27 (plan 09, P09.T33.b): plan 08's
 /// band-E displaced class `class`, of a young component's source, whose density is its form, and
 /// the deaths of that component's stars ejected into it as `kind`: every runaway, a feature's
@@ -228,25 +342,24 @@ pub(crate) struct EjectedTerm {
     /// ([`Galaxy::field_part`]) for a walkaway's, whose features list their walkaways' deaths
     /// themselves (P09.T36.a).
     systems: f64,
-    /// An upper bound, over every mass, on the share of a band-E star's deaths that the class
-    /// takes as the kind ([`largest_ejected_share`]), raised by 2⁻⁴⁰. The candidate thins its mass
-    /// against it.
-    largest_share: f64,
-    /// The bound on the deaths per system over the interval of those systems' ages: the budget's
-    /// for a runaway's term, the field's, the field term's own
-    /// ([`YoungComponent::deaths_per_system`]), for a walkaway's.
-    deaths_per_system: f64,
+    /// An upper bound, over each of band E's node intervals, on the share of a band-E star's
+    /// deaths that the class takes as the kind ([`ejected_share_bounds`]), raised by 2⁻⁴⁰. The
+    /// candidate thins its mass against its interval's.
+    shares: [f64; INTERVALS],
+    /// The bounds by interval on the deaths per system of those systems' ages, the budget's for a
+    /// runaway's term and the field's for a walkaway's, with odds that take [`shares`](Self::shares)
+    /// in too.
+    rates: MassRates,
+    /// The odds' sum: the term's deaths per system in the envelope, at one system's form.
+    weight: f64,
 }
 
 impl EjectedTerm {
     /// The term's weight at the point `at`, recent deaths per cubic light-year: its systems × its
-    /// class's form there × its largest share × its deaths per system.
+    /// class's form there × its [`weight`](Self::weight).
     #[must_use]
     fn weight_at(&self, displaced: &DisplacedFields, at: &FormPoint<'_>) -> f64 {
-        self.systems
-            * displaced.density_at(self.class, at)
-            * self.largest_share
-            * self.deaths_per_system
+        self.systems * displaced.density_at(self.class, at) * self.weight
     }
 
     /// The displaced class whose form the term's deaths follow.
@@ -307,9 +420,38 @@ pub struct YoungComponent {
     id: ComponentId,
     share: f64,
     deaths_per_system: f64,
+    /// From 27 its bounds by mass interval ([`MassRates`]), whose odds sum to its deaths per
+    /// system; `None` under the held arm.
+    by_mass: Option<MassRates>,
 }
 
 impl YoungComponent {
+    /// A field candidate's primary's initial mass in band E on `stream`, and the death rate bound
+    /// its step 5 thins against: under the held arm a mass by the mass function and the
+    /// component's largest rate; from 27, where the class follows `displaced`'s runaways, a mass
+    /// by its interval's odds and that interval's rate (`MassRates`). `None` where no interval has
+    /// odds.
+    #[must_use]
+    fn mass(
+        &self,
+        galaxy: &Galaxy,
+        displaced: Option<&DisplacedFields>,
+        stream: &mut Stream,
+    ) -> Option<(SolarMasses, f64)> {
+        let imf = galaxy.mass_function();
+        match (displaced, &self.by_mass) {
+            (Some(displaced), Some(by_mass)) => {
+                let masses = displaced.class_table().nodes(MassBand::E).masses();
+                let (i, mass) = by_mass.draw(masses, imf, stream)?;
+                Some((mass, by_mass.rates[i]))
+            }
+            (Some(_) | None, _) => Some((
+                SolarMasses::new(imf.sample_in_band(MassBand::E, stream)),
+                self.deaths_per_system,
+            )),
+        }
+    }
+
     /// The component.
     #[must_use]
     pub const fn id(&self) -> ComponentId {
@@ -323,7 +465,9 @@ impl YoungComponent {
     }
 
     /// The bound on its deaths per system over the interval: its largest age density below
-    /// [`RECENT_DEATH_AGES`], per year, raised by 2⁻⁴⁰, × the interval's length in Julian years.
+    /// [`RECENT_DEATH_AGES`], per year, raised by 2⁻⁴⁰, × the interval's length in Julian years;
+    /// from 27 (P09.T33.b) the mean, over band E's masses, of each mass interval's bound, the
+    /// greatest age density below the oldest age a death of those masses can have.
     #[must_use]
     pub const fn deaths_per_system(&self) -> f64 {
         self.deaths_per_system
@@ -500,6 +644,7 @@ impl CoreCollapseProcess {
                         id,
                         share,
                         deaths_per_system: rate * (1.0 + RATE_MARGIN) * interval_years,
+                        by_mass: None,
                     },
                 )
             })
@@ -508,27 +653,41 @@ impl CoreCollapseProcess {
             RunawayDeathsRules::FieldOnly => None,
             RunawayDeathsRules::Ejected => fields.displaced(),
         };
-        let ejected = displaced.map_or_else(Vec::new, |displaced| {
-            ejected_terms(galaxy, displaced, &held, interval_years)
-        });
-        let ejecting = !ejected.is_empty();
+        let intervals = displaced
+            .map(|displaced| MassIntervals::of(galaxy, displaced.class_table(), interval_years));
+        let ejected =
+            displaced
+                .zip(intervals.as_ref())
+                .map_or_else(Vec::new, |(displaced, intervals)| {
+                    ejected_terms(galaxy, displaced, &held, intervals, interval_years)
+                });
         // From 27 the field's share is its band budget's taken to the field, not what the field
-        // keeps of the component's systems now: the ejection marks thin its deaths instead.
-        let components = if ejecting {
-            held.into_iter()
-                .map(|young| YoungComponent {
-                    share: galaxy.field_part(
-                        young.id,
-                        MassBand::E,
-                        galaxy
-                            .shares()
-                            .share(MassBand::E, fields.component(young.id).population()),
-                    ),
-                    ..young
+        // keeps of the component's systems now: the ejection marks thin its deaths instead. Its
+        // death rate is bounded by mass interval, where band E dies.
+        let components = match intervals.filter(|_| !ejected.is_empty()) {
+            Some(intervals) => held
+                .into_iter()
+                .map(|young| {
+                    let rates = intervals.rates(
+                        galaxy.field_ages(young.id),
+                        interval_years,
+                        &[1.0; INTERVALS],
+                    );
+                    YoungComponent {
+                        share: galaxy.field_part(
+                            young.id,
+                            MassBand::E,
+                            galaxy
+                                .shares()
+                                .share(MassBand::E, fields.component(young.id).population()),
+                        ),
+                        deaths_per_system: rates.total(),
+                        by_mass: Some(rates),
+                        ..young
+                    }
                 })
-                .collect()
-        } else {
-            held
+                .collect(),
+            None => held,
         };
         Self {
             components,
@@ -639,20 +798,20 @@ impl SourceNodes {
 /// and the nuclear disc), in the components' order, each of its source's classes with a form that
 /// can take a share of some band-E star's deaths, in the classes' order, and each kind its speed
 /// law puts in the class's bin, runaways first. A runaway's term is at the component's whole
-/// band-E budget and its largest death rate; a walkaway's at the budget taken to the field and the
-/// field's largest death rate, the field term's (module documentation). Each takes the class's
-/// largest share of a star's deaths as the kind.
+/// band-E budget and its ages; a walkaway's at the budget taken to the field and the field's ages,
+/// the field term's (module documentation). Each takes the class's share bounds as the kind and
+/// its ages' death rates, by band E's node `intervals`.
 #[must_use]
 fn ejected_terms(
     galaxy: &Galaxy,
     displaced: &DisplacedFields,
     components: &[YoungComponent],
+    intervals: &MassIntervals,
     interval_years: f64,
 ) -> Vec<EjectedTerm> {
     let table = displaced.class_table();
     let model = table.runaway_model();
     let fields = galaxy.fields();
-    let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
     let mut terms = Vec::new();
     for young in components {
         let source = table.component_source(young.id);
@@ -664,15 +823,10 @@ fn ejected_terms(
         // A runaway's at the whole budget and its ages, a walkaway's at the field's part and the
         // field's ages, the field term's.
         let budgets = KINDS.map(|kind| match kind {
-            Ejected::Runaway => (
-                budget,
-                component.ages().max_pdf_between(floor, RECENT_DEATH_AGES)
-                    * (1.0 + RATE_MARGIN)
-                    * interval_years,
-            ),
+            Ejected::Runaway => (budget, component.ages()),
             Ejected::Walkaway => (
                 galaxy.field_part(young.id, MassBand::E, budget),
-                young.deaths_per_system,
+                galaxy.field_ages(young.id),
             ),
         });
         let nodes = SourceNodes::of(table, source);
@@ -689,16 +843,17 @@ fn ejected_terms(
             if class.form().is_none() {
                 continue;
             }
-            for (k, (&kind, &(systems, deaths_per_system))) in
-                KINDS.iter().zip(&budgets).enumerate()
-            {
-                let largest_share = largest_ejected_share(
+            for (k, (&kind, &(systems, ages))) in KINDS.iter().zip(&budgets).enumerate() {
+                let shares = ejected_share_bounds(
                     &nodes,
                     model,
                     (kind, speed, age.map(|age| age_bin_years(age, tau_unit))),
                     &speeds[k],
-                ) * (1.0 + RATE_MARGIN);
-                if largest_share <= 0.0 || systems <= 0.0 || deaths_per_system <= 0.0 {
+                )
+                .map(|share| share * (1.0 + RATE_MARGIN));
+                let rates = intervals.rates(ages, interval_years, &shares);
+                let weight = rates.total();
+                if weight <= 0.0 || systems <= 0.0 {
                     continue;
                 }
                 terms.push(EjectedTerm {
@@ -709,8 +864,9 @@ fn ejected_terms(
                     speed,
                     age,
                     systems,
-                    largest_share,
-                    deaths_per_system,
+                    shares,
+                    rates,
+                    weight,
                 });
             }
         }
@@ -725,10 +881,10 @@ const KINDS: [Ejected; 2] = [Ejected::Runaway, Ejected::Walkaway];
 /// age of its kind, a runaway's two 16-node rules or a walkaway's one.
 const MAX_PARTS: usize = 32;
 
-/// An upper bound, over band E's masses, on the share of a star's deaths that the class of speed
-/// bin `speed` and, for a thin-disc class, the age bin spanning `bin` (years) takes as `kind`,
-/// [`ejected_parts`]' sum, the kind's shares in the speed bins `speeds`, at its source's `nodes`
-/// (P09.T33.b).
+/// Upper bounds, over each of band E's node intervals, on the share of a star's deaths that the
+/// class of speed bin `speed` and, for a thin-disc class, the age bin spanning `bin` (years) takes
+/// as `kind`, [`ejected_parts`]' sum, the kind's shares in the speed bins `speeds`, at its
+/// source's `nodes` (P09.T33.b).
 ///
 /// Between two of the class table's mass nodes a star's reference lifetime is linear in log mass,
 /// so its range there is its ends'. Where the nodes' lifetimes do not rise with mass, an ejection
@@ -736,28 +892,27 @@ const MAX_PARTS: usize = 32;
 /// rise either, so its range is its ends' too, and the time from it to the death lies between
 /// those ends' least and greatest. On each interval the bound is then the kind's lifetime share at
 /// the heavier end (neither kind's falls with mass), times its share in the speed bin, times the
-/// weights of the ejection ages that can fall before the death with that time in the age bin; and
-/// the largest over the intervals bounds every mass. Should the lifetimes rise anywhere, every
-/// ejection age counts, the kind's largest share at any mass.
+/// weights of the ejection ages that can fall before the death with that time in the age bin.
+/// Should the lifetimes rise anywhere, every ejection age counts, the kind's largest share at any
+/// mass, in every interval.
 #[must_use]
-fn largest_ejected_share(
+fn ejected_share_bounds(
     nodes: &SourceNodes,
     model: RunawayModel,
     (kind, speed, bin): (Ejected, SpeedBin, Option<(Years, Option<Years>)>),
     speeds: &[f64; SPEED_BINS],
-) -> f64 {
+) -> [f64; INTERVALS] {
     let in_bin = speeds[speed.index()];
     if nodes.lifetimes.windows(2).any(|w| w[1] > w[0]) {
-        return largest_lifetime_share(model, kind) * in_bin;
+        return [largest_lifetime_share(model, kind) * in_bin; INTERVALS];
     }
     let k = kind_slot(kind);
-    let mut largest = 0.0_f64;
-    for i in 0..MARK_MASS_NODES - 1 {
+    std::array::from_fn(|i| {
         let heavy = SolarMasses::new(nodes.masses[i + 1]);
         let (shortest, longest) = (nodes.lifetimes[i + 1], nodes.lifetimes[i]);
         let share = lifetime_share(model, kind, heavy) * in_bin;
         if share <= 0.0 {
-            continue;
+            return 0.0;
         }
         let weight = nodes.ages[i][k]
             .iter()
@@ -772,9 +927,8 @@ fn largest_ejected_share(
                     })
             })
             .fold(0.0, |sum, ((_, w), _)| sum + w);
-        largest = largest.max(share * weight);
-    }
-    largest
+        share * weight
+    })
 }
 
 /// `kind`'s place in [`KINDS`], and so in a [`SourceNodes`]' ages.
@@ -994,8 +1148,9 @@ impl ClassProcess for CoreCollapseProcess {
     /// the cell's closed box ([`Component::bound`](crate::galaxy::fields::Component::bound)) × its
     /// deaths per system, and from 27 (P09.T33.b) then over the runaway and walkaway terms in
     /// order, each one's systems × its class's form bound over the box (plan 08's P08.T11) × its
-    /// largest share × its deaths per system: each term bounds the matching weight of the site's
-    /// thinning, in the same arithmetic, so their sum bounds the weights' running total.
+    /// deaths per system by mass, its share and rate bounds' odds summed: each term bounds the
+    /// matching weight of the site's thinning, in the same arithmetic, so their sum bounds the
+    /// weights' running total.
     ///
     /// # Panics
     ///
@@ -1011,10 +1166,7 @@ impl ClassProcess for CoreCollapseProcess {
         // bound over the cell in the terms' weights' arithmetic (P09.T33.b).
         let total = self.ejecting(galaxy).map_or(field, |displaced| {
             self.ejected.iter().fold(field, |sum, term| {
-                sum + term.systems
-                    * displaced.bound(term.class, &cube)
-                    * term.largest_share
-                    * term.deaths_per_system
+                sum + term.systems * displaced.bound(term.class, &cube) * term.weight
             })
         });
         PerCubicLightYear::new(total)
@@ -1067,16 +1219,13 @@ impl ClassProcess for CoreCollapseProcess {
         if let (Some(displaced), Some(term)) = (displaced, picked.checked_sub(n)) {
             return self.ejected_candidate(galaxy, displaced, (id, site), &self.ejected[term]);
         }
-        let young = self.components[picked];
+        let young = &self.components[picked];
         let component = young.id;
         let laws = galaxy.fields().component(component);
-        // 2. The primary's initial mass and its [Fe/H].
+        // 2. The primary's initial mass and its [Fe/H]; from 27 the mass by its interval's death
+        //    rate bound (`MassRates`), whose bound step 5 thins against.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_MASS, key);
-        let mass = SolarMasses::new(
-            galaxy
-                .mass_function()
-                .sample_in_band(MassBand::E, &mut stream),
-        );
+        let (mass, rate) = young.mass(galaxy, displaced, &mut stream)?;
         // From 27 its ejection marks: a death after an ejection is a runaway's or a walkaway's
         // term's, not the field's (P09.T33.b).
         if let Some(displaced) = displaced {
@@ -1114,10 +1263,11 @@ impl ClassProcess for CoreCollapseProcess {
         let death = self.death_at(stream.uniform());
         let age_at_epoch = Years::new(life - death.since_epoch().as_julian_years_f64());
         // 5. Thinned on the component's death rate at that age: its age density, as deaths per
-        //    system over the interval, against the component's largest.
+        //    system over the interval, against the component's largest, from 27 its mass
+        //    interval's.
         let deaths = galaxy.field_ages(component).pdf(age_at_epoch)
             * self.interval.length().as_julian_years_f64();
-        if !stream.decide(Threshold::from_ratio(deaths, young.deaths_per_system)) {
+        if !stream.decide(Threshold::from_ratio(deaths, rate)) {
             return None;
         }
         // 6. The one velocity.
@@ -1270,15 +1420,18 @@ impl CoreCollapseProcess {
     /// `displaced`'s classes, after the site's mark picked it (from 27, P09.T33.b; module
     /// documentation), on the field candidate's streams and `class.core_collapse.ejection`:
     ///
-    /// 2. its primary's initial mass in band E, thinned on the class's share of that mass's deaths
-    ///    as the term's kind against the term's largest (the mass stream's words 0 and 1); then
+    /// 2. its primary's initial mass in band E, its mass interval by the term's odds (the mass
+    ///    stream's word 0) and its mass in it by the mass function (word 1), thinned on the
+    ///    class's share of that mass's deaths as the term's kind against the interval's bound
+    ///    (word 2); then
     ///    its ejection age among the kind's by their shares (ejection word 0), its speed inside the
     ///    class's bin (word 1) and an azimuth (word 2); and its \[Fe/H\] from its component's law
     ///    at its source's reference site, at age zero;
     /// 3. its primary's draws and lifetime, as a field candidate's;
     /// 4. T across the interval, and its age at the epoch;
     /// 5. thinned on the age density at that age of the term's systems, the component's budget's
-    ///    for a runaway and its field's for a walkaway, as a field candidate is on the field's;
+    ///    for a runaway and its field's for a walkaway, against its interval's bound, as a field
+    ///    candidate is on the field's;
     /// 6. its velocity at the site by its class's law, plan 08's (Design note 22): in a ballistic
     ///    bin the circular velocity plus the ejection, its vertical part its height over the time
     ///    since the ejection at its reference lifetime; otherwise the class's Gaussian, on
@@ -1297,16 +1450,16 @@ impl CoreCollapseProcess {
         let table = displaced.class_table();
         let component = term.component;
         let laws = galaxy.fields().component(component);
-        // 2. The mass, thinned on the class's share of its deaths, and the ejection.
+        // 2. The mass by its interval's odds, thinned on the class's share of its deaths against
+        //    the interval's bound, and the ejection.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_MASS, key);
-        let mass = SolarMasses::new(
-            galaxy
-                .mass_function()
-                .sample_in_band(MassBand::E, &mut stream),
-        );
+        let masses = table.nodes(MassBand::E).masses();
+        let (interval, mass) = term
+            .rates
+            .draw(masses, galaxy.mass_function(), &mut stream)?;
         let mut parts = [NO_PART; MAX_PARTS];
         let (count, share) = ejected_parts(table, term, mass, &mut parts);
-        if !stream.decide(Threshold::from_ratio(share, term.largest_share)) {
+        if !stream.decide(Threshold::from_ratio(share, term.shares[interval])) {
             return None;
         }
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_EJECTION, key);
@@ -1350,7 +1503,7 @@ impl CoreCollapseProcess {
             Ejected::Walkaway => galaxy.field_ages(component),
         };
         let deaths = ages.pdf(age_at_epoch) * self.interval.length().as_julian_years_f64();
-        if !stream.decide(Threshold::from_ratio(deaths, term.deaths_per_system)) {
+        if !stream.decide(Threshold::from_ratio(deaths, term.rates.rates[interval])) {
             return None;
         }
         // 6. The one velocity, by the class's law at the site.
