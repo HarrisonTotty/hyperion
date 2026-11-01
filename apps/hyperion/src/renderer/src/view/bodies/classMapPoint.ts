@@ -75,8 +75,11 @@
  * - **Near the switch only** (R10.T14.f's deferred levers). The terrain session's slices step a
  *   map's work only while some view's frame draws its body under {@link CLASS_MAP_POINT_BAND} × 3 px
  *   of its own pixels ({@link nearClassMapPointSwitch}): the frame notes it, as a point it draws or
- *   a disc ({@link noteClassMapPointNear}), and the note holds for {@link CLASS_MAP_POINT_NEAR_SLICES} slices, so that a
- *   body drawn larger in every view costs no slice; the queues and their order are as before.
+ *   a disc it warms, and the note holds for {@link CLASS_MAP_POINT_NEAR_SLICES} slices, so that a
+ *   body drawn larger in every view costs no slice; the queues and their order are as before. While
+ *   a body is a disc in that band its lights' ratios are found in the slices
+ *   ({@link warmClassMapPoint}), each light's held where none of its own is within δ, so that at its
+ *   first frame as a point each light has a held ratio of its own and none is found on the frame.
  */
 import { dot, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
@@ -714,11 +717,23 @@ export interface ClassMapPointWork {
   readonly builds: number;
   /** The ratios queued to be found again. */
   readonly refreshes: number;
+  /**
+   * The lights' ratios the frame's path has found at once since the module loaded: a light's
+   * first with none held near it, on the frame (R10.T14.f's lever).
+   */
+  readonly frameEvaluations: number;
 }
+
+/** The lights' ratios the frame's path has found at once. */
+let FRAME_EVALUATIONS = 0;
 
 /** The work the frames' slices hold now. */
 export function classMapPointWork(): ClassMapPointWork {
-  return { builds: QUEUE.length, refreshes: REFRESHES.length };
+  return {
+    builds: QUEUE.length,
+    refreshes: REFRESHES.length,
+    frameEvaluations: FRAME_EVALUATIONS,
+  };
 }
 
 /**
@@ -1230,6 +1245,7 @@ function heldRatio(
     }
     return near.ratio;
   }
+  FRAME_EVALUATIONS += 1;
   const ratio = ratioOf(figure, surface, elements, towardsLight, towardsObserver);
   hold(surface, { ...at, ratio });
   return ratio;
@@ -1255,26 +1271,38 @@ function noteUniform(texels: ClassMapTexels, at: LightGeometry): void {
 }
 
 /**
- * What a frame's point under `surface` is drawn by (R10.T14.f): the surface itself once its
- * elements are made; until then its stand-in where it has one whose are, its build queued if it is
- * not; `null` for the uniform point, noted as the map's provisional ratio. The map is noted near the
- * switch.
+ * What a point under `surface` would be drawn by now: the surface itself once its elements are
+ * made; until then its stand-in where it has one whose are; `null` for the uniform point.
  */
-function drawnPointOf(surface: ClassMapDiscSurface, at: LightGeometry): DrawnPoint | null {
+function drawablePointOf(surface: ClassMapDiscSurface): DrawnPoint | null {
   const forTexels = surface.texels;
-  noteNear(forTexels);
   const elements = surfaceElements(surface);
   if (elements !== null) {
     return { surface, elements, forTexels };
   }
-  queueBuild(forTexels, surface.normals?.texels ?? null);
   const standIn = STAND_INS.get(forTexels);
   const standInElements = standIn === undefined ? null : surfaceElements(standIn);
-  if (standIn === undefined || standInElements === null) {
-    noteUniform(forTexels, at);
-    return null;
+  return standIn === undefined || standInElements === null
+    ? null
+    : { surface: standIn, elements: standInElements, forTexels };
+}
+
+/**
+ * What a frame's point under `surface` is drawn by (R10.T14.f): {@link drawablePointOf}'s, the
+ * map's build queued where its elements are not made and are not queued; `null` for the uniform
+ * point, noted as the map's provisional ratio. The map is noted near the switch.
+ */
+function drawnPointOf(surface: ClassMapDiscSurface, at: LightGeometry): DrawnPoint | null {
+  const forTexels = surface.texels;
+  noteNear(forTexels);
+  if (surfaceElements(surface) === null) {
+    queueBuild(forTexels, surface.normals?.texels ?? null);
   }
-  return { surface: standIn, elements: standInElements, forTexels };
+  const drawn = drawablePointOf(surface);
+  if (drawn === null) {
+    noteUniform(forTexels, at);
+  }
+  return drawn;
 }
 
 /**
@@ -1319,12 +1347,7 @@ export function classMapPointReflection(
     towardsLight,
     towardsObserver,
   );
-  const at: LightGeometry = {
-    lightKey,
-    towardsLight: rotateToBodyFixed(rotation, towardsLight),
-    towardsObserver: rotateToBodyFixed(rotation, towardsObserver),
-    cOverA: figure.polarRadiusM / figure.equatorialRadiusM,
-  };
+  const at = lightGeometryOf(figure, rotation, towardsLight, towardsObserver, lightKey);
   const drawn = drawnPointOf(surface, at);
   if (drawn === null) {
     return uniform;
@@ -1333,13 +1356,74 @@ export function classMapPointReflection(
   return [uniform[0] * ratio[0], uniform[1] * ratio[1], uniform[2] * ratio[2]];
 }
 
+/** A light's geometry in the body-fixed axes, as the frame's point and its warming take it. */
+function lightGeometryOf(
+  figure: BodyFigure,
+  rotation: Rotation3,
+  towardsLight: Vec3,
+  towardsObserver: Vec3,
+  lightKey: string,
+): LightGeometry {
+  return {
+    lightKey,
+    towardsLight: rotateToBodyFixed(rotation, towardsLight),
+    towardsObserver: rotateToBodyFixed(rotation, towardsObserver),
+    cOverA: figure.polarRadiusM / figure.equatorialRadiusM,
+  };
+}
+
 /**
- * Notes that a frame drew a body as a disc near the switch under `surface`
- * ({@link nearClassMapPointSwitch}), so that the terrain session's slices step its map's work
- * (R10.T14.f's deferred lever); a frame's point notes its own.
+ * Begins a light's ratio in the frames' slices while its body is a disc near the switch (R10.T14.f's
+ * deferred lever), from the geometry its point would take ({@link classMapPointReflection}'s
+ * arguments, the disc's own lights), so that at the body's first frame as a point the light has a
+ * held ratio of its own and none is found on the frame. It notes the map near the switch.
+ *
+ * @remarks
+ * Where the point would be drawn by a surface whose elements are made (the map's own, or its
+ * stand-in's), a refresh is queued at this geometry ({@link stepClassMapPoints} finds it), unless
+ * that surface holds a ratio of this light within the cache's angle of it, or a refresh of this
+ * light within the stand-in's angle of it is queued; its ratio is then held as a refresh's is
+ * (`holdRefreshed`), so that each light keeps its one entry. Nothing is evaluated here, and where
+ * no made surface stands, nothing is queued: the map's build is stepped as its body is near.
+ *
+ * @param lightKey - The light's identity among the body's lights, as `pointFlux` names it.
+ * @throws Error if the surface's laws are not one per class of its map, or, under its map's
+ *   maturity, a class drawn from its nodes has an A other than its node K − 1.
  */
-export function noteClassMapPointNear(surface: ClassMapDiscSurface): void {
+export function warmClassMapPoint(
+  figure: BodyFigure,
+  surface: ClassMapDiscSurface,
+  rotation: Rotation3,
+  towardsLight: Vec3,
+  towardsObserver: Vec3,
+  lightKey: string,
+): void {
+  assertLawPerClass(surface);
   noteNear(surface.texels);
+  const drawn = drawablePointOf(surface);
+  if (drawn === null) {
+    return;
+  }
+  const at = lightGeometryOf(figure, rotation, towardsLight, towardsObserver, lightKey);
+  const alpha = Math.acos(Math.min(1, Math.max(-1, dot(at.towardsLight, at.towardsObserver))));
+  const cacheAngle = classMapPointCacheAngleRad(alpha);
+  if ((HELD.get(drawn.surface) ?? []).some((entry) => nearAs(entry, at, cacheAngle))) {
+    return;
+  }
+  const staleAngle = classMapPointStaleAngleRad(alpha);
+  if (
+    REFRESHES.some(
+      (refresh) => refresh.surface === drawn.surface && nearAs(refresh, at, staleAngle),
+    )
+  ) {
+    return;
+  }
+  REFRESHES.push({
+    ...at,
+    surface: drawn.surface,
+    forTexels: drawn.forTexels,
+    steps: ratioSteps(figure, drawn.surface, drawn.elements, at.towardsLight, at.towardsObserver),
+  });
 }
 
 /** Whether a refresh failed already, said once. */

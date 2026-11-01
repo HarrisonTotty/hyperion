@@ -1,3 +1,4 @@
+import type { BodyIdHex } from "@hyperion/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
@@ -50,6 +51,7 @@ import {
   makeClassMapPointNow,
   queueClassMapPoint,
   stepClassMapPoints,
+  warmClassMapPoint,
 } from "./classMapPoint";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
@@ -70,7 +72,7 @@ import {
 } from "./discSurface";
 import { type LitBodyInput, planLitBodies, pointFlux } from "./draw";
 import { bodyReflection } from "./oblate";
-import { POINT_BELOW_PX } from "./regime";
+import { type LitRegime, POINT_BELOW_PX } from "./regime";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -1670,6 +1672,14 @@ describe("the point's phase integral on a Mars-like world (R10.T10.e)", () => {
   });
 });
 
+/** Runs the near scope's slices until none of its work remains, whatever the time. */
+function drainNear(): void {
+  stepClassMapPoints(Number.POSITIVE_INFINITY, () => 0, "near");
+}
+
+/** The leading side's star's key, as `pointFlux` names `aHostDisc`'s. */
+const LEADING_STAR = `star ${String(aHostDisc().star)}`;
+
 describe("the class-mapped point near the switch only (R10.T14.f's deferred levers)", () => {
   afterEach(() => {
     // Each test cancels or drains what it queues, so that none steps another's.
@@ -1725,6 +1735,92 @@ describe("the class-mapped point near the switch only (R10.T14.f's deferred leve
       ...Array.from({ length: CLASS_MAP_POINT_NEAR_SLICES }, () => true),
       false,
     ]);
+  });
+
+  it("evaluates no light on the frame an approach through the band makes the body a point", () => {
+    const surface = surfaceOf(iapetusMap());
+    let previous: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+    const before = classMapPointWork().frameEvaluations;
+    const regimes: LitRegime[] = [];
+    for (let px = BAND_PX + 1; px > 2; px -= 0.25) {
+      const { body, hosts } = iapetusAt(surface, APEX, vec3(1, 0, 0), 60 * RAD, px);
+      previous = planLitBodies([body], hosts, OPTIONS, previous).regimes;
+      regimes.push(previous.get(body.id) ?? "disc");
+      drainNear();
+    }
+    expect([regimes.includes("point"), classMapPointWork().frameEvaluations - before]).toEqual([
+      true,
+      0,
+    ]);
+  });
+
+  it("draws the first point frame within T10.f's cache bound of a fresh evaluation there, inside R07's 1%", () => {
+    const surface = surfaceOf(iapetusMap());
+    let previous: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+    let first: { readonly drawn: Rgb; readonly px: number } | null = null;
+    for (let px = BAND_PX + 1; px > 2 && first === null; px -= 0.25) {
+      const { body, hosts } = iapetusAt(surface, APEX, vec3(1, 0, 0), 60 * RAD, px);
+      previous = planLitBodies([body], hosts, OPTIONS, previous).regimes;
+      if (previous.get(body.id) === "point") {
+        first = { drawn: pointFlux(body, hosts, [], DISC_ANNULI_HIGH), px };
+      }
+      drainNear();
+    }
+    if (first === null) {
+      throw new Error("the approach never made the body a point");
+    }
+    const twin = surfaceOf(iapetusMap());
+    const { body, hosts } = iapetusAt(twin, APEX, vec3(1, 0, 0), 60 * RAD, first.px);
+    const fresh = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+    expect(worstRatio(first.drawn, fresh)).toBeLessThan(1.7e-3);
+  });
+
+  it("draws a light warmed at its geometry by the ratio the slices found, bit for bit the synchronous path's", () => {
+    const surface = surfaceOf(halfIapetus());
+    warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
+    drainNear();
+    const before = classMapPointWork().frameEvaluations;
+    const drawn = classMapPointReflection(
+      SPHERE,
+      surface,
+      IDENTITY_ROTATION,
+      LEADING_LIGHT,
+      APEX,
+      LEADING_STAR,
+    );
+    const evaluated = classMapPointWork().frameEvaluations - before;
+    const expected = leadingWith(
+      classMapReflectionRatio(SPHERE, surfaceOf(halfIapetus()), LEADING_LIGHT, APEX),
+    );
+    expect([drawn.map((value, c) => Object.is(value, expected[c])), evaluated]).toEqual([
+      [true, true, true],
+      0,
+    ]);
+  });
+
+  it("queues one refresh a light to warm it, and none while its own ratio is held within δ", () => {
+    const surface = surfaceOf(halfIapetus());
+    const warm = (): number => {
+      const before = classMapPointWork().refreshes;
+      warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
+      return classMapPointWork().refreshes - before;
+    };
+    const queued = [warm(), warm()];
+    drainNear();
+    queued.push(warm());
+    expect(queued).toEqual([1, 0, 0]);
+  });
+
+  it("warms nothing while no made surface stands for the map, and notes its body near so that its build is stepped", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(surface.texels, null, null);
+    const before = classMapPointWork().refreshes;
+    warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
+    const queued = classMapPointWork().refreshes - before;
+    const clock = tickingClock();
+    stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, "near");
+    cancelClassMapPoint(surface.texels);
+    expect([queued, clock.readings() > 1]).toEqual([0, true]);
   });
 
   /**

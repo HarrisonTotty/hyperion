@@ -151,7 +151,7 @@ import {
 import {
   classMapPointReflection,
   nearClassMapPointSwitch,
-  noteClassMapPointNear,
+  warmClassMapPoint,
 } from "./classMapPoint";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
@@ -484,7 +484,7 @@ export function pointFlux(
   const reflection = pointReflectionOf(body, toCamera);
   const flux: [number, number, number] = [0, 0, 0];
   for (const light of lightsOf(body, hosts)) {
-    const reflected = reflection(normalise(light.toStarM), `star ${String(light.host.disc.star)}`);
+    const reflected = reflection(normalise(light.toStarM), starLightKey(light));
     const visible = discEclipseVisible(
       light.host,
       body,
@@ -506,21 +506,47 @@ export function pointFlux(
   return flux;
 }
 
+/** A star's key among a body's lights, by which a class map's held ratios are its own. */
+function starLightKey(light: LightAtPoint): string {
+  return `star ${String(light.host.disc.star)}`;
+}
+
 /**
- * Notes a body drawn as a disc near the 3 px switch under a class map (plan R10, R10.T14.f's
- * deferred lever; `nearClassMapPointSwitch`), so that the frames' slices step its map's build and
- * refreshes. Nothing for a body without a class map, a known rotation, or the band.
+ * Begins, in the frames' slices, the point's ratio of each light of a body drawn as a disc near the
+ * 3 px switch under a class map (plan R10, R10.T14.f's deferred lever; `warmClassMapPoint`), from
+ * the geometry its point would take (`pointFlux`'s lights, directions and keys), so that its first
+ * frame as a point finds each light's ratio held; and notes its map near the switch, so that the
+ * slices step its build. Nothing for a body without a class map, a known rotation, or the band.
  */
-function notePointNear(body: LitBodyInput, camera: ProjectionCamera, viewport: Viewport): void {
+function warmPointOf(
+  body: LitBodyInput,
+  lit: BodyLightSources,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): void {
   const { surface, rotation } = body;
   if (
-    surface?.kind === "class-map" &&
-    rotation !== undefined &&
-    nearClassMapPointSwitch(
+    surface?.kind !== "class-map" ||
+    rotation === undefined ||
+    !nearClassMapPointSwitch(
       angularDiameterPx(body.centreM, body.figure.equatorialRadiusM, camera, viewport),
     )
   ) {
-    noteClassMapPointNear(surface);
+    return;
+  }
+  const toCamera = scale(body.centreM, -1 / norm(body.centreM));
+  for (const light of lit.stars) {
+    warmClassMapPoint(
+      body.figure,
+      surface,
+      rotation,
+      normalise(light.toStarM),
+      toCamera,
+      starLightKey(light),
+    );
+  }
+  for (const source of lit.planetshine) {
+    warmClassMapPoint(body.figure, surface, rotation, source.direction, toCamera, source.body);
   }
 }
 
@@ -840,9 +866,9 @@ export function planLitBodies(
     sources.set(body.id, lit);
     closeRun();
     const regime = regimes.get(body.id);
-    // A disc near the 3 px switch has its point's work stepped in the slices (R10.T14.f).
+    // A disc near the 3 px switch begins its point's lights in the slices (R10.T14.f).
     if (regime !== "terrain") {
-      notePointNear(body, camera, viewport);
+      warmPointOf(body, lit, camera, viewport);
     }
     if (drawnAsMesh(regime)) {
       // Only a body handed over has terrain over its figure to give the surveyed ground to.

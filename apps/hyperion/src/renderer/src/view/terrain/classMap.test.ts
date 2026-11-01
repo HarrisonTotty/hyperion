@@ -1044,6 +1044,7 @@ describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
     } finally {
       store.dispose();
     }
-    expect(classMapPointWork()).toEqual({ builds: 0, refreshes: 0 });
+    const { builds, refreshes } = classMapPointWork();
+    expect({ builds, refreshes }).toEqual({ builds: 0, refreshes: 0 });
   });
 });
