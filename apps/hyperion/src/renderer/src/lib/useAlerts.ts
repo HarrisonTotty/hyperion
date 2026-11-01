@@ -117,7 +117,10 @@ export type ObserverFault =
 /** What a display's detections hold at one moment, as a render reads them. */
 export interface AlertsSnapshot {
   readonly status: AlertsStatus;
-  /** Every contact the subscription holds, each as it last stood, in contact order. */
+  /**
+   * Every contact the subscription holds that has not cleared, each as it last stood, in contact
+   * order.
+   */
   readonly contacts: ReadonlyArray<ContactDto>;
   /** Each class's census, in class order: empty until the server has scanned. */
   readonly census: ReadonlyArray<ClassCensusDto>;
@@ -186,6 +189,7 @@ export function contactUsable(contact: ContactDto): boolean {
     contact.flux_w_m2 >= 0 &&
     isFiniteNumber(contact.first_seen.seconds) &&
     isFiniteNumber(contact.last_seen.seconds) &&
+    (contact.cleared === undefined || isFiniteNumber(contact.cleared.seconds)) &&
     bearingUsable;
   let usable: boolean;
   switch (contact.level) {
@@ -201,6 +205,15 @@ export function contactUsable(contact: ContactDto): boolean {
       break;
   }
   return usable;
+}
+
+/**
+ * Whether a contact is lit: its light has not fallen under the sensor's detection limit since its
+ * latest sighting. A cleared contact's condition has ended, and the list drops it (Design note 11;
+ * plan 12, P12.T8.c).
+ */
+export function contactLit(contact: ContactDto): boolean {
+  return contact.cleared === undefined;
 }
 
 /** The contacts of a map, in contact order. */
@@ -436,7 +449,9 @@ class AlertsStore {
     this.#subscription = subscription;
     this.#told = told;
     this.#sequence = 0;
-    this.#contacts = new Map(state.contacts.map((contact) => [contact.contact, contact]));
+    this.#contacts = new Map(
+      state.contacts.filter(contactLit).map((contact) => [contact.contact, contact]),
+    );
     this.#set({
       status: { kind: "live" },
       contacts: inContactOrder(this.#contacts),
@@ -499,8 +514,13 @@ class AlertsStore {
     this.#resubscriptions = 0;
     let acknowledgements = this.#snapshot.acknowledgements;
     for (const contact of body.contacts) {
-      this.#contacts.set(contact.contact, contact);
-      if (contact.acknowledged && acknowledgements.has(contact.contact)) {
+      const lit = contactLit(contact);
+      if (lit) {
+        this.#contacts.set(contact.contact, contact);
+      } else {
+        this.#contacts.delete(contact.contact);
+      }
+      if ((contact.acknowledged || !lit) && acknowledgements.has(contact.contact)) {
         const next = new Map(acknowledgements);
         next.delete(contact.contact);
         acknowledgements = next;
@@ -659,10 +679,11 @@ class AlertsStore {
  * dropped, and a gap, or a push the client cannot use, opens the subscription again, whose state
  * holds every contact the universe's Knowledge holds; so does the server's ending it, after
  * {@link RECONNECT_DELAY_MS}, giving up as `rejected` after three in a row with no push applied. A
- * notification's contacts replace those held, and its census the census, where it sends one. On
- * the link's loss everything held stays on show as `stale`. An acknowledgement is closed-loop: it is
- * `pending` until the server answers, and its acceptance marks the contact acknowledged, since the
- * server pushes the contact only to this subscription and only where it changed (P12.T9.a).
+ * notification's contacts replace those held, and its census the census, where it sends one; a
+ * contact that has cleared is dropped, from a push or from the state opened with
+ * ({@link contactLit}; P12.T8.c). On the link's loss everything held stays on show as `stale`. An
+ * acknowledgement is closed-loop: it is `pending` until the server answers, and its acceptance
+ * marks the contact acknowledged, since the server pushes the contact only where it changed.
  *
  * @param universe - The universe whose detections to hold, or `null` for none (`idle`).
  * @param observer - The display's observer and time, or `null` while it has none (`no_observer`).

@@ -2,9 +2,15 @@
 //! directory (plan 12, P12.T7.b; Design note 10).
 //!
 //! The file is `<data_dir>/universes/<id>/knowledge/contacts.v1.jsonl`. Its first line is the
-//! header, `{"format":1}`; every other line is one change, a sighting or an acknowledgement, in
-//! the order it was made, and the store is rebuilt by applying them in order. A change is
-//! appended, synced, and only then applied in memory, so memory never runs ahead of the disk.
+//! header, `{"format":1}`; every other line is one change, a sighting, an acknowledgement or a
+//! clear (P12.T8.c), in the order it was made, and the store is rebuilt by applying them in
+//! order. A change is appended, synced, and only then applied in memory, so memory never runs
+//! ahead of the disk. Each change applied raises its contact in the store's `ChangedContacts`, a
+//! [`watch`] channel each alerts subscription of the universe reads to tell its subscriber of the
+//! contacts that changed (P12.T8.c), as the survey log's revisions tell a scene.
+//!
+//! The clear's line joins format 1 without a bump (lean, 2026-11-01): the first build to write a
+//! sighting is P12.T8.b's, so no file holds a contact that a build unable to read a clear wrote.
 //!
 //! On load, a header of another format, or a file of a later format beside this one
 //! (`contacts.v2.jsonl` and on), is [`LoadKnowledgeError::UnsupportedFormat`]. A last line with no
@@ -17,6 +23,7 @@
 //! its file stay in step. The log itself, its loading and its appends are the private `jsonl`
 //! module's, which the survey passes share (plan R09, R09.T18).
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::io;
@@ -27,8 +34,10 @@ use hyperion_sim::alerts::{AlertBand, DetectionPhase, TransientKind};
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
+use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 
 use super::jsonl::{self, KnowledgeLog, LogName, TimeLine};
 use super::record::{ContactId, KnowledgeLevel, Sighting, SightingParts};
@@ -58,6 +67,40 @@ pub struct PersistedKnowledge {
 struct Shared {
     log: Mutex<KnowledgeLog>,
     store: Mutex<KnowledgeStore>,
+    /// Each change applied raises its contact here, under the file's lock.
+    changed: watch::Sender<ChangedContacts>,
+}
+
+/// The contacts changed since a universe's Knowledge was opened, each with the count of its
+/// changes: what each alerts subscription reads to tell its subscriber which contacts to push
+/// again (P12.T8.c), whichever subscription's push made the change.
+///
+/// It holds only the changes made since, not those loaded from the file, which a subscription
+/// opens with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ChangedContacts {
+    contacts: BTreeMap<ContactId, u64>,
+}
+
+impl ChangedContacts {
+    /// The contacts changed here since `earlier`, in contact order.
+    pub(crate) fn since<'a>(&'a self, earlier: &'a Self) -> impl Iterator<Item = ContactId> + 'a {
+        self.contacts
+            .iter()
+            .filter(|(contact, changes)| {
+                earlier
+                    .contacts
+                    .get(contact)
+                    .is_none_or(|then| then < *changes)
+            })
+            .map(|(&contact, _)| contact)
+    }
+
+    /// Counts one more change of `contact`.
+    fn raise(&mut self, contact: ContactId) {
+        let changes = self.contacts.entry(contact).or_default();
+        *changes = changes.saturating_add(1);
+    }
 }
 
 impl PersistedKnowledge {
@@ -88,6 +131,7 @@ impl PersistedKnowledge {
             shared: Arc::new(Shared {
                 log: Mutex::new(log),
                 store: Mutex::new(store),
+                changed: watch::Sender::default(),
             }),
         })
     }
@@ -133,6 +177,34 @@ impl PersistedKnowledge {
             })?
     }
 
+    /// Clears `event`'s contact at `at`, the observer's time its light fell under the detection
+    /// limit ([`KnowledgeStore::record_clear`]), appending the clear to the file first: the contact
+    /// if it was lit, and `None`, writing nothing, for an event never seen or a contact cleared
+    /// already.
+    ///
+    /// # Errors
+    ///
+    /// As [`record_sighting`](Self::record_sighting).
+    pub async fn record_clear(
+        &self,
+        event: EventId,
+        at: UniverseTime,
+    ) -> Result<Option<ContactId>, SaveKnowledgeError> {
+        let shared = Arc::clone(&self.shared);
+        tokio::task::spawn_blocking(move || shared.record_clear(event, at))
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "a knowledge append's blocking task did not finish");
+                SaveKnowledgeError::Interrupted
+            })?
+    }
+
+    /// The contacts changed from now on: a receiver of the store's `ChangedContacts`, its value as
+    /// it stands now marked seen, which every change wakes.
+    pub(crate) fn changes(&self) -> watch::Receiver<ChangedContacts> {
+        self.shared.changed.subscribe()
+    }
+
     /// Calls `f` with the store, for its [`contacts`](KnowledgeStore::contacts) and
     /// [`view`](KnowledgeStore::view)s. The lock is held only while `f` runs and never over a
     /// write, so `f` should be short.
@@ -154,7 +226,26 @@ impl Shared {
         lock(&self.store)
             .apply(entry)
             .expect("an entry the store planned under the file's lock still fits it");
+        self.changed.send_modify(|changed| changed.raise(contact));
         Ok(contact)
+    }
+
+    fn record_clear(
+        &self,
+        event: EventId,
+        at: UniverseTime,
+    ) -> Result<Option<ContactId>, SaveKnowledgeError> {
+        let mut log = self.writer()?;
+        let Some(entry) = lock(&self.store).clear_entry(event, at) else {
+            return Ok(None);
+        };
+        let contact = entry.contact();
+        log.append(&EntryLine::from(&entry))?;
+        lock(&self.store)
+            .apply(entry)
+            .expect("an entry the store planned under the file's lock still fits it");
+        self.changed.send_modify(|changed| changed.raise(contact));
+        Ok(Some(contact))
     }
 
     fn acknowledge(&self, contact: ContactId) -> Result<bool, AcknowledgeContactError> {
@@ -172,6 +263,7 @@ impl Shared {
         lock(&self.store)
             .apply(entry)
             .expect("a contact the store had under the file's lock still has it");
+        self.changed.send_modify(|changed| changed.raise(contact));
         Ok(true)
     }
 }
@@ -203,7 +295,7 @@ fn load(dir: PathBuf) -> Result<(KnowledgeStore, KnowledgeLog), LoadKnowledgeErr
     Ok((store, log))
 }
 
-/// One change, as a line of format 1. Field order is the order on disk.
+/// One change, as a line of format 1, tagged by `kind`. Field order is the order on disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum EntryLine {
@@ -226,6 +318,11 @@ enum EntryLine {
     },
     Acknowledged {
         contact: u32,
+    },
+    /// Its light fell under the detection limit at `at`, the observer's time (P12.T8.c).
+    Cleared {
+        contact: u32,
+        at: TimeLine,
     },
 }
 
@@ -319,6 +416,10 @@ impl From<&KnowledgeEntry> for EntryLine {
             KnowledgeEntry::Acknowledged { contact } => Self::Acknowledged {
                 contact: contact.get(),
             },
+            KnowledgeEntry::Cleared { contact, at } => Self::Cleared {
+                contact: contact.get(),
+                at: TimeLine::from(*at),
+            },
         }
     }
 }
@@ -376,6 +477,10 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
             }
             EntryLine::Acknowledged { contact } => Ok(Self::Acknowledged {
                 contact: contact_of(contact)?,
+            }),
+            EntryLine::Cleared { contact, at } => Ok(Self::Cleared {
+                contact: contact_of(contact)?,
+                at: at.to_time().ok_or("at")?,
             }),
         }
     }
@@ -763,6 +868,73 @@ mod tests {
         assert_eq!(lines[2]["band"], "x_ray");
         assert_eq!(lines[3]["level"], "resolved");
         assert_eq!(lines[1]["event"], event_of(host()).to_string());
+    }
+
+    /// P12.T8.c: a clear is a line of its own, read back with its time; a clear of a contact
+    /// cleared already writes nothing; and each change that is made, a sighting, an
+    /// acknowledgement or a clear, names its contact in the store's `ChangedContacts`, and none
+    /// that is not.
+    #[tokio::test]
+    async fn knowledge_clears_round_trip_and_each_change_names_its_contact() {
+        let (_dir, store) = universe();
+        let knowledge = PersistedKnowledge::open(&store, UNIVERSE).await.unwrap();
+        let mut changes = knowledge.changes();
+        let mut told = changes.borrow_and_update().clone();
+        let mut named = || {
+            let now = changes.borrow_and_update().clone();
+            let since: Vec<u32> = now.since(&told).map(ContactId::get).collect();
+            told = now;
+            since
+        };
+        let v = AlertBand::Photometric(Band::V);
+        let event = event_of(host());
+        let seen = sighting([0.0, 25_000.0, 0.0], 0, v, KnowledgeLevel::Bearing);
+        let contact = knowledge.record_sighting(event, seen).await.unwrap();
+        assert_eq!(named(), [1]);
+        let at = UniverseTime::from_julian_years(2).unwrap();
+        assert_eq!(
+            knowledge.record_clear(event, at).await.unwrap(),
+            Some(contact)
+        );
+        assert_eq!(named(), [1]);
+        assert_eq!(knowledge.record_clear(event, at).await.unwrap(), None);
+        let unseen = event_of(other_host());
+        assert_eq!(knowledge.record_clear(unseen, at).await.unwrap(), None);
+        assert_eq!(
+            named(),
+            Vec::<u32>::new(),
+            "a clear that changes nothing names nothing"
+        );
+        assert!(knowledge.acknowledge(contact).await.unwrap());
+        assert!(!knowledge.acknowledge(contact).await.unwrap());
+        assert_eq!(named(), [1]);
+        let written = knowledge.read(Clone::clone);
+        drop(knowledge);
+
+        let reread = PersistedKnowledge::open(&store, UNIVERSE).await.unwrap();
+        assert_eq!(reread.read(Clone::clone), written);
+        assert_eq!(
+            reread.read(|store| store.view(contact).unwrap().seen().cleared()),
+            Some(at)
+        );
+        let text = fs::read_to_string(contacts_file(&store)).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let kinds: Vec<_> = lines[1..].iter().map(|line| line["kind"].clone()).collect();
+        assert_eq!(
+            kinds,
+            ["sighting", "cleared", "acknowledged"].map(serde_json::Value::from)
+        );
+        assert_eq!(
+            lines[2],
+            serde_json::json!({
+                "kind": "cleared",
+                "contact": 1,
+                "at": { "seconds": at.seconds(), "nanos": 0 },
+            })
+        );
     }
 
     /// P12.T7.b: reopening a universe restores its contacts and acknowledgements, and the

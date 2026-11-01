@@ -23,6 +23,7 @@ pub mod surveys;
 #[cfg(test)]
 mod testing;
 
+pub(crate) use persist::ChangedContacts;
 pub use persist::{KNOWLEDGE_FORMAT, LoadKnowledgeError, PersistedKnowledge, SaveKnowledgeError};
 pub use record::{
     Acknowledgement, BearingContact, ContactId, ContactView, KnowledgeLevel, ResolvedContact,

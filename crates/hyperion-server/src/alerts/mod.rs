@@ -10,11 +10,11 @@
 //!
 //! The scans run on the CPU pool through the server's `AlertScans` (P12.T8.b), which shares
 //! each walk among the subscriptions that ask for it and keeps them in a byte budget. The wire's
-//! `alerts` topic opens a subscription, runs its scans, makes the pushes that fall due into
-//! sightings in the universe's Knowledge and pushes the contacts they change with the census, and
-//! answers `alerts_observer` and `alerts_acknowledge` (P12.T9.a). Each universe's contacts are
-//! opened once and shared (`UniverseContacts`). A clear, and telling the universe's other
-//! subscriptions of a change, are P12.T8.c's.
+//! `alerts` topic opens a subscription, runs its scans, records the pushes that fall due in the
+//! universe's Knowledge, sightings and clears (P12.T8.c), pushes its census, and answers
+//! `alerts_observer` and `alerts_acknowledge` (P12.T9.a). Each universe's contacts are opened once
+//! and shared (`UniverseContacts`), and every subscription of the universe pushes the contacts any
+//! of them changed.
 
 mod contacts;
 mod scan;

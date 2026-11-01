@@ -45,4 +45,10 @@ phase: DetectionPhaseDto,
 /**
  * Whether the crew has acknowledged it; acknowledgement never hides it.
  */
-acknowledged: boolean, };
+acknowledged: boolean, 
+/**
+ * When its light fell under the sensor's detection limit, the observer's time, if no sighting
+ * has come since: its condition has cleared (Design note 11), and an alert list drops it.
+ * Absent while it is lit, and from a server built before P12.T8.c (galaxy plan 12).
+ */
+cleared?: UniverseTime, };

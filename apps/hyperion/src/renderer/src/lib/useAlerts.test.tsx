@@ -57,7 +57,7 @@ async function opens(
   await settle();
 }
 
-describe("useAlerts (plan 12, P12.T12)", () => {
+describe("useAlerts (plan 12, P12.T12 and P12.T8.c)", () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -193,6 +193,56 @@ describe("useAlerts (plan 12, P12.T12)", () => {
 
     expect(result.current.census).toEqual([aCensusLine("complete")]);
     expect(result.current.contacts.map((contact) => contact.contact)).toEqual([1, 3]);
+  });
+
+  it("drops a contact a notification says has cleared, and shows it again once it is lit", async () => {
+    const { socket, result } = renderAlerts();
+    await opens(socket, 4, [aBearingContact(), aBearingContact({ contact: 3 })]);
+
+    act(() => {
+      socket.serverNotifies(
+        4,
+        alertsNotification(1, [aBearingContact({ cleared: universeTimeFromYears(0.6) })]),
+      );
+    });
+    expect(result.current.contacts.map((contact) => contact.contact)).toEqual([3]);
+
+    act(() => {
+      socket.serverNotifies(4, alertsNotification(2, [aBearingContact({ flux_w_m2: 9e-12 })]));
+    });
+    expect(result.current.contacts.map((contact) => [contact.contact, contact.flux_w_m2])).toEqual([
+      [1, 9e-12],
+      [3, 3.2e-12],
+    ]);
+  });
+
+  it("opens without the contacts that have cleared", async () => {
+    const { socket, result } = renderAlerts();
+    await opens(socket, 4, [
+      aBearingContact({ cleared: universeTimeFromYears(0.6) }),
+      aBearingContact({ contact: 3 }),
+    ]);
+
+    expect(result.current.contacts.map((contact) => contact.contact)).toEqual([3]);
+  });
+
+  it("forgets the acknowledgement in flight of a contact that clears", async () => {
+    const { socket, result } = renderAlerts();
+    await opens(socket, 4);
+
+    act(() => {
+      result.current.acknowledge(1);
+    });
+    expect(result.current.acknowledgements.get(1)).toEqual({ kind: "pending" });
+    act(() => {
+      socket.serverNotifies(
+        4,
+        alertsNotification(1, [aBearingContact({ cleared: universeTimeFromYears(0.6) })]),
+      );
+    });
+
+    expect(result.current.contacts).toEqual([]);
+    expect(result.current.acknowledgements.has(1)).toBe(false);
   });
 
   it("opens the subscription again after a gap in the numbering, stale meanwhile", async () => {

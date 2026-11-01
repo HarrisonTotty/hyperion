@@ -214,6 +214,7 @@ fn seen_dto(seen: &BearingContact, kind: TransientKindDto) -> BearingContactDto 
             DetectionPhase::InProgress => DetectionPhaseDto::InProgress,
         },
         acknowledged: seen.acknowledged() == Acknowledgement::Acknowledged,
+        cleared: seen.cleared().map(wire_time),
     }
 }
 

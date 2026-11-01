@@ -270,6 +270,12 @@ pub struct BearingContactDto {
     pub phase: DetectionPhaseDto,
     /// Whether the crew has acknowledged it; acknowledgement never hides it.
     pub acknowledged: bool,
+    /// When its light fell under the sensor's detection limit, the observer's time, if no sighting
+    /// has come since: its condition has cleared (Design note 11), and an alert list drops it.
+    /// Absent while it is lit, and from a server built before P12.T8.c (galaxy plan 12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleared: Option<UniverseTime>,
 }
 
 /// A resolved contact: a bearing's fields and the host's.
@@ -370,6 +376,7 @@ mod tests {
             band: AlertBandDto::V,
             phase: DetectionPhaseDto::Onset,
             acknowledged: false,
+            cleared: None,
         }
     }
 
@@ -519,6 +526,45 @@ mod tests {
         let mut wire = seen_json();
         wire["level"] = json!("resolved");
         wire["kind"] = json!("flare");
+        wire["host"] = json!("0200080020000000");
+        wire["designation"] = json!("Vorth AB-C e4-17");
+        wire["light_age_yr"] = json!(12.5);
+        wire["apparent_position"] = sun_json();
+        wire["present_position"] = sun_json();
+        wire["curvature_error_ly"] = json!(0.0);
+        assert_wire_form(&resolved, wire);
+    }
+
+    /// A cleared contact says when it cleared, at either level, and a lit one holds no `cleared`
+    /// key, so that a contact from a server built before the field reads as lit (P12.T8.c).
+    #[test]
+    fn a_cleared_contact_says_when_and_a_lit_one_holds_no_such_key() {
+        let cleared_at = UniverseTime {
+            seconds: 172_800,
+            nanos: 5,
+        };
+        let cleared = || BearingContactDto {
+            cleared: Some(cleared_at),
+            ..seen()
+        };
+        let mut bearing = seen_json();
+        bearing["level"] = json!("bearing");
+        assert!(bearing.get("cleared").is_none());
+        bearing["cleared"] = json!({ "seconds": 172_800, "nanos": 5 });
+        assert_wire_form(&ContactDto::Bearing(cleared()), bearing);
+
+        let resolved = ContactDto::Resolved(ResolvedContactDto {
+            seen: cleared(),
+            host: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+            designation: "Vorth AB-C e4-17".to_owned(),
+            light_age_yr: 12.5,
+            apparent_position: sun(),
+            present_position: sun(),
+            curvature_error_ly: 0.0,
+        });
+        let mut wire = seen_json();
+        wire["level"] = json!("resolved");
+        wire["cleared"] = json!({ "seconds": 172_800, "nanos": 5 });
         wire["host"] = json!("0200080020000000");
         wire["designation"] = json!("Vorth AB-C e4-17");
         wire["light_age_yr"] = json!(12.5);

@@ -6,13 +6,15 @@
 //! the scans its schedule asks for on the [`AlertScans`](super::AlertScans) and merges each in the
 //! order asked, empty if it failed; a class the census sends to the background is merged late,
 //! once its walk ends, and is `pending` until then (Design note 7). After each merge and each move
-//! of the observer, the pushes that fell due become sightings in the universe's Knowledge, each at
-//! its own time and its own light ([`Sighting::new`]): a detection's light at the limit's crossing,
-//! from its host's line as the walk read it. The contacts they changed, and the census when it
-//! changed, are pushed to the subscriber. A clear makes no sighting (P12.T8.c's). What it also
-//! pushes is a contact the subscriber acknowledges.
+//! of the observer, the pushes that fell due are recorded in the universe's Knowledge (P12.T8.c):
+//! a detect or a resolve as a sighting at its own time and its own light ([`Sighting::new`]), a
+//! detection's light at the limit's crossing from its host's line as the walk read it, and a clear
+//! as its contact's clear. The census is pushed to the subscriber when it changes. The contacts
+//! changed are pushed to every subscription of the universe, whichever's push or acknowledgement
+//! changed them: each reads the universe's `ChangedContacts` and pushes the contacts changed since
+//! it last looked, as a scene reads the surveys' revisions.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +31,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 use hyperion_sim::observe::{Drift, Observer, curvature_error, extrapolate_to_present, retarded};
 use hyperion_sim::time::UniverseTime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use super::scan::{LOCAL_EVENTS_STARS, ScanSpec};
 use super::service::Walked;
@@ -40,7 +42,7 @@ use crate::convert::{
     AlertsAsked, acknowledge_refusal, census_dto, contact_dto, open_contacts_refusal,
     pending_census,
 };
-use crate::knowledge::{ContactId, KnowledgeLevel, PersistedKnowledge, Sighting};
+use crate::knowledge::{ChangedContacts, ContactId, KnowledgeLevel, PersistedKnowledge, Sighting};
 use crate::requests::{openable_universe, request_error};
 use crate::subscriptions::{
     AlertsPush, PendingPush, Pusher, SubscriptionCommand, not_of_this_topic,
@@ -72,6 +74,10 @@ pub(crate) async fn open(
         .map_err(|error| open_contacts_refusal(&error))?;
     let key = opened.key();
     let galaxy = state.galaxies.get(key).await?;
+    // Looked at before the contacts are read, so that a change between is pushed again rather
+    // than missed.
+    let changes = contacts.changes();
+    let told = changes.borrow().clone();
     let known = known_contacts(&contacts);
     let (subscription, first) = Subscription::new(
         asked.observer,
@@ -93,6 +99,8 @@ pub(crate) async fn open(
         launched: 0,
         background: BTreeMap::new(),
         commands: pusher.take_commands(),
+        changes,
+        told,
         crew: Crew {
             galaxy,
             contacts,
@@ -142,6 +150,7 @@ enum Wake {
     Command(SubscriptionCommand),
     Scanned(Scanned),
     BackgroundWalked(BackgroundWalked),
+    ContactsChanged,
 }
 
 /// One alerts subscription's task: its schedule, its scans in flight, the census, and what it
@@ -165,6 +174,10 @@ struct Topic {
     /// census is complete when that one ends.
     background: BTreeMap<ClassId, u64>,
     commands: Option<mpsc::Receiver<SubscriptionCommand>>,
+    /// The universe's contacts changed, by any of its subscriptions.
+    changes: watch::Receiver<ChangedContacts>,
+    /// The changes this subscription has pushed.
+    told: ChangedContacts,
     crew: Crew,
 }
 
@@ -195,11 +208,15 @@ impl Topic {
                 Some(walked) = self.backgrounds.next(), if !self.backgrounds.is_empty() => {
                     Wake::BackgroundWalked(walked)
                 }
+                // The universe's Knowledge outlives every topic that holds it, so its sender
+                // never closes.
+                Ok(()) = self.changes.changed() => Wake::ContactsChanged,
             };
             match wake {
                 Wake::Command(command) => self.on_command(command).await,
                 Wake::Scanned(scanned) => self.on_scanned(scanned).await,
                 Wake::BackgroundWalked(walked) => self.on_background(walked).await,
+                Wake::ContactsChanged => self.push_changed(),
             }
         }
     }
@@ -215,6 +232,7 @@ impl Topic {
             }
             SubscriptionCommand::AlertsAcknowledge { contact, answer } => {
                 let acknowledged = self.crew.acknowledge(contact).await;
+                self.push_changed();
                 // As above: a cancelled request needs no answer.
                 let _ = answer.send(acknowledged);
             }
@@ -332,13 +350,21 @@ impl Topic {
             None => {}
         }
         let position = *self.subscription.schedule().position();
-        let changed = self.crew.record(&position, due).await;
-        let census = if census_changed {
-            self.census_dtos()
-        } else {
-            Vec::new()
-        };
-        self.crew.push(&changed, census);
+        self.crew.record(&position, due).await;
+        if census_changed {
+            self.crew.push(&[], self.census_dtos());
+        }
+        // This subscription's own changes go out with it, before its request is answered.
+        self.push_changed();
+    }
+
+    /// Pushes the contacts the universe changed since this subscription last looked, each as it
+    /// now stands.
+    fn push_changed(&mut self) {
+        let now = self.changes.borrow_and_update().clone();
+        let changed: Vec<ContactId> = now.since(&self.told).collect();
+        self.told = now;
+        self.crew.push(&changed, Vec::new());
     }
 
     /// Starts the interactive walk of `request`, merged when it ends.
@@ -404,30 +430,31 @@ impl Topic {
 }
 
 impl Crew {
-    /// Records each push of `due` that makes a sighting, in order, at `position`: the contacts
-    /// they changed.
-    async fn record(&self, position: &GalacticPosition, due: Vec<Push>) -> BTreeSet<ContactId> {
-        let mut changed = BTreeSet::new();
+    /// Records each push of `due` in order, at `position`: a detect or a resolve as a sighting at
+    /// its level ([`Crossing::level`](super::Crossing::level)), and a clear, which is no sighting,
+    /// as its contact's clear (Design note 11). The universe's `ChangedContacts` names the
+    /// contacts they changed.
+    async fn record(&self, position: &GalacticPosition, due: Vec<Push>) {
         for push in due {
-            // A clear is no sighting: P12.T8.c decides what it tells the crew.
-            let Some(level) = push.crossing().level() else {
-                continue;
+            let event = push.detection().event();
+            let recorded = match push.crossing().level() {
+                Some(level) => {
+                    let sighting = self.sighting(position, &push, level);
+                    self.contacts
+                        .record_sighting(event, sighting)
+                        .await
+                        .map(|_| ())
+                }
+                None => self
+                    .contacts
+                    .record_clear(event, push.at())
+                    .await
+                    .map(|_| ()),
             };
-            let sighting = self.sighting(position, &push, level);
-            match self
-                .contacts
-                .record_sighting(push.detection().event(), sighting)
-                .await
-            {
-                Ok(contact) => {
-                    changed.insert(contact);
-                }
-                Err(error) => {
-                    tracing::error!(%error, "an alert's sighting could not be recorded");
-                }
+            if let Err(error) = recorded {
+                tracing::error!(%error, crossing = ?push.crossing(), "an alert could not be recorded");
             }
         }
-        changed
     }
 
     /// The sighting `push` makes at `level`: the observer at `position`, the schedule's place, at
@@ -459,9 +486,9 @@ impl Crew {
         )
     }
 
-    /// Pushes the views of the contacts `changed`, and `census` unless it is empty, unless both
-    /// are.
-    fn push(&self, changed: &BTreeSet<ContactId>, census: Vec<ClassCensusDto>) {
+    /// Pushes the views of the contacts `changed`, in contact order, and `census` unless it is
+    /// empty, unless both are.
+    fn push(&self, changed: &[ContactId], census: Vec<ClassCensusDto>) {
         if changed.is_empty() && census.is_empty() {
             return;
         }
@@ -476,20 +503,14 @@ impl Crew {
             .push(PendingPush::Alerts(AlertsPush { contacts, census }));
     }
 
-    /// Acknowledges `contact` and, if that changed it, pushes it as it now stands.
+    /// Acknowledges `contact`: if that changed it, the universe's `ChangedContacts` names it, and
+    /// every subscription of the universe pushes it.
     async fn acknowledge(&self, contact: ContactId) -> Result<(), RequestError> {
-        let changed = self
-            .contacts
+        self.contacts
             .acknowledge(contact)
             .await
-            .map_err(|error| acknowledge_refusal(&error))?;
-        if changed && let Some(view) = self.contacts.read(|store| store.view(contact)) {
-            self.pusher.push(PendingPush::Alerts(AlertsPush {
-                contacts: vec![contact_dto(&view)],
-                census: Vec::new(),
-            }));
-        }
-        Ok(())
+            .map(drop)
+            .map_err(|error| acknowledge_refusal(&error))
     }
 }
 

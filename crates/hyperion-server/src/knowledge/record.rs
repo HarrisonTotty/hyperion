@@ -255,8 +255,9 @@ pub(crate) struct SightingParts {
 }
 
 /// Everything the server knows of one contact, keyed by its event inside the server: the event,
-/// every sighting in the order it was recorded, the highest level reached and whether it has been
-/// acknowledged (Design note 10).
+/// every sighting in the order it was recorded, the highest level reached, whether it has been
+/// acknowledged, and whether its light has fallen under the detection limit since its last
+/// sighting (Design notes 10 and 11).
 ///
 /// Nothing of it leaves the server except through
 /// [`KnowledgeStore::view`](super::KnowledgeStore::view), which degrades it to its level, and its
@@ -268,6 +269,9 @@ pub(crate) struct ContactRecord {
     sightings: Vec<Sighting>,
     level: KnowledgeLevel,
     acknowledged: Acknowledgement,
+    /// When its light fell under the detection limit, on the observer's clock, if no sighting has
+    /// been recorded since.
+    cleared: Option<UniverseTime>,
 }
 
 /// Whether the crew has acknowledged a contact. An acknowledged contact is still listed (Design
@@ -288,6 +292,7 @@ impl fmt::Debug for ContactRecord {
             .field("level", &self.level)
             .field("sightings", &self.sightings.len())
             .field("acknowledged", &self.acknowledged)
+            .field("cleared", &self.cleared)
             .finish_non_exhaustive()
     }
 }
@@ -302,13 +307,27 @@ impl ContactRecord {
             level: first.level(),
             sightings: vec![first],
             acknowledged: Acknowledgement::Pending,
+            cleared: None,
         }
     }
 
-    /// Adds a sighting; the level rises to the sighting's if that is higher, and never falls.
+    /// Adds a sighting; the level rises to the sighting's if that is higher, and never falls. A
+    /// cleared contact is lit again: its light rose back to the limit.
     pub(crate) fn add(&mut self, sighting: Sighting) {
         self.level = self.level.max(sighting.level());
         self.sightings.push(sighting);
+        self.cleared = None;
+    }
+
+    /// Marks the record cleared at `at`, the observer's time its light fell under the detection
+    /// limit, returning whether it was lit. A clear holds until the next sighting recorded,
+    /// whatever its time, so that a clock moved back past the clear lights the contact again.
+    pub(crate) fn clear(&mut self, at: UniverseTime) -> bool {
+        let lit = self.cleared.is_none();
+        if lit {
+            self.cleared = Some(at);
+        }
+        lit
     }
 
     /// Marks the record acknowledged, returning whether it was not already.
@@ -322,6 +341,12 @@ impl ContactRecord {
     #[must_use]
     pub(crate) const fn contact(&self) -> ContactId {
         self.contact
+    }
+
+    /// Whether its light has fallen under the detection limit since its last sighting.
+    #[must_use]
+    pub(crate) const fn is_cleared(&self) -> bool {
+        self.cleared.is_some()
     }
 
     /// The highest level reached.
@@ -360,6 +385,7 @@ impl ContactRecord {
             kind: latest.kind(),
             phase: latest.phase(),
             acknowledged: self.acknowledged,
+            cleared: self.cleared,
             sightings: self.sightings.len(),
         };
         match self.level {
@@ -422,6 +448,7 @@ pub struct BearingContact {
     kind: TransientKind,
     phase: DetectionPhase,
     acknowledged: Acknowledgement,
+    cleared: Option<UniverseTime>,
     sightings: usize,
 }
 
@@ -466,6 +493,13 @@ impl BearingContact {
     #[must_use]
     pub const fn acknowledged(&self) -> Acknowledgement {
         self.acknowledged
+    }
+
+    /// When its light fell under the sensor's detection limit, on the observer's clock, if no
+    /// sighting has been recorded since: its condition has cleared (Design note 11).
+    #[must_use]
+    pub const fn cleared(&self) -> Option<UniverseTime> {
+        self.cleared
     }
 
     /// How many sightings the contact has.

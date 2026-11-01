@@ -2992,3 +2992,15 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Rebased onto P12.T5.d (2026-11-01)._ The Type Ia's `OneShotClass` is T5.d's, on the new
     signature; `one_shot_scan_cell` reads `cell_events`. `ProductionAlertClasses` walks
     `STELLAR_MERGER` and `NEUTRON_STAR_MERGER` with `one_shot_detections`; neither is `Unwalked`.
+- **P12.T8.c as built (lane `p12-t8a`, 2026-11-01; `PROTOCOL_VERSION` 3, additive).** Built.
+  - _Names._ `KnowledgeStore::record_clear` and `PersistedKnowledge::record_clear(event, at)`,
+    written as a `cleared` line; `BearingContact::cleared()`; `PersistedKnowledge::changes()`, a
+    `watch` of `ChangedContacts` that every alerts subscription of the universe pushes from.
+  - _Wire._ `BearingContactDto.cleared` is optional and absent while a contact is lit.
+    `useAlerts` drops a cleared contact (`contactLit`); the alert list words `unwalked` as
+    `NOT WALKED`.
+  - _Leans (2026-11-01)._ A clear holds until the contact's next sighting is recorded, whatever its
+    time, and its level never falls. The `cleared` line joins format 1 with no bump: no file held a
+    sighting before T8.b.
+  - _For T12._ An acknowledgement, a sighting and a clear now reach every subscription of the
+    universe.
