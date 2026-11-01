@@ -32,6 +32,7 @@ import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
 import {
+  IMAGE_DETAIL_LIMITED,
   INSTRUMENT_RATE_HZ,
   photorealisticAllowed,
   type ViewBudget,
@@ -132,7 +133,8 @@ import {
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
-import { QUALITY_NAMES, type QualitySetting } from "../../view/quality/qualitySetting";
+import { renderViewport } from "../../view/photoreal/internalScale";
+import { QUALITY_NAMES, type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -142,6 +144,7 @@ import {
 import { ViewCanvas } from "./ViewCanvas";
 import {
   makeViewFrameDrawer,
+  presentedViewport,
   terrainReportOf,
   type ViewFrameDrawer,
   type ViewFrameInputs,
@@ -620,6 +623,13 @@ interface Published {
    * block's notes and fault lines.
    */
   readonly atmosphere: ViewAtmosphereShown;
+  /**
+   * Whether its last frame drew its photorealistic image below its quality setting's resolution,
+   * its internal scale stepped down by its frame-rate floor or by the resolution controller beside
+   * open instruments, which its label block states as `IMAGE: DETAIL LIMITED` (the owner's report,
+   * 2026-11-01).
+   */
+  readonly imageLimited: boolean;
 }
 
 /** The survey edges before the loop's first frame: none. */
@@ -839,6 +849,7 @@ function ViewStage({
     surveyEdges: NO_SURVEY_EDGES,
     contourIntervalM: null,
     atmosphere: NO_ATMOSPHERE_SHOWN,
+    imageLimited: false,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // What the label block's terrain lines are made from, its FRAME body's survey and the terrain
@@ -967,7 +978,13 @@ function ViewStage({
       instruments.slots.some((slot) => slot.id === spec.id && standingOf(slot.slot) === "stands"),
     ),
   ];
-  const budgets = viewBudgets(specs, setting);
+  // The primary's render resolution's rows, by which its photorealistic image alone takes its
+  // frame-rate floor (the owner's report, 2026-11-01).
+  const primaryRenderRowsPx =
+    size === null || size.heightPx <= 0
+      ? null
+      : renderViewport(presentedViewport(size), SETTINGS[setting].terrain.renderHeightPx).heightPx;
+  const budgets = viewBudgets(specs, setting, primaryRenderRowsPx);
   // While no view can be drawn both styles are held back, by the style panel and the key 4 alike,
   // whatever the adapter offers (decision-r07-t19b-exposure-fit, item 2).
   const drawing = engineState.kind === "ready" && !viewRefused;
@@ -1184,6 +1201,8 @@ function ViewStage({
     let drawnStyle: RenderStyle = "wireframe";
     // Whether the last frame drawn drew the photorealistic image, presented or held back.
     let imageDrawn = false;
+    // Whether that image was drawn below its setting's resolution (the owner's report).
+    let imageLimited = false;
     let sceneStars = false;
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
@@ -1444,6 +1463,7 @@ function ViewStage({
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           imageDrawn = drawn.drawnStyle === "photorealistic";
+          imageLimited = imageDrawn && renderScale < primaryBudget.renderScale;
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
@@ -1521,6 +1541,7 @@ function ViewStage({
             atmosphereReport === null
               ? NO_ATMOSPHERE_SHOWN
               : atmosphereShownOf(atmosphereReport, run.scene),
+          imageLimited: imageLimited && drawnStyle === "photorealistic",
         });
         setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
       } else if (grounds.due(inputs.slopeBaselineM)) {
@@ -1800,6 +1821,8 @@ function ViewStage({
   const primaryFolds = useReasonFolds();
   const primaryStatements: ReadonlyArray<LabelStatement> = [
     ...labelStatements(shown.run, primaryTerrain),
+    // After the terrain's annunciation, its own drawing's as this is (the owner's report).
+    ...(shown.imageLimited ? [IMAGE_DETAIL_LIMITED] : []),
     ...sceneStatements,
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
