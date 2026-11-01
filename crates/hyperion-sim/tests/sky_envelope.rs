@@ -5,8 +5,9 @@
 //! - `envelope_bounds_dense_tracks`: for 10⁴ masses drawn in each layer's band, at a metallicity
 //!   and a Reimers η drawn across the envelope's span (\[Fe/H\] −2.3 to +0.4, η within ±3.5σ), and
 //!   at ages drawn across 10⁴ years to 13.5 Gyr, no star is brighter in V than the envelope, and
-//!   none uses more than 0.1 mag of its 0.3 mag margin. It reads the checked-in table,
-//!   `tables::sky_envelope`, through `BrightnessEnvelope::build`.
+//!   none uses more than 0.1 mag of its 0.3 mag margin; nor does any of 2,000 helium-rich tracks
+//!   in each of A, B and C, old, at a helium excess to the envelope's largest node (R06.T16.a). It
+//!   reads the checked-in table, `tables::sky_envelope`, through `BrightnessEnvelope::build`.
 //! - `envelope_bounds_pair_states` (R06.T16.b): over 10⁴ realised multiple systems, a thousand of
 //!   each stellar layer near the Sun, where the thin disc holds young systems, and a thousand in
 //!   the old bulge, at the epoch and 900 years before it, no star of the pair-evolved
@@ -26,14 +27,15 @@
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::fields::ComponentId;
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::sky::envelope::{
-    BrightnessEnvelope, FE_H_NODES, MARGIN_MAG, SAMPLES_PER_PHASE, from_millimag, max_star_mass,
-    to_millimag,
+    BrightnessEnvelope, FE_H_NODES, HELIUM_EXCESS_NODES, MARGIN_MAG, SAMPLES_PER_PHASE,
+    from_millimag, max_star_mass, to_millimag,
 };
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Composition;
@@ -60,8 +62,7 @@ fn envelope_bounds_dense_tracks() {
     let component = galaxy.fields().component_ids().next().expect("a component");
     let mut lcg = Lcg::new(0x5e6_0006_b000_0001);
     let mut worst_use = f64::NEG_INFINITY;
-    let mut violations: std::collections::BTreeMap<String, (u32, f64, String)> =
-        std::collections::BTreeMap::new();
+    let mut violations = Violations::new();
     for band in [
         MassBand::BrownDwarf,
         MassBand::A,
@@ -137,12 +138,88 @@ fn envelope_bounds_dense_tracks() {
             }
         }
     }
+    helium_rich_tracks(&envelope, component, &mut worst_use, &mut violations);
     eprintln!(
         "the most margin used: {worst_use:.4} mag; {} violations",
         violations.len()
     );
     assert!(violations.is_empty(), "{violations:#?}");
 }
+
+/// The violations `envelope_bounds_dense_tracks` finds, by band and phase: their count, the most
+/// margin one uses and its star.
+type Violations = std::collections::BTreeMap<String, (u32, f64, String)>;
+
+/// `envelope_bounds_dense_tracks`' helium-rich tracks of globulars' later populations, the only
+/// stars with an excess (R06.T16.a): living stars of A, B and C, old, at a helium excess drawn to
+/// the envelope's largest node, each against `envelope` with `worst_use` and `violations` kept as
+/// the rest's. Under the identity table (to version 25) each is its composition's at no excess;
+/// under P15.T7.b's fit the envelope is built at helium-excess nodes too.
+fn helium_rich_tracks(
+    envelope: &BrightnessEnvelope,
+    component: ComponentId,
+    worst_use: &mut f64,
+    violations: &mut Violations,
+) {
+    let mut lcg = Lcg::new(0x5e6_0016_a000_0001);
+    let largest = HELIUM_EXCESS_NODES[HELIUM_EXCESS_NODES.len() - 1];
+    for band in [MassBand::A, MassBand::B, MassBand::C] {
+        let layer = Layer::from(band);
+        let (ln_lo, ln_hi) = (math::ln(band.lo()), math::ln(band.hi()));
+        for _ in 0..HELIUM_RICH_MASSES {
+            let m = math::exp(ln_lo + (ln_hi - ln_lo) * lcg.next_f64());
+            let fe_h = -2.3 + 2.3 * lcg.next_f64();
+            let dy = largest * lcg.next_f64();
+            let eta = -0.5 / 0.07 + (7.0 + 0.5 / 0.07) * lcg.next_f64();
+            let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(dy));
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                eta: StandardNormal::new(eta).expect("finite"),
+                ..StarDrawsParts::MEDIAN
+            });
+            let track = Track::to_age(
+                SolarMasses::new(m),
+                &composition,
+                &draws,
+                Years::new(1.35e10),
+            );
+            for _ in 0..AGES {
+                let age =
+                    math::exp(math::ln(1e9) + (math::ln(1.35e10) - math::ln(1e9)) * lcg.next_f64());
+                let state = track.state_at(Years::new(age));
+                let Some(v) = absolute_v_of_state(&state) else {
+                    continue;
+                };
+                let bound = envelope
+                    .brightest(
+                        layer,
+                        component,
+                        SolarMasses::new(m),
+                        (Years::new(age), Years::new(age)),
+                    )
+                    .map_or(f64::INFINITY, Magnitudes::value);
+                let used = (bound + MARGIN_MAG) - v.value();
+                *worst_use = worst_use.max(used);
+                if v.value() < bound || used > 0.1 {
+                    let entry = violations
+                        .entry(format!("{band:?} {:?} helium-rich", state.phase()))
+                        .or_insert((0, f64::NEG_INFINITY, String::new()));
+                    entry.0 += 1;
+                    if used > entry.1 {
+                        entry.1 = used;
+                        entry.2 = format!(
+                            "m {m} [Fe/H] {fe_h:.2} ΔY {dy:.3} η {eta:.2} age {age:.4e}: V {} \
+                         against {bound}",
+                            v.value()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Helium-rich masses per layer in `envelope_bounds_dense_tracks` (R06.T16.a).
+const HELIUM_RICH_MASSES: u32 = 2_000;
 
 /// Multiple systems per layer and place in `envelope_bounds_pair_states`.
 const MULTIPLES: u32 = 1_000;

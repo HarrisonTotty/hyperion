@@ -75,12 +75,35 @@ pub const MASS_NODES: usize = 192;
 /// 10⁻⁴, \[Fe/H\] ≈ −2.30, which −2.5 reads) to their metal-rich one (Z = 0.03, +0.18), every
 /// quarter dex. The tracks read nothing of a composition beyond its clamped Z and its helium
 /// excess, which the provisional `tables::helium` (P06.T17, the identity) leaves without effect,
-/// so these cover every star. When plan 15's P15.T7 fits that table, a helium-rich star reaches
-/// its giant phases earlier, and the fitted envelope (`hyperion-fit`'s `sky_envelope`) must be
-/// rebuilt with helium-excess nodes.
+/// so under its rules these cover every star. Under plan 15's fitted table (P15.T7.b,
+/// `tables::helium_26`) a helium-rich star reaches its giant phases earlier, and each is built at
+/// every helium excess of [`HELIUM_EXCESS_NODES`] too ([`helium_excess_nodes`]; R06.T16.a).
 pub const FE_H_NODES: [f64; 12] = [
     -2.5, -2.25, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.18,
 ];
+
+/// The helium excesses ΔY at which the envelope's tracks are also built under the fitted helium
+/// table (R06.T16.a; decision-p15-revalidation Q7): every 0.045 from 0.045 to the features'
+/// largest, `HELIUM_EXCESS_MAX` (0.18; Milone and Marino 2022), the only stars with an excess
+/// being the feature members of globulars' later populations. Under the identity table a helium-rich
+/// track is its composition's at no excess, so none is built ([`helium_excess_nodes`]).
+pub const HELIUM_EXCESS_NODES: [f64; 4] = [0.045, 0.09, 0.135, 0.18];
+
+/// The helium excesses the envelope's tracks are built at: nought and [`HELIUM_EXCESS_NODES`]
+/// under P15.T7.b's fitted table, which every version from 26 reads (its hold, `HELIUM_VERSION`,
+/// folded at 26; P06.T17's identity table before it built nought alone).
+#[must_use]
+pub(crate) const fn helium_excess_nodes() -> &'static [f64] {
+    /// Nought, then [`HELIUM_EXCESS_NODES`].
+    const FITTED: [f64; HELIUM_EXCESS_NODES.len() + 1] = [
+        0.0,
+        HELIUM_EXCESS_NODES[0],
+        HELIUM_EXCESS_NODES[1],
+        HELIUM_EXCESS_NODES[2],
+        HELIUM_EXCESS_NODES[3],
+    ];
+    &FITTED
+}
 
 /// The standard-normal draws of Reimers η (η = 0.5 + 0.07 z, plan 06's design note 7) at which
 /// the envelope's tracks are built: the physical extreme η = 0, no Reimers wind (z = −0.5 ÷ 0.07),
@@ -506,21 +529,72 @@ pub(crate) fn raw_node_under(
                 continue;
             }
         }
-        for &eta in &ETA_DRAWS {
-            let draws = StarDraws::from_parts(StarDrawsParts {
-                eta: StandardNormal::new(eta).expect("finite"),
-                ..StarDrawsParts::MEDIAN
-            });
-            let track = Track::to_age_with(
-                SolarMasses::new(m),
-                &composition,
-                &draws,
-                options,
-                Years::new(MAX_AGE_YEARS),
-            );
-            enter_track(&track, samples_per_phase, &mut bins);
+        // Only the tracks read a helium excess; nought is the composition's own.
+        for &dy in helium_excess_nodes() {
+            let composition = if dy > 0.0 {
+                Composition::from_fe_h(Dex::new(z), HeliumExcess::new(dy))
+            } else {
+                composition
+            };
+            enter_tracks(m, &composition, (samples_per_phase, options), &mut bins);
         }
     }
+    bins
+}
+
+/// Enters into `bins` the tracks of mass `m` at `composition`, one for each draw of
+/// [`ETA_DRAWS`], each phase cut into `samples_per_phase` parts, built with `options`.
+fn enter_tracks(
+    m: f64,
+    composition: &Composition,
+    (samples_per_phase, options): (u32, TrackOptions),
+    bins: &mut [f64; AGE_BINS + 1],
+) {
+    for &eta in &ETA_DRAWS {
+        let draws = StarDraws::from_parts(StarDrawsParts {
+            eta: StandardNormal::new(eta).expect("finite"),
+            ..StarDrawsParts::MEDIAN
+        });
+        let track = Track::to_age_with(
+            SolarMasses::new(m),
+            composition,
+            &draws,
+            options,
+            Years::new(MAX_AGE_YEARS),
+        );
+        enter_track(&track, samples_per_phase, bins);
+    }
+}
+
+/// The helium excesses the fitted envelope's tracks are built at under the generator version's
+/// rules ([`HELIUM_EXCESS_NODES`] and nought, from 26).
+#[doc(hidden)]
+#[must_use]
+pub fn helium_excess_nodes_in_force() -> &'static [f64] {
+    helium_excess_nodes()
+}
+
+/// The brightest absolute V per age bin, as [`raw_node`]'s before its spread, of the tracks of
+/// mass `m`, at least 0.1 M☉, at \[Fe/H\] `fe_h` and the helium excess `delta_y` alone, one for
+/// each draw of [`ETA_DRAWS`], under the generator version's rules: the fit's probe of a
+/// helium-rich track (R06.T16.a).
+///
+/// # Panics
+///
+/// If `m` is below 0.1 M☉, or `delta_y` is not a valid helium excess.
+#[doc(hidden)]
+#[must_use]
+pub fn raw_helium_node(
+    m: f64,
+    fe_h: f64,
+    delta_y: f64,
+    samples_per_phase: u32,
+) -> [f64; AGE_BINS + 1] {
+    assert!(m >= MIN_INITIAL_MASS.value(), "a track's mass, not {m} M☉");
+    let options = TrackOptions::default().with_rules(StellarRules::of_version(GENERATOR_VERSION));
+    let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(delta_y));
+    let mut bins = [f64::INFINITY; AGE_BINS + 1];
+    enter_tracks(m, &composition, (samples_per_phase, options), &mut bins);
     bins
 }
 

@@ -3136,7 +3136,8 @@ draft, and the owner's sign-off recorded in this plan.
       from the field and the members together (item 1's design).
 
     Acceptance: `cargo test -p hyperion-sim sky::census::features`, the member-cost bench of
-    item 2, and `just ci`.
+    item 2, and `just ci`. _Built 2026-11-01, in force wherever the galaxy's field gives up φ:
+    Risks, "R06.T16.a, as built", with the three items' leans._
 - **R06.T16.b Binaries (after P11.T6–T11; due now, after T8.e).** When plan 11 wires binary
   evolution into `SystemStars`, `max_star_mass` returns min(2 m₁, 150 M☉), the envelope's age
   range starts at zero, and the n × F₁ bound requires a system that cannot have interacted (Design
@@ -9942,3 +9943,31 @@ CensusCost)`.
     after it was last idle, and it is written as a job finishes, so none comes during one job.
   - A sky cancelled, superseded or whose connection closed logs "given up before its final reply"
     from a drop guard, since its aborted task never returns.
+- **R06.T16.a, re-validated alone at 3208734 and built (2026-11-01).**
+  - **Its hook.** A range query's `SystemHit` carries no member's velocity, composition or
+    multiplicity, and `SystemStars::generate` reads a density component, so the census reads
+    members through its own trait, `sky::census::SkySource::members_seen` (`MemberRecord`s, a
+    shell and a `MemberPart` at a time), which `FeatureMemberSource` implements;
+    `SkyContext::sources` is `&[&dyn SkySource]`. The centre's and the list's sources join at 27.
+  - **The switch.** `sky::census::takes_feature_members(galaxy)`, the galaxy's own `field_share`,
+    with no version of its own; the server's `SkyMembers::of` gives the census jobs the feature
+    caches there. The sightlines' `FeatureGas` stays on the server's `FEATURE_MEMBERS_FROM` gate.
+  - **Item 1, the band and the caps (lean, 2026-11-01).** They stay on the budget, the field and
+    the members' expectation together, so the members' light below the cut and beyond each cap
+    is in the band, and their counts in each `expected_beyond`, spread as the field's. Listed
+    members are kept within the band's boundary (`Completeness::radius_at`). A globular's
+    unresolved glow is not gathered at it: a follow-up with the centre's members.
+  - **Item 2, the cost (lean, 2026-11-01).** Members are always generated. Each shell's are one
+    job a worker, queued ahead of its slabs; a member is the shell's of its nearest possible star
+    (`layer_offset_bound`); a cone's census skips the members outside its plan's cone. Measured in
+    the outbox; a globular core's cost is a finding.
+  - **Item 3, helium (lean, 2026-11-01).** P15.T7.b's fit is on the tip behind `HELIUM_VERSION`
+    (26): the envelope's build takes `HELIUM_EXCESS_NODES` under its arm alone, the fit's
+    fingerprint gains helium-rich probes there, and the dense bound test helium-rich tracks. At
+    24–25 nothing moves; train 26's refit of `sky_envelope` takes them.
+  - **The tests' readings (lean, 2026-11-01).** Near the Sun one cluster of 2.2 × 10⁴ M☉ lists
+    345 of the 365 members' stars, so the count is held below by the budget's Poisson error and
+    above by its clumps' compound error. The globular is the one nearest 47 Tuc's central density
+    of at least its mass; the one nearest its mass alone lists 1.24 × 10⁵.
+  - **The label.** No client change: `feature_members` leaves `not_modelled` wherever the census
+    takes members, and `centre_members` stays where a census meets one, until 27.
