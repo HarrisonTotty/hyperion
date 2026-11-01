@@ -45,6 +45,7 @@ import {
   type MarchStep,
   SKY_WARP_COSINE,
   skyWarpOf,
+  towardCameraSplit,
 } from "./marchSteps";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
@@ -138,6 +139,25 @@ describe("marchSplit and marchStep", () => {
     expect(up[31]?.dtM).toBeCloseTo((63 * 100_000) / 32 ** 2, 6);
     const toGround = stepsOf(0, 100_000, 200_000, 32, true);
     expect(toGround[31]?.dtM).toBeCloseTo(100_000 / 32 ** 2, 6);
+  });
+
+  it("place a segment onto an envelope's floor from the camera, its count and sides unchanged (R08.T16.a.2)", () => {
+    // From orbit down to the floor: one-sided, t* at its end.
+    const toFloor = marchSplit(300_000, 1_090_000, 1_200_000, 36, false);
+    const placed = towardCameraSplit(toFloor);
+    expect(placed).toEqual({ ...toFloor, beforeTowardStart: true });
+    const steps = Array.from({ length: 36 }, (_, i) => marchStep(placed, i));
+    expect(steps[0]?.dtM).toBeCloseTo(790_000 / 36 ** 2, 6);
+    expect(steps[35]?.dtM).toBeCloseTo((71 * 790_000) / 36 ** 2, 6);
+    // Its pieces likewise, each from its end nearer the camera.
+    const pieces = marchPiecesSteps(marchPieces(placed, [-38_000]));
+    const boundaries = boundariesOf(pieces);
+    const cloud = pieces.filter(({ tM }) => tM > 1_090_000 - 38_000);
+    expect(cloud[0]?.dtM ?? Number.NaN).toBeLessThan(cloud.at(-1)?.dtM ?? Number.NaN);
+    expect(isBoundary(boundaries, 1_090_000 - 38_000)).toBe(true);
+    // A segment with no side before t* has nothing to turn.
+    const upward = marchSplit(0, 5_000, -1, 20, true);
+    expect(towardCameraSplit(upward)).toEqual(upward);
   });
 
   it("refuse fewer than 2 steps", () => {

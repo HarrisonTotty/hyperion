@@ -854,6 +854,11 @@ export interface DeckTables {
   readonly deckAltitudeM: number;
   /** The deck's floor, h\* in m. */
   readonly floorAltitudeM: number;
+  /**
+   * The split's floor ({@link DeckSplit.floor}): a deck over a surface's or an envelope's, whose
+   * rays onto the split the ray march steps from the camera (`deckRead.ts`, "An envelope's floor").
+   */
+  readonly floor: DeckFloor;
   /** J_ms over the upper medium, the deck its ground (`bake.ts`'s table, altitudes from the split). */
   readonly above: MsSourceTable;
   /** μ₀, ascending in [−1, 1]: the grid's, the rows below the horizontal among them. */
@@ -1004,6 +1009,7 @@ export interface DeckBinShare {
   readonly band: ThickBakeBand;
   readonly deckAltitudeM: number;
   readonly floorAltitudeM: number;
+  readonly floor: DeckFloor;
   readonly sunCosines: Float64Array;
   readonly viewCosines: Float64Array;
   readonly modes: number;
@@ -1262,6 +1268,7 @@ export function bakeDeckBins(
     band: geometry,
     deckAltitudeM: prepared.split.altitudeM,
     floorAltitudeM: prepared.floorAltitudeM,
+    floor: prepared.split.floor,
     sunCosines: grid.sunCosines.slice(),
     viewCosines: grid.upwardCosines.slice(),
     modes,
@@ -1286,7 +1293,7 @@ export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables 
   }
   const byBin: DeckBinPart[] = [];
   for (const share of shares) {
-    if ((share.below === null) !== (first.below === null)) {
+    if ((share.below === null) !== (first.below === null) || share.floor !== first.floor) {
       throw new RangeError("a deck's bin shares are over a surface and an envelope");
     }
     for (const part of share.bins) {
@@ -1348,6 +1355,7 @@ export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables 
     band: first.band,
     deckAltitudeM: first.deckAltitudeM,
     floorAltitudeM: first.floorAltitudeM,
+    floor: first.floor,
     above,
     sunCosines: first.sunCosines.slice(),
     viewCosines: first.viewCosines.slice(),

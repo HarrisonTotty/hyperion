@@ -54,12 +54,30 @@
  *
  * **The texture** is `rgba32uint`, a 2D array of one layer a band and light slot (layer
  * b × slots + k), each texel's first three words three `f32` values' bits (red, green, blue), the
- * fourth 0: {@link DECK_TABLE_WIDTH} texels across, eight cells of {@link DECK_TEXELS_A_CELL} a row,
+ * fourth 0 but the floor's word ({@link DECK_FLOOR_WORD}): {@link DECK_TABLE_WIDTH} texels across, eight cells of {@link DECK_TEXELS_A_CELL} a row,
  * cell v of row s at texels v × 26 … v × 26 + 25 (the eight ρᵐ − ρ_ssᵐ, the eight βρᵐ, the eight Dᵐ,
  * G and G_β), and the phase's 256 entries after the 46 rows, entry i at texel (i mod 208,
  * 46 + ⌊i ÷ 208⌋): 208 × 48 texels, 159,744 B a band and light. The values are `f32`, as the
  * texture's words hold them: the deck's table is read once a ray, not a step, so the half floats of
  * the thick table, and their least normal, do not arise.
+ *
+ * **An envelope's floor** (R08.T16.a.2; {@link PackedDeckTable.floor}). Above an envelope's floor
+ * lies τ(550) 10 of the upper medium by its rule (`regime.ts`'s `envelopeFloorM`), so a ray from
+ * above onto the floor gathers its light within the first optical depth or two of its own path,
+ * the cloud tops a low sun lights. R05.T12.e's placement steps its segment toward its lowest point,
+ * the floor, and leaves its coarsest steps where the light lies: on `giant-deck` split at its
+ * envelope floor, the NH₃ deck's τ 10 above the floor took seven of the march's 36 steps, the first
+ * 10.1 km and τ(544) 1.9 deep, and the march read the disc at μ₀ cos 85° in red at 0.855 of the
+ * reference, 0.938 at 64 times the steps (scratch probe, pod, 16 vCPU, 2026-11-01). So the ray
+ * march over an envelope's floor steps the side of such a ray before its lowest point from the
+ * camera (`marchSteps.ts`'s `towardCameraSplit`, the camera side's placement; `deckRead.wgsl`'s
+ * `deckFloorSplit`): at the setting's count it reads that disc at 0.931, within 0.8% of its march
+ * at 16 times the steps at every disc and limb view of the case (`reference/envelopeMarch.test.ts`),
+ * where the floor's placement missed by 8.9%. Over the hand Jupiter's stacked decks it takes the
+ * routed march's red at the setting's count from 17–31% under its converged value to 12–24%
+ * (phases 0° and 90° from 10⁹ m); that march converges only at 16 times the steps
+ * (`thick/discBakeJupiter.test.ts`). A deck over a surface keeps R05.T12.e's placement, its upper
+ * medium the air above the deck's top.
  *
  * **Below the deck** (R08.T15.b.2; {@link packBelowDeckTable}). Under a deck over a surface the
  * kernels read `deck.ts`'s `BelowDeckTable`, the whole column's plane-parallel field at the deck's
@@ -112,7 +130,7 @@ import {
 } from "../medium";
 import { type BodyGravity, gravityRatio, type SpheroidFigure } from "../oblate";
 import type { MsSourceTable } from "./bake";
-import type { DeckTables } from "./deck";
+import type { DeckFloor, DeckTables } from "./deck";
 import type { PolarisationTable } from "./polarisation";
 import {
   THICK_SOURCE_MODES,
@@ -148,6 +166,11 @@ export const DECK_TABLE_ROWS =
   DECK_PHASE_ROW + Math.ceil(DECK_TABLE_PHASE_ENTRIES / DECK_TABLE_WIDTH);
 /** The texture's format: four 32-bit words a texel, three `f32` values' bits and a 0. */
 export const DECK_TABLE_FORMAT = "rgba32uint";
+/**
+ * The floor's word, the fourth of each layer's first texel (the module's remarks, "An envelope's
+ * floor"): 1 where the deck lies over an envelope's floor, 0 over a surface's.
+ */
+export const DECK_FLOOR_WORD = 3;
 /** A layer's bytes as allocated, B: 208 × 48 texels × 16 B, 159,744. */
 export const DECK_LAYER_BYTES = DECK_TABLE_WIDTH * DECK_TABLE_ROWS * 16;
 
@@ -172,6 +195,11 @@ export interface PackedDeckTable {
   readonly bands: number;
   /** The deck's sky-lit radiance's modes, those past them held 0. */
   readonly diffuseModes: number;
+  /**
+   * The split's floor (`deck.ts`'s `DeckTables.floor`), held in every layer's
+   * {@link DECK_FLOOR_WORD}: an envelope's, whose rays onto it the ray march steps from the camera.
+   */
+  readonly floor: DeckFloor;
   /** Four words a texel, row-major in each layer, layer after layer. */
   readonly texels: Uint32Array;
 }
@@ -197,8 +225,8 @@ function viewCosineAt(v: number): number {
  *
  * @param bands - The deck's tables (`deck.ts`'s `bakeDeck`), one a latitude band in the body's
  *   order, each with the same light slots.
- * @throws RangeError for no band or no light slot, bands with other light slots or modes, a table
- *   off the grid ({@link THICK_SUN_COSINES} μ₀ at `read.ts`'s `thickSunCosineAt`, eight view
+ * @throws RangeError for no band or no light slot, bands with other light slots, modes or floors,
+ *   a table off the grid ({@link THICK_SUN_COSINES} μ₀ at `read.ts`'s `thickSunCosineAt`, eight view
  *   cosines at (v + ½) ÷ 8, {@link DECK_TABLE_MODES} modes, at most as many of the sky-lit radiance,
  *   {@link DECK_TABLE_PHASE_ENTRIES} phase entries), or a value that is not finite.
  */
@@ -215,6 +243,7 @@ export function packDeckTable(bands: ReadonlyArray<DeckTables>): PackedDeckTable
   for (const [b, band] of bands.entries()) {
     if (
       band.slots.length !== slots ||
+      band.floor !== first.floor ||
       band.modes !== DECK_TABLE_MODES ||
       band.diffuseModes !== diffuseModes ||
       diffuseModes > DECK_TABLE_MODES ||
@@ -243,6 +272,7 @@ export function packDeckTable(bands: ReadonlyArray<DeckTables>): PackedDeckTable
   for (const [b, band] of bands.entries()) {
     for (const [k, slot] of band.slots.entries()) {
       const base = (b * slots + k) * DECK_TABLE_WIDTH * DECK_TABLE_ROWS;
+      texels[base * 4 + DECK_FLOOR_WORD] = first.floor === "envelope" ? 1 : 0;
       for (let s = 0; s < THICK_SUN_COSINES; s += 1) {
         const mu0 = band.sunCosines[s] ?? Number.NaN;
         const sunSine = Math.sqrt(1 - mu0 * mu0);
@@ -306,6 +336,7 @@ export function packDeckTable(bands: ReadonlyArray<DeckTables>): PackedDeckTable
     slots,
     bands: bands.length,
     diffuseModes,
+    floor: first.floor,
     texels,
   };
 }

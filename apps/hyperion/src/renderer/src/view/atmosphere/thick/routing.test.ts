@@ -187,11 +187,14 @@ describe("deckRouted (R08.T15.b.2)", () => {
   };
   const both: DeckRouteRange = { ground: open, envelope: open };
 
-  it("routes nothing in the product: no deck gate passes", () => {
+  it("routes no deck over a surface in the product, and an envelope only within giant-deck's range", () => {
     expect([
       DECK_ROUTE_RANGE,
       REGIMES.flatMap((regime) => [deckRouted(regime, air, false), deckRouted(regime, air, true)]),
-    ]).toEqual([null, [false, false, false, false, false, false]]);
+    ]).toEqual([
+      { ground: null, envelope: ENVELOPE_ROUTE_RANGE },
+      [false, false, false, false, false, false],
+    ]);
   });
 
   it("routes cloudDeck alone under a test's open range, never thin nor thickScattering", () => {
@@ -278,11 +281,16 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     );
   });
 
-  it("keeps the route closed on the recorded verdict: the disc misses at p75 and p85", () => {
+  it("opens the route on the recorded verdict, every image passing (R08.T16.a.2's floor placement)", () => {
     expect([
       deckGatePasses(ENVELOPE_GATE_TALLIES),
       deckRouteRangeOf(ENVELOPE_GATE_TALLIES),
-    ]).toEqual([false, null]);
+      DECK_ROUTE_RANGE,
+    ]).toEqual([
+      true,
+      { ground: null, envelope: ENVELOPE_ROUTE_RANGE },
+      deckRouteRangeOf(ENVELOPE_GATE_TALLIES),
+    ]);
   });
 
   it("opens the envelope's route alone on a recorded pass, and routes giant-deck at its envelope floor", () => {

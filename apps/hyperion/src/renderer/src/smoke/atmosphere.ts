@@ -191,6 +191,7 @@ import {
 } from "../test/thickTables";
 import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
 import type { TwinThermal } from "../view/atmosphere/tablesCpu";
+import type { DeckFloor } from "../view/atmosphere/thick/deck";
 import {
   belowDeckSplitM,
   deckCorrectionAbove,
@@ -2156,6 +2157,8 @@ type ThickTwinTable =
       readonly kind: "deck";
       /** The deck's split, h\* in m over the body's own datum. */
       readonly deckAltitudeM: number;
+      /** Its floor: a surface's, or an envelope's, whose rays onto it the march steps from the camera. */
+      readonly floor: DeckFloor;
     };
 
 /**
@@ -2331,7 +2334,8 @@ const EARTH_DECK_ALTITUDE_M = 3_000;
  * `decision-r08-t6b-floor.md`), with the sky view and the aerial perspective over the thick table:
  * R05's Earth's upper medium over a deck 3 km up, on the deck's datum (one band), and the
  * Saturn-class air's over its NH₃-like deck's top, 0.5 bar (five slices, four bands), each over
- * {@link DECK_TWIN_FRAMES}, on high.
+ * {@link DECK_TWIN_FRAMES}, on high; and since R08.T16.a.2 the same Saturn-class air over an
+ * envelope's floor there, whose rays onto it the march steps from the camera.
  */
 export async function checkDeckFrameTwins(
   engine: RenderEngine,
@@ -2343,7 +2347,7 @@ export async function checkDeckFrameTwins(
   await checkThickTwinBodies(engine, checks, twins, [
     {
       name: "R05's Earth over a deck",
-      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M },
+      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M, floor: "ground" },
       medium: upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M),
       curves: NO_ABSORBER_CURVES,
       figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
@@ -2352,7 +2356,16 @@ export async function checkDeckFrameTwins(
     },
     {
       name: "the Saturn-class figure over its deck",
-      table: { kind: "deck", deckAltitudeM: saturnDeckM },
+      table: { kind: "deck", deckAltitudeM: saturnDeckM, floor: "ground" },
+      medium: upperMediumOf(saturnClassMedium(), saturnDeckM),
+      curves: NO_ABSORBER_CURVES,
+      figure: deckDatumOf(SATURN_SPHEROID, saturn.gravity, saturnDeckM),
+      gravity: saturn.gravity,
+      frames: DECK_TWIN_FRAMES,
+    },
+    {
+      name: "the Saturn-class figure over an envelope's floor",
+      table: { kind: "deck", deckAltitudeM: saturnDeckM, floor: "envelope" },
       medium: upperMediumOf(saturnClassMedium(), saturnDeckM),
       curves: NO_ABSORBER_CURVES,
       figure: deckDatumOf(SATURN_SPHEROID, saturn.gravity, saturnDeckM),
@@ -2531,7 +2544,13 @@ async function checkThickTwinBodies(
             table = "";
             break;
           case "deck":
-            withDeckTable(atmosphere.tables, body.curves.length, drawn.deckAltitudeM);
+            withDeckTable(
+              atmosphere.tables,
+              body.curves.length,
+              drawn.deckAltitudeM,
+              null,
+              drawn.floor,
+            );
             task = "R08.T15.a.2";
             table = ", over the deck";
             break;
@@ -3277,13 +3296,15 @@ export async function checkMarchOneBand(
  * in, one layer a band and light slot of `slots` (at least one): the deck's every series, G, G_β
  * and its phase in every texel of its read, and the march's bare ground read through them. With a
  * `column`, the whole medium as the kernels read it, the deck stands over a surface with the
- * pattern's table below it (R08.T15.b.2), its paths reading `column`'s depth and extinction.
+ * pattern's table below it (R08.T15.b.2), its paths reading `column`'s depth and extinction. Its
+ * `floor` is a surface's unless given (R08.T16.a.2).
  */
 export function withDeckTable(
   tables: AtmosphereTables,
   slots: number,
   deckAltitudeM: number,
   column: AtmosphereMedium | null = null,
+  floor: DeckFloor = "ground",
 ): void {
   const count = Math.max(1, slots);
   tables.setDeckTables(
@@ -3293,6 +3314,7 @@ export function withDeckTable(
       count,
       deckAltitudeM,
       column !== null,
+      floor,
     ),
     column,
   );

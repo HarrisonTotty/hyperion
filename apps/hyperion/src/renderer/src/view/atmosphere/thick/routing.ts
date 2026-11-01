@@ -9,10 +9,10 @@
  * recorded verdict passing with its named exceptions ({@link HAZE_GATE_TALLIES},
  * {@link HAZE_GATE_EXCEPTIONS}, R08.T14.d.4), which it does. A
  * `cloudDeck` world routes to its deck's bake only within the range its
- * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2), which none does yet: a gas
- * envelope's opens on `giant-deck`'s envelope variant alone, once its recorded verdict passes
- * ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2). Tests route by injection (`AtmosphereCache`'s
- * `routes`).
+ * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2): a gas envelope's, open on
+ * `giant-deck`'s envelope variant alone, whose recorded verdict passes since the march steps a ray
+ * onto an envelope's floor from the camera ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2); a deck over
+ * a surface's, none yet. Tests route by injection (`AtmosphereCache`'s `routes`).
  *
  * And whether it asks a world's polarisation correction (R08.T14.f; Design note 10): turned on with
  * the route ({@link CORRECTION_ROUTED}), for thin worlds and routed thick worlds alone (main, with
@@ -145,16 +145,17 @@ export interface GateImageTally {
  * `giant-deck`'s envelope variant's recorded verdict by image (R08.T16.a.2): `vectorGate.json`'s
  * `deck.asAnEnvelope.tallies.images`, the case split at its envelope floor (21,958 m) over a black
  * floor, through the route an envelope takes, held to the file by the test. Against the re-traced
- * reference (R08.T12.h's), 27 of its 30 values pass and 3 miss, on the disc at p75 (red, 0.92 of
- * the reference) and p85 (red and green, from 0.85), so the route stays closed
- * ({@link DECK_ROUTE_RANGE}).
+ * reference (R08.T12.h's) all 30 of its values pass, the disc at p85 in red the closest, 0.93 of
+ * the reference at 0.96 of the gate's edge, so the route opens ({@link DECK_ROUTE_RANGE}). It
+ * missed three on the disc at p75 and p85 (red from 0.85) until the march stepped a ray onto an
+ * envelope's floor from the camera (`thick/deckRead.ts`, "An envelope's floor").
  */
 export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
   { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "disc-p60", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "disc-p75", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
-  { image: "disc-p85", comparisons: 3, passes: 1, misses: 2, refusals: 0 },
+  { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "limb", comparisons: 15, passes: 15, misses: 0, refusals: 0 },
 ];
 
@@ -405,14 +406,15 @@ export function deckRouteRangeOf(
 }
 
 /**
- * The range the cloud-deck split's passing gates cover (R08.T15.b.2, R08.T16.a.2): none yet. No
- * deck case passes: the Venus-class cases' scalar gate refuses nearly every value below the deck at
- * their references' 1,024 samples, `giant-deck` below its split misses 42 of its twilight values
- * (s90, its plane-parallel table dark there), and its envelope variant misses 3 of its 30 values
- * on the disc ({@link ENVELOPE_GATE_TALLIES}). A `cloudDeck` world stays drawn by the analytic term
- * under `ATMOSPHERE: APPROXIMATE`, its deck's bake unasked. Routing a gas envelope changes its draw
- * path, so its opening also waits on the owner's RTX run of its frame against
- * `decision-r08-t11-frame.md`'s 16.67 ms.
+ * The range the cloud-deck split's passing gates cover (R08.T15.b.2, R08.T16.a.2): a gas
+ * envelope's, {@link ENVELOPE_ROUTE_RANGE}, since `giant-deck`'s envelope variant passes
+ * ({@link ENVELOPE_GATE_TALLIES}); a deck over a surface's, none. The Venus-class cases' scalar gate
+ * refuses nearly every value below the deck at their references' 1,024 samples, and `giant-deck`
+ * below its split misses 42 of its twilight values (s90, its plane-parallel table dark there), so a
+ * deck over a surface stays drawn by the analytic term under `ATMOSPHERE: APPROXIMATE`, its deck's
+ * bake unasked. Neither the hand nor the generated Jupiter lies within the envelope's range (its
+ * chromophore absorbs), so neither routes on it. A routed envelope's frame waits on the owner's RTX
+ * run against `decision-r08-t11-frame.md`'s 16.67 ms.
  */
 export const DECK_ROUTE_RANGE: DeckRouteRange | null = deckRouteRangeOf(ENVELOPE_GATE_TALLIES);
 

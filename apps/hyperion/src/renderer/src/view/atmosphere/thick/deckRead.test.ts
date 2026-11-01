@@ -13,6 +13,7 @@ import deckReadWgsl from "../shaders/deckRead.wgsl?raw";
 import { kernelMedium, type TablesBand } from "../tables";
 import { DECK_MODES, DECK_PHASE_U, type DeckTables } from "./deck";
 import {
+  DECK_FLOOR_WORD,
   DECK_LAYER_BYTES,
   DECK_PHASE_ROW,
   DECK_TABLE_MODES,
@@ -29,6 +30,7 @@ import {
   deckReadScratch,
   deckTableBytes,
   packDeckTable,
+  type PackedDeckTable,
   upperMediumOf,
 } from "./deckRead";
 import type { PolarisationTable } from "./polarisation";
@@ -94,6 +96,26 @@ function deckReadConstant(name: string): number {
 /** The patterned deck over the upper medium of {@link MEDIUM}, `slots` light slots. */
 function decks(bands: ReadonlyArray<TablesBand>, slots: number): DeckTables[] {
   return patternedDeckTables(bands, kernelMedium(upperMediumOf(MEDIUM, SPLIT_M)), slots, SPLIT_M);
+}
+
+/** `band` over an envelope's floor (R08.T16.a.2). */
+function asEnvelope(band: DeckTables): DeckTables {
+  return { ...band, floor: "envelope" };
+}
+
+/** Each layer's floor word of a packed table (R08.T16.a.2). */
+function floorWords(packed: PackedDeckTable): number[] {
+  const layerWords = packed.widthTexels * packed.heightTexels * 4;
+  return Array.from(
+    { length: packed.layers },
+    (_, layer) => packed.texels[layer * layerWords + DECK_FLOOR_WORD] ?? Number.NaN,
+  );
+}
+
+/** Every word of a packed table but its layers' floor words. */
+function otherWords(packed: PackedDeckTable): Uint32Array {
+  const layerWords = packed.widthTexels * packed.heightTexels * 4;
+  return packed.texels.filter((_, i) => i % layerWords !== DECK_FLOOR_WORD);
 }
 
 /** An array's entry, or a test failure. */
@@ -216,6 +238,17 @@ describe("the deck table's shape (R08.T15.a.2)", () => {
     expect(packed.texels.length).toBe((4 * DECK_LAYER_BYTES) / 4);
   });
 
+  it("holds an envelope's floor in every layer's floor word, and a surface's as 0 (R08.T16.a.2)", () => {
+    const ground = packDeckTable(decks(TWO_BANDS, 2));
+    const envelope = packDeckTable(decks(TWO_BANDS, 2).map(asEnvelope));
+    expect([ground.floor, envelope.floor]).toEqual(["ground", "envelope"]);
+    expect(floorWords(ground)).toEqual([0, 0, 0, 0]);
+    expect(floorWords(envelope)).toEqual([1, 1, 1, 1]);
+    // Every other word is the surface's deck's.
+    expect(otherWords(envelope)).toEqual(otherWords(ground));
+    expect(deckReadConstant("DECK_FLOOR_WORD")).toBe(DECK_FLOOR_WORD);
+  });
+
   it("refuses a table off the grid, of other slots, or not finite", () => {
     const [band] = decks(ONE_BAND, 1);
     if (band === undefined) {
@@ -228,6 +261,7 @@ describe("the deck table's shape (R08.T15.a.2)", () => {
       packDeckTable([{ ...band, sunCosines: band.sunCosines.filter((mu) => mu > 0) }]),
     ).toThrow(RangeError);
     expect(() => packDeckTable([band, other ?? band])).toThrow(RangeError);
+    expect(() => packDeckTable([band, asEnvelope(band)])).toThrow(RangeError);
     const slot = band.slots[0];
     if (slot === undefined) {
       throw new Error("a slot");

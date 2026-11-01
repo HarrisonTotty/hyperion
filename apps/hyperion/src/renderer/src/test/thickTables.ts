@@ -9,7 +9,12 @@
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { TablesBand } from "../view/atmosphere/tables";
 import type { MsSourceSlot, MsSourceTable } from "../view/atmosphere/thick/bake";
-import type { BelowDeckTable, DeckSlot, DeckTables } from "../view/atmosphere/thick/deck";
+import type {
+  BelowDeckTable,
+  DeckFloor,
+  DeckSlot,
+  DeckTables,
+} from "../view/atmosphere/thick/deck";
 import {
   BELOW_DECK_ALTITUDES,
   BELOW_DECK_MODES,
@@ -387,7 +392,8 @@ export function patternedBelowDeck(
  * {@link patternedThickBake}'s over `medium`, the upper medium as the kernels read it, its altitudes
  * from the split up. Its beam's rows below the horizontal hold 0, as a bake's do. With `below`, a
  * deck over a surface's, each band holds {@link patternedBelowDeck}'s table (R08.T15.b.2); else
- * none, as an envelope's.
+ * none, as an envelope's. Its `floor` is a surface's unless given (R08.T16.a.2: an envelope's floor
+ * steps the ray march's segments onto it from the camera).
  */
 export function patternedDeckTables(
   bands: ReadonlyArray<TablesBand>,
@@ -395,6 +401,7 @@ export function patternedDeckTables(
   slots: number,
   deckAltitudeM: number,
   below = false,
+  floor: DeckFloor = "ground",
 ): DeckTables[] {
   const above = patternedThickBake(bands, medium, slots);
   const { sunCosines } = patternGrid(medium);
@@ -459,6 +466,7 @@ export function patternedDeckTables(
       band: table.band,
       deckAltitudeM,
       floorAltitudeM: 0,
+      floor,
       above: { ...table, altitudesM: table.altitudesM.map((h) => h + deckAltitudeM) },
       sunCosines,
       viewCosines,

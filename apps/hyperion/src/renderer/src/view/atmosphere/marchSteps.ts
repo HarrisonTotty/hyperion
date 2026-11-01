@@ -185,6 +185,17 @@ export function marchSplit(
 }
 
 /**
+ * `split` with its side before t* placed toward the camera wherever it has one (plan R08,
+ * R08.T16.a.2; `deckRead.wgsl`'s `deckFloorSplit`): the ray march's segment onto an envelope's
+ * floor, which lies under τ(550) 10 of the upper medium, so that the ray's light is gathered within
+ * its first optical depths, where R05.T12.e's placement toward t* leaves its coarsest steps
+ * (`thick/deckRead.ts`, "An envelope's floor").
+ */
+export function towardCameraSplit(split: MarchSplit): MarchSplit {
+  return { ...split, beforeTowardStart: split.beforeTowardStart || split.beforeM > 0 };
+}
+
+/**
  * Step `i` of a split segment, counted from t_start. A side of length L and n steps placed toward
  * an end a has its boundaries at a ∓ L (k ÷ n)², k = 0…n, so its step k from a has its midpoint at
  * a ∓ L (k² + k + ½) ÷ n² and the length L (2k + 1) ÷ n².

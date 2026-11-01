@@ -6118,8 +6118,9 @@ Acceptance: `pnpm test`.
 
   _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built"). _The volatile decks'
   optics, T16.a.2's blocker, built 2026-10-31_ (Risks, "The volatile decks' optics, as built").
-  _T16.a.2 built 2026-11-01, its route closed until `giant-deck`'s re-trace passes_ (Risks,
-  "Deviations in T16.a.2, as built").
+  _T16.a.2 built 2026-11-01; its gate passes and its route is open over `giant-deck`'s envelope
+  range since its floor's march, 2026-11-01_ (Risks, "Deviations in T16.a.2, as built" and "The
+  envelope's disc edge, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -24557,3 +24558,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `mie.ts`: `mieSphere(…, scratch?)` and `mieScratch`.
   - `discBake.ts`: a view step holds its own terms; `decodedThickRead` takes `decodedReadScratch()`.
   - Left: the hand Jupiter's deck, and its disc table at 768 steps, over `BAKE_CEILING_S`.
+- **The envelope's disc edge, as built** (R08.T16.a.2, 2026-11-01; lane `giant-envelope-disc-edge`;
+  the diagnosis and its figures in the lane's outbox).
+  - _The march onto an envelope's floor_ (`thick/deckRead.ts`, "An envelope's floor"):
+    `DeckTables.floor` and `PackedDeckTable.floor` (word `DECK_FLOOR_WORD` of each layer's first
+    texel); `deckRead.wgsl`'s `deckFloorSplit`, `DECK_READ`'s third line, and the twin's
+    `towardCameraSplit` step the side before t* of a ray ending on the floor from the camera.
+  - _The gate_: `deck.asAnEnvelope` 30 pass (disc-p85 red 0.93, 0.96 of the edge); every other
+    section of `vectorGate.json` is unchanged. `DECK_ROUTE_RANGE` opens its `envelope` floor on
+    `ENVELOPE_ROUTE_RANGE`; the hand and generated Jupiters stay outside it (their chromophore).
+  - _The hand Jupiter_: its routed march at 36 samples now reads red 12–24% under its converged
+    value (17–31% before); it converges only at 16×, which `discBakeJupiter.test.ts` now takes, its
+    step at the switch pinned at −2.4% to +29.6%. Its stacked decks want more steps before it routes.
+  - _Left_: the sky view and aerial perspective from inside an envelope keep R05.T12.e's placement;
+    the J rows near a cloud top (a finding). Pending, the owner's RTX run of a routed envelope.

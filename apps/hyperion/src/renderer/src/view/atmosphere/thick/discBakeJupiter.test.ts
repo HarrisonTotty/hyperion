@@ -5,8 +5,9 @@
  *
  * @remarks
  * The deck's preparation and its three bands' bakes take about 80 s on a pod, and the table's and
- * the twins' as long again. The product's read path stays shut while the giant's route is closed
- * (`thick/routing.ts`'s `DECK_ROUTE_RANGE`): this is the table it reads once the gate opens.
+ * the twins' as long again. The product's read path stays shut while the hand Jupiter lies outside
+ * the envelope's route (`thick/routing.ts`'s `DECK_ROUTE_RANGE`): this is the table it reads once
+ * a gate covering it passes.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -108,11 +109,13 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
 
   for (const phaseDeg of [0, 90]) {
     it.skipIf(!SLOW)(
-      `agrees with the routed march to 5% from 10⁹ m at a phase of ${phaseDeg}°, converged at eight times the high setting's samples; the product's own counts as measured`,
+      `agrees with the routed march to 5% from 10⁹ m at a phase of ${phaseDeg}°, converged at sixteen times the high setting's samples; the product's own counts as measured`,
       () => {
         const { jupiter: item, baked: table, twins: passes } = built();
+        // Sixteen, since the march steps a ray onto the floor from the camera (R08.T16.a.2): at
+        // eight its red reads 4–8% dark, at sixteen and thirty-two within 0.5% of each other.
         const converged = integratedRadianceAt(item, table, passes, phaseDeg, {
-          marchScale: 8,
+          marchScale: 16,
           radii: 60,
           azimuths: 16,
         });
@@ -120,11 +123,12 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
         for (const c of [0, 1, 2] as const) {
           expect(Math.abs(converged.disc[c] / converged.routed[c] - 1)).toBeLessThan(0.05);
           // At the high setting's 36 samples the march under-resolves the decks above the floor,
-          // its red 15–27% dark: pinned as measured (+0.5% to +42.5%, red at 90° the most), the
-          // step a routed giant would show at the switch (plan R08's record of T16.b.2).
+          // its red 8–18% dark since it steps a ray onto the floor from the camera (15–27% before,
+          // R08.T16.a.2): pinned as measured (−2.4% to +29.6%, red at 90° the most), the step a
+          // routed giant would show at the switch (plan R08's records of T16.b.2 and T16.a.2).
           const step = product.disc[c] / product.routed[c] - 1;
           expect(step).toBeGreaterThan(-0.05);
-          expect(step).toBeLessThan(0.45);
+          expect(step).toBeLessThan(0.3);
         }
       },
       LIMIT_MS,

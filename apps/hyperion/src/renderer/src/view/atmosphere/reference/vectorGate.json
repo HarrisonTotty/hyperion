@@ -3741,58 +3741,58 @@
       "tallies": {
         "all": {
           "comparisons": 30,
-          "passes": 27,
-          "misses": 3,
+          "passes": 30,
+          "misses": 0,
           "refusals": 0,
-          "worstRatio": 2.015591,
+          "worstRatio": 0.9585894,
           "worstAt": "disc-p85/r",
-          "missed": ["disc-p75/r", "disc-p85/rg"]
+          "missed": []
         },
         "images": [
-          ["disc-p0", 3, 3, 0, 0, 0.06742528, "disc-p0", "r"],
-          ["disc-p30", 3, 3, 0, 0, 0.2851596, "disc-p30", "g"],
-          ["disc-p60", 3, 3, 0, 0, 0.1539446, "disc-p60", "r"],
-          ["disc-p75", 3, 2, 1, 0, 1.067, "disc-p75", "r"],
-          ["disc-p85", 3, 1, 2, 0, 2.015591, "disc-p85", "r"],
+          ["disc-p0", 3, 3, 0, 0, 0.2969306, "disc-p0", "r"],
+          ["disc-p30", 3, 3, 0, 0, 0.09449096, "disc-p30", "g"],
+          ["disc-p60", 3, 3, 0, 0, 0.1184012, "disc-p60", "g"],
+          ["disc-p75", 3, 3, 0, 0, 0.1591861, "disc-p75", "r"],
+          ["disc-p85", 3, 3, 0, 0, 0.9585894, "disc-p85", "r"],
           ["limb", 15, 15, 0, 0, 0.7677756, "limb-10H", "r"]
         ]
       },
       "ratios": [
-        ["disc-p0", 0.9952287, "disc-p0/r", 1.003251, "disc-p0/g"],
-        ["disc-p30", 1.005949, "disc-p30/b", 1.020251, "disc-p30/g"],
-        ["disc-p60", 0.9891296, "disc-p60/r", 1.003103, "disc-p60/b"],
-        ["disc-p75", 0.9245849, "disc-p75/r", 0.974347, "disc-p75/b"],
-        ["disc-p85", 0.854892, "disc-p85/r", 0.9917136, "disc-p85/b"],
-        ["limb", 1.010322, "limb-0.1H/b", 1.054036, "limb-10H/r"]
+        ["disc-p0", 0.9789882, "disc-p0/r", 0.987117, "disc-p0/g"],
+        ["disc-p30", 0.9944557, "disc-p30/b", 1.006711, "disc-p30/g"],
+        ["disc-p60", 0.9986945, "disc-p60/r", 1.008303, "disc-p60/g"],
+        ["disc-p75", 0.9887488, "disc-p75/r", 1.006953, "disc-p75/b"],
+        ["disc-p85", 0.9309884, "disc-p85/r", 1.021243, "disc-p85/b"],
+        ["limb", 1.00923, "limb-0.1H/b", 1.054036, "limb-10H/r"]
       ]
     },
     "envelopeFloorAtOne": {
       "tallies": {
         "all": {
           "comparisons": 30,
-          "passes": 1,
-          "misses": 29,
+          "passes": 0,
+          "misses": 30,
           "refusals": 0,
-          "worstRatio": 5.190034,
-          "worstAt": "disc-p0/g",
-          "missed": ["disc-p0/rgb", "disc-p30/rgb", "disc-p60/rgb", "disc-p75/rgb", "disc-p85/gb", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb"]
+          "worstRatio": 4.812277,
+          "worstAt": "disc-p30/g",
+          "missed": ["disc-p0/rgb", "disc-p30/rgb", "disc-p60/rgb", "disc-p75/rgb", "disc-p85/rgb", "limb-0.1H/rgb", "limb-0.3H/rgb", "limb-1H/rgb", "limb-3H/rgb", "limb-10H/rgb"]
         },
         "images": [
-          ["disc-p0", 3, 0, 3, 0, 5.190034, "disc-p0", "g"],
-          ["disc-p30", 3, 0, 3, 0, 5.167132, "disc-p30", "g"],
-          ["disc-p60", 3, 0, 3, 0, 4.069718, "disc-p60", "b"],
-          ["disc-p75", 3, 0, 3, 0, 3.086226, "disc-p75", "b"],
-          ["disc-p85", 3, 1, 2, 0, 2.932229, "disc-p85", "b"],
+          ["disc-p0", 3, 0, 3, 0, 4.801717, "disc-p0", "b"],
+          ["disc-p30", 3, 0, 3, 0, 4.812277, "disc-p30", "g"],
+          ["disc-p60", 3, 0, 3, 0, 4.005778, "disc-p60", "b"],
+          ["disc-p75", 3, 0, 3, 0, 3.459308, "disc-p75", "b"],
+          ["disc-p85", 3, 0, 3, 0, 3.272429, "disc-p85", "b"],
           ["limb", 15, 0, 15, 0, 1.986716, "limb-10H", "b"]
         ]
       },
       "ratios": [
-        ["disc-p0", 1.300435, "disc-p0/r", 1.368124, "disc-p0/g"],
-        ["disc-p30", 1.296998, "disc-p30/r", 1.366958, "disc-p30/g"],
-        ["disc-p60", 1.214923, "disc-p60/r", 1.277991, "disc-p60/b"],
-        ["disc-p75", 1.115887, "disc-p75/r", 1.205654, "disc-p75/b"],
-        ["disc-p85", 1.024733, "disc-p85/r", 1.19546, "disc-p85/b"],
-        ["limb", 1.09684, "limb-3H/r", 1.13861, "limb-10H/b"]
+        ["disc-p0", 1.273737, "disc-p0/r", 1.339939, "disc-p0/g"],
+        ["disc-p30", 1.274102, "disc-p30/r", 1.341757, "disc-p30/g"],
+        ["disc-p60", 1.216777, "disc-p60/r", 1.273623, "disc-p60/b"],
+        ["disc-p75", 1.173756, "disc-p75/r", 1.230514, "disc-p75/b"],
+        ["disc-p85", 1.095182, "disc-p85/r", 1.218137, "disc-p85/b"],
+        ["limb", 1.093236, "limb-0.3H/r", 1.13861, "limb-10H/b"]
       ]
     },
     "floorCoAlbedo": [0.00184731, 0.0002563264, -0.00005306948],
@@ -4158,45 +4158,45 @@
         ["case/surfaceShare/giant-deck/limb-10H", 0, 0, 0]
       ],
       "as an envelope": [
-        ["case/radiance/giant-deck/disc-p0", 32925.47, 32371.54, 32037.6],
+        ["case/radiance/giant-deck/disc-p0", 32388.18, 31850.96, 31582.24],
         ["case/surfaceShare/giant-deck/disc-p0", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p30", 28758.93, 28242.03, 27821.85],
+        ["case/radiance/giant-deck/disc-p30", 28371.82, 27867.2, 27503.98],
         ["case/surfaceShare/giant-deck/disc-p30", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p60", 15395.15, 15197.81, 14926.43],
+        ["case/radiance/giant-deck/disc-p60", 15544.02, 15301.89, 14999.28],
         ["case/surfaceShare/giant-deck/disc-p60", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p75", 6643.391, 6789.459, 6898.069],
+        ["case/radiance/giant-deck/disc-p75", 7104.426, 7158.824, 7128.908],
         ["case/surfaceShare/giant-deck/disc-p75", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p85", 1767.98, 2046.21, 2257.279],
+        ["case/radiance/giant-deck/disc-p85", 1925.353, 2168.537, 2324.493],
         ["case/surfaceShare/giant-deck/disc-p85", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-0.1H", 15363.7, 17289.39, 17062.99],
+        ["case/radiance/giant-deck/limb-0.1H", 15277.21, 17206.27, 17044.55],
         ["case/surfaceShare/giant-deck/limb-0.1H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-0.3H", 15235.74, 17256.98, 17056.6],
+        ["case/radiance/giant-deck/limb-0.3H", 15161.27, 17184.13, 17040.08],
         ["case/surfaceShare/giant-deck/limb-0.3H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-1H", 14672.05, 17086.41, 17024.19],
+        ["case/radiance/giant-deck/limb-1H", 14620.59, 17040.26, 17017.31],
         ["case/surfaceShare/giant-deck/limb-1H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-3H", 11160.86, 14784.03, 16423.37],
+        ["case/radiance/giant-deck/limb-3H", 11159.17, 14783.29, 16423.72],
         ["case/surfaceShare/giant-deck/limb-3H", 0, 0, 0],
         ["case/radiance/giant-deck/limb-10H", 257.6046, 488.7483, 1165.792],
         ["case/surfaceShare/giant-deck/limb-10H", 0, 0, 0]
       ],
       "as an envelope, floor at 1": [
-        ["case/radiance/giant-deck/disc-p0", 43022.72, 44144.77, 43631.74],
+        ["case/radiance/giant-deck/disc-p0", 42139.46, 43235.34, 42790.99],
         ["case/surfaceShare/giant-deck/disc-p0", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p30", 36944.52, 37839.36, 37274.41],
+        ["case/radiance/giant-deck/disc-p30", 36292.32, 37141.76, 36639.05],
         ["case/surfaceShare/giant-deck/disc-p30", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p60", 18909.48, 19333.5, 19016.82],
+        ["case/radiance/giant-deck/disc-p60", 18938.33, 19303.41, 18951.83],
         ["case/surfaceShare/giant-deck/disc-p60", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p75", 8017.946, 8433.969, 8535.647],
+        ["case/radiance/giant-deck/disc-p75", 8433.756, 8748.697, 8711.653],
         ["case/surfaceShare/giant-deck/disc-p75", 0, 0, 0],
-        ["case/radiance/giant-deck/disc-p85", 2119.223, 2491.926, 2721.034],
+        ["case/radiance/giant-deck/disc-p85", 2264.917, 2599.623, 2772.651],
         ["case/surfaceShare/giant-deck/disc-p85", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-0.1H", 16633.4, 18938.7, 18654.02],
+        ["case/radiance/giant-deck/limb-0.1H", 16465.02, 18793.79, 18626.78],
         ["case/surfaceShare/giant-deck/limb-0.1H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-0.3H", 16495.66, 18898.12, 18641.91],
+        ["case/radiance/giant-deck/limb-0.3H", 16352.62, 18773.12, 18617.88],
         ["case/surfaceShare/giant-deck/limb-0.3H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-1H", 15832.17, 18659.77, 18585.31],
+        ["case/radiance/giant-deck/limb-1H", 15732.59, 18578.65, 18574.72],
         ["case/surfaceShare/giant-deck/limb-1H", 0, 0, 0],
-        ["case/radiance/giant-deck/limb-3H", 11944, 16042.93, 17872.45],
+        ["case/radiance/giant-deck/limb-3H", 11940.11, 16040.85, 17872.8],
         ["case/surfaceShare/giant-deck/limb-3H", 0, 0, 0],
         ["case/radiance/giant-deck/limb-10H", 274.202, 527.8745, 1262.079],
         ["case/surfaceShare/giant-deck/limb-10H", 0, 0, 0]

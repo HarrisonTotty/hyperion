@@ -141,6 +141,7 @@ import {
   marchStep,
   type MarchStep,
   skyWarpOf,
+  towardCameraSplit,
 } from "./marchSteps";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
@@ -2357,6 +2358,8 @@ function crossingsFromLowestM(
  *
  * @param samples - The steps, an integer of at least 2.
  * @param edgesM - The marches' layer edges, m ({@link mediumMarchEdgesM}).
+ * @param towardCamera - Whether the side before t* is placed toward the camera, as the ray march
+ *   places a segment onto an envelope's floor (`marchSteps.ts`'s `towardCameraSplit`, R08.T16.a.2).
  * @throws RangeError from `marchSplit` for fewer than 2 steps.
  */
 export function rayPieces(
@@ -2364,11 +2367,13 @@ export function rayPieces(
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
+  towardCamera = false,
 ): MarchPieces {
   const o = ray.originM;
   const d = ray.direction;
   const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
-  const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
+  const placed = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
+  const split = towardCamera ? towardCameraSplit(placed) : placed;
   return marchPieces(split, crossingsFromLowestM(ray, split.lowestM, edgesM, geometry));
 }
 
@@ -2376,7 +2381,7 @@ export function rayPieces(
  * A per-frame march's steps as the kernels place them since R08.T6.i: {@link rayPieces}' segment,
  * stepped piece by piece (`marchSteps.ts`'s `marchPiecesSteps`); the ray march's two-sided sky
  * segments, inside the air or outside it, under the sun-aware warp by their sun over the same pieces
- * (`marchEvenSteps`, R08.T8).
+ * (`marchEvenSteps`, R08.T8); with `towardCamera`, as {@link rayPieces} takes it.
  *
  * @throws RangeError as {@link rayPieces}, and for a two-sided sky segment given without its sun.
  */
@@ -2385,8 +2390,9 @@ export function piecedSteps(
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
+  towardCamera = false,
 ): MarchStep[] {
-  const pieces = rayPieces(ray, samples, edgesM, geometry);
+  const pieces = rayPieces(ray, samples, edgesM, geometry, towardCamera);
   const warp = skyWarpOfSegment(ray, pieces.split);
   if (warp !== null) {
     return marchEvenSteps(pieces.split, pieces.fromLowestM, warp);
@@ -4106,7 +4112,11 @@ function rayMarchTexelInto(
   }
   const samples = marchSamplesOf(kind, depthG, context.samples, edgesM.length, depthSteps);
   const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray);
-  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry)) {
+  // A segment onto an envelope's floor is stepped from the camera (R08.T16.a.2), as
+  // `deckRead.wgsl`'s `deckFloorSplit` steps it.
+  const onFloor = datumHitM !== null && datumHitM <= ray.tEndM;
+  const towardCamera = onFloor && context.deck?.table.floor === "envelope";
+  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry, towardCamera)) {
     marcher.step(tM, dtM);
   }
   const luminance = marcher.luminance;

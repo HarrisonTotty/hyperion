@@ -135,7 +135,8 @@
  *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
  * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
- * routes none while no deck gate passes: `DECK_ROUTE_RANGE`, R08.T15.b.2) is drawn over its deck:
+ * routes a gas envelope within `giant-deck`'s range alone: `DECK_ROUTE_RANGE`, R08.T16.a.2) is
+ * drawn over its deck:
  * its tables are made of its upper medium on the deck's datum (`thick/deckRead.ts`'s
  * `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick bake's place, every band
  * in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own figure, its split the regime's
@@ -527,7 +528,7 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
    * takes its thick bake (R08.T14.c) or its deck's (R08.T15.b.2): `thick/routing.ts`'s
    * `thickBakeRouted` or `deckRouted` if absent, which route a `thickScattering` world within the
    * range its gates pass over (R08.T14.d.4) and a `cloudDeck` world within its deck gates' range,
-   * none yet (`DECK_ROUTE_RANGE`); a test's routing otherwise.
+   * a gas envelope's alone (`DECK_ROUTE_RANGE`); a test's routing otherwise.
    */
   readonly routes?: (
     regime: AtmosphereRegime,

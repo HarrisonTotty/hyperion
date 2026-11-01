@@ -166,6 +166,7 @@ function deckShareOf(bins: ReadonlyArray<number>): DeckBinShare {
     band: above.band,
     deckAltitudeM: 3_000,
     floorAltitudeM: 0,
+    floor: "envelope",
     sunCosines: new Float64Array(46),
     viewCosines: new Float64Array(8),
     modes: 8,
