@@ -3,7 +3,7 @@
  * drawn photorealistically as a kept scene of its served records, and closed back to the scene
  * shown before.
  */
-import { galacticPositionFromLy } from "@hyperion/protocol";
+import { galacticPositionFromLy, type SurfaceRevisionDto } from "@hyperion/protocol";
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,8 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
+import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
+import type { TerrainSession } from "../../view/terrain/session";
 import { type InspectionOpening, inspectionOption } from "./ViewSceneProvider";
 
 afterEach(() => {
@@ -28,8 +30,11 @@ afterEach(() => {
 /** The fixture's system's designation of record. */
 const DESIGNATION = "H7K 4C0RFZ D-7";
 
+/** The survey of the slice's Earth as the server records it: its third pass. */
+const RECORDED: InspectionSurvey = { kind: "recorded", body: FIXTURE_EARTH, level: 8, revision: 3 };
+
 /** The slice's Earth's inspection, opened once, as `SYSTEM`'s `VIEW BODY` opens it. */
-function earthOpening(): InspectionOpening {
+function earthOpening(survey: InspectionSurvey = RECORDED): InspectionOpening {
   const result = toSystemBodiesModel(sliceBodies(), DESIGNATION);
   if (result.kind !== "ok") {
     throw new Error(`the slice's answer is unusable: ${result.fault}`);
@@ -49,17 +54,21 @@ function earthOpening(): InspectionOpening {
       time: { seconds: 3_600, nanos: 0 },
     }),
     sequence: 1,
+    survey: Promise.resolve(survey),
   };
 }
 
 /** `VIEW` mounted on the Earth's inspection, its engine made and its first frames drawn. */
-async function inspecting(): Promise<ViewDisplayHarness> {
+async function inspecting(
+  watchTerrain?: (session: TerrainSession) => () => void,
+): Promise<ViewDisplayHarness> {
   const fake = timedEngineSource();
   const view = renderViewDisplay({
     store: await nominalStore(),
     source: fake.source,
     engines: fake.engines,
     inspection: earthOpening(),
+    ...(watchTerrain === undefined ? {} : { watchTerrain }),
   });
   await settle();
   // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
@@ -104,6 +113,18 @@ describe("VIEW's body inspection (the owner's request)", () => {
         .requestsOfKind("sky")
         .some((request) => request.body.exclude_system === FIXTURE_SYSTEM),
     ).toBe(true);
+  });
+
+  it("tells its terrain session the revision of its body's survey once the server records it", async () => {
+    const noted: Array<ReadonlyArray<SurfaceRevisionDto>> = [];
+    await inspecting((session) => {
+      vi.spyOn(session, "noteSurfaceRevisions").mockImplementation((revisions) => {
+        noted.push(revisions);
+      });
+      return () => undefined;
+    });
+
+    expect(noted).toEqual([[{ body: FIXTURE_EARTH, revision: 3 }]]);
   });
 
   it("gives the focus to the scene shown when its CLOSE goes with it", async () => {

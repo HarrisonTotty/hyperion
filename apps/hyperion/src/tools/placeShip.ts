@@ -28,10 +28,11 @@
  *
  * With `--survey <SOURCE> <RESOLUTION_M>` (plan R10, R10.T16.d; decision-r10-live-path, gap G3),
  * it then records one R09 `survey_pass` over the target body: every cell of its coarse field, one
- * run at the level the server finds from the body's figure ({@link coarseLevel} of `body_detail`'s
- * ∛(a² c)), at the placement's time, so that a served world can be surveyed by hand once the serve
- * gate opens and `VIEW` has its surveyed ground to draw. Nothing else in the client sends it: the
- * sensors plan replaces both.
+ * run at the level the server finds from the body's figure ({@link figureLevel} of `body_detail`'s),
+ * at the placement's time, so that a served world can be surveyed by hand once the serve
+ * gate opens and `VIEW` has its surveyed ground to draw. Only `VIEW`'s body inspection sends the
+ * same pass besides it ({@link wholeBodySurveyPass}; the owner's request, 2026-11-01): the sensors
+ * plan replaces both.
  *
  * With `--json` it prints the placement as one line of JSON ({@link Placement}) in place of its
  * report, for a script that runs it before a check (plan R10, R10.T15.b: the descent spike's served
@@ -76,6 +77,13 @@ import {
   parsePort,
   serverUrlOf,
 } from "../main/cli";
+import {
+  coarseCellCount,
+  figureLevel,
+  type SurveyAsked,
+  type SurveyRecorded,
+  wholeBodySurveyPass,
+} from "../renderer/src/lib/wholeBodySurvey";
 
 /** The astronomical unit, m (IAU 2012 Resolution B2). */
 export const AU_M = 149_597_870_700;
@@ -138,58 +146,8 @@ export type LookAt =
   | { readonly kind: "planet" }
   | { readonly kind: "body"; readonly body: string };
 
-/**
- * A survey pass to record over the target body, R09's stand-in for the sensors (plan R10,
- * R10.T16.d; R09's Risks, "The survey stand-in"): how it measured and how finely.
- */
-export interface SurveyAsked {
-  readonly source: SurveySourceDto;
-  /** How finely it measured, m: finite and positive; the server refuses one coarser than 36,000 km. */
-  readonly resolutionM: number;
-}
-
 /** The survey sources the wire names (`SurveySourceDto`). */
 const SURVEY_SOURCES: ReadonlyArray<SurveySourceDto> = ["orbital", "close_range", "landed"];
-
-/**
- * The widest mean cell of a body's coarse field, m: R09's `MAX_MEAN_CELL_M`, the brainstorm's
- * "no wider than about 40 km" (R09 Design note 4). A test holds it to `field.rs`.
- */
-export const MAX_MEAN_CELL_M = 40_000;
-
-/** The levels a coarse field takes, R09's `CoarseLevel::MIN` and `MAX`; a test holds them. */
-export const COARSE_LEVELS = { min: 5, max: 8 } as const;
-
-/**
- * The level of the coarse field of a body of volumetric mean radius `radiusM`, m: R09's
- * `coarse_level` (`crates/hyperion-surface/src/field.rs`), the shallowest of levels 5 to 7 whose
- * mean cell, (R × √(4π ÷ 6)) ÷ 2ᴸ in that order, is no wider than {@link MAX_MEAN_CELL_M}, and 8
- * otherwise: 6 for the Moon, 8 for an Earth.
- *
- * @remarks
- * The server takes the radius from the body's figure as ∛(a² c) through its own `cbrt`; `Math.cbrt`
- * may differ from it in the last place, which moves the level only for a radius within an ulp of
- * one of the three radii where it changes.
- *
- * @throws RangeError for a radius that is not finite and positive.
- */
-export function coarseLevel(radiusM: number): number {
-  if (!(Number.isFinite(radiusM) && radiusM > 0)) {
-    throw new RangeError(`a body's radius must be finite and positive, got ${String(radiusM)} m`);
-  }
-  const wholeFace = radiusM * Math.sqrt((4 * Math.PI) / 6);
-  for (let level: number = COARSE_LEVELS.min; level < COARSE_LEVELS.max; level += 1) {
-    if (wholeFace / 2 ** level <= MAX_MEAN_CELL_M) {
-      return level;
-    }
-  }
-  return COARSE_LEVELS.max;
-}
-
-/** The number of cells of a coarse field at `level`, 6 · 4ᴸ. */
-export function coarseCellCount(level: number): number {
-  return 6 * 4 ** level;
-}
 
 /** The tool's options, after parsing. */
 export interface PlaceShipOptions {
@@ -521,17 +479,9 @@ export interface Placement {
   readonly survey: SurveyRecorded | null;
 }
 
-/** A survey pass the server recorded over the target body. */
-export interface SurveyRecorded extends SurveyAsked {
-  /** The level of the body's coarse field the pass covered, its every cell. */
-  readonly level: number;
-  /** The body's coverage revision with the pass folded in. */
-  readonly revision: number;
-}
-
 /**
- * The level of `body`'s coarse field, as the server finds it for a pass: {@link coarseLevel} of
- * the volumetric radius ∛(a² c) of its figure, from `body_detail`.
+ * The level of `body`'s coarse field, as the server finds it for a pass: {@link figureLevel} of
+ * its figure, from `body_detail`.
  *
  * @throws Error for a body whose figure section is not `ok`, which the server refuses too.
  */
@@ -547,13 +497,14 @@ async function fieldLevel(
     throw new Error(`body ${body} has no figure to give its coarse field's level`);
   }
   const { equatorial_radius_m: a, polar_radius_m: c } = figure.value;
-  return coarseLevel(Math.cbrt(a * a * c));
+  return figureLevel({ equatorialRadiusM: a, polarRadiusM: c });
 }
 
 /**
  * Records `survey` over every cell of `body`'s coarse field at `time`: one `survey_pass` of the
- * run of every cell at the field's level, R09's stand-in for the sensors, so that a served world's
- * field holds surveyed ground to draw (decision-r10-live-path, gap G3).
+ * run of every cell at the field's level ({@link wholeBodySurveyPass}, which `VIEW`'s body
+ * inspection sends too), R09's stand-in for the sensors, so that a served world's field holds
+ * surveyed ground to draw (decision-r10-live-path, gap G3).
  */
 async function surveyBody(
   ask: Ask,
@@ -563,16 +514,7 @@ async function surveyBody(
   time: UniverseTime,
 ): Promise<SurveyRecorded> {
   const level = await fieldLevel(ask, universe, body, time);
-  const { revision } = await ask({
-    kind: "survey_pass",
-    universe,
-    body,
-    from: time,
-    to: time,
-    source: survey.source,
-    resolution_m: survey.resolutionM,
-    cells: [{ start: 0, end: coarseCellCount(level) }],
-  });
+  const { revision } = await ask(wholeBodySurveyPass({ universe, body, level, survey, time }));
   return { ...survey, level, revision };
 }
 

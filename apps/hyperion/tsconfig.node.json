@@ -12,6 +12,7 @@
     "src/smoke",
     "src/tools",
     "src/renderer/src/lib/pinnedMath.ts",
+    "src/renderer/src/lib/wholeBodySurvey.ts",
     "electron.vite.config.mts",
     "vitest.config.mts",
     "package.json"

@@ -10,6 +10,7 @@ import {
   INSPECTION_SCENE_NAME,
   inspectionScene,
 } from "../../view/scenes/inspectionScene";
+import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
 import { viewProvenance } from "./serverScene";
 import { SCENE_OPTIONS, type SceneOption, SERVER_SCENE_NAME } from "./viewRun";
 
@@ -21,13 +22,15 @@ const SCENE_DETAIL: DetailLevelDto = "full";
 
 /**
  * One opening of `VIEW`'s body inspection, from the `SYSTEM` display's `VIEW BODY` (the owner's
- * request, 2026-11-01): its kept scene, made once as it is opened, and how many openings came
- * before, so that each is a new scene.
+ * request, 2026-11-01): its kept scene, made once as it is opened, how many openings came before,
+ * so that each is a new scene, and the survey of its body sent as it was opened.
  */
 export interface InspectionOpening {
   readonly option: SceneOption;
   /** Counts the openings from 1, by which `VIEW` makes a new stage for each. */
   readonly sequence: number;
+  /** The whole body's survey (`surveyInspected`), which never rejects. */
+  readonly survey: Promise<InspectionSurvey>;
 }
 
 /**

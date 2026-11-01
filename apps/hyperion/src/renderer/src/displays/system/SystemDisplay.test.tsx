@@ -15,13 +15,21 @@ import {
   aUniverse,
   aUniverseList,
 } from "../../test/galaxyFixtures";
-import { FIXTURE_SYSTEM, populatedBodies } from "../../test/planetaryFixture";
+import {
+  FIXTURE_SYSTEM,
+  populatedBodies,
+  populatedBodiesWith,
+  withEarthsFigure,
+} from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { aSummaryResponse, aSystemSummary } from "../../test/systemFixtures";
 import { statusLine } from "../../test/statusLine";
 
 /** A second universe, which the operator can open instead of the first. */
 const SURVEY_2 = aUniverse({ id: "00000000000000b2", name: "SURVEY 2", seed: "000000000000beef" });
+
+/** The populated answer's ringed planet, `/256`. */
+const RINGED_PLANET = `${FIXTURE_SYSTEM}.0100`;
 
 /** The chart's time, which the answer echoes and `OPEN SYSTEM` carries. */
 const CHART_TIME_YR = 12.5;
@@ -247,6 +255,38 @@ describe("the SYSTEM display", () => {
       "true",
     );
     expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
+  });
+
+  it("surveys the body it opens in VIEW whole through the server's survey pass (the owner's request)", async () => {
+    const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+    await answerSummaries(socket);
+    await server(() => {
+      socket.serverAnswers("system_bodies", () =>
+        populatedBodiesWith(withEarthsFigure(RINGED_PLANET)),
+      );
+    });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+    await user.keyboard("c");
+    expect(socket.requestsOfKind("survey_pass")).toEqual([]);
+    await user.keyboard("v");
+
+    // At the display's time, every cell of the level of the figure's 6,371.0 km, 6 · 4⁸ of them.
+    const time = universeTimeFromYears(CHART_TIME_YR);
+    expect(socket.requestsOfKind("survey_pass").map(({ body }) => body)).toEqual([
+      {
+        kind: "survey_pass",
+        universe: aUniverse().id,
+        body: RINGED_PLANET,
+        from: time,
+        to: time,
+        source: "orbital",
+        resolution_m: 50,
+        cells: [{ start: 0, end: 393_216 }],
+      },
+    ]);
   });
 
   it("asks nothing again for its answer when the display is left and shown again", async () => {

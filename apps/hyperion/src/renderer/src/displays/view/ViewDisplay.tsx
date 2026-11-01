@@ -2521,6 +2521,28 @@ function ViewPanels({
     requests: server === null && served === null ? null : share.atmosphere,
     createWorker: opticsWorkers,
   });
+  // The inspection's survey, once recorded, is told to the session, which asks its body's new cells:
+  // the scene topic's push tells it too, but only while the scene is subscribed and drawn.
+  const survey = inspection?.survey ?? null;
+  useEffect(() => {
+    if (terrain === null || survey === null) {
+      return undefined;
+    }
+    let ignore = false;
+    survey
+      .then((outcome) => {
+        if (!ignore && outcome.kind === "recorded") {
+          terrain.noteSurfaceRevisions([{ body: outcome.body, revision: outcome.revision }]);
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        console.error("the inspection's survey could not be told to the terrain session:", error);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [terrain, survey]);
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
   useEffect(
     () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),

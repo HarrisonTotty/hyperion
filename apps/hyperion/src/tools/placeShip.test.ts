@@ -22,9 +22,6 @@ import {
   AU_M,
   askThrough,
   bodyKinematics,
-  COARSE_LEVELS,
-  coarseCellCount,
-  coarseLevel,
   DEFAULT_BODY_DISTANCE_AU,
   DEFAULT_HILL_FRACTION,
   DEFAULT_NEAR_LY,
@@ -33,7 +30,6 @@ import {
   defaultBodyDistanceM,
   describePlacement,
   GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
-  MAX_MEAN_CELL_M,
   nearestFirst,
   type PlaceShipOptions,
   parsePlaceShipArgs,
@@ -41,6 +37,7 @@ import {
   pericentreHillRadiusM,
   placeShip,
 } from "./placeShip";
+import { COARSE_LEVELS, coarseLevel, MAX_MEAN_CELL_M } from "../renderer/src/lib/wholeBodySurvey";
 
 const UNIVERSE: UniverseInfo = {
   id: "00000000000000aa",
@@ -654,21 +651,6 @@ describe("the geometry", () => {
       "no velocity",
     );
   });
-
-  it("finds a body's coarse level as R09's coarse_level does: 5 for a Ceres to 8 for an Earth", () => {
-    // Volumetric mean radii: Ceres's 469.7 km (Dawn), the Moon's 1,737.4 km, Mars's 3,389.5 km and
-    // Earth's 6,371.0 km (NASA's fact sheets); a world of 2 R⊕ where the cap at 8 binds.
-    expect([469_700, 1_737_400, 3_389_500, 6_371_000, 12_742_000].map(coarseLevel)).toEqual([
-      5, 6, 7, 8, 8,
-    ]);
-    // A level changes where (R √(4π ÷ 6)) ÷ 2ᴸ crosses 40 km: here between levels 5 and 6.
-    const switchM = (40_000 * 2 ** 5) / Math.sqrt((4 * Math.PI) / 6);
-    expect([coarseLevel(switchM * (1 - 1e-12)), coarseLevel(switchM * (1 + 1e-12))]).toEqual([
-      5, 6,
-    ]);
-    expect(coarseCellCount(6)).toBe(24_576);
-    expect(() => coarseLevel(0)).toThrow(RangeError);
-  });
 });
 
 /**
@@ -734,6 +716,8 @@ function nextUp(x: number): number {
   return view.getFloat64(0);
 }
 
+// The shared level rule's (`lib/wholeBodySurvey.ts`) tripwire stands here, in Node, which reads the
+// Rust source.
 describe("the level rule's tie to R09's source (a tripwire)", () => {
   const rule = rustLevelRule();
 

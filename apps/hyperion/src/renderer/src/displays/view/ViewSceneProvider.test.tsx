@@ -16,7 +16,11 @@ import { type InspectionOpening, ViewSceneContext, ViewSceneProvider } from "./V
 
 /** An opening of the body inspection, its scene a stand-in. */
 function opening(sequence: number): InspectionOpening {
-  return { option: { name: INSPECTION_SCENE_NAME, make: precisionScene }, sequence };
+  return {
+    option: { name: INSPECTION_SCENE_NAME, make: precisionScene },
+    sequence,
+    survey: Promise.resolve({ kind: "refused", body: "0200080020000000.0300", reason: "none" }),
+  };
 }
 
 /** The host's choice, its inspection's count and its stand-in, and its choices as buttons. */

@@ -10,6 +10,7 @@
  */
 import {
   type BodyHooksDto,
+  type BodyIdHex,
   type BodyRotationDto,
   type BodySummaryDto,
   decodeServerMessage,
@@ -232,6 +233,18 @@ export function sliceBodiesWith(
 ): ResponseFor<"system_bodies"> {
   const slice = sliceBodies();
   return { ...slice, bodies: slice.bodies.map(change) };
+}
+
+/**
+ * `body`'s summary with the slice Earth's figure (`earthDetail`'s), which the populated answer's
+ * summaries do not carry, as a server from P14.T46 sends it; any other body's as it is.
+ */
+export function withEarthsFigure(body: BodyIdHex): (summary: BodySummaryDto) => BodySummaryDto {
+  const figure = earthDetail().record.figure;
+  if (figure === undefined) {
+    throw new Error("the fixture's Earth has its figure");
+  }
+  return (summary) => (summary.id === body ? { ...summary, figure } : summary);
 }
 
 /** The populated answer with its bodies changed by `change`, as a later generator might send it. */

@@ -28,6 +28,7 @@ import { ViewsProbe } from "./displays/view/check/viewsProbe";
 import type { ViewEngineSource } from "./displays/view/useViewEngine";
 import type { SceneOption } from "./displays/view/viewRun";
 import type { BodyInspection } from "./view/scenes/inspectionScene";
+import { surveyInspected } from "./view/scenes/inspectionSurvey";
 import type { TerrainSession } from "./view/terrain/session";
 import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
@@ -318,12 +319,22 @@ export function App() {
     setActiveDisplay("system");
   }, []);
   const [inspection, setInspection] = useState<InspectionOpening | null>(null);
-  const viewBody = useCallback((body: BodyInspection): void => {
-    // Made here, as the operator opens it, not in a render.
-    const option = inspectionOption(body);
-    setInspection((previous) => ({ option, sequence: (previous?.sequence ?? 0) + 1 }));
-    setActiveDisplay("view");
-  }, []);
+  const viewBody = useCallback(
+    (body: BodyInspection): void => {
+      // Made here, as the operator opens it, not in a render.
+      const option = inspectionOption(body);
+      // The body surveyed whole as it opens, so that its ground is drawn at once.
+      const survey = surveyInspected(requests, body).then((outcome) => {
+        if (outcome.kind === "refused") {
+          console.warn(`the inspection's survey of ${outcome.body} was refused: ${outcome.reason}`);
+        }
+        return outcome;
+      });
+      setInspection((previous) => ({ option, sequence: (previous?.sequence ?? 0) + 1, survey }));
+      setActiveDisplay("view");
+    },
+    [requests],
+  );
   const target = systemOpening?.target ?? null;
   const knownSystem = useMemo(
     (): SystemPlace | null =>
