@@ -456,7 +456,7 @@ export interface PrimaryPlate {
 }
 
 /** The primary's canvas, by its accessible name's slot, or `null`. */
-function primaryCanvas(document: Document): HTMLCanvasElement | null {
+export function primaryCanvas(document: Document): HTMLCanvasElement | null {
   for (const canvas of document.querySelectorAll<HTMLCanvasElement>('canvas[role="application"]')) {
     if ((canvas.getAttribute("aria-label") ?? "").split(", ")[2] === PRIMARY_NAME) {
       return canvas;

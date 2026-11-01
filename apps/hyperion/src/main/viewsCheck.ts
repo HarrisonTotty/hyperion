@@ -182,7 +182,8 @@ export function viewsCheckDirs(
  * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
  * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
  * awaited and a flight to eight air fixtures and the seat's night, 8 and 15; the inspection run's,
- * one body opened and its first photorealistic frames and atmosphere awaited, 8 and 10. Each is
+ * one body opened, its first photorealistic frames, its atmosphere and its surveyed ground awaited,
+ * and a close look flown to and its terrain streamed, 8 and 15. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -204,7 +205,7 @@ export function viewsCheckWatchdogMs(
       ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
       break;
     case "inspection":
-      ms = launch.smoke ? 8 * 60_000 : 10 * 60_000;
+      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;

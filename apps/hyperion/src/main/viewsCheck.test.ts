@@ -552,12 +552,12 @@ describe("the inspection run (the owner's request)", () => {
     }
   });
 
-  it("is given 10 minutes, a smoke 8, five times as long in software", () => {
+  it("is given 15 minutes, a smoke 8, five times as long in software", () => {
     expect([
       viewsCheckWatchdogMs(LAUNCH, "vulkan"),
       viewsCheckWatchdogMs({ ...LAUNCH, smoke: true }, "vulkan"),
       viewsCheckWatchdogMs(LAUNCH, "software"),
-    ]).toEqual([10 * 60_000, 8 * 60_000, 50 * 60_000]);
+    ]).toEqual([15 * 60_000, 8 * 60_000, 75 * 60_000]);
   });
 
   it("names its capture between phases and passes once it is saved", async () => {

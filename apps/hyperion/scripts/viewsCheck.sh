@@ -63,12 +63,14 @@
 #
 # --inspection --universe <ID> --body <ID> runs the inspection run instead (the owner's request,
 # 2026-11-01): on a running server, the universe opened on GALAXY, the body's system on SYSTEM, the
-# body selected, FOCUS BODY and VIEW BODY pressed, and VIEW's photorealistic body inspection of it
-# captured once AUTO has settled, as between-inspection-<system>-<index>.png, then with MAXIMIZE VIEW
-# on as between-inspection-<system>-<index>-maximized.png, then with GRID OFF as
-# between-inspection-<system>-<index>-grid-off.png, under target/views-check/inspection/. One
-# setting, high unless given, and one body a launch; it exits 1 when a step does not take effect,
-# VIEW BODY is held back, or a fault line stands on the capture.
+# body selected, FOCUS BODY and VIEW BODY pressed, and VIEW's photorealistic body inspection of it,
+# on AUTO and its ground surveyed, captured once AUTO has settled, as
+# between-inspection-<system>-<index>.png, then with MAXIMIZE VIEW on as
+# between-inspection-<system>-<index>-maximized.png, then with GRID OFF as
+# between-inspection-<system>-<index>-grid-off.png, and, over surveyed ground, closed in to 5% of
+# its radius above it as between-inspection-<system>-<index>-close.png, under
+# target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
+# when a step does not take effect, VIEW BODY is held back, or a fault line stands on a capture.
 #
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and
@@ -190,14 +192,14 @@ if [[ $hidden -eq 1 ]]; then
 fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
-# 15); the inspection run's 10 and 12, above its (8 and 10). Given two, the client refuses the
+# 15); the inspection run's 10 and 17, above its (8 and 15). Given two, the client refuses the
 # launch at once, so the first run's limit here stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
 elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 1200 ))
 elif [[ $inspection -eq 1 ]]; then
-    limit=$(( smoke == 1 ? 600 : 720 ))
+    limit=$(( smoke == 1 ? 600 : 1020 ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

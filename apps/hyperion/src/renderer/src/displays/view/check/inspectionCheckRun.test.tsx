@@ -1,9 +1,13 @@
 import { RequestClient } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
+import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import {
+  closeRateStep,
   INSPECTION_CHECK_TIMING,
   inspectionCaptureLabel,
+  inspectionGround,
+  positionRangeM,
   recordInspectionCheck,
   runInspectionCheck,
 } from "./inspectionCheckRun";
@@ -69,7 +73,15 @@ describe("the inspection run (the owner's request)", () => {
 
     await recordInspectionCheck(
       { end },
-      () => Promise.resolve({ label: "a", frame: null, exposure: null, statements: [] }),
+      () =>
+        Promise.resolve({
+          label: "a",
+          frame: null,
+          exposure: null,
+          statements: [],
+          ground: [],
+          closeGround: null,
+        }),
       new AbortController().signal,
     );
 
@@ -89,5 +101,34 @@ describe("the inspection run (the owner's request)", () => {
     expect(end.mock.calls).toEqual([
       [{ status: "fail", reason: "views check: VIEW BODY was held back" }],
     ]);
+  });
+});
+
+describe("the inspection run's reading of the ground and the camera's range", () => {
+  it("reads the ground as surveyed by its ELEVATION, not by NOT SURVEYED", () => {
+    expect(
+      [
+        ["SURVEY COVERAGE 100 % · FINEST 50 m", "GROUND AT LINE OF SIGHT", "ELEVATION 1204 ± 40 m"],
+        ["SURVEY COVERAGE: PENDING", "GROUND AT LINE OF SIGHT", "NOT SURVEYED"],
+        ["TERRAIN: NOT YET MODELLED"],
+        [],
+      ].map(inspectionGround),
+    ).toEqual(["surveyed", "waiting", "not modelled", "waiting"]);
+  });
+
+  it("reads the POSITION line's range in its unit, its digits grouped", () => {
+    expect(
+      ["6.69 Mm 023° -12°", "1,000 km 001° +00°", "87.0 km 359° +89°", "—", null].map(
+        positionRangeM,
+      ),
+    ).toEqual([6.69e6, 1e6, 87_000, null, null]);
+  });
+
+  it("closes in by holds whose one camera step flies at most a third of what is left", () => {
+    const steps = [3e3, 1e5, 1.55e7].map((remainingM) => {
+      const flownM = freeRateMPerS(closeRateStep(remainingM)) * MAX_FREE_STEP_S;
+      return flownM <= remainingM / 3 && flownM > remainingM / 3 / Math.sqrt(10);
+    });
+    expect(steps).toEqual([true, true, true]);
   });
 });

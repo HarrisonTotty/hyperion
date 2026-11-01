@@ -91,8 +91,8 @@ export function handoverCheckTimingOf(
 
 /**
  * The inspection run's timing for a launch (the owner's request, 2026-11-01): its waits for a
- * control and for the first photorealistic frames, and `AUTO`'s settle limit, stretched in the
- * software mode.
+ * control, for the first photorealistic frames and for its surveyed ground, and `AUTO`'s settle
+ * limit, stretched in the software mode.
  */
 export function inspectionCheckTimingOf(
   timing: InspectionCheckTiming,
@@ -104,6 +104,7 @@ export function inspectionCheckTimingOf(
         waitMs: stretched(timing.waitMs),
         drawWaitMs: stretched(timing.drawWaitMs),
         settleMaxMs: stretched(timing.settleMaxMs),
+        groundWaitMs: stretched(timing.groundWaitMs),
       }
     : timing;
 }

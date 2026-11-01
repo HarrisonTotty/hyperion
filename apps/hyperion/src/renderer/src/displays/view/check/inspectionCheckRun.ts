@@ -14,11 +14,20 @@
  * 3. On `SYSTEM` the body's row is selected in the body list, `FOCUS BODY` pressed, which focuses it
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
  * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, the
- *    exposure is put under `AUTO` (`ENABLE`), and once `AUTO` has settled and a few frames are drawn
- *    the page is captured as `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels
- *    hidden and the stage the display's whole body, as `inspection-<system>-<index>-maximized`
- *    (the owner's request, 2026-11-01), and with it off again; then with the `STYLE` panel's
- *    `GRID` at `OFF`, the image bare, as `inspection-<system>-<index>-grid-off`.
+ *    exposure must stand at `AUTO`, which the inspection opens on, and the ground at the line of
+ *    sight on the lower plate must read the body's surveyed ground (`ELEVATION`), the inspection
+ *    having surveyed it as it opened, or the plate must say `TERRAIN: NOT YET MODELLED`. Once
+ *    `AUTO` has settled and a few frames are drawn the page is captured as
+ *    `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels hidden and the stage
+ *    the display's whole body, as `inspection-<system>-<index>-maximized` (the owner's request,
+ *    2026-11-01), and with it off again; then with the `STYLE` panel's `GRID` at `OFF`, the image
+ *    bare, as `inspection-<system>-<index>-grid-off`.
+ * 5. Over surveyed ground the camera then closes in along its line of sight, the flight key `W`
+ *    held on the primary's canvas in short holds at a rate step (`PageUp`, `PageDown`) that flies a
+ *    third of what is left, each read back from the `POSITION` line once its coast has run out,
+ *    until it stands {@link CLOSE_ALTITUDE_SHARE} of the body's radius above it (at least
+ *    {@link CLOSE_ALTITUDE_MIN_M}); once the terrain has streamed, its ground is read, `AUTO` has
+ *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
  * (with its reason), or where the primary's label block shows a fault line as it is captured, or as
@@ -40,12 +49,20 @@ import {
 import type { ServedWorldNames, ViewsCheckApi } from "../../../../../preload/api";
 import { vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
+import { MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import { INSPECTION_SCENE_NAME } from "../../../view/scenes/inspectionScene";
+import { TERRAIN_NOT_MODELLED } from "../../../view/terrain/readouts";
 import { FOCUS_KEY, VIEW_BODY_KEY } from "../../system/OrbitMapPanel";
 import type { SystemTarget } from "../../system/systemTarget";
 import { MAXIMIZE_KEY } from "../displayKeys";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
-import { exposureEv100, primaryPlate, type PrimaryPlate } from "./atmosphereCheckRun";
+import {
+  exposureEv100,
+  primaryCanvas,
+  primaryPlate,
+  type PrimaryPlate,
+  rateStepOfCameraLine,
+} from "./atmosphereCheckRun";
 import { viewDriver } from "./viewsCheckRun";
 import type { ViewsProbe } from "./viewsProbe";
 
@@ -68,6 +85,16 @@ export interface InspectionCheckTiming {
   readonly settleMaxMs: number;
   /** The primary's draws waited for before the capture. */
   readonly framesBeforeCapture: number;
+  /**
+   * The longest wait for the ground at the line of sight to read surveyed, and for the terrain to
+   * stream once the camera has closed in, ms: the survey recorded, the field computed and sent,
+   * the patches baked.
+   */
+  readonly groundWaitMs: number;
+  /** The most holds the camera closes in by before the run fails. */
+  readonly closeHolds: number;
+  /** The primary's draws waited for after each hold, for the camera's coast to run out. */
+  readonly coastFrames: number;
 }
 
 /** The run's timing: a minute for a control, three for the first photorealistic frames. */
@@ -79,7 +106,19 @@ export const INSPECTION_CHECK_TIMING: InspectionCheckTiming = {
   settleToleranceEv: 0.1,
   settleMaxMs: 60_000,
   framesBeforeCapture: 5,
+  groundWaitMs: 300_000,
+  closeHolds: 40,
+  coastFrames: 8,
 };
+
+/** How far above the body the camera closes in to, as a share of its equatorial radius: 5%. */
+export const CLOSE_ALTITUDE_SHARE = 0.05;
+
+/** The least height above the body the camera closes in to, m: 30 km, above a small body's peaks. */
+export const CLOSE_ALTITUDE_MIN_M = 30_000;
+
+/** How near its goal a hold leaves the camera before the run stops, as a share of its height. */
+export const CLOSE_TOLERANCE = 0.2;
 
 /** The instant the system is opened at: the epoch, within every universe's clock window. */
 const EPOCH: UniverseTime = { seconds: 0, nanos: 0 };
@@ -115,6 +154,77 @@ export interface InspectionCapture {
   readonly frame: string | null;
   readonly exposure: string | null;
   readonly statements: ReadonlyArray<string>;
+  /** The lower plate's lines as it was captured: the survey line, `DATUM` and the ground. */
+  readonly ground: ReadonlyArray<string>;
+  /** The lower plate's lines as the close capture was taken, or `null` where none was. */
+  readonly closeGround: ReadonlyArray<string> | null;
+}
+
+/** What the ground at the line of sight reads: surveyed, not modelled, or neither yet. */
+export type InspectionGround = "surveyed" | "not modelled" | "waiting";
+
+/**
+ * What the lower plate's lines say of the ground at the line of sight: `surveyed` with an
+ * `ELEVATION` reading, `not modelled` where the plate says `TERRAIN: NOT YET MODELLED`, and
+ * `waiting` otherwise, `NOT SURVEYED` among them.
+ */
+export function inspectionGround(lines: ReadonlyArray<string>): InspectionGround {
+  if (lines.includes(TERRAIN_NOT_MODELLED)) {
+    return "not modelled";
+  }
+  return lines.some((line) => line.startsWith("ELEVATION ")) ? "surveyed" : "waiting";
+}
+
+/** Metres in each of the `POSITION` line's units. */
+const METRES_PER_UNIT: Readonly<Record<string, number>> = {
+  km: 1e3,
+  Mm: 1e6,
+  Gm: 1e9,
+  AU: 1.495_978_707e11,
+};
+
+/**
+ * The camera's range from its frame's centre as the `POSITION` line reads it (`6.69 Mm 023° -12°`),
+ * m, or `null` where it reads none.
+ */
+export function positionRangeM(positionLine: string | null): number | null {
+  const match = /^([\d,]+(?:\.\d+)?) (km|Mm|Gm|AU) /u.exec(positionLine ?? "");
+  const digits = match?.[1];
+  const perUnit = match?.[2] === undefined ? undefined : METRES_PER_UNIT[match[2]];
+  return digits === undefined || perUnit === undefined
+    ? null
+    : Number(digits.replaceAll(",", "")) * perUnit;
+}
+
+/**
+ * The free camera's rate step for a hold that closes `remainingM`: the fastest whose one camera
+ * step, at most {@link MAX_FREE_STEP_S} of its rate, flies no more than a third of it, so that a
+ * hold of a draw or two leaves the camera short of its goal; between 0 and 31.
+ */
+export function closeRateStep(remainingM: number): number {
+  const step = Math.floor(2 * Math.log10(remainingM / 3 / MAX_FREE_STEP_S));
+  return Math.min(Math.max(step, 0), 31);
+}
+
+/** The lower plate's lines (`.view-label--lower`, by the primary canvas's description), as read. */
+export function lowerPlateLines(document: Document): ReadonlyArray<string> {
+  const ids = primaryCanvas(document)?.getAttribute("aria-describedby")?.split(" ") ?? [];
+  const id = ids.find((each) => each.endsWith("-lower"));
+  const plate = id === undefined ? null : document.getElementById(id);
+  if (plate === null) {
+    return [];
+  }
+  return [
+    ...plate.querySelectorAll(
+      ".view-label__line, .view-label__heading, .view-label__statement, .request-status__text",
+    ),
+  ].map((line) => {
+    const label = line.querySelector("dt")?.textContent.trim();
+    const value = line.querySelector("dd")?.textContent.replaceAll(/\s+/gu, " ").trim();
+    return label === undefined || value === undefined
+      ? line.textContent.replaceAll(/\s+/gu, " ").trim()
+      : `${label} ${value}`;
+  });
 }
 
 /** The capture's label for `body`: `inspection-<system>-<index in hexadecimal>`. */
@@ -250,7 +360,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     () => controls.sceneButton(INSPECTION_SCENE_NAME)?.getAttribute("aria-pressed") === "true",
   );
 
-  // 4. The inspection drawn, its exposure under AUTO and settled, and captured.
+  // 4. The inspection drawn, on AUTO from its opening, its ground surveyed, and captured.
   await drawn.until(
     "the inspection was not drawn photorealistic",
     () => controls.styleOf(PRIMARY_NAME) === "photorealistic",
@@ -259,15 +369,18 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     "the inspection's atmosphere stayed pending",
     () => !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
   );
-  const enableOffered = (): boolean => {
-    const button = controls.exposureButton("ENABLE");
-    return button !== null && button.getAttribute("aria-disabled") !== "true";
-  };
-  controls.unfoldPanel("view-exposure");
-  await until("the EXPOSURE panel's ENABLE was not offered", enableOffered);
-  stopped();
-  controls.exposureButton("ENABLE")?.click();
-  await until("AUTO did not resume on ENABLE", () => !enableOffered());
+  await drawn.until(
+    "the inspection did not open on AUTO",
+    () => plate().line("EXPOSURE")?.endsWith(" AUTO") === true,
+    () => plate().line("EXPOSURE") ?? "no EXPOSURE line",
+  );
+  const grounded = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.groundWaitMs } });
+  const ground = (): ReadonlyArray<string> => lowerPlateLines(document);
+  await grounded.until(
+    "the ground at the line of sight did not read surveyed",
+    () => inspectionGround(ground()) !== "waiting",
+    () => ground().join("; "),
+  );
   const read = (): number => {
     const line = plate().line("EXPOSURE");
     const ev = exposureEv100(line);
@@ -276,29 +389,33 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     }
     return ev;
   };
-  const settleFromMs = deps.nowMs();
-  const settled = async (beforeEv: number): Promise<void> => {
-    await wait(timing.settleStepMs);
-    const ev = read();
-    // The readings are to a tenth: the allowance keeps a tenth's step from failing on rounding.
-    if (Math.abs(ev - beforeEv) <= timing.settleToleranceEv + 1e-9) {
-      return;
-    }
-    if (deps.nowMs() - settleFromMs >= timing.settleMaxMs) {
-      throw new Error(
-        `views check: AUTO did not settle within ${String(timing.settleMaxMs / 1000)} s (EV100 ${beforeEv.toFixed(1)}, then ${ev.toFixed(1)})`,
-      );
-    }
-    await settled(ev);
+  /** Waits for `AUTO` to settle, from now, within {@link InspectionCheckTiming.settleMaxMs}. */
+  const settle = async (): Promise<void> => {
+    const settleFromMs = deps.nowMs();
+    const settled = async (beforeEv: number): Promise<void> => {
+      await wait(timing.settleStepMs);
+      const ev = read();
+      // The readings are to a tenth: the allowance keeps a tenth's step from failing on rounding.
+      if (Math.abs(ev - beforeEv) <= timing.settleToleranceEv + 1e-9) {
+        return;
+      }
+      if (deps.nowMs() - settleFromMs >= timing.settleMaxMs) {
+        throw new Error(
+          `views check: AUTO did not settle within ${String(timing.settleMaxMs / 1000)} s (EV100 ${beforeEv.toFixed(1)}, then ${ev.toFixed(1)})`,
+        );
+      }
+      await settled(ev);
+    };
+    await settled(read());
   };
-  await settled(read());
-  const framesDrawn = async (): Promise<void> => {
+  await settle();
+  /** Waits for `count` of the primary's draws from now. */
+  const framesDrawn = async (count = timing.framesBeforeCapture): Promise<void> => {
     const fromMs = deps.nowMs();
     await until(
-      `the primary did not draw ${String(timing.framesBeforeCapture)} frames`,
+      `the primary did not draw ${String(count)} frames`,
       () =>
-        deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >=
-        timing.framesBeforeCapture,
+        deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >= count,
     );
   };
   await framesDrawn();
@@ -306,6 +423,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   if (said.faults.length > 0) {
     throw new Error(`views check: the inspection shows faults: ${said.faults.join("; ")}`);
   }
+  const groundSaid = ground();
   const label = inspectionCaptureLabel(served.body);
   stopped();
   await deps.api.capture(label);
@@ -334,12 +452,110 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   await framesDrawn();
   stopped();
   await deps.api.capture(`${label}-grid-off`);
-  return {
+  const orbit = {
     label,
     frame: said.line("FRAME"),
     exposure: said.line("EXPOSURE"),
     statements: said.statements,
+    ground: groundSaid,
   };
+  if (inspectionGround(groundSaid) !== "surveyed") {
+    return { ...orbit, closeGround: null };
+  }
+
+  // 5. Closed in over the surveyed ground, and captured.
+  const { record: detail } = await asked({
+    kind: "body_detail",
+    universe: universe.id,
+    body: served.body,
+    time: EPOCH,
+    detail: "full",
+  });
+  const radiusM =
+    detail.figure?.state === "ok"
+      ? detail.figure.value.equatorial_radius_m
+      : detail.bulk.state === "ok"
+        ? detail.bulk.value.radius_m
+        : null;
+  if (radiusM === null) {
+    throw new Error(`views check: ${served.body}'s record gives no radius to close in to`);
+  }
+  const altitudeM = Math.max(CLOSE_ALTITUDE_SHARE * radiusM, CLOSE_ALTITUDE_MIN_M);
+  const goalM = radiusM + altitudeM;
+  const canvas = (): HTMLCanvasElement => {
+    const found = primaryCanvas(document);
+    if (found === null) {
+      throw new Error("views check: the primary's canvas is not shown");
+    }
+    return found;
+  };
+  const range = (): number => {
+    const line = plate().line("POSITION");
+    const rangeM = positionRangeM(line);
+    if (rangeM === null) {
+      throw new Error(`views check: the POSITION line reads no range (${line ?? "none"})`);
+    }
+    return rangeM;
+  };
+  /** Sets the free camera's rate to `wanted` through `PageUp` and `PageDown` on its canvas. */
+  const setRate = async (wanted: number): Promise<void> => {
+    const now = rateStepOfCameraLine(plate().line("CAMERA"));
+    if (now === null) {
+      throw new Error("views check: the CAMERA line reads no FREE rate");
+    }
+    if (now === wanted) {
+      return;
+    }
+    stopped();
+    pressKey(canvas(), now < wanted ? "PageUp" : "PageDown");
+    await until(
+      `the rate did not step from ${String(now)}`,
+      () => rateStepOfCameraLine(plate().line("CAMERA")) !== now,
+    );
+    await setRate(wanted);
+  };
+  /** Closes in by holds of `W`, or of `S` past the goal, until within the tolerance. */
+  const closeIn = async (left: number): Promise<void> => {
+    const remainingM = range() - goalM;
+    if (Math.abs(remainingM) <= CLOSE_TOLERANCE * altitudeM) {
+      return;
+    }
+    if (left === 0) {
+      throw new Error(
+        `views check: the camera did not close to ${String(Math.round(goalM / 1000))} km from the centre in ${String(timing.closeHolds)} holds (at ${String(Math.round(range() / 1000))} km)`,
+      );
+    }
+    await setRate(closeRateStep(Math.abs(remainingM)));
+    const key = remainingM > 0 ? "w" : "s";
+    const target = canvas();
+    stopped();
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    try {
+      await framesDrawn(1);
+    } finally {
+      target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+    }
+    await framesDrawn(timing.coastFrames);
+    await closeIn(left - 1);
+  };
+  await closeIn(timing.closeHolds);
+  await grounded.until(
+    "the terrain did not stream once the camera closed in",
+    () =>
+      !plate().statements.includes("TERRAIN: STREAMING") &&
+      inspectionGround(ground()) === "surveyed",
+    () => [...plate().statements, ...ground()].join("; "),
+  );
+  await settle();
+  await framesDrawn();
+  const close = plate();
+  if (close.faults.length > 0) {
+    throw new Error(`views check: the close inspection shows faults: ${close.faults.join("; ")}`);
+  }
+  const closeGround = ground();
+  stopped();
+  await deps.api.capture(`${label}-close`);
+  return { ...orbit, closeGround };
 }
 
 /** What {@link recordInspectionCheck} asks of the main process. */

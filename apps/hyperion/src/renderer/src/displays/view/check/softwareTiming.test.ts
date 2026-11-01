@@ -67,12 +67,13 @@ describe("the software mode's timings (R01.T16)", () => {
     ]).toEqual([300_000, 1_500_000]);
   });
 
-  it("stretch the inspection run's waits for a control, its drawing and AUTO (the owner's request)", () => {
+  it("stretch the inspection run's waits for a control, its drawing, AUTO and its ground (the owner's request)", () => {
     expect(inspectionCheckTimingOf(INSPECTION_CHECK_TIMING, "software")).toEqual({
       ...INSPECTION_CHECK_TIMING,
       waitMs: 5 * INSPECTION_CHECK_TIMING.waitMs,
       drawWaitMs: 5 * INSPECTION_CHECK_TIMING.drawWaitMs,
       settleMaxMs: 5 * INSPECTION_CHECK_TIMING.settleMaxMs,
+      groundWaitMs: 5 * INSPECTION_CHECK_TIMING.groundWaitMs,
     });
   });
 
