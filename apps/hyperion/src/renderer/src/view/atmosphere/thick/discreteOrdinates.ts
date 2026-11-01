@@ -94,6 +94,19 @@
  * (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z(±μ_u), ω̃ the scattered constant's quadrature (ω), integrated in
  * closed form through each layer ({@link ThermalEmission}).
  *
+ * **Stream sources** (plan R08, R08.T14.d.4: the horizon's first-order spherical terms, `bake.ts`'s
+ * remarks): a signed source Q(t, ±μ) = a + b t on every stream, linear in t through each layer
+ * between the values given at its faces, at one mode, solved on that mode's factorisation after the
+ * beams ({@link solveDiscreteOrdinatesWithSources}), with nothing entering the top and the ground
+ * reflecting its light as it reflects the beams' diffuse light. It generalises the thermal
+ * emission's isotropic, non-negative (1 − ω)B. On the 2N nodes, M I′ = A I − Q with
+ * A = 1 − (ω ÷ 2) Dᵐ W, whose particular solution is c₀ + c₁ t, A c₁ = b and A c₀ = a + M c₁. At
+ * m = 0 and ω = 1, A holds the conservative null 1 (A1 = 0, wᵀA = 0), and the particular is cubic:
+ * c₃ = γ₃ 1 and c₂ = 3γ₃ v + γ₂ 1, A v = M1, each γ set so that the next degree's right side lies in
+ * A's range (wᵀ y = 0), solved on A bordered by its null. On a user stream the source, the
+ * particular's scattering and Q's own value, is a polynomial in t, whose particular gives each
+ * layer's share in closed form.
+ *
  * Out of scope here (plan R08): delta-M and the Nakajima–Tanaka corrections and the optics worker
  * (R08.T14.b) and the vector mode (R08.T14.e). Pure: no state, no clock, no platform API.
  */
@@ -102,6 +115,7 @@ import { gaussLegendre } from "../irradianceQuadrature";
 import {
   type BandLu,
   bandIndex,
+  type DenseLu,
   bandMatrix,
   choleskyLower,
   factorBand,
@@ -1486,10 +1500,12 @@ interface PreparedBeam {
 export function solveDiscreteOrdinates(
   problem: DiscreteOrdinatesProblem,
 ): DiscreteOrdinatesSolution {
-  const { beams, quadrature, interfaceDepths, userCosines, perBeam, thermal } = solvedModes(
-    problem,
-    0,
-  );
+  return solutionOf(solvedModes(problem, 0, undefined));
+}
+
+/** A solve's results from its modes from 0 on: each beam's modes and its fluxes. */
+function solutionOf(made: SolvedModes): DiscreteOrdinatesSolution {
+  const { beams, quadrature, interfaceDepths, userCosines, perBeam, thermal } = made;
   const n = quadrature.nodes.length;
   const layerCount = interfaceDepths.length - 1;
   const solved = beams.map((beam, b): BeamSolution => {
@@ -1529,21 +1545,28 @@ export function solveDiscreteOrdinateModes(
   if (!(Number.isInteger(fromMode) && fromMode >= 0 && fromMode <= problem.maxMode)) {
     throw new RangeError(`the modes solved start in [0, ${problem.maxMode}], not at ${fromMode}`);
   }
-  return solvedModes(problem, fromMode).perBeam;
+  return solvedModes(problem, fromMode, undefined).perBeam;
 }
 
-/** A problem's modes from `fromMode` on, each beam's, and its thermal field where mode 0 is solved. */
-function solvedModes(
-  problem: DiscreteOrdinatesProblem,
-  fromMode: number,
-): {
+/** A problem's modes from some mode on, each beam's, and its thermal field where mode 0 is solved. */
+interface SolvedModes {
   readonly beams: ReadonlyArray<PreparedBeam>;
   readonly quadrature: DoubleGaussQuadrature;
   readonly interfaceDepths: Float64Array;
   readonly userCosines: Float64Array;
   readonly perBeam: ReadonlyArray<ReadonlyArray<ModeIntensities>>;
   readonly thermal: ThermalSolution | undefined;
-} {
+}
+
+/**
+ * A problem's modes from `fromMode` on, each mode's context pushed onto `contexts` where given, for
+ * a later source on its factorisation ({@link solveDiscreteOrdinatesWithSources}).
+ */
+function solvedModes(
+  problem: DiscreteOrdinatesProblem,
+  fromMode: number,
+  contexts: ModeContext[] | undefined,
+): SolvedModes {
   const streams = problem.streams ?? DISCRETE_ORDINATE_STREAMS;
   requireStreams(streams);
   requireMode(problem.maxMode, streams);
@@ -1590,6 +1613,7 @@ function solvedModes(
       ground,
       fields,
     );
+    contexts?.push(context);
     solveBeamModes(context, beams, exponentials).forEach((mode, b) => {
       perBeam[b]?.push(mode);
     });
@@ -2359,6 +2383,454 @@ function thermalFluxesOf(
     meanIntensity[k] = mean / 2;
   }
   return { direct, diffuseDown, diffuseUp, meanIntensity };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stream sources (R08.T14.d.4).
+
+/**
+ * A signed source at one mode on every stream, linear in τ through each layer between its values at
+ * the layer's faces (the module's remarks, "Stream sources"): the Q^m(τ, μ) of the module's
+ * equation, in the beams' unit.
+ *
+ * @remarks
+ * A layer's slope b enters its particular solution as about M A⁻² b, so a slope large against the
+ * field it makes, as a source that grows as 1 ÷ τ in a thin layer gives, cancels at the faces to
+ * rounding: such a caller takes the layer's mean at both faces (`bake.ts`'s `HORIZON_THIN_DEPTH`).
+ */
+export interface StreamSourceMode {
+  /** Per layer p from the top, Q at its top on the nodes, L × 2N at `p × 2N`: +μ_i, then −μ_i. */
+  readonly nodesTop: Float64Array;
+  /** The same at its bottom. */
+  readonly nodesBottom: Float64Array;
+  /** Per layer p, Q at its top at the user cosines, L × 2U at `p × 2U`: +μ_u, then −μ_u. */
+  readonly usersTop: Float64Array;
+  /** The same at its bottom. */
+  readonly usersBottom: Float64Array;
+}
+
+/** A stream source, per mode m = 0 … M in order: `null`, or no entry, for none at a mode. */
+export type StreamSource = ReadonlyArray<StreamSourceMode | null>;
+
+/** A solve's results with each stream source's field ({@link solveDiscreteOrdinatesWithSources}). */
+export interface SourcedSolution {
+  readonly solution: DiscreteOrdinatesSolution;
+  /** Per source in `sourcesOf`'s order, its field's modes 0 … M, each 0 where it has none. */
+  readonly sourced: ReadonlyArray<ReadonlyArray<ModeIntensities>>;
+}
+
+/**
+ * Solves a problem as {@link solveDiscreteOrdinates} does, to the bit, and then the field of each
+ * stream source `sourcesOf` forms from that solution, on the factorisation of each of its modes (the
+ * module's remarks, "Stream sources"): nothing entering the top, and the ground reflecting the
+ * source's own light, with no beam of its own.
+ *
+ * @throws RangeError as {@link solveDiscreteOrdinates}, or for a stream source mode whose values
+ *   are not finite, or not 2N and 2U a layer's face.
+ */
+export function solveDiscreteOrdinatesWithSources(
+  problem: DiscreteOrdinatesProblem,
+  sourcesOf: (solution: DiscreteOrdinatesSolution) => ReadonlyArray<StreamSource>,
+): SourcedSolution {
+  const contexts: ModeContext[] = [];
+  const solution = solutionOf(solvedModes(problem, 0, contexts));
+  const sources = sourcesOf(solution);
+  const sourced: ModeIntensities[][] = sources.map(() => []);
+  for (const context of contexts) {
+    const modes = sources.map((source) => source[context.m] ?? null);
+    solveStreamSourceMode(context, modes).forEach((field, i) => {
+      sourced[i]?.push(field);
+    });
+  }
+  return { solution, sourced };
+}
+
+/**
+ * A layer's scattering operator on its 2N streams at one mode, A = 1 − (ω ÷ 2) Dᵐ W (the module's
+ * remarks, "Stream sources"), factorised, or at a conservative layer A bordered by its null,
+ * [[A, 1], [wᵀ, 0]]; and the user streams' scattered source of a node field, {@link userSource}, as
+ * a matrix.
+ */
+interface StreamOperator {
+  /** A factorised, or at a conservative layer the bordered A. */
+  readonly lu: DenseLu;
+  readonly conservative: boolean;
+  /** At a conservative layer, v with A v = M1 and wᵀv = 0, the diffusion's slope; else empty. */
+  readonly drift: Float64Array;
+  /** At a conservative layer, wᵀ M v, the slope's flux; else 0. */
+  readonly driftFlux: number;
+  /**
+   * The source at +μ_u (rows u < U) and −μ_u (rows U + u) of node intensities at +μ_j (columns
+   * j < N) and −μ_j, 2U × 2N row-major: {@link userSource}'s sums as one matrix.
+   */
+  readonly users: Float64Array;
+}
+
+function streamOperatorOf(context: ModeContext, lm: LayerMode): StreamOperator {
+  const { quadrature, nodeLegendre, userLegendre, userCosines } = context;
+  const { nodes, weights, streams } = quadrature;
+  const n = nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const m = lm.mode;
+  const { omega, moments } = lm.layer;
+  const { conservative, weightedNodeLegendre, sourceCoefficients } = lm;
+  // Λ_l^m at each of the 2N streams, Λ(−μ) = (−1)^{l+m} Λ(μ), at `a × NSTR + l`.
+  const signedLegendre = new Float64Array(span * streams);
+  for (let a = 0; a < span; a += 1) {
+    for (let l = m; l < streams; l += 1) {
+      const sign = a < n || (l + m) % 2 === 0 ? 1 : -1;
+      signedLegendre[a * streams + l] = sign * at(nodeLegendre, l * n + (a % n));
+    }
+  }
+  const order = conservative ? span + 1 : span;
+  const matrix = new Float64Array(order * order);
+  for (let a = 0; a < span; a += 1) {
+    for (let b = 0; b < span; b += 1) {
+      let d = 0;
+      for (let l = m; l < streams; l += 1) {
+        d +=
+          (2 * l + 1) *
+          at(moments, l) *
+          at(signedLegendre, a * streams + l) *
+          at(signedLegendre, b * streams + l);
+      }
+      matrix[a * order + b] = (a === b ? 1 : 0) - (omega / 2) * at(weights, b % n) * d;
+    }
+  }
+  const usersMatrix = new Float64Array(2 * users * span);
+  for (let l = m; l < streams; l += 1) {
+    const coefficient = at(sourceCoefficients, l);
+    if (coefficient === 0) {
+      continue;
+    }
+    const sign = (l + m) % 2 === 0 ? 1 : -1;
+    for (let u = 0; u < users; u += 1) {
+      const c = coefficient * at(userLegendre, l * users + u);
+      for (let j = 0; j < n; j += 1) {
+        const term = c * at(weightedNodeLegendre, l * n + j);
+        const up = u * span;
+        const down = (users + u) * span;
+        usersMatrix[up + j] = at(usersMatrix, up + j) + term;
+        usersMatrix[up + n + j] = at(usersMatrix, up + n + j) + sign * term;
+        usersMatrix[down + j] = at(usersMatrix, down + j) + sign * term;
+        usersMatrix[down + n + j] = at(usersMatrix, down + n + j) + term;
+      }
+    }
+  }
+  const signed = (a: number): number => (a < n ? at(nodes, a) : -at(nodes, a - n));
+  if (!conservative) {
+    return {
+      lu: factorDense(matrix, order),
+      conservative,
+      drift: new Float64Array(0),
+      driftFlux: 0,
+      users: usersMatrix,
+    };
+  }
+  for (let a = 0; a < span; a += 1) {
+    matrix[a * order + span] = 1;
+    matrix[span * order + a] = at(weights, a % n);
+  }
+  const lu = factorDense(matrix, order);
+  const drift = Float64Array.from({ length: span }, (_, a) => signed(a));
+  solveBordered(lu, drift);
+  let driftFlux = 0;
+  for (let a = 0; a < span; a += 1) {
+    driftFlux += at(weights, a % n) * signed(a) * at(drift, a);
+  }
+  return { lu, conservative, drift, driftFlux, users: usersMatrix };
+}
+
+/**
+ * x with A x = y, in place, at a conservative layer: the one with wᵀx = 0, y lying in A's range
+ * (wᵀy = 0), the border's multiplier then 0.
+ */
+function solveBordered(bordered: DenseLu, y: Float64Array): void {
+  const extended = new Float64Array(y.length + 1);
+  extended.set(y);
+  solveDense(bordered, extended);
+  y.set(extended.subarray(0, y.length));
+}
+
+/**
+ * The polynomial particular solution c₀ + c₁t + … on the 2N streams of a source a + b t through a
+ * layer, M I′ = A I − (a + b t) (the module's remarks, "Stream sources"), into `out`'s first
+ * entries, returning their count: degree 1, c₁ = A⁻¹b and c₀ = A⁻¹(a + M c₁); at a conservative
+ * layer degree 3, A's null 1 taking what the source adds to the layer's light, each degree's
+ * solvability on A's range, wᵀ y = 0, setting the next one's share of 1.
+ */
+function streamParticularInto(
+  operator: StreamOperator,
+  quadrature: DoubleGaussQuadrature,
+  a: Float64Array,
+  b: Float64Array,
+  out: ReadonlyArray<Float64Array>,
+): number {
+  const { nodes, weights } = quadrature;
+  const n = nodes.length;
+  const span = 2 * n;
+  const [constant, linear, quadratic, cubic] = out;
+  if (constant === undefined || linear === undefined) {
+    throw new Error("a particular solution has room for its coefficients");
+  }
+  const signed = (r: number): number => (r < n ? at(nodes, r) : -at(nodes, r - n));
+  const { lu } = operator;
+  if (!operator.conservative) {
+    linear.set(b);
+    solveDense(lu, linear);
+    for (let r = 0; r < span; r += 1) {
+      constant[r] = at(a, r) + signed(r) * at(linear, r);
+    }
+    solveDense(lu, constant);
+    return 2;
+  }
+  if (quadratic === undefined || cubic === undefined) {
+    throw new Error("a conservative layer's particular solution has room for degree 3");
+  }
+  const weighed = (x: Float64Array): number => {
+    let sum = 0;
+    for (let r = 0; r < span; r += 1) {
+      sum += at(weights, r % n) * at(x, r);
+    }
+    return sum;
+  };
+  const { drift, driftFlux } = operator;
+  // c₃ = γ₃ 1, with wᵀ(b + 6γ₃ M v) = 0.
+  const gamma3 = -weighed(b) / (6 * driftFlux);
+  for (let r = 0; r < span; r += 1) {
+    linear[r] = at(b, r) + 6 * gamma3 * signed(r) * at(drift, r);
+  }
+  solveBordered(lu, linear);
+  let flux = 0;
+  for (let r = 0; r < span; r += 1) {
+    flux += at(weights, r % n) * signed(r) * at(linear, r);
+  }
+  // c₂ = 3γ₃ v + γ₂ 1, with wᵀ(a + M c₁) = 0 and c₁ = A⁺(b + 6γ₃Mv) + 2γ₂ v.
+  const gamma2 = -(weighed(a) + flux) / (2 * driftFlux);
+  for (let r = 0; r < span; r += 1) {
+    linear[r] = at(linear, r) + 2 * gamma2 * at(drift, r);
+    constant[r] = at(a, r) + signed(r) * at(linear, r);
+    quadratic[r] = 3 * gamma3 * at(drift, r) + gamma2;
+    cubic[r] = gamma3;
+  }
+  solveBordered(lu, constant);
+  return 4;
+}
+
+/** What {@link streamLayerInto} reuses from layer to layer and source to source. */
+interface StreamScratch {
+  /** The source's slope through the layer on the 2N streams. */
+  readonly slope: Float64Array;
+  /** The particular's coefficients c_k, k ≤ 3, 2N each. */
+  readonly coefficients: ReadonlyArray<Float64Array>;
+  /** The user streams' source's coefficients s_k, 2U each: +μ_u, then −μ_u. */
+  readonly userCoefficients: ReadonlyArray<Float64Array>;
+}
+
+function streamScratch(span: number, users: number): StreamScratch {
+  return {
+    slope: new Float64Array(span),
+    coefficients: Array.from({ length: 4 }, () => new Float64Array(span)),
+    userCoefficients: Array.from({ length: 4 }, () => new Float64Array(2 * users)),
+  };
+}
+
+/**
+ * A stream source mode's particular solution in layer p into `out`, at its faces and along its user
+ * streams: on each user stream the source S(t, ±μ_u), the particular's scattering and the source's
+ * own value, is a polynomial in t, whose own particular e_k = s_k ± (k + 1) μ_u e_(k+1) gives the
+ * layer's share in closed form, E(0) − E(Δ) e^(−Δ ÷ μ_u) up to the top and E(Δ) − E(0) e^(−Δ ÷ μ_u)
+ * down to the bottom.
+ */
+function streamLayerInto(
+  context: ModeContext,
+  operator: StreamOperator,
+  p: number,
+  source: StreamSourceMode,
+  scratch: StreamScratch,
+  out: ModeParticulars,
+): void {
+  const { quadrature, layerModes, userCosines, transfers } = context;
+  const depth = layerModes[p]?.layer.opticalDepth ?? Number.NaN;
+  if (!(depth > 0)) {
+    return;
+  }
+  const n = quadrature.nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const { slope, coefficients, userCoefficients } = scratch;
+  const face = p * span;
+  const top = source.nodesTop.subarray(face, face + span);
+  for (let r = 0; r < span; r += 1) {
+    slope[r] = (at(source.nodesBottom, face + r) - at(top, r)) / depth;
+  }
+  const terms = streamParticularInto(operator, quadrature, top, slope, coefficients);
+  for (let r = 0; r < span; r += 1) {
+    let value = 0;
+    for (let k = terms - 1; k >= 0; k -= 1) {
+      value = value * depth + at(coefficients[k] ?? slope, r);
+    }
+    out.top[face + r] = at(coefficients[0] ?? slope, r);
+    out.bottom[face + r] = value;
+  }
+  // The user streams' source s_k: the particular's scattering, and the source's own value and slope.
+  const userFace = p * 2 * users;
+  const { users: scattering } = operator;
+  for (let k = 0; k < terms; k += 1) {
+    const c = coefficients[k] ?? slope;
+    const s = userCoefficients[k] ?? slope;
+    for (let v = 0; v < 2 * users; v += 1) {
+      let sum = 0;
+      for (let r = 0; r < span; r += 1) {
+        sum += at(scattering, v * span + r) * at(c, r);
+      }
+      const own = at(source.usersTop, userFace + v);
+      if (k === 0) {
+        sum += own;
+      } else if (k === 1) {
+        sum += (at(source.usersBottom, userFace + v) - own) / depth;
+      }
+      s[v] = sum;
+    }
+  }
+  const transfer = transfers[p];
+  if (transfer === undefined) {
+    throw new Error(`layer ${p} has no user-angle transfer`);
+  }
+  for (let u = 0; u < users; u += 1) {
+    const mu = at(userCosines, u);
+    const e = at(transfer.attenuation, u);
+    let up = 0;
+    let down = 0;
+    let upAtDepth = 0;
+    let downAtDepth = 0;
+    for (let k = terms - 1; k >= 0; k -= 1) {
+      const s = userCoefficients[k] ?? slope;
+      up = at(s, u) + (k + 1) * mu * up;
+      down = at(s, users + u) - (k + 1) * mu * down;
+      upAtDepth = upAtDepth * depth + up;
+      downAtDepth = downAtDepth * depth + down;
+    }
+    out.userUp[p * users + u] = up - upAtDepth * e;
+    if (context.fields.userDown) {
+      out.userDown[p * users + u] = downAtDepth - down * e;
+    }
+  }
+}
+
+/**
+ * Checks a stream source mode's sizes and values against a solve of L layers, N nodes and U user
+ * cosines a hemisphere.
+ *
+ * @throws RangeError for values not finite, or not 2N and 2U a layer's face.
+ */
+function checkStreamSource(
+  source: StreamSourceMode,
+  layerCount: number,
+  span: number,
+  users: number,
+): void {
+  const sizes: ReadonlyArray<readonly [string, Float64Array, number]> = [
+    ["nodesTop", source.nodesTop, span],
+    ["nodesBottom", source.nodesBottom, span],
+    ["usersTop", source.usersTop, 2 * users],
+    ["usersBottom", source.usersBottom, 2 * users],
+  ];
+  for (const [name, values, width] of sizes) {
+    if (values.length !== layerCount * width) {
+      throw new RangeError(
+        `a stream source's ${name} holds ${width} values a layer, ${layerCount * width}, not ${values.length}`,
+      );
+    }
+    for (const value of values) {
+      if (!Number.isFinite(value)) {
+        throw new RangeError(`a stream source's ${name} must be finite, not ${value}`);
+      }
+    }
+  }
+}
+
+/**
+ * Each stream source's field at one mode on the mode's factorisation, every source's right-hand side
+ * taken in one pass over the factors; 0 where a source has none at the mode.
+ */
+function solveStreamSourceMode(
+  context: ModeContext,
+  modes: ReadonlyArray<StreamSourceMode | null>,
+): ModeIntensities[] {
+  const { quadrature, layerModes, userCosines, stack } = context;
+  const n = quadrature.nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const layerCount = layerModes.length;
+  const columns = modes.length;
+  if (columns === 0) {
+    return [];
+  }
+  const particulars = modes.map((mode): ModeParticulars => {
+    if (mode !== null) {
+      checkStreamSource(mode, layerCount, span, users);
+    }
+    return modeParticulars(layerCount, span, users);
+  });
+  // Layer by layer, its operator made once for every source.
+  const scratch = streamScratch(span, users);
+  layerModes.forEach((lm, p) => {
+    if (!(lm.layer.opticalDepth > 0) || modes.every((mode) => mode === null)) {
+      return;
+    }
+    const operator = streamOperatorOf(context, lm);
+    modes.forEach((mode, j) => {
+      const parts = particulars[j];
+      if (mode !== null && parts !== undefined) {
+        streamLayerInto(context, operator, p, mode, scratch, parts);
+      }
+    });
+  });
+  const rows = span * layerCount;
+  const rightHandSides = new Float64Array(rows * columns);
+  particulars.forEach((parts, j) => {
+    layerStackRightHandSideInto(stack, parts, undefined, rightHandSides, j, columns);
+  });
+  solveLayerStackColumns(stack, rightHandSides, columns);
+  const coefficients = new Float64Array(rows);
+  const groundUserUp = diffuseGroundUserUp(context);
+  return particulars.map((parts, j) => {
+    for (let r = 0; r < rows; r += 1) {
+      coefficients[r] = at(rightHandSides, r * columns + j);
+    }
+    return modeField(context, parts, coefficients, groundUserUp);
+  });
+}
+
+/** The ground's upward user intensities of a field without a beam: its reflection of the field alone. */
+function diffuseGroundUserUp(context: ModeContext): GroundUserUp {
+  const { m, quadrature, layerModes, userCosines, groundAlbedo, ground } = context;
+  const n = quadrature.nodes.length;
+  const users = userCosines.length;
+  const layerCount = layerModes.length;
+  return (quadratureDown, userUp) => {
+    if (m === 0 && groundAlbedo > 0) {
+      let flux = 0;
+      for (let j = 0; j < n; j += 1) {
+        flux +=
+          at(quadrature.weights, j) *
+          at(quadrature.nodes, j) *
+          at(quadratureDown, layerCount * n + j);
+      }
+      userUp.fill(2 * groundAlbedo * flux, layerCount * users);
+    }
+    if (ground !== undefined) {
+      for (let u = 0; u < users; u += 1) {
+        let value = 0;
+        for (let j = 0; j < n; j += 1) {
+          value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
+        }
+        userUp[layerCount * users + u] = value;
+      }
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
