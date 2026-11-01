@@ -5,11 +5,14 @@
 //! - The tripwire; the held arm's process and cells are every 26 hold's, and its first entries of a
 //!   cell are pinned bit for bit (the class's golden runs at 24, which holds no displaced class);
 //!   the galaxy keeps one process per rules, a fresh one's.
-//! - The terms are the young field's band-E runaway and walkaway classes, each with a form, at the
-//!   field's share of the component's budget; a term's largest share bounds its class's share of
-//!   a star's deaths at every mass; a source's classes together take exactly the share the
-//!   field's ejection marks drop, mass by mass, `RunawayModel`'s closed form; and the field's
-//!   marks drop that share, at α = 10⁻³.
+//! - The terms are the young field's band-E runaway and walkaway classes, each with a form, a term
+//!   per kind, the runaways' at the component's whole budget and the walkaways' at the field's
+//!   part of it; a term's largest share bounds its class's share of a star's deaths as its kind at
+//!   every mass; a source's classes together take exactly each kind's share of `RunawayModel`'s
+//!   closed form, mass by mass, which the field's ejection marks drop, at α = 10⁻³.
+//! - A feature's list drops its runaways' deaths by the same marks on its members' own keys, at
+//!   the closed form's runaway share (α = 10⁻³), and a nursery's list is the held arm's less
+//!   them.
 //! - The envelope holds over random points, and no cell comes near the index.
 //! - The ejection's speed is its kind's law inside its bin.
 //! - Every runaway's or walkaway's entry is its term's: its ejection in its class's speed and age
@@ -19,7 +22,7 @@
 //!   (complementarity), so the grid's carve-out claims the runaways the class places.
 //! - The cells do not depend on the order they are generated in.
 //! - Slow: galaxy-wide, the candidates' ejected share is the closed form's, each candidate's odds
-//!   its mass's ejected share (α = 10⁻³), under every 27 hold and with the field at the budget.
+//!   its mass's and age's (α = 10⁻³), under every 27 hold and with the field at the budget.
 
 use std::sync::OnceLock;
 
@@ -33,13 +36,20 @@ use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry, check_class_headroom};
+use std::collections::BTreeMap;
+
 use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::displaced::death_in_interval_under;
 use crate::galaxy::displaced::explosion_site;
+use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
+use crate::galaxy::features::ids::FeatureProcess;
+use crate::galaxy::features::members::FeatureLevelList;
+use crate::galaxy::features::members::recent::{RecentClass, RecentEntry};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
+use crate::id::{FeatureMemberId, MemberSlot, SystemIdKind};
 use crate::stellar::system::{draw_metallicity, primary_draws};
 
 /// The seed of the Milky Way fixture, P09.T33.a's tests'.
@@ -105,19 +115,47 @@ fn ejected_share(source: BirthSource, m: SolarMasses) -> f64 {
 }
 
 /// The share of a band-E star of initial mass `m` of `source` ejected before its death at its
-/// reference lifetime under `table`, the closed form: each kind's lifetime share × the weight of
-/// its ejection ages below that lifetime.
+/// reference lifetime under `table`, the closed form: each kind's ([`closed_form_kind_share`]).
 fn closed_form_share(table: &ClassTable, source: BirthSource, m: SolarMasses) -> f64 {
-    let model = table.runaway_model();
-    let life = table.reference_lifetime(source, MassBand::E, m);
     KINDS.iter().fold(0.0, |sum, &kind| {
-        let before = table
-            .ejection_ages(source, kind, m)
-            .iter()
-            .filter(|(age, _)| *age < life)
-            .fold(0.0, |s, (_, w)| s + w);
-        sum + lifetime_share(model, kind, m) * before
+        sum + closed_form_kind_share(table, source, kind, m)
     })
+}
+
+/// The share of a band-E star of initial mass `m` of `source` ejected as `kind` before its death
+/// at its reference lifetime under `table`, the closed form: the kind's lifetime share × the
+/// weight of its ejection ages below that lifetime.
+fn closed_form_kind_share(
+    table: &ClassTable,
+    source: BirthSource,
+    kind: Ejected,
+    m: SolarMasses,
+) -> f64 {
+    let life = table.reference_lifetime(source, MassBand::E, m);
+    let before = table
+        .ejection_ages(source, kind, m)
+        .iter()
+        .filter(|(age, _)| *age < life)
+        .fold(0.0, |s, (_, w)| s + w);
+    lifetime_share(table.runaway_model(), kind, m) * before
+}
+
+/// The young thin disc's component in `galaxy`.
+fn young_disc_of(galaxy: &Galaxy) -> ComponentId {
+    galaxy
+        .fields()
+        .component_ids()
+        .find(|&id| galaxy.fields().component(id).population() == Population::YoungThinDisc)
+        .expect("the fixture has a young thin disc")
+}
+
+/// What the field keeps of component `id`'s band-E systems of age `age`: `1 − φ(age)` for the
+/// young disc, scaled to its field factor (`FieldShare::keeps`), and 1 where the field is the
+/// budget.
+fn field_keeps(galaxy: &Galaxy, id: ComponentId, age: Years) -> f64 {
+    galaxy
+        .field_share()
+        .map_or(1.0, |field| field.keeps(id, MassBand::E, age))
 }
 
 /// `n` log-spaced masses across band E, its edges included.
@@ -206,17 +244,19 @@ fn the_galaxy_keeps_one_process_per_rules() {
 // 2. The terms and the closed form.
 
 /// The terms are the young field's: the young thin disc's thin-disc classes and each nuclear-disc
-/// component's nuclear-disc classes, each with a form, in the components' and the classes' order,
-/// at the field's part of the component's band budget and the field term's largest death rate,
-/// the field's components at their band budgets taken to the field; and every class of an
-/// ejecting source that holds a share of a band-E star's deaths has its term, so none is lost.
+/// component's nuclear-disc classes, each with a form, a term for each kind its speed law puts in
+/// the class's bin, in the components', the classes' and the kinds' order; a runaway's at the
+/// component's whole band budget and the largest death rate of its ages, a walkaway's at the
+/// field's part of it and the field term's largest death rate; and the field's components at
+/// their band budgets taken to the field.
 #[test]
 fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
     let galaxy = galaxy();
     let process = CoreCollapseProcess::new(galaxy);
     let displaced = galaxy.fields().displaced().expect("the displaced classes");
-    let table = table();
     let fields = galaxy.fields();
+    let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
+    let interval = process.interval().length().as_julian_years_f64();
     let mut order = Vec::new();
     for young in process.components() {
         let component = fields.component(young.id());
@@ -240,24 +280,62 @@ fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
             }
             other => panic!("{other:?} is no young field's runaway class"),
         }
-        assert_same_bits(
-            term.systems,
-            galaxy.field_part(
-                term.component,
-                MassBand::E,
-                component.count() * galaxy.shares().share(MassBand::E, component.population()),
-            ),
-        );
         let young = process
             .components()
             .iter()
             .find(|young| young.id() == term.component)
             .expect("a term's component is young");
-        assert_same_bits(term.deaths_per_system, young.deaths_per_system());
-        order.push((term.component.index(), term.class.index()));
+        let budget = component.count() * galaxy.shares().share(MassBand::E, component.population());
+        let (systems, rate) = match term.kind {
+            Ejected::Runaway => (
+                budget,
+                component.ages().max_pdf_between(floor, RECENT_DEATH_AGES)
+                    * (1.0 + RATE_MARGIN)
+                    * interval,
+            ),
+            Ejected::Walkaway => (
+                galaxy.field_part(term.component, MassBand::E, budget),
+                young.deaths_per_system(),
+            ),
+        };
+        assert_same_bits(term.systems, systems);
+        assert_same_bits(term.deaths_per_system, rate);
+        order.push((
+            term.component.index(),
+            term.class.index(),
+            kind_slot(term.kind),
+        ));
     }
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
-    // No class with a share of some band-E star's deaths is left without a term.
+    // Every walkaway is in speed bin 0, so a faster class has a runaway's term alone; the young
+    // disc's runaways weigh its whole budget, more than the field's part the walkaways weigh.
+    let terms = process.ejected_terms();
+    assert!(
+        terms
+            .iter()
+            .filter(|t| t.kind == Ejected::Walkaway)
+            .all(|t| t.speed.index() == 0)
+    );
+    let young_disc = young_disc_of(galaxy);
+    let systems_of = |kind| {
+        terms
+            .iter()
+            .find(|t| t.component == young_disc && t.kind == kind)
+            .expect("the young disc has both kinds' terms")
+            .systems
+    };
+    assert!(systems_of(Ejected::Runaway) > systems_of(Ejected::Walkaway));
+}
+
+/// Every class and kind of an ejecting source that holds a share of some band-E star's deaths has
+/// its term, so none is lost.
+#[test]
+fn every_class_and_kind_with_a_share_has_its_term() {
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
+    let displaced = galaxy.fields().displaced().expect("the displaced classes");
+    let table = table();
+    let terms = process.ejected_terms();
     let mut parts = [NO_PART; MAX_PARTS];
     for young in process.components() {
         let source = table.component_source(young.id());
@@ -272,34 +350,47 @@ fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
                     continue;
                 }
             };
-            let probe = EjectedTerm {
-                class: id,
-                component: young.id(),
-                source,
-                speed,
-                age,
-                systems: 1.0,
-                largest_share: 1.0,
-                deaths_per_system: 1.0,
-            };
-            let takes =
-                band_masses(256).any(|m| ejected_parts(table, &probe, m, &mut parts).1 > 0.0);
-            let termed = process
-                .ejected_terms()
-                .iter()
-                .any(|t| t.component == young.id() && t.class == id);
-            assert_eq!(takes, termed, "{:?} of {:?}", class.key(), young.id());
+            for kind in KINDS {
+                let probe = EjectedTerm {
+                    class: id,
+                    kind,
+                    component: young.id(),
+                    source,
+                    speed,
+                    age,
+                    systems: 1.0,
+                    largest_share: 1.0,
+                    deaths_per_system: 1.0,
+                };
+                let takes =
+                    band_masses(256).any(|m| ejected_parts(table, &probe, m, &mut parts).1 > 0.0);
+                let termed = terms
+                    .iter()
+                    .any(|t| t.component == young.id() && t.class == id && t.kind == kind);
+                assert_eq!(
+                    takes,
+                    termed,
+                    "{:?} of {:?} as {kind:?}",
+                    class.key(),
+                    young.id()
+                );
+            }
         }
     }
 }
 
-/// A term's largest share bounds its class's share of a band-E star's deaths at every mass, over
-/// a fine grid and random masses; and a source's classes together take, at each mass, the closed
-/// form's ejected share: the share the field's marks drop.
+/// A term's largest share bounds its class's share of a band-E star's deaths as its kind at every
+/// mass, over a fine grid and random masses; and at each mass a source's classes together take
+/// as each kind the closed form's share of that kind, so that the runaways' terms take the
+/// component's whole budget's runaway deaths and the walkaways' the field's part of its walkaway
+/// deaths, to 10⁻¹²: what the field's marks drop of the field's, and the features' lists of
+/// their runaways.
 #[test]
 fn the_classes_take_the_closed_form_s_share_mass_by_mass() {
-    let process = CoreCollapseProcess::new(galaxy());
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
     let table = table();
+    let fields = galaxy.fields();
     let mut lcg = Lcg::new(0x0933_b001);
     let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
     let masses: Vec<SolarMasses> = band_masses(4_096)
@@ -311,19 +402,42 @@ fn the_classes_take_the_closed_form_s_share_mass_by_mass() {
     for &m in &masses {
         for young in process.components() {
             let source = table.component_source(young.id());
+            let component = fields.component(young.id());
+            let budget =
+                component.count() * galaxy.shares().share(MassBand::E, component.population());
             let mut taken = 0.0;
-            for term in process
-                .ejected_terms()
-                .iter()
-                .filter(|t| t.component == young.id())
-            {
-                let (count, share) = ejected_parts(table, term, m, &mut parts);
-                assert!(share <= term.largest_share, "{m:?}: {share} over {term:?}");
-                let summed = parts[..count]
+            for kind in KINDS {
+                let (mut share_taken, mut deaths) = (0.0, 0.0);
+                for term in process
+                    .ejected_terms()
                     .iter()
-                    .fold(0.0, |sum, part| sum + part.share);
-                assert_same_bits(summed, share);
-                taken += share;
+                    .filter(|t| t.component == young.id() && t.kind == kind)
+                {
+                    let (count, share) = ejected_parts(table, term, m, &mut parts);
+                    assert!(share <= term.largest_share, "{m:?}: {share} over {term:?}");
+                    let summed = parts[..count]
+                        .iter()
+                        .fold(0.0, |sum, part| sum + part.share);
+                    assert_same_bits(summed, share);
+                    share_taken += share;
+                    deaths += term.systems * share;
+                }
+                let closed = closed_form_kind_share(table, source, kind, m);
+                assert!(
+                    (share_taken - closed).abs() <= 1e-12,
+                    "{m:?} of {source:?} as {kind:?}: the classes take {share_taken}, the closed \
+                     form {closed}"
+                );
+                let systems = match kind {
+                    Ejected::Runaway => budget,
+                    Ejected::Walkaway => galaxy.field_part(young.id(), MassBand::E, budget),
+                };
+                assert!(
+                    (deaths - systems * closed).abs() <= 1e-12 * systems,
+                    "{m:?} of {source:?} as {kind:?}: {deaths} deaths against {}",
+                    systems * closed
+                );
+                taken += share_taken;
             }
             let closed = ejected_share(source, m);
             assert!(
@@ -353,12 +467,9 @@ fn the_field_s_marks_drop_the_closed_form_s_share() {
             tags::CLASS_CORE_COLLAPSE_EJECTION,
             ObjectKey::from(SystemId::from(id)),
         );
-        dropped += u32::from(ejected_before_death(
-            table,
-            BirthSource::ThinDisc,
-            m,
-            &mut stream,
-        ));
+        dropped += u32::from(
+            ejection_before_death(table, BirthSource::ThinDisc, m, &mut stream).is_some(),
+        );
         let p = ejected_share(BirthSource::ThinDisc, m);
         expected += p;
         variance += p * (1.0 - p);
@@ -370,6 +481,112 @@ fn the_field_s_marks_drop_the_closed_form_s_share() {
         2.0 * normal_cdf(-z.abs()),
         ALPHA,
     );
+}
+
+/// A feature's list drops a candidate's death with its mass's closed-form runaway share, by the
+/// field's ejection marks on the member's own key ([`feature_runaway`]): over 40,000 masses
+/// across band E, keyed as the young disc's nurseries' list entries are, the drops against the
+/// sum of their odds, at α = 10⁻³. A member's key is a feature-level member ID's, prefix `0`,
+/// and never a class candidate's, prefix `111`. Under the held arm nothing is dropped.
+#[test]
+fn a_feature_s_list_drops_its_runaways_deaths() {
+    let galaxy = galaxy();
+    let table = table();
+    let young = young_disc_of(galaxy);
+    let nurseries: Vec<FeatureRecord> =
+        FeatureCatalogue::walk_process(galaxy, FeatureProcess::Nursery)
+            .filter(|f| f.component() == Some(young))
+            .take(5)
+            .collect();
+    assert_eq!(nurseries.len(), 5);
+    let held = galaxy.clone().with_rules(GalaxyRules {
+        runaway_deaths: RunawayDeathsRules::FieldOnly,
+        ..GalaxyRules::every_27_hold()
+    });
+    let mut lcg = Lcg::new(0x0933_b005);
+    let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
+    let (mut dropped, mut expected, mut variance) = (0_u32, 0.0, 0.0);
+    for index in 0..40_000_u32 {
+        let feature = &nurseries[usize::try_from(index / 8_000).unwrap()];
+        let member = FeatureMemberId::new(
+            feature.id().feature_ref(),
+            MemberSlot::FeatureLevel {
+                index: u16::try_from(index % 8_000).unwrap(),
+            },
+        )
+        .unwrap();
+        let system = SystemId::from(member);
+        assert!(matches!(system.kind(), SystemIdKind::FeatureMember(_)));
+        let key = ObjectKey::from(system);
+        let m = SolarMasses::new(lo * crate::math::exp(lcg.next_f64() * crate::math::ln(hi / lo)));
+        dropped += u32::from(feature_runaway(galaxy, young, m, key));
+        if index % 100 == 0 {
+            assert!(
+                !feature_runaway(&held, young, m, key),
+                "the held arm drops none"
+            );
+        }
+        let p = closed_form_kind_share(table, BirthSource::ThinDisc, Ejected::Runaway, m);
+        expected += p;
+        variance += p * (1.0 - p);
+    }
+    let z = (f64::from(dropped) - expected) / variance.sqrt();
+    eprintln!("{dropped} of 40,000 members' deaths dropped against {expected:.1}, z = {z:.2}");
+    assert_p_value(
+        "the features' runaway drops",
+        2.0 * normal_cdf(-z.abs()),
+        ALPHA,
+    );
+}
+
+/// A nursery's list under every 27 hold is its list under the held arm less the core collapses
+/// whose members its ejection marks make runaways: the same entries, sites and windows otherwise,
+/// walkaways' deaths among them.
+#[test]
+fn a_nursery_s_list_is_the_held_arm_s_less_its_runaways() {
+    let galaxy = galaxy();
+    let young = young_disc_of(galaxy);
+    let held = galaxy.clone().with_rules(GalaxyRules {
+        runaway_deaths: RunawayDeathsRules::FieldOnly,
+        ..GalaxyRules::every_27_hold()
+    });
+    let (mut kept, mut dropped) = (0, 0);
+    for feature in FeatureCatalogue::walk_process(galaxy, FeatureProcess::Nursery)
+        .filter(|f| f.component() == Some(young))
+    {
+        let held_list = FeatureLevelList::of(&held, &feature);
+        let list = FeatureLevelList::of(galaxy, &feature);
+        assert_eq!(
+            list.entries().count(),
+            held_list.entries().count(),
+            "the drop is a thinning: the candidates' count is the held arm's"
+        );
+        let ejected: BTreeMap<SystemId, RecentEntry> = list
+            .recent_entries(galaxy)
+            .map(|entry| (entry.member().record().id(), entry))
+            .collect();
+        for entry in held_list.recent_entries(&held) {
+            let record = entry.member().record();
+            let now = ejected.get(&record.id());
+            if entry.class() != RecentClass::CoreCollapse {
+                assert_eq!(now, Some(&entry));
+                continue;
+            }
+            let key = ObjectKey::from(record.id());
+            if feature_runaway(galaxy, young, record.primary_initial_mass(), key) {
+                assert_eq!(now, None, "{:?} is a runaway's death", record.id());
+                dropped += 1;
+            } else {
+                assert_eq!(now, Some(&entry));
+                kept += 1;
+            }
+        }
+        if kept >= 20 && dropped >= 2 {
+            break;
+        }
+    }
+    eprintln!("{kept} core collapses kept, {dropped} runaways' dropped");
+    assert!(kept >= 20 && dropped >= 2, "{kept} {dropped}");
 }
 
 // 3. The envelope, the index and the speed law.
@@ -777,7 +994,7 @@ fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
 }
 
 /// The new arm's first runaway and walkaway entries of the sample cells, as measured
-/// (2026-11-01, at generator version 25).
+/// (2026-11-01, with the runaways' terms at the whole budget; at generator version 25).
 const EJECTED_PIN: [[u64; 7]; 3] = [
     [
         0x4036_83f3_3563_62aa,
@@ -825,8 +1042,14 @@ fn the_new_arm_s_ejected_entries_are_pinned() {
 // 6. The closed form, galaxy-wide.
 
 /// `galaxy`'s candidates over every cell of the root cube whose mean is not negligible, on 16
-/// threads: their count, the ejected among them, and the sum of their masses' ejected shares and
-/// of those shares' variances.
+/// threads: their count, the ejected among them, and the sum of their odds of being ejected and
+/// of those odds' variances.
+///
+/// A death at mass m and age a is the field's at the rate `k p(a) (1 − P(m))`, a walkaway's term's
+/// at `k p(a) P_w(m)` and a runaway's at `p(a) P_r(m)`, with `p` the budget's age density, `k`
+/// what the field keeps at that age ([`field_keeps`]) and `P = P_r + P_w` the closed form's shares
+/// by kind; so its odds of being ejected are `(k P_w + P_r) ÷ (k (1 − P_r) + P_r)`, `P(m)` where
+/// the field is the budget.
 fn ejected_census(galaxy: &Galaxy) -> [f64; 4] {
     let process = CoreCollapseProcess::new(galaxy);
     let table = galaxy
@@ -847,7 +1070,10 @@ fn ejected_census(galaxy: &Galaxy) -> [f64; 4] {
                         continue;
                     };
                     let source = table.component_source(candidate.component);
-                    let p = closed_form_share(table, source, candidate.mass);
+                    let [runaway, walkaway] = KINDS
+                        .map(|kind| closed_form_kind_share(table, source, kind, candidate.mass));
+                    let k = field_keeps(galaxy, candidate.component, candidate.age_at_epoch);
+                    let p = (k * walkaway + runaway) / (k * (1.0 - runaway) + runaway);
                     sums[0] += 1.0;
                     sums[1] += f64::from(u8::from(candidate.ejection.is_some()));
                     sums[2] += p;
@@ -886,11 +1112,12 @@ fn ejected_census(galaxy: &Galaxy) -> [f64; 4] {
 }
 
 /// Galaxy-wide, the candidates' ejected share is the closed form's: each candidate a runaway's or
-/// a walkaway's with odds its mass's ejected share ([`ejected_share`]), the field's part of each
-/// mass's deaths split between the field term and the classes alike; summed over the whole root
-/// cube, the ejected count against the shares' sum and their variance, at α = 10⁻³. Integrated
-/// over the cube a class's form is one system's, so this holds whatever the forms. Under every 27
-/// hold, and under every 27 hold but the field share, where the field is the budget.
+/// a walkaway's with odds its mass's and age's ([`ejected_census`]), the runaways at the whole
+/// budget and the walkaways and the field at the field's part; summed over the whole root cube,
+/// the ejected count against the odds' sum and their variance, at α = 10⁻³. Integrated over the
+/// cube a class's form is one system's, so this holds whatever the forms. Under every 27 hold,
+/// and under every 27 hold but the field share, where the field is the budget and the odds the
+/// mass's ejected share ([`ejected_share`]).
 #[test]
 #[ignore = "slow: the class's candidates over the whole galaxy, twice"]
 fn the_ejected_share_is_the_closed_form_galaxy_wide() {

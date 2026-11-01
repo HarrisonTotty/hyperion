@@ -18,7 +18,12 @@
 //!   as its stars are (`death_in_interval_under`), then [`DeathMarks::of`] and
 //!   [`claims`] in the feature's surroundings, the nursery's superbubble at the death
 //!   ([`ShellEnvironment::Bubble`], the window ended at the wall) where the site lies in one, the
-//!   field's otherwise.
+//!   field's otherwise. From generator version 27 (P09.T33.b's `RUNAWAY_DEATHS_VERSION`) a
+//!   candidate whose ejection marks put a runaway's ejection before its death is no entry: a
+//!   runaway dies some 1,900 ly from its birth cluster, in the field, where the class's runaway
+//!   terms place it at the whole budget, while a walkaway dies inside its feature's bubble and
+//!   stays listed (lean, 2026-11-01; research-leans-21). The drop is a thinning of the
+//!   candidates, whose expected count is unchanged.
 //! - **`TYPE_IA`**: the Type Ia of the feature's members, exploding in the interval, drawn delay
 //!   first as the field's class draws them ([`IaProgenitor::draw_in`]) on a delay-time distribution
 //!   of the feature's own ages, their window the shared test's in the feature's surroundings, in
@@ -54,6 +59,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
 use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::catalogue_classes::ClassId;
+use crate::galaxy::catalogue_classes::core_collapse::feature_runaway;
 use crate::galaxy::catalogue_classes::lbv::{NODES, horizon_window, host_ages, may_host};
 use crate::galaxy::catalogue_classes::supernova::{
     BubbleInterior, DeathMarks, SupernovaInterval, Surroundings, claimed_window, claims,
@@ -550,6 +556,17 @@ impl FeatureStars {
                         site: None,
                         window: None,
                     });
+                }
+                // From 27 a runaway's death is the class's, in the field (P09.T33.b).
+                if self.feature.component().is_some_and(|component| {
+                    feature_runaway(
+                        galaxy,
+                        component,
+                        record.primary_initial_mass(),
+                        ObjectKey::from(record.id()),
+                    )
+                }) {
+                    return None;
                 }
                 let (claim, site) =
                     self.core_collapse(galaxy, &record, &self.composition, self.velocity)?;
