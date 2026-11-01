@@ -7,13 +7,15 @@ use super::*;
 use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
+use crate::planetary::hooks::aerosols::AerosolDeck;
 use crate::substance::aloft::law_aloft;
 use crate::substance::by_key;
 use crate::units::{Kelvin, Pascals};
 
 /// The record's atmosphere `atmosphere` under `gravity` (m s⁻²) as the engine reads it (the tests'
-/// reference): its 1-bar gas throughout but CH₄ above its deck's base, held to its saturation, and
-/// each of its modes with a τ ([`assemble`]).
+/// reference): its 1-bar gas throughout but CH₄, its deck's vapour below it (the 1-bar gas's where
+/// it has no deck) and held to its saturation above its base, and each of its modes with a τ
+/// ([`assemble`]).
 pub(crate) fn record_column(atmosphere: &EnvelopeAtmosphere, gravity: f64) -> EnvelopeColumn {
     let share = |key: &str| {
         let id = by_key(key).expect("a row");
@@ -24,10 +26,14 @@ pub(crate) fn record_column(atmosphere: &EnvelopeAtmosphere, gravity: f64) -> En
             .map(|&(_, x)| x)
             .sum::<f64>()
     };
+    let methane_deck = atmosphere
+        .decks()
+        .iter()
+        .find(|d| d.condensate() == by_key("CH4").expect("a row"));
     let gas = Absorbers {
         hydrogen: share("H2"),
         helium: share("He"),
-        methane: share("CH4"),
+        methane: methane_deck.map_or_else(|| share("CH4"), AerosolDeck::vapour_below),
         water: share("H2O"),
         carbon_monoxide: share("CO"),
         sodium: share("Na"),
@@ -38,11 +44,7 @@ pub(crate) fn record_column(atmosphere: &EnvelopeAtmosphere, gravity: f64) -> En
         .iter()
         .filter_map(column::column_mode)
         .collect();
-    let methane_base = atmosphere
-        .decks()
-        .iter()
-        .find(|d| d.condensate() == by_key("CH4").expect("a row"))
-        .map(|d| d.base().value());
+    let methane_base = methane_deck.map(|d| d.base().value());
     let methane_law = law_aloft(by_key("CH4").expect("a row")).expect("a law");
     assemble(
         (gravity, atmosphere.mean_molar_mass_g_per_mol()),
@@ -171,12 +173,14 @@ pub(crate) fn hot_jupiter_inputs() -> AtmosphereInputs {
 /// each from memory as plan 14 cites it, with the albedo the closed form gives each under every
 /// 27 hold, pinned: part 6's chromophore and ammonia haze bring Jupiter within its measurement
 /// (from part 5's 0.2859) and Saturn to 0.4017 (from 0.1899), within Wang et al.'s (2024) 0.41 ±
-/// 0.02, and part 7's methane layer Uranus and Neptune within theirs (from 0.4829 and 0.5255).
+/// 0.02, and part 7's methane layer Uranus and Neptune within theirs (from 0.4829 and 0.5255);
+/// part 8's cold-opacity law moves Saturn to 0.3882, Uranus to 0.3084 and Neptune to 0.3238, each
+/// still within its measurement (Saturn's Wang et al.'s).
 const GIANTS: [(&str, (f64, f64), f64); 4] = [
     ("Jupiter", (0.503, 0.012), JUPITER),
-    ("Saturn", (0.342, 0.030), 0.4017),
-    ("Uranus", (0.300, 0.049), 0.2995),
-    ("Neptune", (0.290, 0.067), 0.3101),
+    ("Saturn", (0.342, 0.030), 0.3882),
+    ("Uranus", (0.300, 0.049), 0.3084),
+    ("Neptune", (0.290, 0.067), 0.3238),
 ];
 
 /// Jupiter's own Bond albedo under every 27 hold, pinned: 0.5003, the ammonia haze's fit
@@ -195,10 +199,11 @@ fn the_envelope_bond_is_held_only_until_the_27_bump() {
     use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < ENVELOPE_BOND_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b parts 5 to 7 on the record: delete \
+        "the 26 → 27 bump puts P14.T24.h.b parts 5 to 8 on the record: delete \
          `ENVELOPE_BOND_VERSION`, `EnvelopeBondRules` with its `ClassTable` arm and the guards in \
          `gas_envelope_bond`, `photochem`'s chromophore column, P14.T52.d's photochemistry and \
-         assembly, the closed form's decks and hazes and `GreyProfile::in_force` (κ₁ then \
+         assembly, the closed form's decks and hazes and `GreyProfile::in_force` and \
+         `in_force_at` (κ₁ then \
          2.92e-3 in `ADOPTED`), the \
          tests' `with_envelope_bond`, its switch in `with_every_27_hold`, the `ClassTable` arms \
          of these tests, and this test"

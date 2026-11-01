@@ -954,9 +954,10 @@ pub const AMMONIA_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(1.0), 0
 /// for the bright cloud the column reads above its floor, where the decks' large particles,
 /// forward-scattering, leave Jupiter dark.
 ///
-/// Saturn under the same rule is its check: its own Bond albedo, 0.402, against Wang et al.'s
-/// (2024) 0.41 ± 0.02 and Hanel et al.'s (1983) 0.342 ± 0.030, and the haze's τ against the plan's
-/// ~10 for its tropospheric haze (Karkoschka and Tomasko 2005).
+/// Saturn under the same rule is its check: its own Bond albedo, 0.402 (0.388 on part 8's
+/// cold-opacity law), against Wang et al.'s (2024) 0.41 ± 0.02 and Hanel et al.'s (1983) 0.342 ±
+/// 0.030, and the haze's τ against the plan's ~10 for its tropospheric haze (Karkoschka and
+/// Tomasko 2005).
 pub const AMMONIA_HAZE_OPTICAL_DEPTH: f64 = 10.0;
 
 /// The haze above a cold giant's ammonia cloud, whose base (P14.T52.c's NH₃ deck's) lies at

@@ -266,6 +266,7 @@ pub(crate) fn envelope_of(
     let internal_temperature =
         envelope_internal_temperature(of.internal_luminosity, of.radius, of.mass, of.age)
             .map_err(DeriveEnvelopeError::InternalTemperature)?;
+    let effective = effective_temperature(of.equilibrium_temperature, internal_temperature);
     let inputs = EnvelopeInputs {
         mass: of.mass,
         fractions: of.fractions,
@@ -274,10 +275,7 @@ pub(crate) fn envelope_of(
         fe_h: of.fe_h,
         alpha_fe,
         host: of.host,
-        effective_temperature: effective_temperature(
-            of.equilibrium_temperature,
-            internal_temperature,
-        ),
+        effective_temperature: effective,
         age: of.age,
         surface_gravity: of.gravity,
         primordial_helium_per_hydrogen: of.primordial_helium_per_hydrogen,
@@ -296,7 +294,7 @@ pub(crate) fn envelope_of(
         equilibrium_temperature: of.equilibrium_temperature,
         gravity: of.gravity,
         fe_h: of.fe_h,
-        grey: GreyProfile::in_force(),
+        grey: GreyProfile::in_force_at(effective),
         starlit: of.starlit,
     })
     .map_err(DeriveEnvelopeError::Atmosphere)?;

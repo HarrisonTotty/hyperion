@@ -36,7 +36,9 @@
 //! - **f = ¼** ([`MEAN_REDISTRIBUTION`]), the whole planet's mean.
 //! - **κ₁** ([`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`]), fitted through this module on the Solar System
 //!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule;
-//!   from 27 refitted at Jupiter's own Bond albedo (`GreyProfile::in_force`, P14.T24.h.b part 6).
+//!   from 27 refitted at Jupiter's own Bond albedo (`GreyProfile::in_force`, P14.T24.h.b part 6),
+//!   and below a `T_eff` of 120 K lowered as (`T_eff` ÷ 120 K)^2.4 (`GreyProfile::in_force_at`,
+//!   part 8; [`COLD_OPACITY_EXPONENT`]).
 //!
 //! `T_irr` is Guillot's T* (R* ÷ D)^½ (his Eq. 1, with `T_eq`⁴ = `T_irr`⁴ ÷ 4 for no albedo, Eq.
 //! 2), here of the starlight absorbed: `T_irr`⁴ = 4 `T_eq`⁴ ([`irradiation_temperature`]), `T_eq`
@@ -152,6 +154,21 @@ pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.87e-3;
 /// place of T51.b's class table's 0.480, at 2.9182 × 10⁻³.
 pub const THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG: f64 = 2.92e-3;
 
+/// The effective temperature below which an envelope's κ₁ falls with it from generator version 27
+/// (P14.T24.h.b part 8, `ENVELOPE_BOND_VERSION`'s hold): 120 K, a round level under the table's
+/// Jupiter's own 123.4 K, so that κ₁'s calibration on the Galileo probe stands.
+pub const COLD_OPACITY_REFERENCE: Kelvin = Kelvin::new(120.0);
+
+/// The power β of `T_eff` ÷ [`COLD_OPACITY_REFERENCE`] that scales κ₁ below it (P14.T24.h.b part
+/// 8): decision-p14-t24d-profile §1.5's route of a temperature-dependent mean opacity, fitted on
+/// the measured 1-bar temperatures of Saturn (134 ± 4 K, Lindal et al. 1985), Uranus (76 K,
+/// Robinson and Catling 2014, Table 1) and Neptune (72 ± 2 K, Lindal 1992), as that section reads
+/// them: 2.4, to two figures, where χ² over the three (σ 4, 2 and 2 K, Uranus's taken as 2 K)
+/// is 4.58 against its least, 4.52 near 2.45, under every 27 hold. Its ground (recalled,
+/// labelled): the mean of H₂'s collision-induced absorption falls as a cold photosphere's Planck
+/// peak moves into the far infrared, where the pairs' translational band is weak.
+pub const COLD_OPACITY_EXPONENT: f64 = 2.4;
+
 /// The deepest level of the published adiabat, `p_bottom`: 100 bar (10⁷ Pa; science-r08-gases-2.md
 /// §1.7.3). Deeper, [`EnvelopeProfile::temperature_at`] takes the last segment's exponent.
 pub const ADIABAT_BOTTOM: Pascals = Pascals::new(1.0e7);
@@ -245,6 +262,31 @@ impl GreyProfile {
                 thermal_opacity_m2_per_kg: THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG,
                 ..Self::ADOPTED
             },
+        }
+    }
+
+    /// The parameters in force for an envelope of effective temperature `effective`, the
+    /// (`T_eq`⁴ + `T_int`⁴)^¼ its caller already holds (its profile's emission, one pass, no
+    /// solve): [`Self::in_force`]'s, and from P14.T24.h.b's `ENVELOPE_BOND_VERSION` (part 8) κ₁
+    /// times (`T_eff` ÷ [`COLD_OPACITY_REFERENCE`])^β ([`COLD_OPACITY_EXPONENT`]) where `T_eff`
+    /// lies below the reference: one-sided, and continuous there.
+    #[must_use]
+    pub(crate) fn in_force_at(effective: Kelvin) -> Self {
+        let grey = Self::in_force();
+        match EnvelopeBondRules::in_force() {
+            EnvelopeBondRules::ClassTable => grey,
+            EnvelopeBondRules::Own => {
+                let ratio = effective.value() / COLD_OPACITY_REFERENCE.value();
+                if ratio < 1.0 {
+                    Self {
+                        thermal_opacity_m2_per_kg: grey.thermal_opacity_m2_per_kg
+                            * math::powf(ratio, COLD_OPACITY_EXPONENT),
+                        ..grey
+                    }
+                } else {
+                    grey
+                }
+            }
         }
     }
 

@@ -201,7 +201,8 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
 
 /// Asserts what every `Ok` envelope holds (the design's §4 item 1), the envelope `envelope` of the
 /// body `at` whose inputs were `of`: no supercritical condensable; the grey profile in force (κ₁
-/// 2.87 × 10⁻³ m² kg⁻¹ to 26 and 2.92 × 10⁻³ from 27, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
+/// 2.87 × 10⁻³ m² kg⁻¹ to 26 and 2.92 × 10⁻³ from 27, at most, below a `T_eff` of 120 K the cold
+/// law's, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
 /// so that the wire's `T_irr`⁴ = `T_eq`⁴ ÷ f) to 10⁻¹²; a finite join, the adiabat's nodes
 /// ascending from it to at least the larger of 100 bar and e^0.3 times its pressure; the 1-bar
 /// composition summing to 1 to 10⁻⁹, largest first, each at least 10⁻¹²; every mode covering the
@@ -216,14 +217,20 @@ fn check_envelope(at: &str, envelope: &Envelope, of: &EnvelopeOf) {
     let grey = profile.grey();
     assert_same_bits(
         grey.thermal_opacity_m2_per_kg(),
-        GreyProfile::in_force().thermal_opacity_m2_per_kg(),
+        GreyProfile::in_force_at(super::effective_temperature(
+            of.equilibrium_temperature,
+            atmosphere.internal_temperature(),
+        ))
+        .thermal_opacity_m2_per_kg(),
     );
     let kappa = match EnvelopeBondRules::in_force() {
         EnvelopeBondRules::ClassTable => 2.87e-3,
         EnvelopeBondRules::Own => 2.92e-3,
     };
     assert!(
-        (grey.thermal_opacity_m2_per_kg() - kappa).abs() < 5e-6,
+        grey.thermal_opacity_m2_per_kg() < kappa + 5e-6
+            && (grey.thermal_opacity_m2_per_kg() > kappa - 5e-6
+                || EnvelopeBondRules::in_force() == EnvelopeBondRules::Own),
         "{at}"
     );
     assert_same_bits(grey.optical_depth_exponent(), OPTICAL_DEPTH_EXPONENT);
@@ -2475,5 +2482,46 @@ fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
             "{name}: {deck_tau}"
         );
         eprintln!("{name} at 27: its methane layer's τ {deck_tau:.3}");
+    }
+}
+
+/// P14.T24.h.b part 8: under every 27 hold, on the cold-opacity law, the table's cold giants meet
+/// their measured 1-bar temperatures within twice their errors (Saturn 134 ± 4 K, Lindal et al.
+/// 1985; Uranus 76 K, Robinson and Catling 2014, taken ± 2 K; Neptune 72 ± 2 K, Lindal 1992), and
+/// Jupiter keeps the Galileo probe's 166.1 K; the ice giants' CH₄ decks then form below 1 bar.
+#[test]
+fn under_every_27_hold_the_cold_giants_meet_their_one_bar_temperatures() {
+    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+    let methane = by_key("CH4").expect("a row");
+    for (name, measured, error) in [
+        ("Jupiter", 166.1, 0.25),
+        ("Saturn", 134.0, 4.0),
+        ("Uranus", 76.0, 2.0),
+        ("Neptune", 72.0, 2.0),
+    ] {
+        let one_bar = |envelope: &Envelope| {
+            envelope
+                .atmosphere()
+                .profile()
+                .temperature_at(Pascals::new(1e5))
+                .value()
+        };
+        let (_, held) = with_every_26_hold(|| table_envelope(name));
+        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let (before, after) = (one_bar(&held), one_bar(&own));
+        let deck = own
+            .atmosphere()
+            .decks()
+            .iter()
+            .find(|d| d.condensate() == methane)
+            .map(|d| d.base().value() / 1e5);
+        eprintln!(
+            "{name}: T(1 bar) {before:.1} K at 26, {after:.1} K at 27, against {measured} K; its \
+             CH₄ deck at {deck:?} bar"
+        );
+        assert!((after - measured).abs() <= 2.0 * error, "{name}: {after} K");
+        if matches!(name, "Uranus" | "Neptune") {
+            assert!(deck.is_some_and(|base| base > 1.0), "{name}: {deck:?}");
+        }
     }
 }

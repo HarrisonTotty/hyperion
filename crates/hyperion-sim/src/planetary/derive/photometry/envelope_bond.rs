@@ -9,7 +9,9 @@
 //! (`photochem::ammonia_haze`), whose τ(550) is fitted on Jupiter's measured Bond albedo, and κ₁
 //! refitted to the Galileo probe at that albedo (`GreyProfile::in_force`). Part 7 draws an ice
 //! giant's CH₄ deck as its methane layer, Irwin et al.'s (2022) Aerosol-2 of haze cores
-//! (`envelope_atmosphere::methane_layer_mode`).
+//! (`envelope_atmosphere::methane_layer_mode`). Part 8 lowers a cold envelope's κ₁ with its
+//! effective temperature below 120 K (`GreyProfile::in_force_at`), so that the cold giants meet
+//! their measured 1-bar temperatures.
 //!
 //! # The column
 //!
@@ -86,12 +88,13 @@ mod tests;
 /// The generator version from which a gas envelope's Bond albedo is its own column's (P14.T24.h.b
 /// part 5): 27, the planetary train after 26's.
 ///
-/// It is parts 5, 6 and 7's one hold. Below it [`EnvelopeBondRules::in_force`] is
+/// It is parts 5 to 8's one hold. Below it [`EnvelopeBondRules::in_force`] is
 /// [`EnvelopeBondRules::ClassTable`]: every gas envelope takes T51.b's table, the chromophore the
-/// Great Red Spot's column, no ammonia cloud a haze, κ₁ its fit at the table's albedo and a CH₄
-/// deck its ice, as to 26, bit for bit. 27's bump deletes this hold, [`EnvelopeBondRules`] with its `ClassTable` arm, the
+/// Great Red Spot's column, no ammonia cloud a haze, κ₁ its fit at the table's albedo for every
+/// envelope and a CH₄ deck its ice, as to 26, bit for bit. 27's bump deletes this hold, [`EnvelopeBondRules`] with its `ClassTable` arm, the
 /// guards that read it (here, in `photochem`'s chromophore column, P14.T52.d's photochemistry and
-/// envelope assembly, the closed form's decks and hazes, and `GreyProfile::in_force`), the tests'
+/// envelope assembly, the closed form's decks and hazes, and `GreyProfile::in_force` and
+/// `in_force_at`), the tests'
 /// switch and its tripwire
 /// (`the_envelope_bond_is_held_only_until_the_27_bump`).
 pub(crate) const ENVELOPE_BOND_VERSION: GeneratorVersion = GeneratorVersion::new(27);
@@ -102,7 +105,7 @@ pub(crate) enum EnvelopeBondRules {
     /// Version 26's and before: T51.b's class table (and the clouds and κ₁ as they were).
     ClassTable,
     /// Version 27's: its own column's ([`column::snapshot_bond`]), with parts 6 and 7's clouds
-    /// and κ₁.
+    /// and parts 6 and 8's κ₁.
     Own,
 }
 

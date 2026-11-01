@@ -287,12 +287,10 @@ impl<'a> HeatCapacity<'a> {
 /// `equilibrium` and gravity `gravity`, whose adiabat's `c_p` is `mixture`'s; `None` where no
 /// join forms or a `c_p` is not known.
 fn profile(
-    internal: Kelvin,
-    equilibrium: Kelvin,
+    (grey, internal, equilibrium): (GreyProfile, Kelvin, Kelvin),
     gravity: MetresPerSecondSquared,
     mixture: &[(SubstanceId, f64)],
 ) -> Option<Profile> {
-    let grey = GreyProfile::in_force();
     let irradiation = irradiation_temperature(equilibrium);
     let mut profile = Profile {
         grey,
@@ -628,6 +626,8 @@ pub(crate) fn snapshot_column(inputs: &AtmosphereInputs) -> Option<EnvelopeColum
         math::powi(equilibrium, 4) + math::powi(internal.value(), 4),
         0.25,
     );
+    // The grey parameters at that effective temperature (part 8), read once for both profiles.
+    let grey = GreyProfile::in_force_at(Kelvin::new(effective));
     let (_, distance) = FORMED_AT
         .iter()
         .find(|(side, _)| *side == inputs.formed)
@@ -658,12 +658,11 @@ pub(crate) fn snapshot_column(inputs: &AtmosphereInputs) -> Option<EnvelopeColum
     let rows = Rows::find();
     let first = gas_of(
         &abundances,
-        profile_free_one_bar(internal, inputs.equilibrium, g),
+        profile_free_one_bar((grey, internal, inputs.equilibrium), g),
         &rows,
     )?;
     let shape = profile(
-        internal,
-        inputs.equilibrium,
+        (grey, internal, inputs.equilibrium),
         g,
         &first.mixture(rows.carbon_monoxide),
     )?;
@@ -703,11 +702,9 @@ pub(crate) fn snapshot_column(inputs: &AtmosphereInputs) -> Option<EnvelopeColum
 
 /// The grey profile's temperature at 1 bar, K, before any join: the first speciation's.
 fn profile_free_one_bar(
-    internal: Kelvin,
-    equilibrium: Kelvin,
+    (grey, internal, equilibrium): (GreyProfile, Kelvin, Kelvin),
     gravity: MetresPerSecondSquared,
 ) -> f64 {
-    let grey = GreyProfile::in_force();
     let tau = grey.optical_depth(Pascals::new(1.0e5), gravity);
     grey.temperature(tau, internal, irradiation_temperature(equilibrium))
         .value()

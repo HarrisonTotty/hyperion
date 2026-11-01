@@ -604,8 +604,8 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
 ///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
 ///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
-///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo, and part 7's CH₄ deck
-///   drawn as its methane layer.
+///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo, part 7's CH₄ deck drawn
+///   as its methane layer, and part 8's κ₁ falling with a cold envelope's effective temperature.
 /// - the coarse pass's seasonal runs extrapolated by RRE(2), `ORBIT_EXTRAPOLATION_VERSION`
 ///   (rendering plan R09, I13), at `OrbitExtrapolationRules::ReducedRank` through
 ///   `with_orbit_extrapolation`: the climate's orbits to their stop, and so every wet world's field.
