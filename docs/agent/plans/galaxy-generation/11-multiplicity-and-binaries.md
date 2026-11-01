@@ -1862,6 +1862,9 @@ Files: `crates/hyperion-sim/tests/binaries_statistical.rs`.
 
 Acceptance: `just test-slow` passes; `just ci` stays green.
 
+_As built (lane `p11-t12`, 2026-11-01; tests only, nothing generated moves): see Risks, "P11.T12,
+as built"._
+
 ### P11.T13 Protocol and server
 
 Extend plan 06's `StarSummaryDto` with `body_index` and `binary_class: BinaryClassDto`; add
@@ -7325,3 +7328,24 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     hosts fed helium leave the class); the hold's own version-arm tests. The bump re-blesses them.
   - _Acceptance:_ `cargo test -p hyperion-sim awd_donors` (the hold's tests and
     `stellar::binary::awd_donors`'); slow, `the_helium_fed_hosts_leave_the_fast_class_in_a_census`.
+- **P11.T12, as built** (lane `p11-t12`, 2026-11-01; tests only, no golden, no fault found). The
+  suite is `tests/binaries_statistical.rs` (feature `testing`, every 27 hold through
+  `Galaxy::from_params_at_version`, eight slots in `.config/nextest.toml`), seven slow tests:
+  - model only: `multiplicity_by_primary_mass_follows_the_model_and_the_surveys`,
+    `sun_like_companion_counts_follow_the_model_and_raghavan`,
+    `first_companions_periods_and_mass_ratios_pass_kolmogorov_smirnov`,
+    `all_stars_below_half_a_solar_mass_match_the_census`;
+  - the engine's, to re-run by name after the BH LMXB and binary-rows fixes:
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs`,
+    `recycled_fields_and_the_double_neutron_star_merger_rate`,
+    `an_old_open_cluster_s_hertzsprung_russell_table` (its table goes where `HYPERION_HR_DUMP`
+    names).
+  - _Leans (2026-11-01):_ seven mass bins, one per anchor as ruling 74 left them, not the plan's
+    six; the model's χ² reads placement class `Alive` only, since the stripped mark selects which
+    remnants plan 08 retains; the surveys are compared on living `Alive` primaries, without the
+    displaced runaways (73–81% of the grid's living primaries above 9 M☉) and the features' cluster
+    stars; plan 06's 0.3–3% window is asserted on primaries, like for like; the recycling and
+    double-neutron-star yields draw every layer-D/E record `Free`.
+  - _Sources:_ the blue-straggler, hot-subdwarf and recycled-field windows are recalled. The pod
+    reads no web, so they go unchecked against their papers, and a miss of any of them is a
+    finding, not a failure.
