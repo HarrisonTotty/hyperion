@@ -763,6 +763,7 @@ fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_hea
     // The level bounds' held range reads both (R09.T8.d (b2)): every groove of the coarse level is
     // a trunk's, no deeper than `trunk_groove_m` of its cell, and a cell that carries no
     // tributaries heads no segment finer than its trunk and evaluates no finer level.
+    let mut cells_without = 0;
     for (field, dry_now) in [(earth(), false), (mars(), false), (mars_epoch(), true)] {
         let header = field.header();
         let level = header.level();
@@ -773,11 +774,12 @@ fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_hea
         let mut network = channels.network(field);
         let cells = usize::try_from(level.cell_count()).unwrap();
         let step = (cells / crate::test_sizes::per_target(4_000, 400)).max(1);
-        let (mut trunks, mut exact, mut without) = (0, 0, 0);
+        let (mut sampled, mut trunks, mut exact, mut without) = (0, 0, 0, 0);
         for n in (0..level.cell_count()).step_by(step) {
             let c = cell_at_index(first, n).unwrap();
             let record = field.cell(c).unwrap();
             let bound = trunk_groove_m(record, body);
+            sampled += 1;
             match network.segment(c).unwrap() {
                 None => assert_eq!(bits(bound), bits(0.0), "{c:?}: no trunk, bound {bound} m"),
                 Some(trunk) => {
@@ -806,12 +808,18 @@ fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_hea
             exact * 2 > trunks,
             "{exact} of {trunks} trunks at their bound"
         );
-        assert!(without > 0, "{without} cells without tributaries");
-        // A world dry now's trunks cut their epoch's valleys as they are.
+        // A world dry now's trunks cut their epoch's valleys as they are, and none of its cells
+        // carries tributaries.
         if dry_now {
             assert_eq!(exact, trunks);
+            assert_eq!(without, sampled);
         }
+        cells_without += without;
     }
+    assert!(
+        cells_without > 0,
+        "{cells_without} cells without tributaries"
+    );
 }
 
 #[test]

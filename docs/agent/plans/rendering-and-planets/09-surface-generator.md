@@ -2730,7 +2730,8 @@ planetary::surface::quantise`, the slow
     `synth::levels::tests::the_level_bound_and_the_reach_hold_at_every_level_at_ten_thousand_points`
     by name, `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, and the
     gate.
-  - _Built 2026-10-21_ (`f547af5a`, `82e36522`).
+  - _Built 2026-10-21_ (`f547af5a`, `82e36522`). _(b2) built 2026-11-01_ for the table's lowest,
+    from the cells held (`af6ab09`, `8c64485`; the record's "(b2), as built").
 
 ### R09.T9 Golden heights across targets
 
