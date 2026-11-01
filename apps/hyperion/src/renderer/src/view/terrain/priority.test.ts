@@ -6,9 +6,9 @@ import { lookAlong } from "../camera/quaternion";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
-import { type PatchKey, patchKeyString } from "./patchKey";
+import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import { compareRequests, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import { compareRequests, fillsHole, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
   type HeightRangeLookup,
   type PatchRequest,
@@ -144,6 +144,43 @@ describe("streaming priority across views", () => {
     expect(requests.length).toBeGreaterThan(1);
     for (let n = 1; n < requests.length; n += 1) {
       expect(requests[n]?.priority ?? NaN).toBeLessThanOrEqual(requests[n - 1]?.priority ?? NaN);
+    }
+  });
+});
+
+describe("a hole in a pass's drawn set (R10.T14.b)", () => {
+  /** Face 0's patches baked to level 6, at ±100 m, and nothing of the other faces. */
+  const faceZero: HeightRangeLookup = {
+    heightRangeM: (key) => (key.face === 0 && key.level <= 6 ? [-100, 100] : undefined),
+  };
+
+  /** Whether a patch over `key`, its parent or coarser, is baked. */
+  function bakedOver(key: PatchKey): boolean {
+    for (let up = parentKey(key); up !== null; up = parentKey(up)) {
+      if (faceZero.heightRangeM(up) !== undefined) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  it("is a request with nothing baked over it, a root's, wherever the demand is not forced", () => {
+    // A view of a hemisphere from 20,000 km and one over the grounded craft at 3 km.
+    const contact: GroundContact = { positionM: above(5), radiusM: 20 };
+    const requests = selectPatches({
+      planet: PLANET,
+      views: [view(above(2e7), PRIMARY_VIEW_WEIGHT, 0), view(above(3_000), SECONDARY_VIEW_WEIGHT)],
+      setting: "high",
+      grounded: [contact],
+      heightRanges: faceZero,
+    }).demand;
+    expect([
+      requests.some((r) => fillsHole(r)),
+      requests.some((r) => !r.forced && !fillsHole(r)),
+      requests.some((r) => r.forced),
+    ]).toEqual([true, true, true]);
+    for (const r of requests) {
+      expect(fillsHole(r)).toBe(!r.forced && !bakedOver(r.key));
     }
   });
 });

@@ -21,9 +21,12 @@
  * height source, vertex path and normals), demand, generation and listeners, over the pool's one
  * queue, workers and fields. The queue takes forced requests first, then the larger weighted excess
  * w × ρ ÷ τ whatever the lane (Design note 24's priority, comparable across lanes), then the older
- * lane's, then by key. A pool made with bake settings (the descent spike's) is a pool of one lane,
- * whose calls are the pool's own; one made without them (the terrain session's) holds the fields
- * and answers the class maps, and bakes through its lanes alone.
+ * lane's, then by key; but where that is one lane's refinement, a lane with a hole in its drawn
+ * set, a root still to bake (`priority.ts`' `fillsHole`), takes the worker first, its best hole
+ * first (the per-pass share, plan R10, R10.T14.b; lean, 2026-11-01). One lane alone is baked in
+ * Design note 24's order, request for request. A pool made with bake settings (the descent spike's)
+ * is a pool of one lane, whose calls are the pool's own; one made without them (the terrain
+ * session's) holds the fields and answers the class maps, and bakes through its lanes alone.
  *
  * A lane's bakes are of one height source, its settings'. The test planet reads no field, so no
  * field ever makes its bakes stale. A body's bakes are held back until its field is started, and
@@ -47,6 +50,7 @@ import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import { type LevelBounds, SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
 import { patchKeyString, unreachable } from "../patchKey";
+import { fillsHole } from "../priority";
 import type { PatchRequest } from "../select";
 import type {
   BakedPatch,
@@ -1015,22 +1019,45 @@ export class HeightWorkerPool {
     );
   }
 
-  /** The best queued request over every lane whose bakes can be made now. */
+  /**
+   * The best queued request over every lane whose bakes can be made now: the first by
+   * {@link before}, unless that is a refinement, neither forced nor filling a hole, and another lane
+   * has a hole to fill, whose best hole by {@link before} then goes first (the per-pass share,
+   * R10.T14.b). So a lane never jumps its own refinements, and one lane alone keeps R05's order.
+   */
   private best(): Candidate | null {
     let best: Candidate | null = null;
+    // Each lane's best request that fills a hole, at most one a lane.
+    const holes: Candidate[] = [];
     for (const lane of this.lanes) {
       // A body's patches are baked over its field, so none is sent before the field is started.
       if (lane.sourceBody !== null && !this.fields.has(lane.sourceBody)) {
         continue;
       }
+      let hole: Candidate | null = null;
       for (const queued of lane.queue.values()) {
         const candidate = { lane, queued };
         if (best === null || before(candidate, best)) {
           best = candidate;
         }
+        if (fillsHole(queued.request) && (hole === null || before(candidate, hole))) {
+          hole = candidate;
+        }
+      }
+      if (hole !== null) {
+        holes.push(hole);
       }
     }
-    return best;
+    if (best === null || best.queued.request.forced || fillsHole(best.queued.request)) {
+      return best;
+    }
+    let share: Candidate | null = null;
+    for (const hole of holes) {
+      if (hole.lane !== best.lane && (share === null || before(hole, share))) {
+        share = hole;
+      }
+    }
+    return share ?? best;
   }
 
   /** Puts a request back in its lane's queue if its key is still wanted and not queued already. */

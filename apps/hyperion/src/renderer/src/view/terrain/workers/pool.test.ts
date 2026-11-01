@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
-import { type PatchKey, patchKeyString } from "../patchKey";
+import { childKeys, type PatchKey, patchKeyString, rootKey } from "../patchKey";
+import { compareRequests } from "../priority";
 import type { PatchRequest } from "../select";
 import type {
   BakedPatch,
@@ -1084,6 +1085,209 @@ describe("the height-worker pool's lanes (R10.T16.b)", () => {
       lane.reprioritise([]);
     }).toThrow(/pool was terminated/u);
     expect(() => pool.lane(laneSettings())).toThrow(/pool was terminated/u);
+  });
+});
+
+/** A request of `key` at `priority`, not forced. */
+function reqOf(key: PatchKey, priority: number, forced = false): PatchRequest {
+  return { key, priority, forced };
+}
+
+/** A lit lane's demand on the moon whose every priority, 1,000 and above, outranks the wireframe's. */
+function heavyDemand(count: number): PatchRequest[] {
+  return Array.from({ length: count }, (_, i) => req(i, 1000 + i));
+}
+
+/** Answers the pool's oldest bake in flight, over every worker, as workers that bake in turn. */
+function answerOldest(created: readonly ScriptedHeightWorker[]): void {
+  let oldest: { readonly worker: ScriptedHeightWorker; readonly id: number } | null = null;
+  for (const worker of created) {
+    const pending = worker.pendingBakes[0];
+    if (pending !== undefined && (oldest === null || pending.id < oldest.id)) {
+      oldest = { worker, id: pending.id };
+    }
+  }
+  if (oldest === null) {
+    throw new Error("no bake is in flight");
+  }
+  oldest.worker.bakeOldest();
+}
+
+/** Every bake sent with the wireframe's settings, over every worker, in the order sent. */
+function wireframeSent(created: readonly ScriptedHeightWorker[]): string[] {
+  return created
+    .flatMap((w) => w.received)
+    .flatMap((m) =>
+      m.kind === "bake" &&
+      m.settings.source.kind === "body" &&
+      m.settings.source.weights === "skipped"
+        ? [{ id: m.id, key: patchKeyString(m.key) }]
+        : [],
+    )
+    .toSorted((a, b) => a.id - b.id)
+    .map((m) => m.key);
+}
+
+describe("the height-worker pool's per-pass share (R10.T14.b)", () => {
+  it("bakes a second lane's roots within 2W + R bakes ahead of the first's refinements, and its finer patches wait", () => {
+    const workers = 3;
+    const { pool, created } = fieldsOnly(workers);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    const wireBakes: string[] = [];
+    wire.onBaked((bake) => wireBakes.push(patchKeyString(bake.key)));
+    lit.reprioritise(heavyDemand(200));
+    // Every worker is full of the lit lane's bakes when the wireframe attaches with nothing resident.
+    expect(pool.inFlightCount).toBe(workers * MAX_IN_FLIGHT_PER_WORKER);
+    const roots = [rootKey(0), rootKey(4)];
+    const finer: PatchKey[] = [...childKeys(rootKey(0)), { face: 4, level: 5, i: 3, j: 7 }];
+    wire.reprioritise([
+      ...roots.map((key) => reqOf(key, 0.5)),
+      ...finer.map((key, n) => reqOf(key, 2 + n)),
+    ]);
+    const rootStrings = roots.map(patchKeyString);
+    // The roots take the next R free workers, one a bake answered.
+    for (let n = 0; n < roots.length; n += 1) {
+      answerOldest(created);
+    }
+    expect(wireframeSent(created).toSorted()).toEqual(rootStrings.toSorted());
+    let answered = roots.length;
+    while (wireBakes.length < roots.length) {
+      answerOldest(created);
+      answered += 1;
+    }
+    // Every bake in flight before them is answered first, at most 2W, then the R roots.
+    expect(answered).toBeLessThanOrEqual(2 * workers + roots.length);
+    expect(wireBakes.toSorted()).toEqual(rootStrings.toSorted());
+    // Its coarsest wanted level whole, its finer patches wait while the lit lane outranks them.
+    for (let n = 0; n < 50; n += 1) {
+      answerOldest(created);
+    }
+    expect([wireframeSent(created).toSorted(), wire.queuedCount]).toEqual([
+      rootStrings.toSorted(),
+      finer.length,
+    ]);
+  });
+
+  it("keeps one lane's bake order, request for request, its roots among its refinements", () => {
+    const [, child] = childKeys(rootKey(2));
+    const demand = [
+      reqOf(rootKey(2), 0.25),
+      reqOf(rootKey(5), 40),
+      reqOf(child, 9),
+      reqOf(keyAt(4), 3, true),
+      reqOf(keyAt(5), 12),
+      reqOf(keyAt(6), 0.5),
+      reqOf(rootKey(1), 12),
+      reqOf(keyAt(7), 1, true),
+    ];
+    const order = (withSecondLane: boolean): string[] => {
+      const { pool, created } = fieldsOnly(1);
+      pool.fieldInit(MOON, blockOf(8, 0));
+      const lane = pool.lane(laneSettings());
+      if (withSecondLane) {
+        // A second lane with no demand changes nothing.
+        pool.lane(laneSettings(MOON_WIREFRAME)).reprioritise([]);
+      }
+      lane.reprioritise(demand);
+      const worker = workerAt(created, 0);
+      while (worker.pendingBakes.length > 0) {
+        worker.bakeOldest();
+      }
+      return bakedKeys(worker);
+    };
+    const asBuilt = demand.toSorted(compareRequests).map((r) => patchKeyString(r.key));
+    expect([order(false), order(true)]).toEqual([asBuilt, asBuilt]);
+  });
+
+  it("bakes every lane's forced requests before another lane's hole", () => {
+    const { pool, created } = fieldsOnly(1);
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    lit.reprioritise([req(1, 0.1, true), req(2, 0.2, true), req(3, 50)]);
+    wire.reprioritise([reqOf(rootKey(3), 0.01), req(4, 0, true)]);
+    // Nothing is sent before the moon's field starts; then the queue's two best, and one a bake.
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const worker = workerAt(created, 0);
+    for (let n = 0; n < 3; n += 1) {
+      worker.bakeOldest();
+    }
+    expect(bakesOf(worker)).toEqual([
+      bakeLine(keyAt(2), "baked"),
+      bakeLine(keyAt(1), "baked"),
+      bakeLine(keyAt(4), "skipped"),
+      bakeLine(rootKey(3), "skipped"),
+      bakeLine(keyAt(3), "baked"),
+    ]);
+  });
+
+  it("serves another lane's hole ahead of a lane's refinement, and never a lane's own hole ahead of its own", () => {
+    const { pool, created } = fieldsOnly(1);
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    lit.reprioritise([req(1, 9), reqOf(rootKey(0), 1), req(2, 0.5)]);
+    wire.reprioritise([reqOf(rootKey(1), 2), reqOf(rootKey(2), 3), req(3, 8)]);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const worker = workerAt(created, 0);
+    for (let n = 0; n < 4; n += 1) {
+      worker.bakeOldest();
+    }
+    // The wireframe's holes by priority while the lit lane's best is a refinement; the lit lane's
+    // root behind its own refinement, then ahead of the wireframe's; then Design note 24's order.
+    expect(bakesOf(worker)).toEqual([
+      bakeLine(rootKey(2), "skipped"),
+      bakeLine(rootKey(1), "skipped"),
+      bakeLine(keyAt(1), "baked"),
+      bakeLine(rootKey(0), "baked"),
+      bakeLine(keyAt(3), "skipped"),
+      bakeLine(keyAt(2), "baked"),
+    ]);
+  });
+
+  it("never sends a hole cancelled from its lane's demand", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    lit.reprioritise(heavyDemand(10));
+    wire.reprioritise([rootKey(0), rootKey(1), rootKey(2)].map((key) => reqOf(key, 1)));
+    // Root 0 cancelled, then root 2 left out of the next demand: root 1 alone is still wanted.
+    wire.cancelStale(new Set([rootKey(1), rootKey(2)].map(patchKeyString)));
+    wire.reprioritise([reqOf(rootKey(1), 1)]);
+    for (let n = 0; n < 6; n += 1) {
+      answerOldest(created);
+    }
+    expect([wireframeSent(created), wire.queuedCount]).toEqual([[patchKeyString(rootKey(1))], 0]);
+  });
+
+  it("asks a hole made stale by its body's block again ahead of another lane's refinements", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    const wireBakes: string[] = [];
+    wire.onBaked((bake) => wireBakes.push(patchKeyString(bake.key)));
+    lit.reprioritise(heavyDemand(10));
+    wire.reprioritise([reqOf(rootKey(0), 1)]);
+    const worker = workerAt(created, 0);
+    answerOldest(created);
+    // The root is in flight behind one lit bake when a block comes; it lands incomplete, so stale.
+    pool.fieldChunk(MOON, blockOf(8, 1));
+    answerOldest(created);
+    const pending = worker.pendingBakes.find((m) => m.key.level === 0);
+    if (pending === undefined) {
+      throw new Error("the root is not in flight");
+    }
+    const bake: BakedPatch = {
+      ...bakeOf(pending.key, pending.generation),
+      layers: layers(false, []),
+    };
+    worker.reply({ kind: "baked", id: pending.id, bake });
+    expect([wireBakes, wireframeSent(created)]).toEqual([
+      [],
+      [patchKeyString(rootKey(0)), patchKeyString(rootKey(0))],
+    ]);
   });
 });
 
