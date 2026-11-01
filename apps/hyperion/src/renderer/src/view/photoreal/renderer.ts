@@ -210,6 +210,12 @@ export interface PhotorealFrame {
    * frame's `viewport` where it is drawn at the presented size, larger under an internal scale.
    */
   readonly presentedPx: Viewport;
+  /**
+   * The size the view's terrain selects at, whose centre pixel the hand-over measures in
+   * {@link PhotorealFrame.presentedPx}'s place (`BodyFrameOptions.selectionPx`; its CSS px, lean
+   * 2026-11-01); absent, `presentedPx`.
+   */
+  readonly selectionPx?: Viewport | undefined;
   readonly role: ViewRole;
   readonly setting: QualitySetting;
   /**
@@ -770,6 +776,7 @@ export class PhotorealRenderer {
         camera,
         viewport,
         presentedPx: frame.presentedPx,
+        ...(frame.selectionPx === undefined ? {} : { selectionPx: frame.selectionPx }),
         exposureScale: frame.exposureScale,
         annuli: settings.discAnnuli,
         planetshine: settings.planetshineSources,

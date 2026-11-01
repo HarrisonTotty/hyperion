@@ -12,6 +12,7 @@ import {
   moonRangeM,
   SESSION_MOON,
   SESSION_MOON_RADIUS_M,
+  SESSION_PRESENTED,
   SESSION_SCENE,
   viewAt,
 } from "../../test/terrainSessionFixtures";
@@ -91,6 +92,22 @@ describe("the bodies a wireframe view hands over (R10.T11; Design note 13)", () 
   it("keeps it handed over out to range ÷ 0.9 from the bodies it handed over last", () => {
     const report = wireAtLimb((0.99 * WIRE_RANGE_M) / (1 - H));
     expect([...wireframeHandovers(report, moonRelief, THE_MOON)]).toEqual([MOON]);
+  });
+
+  it("hands it over at a ratio of 2 at its CSS px's range, not at twice it (lean 2026-11-01)", () => {
+    const retina = {
+      presentedPx: {
+        widthPx: 2 * SESSION_PRESENTED.widthPx,
+        heightPx: 2 * SESSION_PRESENTED.heightPx,
+      },
+      selectionPx: SESSION_PRESENTED,
+    };
+    const inside = wireAtLimb((0.99 * WIRE_RANGE_M) / (1 + H), retina);
+    const twice = wireAtLimb((2 * 0.99 * WIRE_RANGE_M) / (1 + H), retina);
+    expect([
+      [...wireframeHandovers(inside, moonRelief, NONE)],
+      [...wireframeHandovers(twice, moonRelief, NONE)],
+    ]).toEqual([[MOON], []]);
   });
 
   it("hands it back beyond range ÷ 0.9", () => {

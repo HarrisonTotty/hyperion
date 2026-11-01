@@ -46,8 +46,9 @@ export type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 /** The terrain's settings for one {@link QualitySetting} (R05 Design notes 4, 7, 10 and 26). */
 export interface TerrainSettings {
   /**
-   * The screen-space error tolerance τ in pixels at the presented resolution: the largest a level's
-   * error bound may subtend before a finer level is selected (R05 Design note 7).
+   * The screen-space error tolerance τ in pixels at the presented resolution's CSS px
+   * (`selectionViewport`): the largest a level's error bound may subtend before a finer level is
+   * selected (R05 Design note 7).
    */
   readonly tauPx: number;
   /**
@@ -151,9 +152,9 @@ export interface ViewSettings {
  *
  * @remarks
  * Design note 18's other two items are settings already: the view renders at most
- * {@link TerrainSettings.renderHeightPx} rows (720 on low), presented upscaled by the tone-mapping
- * pass, the render resolution that `ViewBudget.renderScale` is a fraction of; and the one
- * photorealistic view is {@link ViewBudgetSettings.photorealisticViews}.
+ * {@link TerrainSettings.renderHeightPx} rows (1,080 on high, 720 on low), presented upscaled by
+ * the tone-mapping pass, the render resolution that `ViewBudget.renderScale` is a fraction of; and
+ * the one photorealistic view is {@link ViewBudgetSettings.photorealisticViews}.
  */
 export interface PhotorealSettings {
   /**
@@ -215,21 +216,24 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * @remarks
  * The low setting renders at 720 rows presented upscaled with τ = 2 px, mesh-resolution normals,
  * the `face-differences` vertex path (`baked-offsets` does not fit its 64 MiB cache) and a 64 MiB
- * cache. The high setting renders at the canvas's size with τ = 1 px, doubled normals and
- * `baked-offsets`, its precision holding by construction until R05.T18 chooses. Under a grounded
- * body every setting draws the finest level whatever these say (R05 Design note 9). Both settings
- * hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
+ * cache. The high setting renders at the canvas's size, at most 1,080 rows presented upscaled (lean
+ * 2026-11-01: the brainstorm states the budget at 1080p, a larger display rendering below native
+ * and upscaling, "Two deployments, one scene"; R07 Design note 14), with τ = 1 px, doubled normals
+ * and `baked-offsets`, its precision holding by construction until R05.T18 chooses. Under a
+ * grounded body every setting draws the finest level whatever these say (R05 Design note 9). Both
+ * settings hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
  * photorealistic primary view at 30 Hz and allows one photorealistic view (R07 Design notes 14 and
  * 18). The low setting's photorealistic style takes its histogram at a stride of 2, blooms over 5
  * levels from quarter resolution, eclipses with 3 annuli and lights each body by planetshine from
- * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07
- * Design note 18, R07.T17).
+ * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07 Design
+ * note 18, R07.T17).
  */
 export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
   high: {
     terrain: {
       tauPx: 1,
-      renderHeightPx: null,
+      // A Retina or 4K canvas renders at 1080p and is upscaled, as low's at 720p (lean 2026-11-01).
+      renderHeightPx: 1080,
       normals: "double",
       vertexPath: "baked-offsets",
       cacheBytes: HIGH_CACHE_BYTES,

@@ -49,6 +49,7 @@ import {
   type HandoverSphere,
   limbDistanceM,
   pixelAngleRad,
+  selectionViewport,
   storeReliefSource,
 } from "./handover";
 import {
@@ -97,6 +98,24 @@ function coverageOf(cells: ReadonlyArray<number>): CoverageView {
 function near(x: number, expected: number, tolerance: number): boolean {
   return Math.abs(x / expected - 1) <= tolerance;
 }
+
+describe("the size a view's terrain selects at (the owner's Retina report, lean 2026-11-01)", () => {
+  it("selects 3200 × 1800 device px at a ratio of 2 as 1600 × 900, its CSS px", () => {
+    expect(selectionViewport({ widthPx: 3200, heightPx: 1800 }, 2)).toEqual({
+      widthPx: 1600,
+      heightPx: 900,
+    });
+  });
+
+  it.each([1, 0.75, Number.NaN])("is the presented size itself at a ratio of %s", (ratio) => {
+    expect(selectionViewport(HD, ratio)).toBe(HD);
+  });
+
+  it("widens a centre pixel's angle by the ratio, so that a body hands over at its CSS px", () => {
+    const retina = selectionViewport({ widthPx: 2 * HD.widthPx, heightPx: 2 * HD.heightPx }, 2);
+    expect(pixelAngleRad(CAMERA, retina)).toBe(pixelAngleRad(CAMERA, HD));
+  });
+});
 
 describe("the hand-over range (R10.T10.e, Design note 13)", () => {
   it("is about 1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px", () => {

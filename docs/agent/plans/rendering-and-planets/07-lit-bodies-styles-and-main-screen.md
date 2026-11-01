@@ -10063,3 +10063,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     table, the gravity bands' scale heights and refraction, as the composite takes none of them
     for the disc.
   - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
+- **Retina (lean, 2026-11-01; lane fix-retina-frame).**
+  - Design note 18: high's `terrain.renderHeightPx` is 1080 (was `null`), low's 720 its twin; a
+    canvas over 1,080 rows renders at 1,080 and is upscaled, and `aloneScaleBounds` floors at 720.
+  - The views check's `--device-pixel-ratio 1|2|3`, hidden runs only
+    (`ClientArgs.viewsCheckPixelRatio`): the window N times its setting's size at zoom N; a software
+    launch's headless screen is N times 1920 × 1080. Pending: the owner's Mac profile at
+    `--device-pixel-ratio 2`.

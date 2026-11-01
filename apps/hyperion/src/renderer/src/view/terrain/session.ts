@@ -267,11 +267,15 @@ export interface TerrainViewReport {
   readonly pose: CameraPose;
   /** Its horizontal field of view, rad, in (0, π). */
   readonly fovXRad: number;
-  /**
-   * The size it was presented at, device px: its canvas's (`presentedViewport`), at which a body's
-   * hand-over range is reckoned for its fields (R05 Design note 23), whatever its internal scale.
-   */
+  /** The size it was presented at, device px: its canvas's (`presentedViewport`). */
   readonly presentedPx: Viewport;
+  /**
+   * The size its terrain selects at and a body's hand-over range is reckoned at, for its fields and
+   * its passes (R05 Design note 23), whatever its internal scale: the presented size ÷ max(1, the
+   * display's device-pixel ratio), its CSS px (`selectionViewport`; lean 2026-11-01); absent,
+   * `presentedPx`, as at a ratio of 1.
+   */
+  readonly selectionPx?: Viewport;
   /** The style its budget draws (`ViewBudget.style`), whose τ judges its range (Design note 13). */
   readonly style: RenderStyle;
   /**
@@ -380,9 +384,10 @@ export interface GroundReadoutOptions {
  * - `rangeRatio` is T10.e's `handoverRangeRatio`: the camera's distance to the body's limb
  *   (`limbDistanceM` of its distance from the centre and the body's equatorial radius) over the
  *   range where `reliefM` subtends τ pixels, τ the view's style's on its setting
- *   (`handoverTauPx`) and the pixel the presented size's centre pixel (`pixelAngleRad`). With no
- *   relief known (no header held) the ratio is infinite, so that a body with no header is wanted
- *   only as some view's local body (main's ruling for R10.T7).
+ *   (`handoverTauPx`) and the pixel the selection size's centre pixel (`pixelAngleRad` of
+ *   {@link TerrainViewReport.selectionPx}). With no relief known (no header held) the ratio is
+ *   infinite, so that a body with no header is wanted only as some view's local body (main's
+ *   ruling for R10.T7).
  *
  * @param reliefM - A body's realised relief, m, from its held header, or `null` with none held.
  */
@@ -397,7 +402,7 @@ export function viewFieldCandidates(
   const tauPx = handoverTauPx(report.style, report.setting);
   const radPerPx = pixelAngleRad(
     { orientation: pose.orientation, fovXRad: report.fovXRad },
-    report.presentedPx,
+    report.selectionPx ?? report.presentedPx,
   );
   return scene.bodies.filter(isLitBody).map((body): FieldCandidate => {
     const centreM = relativeToCamera(
@@ -417,9 +422,9 @@ export function viewFieldCandidates(
 /**
  * One view's part in a body's pass (R10.T16.b): its camera from the body's centre as it last drew,
  * in the body's non-rotating axes (the galactic axes, the body frame's), at its style's τ
- * (`handoverTauPx`), its presented size and its weight (`PRIMARY_VIEW_WEIGHT` or
- * `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null` for a body whose rotation is
- * not known, which is never handed over.
+ * (`handoverTauPx`), its selection size ({@link TerrainViewReport.selectionPx}) and its weight
+ * (`PRIMARY_VIEW_WEIGHT` or `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null`
+ * for a body whose rotation is not known, which is never handed over.
  */
 export function terrainPassViewOf(
   id: ViewId,
@@ -442,7 +447,7 @@ export function terrainPassViewOf(
       cameraM: scale(centreM, -1),
       orientation: report.pose.orientation,
       fovXRad: report.fovXRad,
-      viewport: report.presentedPx,
+      viewport: report.selectionPx ?? report.presentedPx,
     },
     tauPx: handoverTauPx(report.style, report.setting),
     weight: report.streamPriority === "primary" ? PRIMARY_VIEW_WEIGHT : SECONDARY_VIEW_WEIGHT,
@@ -452,11 +457,11 @@ export function terrainPassViewOf(
 /**
  * The bodies a wireframe view hands over to terrain (plan R10, R10.T11; Design note 13): each lit
  * body of its scene whose rotation is known and whose relief (`reliefM`) subtends the wireframe's
- * τ (`handoverTauPx`, 4 px on both settings) at its limb from the view's camera, at the presented
- * size's centre pixel, with R07's hysteresis (`handsOver`) from the bodies it handed over last
- * (`previous`). A view whose budget does not draw the wireframe, or whose last frame was not drawn
- * in it, hands nothing over in it: a photorealistic view standing in with the wireframe draws no
- * terrain, as before (the batch review's S8).
+ * τ (`handoverTauPx`, 4 px on both settings) at its limb from the view's camera, at the selection
+ * size's centre pixel ({@link TerrainViewReport.selectionPx}), with R07's hysteresis (`handsOver`)
+ * from the bodies it handed over last (`previous`). A view whose budget does not draw the
+ * wireframe, or whose last frame was not drawn in it, hands nothing over in it: a photorealistic
+ * view standing in with the wireframe draws no terrain, as before (the batch review's S8).
  *
  * @param reliefM - A body's relief by which it hands over (`HandoverReliefSource.reliefM`), or
  *   `null` where it never does.
@@ -475,7 +480,7 @@ export function wireframeHandovers(
   const tauPx = handoverTauPx("wireframe", report.setting);
   const radPerPx = pixelAngleRad(
     { orientation: pose.orientation, fovXRad: report.fovXRad },
-    report.presentedPx,
+    report.selectionPx ?? report.presentedPx,
   );
   for (const body of scene.bodies) {
     if (!isLitBody(body) || body.rotation === null) {

@@ -44,7 +44,7 @@ import {
   rotateToBodyFixed,
   rotation3FromRows,
 } from "../coords/rotation";
-import type { DrawItem, MaterialHandle, TextureHandle } from "../engine/types";
+import type { DrawItem, MaterialHandle, TextureHandle, ViewSize } from "../engine/types";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
@@ -452,17 +452,28 @@ function fakeSource(
   };
 }
 
-/** A frame terrain of `VIEW` over `source`. */
-function frameTerrain(source: ViewTerrainSource): LiveFrameTerrain {
+/** A frame terrain of `VIEW` over `source`, presented at `presentedPx`, selecting at `selectionPx`. */
+function frameTerrain(
+  source: ViewTerrainSource,
+  presentedPx: ViewSize = VIEWPORT,
+  selectionPx?: ViewSize,
+): LiveFrameTerrain {
   return new LiveFrameTerrain(source, {
     view: VIEW,
     camera: CAMERA,
-    presentedPx: VIEWPORT,
+    presentedPx,
+    selectionPx,
     exposureScale: EXPOSURE,
     occluderSlopePx: 3,
     nowMs: 1_234,
   });
 }
+
+/** {@link VIEWPORT} at a device-pixel ratio of 2. */
+const RETINA_VIEWPORT: ViewSize = {
+  widthPx: 2 * VIEWPORT.widthPx,
+  heightPx: 2 * VIEWPORT.heightPx,
+};
 
 /**
  * A body's view from `cameraM`, the camera from its centre along the galactic axes, its own axes
@@ -545,6 +556,13 @@ describe("a view's frame terrain (R10.T16.c)", () => {
         },
       },
     ]);
+  });
+
+  it("draws each body's terrain at the view's selection size, its CSS px, where given (lean 2026-11-01)", () => {
+    const { plan, body } = handed();
+    const { source, drawn } = fakeSource();
+    frameTerrain(source, RETINA_VIEWPORT, VIEWPORT).draws(plan, [body]);
+    expect(drawn.map(({ input }) => input.view)).toEqual([terrainViewOf(body, CAMERA, VIEWPORT)]);
   });
 
   it("gives the view's cascades to the body over whose datum the camera stands lowest, and not the other (R10.T9.b, D3)", () => {
@@ -1225,6 +1243,12 @@ describe("a wireframe view's terrain (R10.T11; Design note 14)", () => {
     ]).toEqual([IDENTITY_ROTATION, POSE.orientation, Math.PI / 2, VIEWPORT, 1_234, 3]);
     // The camera from the moon's centre: 300 km over the datum at its pole.
     expect(input?.view.cameraM.z).toBeCloseTo(MOON_POLAR_M + 300_000, 6);
+  });
+
+  it("selects at the view's selection size, its CSS px, where given (lean 2026-11-01)", () => {
+    const { source, drawn } = wireSource(theMoon());
+    wireframeTerrainOf(source, wireInput({ viewport: RETINA_VIEWPORT, selectionPx: VIEWPORT }));
+    expect(drawn.map(({ input }) => input.view.viewport)).toEqual([VIEWPORT]);
   });
 
   it("states one interval for the view, from the body it stands lowest over, and draws every body at it", () => {

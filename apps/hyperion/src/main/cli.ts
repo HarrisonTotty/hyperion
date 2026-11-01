@@ -85,6 +85,12 @@
  * its frame from orbit and closed in, per pass and per thread, into
  * `target/views-check/timing/`; `--timing` is refused without `--inspection`.
  *
+ * `--device-pixel-ratio <N>` draws a hidden check's page at a device-pixel ratio of N, 1 to 3, as a
+ * HiDPI display does (the owner's Retina report, 2026-11-01): its offscreen window N times its
+ * setting's size at a zoom factor of N, which Chromium counts in `devicePixelRatio`, so that its
+ * layout is the setting's size in CSS px and its canvases N times it. It is refused without
+ * `--views-check`, and the main process refuses it on a shown run, whose display gives its ratio.
+ *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
  * not the same thing.
@@ -136,7 +142,15 @@ export interface ClientArgs {
    * over its setting's, when given, else `undefined`.
    */
   readonly geometry?: GeometryOverride;
+  /**
+   * The check's page's device-pixel ratio (`--device-pixel-ratio`), the zoom factor its hidden
+   * window is drawn at: 1 by default; `undefined` without `--views-check`.
+   */
+  readonly viewsCheckPixelRatio?: ViewsCheckPixelRatio;
 }
+
+/** A views check's device-pixel ratio, by its window's zoom (`--device-pixel-ratio`). */
+export type ViewsCheckPixelRatio = 1 | 2 | 3;
 
 /** The spike's options other than the flag itself, by their commander attribute names. */
 const SPIKE_OPTIONS = [
@@ -178,6 +192,14 @@ export function parseWorkers(value: string): number {
     throw new InvalidArgumentError("expected a worker count from 1 to 64");
   }
   return workers;
+}
+
+/** Reads a `--device-pixel-ratio` value: 1, 2 or 3. */
+export function parseDevicePixelRatio(value: string): ViewsCheckPixelRatio {
+  if (value === "1" || value === "2" || value === "3") {
+    return value === "1" ? 1 : value === "2" ? 2 : 3;
+  }
+  throw new InvalidArgumentError("expected a device-pixel ratio of 1, 2 or 3");
 }
 
 /** Reads a `--universe` value: a universe's ID, 16 lowercase hexadecimal digits. */
@@ -342,6 +364,12 @@ export function buildCommand(version: string): Command {
         "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit and close in",
       ),
     )
+    .addOption(
+      new Option(
+        "--device-pixel-ratio <N>",
+        "the check's hidden window at a device-pixel ratio of N, 1 to 3, by its zoom (default 1)",
+      ).argParser(parseDevicePixelRatio),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -471,6 +499,10 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (options["timing"] === true && options["inspection"] !== true) {
     command.error("error: --timing is an option of --inspection, which was not given");
   }
+  const ratio: unknown = options["devicePixelRatio"];
+  if (ratio !== undefined && options["viewsCheck"] !== true) {
+    command.error("error: --device-pixel-ratio is an option of --views-check, which was not given");
+  }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
     if (options["descentSpike"] === true) {
@@ -487,7 +519,15 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     if (servedRefusal !== null) {
       command.error(`error: ${servedRefusal}`);
     }
-    return { address, port, setting: viewsCheck.setting, viewsCheck, ...geometryOf(options) };
+    return {
+      address,
+      port,
+      setting: viewsCheck.setting,
+      viewsCheck,
+      // Parsed by `parseDevicePixelRatio`, so 1, 2 or 3 where given.
+      viewsCheckPixelRatio: ratio === 2 || ratio === 3 ? ratio : 1,
+      ...geometryOf(options),
+    };
   }
   if (options["descentSpike"] !== true) {
     // The setting is the consoles' too (R07.T17); the spike's other options are its own.

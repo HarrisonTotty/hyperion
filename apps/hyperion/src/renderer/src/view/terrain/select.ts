@@ -212,7 +212,10 @@ export interface ViewSelectionInput {
   readonly camera: { readonly positionM: BodyFixedVec3; readonly orientation: Quaternion };
   /** The horizontal field of view, rad, in (0, π). */
   readonly fovXRad: number;
-  /** The presented size in device pixels (Design note 23), not the render resolution. */
+  /**
+   * The size its pixels are counted at (Design note 23), not the render resolution: the presented
+   * size, device px, ÷ max(1, the display's device-pixel ratio), its CSS px (`selectionViewport`).
+   */
   readonly viewport: ViewSize;
   /** The view's streaming weight: 1 for the primary view, 0.25 for a secondary (Design note 24). */
   readonly weight: number;

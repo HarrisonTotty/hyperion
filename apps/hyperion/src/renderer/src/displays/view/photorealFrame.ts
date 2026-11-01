@@ -84,6 +84,11 @@ export interface PhotorealInputs {
    * whose centre pixel the lit bodies' hand-over to terrain measures (plan R10, R10.T10.g).
    */
   readonly presentedPx: Viewport;
+  /**
+   * The size the view's terrain selects at (`PhotorealFrame.selectionPx`): the presented size's CSS
+   * px, whose centre pixel the hand-over measures; absent, {@link PhotorealInputs.presentedPx}.
+   */
+  readonly selectionPx?: Viewport | undefined;
   readonly setting: QualitySetting;
   /** The setting whose sizes the frame's air is drawn at (`PhotorealFrame.atmosphereSetting`). */
   readonly atmosphereSetting?: QualitySetting | undefined;
@@ -424,6 +429,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     camera,
     viewport,
     presentedPx: inputs.presentedPx,
+    selectionPx: inputs.selectionPx,
     role: run.camera.role,
     setting: inputs.setting,
     atmosphereSetting: inputs.atmosphereSetting,

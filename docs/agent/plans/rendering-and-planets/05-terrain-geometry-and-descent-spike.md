@@ -8293,3 +8293,10 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   the batching cut the double normals (the refinements) by a fifth, but a cold draft is mostly the
   class weights' steepness quadrature (libm's `exp`, a quarter of it in wasm) and the horizon's far
   field, neither batched. Figures in the lane's outbox.
+- **The selection at CSS px (lean, 2026-11-01; lane fix-retina-frame).** A view's terrain selects,
+  hands over and is judged `DETAIL LIMITED` (Design notes 7 and 23) at its presented size ÷ max(1,
+  DPR) (`handover.ts` `selectionViewport`): `selectionPx` beside `presentedPx` on
+  `TerrainViewReport`, `PhotorealInputs`, `PhotorealFrame`, `BodyFrameOptions`,
+  `LiveFrameTerrainInput` and `WireframeTerrainInput`, absent meaning `presentedPx`;
+  `TerrainView.viewport` and `ViewSelectionInput.viewport` carry it. Bit for bit at DPR 1. The
+  descent spike still selects at its canvas's device px.

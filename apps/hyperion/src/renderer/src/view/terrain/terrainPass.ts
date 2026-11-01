@@ -378,7 +378,10 @@ export interface TerrainView {
   /** The camera's orientation in the body's non-rotating axes. */
   readonly orientation: Quaternion;
   readonly fovXRad: number;
-  /** The presented size in device pixels. */
+  /**
+   * The size it selects at: the presented size, device px, ÷ max(1, the display's device-pixel
+   * ratio), its CSS px (`selectionViewport`; R05 Design note 23).
+   */
   readonly viewport: ViewSize;
 }
 

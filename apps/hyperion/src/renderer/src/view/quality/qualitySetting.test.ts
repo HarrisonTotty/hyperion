@@ -45,10 +45,10 @@ describe("the quality settings", () => {
     });
   });
 
-  it("gives the high setting a 1 px tolerance at the canvas's size with doubled normals", () => {
+  it("gives the high setting a 1 px tolerance at 1080 rows at most with doubled normals", () => {
     expect(SETTINGS.high.terrain).toMatchObject({
       tauPx: 1,
-      renderHeightPx: null,
+      renderHeightPx: 1080,
       normals: "double",
       vertexPath: "baked-offsets",
     });

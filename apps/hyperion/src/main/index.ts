@@ -31,7 +31,13 @@ import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
 import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { CdpTracing } from "./cdpTracing";
-import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
+import {
+  type ClientArgs,
+  parseClientArgs,
+  serverUrlOf,
+  userArgs,
+  type ViewsCheckPixelRatio,
+} from "./cli";
 import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
 import { GpuClockReader } from "./gpuClocks";
 import {
@@ -119,16 +125,23 @@ function spikeSize(launch: SpikeLaunch | ViewsCheckLaunch): {
 
 /**
  * The several-views check's window size (R07.T20): 1920 × 1080 or 1280 × 720 device pixels,
- * whatever the display's scale, so that its canvases are R05 Design note 21's 1080p and 720p;
- * a tiling window manager may still size it to its own tile, which the record reads at the end.
+ * whatever the display's scale, so that its canvases are R05 Design note 21's 1080p and 720p, or
+ * `zoom` times that, its layout still that many CSS px (`--device-pixel-ratio`); a tiling window
+ * manager may still size it to its own tile, which the record reads at the end.
+ *
+ * @param zoom - The page's zoom factor, a hidden run's device-pixel ratio: 1, 2 or 3.
  */
 function viewsCheckSize(
   launch: ViewsCheckLaunch,
   scaleFactor: number,
+  zoom: ViewsCheckPixelRatio,
 ): { readonly width: number; readonly height: number } {
   const px = spikeSize(launch);
   const scale = scaleFactor > 0 ? scaleFactor : 1;
-  return { width: Math.round(px.width / scale), height: Math.round(px.height / scale) };
+  return {
+    width: Math.round((px.width * zoom) / scale),
+    height: Math.round((px.height * zoom) / scale),
+  };
 }
 
 /** The several-views check's window (R07.T20): shown unless hidden. */
@@ -138,6 +151,11 @@ interface ViewsCheckWindowRun {
   readonly hidden: boolean;
   /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
   readonly geometry: GeometryOverride | undefined;
+  /**
+   * The zoom factor its page is drawn at, which Chromium counts in its `devicePixelRatio`
+   * (`--device-pixel-ratio`; the owner's Retina report, 2026-11-01): 1 on a shown run.
+   */
+  readonly zoom: ViewsCheckPixelRatio;
 }
 
 function createWindow(
@@ -150,8 +168,13 @@ function createWindow(
   const run = spike ?? check;
   const size =
     check !== null
-      ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's.
-        viewsCheckSize(check.launch, check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor)
+      ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's, times
+        // the page's zoom.
+        viewsCheckSize(
+          check.launch,
+          check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor,
+          check.zoom,
+        )
       : run === null
         ? { width: 1600, height: 900 }
         : spikeSize(run.launch);
@@ -184,6 +207,8 @@ function createWindow(
       // A hidden spike run renders offscreen, as the smoke harness's does: a hidden window on a
       // hardware adapter draws nothing otherwise, and headless Ozone's GPU process exits there.
       ...(run?.hidden === true ? { offscreen: true, backgroundThrottling: false } : {}),
+      // A hidden check's Retina: its layout the setting's size in CSS px, its canvases `zoom` times.
+      ...(check === null || check.zoom === 1 ? {} : { zoomFactor: check.zoom }),
     },
   });
 
@@ -644,11 +669,20 @@ async function main(): Promise<void> {
   const viewsCheck = args.viewsCheck;
   if (viewsCheck !== undefined) {
     const hidden = viewsCheck.smoke || process.env[VIEWS_CHECK_HIDDEN_ENV] === "1";
+    const zoom = args.viewsCheckPixelRatio ?? 1;
+    if (!hidden && zoom !== 1) {
+      process.stderr.write(
+        "--device-pixel-ratio is an option of a hidden run: a shown window takes its display's\n",
+      );
+      app.exit(2);
+      return;
+    }
     logGeometry("views check", args.geometry);
     const window = createWindow(serverUrl, graphics, args.setting, null, {
       launch: viewsCheck,
       hidden,
       geometry: args.geometry,
+      zoom,
     });
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;

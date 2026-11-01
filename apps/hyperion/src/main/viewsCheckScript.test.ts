@@ -376,6 +376,26 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     expect(limits).toEqual(["1500", "3000", "12000", "18000"]);
   });
 
+  it("passes --device-pixel-ratio on, and sizes a software launch's headless screen by it", () => {
+    const run = runScriptWith(["--software", "--smoke", "--device-pixel-ratio", "2"], {});
+    const launch = run.launches[0] ?? [];
+    expect([
+      run.status,
+      valueOf(launch, "--device-pixel-ratio"),
+      launch.filter((word) => word.startsWith("--ozone-override-screen-size=")),
+    ]).toEqual([0, "2", ["--ozone-override-screen-size=3840,2160"]]);
+  });
+
+  it("passes no ratio on at 1, the default", () => {
+    const run = runScriptWith(["--hidden", "--smoke", "--device-pixel-ratio=1"], {});
+    expect([run.status, run.launches[0]?.includes("--device-pixel-ratio")]).toEqual([0, false]);
+  });
+
+  it("refuses a ratio but 1, 2 or 3, with exit 2 and no launch", () => {
+    const run = runScriptWith(["--hidden", "--smoke", "--device-pixel-ratio", "1.5"], {});
+    expect([run.status, run.launches]).toEqual([2, []]);
+  });
+
   it("refuses --software off Linux, with exit 2 and no launch", () => {
     const run = runScriptWith(["--software", "--smoke"], { uname: "Darwin" });
     expect([run.status, run.launches]).toEqual([2, []]);

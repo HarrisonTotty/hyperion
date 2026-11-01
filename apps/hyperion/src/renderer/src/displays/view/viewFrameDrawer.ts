@@ -58,7 +58,7 @@ import {
   type WireframeTerrainInput,
   wireframeTerrainOf,
 } from "../../view/terrain/frameTerrain";
-import type { HandoverReliefSource } from "../../view/terrain/handover";
+import { type HandoverReliefSource, selectionViewport } from "../../view/terrain/handover";
 import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
@@ -250,11 +250,13 @@ export function terrainReportOf(
   if (size === null) {
     return null;
   }
+  const presentedPx = presentedViewport(size);
   return {
     scene: run.scene,
     pose: runPose(run),
     fovXRad: (run.camera.fovDeg * Math.PI) / 180,
-    presentedPx: presentedViewport(size),
+    presentedPx,
+    selectionPx: selectionViewport(presentedPx, size.devicePixelRatio),
     style: inputs.style,
     drawnStyle,
     setting: inputs.setting,
@@ -422,6 +424,8 @@ export class ViewFrameDrawer {
     }
     const ratio = size.devicePixelRatio;
     const viewport = presentedViewport(size);
+    // Its terrain selects and hands over at its CSS px, whatever the display's density.
+    const selection = selectionViewport(viewport, ratio);
     if (this.#sized?.widthPx !== viewport.widthPx || this.#sized.heightPx !== viewport.heightPx) {
       this.#view.resize(viewport);
       this.#sized = viewport;
@@ -495,7 +499,15 @@ export class ViewFrameDrawer {
     let drawn = false;
     let terrain: TerrainAnnunciation | null = null;
     if (triesPhotoreal) {
-      const photoreal = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+      const photoreal = this.#drawPhotoreal(
+        inputs,
+        tokens,
+        { presentedPx: viewport, selectionPx: selection },
+        camera,
+        list,
+        cube,
+        exposed,
+      );
       drawn = photoreal.drawn;
       terrain = photoreal.terrain;
     }
@@ -513,6 +525,7 @@ export class ViewFrameDrawer {
               scene: run.scene,
               camera,
               viewport,
+              selectionPx: selection,
               strokeScale: list.strokeScale,
               lowSetting: inputs.setting === "low",
               tokens,
@@ -587,13 +600,14 @@ export class ViewFrameDrawer {
   #drawPhotoreal(
     inputs: ViewFrameInputs,
     tokens: ColourTokens,
-    viewport: ViewSize,
+    sizes: { readonly presentedPx: ViewSize; readonly selectionPx: ViewSize },
     camera: { readonly pose: CameraPose; readonly fovXRad: number },
     list: ReturnType<typeof buildWireframeDrawList>,
     cube: BakedCube | null,
     exposed: number,
   ): { readonly drawn: boolean; readonly terrain: TerrainAnnunciation | null } {
     const { sky, run } = inputs;
+    const { presentedPx: viewport, selectionPx } = sizes;
     const airView = inputs.atmosphere?.view;
     const reportAirFailure =
       airView === undefined
@@ -609,6 +623,7 @@ export class ViewFrameDrawer {
             view: inputs.terrain.view,
             camera: { orientation: camera.pose.orientation, fovXRad: camera.fovXRad },
             presentedPx: viewport,
+            selectionPx,
             exposureScale: exposed,
             occluderSlopePx: list.occluderSlopePx,
             nowMs: inputs.terrain.nowMs,
@@ -632,8 +647,10 @@ export class ViewFrameDrawer {
           run,
           pose: camera.pose,
           viewport: internal,
-          // The hand-over's pixel, which the internal scale must not move (R10.T10.g).
+          // The hand-over's pixel, which the internal scale must not move (R10.T10.g), at the
+          // selection's CSS px.
           presentedPx: viewport,
+          selectionPx,
           setting: inputs.setting,
           atmosphereSetting: inputs.atmosphereSetting,
           exposureScale: exposed,

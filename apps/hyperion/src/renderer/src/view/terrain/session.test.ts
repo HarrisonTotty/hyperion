@@ -34,6 +34,7 @@ import {
   SESSION_MOON,
   SESSION_MOON_RADIUS_M,
   SESSION_PLANET,
+  SESSION_PRESENTED,
   SESSION_SCENE,
   viewAt,
 } from "../../test/terrainSessionFixtures";
@@ -246,6 +247,20 @@ describe("a view's field candidates (R10.T16.a)", () => {
   it("gives a body its limb's distance over its range at the style's τ", () => {
     const [, moon] = viewFieldCandidates(viewAt(2e7, "wireframe"), () => 18_000);
     expect(moon?.rangeRatio).toBeCloseTo(limbDistanceM(2e7, MOON_RADIUS_M) / moonRangeM(4), 12);
+  });
+
+  it("gives a body its ratio at the view's selection size, its CSS px, at a ratio of 2 (lean 2026-11-01)", () => {
+    const retina = {
+      ...viewAt(2e7),
+      presentedPx: {
+        widthPx: 2 * SESSION_PRESENTED.widthPx,
+        heightPx: 2 * SESSION_PRESENTED.heightPx,
+      },
+      selectionPx: SESSION_PRESENTED,
+    };
+    expect(viewFieldCandidates(retina, () => 18_000)).toEqual(
+      viewFieldCandidates(viewAt(2e7), () => 18_000),
+    );
   });
 
   it("gives a body with no relief known an infinite ratio", () => {

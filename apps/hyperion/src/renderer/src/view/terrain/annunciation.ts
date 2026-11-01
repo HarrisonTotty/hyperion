@@ -4,12 +4,12 @@
  * @remarks
  * `TERRAIN: STREAMING` holds while any patch the selection asks for is drawn by a coarser resident
  * ancestor, or not yet drawn at all; `TERRAIN: DETAIL LIMITED` while the drawn selection is coarser
- * than the reference selection, the same pure selection at τ = 1 px at the view's presented
- * resolution with no depth cap. Where both hold, `STREAMING` shows: it clears by itself, and the
- * operator answers it differently. Each is steady text with no status colour and no flashing; a
- * condition must hold for 250 ms before it shows and clear for 1 s before it goes, so that a patch
- * arriving mid-frame cannot make the line flicker. The wording is the guide's nomenclature row,
- * signed off by the owner (2026-10-02).
+ * than the reference selection, the same pure selection at τ = 1 px at the view's selection size
+ * (its presented resolution's CSS px, `selectionViewport`) with no depth cap. Where both hold,
+ * `STREAMING` shows: it clears by itself, and the operator answers it differently. Each is steady
+ * text with no status colour and no flashing; a condition must hold for 250 ms before it shows and
+ * clear for 1 s before it goes, so that a patch arriving mid-frame cannot make the line flicker.
+ * The wording is the guide's nomenclature row, signed off by the owner (2026-10-02).
  */
 
 import type { DrawSet } from "./cache";

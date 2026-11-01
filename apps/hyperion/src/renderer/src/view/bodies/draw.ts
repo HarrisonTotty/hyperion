@@ -39,8 +39,8 @@
  * reference surface beneath its terrain, discarded where its survey's coverage mask holds the
  * ground surveyed (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view
  * that draws none draws its figure whole, as a mesh body's. The hand-over counts the pixels the
- * view is presented at ({@link BodyFrameOptions.presentedPx}, R10.T10.g), R07's 3 px switch the
- * frame's own.
+ * view's terrain selects at ({@link BodyFrameOptions.selectionPx}, the presented size's CSS px;
+ * R10.T10.g), R07's 3 px switch the frame's own.
  *
  * A class-map disc whose surface carries the field's normal map (plan R10, R10.T10.g) shades its
  * surveyed ground with those normals, in its draws and in the point it switches with: its records'
@@ -253,6 +253,13 @@ export interface BodyFrameOptions {
    * size. R07's 3 px switch keeps `viewport`.
    */
   readonly presentedPx: Viewport;
+  /**
+   * The size the view's terrain selects at, whose centre pixel the hand-over measures in its place:
+   * {@link BodyFrameOptions.presentedPx} ÷ max(1, the display's device-pixel ratio), its CSS px
+   * (`selectionViewport`; lean 2026-11-01), so that the hand-over and the field's want stay
+   * together; absent, `presentedPx`, as at a ratio of 1.
+   */
+  readonly selectionPx?: Viewport;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
   /** The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`. */
@@ -720,17 +727,17 @@ function pointSpriteOf(
  *
  * @remarks
  * A disc whose relief subtends the photorealistic style's τ on `options.setting` (R10's
- * `handoverTauPx`) at its limb, in the centre pixels of the size the view is presented at
- * (`options.presentedPx`, plan R10, R10.T10.g), is handed over to terrain (`handOverRegimes`, plan
- * R10, R10.T10.e). The two switches now count different pixels: R07's 3 px switch (`litRegimes`)
- * the frame's own (`options.viewport`), in which the disc's summed flux meets the point's, and the
- * hand-over the presented ones, so that the resolution controller's internal scale, which moves the
- * first, never moves the second (decision-r10-t16-leans §13). A disc whose footprint
- * overlaps one of `options.depthWriters`, a mesh body or a body handed over is promoted to a mesh
- * (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is drawn in the
- * sequence as a disc's is, so the order takes it as a disc (Design note 2); its figure's pixels are
- * drawn before the sequence, with depth. The order is the drawing's, by the drawn centres; each
- * body is lit by its own lighting frame where it has one (T10.a).
+ * `handoverTauPx`) at its limb, in the centre pixels of the size the view's terrain selects at
+ * (`options.selectionPx`, the presented size's CSS px; plan R10, R10.T10.g), is handed over to
+ * terrain (`handOverRegimes`, plan R10, R10.T10.e). The two switches now count different pixels:
+ * R07's 3 px switch (`litRegimes`) the frame's own (`options.viewport`), in which the disc's summed
+ * flux meets the point's, and the hand-over the selection's, so that the resolution controller's
+ * internal scale, which moves the first, never moves the second (decision-r10-t16-leans §13). A
+ * disc whose footprint overlaps one of `options.depthWriters`, a mesh body or a body handed over is
+ * promoted to a mesh (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is
+ * drawn in the sequence as a disc's is, so the order takes it as a disc (Design note 2); its
+ * figure's pixels are drawn before the sequence, with depth. The order is the drawing's, by the
+ * drawn centres; each body is lit by its own lighting frame where it has one (T10.a).
  *
  * Under a class map the plan has two side effects on the point's module-wide work (plan R10,
  * R10.T14.f's levers; `classMapPoint.ts`): a point it draws queues its map's build or a refresh
@@ -790,7 +797,7 @@ export function planLitBodies(
     litRegimes(spheres, camera, viewport, previous),
     spheres,
     handoverTauPx("photorealistic", options.setting),
-    pixelAngleRad(camera, options.presentedPx),
+    pixelAngleRad(camera, options.selectionPx ?? options.presentedPx),
     previous,
   );
   const meshed = new Map<BodyIdHex, LitRegime>(

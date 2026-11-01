@@ -8,6 +8,7 @@
 #
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
 #                 [--geometry <field>=<value>[,...]]
+#                 [--device-pixel-ratio <N>]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID> [--timing]]
@@ -93,6 +94,12 @@
 # A profile is not judged; the launch exits 1 when its file is not written. With no --setting it
 # makes two launches, high then low, as --terrain does.
 #
+# --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
+# display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's
+# size at a zoom factor of N, its layout the setting's size in CSS px and its canvases N times it.
+# A software launch's headless screen is N times 1920 x 1080 too, which would otherwise clamp the
+# window to it. The client refuses it on a shown run, whose display gives its ratio.
+#
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and
 # implying --hidden. It is the check-only software mode, a test-tool exception to R01 Design note 8
@@ -133,6 +140,7 @@ inspection=0
 whole=0
 timing=0
 setting=""
+ratio=1
 check_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -153,9 +161,25 @@ while [[ $# -gt 0 ]]; do
             fi
             setting="$2"; shift 2 ;;
         --setting=*) setting="${1#--setting=}"; shift ;;
+        --device-pixel-ratio)
+            if [[ $# -lt 2 ]]; then
+                echo "views check: --device-pixel-ratio needs 1, 2 or 3" >&2
+                exit 2
+            fi
+            ratio="$2"; shift 2 ;;
+        --device-pixel-ratio=*) ratio="${1#--device-pixel-ratio=}"; shift ;;
         *) check_args+=("$1"); shift ;;
     esac
 done
+
+# The ratio, checked here as well as by the client, since the software mode's screen is sized by it.
+if [[ "$ratio" != 1 && "$ratio" != 2 && "$ratio" != 3 ]]; then
+    echo "views check: --device-pixel-ratio needs 1, 2 or 3, not $ratio" >&2
+    exit 2
+fi
+if [[ "$ratio" != 1 ]]; then
+    check_args+=(--device-pixel-ratio "$ratio")
+fi
 
 # The software mode's switches are the smoke harness's, which only Linux runs headless.
 if [[ $software -eq 1 && "$(uname -s)" != Linux ]]; then
@@ -219,8 +243,10 @@ if [[ $software -eq 1 ]]; then
     # XDG_SESSION_TYPE either.
     env_run+=(-u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE
         DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent)
+    # Headless Ozone holds a window within its screen: one of the ratio's times 1920 x 1080.
     switches=("${adapter_switches[@]}" "${headless_switches[@]}" --hyperion-graphics-software
-        --ozone-override-screen-size=1920,1080 --disable-gpu-watchdog)
+        "--ozone-override-screen-size=$(( 1920 * ratio )),$(( 1080 * ratio ))"
+        --disable-gpu-watchdog)
 elif [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
     # As the `client` recipe does: on Wayland the client would relaunch itself through XWayland, and
     # this script would take the first process's exit for the run's.

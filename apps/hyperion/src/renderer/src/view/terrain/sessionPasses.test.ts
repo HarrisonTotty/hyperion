@@ -912,6 +912,21 @@ describe("the scene's craft as a pass's contacts (R10.T16.b; R05 Design note 9)"
     expect(sceneContacts(scene, moon, ground, 30)).toHaveLength(1);
   });
 
+  it("takes a view into the pass at its selection size, its CSS px, at a ratio of 2 (lean 2026-11-01)", () => {
+    const retina = handing(6e6, {
+      presentedPx: {
+        widthPx: 2 * SESSION_PRESENTED.widthPx,
+        heightPx: 2 * SESSION_PRESENTED.heightPx,
+      },
+      selectionPx: SESSION_PRESENTED,
+    });
+    const view = terrainPassViewOf(PRIMARY, retina, moon);
+    expect([view?.view.viewport, view]).toEqual([
+      SESSION_PRESENTED,
+      terrainPassViewOf(PRIMARY, handing(6e6), moon),
+    ]);
+  });
+
   it("weighs a view by its budget's streaming priority: a secondary's a quarter of a primary's", () => {
     const weightOf = (streamPriority: "primary" | "secondary"): number | undefined =>
       terrainPassViewOf(INSTRUMENT, handing(6e6, { streamPriority }), moon)?.weight;

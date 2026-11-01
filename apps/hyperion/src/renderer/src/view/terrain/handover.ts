@@ -43,11 +43,35 @@ import type { CoverageView } from "./coverage";
  * which R07's regimes measure a body's diameter (`angularDiameterPx`).
  *
  * @remarks
- * The hand-over takes it of the presented viewport (R10.T10.g: `BodyFrameOptions.presentedPx`),
- * R07's 3 px switch of the frame's own.
+ * The hand-over takes it of the selection's size ({@link selectionViewport}, the presented
+ * viewport's CSS px; R10.T10.g: `BodyFrameOptions.selectionPx`), R07's 3 px switch of the frame's
+ * own.
  */
 export function pixelAngleRad(camera: ProjectionCamera, viewport: Viewport): number {
   return (2 * Math.tan(camera.fovXRad / 2)) / viewport.widthPx;
+}
+
+/**
+ * The size a view's terrain selects, hands over and is judged `DETAIL LIMITED` at (R05 Design
+ * notes 7 and 23; the owner's Retina report, lean 2026-11-01): the presented size, device px,
+ * ÷ max(1, `devicePixelRatio`), its CSS px, so that τ is a CSS pixel's visual angle whatever the
+ * display's density.
+ *
+ * @remarks
+ * CSS's reference pixel is a visual angle of about 0.0213°, 1.28′ (CSS Values and Units Level 4,
+ * §6.2, "reference pixel"), near the eye's 1′ limit; a Retina display's device pixel, half that,
+ * lies below it, so selecting at device px drew about 4× the patches at a ratio of 2 for an error
+ * no one sees. The canvas, the render and every pass stay at device px. At a ratio of 1 or under,
+ * or one not finite, it is `presentedPx` itself, so that nothing moves on such a display.
+ */
+export function selectionViewport(presentedPx: Viewport, devicePixelRatio: number): Viewport {
+  if (!(Number.isFinite(devicePixelRatio) && devicePixelRatio > 1)) {
+    return presentedPx;
+  }
+  return {
+    widthPx: presentedPx.widthPx / devicePixelRatio,
+    heightPx: presentedPx.heightPx / devicePixelRatio,
+  };
 }
 
 /**

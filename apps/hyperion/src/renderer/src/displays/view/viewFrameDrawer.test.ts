@@ -259,16 +259,20 @@ describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
     };
   }
 
-  /** The bodies a drawer's photorealistic frame of the phase scene hands over. */
+  /**
+   * The bodies a drawer's photorealistic frame of the phase scene hands over, its stage
+   * {@link PRESENTED}'s size in CSS px at a device-pixel ratio of `ratio`.
+   */
   async function handedOver(
     setting: "high" | "low",
     renderScale: number,
     reliefTau: number,
+    ratio = 1,
   ): Promise<string[]> {
     const run = phaseRun(true);
     const inputs: ViewFrameInputs = {
       run,
-      size: { ...PRESENTED, devicePixelRatio: 1, remPx: 16 },
+      size: { ...PRESENTED, devicePixelRatio: ratio, remPx: 16 },
       tokens: TOKENS,
       exposure: DEFAULT_EXPOSURE,
       stars: [],
@@ -304,6 +308,19 @@ describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
       expect(await handedOver(setting, 0.5, 1.5)).toEqual(whole);
     },
   );
+
+  it.each(["high", "low"] as const)(
+    "hands the same bodies over at a device-pixel ratio of 2 as at 1 on %s, by its CSS px (lean 2026-11-01)",
+    async (setting) => {
+      const whole = await handedOver(setting, 1, 1.5);
+      expect(whole.length).toBeGreaterThan(0);
+      expect(await handedOver(setting, 1, 1.5, 2)).toEqual(whole);
+    },
+  );
+
+  it("hands none over at a ratio of 2 at a relief of 0.75 τ, which its device px would count as 1.5 τ", async () => {
+    expect(await handedOver("high", 1, 0.75, 2)).toEqual([]);
+  });
 
   it("hands none over at either scale on either setting at a relief of 0.5 τ", async () => {
     const handed = await Promise.all(
@@ -373,7 +390,7 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
     expect([planned.size > 0, kept === planned]).toEqual([true, true]);
   });
 
-  it("reports its scene, pose, field of view, presented size, styles, setting and priority", () => {
+  it("reports its scene, pose, field of view, presented and selection sizes, styles, setting and priority", () => {
     const inputs = inputsOf("wireframe", 1.5);
     const regimes = new Map();
     expect(terrainReportOf(inputs, regimes, "secondary", "photorealistic")).toEqual({
@@ -381,6 +398,8 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
       pose: runPose(inputs.run),
       fovXRad: (inputs.run.camera.fovDeg * Math.PI) / 180,
       presentedPx: { widthPx: 480, heightPx: 270 },
+      // Its CSS px, at which its terrain selects (lean 2026-11-01).
+      selectionPx: { widthPx: 320, heightPx: 180 },
       style: "wireframe",
       drawnStyle: "photorealistic",
       setting: "low",

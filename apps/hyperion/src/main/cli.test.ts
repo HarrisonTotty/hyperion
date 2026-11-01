@@ -678,6 +678,36 @@ describe("the several-views check's options", () => {
     expect([error.exitCode, error.message]).toEqual([1, message]);
   });
 
+  it("draws the check's page at a device-pixel ratio of 1 unless --device-pixel-ratio is given", () => {
+    expect([
+      parse(["--views-check"]).viewsCheckPixelRatio,
+      parse(["--views-check", "--device-pixel-ratio", "2"]).viewsCheckPixelRatio,
+      parse([
+        "--views-check",
+        "--inspection",
+        "--universe",
+        UNIVERSE,
+        "--body",
+        BODY,
+        "--device-pixel-ratio=3",
+      ]).viewsCheckPixelRatio,
+      parse([]).viewsCheckPixelRatio,
+    ]).toEqual([1, 2, 3, undefined]);
+  });
+
+  it.each([["0"], ["1.5"], ["4"], ["two"]])("refuses a device-pixel ratio of %s", (ratio) => {
+    expect(refusal(["--views-check", "--device-pixel-ratio", ratio]).exitCode).toBe(1);
+  });
+
+  it.each([[["--device-pixel-ratio", "2"]], [["--descent-spike", "--device-pixel-ratio", "2"]]])(
+    "refuses --device-pixel-ratio without --views-check: %j",
+    (args) => {
+      expect(refusal(args).message).toBe(
+        "error: --device-pixel-ratio is an option of --views-check, which was not given",
+      );
+    },
+  );
+
   it("refuses --atmosphere with the descent spike as separate runs", () => {
     const error = refusal(["--views-check", "--atmosphere", "--descent-spike"]);
     expect(error.message).toBe(

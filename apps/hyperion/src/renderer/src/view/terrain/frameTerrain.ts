@@ -7,7 +7,7 @@
  * - **One rotation and one record** (D5). A body handed over (T10.e's `terrain`, a `MeshBodyPlan`
  *   whose `role` is `handed-over`) is drawn from the plan's body: its `TerrainView` is the
  *   `LitBodyInput` the plan drew the figure with ({@link terrainViewOf}: its rotation, its centre
- *   negated, the camera's orientation and field of view, the presented size), so that the
+ *   negated, the camera's orientation and field of view, the selection size), so that the
  *   terrain, its coverage mask, its class map and the reference surface share R07.T10.a's
  *   `rotationAt`; and its lights are its disc record's ({@link terrainLightingOf}), rotated into the
  *   body-fixed axes by the inverse of that rotation, so that the disc, the reference surface and
@@ -162,15 +162,16 @@ export function terrainLightingOf(
  * The view of a body's terrain from the plan's body (plan R10, R10.T16.c): `rotation` the body's
  * `LitBodyInput.rotation`, the one the plan drew its figure with; `cameraM` its `centreM` negated,
  * the camera from the body's centre along the galactic axes, the body frame's; the camera's
- * orientation and field of view; and the presented size, at which its pass selects. `null` for a
- * body whose rotation is not known, which is never handed over.
+ * orientation and field of view; and the size at which its pass selects. `null` for a body whose
+ * rotation is not known, which is never handed over.
  *
- * @param presentedPx - The view's presented size, device px (its canvas's, R05 Design note 23).
+ * @param selectionPx - The view's selection size (R05 Design note 23): its presented size, device
+ *   px, ÷ max(1, the display's device-pixel ratio), its CSS px (`selectionViewport`).
  */
 export function terrainViewOf(
   body: LitBodyInput,
   camera: ProjectionCamera,
-  presentedPx: ViewSize,
+  selectionPx: ViewSize,
 ): TerrainView | null {
   const rotation = body.rotation;
   if (rotation === undefined) {
@@ -181,7 +182,7 @@ export function terrainViewOf(
     cameraM: scale(body.centreM, -1),
     orientation: camera.orientation,
     fovXRad: camera.fovXRad,
-    viewport: presentedPx,
+    viewport: selectionPx,
   };
 }
 
@@ -318,6 +319,11 @@ export interface LiveFrameTerrainInput {
   readonly camera: ProjectionCamera;
   /** The size the view is presented at, device px: its canvas's. */
   readonly presentedPx: ViewSize;
+  /**
+   * The size its passes select at ({@link terrainViewOf}): the presented size's CSS px
+   * (`selectionViewport`); absent, {@link LiveFrameTerrainInput.presentedPx}.
+   */
+  readonly selectionPx?: ViewSize | undefined;
   /** The frame's pre-exposure. */
   readonly exposureScale: number;
   /**
@@ -385,7 +391,8 @@ export class LiveFrameTerrain implements FrameTerrain {
    * @param bodies - The lit bodies the plan was made from, its `LitBodyInput`s.
    */
   draws(plan: BodyFramePlan, bodies: ReadonlyArray<LitBodyInput>): ReadonlyArray<DrawItem> {
-    const { view, camera, presentedPx, exposureScale, occluderSlopePx, nowMs } = this.#input;
+    const { view, camera, presentedPx, selectionPx, exposureScale, occluderSlopePx, nowMs } =
+      this.#input;
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
     const depth: DrawItem[] = [];
@@ -403,7 +410,8 @@ export class LiveFrameTerrain implements FrameTerrain {
       }
       const record = plan.discs[mesh.index];
       const body = record === undefined ? undefined : byId.get(record.body);
-      const terrainView = body === undefined ? null : terrainViewOf(body, camera, presentedPx);
+      const terrainView =
+        body === undefined ? null : terrainViewOf(body, camera, selectionPx ?? presentedPx);
       if (record === undefined || body === undefined || terrainView === null) {
         continue;
       }
@@ -575,8 +583,13 @@ export interface WireframeTerrainInput {
   readonly scene: ViewScene;
   /** The frame's camera. */
   readonly camera: DrawCamera;
-  /** The size the view is presented at, device px: its canvas's, at which its pass selects. */
+  /** The size the view is presented at, device px: its canvas's, its graticule's. */
   readonly viewport: ViewSize;
+  /**
+   * The size its passes select at: the presented size's CSS px (`selectionViewport`); absent,
+   * {@link WireframeTerrainInput.viewport}.
+   */
+  readonly selectionPx?: ViewSize | undefined;
   /** The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`). */
   readonly strokeScale: number;
   /** The wireframe's low setting, whose graticules are at 30° only (R02's `lowSetting`). */
@@ -735,7 +748,7 @@ export function wireframeTerrainOf(
         cameraM: scale(centreM, -1),
         orientation: camera.pose.orientation,
         fovXRad: camera.fovXRad,
-        viewport,
+        viewport: input.selectionPx ?? viewport,
       },
       sunDirectionBodyFixed: NO_SUN,
       sunIlluminanceLx: NO_LIGHT,
