@@ -122,6 +122,14 @@ struct Draw {
 
 const HALF_MAX : f32 = 65504.0;
 
+// The views check's probe of the composite's cost (the owner's priority, 2026-11-01; `hillaire.ts`'s
+// compositeProbedMaterial): 0, the composite as drawn, on every launch but an inspection profile's
+// `--composite-probe`, whose material sets 1, every sky pixel keeping the scene's light (no sky
+// branch), or 2, the sky drawn with no transmittance across from above, 1 in its place (neither the
+// far-limb footprint nor the sliced lookups it takes). A constant, so that the composite every
+// player draws compiles neither.
+const COMPOSITE_PROBE : u32 = 0u;
+
 struct VertexOut {
   @builtin(position) position : vec4f,
 }
@@ -440,6 +448,9 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let here = marchedHere(pixel);
 
   if (depth == 0.0) {
+    if (COMPOSITE_PROBE == 1u) {
+      return vec4f(min(colour, vec3f(HALF_MAX)), meterClass);
+    }
     // The source whose disc the ray falls in, the last such, whose light slot dims what lies behind
     // it; slot 0's elsewhere.
     var slotHere = 0u;
@@ -459,9 +470,11 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       behind = vec3f(1.0);
       inscattered = vec3f(0.0);
       if (here) {
-        footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
         inscattered = rayMarched(pixel, depth).rgb;
-        behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+        if (COMPOSITE_PROBE != 2u) {
+          footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
+          behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+        }
       }
     } else {
       // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
@@ -506,7 +519,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         var toSpace : vec3f;
         if (aboveTop) {
           toSpace = vec3f(1.0);
-          if (here) {
+          if (here && COMPOSITE_PROBE != 2u) {
             toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
           }
         } else if (draw.shell.w > 0.0) {

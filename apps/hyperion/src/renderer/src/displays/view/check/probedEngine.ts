@@ -10,7 +10,8 @@
  * check's launch uses it (`ViewsProbe`). The terrain run (plan R10, R10.T16.d) also reads each
  * render's submission and each target made, through the same probe. A depth-layer target's render
  * (plan R10, R10.T9.b) notes its CPU time as `<owner>:shadows`'s, its owner the view it names: one
- * target serves every view.
+ * target serves every view. An inspection profile's `--composite-probe` (the owner's priority,
+ * 2026-11-01) is the one change it makes: the atmosphere's composite made under the probe.
  */
 
 import type {
@@ -19,6 +20,11 @@ import type {
   MemoryCategory,
   TextureSpec,
 } from "../../../view/engine/memory";
+import {
+  COMPOSITE_MATERIAL,
+  type CompositeProbe,
+  compositeProbedMaterial,
+} from "../../../view/atmosphere/hillaire";
 import type { KernelPair } from "../../../view/engine/kernels";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
@@ -218,11 +224,30 @@ export class ProbedEngine implements RenderEngine {
   readonly #inner: RenderEngine;
   readonly #probe: EngineProbe;
   readonly #nowMs: () => number;
+  readonly #compositeProbe: CompositeProbe | null;
 
-  constructor(inner: RenderEngine, probe: EngineProbe, nowMs: () => number) {
+  /**
+   * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
+   *   (`--composite-probe`; the owner's priority, 2026-11-01): each composite made through this
+   *   engine is made under it ({@link compositeProbedMaterial}); `null`, the default, as drawn.
+   */
+  constructor(
+    inner: RenderEngine,
+    probe: EngineProbe,
+    nowMs: () => number,
+    compositeProbe: CompositeProbe | null = null,
+  ) {
     this.#inner = inner;
     this.#probe = probe;
     this.#nowMs = nowMs;
+    this.#compositeProbe = compositeProbe;
+  }
+
+  /** `spec`, or the composite's under the launch's probe where it is the composite and one is set. */
+  #materialOf(spec: WgslMaterialSpec): WgslMaterialSpec {
+    return this.#compositeProbe !== null && spec.name === COMPOSITE_MATERIAL.name
+      ? compositeProbedMaterial(this.#compositeProbe)
+      : spec;
   }
 
   get capabilities(): RenderEngine["capabilities"] {
@@ -263,7 +288,7 @@ export class ProbedEngine implements RenderEngine {
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
-    return this.#inner.createMaterial(spec);
+    return this.#inner.createMaterial(this.#materialOf(spec));
   }
 
   /**
@@ -285,7 +310,7 @@ export class ProbedEngine implements RenderEngine {
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle> {
-    return this.#inner.createMaterialAsync(spec, targets, meshes);
+    return this.#inner.createMaterialAsync(this.#materialOf(spec), targets, meshes);
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {

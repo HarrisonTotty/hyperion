@@ -2,7 +2,8 @@ import { describe, expect, it, type Mock, vi } from "vitest";
 
 import { FakeAdapter, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
 import { FakeRenderEngine } from "../../../test/fakeRenderEngine";
-import type { DepthLayerPass } from "../../../view/engine/types";
+import { COMPOSITE_MATERIAL, SKY_VIEW_KERNEL } from "../../../view/atmosphere/hillaire";
+import type { DepthLayerPass, WgslMaterialSpec } from "../../../view/engine/types";
 import { type EngineProbe, ProbedEngine } from "./probedEngine";
 
 /** A probe whose renders and submissions a test reads. */
@@ -60,5 +61,42 @@ describe("a probed engine's depth layers (R10.T9.b)", () => {
       rendered: [["view:shadows", 7, 7, 1.5]],
       submitted: 0,
     });
+  });
+});
+
+describe("a probed engine's composite probe (the owner's priority, 2026-11-01)", () => {
+  /** The WGSL each material was made with through `engine`, by name, in order. */
+  async function madeWith(
+    probe: "sky-off" | "transmittance-off" | null,
+  ): Promise<ReadonlyArray<readonly [string, string]>> {
+    const device = await new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] }).requestDevice();
+    const inner = new FakeRenderEngine(device);
+    // The fake makes an async material through its `createMaterial`, which sees both.
+    const made = vi.spyOn(inner, "createMaterial");
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0, probe);
+    const other: WgslMaterialSpec = { ...COMPOSITE_MATERIAL, name: SKY_VIEW_KERNEL.name };
+    await engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"]);
+    engine.createMaterial(other);
+    return made.mock.calls.map(([spec]) => [
+      spec.name,
+      /const COMPOSITE_PROBE : u32 = (\d)u;/u.exec(spec.fragmentWgsl)?.[1] ?? "none",
+    ]);
+  }
+
+  it("makes the composite as drawn without a probe", async () => {
+    expect(await madeWith(null)).toEqual([
+      ["atmosphere composite", "0"],
+      [SKY_VIEW_KERNEL.name, "0"],
+    ]);
+  });
+
+  it.each([
+    ["sky-off", "1"],
+    ["transmittance-off", "2"],
+  ] as const)("makes the composite alone under %s", async (probe, value) => {
+    expect(await madeWith(probe)).toEqual([
+      ["atmosphere composite", value],
+      [SKY_VIEW_KERNEL.name, "0"],
+    ]);
   });
 });

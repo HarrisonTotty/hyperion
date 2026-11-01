@@ -117,7 +117,9 @@ function checkProbesOf(
   requests: RequestClient,
   served: HandoverWorld | null = null,
 ): CheckProbes {
-  const views = new ViewsProbe();
+  // An inspection profile's `--composite-probe` makes VIEW's composite under it (the owner's
+  // priority, 2026-11-01).
+  const views = new ViewsProbe(undefined, undefined, launch.compositeProbe ?? null);
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
     new TerrainProbe(views, {

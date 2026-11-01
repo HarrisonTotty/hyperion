@@ -127,6 +127,23 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, timing: true })).toBeNull();
   });
 
+  it("carries the frame profile's composite probe, on that profile alone (the owner's priority)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    for (const compositeProbe of ["sky-off", "transmittance-off"] as const) {
+      const launch: ViewsCheckLaunch = { ...profile, compositeProbe };
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    }
+    expect(readViewsCheckLaunch({ ...profile, compositeProbe: "march-off" })).toBeNull();
+    const { timing: _, ...inspection } = profile;
+    expect(readViewsCheckLaunch({ ...inspection, compositeProbe: "sky-off" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, compositeProbe: "sky-off" })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });

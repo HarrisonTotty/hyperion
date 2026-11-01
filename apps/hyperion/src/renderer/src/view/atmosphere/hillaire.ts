@@ -1455,6 +1455,43 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
 };
 
 /**
+ * A views check's probe of the composite's cost (the owner's priority, 2026-11-01): `sky-off`, every
+ * sky pixel keeping the scene's light, or `transmittance-off`, the sky drawn with no transmittance
+ * across from above (`composite.wgsl`'s `transmittanceAcrossFromAbove`, 1 in its place). It is
+ * check-only: an inspection profile's `--composite-probe`, never drawn on a player's launch.
+ */
+export type CompositeProbe = "sky-off" | "transmittance-off";
+
+/** The line of `composite.wgsl` a probe's material replaces. */
+const COMPOSITE_PROBE_LINE = "const COMPOSITE_PROBE : u32 = 0u;";
+
+/**
+ * {@link COMPOSITE_MATERIAL} under `probe`: the same draw with `composite.wgsl`'s `COMPOSITE_PROBE`
+ * set, 1 for `sky-off` and 2 for `transmittance-off`.
+ *
+ * @throws Error if the composite's WGSL no longer declares the probe's constant.
+ */
+export function compositeProbedMaterial(probe: CompositeProbe): WgslMaterialSpec {
+  let value: number;
+  switch (probe) {
+    case "sky-off":
+      value = 1;
+      break;
+    case "transmittance-off":
+      value = 2;
+      break;
+  }
+  if (!COMPOSITE_WGSL.includes(COMPOSITE_PROBE_LINE)) {
+    throw new Error(`the composite's WGSL declares no ${COMPOSITE_PROBE_LINE}`);
+  }
+  const wgsl = COMPOSITE_WGSL.replace(
+    COMPOSITE_PROBE_LINE,
+    `const COMPOSITE_PROBE : u32 = ${String(value)}u;`,
+  );
+  return { ...COMPOSITE_MATERIAL, vertexWgsl: wgsl, fragmentWgsl: wgsl };
+}
+
+/**
  * What the atmosphere is laid over: the colour and reversed-Z depth of the opaque surfaces aerial
  * perspective applies to (R08.T9.a). On the `terrain` scope that is the terrain alone, as R05's
  * spike draws it and R10's lit terrain is drawn (R10.T10.b); on `scene`, every opaque pass drawn

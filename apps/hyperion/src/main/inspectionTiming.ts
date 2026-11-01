@@ -28,6 +28,7 @@ import { join } from "node:path";
 import type { TraceConfig } from "electron";
 
 import type {
+  CompositeProbeName,
   InspectionTimingMemory,
   InspectionTimingRecord,
   InspectionTimingWindow,
@@ -586,6 +587,11 @@ export interface InspectionTimingResults {
     readonly devicePixelRatio: number;
     readonly served: ServedWorldNames | null;
     readonly timer: SpikePassTimer;
+    /**
+     * The composite's probe the profile drew under (`--composite-probe`; the owner's priority,
+     * 2026-11-01), or `null`, the composite as a player's is drawn.
+     */
+    readonly compositeProbe: CompositeProbeName | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
 }
@@ -594,6 +600,8 @@ export interface InspectionTimingResults {
 export interface InspectionTimingInput {
   readonly run: Omit<ViewsCheckRunInput, "captures" | "displayHz" | "smoke">;
   readonly served: ServedWorldNames | null;
+  /** The composite's probe the launch drew under, or `null` (`ViewsCheckLaunch.compositeProbe`). */
+  readonly compositeProbe: CompositeProbeName | null;
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
@@ -697,6 +705,7 @@ export function buildInspectionTimingResults(
       devicePixelRatio: record.devicePixelRatio,
       served: input.served,
       timer: record.timer,
+      compositeProbe: input.compositeProbe,
     },
     windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
   };
@@ -850,7 +859,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),
@@ -872,8 +881,8 @@ const NODE_FILES: ResultsFiles = {
 
 /**
  * Writes the timing file and its summary into `dir` as
- * `<date>-<machine>-<setting>-inspection-timing.json` and `.md`, adding `-2`, `-3` and so on where
- * a run of the same name is there, and warns of a file over the repository's limit for added files.
+ * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` after
+ * it for a probed run), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -883,7 +892,8 @@ export async function writeInspectionTimingResults(
   files: ResultsFiles = NODE_FILES,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing`;
+  const probe = results.run.compositeProbe;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

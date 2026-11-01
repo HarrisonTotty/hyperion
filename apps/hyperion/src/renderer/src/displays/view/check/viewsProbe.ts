@@ -27,6 +27,7 @@ import type {
   ViewsCheckViewName,
   ViewsCheckViewRecord,
 } from "../../../../../preload/api";
+import type { CompositeProbe } from "../../../view/atmosphere/hillaire";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
 import type {
   FrameSubmission,
@@ -164,16 +165,23 @@ export class ViewsProbe implements EngineProbe {
   #generation = 0;
   /** The materials' preparations seen, those not yet settled, and when the last settled (R10.T14.d). */
   readonly #preparations: PreparationCount = { seen: 0, inFlight: 0, lastSettledAtMs: null };
+  /** The probe its engines make the atmosphere's composite under, or `null` (as drawn). */
+  readonly #compositeProbe: CompositeProbe | null;
 
   /**
    * @param inner - Where the engines come from: R01's by default.
    * @param nowMs - The page's clock, `performance.now()`, on which animation frames are stamped.
+   * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
+   *   (`--composite-probe`; the owner's priority, 2026-11-01), which every engine's composite is
+   *   made under ({@link ProbedEngine}); `null`, the default, as drawn.
    */
   constructor(
     inner: ViewEngineSource = DEFAULT_ENGINE_SOURCE,
     nowMs: () => number = () => performance.now(),
+    compositeProbe: CompositeProbe | null = null,
   ) {
     this.#nowMs = nowMs;
+    this.#compositeProbe = compositeProbe;
     this.source = {
       requestAdapter: inner.requestAdapter,
       load: async (outcome, status) => this.#attach(await inner.load(outcome, status)),
@@ -571,7 +579,7 @@ export class ViewsProbe implements EngineProbe {
       this.#generation += 1;
       this.#restoresAtMs.push(this.#nowMs());
     });
-    return new ProbedEngine(engine, this, this.#nowMs);
+    return new ProbedEngine(engine, this, this.#nowMs, this.#compositeProbe);
   }
 
   #key(resolve: number): string {

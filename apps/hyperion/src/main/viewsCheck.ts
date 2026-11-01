@@ -731,6 +731,7 @@ export class ViewsCheckSession {
     const results = buildInspectionTimingResults({
       run: { ...run, window: this.#deps.windowSize() },
       served: this.#deps.launch.served ?? null,
+      compositeProbe: this.#deps.launch.compositeProbe ?? null,
       record,
       traces: this.#profiles,
     });

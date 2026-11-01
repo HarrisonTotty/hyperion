@@ -1073,7 +1073,23 @@ export interface ViewsCheckLaunch {
    * `target/views-check/timing/`; absent on every other launch.
    */
   readonly timing?: true;
+  /**
+   * The frame profile's probe of the atmosphere's composite (`--composite-probe`; the owner's
+   * priority, 2026-11-01): present only on an `--inspection --timing` launch that asks for it,
+   * whose `VIEW` then draws its composite under it ({@link CompositeProbeName}); absent on every
+   * other launch, whose composite is drawn as on a player's.
+   */
+  readonly compositeProbe?: CompositeProbeName;
 }
+
+/**
+ * A probe of the atmosphere's composite for the inspection run's frame profile (the owner's
+ * priority, 2026-11-01): `sky-off` draws every sky pixel as the scene's light, with no sky branch;
+ * `transmittance-off` draws the sky with no transmittance across from above the top (the per-pixel,
+ * per-channel lookups over the far limb's footprint), 1 in its place. Either is a measurement's
+ * picture, never a player's.
+ */
+export type CompositeProbeName = "sky-off" | "transmittance-off";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

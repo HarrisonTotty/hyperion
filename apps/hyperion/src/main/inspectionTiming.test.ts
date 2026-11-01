@@ -185,8 +185,13 @@ const RECORD: InspectionTimingRecord = {
   ],
 };
 
-/** The timing file of {@link RECORD}, its trace a main thread busy 1,500 ms. */
-function results(): InspectionTimingResults {
+/**
+ * The timing file of {@link RECORD}, its trace a main thread busy 1,500 ms, drawn under
+ * `compositeProbe`.
+ */
+function results(
+  compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
+): InspectionTimingResults {
   return buildInspectionTimingResults({
     run: {
       startedAt: new Date("2026-11-01T12:00:00Z"),
@@ -213,6 +218,7 @@ function results(): InspectionTimingResults {
       window: { widthDip: 1280, heightDip: 720 },
     },
     served: { universe: "9ada16dcbdbd080a", body: "41ffecb200000002.0400" },
+    compositeProbe,
     record: RECORD,
     traces: new Map([
       [
@@ -318,6 +324,33 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
       version: 1,
+      run: { compositeProbe: null },
+    });
+  });
+
+  it("names and states a run drawn under a composite probe (the owner's priority)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const probed = results("transmittance-off");
+    const paths = await writeInspectionTimingResults("/timing", probed, files);
+    expect({
+      json: paths.json,
+      launch: inspectionTimingMarkdown(probed)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**")),
+      plain: inspectionTimingMarkdown(results()).includes("composite probe"),
+    }).toEqual({
+      json: "/timing/2026-11-01-pod-low-inspection-timing-composite-transmittance-off.json",
+      launch:
+        "- **Launch:** linux, software mode, setting low, window hidden 1280 × 720 DIP at a device-pixel ratio of 1; pass timer quantized; composite probe transmittance-off, not the picture a player sees",
+      plain: false,
     });
   });
 });

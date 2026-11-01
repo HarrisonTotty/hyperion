@@ -9,10 +9,20 @@
  * reader only, which imports types alone, so it is safe in either bundle.
  */
 
-import type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
+import type {
+  CompositeProbeName,
+  ViewsCheckLaunch,
+  ViewsCheckRunKind,
+  ViewsCheckTerrainFixture,
+} from "./api";
 import { readServedWorldNames } from "./spikeLaunch";
 
-export type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
+export type {
+  CompositeProbeName,
+  ViewsCheckLaunch,
+  ViewsCheckRunKind,
+  ViewsCheckTerrainFixture,
+} from "./api";
 
 /** The switch carrying the options. */
 const VIEWS_CHECK_SWITCH = "--hyperion-views-check=";
@@ -42,6 +52,9 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
   "terrain-test-whole",
 ];
 
+/** The composite's probes an inspection profile may draw under. */
+const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = ["sky-off", "transmittance-off"];
+
 /**
  * `value` as the check's options, or `null` if it is not one: every field present and of its type,
  * and the weathered fixture on a terrain run or its hand-over check alone (T20's run and the
@@ -50,17 +63,20 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
  * hand-over check of `TERRAIN TEST`'s own fixture, and always on the inspection run (the owner's
  * request, 2026-11-01), which serves no field either; the whole body's field (plan R10,
  * R10.T14.c), its file's path, on a terrain run alone and exactly when its fixture is the whole
- * body's; and the frame profile (`timing`, `true`) on the inspection run alone (the owner's report,
- * 2026-11-01).
+ * body's; the frame profile (`timing`, `true`) on the inspection run alone (the owner's report,
+ * 2026-11-01); and the composite's probe (`compositeProbe`, the owner's priority, 2026-11-01) on
+ * that profile alone.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out, served, wholeField, timing } = value;
+  const { setting, smoke, out, served, wholeField, timing, compositeProbe } = value;
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
+  const probe = COMPOSITE_PROBES.find((each) => each === compositeProbe) ?? null;
   if (
+    (compositeProbe !== undefined && probe === null) ||
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
     !(out === null || (typeof out === "string" && out.length > 0)) ||
@@ -76,13 +92,14 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
       run === "terrain" &&
       served === undefined &&
       timing === undefined &&
+      probe === null &&
       typeof wholeField === "string" &&
       wholeField.length > 0
       ? { setting, smoke, out, run, fixture, wholeField }
       : null;
   }
   if (served === undefined) {
-    return run === "inspection" || timing !== undefined
+    return run === "inspection" || timing !== undefined || probe !== null
       ? null
       : { setting, smoke, out, run, fixture };
   }
@@ -95,11 +112,14 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
     return null;
   }
   if (timing === undefined) {
-    return { setting, smoke, out, run, fixture, served: names };
+    return probe === null ? { setting, smoke, out, run, fixture, served: names } : null;
   }
-  return timing === true && run === "inspection"
+  if (timing !== true || run !== "inspection") {
+    return null;
+  }
+  return probe === null
     ? { setting, smoke, out, run, fixture, served: names, timing }
-    : null;
+    : { setting, smoke, out, run, fixture, served: names, timing, compositeProbe: probe };
 }
 
 /**
