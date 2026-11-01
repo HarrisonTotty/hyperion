@@ -1340,7 +1340,8 @@ mod tests {
 
     /// The remnants maps under every 26 hold, face-on and edge-on, are the bits they were before
     /// the edge-on view shared its work along a column (lane `perf-remnants-map`, 2026-11-01): the
-    /// digests are BASE's, the tree the work started from.
+    /// digests are BASE's, the tree the work started from (at generator version 25, measured again
+    /// there).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn under_every_26_hold_the_remnants_maps_are_the_pinned_ones() {
         let moved = moved(
@@ -1350,12 +1351,12 @@ mod tests {
                 (
                     MapView::FaceOn,
                     MapPopulation::LayerERemnants,
-                    [0x3b6f_683d_3cbd_a1d5, 0xb1b0_b81f_d034_e275],
+                    [0xb352_dc5b_16f2_f63d, 0x8da8_e802_03b7_f995],
                 ),
                 (
                     MapView::EdgeOn,
                     MapPopulation::LayerERemnants,
-                    [0x0a50_fe54_7f36_f41d, 0x6799_ea1b_0e8f_363d],
+                    [0xb417_dc61_e2c7_9dbd, 0x3f9c_c086_38c6_ceed],
                 ),
             ],
         )
@@ -1364,7 +1365,8 @@ mod tests {
     }
 
     /// Every other map is unchanged at 24, 25 and 26 by the remnants map's work: each population's
-    /// digests, both views, are BASE's (lane `perf-remnants-map`, 2026-11-01).
+    /// digests, both views, are BASE's (lane `perf-remnants-map`, 2026-11-01; at generator version
+    /// 25, measured again there).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn the_other_maps_are_the_pinned_ones_at_24_25_and_26() {
         let all_and_young = |pinned: [[u64; 2]; 4]| -> Vec<Pinned> {
@@ -1383,16 +1385,16 @@ mod tests {
         let below_26 = [
             [0x31c9_7d61_e64d_0d29, 0x64fa_9e3d_d5db_a22d],
             [0xef3d_9fe4_612e_40d5, 0x6b9f_b6d2_2aed_b53d],
-            [0xf4c1_3223_4e85_876d, 0x6e9a_cc3b_6743_3be5],
-            [0xfe6a_8b36_1b2e_f78d, 0xc1e1_63a7_f9d9_3cd5],
+            [0x9cc0_3969_99c8_6885, 0x9f8b_ed84_611e_ac25],
+            [0x7698_b992_5b61_51d5, 0x7b13_ef19_25b8_be6d],
         ];
         let at_24 = all_and_young(below_26);
         let at_25 = all_and_young(below_26);
         // The edge-on view keeps the field's picture for every system and the young disc (lean,
         // 2026-10-31), so only the face-on maps move at 26.
         let at_26 = all_and_young([
-            [0xa9bc_4b81_9c4c_0e69, 0x2632_c5fa_440b_f29d],
-            [0x7db4_7b9a_586a_03ad, 0x6b9f_b6d2_2aed_b53d],
+            [0xcdf3_22fc_6fcf_61a1, 0x95e4_36d4_52f9_2abd],
+            [0x253d_7c22_02f3_779d, 0xd828_d4ce_b8f0_b8bd],
             below_26[2],
             below_26[3],
         ]);
