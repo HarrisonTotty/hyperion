@@ -15,10 +15,9 @@
 //! Every sum runs in cell-index order, then t's nodes, then s's, in `f64`.
 
 use hyperion_surface::cube::{FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
-use hyperion_surface::field::cell_index;
 use hyperion_surface::synth::interp::{CellValues, interpolate, interpolate_pair};
 
-use crate::planetary::surface::grid::CellGraph;
+use crate::planetary::surface::grid::{CellGraph, CellIndexer};
 use crate::planetary::surface::steps::plates::slot;
 
 /// The nodes a side of each cell the pass's quadrature takes, n: 3 (nine a cell), the smallest
@@ -121,6 +120,8 @@ pub(crate) struct Values<'a> {
     cells: &'a [f64],
     /// Whether every cell within the margin of each cell has its value.
     uniform: Vec<bool>,
+    /// Each read cell's index, `cell_index`'s, from tables.
+    indexer: CellIndexer,
 }
 
 impl<'a> Values<'a> {
@@ -144,6 +145,7 @@ impl<'a> Values<'a> {
             level: grid.level(),
             cells: values,
             uniform: uniform_cells(grid, values),
+            indexer: CellIndexer::new(grid.level()),
         }
     }
 
@@ -248,7 +250,7 @@ impl CellValues for Values<'_> {
     }
 
     fn value(&self, cell: PatchKey) -> Option<f64> {
-        self.cells.get(slot(cell_index(cell))).copied()
+        self.cells.get(slot(self.indexer.index(cell))).copied()
     }
 }
 

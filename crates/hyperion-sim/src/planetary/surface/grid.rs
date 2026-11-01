@@ -14,7 +14,7 @@
 use std::error::Error;
 use std::fmt;
 
-use hyperion_surface::cube::{Edge, PatchKey, st_to_uv};
+use hyperion_surface::cube::{Edge, Face, PatchKey, st_to_uv};
 use hyperion_surface::field::{CoarseLevel, cell_at_index, cell_index};
 
 use crate::math;
@@ -286,6 +286,58 @@ fn solid_angle_sr(cell: PatchKey) -> f64 {
     f(u1, v1) - f(u0, v1) - f(u1, v0) + f(u0, v0)
 }
 
+/// [`cell_index`] of the cells of one level, from a table of each coordinate's Morton bits: the
+/// same integer, without spreading i and j at every read.
+///
+/// Why: the coarse pass's quadratures read R09.T4's interpolant at nine nodes a cell, and every
+/// read of a stencil's cell takes its index. At level 8 the index took a third of the reference
+/// Earth's erosion step, 2.9 s of 8.9 (pod, 16 vCPU, release, 2026-11-01; `cell_index` and its
+/// `spread`), and the tables hold 2ᴸ entries a coordinate, 2 KiB at level 8.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CellIndexer {
+    level: u8,
+    /// `cell_index` of the cell (`PosX`, i, 0) for each i: i's bits spread to the even places.
+    i_bits: Vec<u32>,
+    /// `cell_index` of the cell (`PosX`, 0, j) for each j: j's bits spread to the odd places.
+    j_bits: Vec<u32>,
+}
+
+impl CellIndexer {
+    /// The indexer of `level`'s cells.
+    ///
+    /// # Panics
+    ///
+    /// If `level` is deeper than `cell_index` numbers, as it panics.
+    #[must_use]
+    pub(crate) fn new(level: u8) -> Self {
+        let side = 1_u32 << level;
+        let index_of = |i: u32, j: u32| {
+            cell_index(PatchKey::new(Face::PosX, level, i, j).expect("i and j are below 2^level"))
+        };
+        Self {
+            level,
+            i_bits: (0..side).map(|i| index_of(i, 0)).collect(),
+            j_bits: (0..side).map(|j| index_of(0, j)).collect(),
+        }
+    }
+
+    /// `cell_index(cell)`: from the tables for a cell of the indexer's level, the face's bits above
+    /// the coordinates' Morton bits as `cell_index` puts them, and from `cell_index` itself for a
+    /// cell of any other level.
+    #[must_use]
+    pub(crate) fn index(&self, cell: PatchKey) -> u32 {
+        if cell.level() != self.level {
+            return cell_index(cell);
+        }
+        let coordinate = |bits: &[u32], at: u32| {
+            bits[usize::try_from(at).expect("a coordinate below 2^level fits a usize")]
+        };
+        (u32::from(cell.face().index()) << (2 * self.level))
+            | coordinate(&self.i_bits, cell.i())
+            | coordinate(&self.j_bits, cell.j())
+    }
+}
+
 /// The angle between two unit vectors, by atan2 of their cross and dot products.
 #[must_use]
 fn arc(a: [f64; 3], b: [f64; 3]) -> Radians {
@@ -302,8 +354,22 @@ fn arc(a: [f64; 3], b: [f64; 3]) -> Radians {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyperion_surface::cube::Face;
     use hyperion_testkit::float::assert_same_bits;
+
+    /// The indexer gives every cell of its level the index `cell_index` gives it, the coarse
+    /// levels' every cell, and a cell of another level `cell_index`'s too.
+    #[test]
+    fn the_indexer_gives_each_cell_its_cell_index() {
+        for level in 0..=8 {
+            let indexer = CellIndexer::new(level);
+            for index in 0..6 * (1_u32 << (2 * level)) {
+                let cell = cell_at_index(level, index).expect("an index of the level");
+                assert_eq!(indexer.index(cell), index, "level {level}");
+            }
+        }
+        let coarser = PatchKey::new(Face::NegZ, 3, 5, 6).unwrap();
+        assert_eq!(CellIndexer::new(8).index(coarser), cell_index(coarser));
+    }
 
     /// The face solid angle, 4π ÷ 6.
     const FACE_SR: f64 = 2.0 * core::f64::consts::PI / 3.0;

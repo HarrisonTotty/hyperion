@@ -69,7 +69,6 @@
 use std::borrow::Cow;
 
 use hyperion_surface::cube::{FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
-use hyperion_surface::field::cell_index;
 use hyperion_surface::num;
 use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::tags::SURFACE_COARSE_EROSION;
@@ -80,7 +79,7 @@ use super::drainage::{self, Routing, canonical, receiver_marks};
 use super::mesh::Mesh;
 use super::solver::{self, Cells, Threshold, Time};
 use crate::planetary::hooks::SurfaceSeed;
-use crate::planetary::surface::grid::CellGraph;
+use crate::planetary::surface::grid::{CellGraph, CellIndexer};
 use crate::rng::{Mark, ObjectKey};
 use crate::units::Metres;
 
@@ -619,10 +618,12 @@ fn basin_freeboard(
     (freeboard_m, basin, base_level_m)
 }
 
-/// Level `level`'s values as R09.T4's interpolant reads them.
+/// Level `level`'s values as R09.T4's interpolant reads them, each read cell's index from
+/// `indexer`'s tables.
 struct LevelValues<'a> {
     level: u8,
     values: &'a [f64],
+    indexer: CellIndexer,
 }
 
 impl CellValues for LevelValues<'_> {
@@ -632,7 +633,7 @@ impl CellValues for LevelValues<'_> {
 
     fn value(&self, cell: PatchKey) -> Option<f64> {
         if cell.level() == self.level {
-            self.values.get(slot(cell_index(cell))).copied()
+            self.values.get(slot(self.indexer.index(cell))).copied()
         } else {
             None
         }
@@ -693,6 +694,7 @@ pub(crate) fn upsample(
     let read = LevelValues {
         level: coarse.level(),
         values,
+        indexer: CellIndexer::new(coarse.level()),
     };
     let side = f64::from(1_u32 << fine.level());
     fine.cells()

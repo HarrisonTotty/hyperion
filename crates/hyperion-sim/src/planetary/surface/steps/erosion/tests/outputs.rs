@@ -485,7 +485,7 @@ fn assert_the_budget_books_what_is_drawn(
     use hyperion_surface::synth::Synthesiser;
     let pass = through.pass();
     let body = budget::Body::of(&pass, &through.finished.spectrum);
-    let booked = budget::book(&pass, &through.finished, &body).channels_m2;
+    let booked = budget::book_afresh(&pass, &through.finished, &body).channels_m2;
     let field =
         crate::planetary::surface::quantise::quantise(pass.inputs(), through.finished.clone())
             .expect("the finished state quantises");
@@ -553,7 +553,7 @@ fn print_sigma_h(what: &str, through: &Through) -> f64 {
     let target = pass.inputs().sigma_h().value();
     let realised = through.finished.realised_sigma_h.value();
     let book = |working: &Working| {
-        budget::book(&pass, working, &budget::Body::of(&pass, &working.spectrum)).channels_m2
+        budget::book_afresh(&pass, working, &budget::Body::of(&pass, &working.spectrum)).channels_m2
     };
     eprintln!(
         "{what}: C_c booked by the re-match {:.1} m², on the field the step left {:.1} m², after \
@@ -816,7 +816,7 @@ fn a_world_without_the_erosion_step_books_no_channels() {
         assert_eq!(cell.flow, FlowDirection::Terminal);
         assert_same_bits(cell.runoff_m_per_year, 0.0);
     }
-    let booked = budget::book(&pass, &working, &budget::Body::of(&pass, &working.spectrum));
+    let booked = budget::book_afresh(&pass, &working, &budget::Body::of(&pass, &working.spectrum));
     assert_same_bits(booked.channels_m2, 0.0);
     for (what, inputs) in [
         ("reference Moon", reference::moon_like()),

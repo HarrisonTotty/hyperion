@@ -237,7 +237,8 @@ pub(super) fn after_late_craters(pass: &Pass<'_>, working: &mut Working) {
     if working.routed {
         super::erosion::route_final(pass, working);
     }
-    let booked = budget::book(pass, working, &budget::Body::of(pass, &working.spectrum));
+    let body = budget::Body::of(pass, &working.spectrum);
+    let booked = budget::book(pass, working, &body);
     let _ = budget::figures(pass, working, Phase::AfterErosion, &booked);
 }
 

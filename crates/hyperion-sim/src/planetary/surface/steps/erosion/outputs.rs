@@ -414,7 +414,8 @@ pub(crate) fn route_as_it_stands(pass: &Pass<'_>, working: &mut Working) {
 /// The realised figures of `working`'s field of `pass` as it stands at the step's end, with the
 /// craters that do not wait smoothed in, from a fresh book of its records (`budget::figures`).
 fn realised_figures(pass: &Pass<'_>, working: &mut Working) -> Figures {
-    let booked = budget::book(pass, working, &budget::Body::of(pass, &working.spectrum));
+    let body = budget::Body::of(pass, &working.spectrum);
+    let booked = budget::book(pass, working, &body);
     budget::figures(pass, working, Phase::BeforeErosion, &booked)
 }
 

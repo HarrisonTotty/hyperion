@@ -362,6 +362,10 @@ pub struct Working {
     /// climate step, which sets it, and no output: the quantiser does not read it. `None` before
     /// the climate step.
     pub(crate) climate_records: Option<climate::after_erosion::ClimateRecords>,
+    /// The last structural share the pass's budget booked, with what it read, which a later book
+    /// of the same values takes again to the bit (`relief::budget::StructuralMemo`). No output:
+    /// the quantiser does not read it. `None` before the first book.
+    pub(crate) structural_memo: Option<relief::budget::StructuralMemo>,
 }
 
 impl Working {
@@ -434,6 +438,7 @@ impl Working {
             plates: Vec::new(),
             routed: false,
             climate_records: None,
+            structural_memo: None,
         }
     }
 }

@@ -251,11 +251,37 @@ pub(crate) fn records<'a>(
 /// and `working`'s sea level ([`drawn_channel_variance`]), averaged over the cells' solid angles
 /// in cell-index order.
 ///
+/// The structural share is taken from the pass's last book where that read the same values
+/// ([`StructuralMemo`]), and this one's is kept for the next: the same bits, without the
+/// quadrature (rendering plan R09; R09.T17's follow-up, the cold field's cost).
+///
 /// # Panics
 ///
 /// As [`records`].
 #[must_use]
-pub(crate) fn book(pass: &Pass<'_>, working: &Working, body: &Body) -> Booked {
+pub(crate) fn book(pass: &Pass<'_>, working: &mut Working, body: &Body) -> Booked {
+    let mut memo = working.structural_memo.take();
+    let booked = book_with(pass, working, body, &mut memo);
+    working.structural_memo = memo;
+    booked
+}
+
+/// [`book`] of `working` with no memo: its structural share always by the quadrature, as the
+/// tests' fresh book.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn book_afresh(pass: &Pass<'_>, working: &Working, body: &Body) -> Booked {
+    book_with(pass, working, body, &mut None)
+}
+
+/// [`book`], its structural share read from `memo` where `memo` read the same values, and taken by
+/// the quadrature into `memo` otherwise.
+fn book_with(
+    pass: &Pass<'_>,
+    working: &Working,
+    body: &Body,
+    memo: &mut Option<StructuralMemo>,
+) -> Booked {
     let omega = pass.grid().solid_angles_sr();
     let count = working.cells.len();
     let cells: Vec<SynthesisCell> = records(pass.inputs(), working).collect();
@@ -278,10 +304,49 @@ pub(crate) fn book(pass: &Pass<'_>, working: &Working, body: &Body) -> Booked {
         whole += w * drawn(key, body.whole);
         finer += w * drawn(key, body.nyquist_wavelength);
     }
+    let structural = match memo {
+        Some(held) if held.reads(&body.structure, &amplitude, &belt) => held.share,
+        _ => {
+            let share = structural_share(pass, body, &amplitude, &belt);
+            *memo = Some(StructuralMemo {
+                amplitude,
+                belt,
+                structure: body.structure.clone(),
+                share,
+            });
+            share
+        }
+    };
     Booked {
-        structural: structural_share(pass, body, &amplitude, &belt),
+        structural,
         channels_m2: whole / total,
         channels_finer_m2: finer / total,
+    }
+}
+
+/// A pass's last structural share ([`structural_share`]), with the cells' style amplitudes and belt
+/// weights and the body's structural variance it read: a function of them and the pass's grid
+/// alone, so that a later book that reads the same values, bit for bit, takes it without its
+/// quadrature (the relief's match, the erosion's re-match and its realised figures each book the
+/// cells' styles, which the steps between them may leave as they were). No output: the quantiser
+/// does not read it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StructuralMemo {
+    amplitude: Vec<f64>,
+    belt: Vec<f64>,
+    structure: StructuralVariance,
+    share: StructuralShare,
+}
+
+impl StructuralMemo {
+    /// Whether this share read `structure`, `amplitude` and `belt`: the variance equal, and each
+    /// amplitude and belt weight the same bits (`total_cmp`, by which −0 and +0 are two).
+    #[must_use]
+    fn reads(&self, structure: &StructuralVariance, amplitude: &[f64], belt: &[f64]) -> bool {
+        let same = |held: &[f64], now: &[f64]| {
+            held.len() == now.len() && held.iter().zip(now).all(|(a, b)| a.total_cmp(b).is_eq())
+        };
+        self.structure == *structure && same(&self.amplitude, amplitude) && same(&self.belt, belt)
     }
 }
 
@@ -755,5 +820,45 @@ pub(crate) fn figures(
         finer,
         relief_m: highest - lowest,
         reconstructed_range_m: high - low,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_surface::field::CoarseLevel;
+    use hyperion_surface::synth::SpectrumShape;
+
+    use super::*;
+
+    /// A silicate crust's law anchored at 1 km on a body of radius `radius_m`.
+    fn spectrum(radius_m: f64) -> BandSpectrum {
+        BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            Metres::new(radius_m),
+            Metres::new(1_000.0),
+        )
+    }
+
+    /// A memo is taken only for the same structural variance and the same amplitudes and belt
+    /// weights, bit for bit: a value moved, −0 for +0, or one cell more is another book.
+    #[test]
+    fn a_memo_reads_only_the_same_bits() {
+        let level = CoarseLevel::new(5).expect("a coarse level");
+        let structure = StructuralVariance::new(&spectrum(6.371e6), level, Metres::new(6.371e6));
+        let memo = StructuralMemo {
+            amplitude: vec![1.0, 0.0, 2.5],
+            belt: vec![0.0, 0.25, 0.0],
+            structure: structure.clone(),
+            share: StructuralShare {
+                share_m2: 1.0,
+                amplitude_square: 1.0,
+            },
+        };
+        assert!(memo.reads(&structure, &[1.0, 0.0, 2.5], &[0.0, 0.25, 0.0]));
+        assert!(!memo.reads(&structure, &[1.0, 0.0, 2.500_000_1], &[0.0, 0.25, 0.0]));
+        assert!(!memo.reads(&structure, &[1.0, -0.0, 2.5], &[0.0, 0.25, 0.0]));
+        assert!(!memo.reads(&structure, &[1.0, 0.0, 2.5], &[0.0, 0.25, 0.0, 0.0]));
+        let other = StructuralVariance::new(&spectrum(3.4e6), level, Metres::new(3.4e6));
+        assert!(!memo.reads(&other, &[1.0, 0.0, 2.5], &[0.0, 0.25, 0.0]));
     }
 }

@@ -2698,18 +2698,19 @@ fn located(table: Option<&Tabulated>, t_k: f64) -> Located<'_> {
 ///
 /// There truncating is flooring and the integer is exact in `f64`. Without SSE4.1's `roundsd`,
 /// x86-64's `floor` is a software routine, which took 3.5% of a small-Earth pass in
-/// [`Tabulated::locate`], up to nine times a point a step (R09.T16, pod, 8 vCPU, 2026-10-30).
+/// [`Tabulated::locate`], up to nine times a point a step (R09.T16, pod, 8 vCPU, 2026-10-30). The
+/// truncation goes through `i64`, whose conversions x86-64 makes in one instruction each way,
+/// where `u64`'s take a branch and a fix-up (2026-11-01).
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     reason = "x is positive and below 2^52, so the cast truncates it to its floor, which converts \
               back exactly"
 )]
 fn truncating_floor(x: f64) -> f64 {
     if x > 0.0 && x < 4_503_599_627_370_496.0 {
-        (x as u64) as f64
+        (x as i64) as f64
     } else {
         x.floor()
     }

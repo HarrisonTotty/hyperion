@@ -554,11 +554,40 @@ fn assert_fresh_book(world: Reference) {
     let f = finished(world);
     let pass = f.pass();
     let mut working = f.working.clone();
-    let fresh = budget::book(&pass, &working, &budget::Body::of(&pass, &working.spectrum));
+    let fresh = budget::book_afresh(&pass, &working, &budget::Body::of(&pass, &working.spectrum));
     assert_eq!(fresh, f.matched.booked, "{world:?}");
     let figures = budget::figures(&pass, &mut working, Phase::BeforeErosion, &fresh);
     assert_eq!(figures, f.figures, "{world:?}");
     assert_eq!(working, f.working, "{world:?}");
+}
+
+/// The budget's book takes the structural share from the pass's last book of the same values, and
+/// books afresh where they differ, to the same bits either way: on the three worlds cheaper than
+/// the Earth, the finished state's memo is the match's, a book of that state is the fresh book and
+/// keeps the memo, and a memo of another world's cells is not taken, but replaced by this one's
+/// (rendering plan R09; R09.T17's follow-up).
+#[test]
+fn the_book_takes_its_structural_share_from_a_memo_of_the_same_values() {
+    for world in CHEAP {
+        let f = finished(world);
+        let pass = f.pass();
+        let body = budget::Body::of(&pass, &f.working.spectrum);
+        let fresh = budget::book_afresh(&pass, &f.working, &body);
+        assert!(f.working.structural_memo.is_some(), "{world:?}");
+        let mut working = f.working.clone();
+        assert_eq!(budget::book(&pass, &mut working, &body), fresh, "{world:?}");
+        assert_eq!(working, f.working, "{world:?}: the memo kept");
+        let other = CHEAP
+            .into_iter()
+            .find(|&w| w != world)
+            .expect("three worlds");
+        working.structural_memo = finished(other).working.structural_memo.clone();
+        assert_eq!(budget::book(&pass, &mut working, &body), fresh, "{world:?}");
+        assert_eq!(
+            working, f.working,
+            "{world:?}: the memo replaced by its own"
+        );
+    }
 }
 
 /// The staged second entry of `finish` is [`run_after_craters`], bit for bit, on the three worlds
