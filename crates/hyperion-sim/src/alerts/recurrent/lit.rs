@@ -169,7 +169,9 @@ pub(super) fn longest(kind: TransientKind) -> Span {
 /// kind can be seen from, at every onset the interval could hold.
 ///
 /// The interval is `[t₁ − s − ε − R, t₂ − s + ε + DAY)`, with s the light time from where the host
-/// is at its motion's own time, R twice `look_back` and a day, and ε = β (s + W + R) ÷ (1 − β), β
+/// is at its motion's own time, R twice `look_back` and a day (an event in progress needs one
+/// look-back; the second is a margin, as the magnetars' interval takes twice D), and
+/// ε = β (s + W + R) ÷ (1 − β), β
 /// the host's faster speed, before or after its motion's break, over light's, and W the window's
 /// furthest end from that time. The light time
 /// from wherever the host is at an onset in the interval lies within ε of s, so the interval holds

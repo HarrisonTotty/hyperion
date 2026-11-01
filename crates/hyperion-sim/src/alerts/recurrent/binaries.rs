@@ -46,7 +46,7 @@ use super::sort_detections;
 /// # Panics
 ///
 /// As plan 11's [`scan::scan_cell`] does.
-pub fn nova_scan_cell(
+pub(crate) fn nova_scan_cell(
     galaxy: &Galaxy,
     ctx: &mut AlertContext<'_>,
     query: &AlertQuery,
@@ -126,7 +126,7 @@ fn may_erupt(marks: &AwdScanMarks, interval: TimeWindow) -> bool {
 /// # Panics
 ///
 /// As plan 11's [`scan::scan_cell`] does.
-pub fn xray_binary_scan_cell(
+pub(crate) fn xray_binary_scan_cell(
     galaxy: &Galaxy,
     ctx: &mut AlertContext<'_>,
     query: &AlertQuery,

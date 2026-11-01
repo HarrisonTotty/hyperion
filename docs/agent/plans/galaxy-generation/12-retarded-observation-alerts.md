@@ -3004,3 +3004,39 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     sighting before T8.b.
   - _For T12._ An acknowledgement, a sighting and a clear now reach every subscription of the
     universe.
+- **P12.T5.c as built, the other classes (lane `p12-t5c-classes`, 2026-10-31, rebased onto
+  P12.T5.b and T5.d on 2026-11-01, at `GENERATOR_VERSION` 24).** No generated output moves.
+  `alerts/registry.golden` is re-blessed by name; `alerts/recurrent_binaries.golden` and
+  `alerts/recurrent_eruptions.golden` are new; `alerts/recurrent.golden` does not move. The magnetar
+  half's "_Not built_" bullet above is built here, but for the dwarf novae (below).
+  - _Rows._ Plan 11's other five are built on T5.b's `LightCurveSource::BinaryCurve`, each band's
+    bound its curve's peak at the top of the samplers' masses (`NOVA_BAND_PEAKS`,
+    `DWARF_NOVA_BAND_PEAKS`, `XRAY_TRANSIENT_BAND_PEAKS`, `XRAY_BURST_BAND_PEAKS`,
+    `BEX_OUTBURST_BAND_PEAKS`), D to 1% of the peak (P11.T9.b's `ACTIVE_SHARE`): novae 3.2612 ×
+    10³¹ W in V, 169.26 d, rise 9.58 d; dwarf novae 1.8985 × 10²⁶ W in V, 5,517 yr (a loose sum of
+    extremes), rise 1 d; X-ray transients 1.0282 × 10³² W in X, 143.16 d, 5 d; bursts 3.9023 ×
+    10³¹ W in X, 144 s, 5 s; Be/X outbursts 2.9472 × 10³⁰ W in X only, 102.10 d, 10 d.
+    `GiantEruption` is now per band (`GIANT_ERUPTION_BAND_PEAKS`, a 5,000 K blackbody,
+    `GIANT_ERUPTION_SHARES`): 1.1401 × 10³³ W in V, 1,007 ly at a V limit of 10⁻⁶ W m⁻². With T5.b's
+    mergers every row is built; `RowSource::Pending` and `pending_on` stay for a kind registered
+    before its source.
+  - _Names._ `scan_plan` and `scan_cell` dispatch the core collapses, both accreting white dwarf
+    classes, the X-ray binaries and the luminous blue variables. New: `recurrent_scan_plan`,
+    `recurrent_reach` (the largest `kind_reach` of a class's recurrent kinds),
+    `recurrent_detections`, and `giant_eruption_scan_cell` with `EruptionClass`, `EruptionHost`
+    and `BuildEruptionHostError`; the binary classes' walks are crate-private, reached through
+    `scan_cell`. The binary events' light is T5.b's (`ArrivingLight::binary`, `binary_luminosity`);
+    `ArrivingLight` gains an eruption's own light. `class_longest_rise`: X-ray binaries 10 d,
+    accreting white dwarfs 9.58 d.
+  - _Leans (2026-10-31)._ A binary or LBV host's emission interval is bounded by its speed (one
+    distance, no light-cone root), and a host is passed over unasked if it stays beyond its kind's
+    reach; a slow white dwarf by its carried eruptions, a fast one by its phase's noise bound. An
+    event is in progress until plan 11's end of the event (an eruption's own end), seen by its
+    light at t₁; an onset by its peak. The line of sight is the magnetars' rule, per host and
+    Julian year.
+  - _Dwarf novae are not walked (T5.e)._ Plan 11 lists them only from an `AwdEntry` (its orbit),
+    not from scan marks, and no range query's rows are catalogue hosts. They join `local_events`
+    with the task that brings catalogue hosts into the range query.
+  - _For T8.b._ No cell cache is lent for the new classes: white dwarf and X-ray binary cells are
+    rescanned from their marks (`binary/awd_scan_marks`), and an LBV cell is generated whole each
+    call; a server that rescans should keep LBV cells as it keeps the magnetars'.

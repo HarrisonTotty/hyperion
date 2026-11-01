@@ -41,6 +41,7 @@ use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
+use hyperion_testkit::order::assert_order_independent;
 
 use common::observe::{Seen, brute_force_binary_detections, observer_at};
 
@@ -530,6 +531,47 @@ fn binary_alerts_lights_are_the_walks_flux_at_their_own_times() {
     assert_eq!(seen, 4);
 }
 
+/// The walk gives each of five queries beside the burster, its ten days, a day's two halves and two
+/// days a week on, the same detections whatever it walked before with the same noise cache,
+/// forwards, backwards, shuffled and alone.
+#[test]
+fn binary_alerts_do_not_depend_on_what_was_walked_before() {
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    let day = 86_400.0;
+    let burster = target(
+        &galaxy,
+        ClassId::XRAY_BINARY,
+        about_the_centre(),
+        BinaryEventKind::XrayBurst,
+        window(UniverseTime::EPOCH, day),
+        1.0,
+    );
+    let queries: Vec<_> = [
+        (0.0, 10.0 * day),
+        (0.0, 0.5 * day),
+        (0.5 * day, 0.5 * day),
+        (7.0 * day, 2.0 * day),
+        (-day, day),
+    ]
+    .map(|(from, length)| {
+        query(
+            burster.position,
+            window(shifted(burster.arrival, from), length),
+            xray(),
+        )
+    })
+    .into_iter()
+    .collect();
+    let noise = std::cell::RefCell::new(NoiseCache::with_capacity(4_096));
+    assert_order_independent(&queries, |q| {
+        let mut noise = noise.borrow_mut();
+        let mut context = AlertContext::new(&mut noise, &NoModifiers);
+        let mut out = Vec::new();
+        recurrent_detections(&galaxy, &mut context, ClassId::XRAY_BINARY, q, &mut out);
+        out.iter().map(Seen::of).collect::<Vec<_>>()
+    });
+}
+
 /// The reach of the sensors is the sphere's, to a part in 10¹²: the novae's in V, the X-ray
 /// binaries' transients' in 2–10 keV.
 #[test]
@@ -618,9 +660,13 @@ const V_ZERO_POINT: f64 = 3.631e-8 * 0.084;
 /// from the epoch, through plan 07's dust: every cell of both accreting white dwarf classes the
 /// scan plans, the whole cube, walked on eight threads. Plan 11 generates 46.0 a year in this
 /// galaxy (P11.T9.b), and 9.8 a year are seen; about ten a year are found in the Milky Way, most
-/// of them brighter than twelfth magnitude (recalled, not read at source). Pinned as measured.
+/// of them brighter than twelfth magnitude, against 26–50 a year in all (Shafter 2017, ApJ 834,
+/// 196; De et al. 2021, ApJ 912, 19; Kawash et al. 2022, ApJ 937, 64; recalled, not read at
+/// source). Pinned as measured.
 #[test]
 #[ignore = "slow: walks every accreting white dwarf cell of the cube for a decade"]
+// Its eight threads: wasip1 spawns none.
+#[cfg(not(target_family = "wasm"))]
 fn the_galaxys_novae_seen_from_the_sun_a_year() {
     let galaxy = Galaxy::from_params(
         Seed::new(MILKY_WAY_SEED),

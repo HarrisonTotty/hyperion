@@ -19,7 +19,8 @@ mod common;
 
 use std::f64::consts::PI;
 
-use hyperion_sim::Seed;
+use std::cell::RefCell;
+
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, Detection, DetectionLight, DetectionPhase,
     EruptionClass, EruptionHost, GIANT_ERUPTION_BAND_PEAKS, SensorHorizon, StarRecipe,
@@ -48,7 +49,11 @@ use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{
     Dex, HeliumExcess, PerCubicLightYear, SolarMasses, WattsPerSquareMetre, Years,
 };
+use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
+use hyperion_testkit::order::assert_order_independent;
 
 use common::observe::{Seen, brute_force_eruption_detections, observer_at};
 
@@ -395,6 +400,69 @@ fn eruption_alerts_lights_are_the_walks_flux_at_their_own_times() {
         };
         assert_same_bits(at(own), d.flux().value());
     }
+}
+
+/// The walk gives each of the toy's queries, its target's year and day and the clock window, the
+/// same detections whatever it walked before with the same noise cache, forwards, backwards,
+/// shuffled and alone.
+#[test]
+fn eruption_alerts_do_not_depend_on_what_was_walked_before() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0c0e));
+    let process = ToyEruptions::new();
+    let target = toy_target(&galaxy, &process);
+    let h = CLOCK_WINDOW_H.as_seconds_f64() - YEAR;
+    let halfway = shifted(target.arrival, target.duration.as_seconds_f64() / 2.0);
+    let queries = [
+        query(CENTRE, window(shifted(target.arrival, -0.5 * YEAR), YEAR)),
+        query(CENTRE, window(halfway, 86_400.0)),
+        query(CENTRE, window(shifted(UniverseTime::EPOCH, -h), 2.0 * h)),
+    ];
+    let noise = RefCell::new(NoiseCache::with_capacity(4_096));
+    assert_order_independent(&queries, |q| {
+        let mut noise = noise.borrow_mut();
+        let mut context = AlertContext::new(&mut noise, &NoModifiers);
+        let mut out = Vec::new();
+        for cell in recurrent_scan_plan(ClassId::LUMINOUS_BLUE_VARIABLE, q) {
+            giant_eruption_scan_cell(&galaxy, &mut context, q, &process, cell, &mut out);
+        }
+        let mut seen: Vec<Seen> = out.iter().map(Seen::of).collect();
+        seen.sort();
+        seen
+    });
+}
+
+/// Pins the toy's eruptions over the clock window from its centre: each detection's event,
+/// arrival, phase, band and flux, so that a change to plan 06's eruptions, the shares, plan 07's
+/// lines or the walk shows, which the brute force, built on the same, cannot.
+#[test]
+fn eruption_alerts_golden() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0c0e));
+    let process = ToyEruptions::new();
+    let h = CLOCK_WINDOW_H.as_seconds_f64() - YEAR;
+    let q = query(CENTRE, window(shifted(UniverseTime::EPOCH, -h), 2.0 * h));
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut context = AlertContext::new(&mut noise, &NoModifiers);
+    let mut out = Vec::new();
+    for cell in recurrent_scan_plan(ClassId::LUMINOUS_BLUE_VARIABLE, &q) {
+        giant_eruption_scan_cell(&galaxy, &mut context, &q, &process, cell, &mut out);
+    }
+    out.sort_by_key(|d| (d.arrival(), d.event()));
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.line(&format!("{} detections", out.len()));
+    for d in &out {
+        w.f64(
+            &format!(
+                "{} arriving {} {:?} in {:?}",
+                d.event(),
+                d.arrival(),
+                d.phase(),
+                d.band()
+            ),
+            d.flux().value(),
+        );
+    }
+    golden!("alerts/recurrent_eruptions", w.as_str());
 }
 
 /// The sensor's reach for an eruption is the sphere's.

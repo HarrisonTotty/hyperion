@@ -9,7 +9,7 @@
 //!   [`ClassId::CORE_COLLAPSE`] (main's ruling of 2026-10-30; below);
 //! - the accreting white dwarfs, fast and slow, their novae, and the X-ray binaries, their
 //!   transients, X-ray bursts and Be/X outbursts, through plan 11's scan marks alone (P11.T8.a–b,
-//!   P11.T9; [`nova_scan_cell`], [`xray_binary_scan_cell`]);
+//!   P11.T9);
 //! - the luminous blue variables of plan 09's class (P09.T43), plan 06's giant eruptions
 //!   (P06.T28.e; [`giant_eruption_scan_cell`]).
 //!
@@ -107,7 +107,7 @@ mod binaries;
 mod eruptions;
 mod lit;
 
-pub use binaries::{nova_scan_cell, xray_binary_scan_cell};
+use binaries::{nova_scan_cell, xray_binary_scan_cell};
 pub use eruptions::{
     BuildEruptionHostError, EruptionClass, EruptionHost, giant_eruption_scan_cell,
 };
@@ -483,8 +483,8 @@ fn is_walked(class: ClassId) -> bool {
 /// Appends to `out` the recurrent events of `class`'s hosts in `cell` that `query`'s sensor sees in
 /// its window, sorted by arrival and then by event: for the core collapses, their magnetars'
 /// ([`magnetar_scan_cell`] with plan 09's process); for the accreting white dwarfs, their novae
-/// ([`nova_scan_cell`]), for the X-ray binaries, their outbursts and bursts
-/// ([`xray_binary_scan_cell`]), and for the luminous blue variables, their giant eruptions
+/// through their scan marks, for the X-ray binaries, their outbursts and bursts, the same way,
+/// and for the luminous blue variables, their giant eruptions
 /// ([`giant_eruption_scan_cell`]), each with its class's process; nothing for the other classes
 /// (module documentation). A pure function of one catalogue cell, which a background scan runs in
 /// chunks (Design note 8).
@@ -1046,8 +1046,8 @@ mod tests {
     use crate::galaxy::gas::noise::NoiseCache;
     use crate::units::{Kelvin, WattsPerSquareMetre};
 
-    /// The giant eruptions' shares are a 5,000 K blackbody's through each band's top hat, to 10⁻¹²,
-    /// none in radio or X-rays, 0.094 in V.
+    /// The giant eruptions' shares are a 5,000 K blackbody's through each band's top hat, to the
+    /// bit, none in radio or X-rays, 0.094 in V.
     #[test]
     fn the_eruption_shares_are_a_5000_k_blackbodys() {
         for (band, &stored) in AlertBand::ALL.iter().zip(&GIANT_ERUPTION_SHARES) {
@@ -1055,11 +1055,7 @@ mod tests {
                 AlertBand::Photometric(_) => band_share(Kelvin::new(5_000.0), *band),
                 AlertBand::XRay => 0.0,
             };
-            if share > 0.0 {
-                assert!((stored / share - 1.0).abs() <= 1e-12, "{band:?}");
-            } else {
-                assert_same_bits(stored, 0.0);
-            }
+            assert_same_bits(stored, share);
         }
         let v = AlertBand::Photometric(crate::galaxy::gas::ccm::Band::V).index();
         assert!((GIANT_ERUPTION_SHARES[v] - 0.094).abs() < 5e-4);
@@ -1180,6 +1176,26 @@ mod tests {
             pulsars > 10 && magnetars > 0,
             "{pulsars} pulsars, {magnetars} magnetars"
         );
+    }
+
+    /// `scan_plan` and `scan_cell` walk exactly the classes that host a recurrent kind of the
+    /// registry, each of whose rows is built: a class added to a recurrent row is walked, or this
+    /// fails.
+    #[test]
+    fn the_walked_classes_are_the_registrys_recurrent_ones() {
+        for class in crate::galaxy::catalogue_classes::ALL_CLASSES {
+            let hosted = TransientKind::ALL.into_iter().any(|kind| {
+                let row = kind.row();
+                row.route() == Route::Recurrent && row.classes().contains(class)
+            });
+            let walked = class == ClassId::CORE_COLLAPSE || is_walked(class);
+            assert_eq!(walked, hosted, "{class}");
+        }
+        for kind in TransientKind::ALL {
+            if kind.row().route() == Route::Recurrent {
+                assert_eq!(kind.row().pending(), None, "{kind:?}");
+            }
+        }
     }
 
     /// The classes with no recurrent kind walked here, and those whose recurrent kinds a sensor

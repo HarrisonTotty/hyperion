@@ -564,7 +564,9 @@ fn binary_kind(kind: BinaryEventKind) -> TransientKind {
         BinaryEventKind::XrayTransient => TransientKind::XrayTransient,
         BinaryEventKind::XrayBurst => TransientKind::XrayBurst,
         BinaryEventKind::BeXGiantOutburst => TransientKind::BeXOutburst,
-        other => panic!("{other:?} is not walked with its class"),
+        kind @ (BinaryEventKind::DwarfNova
+        | BinaryEventKind::LuminousRedNova
+        | BinaryEventKind::Kilonova) => panic!("{kind:?} is not walked with its class"),
     }
 }
 

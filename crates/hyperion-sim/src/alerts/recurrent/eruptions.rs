@@ -160,16 +160,20 @@ pub trait EruptionClass: ClassProcess {
 impl EruptionClass for LbvProcess {
     /// The entry's system, its primary as the stellar stage builds it, and the window its class's
     /// test read; every entry is one.
+    ///
+    /// # Panics
+    ///
+    /// For an entry moving no slower than light or whose window runs backwards, which plan 09's
+    /// draws and its class's test never give: a broken invariant of the class.
     fn eruption_host(&self, galaxy: &Galaxy, entry: &LbvEntry) -> Option<EruptionHost> {
-        // The class's motions are below light's speed (plan 08's draws, P09.T43), and its windows
-        // run forward, so nothing is refused.
-        EruptionHost::new(
+        let host = EruptionHost::new(
             entry.record().id(),
             entry.window(),
             *entry.motion(),
             StarRecipe::of_record(galaxy, entry.record(), *entry.composition()),
         )
-        .ok()
+        .expect("plan 09's LBV motions are below light's speed and their windows run forward");
+        Some(host)
     }
 }
 
