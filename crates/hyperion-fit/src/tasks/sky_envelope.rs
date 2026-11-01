@@ -42,8 +42,9 @@ pub const FINGERPRINT_FE_H: [f64; 2] = [-2.5, 0.0];
 
 /// The masses, M☉, and \[Fe/H\] of the fingerprint's helium-rich probes, at the largest helium
 /// excess the envelope is built at, under a version whose tracks read a fitted helium table
-/// (R06.T16.a): a globular's turn-off star and a heavier giant of its later populations, metal-poor.
-pub const FINGERPRINT_HELIUM: [(f64, f64); 2] = [(0.8, -1.5), (1.2, -1.5)];
+/// (R06.T16.a): a metal-poor globular's turn-off stars, which its later populations' excess brings
+/// to their giant branch within a Hubble time.
+pub const FINGERPRINT_HELIUM: [(f64, f64); 2] = [(0.8, -1.5), (0.9, -1.5)];
 
 /// The probes' samples per phase: fewer than the table's, since only their values matter.
 const FINGERPRINT_SAMPLES: u32 = 4;

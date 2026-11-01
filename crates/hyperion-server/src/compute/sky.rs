@@ -1208,6 +1208,7 @@ enum Work {
 
 impl Work {
     /// The layer of the shell the work is of.
+    #[must_use]
     fn layer(&self) -> Layer {
         match self {
             Self::Cells(cells) => cells.layer,
@@ -1603,15 +1604,8 @@ fn census_job(
         let source = caches
             .as_ref()
             .map(|(features, interiors)| FeatureMemberSource::new(features, interiors));
-        let held: [&dyn SkySource; 1];
-        let sources: &[&dyn SkySource] = match &source {
-            Some(source) => {
-                held = [source];
-                &held
-            }
-            None => &[],
-        };
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache, sources, &gas);
+        let source: Option<&dyn SkySource> = source.as_ref().map(|source| source as _);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache, source.as_slice(), &gas);
         let layer = work.layer();
         let mut work = match work {
             Work::Members(plan, shell, part) => {
@@ -2221,11 +2215,9 @@ pub(crate) mod tests {
         );
         let members = SkyMembers::of(&galaxy, &features, &interiors);
         assert!(members.is_some(), "a galaxy of 27 gives up φ");
+        // At the version in force, below φ's, the field keeps every population's budget.
         let held = Galaxy::new(Seed::new(0x4d2));
-        assert_eq!(
-            SkyMembers::of(&held, &features, &interiors).is_some(),
-            takes_feature_members(&held)
-        );
+        assert!(SkyMembers::of(&held, &features, &interiors).is_none());
 
         let near = sun().position().to_owned();
         let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(

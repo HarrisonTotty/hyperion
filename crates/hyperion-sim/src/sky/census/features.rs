@@ -25,7 +25,7 @@
 //! - **Its stars.** As a grid system's, each measured at its retarded time
 //!   ([`census_record`](super::census_record)'s path, a star past the cut with no extinction
 //!   taking no sightline), and kept only nearer than the radius its layer is complete to towards
-//!   its band texel once the census is final ([`Completeness::radius_at`]): the band's boundary,
+//!   its band texel once the census is final (`Completeness::radius_at`): the band's boundary,
 //!   beyond which the band holds the layer's light.
 //!
 //! # The band and the caps
@@ -61,11 +61,12 @@ use super::query::{CensusPlan, Completeness, Shell, SkyContext, SkyQuery, light_
 /// galactic centre's and the global list's join (plan 09's P09.T29 and plan 10's P10.T10.b, from
 /// generator version 27), whose members move on orbits rather than lines.
 pub trait SkySource {
-    /// Gives `each` every member of `seen`'s shell's band whose light can reach `observer` from
-    /// between the shell's inner and outer distances, of the members `seen`'s part holds: each
-    /// that lies so at some time from the outer distance's light time before the observer's time
-    /// to it, born by the observer's time. The parts of one number hold each member once between
-    /// them.
+    /// Gives `each` every member of `seen`'s part of its shell whose light can reach `observer`.
+    ///
+    /// The shell is a band and an inner and an outer distance; the members are each of the band
+    /// that lies between them at some time from the outer distance's light time before the
+    /// observer's time to it, born by the observer's time. The parts of one number hold each
+    /// member once between them.
     fn members_seen(
         &self,
         galaxy: &Galaxy,
@@ -75,9 +76,10 @@ pub trait SkySource {
     );
 }
 
-/// One of the parts a shell's members are drawn in, so that they can be several jobs (R06.T16.a's
-/// cost): the `index`-th of `of`. Every member is in one part of each number of parts, so the
-/// census of a shell is the same however many parts it is taken in.
+/// One of the parts a shell's members are drawn in, so that they can be several jobs.
+///
+/// It is the `index`-th of `of` (R06.T16.a's cost). Every member is in one part of each number of
+/// parts, so the census of a shell is the same however many parts it is taken in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MemberPart {
     index: u32,
@@ -132,7 +134,7 @@ impl SkySource for FeatureMemberSource<'_> {
             galaxy,
             observer.position(),
             (earliest, t),
-            (shell, (part.index, part.of.get())),
+            (shell, (part.index, part.of)),
             each,
         );
     }
@@ -169,6 +171,68 @@ pub fn takes_feature_members(galaxy: &Galaxy) -> bool {
 ///
 /// If `shell` is not one of `plan`'s; as [`MemberRecord::stars`], for a member a source gives of
 /// another galaxy.
+///
+/// # Examples
+///
+/// Each shell's members beside its cells, as a census's jobs take them, the members only where the
+/// galaxy's field gives them up:
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+/// use hyperion_sim::galaxy::features::members::source::{FeatureMemberSource, KeepInteriors};
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::census::{
+///     CellOffsets, MemberPart, NoSkyCellCache, SkyContext, SkyQuery, SkySource, census_cell,
+///     census_members, census_plan, merge_shells, takes_feature_members,
+/// };
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Magnitudes;
+///
+/// let galaxy = Galaxy::new(Seed::new(11)).with_full_potential();
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
+/// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(6.5))
+///     .build()?;
+/// let mut noise = NoiseCache::with_capacity(1 << 16);
+/// let plan = census_plan(&galaxy, &tables, &envelope, &query, &mut noise);
+/// let interiors = KeepInteriors::new(&galaxy);
+/// let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+/// let held: [&dyn SkySource; 1] = [&source];
+/// let sources: &[&dyn SkySource] = if takes_feature_members(&galaxy) { &held } else { &[] };
+/// let mut ctx = SkyContext {
+///     tables: &tables,
+///     envelope: &envelope,
+///     offsets: &offsets,
+///     noise,
+///     cells: &NoSkyCellCache,
+///     sources,
+///     modifiers: &NoModifiers,
+/// };
+/// let mut parts = Vec::new();
+/// for shell in plan.shells() {
+///     let mut stars = Vec::new();
+///     let whole = (shell, MemberPart::WHOLE);
+///     let members = census_members(&galaxy, &mut ctx, &plan, whole, &query, &mut stars);
+///     parts.push((stars, members));
+///     for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+///         let mut stars = Vec::new();
+///         let cell = census_cell(&galaxy, &mut ctx, key, &query, &mut stars);
+///         parts.push((stars, cell));
+///     }
+/// }
+/// let census = merge_shells(parts, query.n_max(), plan.complete());
+/// // The sky's gap is stated exactly where the census lacks the members.
+/// assert_eq!(census.tallies().feature_members_absent(), !takes_feature_members(&galaxy));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn census_members(
     galaxy: &Galaxy,
     ctx: &mut SkyContext<'_>,
@@ -192,7 +256,18 @@ pub fn census_members(
     let observer = query.observer();
     let [x, y, z] = observer.position().to_light_years_f64();
     let from_centre = math::hypot(math::hypot(x, y), z);
-    let offset = layer_offset_bound(galaxy, layer, LightYears::new(from_centre + outer.value()));
+    // One offset for every shell of the layer, its cap's, so that its shells' spans, moved by it
+    // alike, still meet edge to edge and hold each member once.
+    let cap = plan
+        .caps()
+        .iter()
+        .find(|cap| cap.layer() == layer)
+        .expect("a shell's layer has a cap");
+    let offset = layer_offset_bound(
+        galaxy,
+        layer,
+        LightYears::new(from_centre + cap.radius().value()),
+    );
     let complete = plan.complete();
     let span = (inner, outer, offset);
     for source in sources {
@@ -213,8 +288,8 @@ pub fn census_members(
 }
 
 /// One member's stars for `query`, in the shell between `inner` and `outer` whose layer's stars
-/// lie at most `offset` from their barycentres, each kept within the radius `complete` gives its
-/// layer towards it.
+/// lie at most `offset` from their barycentres, the same for every shell of the layer, each kept
+/// within the radius `complete` gives its layer towards it.
 fn census_member(
     galaxy: &Galaxy,
     ctx: &mut SkyContext<'_>,
@@ -280,6 +355,7 @@ mod tests {
     use crate::coords::{GalacticPosition, UnitVector};
     use crate::galaxy::ages::FieldShareRules;
     use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
+    use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::features::cluster::ClusterModel;
     use crate::galaxy::features::members::source::KeepInteriors;
     use crate::galaxy::features::members::{FeatureInterior, local_offset};
@@ -296,7 +372,7 @@ mod tests {
     use crate::sky::census::cell::{CellOffsets, census_cell};
     use crate::sky::census::merge::{SkyCensus, merge_shells, sky_order};
     use crate::sky::census::query::{
-        CellSlab, Cone, MAX_N_MAX, census_plan, census_plan_with_edges,
+        CellSlab, Cone, MAX_N_MAX, SHELL_EDGES_LY, census_plan, census_plan_with_edges,
     };
     use crate::sky::luminosity::LuminosityTables;
     use crate::sky::testing::{SUN_LY, milky_way_dark_context, milky_way_envelope};
@@ -486,16 +562,15 @@ mod tests {
             .collect()
     }
 
-    /// The members' stars of every shell of `plan`, each shell in `parts` parts, in the census's
-    /// order, with their tallies added.
+    /// The members' stars of every shell of `plan`, each shell in `parts` parts, through
+    /// `interiors`, in the census's order, with their tallies added.
     fn members_of(
         galaxy: &Galaxy,
-        plan: &CensusPlan,
-        query: &SkyQuery,
+        (plan, query): (&CensusPlan, &SkyQuery),
         parts: NonZeroU32,
+        interiors: &KeepInteriors<'_>,
     ) -> (Vec<SkyStar>, CensusTallies) {
-        let interiors = KeepInteriors::new(galaxy);
-        let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+        let source = FeatureMemberSource::new(&NoFeatureCache, interiors);
         let sources: [&dyn SkySource; 1] = [&source];
         let mut ctx = SkyContext {
             sources: &sources,
@@ -582,8 +657,9 @@ mod tests {
     /// - a context's sources say whether a census's tallies leave the members out, its cells'
     ///   and its members' alike, and one without them takes no member;
     /// - inside the Pleiades-like cluster, to 12 ly at V 9, the members' stars of shells to 4, 8
-    ///   and 12 ly, in one part or three, are those of one shell to 12 ly, bit for bit and tally
-    ///   for tally, and those of a brute force over every member placed near, each star measured.
+    ///   and 12 ly, in one part or three, through interiors built for them or held warm by an
+    ///   earlier census, are those of one shell to 12 ly, bit for bit and tally for tally, and
+    ///   those of a brute force over every member placed near, each star measured.
     #[test]
     fn the_census_takes_each_member_once_where_the_field_gives_them_up() {
         let galaxy = phi_galaxy();
@@ -634,7 +710,8 @@ mod tests {
 
         let one = NonZeroU32::MIN;
         let three = NonZeroU32::new(3).expect("not zero");
-        let (stars, tallies) = members_of(galaxy, &whole, &query, one);
+        let warm = KeepInteriors::new(galaxy);
+        let (stars, tallies) = members_of(galaxy, (&whole, &query), one, &warm);
         assert!(!tallies.feature_members_absent());
         assert!(
             stars.len() > 10,
@@ -642,8 +719,14 @@ mod tests {
             stars.len()
         );
         assert!(stars.iter().all(is_member));
-        for (plan, parts) in [(&shelled, one), (&shelled, three), (&whole, three)] {
-            let (each, each_tallies) = members_of(galaxy, plan, &query, parts);
+        for (plan, parts, kept) in [
+            (&shelled, one, false),
+            (&shelled, three, true),
+            (&whole, three, false),
+        ] {
+            let cold = KeepInteriors::new(galaxy);
+            let interiors = if kept { &warm } else { &cold };
+            let (each, each_tallies) = members_of(galaxy, (plan, &query), parts, interiors);
             assert_eq!(star_bits(&each), star_bits(&stars), "{parts} parts");
             for layer in Layer::ALL {
                 let (got, want) = (each_tallies.layer(layer), tallies.layer(layer));
@@ -657,6 +740,54 @@ mod tests {
         assert_eq!(
             star_bits(&every_member(galaxy, &query, 12.0)),
             star_bits(&stars)
+        );
+    }
+
+    /// Each layer's shells, at the fixed edges, meet edge to edge from nought to its cap's farthest
+    /// radius ([`CensusPlan::shell_span`]), so that, one offset a layer moving them all alike, a
+    /// member's nearest possible star lies in exactly one (R06.T16.a): near the Sun, at caps as
+    /// `CensusPlan::completeness`'s example puts them.
+    #[test]
+    fn a_layers_shells_meet_edge_to_edge_from_nought_to_its_cap() {
+        let query = forced(milky_way_galaxy(), SUN_LY, 7.95, &[]);
+        let caps = [11.0, 68.0, 8_193.0, 9_925.0, 21_369.0, 1.0]
+            .iter()
+            .zip(CAPPED_LAYERS)
+            .map(|(&r, layer)| LayerCap::forced(layer, LightYears::new(r)))
+            .collect();
+        let plan = census_plan_with_edges(&query, caps, &SHELL_EDGES_LY);
+        for cap in plan.caps() {
+            let spans: Vec<(LightYears, LightYears)> = plan
+                .shells()
+                .filter(|shell| shell.layer() == cap.layer())
+                .map(|shell| plan.shell_span(shell))
+                .collect();
+            let (first, last) = (
+                spans.first().expect("a shell"),
+                spans.last().expect("a shell"),
+            );
+            assert_eq!(bits(first.0.value()), bits(0.0), "{:?}", cap.layer());
+            assert_eq!(
+                bits(last.1.value()),
+                bits(cap.radius().value()),
+                "{:?}",
+                cap.layer()
+            );
+            for pair in spans.windows(2) {
+                assert_eq!(
+                    bits(pair[0].1.value()),
+                    bits(pair[1].0.value()),
+                    "{:?}",
+                    cap.layer()
+                );
+                assert!(pair[0].0.value() < pair[0].1.value(), "{:?}", cap.layer());
+            }
+        }
+        assert!(
+            plan.shells()
+                .filter(|shell| shell.layer() == Layer::E)
+                .count()
+                > 5
         );
     }
 
@@ -743,32 +874,32 @@ mod tests {
     /// The globular core's sky from its centre lists stars to V 6.5 within a factor of two of the
     /// brainstorm's about 4 × 10⁵, its 47 Tuc row (R06.T16.a).
     ///
-    /// The count is set by the stars within some tens of light-years of the centre, so the core is
-    /// the fixture's globular of at least 47 Tuc's mass whose central density is nearest 47 Tuc's:
-    /// 7.8 × 10⁵ M☉ (Baumgardt and Hilker 2018, MNRAS 478, 1520), and log ρ₀ = 4.88 L☉ pc⁻³
-    /// (Harris 1996, 2010 edition) at a mass-to-light ratio of about 2 in V (Baumgardt and Hilker 2018), 1.5 × 10⁵ M☉ pc⁻³ or
-    /// 4.4 × 10³ M☉ ly⁻³. Measured 2026-11-01: the 1.33 × 10⁶ M☉ globular of 3,222 M☉ ly⁻³ lists
-    /// 2.98 × 10⁵ (its census some 6,500 CPU-s on a pod of 16 vCPU), where the 7.6 × 10⁵ M☉ one
-    /// nearest 47 Tuc's mass, of 1,581 M☉ ly⁻³, lists 1.24 × 10⁵.
+    /// The count is set by the stars within some tens of light-years of the centre. The core is
+    /// the fixture's of 1.33 × 10⁶ M☉ and 3,222 M☉ ly⁻³, about twice 47 Tuc's central density:
+    /// 47 Tuc has 8.53 × 10⁵ M☉ and 10^4.72 M☉ pc⁻³, or 1.51 × 10³ M☉ ly⁻³ at 34.70 ly³ a cubic
+    /// parsec (Baumgardt and Hilker's catalogue, version 4; `galaxy::features::testing`'s
+    /// `NGC_104`). Measured 2026-11-01: it lists 2.98 × 10⁵ stars, its census some 6,500 CPU-s on
+    /// a pod of 16 vCPU. The fixture's analogue of 47 Tuc by mass and density, of 7.6 × 10⁵ M☉
+    /// and 1,581 M☉ ly⁻³, lists 1.24 × 10⁵ (1.42 × 10⁵ with A to 16 ly and B to 45 ly), a
+    /// finding (lean, 2026-11-01).
     #[test]
     #[ignore = "slow: generates some 10⁶ members of a globular's core, some 6,500 CPU-s"]
     fn a_globular_cores_sky_lists_some_four_hundred_thousand_stars_to_v_6_5() {
-        /// 47 Tuc's mass, M☉ (Baumgardt and Hilker 2018).
-        const TUC_47_MSUN: f64 = 7.8e5;
-        /// 47 Tuc's central density, M☉ ly⁻³: 10^4.88 L☉ pc⁻³ (Harris 1996, 2010 edition) at
-        /// a mass-to-light ratio of 2 in V, over 34.6 ly³ a cubic parsec.
-        const TUC_47_RHO0: f64 = 4.4e3;
+        /// The pinned core's mass, M☉, and central density, M☉ ly⁻³ (surveyed 2026-11-01).
+        const CORE: (f64, f64) = (1.333e6, 3.222e3);
         let galaxy = phi_galaxy();
         let (globular, model) = FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular)
             .filter_map(|feature| {
                 ClusterModel::from_record(galaxy, &feature).map(|model| (feature, model))
             })
-            .filter(|(_, model)| model.mass().value() >= TUC_47_MSUN)
             .min_by(|a, b| {
-                let off = |m: &ClusterModel| math::ln(m.central_density() / TUC_47_RHO0).abs();
+                let off = |m: &ClusterModel| {
+                    math::ln(m.mass().value() / CORE.0).abs()
+                        + math::ln(m.central_density() / CORE.1).abs()
+                };
                 off(&a.1).total_cmp(&off(&b.1))
             })
-            .expect("a globular as heavy as 47 Tuc");
+            .expect("a globular");
         // Each layer's cap holds its stars brighter than V 6.5 from the centre: M dwarfs within
         // 10 ly, K dwarfs within 40 ly, the turn-off's and the giants' within the tidal radius.
         let query = forced(
@@ -799,7 +930,7 @@ mod tests {
         );
         #[expect(
             clippy::cast_precision_loss,
-            reason = "a count of stars, for comparison"
+            reason = "a count below 2⁵³ converts exactly"
         )]
         let stars_f = stars as f64;
         assert!(
@@ -851,7 +982,7 @@ mod tests {
         );
         #[expect(
             clippy::cast_precision_loss,
-            reason = "counts of stars, for comparison"
+            reason = "counts below 2⁵³ convert exactly"
         )]
         let (listed, budget, squares) = (listed as f64, budget as f64, squares as f64);
         assert!(

@@ -151,10 +151,12 @@ fn envelope_bounds_dense_tracks() {
 type Violations = std::collections::BTreeMap<String, (u32, f64, String)>;
 
 /// `envelope_bounds_dense_tracks`' helium-rich tracks of globulars' later populations, the only
-/// stars with an excess (R06.T16.a): living stars of A, B and C, old, at a helium excess drawn to
-/// the envelope's largest node, each against `envelope` with `worst_use` and `violations` kept as
-/// the rest's. Under the identity table (to version 25) each is its composition's at no excess;
-/// under P15.T7.b's fit the envelope is built at helium-excess nodes too.
+/// stars with an excess (R06.T16.a).
+///
+/// They are living stars of A (from 0.1 M☉), B and C, old, at a helium excess drawn to the
+/// envelope's largest node, each against `envelope` with `worst_use` and `violations` kept as the
+/// rest's. Under the identity table (to version 25) each is its composition's at no excess; under
+/// P15.T7.b's fit the envelope is built at helium-excess nodes too.
 fn helium_rich_tracks(
     envelope: &BrightnessEnvelope,
     component: ComponentId,
@@ -165,7 +167,10 @@ fn helium_rich_tracks(
     let largest = HELIUM_EXCESS_NODES[HELIUM_EXCESS_NODES.len() - 1];
     for band in [MassBand::A, MassBand::B, MassBand::C] {
         let layer = Layer::from(band);
-        let (ln_lo, ln_hi) = (math::ln(band.lo()), math::ln(band.hi()));
+        // The tracks', from 0.1 M☉: below it A's stars follow the cooling fits, which read no
+        // helium excess.
+        let lo = band.lo().max(MIN_INITIAL_MASS.value());
+        let (ln_lo, ln_hi) = (math::ln(lo), math::ln(band.hi()));
         for _ in 0..HELIUM_RICH_MASSES {
             let m = math::exp(ln_lo + (ln_hi - ln_lo) * lcg.next_f64());
             let fe_h = -2.3 + 2.3 * lcg.next_f64();

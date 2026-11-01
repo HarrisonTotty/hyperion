@@ -968,8 +968,9 @@ fn narrow(count: impl TryInto<u32>) -> u32 {
 
 /// What the sky leaves out, each a label on the view (Design note 23; T8.c's mapping and
 /// `decision-r06-t16a-scope.md`): the feature members whenever the census lacks them, which is
-/// every census until R06.T16.a; the galactic centre's members where a census met one; and the
-/// white dwarfs where a generated system held one.
+/// every census whose galaxy's field keeps them (R06.T16.a's switch, `takes_feature_members`);
+/// the galactic centre's members where a census met one; and the white dwarfs where a generated
+/// system held one.
 #[must_use]
 fn not_modelled(tallies: &CensusTallies) -> Vec<SkyGapDto> {
     let any = |count: fn(&LayerTally) -> u64| {

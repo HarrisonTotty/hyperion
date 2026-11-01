@@ -284,7 +284,7 @@ impl Completeness {
     /// position: [`radius_for`](Self::radius_for) of a star of `layer` there, before the star is
     /// measured (R06.T16.a's members, kept within it).
     #[must_use]
-    pub fn radius_at(&self, layer: Layer, apparent: &GalacticPosition) -> LightYears {
+    pub(crate) fn radius_at(&self, layer: Layer, apparent: &GalacticPosition) -> LightYears {
         let d = self.observer.displacement_to(apparent).metres();
         match self.band_spec.texel_of(d) {
             Some((face, row, column)) => self
@@ -1126,10 +1126,12 @@ pub struct SkyContext<'a> {
     /// The cell cache, its entries blocks of cells keyed by magnitude (R06.T8.h;
     /// [`super::cache::NoSkyCellCache`] keeps none).
     pub cells: &'a dyn SkyCellCache,
-    /// The sources of systems beyond the grid that the census takes: plan 09's feature members
-    /// wherever the galaxy's field gives them up ([`takes_feature_members`]), and none otherwise
-    /// (R06.T16.a). Each of a census's jobs carries the same: a cell's tallies then say the
-    /// members are in, and [`census_members`] takes theirs shell by shell.
+    /// The sources of systems beyond the grid that the census takes (R06.T16.a).
+    ///
+    /// They are plan 09's feature members wherever the galaxy's field gives them up
+    /// ([`takes_feature_members`]), and none otherwise. Each of a census's jobs carries the same:
+    /// a cell's tallies then say the members are in, and [`census_members`] takes theirs shell by
+    /// shell.
     ///
     /// [`takes_feature_members`]: super::takes_feature_members
     /// [`census_members`]: super::census_members
@@ -1257,17 +1259,19 @@ impl CensusPlan {
         self.slabs_of(self.walk_of(shell), usize::from(shell.index))
     }
 
-    /// The distances between which `shell` completes its layer, ly: the edge of the shell before
-    /// it, or nought for its layer's first, and its own edge, or its cap's farthest radius for its
-    /// layer's last. A star a shell's census holds lies between them, nearer than the radius its
-    /// layer is complete to towards it ([`completeness`](Self::completeness)), so feature members
-    /// are taken shell by shell between them (R06.T16.a).
+    /// The distances between which `shell` completes its layer, ly.
+    ///
+    /// They are the edge of the shell before it, or nought for its layer's first, and its own
+    /// edge, or its cap's farthest radius for its layer's last. A star a shell's census holds lies
+    /// between them, nearer than the radius its layer is complete to towards it
+    /// ([`completeness`](Self::completeness)), so feature members are taken shell by shell
+    /// between them (R06.T16.a).
     ///
     /// # Panics
     ///
     /// If `shell` is not one of the plan's ([`shells`](Self::shells)).
     #[must_use]
-    pub fn shell_span(&self, shell: Shell) -> (LightYears, LightYears) {
+    pub(crate) fn shell_span(&self, shell: Shell) -> (LightYears, LightYears) {
         let walk = self.walk_of(shell);
         let index = usize::from(shell.index);
         let inner = index

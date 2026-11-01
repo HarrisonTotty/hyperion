@@ -29,6 +29,7 @@
 //! grid's level and cell order, so the census is a function of the galaxy and the sphere alone.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
@@ -47,7 +48,7 @@ use super::super::{FeatureId, FeatureProcess};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
-use super::super::nested::box_distance;
+use super::super::nested::{NestedCell, box_distance};
 use super::placement::FeatureInterior;
 use super::{MemberRecord, local_offset};
 
@@ -325,8 +326,8 @@ impl<'a> FeatureMemberSource<'a> {
     /// catalogue lists them, then cells in the grid's order, then members in index order. It may
     /// give a member beyond the shell, never leave one out. What the sky's census reads, a shell
     /// at a time (rendering plan R06, R06.T16.a), in `parts` parts: the part `part` gives the
-    /// members of every `parts`-th cell it visits from the `part`-th, so that the parts give each
-    /// member once between them, whatever their number.
+    /// members of the cells whose own key falls to it ([`part_of_cell`]), so that the parts give
+    /// each member once between them, whatever their number and whatever the caches hold.
     ///
     /// Each feature is padded by its own members' speed bound
     /// ([`FeatureInterior::member_speed_bound`], P09.T23.b), never by a layer's pad: a member
@@ -338,7 +339,10 @@ impl<'a> FeatureMemberSource<'a> {
         galaxy: &Galaxy,
         centre: &GalacticPosition,
         window: (UniverseTime, UniverseTime),
-        ((band, inner, outer), (part, parts)): ((MassBand, LightYears, LightYears), (u32, u32)),
+        ((band, inner, outer), (part, parts)): (
+            (MassBand, LightYears, LightYears),
+            (u32, NonZeroU32),
+        ),
         each: &mut dyn FnMut(&MemberRecord),
     ) {
         let (from, to) = window;
@@ -351,8 +355,6 @@ impl<'a> FeatureMemberSource<'a> {
         };
         let lookup = outer + pad_for(farthest, UNBOUND_PAD_SPEED);
         let mut members = Vec::new();
-        // The cells visited so far, whose count says which part takes the next.
-        let mut visited = 0_u64;
         for interior in self.interiors_near(galaxy, centre, lookup) {
             let local = local_offset(interior.feature().position(), centre);
             let near = [local.x, local.y, local.z];
@@ -365,9 +367,7 @@ impl<'a> FeatureMemberSource<'a> {
                 if box_farthest(&interior.grid().local_cell(cell), near) < inside {
                     continue;
                 }
-                let mine = visited % u64::from(parts) == u64::from(part);
-                visited += 1;
-                if !mine {
+                if part_of_cell(interior.feature().id(), (band, cell), parts) != part {
                     continue;
                 }
                 interior.members_in_cell_near(
@@ -387,6 +387,40 @@ impl<'a> FeatureMemberSource<'a> {
             }
         }
     }
+}
+
+/// Which of `parts` parts takes the members of `band` in `feature`'s nested cell `cell`: a fixed
+/// mix of the feature's object word, the band, the cell's level and coordinates (a `SplitMix64`
+/// step at each, Stafford's Mix13; Vigna 2015, `splitmix64.c`), modulo the parts. A
+/// function of the cell alone, so no visit's order or cache changes which part holds a member.
+#[must_use]
+fn part_of_cell(
+    feature: FeatureId,
+    (band, cell): (MassBand, NestedCell),
+    parts: NonZeroU32,
+) -> u32 {
+    let [x, y, z] = cell.cell();
+    let band = u64::try_from(band.index()).expect("a band's index is below seven");
+    let key = [
+        band,
+        u64::from(cell.level()),
+        u64::from(x),
+        u64::from(y),
+        u64::from(z),
+    ]
+    .into_iter()
+    .fold(feature.object_word(), |word, part| mix(word ^ part));
+    u32::try_from(key % u64::from(parts.get())).expect("below a u32's parts")
+}
+
+/// One `SplitMix64` step from the state `word`: the golden gamma, then Stafford's Mix13 (Stafford
+/// 2011, "Better bit mixing"), as Vigna's 2015 `splitmix64.c` gives it.
+#[must_use]
+const fn mix(word: u64) -> u64 {
+    let mut z = word.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }
 
 /// The distance from the local point `p` to the farthest point of `cell`'s box, ly.

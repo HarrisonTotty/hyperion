@@ -220,7 +220,12 @@ pub enum CellOutcome { Served, Missed, Rebuilt(Rebuild) }
 pub enum Rebuild { Key, Window, Parameters }
 pub struct SkyContext<'a> { /* tables: &'a LuminosityTables, envelope: &'a BrightnessEnvelope,
     noise: NoiseCache (the job's own), cells: &'a dyn SkyCellCache,
-    sources: &'a [&'a dyn SystemSource], modifiers: &'a dyn GasModifierSource */ }
+    sources: &'a [&'a dyn SkySource], modifiers: &'a dyn GasModifierSource */ }
+pub trait SkySource { fn members_seen(&self, galaxy: &Galaxy, observer: &Observer,
+    seen: ((MassBand, LightYears, LightYears), MemberPart), each: &mut dyn FnMut(&MemberRecord)); }
+pub fn census_members(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, plan: &CensusPlan,
+    shell: (Shell, MemberPart), query: &SkyQuery, out: &mut Vec<SkyStar>) -> CensusTallies;
+pub fn takes_feature_members(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
 pub struct CensusPlan { /* caps: Vec<LayerCap>, cells: Vec<CellKey> (canonical order) */ }
 pub fn census_plan(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     query: &SkyQuery, cache: &mut NoiseCache) -> CensusPlan;
@@ -3137,7 +3142,7 @@ draft, and the owner's sign-off recorded in this plan.
 
     Acceptance: `cargo test -p hyperion-sim sky::census::features`, the member-cost bench of
     item 2, and `just ci`. _Built 2026-11-01, in force wherever the galaxy's field gives up φ:
-    Risks, "R06.T16.a, as built", with the three items' leans._
+    Risks, "R06.T16.a, re-validated alone at 3208734 and built", with the items' leans._
 - **R06.T16.b Binaries (after P11.T6–T11; due now, after T8.e).** When plan 11 wires binary
   evolution into `SystemStars`, `max_star_mass` returns min(2 m₁, 150 M☉), the envelope's age
   range starts at zero, and the n × F₁ bound requires a system that cannot have interacted (Design
@@ -9944,30 +9949,23 @@ CensusCost)`.
   - A sky cancelled, superseded or whose connection closed logs "given up before its final reply"
     from a drop guard, since its aborted task never returns.
 - **R06.T16.a, re-validated alone at 3208734 and built (2026-11-01).**
-  - **Its hook.** A range query's `SystemHit` carries no member's velocity, composition or
-    multiplicity, and `SystemStars::generate` reads a density component, so the census reads
-    members through its own trait, `sky::census::SkySource::members_seen` (`MemberRecord`s, a
-    shell and a `MemberPart` at a time), which `FeatureMemberSource` implements;
-    `SkyContext::sources` is `&[&dyn SkySource]`. The centre's and the list's sources join at 27.
-  - **The switch.** `sky::census::takes_feature_members(galaxy)`, the galaxy's own `field_share`,
-    with no version of its own; the server's `SkyMembers::of` gives the census jobs the feature
-    caches there. The sightlines' `FeatureGas` stays on the server's `FEATURE_MEMBERS_FROM` gate.
-  - **Item 1, the band and the caps (lean, 2026-11-01).** They stay on the budget, the field and
-    the members' expectation together, so the members' light below the cut and beyond each cap
-    is in the band, and their counts in each `expected_beyond`, spread as the field's. Listed
-    members are kept within the band's boundary (`Completeness::radius_at`). A globular's
-    unresolved glow is not gathered at it: a follow-up with the centre's members.
-  - **Item 2, the cost (lean, 2026-11-01).** Members are always generated. Each shell's are one
-    job a worker, queued ahead of its slabs; a member is the shell's of its nearest possible star
-    (`layer_offset_bound`); a cone's census skips the members outside its plan's cone. Measured in
-    the outbox; a globular core's cost is a finding.
-  - **Item 3, helium (lean, 2026-11-01).** P15.T7.b's fit is on the tip behind `HELIUM_VERSION`
-    (26): the envelope's build takes `HELIUM_EXCESS_NODES` under its arm alone, the fit's
-    fingerprint gains helium-rich probes there, and the dense bound test helium-rich tracks. At
-    24–25 nothing moves; train 26's refit of `sky_envelope` takes them.
-  - **The tests' readings (lean, 2026-11-01).** Near the Sun one cluster of 2.2 × 10⁴ M☉ lists
-    345 of the 365 members' stars, so the count is held below by the budget's Poisson error and
-    above by its clumps' compound error. The globular is the one nearest 47 Tuc's central density
-    of at least its mass; the one nearest its mass alone lists 1.24 × 10⁵.
+  - **Its hook.** `SystemHit` carries no member's velocity, composition or multiplicity, so the
+    census reads members through `sky::census::SkySource` (`MemberRecord`s a shell and a
+    `MemberPart` at a time), which `FeatureMemberSource` implements; the centre's join at 27.
+  - **The switch.** `takes_feature_members(galaxy)`, its own `field_share`, no version; the server's
+    `SkyMembers::of`. The sightlines' `FeatureGas` stays on `FEATURE_MEMBERS_FROM`, which its
+    tripwire opens with φ's train or before it.
+  - **Item 1 (lean, 2026-11-01).** The band and the caps stay on the budget, field and members'
+    expectation together; listed members are kept within the band's boundary
+    (`Completeness::radius_at`). A globular's unresolved glow is not gathered at it: a follow-up.
+  - **Item 2 (lean, 2026-11-01).** Members are always generated; each shell's in one part a worker,
+    split by cell (`part_of_cell`), ahead of its slabs. Near the Sun, served: 1.33 CPU-s in the
+    first shells, 31.3 in all (`sky/census_near_sun_members/served_5.0`, pod, 16 vCPU).
+  - **Item 3 (lean, 2026-11-01).** Under the fitted helium arm (26) the envelope's build takes
+    `HELIUM_EXCESS_NODES` and the fit's fingerprint helium-rich probes; nothing moves at 24–25,
+    and train 26's refit of `sky_envelope` takes them.
+  - **The tests (lean, 2026-11-01).** The three are slow (`just test-slow` by name). Near the Sun,
+    3σ of the budget's Poisson error below and of its clumps' compound error above; the core one
+    of twice 47 Tuc's density, its analogue by mass and density giving 1.24 × 10⁵ (a finding).
   - **The label.** No client change: `feature_members` leaves `not_modelled` wherever the census
-    takes members, and `centre_members` stays where a census meets one, until 27.
+    takes members; `centre_members` stays where a census meets one, until 27.
