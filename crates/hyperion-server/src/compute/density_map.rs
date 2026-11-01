@@ -8,7 +8,7 @@
 //! [`PerLy2`] here, so that a density map can be neither quantised nor answered as an extinction
 //! map.
 //! [`DensityMapService`] owns that cache: it renders a map's rows in bands of [`BAND_ROWS`] as bulk
-//! jobs on the CPU pool, from plan 02's [`render_rows`], and hands out the assembled grid.
+//! jobs on the CPU pool, from plan 02's [`render_row_ranges`], and hands out the assembled grid.
 //! Each response quantises it to the bit depth its request asks for with [`quantise_map`], one
 //! pass over the grid and cheap next to computing it, and base64-encodes the codes with
 //! [`QuantisedMap::to_base64`]. The encoding, the orientation and the decode formula are those
@@ -27,7 +27,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use hyperion_protocol::{MapPopulation, MapView};
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView as SpecView, render_rows};
+use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView as SpecView, render_row_ranges};
 use hyperion_sim::math;
 
 use super::{
@@ -705,69 +705,143 @@ impl fmt::Debug for DensityMapService {
     }
 }
 
-/// Renders every band of `key`'s raster on the pool and assembles them in row order.
+/// Renders every band of `key`'s raster on the pool and assembles them in row order: an edge-on
+/// map's in mirrored halves ([`Banding::Mirrored`]).
 async fn render(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     key: MapKey,
 ) -> Result<RawDensityMap, ComputeError> {
+    let banding = match key.view() {
+        MapView::FaceOn => Banding::Consecutive,
+        MapView::EdgeOn => Banding::Mirrored,
+    };
     render_bands(
         pool,
         galaxy,
         key.spec(),
         key.resolution(),
         key.view(),
-        |galaxy, spec, rows, values| render_rows(galaxy.fields(), spec, rows, values),
+        banding,
+        |galaxy, spec, ranges, values| render_row_ranges(galaxy.fields(), spec, ranges, values),
     )
     .await
+}
+
+/// How a raster's rows are split into the pool's bulk jobs, each of at most [`BAND_ROWS`] rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Banding {
+    /// Bands of [`BAND_ROWS`] consecutive rows, from the top.
+    Consecutive,
+    /// Half-bands from the top, each with its mirror in the plane from the bottom as one job: an
+    /// edge-on density map's, whose displaced classes share each height's line of sight between a
+    /// row and its mirror ([`render_row_ranges`]), which halves the remnants map's cost (lane
+    /// `perf-remnants-map`, 2026-11-01). The middle row of an odd number of rows is a job alone.
+    Mirrored,
+}
+
+impl Banding {
+    /// The jobs of a raster `height_px` rows tall, from the top: each the row ranges one job
+    /// renders as one band, in the order its values come.
+    #[must_use]
+    fn jobs(self, height_px: u32) -> Vec<Vec<Range<u32>>> {
+        let band = u32::from(BAND_ROWS);
+        let mut jobs = Vec::new();
+        match self {
+            Self::Consecutive => {
+                let mut first = 0;
+                while first < height_px {
+                    let end = (first + band).min(height_px);
+                    jobs.push(std::iter::once(first..end).collect());
+                    first = end;
+                }
+            }
+            Self::Mirrored => {
+                let (half, step) = (height_px / 2, (band / 2).max(1));
+                let mut first = 0;
+                while first < half {
+                    let end = (first + step).min(half);
+                    jobs.push(vec![first..end, height_px - end..height_px - first]);
+                    first = end;
+                }
+                if height_px % 2 == 1 {
+                    jobs.push(std::iter::once(half..half + 1).collect());
+                }
+            }
+        }
+        jobs
+    }
+}
+
+/// Fills `values` with each of `ranges` in turn, rendered by `render` one range at a time: a
+/// renderer of one range of rows as [`Banding`]'s jobs call it.
+pub(super) fn each_range(
+    ranges: &[Range<u32>],
+    values: &mut Vec<f64>,
+    mut render: impl FnMut(Range<u32>, &mut Vec<f64>),
+) {
+    values.clear();
+    let mut part = Vec::new();
+    for rows in ranges {
+        render(rows.clone(), &mut part);
+        values.extend_from_slice(&part);
+    }
 }
 
 /// Renders every band of `spec`'s raster on the pool with `render_band` and assembles the log₁₀ of
 /// its values in row order, in the unit `U` marks: the banding both map services share (plan 07,
 /// P07.T10.a).
 ///
-/// Each band is one bulk job over [`BAND_ROWS`] rows of the one [`MapSpec`], so the values do not
-/// depend on how the rows were split or on how many workers ran them (plan 02, P02.T10: the rasters
-/// of band sizes 1 to 13 are identical bit for bit). `render_band` follows plan 02's `render_rows`
-/// contract: it clears its output and fills it with the band's values row by row, each 0 or more,
-/// 0 for an empty pixel.
+/// Each job is one bulk job over at most [`BAND_ROWS`] rows of the one [`MapSpec`], split as
+/// `banding` says, so the values do not depend on how the rows were split or on how many workers
+/// ran them (plan 02, P02.T10: the rasters of band sizes 1 to 13 are identical bit for bit).
+/// `render_band` follows plan 02's `render_row_ranges` contract: it clears its output and fills it
+/// with the job's ranges' values in turn, row by row, each 0 or more, 0 for an empty pixel.
 pub(super) async fn render_bands<U>(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     spec: MapSpec,
     resolution: MapResolution,
     view: MapView,
-    render_band: fn(&Galaxy, &MapSpec, Range<u32>, &mut Vec<f64>),
+    banding: Banding,
+    render_band: fn(&Galaxy, &MapSpec, &[Range<u32>], &mut Vec<f64>),
 ) -> Result<RawMap<U>, ComputeError> {
     let (width_px, height_px) = (resolution.width_px(), resolution.height_px(view));
     let token = CancelToken::new();
     // Cancels the bands still queued once every waiter on this map has gone.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
-    let mut bands = Vec::with_capacity(usize::from(height_px).div_ceil(usize::from(BAND_ROWS)));
-    let mut first_row = 0;
-    while first_row < u32::from(height_px) {
-        let rows = first_row..(first_row + u32::from(BAND_ROWS)).min(u32::from(height_px));
-        first_row = rows.end;
+    let jobs = banding.jobs(u32::from(height_px));
+    let mut bands = Vec::with_capacity(jobs.len());
+    for ranges in jobs {
         let galaxy = Arc::clone(galaxy);
-        bands.push(
+        let rendered = ranges.clone();
+        bands.push((
+            ranges,
             pool.submit(Priority::Bulk, token.clone(), move |token| {
                 if token.is_cancelled() {
                     return None;
                 }
                 let mut values = Vec::new();
-                render_band(&galaxy, &spec, rows, &mut values);
+                render_band(&galaxy, &spec, &rendered, &mut values);
                 Some(to_log10(&values))
             })
             .await?,
-        );
+        ));
     }
-    let mut log10 = Vec::with_capacity(usize::from(width_px) * usize::from(height_px));
-    for band in bands {
+    let width = usize::from(width_px);
+    let mut log10 = vec![f32::NEG_INFINITY; width * usize::from(height_px)];
+    for (ranges, band) in bands {
         let values = band
             .await
             .unwrap_or_else(|closed| Err(JobError::from(closed)))?
             .ok_or(JobError::Cancelled)?;
-        log10.extend_from_slice(&values);
+        let mut read = 0;
+        for rows in ranges {
+            let start = usize::try_from(rows.start).expect("a row of the raster") * width;
+            let end = usize::try_from(rows.end).expect("a row of the raster") * width;
+            log10[start..end].copy_from_slice(&values[read..read + (end - start)]);
+            read += end - start;
+        }
     }
     Ok(RawMap::new(
         width_px,
@@ -810,6 +884,7 @@ mod tests {
     use std::time::Duration;
 
     use hyperion_protocol::{DensityMap, UniverseIdHex};
+    use hyperion_sim::galaxy::map::render_rows;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
@@ -864,22 +939,39 @@ mod tests {
         (pool, service)
     }
 
+    /// The test galaxy's seed under the rules of generator version `version`.
+    fn galaxy_at(version: u32) -> Galaxy {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::imf::MassFunctionKind;
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        let seed = Seed::new(SEED);
+        Galaxy::from_params_at_version(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            GeneratorVersion::new(version),
+        )
+        .expect("a drawn galaxy builds")
+    }
+
+    /// The test galaxy's seed under version 24's rules, the version in force: [`galaxy`]'s, built
+    /// by its version so that a bump does not change it unseen.
+    fn galaxy_24() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(24))
+    }
+
+    /// The test galaxy's seed under version 25's rules, every hold at 25 in force: no displaced
+    /// class yet.
+    fn galaxy_25() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(25))
+    }
+
     /// The test galaxy's seed under version 26's rules, every hold at 26 in force, so that it
     /// holds plan 08's displaced classes.
     fn galaxy_26() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| {
-            use hyperion_sim::GeneratorVersion;
-            use hyperion_sim::galaxy::imf::MassFunctionKind;
-            use hyperion_sim::galaxy::params::GalaxyParams;
-            let seed = Seed::new(SEED);
-            Galaxy::from_params_at_version(
-                seed,
-                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-                GeneratorVersion::new(26),
-            )
-            .expect("a drawn galaxy builds")
-        })
+        GALAXY.get_or_init(|| galaxy_at(26))
     }
 
     /// The key of a 128-pixel map of the test galaxy.
@@ -969,6 +1061,42 @@ mod tests {
                 assert_eq!(spec.height_px(), u32::from(resolution.height_px(view)));
             }
         }
+    }
+
+    /// Each banding covers every row once, in jobs of at most a band's rows, and a mirrored job's
+    /// two halves are each other's reflection in the plane, for the four served heights and odd
+    /// ones.
+    #[test]
+    fn a_banding_covers_every_row_once_in_jobs_of_a_band_at_most() {
+        for height in [64, 128, 256, 512, 1, 2, 15, 17, 33] {
+            for banding in [Banding::Consecutive, Banding::Mirrored] {
+                let jobs = banding.jobs(height);
+                let mut rows: Vec<u32> = jobs.iter().flatten().flat_map(Clone::clone).collect();
+                for job in &jobs {
+                    let size: u32 = job.iter().map(|rows| rows.end - rows.start).sum();
+                    assert!(
+                        size >= 1 && size <= u32::from(BAND_ROWS),
+                        "{banding:?}: {job:?}"
+                    );
+                    if let [top, mirror] = job.as_slice() {
+                        assert_eq!(banding, Banding::Mirrored);
+                        assert_eq!(
+                            (mirror.start, mirror.end),
+                            (height - top.end, height - top.start)
+                        );
+                    }
+                }
+                rows.sort_unstable();
+                assert_eq!(
+                    rows,
+                    (0..height).collect::<Vec<_>>(),
+                    "{banding:?} of {height}"
+                );
+            }
+        }
+        assert_eq!(Banding::Mirrored.jobs(64)[0], [0..8, 56..64]);
+        let second = &Banding::Consecutive.jobs(64)[1];
+        assert_eq!((second.len(), &second[0]), (1, &(16..32)));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1178,6 +1306,100 @@ mod tests {
             assert!(part < whole, "{part} of {whole}");
         }
         pool.shutdown().await.unwrap();
+    }
+
+    /// FNV-1a digests of a map: of its raw log₁₀ values, bit for bit, and of its 16-bit codes.
+    fn digests(map: &RawDensityMap, view: MapView) -> [u64; 2] {
+        let quantised = quantise_map(map, view, CodeDepth::Sixteen);
+        let codes: Vec<f64> = codes(&quantised).into_iter().map(f64::from).collect();
+        [golden::f32_digest(map.log10()), golden::f64_digest(&codes)]
+    }
+
+    /// A 128-pixel map's view, population and its two [`digests`].
+    type Pinned = (MapView, MapPopulation, [u64; 2]);
+
+    /// The maps of `pinned`, computed over `galaxy`, whose digests are not theirs, each as the
+    /// line that would pin it, labelled `label`.
+    async fn moved(galaxy: fn() -> &'static Galaxy, label: &str, pinned: &[Pinned]) -> Vec<String> {
+        let (pool, service) = service_of(galaxy, 4);
+        let mut moved = Vec::new();
+        for &(view, population, expected) in pinned {
+            let map = get(&service, key(view, population)).await;
+            let actual = digests(&map, view);
+            if actual != expected {
+                let [raw, quantised] = actual;
+                moved.push(format!(
+                    "{label}: (MapView::{view:?}, MapPopulation::{population:?}, \
+                     [{raw:#018x}, {quantised:#018x}])"
+                ));
+            }
+        }
+        pool.shutdown().await.unwrap();
+        moved
+    }
+
+    /// The remnants maps under every 26 hold, face-on and edge-on, are the bits they were before
+    /// the edge-on view shared its work along a column (lane `perf-remnants-map`, 2026-11-01): the
+    /// digests are BASE's, the tree the work started from.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn under_every_26_hold_the_remnants_maps_are_the_pinned_ones() {
+        let moved = moved(
+            galaxy_26,
+            "26",
+            &[
+                (
+                    MapView::FaceOn,
+                    MapPopulation::LayerERemnants,
+                    [0x3b6f_683d_3cbd_a1d5, 0xb1b0_b81f_d034_e275],
+                ),
+                (
+                    MapView::EdgeOn,
+                    MapPopulation::LayerERemnants,
+                    [0x0a50_fe54_7f36_f41d, 0x6799_ea1b_0e8f_363d],
+                ),
+            ],
+        )
+        .await;
+        assert!(moved.is_empty(), "moved:\n{}", moved.join("\n"));
+    }
+
+    /// Every other map is unchanged at 24, 25 and 26 by the remnants map's work: each population's
+    /// digests, both views, are BASE's (lane `perf-remnants-map`, 2026-11-01).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_other_maps_are_the_pinned_ones_at_24_25_and_26() {
+        let all_and_young = |pinned: [[u64; 2]; 4]| -> Vec<Pinned> {
+            let maps = [
+                (MapView::FaceOn, MapPopulation::All),
+                (MapView::FaceOn, MapPopulation::Young),
+                (MapView::EdgeOn, MapPopulation::All),
+                (MapView::EdgeOn, MapPopulation::Young),
+            ];
+            maps.into_iter()
+                .zip(pinned)
+                .map(|((view, population), digests)| (view, population, digests))
+                .collect()
+        };
+        // Below 26 no galaxy holds a displaced class, so 25's maps are 24's.
+        let below_26 = [
+            [0x31c9_7d61_e64d_0d29, 0x64fa_9e3d_d5db_a22d],
+            [0xef3d_9fe4_612e_40d5, 0x6b9f_b6d2_2aed_b53d],
+            [0xf4c1_3223_4e85_876d, 0x6e9a_cc3b_6743_3be5],
+            [0xfe6a_8b36_1b2e_f78d, 0xc1e1_63a7_f9d9_3cd5],
+        ];
+        let at_24 = all_and_young(below_26);
+        let at_25 = all_and_young(below_26);
+        // The edge-on view keeps the field's picture for every system and the young disc (lean,
+        // 2026-10-31), so only the face-on maps move at 26.
+        let at_26 = all_and_young([
+            [0xa9bc_4b81_9c4c_0e69, 0x2632_c5fa_440b_f29d],
+            [0x7db4_7b9a_586a_03ad, 0x6b9f_b6d2_2aed_b53d],
+            below_26[2],
+            below_26[3],
+        ]);
+        let mut all = moved(galaxy_24, "24", &at_24).await;
+        all.extend(moved(galaxy_25, "25", &at_25).await);
+        all.extend(moved(galaxy_26, "26", &at_26).await);
+        assert!(all.is_empty(), "moved:\n{}", all.join("\n"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

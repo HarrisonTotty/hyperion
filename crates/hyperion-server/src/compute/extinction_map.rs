@@ -20,7 +20,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::map::render_extinction_rows;
 use hyperion_sim::galaxy::map::{MapSelection, MapSpec};
 
-use super::density_map::{render_bands, spec_view};
+use super::density_map::{Banding, each_range, render_bands, spec_view};
 use super::{ComputeError, CpuPool, GalaxyCache, GalaxyKey, MapResolution, RawMap, SingleFlight};
 use crate::cache::{LruCounters, SharedByteLru};
 
@@ -184,7 +184,12 @@ async fn render(
         key.spec(),
         key.resolution(),
         key.view(),
-        |galaxy, spec, rows, values| render_extinction_rows(galaxy.gas(), spec, rows, values),
+        Banding::Consecutive,
+        |galaxy, spec, ranges, values| {
+            each_range(ranges, values, |rows, part| {
+                render_extinction_rows(galaxy.gas(), spec, rows, part);
+            });
+        },
     )
     .await
 }

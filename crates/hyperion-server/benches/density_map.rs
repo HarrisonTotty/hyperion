@@ -75,9 +75,34 @@
 //! pool is answered in 44 µs (median of 20; 152 µs at worst) at a load of 10 and 76 to 90 µs at a
 //! load of 22, against a target of 50 ms: **met by hundreds of times**, which is design note 21
 //! working — a band never runs on the runtime.
+//!
+//! # The remnants map under every 26 hold, measured 2026-11-01
+//!
+//! `remnants_26` builds the fixture galaxy at generator version 26, the first whose galaxies hold
+//! plan 08's displaced classes, and renders its layer-E remnants map on the pool as the service
+//! bands it (P08.T15.b; lane `perf-remnants-map`). Release profile, on a pod's 16 vCPU (an EPYC
+//! 7571) with `HYPERION_WORKERS=16`. "Before" is the base tree, banded in 16 consecutive rows,
+//! timed by a harness that rendered the same bands on 16 threads; "after" is Criterion's median,
+//! and the harness's for the two largest maps:
+//!
+//! | Raster | Before | After | CPU-ms a pixel |
+//! | --- | --- | --- | --- |
+//! | 128 face-on | 0.11 s | 0.110 s | 0.051, unchanged |
+//! | 256 face-on | 0.22 s | 0.226 s | 0.051, unchanged |
+//! | 128 edge-on | 108 s | 3.33 s | 52.8 → 1.55 |
+//! | 256 edge-on | 201 s | 6.41 s | 48.9 → 1.50 |
+//! | 512 edge-on | 408 s | 14.5 s | 49.2 → 1.58 |
+//! | 1,024 edge-on | some 27 min, from 512's | 50 to 55 s | 1.50 to 1.54 |
+//!
+//! An edge-on map of 128 or 256 pixels is 4 or 8 jobs, so only that many workers run it. Its cost
+//! was each class's two-dimensional quadrature at every pixel; the band now shares what its pixels
+//! have in common, bit for bit (`galaxy/map/class_columns.rs` in the sim). On 15 workers, a
+//! 16-thread host's default, the 1,024-pixel map's 32 jobs take three rounds: 72.6 s.
 
+use std::env::VarError;
 use std::hint::black_box;
 use std::num::NonZeroUsize;
+use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -85,11 +110,15 @@ use std::time::Duration;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use hyperion_protocol::{MapPopulation, MapView};
 use hyperion_server::compute::{
-    CodeDepth, CpuPool, DensityMapService, GalaxyCache, GalaxyKey, MapKey, MapResolution,
-    RawDensityMap, quantise_map,
+    CancelToken, CodeDepth, CpuPool, DensityMapService, GalaxyCache, GalaxyKey, MapKey,
+    MapResolution, Priority, RawDensityMap, quantise_map,
 };
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
-use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::imf::MassFunctionKind;
+use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView as SpecView, render_row_ranges};
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 use tokio::runtime::{Builder, Runtime};
 
 /// The seed of every galaxy these benchmarks map: the plan's fixture universe.
@@ -191,8 +220,9 @@ fn measurement_time(view: MapView, population: MapPopulation, workers: NonZeroUs
         (MapView::FaceOn, MapPopulation::All, 1) => 90,
         (MapView::FaceOn, MapPopulation::All, _) => 30,
         // 37 ms and 117 ms: a young-only map integrates the young thin disc alone. The remnants
-        // map is not measured: it is empty below generator version 26, which holds no displaced
-        // class, and the benchmark builds the version in force (plan 08, P08.T15.b).
+        // map is not measured here: it is empty below generator version 26, which holds no
+        // displaced class, and the service builds the version in force; `remnants_26` measures it
+        // under every 26 hold (plan 08, P08.T15.b).
         (MapView::FaceOn, MapPopulation::Young, _) | (_, MapPopulation::LayerERemnants, _) => 10,
         // About 13 s on eight workers and 53 s on one: 0.40 ms a pixel over 131,072, plan 02's
         // line-of-sight integral per spheroid component.
@@ -203,6 +233,147 @@ fn measurement_time(view: MapView, population: MapPopulation, workers: NonZeroUs
         (MapView::EdgeOn, MapPopulation::Young, _) => 20,
     };
     Duration::from_secs(seconds)
+}
+
+/// The layer-E remnants map under every 26 hold (plan 08, P08.T15.b), built cold face-on and
+/// edge-on at 128 and 256 pixels on the pool [`remnants_workers`] gives.
+///
+/// The service builds its galaxies at the generator version in force, and below 26 no galaxy holds
+/// a displaced class, so its map would be empty: this group builds the fixture galaxy at 26 and
+/// renders it on the pool as the service does ([`remnants_map`]).
+fn remnants_26(c: &mut Criterion) {
+    let runtime = runtime();
+    let seed = Seed::new(SEED);
+    let galaxy = Arc::new(
+        Galaxy::from_params_at_version(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            GeneratorVersion::new(26),
+        )
+        .expect("the fixture galaxy builds under every 26 hold"),
+    );
+    let workers = remnants_workers();
+    let pool = CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
+        .expect("the pool starts");
+    let mut group = c.benchmark_group("remnants_26");
+    // An edge-on build is seconds long, so a sample is one iteration, as in `map_512`.
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_secs(1));
+    for view in [MapView::FaceOn, MapView::EdgeOn] {
+        for resolution in [MapResolution::Px128, MapResolution::Px256] {
+            // Room for ten builds from the module docs' costs: about 0.3 s face-on at 256 pixels,
+            // and edge-on 3.3 and 6.4 s, whose 4 and 8 bands keep that many workers busy.
+            let seconds = match (view, resolution) {
+                (MapView::FaceOn, _) => 10,
+                (MapView::EdgeOn, MapResolution::Px128) => 40,
+                (MapView::EdgeOn, _) => 80,
+            };
+            group.measurement_time(Duration::from_secs(seconds));
+            group.bench_function(
+                format!(
+                    "{} {} px ({workers} workers)",
+                    view_label(view),
+                    resolution.width_px()
+                ),
+                |b| b.iter(|| runtime.block_on(remnants_map(&pool, &galaxy, view, resolution))),
+            );
+        }
+    }
+    runtime
+        .block_on(pool.shutdown())
+        .expect("the pool shuts down");
+    group.finish();
+}
+
+/// The remnants map of `galaxy` seen in `view` at `resolution`, rendered on `pool` as the
+/// service's `render_bands` renders a map, each band one bulk job: face-on in bands of 16
+/// consecutive rows, edge-on in half-bands of 8 rows from the top each with its mirror in the plane
+/// from the bottom, whose displaced classes share their lines of sight ([`render_row_ranges`]).
+///
+/// It returns the bands' values in the order they were asked for, unassembled: the assembly is a
+/// copy, and nothing here reads the map.
+async fn remnants_map(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    view: MapView,
+    resolution: MapResolution,
+) -> Vec<Vec<f64>> {
+    let (width, height) = (
+        u32::from(resolution.width_px()),
+        u32::from(resolution.height_px(view)),
+    );
+    let spec_view = match view {
+        MapView::FaceOn => SpecView::FaceOn,
+        MapView::EdgeOn => SpecView::EdgeOn,
+    };
+    let spec = MapSpec::new(
+        spec_view,
+        MapSelection::LayerERemnants,
+        [width, height],
+        [0.0, 0.0],
+        resolution.ly_per_px(),
+    )
+    .expect("the map spans the root cube exactly");
+    let mut jobs: Vec<Vec<Range<u32>>> = Vec::new();
+    let mut first = 0;
+    match view {
+        MapView::FaceOn => {
+            while first < height {
+                let end = (first + 16).min(height);
+                jobs.push(std::iter::once(first..end).collect());
+                first = end;
+            }
+        }
+        MapView::EdgeOn => {
+            while first < height / 2 {
+                let end = (first + 8).min(height / 2);
+                jobs.push(vec![first..end, height - end..height - first]);
+                first = end;
+            }
+        }
+    }
+    let mut bands = Vec::with_capacity(jobs.len());
+    for ranges in jobs {
+        let galaxy = Arc::clone(galaxy);
+        bands.push(
+            pool.submit(Priority::Bulk, CancelToken::new(), move |_| {
+                let mut values = Vec::new();
+                render_row_ranges(galaxy.fields(), &spec, &ranges, &mut values);
+                values
+            })
+            .await
+            .expect("the pool takes the band"),
+        );
+    }
+    let mut values = Vec::with_capacity(bands.len());
+    for band in bands {
+        values.push(
+            band.await
+                .expect("the pool answers the band")
+                .expect("the band renders"),
+        );
+    }
+    values
+}
+
+/// The remnants group's workers: `HYPERION_WORKERS` where it is set, the server's own variable for
+/// its pool's width, so that a run can take the CPU quota a pod has and its thread count does not
+/// show; otherwise every worker the host has.
+///
+/// # Panics
+///
+/// If the variable is set to anything but a positive count, or is not Unicode.
+fn remnants_workers() -> NonZeroUsize {
+    match std::env::var("HYPERION_WORKERS") {
+        Ok(text) => text.parse().unwrap_or_else(|error| {
+            panic!("HYPERION_WORKERS={text}: not a positive count ({error})")
+        }),
+        Err(VarError::NotPresent) => all_workers(),
+        Err(VarError::NotUnicode(text)) => {
+            panic!("HYPERION_WORKERS={} is not Unicode", text.display())
+        }
+    }
 }
 
 /// One response's quantisation and base64 of a 512-pixel face-on map, at both depths.
@@ -257,5 +428,11 @@ fn population_label(population: MapPopulation) -> &'static str {
     }
 }
 
-criterion_group!(density_map, map_512, quantise_512, quantise_1024);
+criterion_group!(
+    density_map,
+    map_512,
+    remnants_26,
+    quantise_512,
+    quantise_1024
+);
 criterion_main!(density_map);
