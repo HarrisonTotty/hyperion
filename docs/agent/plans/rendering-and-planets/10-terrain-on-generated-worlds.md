@@ -2721,6 +2721,23 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
       `TEST EARTH` at 51 Mm shows beyond the limb's casing.
   - _Built 2026-10-27_ (Risks, "Deviations in T16.g, as built").
 
+- **R10.T16.h The drawn ground never collapses to a coarse ancestor** (new, 2026-11-01, the
+  owner's priority: "terrain pops in with very distinct chunks"; research-terrain-seamless's
+  brief 1). Records:
+  [10-terrain-on-generated-worlds/records/R10.T16.h.md](10-terrain-on-generated-worlds/records/R10.T16.h.md).
+  - **The rule.** An arrival never evicts the selection's chain; a missing selected patch is drawn
+    by its nearest resident ancestor over its own area alone (a sub-patch instance on the
+    ancestor's surface), its resident siblings drawn as themselves; the motion margin's ground does
+    not feed back into the next selection.
+  - **Files.** `view/terrain/cache.ts`, `terrainPass.ts`, `coarseFineHolds.ts`, `gpu/uniforms.ts`
+    (`subPatchWord`, the record's `sub`), `shaders/terrainPatch.wgsl` (`sourceGridOf`,
+    `surfacePointAt`), `gpu/vertexEmulation.ts`, and the probe, `seamlessProbe.wasm.test.ts` with
+    `seamlessSummary.ts`.
+  - **Acceptance.** The probe under `HYPERION_SLOW_TESTS=1` (TERRAIN TEST, 3 workers × 41 ms, both
+    settings): no collapse, no change of 3 levels or more, no selected patch evicted, a coarsen's
+    level part at most 10 px.
+  - _Built 2026-11-01_.
+
 ### R10.T11 The wireframe's terrain
 
 Records: [10-terrain-on-generated-worlds/records/R10.T11.md](10-terrain-on-generated-worlds/records/R10.T11.md).
