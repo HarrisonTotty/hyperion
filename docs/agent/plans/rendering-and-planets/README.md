@@ -91,6 +91,10 @@ nothing else waits on Phase C except R12's main-screen run.
 | RM6       | R11–R12 | Decoration, authoritative rocks, clouds, oceans with glint, rings close to, still images; the budget measured on both GPUs, the ladder adjusted and every low setting audited                                                                                                                                                                                                                                       |
 | RM8       | R14     | Added 2026-11-01 at the owner's request, beside RM6. One GPU-driven cluster path for every 3D model, terrain first and Apple Silicon first: clusters culled and chosen by projected error on the GPU for every pass and drawn by indirect buckets, a visibility buffer, measured-error strides and occlusion, mesh pages streamed into one pool; heights, selection and the collision ground unchanged              |
 
+RM8 is done when R14's Verification holds with the owner's Mac and RTX figures recorded, or when the
+owner signs off where `diag-frame-cost` moves the fps target; its T5 closes only after RM6's content
+(R11's rocks and particles), its consumers.
+
 ## Target hardware
 
 The owner ruled on 2026-09-30 that the development machine is HYPERION's recommended specification
@@ -115,6 +119,13 @@ project had no discrete GPU; both are corrected here and in the plans.
   generation, an i7-8665U with its Intel UHD Graphics 620 (Whiskey Lake-U GT2, Gen9.5) and 16 GB of
   LPDDR3 shared by the CPU and the GPU, on Mesa's ANV (R12 Design note 11 and "What exists today").
   The owner tests it by hand, later.
+- **The owner's Mac** (added 2026-11-01 for [R14](14-virtualized-geometry.md); by hand): an Apple
+  Silicon M-class Mac, Metal through WebGPU in Electron. Its chip and GPU cores, unified memory,
+  macOS, display and device-pixel ratio and Electron version are recorded here before R14.T1's
+  first owner run, and each Mac record names this entry. The owner's report (2026-11-01): a planet
+  with terrain and atmosphere at 1 fps or lower; the target 30 fps on high and 60 on low at
+  1920 × 1080 (`diag-frame-cost`, R14), a miss being a finding. Its memory ceiling is the discrete
+  target's until measured (a lean). No machine runs Windows (D3D12): it is held to builds and lints.
 
 By-hand GPU checks (the three canvases, the soaks, the adapter, the benchmarks, the discrete
 descent and R12's discrete runs) run on the development machine wherever they are not specific to
