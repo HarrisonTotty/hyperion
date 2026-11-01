@@ -943,7 +943,7 @@ gen-surface: (_wasm-preflight "bindgen")
     # the module the manifest's two crate types built, byte for byte: cargo runs the release
     # profile's thin LTO only on a unit that is not also a `lib` (alone, the module was 145,093 B
     # against 137,969 B, 2026-10-10).
-    cargo rustc -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release --crate-type lib,cdylib
+    cargo rustc -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release --crate-type lib,cdylib -- -C target-feature=+simd128
     target="${CARGO_TARGET_DIR:-target}"
     out=apps/hyperion/src/renderer/src/generated/surface
     # Generated beside the module and swapped in only when it differs, so that an unchanged module
