@@ -24509,6 +24509,14 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     code: Multiple scattering: computed beyond its checked range, the brightest star low over the
     local horizontal)." The routed views it clears though their gate misses gain titan-class's
     three exceptions.
+  - _The look_: the atmosphere run's tour captures `TEST TITAN` again from its limb
+    (`atmosphereCheckRun.ts`'s `TITAN_LIMB_RANGE_M`, 9 × 10⁶ m, `fixture-test-titan-9000-km`).
+    Not built: a capture from the ground at a sun 10° up, since the tour flies only along lines to
+    a body's centre and ends within 5% of the range (some 130 km at Titan's ground); the label is
+    held by the cache's tests.
+  - _Not built_: the pool's arrival in `bake.bench.ts`. Real workers in vitest need
+    `node:worker_threads`, which R04.T10.c bars from renderer code; the in-process worker runs
+    serially. Measured by a scratch probe (the lane's outbox).
   - _Pending, the owner's runs_: a routed Titan's RTX frame (part 1 with
     `--smoke-gpu-timing=1 --smoke-thick-read=1`) and the UHD 620 host's arrival.
 - **The composite over the air's area, as built** (2026-11-01; lane `r08-t16a2`, chained; main's

@@ -38,6 +38,7 @@ import {
   recordAtmosphereCheck,
   runAtmosphereCheck,
   stageRangesM,
+  TITAN_LIMB_RANGE_M,
 } from "./atmosphereCheckRun";
 import { STOPPED } from "./viewsCheckRun";
 import type { WindowFigures } from "./viewsProbe";
@@ -93,6 +94,10 @@ describe("the atmosphere run's captures' labels", () => {
     ]);
   });
 
+  it("name TEST TITAN's limb capture by its range (R08.T14.d.4)", () => {
+    expect(rangeCaptureLabel("TEST TITAN", TITAN_LIMB_RANGE_M)).toBe("fixture-test-titan-9000-km");
+  });
+
   it("refuse a range of no whole kilometres", () => {
     expect(() => rangeCaptureLabel("TEST JUPITER", 1.5e8 + 1)).toThrow("makes no capture label");
   });
@@ -107,7 +112,7 @@ describe("the atmosphere run's tour", () => {
   const legs = atmosphereLegs(atmosphereSeatM(), ATMOSPHERE_TOUR);
   const captured = legs.flatMap((leg) => (leg.capture === null ? [] : [leg.capture]));
 
-  it("captures every air fixture but the giant once, each at its goal's range, and TEST JUPITER at each of its ranges", () => {
+  it("captures every air fixture but the giant once, each at its goal's range, TEST TITAN again from its limb, and TEST JUPITER at each of its ranges", () => {
     expect(captured.map((each) => [each.label, each.rangeM] as const).toSorted(byLabel)).toEqual(
       [
         ...ATMOSPHERE_FIXTURES.filter(({ designation }) => designation !== "TEST JUPITER").map(
@@ -117,6 +122,7 @@ describe("the atmosphere run's tour", () => {
               ATMOSPHERE_GOAL_RADII * fixture.figure.equatorialRadiusM,
             ] as const,
         ),
+        [rangeCaptureLabel("TEST TITAN", TITAN_LIMB_RANGE_M), TITAN_LIMB_RANGE_M] as const,
         ...JUPITER_CAPTURE_RANGES_M.map(
           (rangeM) => [rangeCaptureLabel("TEST JUPITER", rangeM), rangeM] as const,
         ),
@@ -178,6 +184,7 @@ describe("the atmosphere run's tour", () => {
       ["TEST VENUS", 2],
       ["TEST VENUS 5.80 MPa", 2],
       ["TEST TITAN", 2],
+      ["TEST TITAN", 1],
       ["TEST SATURN NH3 ICE DECK", 1],
       ["TEST JUPITER", 1],
       ["TEST JUPITER", 1],
@@ -187,16 +194,17 @@ describe("the atmosphere run's tour", () => {
     ]);
   });
 
-  it("passes no body but its target within five of its radii, but the planet it climbs from and a body it flies away from", () => {
+  it("passes no body but its target within five of its radii, but the planet it climbs from and a body it leaves", () => {
     const near = legs.flatMap((leg, i) =>
       OBSTACLES.filter(
         (body) =>
           body.designation !== leg.target &&
           !(i === 0 && body.designation === "TEST EARTH") &&
-          // The leg after TEST JUPITER's last capture starts at 2.1 of its radii, flying away.
+          // The legs after TEST TITAN's limb and TEST JUPITER's last capture start at 3.5 and 2.1
+          // of their radii, and close on them by less than a tenth of that as they leave.
           !(
             body.designation === legs[i - 1]?.target &&
-            dot(sub(leg.toM, leg.fromM), sub(leg.fromM, body.centreM)) > 0
+            closestM(leg.fromM, leg.toM, body.centreM) > 0.9 * norm(sub(leg.fromM, body.centreM))
           ) &&
           closestM(leg.fromM, leg.toM, body.centreM) < 5 * body.radiusM,
       ).map((body) => `${leg.target}: ${body.designation}`),

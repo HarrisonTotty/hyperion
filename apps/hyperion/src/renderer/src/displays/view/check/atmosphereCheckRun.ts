@@ -105,7 +105,7 @@ const MOON_DESIGNATION = "TEST MOON";
 /**
  * A step of the tour: to a fixture, to {@link ATMOSPHERE_GOAL_RADII} radii from it, captured
  * there; to a fixture's range, m from its centre, captured there (R08.T16.a.2's giant from 10⁹ m
- * to its limb); or towards a body (a fixture or `TEST MOON`) by a distance, captured nowhere.
+ * to its limb, R08.T14.d.4's Titan-class haze at its limb); or towards a body (a fixture or `TEST MOON`) by a distance, captured nowhere.
  */
 export type AtmosphereTourStep =
   | { readonly kind: "fixture"; readonly designation: string }
@@ -122,13 +122,22 @@ export type AtmosphereTourStep =
 export const JUPITER_CAPTURE_RANGES_M: ReadonlyArray<number> = [9.5e8, 5e8, 2.2e8, 1.5e8];
 
 /**
+ * The range `TEST TITAN` is captured at from its limb, m from its centre (R08.T14.d.4, its haze
+ * routed): 9 × 10⁶, at which the top of its air, 390 km over its 2,574.73 km ground, stands 38.5°
+ * across and its ground 33.2°, so that the haze's limb lies inside the primary's field all round
+ * (60° wide and some 40° high, the low setting's 816 × 517 px).
+ */
+export const TITAN_LIMB_RANGE_M = 9e6;
+
+/**
  * The tour, from the seat on `TEST EARTH`'s night side: a climb of 5 × 10⁷ m, some eight of
  * `TEST EARTH`'s radii, towards `TEST MOON`, about 47° up, so that the camera leaves the ground
  * upwards, since the line from the seat to `TEST EARTH O3 SLAB` runs 30° below the horizon; then
  * each fixture on the scene's legs: `TEST EARTH O3 SLAB` a quarter of the way round the star,
  * seen at about 45° of phase, `TEST MARS`, `TEST SATURN` and R08.T12.b.2's four under cloud or
- * haze, `TEST VENUS`, `TEST VENUS 5.80 MPa`, `TEST TITAN` and `TEST SATURN NH3 ICE DECK`, at about
- * 60°, `TEST JUPITER` at each of {@link JUPITER_CAPTURE_RANGES_M} in turn, and back to
+ * haze, `TEST VENUS`, `TEST VENUS 5.80 MPa`, `TEST TITAN`, then again from its limb
+ * ({@link TITAN_LIMB_RANGE_M}), and `TEST SATURN NH3 ICE DECK`, at about 60°, `TEST JUPITER` at
+ * each of {@link JUPITER_CAPTURE_RANGES_M} in turn, and back to
  * `TEST EARTH`, which so comes on its day side at about 45°.
  */
 export const ATMOSPHERE_TOUR: ReadonlyArray<AtmosphereTourStep> = [
@@ -139,6 +148,7 @@ export const ATMOSPHERE_TOUR: ReadonlyArray<AtmosphereTourStep> = [
   { kind: "fixture", designation: "TEST VENUS" },
   { kind: "fixture", designation: "TEST VENUS 5.80 MPa" },
   { kind: "fixture", designation: "TEST TITAN" },
+  { kind: "range", designation: "TEST TITAN", rangeM: TITAN_LIMB_RANGE_M },
   { kind: "fixture", designation: "TEST SATURN NH3 ICE DECK" },
   ...JUPITER_CAPTURE_RANGES_M.map((rangeM): AtmosphereTourStep => ({
     kind: "range",
