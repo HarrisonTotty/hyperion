@@ -185,12 +185,15 @@ use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, hydrostatic_j2};
+use crate::planetary::moons::eccentricity::EccentricityDampingRules;
 use crate::planetary::moons::regular::{
     DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBeforePasses, MoonBulk, MoonInputs,
     MoonNursery, MoonPasses, MoonRecordOf, MoonShape, MoonSky, MoonTideAt, derive_moon_under,
     moon_before_passes,
 };
-use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius, regular_ice_fraction};
+use crate::planetary::moons::regular::{
+    ICY_MOON_ICE_FRACTION, RegularTides, hosts_regular_moons, moon_radius, regular_ice_fraction,
+};
 use crate::planetary::moons::{
     BeltAdjacency, CaptureKind, MoonParent, MoonParentParts, NearestBelt, ParentKind,
 };
@@ -1263,8 +1266,8 @@ struct SatelliteSite {
     /// The parent's index.
     index: BodyIndex,
     /// The parent as the moon generators and its rings read it ([`parent_at_epoch`]), if it can
-    /// be read.
-    parent: Option<(MoonParent, Option<RingParent>)>,
+    /// be read, with its regular moons' tides from 27 (P14.T55.j.a).
+    parent: Option<(MoonParent, Option<RingParent>, Option<RegularTides>)>,
     /// The belt next to it, which a rocky planet's captures read.
     belt: Option<NearestBelt>,
 }
@@ -1275,7 +1278,7 @@ impl SatelliteSite {
     fn find(&self, seed: Seed, ctx: &SystemContext, frame: SatelliteFrame<'_>) -> Satellites {
         self.parent.as_ref().map_or_else(
             || Satellites::none(self.index),
-            |(moon_parent, ring_parent)| {
+            |(moon_parent, ring_parent, tides)| {
                 satellites_of(
                     seed,
                     self.index,
@@ -1284,6 +1287,7 @@ impl SatelliteSite {
                     self.belt,
                     ctx.age_at_epoch(),
                     frame,
+                    tides.as_ref(),
                 )
             },
         )
@@ -1412,6 +1416,13 @@ fn parent_time(ctx: &SystemContext) -> UniverseTime {
 /// pass gives; its rings' parent reads its effective or equilibrium temperature, the stand-in's,
 /// which for a giant, whose envelope its passes never read their record through, is its record
 /// passes' to the bit (`an_envelope_body_s_passes_over_its_record_are_its_stand_in_s`).
+///
+/// From P14.T55.j.a's hold at 27 ([`EccentricityDampingRules`]) a planet with regular moons
+/// ([`hosts_regular_moons`]) also gives their tides ([`RegularTides`]): the nursery its record's
+/// moons form in ([`nursery`](PlanetarySystem::nursery)'s, at its formation distance), the sky of
+/// this derivation and its class's Love number, at its time, by which its satellites damp their
+/// eccentricities before any moon's orbit is read. `None` below 27, and where one cannot be
+/// built.
 #[must_use]
 fn parent_at_epoch(
     seed: Seed,
@@ -1419,7 +1430,7 @@ fn parent_at_epoch(
     zone: &OrbitZone,
     profile: &DiscProfile,
     body: &Body,
-) -> Option<(MoonParent, Option<RingParent>)> {
+) -> Option<(MoonParent, Option<RingParent>, Option<RegularTides>)> {
     let (placed, kind) = match &body.part {
         Part::Planet(planet) => (planet.placed_body(planet.placed.mass()), ParentKind::Planet),
         Part::Member(member) => (member.member.placed_body(), ParentKind::DwarfPlanet),
@@ -1465,6 +1476,30 @@ fn parent_at_epoch(
             };
             let bulk = DerivedBulk::from(&derived);
             let parent = moon_parent(body, (id, kind), &bulk, &placed, host_mass)?;
+            let damped = EccentricityDampingRules::in_force() == EccentricityDampingRules::Damped;
+            let tides = (damped && hosts_regular_moons(&parent))
+                .then(|| {
+                    Some(RegularTides {
+                        nursery: MoonNursery::new(
+                            &parent,
+                            ctx.composition(),
+                            profile,
+                            placed.formation_distance(),
+                        )
+                        .ok()?,
+                        sky: MoonSky::new(&derived, placed.orbit_now(), &hosts).ok()?,
+                        love_number: crate::planetary::derive::rotation::tides(
+                            derived.class(),
+                            derived.mass(),
+                            derived.radius(),
+                            &derived.fractions(),
+                        )
+                        .0,
+                        age,
+                        t,
+                    })
+                })
+                .flatten();
             let rings = RingParent::new(
                 body.index,
                 derived.class(),
@@ -1476,7 +1511,7 @@ fn parent_at_epoch(
                 derived.flux(),
             )
             .ok();
-            Some((parent, rings))
+            Some((parent, rings, tides))
         }
         // A member's moons read nothing a pass gives (lever (e2)): its bulk before its passes.
         ParentKind::DwarfPlanet => {
@@ -1494,6 +1529,7 @@ fn parent_at_epoch(
             let bulk = before_passes()?;
             Some((
                 moon_parent(body, (id, kind), &bulk, &placed, host_mass)?,
+                None,
                 None,
             ))
         }
@@ -1546,7 +1582,7 @@ pub(crate) fn satellite_parent(
     seed: Seed,
     ctx: &SystemContext,
     body: &Body,
-) -> Option<(MoonParent, Option<RingParent>)> {
+) -> Option<(MoonParent, Option<RingParent>, Option<RegularTides>)> {
     let zones = ctx.zones();
     let zone = zones
         .iter()

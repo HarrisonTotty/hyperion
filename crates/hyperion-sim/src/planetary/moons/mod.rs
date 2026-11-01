@@ -61,6 +61,7 @@ use crate::units::{
     EarthMasses, GravitationalParameter, Kilograms, KilogramsPerCubicMetre, Metres, Radians,
 };
 
+pub mod eccentricity;
 pub mod impact;
 pub mod irregular;
 pub mod regular;

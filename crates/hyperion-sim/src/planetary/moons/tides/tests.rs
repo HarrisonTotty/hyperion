@@ -14,7 +14,7 @@ use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_fl
 use crate::planetary::moons::regular::{MOON_PRIMORDIAL_PERIOD_HOURS, ocean_layers};
 use crate::planetary::params::{ICE_MELTING_VISCOSITY_PA_S, ICE_POISSON_RATIO};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
-use crate::units::{Dex, EarthMasses, Seconds};
+use crate::units::{Dex, EarthMasses, Seconds, Watts};
 
 /// A moon at its measured elements, and what its tides read beyond them.
 #[derive(Debug, Clone, Copy)]
@@ -1487,6 +1487,123 @@ fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
             "{name}: {tides:?}"
         );
         assert!(tides.heat_flow().value().is_finite(), "{name}: {tides:?}");
+    }
+}
+
+/// Saturn's equatorial radius at 1 bar, km (NASA's Saturn fact sheet, from memory), the
+/// reference radius of its astrometric k₂ (Lainey et al. 2017), at which a resonance's budget reads
+/// its tide.
+const SATURN_RADIUS_KM: f64 = 60_268.0;
+
+impl Measured {
+    /// Its tidal heat at the eccentricity `e`, W, under P14.T51.g.b's rules over the solutes of
+    /// [`solved`](Self::solved) at `ammonia`, and its tides there.
+    fn heat_at(&self, e: f64, ammonia: bool) -> (f64, MoonTides) {
+        let at = Measured { e, ..*self };
+        let tides = at.solved(ammonia).0;
+        (at.forcing().value() * tides.loss() * at.area(), tides)
+    }
+
+    /// Its orbit as a resonance's budget reads it.
+    fn resonant_orbit(&self) -> crate::planetary::moons::eccentricity::ResonantOrbit {
+        crate::planetary::moons::eccentricity::ResonantOrbit {
+            mass: self.mass(),
+            a: Metres::new(self.a_km * 1e3),
+            mean_motion_rad_per_s: self.mean_motion(),
+        }
+    }
+}
+
+/// The Sun's age, s.
+fn solar_age() -> Seconds {
+    Seconds::new(SOLAR_AGE.value() * SECONDS_PER_JULIAN_YEAR)
+}
+
+/// P14.T55.j.a: an Enceladus at Enceladus's orbit with a drawn e of 0.0047, in a 2:1 pair with
+/// Dione at its 0.0022, under every 27 hold, takes the pair's scale of both, at which the pair
+/// dissipates no more than its budget at Saturn's locking k₂ ÷ Q (10–20 GW), and keeps its ocean,
+/// in fresh water and in its brine. Recorded: the scale, both eccentricities, their heat and
+/// Enceladus's shell, against the 15.8 ± 3.1 GW of its south polar terrain (Howett et al. 2011,
+/// JGR 116, E03003).
+#[test]
+fn under_every_27_hold_an_enceladus_in_a_pair_with_dione_keeps_an_ocean_at_its_budget() {
+    use crate::planetary::moons::eccentricity::{
+        forced_scale, locking_tidal_response, resonance_budget,
+    };
+    let (enceladus, dione) = (moon("Enceladus"), moon("Dione"));
+    let saturn = (
+        Kilograms::new(SATURN_GM * 1e9 / GRAVITATIONAL_CONSTANT),
+        Metres::new(SATURN_RADIUS_KM * 1e3),
+    );
+    let orbits = [enceladus.resonant_orbit(), dione.resonant_orbit()];
+    let response = locking_tidal_response(saturn.0, saturn.1, &orbits[0], solar_age());
+    let budget = resonance_budget(saturn.1, response, &orbits);
+    assert!((10e9..20e9).contains(&budget.value()), "{budget:?}");
+    for ammonia in [false, true] {
+        let (scale, heat, tides, shell) = with_every_27_hold(|| {
+            let pair = |s: f64| {
+                enceladus.heat_at(s * enceladus.e, ammonia).0
+                    + dione.heat_at(s * dione.e, ammonia).0
+            };
+            let scale = forced_scale(budget, |s| Watts::new(pair(s)));
+            let (_, tides) = enceladus.heat_at(scale * enceladus.e, ammonia);
+            let at = Measured {
+                e: scale * enceladus.e,
+                ..enceladus
+            };
+            let shell = match at.solved(ammonia).1 {
+                Subsurface::Ocean(ocean) => Some(ocean.shell_thickness().value()),
+                _ => None,
+            };
+            (scale, pair(scale), tides, shell)
+        });
+        eprintln!(
+            "Enceladus–Dione ({ammonia}) under every 27 hold: budget {:.2} GW at k2/Q \
+             {response:.3e}; scale {scale:.4}, e {:.5} and {:.5}, the pair at {:.2} GW; Enceladus {:?} under \
+             {shell:?} m",
+            budget.value() / 1e9,
+            scale * enceladus.e,
+            scale * dione.e,
+            heat / 1e9,
+            tides.branch(),
+        );
+        assert!(
+            heat <= budget.value(),
+            "{ammonia}: {heat} W against {budget:?}"
+        );
+        assert!(scale > 0.0 && scale < 1.0, "{ammonia}: {scale}");
+        assert_eq!(tides.branch(), TidalBranch::Ocean, "{ammonia}");
+        assert!(shell.is_some(), "{ammonia}");
+    }
+}
+
+/// P14.T55.j.a: the measured moons' damping times at their measured eccentricities under every 27
+/// hold, recorded and not asserted (the brief): Mimas's about 1 Myr and Dione's about 3 Myr, and
+/// Enceladus's under 1 Myr, each far under the Sun's age, so a held eccentricity is no
+/// equilibrium. Each is finite and positive.
+#[test]
+fn under_every_27_hold_the_measured_moons_damping_times_are_recorded() {
+    use crate::planetary::moons::eccentricity::damping_time;
+    let saturn = Kilograms::new(SATURN_GM * 1e9 / GRAVITATIONAL_CONSTANT);
+    for name in ["Mimas", "Enceladus", "Dione"] {
+        let body = moon(name);
+        let (heat, tides) = with_every_27_hold(|| body.heat_at(body.e, true));
+        let tau = damping_time(
+            saturn,
+            body.mass(),
+            Metres::new(body.a_km * 1e3),
+            body.e,
+            Watts::new(heat),
+        );
+        let myr = tau.value() / SECONDS_PER_JULIAN_YEAR / 1e6;
+        eprintln!(
+            "{name} under every 27 hold at e {}: {:?} at {:.2} GW, τ_e {myr:.3} Myr",
+            body.e,
+            tides.branch(),
+            heat / 1e9
+        );
+        assert!(myr.is_finite() && myr > 0.0, "{name}: {myr}");
+        assert!(tau.value() < solar_age().value(), "{name}: {myr} Myr");
     }
 }
 

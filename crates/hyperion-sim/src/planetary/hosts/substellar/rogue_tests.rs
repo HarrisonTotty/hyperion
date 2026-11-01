@@ -564,7 +564,7 @@ fn uncut_satellites(ctx: &SystemContext, system: &PlanetarySystem) -> Satellites
         parent,
         None,
         (None, ctx.age_at_epoch()),
-        SatelliteFrame::OrbitalPlane,
+        (SatelliteFrame::OrbitalPlane, None),
         None,
     )
 }

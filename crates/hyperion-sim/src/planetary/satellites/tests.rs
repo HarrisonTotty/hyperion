@@ -161,6 +161,7 @@ fn a_moon_in_its_parent_s_body_frame_keeps_its_shape_and_its_tilt_to_the_orbital
                 None,
                 ctx.age_at_epoch(),
                 SatelliteFrame::OrbitalPlane,
+                None,
             );
             for moon in found.moons().iter().chain(unframed.moons()) {
                 let local = moon.local_orbit_at(parent, Years::new(1e9));
@@ -288,6 +289,7 @@ fn a_parent_on_its_side_keeps_its_regular_moons_prograde_about_its_spin() {
             None,
             Years::new(4.5e9),
             SatelliteFrame::Laplace(&frame),
+            None,
         );
         let rl = frame.laplace_radius([]);
         for moon in found.moons() {
@@ -383,6 +385,7 @@ fn a_regular_moon_in_the_band_is_dropped_with_every_regular_moon_beyond_it() {
             None,
             Years::new(4.5e9),
             SatelliteFrame::OrbitalPlane,
+            None,
         );
         let found = satellites_of(
             SEED,
@@ -392,6 +395,7 @@ fn a_regular_moon_in_the_band_is_dropped_with_every_regular_moon_beyond_it() {
             None,
             Years::new(4.5e9),
             SatelliteFrame::Laplace(&frame),
+            None,
         );
         let kept: Vec<u8> = found
             .moons()
@@ -543,6 +547,7 @@ fn pruning_a_moon_moves_no_other_moon_s_volatile_ranks() {
             None,
             age,
             SatelliteFrame::OrbitalPlane,
+            None,
         );
         let Some(first) = free
             .moons()
@@ -570,6 +575,7 @@ fn pruning_a_moon_moves_no_other_moon_s_volatile_ranks() {
             None,
             age,
             SatelliteFrame::OrbitalPlane,
+            None,
         );
         assert!(pruned.moons().len() <= free.moons().len());
         for moon in pruned.moons() {
@@ -610,6 +616,7 @@ fn each_volatile_rank_of_ten_thousand_generated_moons_is_uniform() {
             None,
             age,
             SatelliteFrame::OrbitalPlane,
+            None,
         );
         for moon in found.moons() {
             for (column, (_, rank)) in all.iter_mut().zip(ranks(moon.volatiles())) {

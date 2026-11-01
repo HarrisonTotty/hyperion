@@ -75,7 +75,9 @@ use crate::planetary::context::SystemContext;
 use crate::planetary::derive::atmosphere::VolatileDraws;
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub, LAST_MOON_SUB};
 use crate::planetary::laplace::{self, InnerMoon, LaplaceFrame, LocalLaplace, PoleSense};
-use crate::planetary::moons::regular::{MoonVolatiles, VolatileSite};
+use crate::planetary::moons::regular::{
+    MoonVolatiles, RegularTides, VolatileSite, damped_regular_moons,
+};
 use crate::planetary::moons::{
     CaptureKind, CapturedMoon, ImpactMoon, IrregularPopulation, MoonParent, NearestBelt,
     RegularMoon, captures, giant_impact_moon, regular_moons,
@@ -383,7 +385,7 @@ pub fn generate_satellites(
     belt: Option<NearestBelt>,
 ) -> Satellites {
     match satellite_parent(seed, ctx, planet) {
-        Some((parent, rings)) => satellites_of(
+        Some((parent, rings, tides)) => satellites_of(
             seed,
             planet.index(),
             &parent,
@@ -391,6 +393,7 @@ pub fn generate_satellites(
             belt,
             ctx.age_at_epoch(),
             SatelliteFrame::of(planet.laplace()),
+            tides.as_ref(),
         ),
         None => Satellites::none(planet.index()),
     }
@@ -398,8 +401,13 @@ pub fn generate_satellites(
 
 /// The satellites of `parent`, the body `parent_index`, whose rings (for a giant) read
 /// `ring_parent`, next to `belt`, in a system aged `age_at_epoch` at the epoch, in the planes
-/// `frame` gives: the four steps of the [module](self) documentation.
+/// `frame` gives, its regular moons' eccentricities damped by their tides `tides` where they are
+/// given (P14.T55.j.a, from 27): the four steps of the [module](self) documentation.
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the parent, its rings, its neighbourhood, its age, its frame and its moons' tides"
+)]
 pub(crate) fn satellites_of(
     seed: Seed,
     parent_index: BodyIndex,
@@ -408,6 +416,7 @@ pub(crate) fn satellites_of(
     belt: Option<NearestBelt>,
     age_at_epoch: Years,
     frame: SatelliteFrame<'_>,
+    tides: Option<&RegularTides>,
 ) -> Satellites {
     satellites_inside(
         seed,
@@ -415,7 +424,7 @@ pub(crate) fn satellites_of(
         parent,
         ring_parent,
         (belt, age_at_epoch),
-        frame,
+        (frame, tides),
         None,
     )
 }
@@ -427,6 +436,12 @@ pub(crate) fn satellites_of(
 /// the clock window, its widest. No regular moon is cut, since the regular moons lie inside a
 /// twentieth of the parent's Hill radius, and so the rings, whose gaps their resonances cut, are
 /// the same with or without it.
+///
+/// Where the parent's regular moons' tides `tides` are given (P14.T55.j.a, from generator version
+/// 27), the regular moons kept, after every cut of step 3, take their eccentricities at their
+/// system's age ([`damped_regular_moons`]), each at the ranks it is numbered with, before the
+/// captures are cleared of them: every later reader, its record, positions, events and tides
+/// among them, reads that one eccentricity.
 #[must_use]
 pub(crate) fn satellites_inside(
     seed: Seed,
@@ -434,7 +449,7 @@ pub(crate) fn satellites_inside(
     parent: &MoonParent,
     ring_parent: Option<&RingParent>,
     (belt, age_at_epoch): (Option<NearestBelt>, Years),
-    frame: SatelliteFrame<'_>,
+    (frame, tides): (SatelliteFrame<'_>, Option<&RegularTides>),
     bound: Option<Metres>,
 ) -> Satellites {
     let frame = match frame {
@@ -480,6 +495,22 @@ pub(crate) fn satellites_inside(
         }
         None => regular,
     };
+    // P14.T55.j.a: the eccentricities at their age, of the moons every cut keeps, each derived at
+    // the ranks `numbered` gives it: regular moons are numbered first, and none is cut by `bound`.
+    let system = parent.id().system();
+    let regular = match tides {
+        Some(tides) => damped_regular_moons(&regular, parent, tides, |i, moon| {
+            let n = u8::try_from(i + 1).ok()?;
+            let key = candidate_key(parent_index, &SatelliteMoon::Regular(*moon))
+                .or_else(|| moon_index(parent_index, n))?
+                .body_id(system);
+            Some((
+                crate::planetary::system::radius_rank(seed, key),
+                VolatileDraws::for_body(seed, key),
+            ))
+        }),
+        None => regular,
+    };
 
     // Ruling 83.8: captures other than a Triton-like one clear every other moon.
     let end_age = Years::new(age_at_epoch.value() + CLOCK_WINDOW_H.as_julian_years_f64());
@@ -519,7 +550,6 @@ pub(crate) fn satellites_inside(
                 widest < bound
             })
         });
-    let system = parent.id().system();
     let moons = numbered(seed, parent_index, parent, frame, generated);
 
     let ring_moons: Vec<RingMoon> = regular

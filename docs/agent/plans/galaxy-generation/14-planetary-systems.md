@@ -8838,6 +8838,20 @@ Each is labelled "not yet modelled" where a console could show it:
   damping (decision-p14-moons §5). Its first inputs are P14.T56.d's thin-shell moons
   (decision-p14-t56d-membrane §7.1): a resonance's energy budget caps the heat that a forced
   eccentricity can sustain, and T17.a's forced e is drawn without that damping.
+  - **P14.T55.j.a A moon's eccentricity at its age** (held at 27 with P14.T56.e, which waits on
+    it; both are blessed together):
+    - A forced e only in a 2:1 resonance that holds; any other moon takes its free e.
+    - A free e damped to the largest e ≤ the drawn one at which τ_e = G `M_p` m e² ÷ (a H(e)
+      (1 − e²)) reaches the age, H the moon's own tide solve at e.
+    - A chain's forced e scaled by one s ≤ 1 to its budget B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ Σ Lᵢ
+      (Meyer and Wisdom 2007), at the parent's locking k₂ ÷ Q at the inner moon, capped at
+      k₂ ÷ 100. B ≤ 0: the free rule.
+    - The record, positions, events and tides read the one damped e, with no draw.
+    - _Tests:_ the budget at Q = 18,000 (1.0–1.3 GW); the locking k₂ ÷ Q within 2σ of Lainey
+      et al. 2009 and 2017; Enceladus–Dione 10–20 GW; Enceladus in its pair keeps an ocean; the
+      5,000-moon census under every 27 hold.
+    - _Files:_ `planetary/moons/{eccentricity, regular}.rs`, `planetary/{satellites, system}.rs`.
+    - _Accept:_ `cargo test -p hyperion-sim planetary::moons`.
 - **P14.T55.k** ice shells beyond P14.T51.g's conductive steady state
   (science-p14-subsurface-ocean):
   - stagnant-lid convection, which freezes oceans the conductive shell keeps (Solomatov 1995;
@@ -34009,3 +34023,27 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `planetary/{resources, surface_conditions_published, surface_inputs, system_events}`, every
     `planetary/systems` golden but `eccentric_giant`, `hot_jupiter` and `t_tauri`, and the
     server's `scene_systems`. Measure again under every 27 hold.
+    Restate the Mimas fixture's water at 0.743 in `tides/tests.rs`, its density's at the rock and
+    ice that give Rhea 0.66 and Iapetus 0.81 (3,077 and 945 kg m⁻³, back-solved; check them
+    against ruling 83.7); it moves `planetary/moon_tides*`, which 27 re-blesses anyway.
+- **Deviations in P14.T55.j.a, as built (lane `fix-p14-t56e-heat`, 2026-11-01).** Held at 27
+  (`moons::eccentricity::ECCENTRICITY_DAMPING_VERSION`; `EccentricityDampingRules::{Held, Damped}`,
+  `with_eccentricity_damping`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _New items:_ `moons::eccentricity` (`damping_time`, `locking_tidal_response`,
+    `budget_tidal_response` with `BudgetResponse`, `resonance_budget`, `free_eccentricity`,
+    `forced_scale`, `ResonantOrbit`, `RESONANCE_LEAST_TIDAL_Q`); in `regular`, `RegularTides`,
+    `damped_regular_moons`, `damping` and `TideModel`. `RegularMoon` keeps its drawn free e.
+  - _Signatures:_ `satellites_of` takes `tides: Option<&RegularTides>` and `satellites_inside`
+    `(frame, tides)`; `parent_at_epoch` and `satellite_parent` return the parent's `RegularTides`
+    third, from 27, for a planet with regular moons.
+  - _Where the e is fixed:_ in `satellites_inside`, after every cut (a capture's, the gap's, the
+    Laplace band's), before the captures' clearance. The model is P14.T17.b's stand-in
+    derivation in the parent's nursery and sky at `parent_time`, on the orbit as placed. A rogue
+    planet's moons, not derived, keep their drawn e.
+  - _Leans (2026-11-01):_ a chain of more than two 2:1 moons is one group, its budget the pair's
+    sums, at the inner moon's k₂ ÷ Q; a chain with B ≤ 0 frees its moons' forced e; a free moon
+    that keeps no e goes circular (e = 0); the budget's k₂ ÷ Q is capped at the planet's class
+    k₂ ÷ 100 (research-leans-19).
+  - _The edge:_ a damped moon often sits where its ocean freezes. Derived afresh on its damped
+    orbit (its insolation reads e), 203 of 5,000 take the other branch, yet keep their budget and
+    age to 10⁻⁶. The record's own passes (its law, a kept or lagged bulk) are not the model's.

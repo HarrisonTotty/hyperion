@@ -269,7 +269,9 @@ pub(super) fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
                 &parent,
                 rings.as_ref(),
                 (None, ctx.age_at_epoch()),
-                SatelliteFrame::OrbitalPlane,
+                // A rogue planet's moons are not derived (see the module documentation), so
+                // their eccentricities are drawn (P14.T55.j.a).
+                (SatelliteFrame::OrbitalPlane, None),
                 object.moon_bound(),
             )
         },

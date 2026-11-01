@@ -594,6 +594,10 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   at `CoreShareRules::Host` through `with_core_share`: its draw, ruling 58's floor and the
 ///   window's dry top shifted by its host's Fe/(Mg + Si), and P14.T51.k's factor reading its core
 ///   share about the Sun's ratios.
+/// - a regular moon's eccentricity at its age, `ECCENTRICITY_DAMPING_VERSION` (P14.T55.j.a), at
+///   `EccentricityDampingRules::Damped` through `with_eccentricity_damping`: a forced
+///   eccentricity only in a resonance that holds, at its budget, and a free one damped by its
+///   moon's own heat.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -610,12 +614,16 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
+    use crate::planetary::moons::eccentricity::{
+        EccentricityDampingRules, with_eccentricity_damping,
+    };
     use crate::planetary::moons::tides::{PorousCoreRules, with_porous_core};
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_core_share(CoreShareRules::Host, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
     let run = move || with_porous_core(PorousCoreRules::Porous, run);
+    let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 
