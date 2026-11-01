@@ -1875,38 +1875,18 @@ fn under_the_deck_profile_the_giants_volatile_decks_are_drawn_on_their_columns()
     assert_eq!(checked, 3, "Jupiter's NH₃ and the ice giants' CH₄");
 }
 
-/// The dayside decks (P14.T52.h) are held until the 25 → 26 bump: the rules in force are version
-/// 25's, and the tests' switch reaches 26's.
-#[test]
-fn the_dayside_decks_are_held_only_until_the_26_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < DAYSIDE_DECKS_VERSION,
-        "the 25 → 26 bump clears a hot envelope's dayside above 1 bar (P14.T52.h): delete \
-         `DAYSIDE_DECKS_VERSION`, `DaysideDecksRules` with its `Held` arm and `dayside_level`'s \
-         check of it, the tests' `with_dayside_decks`, its line in `with_every_26_hold` with its \
-         test `the_dayside_decks_hold_is_in_force_inside_26_s_helper_alone`, this test and \
-         `a_panic_inside_the_dayside_decks_switch_sets_the_rules_back`"
-    );
-    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
-    assert_eq!(
-        with_dayside_decks(DaysideDecksRules::Cleared, DaysideDecksRules::in_force),
-        DaysideDecksRules::Cleared
-    );
-    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
-}
-
-/// The switch sets the version's rules back when its closure panics. Native only: on
+/// The switch sets the cut back when its closure panics. Native only: on
 /// wasm32-wasip1 a panic aborts the whole test binary (panic = abort), so `catch_unwind` cannot
 /// catch it, and no rules are left to set back.
 #[test]
 #[cfg(not(target_family = "wasm"))]
 fn a_panic_inside_the_dayside_decks_switch_sets_the_rules_back() {
     let unwound = std::panic::catch_unwind(|| {
-        with_dayside_decks(DaysideDecksRules::Cleared, || panic!("inside the switch"));
+        with_dayside_decks(DaysideDecksRules::Held, || panic!("inside the switch"));
     });
     let payload = unwound.expect_err("the closure panics");
     assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the switch"));
-    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
+    assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Cleared);
 }
 
 /// A hot Jupiter with a hot interior at `T_eq` `t_eq` K and gravity `gravity` m s⁻² (P14.T52.h's

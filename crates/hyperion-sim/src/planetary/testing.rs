@@ -447,9 +447,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
-/// - a hot envelope's dayside above 1 bar, `DAYSIDE_DECKS_VERSION` (P14.T52.h), at
-///   `DaysideDecksRules::Cleared` through `with_dayside_decks`: each refractory, sulphide or salt
-///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
 /// - an envelope's formation draws, `FORMATION_DRAWS_VERSION` (P14.T50.d), at
 ///   `FormationDrawRules::Drawn` through `with_formation_draws`: its enrichment's scatter and its
 ///   solids' share, on its own stream.
@@ -468,7 +465,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
-    use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
@@ -483,7 +479,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
-    let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
@@ -781,25 +776,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 26's dayside decks' switch (P14.T52.h): in force inside 26's helper, held outside it and
-    /// where a test sets it back.
-    #[test]
-    fn the_dayside_decks_hold_is_in_force_inside_26_s_helper_alone() {
-        use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
-        assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
-        assert_eq!(
-            with_every_26_hold(DaysideDecksRules::in_force),
-            DaysideDecksRules::Cleared
-        );
-        assert_eq!(
-            with_every_26_hold(|| {
-                with_dayside_decks(DaysideDecksRules::Held, DaysideDecksRules::in_force)
-            }),
-            DaysideDecksRules::Held
-        );
-        assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
     }
 
     /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it, inside

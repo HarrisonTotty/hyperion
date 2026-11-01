@@ -139,7 +139,7 @@
 //!
 //! ## The dayside
 //!
-//! From generator version 26 (P14.T52.h, behind its hold `DAYSIDE_DECKS_VERSION`), on an
+//! From generator version 26 (P14.T52.h), on an
 //! envelope whose `T_eq` is at or above [`HOT_DAYSIDE_TEMPERATURE`] (950 K), each mode of a
 //! refractory, sulphide or salt deck ([`DeckKind::Refractory`], [`DeckKind::SulphideOrSalt`]) is
 //! published as the dayside holds it: below 1 bar ([`DAYSIDE_LEVEL`]), or below the photosphere
@@ -335,7 +335,6 @@ use crate::units::{
     Dex, EarthMasses, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     Watts, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub mod supercritical;
 #[cfg(test)]
@@ -580,20 +579,12 @@ pub const HOT_DAYSIDE_TEMPERATURE: Kelvin = Kelvin::new(950.0);
 /// temperature". The cut lies here, or at the photosphere where that is deeper.
 pub const DAYSIDE_LEVEL: Pascals = Pascals::new(1.0e5);
 
-/// The generator version from which a hot envelope's dayside is cleared above
-/// [`DAYSIDE_LEVEL`] (P14.T52.h): 26, the planetary bump after 25's (main, 2026-10-30).
-///
-/// Below it [`DaysideDecksRules::in_force`] is [`DaysideDecksRules::Held`]: no mode is cut and
-/// every envelope is version 25's bit for bit. 26's bump deletes this hold,
-/// [`DaysideDecksRules`] with its `Held` arm, the tests' switch, its line in `with_every_26_hold`
-/// and its tripwire (`the_dayside_decks_are_held_only_until_the_26_bump`).
-pub(crate) const DAYSIDE_DECKS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether a hot envelope's dayside is cleared above [`DAYSIDE_LEVEL`] (P14.T52.h's hold,
-/// [`DAYSIDE_DECKS_VERSION`]).
+/// Whether a hot envelope's dayside is cleared above [`DAYSIDE_LEVEL`] (P14.T52.h): cleared, from
+/// generator version 26, and in the tests the global column, their oracle of the cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum DaysideDecksRules {
-    /// Version 25's and before: every mode is its deck's, the global column's.
+    /// Version 25's and before: every mode is its deck's, the global column's, the tests' oracle
+    /// of the cut ([`with_dayside_decks`]).
     Held,
     /// Version 26's: a hot envelope's refractory, sulphide and salt modes are cut at the level
     /// (the [module](self)'s "The dayside").
@@ -601,33 +592,28 @@ pub(crate) enum DaysideDecksRules {
 }
 
 impl DaysideDecksRules {
-    /// The rules this generator version gives: cleared from [`DAYSIDE_DECKS_VERSION`], held below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_dayside_decks`]).
+    /// The rules in force: cleared; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_dayside_decks`]), the held column their oracle.
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = DAYSIDE_DECKS_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= DAYSIDE_DECKS_VERSION {
-            Self::Cleared
-        } else {
-            Self::Held
-        }
+        Self::Cleared
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The dayside decks' rules a test sets on its thread, `None` for the version's.
+    /// The dayside decks' rules a test sets on its thread, `None` for the cut.
     static DAYSIDE_DECKS_RULES: core::cell::Cell<Option<DaysideDecksRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the dayside decks' rules `rules` on this thread, for the tests to reach
-/// 26's dayside ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. An envelope reads the rules as it is derived, so a test derives it inside the switch.
-/// 26's bump deletes it with the hold.
+/// `run`'s result with the dayside decks' rules `rules` on this thread, the tests' oracle of the
+/// cut under [`DaysideDecksRules::Held`]; the cut is set back after, a panic in `run` included. An
+/// envelope reads the rules as it is derived, so a test derives it inside the switch.
 #[cfg(test)]
 pub(crate) fn with_dayside_decks<R>(rules: DaysideDecksRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
