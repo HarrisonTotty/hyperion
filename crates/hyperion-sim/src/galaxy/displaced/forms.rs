@@ -41,7 +41,7 @@ use crate::galaxy::PointLy;
 use crate::galaxy::Population;
 use crate::galaxy::bounds::{ScalarRange, UnimodalFactor};
 use crate::galaxy::fields::arms::{ArmGeometry, ArmPoint, SharpArm};
-use crate::galaxy::fields::disc::ExponentialDisc;
+use crate::galaxy::fields::disc::{ExponentialDisc, radial_exponent};
 use crate::galaxy::fields::{BuildFieldError, Fields, Shape};
 use crate::math;
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
@@ -352,6 +352,15 @@ impl FlaredLayer {
         self.norm * self.shape(r, z)
     }
 
+    /// [`density`](Self::density) at the height `z` (ly) over a radius whose radial envelope
+    /// ([`radial`](Self::radial)) is `radial` and whose scale height
+    /// ([`scale_height`](Self::scale_height)) is `h` (ly), bit for bit: for a quadrature that takes
+    /// many heights over each radius and finds those two once (the map's edge-on view).
+    #[must_use]
+    pub(crate) fn density_from(&self, radial: f64, h: f64, z: f64) -> f64 {
+        self.norm * (radial * self.vertical(h, z))
+    }
+
     /// The normalisation, the inverse of the unnormalised form's integral over the cube, ly⁻³.
     #[must_use]
     pub fn norm(&self) -> f64 {
@@ -630,6 +639,30 @@ impl BallisticLayer {
             Some(arm) => envelope * arm.factor(&at.arm_point(arm.geometry())),
             None => envelope,
         }
+    }
+
+    /// The radius's part of the normalised envelope at the cylindrical radius `r` (ly): the young
+    /// disc's `R ÷ L`, with its hole's `R_h ÷ R`, for [`envelope_from`](Self::envelope_from).
+    #[must_use]
+    pub(crate) fn radial_exponent(&self, r: f64) -> f64 {
+        radial_exponent(r, 1.0 / self.disc.length().value(), self.disc.hole_ly())
+    }
+
+    /// The height's part of the normalised envelope at `z` (ly, either side of the plane): the
+    /// young disc's vertical exponent at the squeezed height, for
+    /// [`envelope_from`](Self::envelope_from).
+    #[must_use]
+    pub(crate) fn height_exponent(&self, z: f64) -> f64 {
+        self.disc.profile().exponent(z * self.squeeze)
+    }
+
+    /// The normalised envelope, [`density`](Self::density) without the arm factor, bit for bit,
+    /// from its radius's part `radial` ([`radial_exponent`](Self::radial_exponent)) and its
+    /// height's `height` ([`height_exponent`](Self::height_exponent)), ly⁻³: for a quadrature that
+    /// takes many heights over each radius and finds each part once (the map's edge-on view).
+    #[must_use]
+    pub(crate) fn envelope_from(&self, radial: f64, height: f64) -> f64 {
+        self.norm * (self.squeeze * (self.disc.n0() * math::exp(-(radial + height))))
     }
 
     /// The normalisation, ly⁻³.
