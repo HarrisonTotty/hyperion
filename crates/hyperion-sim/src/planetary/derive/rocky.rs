@@ -33,13 +33,15 @@
 //!
 //! # About the host's iron (from version 27)
 //!
-//! Rocky planets' iron follows their host's: Plotnykov and Valencia's (2020) host stars'
-//! abundances predict their core mass fractions as 0.32 +0.14 −0.12 (abstract, read), and
-//! Adibekyan et al. (2021, Science 374, 330; not read here) is cited for the same link. From
-//! version 27 (`CORE_SHARE_HOST_VERSION`) the distribution is shifted in logit by its host's iron
-//! ([`CoreShareShift`]): the host's Fe/(Mg + Si), so its \[α/Fe\] and Mg/Si, and not its \[Fe/H\],
-//! sets a rocky body's iron per kilogram of rock. Ruling 58's floor beyond the snow line takes the
-//! same shift, and a host at the Sun's ratios moves no share, to the bit.
+//! A host's rock sets the iron its rocky planets can hold: Plotnykov and Valencia (2020) predict
+//! their planets' core mass fractions from their host stars' abundances as 0.32 +0.14 −0.12,
+//! inside the planets' own wider 0.24 +0.33 −0.18 (abstract, read), and Adibekyan et al. (2021,
+//! Science 374, 330; not read here) is cited for the planets' iron following their hosts'. From
+//! version 27 (`CORE_SHARE_HOST_VERSION`) the population's spread is kept and shifted in logit by
+//! its host's iron ([`CoreShareShift`], lean, 2026-11-01): the host's Fe/(Mg + Si), so its
+//! \[α/Fe\] and Mg/Si, and not its \[Fe/H\], sets a rocky body's iron per kilogram of rock. Ruling
+//! 58's floor beyond the snow line takes the same shift, and a host at the Sun's ratios moves no
+//! share, to the bit.
 
 use crate::math;
 use crate::planetary::chem::solar_magnesium_to_silicon;
@@ -173,8 +175,8 @@ impl CoreShareShift {
     /// The shift of a host of Mg/Si `host_magnesium_to_silicon` (by number) and \[α/Fe\]
     /// `alpha_fe`, under the rules in force: [`NONE`](Self::NONE) below version 27.
     ///
-    /// 0.325 ρ is held inside (0, 1), which only a host whose solids were over 82% iron would
-    /// leave, so the shift is finite for every finite host.
+    /// 0.325 ρ is held inside (0, 1), which only a host of over 3.08 times the Sun's iron
+    /// fraction would leave, so the shift is finite for every finite host.
     #[must_use]
     pub fn of_host(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> Self {
         match CoreShareRules::in_force() {

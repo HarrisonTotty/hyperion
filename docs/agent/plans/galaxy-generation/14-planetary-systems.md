@@ -7548,6 +7548,8 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::crust`.
   - _Built_ 2026-11-01, held at 27 (`MINOR_OXIDES_VERSION`): Risks, "Deviations in P14.T51.k,
     as built".
+  - _Fixed_ 2026-11-01, held at 27 (`CORE_SHARE_HOST_VERSION`): a rocky body's core share answers
+    to its host's iron; Risks, "The core share by the host, as built".
 - **P14.T51.l The passes' superlinear bracketed root** (a later planetary bump, the first after
   24; amends P14.T51.h; after P14.T54.b; decision-p14-t54a-passes §C.5's deferred finding;
   decision-24-cost D4).
@@ -33978,3 +33980,32 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Units (research, 2026-11-01):_ the rows' heading reads `MASS FRACTION OUTER LAYERS`, naming
     the quantity once as `MOLE FRACTION` does; `formatMassFraction` gives `%` from 0.01 %, `ppm`
     from 1 ppm and `ppb` below. `TEMPERATE` stays the class.
+- **The core share by the host, as built (`fix-p14-core-share-host`, 2026-11-01).** P14.T51.k's
+  fix (design note 8, rulings 53 and 58). Held at 27 (`derive::rocky::CORE_SHARE_HOST_VERSION`;
+  `CoreShareRules::{Population, Host}`, `with_core_share`, one line in `with_every_27_hold`;
+  tripwire `the_core_share_is_held_only_until_the_27_bump`). Nothing moves at 24, 25 or 26.
+  - _Δ (lean, 2026-11-01):_ `rocky::CoreShareShift::of_host(Mg/Si, [α/Fe])` = logit(0.325 ρ) −
+    logit(0.325), ρ the host's `bulk_iron_mass_fraction` over the Sun's (its Mg/Si, [α/Fe] 0);
+    `NONE` under `Population`. A shift of exactly 0 returns its input: the Sun's ratios keep bits.
+  - _Its uses:_ the draw logistic(logit(0.24) + Δ + s Φ⁻¹), ruling 58's floor and the window's dry
+    top at `about_host(0.325)`; T51.k's factor at `solar_equivalent(f)`, the mass balance at f.
+  - _Signatures:_ `core_mass_fraction_at`, `core_mass_fraction_rank` and
+    `core_mass_fraction_at_least` (`rocky`) take a `CoreShareShift`;
+    `RadiusWindow::core_share_shift()`; `composition::radius_window_about` (crate), of which
+    `radius_window` is the `NONE` case.
+  - _`FormationHost`_ gains `magnesium_to_silicon: f64` and `alpha_fe: Dex`, from
+    `BodyHosts::with_host_rock` (crate; `new` gives the Sun's): `with_hosts` fills it from
+    `crust_host`, `parent_at_epoch` (now given the seed) from `system::host_rock`, `MoonSky` from
+    its planet's hosts, and `birth_host(composition, Mg/Si, [α/Fe])` from the rogue's own system.
+    `formation_composition` stays at the Sun's ratios.
+  - _Left as it was:_ the solve's Earth-like core (0.325) under water beyond the snow line and an
+    enveloped outcome's are not shifted, though T51.k's factor reads them as about the host.
+  - _For 27's bump:_ delete what the tripwire lists; restate the `Population` halves of the
+    under-27 tests in `rocky`, `crust` and `resources` that name the hold,
+    `under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck`,
+    `under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surface` and the
+    server's `a_crust_s_wire_form_is_pinned`. Re-bless (measured with the hold alone on 24's
+    rules) `frame/body_rotations`, `observe/in_system`, `orbit/drifting_states`,
+    `planetary/{resources, surface_conditions_published, surface_inputs, system_events}`, every
+    `planetary/systems` golden but `eccentric_giant`, `hot_jupiter` and `t_tauri`, and the
+    server's `scene_systems`. Measure again under every 27 hold.

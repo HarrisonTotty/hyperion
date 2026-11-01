@@ -699,7 +699,8 @@ impl<'a> BodyHosts<'a> {
         }
     }
 
-    /// The host's Mg/Si by number, as its bodies' crusts read it ([`with_host_rock`](Self::with_host_rock)).
+    /// The host's Mg/Si by number, as its bodies' crusts read it
+    /// ([`with_host_rock`](Self::with_host_rock)).
     #[must_use]
     pub(crate) const fn host_magnesium_to_silicon(&self) -> f64 {
         self.host_magnesium_to_silicon

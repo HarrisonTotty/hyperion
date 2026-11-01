@@ -471,9 +471,9 @@ impl RadiusWindow {
     }
 
     /// The top of the rocky outcomes (rulings 53 and 58): the pure-rock curve inside the snow
-    /// line, and beyond it the Earth-like curve (at [`dry_top_core_mass_fraction`](Self::dry_top_core_mass_fraction),
-    /// Earth's about the body's host), above which a body formed there keeps Chen and Kipping's
-    /// radius and the water the solve reads in it.
+    /// line, and beyond it the Earth-like curve, at Earth's core mass fraction about the body's
+    /// host ([`dry_top_core_mass_fraction`](Self::dry_top_core_mass_fraction)), above which a
+    /// body formed there keeps Chen and Kipping's radius and the water the solve reads in it.
     #[must_use]
     pub const fn dry_top(&self) -> EarthRadii {
         self.dry_top
@@ -488,7 +488,8 @@ impl RadiusWindow {
     }
 
     /// The shift of the body's host ([`CoreShareShift`]), by which its rocky outcomes' core mass
-    /// fractions are drawn ([`rocky_core_mass_fraction`](crate::planetary::derive::rocky_core_mass_fraction)):
+    /// fractions are drawn
+    /// ([`rocky_core_mass_fraction`](crate::planetary::derive::rocky_core_mass_fraction)):
     /// [`CoreShareShift::NONE`] for a [`radius_window`].
     #[must_use]
     pub const fn core_share_shift(&self) -> CoreShareShift {
