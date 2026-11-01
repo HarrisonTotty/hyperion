@@ -710,11 +710,14 @@ fn profile_free_one_bar(
 }
 
 /// The Bond albedo of the gas envelope `inputs` describes under the light `shade`, its own
-/// column's ([`snapshot_column`], [`column_bond`]); `None` where the closed form gives no column.
+/// column's ([`snapshot_column`], [`column_bond`]); `None` where the closed form gives no column,
+/// or where its column returns no light at all (labelled): an opaque top layer the Eddington
+/// closure holds at R = 0, ω′(4 − 3g′) < 1, as a soot-shrouded sub-Neptune's (τ 17, ω about 0.25),
+/// where the photometry needs a p above 0 and a semi-infinite layer reflects a few per cent.
 #[must_use]
 pub(crate) fn snapshot_bond(inputs: &AtmosphereInputs, shade: &HostShade) -> Option<f64> {
     let bond = column_bond(&snapshot_column(inputs)?, shade);
-    (bond.is_finite() && (0.0..=1.0).contains(&bond)).then_some(bond)
+    (bond.is_finite() && bond > 0.0 && bond <= 1.0).then_some(bond)
 }
 
 /// A mode as the column's assembly reads it: `None` for one with no τ(550).

@@ -2308,3 +2308,39 @@ fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_sate
     }
     assert!(!envelopes.is_empty(), "the census holds gas envelopes");
 }
+
+/// P14.T24.h.b part 5: a soot-shrouded warm sub-Neptune, the sample's 42002cb200000000 body 0300
+/// (soot τ 17 at its top, ω about 0.25, `T_eq` about 720 K), whose own column the Eddington
+/// closure returns no light from, takes the class table's albedo under every 27 hold (within its
+/// passes' fixed point, an early pass's column returning some), and its photometry a p above 0 in
+/// every band.
+#[test]
+fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo() {
+    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
+    let id = crate::id::SystemId::from_raw(0x4200_2cb2_0000_0000).expect("a system's id");
+    let ctx = sample()
+        .iter()
+        .find(|ctx| ctx.id() == id)
+        .expect("the sample's system");
+    let body = |rules| {
+        records_at_27(SEED, ctx, rules)
+            .into_iter()
+            .find(|(index, _)| *index == 0x0300)
+            .map(|(_, record)| record)
+            .expect("its body 0300")
+    };
+    let (own, table) = (
+        body(EnvelopeBondRules::Own),
+        body(EnvelopeBondRules::ClassTable),
+    );
+    let (Section::Ok(a), Section::Ok(b)) = (own.photometry(), table.photometry()) else {
+        panic!("photometry either side")
+    };
+    let (own, table) = (a.bond_albedo().value(), b.bond_albedo().value());
+    assert!(
+        own > 0.0 && (own - table).abs() < 1e-6,
+        "{own} against {table}"
+    );
+    let p = a.geometric_albedo();
+    assert!(p.b > 0.0 && p.v > 0.0 && p.r > 0.0, "{p:?}");
+}

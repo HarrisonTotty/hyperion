@@ -363,7 +363,8 @@ impl LayerGas {
 /// single-scattering albedo `omega` and asymmetry `g`, over black and lit diffusely: the δ-Eddington
 /// two-stream of `area_mix`'s haze layer (Joseph, Wiscombe and Weinman 1976; Meador and Weaver
 /// 1980), its deep limit R = γ₂ ÷ (k + γ₁), T = 0 where k τ′ passes 300 (e^−600 of the light),
-/// which the hyperbolic functions would overflow.
+/// which the hyperbolic functions would overflow. A dark, forward layer, ω′(4 − 3g′) < 1, whose R
+/// would be negative takes R = 0, as `area_mix`'s does (a lower bound: such a layer reflects some).
 #[must_use]
 pub(crate) fn layer_two_stream(tau: f64, omega: f64, g: f64) -> (f64, f64) {
     let f = g * g;
@@ -649,7 +650,7 @@ pub(crate) fn assemble(
 /// rules in force give it: T51.b's class table ([`giant_bond`]) to 26, and from
 /// [`ENVELOPE_BOND_VERSION`] its own column's ([`column::snapshot_bond`]), the class table's where
 /// the closed form gives no column (no internal heat to join an adiabat, an envelope not
-/// hydrogen-dominated, abundances refused; labelled).
+/// hydrogen-dominated, abundances refused) or its column no light (labelled).
 ///
 /// [`giant_bond`]: super::area_mix::giant_bond
 #[must_use]
