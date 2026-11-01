@@ -41,6 +41,14 @@ const DESIGNATION = "H7K 4C0RFZ D-7";
 /** The survey of the slice's Earth as the server records it: its third pass. */
 const RECORDED: InspectionSurvey = { kind: "recorded", body: FIXTURE_EARTH, level: 8, revision: 3 };
 
+/** The survey of the slice's Earth as the server refuses it. */
+const REFUSED: InspectionSurvey = {
+  kind: "refused",
+  body: FIXTURE_EARTH,
+  reason: "no such body",
+  standing: "refused",
+};
+
 /**
  * The slice's Earth's inspection, opened once, as `SYSTEM`'s `VIEW BODY` opens it, its survey
  * `survey` (recorded at once unless given).
@@ -197,9 +205,31 @@ describe("VIEW's body inspection (the owner's request)", () => {
   });
 
   it("asks nothing more of its body's field where its survey is refused", async () => {
-    expect(
-      await fieldHeldBeforeSurvey({ kind: "refused", body: FIXTURE_EARTH, reason: "none" }),
-    ).toEqual([null]);
+    expect(await fieldHeldBeforeSurvey(REFUSED)).toEqual([null]);
+  });
+
+  it("states SURVEY PASS: PENDING on its plate while its survey is out", async () => {
+    await inspecting(earthOpening(surveyed().survey));
+
+    expect(primaryLabelBlock().textContent).toContain("SURVEY PASS: PENDING");
+  });
+
+  it("states its survey's refusal on its plate, with its remedy", async () => {
+    const view = await inspecting(earthOpening(Promise.resolve(REFUSED)));
+    view.advance(300);
+    await settle();
+
+    expect(primaryLabelBlock().textContent).toContain(
+      "SURVEY PASS REJECTED: no such body, reopen with VIEW BODY to retry",
+    );
+  });
+
+  it("states nothing of its survey once it is recorded", async () => {
+    const view = await inspecting();
+    view.advance(300);
+    await settle();
+
+    expect(primaryLabelBlock().textContent).not.toContain("SURVEY PASS");
   });
 
   it("opens exposed for its body, AUTO at its image's first metered value at once", async () => {

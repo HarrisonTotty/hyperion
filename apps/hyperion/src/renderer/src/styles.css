@@ -4594,7 +4594,7 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 /* Pressed on the plate's own --surface-0, a control fills a step above it, not with it. */
-.view-label .control:active {
+.view-label .control:not([aria-disabled="true"]):active {
   background: var(--surface-1);
 }
 

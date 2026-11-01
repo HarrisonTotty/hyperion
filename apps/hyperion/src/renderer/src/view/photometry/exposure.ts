@@ -266,6 +266,32 @@ export type ExposureControl =
 /** A new view's exposure: `MAN` at the default triple. */
 export const DEFAULT_EXPOSURE: ExposureControl = { kind: "manual", triple: DEFAULT_MAN_TRIPLE };
 
+/**
+ * Whether a view that opens at its meter (a kept scene's `startExposure`, the body inspection's;
+ * the owner's request, 2026-11-01) may take `AUTO` over `control`: the display's own default `MAN`,
+ * `AUTO`, or a system inhibit, which returns to `AUTO` by itself; never a level the operator set,
+ * `MAN` entered or `INHIBITED · OPERATOR`, which only `ENABLE` leaves.
+ *
+ * @remarks
+ * The default is told by its identity, {@link DEFAULT_EXPOSURE} itself, so that `MAN` entered at
+ * the default's own value is the operator's.
+ */
+export function yieldsToMeter(control: ExposureControl): boolean {
+  let yields: boolean;
+  switch (control.kind) {
+    case "manual":
+      yields = control === DEFAULT_EXPOSURE;
+      break;
+    case "auto":
+      yields = true;
+      break;
+    case "inhibited":
+      yields = control.reason !== "operator";
+      break;
+  }
+  return yields;
+}
+
 /** An exposure command's outcome: the new control, or why it was refused. */
 export type ExposureCommandResult =
   | { readonly kind: "accepted"; readonly control: ExposureControl }

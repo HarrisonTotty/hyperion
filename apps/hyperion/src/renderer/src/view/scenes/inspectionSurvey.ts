@@ -15,6 +15,7 @@
 
 import type { BodyIdHex, RequestClient } from "@hyperion/protocol";
 
+import { isRefusal } from "../../lib/refusal";
 import { figureLevel, type SurveyAsked, wholeBodySurveyPass } from "../../lib/wholeBodySurvey";
 import type { BodyInspection } from "./inspectionScene";
 
@@ -34,8 +35,10 @@ export type InspectionSurvey =
   | {
       readonly kind: "refused";
       readonly body: BodyIdHex;
-      /** Why: the body's record holds no figure, or the server's refusal. */
+      /** Why: the body's record holds no figure, or the server's own reason. */
       readonly reason: string;
+      /** A refusal of what was asked, or the server's own failure (`lib/refusal.ts`). */
+      readonly standing: "refused" | "fault";
     };
 
 /**
@@ -49,7 +52,12 @@ export async function surveyInspected(
   const { universe, body, time } = inspection;
   const figure = inspection.bodies.bodies.find((each) => each.id === body)?.figure;
   if (figure?.state !== "ok") {
-    return { kind: "refused", body, reason: "its record holds no figure to give its level" };
+    return {
+      kind: "refused",
+      body,
+      reason: "its record holds no figure to give its level",
+      standing: "refused",
+    };
   }
   const level = figureLevel(figure.value);
   const outcome = await requests.request(
@@ -57,5 +65,10 @@ export async function surveyInspected(
   ).outcome;
   return outcome.ok
     ? { kind: "recorded", body, level, revision: outcome.response.revision }
-    : { kind: "refused", body, reason: `${outcome.error.code}: ${outcome.error.message}` };
+    : {
+        kind: "refused",
+        body,
+        reason: outcome.error.message,
+        standing: isRefusal(outcome.error.code) ? "refused" : "fault",
+      };
 }

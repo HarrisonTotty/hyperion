@@ -19,7 +19,12 @@ function opening(sequence: number): InspectionOpening {
   return {
     option: { name: INSPECTION_SCENE_NAME, make: precisionScene },
     sequence,
-    survey: Promise.resolve({ kind: "refused", body: "0200080020000000.0300", reason: "none" }),
+    survey: Promise.resolve({
+      kind: "refused",
+      body: "0200080020000000.0300",
+      reason: "none",
+      standing: "refused",
+    }),
   };
 }
 

@@ -67,6 +67,7 @@ import {
   type ExposureControl,
   exposureLevelReading,
   VIEW_CAMERA,
+  yieldsToMeter,
 } from "../../view/photometry/exposure";
 import {
   cameraKinematics,
@@ -145,6 +146,8 @@ import type { PlacePage } from "./PlaceTabs";
 import { useGroundPage } from "./useGroundPage";
 import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import { useReasonFolds } from "./reasonFolds";
+import { surveyPassStatement } from "./surveyPassStatement";
+import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
 import {
   columnsFit,
   INSTRUMENT_SLOT_REM,
@@ -323,6 +326,9 @@ const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
   "meter",
 ];
 
+/** No statement of a scene's opening. */
+const NO_SCENE_STATEMENTS: ReadonlyArray<LabelStatement> = [];
+
 /** The engine's standing while it is not ready: being made, until an adapter answers. */
 const ACQUIRING: { readonly text: string; readonly standing: StatusStanding } = {
   text: "GRAPHICS ACQUIRING ADAPTER",
@@ -450,6 +456,12 @@ interface ViewStageProps {
   readonly atmosphere: AtmosphereCache | null;
   /** Whether the link to the server is up: the atmosphere cache asks nothing while it is down. */
   readonly linkUp: boolean;
+  /**
+   * What the scene's opening states on the primary's label block besides its own statements: the
+   * body inspection's survey pass while it is out or once refused (`surveyPassStatement`); none
+   * for any other scene.
+   */
+  readonly sceneStatements: ReadonlyArray<LabelStatement>;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -785,6 +797,7 @@ function ViewStage({
   terrain,
   atmosphere,
   linkUp,
+  sceneStatements,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -1156,8 +1169,12 @@ function ViewStage({
       program: VIEW_CAMERA,
       control: inputsRef.current.exposure,
       meter: inputsRef.current.meter,
-      // A kept scene may open exposed for its subject, the body inspection (the owner's request).
-      opensAtMeter: started.kind === "kept" && started.kept.startExposure === "metered",
+      // A kept scene may open exposed for its subject, the body inspection, over any level but one
+      // the operator set (the owner's request).
+      opensAtMeter:
+        started.kind === "kept" &&
+        started.kept.startExposure === "metered" &&
+        yieldsToMeter(inputsRef.current.exposure),
     });
     // What the loop last read of the display's control, and what it last gave the display: an
     // operator's command is a control it reads that it did not give.
@@ -1698,6 +1715,7 @@ function ViewStage({
   const primaryFolds = useReasonFolds();
   const primaryStatements: ReadonlyArray<LabelStatement> = [
     ...labelStatements(shown.run, primaryTerrain),
+    ...sceneStatements,
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
@@ -2536,28 +2554,47 @@ function ViewPanels({
     requests: server === null && served === null ? null : share.atmosphere,
     createWorker: opticsWorkers,
   });
-  // The inspection's survey, once recorded, is told to the session, which asks its body's new cells:
-  // the scene topic's push tells it too, but only while the scene is subscribed and drawn.
+  // The inspection's survey as it ended, held for the opening it was sent at; `null` while it is out.
   const survey = inspection?.survey ?? null;
+  const [settledSurvey, setSettledSurvey] = useState<{
+    readonly survey: Promise<InspectionSurvey>;
+    readonly outcome: InspectionSurvey;
+  } | null>(null);
   useEffect(() => {
-    if (terrain === null || survey === null) {
+    if (survey === null) {
       return undefined;
     }
     let ignore = false;
     survey
       .then((outcome) => {
-        if (!ignore && outcome.kind === "recorded") {
-          terrain.noteSurfaceRevisions([{ body: outcome.body, revision: outcome.revision }]);
+        if (!ignore) {
+          setSettledSurvey({ survey, outcome });
         }
         return undefined;
       })
       .catch((error: unknown) => {
-        console.error("the inspection's survey could not be told to the terrain session:", error);
+        console.error("the inspection's survey could not be taken:", error);
       });
     return () => {
       ignore = true;
     };
-  }, [terrain, survey]);
+  }, [survey]);
+  const surveyOutcome =
+    survey !== null && settledSurvey?.survey === survey ? settledSurvey.outcome : null;
+  // A recorded pass is told to the session, which asks its body's new cells: the scene topic's
+  // push tells it too, but only while the scene is subscribed and drawn.
+  useEffect(() => {
+    if (terrain !== null && surveyOutcome?.kind === "recorded") {
+      terrain.noteSurfaceRevisions([
+        { body: surveyOutcome.body, revision: surveyOutcome.revision },
+      ]);
+    }
+  }, [terrain, surveyOutcome]);
+  // The inspection's plate states its pass while it is out and once it is refused (closed-loop).
+  const surveyStatement =
+    server === null && inspection !== null && option === inspection.option
+      ? surveyPassStatement(surveyOutcome)
+      : null;
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
   useEffect(
     () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),
@@ -2685,6 +2722,7 @@ function ViewPanels({
         terrain={terrain}
         atmosphere={atmosphere}
         linkUp={link.status === "connected"}
+        sceneStatements={surveyStatement === null ? NO_SCENE_STATEMENTS : [surveyStatement]}
       />
     </div>
   );

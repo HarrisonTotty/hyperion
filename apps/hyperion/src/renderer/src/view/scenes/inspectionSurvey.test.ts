@@ -102,7 +102,25 @@ describe("the body inspection's survey (the owner's request)", () => {
     expect(await surveyed).toEqual({
       kind: "refused",
       body: FIXTURE_EARTH,
-      reason: "unknown_body: no such body",
+      reason: "no such body",
+      standing: "refused",
+    });
+  });
+
+  it("gives the server's own failure as a fault", async () => {
+    const { client, socket } = linked();
+    const surveyed = surveyInspected(client, earthInspection(sliceBodies()));
+    const [asked] = socket.requestsOfKind("survey_pass");
+    if (asked === undefined) {
+      throw new Error("the survey was not asked");
+    }
+    socket.serverRejects(asked.id, { code: "storage_failed", message: "disk full", field: null });
+
+    expect(await surveyed).toEqual({
+      kind: "refused",
+      body: FIXTURE_EARTH,
+      reason: "disk full",
+      standing: "fault",
     });
   });
 
@@ -115,6 +133,7 @@ describe("the body inspection's survey (the owner's request)", () => {
       kind: "refused",
       body: FIXTURE_EARTH,
       reason: "its record holds no figure to give its level",
+      standing: "refused",
     });
     expect(socket.requestsOfKind("survey_pass")).toEqual([]);
   });
