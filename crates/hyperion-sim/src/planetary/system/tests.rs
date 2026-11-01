@@ -1500,8 +1500,9 @@ fn check_record_condensates<'a>(
 
 /// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
 /// solid surface has its surface section `Ok`, from `DetailLevel::Surface` and not below, and its
-/// envelope not applicable, or its surface not applicable and its envelope not modelled under a
-/// supercritical envelope (P14.T53.b part 2, whose test the record does not carry:
+/// envelope not applicable, or its surface not applicable and its envelope its model or not
+/// modelled under a supercritical envelope (P14.T53.b part 2 and P14.T53.f, whose test the record
+/// does not carry:
 /// `a_surface_holds_a_solid_state_and_its_conditions_regime` checks it on the derivation); every
 /// other its surface not applicable and its envelope `Ok` or not modelled (P14.T54.b.i's,
 /// `system::envelope`'s tests), so that exactly one of the two applies. Whether the body's class
@@ -1513,7 +1514,11 @@ fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
     let envelope = record.section_state(RecordSection::Envelope);
     let solid = bulk.class().has_solid_surface();
     if solid && surface == SectionState::NotApplicable {
-        assert_eq!(envelope, SectionState::NotModelled, "{index:?}");
+        // From 26 a supercritical envelope's section is its model (P14.T53.f), or not modelled.
+        assert!(
+            matches!(envelope, SectionState::Ok | SectionState::NotModelled),
+            "{index:?}: {envelope:?}"
+        );
         let at = |level| record.degrade(level).section_state(RecordSection::Surface);
         assert_eq!(
             at(DetailLevel::Surface),
@@ -12683,8 +12688,8 @@ const SUPERCRITICAL_MOON: &str = "02001b2ca0000000.0401";
 /// are_stated`), so one is built by hand from the sample's nearest, [`SUPERCRITICAL_MOON`], its
 /// nitrogen rank raised to 1 − 10⁻⁶ in its generated system. Its
 /// record (`satellite_record`) then takes the envelope's tags, its surface not applicable and its
-/// envelope not modelled, under its nitrogen's reservoir above N₂'s critical isochore; at its own
-/// ranks its surface stays.
+/// envelope its model (from 26, P14.T53.f), under its nitrogen's reservoir above N₂'s critical
+/// isochore; at its own ranks its surface stays.
 #[test]
 fn under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_s_tags() {
     use crate::stellar::draws::UnitUniform;
@@ -12735,7 +12740,8 @@ fn under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_
     assert!(raised.label.ends_with("moons"), "{}", raised.label);
     assert!(raised.class.has_solid_surface(), "{}", raised.line());
     assert_eq!(raised.surface, SectionState::NotApplicable);
-    assert_eq!(raised.envelope, SectionState::NotModelled);
+    // From 26 its supercritical envelope is its model (P14.T53.f).
+    assert_eq!(raised.envelope, SectionState::Ok);
     let hidden = raised
         .hidden
         .expect("its nitrogen's reservoir hides the surface");
@@ -12786,9 +12792,10 @@ fn assert_envelope_tags(body: &EnvelopeBody) {
 /// A solid class has its surface `Ok` and its envelope not applicable exactly where no
 /// supercritical envelope hides its surface and its published state is no steam envelope (part 3's
 /// label, the section's whatever the bulk's gravity), and its surface not applicable and its
-/// envelope not modelled where either holds; every other class its surface not applicable and its
-/// envelope `Ok` or not modelled (P14.T54.b.i's envelope, `system::envelope`'s tests; a
-/// supercritical envelope's section stays not modelled at 24, decision-p14-t53b-part3 §5). So no
+/// envelope `Ok` or not modelled where either holds (from 26 a supercritical envelope's section is
+/// its model, P14.T53.f; to 25 it stayed not modelled, decision-p14-t53b-part3 §5); every other
+/// class its surface not applicable and its envelope `Ok` or not modelled (P14.T54.b.i's envelope,
+/// `system::envelope`'s tests). So no
 /// `Ok` surface lies under a supercritical envelope, and exactly one of the two applies. No
 /// derivation's own state is a steam envelope; a hidden surface's reservoir hides it, and its share
 /// is, to the bit, the partition's reservoir's (P14.T53.b part 3).
@@ -12810,7 +12817,11 @@ pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
         if solid && body.hidden.is_none() && !steam {
             (SectionState::Ok, &[SectionState::NotApplicable])
         } else if solid {
-            (SectionState::NotApplicable, &[SectionState::NotModelled])
+            // From 26 a solid body's supercritical envelope is its model (P14.T53.f).
+            (
+                SectionState::NotApplicable,
+                &[SectionState::Ok, SectionState::NotModelled],
+            )
         } else {
             (
                 SectionState::NotApplicable,
