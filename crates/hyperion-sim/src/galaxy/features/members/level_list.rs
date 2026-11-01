@@ -33,12 +33,15 @@
 //! its list. It holds up to `(√(limit + 15) − 4)²` expected members: 7,498.3 at 8,192 and 63,518.8
 //! at 65,536.
 //!
-//! This task registers no class: [`FeatureLevelList::of`] lists none, and the classes' tasks
-//! (P09.T36 and T43) register theirs in [`registered_classes`]. The first class of the order, the
+//! This task registers no class: the classes' tasks register theirs in [`registered_classes`],
+//! P09.T36 the recently dead and the luminous blue variables of a catalogue feature
+//! ([`recent`](super::recent)), held until generator version 26. The first class of the order, the
 //! tidal disruptions' victims (P09.T30.b), is the galactic centre's alone and is listed by the
 //! centre itself, at indices 1 upward after its black hole
 //! ([`events::victims`](crate::galaxy::features::centre::events::victims)), so a class listed on
 //! the centre after them starts past their count.
+
+use std::num::NonZeroU16;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition};
 use crate::galaxy::Galaxy;
@@ -51,6 +54,7 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use super::super::catalogue::FeatureRecord;
 use super::super::interior::ClassProfile;
 use super::MemberRecord;
+use super::recent::{FeatureStars, RecentClass, RecentEntry, recent_classes};
 
 /// The words each class owns on the list's streams: 2³², far beyond any count's draws.
 const CLASS_WORDS: u64 = 1 << 32;
@@ -202,11 +206,12 @@ pub enum MemberZero {
 }
 
 /// The classes registered on `feature`'s list, in list order, with their counts and profiles:
-/// none until P09.T36 and T43 register theirs (the tidal disruptions' victims, P09.T30.b, are on
-/// the galactic centre's list alone, which the centre lists itself).
+/// from generator version 26 its recently dead and its luminous blue variables (P09.T36, P09.T43;
+/// `members::recent`), none before (the tidal disruptions' victims, P09.T30.b, are on the
+/// galactic centre's list alone, which the centre lists itself).
 #[must_use]
-pub fn registered_classes(_galaxy: &Galaxy, _feature: &FeatureRecord) -> Vec<ListClass> {
-    Vec::new()
+pub fn registered_classes(galaxy: &Galaxy, feature: &FeatureRecord) -> Vec<ListClass> {
+    recent_classes(galaxy, feature)
 }
 
 /// A feature's feature-level list (module documentation).
@@ -219,6 +224,10 @@ pub struct FeatureLevelList {
     classes: Vec<ListClass>,
     /// Each class's count after the clamp, in list order.
     counts: Vec<u32>,
+    /// The index of the classes' first entry: 1, or past the galactic centre's victims.
+    first: u32,
+    /// The feature's stars, which draw its recent classes' entries, where it registers any.
+    stars: Option<Box<FeatureStars>>,
 }
 
 impl FeatureLevelList {
@@ -226,14 +235,21 @@ impl FeatureLevelList {
     /// feature has one, and a catalogue feature's 13-bit index.
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Self {
-        Self::with_classes(
-            galaxy,
-            feature.id().object_word(),
-            feature.position(),
-            MemberZero::Absent,
-            ListIndex::Feature,
-            registered_classes(galaxy, feature),
-        )
+        let stars = FeatureStars::listing(galaxy, feature);
+        let classes = stars
+            .as_ref()
+            .map_or_else(Vec::new, |stars| stars.list_classes(galaxy));
+        Self {
+            stars: stars.filter(|_| !classes.is_empty()).map(Box::new),
+            ..Self::with_classes(
+                galaxy,
+                feature.id().object_word(),
+                feature.position(),
+                MemberZero::Absent,
+                ListIndex::Feature,
+                classes,
+            )
+        }
     }
 
     /// The list keyed by the feature word `word` about `centre`, with or without member zero,
@@ -253,6 +269,37 @@ impl FeatureLevelList {
         index: ListIndex,
         classes: Vec<ListClass>,
     ) -> Self {
+        Self::with_classes_from(
+            galaxy,
+            word,
+            centre,
+            member_zero,
+            index,
+            NonZeroU16::MIN,
+            classes,
+        )
+    }
+
+    /// [`with_classes`](Self::with_classes) with the classes' first entry at index `first`: the
+    /// galactic centre's list, whose classes after its victims start past their count (P09.T36.b;
+    /// the victims' record). Indices 1 to `first − 1` are the caller's, and count against the
+    /// index's limit as members.
+    ///
+    /// # Panics
+    ///
+    /// As [`with_classes`](Self::with_classes), the indices below `first` counted with the
+    /// expected members.
+    #[must_use]
+    pub(crate) fn with_classes_from(
+        galaxy: &Galaxy,
+        word: u64,
+        centre: &GalacticPosition,
+        member_zero: MemberZero,
+        index: ListIndex,
+        first: NonZeroU16,
+        classes: Vec<ListClass>,
+    ) -> Self {
+        let first = u32::from(first.get());
         let place = |c: ClassId| {
             FEATURE_LEVEL_LIST_ORDER
                 .iter()
@@ -265,14 +312,14 @@ impl FeatureLevelList {
                 .all(|w| place(w[0].class) < place(w[1].class)),
             "a list's classes must be distinct and in the list order"
         );
-        let expected: f64 = classes.iter().map(|c| c.expected).sum();
+        let expected: f64 = classes.iter().map(|c| c.expected).sum::<f64>() + f64::from(first - 1);
         let limit = index.limit();
         assert!(
             fits_list_index(expected, limit),
             "a feature-level list expecting {expected} members cannot keep eight standard \
              deviations under its {limit} index"
         );
-        let mut room = limit - 1;
+        let mut room = limit - first;
         let counts = classes
             .iter()
             .map(|c| {
@@ -292,6 +339,8 @@ impl FeatureLevelList {
             member_zero,
             classes,
             counts,
+            first,
+            stars: None,
         }
     }
 
@@ -301,16 +350,20 @@ impl FeatureLevelList {
         self.member_zero
     }
 
-    /// The number of indices in use: 1 (index 0, a member or not) plus every class's count.
+    /// The number of indices in use: the classes' first index (index 0, a member or not, and any
+    /// before the classes) plus every class's count.
     #[must_use]
     pub fn len(&self) -> u32 {
-        1 + self.counts.iter().sum::<u32>()
+        self.first + self.counts.iter().sum::<u32>()
     }
 
-    /// Whether the list holds no member at all.
+    /// Whether the list holds no member at all: no member zero, no index before the classes' and
+    /// no class's entry.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.member_zero == MemberZero::Absent && self.counts.iter().all(|&n| n == 0)
+        self.member_zero == MemberZero::Absent
+            && self.first == 1
+            && self.counts.iter().all(|&n| n == 0)
     }
 
     /// The count of `class` on the list, 0 if it is not registered.
@@ -323,11 +376,11 @@ impl FeatureLevelList {
             .map_or(0, |(_, &n)| n)
     }
 
-    /// The entry at `index` of the classes' part, 1 upward, or `None` for index 0 or an index past
-    /// the list.
+    /// The entry at `index` of the classes' part, from its first index upward, or `None` for an
+    /// index before it or past the list.
     #[must_use]
     pub fn entry(&self, index: u16) -> Option<ListEntry> {
-        let mut first = 1_u32;
+        let mut first = self.first;
         let wanted = u32::from(index);
         for (class, &n) in self.classes.iter().zip(&self.counts) {
             if (first..first + n).contains(&wanted) {
@@ -351,7 +404,7 @@ impl FeatureLevelList {
     /// Never: a list's length is clamped at its index's limit, at most 65,536 at the centre, so
     /// each index below it, at most 65,535, fits in `u16`.
     pub fn entries(&self) -> impl Iterator<Item = ListEntry> + '_ {
-        (1..self.len()).filter_map(|i| {
+        (self.first..self.len()).filter_map(|i| {
             self.entry(
                 u16::try_from(i).expect("a list's indices are below its length, 65,536 at most"),
             )
@@ -382,10 +435,31 @@ impl FeatureLevelList {
     }
 
     /// The member at `index`, or `None`: no member zero is generated for a catalogue feature, and
-    /// the classes' members are drawn by the classes' own tasks, which register them.
+    /// an entry of a recent class is its member where the class's test keeps it
+    /// ([`recent_entry`](Self::recent_entry)).
     #[must_use]
-    pub fn member(&self, index: u16) -> Option<MemberRecord> {
-        self.entry(index).and(None)
+    pub fn member(&self, galaxy: &Galaxy, index: u16) -> Option<MemberRecord> {
+        self.recent_entry(galaxy, index)
+            .map(|entry| *entry.member())
+    }
+
+    /// The entry at `index` of a recent class (P09.T36), its member, site and shell, or `None` for
+    /// an index of no such class, past the list, or a candidate the class's test rejects.
+    #[must_use]
+    pub fn recent_entry(&self, galaxy: &Galaxy, index: u16) -> Option<RecentEntry> {
+        let stars = self.stars.as_ref()?;
+        let entry = self.entry(index)?;
+        let class = RecentClass::of(entry.class())?;
+        stars.entry(galaxy, class, index, entry.position())
+    }
+
+    /// Every entry of the recent classes that their tests keep, in index order.
+    pub fn recent_entries<'a>(
+        &'a self,
+        galaxy: &'a Galaxy,
+    ) -> impl Iterator<Item = RecentEntry> + 'a {
+        self.entries()
+            .filter_map(move |entry| self.recent_entry(galaxy, entry.index()))
     }
 }
 
@@ -691,5 +765,76 @@ mod tests {
             last = e.index();
         }
         assert_eq!((n, last), (65_535, u16::MAX));
+    }
+
+    /// A list built from `first` (P09.T36.b), member zero absent.
+    fn list_from(
+        galaxy: &Galaxy,
+        f: &FeatureRecord,
+        first: u16,
+        classes: Vec<ListClass>,
+    ) -> FeatureLevelList {
+        FeatureLevelList::with_classes_from(
+            galaxy,
+            f.id().object_word(),
+            f.position(),
+            MemberZero::Absent,
+            ListIndex::Feature,
+            NonZeroU16::new(first).unwrap(),
+            classes,
+        )
+    }
+
+    /// The classes' first index (P09.T36.b): a list from index 30 draws the counts that a list
+    /// from 1 draws, each class's on its own words, and numbers its entries 29 later; its length
+    /// counts the 29 indices before them, no index below 30 is an entry, and a list from 30 with no
+    /// class is not empty.
+    #[test]
+    fn a_list_from_a_later_first_index_numbers_its_classes_from_there() {
+        let galaxy = galaxy();
+        let f = feature(&galaxy);
+        let classes = || {
+            vec![
+                class(ClassId::CORE_COLLAPSE, 40.0),
+                class(ClassId::TYPE_IA, 5.0),
+            ]
+        };
+        let (from_one, later) = (
+            list(&galaxy, &f, classes()),
+            list_from(&galaxy, &f, 30, classes()),
+        );
+        for c in [ClassId::CORE_COLLAPSE, ClassId::TYPE_IA] {
+            assert_eq!(later.count(c), from_one.count(c), "{c:?}");
+        }
+        assert_eq!(later.len(), from_one.len() + 29);
+        for index in 0..30 {
+            assert_eq!(later.entry(index), None, "{index}");
+        }
+        let shifted: Vec<_> = from_one
+            .entries()
+            .map(|e| (e.index() + 29, e.class(), e.number()))
+            .collect();
+        let entries: Vec<_> = later
+            .entries()
+            .map(|e| (e.index(), e.class(), e.number()))
+            .collect();
+        assert_eq!(entries, shifted);
+        assert!(!later.is_empty());
+        let none = list_from(&galaxy, &f, 30, Vec::new());
+        assert_eq!(none.len(), 30);
+        assert!(!none.is_empty());
+        assert!(list(&galaxy, &f, Vec::new()).is_empty());
+    }
+
+    /// The indices before the first count against the index's limit: 7,000 expected members fit a
+    /// catalogue feature's 8,192 from index 1, and not from index 2,000.
+    #[test]
+    #[should_panic(expected = "eight standard deviations under its 8192 index")]
+    fn the_indices_before_the_first_count_against_the_limit() {
+        let galaxy = galaxy();
+        let f = feature(&galaxy);
+        let classes = || vec![class(ClassId::CORE_COLLAPSE, 7_000.0)];
+        let _ = list(&galaxy, &f, classes());
+        let _ = list_from(&galaxy, &f, 2_000, classes());
     }
 }

@@ -117,13 +117,13 @@ use crate::units::{Dex, HeliumExcess, PerCubicLightYear, Seconds, SolarMasses, Y
 pub mod sampler;
 
 /// The number of the sampler's mass nodes.
-const NODES: usize = LBV_SAMPLER.nodes().len();
+pub(crate) const NODES: usize = LBV_SAMPLER.nodes().len();
 
 /// The ages at the epoch at which a star of the sampler's node `k` may host: from the node's first
 /// age less H to its last plus H + L, the ages at which a window of the node's can overlap the
 /// source horizon.
 #[must_use]
-fn host_ages(k: usize) -> (Years, Years) {
+pub(crate) fn host_ages(k: usize) -> (Years, Years) {
     let node = LBV_SAMPLER.nodes()[k];
     let h = CLOCK_WINDOW_H.as_julian_years_f64();
     let l = LIGHT_CROSSING_L.as_julian_years_f64();

@@ -174,6 +174,49 @@ pub struct DelayTimeDistribution {
     ln_mass_falling: Vec<f64>,
 }
 
+/// The lifetimes of [`DelayTimeDistribution`]'s table: `ln m` and `ln τ` (years) at its 48 nodes
+/// over 0.8–8 M☉, at solar composition and median draws, `τ` falling with `m`.
+#[derive(Debug, Clone, PartialEq)]
+struct LifetimeTable {
+    ln_mass: Vec<f64>,
+    ln_lifetime: Vec<f64>,
+}
+
+impl LifetimeTable {
+    /// The table, 48 stellar lifetimes (some tens of milliseconds).
+    #[must_use]
+    fn new() -> Self {
+        let composition = Composition::SOLAR;
+        let draws = StarDraws::median();
+        let (lo, hi) = (math::ln(LIFETIME_MASSES.0), math::ln(LIFETIME_MASSES.1));
+        let last = LIFETIME_NODES - 1;
+        let ln_mass: Vec<f64> = (0..LIFETIME_NODES)
+            .map(|i| lo + (hi - lo) * index_f64(i) / index_f64(last))
+            .collect();
+        let ln_lifetime: Vec<f64> = ln_mass
+            .iter()
+            .map(|&x| {
+                let m = SolarMasses::new(math::exp(x).min(LIFETIME_MASSES.1));
+                math::ln(lifetime(m, &composition, &draws).value())
+            })
+            .collect();
+        Self {
+            ln_mass,
+            ln_lifetime,
+        }
+    }
+
+    /// The table, built on its first read: a lazy constant, the same bits whoever reads it first,
+    /// since it reads neither a galaxy nor its rules (the sim-determinism skill's exception, as
+    /// `LifetimeBracket::shared`; `the_shared_lifetime_table_is_the_built_one_bit_for_bit`).
+    #[must_use]
+    fn shared() -> &'static Self {
+        static TABLE: std::sync::LazyLock<LifetimeTable> =
+            std::sync::LazyLock::new(LifetimeTable::new);
+        &TABLE
+    }
+}
+
 /// One component's part of the rate.
 #[derive(Debug, Clone, PartialEq)]
 struct ComponentRate {
@@ -185,6 +228,26 @@ struct ComponentRate {
     mean_rate: f64,
     /// `E[Ψ(age − S)]`: Type Ia per solar mass formed that exploded before the interval.
     exploded: f64,
+}
+
+impl ComponentRate {
+    /// The part of `systems` systems of `population` with ages `ages`.
+    #[must_use]
+    fn new(population: Population, systems: f64, ages: AgeDistribution) -> Self {
+        let before = before_interval();
+        let psi = |a: f64| DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(a));
+        let mean_rate = expectation(&ages, MIN_DELAY, psi);
+        let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
+            DelayTimeDistribution::cumulative_per_solar_mass(Years::new(a - before))
+        });
+        Self {
+            population,
+            systems,
+            ages,
+            mean_rate,
+            exploded,
+        }
+    }
 }
 
 impl DelayTimeDistribution {
@@ -276,39 +339,17 @@ impl DelayTimeDistribution {
         galaxy: &Galaxy,
         part: impl Fn(ComponentId, &Component) -> (f64, AgeDistribution),
     ) -> Self {
-        let composition = Composition::SOLAR;
-        let draws = StarDraws::median();
-        let (lo, hi) = (math::ln(LIFETIME_MASSES.0), math::ln(LIFETIME_MASSES.1));
-        let last = LIFETIME_NODES - 1;
-        let ln_mass: Vec<f64> = (0..LIFETIME_NODES)
-            .map(|i| lo + (hi - lo) * index_f64(i) / index_f64(last))
-            .collect();
-        let ln_lifetime: Vec<f64> = ln_mass
-            .iter()
-            .map(|&x| {
-                let m = SolarMasses::new(math::exp(x).min(LIFETIME_MASSES.1));
-                math::ln(lifetime(m, &composition, &draws).value())
-            })
-            .collect();
-        let before = before_interval();
+        let LifetimeTable {
+            ln_mass,
+            ln_lifetime,
+        } = LifetimeTable::new();
         let fields = galaxy.fields();
         let components = fields
             .component_ids()
             .map(|id| {
                 let c = fields.component(id);
                 let (systems, ages) = part(id, c);
-                let psi = |a: f64| Self::rate_per_year_per_solar_mass(Years::new(a));
-                let mean_rate = expectation(&ages, MIN_DELAY, psi);
-                let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
-                    Self::cumulative_per_solar_mass(Years::new(a - before))
-                });
-                ComponentRate {
-                    population: c.population(),
-                    systems,
-                    ages,
-                    mean_rate,
-                    exploded,
-                }
+                ComponentRate::new(c.population(), systems, ages)
             })
             .collect();
         let band_d = crate::galaxy::POPULATIONS.map(|p| galaxy.shares().share(MassBand::D, p));
@@ -321,6 +362,39 @@ impl DelayTimeDistribution {
             ln_mass,
             ln_lifetime,
         }
+    }
+
+    /// The distribution of a catalogue feature's own members, of `population` and with ages
+    /// `ages` (plan 09, P09.T36): one component, at index 0, whose systems are 1, with the
+    /// lifetime table every distribution holds, built once a process (a lazy constant of solar
+    /// composition and median draws, which neither the galaxy nor its rules move). It costs one
+    /// quadrature of `ψ` over the ages.
+    #[must_use]
+    pub(crate) fn of_feature(
+        galaxy: &Galaxy,
+        population: Population,
+        ages: AgeDistribution,
+    ) -> Self {
+        let table = LifetimeTable::shared();
+        let band_d = crate::galaxy::POPULATIONS.map(|p| galaxy.shares().share(MassBand::D, p));
+        Self {
+            components: vec![ComponentRate::new(population, 1.0, ages)],
+            formed_mass: galaxy.mean_formed_mass().value(),
+            band_d,
+            ln_lifetime_rising: table.ln_lifetime.iter().rev().copied().collect(),
+            ln_mass_falling: table.ln_mass.iter().rev().copied().collect(),
+            ln_mass: table.ln_mass.clone(),
+            ln_lifetime: table.ln_lifetime.clone(),
+        }
+    }
+
+    /// `E[ψ(age)]` over `ages`, per year per solar mass formed: the Type Ia rate per solar mass
+    /// formed at the epoch of systems of those ages, a component's `mean_rate` (P09.T36).
+    #[must_use]
+    pub(crate) fn mean_rate_over(ages: &AgeDistribution) -> f64 {
+        expectation(ages, MIN_DELAY, |a| {
+            Self::rate_per_year_per_solar_mass(Years::new(a))
+        })
     }
 
     /// The galaxy's Type Ia rate at the epoch, per year.
@@ -1471,5 +1545,37 @@ mod tests {
             IaLeftover::PartlyBurntDwarf.offset_at(Years::new(1e4)),
             Some(LightYears::ZERO)
         );
+    }
+
+    /// The lifetime table a feature's distribution reads, built once a process
+    /// (`LifetimeTable::shared`), is the one every galaxy's distribution builds, bit for bit, and a
+    /// feature's distribution holds it as the galaxy's does (P09.T36).
+    #[test]
+    fn the_shared_lifetime_table_is_the_built_one_bit_for_bit() {
+        let (shared, built) = (LifetimeTable::shared(), LifetimeTable::new());
+        assert_eq!(shared.ln_mass.len(), LIFETIME_NODES);
+        for (a, b) in [
+            (&shared.ln_mass, &built.ln_mass),
+            (&shared.ln_lifetime, &built.ln_lifetime),
+        ] {
+            assert_eq!(a.len(), b.len());
+            for (&x, &y) in a.iter().zip(b) {
+                assert_same_bits(x, y);
+            }
+        }
+        let galaxy = milky_way();
+        let ages = AgeDistribution::uniform(Years::new(1e9), Years::new(2e9)).unwrap();
+        let feature = DelayTimeDistribution::of_feature(&galaxy, Population::OldThinDisc, ages);
+        let whole = DelayTimeDistribution::from_galaxy(&galaxy);
+        for (a, b) in [
+            (&feature.ln_mass, &whole.ln_mass),
+            (&feature.ln_lifetime, &whole.ln_lifetime),
+            (&feature.ln_mass_falling, &whole.ln_mass_falling),
+            (&feature.ln_lifetime_rising, &whole.ln_lifetime_rising),
+        ] {
+            for (&x, &y) in a.iter().zip(b) {
+                assert_same_bits(x, y);
+            }
+        }
     }
 }

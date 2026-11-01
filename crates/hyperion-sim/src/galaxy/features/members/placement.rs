@@ -20,6 +20,9 @@
 //!   `member.position` put it in its cell ([`CellProposal::place`]), one mark on `member.accept`
 //!   picks its class under the bound there or rejects it ([`MemberClassTable::pick`]), and an
 //!   accepted candidate is drawn by [`draw_member`].
+//! - **Claim.** From generator version 26 a band-E member that the feature's list holds, a recent
+//!   death or a luminous blue variable (`members::recent`'s `claimed_by`; plan 09, P09.T36.a), is
+//!   no member of the cells, as a thinned candidate is not: the list's or the cells', never both.
 //!
 //! [`resolve_member`] reruns one candidate: "no such system" for an index at or past its cell's
 //! count, a rejected candidate, a feature that does not resolve or has no members, or a band the
@@ -41,6 +44,7 @@ use super::super::interior::counts::TailReach;
 use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
+use super::recent::{FeatureStars, claimed_by};
 use super::source::FeatureInteriorCache;
 use super::{INTERNAL_SPEED_SIGMAS, MemberRecord, draw_member, equipartition_factor};
 
@@ -54,6 +58,8 @@ pub struct FeatureInterior {
     grid: NestedGrid,
     bulk: GalacticVelocity,
     speed_bound: KilometresPerSecond,
+    /// The feature's stars, where its band-E cells give its list the members it claims (P09.T36.a).
+    claims: Option<Box<FeatureStars>>,
 }
 
 impl FeatureInterior {
@@ -90,6 +96,7 @@ impl FeatureInterior {
             speed_bound.value(),
             UNBOUND_PAD_SPEED.value()
         );
+        let claims = FeatureStars::claiming(galaxy, feature).map(Box::new);
         Some(Self {
             feature: *feature,
             model,
@@ -97,6 +104,7 @@ impl FeatureInterior {
             grid,
             bulk,
             speed_bound,
+            claims,
         })
     }
 
@@ -309,7 +317,25 @@ impl FeatureInterior {
             id,
             self.bulk,
         )
+        .filter(|member| !self.claimed(galaxy, band, member))
         .map(|member| (member, p))
+    }
+
+    /// Whether the feature's list claims `member` of `band` (P09.T36.a): never under the hold's
+    /// held arm or outside band E.
+    #[must_use]
+    fn claimed(&self, galaxy: &Galaxy, band: MassBand, member: &MemberRecord) -> bool {
+        band == MassBand::E
+            && self.claims.as_ref().is_some_and(|stars| {
+                claimed_by(
+                    galaxy,
+                    stars,
+                    member.record(),
+                    member.composition(),
+                    member.velocity(),
+                )
+                .is_some()
+            })
     }
 
     /// The galactic position of the local point `p` of a member.
@@ -446,7 +472,7 @@ pub fn resolve_member(
         .ok_or(ResolveSystemError::NoSuchSystem)?;
     match id.slot() {
         MemberSlot::FeatureLevel { index } => FeatureLevelList::of(galaxy, &feature)
-            .member(index)
+            .member(galaxy, index)
             .ok_or(ResolveSystemError::NoSuchSystem),
         MemberSlot::InCell {
             band,

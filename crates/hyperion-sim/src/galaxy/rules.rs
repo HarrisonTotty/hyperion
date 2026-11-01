@@ -39,6 +39,10 @@
 //!   gives the core-collapse and luminous blue variables' classes their hosts, and layer D gives
 //!   up its ancient Type Ia. It is read where the galaxy is built, which installs layer D's
 //!   factors, so `Galaxy::with_rules` refuses to change it too.
+//! - [`feature_classes`](GalaxyRules::feature_classes), at [`FEATURE_CLASSES_VERSION`] (plan 09,
+//!   P09.T36): catalogue features list their recently dead and their luminous blue variables,
+//!   and their band-E cells give them up. It is read where a list or an
+//!   interior is built, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -53,6 +57,7 @@ use crate::galaxy::features::centre::events::luminosity::{
     CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules,
 };
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
+use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
 use crate::galaxy::motion::{
@@ -84,6 +89,8 @@ pub(crate) struct GalaxyRules {
     pub(crate) field_share: FieldShareRules,
     /// Whether the grid gives the catalogue classes their hosts (P09.T35).
     pub(crate) carve_out: CarveOutRules,
+    /// Whether features list their recently dead and their luminous blue variables (P09.T36).
+    pub(crate) feature_classes: FeatureClassesRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -134,6 +141,11 @@ impl GalaxyRules {
             } else {
                 CarveOutRules::Unclaimed
             },
+            feature_classes: if version.get() >= FEATURE_CLASSES_VERSION.get() {
+                FeatureClassesRules::Listed
+            } else {
+                FeatureClassesRules::Unlisted
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -150,10 +162,10 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
     /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
-    /// P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, and `carve_out`, P09.T35; the
-    /// stellar rules' `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b,
-    /// `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d, `peculiar_classes`, P06.T24.b, and
-    /// `star_events`, P06.T28.g; [`StellarRules::every_26_hold`]).
+    /// P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, `carve_out`, P09.T35, and
+    /// `feature_classes`, P09.T36; the stellar rules' `dwarf_sequence`, P06.T23.a, `helium`,
+    /// P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d,
+    /// `peculiar_classes`, P06.T24.b, and `star_events`, P06.T28.g; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -161,6 +173,23 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_26_hold() -> Self {
         Self::of_version(GeneratorVersion::new(26))
+    }
+
+    /// Every 26 hold but the stellar rules' Humphreys–Davidson limit (P06.T42.b), which moves a
+    /// massive star's track while plan 08's interval predicate and the fitted tables it reads keep
+    /// the version's rules until the bump refits them, so that the one shared test and the star's
+    /// own death part: the recently dead's figures under every other 26 hold (P09.T36's tests).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn every_26_hold_but_the_hd_limit() -> Self {
+        let every = Self::every_26_hold();
+        Self {
+            stellar: StellarRules {
+                hd_limit: StellarRules::of_version(crate::GENERATOR_VERSION).hd_limit,
+                ..every.stellar
+            },
+            ..every
+        }
     }
 }
 
@@ -345,6 +374,15 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().carve_out,
             CarveOutRules::Claimed
+        );
+        let classes = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).feature_classes;
+        for v in [23, 24, 25] {
+            assert_eq!(classes(v), FeatureClassesRules::Unlisted, "{v}");
+        }
+        assert_eq!(classes(26), FeatureClassesRules::Listed);
+        assert_eq!(
+            GalaxyRules::every_26_hold().feature_classes,
+            FeatureClassesRules::Listed
         );
     }
 }

@@ -268,6 +268,12 @@ threads-required = "num-cpus"
 filter = "package(hyperion-sim) & test(=galaxy::placement::carve_out_hold::census_of_the_carve_out)"
 threads-required = 16
 
+# P09.T36.a's census walks every catalogue feature's list and two classes' cells in sixteen shares of
+# its own (`in_shares`), so it reserves sixteen slots too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::features::members::recent::tests::the_features_hold_most_core_collapses_and_some_of_the_shells)"
+threads-required = 16
+
 # R10.T4.a's level bounds (`level_bound_worlds`, one slow test) measure each of the six sample worlds
 # on a thread of its own, its body's σ on one more and its points and patches on four more
 # (`THREADS`): up to 36 threads at once, more than a run's pool, so the test takes every slot and

@@ -58,6 +58,7 @@ use remnants::remnant_attempt_fits;
 pub mod headroom;
 pub mod level_list;
 pub mod placement;
+pub mod recent;
 pub(crate) mod remnants;
 pub mod source;
 
