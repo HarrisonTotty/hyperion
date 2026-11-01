@@ -35,8 +35,10 @@
 //!   and 0.05 bar, but 1.0 × 10⁻⁵ at 5,000 K and 10 mbar, and gives most of the electrons above
 //!   about 5,000 K at 10 mbar or less (the reach, below; P14.T52.e). A row that held two
 //!   trace atoms would break the closed form, and [`Network::registry`] refuses it
-//!   ([`BuildNetworkError::TwoTraceAtoms`]); P14.T52.e's P₂ and chlorides will need P and Cl among
-//!   the solved elements.
+//!   ([`BuildNetworkError::TwoTraceAtoms`]). So from generator version 27 P and Cl are solved
+//!   elements as the major ones are ([`SOLVED_FROM_27`]: PH₃ and HCl their basis species, each
+//!   with its unknown and its balance), so that P₂ and the chlorides can join; their unknowns come
+//!   after the nuclei's, so that 26's network, which leaves them inactive, keeps its bits.
 //!
 //! The charge is balanced over the metals' first ions (and from 27 the major elements'), the
 //! electrons and H⁻: each ion's K is that of M ⇌ M⁺ + e⁻ from CEA's records, the Saha equation with
@@ -240,11 +242,22 @@ pub const MAJOR_ELEMENTS: [(Element, &str); 5] = [
     (Element::S, "H2S"),
 ];
 
+/// The elements the network solves from generator version 27 beside [`MAJOR_ELEMENTS`]
+/// (P14.T52.e, `CARRIERS_VERSION`), each with its basis species' key: phosphorus and chlorine,
+/// whose P₂ and chlorides hold two atoms of elements the closed form would otherwise share. Below
+/// 27 they are trace elements.
+pub const SOLVED_FROM_27: [(Element, &str); 2] = [(Element::P, "PH3"), (Element::Cl, "HCl")];
+
+/// The most elements a network solves: [`MAJOR_ELEMENTS`] and [`SOLVED_FROM_27`].
+const SOLVED: usize = MAJOR_ELEMENTS.len() + SOLVED_FROM_27.len();
+
 /// The free electron's key, the charge's basis.
 const ELECTRON: &str = "e-";
 
-/// The number of unknowns: the five basis pressures, the electrons' and the hydrogen nuclei's.
-const UNKNOWNS: usize = 7;
+/// The number of unknowns: the solved elements' basis pressures, the electrons' and the hydrogen
+/// nuclei's. A network that solves only [`MAJOR_ELEMENTS`] (26's) leaves P's and Cl's inactive: a
+/// unit row and a zero column, which change none of the other unknowns' bits.
+const UNKNOWNS: usize = SOLVED + 2;
 
 /// The place of the electrons' logarithm among the unknowns, and of the charge's equation.
 const CHARGE: usize = 5;
@@ -252,6 +265,24 @@ const CHARGE: usize = 5;
 /// The place of the hydrogen nuclei's logarithm among the unknowns, and of the total pressure's
 /// equation.
 const NUCLEI: usize = 6;
+
+/// The unknown of solved element `k`, in [`MAJOR_ELEMENTS`]' and then [`SOLVED_FROM_27`]'s order:
+/// the major elements' first, then, after the electrons' and the nuclei's, P's and Cl's, so that
+/// 26's unknowns keep their places.
+#[must_use]
+const fn unknown_of(k: usize) -> usize {
+    if k < MAJOR_ELEMENTS.len() { k } else { k + 2 }
+}
+
+/// Solved element `k` and its basis species' key.
+#[must_use]
+const fn solved_element(k: usize) -> (Element, &'static str) {
+    if k < MAJOR_ELEMENTS.len() {
+        MAJOR_ELEMENTS[k]
+    } else {
+        SOLVED_FROM_27[k - MAJOR_ELEMENTS.len()]
+    }
+}
 
 /// The Newton steps every solution takes, from the closed-form start, at most: it stops early only
 /// where a step would leave the unknowns as they are, so that every later one would too.
@@ -982,12 +1013,14 @@ struct Species {
     /// (1, or ½ where the reaction is doubled to keep H₂'s coefficient whole); `None` for a basis
     /// species, whose K is 1.
     formation: Option<(Reaction, f64)>,
-    /// Its ν over the unknowns' basis: H₂, CH₄, NH₃, H₂O, H₂S and the electron.
-    nu: [f64; CHARGE + 1],
+    /// Its ν over the unknowns' basis: H₂, CH₄, NH₃, H₂O, H₂S, the electron, none for the nuclei,
+    /// then PH₃ and HCl where they are solved.
+    nu: [f64; UNKNOWNS],
     /// Twice each ν, whole numbers, which say which unknowns its pressure reads.
-    doubled: [i32; CHARGE + 1],
-    /// Its atoms of each major element, in [`MAJOR_ELEMENTS`]' order.
-    counts: [u16; 5],
+    doubled: [i32; UNKNOWNS],
+    /// Its atoms of each solved element, in [`solved_element`]'s order (zero for one the network
+    /// does not solve).
+    counts: [u16; SOLVED],
     charge: i8,
     /// The trace element it holds, by its place in the network's traces.
     trace: Option<usize>,
@@ -1028,8 +1061,12 @@ struct StartSpecies {
 pub struct Network {
     species: Vec<Species>,
     traces: Vec<Trace>,
-    /// The basis species' places, in [`MAJOR_ELEMENTS`]' order, then the electron's.
-    basis: [usize; CHARGE + 1],
+    /// The basis species' places, by unknown: the solved elements' and the electron's (none for
+    /// the nuclei, nor for P and Cl where they are trace elements).
+    basis: [Option<usize>; UNKNOWNS],
+    /// How many elements it solves, in [`solved_element`]'s order: [`MAJOR_ELEMENTS`]' five, and
+    /// from generator version 27 P and Cl.
+    solved: usize,
     start: StartSpecies,
     /// Whether a major element has a cation in the network (H⁺, C⁺, N⁺, O⁺ and S⁺, from
     /// generator version 27), which the start's electrons then count.
@@ -1257,16 +1294,19 @@ fn atoms(id: SubstanceId, element: Element) -> u16 {
         .map_or(0, |&(_, n)| n)
 }
 
-/// Whether `element` is a major element.
+/// Whether `element` is one of the first `solved` solved elements.
 #[must_use]
-fn is_major(element: Element) -> bool {
-    MAJOR_ELEMENTS.iter().any(|&(e, _)| e == element)
+fn is_solved(element: Element, solved: usize) -> bool {
+    (0..solved).any(|k| solved_element(k).0 == element)
 }
 
 /// The trace elements of the network's `rows`, in [`Element::ALL`]'s order, each with its species
 /// and the place of its basis: its neutral species of fewest atoms, the first in registry order on
 /// a tie.
-fn trace_elements(rows: &[SubstanceId]) -> Result<Vec<(Trace, usize)>, BuildNetworkError> {
+fn trace_elements(
+    rows: &[SubstanceId],
+    solved: usize,
+) -> Result<Vec<(Trace, usize)>, BuildNetworkError> {
     let size = |id: SubstanceId| -> u32 {
         id.substance()
             .elements()
@@ -1276,7 +1316,7 @@ fn trace_elements(rows: &[SubstanceId]) -> Result<Vec<(Trace, usize)>, BuildNetw
     };
     let mut traces = Vec::new();
     for element in Element::ALL {
-        if is_major(element) {
+        if is_solved(element, solved) {
             continue;
         }
         let species: Vec<usize> = (0..rows.len())
@@ -1304,13 +1344,14 @@ fn trace_elements(rows: &[SubstanceId]) -> Result<Vec<(Trace, usize)>, BuildNetw
     Ok(traces)
 }
 
-/// Species `i` of the network's `rows`: its formation from the basis (the major elements' `basis`
+/// Species `i` of the network's `rows`: its formation from the basis (the solved elements' `basis`
 /// and, for a trace species, its element's in `traces`), its ν over the unknowns and its atoms of
-/// the major elements.
+/// the first `solved` solved elements.
 fn species_of(
     i: usize,
     rows: &[SubstanceId],
-    basis: &[usize; CHARGE + 1],
+    basis: &[Option<usize>; UNKNOWNS],
+    solved: usize,
     traces: &[(Trace, usize)],
 ) -> Result<Species, BuildNetworkError> {
     let id = rows[i];
@@ -1326,38 +1367,55 @@ fn species_of(
         }
         trace = Some(t);
     }
-    let counts = MAJOR_ELEMENTS.map(|(e, _)| i32::from(atoms(id, e)));
-    // The trace basis' own atoms of the major elements, taken out of ν.
-    let base = trace.map(|t| traces[t].1);
-    let base_counts = base.map_or([0; 5], |b| {
-        MAJOR_ELEMENTS.map(|(e, _)| i32::from(atoms(rows[b], e)))
+    let counts: [u16; SOLVED] = core::array::from_fn(|k| {
+        if k < solved {
+            atoms(id, solved_element(k).0)
+        } else {
+            0
+        }
     });
-    let own: [i32; 5] = core::array::from_fn(|k| counts[k] - base_counts[k]);
-    // ν over CH₄, NH₃, H₂O and H₂S is the species' own atoms of C, N, O and S; over H₂, the hydrogen
-    // left, halved; over the electron, −q.
-    let twice_hydrogen = own[0] - 4 * own[1] - 3 * own[2] - 2 * own[3] - 2 * own[4];
+    // The trace basis' own atoms of the solved elements, taken out of ν.
+    let base = trace.map(|t| traces[t].1);
+    let own: [i32; SOLVED] = core::array::from_fn(|k| {
+        let based = base.map_or(0, |b| {
+            if k < solved {
+                atoms(rows[b], solved_element(k).0)
+            } else {
+                0
+            }
+        });
+        i32::from(counts[k]) - i32::from(based)
+    });
+    // ν over each solved element's basis but H₂ is the species' own atoms of it; over H₂, the
+    // hydrogen left, halved; over the electron, −q. Integer, so the order of the sum is exact.
+    let mut twice_hydrogen = own[0];
+    for (k, &n) in own.iter().enumerate().skip(1) {
+        if let Some(b) = basis[unknown_of(k)] {
+            twice_hydrogen -= i32::from(atoms(rows[b], Element::H)) * n;
+        }
+    }
     let charge = i32::from(row.charge());
-    let twice = [
-        twice_hydrogen,
-        2 * own[1],
-        2 * own[2],
-        2 * own[3],
-        2 * own[4],
-        -2 * charge,
-    ];
-    let (formation, doubled) = if let Some(k) = basis.iter().position(|&b| b == i) {
-        // A major basis species is its own unknown.
-        let mut unit = [0; CHARGE + 1];
+    let mut twice = [0; UNKNOWNS];
+    twice[0] = twice_hydrogen;
+    for (k, &n) in own.iter().enumerate().skip(1) {
+        twice[unknown_of(k)] = 2 * n;
+    }
+    twice[CHARGE] = -2 * charge;
+    let (formation, doubled) = if let Some(k) = basis.iter().position(|&b| b == Some(i)) {
+        // A solved element's basis species is its own unknown.
+        let mut unit = [0; UNKNOWNS];
         unit[k] = 2;
         (None, unit)
     } else if base == Some(i) {
-        (None, [0; CHARGE + 1])
+        (None, [0; UNKNOWNS])
     } else {
         // Written for two of the species where H₂'s ν is a half, so that every ν is whole.
         let multiple: i32 = if twice_hydrogen % 2 == 0 { 1 } else { 2 };
         let mut terms = vec![(id, multiple)];
         for (&slot, &t) in basis.iter().zip(&twice) {
-            if t != 0 {
+            if let Some(slot) = slot
+                && t != 0
+            {
                 terms.push((rows[slot], -(multiple * t) / 2));
             }
         }
@@ -1375,7 +1433,7 @@ fn species_of(
         formation,
         nu: doubled.map(|t| 0.5 * f64::from(t)),
         doubled,
-        counts: MAJOR_ELEMENTS.map(|(e, _)| atoms(id, e)),
+        counts,
         charge: row.charge(),
         trace,
     })
@@ -1420,21 +1478,32 @@ impl Network {
     /// ```
     pub fn registry() -> Result<Self, BuildNetworkError> {
         let rows: Vec<SubstanceId> = ids().filter(|&id| formation_range(id).is_some()).collect();
+        let solved = match CarriersRules::in_force() {
+            CarriersRules::Held => MAJOR_ELEMENTS.len(),
+            CarriersRules::Carried => SOLVED,
+        };
+        Self::of_rows(&rows, solved)
+    }
+
+    /// The network of `rows`, each a gas row with a record, solving the first `solved` of
+    /// [`solved_element`]'s elements: [`registry`](Self::registry)'s, apart for the tests, which
+    /// build 27's rows with 26's solved elements.
+    fn of_rows(rows: &[SubstanceId], solved: usize) -> Result<Self, BuildNetworkError> {
         let place = |key: &'static str| -> Result<usize, BuildNetworkError> {
             by_key(key)
                 .and_then(|id| rows.iter().position(|&r| r == id))
                 .ok_or(BuildNetworkError::MissingBasis { key })
         };
-        let mut basis = [0; CHARGE + 1];
-        for (slot, &(_, key)) in basis.iter_mut().zip(MAJOR_ELEMENTS.iter()) {
-            *slot = place(key)?;
+        let mut basis = [None; UNKNOWNS];
+        for k in 0..solved {
+            basis[unknown_of(k)] = Some(place(solved_element(k).1)?);
         }
-        basis[CHARGE] = place(ELECTRON)?;
-        let traces = trace_elements(&rows)?;
+        basis[CHARGE] = Some(place(ELECTRON)?);
+        let traces = trace_elements(rows, solved)?;
         let species = (0..rows.len())
-            .map(|i| species_of(i, &rows, &basis, &traces))
+            .map(|i| species_of(i, rows, &basis, solved, &traces))
             .collect::<Result<Vec<Species>, BuildNetworkError>>()?;
-        let (floor, ceiling) = common_range(&rows)?;
+        let (floor, ceiling) = common_range(rows)?;
         let find = |key: &str| by_key(key).and_then(|id| rows.iter().position(|&r| r == id));
         let start = StartSpecies {
             hydrogen_atom: find("H"),
@@ -1454,6 +1523,7 @@ impl Network {
             species,
             traces: traces.into_iter().map(|(t, _)| t).collect(),
             basis,
+            solved,
             start,
             major_cations,
             floor,
@@ -1660,8 +1730,9 @@ fn element_index(element: Element) -> usize {
 /// A gas's abundances as the network reads them.
 #[derive(Debug, Clone, PartialEq)]
 struct Gas {
-    /// Each major element per hydrogen, in [`MAJOR_ELEMENTS`]' order (hydrogen's 1).
-    majors: [f64; 5],
+    /// Each solved element per hydrogen, in [`solved_element`]'s order (hydrogen's 1; zero for one
+    /// the network does not solve).
+    majors: [f64; SOLVED],
     /// Each trace element per hydrogen, in the network's order.
     traces: Vec<f64>,
     /// The share of the hydrogen the all-in hydrides take.
@@ -1671,15 +1742,23 @@ struct Gas {
 impl Gas {
     #[must_use]
     fn new(network: &Network, per_hydrogen: &[f64; Element::ALL.len()]) -> Self {
-        let majors = MAJOR_ELEMENTS.map(|(e, _)| per_hydrogen[element_index(e)]);
+        let majors: [f64; SOLVED] = core::array::from_fn(|k| {
+            if k < network.solved {
+                per_hydrogen[element_index(solved_element(k).0)]
+            } else {
+                0.0
+            }
+        });
         let traces: Vec<f64> = network
             .traces
             .iter()
             .map(|t| per_hydrogen[element_index(t.element)])
             .collect();
         let mut hydride_share = 0.0;
-        for (&slot, &n) in network.basis[1..5].iter().zip(&majors[1..]) {
-            hydride_share += f64::from(network.species[slot].counts[0]) * n;
+        for (k, &n) in majors.iter().enumerate().take(network.solved).skip(1) {
+            if let Some(slot) = network.basis[unknown_of(k)] {
+                hydride_share += f64::from(network.species[slot].counts[0]) * n;
+            }
         }
         for (t, trace) in network.traces.iter().enumerate() {
             hydride_share += trace.hydride_hydrogen * traces[t];
@@ -1712,10 +1791,10 @@ struct State<'a> {
     /// The total pressure, bar, and its natural logarithm.
     bar: f64,
     log_bar: f64,
-    /// The natural logarithm of each major element's abundance per hydrogen (−∞ for one the gas
+    /// The natural logarithm of each solved element's abundance per hydrogen (−∞ for one the gas
     /// does not hold, whose balance is not solved).
-    log_majors: [f64; 5],
-    /// Whether each unknown is solved for: a major element the gas holds, the charge where a
+    log_majors: [f64; SOLVED],
+    /// Whether each unknown is solved for: a solved element the gas holds, the charge where a
     /// cation can form, and always the hydrogen nuclei.
     active: [bool; UNKNOWNS],
     /// Whether each species is present: all its elements held, and the charge active if it is
@@ -1729,23 +1808,23 @@ struct State<'a> {
 struct TraceSums {
     largest: f64,
     weight: f64,
-    mean_nu: [f64; CHARGE + 1],
+    mean_nu: [f64; UNKNOWNS],
 }
 
 impl<'a> State<'a> {
     #[must_use]
     fn new(network: &'a Network, gas: &'a Gas, log_k: &'a [f64], bar: f64) -> Self {
         let mut active = [false; UNKNOWNS];
-        for (a, &n) in active.iter_mut().zip(&gas.majors) {
-            *a = n > 0.0;
+        for (k, &n) in gas.majors.iter().enumerate() {
+            active[unknown_of(k)] = n > 0.0;
         }
         active[NUCLEI] = true;
         let held = active;
         let holds = |s: &Species| {
             s.counts
                 .iter()
-                .zip(&held)
-                .all(|(&count, &is_held)| count == 0 || is_held)
+                .enumerate()
+                .all(|(k, &count)| count == 0 || held[unknown_of(k)])
                 && s.trace.is_none_or(|t| gas.traces[t] > 0.0)
         };
         let charged = network.species.iter().any(|s| s.charge > 0 && holds(s));
@@ -1795,7 +1874,7 @@ impl<'a> State<'a> {
                     }
                 }
                 let mut weight = 0.0;
-                let mut mean_nu = [0.0; CHARGE + 1];
+                let mut mean_nu = [0.0; UNKNOWNS];
                 for &i in &trace.species {
                     if self.present[i] {
                         let w = math::exp(self.exponent(i, y) - largest);
@@ -1853,8 +1932,8 @@ impl<'a> State<'a> {
     #[must_use]
     fn evaluate(&self, y: &[f64; UNKNOWNS]) -> ([f64; UNKNOWNS], [[f64; UNKNOWNS]; UNKNOWNS]) {
         let sums = self.trace_sums(y);
-        let mut held = [0.0; 5];
-        let mut d_held = [[0.0; UNKNOWNS]; 5];
+        let mut held = [0.0; SOLVED];
+        let mut d_held = [[0.0; UNKNOWNS]; SOLVED];
         let mut total = 0.0;
         let mut d_total = [0.0; UNKNOWNS];
         let (mut positive, mut negative) = (0.0, 0.0);
@@ -1865,11 +1944,11 @@ impl<'a> State<'a> {
                 continue;
             };
             let p = math::exp(log_p);
-            // ∂ ln p ÷ ∂ y: ν for a major species; ν less its element's mean, and 1 in ln N, for a
-            // trace species.
+            // ∂ ln p ÷ ∂ y: ν for a species of the solved elements; ν less its element's mean, and 1
+            // in ln N, for a trace species.
             let mut g = [0.0; UNKNOWNS];
             match s.trace {
-                None => g[..=CHARGE].copy_from_slice(&s.nu),
+                None => g.copy_from_slice(&s.nu),
                 Some(t) => {
                     for ((gk, &nu), &mean) in g.iter_mut().zip(&s.nu).zip(&sums[t].mean_nu) {
                         *gk = nu - mean;
@@ -1911,16 +1990,17 @@ impl<'a> State<'a> {
         // carried by one species is linear in the unknowns and Newton's step lands on it.
         let mut residual = [0.0; UNKNOWNS];
         let mut jacobian = [[0.0; UNKNOWNS]; UNKNOWNS];
-        for k in 0..5 {
-            if !self.active[k] {
-                jacobian[k][k] = 1.0;
+        for k in 0..SOLVED {
+            let u = unknown_of(k);
+            if !self.active[u] {
+                jacobian[u][u] = 1.0;
                 continue;
             }
-            residual[k] = math::ln(held[k]) - (self.log_majors[k] + y[NUCLEI]);
-            for (entry, &d) in jacobian[k].iter_mut().zip(&d_held[k]) {
+            residual[u] = math::ln(held[k]) - (self.log_majors[k] + y[NUCLEI]);
+            for (entry, &d) in jacobian[u].iter_mut().zip(&d_held[k]) {
                 *entry = d / held[k];
             }
-            jacobian[k][NUCLEI] -= 1.0;
+            jacobian[u][NUCLEI] -= 1.0;
         }
         if self.active[CHARGE] {
             residual[CHARGE] = math::ln(positive) - math::ln(negative);
@@ -1978,7 +2058,14 @@ impl<'a> State<'a> {
                 continue;
             }
             let now = self.exponent(i, y);
-            let rise: f64 = (0..=CHARGE).map(|k| s.nu[k] * step[k]).sum();
+            let mut rise: f64 = (0..=CHARGE).map(|k| s.nu[k] * step[k]).sum();
+            // P's and Cl's terms after the rest, where the species reads them (from 27), so that
+            // 26's sums keep their bits.
+            for ((&doubled, &nu), &du) in s.doubled.iter().zip(&s.nu).zip(step).skip(NUCLEI + 1) {
+                if doubled != 0 {
+                    rise += nu * du;
+                }
+            }
             if rise > 0.0 && now < ceiling && now + scale * rise > ceiling {
                 scale = (ceiling - now) / rise;
             }
@@ -2071,18 +2158,52 @@ impl<'a> State<'a> {
                 + self.atom_ratio(self.network.start.mercapto, log_hydrogen);
             y[4] = math::ln(self.gas.majors[4] * nuclei / (1.0 + atom));
         }
+        for k in MAJOR_ELEMENTS.len()..self.network.solved {
+            if self.active[unknown_of(k)] {
+                y[unknown_of(k)] = self.start_solved(k, &y, nuclei);
+            }
+        }
         if self.active[CHARGE] {
             y[CHARGE] = self.start_electrons(&y, nuclei);
         }
         y
     }
 
-    /// H₂ against H over the helium and the trace elements, each trace atom one particle:
+    /// The natural log of the basis species' pressure, bar, of solved element `k` beyond the
+    /// major elements (P or Cl, from generator version 27), at the start's other unknowns `y` and
+    /// hydrogen nuclei `nuclei`: its neutral species of one atom of it against those of two,
+    /// `total` = `linear` a + 2 κ a², each species' ratio to its basis at those unknowns, as
+    /// NH₃'s against N₂. Its ions are left out, the electrons' start following this one.
+    #[must_use]
+    fn start_solved(&self, k: usize, y: &[f64; UNKNOWNS], nuclei: f64) -> f64 {
+        let mut probe = *y;
+        probe[unknown_of(k)] = 0.0;
+        let (mut linear, mut kappa) = (0.0, 0.0);
+        for (i, s) in self.network.species.iter().enumerate() {
+            if !self.present[i] || s.charge != 0 {
+                continue;
+            }
+            let ratio = bounded_exp(self.exponent(i, &probe));
+            match s.counts[k] {
+                1 => linear += ratio,
+                2 => kappa += ratio,
+                _ => {}
+            }
+        }
+        math::ln(pair_root(self.gas.majors[k] * nuclei, linear, kappa))
+    }
+
+    /// H₂ against H over the helium and the trace elements (with P and Cl where they are solved),
+    /// each trace atom one particle:
     /// P = s² (1 + 2ε) + K s (1 + ε) and N = 2 s² + K s, with s = √p(H₂) and K the H atom's.
     /// The natural log of p(H₂) and N, bar.
     #[must_use]
     fn start_hydrogen(&self) -> (f64, f64) {
-        let inert: f64 = self.gas.traces.iter().sum();
+        let mut inert: f64 = self.gas.traces.iter().sum();
+        // P and Cl where they are solved (from 27): trace amounts, as the trace elements.
+        for &n in &self.gas.majors[MAJOR_ELEMENTS.len()..self.network.solved] {
+            inert += n;
+        }
         let atom = self
             .log_k_of(self.network.start.hydrogen_atom)
             .map_or(0.0, math::exp);
@@ -2177,7 +2298,7 @@ impl<'a> State<'a> {
         let mut all_ionised = self.gas.traces.iter().sum::<f64>() * nuclei;
         // 26's network has no major cation, and keeps its start's bits by skipping this.
         if network.major_cations {
-            let mut ionisable = [false; 5];
+            let mut ionisable = [false; SOLVED];
             for (i, s) in network.species.iter().enumerate() {
                 if s.trace.is_none() && s.charge > 0 && self.present[i] {
                     cations += bounded_exp(self.exponent(i, &probe));

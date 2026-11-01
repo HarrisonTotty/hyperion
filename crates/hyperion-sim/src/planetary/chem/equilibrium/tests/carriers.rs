@@ -42,6 +42,46 @@ fn under_27_the_network_carries_the_carriers() {
     });
 }
 
+/// Under 27 P and Cl are solved elements, each with its unknown and its basis, PH₃ and HCl, and no
+/// longer trace elements; a row holding two atoms of trace elements is refused until both are
+/// solved: NaCl, Na and Cl, refused under 26's solved elements and past the trace check under
+/// 27's.
+#[test]
+fn under_27_phosphorus_and_chlorine_are_solved() {
+    with_every_27_hold(|| {
+        let network = network();
+        assert_eq!(network.solved, SOLVED);
+        for (k, key) in [
+            (MAJOR_ELEMENTS.len(), "PH3"),
+            (MAJOR_ELEMENTS.len() + 1, "HCl"),
+        ] {
+            let basis = network.basis[unknown_of(k)].expect("solved");
+            assert_eq!(network.species[basis].id, row(key));
+        }
+        assert!(
+            network
+                .traces
+                .iter()
+                .all(|t| !matches!(t.element, Element::P | Element::Cl))
+        );
+        let rows = [row("NaCl")];
+        let held = trace_elements(&rows, MAJOR_ELEMENTS.len()).unwrap();
+        let basis = [Some(0); UNKNOWNS];
+        assert_eq!(
+            species_of(0, &rows, &basis, MAJOR_ELEMENTS.len(), &held).map(|_| ()),
+            Err(BuildNetworkError::TwoTraceAtoms {
+                key: row("NaCl").substance().key()
+            })
+        );
+        let carried = trace_elements(&rows, SOLVED).unwrap();
+        assert!(!matches!(
+            species_of(0, &rows, &basis, SOLVED, &carried),
+            Err(BuildNetworkError::TwoTraceAtoms { .. })
+        ));
+    });
+    assert_eq!(network().solved, MAJOR_ELEMENTS.len());
+}
+
 /// SH holds the sulphur in its field between Visscher, Lodders and Fegley's (2006, §3.1) eq. 7,
 /// where log p > 4.80 − 14,522 ÷ T (S beyond it), and eq. 4, where log p < 6.82 − 17,570 ÷ T
 /// (H₂S beyond it): at 3,000 K and 3 bar, 3,500 K and 17 bar and 4,000 K and 63 bar, each near the

@@ -87,7 +87,7 @@ fn the_registry_s_network_builds() {
     // The basis: H₂, CH₄, NH₃, H₂O, H₂S and the electron; each trace element's, its atom, PH₃ or
     // HCl.
     for (k, key) in ["H2", "CH4", "NH3", "H2O", "H2S", "e-"].iter().enumerate() {
-        assert_eq!(network.species[network.basis[k]].id, row(key));
+        assert_eq!(network.species[network.basis[k].unwrap()].id, row(key));
     }
     for trace in &network.traces {
         let base = network.species[network.trace_basis(trace)].id;
@@ -1039,7 +1039,7 @@ fn stopping_at_the_fixed_point_gives_the_fixed_count_s_bits() {
 #[test]
 fn a_network_that_cannot_be_built_is_refused() {
     assert_eq!(
-        trace_elements(&[row("Na+")]).map(|_| ()),
+        trace_elements(&[row("Na+")], MAJOR_ELEMENTS.len()).map(|_| ()),
         Err(BuildNetworkError::NoNeutralSpecies {
             element: Element::Na
         })
@@ -1049,9 +1049,16 @@ fn a_network_that_cannot_be_built_is_refused() {
         Err(BuildNetworkError::NoCommonRange)
     );
     let rows = [row("NaCl")];
-    let traces = trace_elements(&rows).expect("NaCl is neutral");
+    let traces = trace_elements(&rows, MAJOR_ELEMENTS.len()).expect("NaCl is neutral");
     assert_eq!(
-        species_of(0, &rows, &[0; CHARGE + 1], &traces).map(|_| ()),
+        species_of(
+            0,
+            &rows,
+            &[Some(0); UNKNOWNS],
+            MAJOR_ELEMENTS.len(),
+            &traces
+        )
+        .map(|_| ()),
         Err(BuildNetworkError::TwoTraceAtoms {
             key: row("NaCl").substance().key()
         })
