@@ -32,6 +32,7 @@ import {
   type StructLayout,
   uniformLayout,
 } from "../engine/webgpu/uniforms";
+import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WIRE_PHASE_RECORD_BYTES, WirePhaseRecords } from "./gpu/uniforms";
 import terrainWireWgsl from "./shaders/terrainWire.wgsl?raw";
 import {
@@ -697,8 +698,6 @@ function grazeDepthAt(r: number, surface: "ground" | "skirt"): number | null {
 
 describe("the skirts' and fins' depth beneath grazing ground (R10.T11's far contours; R10.T16.c)", () => {
   const OCCLUDER_SLOPE_PX = 3;
-  /** The wireframe terrain's constant push, a fraction of the depth (`terrainWire.wgsl`). */
-  const DEPTH_FRACTION = 2 ** -16;
   /** A surface's depth slope at row `r`, per px, by a central difference. */
   const slopeAt = (r: number, surface: "ground" | "skirt"): number =>
     Math.abs(
@@ -725,8 +724,17 @@ describe("the skirts' and fins' depth beneath grazing ground (R10.T11's far cont
   });
 
   it("keeps a skirt behind the ground at every row, both pushed by the constant fraction alone", () => {
-    const front = inFront((depth) => depth * (1 - DEPTH_FRACTION));
+    const front = inFront((depth) => depth * (1 - TERRAIN_DEPTH_FRACTION));
     expect([rows().length > 10, Math.max(...front) < 0]).toEqual([true, true]);
+  });
+
+  it("pushes the shader's depth by the constant fraction alone, the grid, skirts and fins alike", () => {
+    const declared = /const WIRE_DEPTH_FRACTION : f32 = ([0-9.]+);/u.exec(terrainWireWgsl)?.[1];
+    const depthLines = terrainWireWgsl.split("\n").filter((line) => line.includes("out.depth ="));
+    expect([Number(declared), depthLines.map((line) => line.trim())]).toEqual([
+      TERRAIN_DEPTH_FRACTION,
+      ["out.depth = clamp(in.clip.z * (1.0 - WIRE_DEPTH_FRACTION), 0.0, 1.0);"],
+    ]);
   });
 });
 

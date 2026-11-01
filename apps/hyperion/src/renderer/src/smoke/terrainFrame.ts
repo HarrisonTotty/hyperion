@@ -26,10 +26,15 @@
  * - the whole frame again, its symbology the body's occluder sphere and two lines of its own on the
  *   datum, as its graticule is: the one over the surveyed ground gives way to the terrain, and the
  *   one beyond the survey's edge stands (R10.T16.f); drawn again with no datum giving way, as the
- *   overlay was built before R10.T16.f, both stand.
+ *   overlay was built before R10.T16.f, both stand;
+ * - R10.T16.c's grazing fix, over a third pass whose every bake lies wholly on the datum
+ *   (`whollyOnTheDatum`), seen grazing it: from 10 km up at 2°, a mark 1 km behind the ground,
+ *   which the terrain's depth hides (its old slope term, some 16 km there, showed it); and from
+ *   2 km up at 2°, 10° and 60°, a line on the ground drawn as the survey edge is, pulled to the
+ *   ground, which draws whole, where the same line not pulled loses its nearer half.
  */
 
-import { add, norm, scale, sub, type Vec3 } from "../geometry/vec3";
+import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import {
   type BodyFrameOptions,
@@ -39,6 +44,7 @@ import {
   planLitBodies,
 } from "../view/bodies/draw";
 import { project } from "../view/camera/projection";
+import { lookAlong, rotate } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { occluderRadius } from "../view/depth/depth";
@@ -58,10 +64,12 @@ import {
   terrainViewOf,
 } from "../view/terrain/frameTerrain";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
-import type { PatchKey } from "../view/terrain/patchKey";
+import { uvToSt, vertexSpacing, xyzToFaceUv } from "../view/terrain/cube";
+import { type PatchKey, sameKey } from "../view/terrain/patchKey";
 import { planetGeometry } from "../view/terrain/planet";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import { TerrainPass, type TerrainPool } from "../view/terrain/terrainPass";
+import type { BakedPatch } from "../view/terrain/workers/messages";
 import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
 import {
   emptyDrawList,
@@ -108,15 +116,29 @@ const TOKENS = { surface0: "#000000" };
 /** The patch past the survey's +i edge from {@link OVER}: column 48, in its unsurveyed cell 24. */
 const BEYOND: PatchKey = { ...OVER, i: OVER.i + 1 };
 
-/** A lane of the pool whose bakes are laid on the datum before the pass takes them. */
-function onTheDatumLane(lane: HeightWorkerLane): TerrainPool {
+/**
+ * A bake laid wholly on the datum (R10.T16.c's grazing checks): {@link onTheDatum}'s, its origin,
+ * from which the face-differences path places each vertex, moved onto the datum's point at vertex
+ * (32, 32), and its height range the datum's, by which the pass culls it, so that its ground is the
+ * datum's to the millimetre. `onTheDatum`'s patches stand each at its origin's height, a few hundred
+ * metres off the datum here, as its checks' poses are set for.
+ */
+function whollyOnTheDatum(bake: BakedPatch): BakedPatch {
+  return { ...onTheDatum(bake), originM: datumAt(bake.key, 32, 32).p, heightRangeM: [0, 0] };
+}
+
+/** A lane of the pool whose bakes are laid on the datum by `lay` before the pass takes them. */
+function onTheDatumLane(
+  lane: HeightWorkerLane,
+  lay: (bake: BakedPatch) => BakedPatch,
+): TerrainPool {
   return {
     reprioritise: (demand) => {
       lane.reprioritise(demand);
     },
     onBaked: (cb) =>
       lane.onBaked((bake) => {
-        cb(onTheDatum(bake));
+        cb(lay(bake));
       }),
     onFailed: (cb) => lane.onFailed(cb),
     terminate: () => {
@@ -224,27 +246,64 @@ function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: num
   return { plan, body, terrain, terrainDraws: terrain.draws(plan, [body]) };
 }
 
-/** Streams `pass` until its view's frame gives the mask and draws its terrain whole, or time runs out. */
+/** The patch of `level` whose square holds the body-fixed point `p` on or near the datum, p = M·d. */
+function patchHolding(p: Vec3, level: number): PatchKey {
+  const { face, u, v } = xyzToFaceUv([
+    p.x / MOON_LIKE.equatorialRadiusM,
+    p.y / MOON_LIKE.equatorialRadiusM,
+    p.z / MOON_LIKE.polarRadiusM,
+  ]);
+  const n = 2 ** level;
+  const index = (w: number): number => Math.min(n - 1, Math.max(0, Math.floor(uvToSt(w) * n)));
+  return { face, level, i: index(u), j: index(v) };
+}
+
+/** The most a stand-in's chords may sag below the datum where a check reads it, m. */
+const STAND_IN_SAG_M = 1;
+
+/** The most a patch of `level`'s chords sag below the datum, m: its widest quad's s² ÷ 8R. */
+function chordSagM(level: number): number {
+  const { maxM } = vertexSpacing(MOON_LIKE.equatorialRadiusM, level);
+  return (maxM * maxM) / (8 * MOON_LIKE.polarRadiusM);
+}
+
+/**
+ * Streams `pass` until its view's frame gives the mask and draws its terrain whole, or time runs
+ * out: every patch its own bake; or, given the body-fixed points a check reads (`near`), every
+ * patch drawn and none standing in whose square holds one of them and whose chords sag more than
+ * {@link STAND_IN_SAG_M} below the datum (154 m at level 0, 0.6 m at level 4). The grazing views'
+ * ground out to the horizon goes on standing in over the survey's margin, which the checks never
+ * read, and their fine patches at the points stream for longer than the part allows.
+ */
 async function settled(
   pass: TerrainPass,
   mask: CoverageMask,
   pose: Pose,
-): Promise<{ readonly done: boolean; readonly frame: LiveFrame }> {
+  near: ReadonlyArray<Vec3> | null = null,
+): Promise<{ readonly done: boolean; readonly frame: LiveFrame; readonly state: string }> {
   const started = performance.now();
   for (;;) {
     const now = performance.now();
     const frame = liveFrame(pass, mask, pose, now);
     const drawSet = pass.lastStep?.drawSet;
     const role = frame.plan.meshes[0]?.role;
+    const standsInNear = (): boolean =>
+      (drawSet?.patches ?? []).some(
+        ({ patch, standIn }) =>
+          standIn &&
+          chordSagM(patch.key.level) > STAND_IN_SAG_M &&
+          (near ?? []).some((p) => sameKey(patchHolding(p, patch.key.level), patch.key)),
+      );
     const done =
       role?.kind === "handed-over" &&
       role.coverage !== null &&
       frame.terrainDraws.length === 1 &&
       drawSet !== undefined &&
       drawSet.missing === 0 &&
-      drawSet.standingIn === 0;
+      (near === null ? drawSet.standingIn === 0 : !standsInNear());
     if (done || now - started > STREAM_TIMEOUT_MS) {
-      return { done, frame };
+      const state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in${near === null ? "" : `, near ${String(standsInNear())}`}`;
+      return { done, frame, state };
     }
     // Streaming runs in the workers; give them the event loop between frames.
     // oxlint-disable-next-line no-await-in-loop
@@ -283,14 +342,20 @@ function markBatch(id: string, a: Vec3, b: Vec3): LineBatch {
 }
 
 /**
- * Whether any pixel within one of `at` on the canvas read-back is the marks' magenta: red and blue
- * near full and green near none, in either channel order and either encoding the canvas has.
+ * Whether the canvas read-back's pixel at byte `n` is the marks' magenta: red and blue near full
+ * and green near none, in either channel order and either encoding the canvas has.
  */
+function isMarked(read: Float32Array | Uint8Array, n: number): boolean {
+  const full = read instanceof Uint8Array ? 255 : 1;
+  const [r = 0, g = full, b = 0] = [read[n], read[n + 1], read[n + 2]];
+  return r > 0.8 * full && g < 0.3 * full && b > 0.8 * full;
+}
+
+/** Whether any pixel within one of `at` on the canvas read-back is the marks' magenta. */
 function markedNear(
   read: Float32Array | Uint8Array,
   at: { readonly xPx: number; readonly yPx: number },
 ): boolean {
-  const full = read instanceof Uint8Array ? 255 : 1;
   for (let dy = -1; dy <= 1; dy += 1) {
     for (let dx = -1; dx <= 1; dx += 1) {
       const x = Math.floor(at.xPx) + dx;
@@ -298,14 +363,74 @@ function markedNear(
       if (x < 0 || y < 0 || x >= VIEWPORT.widthPx || y >= VIEWPORT.heightPx) {
         continue;
       }
-      const n = 4 * (y * VIEWPORT.widthPx + x);
-      const [r = 0, g = full, b = 0] = [read[n], read[n + 1], read[n + 2]];
-      if (r > 0.8 * full && g < 0.3 * full && b > 0.8 * full) {
+      if (isMarked(read, 4 * (y * VIEWPORT.widthPx + x))) {
         return true;
       }
     }
   }
   return false;
+}
+
+/** How many pixels of each row of the canvas read-back, top first, are the marks' magenta. */
+function markedRows(read: Float32Array | Uint8Array): number[] {
+  return Array.from({ length: VIEWPORT.heightPx }, (_, y) => {
+    let count = 0;
+    for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
+      count += isMarked(read, 4 * (y * VIEWPORT.widthPx + x)) ? 1 : 0;
+    }
+    return count;
+  });
+}
+
+/** The row the grazing checks read, just above the view's centre, where each pose's datum point is. */
+const GRAZE_ROW = 23;
+
+/**
+ * Where the ray of `view` through pixel (`xPx`, `yPx`) meets the datum, from the camera, m: on the
+ * sphere of the datum's radius at {@link OVER}'s centre, within metres of the spheroid near it.
+ */
+function datumOnRay(view: Pose, xPx: number, yPx: number): Vec3 {
+  const s = 1 / Math.tan(view.camera.fovXRad / 2);
+  const aspect = VIEWPORT.widthPx / VIEWPORT.heightPx;
+  const ray = normalise(
+    rotate(
+      view.camera.orientation,
+      vec3(
+        ((2 * xPx) / VIEWPORT.widthPx - 1) / s,
+        (1 - (2 * yPx) / VIEWPORT.heightPx) / (s * aspect),
+        -1,
+      ),
+    ),
+  );
+  const radiusM = norm(datumAt(OVER, 32, 32).p);
+  // |c + t r| = R for the camera c from the centre: the nearer root.
+  const b = dot(view.cameraM, ray);
+  const c = dot(view.cameraM, view.cameraM) - radiusM * radiusM;
+  return scale(ray, -b - Math.sqrt(b * b - c));
+}
+
+/**
+ * A grazing view of the datum at {@link OVER}'s centre (R10.T16.c's grazing fix): the camera
+ * `heightM` over the datum, towards −j along the survey's rows, whose ray to the point meets the
+ * datum there `elevationRad` below its horizontal, the body's curvature included, looking along it
+ * with the datum's normal there up, its field `fovXRad` across.
+ */
+function grazingPose(elevationRad: number, heightM: number, fovXRad: number): Pose {
+  const { p, nu } = datumAt(OVER, 32, 32);
+  const alongJ = sub(datumAt(OVER, 32, 64).p, datumAt(OVER, 32, 0).p);
+  const j = normalise(sub(alongJ, scale(nu, dot(alongJ, nu))));
+  const radiusM = norm(p);
+  const sin = Math.sin(elevationRad);
+  // The distance along the ray at which it stands `heightM` over a sphere of the point's radius.
+  const rangeM =
+    -radiusM * sin +
+    Math.sqrt(radiusM * radiusM * sin * sin + heightM * heightM + 2 * radiusM * heightM);
+  const fromPoint = add(scale(j, -Math.cos(elevationRad)), scale(nu, sin));
+  return {
+    cameraM: add(p, scale(fromPoint, rangeM)),
+    camera: { orientation: lookAlong(scale(fromPoint, -1), nu), fovXRad },
+    sun: poseOver().sun,
+  };
 }
 
 /** R10.T16.c's frame: see the module's remarks. */
@@ -325,14 +450,14 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     mask.survey(change);
   });
   const passes: TerrainPass[] = [];
-  const makePass = async (onDatum: boolean): Promise<TerrainPass> => {
+  const makePass = async (lay: ((bake: BakedPatch) => BakedPatch) | null): Promise<TerrainPass> => {
     const pass = new TerrainPass({
       engine,
       setting: "low",
       terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
-      createPool: (bake) => (onDatum ? onTheDatumLane(pool.lane(bake)) : pool.lane(bake)),
+      createPool: (bake) => (lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
     });
     passes.push(pass);
@@ -364,7 +489,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     const bodies = PHOTOREAL_PASS_LABELS.bodies;
 
     // With relief: the reference surface, then the terrain over it, as the bodies pass draws them.
-    const relief = await makePass(false);
+    const relief = await makePass(null);
     const withRelief = await settled(relief, mask, pose);
     const both = await drawn(engine, pose, [
       {
@@ -381,7 +506,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     );
 
     // On the datum: each surface alone, through the same live path.
-    const datum = await makePass(true);
+    const datum = await makePass(onTheDatum);
     const onDatum = await settled(datum, mask, pose);
     const terrainAlone = await drawn(engine, pose, [
       { label: "terrain", draws: onDatum.frame.terrainDraws },
@@ -429,31 +554,41 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       ...emptyDrawList(viewStrokesAt(1)),
       lines: [markBatch("under the ground", ...under), markBatch("over the ground", ...over)],
     };
-    // The marks' camera: only its orientation and field reach their segments, given from it.
-    const camera = {
-      pose: {
-        frame: { kind: "body" as const, body: bodyOf(pose).id },
-        positionM: pose.cameraM,
-        orientation: pose.camera.orientation,
-      },
-      fovXRad: pose.camera.fovXRad,
-    };
     // The frame drawn with `marks` in its symbology, read at the pixels of `at`, from the camera:
     // with or without the terrain's depth in the symbology's pass, and with or without the datum
     // of the body the plan hands over giving way (R10.T16.f), the control as the overlay was built
-    // before it, its datum whole.
+    // before it, its datum whole; through `relief` from `pose` unless another pass or view is given.
     const drawFrame = async (
       marks: WireframeDrawList,
-      options: { readonly withDepth: boolean; readonly giveWay: boolean },
+      options: {
+        readonly withDepth: boolean;
+        readonly giveWay: boolean;
+        readonly pass?: TerrainPass;
+        readonly view?: Pose;
+      },
       at: ReadonlyArray<Vec3>,
     ): Promise<{
       readonly handedOver: boolean;
       readonly depthDraws: number;
       readonly datums: number;
       readonly shown: ReadonlyArray<boolean>;
+      /** How many of the canvas's pixels are the marks' magenta. */
+      readonly marked: number;
+      /** How many of each row's pixels are, top first. */
+      readonly markedRows: ReadonlyArray<number>;
     }> => {
       const { withDepth, giveWay } = options;
-      const frame = liveFrame(relief, mask, pose, performance.now());
+      const view = options.view ?? pose;
+      // The marks' camera: only its orientation and field reach their segments, given from it.
+      const camera = {
+        pose: {
+          frame: { kind: "body" as const, body: bodyOf(view).id },
+          positionM: view.cameraM,
+          orientation: view.camera.orientation,
+        },
+        fovXRad: view.camera.fovXRad,
+      };
+      const frame = liveFrame(options.pass ?? relief, mask, view, performance.now());
       const terrain = withDepth
         ? frame.terrain
         : {
@@ -470,7 +605,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
           : overlaySubmission(wireframe, marks, TOKENS, camera, VIEWPORT, new Map());
       };
       const plan = photoreal.render(canvas, {
-        camera: pose.camera,
+        camera: view.camera,
         viewport: VIEWPORT,
         presentedPx: VIEWPORT,
         role: "eye",
@@ -481,7 +616,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         hostDraws: new Map(),
         glareSources: [],
         lights: [
-          { disc: sunLikeHostDisc(), centreM: add(frame.body.centreM, scale(pose.sun, AU_M)) },
+          { disc: sunLikeHostDisc(), centreM: add(frame.body.centreM, scale(view.sun, AU_M)) },
         ],
         bodies: [frame.body],
         depthWriters: [],
@@ -492,11 +627,14 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       });
       // Read in the task that drew it (`checkPhotorealFrame`'s note).
       const read = await canvas.readBack();
+      const rows = markedRows(read);
       return {
         handedOver: plan?.regimes.get(frame.body.id) === "terrain",
         depthDraws: terrain.symbologyDepth().length,
         datums,
-        shown: at.map((point) => markedNear(read, project(point, pose.camera, VIEWPORT))),
+        shown: at.map((point) => markedNear(read, project(point, view.camera, VIEWPORT))),
+        marked: rows.reduce((sum, count) => sum + count, 0),
+        markedRows: rows,
       };
     };
     const marksAt = [midpoint(under), midpoint(over)];
@@ -561,6 +699,121 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         surveyedWhole === true &&
         beyondWhole === true,
       `handed over ${String(givingWay.handedOver)}, ${String(givingWay.datums)} datum giving way: the lines over the surveyed ground and beyond its edge, at ${linesAt.map(pixelOf).join(" and ")} px, shown ${String(surveyedShown)} and ${String(beyondShown)}; with no datum giving way, ${String(surveyedWhole)} and ${String(beyondWhole)}`,
+    );
+
+    // R10.T16.c's grazing fix, over the flat ground of a pass wholly on the datum, from 10 km up
+    // grazing 2° (136 km out over the body's curve), where a row of this view's 5° across 64 px
+    // spans some 5.3 km of ground. A mark 1 km behind the ground along the rays through row 23's
+    // pixel centres: there the ground those rays meet is the ground the mark stands behind, and the
+    // slope term's 3 px pushed it some 16 km behind itself and showed the mark; pushed by 2^-16 of
+    // its depth, 2 m, it hides it. (A narrower field streams the finest levels 136 km out, past the
+    // part's watchdog.) (The stroke's upper half, over the farther ground of row 22, stands
+    // in front of it, as it should.)
+    const flat = await makePass(whollyOnTheDatum);
+    const graze = grazingPose((2 * Math.PI) / 180, 10_000, (5 * Math.PI) / 180);
+    const behind = [20, 44].map((x) => {
+      const ground = datumOnRay(graze, x + 0.5, GRAZE_ROW + 0.5);
+      return add(ground, scale(normalise(ground), 1_000));
+    });
+    const [behindStart, behindEnd] = behind;
+    if (behindStart === undefined || behindEnd === undefined) {
+      throw new Error("the mark has two ends");
+    }
+    const behindList = {
+      ...emptyDrawList(viewStrokesAt(1)),
+      lines: [markBatch("behind the ground", behindStart, behindEnd)],
+    };
+    const grazed = await settled(
+      flat,
+      mask,
+      graze,
+      [20, 44].map((x) => add(graze.cameraM, datumOnRay(graze, x + 0.5, GRAZE_ROW + 0.5))),
+    );
+    await photoreal.prepare(VIEWPORT, "low", "eye", graze.camera);
+    const behindDrawn = await drawFrame(
+      behindList,
+      { withDepth: true, giveWay: true, pass: flat, view: graze },
+      [],
+    );
+    const behindBare = await drawFrame(
+      behindList,
+      { withDepth: false, giveWay: true, pass: flat, view: graze },
+      [],
+    );
+    const markRow = (marked: ReadonlyArray<number>): number => marked[GRAZE_ROW] ?? 0;
+    checks.check(
+      "R10.T16.c over grazing ground the terrain's depth hides a mark 1 km behind it, seen from 10 km up at 2°",
+      grazed.done &&
+        behindDrawn.handedOver &&
+        behindDrawn.depthDraws === 1 &&
+        markRow(behindDrawn.markedRows) === 0 &&
+        markRow(behindBare.markedRows) >= 20,
+      `settled ${String(grazed.done)} (${grazed.state}), handed over ${String(behindDrawn.handedOver)}, ${String(behindDrawn.depthDraws)} depth draw: the mark's pixels on its ground's row ${String(markRow(behindDrawn.markedRows))}; with no terrain depth, ${String(markRow(behindBare.markedRows))}`,
+    );
+
+    // A line on the ground across the view along row 23's pixel centres, as the survey edge is
+    // drawn (its batch's `groundCentreF32`), from 2 km up at 2°, 10° and 60°: drawn whole, every
+    // pixel it draws with no terrain depth, where the same line off the ground loses its nearer
+    // half to the ground. Its 6 px are wider than the edge's cased 1 px, within the 3 px the list's
+    // slope term pulls it by.
+    /** The line's look at `deg`: whether it holds, and what it read. */
+    const lineAt = async (
+      deg: number,
+    ): Promise<{ readonly ok: boolean; readonly read: string }> => {
+      const view = grazingPose((deg * Math.PI) / 180, 2_000, (2 * Math.PI) / 180);
+      // Three points, so that the chord stands within millimetres of the datum.
+      const points = [8, 32, 56].map((x) => datumOnRay(view, x + 0.5, GRAZE_ROW + 0.5));
+      const [start, middle, end] = points;
+      if (start === undefined || middle === undefined || end === undefined) {
+        throw new Error("the line has three points");
+      }
+      // 6 px wide and uncased, so that its nearer half's rows are counted, wholly covered.
+      const line: LineBatch = {
+        ...markBatch("on the ground", start, middle),
+        segments: Float32Array.from([start, middle, middle, end].flatMap((v) => [v.x, v.y, v.z])),
+        widthPx: 6,
+        casingWidthPx: 0,
+      };
+      const onGround: LineBatch = {
+        ...line,
+        groundCentreF32: Float32Array.from([-view.cameraM.x, -view.cameraM.y, -view.cameraM.z]),
+      };
+      const viewSettled = await settled(
+        flat,
+        mask,
+        view,
+        points.map((p) => add(view.cameraM, p)),
+      );
+      await photoreal.prepare(VIEWPORT, "low", "eye", view.camera);
+      const frameOf = (batch: LineBatch, depth: boolean): ReturnType<typeof drawFrame> =>
+        drawFrame(
+          { ...emptyDrawList(viewStrokesAt(1)), lines: [batch] },
+          { withDepth: depth, giveWay: true, pass: flat, view },
+          [],
+        );
+      const grounded = await frameOf(onGround, true);
+      const bare = await frameOf(onGround, false);
+      const offGround = await frameOf(line, true);
+      return {
+        ok:
+          viewSettled.done &&
+          grounded.depthDraws === 1 &&
+          bare.marked >= 40 &&
+          grounded.marked >= 0.98 * bare.marked &&
+          offGround.marked <= 0.8 * bare.marked,
+        read: `${String(deg)}°: settled ${String(viewSettled.done)} (${viewSettled.state}), on the ground ${String(grounded.marked)} of ${String(bare.marked)} px, off it ${String(offGround.marked)}`,
+      };
+    };
+    const looks: { readonly ok: boolean; readonly read: string }[] = [];
+    for (const deg of [2, 10, 60]) {
+      // Each look streams the one pass to its view and draws on the one canvas, so in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      looks.push(await lineAt(deg));
+    }
+    checks.check(
+      "R10.T16.c a line on the ground, as the survey edge is drawn, draws whole over grazing ground at 2°, 10° and 60°, where one off it loses its nearer half",
+      looks.every(({ ok }) => ok),
+      looks.map(({ read }) => read).join("; "),
     );
   } finally {
     canvas.dispose();

@@ -259,7 +259,11 @@ export interface TerrainWireFrameInput {
     readonly text: Float32Array;
     readonly casing: Float32Array;
   };
-  /** The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`). */
+  /**
+   * The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`), carried and, since
+   * R10.T16.c's grazing fix, unread by `terrainWire.wgsl`, whose depth is pushed by its constant
+   * fraction alone.
+   */
   readonly occluderSlopePx: number;
 }
 
@@ -1147,8 +1151,8 @@ export class TerrainPass {
 
   /**
    * A lit pass's terrain as depth alone, compiled for the canvas (`terrainDepthMaterialSpec`,
-   * R10.T16.c): a view's draw with this material and its `occluderSlopePx` writes the drawn ground's
-   * depth into the symbology's pass before its lines; `null` before it is compiled, and for R05's
+   * R10.T16.c): a view's draw with this material writes the drawn ground's depth, pushed by its
+   * constant fraction, into the symbology's pass before its lines; `null` before it is compiled, and for R05's
    * spike shading, which no overlay draws over.
    */
   get symbologyDepthMaterial(): MaterialHandle | null {

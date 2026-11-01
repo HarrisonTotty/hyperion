@@ -16,6 +16,7 @@ import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { geometricAlbedo, lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { shapeGeometricAlbedo } from "../appearance/shapes";
 import { oblateAlbedoScale } from "../bodies/oblate";
+import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { WgslMaterialSpec } from "../engine/types";
 import {
@@ -196,6 +197,14 @@ describe("the lit terrain's depth material for the symbology (R10.T16.c)", () =>
     const fraction = /DEPTH_FRACTION\s*=\s*([0-9.]+)/u;
     const depthFraction = /TERRAIN_DEPTH_FRACTION : f32 = ([0-9.]+)/u;
     expect(terrainDepthWgsl.match(depthFraction)?.[1]).toBe(occluderWgsl.match(fraction)?.[1]);
+    expect(Number(terrainDepthWgsl.match(depthFraction)?.[1])).toBe(TERRAIN_DEPTH_FRACTION);
+  });
+
+  it("pushes its depth by that fraction alone, with no slope term (R10.T16.c's grazing fix)", () => {
+    const depthLines = terrainDepthWgsl.split("\n").filter((line) => line.includes("out.depth ="));
+    expect(depthLines.map((line) => line.trim())).toEqual([
+      "out.depth = clamp(in.clip.z * (1.0 - TERRAIN_DEPTH_FRACTION), 0.0, 1.0);",
+    ]);
   });
 });
 

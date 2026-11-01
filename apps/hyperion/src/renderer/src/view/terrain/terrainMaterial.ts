@@ -318,7 +318,8 @@ const DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * photorealistic image (plan R10, R10.T16.c; `terrainDepth.wgsl`): {@link LIT_TERRAIN_SOURCE}, the
  * depth's own `Draw` and fragment stage and the path's source, drawn with a lit view draw's
  * resources (`TerrainPass.drawFor`'s) into the canvas's depth before the overlay's lines, so that
- * nearer ground hides them, each fragment pushed away by `occluderSlopePx` as the occluders are.
+ * nearer ground hides them, each fragment pushed away by 2⁻¹⁶ of its depth alone (R10.T16.c's
+ * grazing fix; its `occluderSlopePx` uniform is carried and unread).
  *
  * @remarks
  * It binds what its entry points read alone: R05's vertex storage (four on `face-differences`)

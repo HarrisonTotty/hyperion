@@ -315,8 +315,10 @@ export interface LiveFrameTerrainInput {
   /** The frame's pre-exposure. */
   readonly exposureScale: number;
   /**
-   * The symbology's slope term, device px (the overlay's draw list's `occluderSlopePx`), by which
-   * the terrain's depth there is pushed away, as the occluders' is.
+   * The symbology's slope term, device px (the overlay's draw list's `occluderSlopePx`), which the
+   * terrain's depth draw carries and, since R10.T16.c's grazing fix, does not read: that depth is
+   * pushed by its constant fraction alone, and the survey edge pulls its own depth instead
+   * (`lineStroke.wgsl`). Kept so that the fix left the draw's uniforms as they stood.
    */
   readonly occluderSlopePx: number;
   /** The frame's monotonic time, ms. */
@@ -552,7 +554,11 @@ export interface WireframeTerrainInput {
   readonly lowSetting: boolean;
   /** The colours the contours and graticule take, as `readTokens` read them. */
   readonly tokens: Pick<ColourTokens, "textMuted" | "text" | "surface0">;
-  /** The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`). */
+  /**
+   * The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`), carried and, since
+   * R10.T16.c's grazing fix, unread by `terrainWire.wgsl`, whose depth is pushed by its constant
+   * fraction alone.
+   */
   readonly occluderSlopePx: number;
   /** The frame's monotonic time, ms, for the annunciation's debounce. */
   readonly nowMs: number;
