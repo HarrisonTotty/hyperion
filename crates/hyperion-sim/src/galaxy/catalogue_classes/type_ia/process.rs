@@ -70,7 +70,7 @@ use std::sync::Arc;
 
 #[cfg(doc)]
 use super::PRIMARY_MIN;
-use super::{DelayTimeDistribution, IaLeftover, IaProgenitor};
+use super::{DelayTimeDistribution, EXPLOSION_WORD, IaLeftover, IaProgenitor, explosion_in};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::catalogue_classes::core_collapse::class_site_velocity;
@@ -398,6 +398,17 @@ impl ClassProcess for TypeIaProcess {
             velocity,
             leftover,
         })
+    }
+
+    /// Its explosion time, read first (rule 10): `class.type_ia.progenitor` at word
+    /// `EXPLOSION_WORD`, placed in the interval as its progenitor's draw places it
+    /// (`explosion_in`), so the very time its entry takes. It is read whether or not the
+    /// candidate's site and delay are drawn and kept.
+    fn event_time(&self, galaxy: &Galaxy, id: CatalogueSystemId) -> Option<UniverseTime> {
+        let key = ObjectKey::from(SystemId::from(id));
+        let mut stream = Stream::open(galaxy.seed(), tags::CLASS_TYPE_IA_PROGENITOR, key);
+        stream.seek(EXPLOSION_WORD);
+        explosion_in(&mut stream, self.interval.start(), self.interval.end())
     }
 
     fn test(&self, galaxy: &Galaxy, candidate: TypeIaCandidate) -> Option<TypeIaEntry> {

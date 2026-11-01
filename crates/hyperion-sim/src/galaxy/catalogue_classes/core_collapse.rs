@@ -432,6 +432,16 @@ impl ClassProcess for CoreCollapseProcess {
         })
     }
 
+    /// Its death time T, read first (rule 10): word 0 of `class.core_collapse.death`, placed in
+    /// the interval as the candidate's step 4 places it. Its entry's T is its primary's death at
+    /// the age at the epoch that step sets, lifetime − T: the same time but for the rounding of
+    /// lifetime − (lifetime − T) in years, a fraction of a second.
+    fn event_time(&self, galaxy: &Galaxy, id: CatalogueSystemId) -> Option<UniverseTime> {
+        let key = ObjectKey::from(SystemId::from(id));
+        let mut stream = Stream::open(galaxy.seed(), tags::CLASS_CORE_COLLAPSE_DEATH, key);
+        Some(self.death_at(stream.uniform()))
+    }
+
     fn test(&self, galaxy: &Galaxy, candidate: CoreCollapseCandidate) -> Option<CoreCollapseEntry> {
         let death = RecentDeath::of(galaxy, &candidate)?;
         let window = claimed_window(galaxy, &death.site, &death.marks, Surroundings::Field)?;

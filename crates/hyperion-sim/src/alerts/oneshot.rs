@@ -76,6 +76,7 @@ use crate::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind}
 use crate::galaxy::catalogue_classes::type_ia::{TypeIaEntry, TypeIaProcess};
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassProcess, cells_in_sphere,
+    entries_when,
 };
 use crate::galaxy::query::QuerySphere;
 use crate::id::{EventId, SystemId};
@@ -87,6 +88,7 @@ use crate::time::{Span, UniverseTime};
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre, Years};
 
 use super::arriving::{ArrivingLight, DetectionLight};
+use super::cut;
 use super::light::{binary_luminosity, binary_peak, supernova_luminosities, supernova_peak};
 use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::TransientKind;
@@ -236,6 +238,27 @@ pub trait OneShotClass: ClassProcess {
             .filter_map(|entry| self.event(galaxy, entry.value()))
             .collect()
     }
+
+    /// The events of the class's cell `key` whose time `wanted` may accept, in index order:
+    /// [`cell_events`](Self::cell_events)' own, less any of a candidate whose time, read first,
+    /// `wanted` refuses (plan 12, P12.T8.b.2). By default those of the entries [`entries_when`]
+    /// keeps; a class whose candidates read no time first gives every event, and may give them
+    /// its own way.
+    #[must_use]
+    fn cell_events_when(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        wanted: impl Fn(UniverseTime) -> bool,
+    ) -> Vec<OneShotEvent>
+    where
+        Self: Sized,
+    {
+        entries_when(galaxy, self, key, wanted)
+            .iter()
+            .filter_map(|entry| self.event(galaxy, entry.value()))
+            .collect()
+    }
 }
 
 impl OneShotClass for CoreCollapseProcess {
@@ -283,6 +306,17 @@ impl OneShotClass for StellarMergers {
         )
     }
 
+    /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
+    /// time first.
+    fn cell_events_when(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        _wanted: impl Fn(UniverseTime) -> bool,
+    ) -> Vec<OneShotEvent> {
+        self.cell_events(galaxy, key)
+    }
+
     /// The cell's events from its scan marks, which are its entries' exactly
     /// ([`scan_merger_cell`]), without the contact pairs and merged stars the entries build.
     fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
@@ -321,6 +355,17 @@ impl OneShotClass for NeutronStarMergers {
             *entry.motion(),
             &mut Vec::with_capacity(1),
         )
+    }
+
+    /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
+    /// time first.
+    fn cell_events_when(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        _wanted: impl Fn(UniverseTime) -> bool,
+    ) -> Vec<OneShotEvent> {
+        self.cell_events(galaxy, key)
     }
 
     /// The cell's events from its scan marks, which are its entries' exactly ([`scan_nsm_cell`]),
@@ -583,6 +628,11 @@ pub fn one_shot_scan_plan<P: OneShotClass>(
 /// [`one_shot_detections`]' own, each to the bit, in any order of the cells and with any cache.
 /// A cell beyond the plan adds nothing, since no event beyond its kind's reach reaches the limit.
 ///
+/// It builds only the candidates whose time, read first, can light the window from the cell
+/// ([`cell_events_when`](OneShotClass::cell_events_when) with the one-shot cut, P12.T8.b.2), a
+/// few in ten thousand of a supernova cell's over a year, and so never takes the cell from the
+/// context's [`OneShotCells`], which hold whole cells.
+///
 /// # Panics
 ///
 /// As [`one_shot_detections`].
@@ -600,18 +650,11 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
     }
     let kind = process.kind();
     let observer = *query.observer_position();
-    let mut candidates = Vec::new();
-    ctx.one_shot_events(
-        cell,
-        &mut || process.cell_events(galaxy, cell),
-        &mut |events| {
-            candidates.extend(
-                events
-                    .iter()
-                    .filter_map(|event| candidate(event, &observer, query)),
-            );
-        },
-    );
+    let candidates: Vec<Candidate> = process
+        .cell_events_when(galaxy, cell, cut::one_shot(query, &cell))
+        .iter()
+        .filter_map(|event| candidate(event, &observer, query))
+        .collect();
     let start = out.len();
     for candidate in candidates {
         if let Some(detection) = detect(galaxy, ctx, query, process, kind, &candidate) {

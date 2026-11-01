@@ -51,8 +51,8 @@ use super::reach::inverse_square_flux;
 
 /// How long after its explosion a supernova's template is followed: 228 Julian years, after which
 /// no template gives light, every term's exponential being below the smallest `f64`
-/// ([`oneshot`](super::oneshot)).
-const SUPERNOVA_LIGHT_YEARS: f64 = 228.0;
+/// ([`oneshot`](super::oneshot)); so the longest a scan reads back for one ([`cut`](super::cut)).
+pub(crate) const SUPERNOVA_LIGHT_YEARS: f64 = 228.0;
 
 /// What a detection's light does at the observer over the observer's time (module
 /// documentation).

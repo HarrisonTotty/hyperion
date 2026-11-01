@@ -77,6 +77,7 @@ use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCol
 use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
+    entries_when,
 };
 use crate::galaxy::gas::extinction::Sightline;
 use crate::galaxy::placement::SystemRecord;
@@ -97,6 +98,7 @@ use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SPEED_OF_LIGHT};
 use crate::units::{Gauss, LightYears, Metres, SolarMasses, Watts, Years};
 
 use super::arriving::{ArrivingLight, DetectionLight};
+use super::cut;
 use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::{Route, TransientKind};
 use super::{
@@ -730,8 +732,21 @@ pub fn magnetar_detections<P: MagnetarClass>(
     out: &mut Vec<Detection>,
 ) {
     let start = out.len();
-    for cell in magnetar_scan_plan(process.class(), query) {
-        magnetar_scan_cell(galaxy, ctx, query, process, cell, out);
+    if query.classes().contains(process.class()) {
+        let observer = *query.observer_position();
+        for cell in magnetar_scan_plan(process.class(), query) {
+            let mut active = Vec::new();
+            ctx.magnetar_hosts(
+                cell,
+                &mut || hosts_of(galaxy, process, cell),
+                &mut |hosts| {
+                    active.extend(hosts.iter().filter_map(|host| {
+                        emission_of(host, &observer, query).map(|interval| (host.clone(), interval))
+                    }));
+                },
+            );
+            hosts_detections(galaxy, ctx, query, process.class(), active, out);
+        }
     }
     sort_detections(&mut out[start..]);
 }
@@ -739,6 +754,11 @@ pub fn magnetar_detections<P: MagnetarClass>(
 /// Appends to `out` the detections of the magnetars of `process`'s cell `cell` that `query`'s
 /// sensor sees in its window, sorted by arrival and then by event (module documentation). Nothing
 /// for a cell of another class, or one the query does not ask about.
+///
+/// It builds only the entries whose death, read first, can make a magnetar that lights the window
+/// from the cell (the magnetar cut, plan 12, P12.T8.b.2), some one in fifteen of a cell's, and so
+/// never takes the cell from the context's [`MagnetarCells`], which hold whole cells. Over every
+/// cell of [`magnetar_scan_plan`] the detections are [`magnetar_detections`]' own, each to the bit.
 ///
 /// # Panics
 ///
@@ -758,17 +778,29 @@ pub fn magnetar_scan_cell<P: MagnetarClass>(
         return;
     }
     let observer = *query.observer_position();
-    let mut active = Vec::new();
-    ctx.magnetar_hosts(
-        cell,
-        &mut || hosts_of(galaxy, process, cell),
-        &mut |hosts| {
-            active.extend(hosts.iter().filter_map(|host| {
-                emission_of(host, &observer, query).map(|interval| (host.clone(), interval))
-            }));
-        },
-    );
+    let active: Vec<(MagnetarHost, TimeWindow)> =
+        entries_when(galaxy, process, cell, cut::magnetars(query, &cell))
+            .iter()
+            .filter_map(|entry| process.magnetar_host(galaxy, entry.value()))
+            .filter_map(|host| {
+                emission_of(&host, &observer, query).map(|interval| (host, interval))
+            })
+            .collect();
     let start = out.len();
+    hosts_detections(galaxy, ctx, query, class, active, out);
+    sort_detections(&mut out[start..]);
+}
+
+/// Appends to `out` the detections of each of `active`'s hosts of `class` over its emission
+/// interval, a cell's, unsorted.
+fn hosts_detections(
+    galaxy: &Galaxy,
+    ctx: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    class: ClassId,
+    active: Vec<(MagnetarHost, TimeWindow)>,
+    out: &mut Vec<Detection>,
+) {
     let mut scratch = Scratch::default();
     for (host, interval) in active {
         host_detections(
@@ -782,7 +814,6 @@ pub fn magnetar_scan_cell<P: MagnetarClass>(
             out,
         );
     }
-    sort_detections(&mut out[start..]);
 }
 
 /// Sorts detections by arrival and then by event, the [`AlertResult`](super::AlertResult)'s

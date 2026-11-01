@@ -90,6 +90,12 @@ pub const DONOR_MAX: f64 = 3.0;
 /// hundredth for every component the galaxy has, so 4,096 fail with probability under 10⁻¹⁷.
 const DELAY_ATTEMPTS: u64 = 4_096;
 
+/// The word of a progenitor's stream, counted from its component mark's, at which its explosion
+/// time is drawn: after the mark, the delay's 2 × [`DELAY_ATTEMPTS`] proposal words, the channel's
+/// mark and the two masses' uniforms. So the time can be read first, before the rest of the draw
+/// (plan 12, P12.T8.b.2), and the draw itself checks that it reads it there.
+const EXPLOSION_WORD: u64 = 1 + 2 * DELAY_ATTEMPTS + 3;
+
 /// The masses the lifetime table spans, M☉, and its nodes.
 const LIFETIME_MASSES: (f64, f64) = (0.8, 8.0);
 const LIFETIME_NODES: usize = 48;
@@ -679,7 +685,8 @@ impl IaProgenitor {
     }
 
     /// The draw of component `index`'s progenitor from word `base` + 1 of `stream` on, `base`
-    /// being the word `draw`'s component mark was read at.
+    /// being the word `draw`'s component mark was read at; its explosion is [`explosion_in`] at
+    /// word `base` + [`EXPLOSION_WORD`].
     fn draw_after_pick(
         delays: &DelayTimeDistribution,
         stream: &mut Stream,
@@ -701,17 +708,12 @@ impl IaProgenitor {
         let channel = IaChannel::ALL[channel_index];
         let u_primary = stream.uniform();
         let u_secondary = stream.uniform();
-        let window = until
-            .checked_since(after)
-            .filter(|s| !s.is_negative() && s.seconds() > 0);
-        debug_assert!(window.is_some(), "an explosion interval must have a length");
-        let length = NonZeroU64::new(
-            u64::try_from(window?.seconds()).expect("the filter keeps only positive lengths"),
-        )?;
-        let offset = 1 + stream.below(length);
-        let explosion = after.checked_add(Span::from_seconds(
-            i64::try_from(offset).expect("an offset at most the interval's length fits in i64"),
-        ))?;
+        debug_assert_eq!(
+            stream.position(),
+            base + EXPLOSION_WORD,
+            "the explosion is drawn at its own word, which the scans read first"
+        );
+        let explosion = explosion_in(stream, after, until)?;
         let delay = Span::from_seconds_f64(delay_years * SECONDS_PER_JULIAN_YEAR)?;
         let fit = delays.mass_with_lifetime(Years::new(delay_years));
         let (lo, hi) = primary_range(fit);
@@ -900,6 +902,29 @@ pub fn secondary_window(channel: IaChannel, primary: f64, fit: SolarMasses) -> (
         let top = DONOR_MAX.min(fit.value()).min(primary);
         ((0.5 * top).max(floor).min(top), top)
     }
+}
+
+/// The explosion time `stream` draws at its position in `(after, until]`: `after` and one more
+/// second than a whole number of seconds below the interval's whole seconds, or `None` for an
+/// interval of no whole second. A progenitor's draw and the scans that read the time first
+/// ([`TypeIaProcess`]'s `event_time`, plan 12, P12.T8.b.2) both draw it here, at the stream's
+/// [`EXPLOSION_WORD`].
+fn explosion_in(
+    stream: &mut Stream,
+    after: UniverseTime,
+    until: UniverseTime,
+) -> Option<UniverseTime> {
+    let window = until
+        .checked_since(after)
+        .filter(|s| !s.is_negative() && s.seconds() > 0);
+    debug_assert!(window.is_some(), "an explosion interval must have a length");
+    let length = NonZeroU64::new(
+        u64::try_from(window?.seconds()).expect("the filter keeps only positive lengths"),
+    )?;
+    let offset = 1 + stream.below(length);
+    after.checked_add(Span::from_seconds(
+        i64::try_from(offset).expect("an offset at most the interval's length fits in i64"),
+    ))
 }
 
 /// The delay, years, from the rejection draw on `stream`'s words after the component's: a proposal

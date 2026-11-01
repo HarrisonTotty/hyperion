@@ -52,6 +52,7 @@ use crate::units::{LightYears, WattsPerSquareMetre};
 pub mod arriving;
 pub mod census;
 pub mod centre;
+mod cut;
 pub mod light;
 pub mod local;
 pub mod oneshot;

@@ -28,8 +28,8 @@ pub mod type_ia;
 
 pub use self::grid::{
     CatalogueClassCell, CatalogueEntry, CatalogueMember, CheckClassHeadroomError, ClassLookup,
-    ClassProcess, ClassVisitor, MemberVisitor, ProductionClasses, cells_in_sphere,
-    check_class_headroom, resolve, resolve_entry,
+    ClassProcess, ClassVisitor, MemberVisitor, ProductionClasses, cells_in_slab, cells_in_sphere,
+    check_class_headroom, class_slabs, entries_when, occupied_cells, resolve, resolve_entry,
 };
 pub use self::ids::{BuildCatalogueCellKeyError, CatalogueCellKey};
 pub use self::registry::{ALL_CLASSES, ClassId, FEATURE_LEVEL_LIST_ORDER};
