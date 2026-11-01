@@ -3,14 +3,14 @@
 //! 100 ly, its eccentricities are thermal, its brightest band inside 0.04 ly holds S2-like orbits,
 //! and its members lie some 0.05 ly apart at 3 ly.
 //!
-//! They run on the centre's Milky Way fixture under the version's rules, whose Kepler regime and exact
-//! orbit in the centre's potential (P09.T28.b.b, P09.T28.d.b) are what move the members. A shell's
-//! members at a time are those [`CentreMemberSource`] finds in the sphere of its outer radius about
-//! the black hole then, in the bands the shell samples, less those inside its inner radius: the
-//! source's hits equal a scan of every member (its tests), so the sample is the shell's whole
-//! population in those bands, thinned by a hash of the ID where it is large. The black hole and the
-//! tidal disruptions' victims, the centre's feature-level members, are on no distribution function
-//! and are left out.
+//! They run on the centre's Milky Way fixture under the version's rules, whose Kepler regime and
+//! exact orbit in the centre's potential (P09.T28.b.b, P09.T28.d.b) are what move the members. A
+//! shell's members at a time are those [`CentreMemberSource`] finds in the sphere of its outer
+//! radius about the black hole then, in the bands the shell samples, less those inside its inner
+//! radius: the source's hits equal a scan of every member (its tests), so the sample is the shell's
+//! whole population in those bands, thinned by a hash of the ID where it is large. The black hole
+//! and the tidal disruptions' victims, the centre's feature-level members, are on no distribution
+//! function and are left out.
 //!
 //! The profile a shell keeps is the placement's: a band's members lie at a density of
 //! `Σ_c N_c n_t(r) g_t(θ) ÷ A_t` over its classes (the members module's documentation), so over the
