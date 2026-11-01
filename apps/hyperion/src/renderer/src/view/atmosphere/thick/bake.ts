@@ -1156,36 +1156,73 @@ export function bakeLightBins(
 // ---------------------------------------------------------------------------------------------
 // One band.
 
-/** A band's layers in one bin, before the gases: per layer from the top. */
-interface BandBin {
-  readonly extinction: Float64Array;
-  readonly scattering: Float64Array;
-  /** The layer's mixed χ₀ … χ₁₆, scattering-weighted, row-major `[p × 17 + l]`. */
-  readonly moments: Float64Array;
-  readonly forwardDelta: Float64Array;
+/**
+ * A term's optics at relative density 1 at one wavelength, as the bake mixes a layer by them: its
+ * bins', a deck's, or the correction's a₁ at a channel.
+ */
+export interface LayerTermOptics {
+  readonly scatteringPerM: number;
+  readonly absorptionPerM: number;
+  readonly forwardDelta: number;
+  /** χ₀ … χ_NSTR at least. */
+  readonly moments: ArrayLike<number>;
 }
 
-function bandBinOf(prepared: PreparedBake, bin: number, factor: number): BandBin {
-  const layers = prepared.grid.layers;
-  const order = THICK_BAKE_STREAMS;
-  const terms = prepared.binOptics[bin] ?? [];
-  const extinction = new Float64Array(layers);
-  const scattering = new Float64Array(layers);
-  const moments = new Float64Array(layers * (order + 1));
-  const forwardDelta = new Float64Array(layers);
-  for (let p = 0; p < layers; p += 1) {
+/**
+ * A run of a column's layers in one bin of a band, their terms mixed by their scattering (plan R08,
+ * R08.T15.a.1's "Two layer mixers": the bake's and the deck's one): each term's column times the
+ * band's factor, term by term in the column's order.
+ */
+export interface MixedLayers {
+  /** Each layer's vertical extinction optical depth before the gases' sums, in the band's frame. */
+  readonly extinction: Float64Array;
+  /** Its scattering optical depth. */
+  readonly scattering: Float64Array;
+  /**
+   * Its mixed χ₀ … χ_NSTR, scattering-weighted, row-major `[p × (NSTR + 1) + l]`: χ₀ = 1 and the
+   * rest 0 where it scatters nothing.
+   */
+  readonly moments: Float64Array;
+  /** Its f_c, scattering-weighted; 0 where it scatters nothing. */
+  readonly forwardDelta: Float64Array;
+  /** Per layer, each term's share of its scattering, `[p][t]`, all 0 where it scatters nothing. */
+  readonly scatteringShares: ReadonlyArray<Float64Array>;
+}
+
+/**
+ * The {@link MixedLayers} of `layerCount` layers from `terms`' optics in one bin.
+ *
+ * @param layerColumnsM - Per term, per layer from the top, ∫ρ dh over it, m.
+ * @param factor - The band's factor, 1 ÷ s_b.
+ * @param streams - NSTR, whose χ_NSTR the moments carry for delta-M.
+ */
+export function mixedLayers(
+  terms: ReadonlyArray<LayerTermOptics>,
+  layerColumnsM: ReadonlyArray<Float64Array>,
+  layerCount: number,
+  factor: number,
+  streams: number = THICK_BAKE_STREAMS,
+): MixedLayers {
+  const extinction = new Float64Array(layerCount);
+  const scattering = new Float64Array(layerCount);
+  const moments = new Float64Array(layerCount * (streams + 1));
+  const forwardDelta = new Float64Array(layerCount);
+  const scatteringShares: Float64Array[] = [];
+  for (let p = 0; p < layerCount; p += 1) {
     let tau = 0;
     let tauS = 0;
     let delta = 0;
+    const shares = new Float64Array(terms.length);
     for (const [t, o] of terms.entries()) {
-      const c = (prepared.layerColumnsM[t]?.[p] ?? Number.NaN) * factor;
+      const c = (layerColumnsM[t]?.[p] ?? Number.NaN) * factor;
       tau += (o.scatteringPerM + o.absorptionPerM) * c;
       const s = o.scatteringPerM * c;
       if (s > 0) {
         tauS += s;
         delta += s * o.forwardDelta;
-        for (let l = 0; l <= order; l += 1) {
-          const k = p * (order + 1) + l;
+        shares[t] = s;
+        for (let l = 0; l <= streams; l += 1) {
+          const k = p * (streams + 1) + l;
           moments[k] = (moments[k] ?? 0) + s * (o.moments[l] ?? Number.NaN);
         }
       }
@@ -1193,12 +1230,79 @@ function bandBinOf(prepared: PreparedBake, bin: number, factor: number): BandBin
     extinction[p] = tau;
     scattering[p] = tauS;
     forwardDelta[p] = tauS > 0 ? delta / tauS : 0;
-    for (let l = 0; l <= order; l += 1) {
-      const k = p * (order + 1) + l;
+    for (let l = 0; l <= streams; l += 1) {
+      const k = p * (streams + 1) + l;
       moments[k] = tauS > 0 ? (moments[k] ?? 0) / tauS : l === 0 ? 1 : 0;
     }
+    if (tauS > 0) {
+      for (let t = 0; t < shares.length; t += 1) {
+        shares[t] = (shares[t] ?? 0) / tauS;
+      }
+    }
+    scatteringShares.push(shares);
   }
-  return { extinction, scattering, moments, forwardDelta };
+  return { extinction, scattering, moments, forwardDelta, scatteringShares };
+}
+
+/** Mixed layers delta-M scaled for one term of a bin's gases ({@link deltaMLayersOf}). */
+export interface DeltaMLayers {
+  /** The delta-M layers, from the top down. */
+  readonly layers: ReadonlyArray<OrdinateLayer>;
+  /** Their optical depths, `layers`' own. */
+  readonly scaledDepths: Float64Array;
+  /** Each layer's depth as the kernels march it: the gases' and the extinction less the forward delta. */
+  readonly kernelDepths: Float64Array;
+  /** Each layer's truncated fraction f ({@link DeltaMLayer.truncated}). */
+  readonly truncated: Float64Array;
+}
+
+/**
+ * Mixed layers with one term of a bin's gases added and delta-M taken at `streams` ({@link
+ * deltaMLayer}), layer by layer.
+ *
+ * @param absorptionDepth - The term's gases' depth per layer of the whole column, in the reference
+ *   frame: the run's layers are its entries from `offset` on, each times the band's `factor`.
+ */
+export function deltaMLayersOf(
+  mixed: MixedLayers,
+  factor: number,
+  absorptionDepth: ArrayLike<number>,
+  offset: number,
+  streams: number = THICK_BAKE_STREAMS,
+): DeltaMLayers {
+  const layerCount = mixed.extinction.length;
+  const layers: OrdinateLayer[] = [];
+  const scaledDepths = new Float64Array(layerCount);
+  const kernelDepths = new Float64Array(layerCount);
+  const truncated = new Float64Array(layerCount);
+  for (let p = 0; p < layerCount; p += 1) {
+    const tau =
+      (mixed.extinction[p] ?? Number.NaN) + factor * (absorptionDepth[offset + p] ?? Number.NaN);
+    const tauS = mixed.scattering[p] ?? Number.NaN;
+    const delta = mixed.forwardDelta[p] ?? Number.NaN;
+    const scaled = deltaMLayer(
+      tau,
+      tauS,
+      mixed.moments.subarray(p * (streams + 1), (p + 1) * (streams + 1)),
+      delta,
+      streams,
+    );
+    layers.push(scaled.layer);
+    scaledDepths[p] = scaled.layer.opticalDepth;
+    kernelDepths[p] = Math.max(tau - tauS * delta, 0);
+    truncated[p] = scaled.truncated;
+  }
+  return { layers, scaledDepths, kernelDepths, truncated };
+}
+
+/** A band's layers in one bin, mixed. */
+function bandBinOf(prepared: PreparedBake, bin: number, factor: number): MixedLayers {
+  return mixedLayers(
+    prepared.binOptics[bin] ?? [],
+    prepared.layerColumnsM,
+    prepared.grid.layers,
+    factor,
+  );
 }
 
 /** The Legendre functions the source takes, per mode: at the nodes, the view cosines and the suns. */
@@ -1330,7 +1434,7 @@ function solveOf(
   prepared: PreparedBake,
   band: ThickBakeBand,
   bin: number,
-  base: BandBin,
+  base: MixedLayers,
   term: BinTerm,
   legendre: SourceLegendre,
   ground: BakeGround | undefined,
@@ -1341,24 +1445,11 @@ function solveOf(
   const layers = grid.layers;
   const order = THICK_BAKE_STREAMS;
   const factor = band.coefficientFactor;
-  const scaled: OrdinateLayer[] = [];
-  const scaledDepths = new Float64Array(layers);
-  const kernelDepths = new Float64Array(layers);
-  for (let p = 0; p < layers; p += 1) {
-    const tau =
-      (base.extinction[p] ?? Number.NaN) + factor * (term.absorptionDepth[p] ?? Number.NaN);
-    const tauS = base.scattering[p] ?? Number.NaN;
-    const delta = base.forwardDelta[p] ?? Number.NaN;
-    const { layer } = deltaMLayer(
-      tau,
-      tauS,
-      base.moments.subarray(p * (order + 1), (p + 1) * (order + 1)),
-      delta,
-    );
-    scaled.push(layer);
-    scaledDepths[p] = layer.opticalDepth;
-    kernelDepths[p] = Math.max(tau - tauS * delta, 0);
-  }
+  const {
+    layers: scaled,
+    scaledDepths,
+    kernelDepths,
+  } = deltaMLayersOf(base, factor, term.absorptionDepth, 0);
   const radius = band.bottomRadiusM;
   const planck = prepared.interfacePlanck?.[bin];
   const scaledBeams = Array.from(grid.sunCosines, (mu0) =>

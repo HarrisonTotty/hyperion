@@ -139,8 +139,10 @@ import {
   type BinSolve,
   type BinTerm,
   checkBakeInputs,
-  deltaMLayer,
+  deltaMLayersOf,
   gatherBins,
+  type LayerTermOptics,
+  mixedLayers,
   type MsBinShare,
   type MsSourceTable,
   type PreparedBake,
@@ -163,6 +165,7 @@ import {
   type GroundReflectance,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
+  solveDiscreteOrdinateModes,
   solveDiscreteOrdinates,
 } from "./discreteOrdinates";
 import { EXP_SUM_OPTIONS, type ExpSumOptions } from "./expSum";
@@ -493,15 +496,6 @@ export function prepareDeck(
 // ---------------------------------------------------------------------------------------------
 // The deck's layers and reflectance.
 
-/** A term's optics at relative density 1 at one wavelength, as the bake and the correction hold them. */
-interface LayerTermOptics {
-  readonly scatteringPerM: number;
-  readonly absorptionPerM: number;
-  readonly forwardDelta: number;
-  /** χ₀ … χ_NSTR at least. */
-  readonly moments: ArrayLike<number>;
-}
-
 /** A run of layers as a solve takes them, and their extinction before the gases. */
 export interface DeckOrdinateLayers {
   /** The delta-M layers, from the top down. */
@@ -517,9 +511,10 @@ export interface DeckOrdinateLayers {
 }
 
 /**
- * The delta-M layers of a run of a column's layers in one band (`bake.ts`'s arithmetic, term by term
- * in the column's order): each term's column times the band's factor, mixed by its scattering, the
- * gases' depth of one term of the bin's sums added, then `deltaMLayer` at `streams`.
+ * The delta-M layers of a run of a column's layers in one band, by `bake.ts`'s own mixer and delta-M
+ * (`mixedLayers` and `deltaMLayersOf`, R08.T15.a.1's "Two layer mixers" folded into one): each
+ * term's column times the band's factor, mixed by its scattering, the gases' depth of one term of
+ * the bin's sums added, then `deltaMLayer` at `streams`.
  *
  * @param layerColumnsM - Per term, per layer from the top, ∫ρ dh over it, m.
  * @param absorptionDepth - One term of a bin's gases, per layer of the whole column, in the reference
@@ -534,48 +529,21 @@ function deckOrdinateLayers(
   offset: number,
   streams: number,
 ): DeckOrdinateLayers {
-  const layers: OrdinateLayer[] = [];
-  const extinction = new Float64Array(layerCount);
-  const kernelDepths = new Float64Array(layerCount);
-  const truncated = new Float64Array(layerCount);
-  const scatteringShares: Float64Array[] = [];
-  for (let p = 0; p < layerCount; p += 1) {
-    let tau = 0;
-    let tauS = 0;
-    let delta = 0;
-    const moments = new Float64Array(streams + 1);
-    const shares = new Float64Array(terms.length);
-    for (const [t, o] of terms.entries()) {
-      const c = (layerColumnsM[t]?.[p] ?? Number.NaN) * factor;
-      tau += (o.scatteringPerM + o.absorptionPerM) * c;
-      const s = o.scatteringPerM * c;
-      if (s > 0) {
-        tauS += s;
-        delta += s * o.forwardDelta;
-        shares[t] = s;
-        for (let l = 0; l <= streams; l += 1) {
-          moments[l] = (moments[l] ?? 0) + s * (o.moments[l] ?? Number.NaN);
-        }
-      }
-    }
-    const forwardDelta = tauS > 0 ? delta / tauS : 0;
-    for (let l = 0; l <= streams; l += 1) {
-      moments[l] = tauS > 0 ? (moments[l] ?? 0) / tauS : l === 0 ? 1 : 0;
-    }
-    if (tauS > 0) {
-      for (let t = 0; t < shares.length; t += 1) {
-        shares[t] = (shares[t] ?? 0) / tauS;
-      }
-    }
-    const total = tau + factor * (absorptionDepth[offset + p] ?? Number.NaN);
-    const scaled = deltaMLayer(total, tauS, moments, forwardDelta, streams);
-    layers.push(scaled.layer);
-    extinction[p] = tau;
-    kernelDepths[p] = Math.max(total - tauS * forwardDelta, 0);
-    truncated[p] = scaled.truncated;
-    scatteringShares.push(shares);
-  }
-  return { layers, extinction, kernelDepths, truncated, scatteringShares };
+  const mixed = mixedLayers(terms, layerColumnsM, layerCount, factor, streams);
+  const { layers, kernelDepths, truncated } = deltaMLayersOf(
+    mixed,
+    factor,
+    absorptionDepth,
+    offset,
+    streams,
+  );
+  return {
+    layers,
+    extinction: mixed.extinction,
+    kernelDepths,
+    truncated,
+    scatteringShares: mixed.scatteringShares,
+  };
 }
 
 /**
@@ -694,11 +662,18 @@ function trueScatteringOf(
  * layers, a plane-parallel beam at each incident cosine μ′, the upward intensity at its top at each
  * outgoing cosine μ, ρ^m(μ, μ′) = π I^m(0, +μ) ÷ μ′ for m = 0 … `maxMode`.
  *
+ * @remarks
+ * Given `known`, a reflectance of the same layers over the same floor at the same streams whose
+ * cosines hold `cosines` (as the bake's coupling to the deck holds the kernels', R08.T15.a's
+ * lever), its modes are taken at these cosines and only the modes past them solved: each beam and
+ * user cosine of a solve is its own, so they are the bits a solve of these cosines alone gives.
+ *
  * @param layers - The deck's layers from its top down.
  * @param floorAlbedo - The Lambertian albedo beneath them, in [0, 1].
  * @param streams - NSTR of the deck's solve; the thick bake's 16 by default, whatever the streams of
  *   the solve that reads it.
- * @throws RangeError as `discreteOrdinates.ts`'s `solveDiscreteOrdinates` refuses the deck's solve.
+ * @throws RangeError as `discreteOrdinates.ts`'s `solveDiscreteOrdinates` refuses the deck's solve,
+ *   or for a `known` whose cosines miss one of `cosines`.
  */
 export function deckReflectance(
   layers: ReadonlyArray<OrdinateLayer>,
@@ -706,33 +681,83 @@ export function deckReflectance(
   cosines: GroundCosines,
   maxMode: number,
   streams: number = THICK_BAKE_STREAMS,
+  known?: GroundReflectance,
 ): GroundReflectance {
   const { outgoingCosines, incidentCosines } = cosines;
-  const solution = solveDiscreteOrdinates({
-    layers,
-    groundAlbedo: floorAlbedo,
-    beamCosines: incidentCosines,
-    userCosines: outgoingCosines,
-    maxMode,
-    streams,
-    // ρ is the upward user field at the top alone (R08.T14.b's lever): no node field past the
-    // floor's, which its reflection reads, and no downward user field.
-    fieldInterfaces: [],
-    userDown: false,
-  });
   const columns = incidentCosines.length;
-  const modes = Array.from({ length: maxMode + 1 }, (_, m) => {
+  const taken = Math.min(known?.modes.length ?? 0, maxMode + 1);
+  const modes: Float64Array[] = [];
+  if (known !== undefined && taken > 0) {
+    const outgoing = firstIndices(known.outgoingCosines);
+    const incident = firstIndices(known.incidentCosines);
+    const knownColumns = known.incidentCosines.length;
+    const rows = Array.from(outgoingCosines, (mu) => indexIn(outgoing, mu));
+    const across = Array.from(incidentCosines, (mu) => indexIn(incident, mu));
+    for (let m = 0; m < taken; m += 1) {
+      const from = known.modes[m];
+      modes.push(
+        Float64Array.from({ length: outgoingCosines.length * columns }, (_, k) => {
+          const row = rows[Math.floor(k / columns)] ?? -1;
+          const column = across[k % columns] ?? -1;
+          return from?.[row * knownColumns + column] ?? Number.NaN;
+        }),
+      );
+    }
+  }
+  if (taken > maxMode) {
+    return { outgoingCosines, incidentCosines, modes };
+  }
+  const beams = solveDiscreteOrdinateModes(
+    {
+      layers,
+      groundAlbedo: floorAlbedo,
+      beamCosines: incidentCosines,
+      userCosines: outgoingCosines,
+      maxMode,
+      streams,
+      // ρ is the upward user field at the top alone (R08.T14.b's lever): no node field past the
+      // floor's, which its reflection reads, and no downward user field.
+      fieldInterfaces: [],
+      userDown: false,
+    },
+    taken,
+  );
+  for (let m = taken; m <= maxMode; m += 1) {
     const rho = new Float64Array(outgoingCosines.length * columns);
-    solution.beams.forEach((beam, j) => {
-      const up = beam.modes[m]?.userUp;
+    beams.forEach((beam, j) => {
+      const up = beam[m - taken]?.userUp;
       const mu = incidentCosines[j] ?? Number.NaN;
       for (let i = 0; i < outgoingCosines.length; i += 1) {
         rho[i * columns + j] = (Math.PI * (up?.[i] ?? Number.NaN)) / mu;
       }
     });
-    return rho;
-  });
+    modes.push(rho);
+  }
   return { outgoingCosines, incidentCosines, modes };
+}
+
+/** Each cosine's first index among `cosines`. */
+function firstIndices(cosines: Float64Array): ReadonlyMap<number, number> {
+  const indices = new Map<number, number>();
+  cosines.forEach((mu, i) => {
+    if (!indices.has(mu)) {
+      indices.set(mu, i);
+    }
+  });
+  return indices;
+}
+
+/**
+ * A cosine's index among a known reflectance's.
+ *
+ * @throws RangeError for a cosine it does not hold.
+ */
+function indexIn(indices: ReadonlyMap<number, number>, mu: number): number {
+  const index = indices.get(mu);
+  if (index === undefined) {
+    throw new RangeError(`the known reflectance holds no cosine ${mu}`);
+  }
+  return index;
 }
 
 /**
@@ -1036,11 +1061,15 @@ export function bakeDeckBins(
       throw new Error(`bin ${String(bin)}'s solve took no deck`);
     }
     const deck = layersOf(bin, term);
+    // The coupling's solve of the same layers holds the kernels' cosines at its modes: those are
+    // taken from it, and only the deck's modes past them solved (R08.T15.a's lever).
     const own = deckReflectance(
       deck.layers,
       floorAlbedo[bin] ?? Number.NaN,
       kernelCosines,
       modes - 1,
+      THICK_BAKE_STREAMS,
+      coupling,
     );
     const single = deckSingleScattering(deck.layers, kernelCosines, modes - 1);
     const geometryFactor = deckSingleGeometry(deck.layers, deck.truncated, kernelCosines);

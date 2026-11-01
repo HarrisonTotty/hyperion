@@ -752,6 +752,31 @@ describe("the deck's own tables (R08.T15.a.2)", () => {
   const cosines = Float64Array.of(0.15, 0.4, 0.8, 1);
   const pairs = { outgoingCosines: cosines, incidentCosines: cosines };
 
+  it("takes a known reflectance's modes at cosines it holds, the rest solved, to the bits of its own solve (R08.T15.a)", () => {
+    // As the bake's coupling holds the kernels' cosines among the nodes' and the suns'.
+    const rayleigh = Float64Array.from({ length: 17 }, (_, l) => (l === 0 ? 1 : l === 2 ? 0.1 : 0));
+    const layers = [
+      deltaMLayer(0.3, 0.27, rayleigh, 0).layer,
+      deltaMLayer(1.5, 1.4, cornetteShanksMoments(0.75, 16), 0).layer,
+    ];
+    const wide = Float64Array.of(0.05, 0.15, 0.3, 0.4, 0.8, 0.9, 1);
+    const known = deckReflectance(layers, 0.2, { outgoingCosines: wide, incidentCosines: wide }, 2);
+    const own = deckReflectance(layers, 0.2, pairs, DECK_MODES - 1);
+    const taken = deckReflectance(layers, 0.2, pairs, DECK_MODES - 1, THICK_BAKE_STREAMS, known);
+    expect(taken.modes).toHaveLength(DECK_MODES);
+    expect(taken.modes).toEqual(own.modes);
+    expect(() =>
+      deckReflectance(
+        layers,
+        0.2,
+        { ...pairs, incidentCosines: Float64Array.of(0.5) },
+        2,
+        16,
+        known,
+      ),
+    ).toThrow(RangeError);
+  });
+
   it("takes the solver's own single scattering out: a thin slab's reflectance at every mode, to 10⁻⁶", () => {
     // Cornette–Shanks g 0.75 by delta-M at 16 streams, τ′ 10⁻⁷ over a black floor: the solve's
     // reflectance is its single scattering to O(τ′).

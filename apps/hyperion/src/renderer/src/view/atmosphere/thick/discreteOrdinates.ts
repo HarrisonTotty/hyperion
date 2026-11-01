@@ -1486,6 +1486,64 @@ interface PreparedBeam {
 export function solveDiscreteOrdinates(
   problem: DiscreteOrdinatesProblem,
 ): DiscreteOrdinatesSolution {
+  const { beams, quadrature, interfaceDepths, userCosines, perBeam, thermal } = solvedModes(
+    problem,
+    0,
+  );
+  const n = quadrature.nodes.length;
+  const layerCount = interfaceDepths.length - 1;
+  const solved = beams.map((beam, b): BeamSolution => {
+    const modes = perBeam[b] ?? [];
+    const zeroth = modes[0];
+    if (zeroth === undefined) {
+      throw new Error("mode 0 is always solved");
+    }
+    return {
+      beamCosine: beam.cosine,
+      modes,
+      fluxes: fluxesOf(zeroth, beam, quadrature, layerCount, n),
+    };
+  });
+  return {
+    quadrature,
+    interfaceDepths,
+    userCosines,
+    beams: solved,
+    ...(thermal === undefined ? {} : { thermal }),
+  };
+}
+
+/**
+ * The modes `fromMode` … M of a problem alone, per beam in its order (plan R08, R08.T15.a's lever:
+ * a deck's reflectance at the modes past those a solve of the same layers holds): each mode
+ * {@link solveDiscreteOrdinates}'s of the same problem to the bit, since no mode's solve reads
+ * another's. It gives no fluxes, and a thermal emission is not solved (it is mode 0's).
+ *
+ * @throws RangeError as {@link solveDiscreteOrdinates}, or for a `fromMode` that is not a whole
+ *   number in [0, M].
+ */
+export function solveDiscreteOrdinateModes(
+  problem: DiscreteOrdinatesProblem,
+  fromMode: number,
+): ReadonlyArray<ReadonlyArray<ModeIntensities>> {
+  if (!(Number.isInteger(fromMode) && fromMode >= 0 && fromMode <= problem.maxMode)) {
+    throw new RangeError(`the modes solved start in [0, ${problem.maxMode}], not at ${fromMode}`);
+  }
+  return solvedModes(problem, fromMode).perBeam;
+}
+
+/** A problem's modes from `fromMode` on, each beam's, and its thermal field where mode 0 is solved. */
+function solvedModes(
+  problem: DiscreteOrdinatesProblem,
+  fromMode: number,
+): {
+  readonly beams: ReadonlyArray<PreparedBeam>;
+  readonly quadrature: DoubleGaussQuadrature;
+  readonly interfaceDepths: Float64Array;
+  readonly userCosines: Float64Array;
+  readonly perBeam: ReadonlyArray<ReadonlyArray<ModeIntensities>>;
+  readonly thermal: ThermalSolution | undefined;
+} {
   const streams = problem.streams ?? DISCRETE_ORDINATE_STREAMS;
   requireStreams(streams);
   requireMode(problem.maxMode, streams);
@@ -1518,7 +1576,7 @@ export function solveDiscreteOrdinates(
   const perBeam: ModeIntensities[][] = beams.map(() => []);
   const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   let thermal: ThermalSolution | undefined;
-  for (let m = 0; m <= problem.maxMode; m += 1) {
+  for (let m = fromMode; m <= problem.maxMode; m += 1) {
     const ground =
       groundReflectance === undefined
         ? undefined
@@ -1540,26 +1598,7 @@ export function solveDiscreteOrdinates(
       thermal = { mode, fluxes: thermalFluxesOf(mode, quadrature, layerCount, n) };
     }
   }
-
-  const solved = beams.map((beam, b): BeamSolution => {
-    const modes = perBeam[b] ?? [];
-    const zeroth = modes[0];
-    if (zeroth === undefined) {
-      throw new Error("mode 0 is always solved");
-    }
-    return {
-      beamCosine: beam.cosine,
-      modes,
-      fluxes: fluxesOf(zeroth, beam, quadrature, layerCount, n),
-    };
-  });
-  return {
-    quadrature,
-    interfaceDepths,
-    userCosines,
-    beams: solved,
-    ...(thermal === undefined ? {} : { thermal }),
-  };
+  return { beams, quadrature, interfaceDepths, userCosines, perBeam, thermal };
 }
 
 /** A stream's direction of travel: up (+μ) or down (−μ). */

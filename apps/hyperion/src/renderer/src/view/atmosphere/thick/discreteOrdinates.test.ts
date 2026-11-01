@@ -17,6 +17,7 @@ import {
   layerStackRightHandSide,
   normalizedAssociatedLegendre,
   planeParallelBeam,
+  solveDiscreteOrdinateModes,
   solveDiscreteOrdinates,
   solveLayerStack,
 } from "./discreteOrdinates";
@@ -463,6 +464,18 @@ describe("the fields a solve makes (R08.T14.b)", () => {
         expect(keptMode?.userDown.every(Number.isNaN)).toBe(true);
       });
     });
+  });
+
+  it("solves the modes from one alone, each to the bits of the whole solve's (R08.T15.a)", () => {
+    const whole = solveDiscreteOrdinates(base);
+    const from1 = solveDiscreteOrdinateModes(base, 1);
+    from1.forEach((modes, b) => {
+      expect(modes.map((mode) => mode.mode)).toEqual([1, 2]);
+      expect(modes).toEqual(beamAt(whole, b).modes.slice(1));
+    });
+    for (const fromMode of [-1, 3, 0.5]) {
+      expect(() => solveDiscreteOrdinateModes(base, fromMode)).toThrow(RangeError);
+    }
   });
 
   it("refuses an interface the solve does not have", () => {
