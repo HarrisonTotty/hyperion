@@ -10,6 +10,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
 import { aUniverse } from "../../test/galaxyFixtures";
 import { FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "../../test/planetaryFixture";
+import { fakeViewEngineSource } from "../../test/fakeViewEngine";
+import {
+  DEFAULT_MAN_EV100,
+  ev100FromAverageLuminance,
+  exposureScale,
+} from "../../view/photometry/exposure";
+import { binCentreLuminance } from "../../view/post/histogram";
+import { METER_CLASS } from "../../view/post/meter";
 import {
   nominalStore,
   openUniverse,
@@ -78,6 +86,25 @@ async function inspecting(
   return view;
 }
 
+/** The primary's exposure as its panel reads it: `EV100 7.3 AUTO`. */
+function exposureReadout(): string {
+  return (
+    within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getAllByRole("status")[0]
+      ?.textContent ?? ""
+  );
+}
+
+/** The primary's exposure readings, one each quarter of a second for `count` of them. */
+async function readingsOver(view: ViewDisplayHarness, count: number): Promise<string[]> {
+  if (count === 0) {
+    return [];
+  }
+  view.advance(250);
+  await settle();
+  const reading = exposureReadout();
+  return [reading, ...(await readingsOver(view, count - 1))];
+}
+
 function sceneButton(name: string): HTMLElement {
   return within(screen.getByRole("group", { name: "Scene" })).getByRole("button", { name });
 }
@@ -125,6 +152,29 @@ describe("VIEW's body inspection (the owner's request)", () => {
     });
 
     expect(noted).toEqual([[{ body: FIXTURE_EARTH, revision: 3 }]]);
+  });
+
+  it("opens exposed for its body, AUTO at its image's first metered value at once", async () => {
+    const fake = fakeViewEngineSource();
+    // A sunlit disc: brighter than the display's MAN default, EV100 -1.0, by some 14 stops.
+    fake.image.pixels = [{ meterClass: METER_CLASS.litBody, bin: 150, count: 200 }];
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    const readings = await readingsOver(view, 8);
+
+    // MAN's EV100 -1.0 stands until the first metered frame, then AUTO at the meter's reading of
+    // the frame drawn at it, at once: a walk at AUTO's 3 EV a second would be short of 0 here.
+    const first = readings.find((reading) => reading.endsWith(" AUTO"));
+    const appliedEv = Number(/^EV100 (-?\d+\.\d) AUTO$/u.exec(first ?? "")?.[1]);
+    const meteredEv = ev100FromAverageLuminance(
+      binCentreLuminance(150) / exposureScale(DEFAULT_MAN_EV100),
+    );
+    expect(readings[0]).toBe("EV100 -1.0 MAN");
+    expect(Math.abs(appliedEv - meteredEv)).toBeLessThanOrEqual(0.5);
   });
 
   it("gives the focus to the scene shown when its CLOSE goes with it", async () => {

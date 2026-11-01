@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { viewId } from "../camera/state";
 import {
+  controlEv100,
   ev100FromAverageLuminance,
   ev100FromTriple,
   exposureLevelReading as exposureLevel,
@@ -10,6 +11,7 @@ import {
   MAN_EV100_MIN,
   programTriple,
   setAuto,
+  setManualEv100,
   type ExposureControl,
   VIEW_CAMERA,
 } from "../photometry/exposure";
@@ -418,6 +420,58 @@ function kindsOf(seen: ReadonlyArray<Metering>): string[] {
   }
   return kinds;
 }
+
+describe("an exposure that opens at its meter (the owner's request)", () => {
+  /** A controller from the display's MAN default that opens at its meter, its image drawn. */
+  function opening(): AutoExposure {
+    const exposure = new AutoExposure({
+      source: SOURCE,
+      program: VIEW_CAMERA,
+      control: DEFAULT_MAN,
+      meter: "average",
+      opensAtMeter: true,
+    });
+    exposure.noteImage(true);
+    return exposure;
+  }
+
+  it("takes AUTO at its first metered value at once, not walked to it from MAN's", () => {
+    const exposure = opening();
+    exposure.step(undefined, 1 / 60);
+    expect(exposure.control).toEqual(DEFAULT_MAN);
+
+    const reading = exposure.step(histogram([[120, 10]]), 1 / 60);
+
+    const metered = exposure.meteredEv100;
+    if (metered === null) {
+      throw new Error("the histogram is metered");
+    }
+    // The display's MAN default is EV100 -1; a sunlit disc meters some 14 stops above it.
+    expect([reading.control.kind, Math.abs(reading.ev100 - metered) <= 0.5]).toEqual([
+      "auto",
+      true,
+    ]);
+  });
+
+  it("smooths as AUTO does from then on, and INHIBIT holds it", () => {
+    const exposure = opening();
+    exposure.step(histogram([[120, 10]]), 1 / 60);
+    const opened = exposure.control;
+
+    const stepped = exposure.step(histogram([[100, 10]]), 1 / 60).ev100;
+    expect(stepped).toBeLessThan(controlEv100(opened));
+    expect(stepped).toBeGreaterThan(exposure.meteredEv100 ?? Number.NEGATIVE_INFINITY);
+    expect(exposure.apply(inhibit(exposure.control))).toBe(true);
+    expect(exposure.step(histogram([[120, 10]]), 1 / 60).ev100).toBe(stepped);
+  });
+
+  it("leaves an operator's command, given before the first metering, to decide", () => {
+    const exposure = opening();
+    expect(exposure.apply(setManualEv100(5))).toBe(true);
+
+    expect(exposure.step(histogram([[120, 10]]), 1 / 60).control.kind).toBe("manual");
+  });
+});
 
 describe("the meter's causes (R07.T16.b)", () => {
   // A drawn image with no lit body: a star field and a body drawn black, both `other`.

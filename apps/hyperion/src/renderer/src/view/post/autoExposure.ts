@@ -257,6 +257,12 @@ export interface AutoExposureOptions {
   readonly meter: MeterMode;
   /** {@link FULL_WINDOW} unless an operator's meter says otherwise. */
   readonly window?: PercentileWindow;
+  /**
+   * Whether it opens at the first metered value: `AUTO` at it at once, not smoothed toward it,
+   * from whatever level it starts at, unless an operator's command comes first (a kept scene's
+   * `startExposure`, the body inspection's; the owner's request, 2026-11-01).
+   */
+  readonly opensAtMeter?: boolean;
 }
 
 /**
@@ -265,7 +271,8 @@ export interface AutoExposureOptions {
  *
  * @remarks
  * Under `MAN` and `INHIBITED` the applied value does not move; the meter still reads, so that
- * `setAuto` and `enable` can take its value. Exposure adaptation is not motion, so
+ * `setAuto` and `enable` can take its value. One that opens at its meter
+ * ({@link AutoExposureOptions.opensAtMeter}) takes `AUTO` at its first metered value at once. Exposure adaptation is not motion, so
  * `prefers-reduced-motion` leaves it alone. No dark adaptation of the eye is modelled.
  *
  * Each frame the owner calls {@link AutoExposure.step} with the histogram that arrived, then draws
@@ -291,6 +298,8 @@ export class AutoExposure {
   // Whether the window since the image came to be drawn, or the meter changed, with no value held
   // is still open.
   #acquiring = false;
+  // Whether `AUTO` is still to be taken at the first metered value at once.
+  #opensAtMeter: boolean;
 
   constructor(options: AutoExposureOptions) {
     this.#source = options.source;
@@ -298,6 +307,7 @@ export class AutoExposure {
     this.#window = options.window ?? FULL_WINDOW;
     this.#control = options.control;
     this.#meter = options.meter;
+    this.#opensAtMeter = options.opensAtMeter === true;
   }
 
   /** The operator's meter. */
@@ -371,6 +381,8 @@ export class AutoExposure {
       return false;
     }
     this.#control = result.control;
+    // The operator's command decides the exposure from here.
+    this.#opensAtMeter = false;
     return true;
   }
 
@@ -402,7 +414,11 @@ export class AutoExposure {
     }
     const metering = this.metering;
     const control = this.#control;
-    if (control.kind !== "manual") {
+    if (this.#opensAtMeter && metering.kind === "metered") {
+      // Opened at the first metered value, as `ENABLE` sets it, not walked to it.
+      this.#opensAtMeter = false;
+      this.#control = { kind: "auto", ev100: metering.ev100 };
+    } else if (control.kind !== "manual") {
       // `AUTO` follows the value, and a system inhibit resumes from where it was held and smooths
       // from there, or takes the new cause; an operator's inhibit is untouched (R02's
       // `onMetering`). While acquiring, the control stands as it is.

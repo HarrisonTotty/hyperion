@@ -23,6 +23,8 @@
  *   disc spans {@link INSPECTION_DISC_SHARE} of the view's smaller side at the default field of
  *   view: framed for the view's own aspect at its first frame with a size
  *   (`KeptScene.framedPoseFor`), and for a 16:9 view until then.
+ * - **Its exposure** opens at `AUTO` at the image's first metered value at once
+ *   (`KeptScene.startExposure`), so that the body is exposed for from its first metered frame.
  * - **Its tidal radius**, which bounds only a camera flown out of the system, is the kept scenes'
  *   (`KEPT_TIDAL_RADIUS_M`): the server states a system's in its scene alone (a lean of this
  *   change, 2026-11-01).
@@ -272,5 +274,8 @@ export function inspectionScene(inspection: BodyInspection): KeptScene {
     cameraAt: () => pose,
     framedPoseFor: (aspect) => framedPose(drawn, star, aspect),
     startStyle: "photorealistic",
+    // Exposed for the body from its first metered frame: the display's MAN default stands about
+    // 14 stops over a sunlit disc (the owner's request, 2026-11-01).
+    startExposure: "metered",
   };
 }

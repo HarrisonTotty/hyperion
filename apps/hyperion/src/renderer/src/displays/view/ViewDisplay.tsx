@@ -1150,11 +1150,14 @@ function ViewStage({
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
     // applied to it when the display's control changes to one the controller did not publish.
+    const started = runRef.current.source;
     const auto = new AutoExposure({
       source: VIEW_ID,
       program: VIEW_CAMERA,
       control: inputsRef.current.exposure,
       meter: inputsRef.current.meter,
+      // A kept scene may open exposed for its subject, the body inspection (the owner's request).
+      opensAtMeter: started.kind === "kept" && started.kept.startExposure === "metered",
     });
     // What the loop last read of the display's control, and what it last gave the display: an
     // operator's command is a control it reads that it did not give.

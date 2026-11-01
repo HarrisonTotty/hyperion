@@ -36,6 +36,13 @@ export interface KeptScene {
    * other kept scene starts.
    */
   readonly startStyle?: RenderStyle;
+  /**
+   * How a view of it opens its exposure: `metered`, at `AUTO` at its image's first metered value at
+   * once, not walked to it from where the exposure stood, as `ENABLE` would set it, for `VIEW`'s
+   * body inspection (the owner's request, 2026-11-01); as the display's exposure stands where
+   * absent, as every other kept scene opens.
+   */
+  readonly startExposure?: "metered";
 }
 
 /** The kept scenes' system: a made-up ID, labelled as a test wherever it is shown. */
