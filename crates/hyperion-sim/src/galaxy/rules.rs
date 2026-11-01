@@ -211,7 +211,8 @@ impl GalaxyRules {
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, and
     /// `class_source`, P09.T37.a) and the stellar rules' `ia_explosion` (P11.T6;
     /// [`StellarRules::every_27_hold`]). The planetary stage's holds at 27 are switched on the
-    /// thread instead (`planetary::testing::with_every_27_hold`), around a galaxy built under these.
+    /// thread instead (`planetary::testing::with_every_27_hold`), around a galaxy built under
+    /// these.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.
