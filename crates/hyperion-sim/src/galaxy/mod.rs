@@ -50,6 +50,7 @@ use std::fmt;
 use std::sync::{Arc, OnceLock};
 
 use self::ages::FieldShareRules;
+use self::catalogue_classes::core_collapse::CoreCollapseProcess;
 use self::catalogue_classes::type_ia::DelayTimeDistribution;
 use self::displaced::class_table::{ClassTable, FormTable};
 use self::displaced::forms::BuildFormError;
@@ -231,6 +232,7 @@ pub struct Galaxy {
     centre_potential: CentrePotentialCell,
     companions: CompanionsCell,
     type_ia_delays: TypeIaDelaysCell,
+    core_collapse: CoreCollapseCell,
     /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
     /// under the held arm, where the field is the budget.
     field_share: Option<Box<FieldShare>>,
@@ -419,10 +421,16 @@ impl Galaxy {
         } else {
             (CentreModelCell::default(), TypeIaDelaysCell::default())
         };
+        let core_collapse = if rules == self.rules {
+            self.core_collapse
+        } else {
+            CoreCollapseCell::default()
+        };
         Self {
             feature_shares,
             centre,
             type_ia_delays,
+            core_collapse,
             rules,
             ..self
         }
@@ -501,6 +509,7 @@ impl Galaxy {
             centre_potential: CentrePotentialCell::default(),
             companions: CompanionsCell::default(),
             type_ia_delays: TypeIaDelaysCell::default(),
+            core_collapse: CoreCollapseCell::default(),
             field_share,
             layer_d_kept: None,
             rules,
@@ -547,6 +556,9 @@ impl Galaxy {
             fields,
             shares,
             layer_d_kept,
+            // The core-collapse process reads the classes, so the field galaxy's, were it read,
+            // is not this galaxy's.
+            core_collapse: CoreCollapseCell::default(),
             ..self
         })
     }
@@ -686,6 +698,21 @@ impl Galaxy {
         self.type_ia_delays
             .0
             .get_or_init(|| Arc::new(DelayTimeDistribution::of_field(self)))
+    }
+
+    /// The core-collapse class's process ([`CoreCollapseProcess::new`]), which the production
+    /// lookup visits (plan 09, P09.T33.a–b).
+    ///
+    /// It is built when first read and kept, as [`centre_motion`](Self::centre_motion) is: under
+    /// every 27 hold it costs some 0.42 ms (the runaway and walkaway terms' largest shares; release,
+    /// pod, 16 vCPU, 2026-11-01), which the lookup paid at every visit and `system_of` twice. It is
+    /// a pure function of the galaxy's fields, shares, window caps and rules, so the galaxy's
+    /// equality and its `Debug` text do not depend on whether it has been read.
+    #[must_use]
+    pub(crate) fn core_collapse(&self) -> &CoreCollapseProcess {
+        self.core_collapse
+            .0
+            .get_or_init(|| Box::new(CoreCollapseProcess::new(self)))
     }
 
     /// The galactic centre's model: the nuclear cluster's profile, its four distribution
@@ -879,9 +906,9 @@ impl Galaxy {
     /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
     /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), and the
     /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), the
-    /// companions, once read, 3.8 KiB, and the field's Type Ia delay-time distribution, once read,
-    /// its components' ages and its tables of lifetimes (P09.T34.a), so the figure depends on what
-    /// has been read.
+    /// companions, once read, 3.8 KiB, the field's Type Ia delay-time distribution, once read,
+    /// its components' ages and its tables of lifetimes (P09.T34.a), and the core-collapse
+    /// process, once read, its components and terms, so the figure depends on what has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -919,6 +946,9 @@ impl Galaxy {
                 .map_or(0, CompanionMasses::heap_bytes)
             + self.type_ia_delays.0.get().map_or(0, |delays| {
                 size_of::<DelayTimeDistribution>() + delays.heap_bytes()
+            })
+            + self.core_collapse.0.get().map_or(0, |process| {
+                size_of::<CoreCollapseProcess>() + process.heap_bytes()
             })
             + self
                 .field_share
@@ -1059,6 +1089,26 @@ impl PartialEq for CompanionsCell {
 impl fmt::Debug for CompanionsCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CompanionsCell")
+    }
+}
+
+/// [`Galaxy::core_collapse`]'s value, built when first read, as [`CentreMotionCell`] is; boxed, as
+/// [`CentreModelCell`]'s is.
+#[derive(Clone, Default)]
+struct CoreCollapseCell(OnceLock<Box<CoreCollapseProcess>>);
+
+/// Equal always, as [`CentreMotionCell`]: the process is a pure function of what the galaxy's
+/// equality compares.
+impl PartialEq for CoreCollapseCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CoreCollapseCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CoreCollapseCell")
     }
 }
 

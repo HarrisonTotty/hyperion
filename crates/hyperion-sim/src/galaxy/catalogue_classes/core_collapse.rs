@@ -500,6 +500,13 @@ impl CoreCollapseProcess {
         }
     }
 
+    /// The bytes the process owns on the heap: its components and terms.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.components.capacity() * size_of::<YoungComponent>()
+            + self.ejected.capacity() * size_of::<EjectedTerm>()
+    }
+
     /// The runaway and walkaway terms the class follows: none under the held arm (from 27,
     /// P09.T33.b; module documentation).
     #[cfg(test)]

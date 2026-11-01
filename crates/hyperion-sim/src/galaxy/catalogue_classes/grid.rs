@@ -55,7 +55,6 @@ use std::fmt;
 use super::binary::{
     AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers, XrayBinaries,
 };
-use super::core_collapse::CoreCollapseProcess;
 use super::ids::{CatalogueCellKey, entry_of};
 use super::lbv::LbvProcess;
 use super::registry::ClassId;
@@ -936,7 +935,7 @@ pub trait ClassLookup {
 /// The production lookup of class processes (plan 09, P09.T32).
 ///
 /// Each class's process is registered here by the task that builds it, as one arm,
-/// `ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy)))`:
+/// `ClassId::TYPE_IA => Some(visitor.visit(&TypeIaProcess::new(galaxy)))`:
 /// [`CORE_COLLAPSE`](ClassId::CORE_COLLAPSE) by P09.T33.a, [`TYPE_IA`](ClassId::TYPE_IA) by
 /// P09.T34.a and [`LUMINOUS_BLUE_VARIABLE`](ClassId::LUMINOUS_BLUE_VARIABLE) by P09.T43 (all three
 /// registered), and plan 11's five by P11.T8, of which
@@ -947,7 +946,9 @@ pub trait ClassLookup {
 /// [`NEUTRON_STAR_MERGER`](ClassId::NEUTRON_STAR_MERGER) (P11.T8.d) are registered.
 /// [`TIDAL_DISRUPTION_VICTIM`](ClassId::TIDAL_DISRUPTION_VICTIM) is never placed and gets none.
 /// Until its class's arm is added, every `111` ID of a class answers
-/// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem).
+/// [`NoSuchSystem`](ResolveSystemError::NoSuchSystem). The core-collapse class's arm visits the
+/// galaxy's own process, built once per galaxy and rules, whose runaway and walkaway terms cost
+/// some 0.42 ms under every 27 hold (P09.T33.b).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProductionClasses;
 
@@ -959,7 +960,7 @@ impl ClassLookup for ProductionClasses {
         visitor: V,
     ) -> Option<V::Output> {
         match class {
-            ClassId::CORE_COLLAPSE => Some(visitor.visit(&CoreCollapseProcess::new(galaxy))),
+            ClassId::CORE_COLLAPSE => Some(visitor.visit(galaxy.core_collapse())),
             ClassId::TYPE_IA => Some(visitor.visit(&TypeIaProcess::new(galaxy))),
             ClassId::LUMINOUS_BLUE_VARIABLE => Some(visitor.visit(&LbvProcess::new(galaxy))),
             ClassId::ACCRETING_WHITE_DWARF => Some(visitor.visit(&AccretingWdFast::new(galaxy))),

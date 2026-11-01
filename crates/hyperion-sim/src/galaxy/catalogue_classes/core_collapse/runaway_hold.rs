@@ -3,7 +3,8 @@
 //! tests and golden hold it at the version's rules); these hold the new arm, under every 27 hold.
 //!
 //! - The tripwire; the held arm's process and cells are every 26 hold's, and its first entries of a
-//!   cell are pinned bit for bit (the class's golden runs at 24, which holds no displaced class).
+//!   cell are pinned bit for bit (the class's golden runs at 24, which holds no displaced class);
+//!   the galaxy keeps one process per rules, a fresh one's.
 //! - The terms are the young field's band-E runaway and walkaway classes, each with a form, at the
 //!   field's share of the component's budget; a term's largest share bounds its class's share of
 //!   a star's deaths at every mass; a source's classes together take exactly the share the
@@ -183,6 +184,22 @@ fn the_held_arm_is_every_26_hold_s() {
             .map(|g| CatalogueClassCell::generate(g, &CoreCollapseProcess::new(g), cell));
         assert_eq!(a.into_entries(), b.into_entries(), "{cell:?}");
     }
+}
+
+/// The galaxy keeps the process the production lookup visits, built once and equal to a fresh
+/// one; a galaxy whose rules change builds its own.
+#[test]
+fn the_galaxy_keeps_one_process_per_rules() {
+    let galaxy = galaxy().clone();
+    let kept = galaxy.core_collapse();
+    assert!(std::ptr::eq(kept, galaxy.core_collapse()), "built once");
+    assert_eq!(*kept, CoreCollapseProcess::new(&galaxy));
+    let held = galaxy.clone().with_rules(GalaxyRules {
+        runaway_deaths: RunawayDeathsRules::FieldOnly,
+        ..GalaxyRules::every_27_hold()
+    });
+    assert_eq!(*held.core_collapse(), CoreCollapseProcess::new(&held));
+    assert_eq!(held.core_collapse().ejected_terms(), []);
 }
 
 // 2. The terms and the closed form.
