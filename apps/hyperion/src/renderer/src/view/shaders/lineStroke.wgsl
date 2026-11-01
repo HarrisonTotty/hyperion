@@ -2,7 +2,8 @@
 // R10.T11, shared by lines.wgsl and linesSurveyed.wgsl): every segment an instance, expanded to a
 // screen-space quad, with its coverage computed analytically over the stroke's width plus a pixel.
 // Composed after frame.wgsl, before a stroke's own `Draw` and entry points; its includer's `draw`
-// has R02's `offsetFromCameraM`, `widthPx`, `firstSegment`, `space`, `dashOnPx` and `dashOffPx`.
+// has R02's `offsetFromCameraM`, `widthPx`, `firstSegment`, `space`, `dashOnPx` and `dashOffPx`,
+// and R10.T16.c's `ground`.
 
 // Two per segment: one end's x, y, z and the dash's phase there, px; the other end's x, y, z, 0.
 @group(2) @binding(0) var<storage, read> segments: array<vec4f>;
@@ -110,4 +111,28 @@ fn line_coverage(v: LineVarying) -> f32 {
     }
   }
   return coverage;
+}
+
+// The depth a fragment of a stroke is tested at (plan R10, R10.T16.c): its own, or for a batch
+// drawn on a body's ground (the survey edge; `draw.ground.w` the list's `occluderSlopePx`, 0 for
+// any other batch, `draw.ground.xyz` the body's centre from the camera) pulled towards the camera
+// by that many pixels of the screen slope the datum's tangent plane at its point has in depth, so
+// that the ground it lies on, and the nearer ground beneath its own width, stay behind it while the
+// terrain's depth is pushed by its constant fraction alone (`groundPull.ts`' twin). Under the
+// reversed, infinite projection a plane's depth n (r . N) / (Q . N) is affine in the ray r, so its
+// slope is n / |Q . N| times the plane's tilt into the screen's two axes.
+fn line_depth(v: LineVarying) -> f32 {
+  if (!(draw.ground.w > 0.0)) {
+    return v.position.z;
+  }
+  let up = normalize(v.chordM - draw.ground.xyz);
+  let q = (frame.viewRotation * vec4f(v.chordM, 0.0)).xyz;
+  let n = (frame.viewRotation * vec4f(up, 0.0)).xyz;
+  let heightM = max(abs(dot(q, n)), 1e-6);
+  let tilt = vec2f(
+    n.x * 2.0 / (frame.viewport.x * frame.clipProjection[0][0]),
+    n.y * 2.0 / (frame.viewport.y * frame.clipProjection[1][1]),
+  );
+  let slope = frame.clipProjection[3][2] / heightM * length(tilt);
+  return min(v.position.z + draw.ground.w * slope, 1.0);
 }

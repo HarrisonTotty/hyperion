@@ -396,6 +396,17 @@ describe("buildWireframeDrawList", () => {
     ]).toEqual(["view", "text", "colour-text", 1, null, CASING_PX, "colour-surface-0", true]);
   });
 
+  it("draws the survey edge on its body's ground, its centre given, and no other batch (R10.T16.c)", () => {
+    const input = scene();
+    const list = withSurveyEdge(input);
+    const centreM = relativeToCamera(centre(FIXTURE_PLANET), CAMERA.pose, sceneOrigins(input));
+    const onGround = list.lines.filter((line) => line.groundCentreF32 !== undefined);
+    expect([onGround.map((line) => line.id), [...(onGround[0]?.groundCentreF32 ?? [])]]).toEqual([
+      [`survey-edge:${FIXTURE_PLANET}`],
+      [...Float32Array.from([centreM.x, centreM.y, centreM.z])],
+    ]);
+  });
+
   it("gives a drawn survey edge its nearest range from the own ship (R10.T10.c)", () => {
     // From the own ship, some 3 × 10⁷ m from the planet's near side.
     const edges = withSurveyEdge().surveyEdges;

@@ -167,8 +167,9 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ...[
     ["terrain-lit-baked-offsets", "7193d9cd210fae4f"],
     ["terrain-lit-face-differences", "55f9745e1498290a"],
-    ["terrain-depth-baked-offsets", "62e422242ad49526"],
-    ["terrain-depth-face-differences", "78e83e7adc2000f7"],
+    // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
+    ["terrain-depth-baked-offsets", "4453d1c82ebce7c8"],
+    ["terrain-depth-face-differences", "60212a5b00c773d1"],
     ["terrain-shadow-baked-offsets", "3a12ec1c40e69ab8"],
     ["terrain-shadow-face-differences", "be182c8f800204c1"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {

@@ -25,9 +25,10 @@
  *   pixel between each grid vertex and the vertices {@link CONTOUR_FADE_QUADS} quads along its row
  *   and its column ({@link footprintPerPx}), interpolated, so that a far line whose facets' slopes
  *   scatter about the fade's band is drawn whole, not in pieces (R10.T11's deferred lever).
- * - **The depth** is pushed away as the occluders' is (R07.T16.d), the skirts and fins at least as
- *   far as the ground beside them ({@link wirePushSlope}), so that none cuts a contour near a
- *   seam.
+ * - **The depth** is pushed away from the camera by 2⁻¹⁶ of itself alone, the grid, skirts and
+ *   fins alike, so that a skirt beneath the ground stays behind it and no ridge lets a mark far
+ *   behind it show through (R10.T16.c's grazing fix); the survey edge, on the ground, pulls its
+ *   own depth towards the camera instead (`view/depth/groundPull.ts`).
  * - **The graticule** is R02's, drawn on the terrain's own height where the terrain is surveyed
  *   (Design note 14): its parallels and meridians at the body's step, the equator and the prime
  *   meridian a step heavier, cased as R02's lines are. Each patch's latitude and longitude are
@@ -216,11 +217,11 @@ export function contourFadeNeighbour(i: number): number {
   return i + CONTOUR_FADE_QUADS <= PATCH_QUADS ? i + CONTOUR_FADE_QUADS : i - CONTOUR_FADE_QUADS;
 }
 
-/** A grid vertex of the footprint as placed for the frame: its place and a value there. */
+/** A grid vertex of the footprint as placed for the frame: its place and the value there. */
 export interface FootprintVertex {
   /** Its place on the screen, device px; `null` where it lies behind the camera (clip w ≤ 0). */
   readonly screenPx: readonly [number, number] | null;
-  /** The value: its contour coordinate u for the fade, its depth for a skirt's push. */
+  /** The value there: its contour coordinate u. */
   readonly value: number;
 }
 
@@ -233,7 +234,7 @@ export interface FootprintVertex {
  * for it where the footprint is seen edge-on, its two steps on one line of the screen; 0 where any
  * of the three lies behind the camera, which only ground a few quads from the camera can, where no
  * line stands close to its neighbour. Of u it fades the contours ({@link contourShade}'s
- * `fadePerPx`); of the ground's depth it pushes a skirt or a fin ({@link wirePushSlope}).
+ * `fadePerPx`).
  */
 export function footprintPerPx(
   vertex: FootprintVertex,
@@ -260,38 +261,6 @@ export function footprintPerPx(
 
 /** The least determinant, px², and step, px, {@link footprintPerPx} divides by: the shader's. */
 const FOOTPRINT_FLOOR = 1e-30;
-
-/**
- * How many of the ground's depth slopes over the footprint a skirt or a fin is pushed by at least
- * ({@link wirePushSlope}; lean, 2026-11-01): a facet beside a seam may be steeper in depth than the
- * footprint's mean, and once pushed by the ground's slope alone a skirt still showed in specks. On
- * `TERRAIN TEST`'s high `between-wire-north-220s` and `between-wire-248s` frames (SwiftShader), the
- * skirts' visible pixels were 55,408 and 54,158 pushed by their own slope, 6,530 and 4,377 by the
- * ground's, and 795 and 356 by twice it.
- */
-export const SKIRT_PUSH_GROUND_SLOPES = 2;
-
-/** A part of the lit mesh the wireframe draws (`gpu/resources.ts`' `LIT_VERTEX_CODE`). */
-export type WireMeshPart = "grid" | "skirt" | "fin";
-
-/**
- * The depth slope a wireframe fragment is pushed away by, `occluderSlopePx` device px of it
- * (R07.T16.d; `terrainWire.wgsl`'s `push_slope`), per device px: the grid's own; a skirt's or a
- * fin's the larger of its own and {@link SKIRT_PUSH_GROUND_SLOPES} of the ground's over the
- * footprint at the grid vertex it hangs from ({@link footprintPerPx} of the depth), since one
- * pushed by its own, shallower than the grazing ground's, stood in front of the ground's pushed
- * depth for a few pixels from each seam and cut the contours there (R10.T11's far contours in
- * pieces).
- */
-export function wirePushSlope(
-  part: WireMeshPart,
-  ownSlopePerPx: number,
-  groundSlopePerPx: number,
-): number {
-  return part === "grid"
-    ? ownSlopePerPx
-    : Math.max(ownSlopePerPx, SKIRT_PUSH_GROUND_SLOPES * groundSlopePerPx);
-}
 
 /**
  * The coverage of a line of `widthPx` at `distancePx` from its centre, device px: clamp(w ÷ 2 + ½ −

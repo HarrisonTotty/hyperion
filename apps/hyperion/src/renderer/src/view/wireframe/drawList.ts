@@ -234,6 +234,15 @@ export interface LineBatch {
    * for every other batch.
    */
   readonly body?: string;
+  /**
+   * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
+   * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, whose depth is tested pulled
+   * towards the camera by {@link WireframeDrawList.occluderSlopePx} pixels of the datum's depth
+   * slope at each point, so that the ground it lies on stays behind it while the terrain's own
+   * depth is pushed by its constant fraction alone (`lineStroke.wgsl`'s `line_depth`); absent for
+   * every other batch.
+   */
+  readonly groundCentreF32?: Float32Array;
 }
 
 /** A body's depth-only occluder sphere (Design note 5). */
@@ -1083,9 +1092,11 @@ export function buildWireframeDrawList(
     segments.set(mark.line);
     segments.set(mark.ticks, mark.line.length);
     if (segments.length > 0) {
-      lines.push(
-        batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
-      );
+      lines.push({
+        ...batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
+        // On the body's ground: its depth pulled towards the camera over it (R10.T16.c).
+        groundCentreF32: Float32Array.from([edge.centreM.x, edge.centreM.y, edge.centreM.z]),
+      });
     }
     surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });
   }

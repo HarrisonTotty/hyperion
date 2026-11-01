@@ -54,10 +54,8 @@ import {
   graticulePatch,
   heightAboveGroundM,
   lineCoverage,
-  SKIRT_PUSH_GROUND_SLOPES,
   TERRAIN_WIRE_MATERIALS,
   terrainWireMaterialSpec,
-  wirePushSlope,
 } from "./terrainWire";
 
 const f = Math.fround;
@@ -512,7 +510,6 @@ describe("the shader's contour constants", () => {
     ["CONTOUR_FULL_PX", CONTOUR_FADE_PX.full],
     ["CONTOUR_GONE_PX", CONTOUR_FADE_PX.gone],
     ["CONTOUR_FADE_QUADS", CONTOUR_FADE_QUADS],
-    ["SKIRT_PUSH_GROUND_SLOPES", SKIRT_PUSH_GROUND_SLOPES],
     ["CONTOUR_INDEX_EVERY", CONTOUR_INDEX_EVERY],
   ] as const)("declares %s as terrainWire.ts does", (name, value) => {
     const declared = new RegExp(`const ${name} : f32 = ([0-9.]+);`, "u").exec(terrainWireWgsl)?.[1];
@@ -698,28 +695,15 @@ function grazeDepthAt(r: number, surface: "ground" | "skirt"): number | null {
   return t > 0 ? grazeDepth(y, z) : null;
 }
 
-describe("the skirts' and fins' depth push (R10.T11's far contours in pieces; wirePushSlope)", () => {
+describe("the skirts' and fins' depth beneath grazing ground (R10.T11's far contours; R10.T16.c)", () => {
   const OCCLUDER_SLOPE_PX = 3;
+  /** The wireframe terrain's constant push, a fraction of the depth (`terrainWire.wgsl`). */
+  const DEPTH_FRACTION = 2 ** -16;
   /** A surface's depth slope at row `r`, per px, by a central difference. */
   const slopeAt = (r: number, surface: "ground" | "skirt"): number =>
     Math.abs(
       ((grazeDepthAt(r + 0.01, surface) ?? 0) - (grazeDepthAt(r - 0.01, surface) ?? 0)) / 0.02,
     );
-  /** The ground's depth slope over a footprint at the seam: the grid vertex, 400 m across, 400 m nearer. */
-  const groundFootprint = (): number => {
-    const vertex = (across: number, along: number): FootprintVertex => {
-      const z = -GRAZE_H_M;
-      const depth = grazeDepth(along, z);
-      const row = grazeRow(along, z);
-      const viewZ = 1 / depth;
-      return { screenPx: [(GRAZE_F_PX * across) / viewZ, row], value: depth };
-    };
-    return footprintPerPx(
-      vertex(0, GRAZE_SEAM_M),
-      vertex(400, GRAZE_SEAM_M),
-      vertex(0, GRAZE_SEAM_M - 400),
-    );
-  };
   /** The rows under the seam where the ray meets the skirt behind the ground, px. */
   const rows = (): number[] => {
     const seam = grazeRow(GRAZE_SEAM_M, -GRAZE_H_M);
@@ -728,33 +712,21 @@ describe("the skirts' and fins' depth push (R10.T11's far contours in pieces; wi
     );
   };
   /** How far the skirt's pushed depth stands in front of the ground's at each of those rows. */
-  const inFront = (pushOf: (own: number) => number): number[] =>
-    rows().map((r) => {
-      const ground = (grazeDepthAt(r, "ground") ?? 0) - OCCLUDER_SLOPE_PX * slopeAt(r, "ground");
-      const skirt =
-        (grazeDepthAt(r, "skirt") ?? 0) - OCCLUDER_SLOPE_PX * pushOf(slopeAt(r, "skirt"));
-      return skirt - ground;
-    });
+  const inFront = (pushed: (depth: number, slopePerPx: number) => number): number[] =>
+    rows().map(
+      (r) =>
+        pushed(grazeDepthAt(r, "skirt") ?? 0, slopeAt(r, "skirt")) -
+        pushed(grazeDepthAt(r, "ground") ?? 0, slopeAt(r, "ground")),
+    );
 
-  it("stood a skirt pushed by its own slope in front of the grazing ground for pixels below the seam", () => {
-    const front = inFront((own) => own);
+  it("stood a skirt pushed by its own slope in front of the grazing ground pushed by its own", () => {
+    const front = inFront((depth, slope) => depth - OCCLUDER_SLOPE_PX * slope);
     expect([rows().length > 10, front.filter((d) => d > 0).length > 10]).toEqual([true, true]);
   });
 
-  it("keeps a skirt pushed as wirePushSlope has it behind the ground at every row", () => {
-    const ground = groundFootprint();
-    expect([
-      ground / slopeAt(grazeRow(GRAZE_SEAM_M, -GRAZE_H_M), "ground"),
-      Math.max(...inFront((own) => wirePushSlope("skirt", own, ground))),
-    ]).toEqual([expect.closeTo(1, 6), expect.toSatisfy((d: number) => d <= 0)]);
-  });
-
-  it("pushes the grid by its own slope alone, as R07.T16.d's occluders are, and a skirt or a fin by twice the ground's at least", () => {
-    expect([
-      wirePushSlope("grid", 2, 9),
-      wirePushSlope("skirt", 2, 9),
-      wirePushSlope("fin", 5, 1),
-    ]).toEqual([2, 18, 5]);
+  it("keeps a skirt behind the ground at every row, both pushed by the constant fraction alone", () => {
+    const front = inFront((depth) => depth * (1 - DEPTH_FRACTION));
+    expect([rows().length > 10, Math.max(...front) < 0]).toEqual([true, true]);
   });
 });
 

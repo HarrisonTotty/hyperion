@@ -175,6 +175,7 @@ const LINE_UNIFORMS: WgslMaterialSpec["uniforms"] = [
   { name: "space", type: "f32" },
   { name: "dashOnPx", type: "f32" },
   { name: "dashOffPx", type: "f32" },
+  { name: "ground", type: "vec4f" },
 ];
 
 /** A hull face's uniforms, for both of its materials, which share one source. */
@@ -736,6 +737,8 @@ export function packWireframe(
         space: new Float32Array([batch.space === "screen" ? 1 : 0]),
         dashOnPx: new Float32Array([batch.dash?.onPx ?? 0]),
         dashOffPx: new Float32Array([batch.dash?.offPx ?? 0]),
+        // A batch on a body's ground pulls its depth towards the camera (R10.T16.c); w 0 for none.
+        ground: groundOf(batch, list.occluderSlopePx),
       };
       const offsetFromCameraM = batch.space === "view" ? batch.originF32 : ZERO_OFFSET;
       if (batch.body === undefined || datum === undefined || centre === undefined) {
@@ -774,6 +777,19 @@ export function packWireframe(
     sprites: new Float32Array(spriteRows),
     draws,
   };
+}
+
+/**
+ * A line batch's `ground` uniform (R10.T16.c; `lineStroke.wgsl`'s `line_depth`): the centre of the
+ * body whose ground it is drawn on and the slope term it is pulled by, or zeros for a batch off the
+ * ground.
+ */
+function groundOf(batch: LineBatch, occluderSlopePx: number): Float32Array {
+  const centre = batch.groundCentreF32;
+  if (centre === undefined || batch.space !== "view") {
+    return new Float32Array(4);
+  }
+  return Float32Array.from([centre[0] ?? 0, centre[1] ?? 0, centre[2] ?? 0, occluderSlopePx]);
 }
 
 function centreOf(sphere: OccluderSphere): Vec3 {

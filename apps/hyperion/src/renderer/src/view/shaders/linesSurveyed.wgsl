@@ -19,6 +19,9 @@ struct Draw {
   // The dash's on and off lengths, px; 0 off for a solid stroke, a body's lines' always.
   dashOnPx: f32,
   dashOffPx: f32,
+  // A batch on a body's ground (R10.T16.c, `line_depth`): xyz the body's centre from the camera,
+  // m, w the list's `occluderSlopePx`; w 0 for any other batch.
+  ground: vec4f,
   // The body's body-fixed axes into the camera frame's, as `mat4x4f` (its rotation).
   coverageAxes: mat4x4f,
   // x the body's equatorial radius over its polar, a ÷ c; y, z, w unused.
@@ -37,12 +40,20 @@ fn vertexMain(
   return line_vertex(corner, instance);
 }
 
+struct LineFragment {
+  @location(0) colour: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
 @fragment
-fn fragmentMain(v: LineVarying) -> @location(0) vec4f {
+fn fragmentMain(v: LineVarying) -> LineFragment {
   let coverage = line_coverage(v);
   if (coverage <= 0.0 || coverage_surveyed(v.chordM - draw.coverageCentreM.xyz)) {
     discard;
   }
+  var out: LineFragment;
   // Premultiplied, over what is beneath.
-  return vec4f(draw.colour.rgb * coverage, coverage);
+  out.colour = vec4f(draw.colour.rgb * coverage, coverage);
+  out.depth = line_depth(v);
+  return out;
 }

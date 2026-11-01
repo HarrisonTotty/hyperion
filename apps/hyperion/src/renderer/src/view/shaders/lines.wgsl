@@ -2,7 +2,8 @@
 // screen-space quad, with its coverage computed analytically over the stroke's width plus a pixel
 // (lineStroke.wgsl). Composed after frame.wgsl and lineStroke.wgsl. Drawn twice per batch, the
 // casing at the stroke's width plus twice the casing's, then the stroke, both premultiplied over
-// what is beneath; depth-tested against the occluders (greater-equal), never writing depth.
+// what is beneath; depth-tested against the occluders (greater-equal), never writing depth, at the
+// stroke's own depth or, on a body's ground, at it pulled towards the camera (`line_depth`).
 
 struct Draw {
   // The batch's origin from the camera, m: zero but for a hull's (Design note 2).
@@ -18,6 +19,9 @@ struct Draw {
   // The dash's on and off lengths, px; an off length of 0 is a solid stroke.
   dashOnPx: f32,
   dashOffPx: f32,
+  // A batch on a body's ground (R10.T16.c, `line_depth`): xyz the body's centre from the camera,
+  // m, w the list's `occluderSlopePx`; w 0 for any other batch.
+  ground: vec4f,
 }
 
 @group(1) @binding(0) var<uniform> draw: Draw;
@@ -30,12 +34,20 @@ fn vertexMain(
   return line_vertex(corner, instance);
 }
 
+struct LineFragment {
+  @location(0) colour: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
 @fragment
-fn fragmentMain(v: LineVarying) -> @location(0) vec4f {
+fn fragmentMain(v: LineVarying) -> LineFragment {
   let coverage = line_coverage(v);
   if (coverage <= 0.0) {
     discard;
   }
+  var out: LineFragment;
   // Premultiplied, over what is beneath.
-  return vec4f(draw.colour.rgb * coverage, coverage);
+  out.colour = vec4f(draw.colour.rgb * coverage, coverage);
+  out.depth = line_depth(v);
+  return out;
 }

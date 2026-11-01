@@ -359,6 +359,29 @@ describe("packWireframe", () => {
     ]);
   });
 
+  it("pulls a batch on a body's ground by the list's slope term, about its centre, and no other (R10.T16.c)", () => {
+    const grounded = packWireframe(
+      {
+        ...list,
+        lines: [
+          aBatch({ id: "edge", space: "view", groundCentreF32: new Float32Array([1, 2, -3e6]) }),
+          aBatch({ id: "orbit", space: "view" }),
+        ],
+      },
+      CAMERA,
+      VIEWPORT,
+    );
+    const grounds = grounded.draws
+      .filter((d) => d.material === "lines")
+      .map((d) => Array.from(d.uniforms["ground"] ?? []));
+    expect(grounds).toEqual([
+      [1, 2, -3e6, 5],
+      [1, 2, -3e6, 5],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ]);
+  });
+
   it("carries a dash's phase on along a polyline and restarts it at a break", () => {
     const phases = [2, 3, 4].map((segment) => packed.segments[segment * 8 + 3]);
     expect(phases).toEqual([0, 10, 0]);
