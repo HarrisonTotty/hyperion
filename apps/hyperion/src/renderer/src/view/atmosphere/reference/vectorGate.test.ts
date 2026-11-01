@@ -39,13 +39,16 @@
  *   2026-10-30): split at the deck's top, the deck read to the black ground beneath, its bake and
  *   correction over the deck baked on the twin's body (`bakeKeptDeck`), and its twin drawing the
  *   upper medium over the deck (`twin.ts`'s `deck`), against the vector I over the geometries above
- *   the split; those below it, its ground and aerial views, are R08.T15.b.2's reads. Beside the
- *   route: the deck's multiple-scattering part cut to m < 3 and m < 6 (the route's 8,
- *   `DECK_MODES`), its sky-lit radiance at the deck's modes (`diffuseModes`), its floor white, the
- *   case split as a gas envelope's at τ 10 (R08.T16.a's route) over its black floor at τ 1,000 and
- *   over a white one, each with its twin ÷ reference by image, the bake's own plane albedo against
- *   each aggregate's upwelling flux, the deck's co-albedo at its floor, and the deck's share of each
- *   orbit image's radiance (its light set to 0). A miss is a finding against R08.T15.b.2's routing.
+ *   the split. Below it (R08.T15.b.2, `deck.routedBelow`), its ground and aerial views through the
+ *   table below the deck, scalar and uncorrected, against the vector I with its tallies against the
+ *   scalar I beside, and the ground's downwelling flux under each aggregate against the vector flux
+ *   by the tolerance test. Beside the route: the deck's multiple-scattering part cut to m < 3 and
+ *   m < 6 (the route's 8, `DECK_MODES`), its sky-lit radiance at the deck's modes
+ *   (`diffuseModes`), its floor white, the case split as a gas envelope's at τ 10 (R08.T16.a's
+ *   route) over its black floor at τ 1,000 and over a white one, each with its twin ÷ reference by
+ *   image, the bake's own plane albedo against each aggregate's upwelling flux, the deck's
+ *   co-albedo at its floor, and the deck's share of each orbit image's radiance (its light set to
+ *   0). A miss is a finding against R08.T15.b.2's routing.
  * - **The Venus-class cases through their deck** (R08.T15.b.2; the record's `deck.venusClass`; main's
  *   ruling of 2026-11-01). `venus-92bar` and `venus-58bar` are read through the `cloudDeck` split
  *   their cover gives them, the deck of τ(550) 34.155 under a cloud fraction of 1, split at its top
@@ -81,6 +84,7 @@ import {
   AGGREGATE_SIGMA_CAP,
   aggregatePasses,
   aggregateRefusal,
+  type FluxReading,
   luminanceOf,
 } from "../gate";
 import { densityAt } from "../medium";
@@ -149,7 +153,7 @@ import earthOzoneSlabReference from "./earth-ozone-slab.reference.json" with { t
 import giantDeckCase from "./giant-deck.case.json" with { type: "json" };
 import giantDeckReference from "./giant-deck.reference.json" with { type: "json" };
 import marsReference from "./mars.reference.json" with { type: "json" };
-import { fluxReadingsOf, type ReferenceFile } from "./references";
+import { fluxReadingsOf, type RadianceKind, type ReferenceFile } from "./references";
 import committedSanity from "./sanityRanges.json" with { type: "json" };
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
 import { GIANT_DECK, thickReferenceCases, VENUS_DECK, VENUS_DECK_MODES } from "./thickCases";
@@ -206,9 +210,10 @@ const RECORD_FILE = "./vectorGate.json";
  * The record's format: 2 from R08.T14.d.1, which adds the cut modes and the bake's figures; 3 from
  * R08.T15.a.2, which adds `giant-deck`'s gate through its deck (`deck`); 4 from R08.T14.d.4, which
  * adds the ground's irradiance through the route; 5 from R08.T15.b.2, which adds the Venus-class
- * cases through their deck, scalar (`deck.venusClass`).
+ * cases through their deck, scalar (`deck.venusClass`); 6 from R08.T15.b.2's step 3.3, which adds
+ * `giant-deck` below its split (`deck.routedBelow`).
  */
-const VECTOR_GATE_FORMAT = 5;
+const VECTOR_GATE_FORMAT = 6;
 
 /** Who writes the record, as each of its records' heads says. */
 const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
@@ -577,6 +582,28 @@ function vectorRecordOf(path: TwinValues): unknown {
 const CHANNEL_NAMES = ["r", "g", "b"] as const;
 
 /**
+ * A flux reading's rows against the twin's value: by channel, the twin's flux, the reference's, its
+ * σ, the twin's over it less 1, and the tolerance test's verdict, `refused` where the reading's σ
+ * refuses it.
+ */
+function fluxRowsOf(reading: FluxReading, twin: Rgb): unknown[][] {
+  return ([0, 1, 2] as const).map((c) => {
+    let verdict = "refused";
+    if (aggregateRefusal(reading, c) === undefined) {
+      verdict = aggregatePasses(twin[c], reading, c) ? "pass" : "miss";
+    }
+    return [
+      CHANNEL_NAMES[c],
+      twin[c],
+      recorded(reading.flux[c]),
+      recorded(reading.standardError[c]),
+      recorded(twin[c] / reading.flux[c] - 1),
+      verdict,
+    ];
+  });
+}
+
+/**
  * The ground's irradiance on each path (R08.T14.d.4, precondition 3): for each case and aggregate,
  * each channel's twin flux, the reference's, its σ, the twin's over it less 1, and the tolerance
  * test's verdict, `refused` where the reading's σ refuses it.
@@ -596,21 +623,11 @@ function groundIrradianceOf(path: TwinValues): ReadonlyArray<Record<string, unkn
     if (reading === undefined || twin === undefined) {
       throw new Error(`the path holds no ground irradiance of ${twinValueKey(spec)}`);
     }
-    const rows = ([0, 1, 2] as const).map((c) => {
-      let verdict = "refused";
-      if (aggregateRefusal(reading, c) === undefined) {
-        verdict = aggregatePasses(twin[c], reading, c) ? "pass" : "miss";
-      }
-      return [
-        CHANNEL_NAMES[c],
-        twin[c],
-        recorded(reading.flux[c]),
-        recorded(reading.standardError[c]),
-        recorded(twin[c] / reading.flux[c] - 1),
-        verdict,
-      ];
-    });
-    return { case: spec.caseName, aggregate: `${spec.name}/downwelling`, rows };
+    return {
+      case: spec.caseName,
+      aggregate: `${spec.name}/downwelling`,
+      rows: fluxRowsOf(reading, twin),
+    };
   });
 }
 
@@ -744,19 +761,25 @@ function giantSplit(referenceCase: ReferenceCase, envelope: boolean): DeckSplit 
 }
 
 /**
- * The case's gate over its geometries above the split alone, which the twin draws from above the
- * deck; those below it, its ground and aerial views, are R08.T15.b.2's reads (`twin.ts` refuses
- * them).
+ * The case's gate over its geometries on one side of the split: above it, which the twin draws from
+ * above the deck, or below it, its ground and aerial views, which it draws through the table below
+ * the deck (R08.T15.b.2).
  */
-function deckGateCase(referenceCase: ReferenceCase, splitM: number): GateCase {
-  const above = new Set(
-    referenceCase.geometries.filter((g) => g.observer.heightM > splitM).map((g) => g.name),
+function deckGateCase(
+  referenceCase: ReferenceCase,
+  splitM: number,
+  side: "above" | "below" = "above",
+): GateCase {
+  const kept = new Set(
+    referenceCase.geometries
+      .filter((g) => g.observer.heightM > splitM === (side === "above"))
+      .map((g) => g.name),
   );
   return {
     referenceCase,
     reference: {
       ...giantDeckReference,
-      geometries: giantDeckReference.geometries.filter((g) => above.has(g.name)),
+      geometries: giantDeckReference.geometries.filter((g) => kept.has(g.name)),
     },
   };
 }
@@ -776,6 +799,54 @@ function deckValuesOf(twin: ReturnType<typeof caseTwin>, gateCase: GateCase): Ma
       })),
     ),
   );
+}
+
+/** A case's specs of the ground's downwelling flux under each of its aggregates (R08.T15.b.2). */
+function downwellingSpecs(referenceCase: ReferenceCase): TwinValueSpec[] {
+  return referenceCase.aggregates.map((a) => ({
+    quantity: "downwelling",
+    setting: "case",
+    caseName: referenceCase.name,
+    name: a.name,
+  }));
+}
+
+/**
+ * A case's twin value of the ground's downwelling flux under `aggregate`.
+ *
+ * @throws Error where `values` hold none.
+ */
+function downwellingOf(values: TwinValues, caseName: string, aggregate: string): Rgb {
+  const value = values.get(
+    twinValueKey({ quantity: "downwelling", setting: "case", caseName, name: aggregate }),
+  );
+  if (value === undefined) {
+    throw new Error(`${caseName} holds no downwelling flux under ${aggregate}`);
+  }
+  return value;
+}
+
+/**
+ * The ground's downwelling flux under each of `reference`'s aggregates against its `kind` flux,
+ * direct and diffuse, by the tolerance test (R08.T15.b.2): by channel, the twin's value, the
+ * reference's flux and standard error, the twin ÷ reference − 1 and the verdict.
+ */
+function deckGroundIrradianceOf(
+  reference: ReferenceFile,
+  kind: RadianceKind,
+  twinOf: (aggregate: string) => Rgb,
+): Record<string, unknown> {
+  const aggregates = fluxReadingsOf(reference, kind)
+    .filter((reading) => reading.name.endsWith("/downwelling"))
+    .map((reading) => ({
+      aggregate: reading.name,
+      rows: fluxRowsOf(reading, twinOf(reading.name.replace(/\/downwelling$/u, ""))),
+    }));
+  return {
+    tolerance: { relative: AGGREGATE_RELATIVE_TOLERANCE, sigmaCap: AGGREGATE_SIGMA_CAP },
+    against: `the ${kind} downwelling flux, direct and diffuse (fluxReadingsOf, ${kind})`,
+    aggregates,
+  };
 }
 
 /** A deck's tables with the multiple-scattering part's modes from `modes` up set to 0: a test's cut. */
@@ -915,9 +986,9 @@ interface DeckFigures {
 
 /**
  * `giant-deck`'s gate through its deck (the module's remarks): the route's case section against the
- * vector I, each variant's tallies, the route's ratios, the bake's plane albedo against the
- * reference's aggregates, the deck's share of each orbit image's radiance, the bakes' figures and
- * every variant's twin values.
+ * vector I above the split and below it, each variant's tallies, the route's ratios, the ground's
+ * flux below the deck and the bake's plane albedo against the reference's aggregates, the deck's
+ * share of each orbit image's radiance, the bakes' figures and every variant's twin values.
  */
 function deckSectionOf(
   values: ReadonlyMap<DeckVariant, TwinValues>,
@@ -940,6 +1011,9 @@ function deckSectionOf(
       "vector",
     );
   const route = gateOf("route");
+  const belowCase = deckGateCase(referenceCase, figures.split.altitudeM, "below");
+  const below = caseGateSection(belowCase, variant("route"), "vector");
+  const belowScalar = caseGateSection(belowCase, variant("route"), "scalar");
   const asRecord = (section: unknown): unknown => ({ cases: { [DECK_CASE]: section } });
   // A variant's tallies and its twin ÷ reference by image, which a refusal leaves out of the tallies.
   const judged = (name: DeckVariant): Record<string, unknown> => {
@@ -993,6 +1067,18 @@ function deckSectionOf(
     routed: recordImagesOf(asRecord(route), DECK_CASE),
     routedRatios: recordRatiosOf(asRecord(route), DECK_CASE),
     geometries: sectionOf(route, "geometries"),
+    routedBelow: {
+      radiance: "vector",
+      route:
+        "beneath the split, the table below the deck (R08.T15.b.2), scalar and uncorrected, its ground black",
+      routed: recordImagesOf(asRecord(below), DECK_CASE),
+      routedRatios: recordRatiosOf(asRecord(below), DECK_CASE),
+      againstScalar: recordImagesOf(asRecord(belowScalar), DECK_CASE),
+      geometries: sectionOf(below, "geometries"),
+      groundIrradiance: deckGroundIrradianceOf(giantDeckReference, "vector", (aggregate) =>
+        downwellingOf(variant("route"), DECK_CASE, aggregate),
+      ),
+    },
     byDeckModes: Object.fromEntries(
       (["m < 3", "m < 6"] as const).map((name) => [name, judged(name)]),
     ),
@@ -1121,12 +1207,7 @@ function venusSpecs(referenceCase: ReferenceCase): TwinValueSpec[] {
         name: g.name,
       })),
     ),
-    ...referenceCase.aggregates.map((a): TwinValueSpec => ({
-      quantity: "downwelling",
-      setting: "case",
-      caseName,
-      name: a.name,
-    })),
+    ...downwellingSpecs(referenceCase),
   ];
 }
 
@@ -1168,37 +1249,7 @@ function venusSectionOf(
   const section = caseGateSection({ referenceCase, reference }, values, "scalar");
   const asRecord = { cases: { [caseName]: section } };
   const splitM = figures.split.altitudeM;
-  const valueOf = (aggregate: string): Rgb => {
-    const value = values.get(
-      twinValueKey({ quantity: "downwelling", setting: "case", caseName, name: aggregate }),
-    );
-    if (value === undefined) {
-      throw new Error(`${caseName} holds no downwelling flux under ${aggregate}`);
-    }
-    return value;
-  };
-  const groundIrradiance = fluxReadingsOf(reference, "scalar")
-    .filter((reading) => reading.name.endsWith("/downwelling"))
-    .map((reading) => {
-      const twin = valueOf(reading.name.replace(/\/downwelling$/u, ""));
-      return {
-        aggregate: reading.name,
-        rows: ([0, 1, 2] as const).map((c) => {
-          let verdict = "refused";
-          if (aggregateRefusal(reading, c) === undefined) {
-            verdict = aggregatePasses(twin[c], reading, c) ? "pass" : "miss";
-          }
-          return [
-            CHANNEL_NAMES[c],
-            twin[c],
-            recorded(reading.flux[c]),
-            recorded(reading.standardError[c]),
-            recorded(twin[c] / reading.flux[c] - 1),
-            verdict,
-          ];
-        }),
-      };
-    });
+  const valueOf = (aggregate: string): Rgb => downwellingOf(values, caseName, aggregate);
   const probe = reference.aggregates.find((a) => a.name === "flux-lsfr");
   if (probe === undefined) {
     throw new Error(`${caseName}'s reference has no probe aggregate`);
@@ -1225,11 +1276,7 @@ function venusSectionOf(
     routed: recordImagesOf(asRecord, caseName),
     routedRatios: recordRatiosOf(asRecord, caseName),
     geometries: sectionOf(section, "geometries"),
-    groundIrradiance: {
-      tolerance: { relative: AGGREGATE_RELATIVE_TOLERANCE, sigmaCap: AGGREGATE_SIGMA_CAP },
-      against: "the scalar downwelling flux, direct and diffuse (fluxReadingsOf, scalar)",
-      aggregates: groundIrradiance,
-    },
+    groundIrradiance: deckGroundIrradianceOf(reference, "scalar", valueOf),
     sanity: {
       aggregate: "flux-lsfr",
       channels,
@@ -1378,7 +1425,7 @@ function vectorGateRecord(
   const uncorrected = caseGateRecord(CASES, C1_VALUES, { writer: WRITER, radiance: "vector" });
   return {
     description:
-      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); its route below the split, the table below the deck uncorrected against the vector I, and the ground's flux against the vector flux (deck.routedBelow, R08.T15.b.2); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
     format: VECTOR_GATE_FORMAT,
     cases: Object.fromEntries(
       CASES.map(({ referenceCase }) => {
@@ -1422,7 +1469,7 @@ function deckRecordOf(
  * `giant-deck`'s deck baked, by hand (the module's remarks): the route's bake and the variants'
  * (the sky-lit radiance at the deck's modes, the floor white, split as an envelope over its black
  * floor and its white), each with its correction over the deck, their twins over the gated
- * geometries, and the deck's section.
+ * geometries (the route's below the split too, and its ground's flux), and the deck's section.
  */
 function deckGateBaked(): Record<string, unknown> {
   const referenceCase = thickReferenceCases()[DECK_CASE];
@@ -1447,8 +1494,17 @@ function deckGateBaked(): Record<string, unknown> {
     at: GateCase = gateCase,
   ): Map<string, Rgb> =>
     deckValuesOf(caseTwin(referenceCase, { deck: { tables, polarisation: correction } }), at);
+  // The route's twin below the split as well, and its ground's flux (R08.T15.b.2).
+  const routeTwin = caseTwin(referenceCase, {
+    deck: { tables: route.tables, polarisation: route.correction },
+  });
+  const routeValues = new Map([
+    ...deckValuesOf(routeTwin, gateCase),
+    ...deckValuesOf(routeTwin, deckGateCase(referenceCase, split.altitudeM, "below")),
+    ...valuesOf(routeTwin, referenceCase, downwellingSpecs(referenceCase)),
+  ]);
   const values = new Map<DeckVariant, TwinValues>([
-    ["route", twinOf(route.tables, route.correction)],
+    ["route", routeValues],
     ["m < 3", twinOf(cutDeckModes(route.tables, 3), route.correction)],
     ["m < 6", twinOf(cutDeckModes(route.tables, 6), route.correction)],
     ["diffuse at 8", twinOf(wide.tables, wide.correction)],

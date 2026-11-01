@@ -264,7 +264,7 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     );
   });
 
-  it("keeps the route closed while no pass is recorded: every value is refused", () => {
+  it("keeps the route closed on the recorded verdict: the disc misses at p75 and p85", () => {
     expect([
       deckGatePasses(ENVELOPE_GATE_TALLIES),
       deckRouteRangeOf(ENVELOPE_GATE_TALLIES),

@@ -140,17 +140,18 @@ export interface GateImageTally {
 /**
  * `giant-deck`'s envelope variant's recorded verdict by image (R08.T16.a.2): `vectorGate.json`'s
  * `deck.asAnEnvelope.tallies.images`, the case split at its envelope floor (21,958 m) over a black
- * floor, through the route an envelope takes, held to the file by the test. Every one of its 30
- * values is refused at the committed reference's samples: the re-traced reference (R08.T12.h's)
- * has not landed, so the route stays closed ({@link DECK_ROUTE_RANGE}).
+ * floor, through the route an envelope takes, held to the file by the test. Against the re-traced
+ * reference (R08.T12.h's), 27 of its 30 values pass and 3 miss, on the disc at p75 (red, 0.92 of
+ * the reference) and p85 (red and green, from 0.85), so the route stays closed
+ * ({@link DECK_ROUTE_RANGE}).
  */
 export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
-  { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-  { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-  { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-  { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-  { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-  { image: "limb", comparisons: 15, passes: 0, misses: 0, refusals: 15 },
+  { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p60", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p75", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
+  { image: "disc-p85", comparisons: 3, passes: 1, misses: 2, refusals: 0 },
+  { image: "limb", comparisons: 15, passes: 15, misses: 0, refusals: 0 },
 ];
 
 /**
@@ -199,10 +200,11 @@ export function deckRouteRangeOf(
 /**
  * The range the cloud-deck split's passing gates cover (R08.T15.b.2, R08.T16.a.2): none yet. No
  * deck case passes: the Venus-class cases' scalar gate refuses nearly every value below the deck at
- * their references' 1,024 samples, and `giant-deck`'s envelope variant refuses all 30 of its gated
- * values ({@link ENVELOPE_GATE_TALLIES}). A `cloudDeck` world stays drawn by the analytic term under
- * `ATMOSPHERE: APPROXIMATE`, its deck's bake unasked. Routing a gas envelope changes its draw path,
- * so its opening also waits on the owner's RTX run of its frame against
+ * their references' 1,024 samples, `giant-deck` below its split misses 42 of its twilight values
+ * (s90, its plane-parallel table dark there), and its envelope variant misses 3 of its 30 values
+ * on the disc ({@link ENVELOPE_GATE_TALLIES}). A `cloudDeck` world stays drawn by the analytic term
+ * under `ATMOSPHERE: APPROXIMATE`, its deck's bake unasked. Routing a gas envelope changes its draw
+ * path, so its opening also waits on the owner's RTX run of its frame against
  * `decision-r08-t11-frame.md`'s 16.67 ms.
  */
 export const DECK_ROUTE_RANGE: DeckRouteRange | null = deckRouteRangeOf(ENVELOPE_GATE_TALLIES);
