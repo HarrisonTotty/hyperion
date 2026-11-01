@@ -370,11 +370,13 @@ fn trunk_depth_m(valley_m: f64, bankfull_m: f64, cap_m: f64) -> f64 {
     num::min(num::max(valley_m, bankfull_m), cap_m)
 }
 
-/// The deepest the groove of the coarse cell `cell`'s trunk can be on `body`, metres: the depth
-/// [`Groove`] gives the trunk the network builds for the cell, but for the base level's hold
-/// ([`trunk_valley_m`]), which only makes a steady-state valley shallower; zero where the cell
-/// heads no trunk, its flow terminal or its catchment shedding no runoff. A cell under water heads
-/// a trunk that cuts nothing (R09.T6.f), and is counted all the same.
+/// The deepest the groove of the coarse cell `cell`'s trunk can be on `body`, metres.
+///
+/// It is the depth [`Groove`] gives the trunk the network builds for the cell, but for the base
+/// level's hold ([`trunk_valley_m`]), which only makes a steady-state valley shallower; zero where
+/// the cell heads no trunk, its flow terminal or its catchment shedding no runoff. A cell under
+/// water heads a trunk that cuts nothing (R09.T6.f), and is counted all the same: its valley is
+/// none, so it counts its bankfull channel alone.
 ///
 /// Every groove of the coarse level is a trunk's, so the largest of this over the cells a view
 /// holds bounds the coarse level's raw incision there, as [`groove_cap_m`] bounds it on any body
@@ -407,9 +409,10 @@ pub(crate) fn trunk_groove_m(cell: &SynthesisCell, body: ChannelBody) -> f64 {
     )
 }
 
-/// Whether the coarse cell `cell` carries tributaries: where it does not, its network evaluates
-/// no level finer than the coarse one ([`deepest_level`] is its coarse level), so none of its
-/// segments is a tributary.
+/// Whether the coarse cell `cell` carries tributaries.
+///
+/// Where it does not, its network evaluates no level finer than the coarse one ([`deepest_level`]
+/// is its coarse level), and none of its segments is a tributary.
 #[must_use]
 pub(crate) fn carries_tributaries(cell: &SynthesisCell) -> bool {
     tributary_steepness_of(cell).is_some() && !cell.epoch_incision.is_epoch()

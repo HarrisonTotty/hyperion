@@ -128,7 +128,6 @@ use crate::patch::normals::{encode_octahedral_f32, surface_normal};
 use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
 };
-use crate::synth::channels::ChannelBody;
 use crate::synth::craters::CraterOctaves;
 use crate::synth::levels::HeldChannels;
 use crate::synth::{
@@ -161,8 +160,8 @@ struct BodyField {
     bounds: LevelBounds,
     /// The lowest and highest elevation of the cells held, millimetres, `None` before any.
     elevation_mm: Option<(i32, i32)>,
-    /// What the cells held certify of the channels' incision, which holds the level table's
-    /// channel terms (R09.T8.d (b2)).
+    /// What the cells held certify of the channels' incision, which holds the channels' share of
+    /// the level table's lowest heights (R09.T8.d (b2)).
     channels: HeldChannels,
     /// The body's σ by level over the cells held as surveyed (R10.T4.b), or `None` where the field
     /// was started with [`SigmaSurvey::Skipped`] (R10.T4.c).
@@ -272,14 +271,13 @@ impl BodyField {
     /// Widens the elevations held, and what the cells held certify of the channels, by `block`'s
     /// cells.
     fn hold_cells(&mut self, block: &DecodedBlock) {
-        let body = ChannelBody::of(self.field.header());
         for cell in block.cells() {
             let e = cell.elevation_mm;
             self.elevation_mm = Some(
                 self.elevation_mm
                     .map_or((e, e), |(lo, hi)| (lo.min(e), hi.max(e))),
             );
-            self.channels.hold(cell, body);
+            self.channels.hold(cell);
         }
     }
 
@@ -1498,7 +1496,7 @@ impl WorkerFields {
             bounds,
             field,
             elevation_mm: None,
-            channels: HeldChannels::default(),
+            channels: HeldChannels::new(header),
             cache: SynthCache::new(),
             nodes: NodeCache::default(),
             parts: None,
@@ -1552,11 +1550,12 @@ impl WorkerFields {
     ///   elevations of the cells held, which R09's approximating spline never leaves, widened by a
     ///   micrometre and a part in 10¹² as R09's patch range is, plus the most the level's and its
     ///   parent's contributions can add ([`LevelBounds::contribution_range_m`]), the channels'
-    ///   share held by what the cells held certify: the deepest trunk groove among them, no finer
-    ///   level where none carries tributaries, and the channels' floor at the sea where none
-    ///   carries a wet epoch's incision (R09.T8.d (b2)); and stretched to the datum, 0, which a
-    ///   vertex outside the survey takes where the field cannot make it (R10.T6.a); exactly 0 and
-    ///   0 while no cell is held;
+    ///   share of the lowest held by what the cells held certify: the deepest trunk groove among
+    ///   them, no finer level where none carries tributaries, and the channels' floor at the sea
+    ///   where none carries a wet epoch's incision (R09.T8.d (b2)); and stretched to the datum, 0,
+    ///   which a vertex outside the survey takes where the field cannot make it (R10.T6.a); exactly
+    ///   0 and 0 while no cell is held. The highest is the header's alone, which the client's
+    ///   off-survey ceiling reads as a bound on ground no cell held certifies;
     /// - the largest vertex spacing of the level on the body's equatorial radius, metres
     ///   ([`vertex_spacing`]).
     ///

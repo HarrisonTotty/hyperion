@@ -174,7 +174,7 @@ fn held_over(field: &CoarseField) -> ((f64, f64), HeldChannels) {
     });
     let (lo, hi) = (f64::from(lo) / 1000.0, f64::from(hi) / 1000.0);
     let slack = |x: f64| 1e-6 + 1e-12 * x.abs();
-    let held = HeldChannels::of(records, ChannelBody::of(field.header()));
+    let held = HeldChannels::of(records, field.header());
     ((lo - slack(lo), hi + slack(hi)), held)
 }
 
@@ -290,7 +290,10 @@ fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) ->
                     held_low <= height && height <= held_high,
                     "{dir:?} {n}: {height} m outside the held [{held_low}, {held_high}] m"
                 );
-                assert!(base.0 + low <= held_low && held_high <= base.1 + high);
+                assert!(
+                    base.0 + low <= held_low,
+                    "{dir:?} {n}: the held lowest {held_low} m is below the header's"
+                );
                 heights.push(height);
             }
             for n in 0..complete {
@@ -471,17 +474,18 @@ fn an_airless_body_s_channels_reach_nothing_and_omit_nothing() {
 }
 
 #[test]
-fn the_held_range_is_the_header_s_with_its_caps_whole_and_never_wider() {
-    // A certificate that holds nothing back: an epoch's valleys, tributaries and trunks as deep as
-    // any cap.
-    let whole = HeldChannels {
-        epoch: true,
-        tributaries: true,
-        trunk_m: f64::INFINITY,
-    };
+fn the_held_range_is_the_header_s_with_its_caps_whole_and_its_highest_always() {
     for &kind in SyntheticWorld::ALL {
         let field = world(kind);
         let header = field.header();
+        // A certificate that holds nothing back: an epoch's valleys, tributaries and trunks as deep
+        // as any cap.
+        let whole = HeldChannels {
+            epoch: true,
+            tributaries: true,
+            trunk_m: f64::INFINITY,
+            ..HeldChannels::new(header)
+        };
         let bounds = LevelBounds::new(header);
         let (base, held) = held_over(field);
         let coarse_cap = groove_cap_m(header.radius().value(), header.level().get());
@@ -499,7 +503,7 @@ fn the_held_range_is_the_header_s_with_its_caps_whole_and_never_wider() {
             | SyntheticWorld::CeresLike
             | SyntheticWorld::Flat
             | SyntheticWorld::OneCrater => {
-                assert_eq!(held, HeldChannels::default(), "{kind:?}");
+                assert_eq!(held, HeldChannels::new(header), "{kind:?}");
             }
         }
         let mut tightened = false;
@@ -511,16 +515,17 @@ fn the_held_range_is_the_header_s_with_its_caps_whole_and_never_wider() {
             assert_same_bits(whole_high, base.1 + high);
             let (held_low, held_high) = bounds.held_height_range_m(level, base, &held);
             assert!(
-                whole_low <= held_low && held_high <= whole_high,
-                "{kind:?} {n}: [{held_low}, {held_high}] outside [{whole_low}, {whole_high}]"
+                whole_low <= held_low,
+                "{kind:?} {n}: {held_low} m below {whole_low} m"
             );
-            tightened |= whole_low < held_low || held_high < whole_high;
+            tightened |= whole_low < held_low;
             if header.is_airless() {
                 assert_same_bits(held_low, whole_low);
-                assert_same_bits(held_high, whole_high);
             }
+            // The highest is the header's, which the off-survey ceiling reads.
+            assert_same_bits(held_high, whole_high);
             // On a world wet now the channels add nothing to the lowest height: the sea floor
-            // holds, and the sea lies above the base's lowest.
+            // holds, and the sea lies above the base's lowest less the other contributions.
             if kind == SyntheticWorld::EarthLike {
                 let others = bounds.relief_reach_m[n] + bounds.craters_reach_m[n];
                 assert_same_bits(held_low, base.0 + -others);

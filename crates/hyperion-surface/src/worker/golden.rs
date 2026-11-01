@@ -4,7 +4,8 @@
 //! `tests/golden/worker/terrain_test.golden` (R10.T16.d; decision-r10-t16-contracts §4), the
 //! payloads of the client's kept scene `TERRAIN TEST` with the answers R09.T19.b gives with them,
 //! `tests/golden/worker/earth_like.golden` (R10.T12), an Earth-like survey whose field holds a
-//! finest-level patch of three classes, with the worker's material at each of its vertices,
+//! finest-level patch of three classes, with the worker's material at each of its vertices and its
+//! level table, the channels' share of whose lowest the cells held hold (R09.T8.d (b2)),
 //! `tests/golden/worker/terrain_test_weathered.golden` (R10.T1.c's client half;
 //! decision-r10-t1c-client-scope §3), the same scene's payloads over `TEST MOON` weathered, with its
 //! maturity's digests, and `tests/golden/worker/maturity_layer.golden` (the same ruling's §4), the
@@ -561,6 +562,9 @@ fn earth_text() -> String {
         .map(|(word, count)| format!("{word}*{count}"))
         .collect();
     out.line(&format!("materials {}", runs.join(" ")));
+    // The table on a world wet now, where the cells held hold its channels' share of the lowest
+    // (R09.T8.d (b2)).
+    write_levels(&mut out, "last", &fields, f.body);
     out.finish()
 }
 

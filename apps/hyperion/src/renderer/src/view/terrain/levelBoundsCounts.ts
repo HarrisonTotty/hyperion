@@ -102,11 +102,13 @@ function slackM(x: number): number {
 
 /**
  * A fixture world as selection reads it: its level table composed as the worker's `level_table`
- * makes it (`crates/hyperion-surface/src/worker.rs`): the cells' lowest and highest elevation,
- * widened by a micrometre and a part in 10¹², plus the most the level's and its parent's
- * contributions can add, stretched to the datum; the stated bound; the largest vertex spacing on
- * the radius. Its σ is the fixture's `sigma_m`. Levels past the complete level take its row (bound
- * and σ 0). The world is a sphere of its radius: the fixture holds no flattening.
+ * made it from the header's caps alone (`crates/hyperion-surface/src/worker.rs`): the cells'
+ * lowest and highest elevation, widened by a micrometre and a part in 10¹², plus the most the
+ * level's and its parent's contributions can add, stretched to the datum; the stated bound; the
+ * largest vertex spacing on the radius. The worker's own rows now hold the channels' share by the
+ * cells it holds (R09.T8.d (b2)), which the fixture does not carry, so these rows are as wide or
+ * wider. Its σ is the fixture's `sigma_m`. Levels past the complete level take its row (bound and
+ * σ 0). The world is a sphere of its radius: the fixture holds no flattening.
  *
  * @throws Error for a world missing a level row up to its complete level.
  */

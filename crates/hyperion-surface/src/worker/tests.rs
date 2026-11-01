@@ -762,7 +762,8 @@ fn worker_level_table_bounds_every_patch_of_its_level() {
 /// channels. They hold every height a patch of the level over the survey bakes, its parent level's
 /// included, at the cube corner the fixture's cell touches and inside it, and lie within R09's
 /// patch range from the header's caps, whose low they raise wherever the level evaluates channels:
-/// the sea floor holds, and the channels add nothing to the lowest height.
+/// the sea floor holds, and the sea lies above the held cells' lowest less the other
+/// contributions' reach.
 #[test]
 fn worker_level_table_holds_every_baked_height_and_tightens_the_channels_on_a_wet_world() {
     let f = earth_fixture();
@@ -792,6 +793,35 @@ fn worker_level_table_holds_every_baked_height_and_tightens_the_channels_on_a_we
         }
     }
     assert!(raised > 10, "{raised} rows raised");
+    // The same rows, bit for bit, whatever the order of the blocks after the first: the fixture's
+    // payload cut into blocks of a kibibyte, taken in order and reversed.
+    let small = split(&encode_within(
+        world(SyntheticWorld::EarthLike),
+        &cover(&[earth_cell()].into_iter().collect(), |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        1024,
+    ));
+    assert!(small.len() > 2, "{} blocks", small.len());
+    let mut forward = WorkerFields::new();
+    let mut reversed = WorkerFields::new();
+    for fields in [&mut forward, &mut reversed] {
+        fields
+            .init(f.body, &small[0], SigmaSurvey::Skipped)
+            .unwrap();
+    }
+    for (a, b) in small[1..].iter().zip(small[1..].iter().rev()) {
+        forward.chunk(f.body, a).unwrap();
+        reversed.chunk(f.body, b).unwrap();
+    }
+    assert_eq!(
+        table_bits(forward.level_table(f.body)),
+        table_bits(Some(table.clone()))
+    );
+    assert_eq!(
+        table_bits(reversed.level_table(f.body)),
+        table_bits(Some(table.clone()))
+    );
     // Every height a patch of the level bakes, at the coarse level, some finer ones and the band
     // limit's, over the cube corner and the cell's centre.
     let mut cache = SynthCache::new();
