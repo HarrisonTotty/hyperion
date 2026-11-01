@@ -87,6 +87,32 @@ export interface SeamFrameChange {
   readonly appearMovePx: number;
 }
 
+/**
+ * What a frame's change of an instance came from (R10.T16.i), at its worst vertex: its fades or
+ * holds alone (`fade`), a newer bake of the patch drawing it (`rebake`), a finer or a coarser patch
+ * than drew that ground the frame before (`refine`, `coarsen`), or nothing drawn there before
+ * (`appear`).
+ */
+export type SeamPopCause = "fade" | "rebake" | "refine" | "coarsen" | "appear";
+
+/** An instance whose change in a frame showed ({@link SeamFrameChange.pops}). */
+export interface SeamPop {
+  readonly tS: number;
+  readonly cause: SeamPopCause;
+  /** The level of the area it draws, of its patch, and of the patch drawn there before (−1: none). */
+  readonly areaLevel: number;
+  readonly level: number;
+  readonly levelBefore: number;
+  readonly movePx: number;
+  readonly normalDeg: number;
+  /** Its own fade and its rebake's or rise's, 0 to 1. */
+  readonly ownFade: number;
+  readonly rebakeFade: number;
+  /** The morph factor at its worst vertex, and the one drawn there the frame before. */
+  readonly k: number;
+  readonly kBefore: number;
+}
+
 /** A link of a missing patch's chain of ancestors at a collapse. */
 export interface SeamChainLink {
   readonly level: number;
@@ -142,6 +168,8 @@ export interface SeamRun {
   readonly collapses: ReadonlyArray<SeamCollapse>;
   /** The frames whose drawn ground changed or faded ({@link SeamFrameChange}). */
   readonly frameChanges: ReadonlyArray<SeamFrameChange>;
+  /** Every instance whose change in a frame showed, in order. */
+  readonly pops: ReadonlyArray<SeamPop>;
 }
 
 /** A change moving the drawn surface more than this on screen is a pop, pixels. */
@@ -218,6 +246,8 @@ export interface SeamSummary {
   readonly frameNormalDeg: { readonly p95: number; readonly max: number };
   /** Instances a second whose change in a frame showed ({@link SeamFrameChange.pops}). */
   readonly framePopsPerS: number;
+  /** Those instances by what their change came from. */
+  readonly framePopsByCause: Readonly<Record<SeamPopCause, number>>;
   /** Instances drawn over ground the view saw with no rise out of the datum, and the largest move. */
   readonly appearsWithoutTransition: number;
   readonly appearMovePxMax: number;
@@ -280,6 +310,21 @@ export function isFlicker(frames: ReadonlyArray<SeamFrame>, n: number): boolean 
     (now < 0.5 * was || now > 2 * was) &&
     (back(frames[n + 1]?.selected) || back(frames[n + 2]?.selected))
   );
+}
+
+/** How many of `pops` came from each cause. */
+function popsByCause(pops: ReadonlyArray<SeamPop>): Record<SeamPopCause, number> {
+  const counts: Record<SeamPopCause, number> = {
+    fade: 0,
+    rebake: 0,
+    refine: 0,
+    coarsen: 0,
+    appear: 0,
+  };
+  for (const pop of pops) {
+    counts[pop.cause] += 1;
+  }
+  return counts;
 }
 
 /** The figures of `run` ({@link SeamSummary}). */
@@ -360,6 +405,7 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
       max: maxOf(changes.map((c) => c.normalDeg)),
     },
     framePopsPerS: drawnSpanS > 0 ? changes.reduce((sum, c) => sum + c.pops, 0) / drawnSpanS : 0,
+    framePopsByCause: popsByCause(run.pops),
     appearsWithoutTransition: changes.reduce((sum, c) => sum + c.appears, 0),
     appearMovePxMax: maxOf(changes.map((c) => c.appearMovePx)),
   };

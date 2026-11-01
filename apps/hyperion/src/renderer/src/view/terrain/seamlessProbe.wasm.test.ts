@@ -45,6 +45,8 @@ import {
   type SeamEvent,
   type SeamFrame,
   type SeamFrameChange,
+  type SeamPop,
+  type SeamPopCause,
   type SeamRun,
   type SeamSummary,
   summariseSeamRun,
@@ -609,6 +611,11 @@ class DrawnSurfaces {
     return [made[at] ?? 0, made[at + 1] ?? 0];
   }
 
+  /** `inst`'s morph factor at (u, v) of its area's quads, on the mesh's triangle there. */
+  kAt(inst: DrawnInstance, u: number, v: number): number {
+    return sampleOn((x, y) => this.vertex(inst, x, y)[1], u, v);
+  }
+
   /**
    * `inst`'s drawn surface at (u, v) of its area's quads: its height on the mesh's triangle there,
    * and the shading normal at its k, `terrainLitShade.wgsl`'s, the datum's `datum` off survey.
@@ -620,7 +627,7 @@ class DrawnSurfaces {
     datum: Vec3,
   ): { readonly h: number; readonly normal: Vec3 | null } {
     const h = sampleOn((x, y) => this.vertex(inst, x, y)[0], u, v);
-    const k = sampleOn((x, y) => this.vertex(inst, x, y)[1], u, v);
+    const k = this.kAt(inst, u, v);
     const s = 2 ** inst.levels;
     const su = (inst.partI * QUADS + u) / s;
     const sv = (inst.partJ * QUADS + v) / s;
@@ -722,7 +729,8 @@ function frameLines(): number[] {
  * from camera `cam` (the frame's), over the instances of `now` whose bake or words changed: at
  * each of their measured vertices on screen, the drawn surface's move along the datum's normal and
  * its shading normal's turn against the instance over that ground before, or the datum's where
- * nothing was and camera `camBefore` saw it; `null` where nothing changed. `masks` is the run's.
+ * nothing was and camera `camBefore` saw it; `null` where nothing changed. `masks` is the run's;
+ * each instance whose change shows goes in `pops`.
  */
 function frameChangeOf(
   figure: BodyFigure,
@@ -732,6 +740,7 @@ function frameChangeOf(
   before: ReadonlyMap<string, DrawnInstance>,
   now: ReadonlyMap<string, DrawnInstance>,
   tS: number,
+  pops: SeamPop[],
 ): SeamFrameChange | null {
   const surfaces = new DrawnSurfaces(figure, cam, masks);
   const ancestors = ancestorsOf(before);
@@ -740,7 +749,7 @@ function frameChangeOf(
   let measured = 0;
   let movePx = 0;
   let normalDeg = 0;
-  let pops = 0;
+  let popCount = 0;
   let appears = 0;
   let appearMovePx = 0;
   for (const [areaString, inst] of now) {
@@ -753,6 +762,8 @@ function frameChangeOf(
     let instDeg = 0;
     let covered = false;
     let bare = false;
+    let worst: Omit<SeamPop, "tS" | "areaLevel" | "level" | "ownFade" | "rebakeFade"> | null = null;
+    let worstBadness = 0;
     for (const y of lines) {
       for (const x of lines) {
         const dir = vertexDir(inst.area, x, y);
@@ -779,27 +790,65 @@ function frameChangeOf(
           then = { h: 0, normal: datum };
         }
         const sinIncidence = norm(cross(datum, normalise(rel)));
-        instPx = Math.max(
-          instPx,
-          (Math.abs(drawn.h - then.h) * sinIncidence * pxPerRad) / norm(rel),
-        );
+        const px = (Math.abs(drawn.h - then.h) * sinIncidence * pxPerRad) / norm(rel);
+        let deg = 0;
         if (drawn.normal !== null && then.normal !== null) {
           const a = drawn.normal;
           const b = then.normal;
           const cos = Math.min(1, Math.max(-1, a.x * b.x + a.y * b.y + a.z * b.z));
-          instDeg = Math.max(instDeg, (Math.acos(cos) * 180) / Math.PI);
+          deg = (Math.acos(cos) * 180) / Math.PI;
+        }
+        instPx = Math.max(instPx, px);
+        instDeg = Math.max(instDeg, deg);
+        const badness = Math.max(px / POP_PX, deg / POP_NORMAL_DEG);
+        if (badness > worstBadness) {
+          worstBadness = badness;
+          const k = surfaces.vertex(inst, x, y)[1];
+          worst =
+            cover === null
+              ? { cause: "appear", levelBefore: -1, movePx: px, normalDeg: deg, k, kBefore: 0 }
+              : {
+                  cause: causeOf(inst, cover.inst),
+                  levelBefore: cover.inst.held.key.level,
+                  movePx: px,
+                  normalDeg: deg,
+                  k,
+                  kBefore: surfaces.kAt(cover.inst, cover.u, cover.v),
+                };
         }
       }
     }
     movePx = Math.max(movePx, instPx);
     normalDeg = Math.max(normalDeg, instDeg);
-    pops += instPx > POP_PX || instDeg > POP_NORMAL_DEG ? 1 : 0;
+    if (worst !== null && (instPx > POP_PX || instDeg > POP_NORMAL_DEG)) {
+      popCount += 1;
+      pops.push({
+        tS,
+        areaLevel: inst.area.level,
+        level: inst.held.key.level,
+        ownFade: inst.ownFade / FADE_STEPS,
+        rebakeFade: inst.rebakeFade,
+        ...worst,
+        movePx: instPx,
+        normalDeg: instDeg,
+      });
+    }
     if (bare && !covered) {
       appears += inst.rises ? 0 : 1;
       appearMovePx = Math.max(appearMovePx, instPx);
     }
   }
-  return measured === 0 ? null : { tS, movePx, normalDeg, pops, appears, appearMovePx };
+  return measured === 0 ? null : { tS, movePx, normalDeg, pops: popCount, appears, appearMovePx };
+}
+
+/** What `inst`'s change from `was`, the instance over its ground the frame before, came from. */
+function causeOf(inst: DrawnInstance, was: DrawnInstance): SeamPopCause {
+  const level = inst.held.key.level;
+  const before = was.held.key.level;
+  if (level !== before) {
+    return level > before ? "refine" : "coarsen";
+  }
+  return was.held === inst.held ? "fade" : "rebake";
 }
 
 /** The primary view's frame of `viewReport` drawn at `tS`: its view, a sun overhead, no lights. */
@@ -952,6 +1001,7 @@ async function play(options: ProbeOptions): Promise<Played> {
   // The bake each slot holds, an older bake's kept in its retired slot until the slot is reused.
   const slots = new Map<number, Held>();
   const frameChanges: SeamFrameChange[] = [];
+  const pops: SeamPop[] = [];
   const masks = new SurveyMasks();
   let drawnBefore = new Map<string, DrawnInstance>();
   const firstDemandS = new Map<string, number>();
@@ -1093,6 +1143,7 @@ async function play(options: ProbeOptions): Promise<Played> {
           drawnBefore,
           drawnNow,
           tS,
+          pops,
         );
         if (change !== null) {
           frameChanges.push(change);
@@ -1282,6 +1333,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       events,
       collapses,
       frameChanges,
+      pops,
     },
     trace,
   };
@@ -1303,6 +1355,9 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     bakesAnswered: run.bakesAnswered,
     summary,
     collapses: run.collapses,
+    // The largest pops of a frame's change, by move and by turn.
+    popsByMove: run.pops.toSorted((a, b) => b.movePx - a.movePx).slice(0, 60),
+    popsByTurn: run.pops.toSorted((a, b) => b.normalDeg - a.normalDeg).slice(0, 60),
     trace: played.trace,
     ...(RECORD ? { record: run } : {}),
   };

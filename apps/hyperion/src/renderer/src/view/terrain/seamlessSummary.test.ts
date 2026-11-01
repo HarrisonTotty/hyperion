@@ -57,6 +57,7 @@ function runOf(frames: SeamFrame[], events: SeamEvent[], more: Partial<SeamRun> 
     events,
     collapses: [],
     frameChanges: [],
+    pops: [],
     ...more,
   };
 }
@@ -132,11 +133,30 @@ describe("the seamless probe's summary", () => {
       { tS: 1, movePx: 0.5, normalDeg: 1, pops: 0, appears: 0, appearMovePx: 0 },
       { tS: 2, movePx: 3, normalDeg: 0.5, pops: 2, appears: 1, appearMovePx: 7 },
     ];
-    const summary = summariseSeamRun(runOf([frameAt(0, 10), frameAt(4, 10)], [], { frameChanges }));
+    const pop = {
+      tS: 2,
+      areaLevel: 9,
+      level: 9,
+      levelBefore: 8,
+      movePx: 3,
+      normalDeg: 0.5,
+      ownFade: 0.5,
+      rebakeFade: 0,
+      k: 0.5,
+      kBefore: 0,
+    };
+    const pops = [
+      { ...pop, cause: "refine" as const },
+      { ...pop, cause: "refine" as const },
+    ];
+    const summary = summariseSeamRun(
+      runOf([frameAt(0, 10), frameAt(4, 10)], [], { frameChanges, pops }),
+    );
     expect(summary).toMatchObject({
       frameMovePxMax: 3,
       frameNormalDeg: { max: 1 },
       framePopsPerS: 0.5,
+      framePopsByCause: { fade: 0, rebake: 0, refine: 2, coarsen: 0, appear: 0 },
       appearsWithoutTransition: 1,
       appearMovePxMax: 7,
     });
