@@ -19,15 +19,15 @@
 //! The tests, each its figure:
 //!
 //! - [`binary_kick_no_system_shows_a_released_star_under_every_27_hold`]: under the held arm every
-//!   system a supernova has unbound still shows the star it released (step 1's count, the double
-//!   count); under the arm none does.
+//!   system a supernova has unbound, a pair of it or an outer orbit (P11.T10's fix), still shows
+//!   the star it released (step 1's count, the double count); under the arm none does.
 //! - [`binary_kick_the_stripped_share_is_stripped_share`]: the primaries the engine strips, against
 //!   the mean of `binarity::stripped_share`.
 //! - [`binary_kick_the_low_mode_is_a_fifth_of_neutron_stars_and_keeps_its_companions`].
 //! - [`binary_kick_most_double_neutron_stars_are_nearly_circular`]: e < 0.3.
-//! - [`binary_kick_released_companions_against_plan_08_s_supernova_release`]: the released
-//!   companions of 2.5 M☉ and up per massive system against `RunawayModel`'s walkaways and the
-//!   tenth of its runaways a supernova releases, and their speeds.
+//! - [`binary_kick_released_companions_against_plan_08_s_supernova_release`]: the living stars of
+//!   2.5 M☉ and up a supernova hides per massive system, against `RunawayModel`'s walkaways and
+//!   the tenth of its runaways a supernova releases, and their speeds: the closure of the two.
 //! - [`binary_kick_a_tenth_of_neutron_stars_stay_below_50_km_s`]: retention in a cluster of 50 km/s
 //!   birth escape speed, a pair judged on its system's velocity.
 //! - [`binary_kick_most_black_holes_are_unkicked`].
@@ -56,11 +56,16 @@ use crate::math;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::testing::massive_records;
-use crate::stellar::binary::{BinaryState, BinaryTimeline, Component};
-use crate::stellar::multiplicity::{MultiplicityContext, StarIndex, stripped_mark_min_mass};
+use crate::stellar::binary::{BinaryState, BinaryTimeline, Component, SupernovaRecord};
+use crate::stellar::multiplicity::{
+    HierarchyNode, MultiplicityContext, StarIndex, stripped_mark_min_mass,
+};
 use crate::stellar::remnant::{KickMode, NatalKick, RemnantKind};
 use crate::stellar::rules::StellarRules;
-use crate::stellar::system::{BinaryKicksRules, PairTimeline, SystemStars, disrupting_supernova};
+use crate::stellar::system::{
+    BinaryKicksRules, OuterRelease, PairTimeline, SystemStars, clock_time_of_death,
+    disrupting_supernova, stars_under,
+};
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, SolarMasses, Years};
 
@@ -82,17 +87,17 @@ const SHARES: usize = 64;
 /// The threads each census runs on, the slots each test reserves (`.config/nextest.toml`).
 const THREADS: usize = 16;
 
-/// The most the stripped share may stand from `stripped_share`'s mean: the plan's 0.02 missed, as
-/// measured (a finding; [`binary_kick_the_stripped_share_is_stripped_share`]).
-const STRIPPED_PIN: f64 = 0.035;
+/// The most the stripped share may stand from `stripped_share`'s mean: the plan's 0.02
+/// ([`binary_kick_the_stripped_share_is_stripped_share`]).
+const STRIPPED_PIN: f64 = 0.02;
 
-/// The bounds of the released companions' rate over `RunawayModel`'s: the plan's 25% missed, as
-/// measured (a finding; [`binary_kick_released_companions_against_plan_08_s_supernova_release`]).
-const RELEASED_PIN: (f64, f64) = (0.1, 0.4);
+/// The bounds of the released stars' rate over `RunawayModel`'s: the plan's 25%
+/// ([`binary_kick_released_companions_against_plan_08_s_supernova_release`]).
+const RELEASED_PIN: (f64, f64) = (0.75, 1.25);
 
 /// The pinned primaries the engine collapses other than at plan 06's death age, remnant and kick,
-/// as measured: a finding ([`binary_kick_massive_primaries_die_as_plan_06_says`]).
-const PIN_MISSES: usize = 9;
+/// or not at all, as measured: a finding ([`binary_kick_massive_primaries_die_as_plan_06_says`]).
+const PIN_MISSES: usize = 63;
 
 /// The Milky Way fixture under every 27 hold.
 fn galaxy() -> &'static Galaxy {
@@ -236,11 +241,26 @@ struct Census {
     released: [u64; 3],
     released_slow: u64,
     released_light: u64,
-    /// Systems a supernova has unbound by the epoch, those of them that show a star of an unbound
-    /// pair, and those the unbinding of the primary's own pair.
+    /// Living stars a supernova releases and a system stops showing by the epoch, of 2.5 M☉ and up,
+    /// by band of their mass then and of their initial mass (15 M☉ and up, 8–15, 2.5–8); by how
+    /// (the companion a pair's supernova unbinds, the member an outer orbit's unbinding releases,
+    /// and one the primary's disrupted pair leaves behind: [`Hidden`]); those whose speed is
+    /// known, the first two, and of them those under 30 km/s; those a system stops showing though
+    /// still bound ([`Hidden::Bound`], all masses); and the lighter ones released.
+    hidden: [u64; 3],
+    hidden_initial: [u64; 3],
+    hidden_by: [u64; 3],
+    hidden_bound: u64,
+    hidden_timed: u64,
+    hidden_slow: u64,
+    hidden_light: u64,
+    /// Systems a supernova has unbound by the epoch, a pair of them or an outer orbit, those of
+    /// them that show a star it took, those the unbinding of the primary's own pair, and those
+    /// with an outer orbit unbound.
     unbound: u64,
     showing: u64,
     primary_pairs: u64,
+    outer_orbits: u64,
 }
 
 impl Census {
@@ -265,9 +285,23 @@ impl Census {
         }
         self.released_slow += o.released_slow;
         self.released_light += o.released_light;
+        for (a, b) in self.hidden.iter_mut().zip(o.hidden) {
+            *a += b;
+        }
+        for (a, b) in self.hidden_initial.iter_mut().zip(o.hidden_initial) {
+            *a += b;
+        }
+        for (a, b) in self.hidden_by.iter_mut().zip(o.hidden_by) {
+            *a += b;
+        }
+        self.hidden_bound += o.hidden_bound;
+        self.hidden_timed += o.hidden_timed;
+        self.hidden_slow += o.hidden_slow;
+        self.hidden_light += o.hidden_light;
         self.unbound += o.unbound;
         self.showing += o.showing;
         self.primary_pairs += o.primary_pairs;
+        self.outer_orbits += o.outer_orbits;
         self
     }
 
@@ -309,6 +343,66 @@ impl Census {
         self.add_marks(galaxy, stars);
         self.add_births(stars);
         self.add_pairs(stars);
+        self.add_hidden(stars);
+    }
+
+    /// What `stars` adds to the stars a system stops showing: at each age of a supernova or an
+    /// outer release by the epoch, each star shown just before it and not just after, living just
+    /// after it.
+    fn add_hidden(&mut self, stars: &SystemStars) {
+        let age_at_epoch = stars.record().age_at_epoch();
+        let mut causes: Vec<(Years, Cause<'_>)> = stars
+            .pairs()
+            .iter()
+            .flat_map(|p| {
+                p.timeline()
+                    .supernovae()
+                    .iter()
+                    .map(move |sn| (sn.age(), Cause::Supernova(p, sn)))
+            })
+            .chain(
+                stars
+                    .releases()
+                    .iter()
+                    .map(|r| (r.age(), Cause::Release(r))),
+            )
+            .filter(|&(age, _)| age <= age_at_epoch)
+            .collect();
+        causes.sort_by(|a, b| a.0.value().total_cmp(&b.0.value()));
+        let shown = |age: Years| stars.shown_at(on_the_clock(age, age_at_epoch));
+        for group in causes.chunk_by(|a, b| a.0.value().total_cmp(&b.0.value()).is_eq()) {
+            let age = group[0].0;
+            let (early, late) = (
+                Years::new(age.value() * (1.0 - 1e-9)),
+                Years::new(age.value() * (1.0 + 1e-9)),
+            );
+            let (was, now) = (shown(early), shown(late));
+            for k in 1..stars.star_count() {
+                if !was.holds(k) || now.holds(k) || !star_state(stars, k, late).phase().is_living()
+                {
+                    continue;
+                }
+                let (by, speed) = hidden_by(stars, k, group.iter().map(|&(_, cause)| cause));
+                let Some(by_index) = by.index() else {
+                    self.hidden_bound += 1;
+                    continue;
+                };
+                let m = star_state(stars, k, early).mass().value();
+                if m < WALKAWAY_MIN_MASS.value() {
+                    self.hidden_light += 1;
+                    continue;
+                }
+                let band = |m: f64| usize::from(m < 15.0) + usize::from(m < 8.0);
+                self.hidden[band(m)] += 1;
+                let initial = stars.stars()[usize::from(k)].initial_mass().value();
+                self.hidden_initial[band(initial)] += 1;
+                self.hidden_by[by_index] += 1;
+                if let Some(speed) = speed {
+                    self.hidden_timed += 1;
+                    self.hidden_slow += u64::from(km_s(speed) < RUNAWAY_MIN_SPEED.value());
+                }
+            }
+        }
     }
 
     /// What the primary of `stars` adds to the stripped share.
@@ -420,18 +514,134 @@ impl Census {
             .filter(|p| disrupting_supernova(p.timeline()).is_some_and(|sn| sn.age() <= age))
             .map(PairTimeline::stars)
             .collect();
-        if !unbound.is_empty() {
+        // A bit for each star a supernova has taken from the system: an unbound pair's two, and
+        // those an unbound outer orbit releases.
+        let released = stars
+            .releases()
+            .iter()
+            .filter(|r| r.age() <= age)
+            .fold(0_u32, |bits, r| bits | stars.released_by(r));
+        let taken = unbound
+            .iter()
+            .flatten()
+            .fold(released, |bits, s| bits | (1_u32 << s.get()))
+            & !1;
+        if taken != 0 {
             self.unbound += 1;
             self.primary_pairs += u64::from(unbound.iter().any(|s| s[0] == StarIndex::PRIMARY));
+            self.outer_orbits += u64::from(released != 0);
             let shown = stars.summary_at(UniverseTime::EPOCH);
-            self.showing += u64::from(shown.stars().iter().any(|s| {
-                unbound
-                    .iter()
-                    .flatten()
-                    .any(|i| u16::from(i.get()) == s.body().body_index() && i.get() != 0)
-            }));
+            self.showing +=
+                u64::from(shown.stars().iter().any(|s| {
+                    s.body().body_index() < 16 && taken & (1 << s.body().body_index()) != 0
+                }));
         }
     }
+}
+
+/// How a system stops showing a star at a supernova ([`Census::add_hidden`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hidden {
+    /// The companion its pair's supernova unbinds.
+    Pair,
+    /// A member of an outer orbit the supernova of a pair below it unbinds.
+    Outer,
+    /// Left behind: the primary's pair unbound, the system is its primary alone, and an outer star
+    /// whose orbit's centre has left it is released (`SystemStars::shown_at`).
+    Behind,
+    /// Hidden though still bound: the system shows only a part of what is left
+    /// (`SystemStars::shown_at`'s leans), and no supernova released it.
+    Bound,
+}
+
+impl Hidden {
+    /// Its slot in [`Census`]'s `hidden_by`, for a released star.
+    const fn index(self) -> Option<usize> {
+        match self {
+            Self::Pair => Some(0),
+            Self::Outer => Some(1),
+            Self::Behind => Some(2),
+            Self::Bound => None,
+        }
+    }
+}
+
+/// The state of star `k` of `stars` at `age`: its pair's where the engine ran it, and otherwise
+/// its own model's.
+fn star_state(stars: &SystemStars, k: u8, age: Years) -> crate::stellar::StarState {
+    let paired = stars
+        .pairs()
+        .iter()
+        .find_map(|p| p.stars().iter().position(|s| s.get() == k).map(|c| (p, c)));
+    match paired {
+        Some((p, c)) => p.timeline().state_at(age).stars()[c],
+        None => stars.stars()[usize::from(k)]
+            .state_at(on_the_clock(age, stars.record().age_at_epoch()))
+            .expect("a star of a system is formed after its supernovae"),
+    }
+}
+
+/// What happened at one age of a system ([`Census::add_hidden`]): a supernova of one of its run
+/// pairs, or an outer orbit unbound.
+#[derive(Debug, Clone, Copy)]
+enum Cause<'a> {
+    Supernova(&'a PairTimeline, &'a SupernovaRecord),
+    Release(&'a OuterRelease),
+}
+
+/// How `stars` stops showing star `k` at the supernovae and releases `causes` of one age, and its
+/// speed then in the frame of its pair's or orbit's barycentre before, where that is known.
+fn hidden_by<'a>(
+    stars: &SystemStars,
+    k: u8,
+    causes: impl Iterator<Item = Cause<'a>> + Clone,
+) -> (Hidden, Option<SystemVelocity>) {
+    for cause in causes.clone() {
+        let Cause::Supernova(p, sn) = cause else {
+            continue;
+        };
+        let Some(c) = p.stars().iter().position(|s| s.get() == k) else {
+            continue;
+        };
+        if disrupting_supernova(p.timeline()).is_some_and(|d| std::ptr::eq(d, sn))
+            && sn.component().index() != c
+        {
+            return (Hidden::Pair, Some(sn.velocities()[c]));
+        }
+    }
+    let hierarchy = stars.hierarchy();
+    for cause in causes.clone() {
+        let Cause::Release(r) = cause else {
+            continue;
+        };
+        if stars.released_by(r) & (1_u32 << k) == 0 {
+            continue;
+        }
+        let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(r.node()) else {
+            unreachable!("a released orbit is a pair's");
+        };
+        for (member, node) in [inner, outer].into_iter().enumerate() {
+            if stars_under(hierarchy, node) & (1_u32 << k) != 0 {
+                return (Hidden::Outer, Some(r.velocities()[member]));
+            }
+        }
+    }
+    // The primary's own pair disrupted now leaves its outer stars behind.
+    let primary_pair = causes.into_iter().any(|cause| {
+        matches!(cause, Cause::Supernova(p, sn)
+            if p.stars().contains(&StarIndex::PRIMARY)
+                && disrupting_supernova(p.timeline()).is_some_and(|d| std::ptr::eq(d, sn)))
+    });
+    if primary_pair {
+        (Hidden::Behind, None)
+    } else {
+        (Hidden::Bound, None)
+    }
+}
+
+/// The clock time at which a system `age_at_epoch` old at the epoch is `age` old.
+fn on_the_clock(age: Years, age_at_epoch: Years) -> UniverseTime {
+    clock_time_of_death(age_at_epoch, age).expect("a sampled system's ages are on the clock")
 }
 
 /// The census of `records` in `galaxy`, in [`SHARES`] fixed shares.
@@ -481,7 +691,10 @@ fn runaway_model_rates(galaxy: &Galaxy) -> [f64; 3] {
 }
 
 /// No system shows a star a supernova released, under every 27 hold, over both samples; under
-/// P11.T10's held arm every one of them does (step 1's count).
+/// P11.T10's held arm every one of them does (step 1's count). As measured (2026-11-01, with
+/// P11.T10's fix) a supernova has unbound a pair or an outer orbit of 5,482 of the massive systems
+/// by the epoch (2,684 the primary's pair, 2,819 an outer orbit) and of 2,553 of layer E's (716
+/// and 1,819).
 #[test]
 #[ignore = "slow: 2 × 10⁴ massive systems, their pairs run through the engine, under both arms"]
 fn binary_kick_no_system_shows_a_released_star_under_every_27_hold() {
@@ -493,9 +706,9 @@ fn binary_kick_no_system_shows_a_released_star_under_every_27_hold() {
         let alone = census_of(galaxy(), &records);
         let shown = census_of(&held, &records);
         println!(
-            "{name}: {} systems a supernova has unbound by the epoch ({} the primary's pair); \
-             showing a released star: {} under the held arm, {} under every 27 hold",
-            alone.unbound, alone.primary_pairs, shown.showing, alone.showing
+            "{name}: {} systems a supernova has unbound by the epoch ({} the primary's pair, {} an \
+             outer orbit); showing a released star: {} under the held arm, {} under every 27 hold",
+            alone.unbound, alone.primary_pairs, alone.outer_orbits, shown.showing, alone.showing
         );
         assert_eq!(alone.showing, 0, "{name}");
         assert_eq!(shown.unbound, alone.unbound, "{name}");
@@ -511,9 +724,10 @@ fn binary_kick_no_system_shows_a_released_star_under_every_27_hold() {
 /// `stripped_share`, the share the stripped mark is drawn at (design note 1), and the marks set
 /// against it by a two-sided z-test at α = 10⁻³.
 ///
-/// The plan asks for 0.02. As measured (2026-11-01) the engine strips 0.428 against a mean share
-/// of 0.452 (marks set 0.459): it strips 77% of the marked primaries and 14% of the unmarked, a
-/// miss by 0.024 logged as a finding and pinned here at 0.035.
+/// The plan asks for 0.02. As measured (2026-11-01, with P11.T10's fix) the engine strips 0.442
+/// against a mean share of 0.452 (marks set 0.459); before the fix ran the pairs the pre-test
+/// passes over for their collapses, 0.428, a miss by 0.024. A primary its own winds strip is
+/// counted, since its supernova record is now written.
 #[test]
 #[ignore = "slow: 10⁴ massive systems, their pairs run through the engine"]
 fn binary_kick_the_stripped_share_is_stripped_share() {
@@ -561,33 +775,55 @@ fn binary_kick_most_double_neutron_stars_are_nearly_circular() {
     assert!(circular > 0.5, "{circular}");
 }
 
-/// The living companions of 2.5 M☉ and up a supernova releases, per massive system, against
-/// `RunawayModel`'s supernova-released share, and most of them under 30 km/s.
+/// The living stars of 2.5 M☉ and up a supernova hides per massive system against
+/// `RunawayModel`'s supernova-released share, the closure of the two, and most of them under
+/// 30 km/s.
 ///
-/// The plan asks for 25%. As measured (2026-11-01, before P11.T4.l's passed-over collapses) the
-/// engine releases 0.135 per massive system (0.080, 0.019 and 0.036 of 15 M☉ and up, 8–15 and
-/// 2.5–8 M☉) against the model's 0.677 (0.158, 0.201 and 0.317): ratios of 0.50, 0.09 and 0.12,
-/// 0.20 in all. The model's walkaway scale W = 0.34 is solved to Renzo et al.'s (2019, A&A 624,
-/// A66, §4 and table 1) present-day 10% of stars above 15 M☉, the only range they measure, and
-/// ruling 128.3's ramp carries it below; the tenth of runaways a supernova releases is ruling
-/// 128.2's (the plan's "half", as §7 amends it). The miss ruling p11-supernova-pins §7 foresaw
-/// (its F11), logged as a finding and pinned here at 0.1–0.4.
+/// Under every 27 hold a system stops showing the stars a supernova releases (P11.T10's
+/// `binary_kicks`), and plan 08 places walkaways and runaways in their stead, so the two rates
+/// must agree or the galaxy gains or loses those stars. A star is counted once, at the supernova
+/// after which the system no longer shows it, if it is living then: the companion a pair's
+/// supernova unbinds, the member of an outer orbit the supernova of a pair below it unbinds, or
+/// that the primary's member, escaping such an orbit, unbinds above it (P11.T10's fix), and an
+/// outer star the primary's disrupted pair leaves behind (the lean of `SystemStars::shown_at`).
+/// Its speed is known for the first two, its own in the frame of the barycentre before. A star the
+/// system stops showing though still bound (`shown_at`'s lean for a part it cannot show) is not
+/// counted.
+///
+/// The plan asks for 25%. As measured (2026-11-01, with P11.T10's fix) the engine releases 0.592
+/// per massive system against the model's 0.677, a ratio of 0.875: 0.176 by pairs, 0.275 by outer
+/// orbits and 0.142 left behind (0.002 hidden though bound); by band of mass at the collapse
+/// 0.119, 0.114 and 0.359 of 15 M☉ and up, 8–15 and 2.5–8 M☉, and by initial mass 0.064, 0.135
+/// and 0.393 against the model's 0.158, 0.201 and 0.317, ratios of 0.41, 0.67 and 1.24
+/// (accretion moves the released stars upward; the model is banded by initial mass). 0.847 of the
+/// 4,507 timed are under 30 km/s. Before the fix, the pairs the pre-test passed over kept their
+/// collapsed stars and no outer orbit took a supernova: 0.265, a ratio of 0.39 (0.135 the pairs'
+/// companions alone). The model's walkaway scale W = 0.34 is solved to Renzo et al.'s (2019, A&A
+/// 624, A66, §4 and table 1) present-day 10% of stars above 15 M☉, and ruling 128.3's ramp
+/// carries it below; the tenth of runaways a supernova releases is ruling 128.2's (the plan's
+/// "half", as §7 amends it). The total closes, so W stays; the band above 15 M☉ is a finding.
 #[test]
 #[ignore = "slow: 10⁴ massive systems, their pairs run through the engine"]
 fn binary_kick_released_companions_against_plan_08_s_supernova_release() {
     let c = massive_census();
     let model = runaway_model_rates(galaxy());
-    let per_system = c.released.map(|n| share(n, c.systems));
-    let (engine, expected): (f64, f64) = (per_system.iter().sum(), model.iter().sum());
-    let all: u64 = c.released.iter().sum();
-    let slow = share(c.released_slow, all);
+    let per = |counts: [u64; 3]| counts.map(|n| share(n, c.systems));
+    let (at_collapse, initial) = (per(c.hidden), per(c.hidden_initial));
+    let (engine, expected): (f64, f64) = (at_collapse.iter().sum(), model.iter().sum());
+    let slow = share(c.hidden_slow, c.hidden_timed);
     println!(
-        "released companions per massive system, 15+ / 8-15 / 2.5-8 M_sun: engine {per_system:.4?} \
-         ({engine:.4}), RunawayModel {model:.4?} ({expected:.4}), ratios {:.3?} ({:.3}); {slow:.3} \
-         under 30 km/s; {} lighter",
-        [0_usize, 1, 2].map(|k| per_system[k] / model[k]),
+        "stars a supernova hides per massive system, 15+ / 8-15 / 2.5-8 M_sun: by mass at the \
+         collapse {at_collapse:.4?}, by initial mass {initial:.4?} ({engine:.4}); RunawayModel \
+         {model:.4?} ({expected:.4}), ratio {:.3}, by initial mass {:.3?}; by pair / outer orbit / \
+         left behind {:.4?}; {slow:.3} of {} timed under 30 km/s; {} lighter; {:.4} hidden though \
+         bound; the pairs' released companions alone {:.4?}",
         engine / expected,
-        c.released_light
+        [0_usize, 1, 2].map(|k| initial[k] / model[k]),
+        per(c.hidden_by),
+        c.hidden_timed,
+        c.hidden_light,
+        share(c.hidden_bound, c.systems),
+        per(c.released),
     );
     assert!(slow > 0.5, "{slow}");
     let ratio = engine / expected;
@@ -623,15 +859,17 @@ fn binary_kick_most_black_holes_are_unkicked() {
 
 /// Design note 16: over layer E's 10⁴ systems the system's `death_time` and `natal_kick` are plan
 /// 06's alone, the primary's single star's (`MultiplicityContext::ForcedSingle`), bit for bit, and
-/// the collapse the engine records of a pinned primary in a pair is at that star's death age, with
-/// its remnant and kick.
+/// a pinned primary in a pair, dead by the age the pair was run to, has the engine's record of its
+/// collapse at that star's death age, with its remnant and kick; one with no record is a miss.
 ///
-/// As measured (2026-11-01) 9 of 5,134 pinned primaries are not: electron-capture primaries of
-/// about 8 M☉, pinned at 37.7–42.5 Myr, whose pair strips them (a common envelope, then stable
-/// transfer) and which do not collapse at the pin; the pair merges later and its product collapses
-/// at 45–176 Myr (system `0x81f7_b160_0000_0018` of the sample: pinned at 42.02 Myr, its merger's
-/// neutron star at 63.33 Myr). An engine fault of P11.T4's pin, logged as a finding and pinned
-/// here at that count.
+/// As measured (2026-11-01, with P11.T10's fix, which records the 237 collapses of pairs the
+/// pre-test passed over) 63 of 5,421 pinned primaries are not. Each is a primary of 8.0–9.5 M☉,
+/// pinned at 29–42.5 Myr, that its pair makes a white dwarf before its pin, by a common envelope
+/// and case-BB transfer or by a merger: 55 then have no collapse at all, and 8 collapse later
+/// from the pair's merger or an accretion-induced collapse, at 45–128 Myr (system
+/// `0x81f7_b160_0000_0018` of the sample: pinned at 42.02 Myr, its merger's neutron star at
+/// 63.33 Myr). An engine fault of P11.T4's pin (`fix-p11-t4-pin-white-dwarfs`), logged as a
+/// finding and pinned here at that count.
 #[test]
 #[ignore = "slow: 10⁴ systems of layer E, their pairs run through the engine"]
 fn binary_kick_massive_primaries_die_as_plan_06_says() {
@@ -651,31 +889,35 @@ fn binary_kick_massive_primaries_die_as_plan_06_says() {
             else {
                 continue;
             };
-            let Some(sn) = pair
-                .timeline()
-                .supernovae()
-                .iter()
-                .find(|s| s.component() == Component::Primary)
-            else {
+            let model = stars.primary();
+            let Some(death) = model.death() else {
                 continue;
             };
-            let model = stars.primary();
-            let death = model.death().expect("a primary that collapses dies");
             // Design note 16 pins a primary of m_cc(Z) − 1 M☉ and up whose own death is a
             // collapse; a lighter one dies as its binary has made it.
+            let at = death.age().value();
             if model.initial_mass() < stripped_mark_min_mass(model.composition())
                 || !death.kind().is_sudden()
+                || at > pair.timeline().until().value()
             {
                 continue;
             }
-            let at = death.age().value();
             collapses += 1;
             let remnant = model.remnant().expect("a remnant");
-            let pinned = (sn.age().value() - at).abs() <= clock_resolution_years(at)
-                && sn.kick() == model.natal_kick()
-                && sn.remnant().kind() == remnant.kind();
+            // A pinned primary dead by the age its pair was run to with no supernova record is a
+            // miss too.
+            let sn = pair
+                .timeline()
+                .supernovae()
+                .iter()
+                .find(|s| s.component() == Component::Primary);
+            let pinned = sn.is_some_and(|sn| {
+                (sn.age().value() - at).abs() <= clock_resolution_years(at)
+                    && sn.kick() == model.natal_kick()
+                    && sn.remnant().kind() == remnant.kind()
+            });
             if !pinned {
-                missed.push((record.id(), at, sn.age().value()));
+                missed.push((record.id(), at, sn.map(|sn| sn.age().value())));
             }
         }
         (collapses, missed)

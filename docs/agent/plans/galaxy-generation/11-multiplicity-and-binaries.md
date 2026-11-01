@@ -7380,3 +7380,32 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     (the grid redraws other systems).
   - _Acceptance:_ `cargo test -p hyperion-sim xrb_class_hold` and `every_x_ray_binary_member`;
     slow, `no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind`.
+- **P11.T10's fix: every collapse acts on the orbits it unbinds, held at 27** (lane
+  `fix-p11-t10-released`, 2026-11-01; nothing moves at 24–26).
+  - _The hold._ `COLLAPSES_VERSION` = 27 (`stellar/binary/collapses.rs`), `StellarRules::collapses`
+    (`CollapseRules::{Gated, Applied}`), read by `run_pair`'s pre-test and `system::outer_releases`;
+    the brief's gate adds `CollapseRules::fitted_tables_hold`. Tests: `rules/collapses_hold.rs`.
+  - _The gate._ A pair the pre-test passes over runs through the engine if a star of it dies
+    suddenly by its age (`evolve::first_sudden_death`, the pin's age for a pinned primary); a white
+    dwarf's birth runs none. Lean (2026-11-01): its pre-collapse orbit is the engine's,
+    wind-widened, so it depends on the age asked (P11.T4.l's closed form, not on this tree, keeps
+    the drawn one); the build-age suite passes under the arm.
+  - _The outer orbits._ `OuterRelease` (`SystemStars::releases`): each run pair's supernova acts
+    on its parent's orbit by A1, the pair a point mass, and up while bound; the primary's member of
+    an unbound orbit goes on as a point mass at its velocity, which may unbind the orbit above.
+    `shown_at` shows the largest drawn part on the primary's chain that is all held: new
+    `Shown::Part { node, stars }`, `SystemHierarchy::part`, `NodeIndex::in_part`. Leans
+    (2026-11-01): Jeans-mode widening of the drawn state; a bound outer orbit keeps its drawn
+    elements; a star still bound beyond a gap in the shown bodies is left out (0.002 per massive
+    system); a star in no run pair collapses without touching its orbit.
+  - _The closure._ The agreement test counts every star a supernova releases and the system hides
+    (pair, outer orbit, left behind by the primary's pair): 0.875 of `RunawayModel`'s rate, inside
+    the plan's 25%, so W stays.
+  - _Not on this tree._ P11.T4.l and `fix-p11-t4-pin-white-dwarfs`: `PIN_MISSES` is 63, 55 of them
+    white dwarfs at their pin, now counted.
+  - _For the bump to 27._ Movers (the arm forced on at 24): the golden `stellar/binary_timelines`;
+    `light::tests::a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` (to restate);
+    `binary_kicks_hold::a_quadruple_whose_outer_pair_is_unbound_shows_its_inner_pair` (its primary's
+    pair now records its collapse); the hold's own tests. The bump refits the pair-light and reach
+    tables, and adds a golden of the releases under both arms (`collapses_hold`'s pinned systems:
+    each release's node, age and velocities, and the shown hierarchy): no golden reads them yet.
