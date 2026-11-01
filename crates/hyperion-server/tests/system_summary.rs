@@ -728,9 +728,9 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included(server: &TestS
             assert_eq!(answer.existence, SystemExistenceDto::Exists);
             assert_eq!(answer.stars.len(), usize::from(stars.star_count()));
             assert_summary_is_the_sims(&answer, &stars, sim_time(answer.time));
-            // Nothing this generator version does not compute is sent as a value.
+            // From version 26 every star's running events are computed and sent (P06.T28.g).
             for star in &answer.stars {
-                assert!(star.active_events.is_none());
+                assert!(star.active_events.is_some());
             }
         }
         shapes.push(stars.star_count());
