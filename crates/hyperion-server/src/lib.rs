@@ -48,7 +48,6 @@ use crate::compute::{
     SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService,
     StartPoolError, TubeTableCache,
 };
-use crate::config::DEFAULT_CLASS_CELL_CACHE_MIB;
 use crate::connections::Connections;
 use crate::limits::{
     BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, GLOBAL_LIST_CACHE_BYTES,
@@ -131,7 +130,7 @@ pub(crate) struct AppState {
     /// Shared with [`AppState::systems`] and [`AppState::briefs`], which resolve a feature's
     /// members through it.
     pub(crate) cluster_models: Arc<SharedClusterModelCache>,
-    /// Plan 09's catalogue class cells made so far, in [`DEFAULT_CLASS_CELL_CACHE_MIB`]: what the
+    /// Plan 09's catalogue class cells made so far, in the configured byte budget: what the
     /// range query's class hosts are read from, from generator version 27 (P09.T40).
     pub(crate) class_cells: Arc<SharedClassCellCache>,
     /// The galaxy map's globulars of every galaxy asked for, found once each in a bulk job and kept
@@ -414,7 +413,7 @@ fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, 
 }
 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
-/// its catalogue class cells, in [`DEFAULT_CLASS_CELL_CACHE_MIB`] (P09.T40), the galaxy map's
+/// its catalogue class cells (P09.T40), the galaxy map's
 /// feature lists (P09.T40.b), and plan 10's global lists (P10.T10.a) with their streams' tube tables
 /// (P10.T10.b), each list and table found on `pool` from the galaxies of `galaxies`.
 #[must_use]
@@ -434,9 +433,7 @@ fn feature_caches(
         Arc::new(SharedClusterModelCache::new(
             config.cluster_model_cache_bytes(),
         )),
-        Arc::new(SharedClassCellCache::new(
-            DEFAULT_CLASS_CELL_CACHE_MIB * (1 << 20),
-        )),
+        Arc::new(SharedClassCellCache::new(config.class_cell_cache_bytes())),
         GalaxyFeaturesService::new(
             Arc::clone(&pool),
             Arc::clone(&galaxies),
@@ -475,7 +472,7 @@ fn log_start(config: &ServerConfig) {
         alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
         feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
         cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
-        class_cell_cache_mib = DEFAULT_CLASS_CELL_CACHE_MIB,
+        class_cell_cache_mib = config.class_cell_cache_bytes() / (1 << 20),
         feature_members = ?config.feature_members(),
         "server started"
     );
@@ -653,6 +650,7 @@ mod tests {
             (fresh.sightlines(), defaults.sightline_cache_bytes()),
             (fresh.feature_cells(), defaults.feature_cache_bytes()),
             (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
+            (fresh.class_cells(), defaults.class_cell_cache_bytes()),
             (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
             (fresh.global_lists(), GLOBAL_LIST_CACHE_BYTES),
             (fresh.tube_tables(), TUBE_TABLE_CACHE_BYTES),

@@ -34,6 +34,7 @@ pub struct ServerStats {
     sightlines: LruCounters,
     feature_cells: LruCounters,
     cluster_models: LruCounters,
+    class_cells: LruCounters,
     galaxy_features: LruCounters,
     global_lists: LruCounters,
     tube_tables: LruCounters,
@@ -61,6 +62,7 @@ impl ServerStats {
             sightlines: state.sightlines.counters(),
             feature_cells: state.feature_cells.counters(),
             cluster_models: state.cluster_models.counters(),
+            class_cells: state.class_cells.counters(),
             galaxy_features: state.galaxy_features.counters(),
             global_lists: state.global_lists.counters(),
             tube_tables: state.global_lists.tube_counters(),
@@ -184,6 +186,13 @@ impl ServerStats {
     #[must_use]
     pub fn cluster_models(&self) -> LruCounters {
         self.cluster_models
+    }
+
+    /// The catalogue class cell cache's contents and use, including its byte budget: a class cell is
+    /// made once and read by every range query within its class's reach (plan 09, P09.T40).
+    #[must_use]
+    pub fn class_cells(&self) -> LruCounters {
+        self.class_cells
     }
 
     /// The galaxy map's feature lists' contents and use, including their byte budget: a galaxy's
