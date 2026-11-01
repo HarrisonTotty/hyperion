@@ -2334,3 +2334,17 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Not met._ The one to two CPU-minutes: the warm-up still costs some 8 CPU-minutes, all of it
     the spray's step, 98.7 % of it the orphans' (a finding). Held at 27 if wanted: ruling 146.3's `τ_p ÷ 32` and
     500 tracers an arm, each about halving it.
+- **P10.T10.b's orphan spray, held at 27 (lane `perf-stream-warmup`, 2026-11-01, at
+  `GENERATOR_VERSION` 24).** Through 26 nothing moved: the 24 warm-up digest and range answers
+  still pass. From 27 an orphan's spray releases 500 tracers an arm at ruling 146.3's `τ_p ÷ 32`.
+  - _Items._ `spray::ORPHAN_TRACERS_PER_ARM`, `spray::ORPHAN_STEPS_PER_CROSSING`,
+    `ORPHAN_SPRAY_VERSION` (27), `OrphanSprayRules`, `GalaxyRules::orphan_spray`;
+    `SprayParams::with_steps_per_crossing`, `steps_per_crossing` and `of_stream`;
+    `FixedStep::with_steps_per_crossing`, `SphericalOrbit::fixed_step_at`. The generator's spray is
+    `SprayParams::of_stream` (`spray`, `TubeTable::build`, the server's pool); `SprayParams::default`
+    stays the exact one, which hyperion-fit's streams fit keeps (lean, 2026-11-01).
+  - _For the bump._ No golden file moves (checked with the hold at 24). Re-pin by name the server's
+    24 warm-up test and P10.T12's `a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures`
+    (the globular tubes' median length falls 6.1 %); the tripwire lists both.
+  - _Not met._ About 1–2 CPU-minutes: the warm-up at 27 costs some 200 CPU-s, since 27's fitted k
+    gives the fixture 355 orphans against 256 (a finding).

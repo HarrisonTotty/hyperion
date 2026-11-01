@@ -278,10 +278,13 @@ fn the_orphan_spray_is_held_only_until_the_27_bump() {
         crate::GENERATOR_VERSION < ORPHAN_SPRAY_VERSION,
         "the 26 → 27 bump sprays every orphan's tube from 500 tracers an arm at ruling 146.3's \
          τ_p ÷ 32 (P10.T10.b's warm-up): every orphan's tube table, its members and the range \
-         query's answers in it move. Delete `ORPHAN_SPRAY_VERSION`, `OrphanSprayRules` with its \
-         `Exact` arm, `GalaxyRules::orphan_spray` and this test in the bump's own commit, and \
-         re-pin by name what plan 10's records list for it (\"P10.T10.b's orphan spray, held \
-         at 27\"): the server's warm-up digest and range answers, and P10.T12's figures"
+         query's answers in it move, but no golden file (checked with the hold at 24). Delete \
+         `ORPHAN_SPRAY_VERSION`, `OrphanSprayRules` with its `Exact` arm, \
+         `GalaxyRules::orphan_spray` and this test in the bump's own commit, and re-pin by name \
+         the server's slow warm-up test (`the_warm_up_readies_every_track_and_a_range_query_\
+         finds_a_stream_s_members`: its tables' digest and range answers) and P10.T12's \
+         `a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures` (the globular tubes' \
+         median length falls 6.1 %)"
     );
     assert_eq!(
         crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_spray,

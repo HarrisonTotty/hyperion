@@ -16,8 +16,17 @@
 //! and 0.4 s of reductions in all; on eight workers 62.1–62.8 s and 485–486 CPU-s when each share
 //! made its own plan, and 62.0–64.2 s and 477–485 CPU-s with one plan a table. The warm-up's own
 //! schedule, several tables in flight, is timed by the slow test.
+//!
+//! `STREAM_WARMUP=27` compares instead every orphan's tube under generator version 27's rules
+//! (P10.T10.b's orphan spray, held at 27) sprayed four ways: exactly, at `τ_p ÷ 32`, from 500
+//! tracers an arm, and both, the 27 arm's. Measured on the fixture's 355 orphans at 27 (pod, 16
+//! vCPU, 2026-11-01): the sprays cost 860, 440, 421 and 216 s; against the exact tube, the step
+//! alone moves the centre line 0.07 of a width (median) and the widths and dispersions under
+//! 0.1 %, while the tracers halved move it 0.31 of a width and the widths by +2.7 %, the
+//! dispersions by +7.7 % and the lengths by −6 %; with both, the worst tracer's energy drift is
+//! 5.0 × 10⁻⁴, against 9.8 × 10⁻⁵ exactly.
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
@@ -33,7 +42,6 @@ use hyperion_sim::galaxy::global_list::{GlobalList, MassLoss, StreamSpec, TubeTa
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::{Galaxy, Population};
-use hyperion_sim::id::SystemId;
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, MetresPerSecond};
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
@@ -245,26 +253,45 @@ fn on_the_pool(galaxy: Galaxy, streams: &[StreamSpec], workers: NonZeroUsize) {
         .expect("the pool shuts down");
 }
 
-/// What one orphan's tube moves from the exact spray to the coarse one (P10.T10.b's orphan spray,
-/// held at 27), along its exact tube.
-#[derive(Debug, Clone, Default)]
-struct Moved {
-    number: u16,
-    /// The spray's CPU time, s: exact, coarse.
-    spray_s: [f64; 2],
-    /// The centre line's offset over the exact width, `√(w_n w_b)`: median and greatest over u.
-    offset: [f64; 2],
-    /// The widths' and the dispersions' ratios, coarse over exact, their medians over u.
+/// The sprays an orphan's tube is compared under at 27: the exact one, then the step halved
+/// alone, the tracers halved alone, and both, the 27 arm's.
+const VARIANTS: [(&str, u32, u32); 4] = [
+    ("exact", 1_000, 64),
+    ("step", 1_000, 32),
+    ("tracers", 500, 64),
+    ("both", 500, 32),
+];
+
+/// How one variant's tube of an orphan lies against the exact one's.
+#[derive(Debug, Clone, Copy, Default)]
+struct Against {
+    /// The centre line's distance from the exact centre line, over the exact width `√(w_n w_b)`
+    /// at the nearest point: the median and the greatest over the tube.
+    across: [f64; 2],
+    /// How far along the exact tube the nearest point lies from the same share of the mass: the
+    /// median of `|Δu|`.
+    along: f64,
+    /// The widths' and the dispersions' ratios at the nearest points, their medians.
     width_ratio: f64,
     dispersion_ratio: f64,
     /// The tubes' lengths' ratio.
     length_ratio: f64,
-    /// The worst energy drift from release to the epoch over the tracers: exact, coarse.
-    drift: [f64; 2],
-    /// Members near nine points of the exact tube: exact's, coarse's, shared by ID, and the shared
-    /// ones' median displacement over the exact width there.
-    members: [usize; 3],
-    member_shift: f64,
+    /// The members within two exact widths of nine points of the exact centre line, over the
+    /// exact tube's.
+    members_ratio: f64,
+}
+
+/// What one orphan's tube moves from the exact spray to the others (P10.T10.b's orphan spray, held
+/// at 27).
+#[derive(Debug, Clone, Default)]
+struct Moved {
+    number: u16,
+    /// Each variant's spray, CPU-s on its thread, and its tracers' worst energy drift from release
+    /// to the epoch.
+    spray_s: [f64; 4],
+    drift: [f64; 4],
+    /// The step's, the tracers' and both against the exact tube.
+    against: [Against; 3],
 }
 
 /// Every tracer's energy drift from its release to the epoch, the worst, in `spray`'s potential:
@@ -289,43 +316,123 @@ fn ly(a: &GalacticPosition, b: &GalacticPosition) -> f64 {
     a.distance_to(b).value() / METRES_PER_LIGHT_YEAR
 }
 
-/// The median of `values`, which it sorts.
+/// The median of `values`, which it sorts, NaNs last.
 fn median(values: &mut [f64]) -> f64 {
     values.sort_by(f64::total_cmp);
     values.get(values.len() / 2).copied().unwrap_or(f64::NAN)
 }
 
-/// The members of `tube` in the cells about `centre` within `radius`, by ID with their places.
+/// The members of `tube` in the cells about `centre` within `radius` ly, counted.
 fn members_near(
     galaxy: &Galaxy,
     (tube, shares): (&TubeTable, &StreamBandShares),
     centre: &GalacticPosition,
     radius: f64,
-) -> Vec<(SystemId, GalacticPosition)> {
-    let mut found = Vec::new();
+) -> usize {
+    let mut found = 0;
     let mut cell_members = Vec::new();
     for cell in tube.cells_touching(centre, LightYears::new(radius)) {
         for band in MassBand::ALL {
             stream_cell_members(galaxy, tube, shares, cell, band, &mut cell_members);
-            found.extend(
-                cell_members
-                    .iter()
-                    .map(|m| (m.record().id(), *m.record().epoch_position()))
-                    .filter(|(_, at)| ly(at, centre) <= radius),
-            );
+            found += cell_members
+                .iter()
+                .filter(|m| ly(m.record().epoch_position(), centre) <= radius)
+                .count();
         }
     }
     found
 }
 
-/// `spec`'s tube in `galaxy` at the exact spray and at its rules' coarse one, compared.
+/// The width `√(w_n w_b)` of `tube` at `u`, ly.
+fn width(tube: &TubeTable, u: f64) -> f64 {
+    let c = tube.locate(u, 0.0, 0.0);
+    (ly(&c, &tube.locate(u, 1.0, 0.0)) * ly(&c, &tube.locate(u, 0.0, 1.0))).sqrt()
+}
+
+/// The rms of `tube`'s three velocity dispersions at `u`, m/s.
+fn dispersion(tube: &TubeTable, u: f64) -> f64 {
+    let d = tube.dispersions_at(u).map(MetresPerSecond::value);
+    ((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / 3.0).sqrt()
+}
+
+/// The nearest point of the polyline `line` (each vertex's share of the mass and place, in ly
+/// from the first) to `point`: its share and its distance, ly.
+fn nearest(line: &[(f64, [f64; 3])], point: [f64; 3]) -> (f64, f64) {
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    line.windows(2)
+        .fold((f64::NAN, f64::INFINITY), |best, pair| {
+            let [(u0, p0), (u1, p1)] = [pair[0], pair[1]];
+            let d = sub(p1, p0);
+            let t = (dot(sub(point, p0), d) / dot(d, d).max(f64::MIN_POSITIVE)).clamp(0.0, 1.0);
+            let on = [p0[0] + t * d[0], p0[1] + t * d[1], p0[2] + t * d[2]];
+            let gap = dot(sub(point, on), sub(point, on)).sqrt();
+            if gap < best.1 {
+                (u0 + t * (u1 - u0), gap)
+            } else {
+                best
+            }
+        })
+}
+
+/// `other` against `exact`, two tubes of `spec`'s stream in `galaxy`.
+fn against(galaxy: &Galaxy, spec: &StreamSpec, exact: &TubeTable, other: &TubeTable) -> Against {
+    let origin = exact.locate(0.5, 0.0, 0.0);
+    let place = |t: &TubeTable, u: f64| {
+        let d = origin.displacement_to(&t.locate(u, 0.0, 0.0)).metres();
+        d.map(|c| c / METRES_PER_LIGHT_YEAR)
+    };
+    let line: Vec<(f64, [f64; 3])> = (0..=2_000)
+        .map(|i| {
+            let u = f64::from(i) / 2_000.0;
+            (u, place(exact, u))
+        })
+        .collect();
+    let (mut across, mut along, mut widths, mut dispersions) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for i in 0..200 {
+        let u = (f64::from(i) + 0.5) / 200.0;
+        let (at, gap) = nearest(&line, place(other, u));
+        across.push(gap / width(exact, at));
+        along.push((at - u).abs());
+        widths.push(width(other, u) / width(exact, at));
+        dispersions.push(dispersion(other, u) / dispersion(exact, at));
+    }
+    let greatest = across.iter().copied().fold(0.0, f64::max);
+    let shares = StreamBandShares::of(galaxy, spec);
+    let (mut of_exact, mut of_other) = (0, 0);
+    for k in 1..10 {
+        let u = f64::from(k) / 10.0;
+        let centre = exact.locate(u, 0.0, 0.0);
+        let radius = 2.0 * width(exact, u);
+        of_exact += members_near(galaxy, (exact, &shares), &centre, radius);
+        of_other += members_near(galaxy, (other, &shares), &centre, radius);
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "counts of members, far below 2^52"
+    )]
+    let members_ratio = of_other as f64 / of_exact.max(1) as f64;
+    Against {
+        across: [median(&mut across), greatest],
+        along: median(&mut along),
+        width_ratio: median(&mut widths),
+        dispersion_ratio: median(&mut dispersions),
+        length_ratio: other.length().value() / exact.length().value(),
+        members_ratio,
+    }
+}
+
+/// `spec`'s tube in `galaxy` under each of [`VARIANTS`], compared with the exact one.
 fn moved(galaxy: &Galaxy, force: &SprayForce, spec: &StreamSpec) -> Moved {
     let (seed, tables, mass) = (
         galaxy.seed(),
         galaxy.potential(),
         galaxy.mean_system_mass(Population::Halo),
     );
-    let sprayed = [SprayParams::default(), SprayParams::of_stream(galaxy, spec)].map(|params| {
+    let built = VARIANTS.map(|(_, per_arm, steps)| {
+        let params = SprayParams::new(NonZeroU32::new(per_arm).expect("not zero"))
+            .with_steps_per_crossing(NonZeroU32::new(steps).expect("not zero"));
         let started = Instant::now();
         let spray = Spray::new(seed, force, tables, spec, &params).expect("a finite span");
         let tracers = spray.tracers();
@@ -334,65 +441,23 @@ fn moved(galaxy: &Galaxy, force: &SprayForce, spec: &StreamSpec) -> Moved {
         let table = TubeTable::from_tracers(seed, mass, spec, &tracers).expect("its tube builds");
         (table, spray_s, drift)
     });
-    let [
-        (exact, exact_s, exact_drift),
-        (coarse, coarse_s, coarse_drift),
-    ] = sprayed;
-    let width = |t: &TubeTable, u: f64| {
-        let c = t.locate(u, 0.0, 0.0);
-        (ly(&c, &t.locate(u, 1.0, 0.0)) * ly(&c, &t.locate(u, 0.0, 1.0))).sqrt()
-    };
-    let rms = |t: &TubeTable, u: f64| {
-        let d = t.dispersions_at(u).map(MetresPerSecond::value);
-        ((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / 3.0).sqrt()
-    };
-    let samples: Vec<f64> = (0..400).map(|i| (f64::from(i) + 0.5) / 400.0).collect();
-    let mut offsets: Vec<f64> = samples
-        .iter()
-        .map(|&u| ly(&exact.locate(u, 0.0, 0.0), &coarse.locate(u, 0.0, 0.0)) / width(&exact, u))
-        .collect();
-    let greatest = offsets.iter().copied().fold(0.0, f64::max);
-    let mut widths: Vec<f64> = samples
-        .iter()
-        .map(|&u| width(&coarse, u) / width(&exact, u))
-        .collect();
-    let mut dispersions: Vec<f64> = samples
-        .iter()
-        .map(|&u| rms(&coarse, u) / rms(&exact, u))
-        .collect();
-    let shares = StreamBandShares::of(galaxy, spec);
-    let mut members = [0; 3];
-    let mut shifts = Vec::new();
-    for k in 1..10 {
-        let u = f64::from(k) / 10.0;
-        let centre = exact.locate(u, 0.0, 0.0);
-        let radius = 2.0 * width(&exact, u);
-        let near = |t: &TubeTable| members_near(galaxy, (t, &shares), &centre, radius);
-        let (of_exact, of_coarse) = (near(&exact), near(&coarse));
-        members[0] += of_exact.len();
-        members[1] += of_coarse.len();
-        for (id, at) in &of_exact {
-            if let Some((_, there)) = of_coarse.iter().find(|(other, _)| other == id) {
-                members[2] += 1;
-                shifts.push(ly(at, there) / (radius / 2.0));
-            }
-        }
-    }
+    let both = SprayParams::of_stream(galaxy, spec);
+    assert_eq!(
+        (both.tracers_per_arm(), both.steps_per_crossing()),
+        (VARIANTS[3].1, VARIANTS[3].2),
+        "the 27 arm's spray"
+    );
+    let exact = &built[0].0;
     Moved {
         number: spec.number().get(),
-        spray_s: [exact_s, coarse_s],
-        offset: [median(&mut offsets), greatest],
-        width_ratio: median(&mut widths),
-        dispersion_ratio: median(&mut dispersions),
-        length_ratio: coarse.length().value() / exact.length().value(),
-        drift: [exact_drift, coarse_drift],
-        members,
-        member_shift: median(&mut shifts),
+        spray_s: core::array::from_fn(|k| built[k].1),
+        drift: core::array::from_fn(|k| built[k].2),
+        against: core::array::from_fn(|k| against(galaxy, spec, exact, &built[k + 1].0)),
     }
 }
 
-/// Every orphan's tube of the fixture under generator version 27's rules, at the exact spray and
-/// at the coarse, compared, the orphans spread over `threads` threads.
+/// Every orphan's tube of the fixture under generator version 27's rules, at each of
+/// [`VARIANTS`], compared with the exact one, the orphans spread over `threads` threads.
 fn at_27(threads: usize) {
     let galaxy = Galaxy::from_params_at_version(
         Seed::new(SEED),
@@ -433,75 +498,83 @@ fn at_27(threads: usize) {
     let mut done = done.into_inner().unwrap_or_else(PoisonError::into_inner);
     done.sort_by_key(|m| m.number);
     for m in &done {
+        let both = m.against[2];
         println!(
-            "orphan {:3}: spray {:.2} s / {:.2} s; offset {:.3} (median) {:.3} (greatest) widths; \
-             widths x{:.3}, dispersions x{:.3}, length x{:.3}; drift {:.1e} / {:.1e}; members \
-             {} / {}, {} shared, shifted {:.3} widths",
+            "orphan {:3}: sprays {:.2?} s; drift {:.1e} {:.1e} {:.1e} {:.1e}; both: across \
+             {:.3} / {:.3} widths, along {:.4}, widths x{:.3}, dispersions x{:.3}, length \
+             x{:.3}, members x{:.3}",
             m.number,
-            m.spray_s[0],
-            m.spray_s[1],
-            m.offset[0],
-            m.offset[1],
-            m.width_ratio,
-            m.dispersion_ratio,
-            m.length_ratio,
+            m.spray_s,
             m.drift[0],
             m.drift[1],
-            m.members[0],
-            m.members[1],
-            m.members[2],
-            m.member_shift
+            m.drift[2],
+            m.drift[3],
+            both.across[0],
+            both.across[1],
+            both.along,
+            both.width_ratio,
+            both.dispersion_ratio,
+            both.length_ratio,
+            both.members_ratio
         );
     }
     summarise(&done);
 }
 
-/// The orphans' tubes' figures at 27 against the exact spray: each one's median, 95th percentile
-/// and greatest.
-fn summarise(done: &[Moved]) {
-    let column = |f: fn(&Moved) -> f64| {
-        let mut v: Vec<f64> = done.iter().map(f).collect();
-        v.sort_by(f64::total_cmp);
-        let at = |q: f64| {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                clippy::cast_precision_loss,
-                reason = "a quantile's index among a few hundred values"
-            )]
-            let i = ((v.len() - 1) as f64 * q).round() as usize;
-            v[i]
-        };
-        format!("{:.3} / {:.3} / {:.3}", at(0.5), at(0.95), at(1.0))
+/// The median, 95th percentile and greatest of `values`, NaNs dropped.
+fn quantiles(mut values: Vec<f64>, scientific: bool) -> String {
+    values.retain(|v| !v.is_nan());
+    values.sort_by(f64::total_cmp);
+    let at = |q: f64| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a quantile's index among a few hundred values"
+        )]
+        let i = ((values.len().saturating_sub(1)) as f64 * q).round() as usize;
+        values.get(i).copied().unwrap_or(f64::NAN)
     };
-    let sum = |f: fn(&Moved) -> usize| done.iter().map(f).sum::<usize>();
-    println!("at 27, over the orphans, median / 95th percentile / greatest:");
-    println!(
-        "  centre offset, median over u: {} widths",
-        column(|m| m.offset[0])
-    );
-    println!(
-        "  centre offset, greatest over u: {} widths",
-        column(|m| m.offset[1])
-    );
-    println!("  widths' ratio: {}", column(|m| m.width_ratio));
-    println!("  dispersions' ratio: {}", column(|m| m.dispersion_ratio));
-    println!("  lengths' ratio: {}", column(|m| m.length_ratio));
-    println!("  energy drift, exact: {}", column(|m| m.drift[0]));
-    println!("  energy drift, coarse: {}", column(|m| m.drift[1]));
-    println!(
-        "  shared members' shift: {} widths",
-        column(|m| m.member_shift)
-    );
-    println!(
-        "  members near the sample points: {} exact, {} coarse, {} shared by ID; sprays {:.1} s \
-         exact, {:.1} s coarse",
-        sum(|m| m.members[0]),
-        sum(|m| m.members[1]),
-        sum(|m| m.members[2]),
-        done.iter().map(|m| m.spray_s[0]).sum::<f64>(),
-        done.iter().map(|m| m.spray_s[1]).sum::<f64>()
-    );
+    if scientific {
+        format!("{:.2e} / {:.2e} / {:.2e}", at(0.5), at(0.95), at(1.0))
+    } else {
+        format!("{:.3} / {:.3} / {:.3}", at(0.5), at(0.95), at(1.0))
+    }
+}
+
+/// The orphans' tubes' figures at 27 against the exact spray, for each variant: the median, 95th
+/// percentile and greatest over the orphans.
+fn summarise(done: &[Moved]) {
+    println!("at 27, over the orphans (median / 95th percentile / greatest):");
+    for (k, (name, per_arm, steps)) in VARIANTS.iter().enumerate() {
+        let spray: f64 = done.iter().map(|m| m.spray_s[k]).sum();
+        println!(
+            "  {name} ({per_arm} an arm, tau_p / {steps}): sprays {spray:.1} s; energy drift {}",
+            quantiles(done.iter().map(|m| m.drift[k]).collect(), true)
+        );
+    }
+    for (k, (name, _, _)) in VARIANTS.iter().enumerate().skip(1) {
+        let of = |f: fn(&Against) -> f64| {
+            quantiles(done.iter().map(|m| f(&m.against[k - 1])).collect(), false)
+        };
+        println!("  {name} against exact:");
+        println!(
+            "    across, median over the tube: {} widths",
+            of(|a| a.across[0])
+        );
+        println!(
+            "    across, greatest over the tube: {} widths",
+            of(|a| a.across[1])
+        );
+        println!("    along, median |du|: {}", of(|a| a.along));
+        println!("    widths' ratio: {}", of(|a| a.width_ratio));
+        println!("    dispersions' ratio: {}", of(|a| a.dispersion_ratio));
+        println!("    lengths' ratio: {}", of(|a| a.length_ratio));
+        println!(
+            "    members' ratio near the track: {}",
+            of(|a| a.members_ratio)
+        );
+    }
 }
 
 fn main() {

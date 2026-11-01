@@ -1358,8 +1358,9 @@ impl<'a> Spray<'a> {
 }
 
 /// The spray of `spec`'s stream in `galaxy`, at the generator's [`SprayParams`] under the galaxy's
-/// rules ([`SprayParams::of_stream`]): its tracers in index order (module documentation). It builds the galaxy's [`SprayForce`] each time; a caller
-/// spraying several streams keeps one and calls [`Spray::new`].
+/// rules ([`SprayParams::of_stream`]): its tracers in index order (module documentation). It builds
+/// the galaxy's [`SprayForce`] each time; a caller spraying several streams keeps one and calls
+/// [`Spray::new`].
 ///
 /// # Errors
 ///
