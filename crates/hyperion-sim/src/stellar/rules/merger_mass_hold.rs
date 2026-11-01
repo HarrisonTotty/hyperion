@@ -69,6 +69,17 @@ fn held() -> &'static Galaxy {
     })
 }
 
+/// The fixture built under every 26 hold: built so, since the field share and the carve-out are
+/// read when a galaxy is built.
+fn every_26() -> Galaxy {
+    Galaxy::from_params_with_rules(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_26_hold(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral")
+}
+
 /// The fixture under the version's rules with this hold's arm on alone.
 fn with_pairs() -> Galaxy {
     let galaxy_rules = GalaxyRules::of_version(GENERATOR_VERSION);
@@ -284,10 +295,47 @@ fn short_share(members: &[MergerMember]) -> (usize, usize) {
     (short, mergers.len())
 }
 
-/// Over the same 3,000 engine mergers P11.T8.c's sampler test draws, every main-sequence merger
-/// keeps the pair's mass under the arm alone (each member's own pair, run again), and under every
-/// 26 hold (the members drawn again under it), against 722 of 803 kept under 95% under the
-/// version's rules.
+/// The least the merged star keeps of the pair's mass, over the main-sequence mergers of the same
+/// grid records `drawn` run again in `galaxy`, and how many there were: each record's first
+/// attempt, every pair that merges with two main-sequence stars just before.
+fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize) {
+    let mut least = f64::INFINITY;
+    let mut n = 0;
+    for member in drawn {
+        for pair in first_attempt(galaxy, member.record()).pairs() {
+            let timeline = pair.timeline();
+            let Some(t) = timeline.merger_age() else {
+                continue;
+            };
+            let pre = timeline.state_at(Years::new(t.value() * (1.0 - 1e-9)));
+            if !pre.stars().iter().all(|s| s.phase() == Phase::MainSequence) {
+                continue;
+            }
+            let total: f64 = pre.stars().iter().map(|s| s.mass().value()).sum();
+            let product = timeline.state_at(t).stars()[0].mass().value();
+            least = least.min(product / total);
+            n += 1;
+        }
+    }
+    (least, n)
+}
+
+/// The most of the pair's mass a main-sequence merger may lose under the arm: 2 × 10⁻³ of it, the
+/// rule's own loss, which is none but the product's own main-sequence wind from its zero-age mass
+/// to the age the rule places it at (`Engine::main_sequence_star`; the merger's other routes, a
+/// contact that coalesces at the end of the main sequence or a collision, place it alike). As
+/// measured (2026-11-01) the least kept is 0.99893 of a 12.9 + 12.7 M☉ contact's 25.5 M☉
+/// ([`LEAST_KEPT_UNDER_THE_ARM`]).
+const MERGER_MASS_TOLERANCE: f64 = 2e-3;
+
+/// The least share of the pair's mass a main-sequence merger keeps over the 3,000 records, under
+/// the arm alone and under every 26 hold, as measured.
+const LEAST_KEPT_UNDER_THE_ARM: [f64; 2] = [0.998_929_750_656_249_7, 0.998_929_750_656_249_7];
+
+/// Over the same 3,000 grid records whose engine mergers P11.T8.c's sampler test draws, every
+/// main-sequence merger keeps the pair's mass less the rule's loss (none but the product's own
+/// wind, [`MERGER_MASS_TOLERANCE`]), under the arm alone and under every 26 hold, each record run
+/// again; against 719 of 803 under 99% under the version's rules.
 #[test]
 #[ignore = "slow: thousands of grid pairs run through the binary engine, three times"]
 fn every_main_sequence_merger_keeps_the_pair_s_mass_under_the_arm() {
@@ -295,41 +343,21 @@ fn every_main_sequence_merger_keeps_the_pair_s_mass_under_the_arm() {
     let (short, all) = short_share(&drawn);
     println!("version's rules: {short} of {all} main-sequence mergers under 99% of the pair");
     assert!(short > all / 2, "{short} of {all}");
-    let arm = with_pairs();
-    let mut kept = 0;
-    for member in &drawn {
-        let stars = first_attempt(&arm, member.record());
-        let pair = stars
-            .pairs()
-            .iter()
-            .find(|p| p.timeline().merger_age() == Some(member.merger_age()))
-            .expect("the member's pair merges at the same age under the arm");
-        let rerun = pair.timeline();
-        let t = member.merger_age().value();
-        let pre = rerun.state_at(Years::new(t * (1.0 - 1e-9)));
-        assert_eq!(
-            pre,
-            member.timeline().state_at(Years::new(t * (1.0 - 1e-9)))
-        );
-        if !pre.stars().iter().all(|s| s.phase() == Phase::MainSequence) {
-            continue;
-        }
-        let total: f64 = pre.stars().iter().map(|s| s.mass().value()).sum();
-        let product = rerun.state_at(member.merger_age()).stars()[0]
-            .mass()
-            .value();
-        assert!(
-            product >= 0.99 * total,
-            "{:?}: {product} of {total}",
-            member.record().id()
-        );
-        kept += 1;
+    let every_26 = every_26();
+    let mut measured = [0.0; 2];
+    for (k, (name, galaxy)) in [("the arm alone", with_pairs()), ("every 26 hold", every_26)]
+        .iter()
+        .enumerate()
+    {
+        let (least, n) = least_kept(galaxy, &drawn);
+        println!("{name}: {n} main-sequence mergers, the least keeps {least:e} of the pair");
+        assert!(n > 700, "{name}: {n}");
+        assert!(least >= 1.0 - MERGER_MASS_TOLERANCE, "{name}: {least}");
+        measured[k] = least;
     }
-    assert_eq!(kept, all);
-    let every_26 = held().clone().with_rules(GalaxyRules::every_26_hold());
-    let (short, all) = short_share(&members(&every_26, 3_000));
-    println!("every 26 hold: {short} of {all} main-sequence mergers under 99% of the pair");
-    assert_eq!(short, 0);
+    for (m, pinned) in measured.iter().zip(LEAST_KEPT_UNDER_THE_ARM) {
+        assert!((m - pinned).abs() < 1e-12, "{measured:?}");
+    }
 }
 
 /// The stellar merger class's sampler against the engine's mergers under every 26 hold: the pair's
@@ -343,7 +371,7 @@ fn the_merger_sampler_against_the_engine_under_every_26_hold() {
     use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
     use crate::math;
     use crate::stellar::binary::SegmentKind;
-    let galaxy = held().clone().with_rules(GalaxyRules::every_26_hold());
+    let galaxy = every_26();
     let process = StellarMergers::new(&galaxy);
     let mut catalogue: Vec<[f64; 3]> = Vec::new();
     'cells: for x in [0, -1, 1, -2, 2, -3, 3] {

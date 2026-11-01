@@ -1034,8 +1034,10 @@ impl Engine {
     /// Dynamical transfer from member `d` that merges the pair (BSE sections 2.6.4 and 2.6.5):
     /// a low-mass main-sequence donor over its critical ratio gives its whole mass on
     /// √(`τ_KH` `τ_dyn`), of which a main-sequence accretor keeps what its thermal timescale allows
-    /// (equation 64) and a giant all; a white dwarf's, neutron star's or black hole's coalesces
-    /// with its companion as a collision does.
+    /// (equation 64) and a giant all, or, under [`MergerMassRules::Pair`] (P11.T4.d, from 26), a
+    /// main-sequence accretor both stars' masses as the collision of two main-sequence stars does
+    /// (section 2.7.3); a white dwarf's, neutron star's or black hole's coalesces with its
+    /// companion as a collision does.
     pub(super) fn merge_dynamically(&mut self, d: usize) {
         let o = 1 - d;
         let (md, td) = self.current(d);

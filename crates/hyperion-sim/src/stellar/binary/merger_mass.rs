@@ -1,17 +1,18 @@
 //! The hold on the mass a dynamical main-sequence merger keeps (plan 11, P11.T4.d's fix, at
 //! [`MERGER_MASS_VERSION`]).
 //!
-//! A fully convective main-sequence donor over its critical mass ratio transfers dynamically and
-//! the pair merges (`Engine::merge_dynamically`, BSE sections 2.6.4 and 2.6.5). As built, a
+//! A low-mass (BSE's k = 0) main-sequence donor over its critical mass ratio transfers
+//! dynamically and the pair merges (`Engine::merge_dynamically`, BSE section 2.6.4). As built, a
 //! main-sequence accretor keeps only what its thermal timescale allows of the donor,
-//! √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it, a few per cent at most, and the rest leaves the pair, so the
-//! product is the accretor's mass: a 0.454 + 0.138 M☉ pair leaves 0.1375 M☉. That is BSE's
-//! dynamical branch, built for transfer that goes on; for a pair that merges, P11.T4.d's rule is
-//! the collision matrix's (their table 2, section 2.7.3), whose two main-sequence stars merge with
-//! their masses, as the engine's own collisions and contacts already merge them
-//! (`Engine::main_sequence_merger`). From 26 the dynamical merger takes that rule: a
-//! main-sequence star of M₁ + M₂ at the fractional age 0.1 Σ Mᵢ τᵢ ÷ M (their equation 80) of both
-//! stars, with no mass lost.
+//! √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it, a small fraction, and the rest leaves the pair, so the
+//! product is the accretor's mass: a 0.454 + 0.138 M☉ pair leaves 0.1375 M☉. That is BSE's own
+//! dynamical branch, which also ends in a single star (as recalled of their code; not read at
+//! source). P11.T4.d's rule as main reads it (the brief of 2026-10-31) is the collision matrix's
+//! instead (their table 2, section 2.7.3), whose two main-sequence stars merge with their masses,
+//! as the engine's own collisions and contacts already merge them (`Engine::main_sequence_merger`):
+//! a departure from BSE's dynamical branch (lean, 2026-10-31). From 26 the dynamical merger takes
+//! that rule: a main-sequence star of M₁ + M₂ at the fractional age 0.1 Σ Mᵢ τᵢ ÷ M (their
+//! equation 80, not read at source) of both stars, with no mass lost.
 
 use crate::GeneratorVersion;
 use crate::stellar::rules::StellarRules;
@@ -34,7 +35,8 @@ pub(crate) const MERGER_MASS_VERSION: GeneratorVersion = GeneratorVersion::new(2
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MergerMassRules {
     /// Version 25's and before: the accretor and what its thermal timescale allows of the donor,
-    /// at the accretor's own fractional age (BSE's dynamical branch, section 2.6.5).
+    /// ΔM, at a tenth of the accretor's fractional age, 0.1 `M_a` `τ_a` ÷ (`M_a` + ΔM) (equation 80
+    /// with the donor's term dropped; BSE's dynamical branch, section 2.6.4, places it otherwise).
     ThermalLimit,
     /// Version 26's: both stars' masses, at both stars' fractional age (BSE's collision of two
     /// main-sequence stars, section 2.7.3 and equation 80).
