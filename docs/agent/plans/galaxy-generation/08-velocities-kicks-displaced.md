@@ -2220,16 +2220,40 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     classes (`Fields::displaced()`, 26's rules). Below 26 every system is in the field, so the
     rows stay plan 04's and the server's two range goldens do not move, as P09.T40.a's gate keeps
     the origins. The 26 bump re-blesses them with `placement` on every grid row.
-  - Client: `ChartSystem.placement`, `placementLabel` and `placedOriginWords`
-    (`lib/galaxy/wire.ts`). A row with a placement reads
+  - Client: `ChartSystem.placement` (`lib/galaxy/model.ts`), `placementLabel` and
+    `placedOriginWords` (`lib/galaxy/wire.ts`). A row with a placement reads
     `ORIGIN OLD THIN DISC · DISPLACED REMNANT`, its origin sent or not (only a grid row carries
-    one), and the list's row name repeats it. The UX guide gains `HYPERVELOCITY SURVIVOR`; it
-    already had the other five terms.
+    one); a population this build does not know reads `— · RUNAWAY`, the dash muted
+    (`SystemReading`'s `afterMissing`). The UX guide gains `HYPERVELOCITY SURVIVOR`; it already had
+    the other five terms.
+  - Deviation: the list repeats `ORIGIN` in the row's accessible name alone (`originName`, the
+    placement alone for an unknown population), since no column has room for it at 1280 × 720.
   - T15.b: `MapPopulation::LayerERemnants` (`layer_e_remnants`) maps to
-    `MapSelection::LayerERemnants`; `REMNANTS` is the selector's third option. No bump: the
-    string is sent only in answer to a request that names it, and an older server answers
-    `bad_request`.
-  - Lean (2026-11-01): below 26 the remnants map is plan 04's empty map (floor and ceiling 0, every
-    code 0), since the wire's map has no `not_modelled`. The client reads `NO SYSTEMS IN MAP`.
+    `MapSelection::LayerERemnants`; `REMNANTS` is the selector's third option.
+  - Deviation from plan 04's Design note 15 (pending main's ruling): `MapPopulation` is closed and
+    sent, yet the new string leaves the protocol at 3, on `partial_response`'s precedent: it is sent
+    only in answer to a request that names it, and an older server answers `bad_request`. Neither
+    the note nor the reserved list carries the exception yet; were it refused, the string bumps.
+  - Lean (2026-11-01): below 26 the server answers the remnants map with plan 04's empty map
+    (floor and ceiling 0, every code 0), since the wire's map has no `not_modelled`; the client
+    draws it as `NO SYSTEMS IN MAP`.
+  - Lean (2026-11-01): the selector offers `REMNANTS` only for a universe at generator version 26
+    or later (`DISPLACED_REMNANTS_FROM`). In the stacked 24 rem column it wraps to a second line,
+    which would overrun the face-on words at 1280 × 1024 and take the `DUST OVERLAY`'s room at
+    1920 × 1080 (a hidden run), for an empty map.
+  - Pending main's ruling, before the 26 bump: `mapPictureWidth`, `mapRows` and `overlayHasRoom`
+    take `PopulationChoices`, which budgets the wrapped line and the legend's
+    (`REMNANTS_LEGEND_REM`). So a 26 universe holds the `DUST OVERLAY` back at 1920 × 1080, and
+    its compact pictures at 1280 × 720 are 232 px, not 256. That goes against
+    decision-gg-port-d0 §3.2.2 (the page's size alone) and §3.2.4 (the design size keeps the
+    overlay), and two tests pin it until the ruling.
+  - The `REMNANTS` map's legend states `DISPLACED · INIT MASS ABOVE 8 M☉` (`DensityLegend`), and
+    the guide's existing `REMNANTS` row now names the displaced remnants (lean, 2026-11-01: it said
+    "the remnants of stars born above 8 M☉", but `LayerERemnants` counts no retained remnant).
+    `DISPLACED_REMNANTS_FROM` copies the sim's hold, which the server does not state: it moves
+    with `DISPLACED_VERSION` if the hold does.
+  - The 26 arm's range test pins the provisional table's kinds at one point
+    (`under_every_26_hold_a_layer_e_row_of_each_kind_is_served_with_its_placement`): for the
+    P15.T6.c–f lane's re-pin.
   - The checks by eye (the 2,000 ly chart 3,000 ly above the plane, the edge-on `REMNANTS` map)
     are not run: the server serves no 26 rules. Pending 26.

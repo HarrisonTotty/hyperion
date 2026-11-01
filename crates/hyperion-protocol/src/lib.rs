@@ -212,8 +212,8 @@ pub use universe::{
 /// Giving a range row its `placement` (galaxy plan 08, P08.T15.a) leaves it at 3 as well: it is an
 /// optional field, absent from every row of a server built before it and of a galaxy below
 /// generator version 26, which a client reads as a row that does not say, and an older client
-/// ignores it. [`PlacementKind`] is closed, and carries
-/// every one of the sim's placement classes from the first build that sends a value of it.
+/// ignores it. [`PlacementKind`] is closed, and carries every one of the sim's placement classes
+/// from the first build that sends a value of it.
 ///
 /// So does [`MapPopulation`]'s `layer_e_remnants` (galaxy plan 08, P08.T15.b), although the enum is
 /// closed and sent: a server sends the string only in the map answering a request that names it,

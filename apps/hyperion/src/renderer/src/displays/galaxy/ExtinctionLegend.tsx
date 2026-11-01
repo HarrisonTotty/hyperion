@@ -43,6 +43,7 @@ export function ExtinctionLegend({ ramp, floorLog10Mag, ceilingLog10Mag }: Extin
       emptyName="Extinction legend, log scale: no extinction above the floor"
       floorText={`FLOOR ${magnitudeText(floorLog10Mag)} mag: AT OR BELOW SHOWN AS BACKGROUND`}
       emptyText={`NOTHING ABOVE FLOOR ${magnitudeText(floorLog10Mag)} mag`}
+      counted={null}
     />
   );
 }

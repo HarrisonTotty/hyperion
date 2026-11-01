@@ -1,4 +1,4 @@
-import type { MapFeatureKindWire, MapPopulation } from "@hyperion/protocol";
+import type { MapFeatureKindWire, MapPopulation, UniverseInfo } from "@hyperion/protocol";
 import { type CSSProperties, useEffect, useId, useState, useSyncExternalStore } from "react";
 
 import { StatusLine } from "../../components/StatusLine";
@@ -22,7 +22,13 @@ import {
 import { MAP_ACROSS_LY } from "./mapCursor";
 import { MapFeatureToggles } from "./MapFeatureToggles";
 import { mapFeatureStatus } from "./mapFeatureStatus";
-import { mapLayout, mapPictureWidth, mapRows, overlayHasRoom } from "./mapLayout";
+import {
+  mapLayout,
+  type PopulationChoices,
+  mapPictureWidth,
+  mapRows,
+  overlayHasRoom,
+} from "./mapLayout";
 import { StaleWaits, staleWaitText } from "./staleWaits";
 import { useGalaxyFeatures } from "./useGalaxyFeatures";
 
@@ -32,8 +38,7 @@ import { useGalaxyFeatures } from "./useGalaxyFeatures";
  * @remarks
  * `young` counts the young thin disc alone (plan 04's `MapPopulation`), so it takes that
  * population's one name, as `PARAMETERS` shows it. `REMNANTS` counts layer E's displaced remnants
- * alone, for the checks by eye of plan 08's classes (P08.T15.b): a galaxy below generator version
- * 26 holds none, and its maps are empty.
+ * alone, for the checks by eye of plan 08's classes (P08.T15.b).
  */
 const POPULATION_LABEL: Readonly<Record<MapPopulation, string>> = {
   all: "ALL",
@@ -47,6 +52,36 @@ function isMapPopulation(key: string): key is MapPopulation {
 
 const POPULATIONS: ReadonlyArray<MapPopulation> =
   Object.keys(POPULATION_LABEL).filter(isMapPopulation);
+
+/**
+ * The generator version from which a galaxy holds plan 08's displaced remnants (P08.T12's hold,
+ * the sim's `DISPLACED_VERSION`), and so from which the page offers `REMNANTS`.
+ *
+ * @remarks
+ * A copy of the sim's hold, which the server does not state: should the hold move to another
+ * train before its bump lands, this moves with it, or a universe whose galaxy holds no displaced
+ * remnant would offer a map that reads `NO SYSTEMS IN MAP`.
+ */
+const DISPLACED_REMNANTS_FROM = 26;
+
+/**
+ * The choices the page offers for `open`: `REMNANTS` only where its galaxy holds the displaced
+ * remnants (lean, 2026-11-01). Below {@link DISPLACED_REMNANTS_FROM} the server's remnants map is
+ * always empty, and the third choice's second line in the stacked column would take the
+ * `DUST OVERLAY`'s room at 1920 × 1080 for nothing.
+ */
+function populationChoices(open: UniverseInfo | null): PopulationChoices {
+  return open !== null && open.generator_version >= DISPLACED_REMNANTS_FROM
+    ? "with_remnants"
+    : "plain";
+}
+
+/** The populations offered under `choices`, in order. */
+function offeredPopulations(choices: PopulationChoices): ReadonlyArray<MapPopulation> {
+  return choices === "with_remnants"
+    ? POPULATIONS
+    : POPULATIONS.filter((population) => population !== "layer_e_remnants");
+}
 
 /** The name of each quantity the maps may show, in the order offered (plan 07, P07.T11.b). */
 const QUANTITY_LABEL: Readonly<Record<MapQuantity, string>> = {
@@ -108,8 +143,9 @@ interface GalaxyMapPanelProps {
  * extents of plan 04, design note 12), so both are at one scale, and one scale bar and one frame
  * name serve them. Each view's words (title, key hint, density under the cursor, legend) stand in a
  * column beside its picture, so that the pictures take the page's height. `ALL` counts every
- * system; `YOUNG THIN DISC` the population where the arms show; `REMNANTS` layer E's displaced
- * remnants, which kicks carried out of their populations (plan 08, P08.T15.b). The page owns the population;
+ * system; `YOUNG THIN DISC` the population where the arms show; and, for a universe whose galaxy
+ * holds them, from generator version 26, `REMNANTS`, layer E's displaced remnants, which kicks
+ * carried out of their populations (plan 08, P08.T15.b). The page owns the population;
  * changing it asks for both maps again. It needs the server, so while the link is down it is held
  * back, described by the link's reason, and the maps on show stay, marked stale (plan 05's T11
  * ruling (8); decision-gg-port-a2 §3). The link's reason stands in the page's one line for the
@@ -125,12 +161,13 @@ interface GalaxyMapPanelProps {
  * toggle, `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, as the guide requires, and says after it what
  * the pictures' brightness then shows, `Brightness is COLUMN DENSITY dimmed by A(V)`, a sentence
  * (decision-gg-port-a2 §5). The overlay is offered only where the page has room for its words
- * beside the pictures ({@link overlayHasRoom}, a rule on the page's size alone); elsewhere, and
- * under `EXTINCTION`, its toggle is held back rather than removed, keeping its focus and described
- * by why, `OVERLAY_NO_ROOM` taking precedence over `OVERLAY_DENSITY_ONLY`: `D` does nothing, and
- * the choice is kept for when it is offered again (decision-gg-port-d0 §3.2.3). The map cursor and
- * the chart's centre belong to the display, which reads the cursor out and enters it in its
- * `CURSOR` panel beside the map; both are marked on both maps.
+ * beside the pictures ({@link overlayHasRoom}, a rule on the page's size and the population
+ * choices it offers); elsewhere, and under `EXTINCTION`, its toggle is held back rather than
+ * removed, keeping its focus and described by why, `OVERLAY_NO_ROOM` taking precedence over
+ * `OVERLAY_DENSITY_ONLY`: `D` does nothing, and the choice is kept for when it is offered again
+ * (decision-gg-port-d0 §3.2.3). The map cursor and the chart's centre belong to the display, which
+ * reads the cursor out and enters it in its `CURSOR` panel beside the map; both are marked on both
+ * maps.
  *
  * A page shorter than the local chart's threshold, as at 1280 × 720, is laid out `compact`
  * ({@link mapLayout}): the controls stand in a row across the page above the pictures, the words
@@ -157,7 +194,12 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   const waitId = useId();
   const { status } = useServerLink();
   const { open } = useUniverse();
-  const [population, setPopulation] = useState<MapPopulation>("all");
+  const [chosenPopulation, setPopulation] = useState<MapPopulation>("all");
+  const choices = populationChoices(open);
+  const offered = offeredPopulations(choices);
+  // A choice the open universe does not offer, `REMNANTS` kept from a universe of 26 or later, reads
+  // as every system's.
+  const population = offered.includes(chosenPopulation) ? chosenPopulation : "all";
   const [quantity, setQuantity] = useState<MapQuantity>("column_density");
   const [overlay, setOverlay] = useState(false);
   const [featureKinds, setFeatureKinds] = useState<ReadonlySet<MapFeatureKindWire>>(
@@ -176,11 +218,11 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
     linkReason === null && staleWait === null ? mapFeatureStatus(featureQuery, featureKinds) : null;
   const inhibited = linkReason !== null;
   const layout = mapLayout(size);
-  const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout);
+  const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout, choices);
   // Why the overlay is not offered, shown beside its toggle, or `null` where it is: the page's room
   // first, since no quantity changes it.
   let overlayReason: string | null = null;
-  if (size === null || !overlayHasRoom(size, layout)) {
+  if (size === null || !overlayHasRoom(size, layout, choices)) {
     overlayReason = OVERLAY_NO_ROOM;
   } else if (!takesOverlay(quantity)) {
     overlayReason = OVERLAY_DENSITY_ONLY;
@@ -228,7 +270,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   }, [inhibited, overlayOffered, keysLive]);
   const devicePixelRatio = size?.devicePixelRatio ?? 1;
   const remPx = size?.remPx ?? 16;
-  const rows = size === null ? null : mapRows(size, layout);
+  const rows = size === null ? null : mapRows(size, layout, choices);
   // The pictures' width and the views' heights, which the stylesheet lays the page out by.
   const gridStyle: CSSProperties & {
     readonly "--map-picture": string;
@@ -283,7 +325,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             <fieldset className="form-choice galaxy-map__population">
               <legend className="form-field__label">POPULATION</legend>
               <div className="form-choice__options">
-                {POPULATIONS.map((value) => (
+                {offered.map((value) => (
                   <label key={value} className="form-choice__option">
                     <input
                       type="radio"

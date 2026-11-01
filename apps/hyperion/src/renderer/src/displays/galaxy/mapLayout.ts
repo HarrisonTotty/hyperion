@@ -68,6 +68,48 @@ interface LayoutWordsRem {
 const FEATURES_ROW_REM = 2.25;
 
 /**
+ * The `POPULATION` choices a page offers (plan 08, P08.T15.b): `ALL` and `YOUNG THIN DISC`, or
+ * `REMNANTS` after them too, for a universe whose galaxy holds plan 08's displaced remnants.
+ */
+export type PopulationChoices = "plain" | "with_remnants";
+
+/**
+ * The stacked controls' second line of `POPULATION` choices, where the page offers `REMNANTS`: it
+ * wraps under `ALL` and `YOUNG THIN DISC` in the 24 rem column, one 2 rem target lower. Measured in
+ * a hidden run at 1280 × 1024 and 1920 × 1080 (2026-11-01): the controls 32 px taller, 304 px and
+ * 279 px, and the face-on words under the overlay at 1920 × 1080 573 px beside a 552 px canvas,
+ * so that the overlay has no room there. Compact, the three choices stand on one line.
+ */
+const POPULATION_WRAP_REM = 2;
+
+/**
+ * The `REMNANTS` map's legend line, `DISPLACED · INIT MASS ABOVE 8 M☉`, in each view's words
+ * (`DensityLegend`): 23 px beside one legend, a line and its margins, and 42 px under the overlay,
+ * where the pair's narrower column wraps it to two lines. Measured in a hidden run of a build
+ * that offered `REMNANTS` at version 24 (2026-11-01), at 1280 × 720, 1536 × 864, 1280 × 1024,
+ * 1920 × 1080 and, under the overlay, 2560 × 1440.
+ */
+const REMNANTS_LEGEND_REM = { plain: 1.4375, overlay: 2.625 } as const;
+
+/** The tallest words of `layout`'s views on a page that offers `choices`. */
+function wordsRem(layout: MapLayout, choices: PopulationChoices): LayoutWordsRem {
+  const words = WORDS_REM[layout];
+  if (choices === "plain") {
+    return words;
+  }
+  const wrap = layout === "stacked" ? POPULATION_WRAP_REM : 0;
+  const plain = REMNANTS_LEGEND_REM.plain;
+  const overlay = REMNANTS_LEGEND_REM.overlay;
+  return {
+    plain: { faceOn: words.plain.faceOn + wrap + plain, edgeOn: words.plain.edgeOn + plain },
+    overlay: {
+      faceOn: words.overlay.faceOn + wrap + overlay,
+      edgeOn: words.overlay.edgeOn + overlay,
+    },
+  };
+}
+
+/**
  * The tallest words a view shows beside its picture, in `rem`, as measured in hidden runs of the
  * console (decision-gg-port-d0 §3.4), each plus the 0.5 rem of headroom the ruling asks for B612 as
  * macOS and Windows render it.
@@ -86,7 +128,9 @@ const FEATURES_ROW_REM = 2.25;
  * the stacked overlay's face-on words, which since then count the overlay's brightness line and
  * the page's line for the views' wait. Each face-on figure then gains {@link FEATURES_ROW_REM},
  * the feature overlay's toggles under the legends (plan 09, P09.T41.b), estimated from their one
- * line of 2 rem targets and the words' 0.25 rem gap, not yet measured in a hidden run.
+ * line of 2 rem targets and the words' 0.25 rem gap, not yet measured in a hidden run. Where the
+ * page offers `REMNANTS` ({@link PopulationChoices}), every figure gains its legend's line,
+ * {@link REMNANTS_LEGEND_REM}, and the stacked face-on figures {@link POPULATION_WRAP_REM} too.
  */
 const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // 150 px face-on and 128 px edge-on plain, 222 px and 200 px under the overlay, at 1280 × 720 and
@@ -107,10 +151,10 @@ const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
 };
 
 /**
- * The pictures' width in CSS pixels for a page of `size` laid out `layout`: as wide as the page
- * leaves beside the words and axes, and no taller together than the page leaves them, the edge-on
- * picture being half the face-on picture's height; even, so that the edge-on picture is a whole
- * number of pixels tall.
+ * The pictures' width in CSS pixels for a page of `size` laid out `layout` that offers the
+ * population `choices`: as wide as the page leaves beside the words and axes, and no taller
+ * together than the page leaves them, the edge-on picture being half the face-on picture's height;
+ * even, so that the edge-on picture is a whole number of pixels tall.
  *
  * @remarks
  * The pictures are never given a width at which a plain state's words would take the page past its
@@ -118,10 +162,14 @@ const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
  * words, whichever is taller, so where the edge-on row's tallest plain words are taller than half
  * the picture the height allows, the pictures take what those words leave, and the face-on row
  * likewise. Stacked, the rows are {@link mapRows}', which a page of 44 rem or more always holds:
- * the pictures are as wide as it allows. The rule reads the page's size alone, never what it shows,
- * so nothing moves as the quantity, the overlay or a data state changes.
+ * the pictures are as wide as it allows. The rule reads the page's size and the choices it offers,
+ * never what it shows, so nothing moves as the quantity, the overlay or a data state changes.
  */
-export function mapPictureWidth(size: ElementSize, layout: MapLayout): number {
+export function mapPictureWidth(
+  size: ElementSize,
+  layout: MapLayout,
+  choices: PopulationChoices,
+): number {
   const remPx = size.remPx;
   if (layout === "stacked") {
     const acrossPx = size.widthPx - (SIDE_REM + AXIS_BEFORE_REM + AXIS_AFTER_REM) * remPx;
@@ -131,7 +179,7 @@ export function mapPictureWidth(size: ElementSize, layout: MapLayout): number {
   const acrossPx = size.widthPx - (COMPACT_SIDE_REM + AXIS_BEFORE_REM + AXIS_AFTER_REM) * remPx;
   // The height both rows share, under the controls and less the gap between the views.
   const rowsPx = size.heightPx - (COMPACT_CONTROLS_REM + VIEW_GAP_REM) * remPx;
-  const { faceOn, edgeOn } = WORDS_REM.compact.plain;
+  const { faceOn, edgeOn } = wordsRem("compact", choices).plain;
   return evenWidth(
     Math.min(
       acrossPx,
@@ -158,20 +206,21 @@ export interface MapRows {
 }
 
 /**
- * The height each view takes on a page of `size` laid out `layout`: its picture's, or its tallest
- * plain words' where they are taller, so that no plain state's words outrun their row
- * (decision-gg-port-d0 §3.2.2).
+ * The height each view takes on a page of `size` laid out `layout` that offers the population
+ * `choices`: its picture's, or its tallest plain words' where they are taller, so that no plain
+ * state's words outrun their row (decision-gg-port-d0 §3.2.2).
  *
  * @remarks
  * Stacked, the face-on view's words stand under the page's controls, beside a picture that starts
  * the tabs' clearance down; on a page too narrow for a picture as tall as those words, as at
  * 1280 × 1024, the view keeps their height and its picture stands at its top. `styles.css` lays the
- * stacked rows out by these, so the rows come from the page's size alone; compact rows are as tall
- * as their picture or their words, which `mapPictureWidth` keeps on the page.
+ * stacked rows out by these, so the rows come from the page's size and the choices it offers,
+ * never what it shows; compact rows are as tall as their picture or their words, which
+ * `mapPictureWidth` keeps on the page.
  */
-export function mapRows(size: ElementSize, layout: MapLayout): MapRows {
-  const pictureWidthPx = mapPictureWidth(size, layout);
-  const { faceOn, edgeOn } = WORDS_REM[layout].plain;
+export function mapRows(size: ElementSize, layout: MapLayout, choices: PopulationChoices): MapRows {
+  const pictureWidthPx = mapPictureWidth(size, layout, choices);
+  const { faceOn, edgeOn } = wordsRem(layout, choices).plain;
   const clearPx = layout === "stacked" ? TABS_CLEAR_REM * size.remPx : 0;
   return {
     faceOnPx: Math.max(pictureWidthPx, faceOn * size.remPx) + clearPx,
@@ -180,25 +229,31 @@ export function mapRows(size: ElementSize, layout: MapLayout): MapRows {
 }
 
 /**
- * Whether a page of `size` laid out `layout` has room for the `DUST OVERLAY`: whether the rows it
- * gives anyway hold the overlay's words beside the pictures (decision-gg-port-d0 §3.2.3).
+ * Whether a page of `size` laid out `layout` that offers the population `choices` has room for the
+ * `DUST OVERLAY`: whether the rows it gives anyway hold the overlay's words beside the pictures
+ * (decision-gg-port-d0 §3.2.3).
  *
  * @remarks
  * The face-on view must be as tall as its words under the overlay (stacked, with the page's
  * controls above them), and the edge-on view as tall as its own; where the pictures are taller than
  * the plain words, as they are at every size measured but 1280 × 1024, that is the ruling's test of
- * the face-on picture's height and of half of it. The rule reads the page's size alone, so the
- * overlay never changes the layout, and nothing moves when it is put on. At 1280 × 720 the
- * overlay's words alone are taller than the page, and it has no room; at 1920 × 1080 it has. Where
- * it has none, the page holds the toggle back with its reason, as the `VIEW` display holds back a
- * slot it has no room for.
+ * the face-on picture's height and of half of it. The rule reads the page's size and the choices it
+ * offers, never what it shows, so the overlay never changes the layout, and nothing moves when it
+ * is put on. At 1280 × 720 the overlay's words alone are taller than the page, and it has no room;
+ * at 1920 × 1080 it has, but on a page that offers `REMNANTS`, whose second line of choices takes
+ * the room. Where it has none, the page holds the toggle back with its reason, as the `VIEW`
+ * display holds back a slot it has no room for.
  */
-export function overlayHasRoom(size: ElementSize, layout: MapLayout): boolean {
-  const rows = mapRows(size, layout);
-  const words = WORDS_REM[layout].overlay;
+export function overlayHasRoom(
+  size: ElementSize,
+  layout: MapLayout,
+  choices: PopulationChoices,
+): boolean {
+  const rows = mapRows(size, layout, choices);
+  const words = wordsRem(layout, choices).overlay;
   const clearPx = layout === "stacked" ? TABS_CLEAR_REM * size.remPx : 0;
   return (
-    mapPictureWidth(size, layout) > 0 &&
+    mapPictureWidth(size, layout, choices) > 0 &&
     words.faceOn * size.remPx <= rows.faceOnPx - clearPx &&
     words.edgeOn * size.remPx <= rows.edgeOnPx
   );

@@ -1,7 +1,12 @@
+import type { MapPopulation } from "@hyperion/protocol";
+
+import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { formatSci } from "../../lib/format";
 import { RasterLegend, tenToThe } from "./RasterLegend";
 
 interface DensityLegendProps {
+  /** The systems the map counts. */
+  readonly population: MapPopulation;
   /** The ramp the map is painted with, from `buildRamp`, so the legend matches the picture. */
   readonly ramp: Uint8ClampedArray;
   /** log₁₀ of the column density, in systems per square light-year, of code 1 (the floor). */
@@ -20,9 +25,22 @@ function tick(log10: number): string {
  *
  * @remarks
  * A {@link RasterLegend} titled `COLUMN DENSITY` in `SYSTEMS/ly²`. Tick labels are in E notation
- * (`1E-4`), since B612 has no superscript minus.
+ * (`1E-4`), since B612 has no superscript minus. The `REMNANTS` map's legend states what it counts,
+ * `DISPLACED · INIT MASS ABOVE 8 M☉`: layer E's displaced remnants alone, not the remnants retained
+ * in their populations (plan 08, P08.T15.b; the guide's `REMNANTS`).
  */
-export function DensityLegend({ ramp, floorLog10PerLy2, ceilingLog10PerLy2 }: DensityLegendProps) {
+export function DensityLegend({
+  population,
+  ramp,
+  floorLog10PerLy2,
+  ceilingLog10PerLy2,
+}: DensityLegendProps) {
+  const remnants = population === "layer_e_remnants";
+  // The bar's name says what the map counts too, for the line's drawn sun sign has a name of its
+  // own.
+  const counted = remnants
+    ? ", displaced remnants of stars of initial mass above 8 solar masses"
+    : "";
   return (
     <RasterLegend
       ramp={ramp}
@@ -33,11 +51,18 @@ export function DensityLegend({ ramp, floorLog10PerLy2, ceilingLog10PerLy2 }: De
       tickLabel={tick}
       name={
         `Column density legend, log scale from ${tenToThe(floorLog10PerLy2)} to ` +
-        `${tenToThe(ceilingLog10PerLy2)} systems per square light-year`
+        `${tenToThe(ceilingLog10PerLy2)} systems per square light-year${counted}`
       }
-      emptyName="Column density legend, log scale: no systems in the map"
+      emptyName={`Column density legend, log scale: no systems in the map${counted}`}
       floorText={`FLOOR ${formatSci(10 ** floorLog10PerLy2)}: AT OR BELOW SHOWN AS BACKGROUND`}
       emptyText="NO SYSTEMS IN MAP"
+      counted={
+        remnants ? (
+          <>
+            DISPLACED · INIT MASS ABOVE 8 <SolarMassUnit />
+          </>
+        ) : null
+      }
     />
   );
 }

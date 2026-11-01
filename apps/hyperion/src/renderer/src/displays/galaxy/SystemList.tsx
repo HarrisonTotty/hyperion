@@ -14,7 +14,7 @@ import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleSlot } from "../../components/StaleSlot";
 import { formatListPosition, formatSubstellarMass } from "../../lib/format";
 import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
-import { placedOriginWords } from "../../lib/galaxy/wire";
+import { placedOriginWords, placementLabel } from "../../lib/galaxy/wire";
 import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
@@ -76,6 +76,21 @@ function starName(system: ChartSystem): string | null {
     return system.kind === "unknown" ? null : "NOT YET FORMED";
   }
   return `${objectKindLabel(system.star.kind)} ${system.star.spectralClass}`;
+}
+
+/**
+ * A grid system's `ORIGIN` for its row's accessible name, as the readout reads it, where its row
+ * says how it was placed (plan 08, P08.T15.a): `OLD THIN DISC · DISPLACED REMNANT`, or the
+ * placement alone where this build does not know the population, since the name leaves a Missing
+ * part out, as it does a mass; `null`, which leaves it out, for a row with no placement.
+ */
+function originName(system: ChartSystem): string | null {
+  if (system.placement === null) {
+    return null;
+  }
+  return system.population === "unknown"
+    ? placementLabel(system.placement)
+    : placedOriginWords(system.population, system.placement);
 }
 
 interface SystemListProps {
@@ -321,8 +336,7 @@ export function SystemList({
                 aria-label={[
                   system.designation,
                   starName(system),
-                  // Its `ORIGIN` as the readout reads it, where its row says how it was placed.
-                  placedOriginWords(system),
+                  originName(system),
                   starCountName(system),
                   `${distance} ${distanceUnit.symbol}`,
                   mass === null ? null : `${mass.value} ${massName}`,

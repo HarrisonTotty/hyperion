@@ -641,7 +641,7 @@ pub struct SystemRecord {
 /// Every value of the sim's classes has a string from the first build that sends one, the
 /// hypervelocity survivors among them, which no galaxy places before plan 09's P09.T34.b gives
 /// their class weight, so the enum is closed: a value added later bumps the protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum PlacementKind {

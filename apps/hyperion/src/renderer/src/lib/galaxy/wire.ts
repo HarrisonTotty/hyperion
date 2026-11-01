@@ -354,16 +354,10 @@ export function placementLabel(placement: PlacementKind): string {
 
 /**
  * A grid system's `ORIGIN` in words, its birth population and how its grid placed it, as the readout
- * and the list's row both write it (plan 08, P08.T15.a): `OLD THIN DISC · DISPLACED REMNANT`, the
- * population the em dash where this build does not know it, as the guide composes a reading with a
- * part Missing; `null` for a row without a placement.
+ * and the list's row both write it (plan 08, P08.T15.a): `OLD THIN DISC · DISPLACED REMNANT`.
  */
-export function placedOriginWords(system: ChartSystem): string | null {
-  if (system.placement === null) {
-    return null;
-  }
-  const population = system.population === "unknown" ? "—" : populationLabel(system.population);
-  return `${population} · ${placementLabel(system.placement)}`;
+export function placedOriginWords(population: Population, placement: PlacementKind): string {
+  return `${populationLabel(population)} · ${placementLabel(placement)}`;
 }
 
 /**

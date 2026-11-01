@@ -7,6 +7,7 @@ import type { ChartSystem } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import {
   anUnknownLayer,
+  anUnknownPopulation,
   aStellarBrief,
   aSystemsInRange,
   withRowFields,
@@ -471,6 +472,25 @@ describe("SystemList's placements (plan 08, P08.T15.a)", () => {
       ).toBeInTheDocument();
     },
   );
+
+  it("names a row whose population it does not know by its placement alone", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "e" }],
+    });
+    const { systems } = toChartResult(
+      withRowFields(response, { population: anUnknownPopulation(), placement: "runaway" }),
+    );
+
+    renderList(systems);
+
+    expect(
+      screen.getByRole("option", {
+        name: "H7K 4C0RFZ E-1, DWARF B0V, RUNAWAY, 2 stars, 1.00 ly, 79.0 solar masses, IN RANGE",
+      }),
+    ).toBeInTheDocument();
+  });
 
   it("leaves the origin out of the name of a row that does not say how it was placed", () => {
     stubViewport();

@@ -1156,6 +1156,7 @@ function MapViewBody({
           >
             {picture.density === null ? null : (
               <DensityLegend
+                population={population}
                 ramp={ramp}
                 floorLog10PerLy2={picture.density.floorLog10}
                 ceilingLog10PerLy2={picture.density.ceilingLog10}

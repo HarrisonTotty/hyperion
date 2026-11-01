@@ -14,16 +14,20 @@ import type {
   ShellState,
   SupernovaState,
 } from "../../lib/galaxy/model";
-import { placedOriginWords, populationLabel } from "../../lib/galaxy/wire";
+import { placedOriginWords, placementLabel, populationLabel } from "../../lib/galaxy/wire";
 import { formatHex64 } from "../../lib/seed";
 import { SystemReading as Reading } from "./SystemReading";
 
 /** The words for what is not there: no remnant, no nebula, no emission. */
 const NONE = "NONE";
 
-/** What the `ORIGIN` reading shows: a value, a status in its place, or the em dash. */
+/**
+ * What the `ORIGIN` reading shows: a value, a value whose first part is Missing (a placement of a
+ * population this build does not know, `— · RUNAWAY`), a status in its place, or the em dash.
+ */
 type OriginShown =
   | { readonly kind: "value"; readonly text: string }
+  | { readonly kind: "after_missing"; readonly text: string }
   | { readonly kind: "status"; readonly text: string }
   | { readonly kind: "missing" };
 
@@ -33,13 +37,15 @@ type OriginShown =
  * build does not know it.
  */
 function gridShown(system: ChartSystem): OriginShown {
-  const placed = placedOriginWords(system);
-  if (placed !== null) {
-    return { kind: "value", text: placed };
+  const { population, placement } = system;
+  if (placement === null) {
+    return population === "unknown"
+      ? { kind: "missing" }
+      : { kind: "value", text: populationLabel(population) };
   }
-  return system.population === "unknown"
-    ? { kind: "missing" }
-    : { kind: "value", text: populationLabel(system.population) };
+  return population === "unknown"
+    ? { kind: "after_missing", text: placementLabel(placement) }
+    : { kind: "value", text: placedOriginWords(population, placement) };
 }
 
 /**
@@ -300,6 +306,7 @@ export function OriginReadings({ system, features, stale }: OriginReadingsProps)
       <Reading
         label="ORIGIN"
         value={origin.kind === "missing" ? null : origin.text}
+        afterMissing={origin.kind === "after_missing"}
         wide
         stale={stale}
         status={origin.kind === "status"}

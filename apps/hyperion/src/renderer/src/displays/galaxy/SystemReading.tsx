@@ -7,6 +7,12 @@ export interface SystemReadingProps {
   readonly label: ReactNode;
   /** The value's digits, or `null` for one that does not exist, shown as an em dash. */
   readonly value: string | null;
+  /**
+   * Whether the value is the rest of a composed reading whose first part does not exist, as
+   * `— · RUNAWAY` is a placement of a population this build does not know: the em dash in
+   * `--text-muted` and the middle dot lead it.
+   */
+  readonly afterMissing?: boolean;
   /** The unit after the value: `ly`, `°`, or an element such as the drawn `M☉`. */
   readonly unit?: ReactNode;
   /** Whether the value takes the rest of the row, as a designation and an ID do. */
@@ -54,6 +60,7 @@ export interface SystemReadingProps {
 export function SystemReading({
   label,
   value,
+  afterMissing = false,
   unit,
   wide = false,
   beside,
@@ -80,6 +87,12 @@ export function SystemReading({
           </>
         ) : (
           <span className={muted ? "stale" : undefined}>
+            {afterMissing ? (
+              <>
+                <span className="readout__missing">—</span>
+                {" · "}
+              </>
+            ) : null}
             {widthCh === undefined ? (
               <span className="system-readout__value">{value}</span>
             ) : (

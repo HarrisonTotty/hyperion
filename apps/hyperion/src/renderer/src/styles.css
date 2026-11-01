@@ -319,6 +319,13 @@ body {
   color: var(--text-muted);
 }
 
+/* What a map counts where its title alone does not say: the REMNANTS map's line (plan 08). */
+.density-legend__counted {
+  margin: -0.25rem 0 0.5rem;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
 /* A display with a fixed layout of its own fills the work area as one cell. */
 .console__work--galaxy {
   grid-template-columns: minmax(0, 1fr);

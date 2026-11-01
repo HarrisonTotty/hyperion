@@ -40,7 +40,7 @@ fn wire_placement(class: PlacementClass) -> PlacementKind {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
     use std::sync::OnceLock;
 
     use hyperion_protocol::{MassLayer, QueryModeDto, SystemsInRange, SystemsInRangeRequest};
@@ -181,8 +181,8 @@ mod tests {
     }
 
     /// How many rows of each placement.
-    fn counted(placements: &[PlacementKind]) -> HashMap<PlacementKind, usize> {
-        let mut counts = HashMap::new();
+    fn counted(placements: &[PlacementKind]) -> BTreeMap<PlacementKind, usize> {
+        let mut counts = BTreeMap::new();
         for &placement in placements {
             *counts.entry(placement).or_default() += 1;
         }
@@ -190,7 +190,12 @@ mod tests {
     }
 
     #[test]
-    fn under_24s_rules_every_system_is_in_the_field_or_retained_and_no_row_says_so() {
+    fn below_26_every_grid_system_is_in_the_field_and_no_row_says_so() {
+        // The 26 bump, which installs the classes in every galaxy, retires this test.
+        assert!(
+            milky_way().fields().displaced().is_none(),
+            "the version in force holds plan 08's displaced classes"
+        );
         // Layer E within 300 ly of the Sun-like point, and every layer within 20 ly of it.
         for request in [
             layer_e_within([0, 26_000, 0], 300.0),
@@ -203,14 +208,9 @@ mod tests {
             assert!(!answer.systems.is_empty(), "{:?}", request.min_layer);
             assert_eq!(answer.systems.len(), classes.len(), "one row per hit");
             for (row, &class) in answer.systems.iter().zip(&classes) {
-                // As the sim says: the galaxy holds no displaced class.
-                assert!(
-                    matches!(
-                        wire_placement(class),
-                        PlacementKind::Field | PlacementKind::Retained
-                    ),
-                    "{class:?}"
-                );
+                // As the sim says: a galaxy that holds no displaced class places every system in
+                // the field, none retained.
+                assert_eq!(class, PlacementClass::Alive, "{}", row.designation);
                 // And the row is plan 04's, as the server's goldens pin it.
                 assert_eq!(row.placement, None, "{}", row.designation);
             }

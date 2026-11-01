@@ -25,6 +25,11 @@ interface RasterLegendProps {
   readonly floorText: string;
   /** The line in place of the floor's for a map with nothing above its floor. */
   readonly emptyText: string;
+  /**
+   * What the map counts, on a line under the caption, where it is not what the title alone says:
+   * `DISPLACED · INIT MASS ABOVE 8 M☉` for the `REMNANTS` map (plan 08, P08.T15.b); `null` for none.
+   */
+  readonly counted: ReactNode;
 }
 
 const SEGMENTS = 32;
@@ -98,9 +103,10 @@ export function tenToThe(log10: number): string {
  * `docs/frontend/ux-guidelines.md`, which give each raster quantity a legend of its own with its
  * title, unit, scale and floor: {@link DensityLegend} and `ExtinctionLegend` are this legend with
  * their own words. The bar is 32 steps of the picture's own ramp; its accessible name gives the
- * range and unit in words. Every decade has a tick; where the bar is too narrow for a label at
- * each, only the decades at a multiple of every second (or third) are labelled, with longer ticks.
- * The block's classes are `density-legend`, the first raster's.
+ * range and unit in words. A map that counts less than its title says has a `counted` line under
+ * the caption. Every decade has a tick; where the bar is too narrow for a label at each, only the
+ * decades at a multiple of every second (or third) are labelled, with longer ticks. The block's
+ * classes are `density-legend`, the first raster's.
  */
 export function RasterLegend({
   ramp,
@@ -113,6 +119,7 @@ export function RasterLegend({
   emptyName,
   floorText,
   emptyText,
+  counted,
 }: RasterLegendProps) {
   const { ref: ticksRef, size: ticksWidth } = useElementSize();
   const spanLog10 = ceilingLog10 - floorLog10;
@@ -133,6 +140,7 @@ export function RasterLegend({
         <span className="density-legend__unit">{unit}</span>
         <span className="density-legend__scale-type">LOG SCALE</span>
       </figcaption>
+      {counted === null ? null : <p className="density-legend__counted">{counted}</p>}
       <div className="density-legend__scale">
         <svg
           className="density-legend__bar"

@@ -96,6 +96,15 @@ function valueOf(readout: HTMLElement, label: string): string | null | undefined
   return term === undefined ? undefined : (term.nextElementSibling?.textContent ?? null);
 }
 
+/** The `dd` after a reading's `dt`. */
+function nextOf(term: HTMLElement): HTMLElement {
+  const value = term.nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error("a reading's term has its value after it");
+  }
+  return value;
+}
+
 /** Every reading of the readout, label and value, in order. */
 function readings(readout: HTMLElement): Array<[string | null, string | null]> {
   return [...readout.querySelectorAll("dt")].map((term) => [
@@ -262,6 +271,9 @@ describe("SystemReadout's placement (plan 08, P08.T15.a)", () => {
     );
 
     expect(valueOf(readout, "ORIGIN")).toBe("— · RUNAWAY");
+    // The missing part is drawn as Missing is everywhere, muted.
+    const term = within(readout).getByText("ORIGIN", { selector: "dt" });
+    expect(within(nextOf(term)).getByText("—")).toHaveClass("readout__missing");
   });
 
   it("reads a feature's member by its feature whatever its row says of placement", () => {

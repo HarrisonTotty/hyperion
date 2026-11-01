@@ -1,4 +1,4 @@
-import type { RequestOf, ResponseFor } from "@hyperion/protocol";
+import type { RequestOf, ResponseFor, UniverseInfo } from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -11,6 +11,7 @@ import {
   aDensityMap,
   anExtinctionMap,
   anOpenedUniverse,
+  aUniverse,
   aUniverseList,
 } from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
@@ -110,7 +111,7 @@ function stubPageSize(widthPx = 792, heightPx = 488): void {
 }
 
 /** Renders the page beside the universe panel, which opens universes for it. */
-async function renderPanel({ shown = true } = {}) {
+async function renderPanel({ shown = true, universes = [aUniverse()] } = {}) {
   const user = userEvent.setup();
   stubCanvas();
   render(
@@ -126,7 +127,7 @@ async function renderPanel({ shown = true } = {}) {
     socket.serverWelcomes();
   });
   await server(() => {
-    socket.serverAnswers("list_universes", () => aUniverseList());
+    socket.serverAnswers("list_universes", () => aUniverseList(universes));
   });
   return { user, socket };
 }
@@ -134,12 +135,16 @@ async function renderPanel({ shown = true } = {}) {
 async function openUniverse(
   user: ReturnType<typeof userEvent.setup>,
   socket: FakeWebSocket,
+  info: UniverseInfo = aUniverse(),
 ): Promise<void> {
-  await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+  await user.click(screen.getByRole("button", { name: `Open universe ${info.name}` }));
   await server(() => {
-    socket.serverAnswers("open_universe", () => anOpenedUniverse());
+    socket.serverAnswers("open_universe", () => anOpenedUniverse(info));
   });
 }
+
+/** `SURVEY 1` at generator version 26, whose galaxy holds plan 08's displaced remnants. */
+const SURVEY_AT_26 = aUniverse({ generator_version: 26 });
 
 async function answerBothMaps(socket: FakeWebSocket): Promise<void> {
   await server(() => {
@@ -210,12 +215,48 @@ describe("GalaxyMapPanel", () => {
     const group = within(panel()).getByRole("group", { name: "POPULATION" });
     expect(within(group).getByRole("radio", { name: "ALL" })).toBeChecked();
     expect(within(group).getByRole("radio", { name: "YOUNG THIN DISC" })).not.toBeChecked();
-    expect(within(group).getByRole("radio", { name: "REMNANTS" })).not.toBeChecked();
-    expect(
-      within(group)
-        .getAllByRole("radio")
-        .map((radio) => radio.getAttribute("value")),
-    ).toEqual(["all", "young", "layer_e_remnants"]);
+  });
+
+  it("does not offer REMNANTS for a universe below generator version 26 (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel({
+      universes: [aUniverse({ generator_version: 25 })],
+    });
+
+    await openUniverse(user, socket, aUniverse({ generator_version: 25 }));
+
+    const group = within(panel()).getByRole("group", { name: "POPULATION" });
+    expect(within(group).queryByRole("radio", { name: "REMNANTS" })).not.toBeInTheDocument();
+  });
+
+  it("offers REMNANTS third for a universe whose galaxy holds the displaced remnants (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+
+    await openUniverse(user, socket, SURVEY_AT_26);
+
+    const radios = within(within(panel()).getByRole("group", { name: "POPULATION" })).getAllByRole(
+      "radio",
+    );
+    expect(radios).toHaveLength(3);
+    expect(radios[2]).toHaveAccessibleName("REMNANTS");
+    expect(radios[2]).not.toBeChecked();
+  });
+
+  it("reads a REMNANTS choice as ALL in a universe below 26 opened after it (plan 08, P08.T15.b)", async () => {
+    const older = aUniverse({ id: "00000000000000a2", name: "SURVEY 2", generator_version: 24 });
+    const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26, older] });
+    await openUniverse(user, socket, SURVEY_AT_26);
+    await answerBothMaps(socket);
+    await user.click(within(panel()).getByRole("radio", { name: "REMNANTS" }));
+    await answerBothMaps(socket);
+
+    await openUniverse(user, socket, older);
+
+    expect(within(panel()).getByRole("radio", { name: "ALL" })).toBeChecked();
+    const requests = socket.requestsOfKind("density_map").map(({ body }) => body);
+    expect(requests.slice(4).map((body) => [body.universe, body.population])).toEqual([
+      [older.id, "all"],
+      [older.id, "all"],
+    ]);
   });
 
   it("asks for both views of every system at first, at the resolution the pictures need", async () => {
@@ -250,7 +291,7 @@ describe("GalaxyMapPanel", () => {
 
   it("asks for both views of layer E's displaced remnants when REMNANTS is chosen (plan 08, P08.T15.b)", async () => {
     const { user, socket } = await renderPanel();
-    await openUniverse(user, socket);
+    await openUniverse(user, socket, SURVEY_AT_26);
     await answerBothMaps(socket);
 
     await user.click(within(panel()).getByRole("radio", { name: "REMNANTS" }));
@@ -262,9 +303,9 @@ describe("GalaxyMapPanel", () => {
     ]);
   });
 
-  it("draws a galaxy's empty REMNANTS maps, as below version 26, saying they hold no systems", async () => {
+  it("draws an empty REMNANTS map as holding no systems", async () => {
     const { user, socket } = await renderPanel();
-    await openUniverse(user, socket);
+    await openUniverse(user, socket, SURVEY_AT_26);
     await answerBothMaps(socket);
     await user.click(within(panel()).getByRole("radio", { name: "REMNANTS" }));
 
@@ -274,9 +315,6 @@ describe("GalaxyMapPanel", () => {
     });
 
     expect(within(panel()).getAllByText("NO SYSTEMS IN MAP")).toHaveLength(2);
-    expect(
-      within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
-    ).toBeInTheDocument();
   });
 
   it("holds the population back while the link is down, and keeps the maps on show, stale", async () => {
@@ -736,6 +774,15 @@ describe("GalaxyMapPanel", () => {
         expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
       }
       expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+    });
+
+    it("holds it back at 1920 × 1080 for a universe that offers REMNANTS, whose second line takes the room", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+      await openUniverse(user, socket, SURVEY_AT_26);
+
+      expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
     });
 
     it("holds it back at 1280 × 720, saying there is no room for it", async () => {

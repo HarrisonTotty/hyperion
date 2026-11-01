@@ -1147,7 +1147,12 @@ mod tests {
         let (pool, service) = service(4);
         for view in [MapView::FaceOn, MapView::EdgeOn] {
             let map = get(&service, key(view, MapPopulation::LayerERemnants)).await;
-            assert!(map.log10().iter().all(|&value| value == EMPTY), "{view:?}");
+            assert!(
+                map.log10()
+                    .iter()
+                    .all(|value| value.to_bits() == EMPTY.to_bits()),
+                "{view:?}"
+            );
             // Plan 04's map with no systems: floor and ceiling 0, and every code 0.
             let quantised = quantise_map(&map, view, CodeDepth::Sixteen);
             assert_same_bits(quantised.floor_log10, 0.0);
