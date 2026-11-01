@@ -1752,7 +1752,7 @@ fn column_per_m2(
 /// The share of [`soot`]'s column an envelope of equilibrium temperature `equilibrium_temperature`
 /// keeps: 0 at and below [`SOOT_GRID_EDGE`]'s 600 K, 1 at and above its 700 K, linear between.
 #[must_use]
-fn soot_weight(equilibrium_temperature: Kelvin) -> f64 {
+pub(crate) fn soot_weight(equilibrium_temperature: Kelvin) -> f64 {
     let (none, whole) = (SOOT_GRID_EDGE.0.value(), SOOT_GRID_EDGE.1.value());
     let s = (equilibrium_temperature.value() - none) / (whole - none);
     if s >= 1.0 {
@@ -1831,6 +1831,16 @@ fn haze_mode(
     weight: f64,
     profile: &EnvelopeProfile,
 ) -> Result<AerosolMode, BuildModeError> {
+    haze_mode_at(haze, weight, |p| profile.temperature_at(p))
+}
+
+/// [`haze_mode`] on a profile given as its temperature by pressure, `temperature_at`, for P14.T24.h.b
+/// part 5's closed form of the column.
+pub(crate) fn haze_mode_at(
+    haze: &Haze,
+    weight: f64,
+    temperature_at: impl Fn(Pascals) -> Kelvin,
+) -> Result<AerosolMode, BuildModeError> {
     let (material, phase) = (haze.material(), haze.phase());
     let shape = ShapeClass::of(material, phase);
     let layer = match haze.profile() {
@@ -1850,7 +1860,7 @@ fn haze_mode(
             0.0,
         )?,
     };
-    let temperature = profile.temperature_at(layer.base());
+    let temperature = temperature_at(layer.base());
     match haze.amount() {
         HazeAmount::ColumnMass(mass) => {
             let mode = Mode::new(

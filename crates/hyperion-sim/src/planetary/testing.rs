@@ -601,6 +601,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a moon's surface that radiates its internal heat, `SURFACE_HEAT_VERSION` (P14.T55.j), at
 ///   `SurfaceHeatRules::Radiated` through `with_surface_heat`: its tides' shell read at
 ///   σ `T_s`⁴ = σ `T_eq`⁴ + F.
+/// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
+///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
+///   of T51.b's class table.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -614,6 +617,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::photometry::envelope_bond::{
+        EnvelopeBondRules, with_envelope_bond,
+    };
     use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
@@ -630,6 +636,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_porous_core(PorousCoreRules::Porous, run);
     let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
+    let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 

@@ -405,4 +405,4 @@ fn effective_temperature(equilibrium: Kelvin, internal: Kelvin) -> Kelvin {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

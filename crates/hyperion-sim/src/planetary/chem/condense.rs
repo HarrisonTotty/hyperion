@@ -2495,6 +2495,62 @@ fn size(
         .map_err(SizeModeError::Distribution)
 }
 
+/// The log-normal of a deck of `id` in `phase` at one level, `pressure` Pa and `temperature` K,
+/// its grain density at that temperature, in `column` of background gas `background` under
+/// `sedimentation`: Ackerman and Marley's eq. 13 at the radius whose fall speed is w*, as each of
+/// [`size`]'s levels takes it, for P14.T24.h.b part 5's closed form of a deck at its base alone
+/// (a stated departure from the loop's mass-weighted harmonic mean over the deck's levels).
+///
+/// # Errors
+///
+/// [`SizeModeError::NoCollisionConstants`] for a background with no Lennard-Jones constants,
+/// [`SizeModeError::NoDensity`] for a phase with no grain density at the temperature, and
+/// [`SizeModeError::Distribution`] for a size the log-normal refuses.
+pub(crate) fn settling_size_at(
+    (id, phase): (SubstanceId, CondensedPhase),
+    (pressure, temperature): (f64, f64),
+    column: &MixingColumn,
+    sedimentation: Sedimentation,
+    background: SubstanceId,
+) -> Result<SizeDistribution, SizeModeError> {
+    let key = id.substance().key();
+    let gas_key = background.substance().key();
+    let constants = COLLISION_CONSTANTS
+        .iter()
+        .find(|c| c.key == gas_key.as_str())
+        .ok_or(SizeModeError::NoCollisionConstants { key: gas_key })?;
+    let density = id
+        .substance()
+        .grain_density(phase, Kelvin::new(temperature))
+        .ok_or(SizeModeError::NoDensity {
+            key,
+            phase,
+            temperature: Kelvin::new(temperature),
+        })?;
+    let sigma = sedimentation.width();
+    let ln_sigma_squared = math::ln(sigma) * math::ln(sigma);
+    let ln_range_m = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
+    let fit = sigma.max(ALPHA_FIT_WIDTH);
+    let air = Air::at(temperature, pressure, column, constants);
+    let w_star = column.eddy_diffusion.square_metres_per_second() / air.scale_height_m;
+    let r_w = air.radius_falling_at(w_star, density, ln_range_m);
+    let alpha =
+        math::ln(air.fall_speed(fit * r_w, density) / air.fall_speed(r_w, density)) / math::ln(fit);
+    let r_g = r_w
+        * math::powf(sedimentation.efficiency(), 1.0 / alpha)
+        * math::exp(-(alpha + 6.0) / 2.0 * ln_sigma_squared);
+    let r_eff = r_g * math::exp(2.5 * ln_sigma_squared);
+    SizeDistribution::log_normal(Metres::new(r_eff), math::exp(ln_sigma_squared) - 1.0)
+        .map_err(SizeModeError::Distribution)
+}
+
+/// The phase a deck of the condensate `id` forms in at `temperature` K, as the loop takes it
+/// ([`phase_of`]), for P14.T24.h.b part 5's closed form.
+#[must_use]
+pub(crate) fn deck_phase(id: SubstanceId, temperature: f64) -> CondensedPhase {
+    phase_of(id, temperature)
+}
+
 /// A level's gas, as the fall speed reads it.
 struct Air {
     /// The gravity, m s⁻².

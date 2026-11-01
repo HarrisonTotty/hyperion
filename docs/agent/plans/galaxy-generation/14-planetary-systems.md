@@ -3029,8 +3029,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Files:_ `planetary/derive/photometry/area_mix.rs`, `planetary/derive/atmosphere.rs`,
       `planetary/derive/atmosphere/tests.rs`.
     - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
-    - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits: Risks,
-      "Deviations in P14.T24.h.b, as built".
+    - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits; the envelope's
+      own albedo built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -33721,9 +33721,32 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     30 km by Bazzon et al.'s τ0, ω and g the optool aggregate's; the upper one's γ enters each
     greenhouse step (`AntiGreenhouse`, `step_anti_greenhouse`) as `T_s`⁴ = (1 − γ) `T_grey`⁴ +
     (γ ÷ 2) `T_base`⁴ (`anti_greenhouse`); `escaping::absorbed_share` gives 1 − A.
-  - _Not built:_ the envelope's own Bond albedo (the decks cost 30–42 ms a giant, so the snapshot
-    keeps T51.b's table; the section's value needs modes' ω and g, gas bands and a wire member
-    frozen at 24) and the refits of `GREENHOUSE_NITROGEN` on Titan with the haze.
+  - _Not built:_ the refits of `GREENHOUSE_NITROGEN` on Titan with the haze.
+  - _Part 5, the envelope's own Bond albedo (lane p14-t24hb-part5, 2026-11-01), held at 27:_
+    `ENVELOPE_BOND_VERSION` = 27, `EnvelopeBondRules::{ClassTable, Own}`, `with_envelope_bond` in
+    `with_every_27_hold`; `envelope_bond::gas_envelope_bond` replaces `giant_bond` in
+    `surface_mix::area_mixed`, the class table where the closed form gives no column. No wire
+    member; the record's envelope is unchanged.
+    - _Route (a), on the snapshot path:_ `envelope_bond::column::snapshot_column`, a closed form
+      of the decks' columns (the decks' bases, Ackerman and Marley's column at the base's
+      saturation slope, eq. 13's sizes at the base, the record's τ, hazes and dayside cut), about a
+      protosolar host (lean): the snapshot carries no \[Fe/H], C/O or formation distance. The
+      light: `envelope_bond::bin_albedos`, δ-Eddington adding over 8 g-points a bin to a black
+      floor at τ(550) 10. New `pub(crate)`: `condense::settling_size_at`, `deck_phase`;
+      `envelope_atmosphere::haze_mode_at`, `soot_weight`.
+    - _Ported:_ `envelope_bond/opacity.rs` (K&T's CH₄ and the alkali wings from the client's
+      tables; DACE's CH₄, H₂O, CO and H₂–H₂ from Nicholls's SOCRATES `Dayspring` files, CC BY 4.0,
+      a fetched dataset `nicholls_2025_dayspring` with its `reduce.py`; Mie tables of the client's
+      index files). Not ported: H₂–He pairs, NH₃, PH₃, CH₄ over 800–851 nm, the alkali cores.
+    - _Photometry:_ the giant templates' `reference_bond` stays T51.b's class I, so at 27 a giant's
+      geometric albedos follow its own Bond albedo; ruling 9's anchor on its analogue's own albedo
+      is 27's bump's to decide.
+    - _The figures_ (pinned in `envelope_bond::tests`; outbox): Jupiter 0.286, Saturn 0.190,
+      Uranus 0.483, Neptune 0.525, the hot fixture 0.132. The decks, not the light, miss the
+      measured giants (findings): the GRS chromophore column, no cold-giant tropospheric haze, the
+      ice giants' CH₄ deck high.
+    - _27's movers:_ `under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_satellites`
+      (slow): gas envelopes' albedo, `T_eq` and envelope, and their satellites.
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
   - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's

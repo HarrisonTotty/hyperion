@@ -59,6 +59,7 @@ use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals, Radians};
 
 pub(crate) mod area_mix;
+pub(crate) mod envelope_bond;
 
 /// The ceiling on the phase factor f: 4, R07's `PHASE_F_CLAMP` (a Lambert crescent vanishes faster
 /// than a cloudy one: Venus's f would reach 61 at 170°).

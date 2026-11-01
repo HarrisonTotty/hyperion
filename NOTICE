@@ -432,7 +432,23 @@ ruled 2026-10-09 and 2026-10-10).
   cross-sections by NASA's Planetary Spectrum Generator (G. L. Villanueva et al., J. Quant.
   Spectrosc. Radiat. Transfer 217 (2018) 86-104; https://psg.gsfc.nasa.gov, file
   data/linelists/xuv/data/ch4.txt, fetched 2026-10-09). Resampled values in
-  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json, and their
+  k-distributions on the optics' bins in
+  crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/opacity.rs (plan 14,
+  P14.T24.h.b part 5).
+
+- k-terms of CH4, H2O and CO lines and of H2-H2 collision-induced absorption from H. Nicholls's
+  SOCRATES spectral files Dayspring/48 (with L. Soucasse; Zenodo, DOI 10.5281/zenodo.15721749) and
+  Dayspring/256 (Zenodo, DOI 10.5281/zenodo.15799474), fitted to the DACE opacity database
+  (S. L. Grimm et al., ApJS 253 (2021) 30), licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/); fetched 2026-11-01. Shared out over the
+  optics' bins and reduced to eight g-points, a modification, in
+  crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/opacity.rs by
+  crates/hyperion-fit/data/nicholls_2025_dayspring/reduce.py (plan 14, P14.T24.h.b part 5); the
+  files themselves are not committed. The same module holds the alkali doublets' far wings of
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json and Mie tables of the
+  client's material index files with hyperion-fit's infrared sets, each reduced onto the bins
+  (their sources' entries in this section).
 
 - Sulphur dioxide absorption cross-sections at 298, 318, 338 and 358 K: C. Hermans, A. C.
   Vandaele and S. Fally, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 756-765, DOI:

@@ -66,6 +66,7 @@ use crate::planetary::derive::pass_record::{OpenWater, PassContext, RecordSpin, 
 use crate::planetary::derive::photometry::area_mix::{
     self, HostShade, IcyResurfacing, LidWeathering, Regolith, VolatileFrost,
 };
+use crate::planetary::derive::photometry::envelope_bond;
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
     is_collisional, qualifies_by,
@@ -918,7 +919,7 @@ pub(super) fn area_mixed(
     } = match air.state {
         SurfaceState::GasEnvelope => SurfaceMix {
             disc: Disc::Whole {
-                albedo: area_mix::giant_bond(shade, inputs.heated, inputs.class),
+                albedo: envelope_bond::gas_envelope_bond(shade, inputs),
                 cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
             },
             lid: None,

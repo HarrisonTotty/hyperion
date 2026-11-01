@@ -606,7 +606,7 @@ fn under_every_24_hold_the_record_s_envelope_is_the_same_twice_and_in_both_queri
 /// radius, gravity, `T_eq` and internal luminosity, the Sun's age, its formation at its own
 /// semi-major axis in the zero-age Sun's disc, a protosolar host (\[Fe/H\] and \[α/Fe\] 0,
 /// P14.T50.a's protosolar C/O and Mg/Si, as P14.T52.d's table cases take it), starlit.
-fn table_envelope(name: &str) -> (EnvelopeOf, Envelope) {
+pub(crate) fn table_envelope(name: &str) -> (EnvelopeOf, Envelope) {
     let &(_, _, _, a, _) = PLANETS
         .iter()
         .find(|(n, ..)| *n == name)
@@ -791,7 +791,7 @@ fn deck_tau_above(envelope: &Envelope, condensate: SubstanceId, level: f64) -> O
 
 /// τ(550) of the mode `mode` above the level `level` (Pa), as [`deck_tau_above`] takes it; `None`
 /// where it has no τ.
-fn mode_tau_above(mode: &AerosolMode, level: f64) -> Option<f64> {
+pub(crate) fn mode_tau_above(mode: &AerosolMode, level: f64) -> Option<f64> {
     let tau = mode.optical_depth().ok()?.value();
     let profile = mode.profile();
     let (base, top, f) = (
@@ -1144,7 +1144,7 @@ fn the_molten_decks_take_a_tau() {
 /// inputs from the record's bulk section: its mass, radius, gravity, `T_eq` and `T_eff` copied
 /// from the fixture, the generator's fractions for its mass, formed at the slice zone's snow line,
 /// 3.1 Gyr old (Torres, Winn and Holman 2008), a solar host, starlit.
-fn fixture_hot_jupiter() -> EnvelopeByHand {
+pub(crate) fn fixture_hot_jupiter() -> EnvelopeByHand {
     use crate::planetary::derive::{SnowLineSide, giant_composition};
     use crate::units::consts::STEFAN_BOLTZMANN;
     use crate::units::{Dex, EarthMasses, Kilograms, MetresPerSecondSquared, Watts, Years};
@@ -2143,4 +2143,157 @@ fn under_every_26_hold_the_formation_draws_census() {
         moved.join("\n  ")
     );
     assert!(!moved.is_empty(), "the census moves an envelope");
+}
+
+/// `seed`'s system `ctx`'s records at the epoch under every 27 hold, a gas envelope's Bond albedo
+/// under `rules` (P14.T24.h.b part 5), by body index.
+fn records_at_27(
+    seed: Seed,
+    ctx: &SystemContext,
+    rules: crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules,
+) -> Vec<(u32, BodyRecord)> {
+    use crate::planetary::derive::photometry::envelope_bond::with_envelope_bond;
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        with_envelope_bond(rules, || {
+            let system = generate(seed, ctx);
+            let mut records = Vec::new();
+            walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+                records.push((u32::from(visit.body.index.get()), visit.record));
+            });
+            records
+        })
+    })
+}
+
+/// P14.T24.h.b part 5's census, the movers at 27 (the brief's): over [`thin_air_sets`] (the 400,
+/// the goldens and LOOK72's 27) at the epoch, every 27 hold against every 27 hold with the class
+/// table set back. Only gas envelopes and their satellites move: each moved envelope with its
+/// class, its `T_eq` and its Bond albedo either side, the satellites by kind, and the albedos'
+/// spread by class, printed (`--nocapture`).
+#[test]
+#[ignore = "slow: P14.T24.h.b part 5's census over 442 systems, the class table and the own albedo"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census, its movers and its spread printed in turn"
+)]
+fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_satellites() {
+    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
+    use crate::planetary::placement::OrbitHost;
+    let sets = thin_air_sets();
+    let mut envelopes: Vec<(String, String, f64, f64, f64, f64)> = Vec::new();
+    let mut satellites = std::collections::BTreeMap::<String, usize>::new();
+    let (mut bodies, mut unmoved_envelopes) = (0usize, 0usize);
+    let start = std::time::Instant::now();
+    for (set, seed, ctx) in &sets {
+        let table = records_at_27(*seed, ctx, EnvelopeBondRules::ClassTable);
+        let own = records_at_27(*seed, ctx, EnvelopeBondRules::Own);
+        assert_eq!(table.len(), own.len(), "{set} {}", ctx.id());
+        let moved_index: Vec<u32> = table
+            .iter()
+            .zip(&own)
+            .filter(|((_, a), (_, b))| format!("{a:?}") != format!("{b:?}"))
+            .map(|((index, _), _)| *index)
+            .collect();
+        for ((index, a), (other, b)) in table.iter().zip(&own) {
+            assert_eq!(index, other);
+            bodies += 1;
+            let at = format!("{set} {} {index:04x}", ctx.id());
+            let gas_envelope = matches!(a.envelope(), Section::Ok(_))
+                && matches!(a.bulk(), Section::Ok(bulk) if !bulk.class().has_solid_surface());
+            let moved = moved_index.contains(index);
+            if gas_envelope {
+                let (Section::Ok(bulk_a), Section::Ok(bulk_b)) = (a.bulk(), b.bulk()) else {
+                    panic!("{at}: an envelope with no bulk");
+                };
+                let (Section::Ok(photometry_a), Section::Ok(photometry_b)) =
+                    (a.photometry(), b.photometry())
+                else {
+                    panic!("{at}: an envelope with no photometry");
+                };
+                if moved {
+                    envelopes.push((
+                        at,
+                        format!("{:?}", bulk_a.class()),
+                        bulk_a.equilibrium_temperature().value(),
+                        bulk_b.equilibrium_temperature().value(),
+                        photometry_a.bond_albedo().value(),
+                        photometry_b.bond_albedo().value(),
+                    ));
+                } else {
+                    unmoved_envelopes += 1;
+                }
+                continue;
+            }
+            if !moved {
+                continue;
+            }
+            // Anything else that moves is a satellite of a moved envelope.
+            let parent = match a.identity().parent() {
+                Some(OrbitHost::Body(parent)) => u32::from(parent.get()),
+                other => panic!(
+                    "{at}: a {:?} moves with no envelope above it ({other:?})",
+                    a.identity().kind()
+                ),
+            };
+            assert!(
+                moved_index.contains(&parent),
+                "{at}: a {:?} moves under an unmoved parent {parent:04x}",
+                a.identity().kind()
+            );
+            *satellites
+                .entry(format!("{:?}", a.identity().kind()))
+                .or_default() += 1;
+        }
+    }
+    eprintln!(
+        "census: {} systems, {bodies} bodies, {} envelopes moved, {unmoved_envelopes} unmoved, \
+         satellites moved {satellites:?}, {:?}",
+        sets.len(),
+        envelopes.len(),
+        start.elapsed()
+    );
+    let mut classes = std::collections::BTreeMap::<String, Vec<(f64, f64)>>::new();
+    for (_, class, _, _, before, after) in &envelopes {
+        classes
+            .entry(class.clone())
+            .or_default()
+            .push((*before, *after));
+    }
+    for (class, pairs) in &classes {
+        let mut after: Vec<f64> = pairs.iter().map(|&(_, a)| a).collect();
+        let mut shift: Vec<f64> = pairs.iter().map(|&(b, a)| a - b).collect();
+        after.sort_by(f64::total_cmp);
+        shift.sort_by(f64::total_cmp);
+        let at = |v: &[f64], q: f64| {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss,
+                reason = "a quantile's index of a short list"
+            )]
+            let i = ((v.len() - 1) as f64 * q).round() as usize;
+            v[i]
+        };
+        eprintln!(
+            "census {class}: {} moved; own albedo min {:.3} median {:.3} max {:.3}; shift min \
+             {:+.3} median {:+.3} max {:+.3}",
+            pairs.len(),
+            after[0],
+            at(&after, 0.5),
+            after[after.len() - 1],
+            shift[0],
+            at(&shift, 0.5),
+            shift[shift.len() - 1]
+        );
+    }
+    let mut by_shift = envelopes.clone();
+    by_shift.sort_by(|a, b| (b.3 - b.2).abs().total_cmp(&(a.3 - a.2).abs()));
+    for (at, class, t_a, t_b, a, b) in by_shift.iter().take(20) {
+        eprintln!("census mover {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");
+    }
+    for (at, class, t_a, t_b, a, b) in envelopes.iter().filter(|e| e.2 >= 950.0) {
+        eprintln!("census hot {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");
+    }
+    assert!(!envelopes.is_empty(), "the census holds gas envelopes");
 }
