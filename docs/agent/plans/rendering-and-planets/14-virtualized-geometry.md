@@ -561,7 +561,8 @@ through `lit_place`.
    2,048 m, the finest detail the map resolves (T1.d). The overlay's depth has no slope term to
    spend: since R10.T16.c's grazing fix its terrain depth is pushed only by
    `TERRAIN_DEPTH_FRACTION`, 2⁻¹⁶ of the depth (about 0.15 m at 10 km, 4.4 m at 287 km), and the
-   survey edge pulls its own depth, so the overlay's pass stays at stride 1 (T1.e). Two modes share
+   survey edge pulls its own depth, so the overlay's pass stays at stride 1 (T1.e; from T3.c's
+   strides, T3.c's "The overlay's depth"). Two modes share
    one record:
    - **Strided template** (terrain, the smooth figure): the grid drawn at stride 1, 2, 4 or 8. Until
      T3 the error is a spacing proxy, s × the level's largest spacing (`vertexSpacing(a, L).maxM`),
@@ -652,7 +653,11 @@ through `lit_place`.
      across programs only where `@builtin(position)` is `@invariant`, so every terrain vertex stage
      carries it, today's included: landed with T1.a (13100d5b, the six pinned lit, depth and caster
      sources re-pinned), and every byte-identity capture of this plan is taken against a base that
-     has it. Each new vertex stage here carries it too.
+     has it. Each new vertex stage here carries it too. The same holds for every non-terrain stage
+     that a byte-identity acceptance compares. The vertex stages of `shaders/smoothMesh.wgsl` and
+     `shaders/occluder.wgsl` are not `@invariant` today, so T4.a and T4.b each first mark their base
+     stage's position `@invariant`, re-pinned, in a commit of its own, and take their base captures
+     after it.
    - Depth-only passes (casters, the overlay's depth) compact with `atomicAdd` appends. Their result
      is order-independent: the final depth is the nearest whatever the order, and their discards are
      per fragment. Such a cull is `presentation-only`, and its lists never reach the CPU.
@@ -770,10 +775,12 @@ through `lit_place`.
      cleared each frame. The engine draws neither today: T2.b adds the `r32uint` target and a target
      drawn with another's depth (Provides). The vertex stage writes only the clip position and one
      flat varying: the visible-cluster index on the `primitive_index` path, the ID on the de-indexed
-     one. The interior patches draw first with no discard; the edge patches draw after with the
-     survey `discard` kept in the raster: an unsurveyed fragment must write no depth, or it would
-     hide R07's reference surface beneath, so the survey test cannot move to the resolve (a
-     correction of the research's phase 2).
+     one. The interior patches draw with no discard. The edge patches draw the lit mesh, not
+     clusters, so they write no ID. They draw forward in the resolve's render pass, after it, with
+     the lit material and its survey `discard`, depth-tested against the raster's depth. An
+     unsurveyed fragment so still writes no depth (it would hide R07's reference surface beneath),
+     and the survey test still cannot move to the resolve (a correction of the research's phase 2).
+     A `terrain-fin` shape (Design note 18) would bring them onto the path.
    - **The resolve**: one full-screen pass into the scene target. A pixel whose ID is 0xffff_ffff is
      discarded and writes no depth. For each pixel with an ID it reads the visible cluster's
      template from its list entry (the cluster word's top 3 bits carry it: the stride and the
@@ -833,9 +840,14 @@ through `lit_place`.
       brainstorm's "no golden images").
       - Exact levers compare frame fingerprints: test-render logs each terrain frame's `bytesDigest`
         (T1.a built it in `smoke/harness.ts`), and one build draws a frame with and without its
-        lever (`TerrainPass.setLevers`). In a pod the exact levers compare test-render's frames
-        (R05.T11.c's terrain, part 7's R10.T16 group); TERRAIN TEST's captures are the owner's RTX
-        run's, since the terrain run does not finish on SwiftShader (Design note 18).
+        lever (`TerrainPass.setLevers`). In a pod the exact levers compare part 7's lit groups in
+        one build by `setLevers`, as T1.a's do: R10.T9.b's cascades (`smoke/sharedPass.ts`) and
+        R10.T16's frame (`smoke/terrainFrame.ts`). R05.T11.c's captures are R05's spike shading,
+        which keeps today's path, and R10.T10.c's limb captures draw `TerrainResources` without
+        `TerrainPass`, so neither shows a lever. Streamed frames vary from run to run (13100d5b's
+        grazing frames), so no exact lever compares them across builds. TERRAIN TEST's captures are
+        the owner's RTX run's, since the terrain run does not finish on SwiftShader (Design note
+        18).
       - Bounded levers compare pixels: T1.d adds `scripts/compareCaptures.mjs` (by hand, as
         `levelCounts.mjs` runs), which takes two directories of `just test-render --captures=DIR`
         frames and reports each frame's differing pixels, their largest difference in stops, and the
@@ -951,7 +963,8 @@ through `lit_place`.
       drawn frame's items equal a fresh pass's.
     - **A refused kernel or material** (`GRAPHICS SHADER REFUSED: <displayName>`): the pass falls
       back to today's path for that consumer from that frame on, and states it in its fault, as a
-      terrain fault does today.
+      terrain fault does today. From T7, which retires that path, it faults its consumer instead
+      (T7).
     - **Overflow** is impossible by construction: a bucket's capacity is the consumer's whole
       cluster count (terrain: `InstanceRecords`' capacity, its slot count, × the template's clusters
       an instance, and from T2.a 16 interior-edge strips an instance drawn as a sub-patch mask,
@@ -963,17 +976,17 @@ through `lit_place`.
     budget's third rule). R12.T0 inventories it; R12.T11 may move its values within this policy,
     never the policy:
 
-    | Field             | High                                                      | Low                                                   | Policy                                               |
-    | ----------------- | --------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-    | `clusterPath`     | on                                                        | on                                                    | Every consumer on the path; off is today's path      |
-    | `casterDepthCull` | on                                                        | on (no cascades on low)                               | Exact                                                |
-    | `casterStrideCap` | 8                                                         | 8 (no cascades on low)                                | Casters at their texel                               |
-    | `overlayDepth`    | T1.e's choice (lean `scene-depth`)                        | T1.e's choice (lean `scene-depth`)                    | No mark's visibility changes                         |
-    | `shading`         | `visibility` (after T2.e)                                 | `forward` until the owner's UHD 620 run (lean, T2.e)  | One shading a pixel where it pays                    |
-    | `strides`         | `measured` (after T3.c)                                   | `measured`                                            | Drawn error within τ′; stride 1 in the forced region |
-    | `occlusion`       | `hzb` (after T3.d)                                        | `hzb` (after T3.d; the UHD 620's run may turn it off) | Exact                                                |
-    | `pageBytes`       | 128 MiB                                                   | 32 MiB                                                | Within the memory ceilings                           |
-    | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean) | camera 2, the same occluder rule (lean)               | A mesh's DAG cut within τ; hidden-line removal holds |
+    | Field             | High                                                                       | Low                                                                        | Policy                                               |
+    | ----------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
+    | `clusterPath`     | on                                                                         | on                                                                         | Every consumer on the path; off is today's path      |
+    | `casterDepthCull` | on                                                                         | on (no cascades on low)                                                    | Exact                                                |
+    | `casterStrideCap` | 8                                                                          | 8 (no cascades on low)                                                     | Casters at their texel                               |
+    | `overlayDepth`    | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | No mark's visibility changes                         |
+    | `shading`         | `visibility` (after T2.e)                                                  | `forward` until the owner's UHD 620 run (lean, T2.e)                       | One shading a pixel where it pays                    |
+    | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region |
+    | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                |
+    | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                           |
+    | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds |
     - Nothing here moves a figure the brainstorm states (τ, 720p, 30 fps, the 4 px wireframe
       tolerance): strides stay within τ′, and `TERRAIN: DETAIL LIMITED` keeps its trigger, the
       selection's budget binding; if T3.e lets a triangle budget bind beyond τ′, that raises it too.
@@ -989,7 +1002,8 @@ through `lit_place`.
         each run's first line, so that the owner's before and after runs come from one build;
       - test-render's terrain part draws once more with `clusterPath=false` (a group in part 7);
       - the fallback on a refused kernel (Design note 16) is tested with test-render's
-        `--fixture=broken-wgsl`: today's path drawn, and the fault stated;
+        `--fixture=broken-wgsl`: today's path drawn, and the fault stated (from T7, the fault
+        alone);
       - each consumer that moves (T4.a, T4.b, T4.c, T6.c) keeps its old draw behind the same field
         until the owner's runs sign it off.
     - **At run time** `GeometrySettings` changes only with the setting, and a change rebuilds the
@@ -1208,15 +1222,17 @@ the research's figures.
   - The coarsest stride s ≤ 8 with s × the level's largest spacing ≤ the cascade's texel, 2 r ÷
     2,048. All of a patch's clusters take one stride a cascade, so no crack opens inside a patch,
     and the skirts close the rest. `casterStrideCap` caps it.
-  - Adds `scripts/compareCaptures.mjs`, the bounded levers' comparison (Design note 10).
+  - Adds `scripts/compareCaptures.mjs`, and adds to `--captures` the lit frames of R10.T9.b's
+    cascades and of R10.T16's frame, each with its terrain mask, drawn with and without the lever in
+    one run at a fixed exposure (Design note 10).
   - _Files:_ `clusters/{cullPass,clusterCull.wgsl,cullTwin}.ts`, `terrain/terrainPass.ts`,
-    `scripts/compareCaptures.mjs`, tests.
+    `scripts/compareCaptures.mjs`, `smoke/sharedPass.ts`, `smoke/terrainFrame.ts`, tests.
   - _Tests:_ the stride twin: the coarsest s with s × the largest spacing ≤ the texel, one stride
     for every cluster of a patch in a cascade.
-  - _Acceptance:_ at ≥ 99.5% of the captures' terrain pixels the lit image within 1/3 stop of T1.c's
-    (the hand-over check's unit), the rest listed with their largest difference; before and after
-    captures in the outbox; caster triangles a further 0.65–1.00 above 1 km and 0.56–0.91 below on
-    the research's counts, accepted against the rebuilt harness's.
+  - _Acceptance:_ at ≥ 99.5% of those lit captures' terrain pixels the lit image within 1/3 stop of
+    T1.c's (the hand-over check's unit), the rest listed with their largest difference; before and
+    after captures in the outbox; caster triangles a further 0.65–1.00 above 1 km and 0.56–0.91
+    below on the research's counts, accepted against the rebuilt harness's.
 - **R14.T1.e The overlay's terrain depth at what it resolves.** Choose by what is simpler to keep
   exact, and record the choice; size S–M.
   - _Today:_ `LiveFrameTerrain.symbologyDepth` redraws each of a view's terrain draws (since T1.a,
@@ -1233,7 +1249,7 @@ the research's figures.
     first form keeps both in the marks' test. It also changes what the marks test against, every
     opaque pass's depth, and agrees in size only on high at internal scale 1, never on low's 720
     rows. **Lean** (the reviews' verdict): the scene's depth where the sizes agree, the cluster path
-    at stride 1 elsewhere.
+    at stride 1 elsewhere; from T3.c's strides, the cluster path (T3.c, "The overlay's depth").
   - _Files:_ `terrain/frameTerrain.ts`, `photoreal/renderer.ts`, `photoreal/overlay.ts`, tests.
   - _Tests:_ for each choice, every mark of R10.T16's frame group kept or hidden exactly as the base
     renders it, compared mark by mark from the overlay's draw list and the depth at the mark's
@@ -1295,15 +1311,15 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
   - `VisibilityBuffer` on T2.b's target; the ID-only vertex stage, `@invariant`, writing the clip
     position and one flat varying (the visible-cluster index on the `primitive_index` path, since
     `instance_index` is vertex-only; the ID on the de-indexed one); `primitive-index` added to
-    `WANTED_FEATURES` and used where the device has it; interior patches first with no discard, edge
-    patches after with the survey discard.
+    `WANTED_FEATURES` and used where the device has it; interior patches, with no discard; the edge
+    patches forward after T2.d's resolve (Design note 9).
   - The visible-cluster list is one a view shares across every consumer, each entry (consumer,
     instance, cluster), so this subtask fixes the layout T5.e adds a pass to (Design note 9).
   - _Tests:_ the ID's packing and its twin; the de-indexed and `primitive_index` paths give the same
     IDs on SwiftShader (test-render's both variants); every material's storage bindings a stage
     counted against 8.
-  - _Acceptance:_ the ID target's depth byte-identical to T2.a's depth; the raster pass's
-    inter-stage data at most 20 B a vertex.
+  - _Acceptance:_ the scene's depth after the bodies pass byte-identical to T2.a's; the raster
+    pass's inter-stage data at most 20 B a vertex.
 - **R14.T2.d The resolve.** Size L.
   - The full-screen resolve with `ResolveMaterial`: a pixel whose ID is 0xffff_ffff discarded with
     no depth written; the visible cluster's template from its list entry (the cluster word's top 3
@@ -1311,16 +1327,18 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     receiver, then `shade_terrain` as the lit fragment calls it; bindings brought to 8 or fewer
     (Design note 6). No opaque pass between the raster and the resolve. One resolve pass a consumer
     class present, refusing the other classes' pixels (Design note 9); R11's planned terrain-shading
-    additions listed by binding class against its 8.
+    additions listed by binding class against its 8. The edge patches draw forward in the resolve's
+    render pass, after it, with the lit material and its survey `discard`, depth-tested against the
+    raster's depth (Design note 9).
   - _Tests:_ the barycentric twin against the rasteriser's on test-render's terrain frame:
     barycentrics from the three clip positions' edge functions with perspective division, the
     reconstructed place within the hardware interpolant's own error (`f32`, a few ulps), not a
     fraction of the distance, which grazing triangles cannot meet; the resolve's output against
     T2.a's at the frame's pixels.
-  - _Acceptance:_ at ≥ 99.5% of the judged terrain pixels of TERRAIN TEST's captures and
-    test-render's frames the image within 1/3 stop of T2.a's, the rest listed; no change in the
-    reference surface's pixels at the survey edge; the hand-over check (`--terrain --handover`)
-    passes as before.
+  - _Acceptance:_ at ≥ 99.5% of the judged terrain pixels of TERRAIN TEST's captures and the lit
+    frames T1.d adds to `--captures` the image within 1/3 stop of T2.a's, the rest listed; no change
+    in the reference surface's pixels at the survey edge; the hand-over check
+    (`--terrain --handover`) passes as before.
 - **R14.T2.e The Mac's order, and the switch.** Size S.
   - `shading: "visibility"` on high once the owner's Mac and RTX runs are recorded; low stays
     `forward` until the owner's UHD 620 run of `just views-check --terrain --hidden --setting low`,
@@ -1346,7 +1364,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
 - _Files (all of T3):_ `clusters/{errors.ts,hzb.ts,hzb.wgsl,clusterCull.wgsl}`,
   `terrain/workers/{heightBake,messages}.ts`, `terrain/coarseFineHolds.ts`,
   `terrain/terrainPass.ts`, `terrain/shaders/patchVertex.wgsl`, `terrain/frameTerrain.ts`,
-  `photoreal/renderer.ts` and `photoreal/passes.ts` (T3.d's split of the bodies pass, each part a
+  `photoreal/overlay.ts` (T3.c's overlay depth), `photoreal/renderer.ts` and `photoreal/passes.ts`
+  (T3.d's split of the bodies pass, each part a
   labelled submission), tests; T3.e's draft in this plan.
 
 - **R14.T3.a The error histogram.** Size S. Over TERRAIN TEST and a served world (`owner-test`'s
@@ -1387,6 +1406,11 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     seamless probe takes its strides from `cullTwin.ts`, since its counting engine sees no GPU.
   - **Beside an edge patch**, which stays at stride 1, a cluster takes stride ≤ 2 on the shared
     edge.
+  - **The overlay's depth.** Where `overlayDepth` is `scene-depth`, the scene's depth carries the
+    camera pass's strides, whose error passes the 2⁻¹⁶ push. So with `strides: "measured"` the
+    overlay draws its own depth on the cluster path at stride 1 (`cluster`), or reads the scene's
+    only where every drawn cluster is at stride 1. T3.c's acceptance adds T1.e's: no mark's
+    visibility changes in R10.T16's frame group.
   - **Fallback**, if the band costs too much of T3.a's gain: a time fade, with a per-(slot, cluster)
     state buffer (the previous stride and its change time; presentation only; one more vertex-stage
     binding, against the 8; rewritten with the slot's records and lost with the device), refining at
@@ -1400,7 +1424,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
   - _Acceptance:_ on the seamless probe at 3 × 41 ms, both settings, per-frame vertex moves from
     stride changes ≤ 1 px (high) and 2 px (low), normal changes ≤ 2°, no crack (no frame where the
     sky shows through the drawn surface in test-render's terrain frames); lit triangles as T3.a
-    predicts, within 10%; the Mac's fps (pending).
+    predicts, within 10%; no mark's visibility changes in R10.T16's frame group (T1.e's); the Mac's
+    fps (pending).
 - **R14.T3.d Two-pass occlusion.** Size M.
   - `DepthPyramid` and the two-pass cull of Design note 4 per view, in both the forward and the
     visibility paths. `occlusion: "hzb"`.
@@ -1457,15 +1482,17 @@ wireframe draw needs only T1.
   are flagged may-discard and draw after the opaque ones (Design note 7). `ClusterConsumer` lands
   here. _Tests:_ the figure's cluster places against `FaceDifferences`' at h = 0 (the twin); its
   triangles before and after. _Acceptance:_ test-render's mesh-bodies frames
-  (`src/renderer/src/smoke/meshBodies.ts`) byte-identical; draws counted against today's (expected:
-  one a stride-1 template bucket).
+  (`src/renderer/src/smoke/meshBodies.ts`) byte-identical, against a base whose `smoothMesh.wgsl`
+  position is first made `@invariant` in a commit of its own (Design note 5); draws counted against
+  today's (expected: one a stride-1 template bucket).
 - **R14.T4.b The generic mesh template, with the hull occluders.** Size S–M. `meshTemplate()`, a
   128-triangle cluster drawn by index pulling, and the DAG-cut mode's draw on a one-level DAG: the
   hull occluder faces (`occluder.wgsl`'s `corners`) as one page, depth-only in the wireframe and as
   the silhouette's fill over the image, depth pushed by `occluderSlopePx` as today. Index pulling
   costs three vertex invocations a triangle (Design note 2), counted. _Tests:_ the DAG cut's twin
   (own ≤ τ < parent) over random monotone DAGs selects a consistent cut. _Acceptance:_ test-render's
-  hull and hidden-line frames byte-identical.
+  hull and hidden-line frames byte-identical, against a base whose `occluder.wgsl` position is first
+  made `@invariant` in a commit of its own (Design note 5).
 - **R14.T4.c The wireframe's terrain on the path.** Size S. The wireframe's depth-and-contour pass
   through the buckets at stride 1, with the interior split (no discard) and the cluster cull (Design
   note 13). _Tests:_ contours at stride 1 everywhere, a twin of `#writeWire`'s. _Acceptance:_ the
@@ -1595,9 +1622,13 @@ Size M, client only, after T1.
 
 Size S, client only, after the owner's runs sign off T1–T3 (and each of T4–T6's consumers its own).
 
-- Removes today's lit, caster and overlay draws and `clusterPath`'s `false`, and each moved
-  consumer's old draw, keeping only R05's spike shading on today's path for good, so that the gate's
-  recorded runs stay comparable (Scope).
+- Removes the interior patches' instanced lit, caster and overlay draws, `clusterPath`'s `false`
+  and each moved consumer's old draw. It keeps the edge patches' lit-mesh draws, which edge patches
+  and seamless-1's sub-patch stand-ins at a level offset of 4 or more still use (Design note 19),
+  and R05's spike shading on today's path for good, so that the gate's recorded runs stay comparable
+  (Scope).
+- From T7 a refused cluster kernel or material faults its consumer and states it, as a refused
+  terrain material does today, and the `--fixture=broken-wgsl` test expects that (Design note 16).
 - _Acceptance:_ test-render, both variants, its captures unchanged against the build before; the
   catalogue no longer holds the retired forms.
 
@@ -1685,8 +1716,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
 - **Not consumers**: clouds (volumetric or a 2D layer), R11's ocean surface, the ring slab
   (R11.T9.c, analytic) and the disc impostors; the ocean's patch grid could take the strided
   templates later (open).
-- **Today's path is kept** until the owner's runs sign off T1–T3; R14.T7 removes it, but for R05's
-  spike shading, which keeps it for good.
+- **Today's path is kept** until the owner's runs sign off T1–T3; R14.T7 removes it, but for the
+  edge patches' lit-mesh draws and R05's spike shading, which keep it for good.
 - **T5 closes after RM6's content**: R11's rocks, pebbles and particles are its consumers.
 - **Asks of other plans** (open):
   - R01: T2.b's ID target (an `r32uint` format, a target drawn with another's depth, a `uint`
