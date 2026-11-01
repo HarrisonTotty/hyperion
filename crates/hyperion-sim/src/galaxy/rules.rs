@@ -14,9 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`member_remnants`](GalaxyRules::member_remnants), at [`TABULATED_REMNANTS_VERSION`] (plan 09,
-//!   P09.T10): a remnant class's member draw asks the cluster's tabulated remnants before it builds
-//!   an attempt's star.
 //! - [`field_share`](GalaxyRules::field_share), at [`FIELD_SHARE_VERSION`] (plan 09, P09.T2.c):
 //!   the field gives up the features' share φ of its systems. It is read where the galaxy is built,
 //!   which installs the field's factors, so `Galaxy::with_rules` refuses to change it.
@@ -104,7 +101,6 @@ use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::survivors::{HYPERVELOCITY_VERSION, HypervelocityRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
-use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
 use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
 use crate::galaxy::global_list::{LIST_SOURCE_VERSION, ListSourceRules};
@@ -115,9 +111,6 @@ use crate::stellar::rules::StellarRules;
 /// (decision-galaxy-25-train §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GalaxyRules {
-    /// How a remnant class's member draw decides an attempt: its star built, or the cluster's
-    /// tabulated remnants first (P09.T10).
-    pub(crate) member_remnants: MemberRemnantRules,
     /// Whether the field gives up the features' share φ of its systems (P09.T2.c).
     pub(crate) field_share: FieldShareRules,
     /// Whether the grid gives the catalogue classes their hosts (P09.T35).
@@ -168,11 +161,6 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
-            member_remnants: if version.get() >= TABULATED_REMNANTS_VERSION.get() {
-                MemberRemnantRules::Tabulated
-            } else {
-                MemberRemnantRules::EveryAttempt
-            },
             field_share: if version.get() >= FIELD_SHARE_VERSION.get() {
                 FieldShareRules::Phi
             } else {
@@ -253,8 +241,8 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
-    /// version's rules with the holds that turn on at 26 (the galaxy's `member_remnants`, P09.T10,
-    /// and `carve_out`, P09.T35; the stellar rules' `stripping`, P11.T1.d;
+    /// version's rules with the holds that turn on at 26 (the galaxy's `carve_out`, P09.T35; the
+    /// stellar rules' `stripping`, P11.T1.d;
     /// [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
@@ -403,15 +391,6 @@ mod tests {
     /// Each galaxy hold at 26 is held below it and new from it on, in every 26 hold.
     #[test]
     fn each_26_hold_turns_on_at_26() {
-        let remnants = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).member_remnants;
-        for v in [23, 24, 25] {
-            assert_eq!(remnants(v), MemberRemnantRules::EveryAttempt, "{v}");
-        }
-        assert_eq!(remnants(26), MemberRemnantRules::Tabulated);
-        assert_eq!(
-            GalaxyRules::every_26_hold().member_remnants,
-            MemberRemnantRules::Tabulated
-        );
         let field = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).field_share;
         for v in [23, 24, 25, 26] {
             assert_eq!(field(v), FieldShareRules::None, "{v}");

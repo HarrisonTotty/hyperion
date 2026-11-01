@@ -1,5 +1,5 @@
 //! A cluster's tabulated remnants: what decides a remnant class's member attempt without its
-//! star's track, from version 26 (plan 09, P09.T10; the hold of [`TABULATED_REMNANTS_VERSION`]).
+//! star's track, from version 26 (plan 09, P09.T10).
 //!
 //! A remnant class's draw ([`draw_member`](super::draw_member)) keeps an attempt whose star leaves
 //! a remnant of the class's kind kicked below the cluster's effective escape speed, and the star
@@ -7,9 +7,8 @@
 //! costs a lifetime build, about 0.55 ms, so a globular core's 50 ly query, some 6,500
 //! white-dwarf and 2,400 neutron-star attempts, takes 6.2 s under 26's rules held but this one;
 //! with the table, 2.5 s, and 1.0 s once the stripping table's helium axis makes a helium-rich
-//! star's share a lookup (a pod of 16 vCPU, release). Under
-//! [`MemberRemnantRules::Tabulated`] the draw asks [`tabulated_fit`] first, and only an attempt it
-//! cannot decide builds its star:
+//! star's share a lookup (a pod of 16 vCPU, release). The draw asks [`tabulated_fit`] first, and
+//! only an attempt it cannot decide builds its star:
 //!
 //! - **A white dwarf** is kept below the cluster's white-dwarf ceiling, if its kick, which the
 //!   star's draws alone set ([`StandardKickLaw::white_dwarf_kick`]), is below the escape speed.
@@ -50,7 +49,6 @@
 
 use std::sync::OnceLock;
 
-use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::displaced::binarity::{self, NEVER_STRIPPED};
 use crate::galaxy::features::cluster::ClusterModel;
@@ -72,24 +70,6 @@ use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, TrackOptions, ZCoeffs};
 use crate::stellar::system::track_mass_of;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, SolarMasses, Years};
-
-/// The generator version whose member draws read a cluster's tabulated remnants
-/// ([`MemberRemnantRules::Tabulated`]). Members are first served at 26, so the arm moves nothing
-/// served before it. The 25 → 26 bump deletes this constant, [`MemberRemnantRules`] with its
-/// `EveryAttempt` arm, `GalaxyRules::member_remnants`, the `match` in [`remnant_attempt_fits`]
-/// and the tripwire `the_tabulated_remnants_are_held_only_until_the_26_bump`.
-pub(crate) const TABULATED_REMNANTS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// How a remnant class's member draw decides an attempt (the hold of
-/// [`TABULATED_REMNANTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MemberRemnantRules {
-    /// Version 25's and before: every attempt's star built ([`remnant_fits`](super::remnant_fits)).
-    EveryAttempt,
-    /// Version 26's: the cluster's tabulated remnants first ([`tabulated_fit`]), the star built
-    /// only for an attempt they leave open.
-    Tabulated,
-}
 
 /// How far below the lightest star that leaves anything but a white dwarf a cluster's
 /// [`white_dwarf_ceiling`](RemnantTable::white_dwarf_ceiling) lies, M☉: the companion-stripped
@@ -281,8 +261,7 @@ pub(crate) fn white_dwarf_edge(model: &ClusterModel, rules: StellarRules) -> Sol
 /// class `kind` and initial mass `mass` (M☉), of `composition`, at `address` (the universe, system
 /// and attempt) and age at the epoch `age`, judged on the effective escape speed and its pair's
 /// systemic speed `speeds` (km/s), the arguments [`remnant_fits`](super::remnant_fits) takes.
-/// Under [`MemberRemnantRules::Tabulated`] it is [`tabulated_fit`]'s answer where that gives one;
-/// otherwise, and always below version 26, the star's own.
+/// It is [`tabulated_fit`]'s answer where that gives one, and otherwise the star's own.
 ///
 /// # Panics
 ///
@@ -299,17 +278,14 @@ pub(crate) fn remnant_attempt_fits(
 ) -> bool {
     let rules = galaxy.rules().stellar;
     let track = || super::remnant_fits(kind, mass, composition, address, age, speeds, rules);
-    let tabulated = match galaxy.rules().member_remnants {
-        MemberRemnantRules::EveryAttempt => None,
-        MemberRemnantRules::Tabulated => tabulated_fit(
-            (kind, mass),
-            composition,
-            address,
-            (age, speeds),
-            model,
-            rules,
-        ),
-    };
+    let tabulated = tabulated_fit(
+        (kind, mass),
+        composition,
+        address,
+        (age, speeds),
+        model,
+        rules,
+    );
     debug_assert!(
         tabulated != Some(true) || track(),
         "the tabulated remnants keep a {kind:?} of {mass} M☉ ({composition:?}, {address:?}) that \
@@ -746,22 +722,6 @@ mod tests {
             .flat_map(|band| table.classes(band).map(|(c, _)| *c).collect::<Vec<_>>())
             .filter(|c| c.kind == kind && c.multiplicity == Multiplicity::Single)
             .collect()
-    }
-
-    #[test]
-    fn the_tabulated_remnants_are_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < TABULATED_REMNANTS_VERSION,
-            "the 25 → 26 bump puts the tabulated remnants on the record: a remnant class's member \
-             draw asks the cluster's ceiling and the kicks' floor before it builds an attempt's \
-             star. Delete `TABULATED_REMNANTS_VERSION`, `MemberRemnantRules` with its \
-             `EveryAttempt` arm, `GalaxyRules::member_remnants`, the `match` in \
-             `remnant_attempt_fits` and this test, in the bump's own commit"
-        );
-        assert_eq!(
-            GalaxyRules::of_version(GENERATOR_VERSION).member_remnants,
-            MemberRemnantRules::EveryAttempt
-        );
     }
 
     /// The fixture's most massive globular, of [Fe/H] −0.54 and a helium excess up to 0.18 in its
