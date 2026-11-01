@@ -6,18 +6,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Vec3 } from "../../geometry/vec3";
+import { worstOutsideClusters } from "../../test/clusterBounds";
 import { WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "../terrain/cube";
 import { litInteriorMeshData } from "../terrain/gpu/resources";
-import { patchTerms } from "../terrain/gpu/uniforms";
-import {
-  faceDifferenceMorphF32,
-  faceDifferencePositionF32,
-  directionDifferenceF32,
-  normalDifferenceF32,
-  type SlotTermsF32,
-} from "../terrain/gpu/vertexEmulation";
 import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet";
 import { CLUSTER_RECORD_BYTES } from "./record";
@@ -156,29 +148,6 @@ function random(seed: number): () => number {
   };
 }
 
-/** `key`'s terms on `figure` at origin height `h0M`, narrowed as its slot record holds them. */
-function termsF32(key: PatchKey, figure: BodyFigure, h0M: number): SlotTermsF32 {
-  const terms = patchTerms(key, figure, h0M);
-  const f = Math.fround;
-  const v = (a: Vec3): Vec3 => ({ x: f(a.x), y: f(a.y), z: f(a.z) });
-  const [a, e1, e2] = terms.axes;
-  return {
-    axisA: v(a),
-    axisE1: v(e1),
-    axisE2: v(e2),
-    s0: f(terms.st0[0]),
-    t0: f(terms.st0[1]),
-    u0: f(terms.uv0[0]),
-    v0: f(terms.uv0[1]),
-    step: f(terms.step),
-    scale: v(terms.scale),
-    m0: v(terms.m0),
-    nu0: v(terms.nu0),
-    h0M: f(h0M),
-    straddles: terms.straddles,
-  };
-}
-
 const MOON_LIKE_FIGURE: BodyFigure = {
   equatorialRadiusM: 1_737_400,
   polarRadiusM: 1_736_000,
@@ -189,7 +158,6 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
   /** Every vertex the GPU places of a random patch, its morphs and its feet, against its clusters. */
   function worstOutside(figure: BodyFigure, key: PatchKey, seed: number): number {
     const next = random(seed);
-    const planet = planetGeometry(figure, null);
     const span = 50 + 9_000 * next();
     const low = -span * next();
     const high = low + span;
@@ -197,65 +165,17 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
     const own = Float64Array.from({ length: 65 * 65 }, () => Math.fround(low + span * next()));
     const morph = Float64Array.from({ length: 65 * 65 }, () => Math.fround(low + span * next()));
     const h0M = own[32 * 65 + 32] ?? 0;
-    const [ox, oy, oz] = surfacePoint(figure, vertexDir(key, 32, 32), h0M);
-    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
-    writeTerrainClusterRecords(
-      planet,
-      { key, originM: { x: ox, y: oy, z: oz }, heightRangeM: [low, high], skirtDepthM },
-      records,
-      0,
-    );
-    const rec = termsF32(key, figure, h0M);
-    const sphere = (cluster: number): readonly [Vec3, number] => {
-      const at = cluster * CLUSTER_RECORD_BYTES;
-      return [
-        {
-          x: records.getFloat32(at, true),
-          y: records.getFloat32(at + 4, true),
-          z: records.getFloat32(at + 8, true),
-        },
-        records.getFloat32(at + 12, true),
-      ];
-    };
-    let worst = -Infinity;
-    const check = (cluster: number, p: Vec3): void => {
-      const [c, r] = sphere(cluster);
-      worst = Math.max(worst, Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z) - r);
-    };
-    for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
-      const block = cluster < TERRAIN_BLOCKS;
-      const t = block ? 0 : STRIDES.length;
-      const template = MESH.templates[t];
-      const indices = MESH.mesh.indices ?? new Uint32Array();
-      for (let n = 0; n < (template?.indexCount ?? 0); n += 1) {
-        const [x, y, code] = terrainClusterGrid(
-          cluster,
-          local(indices[(template?.firstIndex ?? 0) + n] ?? 0),
-        );
-        const q0 = faceDifferencePositionF32(rec, x, y, own[y * 65 + x] ?? 0);
-        const q1 = faceDifferenceMorphF32(rec, x, y, (px, py) => morph[py * 65 + px] ?? 0);
-        const nu = (() => {
-          const d = normalDifferenceF32(rec, directionDifferenceF32(rec, x, y));
-          return { x: rec.nu0.x + d.x, y: rec.nu0.y + d.y, z: rec.nu0.z + d.z };
-        })();
-        for (const k of [0, 0.25, 0.5, 0.75, 1]) {
-          const q = {
-            x: q0.x + k * (q1.x - q0.x),
-            y: q0.y + k * (q1.y - q0.y),
-            z: q0.z + k * (q1.z - q0.z),
-          };
-          const h = (own[y * 65 + x] ?? 0) * (1 - k) + (morph[y * 65 + x] ?? 0) * k;
-          if (code === 0) {
-            check(cluster, q);
-          } else {
-            // `lit_place`'s foot: min(h − d, 0) along the datum's normal from the morphed vertex.
-            const drop = Math.min(h - skirtDepthM, 0) - h;
-            check(cluster, { x: q.x + drop * nu.x, y: q.y + drop * nu.y, z: q.z + drop * nu.z });
-          }
-        }
-      }
-    }
-    return worst;
+    const [x, y, z] = surfacePoint(figure, vertexDir(key, 32, 32), h0M);
+    return worstOutsideClusters({
+      figure,
+      key,
+      originM: { x, y, z },
+      originHeightM: h0M,
+      own,
+      morph,
+      heightRangeM: [low, high],
+      skirtDepthM,
+    });
   }
 
   it.each([

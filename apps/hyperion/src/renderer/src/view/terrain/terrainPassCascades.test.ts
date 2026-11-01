@@ -424,6 +424,20 @@ const CLUSTERS_ALONE: GeometrySettings = {
   overlayDepth: "redraw",
 };
 
+/** A draw as the names of what it draws with: the item a fresh pass's would be. */
+function drawShape(draw: DrawItem): unknown {
+  return {
+    mesh: draw.mesh.name,
+    material: draw.material.name,
+    storage: Object.fromEntries(
+      Object.entries(draw.storageBuffers ?? {}).map(([name, buffer]) => [name, buffer.name]),
+    ),
+    indirect:
+      draw.indirect === undefined ? null : [draw.indirect.buffer.name, draw.indirect.offsetBytes],
+    base: [...(draw.uniforms["clusterBase"] ?? [])],
+  };
+}
+
 /** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
 function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
   const view = new DataView(words.buffer, words.byteOffset, words.byteLength);
@@ -1094,6 +1108,81 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     made.pass.measureClusters(true);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect([unmeasured, copies(), made.pass.clusterStats(PRIMARY)]).toEqual([0, 1, null]);
+  });
+
+  it("makes its cluster path again after a restore, its records, buckets and kernel new, its first frame's items a fresh pass's (R14.T1.b; Design note 16)", async () => {
+    const shapeOf = (frame: TerrainViewFrame): unknown => ({
+      draws: frame.draws.map(drawShape),
+      casters: cascadesOf(frame).passes.map((pass) => pass.draws.map(drawShape)),
+      overlay: frame.overlayDepth?.clusters.map(drawShape) ?? null,
+    });
+    const made = await clusteredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const made0 = {
+      kernels: made.engine.kernelPairs.filter((pair) => pair.name === "cluster cull").length,
+      writes: made.engine.writes.length,
+    };
+    const created: string[] = [];
+    const off = made.engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        created.push(event.name);
+      }
+    });
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    const restored = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    off();
+    const fresh = await clusteredPass();
+    const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([
+      made.engine.kernelPairs.filter((pair) => pair.name === "cluster cull").length > made0.kernels,
+      made.engine.writes
+        .slice(made0.writes)
+        .some((w) => w.buffer === "terrain cluster records" && w.bytes === 96 * 32),
+      ["terrain cluster records", `terrain clusters (${PRIMARY}) lists`].every((name) =>
+        created.includes(name),
+      ),
+    ]).toEqual([true, true, true]);
+    expect(shapeOf(restored)).toEqual(shapeOf(freshFrame));
+  });
+
+  it("times one cull and four caster passes a lit view-frame, one more for the counters while measured, and resolves nothing of its own (R14.T1.b; Design note 18)", async () => {
+    // The heaviest frame's three views (a photorealistic primary and two instruments) of one body.
+    const made = await clusteredPass();
+    const views = [
+      passView(PRIMARY, NEAR),
+      passView(INSTRUMENT, viewOver(50, 40)),
+      passView(instrumentViewId(2), viewOver(50, 80)),
+    ];
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    stream(made, views, 24);
+    const timedOf = (measuring: boolean): readonly [number, number, number] => {
+      made.pass.measureClusters(measuring);
+      const dispatched = made.engine.dispatched.length;
+      const layered = made.engine.depthLayerRenders.length;
+      const frames = made.engine.targetFrames.length;
+      for (const view of views) {
+        made.pass.drawFor(view.id, frameOf(view.view, true));
+      }
+      const passes =
+        made.engine.dispatched.slice(dispatched).filter((d) => d.pass !== undefined).length +
+        made.engine.depthLayerRenders
+          .slice(layered)
+          .reduce((sum, render) => sum + render.passes.length, 0);
+      return [
+        passes,
+        made.engine.targetFrames.length - frames,
+        made.engine.dispatched.length - dispatched,
+      ];
+    };
+    // Unmeasured: 3 × (the cull and four cascades); measured, each view's reduction too.
+    expect([timedOf(false), timedOf(true)]).toEqual([
+      [15, 0, 3],
+      [18, 0, 6],
+    ]);
   });
 
   it("gives two views of one pass each their own four passes, of their own records", async () => {

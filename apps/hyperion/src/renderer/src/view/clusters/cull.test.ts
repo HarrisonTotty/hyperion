@@ -462,3 +462,211 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     });
   });
 });
+
+/** A seeded uniform generator in [0, 1) (mulberry32). */
+function random(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** `f32` arithmetic, one rounding an operation, as the kernel's. */
+const f = Math.fround;
+
+function dotF32(a: Vec3, b: Vec3): number {
+  return f(f(f(a.x * b.x) + f(a.y * b.y)) + f(a.z * b.z));
+}
+
+function narrowed(v: Vec3): Vec3 {
+  return { x: f(v.x), y: f(v.y), z: f(v.z) };
+}
+
+/**
+ * `clusterCull.wgsl`'s `camera_keeps` in `f32`: the sphere at the instance's narrowed origin plus
+ * its narrowed record offset, against the narrowed planes.
+ */
+function cameraKeepsF32(
+  pass: CameraCullPass,
+  originM: Vec3,
+  offsetM: Vec3,
+  radiusM: number,
+): boolean {
+  const o = narrowed(originM);
+  const r = narrowed(offsetM);
+  const centre = { x: f(o.x + r.x), y: f(o.y + r.y), z: f(o.z + r.z) };
+  const radius = f(radiusM);
+  const length = f(Math.sqrt(dotF32(centre, centre)));
+  const slack = f(f(f(1e-6) * length) + 1);
+  const reach = f(radius + slack);
+  if (dotF32(centre, centre) <= f(reach * reach)) {
+    return true;
+  }
+  return pass.planes.every(
+    (plane) => f(dotF32(narrowed(plane.normal), centre) + f(plane.offsetM)) >= -reach,
+  );
+}
+
+/** `clusterCull.wgsl`'s `cascade_keeps` in `f32`, the sphere formed as {@link cameraKeepsF32}'s. */
+function cascadeKeepsF32(
+  pass: CascadeCullPass,
+  originM: Vec3,
+  offsetM: Vec3,
+  radiusM: number,
+): boolean {
+  const o = narrowed(originM);
+  const r = narrowed(offsetM);
+  const centre = { x: f(o.x + r.x), y: f(o.y + r.y), z: f(o.z + r.z) };
+  const [xL, yL, zL] = pass.axes.map(narrowed);
+  const c = narrowed(pass.centreFromCameraLightM);
+  const v = {
+    x: f(dotF32(centre, xL ?? X) - c.x),
+    y: f(dotF32(centre, yL ?? Y) - c.y),
+    z: f(dotF32(centre, zL ?? Z) - c.z),
+  };
+  const slack = f(
+    f(
+      f(1e-6) *
+        f(f(f(Math.sqrt(dotF32(centre, centre))) + f(Math.sqrt(dotF32(c, c)))) + f(pass.radiusM)),
+    ) + 1,
+  );
+  const reach = f(f(f(pass.radiusM) + f(radiusM)) + slack);
+  return (
+    Math.abs(v.x) <= reach &&
+    Math.abs(v.y) <= reach &&
+    v.z >= -f(f(f(pass.depthFarM) + f(radiusM)) + slack)
+  );
+}
+
+/** A unit vector of `next`, uniform on the sphere. */
+function unit(next: () => number): Vec3 {
+  const z = 2 * next() - 1;
+  const phi = 2 * Math.PI * next();
+  const s = Math.sqrt(1 - z * z);
+  return { x: s * Math.cos(phi), y: s * Math.sin(phi), z };
+}
+
+describe("the cluster cull's camera pass in the brainstorm's cases (plan R14, R14.T1.b's tests)", () => {
+  it("keeps a cluster larger than the frustum that holds it, and one the camera is inside", () => {
+    const exact = (c: Vec3, r: number): boolean => cameraKeeps(CAMERA, c, r, 0);
+    expect([
+      // Larger than the frustum's cross-section where it stands, wholly across all four sides.
+      exact({ x: 0, y: 0, z: -300 }, 250),
+      // Its centre behind the camera, the camera inside it.
+      exact({ x: 0, y: 0, z: 5 }, 10),
+      exact({ x: 40, y: -30, z: 20 }, 60),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("keeps a cluster across the near plane, and refuses one wholly behind it", () => {
+    const exact = (c: Vec3, r: number): boolean => cameraKeeps(CAMERA, c, r, 0);
+    expect([
+      exact({ x: 0, y: 0, z: -0.5 }, 0.3),
+      exact({ x: 0, y: 0, z: -0.3 }, 0.25),
+      exact({ x: 0, y: 0, z: 0.4 }, 0.2),
+    ]).toEqual([true, true, false]);
+  });
+
+  it("never refuses in f32 at 10⁷ m from the camera what the f64 sphere test keeps, nor keeps what the widened twin refuses", () => {
+    const next = random(0x14_1f);
+    let keptByExact = 0;
+    let refusedByWidened = 0;
+    const misses: string[] = [];
+    for (let n = 0; n < 20_000; n += 1) {
+      // An instance about 10⁷ m out near one of the frustum's planes, its cluster a patch's width off.
+      const plane = CAMERA.planes[n % 4] ?? { normal: X, offsetM: 0 };
+      const ahead = { x: 0, y: 0, z: -1e7 * (0.5 + next()) };
+      const along = dotF32(plane.normal, ahead);
+      const originM = {
+        x: ahead.x - along * plane.normal.x + 3e4 * (next() - 0.5) * plane.normal.x,
+        y: ahead.y - along * plane.normal.y + 3e4 * (next() - 0.5) * plane.normal.y,
+        z: ahead.z - along * plane.normal.z + 3e4 * (next() - 0.5) * plane.normal.z,
+      };
+      const d = unit(next);
+      const offsetM = { x: 5e3 * d.x, y: 5e3 * d.y, z: 5e3 * d.z };
+      const radiusM = 1 + 2e3 * next();
+      const centre = {
+        x: originM.x + offsetM.x,
+        y: originM.y + offsetM.y,
+        z: originM.z + offsetM.z,
+      };
+      const kernel = cameraKeepsF32(CAMERA, originM, offsetM, radiusM);
+      if (cameraKeeps(CAMERA, centre, radiusM, 0)) {
+        keptByExact += 1;
+        if (!kernel) {
+          misses.push(`refused ${JSON.stringify(centre)} r ${String(radiusM)}`);
+        }
+      }
+      if (!cameraKeeps(CAMERA, centre, radiusM, 2)) {
+        refusedByWidened += 1;
+        if (kernel) {
+          misses.push(`kept ${JSON.stringify(centre)} r ${String(radiusM)}`);
+        }
+      }
+    }
+    expect(misses).toEqual([]);
+    expect([keptByExact, refusedByWidened].every((count) => count > 2_000)).toBe(true);
+  });
+
+  it("never refuses in f32 at 10⁷ m from the camera what the f64 box test keeps, nor keeps what the widened twin refuses", () => {
+    const next = random(0x14_2f);
+    let keptByExact = 0;
+    let refusedByWidened = 0;
+    const misses: string[] = [];
+    for (let n = 0; n < 20_000; n += 1) {
+      const zL = unit(next);
+      const xL = (() => {
+        const a = Math.abs(zL.x) < 0.9 ? X : Y;
+        const t = dotF32(a, zL);
+        const v = { x: a.x - t * zL.x, y: a.y - t * zL.y, z: a.z - t * zL.z };
+        const l = Math.hypot(v.x, v.y, v.z);
+        return { x: v.x / l, y: v.y / l, z: v.z / l };
+      })();
+      const yL = {
+        x: zL.y * xL.z - zL.z * xL.y,
+        y: zL.z * xL.x - zL.x * xL.z,
+        z: zL.x * xL.y - zL.y * xL.x,
+      };
+      const pass = cascade({
+        axes: [xL, yL, zL],
+        // A far cascade, its centre 10⁷ m out along its own x.
+        centreFromCameraLightM: { x: 1e7, y: 0, z: 0 },
+        radiusM: 2e5,
+        depthFarM: 3e5,
+      });
+      // A cluster near the box's x or y face, or its far face, a patch's width off.
+      const side = n % 3;
+      const lx = side === 0 ? 1e7 + (2e5 + 3e4 * (next() - 0.5)) : 1e7 + 4e5 * (next() - 0.5);
+      const ly = side === 1 ? 2e5 + 3e4 * (next() - 0.5) : 4e5 * (next() - 0.5);
+      const lz = side === 2 ? -3e5 + 3e4 * (next() - 0.5) : 4e5 * (next() - 0.5);
+      const centre = {
+        x: lx * xL.x + ly * yL.x + lz * zL.x,
+        y: lx * xL.y + ly * yL.y + lz * zL.y,
+        z: lx * xL.z + ly * yL.z + lz * zL.z,
+      };
+      const d = unit(next);
+      const offsetM = { x: 5e3 * d.x, y: 5e3 * d.y, z: 5e3 * d.z };
+      const originM = { x: centre.x - offsetM.x, y: centre.y - offsetM.y, z: centre.z - offsetM.z };
+      const radiusM = 1 + 2e3 * next();
+      const kernel = cascadeKeepsF32(pass, originM, offsetM, radiusM);
+      if (cascadeKeeps(pass, centre, radiusM, 0)) {
+        keptByExact += 1;
+        if (!kernel) {
+          misses.push(`refused ${JSON.stringify(centre)} r ${String(radiusM)}`);
+        }
+      }
+      if (!cascadeKeeps(pass, centre, radiusM, 2)) {
+        refusedByWidened += 1;
+        if (kernel) {
+          misses.push(`kept ${JSON.stringify(centre)} r ${String(radiusM)}`);
+        }
+      }
+    }
+    expect(misses).toEqual([]);
+    expect([keptByExact, refusedByWidened].every((count) => count > 2_000)).toBe(true);
+  });
+});
