@@ -65,6 +65,10 @@ name = "range_query"
 harness = false
 
 [[bench]]
+name = "served_bake"
+harness = false
+
+[[bench]]
 name = "sky"
 harness = false
 
