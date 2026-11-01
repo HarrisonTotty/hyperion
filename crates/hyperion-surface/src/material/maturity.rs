@@ -5817,7 +5817,9 @@ mod tests {
         use std::time::Instant;
 
         use super::*;
-        use crate::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
+        use crate::bake::{
+            HorizonLayer, NormalsLayer, TerrainBakeOptions, WeightsLayer, bake_terrain,
+        };
         use crate::cube::SampleGrid;
         use crate::field::{Cover, CoverRange, PartialField, ResolutionCode, cell_index};
         use crate::patch::{BakeOptions, NormalScale, VertexPath};
@@ -5833,6 +5835,7 @@ mod tests {
             },
             weights: WeightsLayer::Baked,
             horizon: HorizonLayer::Skipped,
+            normals: NormalsLayer::Baked,
         };
 
         /// The least of `runs` timings of `run`, seconds.

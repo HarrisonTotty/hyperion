@@ -16,6 +16,7 @@ import {
   initSync,
   LineOfSightKind,
   maturityNodeCount,
+  NormalsLayer,
   SigmaSurvey,
   SurfaceFields,
   testPlanetVersion,
@@ -51,6 +52,7 @@ import {
   WASM_HORIZON_LAYER,
   WASM_LINE_OF_SIGHT,
   WASM_NORMAL_SCALE,
+  WASM_NORMALS_LAYER,
   WASM_SIGMA_SURVEY,
   WASM_VERTEX_PATH,
   WASM_WEIGHTS_LAYER,
@@ -322,6 +324,7 @@ function rootDoubledNormals(face: Face): Float32Array {
     WASM_NORMAL_SCALE.double,
     WASM_WEIGHTS_LAYER.skipped,
     WASM_HORIZON_LAYER.skipped,
+    WASM_NORMALS_LAYER.baked,
     0,
   );
   if (root === undefined) {
@@ -410,6 +413,8 @@ describe("the height worker's fields on the real module", () => {
     expect(WASM_WEIGHTS_LAYER.skipped).toBe(WeightsLayer.Skipped);
     expect(WASM_HORIZON_LAYER.baked).toBe(HorizonLayer.Baked);
     expect(WASM_HORIZON_LAYER.skipped).toBe(HorizonLayer.Skipped);
+    expect(WASM_NORMALS_LAYER.baked).toBe(NormalsLayer.Baked);
+    expect(WASM_NORMALS_LAYER.skipped).toBe(NormalsLayer.Skipped);
     expect(WASM_LINE_OF_SIGHT.ground).toBe(LineOfSightKind.Ground);
     expect(WASM_LINE_OF_SIGHT["no-ground"]).toBe(LineOfSightKind.NoGround);
     expect(WASM_LINE_OF_SIGHT["not-surveyed"]).toBe(LineOfSightKind.NotSurveyed);
@@ -545,6 +550,56 @@ describe("the height worker's fields on the real module", () => {
     expect(fields.heldBytes).toBe(0);
   });
 
+  // R10.T11's lever: the wireframe's bakes skip the normals its slot drops, and nothing else moves.
+  it.each([
+    ["mesh", "face-differences"],
+    ["double", "baked-offsets"],
+  ] as const)(
+    "bakes a patch without its %s normals where the source skips them, every other byte as with them",
+    (normals, vertexPath) => {
+      const fields = heldFields();
+      const record = recordsOf("patch").find((r) => r.head[1] === "depth");
+      if (record === undefined) {
+        throw new Error("the fixture has its depth-only patch");
+      }
+      const [, , face, level, i, j] = record.head;
+      const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+      const bakeWith = (
+        skipped: boolean,
+      ): { readonly bake: BakedPatch; readonly bytes: number } => {
+        const source = {
+          kind: "body",
+          body: FIXTURE.body,
+          detailSeed: FIXTURE.seed,
+          weights: "skipped",
+          ...(skipped ? { normals: "skipped" } : {}),
+        } as const satisfies HeightSourceSetting;
+        const { reply, transfer } = answerRequest(
+          module,
+          { kind: "bake", id: 4, key, generation: 1, settings: { vertexPath, normals, source } },
+          fields,
+        );
+        if (reply.kind !== "baked") {
+          throw new Error(`the patch was not baked: ${JSON.stringify(reply)}`);
+        }
+        const bytes = transfer.reduce<number>(
+          (sum, buffer) => sum + (buffer instanceof ArrayBuffer ? buffer.byteLength : 0),
+          0,
+        );
+        return { bake: reply.bake, bytes };
+      };
+      const baked = bakeWith(false);
+      const skipped = bakeWith(true);
+      const side = normals === "double" ? 129 : 65;
+      expect([baked.bake.normals.length, skipped.bake.normals.length]).toEqual([
+        side * side * 2,
+        0,
+      ]);
+      expect({ ...skipped.bake, normals: null }).toEqual({ ...baked.bake, normals: null });
+      expect(baked.bytes - skipped.bytes).toBe(side * side * 2 * 2);
+    },
+  );
+
   it("bakes the fixture's patches as the native bake does, layers and all", () => {
     const fields = heldFields();
     const direct = new SurfaceFields();
@@ -597,6 +652,7 @@ describe("the height worker's fields on the real module", () => {
         WASM_NORMAL_SCALE[settings.normals],
         WASM_WEIGHTS_LAYER[lookup(WEIGHTS, weights)],
         WASM_HORIZON_LAYER[lookup(WEIGHTS, weights)],
+        WASM_NORMALS_LAYER.baked,
         0,
       );
       if (raw === undefined) {
@@ -1311,9 +1367,9 @@ describe("the height worker's fields on the real module", () => {
     expect(() => direct.fieldRelease(id, 70_000)).toThrow(/body index/u);
     expect(() => direct.material(id, 3, 0n, 6, 0, 0)).toThrow(/face/u);
     expect(() => direct.material(id, 3, 0n, 263, 0, 0)).toThrow(/face/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 300, 0, 0, 0, 0, 0, 0, 0)).toThrow(/level/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 5, 99, 0, 0, 0, 0, 0, 0)).toThrow(/outside level 5/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 5, 0, 0, 0, 0, 0, 0, -1)).toThrow(/skirt/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 300, 0, 0, 0, 0, 0, 0, 0, 0)).toThrow(/level/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 5, 99, 0, 0, 0, 0, 0, 0, 0)).toThrow(/outside level 5/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 5, 0, 0, 0, 0, 0, 0, 0, -1)).toThrow(/skirt/u);
     // The palette's photometry (R10.T10.b): none without a field, and a palette refused whole.
     const empty = new Uint8Array(16).fill(PALETTE_NONE);
     expect(direct.photometry(id, 3, empty)).toBeUndefined();
@@ -1444,6 +1500,7 @@ describe("the height worker's fields on the real module", () => {
           WASM_NORMAL_SCALE[settings.normals],
           WASM_WEIGHTS_LAYER[weightsLayer],
           WASM_HORIZON_LAYER[weightsLayer],
+          WASM_NORMALS_LAYER.baked,
           0,
         );
         expect([name, raw?.maturity().length]).toEqual([name, 0]);

@@ -78,11 +78,12 @@
 //!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
 //!   hard bound makes the body's level bounds. `fieldRelease(system, body)` drops it, `true` if
 //!   one was held, and `heldBytes` is what every field holds on the heap.
-//! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon, skirtM)`
-//!   bakes the patch as `bakePatch` does, `weights` a `WeightsLayer` and `horizon` a
-//!   `HorizonLayer`, each `Baked` (0) or `Skipped` (1), and returns a `BakedTerrain`, or
-//!   `undefined` where the field cannot make it yet: none is held, or a surveyed vertex reads a
-//!   cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and R10's layers:
+//! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon,
+//!   normalsLayer, skirtM)` bakes the patch as `bakePatch` does, `weights` a `WeightsLayer`,
+//!   `horizon` a `HorizonLayer` and `normalsLayer` a `NormalsLayer`, each `Baked` (0) or
+//!   `Skipped` (1), its `normals()` empty where the normals are skipped, and returns a
+//!   `BakedTerrain`, or `undefined` where the field cannot make it yet: none is held, or a
+//!   surveyed vertex reads a cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and R10's layers:
 //!   `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry (255 for no
 //!   entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8, vertex (x, y)
 //!   at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when skipped;
@@ -170,7 +171,7 @@ use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::bake::{HorizonLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer};
+use crate::bake::{HorizonLayer, NormalsLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer};
 use crate::cube::{Face, FaceUv, PatchKey};
 use crate::field::{BodyRef, FieldView, cell_index};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
@@ -482,6 +483,16 @@ pub enum JsHorizonLayer {
     Skipped = 1,
 }
 
+/// Whether the normals are baked, as the client names it (R10.T11's [`NormalsLayer`]).
+#[wasm_bindgen(js_name = NormalsLayer)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsNormalsLayer {
+    /// [`NormalsLayer::Baked`].
+    Baked = 0,
+    /// [`NormalsLayer::Skipped`].
+    Skipped = 1,
+}
+
 /// Whether a body's field surveys its σ by level, as the client names it (R10.T4.c's
 /// [`SigmaSurvey`]).
 #[wasm_bindgen(js_name = SigmaSurvey)]
@@ -656,7 +667,7 @@ impl BakedTerrain {
         self.bake.offsets.clone()
     }
 
-    /// The octahedral normal pairs.
+    /// The octahedral normal pairs; empty where the bake skipped them.
     #[must_use]
     pub fn normals(&self) -> Vec<f32> {
         self.bake.normals.clone()
@@ -1353,6 +1364,7 @@ impl JsSurfaceFields {
         normals: JsNormalScale,
         weights: JsWeightsLayer,
         horizon: JsHorizonLayer,
+        normals_layer: JsNormalsLayer,
         skirt_m: f64,
     ) -> Result<Option<BakedTerrain>, JsError> {
         let key = patch_key(face, level, i, j)?;
@@ -1365,6 +1377,10 @@ impl JsSurfaceFields {
             horizon: match horizon {
                 JsHorizonLayer::Baked => HorizonLayer::Baked,
                 JsHorizonLayer::Skipped => HorizonLayer::Skipped,
+            },
+            normals: match normals_layer {
+                JsNormalsLayer::Baked => NormalsLayer::Baked,
+                JsNormalsLayer::Skipped => NormalsLayer::Skipped,
             },
         };
         let answer = self

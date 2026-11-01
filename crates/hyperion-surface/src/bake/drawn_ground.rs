@@ -81,6 +81,7 @@ const BOTH_PATHS: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Skipped,
     horizon: HorizonLayer::Skipped,
+    normals: NormalsLayer::Baked,
 };
 
 /// The sample points drawn at random in each patch.

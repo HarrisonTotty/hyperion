@@ -11,7 +11,7 @@ use hyperion_testkit::order::assert_order_independent;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
-use crate::bake::{HorizonLayer, SURVEYED, WeightsLayer, decode_maturity};
+use crate::bake::{HorizonLayer, NormalsLayer, SURVEYED, WeightsLayer, decode_maturity};
 use crate::cube::{Face, st_to_uv};
 use crate::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, PaletteRole, ResolutionCode,
@@ -44,6 +44,7 @@ pub(super) const MESH: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Baked,
     horizon: HorizonLayer::Skipped,
+    normals: NormalsLayer::Baked,
 };
 
 /// The high setting's: baked offsets and doubled normals, with no extra skirt margin, as the
@@ -56,6 +57,7 @@ pub(super) const DOUBLE: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Baked,
     horizon: HorizonLayer::Skipped,
+    normals: NormalsLayer::Baked,
 };
 
 /// The wireframe's: no weights.
@@ -67,6 +69,7 @@ pub(super) const DEPTH_ONLY: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Skipped,
     horizon: HorizonLayer::Skipped,
+    normals: NormalsLayer::Baked,
 };
 
 /// The fixture: two surveys of the Moon-like world's face +y and their payloads, the second a
@@ -2235,6 +2238,7 @@ const NORMALS_ONLY: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Skipped,
     horizon: HorizonLayer::Skipped,
+    normals: NormalsLayer::Baked,
 };
 
 /// A normal map by its bits, as the tests compare two: its level, its cells, each pair's bits and

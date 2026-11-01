@@ -38,7 +38,10 @@ export interface BakedPatch {
   readonly heights: Float32Array;
   /** On `baked-offsets` only: q₀ and q₁ per vertex from the origin, metres; else `null`. */
   readonly offsets: Float32Array | null;
-  /** Octahedral normals in the body-fixed frame, packed by the worker into half floats. */
+  /**
+   * Octahedral normals in the body-fixed frame, packed by the worker into half floats; empty where
+   * the bake skipped them ({@link NormalsLayerSetting}, the wireframe's).
+   */
   readonly normals: Float16Array;
   /** The baked heights' range above the datum, metres. */
   readonly heightRangeM: readonly [number, number];
@@ -175,10 +178,18 @@ export type WeightsLayerSetting = "baked" | "skipped";
 export type HorizonLayerSetting = "baked" | "skipped";
 
 /**
+ * Whether a body's bake makes its normals (plan R10, R10.T11): the lit style's do, at the setting's
+ * resolution; the wireframe's, whose slot holds none, do not, so that the module asks no height
+ * for them (on the high setting, 129 × 129 normals, three in four between the vertices).
+ */
+export type NormalsLayerSetting = "baked" | "skipped";
+
+/**
  * What a patch's heights come from (R10.T6.b): R05's provisional test planet, with or without its
  * ridges, which the descent spike keeps; or a body, over the field the workers hold of it, with
  * its detail seed (`BodyHooksDto.detail_seed`, R09.T1.b), whether its weights are baked, and,
- * where given, whether its horizon map is (as its weights are where absent).
+ * where given, whether its horizon map is (as its weights are where absent) and whether its
+ * normals are (`baked` where absent).
  */
 export type HeightSourceSetting =
   | { readonly kind: "test-planet"; readonly ridges: TestPlanetRidges }
@@ -188,6 +199,7 @@ export type HeightSourceSetting =
       readonly detailSeed: DetailSeedHex;
       readonly weights: WeightsLayerSetting;
       readonly horizon?: HorizonLayerSetting;
+      readonly normals?: NormalsLayerSetting;
     };
 
 /** How a patch is baked: the setting's vertex path and normal resolution, and its height source. */

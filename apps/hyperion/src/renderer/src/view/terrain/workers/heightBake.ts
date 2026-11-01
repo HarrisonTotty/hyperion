@@ -41,6 +41,7 @@ import type {
   HeightWorkerReply,
   HeightWorkerRequest,
   HorizonLayerSetting,
+  NormalsLayerSetting,
   SigmaSurveySetting,
   SurfaceGroundReadout,
   SurfaceLineOfSight,
@@ -81,6 +82,15 @@ export const WASM_WEIGHTS_LAYER = { baked: 0, skipped: 1 } as const satisfies Re
  */
 export const WASM_HORIZON_LAYER = { baked: 0, skipped: 1 } as const satisfies Record<
   HorizonLayerSetting & WeightsLayerSetting,
+  number
+>;
+
+/**
+ * The module's `NormalsLayer` enum values (`src/wasm.rs`'s `JsNormalsLayer`), by the body's
+ * normals setting, `baked` where absent: the wireframe skips them (R10.T11).
+ */
+export const WASM_NORMALS_LAYER = { baked: 0, skipped: 1 } as const satisfies Record<
+  NormalsLayerSetting,
   number
 >;
 
@@ -273,6 +283,7 @@ export interface WasmSurfaceFields {
     normals: number,
     weights: number,
     horizon: number,
+    normalsLayer: number,
     skirtM: number,
   ): WasmBakedTerrain | undefined;
   reading(
@@ -628,7 +639,8 @@ export class WorkerFields {
 
   /**
    * Bakes `key` of `source`'s body over its field (no extra skirt margin), with R10's layers, the
-   * horizon map with the weights unless the source skips it ({@link WASM_HORIZON_LAYER}), and,
+   * horizon map with the weights unless the source skips it ({@link WASM_HORIZON_LAYER}), the
+   * normals unless it skips them ({@link WASM_NORMALS_LAYER}), and,
    * where the bake made a maturity layer, its codes with the palette's nodes at the key's level
    * (`TerrainLayers.maturity`, R10.T1.c's client half); `null` where the field cannot make it yet:
    * none is held, or a surveyed vertex reads a cell still to come.
@@ -652,6 +664,7 @@ export class WorkerFields {
       WASM_NORMAL_SCALE[settings.normals],
       WASM_WEIGHTS_LAYER[source.weights],
       WASM_HORIZON_LAYER[source.horizon ?? source.weights],
+      WASM_NORMALS_LAYER[source.normals ?? "baked"],
       0,
     );
     if (baked === undefined) {

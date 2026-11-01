@@ -49,7 +49,9 @@ mod bench {
     use hyperion_base::math;
     use hyperion_base::rng::DetailSeed;
     use hyperion_base::units::{Gigayears, PerSquareKilometre};
-    use hyperion_surface::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use hyperion_surface::bake::{
+        HorizonLayer, NormalsLayer, TerrainBakeOptions, WeightsLayer, bake_terrain,
+    };
     use hyperion_surface::cube::{PatchKey, SampleGrid, unit_dir};
     use hyperion_surface::field::{
         CoarseField, Cover, CoverRange, FieldView, PartialField, ResolutionCode, cell_at_index,
@@ -200,6 +202,7 @@ mod bench {
                     patch,
                     weights,
                     horizon: HorizonLayer::Skipped,
+                    normals: NormalsLayer::Baked,
                 };
                 let mut warm = SynthCache::new();
                 let first = bake_terrain(&synth, &mut warm, key, &opts, &[]).expect("held");
@@ -226,6 +229,7 @@ mod bench {
                     patch: LOW,
                     weights: WeightsLayer::Baked,
                     horizon: HorizonLayer::Skipped,
+                    normals: NormalsLayer::Baked,
                 };
                 group.bench_function(format!("{name}/weights-cold"), |b| {
                     b.iter(|| {
@@ -281,6 +285,7 @@ mod bench {
             patch: LOW,
             weights: WeightsLayer::Baked,
             horizon: HorizonLayer::Skipped,
+            normals: NormalsLayer::Baked,
         };
         for (age, n_1km) in [("4.4", 0.05), ("3.5", 4.8e-3), ("1", 8.4e-4)] {
             let (weathered, plain) =
@@ -381,6 +386,7 @@ mod bench {
             patch: LOW,
             weights: WeightsLayer::Baked,
             horizon: HorizonLayer::Baked,
+            normals: NormalsLayer::Baked,
         };
         let without = TerrainBakeOptions {
             horizon: HorizonLayer::Skipped,

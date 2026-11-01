@@ -77,7 +77,7 @@
  *   hysteresis ({@link wireframeHandovers}), judged here at each step from the view's report, since
  *   a wireframe frame plans no regimes. Each body so handed over has a pass of its own shading,
  *   baked without the class weights and the horizon map (`HeightSourceSetting.weights`
- *   `"skipped"`), through a lane of the same pool, shared by every wireframe view that hands it
+ *   `"skipped"`) and without the normals (`normals` `"skipped"`), through a lane of the same pool, shared by every wireframe view that hands it
  *   over and made and disposed as the lit one is; each wireframe view draws its own
  *   ({@link TerrainSession.drawWireTerrain}). The body's mask waits for both passes' rebakes.
  * - **The terrain readout (R10.T12; decision-r10-live-path, D10).** A view's `GROUND AT LINE OF
@@ -179,7 +179,11 @@ import {
   HeightWorkerPool,
   type WorkerLike,
 } from "./workers/pool";
-import type { HorizonLayerSetting, WeightsLayerSetting } from "./workers/messages";
+import type {
+  HorizonLayerSetting,
+  NormalsLayerSetting,
+  WeightsLayerSetting,
+} from "./workers/messages";
 
 /**
  * What a session asks of its server: R09's `surface_field` for the fields and `body_detail` for
@@ -1641,17 +1645,21 @@ export class TerrainSession {
     }
     let terrain: TerrainSettings | null;
     let weights: WeightsLayerSetting;
+    let normals: NormalsLayerSetting;
     let material: string;
     switch (shading) {
       case "lit":
         terrain = null;
         weights = "baked";
+        normals = "baked";
         material = "terrain material";
         break;
       case "wire":
-        // The wireframe's cache, sized by its slots (`WIREFRAME_TERRAIN_SLOTS`, R10.T11).
+        // The wireframe's cache, sized by its slots (`WIREFRAME_TERRAIN_SLOTS`, R10.T11), which
+        // hold no normals, so that its bakes make none.
         terrain = wireframeTerrainSettings(first.report.setting);
         weights = "skipped";
+        normals = "skipped";
         material = "wireframe's terrain material";
         break;
     }
@@ -1671,6 +1679,7 @@ export class TerrainSession {
           weights,
           // The A/B's lit bakes skip the map alone (R10.T15.b); the wireframe's skip it with the weights.
           ...(shading === "lit" && this.#horizonMap === "skipped" ? { horizon: "skipped" } : {}),
+          ...(normals === "skipped" ? { normals } : {}),
         },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,

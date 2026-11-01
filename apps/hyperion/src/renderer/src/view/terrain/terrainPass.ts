@@ -1010,6 +1010,10 @@ export class TerrainPass {
   #cause: TerrainFault = TERRAIN_NOT_AVAILABLE;
   #disposed = false;
 
+  /**
+   * @throws RangeError for a body's source that skips its normals where the pass's slots hold them
+   *   (`TERRAIN_SHADING_TRAITS`' `normals`): only the wireframe's bakes may skip them (R10.T11).
+   */
   constructor(options: TerrainPassOptions) {
     this.#engine = options.engine;
     this.#setting = options.setting;
@@ -1017,6 +1021,13 @@ export class TerrainPass {
     this.#planet = options.planet;
     this.#source = options.source;
     this.#shading = terrainShadingOf(options.source);
+    if (
+      options.source.kind === "body" &&
+      options.source.normals === "skipped" &&
+      TERRAIN_SHADING_TRAITS[this.#shading].normals
+    ) {
+      throw new RangeError(`the ${this.#shading} terrain's slots hold the normals its bakes skip`);
+    }
     this.#materials = this.#shading === "spike" ? null : (options.materials ?? null);
     this.#createPool = options.createPool;
     this.#survey = options.survey ?? null;

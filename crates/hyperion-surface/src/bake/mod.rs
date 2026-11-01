@@ -13,7 +13,7 @@
 //! [`horizon`] module, from the bake's own heights and the ground beyond the patch), and R11's
 //! layers through [`BakeHook`]. Normals are at R05's
 //! [`NormalScale`](crate::patch::NormalScale), which the worker packs as `rg16float` (R05's Design
-//! note 5).
+//! note 5), or skipped with [`NormalsLayer::Skipped`] for a style that shades nothing.
 //!
 //! # The survey
 //!
@@ -88,8 +88,19 @@ pub enum WeightsLayer {
     Skipped,
 }
 
-/// What [`bake_terrain`] makes: R05's options, and whether the class weights and the horizon map
-/// are baked.
+/// Whether a bake makes R05's normals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NormalsLayer {
+    /// At the options' [`NormalScale`](crate::patch::NormalScale), for a style that shades the
+    /// ground (R10.T10).
+    Baked,
+    /// None: [`PatchBake::normals`] is empty and no height is asked for them, for a style that
+    /// draws no shading, as the wireframe's depth-only terrain (R10.T11), whose slot holds none.
+    Skipped,
+}
+
+/// What [`bake_terrain`] makes: R05's options, and whether the class weights, the horizon map and
+/// the normals are baked.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TerrainBakeOptions {
     /// R05's: the vertex path, the normals' resolution and the skirts' margin.
@@ -98,6 +109,8 @@ pub struct TerrainBakeOptions {
     pub weights: WeightsLayer,
     /// Whether the horizon map is baked (R10.T8.a), on either setting.
     pub horizon: HorizonLayer,
+    /// Whether the normals are baked, at [`BakeOptions::normals`]' resolution where they are.
+    pub normals: NormalsLayer,
 }
 
 /// A patch baked on real terrain: R05's arrays and this plan's layers.
@@ -168,7 +181,7 @@ pub fn bake_terrain<F: SurveyView>(
         reference: RefCell::new(vec![false; survey_mask.len()]),
         complete: Cell::new(true),
     };
-    let (patch, heights) = bake_with_heights(&ground, key, &opts.patch, cache)?;
+    let (patch, heights) = bake_with_heights(&ground, key, &opts.patch, opts.normals, cache)?;
     let SurveyedGround {
         reference,
         complete,

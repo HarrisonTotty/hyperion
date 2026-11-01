@@ -34,6 +34,7 @@ pub(super) const MESH: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Baked,
     horizon: HorizonLayer::Baked,
+    normals: NormalsLayer::Baked,
 };
 
 /// The high setting's: baked offsets and normals at twice the mesh's resolution.
@@ -45,6 +46,7 @@ pub(super) const DOUBLE: TerrainBakeOptions = TerrainBakeOptions {
     },
     weights: WeightsLayer::Baked,
     horizon: HorizonLayer::Baked,
+    normals: NormalsLayer::Baked,
 };
 
 /// A resolution code of `metres`.
@@ -679,6 +681,50 @@ fn bake_without_weights_leaves_the_palette_empty_and_the_rest_as_baked() {
     );
     assert_eq!(without.layers().is_complete(), with.layers().is_complete());
     assert_eq!(with.layers().weights().len(), 65 * 65);
+}
+
+/// Skipping the normals (R10.T11's wireframe bake) empties them and changes no other byte, at
+/// either resolution, with the weights or without, inside the survey and over its edge; where the
+/// doubled normals' reads between the vertices left the bake incomplete, the skipped one may be
+/// complete, never the other way.
+#[test]
+fn bake_without_normals_leaves_them_empty_and_the_rest_as_baked() {
+    let (w, edge, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let inside = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    for opts in [MESH, DOUBLE] {
+        for weights in [WeightsLayer::Baked, WeightsLayer::Skipped] {
+            let opts = TerrainBakeOptions { weights, ..opts };
+            let skipped = TerrainBakeOptions {
+                normals: NormalsLayer::Skipped,
+                ..opts
+            };
+            for key in [inside, edge] {
+                let with = bake_terrain(&synth, &mut SynthCache::new(), key, &opts, &[]).unwrap();
+                let without =
+                    bake_terrain(&synth, &mut SynthCache::new(), key, &skipped, &[]).unwrap();
+                let side = opts.patch.normals.side();
+                assert_eq!(with.patch().normals.len(), 2 * side * side);
+                assert_eq!(without.patch().normals, [] as [f32; 0]);
+                assert!(
+                    without.layers().is_complete() || !with.layers().is_complete(),
+                    "{key:?} {opts:?}"
+                );
+                let mut stripped = with.clone();
+                stripped.patch.normals.clear();
+                stripped.layers.complete = without.layers().is_complete();
+                assert_eq!(
+                    bake_bits(&stripped),
+                    bake_bits(&without),
+                    "{key:?} {opts:?}"
+                );
+            }
+            let inside_bake = bake_terrain(&synth, &mut SynthCache::new(), inside, &opts, &[]);
+            assert!(inside_bake.unwrap().layers().is_complete(), "{opts:?}");
+        }
+    }
 }
 
 /// A hook that records what it is handed.

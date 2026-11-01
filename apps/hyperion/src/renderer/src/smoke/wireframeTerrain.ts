@@ -271,7 +271,14 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       setting: "low",
       terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
-      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "skipped" },
+      // The session's wireframe source: no weights, no horizon map and no normals (R10.T11).
+      source: {
+        kind: "body",
+        body: field.body,
+        detailSeed: field.seed,
+        weights: "skipped",
+        normals: "skipped",
+      },
       createPool: (bake) => pool.lane(bake),
       survey,
     });

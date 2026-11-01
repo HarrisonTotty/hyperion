@@ -157,8 +157,11 @@ class WireLane implements TerrainPool {
       originHeightM: originHeightOf(key),
     },
   ): void {
-    // The wireframe keeps no normals; a lit layout takes them at its atlas's resolution.
-    const n = pass.layout.atlas?.samplesPerSide ?? PATCH_VERTICES_PER_SIDE;
+    // The wireframe keeps no normals; a lit layout takes them at its atlas's resolution. None are
+    // baked where the source skips them, as the worker answers (R10.T11).
+    const { source } = this.settings;
+    const skipped = source.kind === "body" && source.normals === "skipped";
+    const n = skipped ? 0 : (pass.layout.atlas?.samplesPerSide ?? PATCH_VERTICES_PER_SIDE);
     const bake: BakedPatch = {
       key,
       generation: 1,
@@ -438,6 +441,29 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
       "baked-offsets",
       "terrain offsets",
     ]);
+  });
+
+  // R10.T11's lever: the wireframe's slots hold no normals, so its bakes may skip them.
+  it.each(["low", "high"] as const)(
+    "bakes a source that skips its normals through its lane as asked, and draws on the %s setting",
+    async (setting) => {
+      const made = await passOver(setting, { ...WIRE_BODY, normals: "skipped" });
+      streamed(made);
+      const source = made.lane().settings.source;
+      expect([
+        source.kind === "body" ? source.normals : null,
+        made.pass.layout.atlas,
+        made.pass
+          .drawFor(PRIMARY, frameOf(VIEW, WIRE))
+          .draw?.material.name.startsWith("terrain-wire-"),
+      ]).toEqual(["skipped", null, true]);
+    },
+  );
+
+  it("refuses a lit source that skips its normals, which its slots hold", async () => {
+    await expect(passOver("low", { ...LIT_BODY, normals: "skipped" })).rejects.toThrow(
+      /lit terrain's slots hold the normals/u,
+    );
   });
 
   it("gives its draw the interval, stroke scale, coastline, widths, graticule, colours and slope term", async () => {

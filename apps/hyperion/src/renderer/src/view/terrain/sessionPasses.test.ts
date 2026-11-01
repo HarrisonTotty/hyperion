@@ -506,6 +506,23 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     ).toBe(true);
   });
 
+  it.each(["low", "high"] as const)(
+    "bakes the lit pass's patches with their normals on the %s setting, as before",
+    async (setting) => {
+      const h = await harness(setting);
+      h.session.noteView(PRIMARY, handing(5e6, { setting }));
+      h.session.step();
+      await answerField(h);
+      h.session.step();
+      await settle();
+      const sources = h.workers.flatMap((w) => w.pendingBakes).map((b) => b.settings.source);
+      expect([sources.length > 0, sources.some((source) => "normals" in source)]).toEqual([
+        true,
+        false,
+      ]);
+    },
+  );
+
   it("keeps a pass handed back, and disposes of it with its handles at its field's release", async () => {
     const h = await harness();
     const before = h.engine.live;
@@ -1231,7 +1248,13 @@ function answerBakesOf(h: Harness, surveys: BakeSurveys): number {
       if (surveyed === null) {
         continue;
       }
-      const n = settings.normals === "double" ? 129 : 65;
+      // As the worker answers: no normals where the source skips them (R10.T11's wireframe).
+      const n =
+        source.kind === "body" && source.normals === "skipped"
+          ? 0
+          : settings.normals === "double"
+            ? 129
+            : 65;
       worker.reply({
         kind: "baked",
         id: request.id,
@@ -1321,6 +1344,38 @@ describe("the terrain session's wireframe pass (R10.T11; decision D10)", () => {
     expect([weights.length > 0, new Set(weights)]).toEqual([true, new Set(["skipped"])]);
   });
 
+  it.each([
+    ["low", 38_028],
+    ["high", 139_428],
+  ] as const)(
+    "asks its bakes without the normals on the %s setting, its slots of %i B holding none as before",
+    async (setting, bytesPerSlot) => {
+      const h = await harness(setting);
+      await handedOverBy(h, [[PRIMARY, wireAt(5e6, { setting })]]);
+      const normals = h.workers.flatMap((w) =>
+        w.pendingBakes.map((b) =>
+          b.settings.source.kind === "body" ? b.settings.source.normals : null,
+        ),
+      );
+      const layout = h.session.wirePass(MOON)?.layout;
+      expect([
+        normals.length > 0,
+        new Set(normals),
+        layout?.slots.bytesPerSlot,
+        layout?.atlas,
+      ]).toEqual([true, new Set(["skipped"]), bytesPerSlot, null]);
+    },
+  );
+
+  it("draws from bakes that carry no normals", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
+    await streamBakesOf(h, 4, { baked: null, skipped: new Set([0, 1]) });
+    expect(material(h.session.drawWireTerrain(PRIMARY, MOON, wireFrameAt(0)))).toMatch(
+      /^terrain-wire-/u,
+    );
+  });
+
   it("bakes through a lane of the session's one pool, starting no worker of its own", async () => {
     const h = await harness();
     await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
@@ -1362,6 +1417,22 @@ describe("a body handed over in both styles at once (R10.T11)", () => {
       [MOON],
       [MOON],
       3,
+    ]);
+  });
+
+  it("bakes the lit pass's patches with their normals and the wireframe pass's without", async () => {
+    const h = await harness();
+    await handedOverBy(h, BOTH);
+    const sources = h.workers.flatMap((w) => w.pendingBakes).map((b) => b.settings.source);
+    const normals = (weights: string): Set<string | undefined> =>
+      new Set(
+        sources.flatMap((source) =>
+          source.kind === "body" && source.weights === weights ? [source.normals] : [],
+        ),
+      );
+    expect([normals("baked"), normals("skipped")]).toEqual([
+      new Set([undefined]),
+      new Set(["skipped"]),
     ]);
   });
 

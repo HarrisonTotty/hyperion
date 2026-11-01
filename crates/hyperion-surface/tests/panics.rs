@@ -2057,8 +2057,8 @@ mod weights {
 mod bake {
     use hyperion_base::rng::DetailSeed;
     use hyperion_surface::bake::{
-        HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain, decode_maturity,
-        encode_maturity,
+        HorizonLayer, NormalsLayer, TerrainBakeOptions, WeightsLayer, bake_terrain,
+        decode_maturity, encode_maturity,
     };
     use hyperion_surface::cube::{Face, PatchKey};
     use hyperion_surface::field::{CoarseField, FieldView, PartialField};
@@ -2169,6 +2169,7 @@ mod bake {
             },
             weights: WeightsLayer::Baked,
             horizon: HorizonLayer::Baked,
+            normals: NormalsLayer::Baked,
         };
         let _ = bake_terrain(
             &synth,

@@ -37,6 +37,7 @@ pub mod collision;
 pub mod normals;
 pub mod vertex;
 
+use crate::bake::NormalsLayer;
 use crate::cube::{PATCH_QUADS, PatchKey};
 use crate::height::HeightSample;
 use crate::num;
@@ -177,7 +178,8 @@ pub struct PatchBake {
     pub heights: Vec<f32>,
     /// [`VertexPath::BakedOffsets`] only: per vertex, q₀ then q₁ relative to the origin, metres.
     pub offsets: Option<Vec<f32>>,
-    /// Per normal sample, row by row, the octahedral pair of the unit normal, body-fixed.
+    /// Per normal sample, row by row, the octahedral pair of the unit normal, body-fixed; empty
+    /// where R10's bake skipped them ([`NormalsLayer::Skipped`]).
     pub normals: Vec<f32>,
     /// The lowest and highest of the baked heights, both channels, metres.
     pub height_range_m: (f32, f32),
@@ -374,11 +376,13 @@ pub fn bake_patch<S: HeightSource>(
     opts: &BakeOptions,
     cache: &mut S::Cache,
 ) -> Result<PatchBake, S::Error> {
-    bake_with_heights(source, key, opts, cache).map(|(bake, _)| bake)
+    bake_with_heights(source, key, opts, NormalsLayer::Baked, cache).map(|(bake, _)| bake)
 }
 
 /// [`bake_patch`], with the heights the source gave it in `f64` ([`HeightSource::patch_heights`]),
-/// which R10's layers read beside the bake (R10.T6.a).
+/// which R10's layers read beside the bake (R10.T6.a), and its normals made or skipped as
+/// `normals_layer` has it: skipped, [`PatchBake::normals`] is empty and the source is asked no
+/// height for them.
 ///
 /// # Errors
 ///
@@ -391,6 +395,7 @@ pub(crate) fn bake_with_heights<S: HeightSource>(
     source: &S,
     key: PatchKey,
     opts: &BakeOptions,
+    normals_layer: NormalsLayer,
     cache: &mut S::Cache,
 ) -> Result<(PatchBake, PatchHeights), S::Error> {
     assert!(
@@ -446,7 +451,12 @@ pub(crate) fn bake_with_heights<S: HeightSource>(
         ),
         VertexPath::FaceDifferences => None,
     };
-    let normals = normals::bake_normals(source, key, opts.normals, patch_heights.samples(), cache)?;
+    let normals = match normals_layer {
+        NormalsLayer::Baked => {
+            normals::bake_normals(source, key, opts.normals, patch_heights.samples(), cache)?
+        }
+        NormalsLayer::Skipped => Vec::new(),
+    };
 
     let bake = PatchBake {
         key,
