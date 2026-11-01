@@ -7,11 +7,11 @@ path = "binary.rs"
 task = "binary_awd"
 revision = 0
 inputs_sha256 = "fd589d224a26cbd7ae0d30563d4917dc8409e1817efb5db5ee17a0cbbc3a1470"
-body_sha256 = "8970fdf790c2f71f007cc4f1ef3ab0d09d12267fc4161b2babaa1ceb1c4f4f44"
-fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 1.0960630250705998, 18.0, 2.0, 0.9942525425604096, 0.008045340234905107, 0.0000000000003980876494578313, 0.638184050985673, 1.3533460296140367, 0.00000000006017080135052314]
-since_generator_version = 24
+body_sha256 = "ee8f037014f91e09e520a0aa919ee964744e3d40ffe572f4f5f9fed3c8973e56"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 1.0960630250705998, 18.0, 2.0, 0.8878641444564905, 0.007813110983722022, 0.00000000000037594782486519837, 0.638184050985673, 1.3533460296140367, 0.00000000006017080135052314]
+since_generator_version = 25
 provisional = false
-acceptance = "fast: 1814 members, donors 0.934/0.042/0.024, layers C 0.477 D 0.512 E 0.011, rates a system 2.10e-6/3.93e-5/2.00e-5/2.03e-5/3.09e-5/3.02e-5/1.19e-5, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; slow: 15120 members, donors 0.315/0.682/0.003, layers C 0.372 D 0.613 E 0.015, rates a system 7.01e-7/3.10e-4/4.89e-4/3.30e-4/3.37e-4/2.88e-4/6.57e-4, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`"
+acceptance = "fast: 1839 members, donors 0.955/0.028/0.016, layers C 0.500 D 0.488 E 0.012, rates a system 2.80e-6/3.98e-5/2.00e-5/2.03e-5/3.23e-5/2.81e-5/1.33e-5, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; slow: 15404 members, donors 0.306/0.692/0.002, layers C 0.388 D 0.598 E 0.014, rates a system 7.01e-7/3.17e-4/4.75e-4/3.30e-4/3.32e-4/2.99e-4/6.72e-4, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`"
 
 [[table]]
 name = "binary_cooling_floor"
@@ -79,11 +79,11 @@ path = "binary.rs"
 task = "binary_xrb"
 revision = 0
 inputs_sha256 = "59047b1bde352b12a6b8f4ee32a5ad35446beefa81bf7d4eb690800829746bb5"
-body_sha256 = "e251371baa61edd6776358d0c13ad75dc21997b74bceaeea884e2cf8c5275ffd"
-fingerprint = [0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 33.0, 1.0, 1.7920606257402825, 1.5057342729821994, -1.356765764977588]
-since_generator_version = 24
+body_sha256 = "9d612857e65d7e2e331491e01879ea3cf3fdb3c5879890a9a22c85aff0f48c2f"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 33.0, 1.0, 1.792186266161387, 1.5056086325610951, -1.3551973469381575]
+since_generator_version = 25
 provisional = false
-acceptance = "slab members 540 of a kind and 1673 of none; young high-mass members 132; kinds 0.0552/0.2397/0.0389/0.6629/0.0013/0.0019; black-hole transients 6629 of 1e4; layers C 0.000 D 0.550 E 0.450; rates a system 1.13e-4/4.59e-5/5.56e-5/3.43e-5/3.08e-5/3.36e-5/5.61e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantRate; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_x_ray_binary_sampler_against_the_engine`"
+acceptance = "slab members 344 of a kind and 238 of none; young high-mass members 110; kinds 0.0467/0.1367/0.0587/0.7537/0.0021/0.0021; black-hole transients 7537 of 1e4; layers C 0.000 D 0.561 E 0.439; rates a system 1.04e-4/1.23e-5/8.05e-6/4.91e-6/4.91e-6/1.19e-5/1.19e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantRate; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_x_ray_binary_sampler_against_the_engine`"
 
 [[table]]
 name = "bowl_permanent_shadow"
