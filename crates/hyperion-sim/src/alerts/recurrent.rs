@@ -718,8 +718,10 @@ pub fn magnetar_scan_plan(class: ClassId, query: &AlertQuery) -> Vec<CatalogueCe
 }
 
 /// The detections of every magnetar of `process`'s class that `query`'s sensor sees in its window
-/// (module documentation), appended to `out` by arrival and then by event: [`magnetar_scan_cell`]
-/// over each cell of [`magnetar_scan_plan`], merged.
+/// (module documentation), appended to `out` by arrival and then by event: each cell of
+/// [`magnetar_scan_plan`] walked whole, its hosts taken from the context's [`MagnetarCells`],
+/// merged. [`magnetar_scan_cell`] over the same cells gives the same detections, each to the bit,
+/// building only the hosts the window can see (P12.T8.b.2).
 ///
 /// # Panics
 ///

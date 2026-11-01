@@ -137,8 +137,11 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 ///     stream of its own may give it through [`event_time`](Self::event_time): read from that
 ///     stream alone, before any other of the candidate's draws, and within a day of the time its
 ///     entry's event takes, whatever the rest of the candidate draws (plan 12, P12.T8.b.2). A scan
-///     then builds only the candidates whose T can matter to it ([`entries_when`]). A class that
-///     reads no time first gives `None`, the default, and every candidate is built.
+///     then builds only the candidates whose T can matter to it ([`entries_when`]), judging from
+///     where the event can be: so a class that gives a time also keeps its event inside the
+///     candidate's cell box at T, as a supernova's site is, and anything the event leaves within
+///     [`LIFETIME_REACH`] of the cell, as a magnetar's remnant is. A class that reads no time first
+///     gives `None`, the default, and every candidate is built.
 ///
 /// # Examples
 ///

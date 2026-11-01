@@ -373,3 +373,28 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_magnetars_as_the_walk_as_built() {
     hosts.dedup();
     assert_eq!((cut.len(), hosts.len()), (27_059, 71));
 }
+
+/// The whole cube's Type Ia through a V limit of 10⁻¹² W m⁻² over [−1,000, 1,000) years from the
+/// Sun-like point: the cut walk over each slab's occupied cells is the walk as built, two onsets,
+/// arriving 198.9 and 747.6 years after the epoch from 27,977 and 17,653 ly. No Type Ia nearer
+/// lights the clock window, and every sensor that sees one of these reaches across the cube, so
+/// there is no fast twin: a Type Ia cell is cheap, and the sweep of bounds is the cost.
+#[test]
+#[ignore = "slow: sweeps every Type Ia cell of the cube twice, some 30 s"]
+fn alerts_galaxy_scan_finds_the_whole_cubes_type_ia_as_the_walk_as_built() {
+    let galaxy = milky_way();
+    let process = TypeIaProcess::new(galaxy);
+    let v = AlertBand::Photometric(Band::V);
+    let query = query(sun(), ClassId::TYPE_IA, sensor(v, 1e-12), -1_000, 1_000);
+    let (built, cut) = one_shot_both(galaxy, &process, &query);
+    assert_eq!(first_difference(&cut, &built), None);
+    let onsets: Vec<f64> = cut
+        .iter()
+        .filter(|detection| detection.phase() == DetectionPhase::Onset)
+        .map(|detection| detection.arrival().since_epoch().as_julian_years_f64())
+        .collect();
+    assert_eq!(onsets.len(), 2, "{onsets:?}");
+    for (onset, expected) in onsets.iter().zip([198.9, 747.6]) {
+        assert!((onset - expected).abs() < 0.05, "{onsets:?}");
+    }
+}
