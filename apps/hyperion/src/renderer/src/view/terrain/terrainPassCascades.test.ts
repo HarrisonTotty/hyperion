@@ -25,7 +25,12 @@ import { cascadeKeeps, cullTwin } from "../clusters/cull";
 import { type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import type { ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
-import { GEOMETRY_BEFORE_R14, TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
+  SETTINGS,
+  TERRAIN_SETTINGS,
+} from "../quality/qualitySetting";
 import { vertexDir, vertexSpacing } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { TERRAIN_SHADOW_PASS_LABEL } from "./gpu/material";
@@ -407,6 +412,9 @@ async function clusteredPass(): Promise<Made> {
   return made;
 }
 
+/** The high setting's geometry without T1.c's receivers' cull: T1.b's cluster path alone. */
+const CLUSTERS_ALONE: GeometrySettings = { ...SETTINGS.high.geometry, casterDepthCull: false };
+
 /** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
 function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
   const view = new DataView(words.buffer, words.byteOffset, words.byteLength);
@@ -425,10 +433,30 @@ function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
       depthFarM: f(24),
       toleranceM: f(16),
       strideCap: 1,
-      receivers: null,
+      receivers:
+        f(28) === 0
+          ? null
+          : {
+              depthM: [f(96), f(100)],
+              reachM: [f(104), f(108)],
+              coveredBelow:
+                f(120) < 0
+                  ? null
+                  : { centreM: [f(112), f(116)], halfSideM: f(120), reachM: f(124) },
+            },
     });
   }
   return out;
+}
+
+/** The cull's view axis, as `packCullParams` laid it out. */
+function parsedViewAxis(words: Uint32Array | Float32Array): Vec3 {
+  const view = new DataView(words.buffer, words.byteOffset, words.byteLength);
+  return {
+    x: view.getFloat32(64, true),
+    y: view.getFloat32(68, true),
+    z: view.getFloat32(72, true),
+  };
 }
 
 /** The instances' origins and pages as last written to `buffer`. */
@@ -736,6 +764,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("takes as each interior record's cull input the cascades castsInto admits its patch to, and its level's largest spacing (R14.T1.b)", async () => {
     const made = await clusteredPass();
+    made.pass.setGeometry(CLUSTERS_ALONE);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
     const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
@@ -820,9 +849,11 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("refuses in its twin every cluster of a patch castsInto refuses, and keeps one only where its sphere meets the cascade's box (R14.T1.b)", async () => {
     const made = await clusteredPass();
+    made.pass.setGeometry(CLUSTERS_ALONE);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
     const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
+    const viewAxis = parsedViewAxis(dispatch?.bindings.uniforms["params"] ?? new Uint32Array());
     const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
     const instances = instanceOrigins(made.engine, `terrain interior instances (${PRIMARY})`);
     const records = clusterRecordsOf(made.engine);
@@ -843,6 +874,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
         passes,
         places: passes.map((_, k) => ({ bucketBase: 8 * k, listBase: 0 })),
         templates: 8,
+        viewAxis,
       },
       0,
     );
@@ -880,6 +912,55 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       }
     });
     expect(refused).toEqual([]);
+  });
+
+  it("culls each cascade's casters by its receivers' depths: a patch's cascades a subset of castsInto's, some refused (R14.T1.c)", async () => {
+    const made = await clusteredPass();
+    /** Each record's cascades, interior then edge, as the frame's casters take them. */
+    const cascadesNow = (): number[] => {
+      made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+      const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+      const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+      const edge = recordsIn(made.engine, `terrain instances (${PRIMARY})`);
+      const byCascade = [1, 2, 3, 4].map((n) =>
+        recordsIn(made.engine, `terrain casters (${PRIMARY}) ${String(n)}`),
+      );
+      return [
+        ...interior.map((_, n) => inputs[2 * n] ?? 0),
+        ...edge.map((record) =>
+          byCascade.reduce((m, records, k) => (records.includes(record) ? m | (1 << k) : m), 0),
+        ),
+      ];
+    };
+    const culled = cascadesNow();
+    made.pass.setGeometry(CLUSTERS_ALONE);
+    const boxed = cascadesNow();
+    expect(culled).toHaveLength(boxed.length);
+    expect(culled.filter((mask, n) => (mask & ~(boxed[n] ?? 0)) !== 0)).toEqual([]);
+    expect(culled.some((mask, n) => mask !== boxed[n])).toBe(true);
+  });
+
+  it("packs each cascade's receivers into the cull's passes: the depths they sample it at and the cover below (R14.T1.c)", async () => {
+    const made = await clusteredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
+    const receivers = passes.map((pass) => pass.receivers ?? fail());
+    const far = receivers.map((r) => r.depthM[1]);
+    expect([
+      receivers.length,
+      receivers.map((r) => r.coveredBelow === null),
+      far.every((d, k) => k === 0 || d > (far[k - 1] ?? Infinity)),
+      // Each near end, the next nearer cascade's fade start, before that cascade's far end.
+      receivers.every((r, k) => k === 0 || r.depthM[0] < (far[k - 1] ?? 0)),
+      receivers.every((r) => r.reachM[0] > 0 && r.reachM[1] > 0),
+    ]).toEqual([4, [true, false, false, false], true, true, true]);
+    made.pass.setGeometry(CLUSTERS_ALONE);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const alone = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    expect(
+      parsePasses(alone?.bindings.uniforms["passes"] ?? new Uint32Array()).map((p) => p.receivers),
+    ).toEqual([null, null, null, null]);
   });
 
   it("writes each slot's 96 cluster records at its upload, and samples its counters only when measured (R14.T1.b)", async () => {

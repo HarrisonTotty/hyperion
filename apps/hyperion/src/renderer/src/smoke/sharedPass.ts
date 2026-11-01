@@ -45,7 +45,13 @@ import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
 import type { DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
-import { GEOMETRY_BEFORE_R14, SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import type { ClusterPassStats } from "../view/clusters/stats";
+import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
+  SETTINGS,
+  TERRAIN_SETTINGS,
+} from "../view/quality/qualitySetting";
 import { LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
 import { allocationTally } from "../view/terrain/gpu/allocationTally";
@@ -536,6 +542,33 @@ function sum(values: ReadonlyArray<number>): number {
 /** A lit mesh patch's triangles, as a caster draws it. */
 const LIT_PATCH_TRIANGLES = LIT_PATCH_INDICES / 3;
 
+/** Each cascade's caster triangles: the lit mesh's patches' and the cluster path's counts. */
+function casterTriangles(
+  litMesh: ReadonlyArray<number>,
+  clusters: ReadonlyArray<ClusterPassStats> | null,
+): number[] {
+  return litMesh.map((n, k) => n * LIT_PATCH_TRIANGLES + (clusters?.[k]?.triangles ?? 0));
+}
+
+/** Each pass's clusters, for the log. */
+function clustersOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
+  return (stats ?? []).map((each) => String(each.clusters)).join(", ");
+}
+
+/** a's sum as a share of b's, to three places. */
+function shareOf(a: ReadonlyArray<number>, b: ReadonlyArray<number>): string {
+  return (sum(a) / Math.max(1, sum(b))).toFixed(3);
+}
+
+/** The high setting's geometry at stride 1: its exact levers alone (plan R14, R14.T1.c). */
+const RECEIVERS_CULLED: GeometrySettings = { ...SETTINGS.high.geometry, casterStrideCap: 1 };
+
+/** The cluster path alone, at stride 1 and without the receivers' cull (plan R14, R14.T1.b). */
+const CLUSTERS_ALONE: GeometrySettings = {
+  ...RECEIVERS_CULLED,
+  casterDepthCull: false,
+};
+
 /**
  * A smoke kernel that copies one layer of the cascades' depth into a buffer as its bits, row by
  * row, so that the layers can be fingerprinted (plan R14, R14.T1.b): a caster change that leaves
@@ -731,8 +764,10 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
       }
     }
     made.step({ views: [passView], grounded: [] });
-    // The cluster path's counters sampled (plan R14, R14.T1.b), for the casters' triangles.
+    // The cluster path's counters sampled (plan R14, R14.T1.b), for the casters' triangles; the
+    // casters culled by their receivers' depths (R14.T1.c) at stride 1.
     made.measureClusters(true);
+    made.setGeometry(RECEIVERS_CULLED);
     const frame = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const living = tally.liveBytes(CASCADE_MEMORY_CATEGORY) - before;
     const cascades = frame.cascades;
@@ -781,8 +816,20 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         seen.brighter <= NEVER_BRIGHTER,
       `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
     );
-    // The same frame by the way back (`GEOMETRY_BEFORE_R14`), as the pass drew it before plan R14:
-    // its cascades' layers and its frame, byte for byte, from the same selection and residents.
+    // Each read waits on the device, and so on the counters' read of the frame before it.
+    const culledStats = made.clusterStats(passView.id);
+    // The same frame by the cluster path alone (R14.T1.b), and by the way back
+    // (`GEOMETRY_BEFORE_R14`), as the pass drew it before plan R14: from the same selection and
+    // residents, the cluster path's cascades' layers and frame byte for byte the way back's, and the
+    // receivers' cull's frame too.
+    made.setGeometry(CLUSTERS_ALONE);
+    const alone = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const shadowedAlone = await texelsOf(engine, "cascades: clusters alone", view, alone.draws);
+    const layersAlone =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, target.layers, target.sizePx);
+    const aloneStats = made.clusterStats(passView.id);
     made.setGeometry(GEOMETRY_BEFORE_R14);
     const unlevered = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const shadowedBefore = await texelsOf(engine, "cascades: before R14", view, unlevered.draws);
@@ -791,20 +838,25 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         ? ["none"]
         : await layerDigests(engine, target.depth, target.layers, target.sizePx);
     made.setGeometry(SETTINGS.high.geometry);
-    // Each cascade's caster triangles: the lit mesh's patches and the cluster path's counts.
-    const stats = made.clusterStats(passView.id);
-    const triangles = (litMesh: ReadonlyArray<number>, clusters: typeof stats): number[] =>
-      litMesh.map((n, k) => n * LIT_PATCH_TRIANGLES + (clusters?.[k]?.triangles ?? 0));
-    const casting = triangles(cascades?.litMeshCasters ?? [], stats);
-    const prior = triangles(unlevered.cascades?.litMeshCasters ?? [], null);
-    const ratio = (sum(casting) / Math.max(1, sum(prior))).toFixed(3);
+    const casting = casterTriangles(alone.cascades?.litMeshCasters ?? [], aloneStats);
+    const culled = casterTriangles(cascades?.litMeshCasters ?? [], culledStats);
+    const prior = casterTriangles(unlevered.cascades?.litMeshCasters ?? [], null);
     checks.check(
       "R14.T1 the cascades' layers and the frame they shadow are those the pass drew before plan R14, byte for byte",
+      bytesDigest(shadowedBefore) === bytesDigest(shadowedAlone) &&
+        layersBefore.join() === layersAlone.join() &&
+        alone.cascades?.clustered === true &&
+        aloneStats !== null,
+      `${path}; ${String(alone.patches.interior)} interior and ${String(alone.patches.edge)} edge patches, the interior cast by clusters ${String(alone.cascades?.clustered)}; caster triangles by cascade ${casting.join(", ")} (clusters ${clustersOf(aloneStats)}), ${prior.join(", ")} before, ${shareOf(casting, prior)} of them; digests ${bytesDigest(shadowedAlone)}, ${bytesDigest(shadowedBefore)} before; layers ${layersAlone.join(", ")}; before ${layersBefore.join(", ")}`,
+    );
+    checks.check(
+      "R14.T1.c the casters culled by their receivers' depths shadow the frame the pass drew before plan R14, byte for byte, with fewer caster triangles",
       bytesDigest(shadowedBefore) === bytesDigest(shadowed) &&
-        layersBefore.join() === layers.join() &&
         cascades?.clustered === true &&
-        stats !== null,
-      `${path}; ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches, the interior cast by clusters ${String(cascades?.clustered)}; caster triangles by cascade ${casting.join(", ")} (clusters ${(stats ?? []).map((each) => String(each.clusters)).join(", ")}), ${prior.join(", ")} before, ${ratio} of them; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}; before ${layersBefore.join(", ")}`,
+        culledStats !== null &&
+        culled.every((n, k) => n <= (casting[k] ?? 0)) &&
+        sum(culled) < sum(casting),
+      `${path}; caster triangles by cascade ${culled.join(", ")} (clusters ${clustersOf(culledStats)}), ${shareOf(culled, casting)} of the cluster path's alone, ${shareOf(culled, prior)} of before R14's; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}, ${layers.filter((d, k) => d !== layersBefore[k]).length} of them differing where no receiver samples`,
     );
     made.dispose();
     pass = null;

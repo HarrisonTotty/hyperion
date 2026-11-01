@@ -9,9 +9,17 @@ import { describe, expect, it } from "vitest";
 import type { Vec3 } from "../../geometry/vec3";
 import { declaredStructLayout } from "../engine/webgpu/uniforms";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
-import { cascadeKeeps, CULL_ROUNDING_M, cullTwin, strideLevel } from "./cull";
+import {
+  cascadeKeeps,
+  CULL_ROUNDING_M,
+  cullTwin,
+  RECEIVER_ROUNDING_M,
+  receiversRefuse,
+  strideLevel,
+} from "./cull";
 import {
   type CascadeCullPass,
+  type CullReceivers,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
   MAX_CULL_PASSES,
@@ -199,6 +207,28 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
     }).toThrow(RangeError);
   });
 
+  it("packs a pass's receivers after its centre, its switch in its scalars, and −1 for no cover", () => {
+    const out = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
+    const covered = cascade({ receivers: RECEIVERS });
+    const nearest = cascade({ receivers: { ...RECEIVERS, coveredBelow: null } });
+    packCullPasses(
+      [covered, nearest],
+      [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 0 },
+      ],
+      out,
+    );
+    const view = new DataView(out);
+    const f = (at: number, words: number[]): number[] =>
+      words.map((o) => view.getFloat32(at + o, true));
+    expect([
+      f(0, [28, 96, 100, 104, 108, 112, 116, 120, 124]),
+      f(CULL_PASS_BYTES, [28, 120, 124]),
+      f(2 * CULL_PASS_BYTES, [28]),
+    ]).toEqual([[1, 40, 200, 3, 5, 10, -20, 60, 2], [1, -1, 0], [0]]);
+  });
+
   it("packs the dispatch's parameters where CullParams holds them", () => {
     const out = new ArrayBuffer(CULL_PARAMS_BYTES);
     packCullParams(
@@ -224,6 +254,13 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
     ]).toEqual([[3, 8, 96, 4, 8], -1, [0, 10, 20, 30, 40, 45, 50, 55], [10, 10, 5, 5]]);
   });
 });
+
+/** Receivers between 40 m and 200 m, reaching 3 m nearer and 5 m farther, a cover below. */
+const RECEIVERS: CullReceivers = {
+  depthM: [40, 200],
+  reachM: [3, 5],
+  coveredBelow: { centreM: [10, -20], halfSideM: 60, reachM: 2 },
+};
 
 /** The stride the twin takes under `strideCap` at a tolerance of 0.2 m for a unit of `unitM`. */
 function strideAt(strideCap: CascadeCullPass["strideCap"], unitM: number): number {
@@ -260,6 +297,30 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     ]).toEqual([8, 4, 2, 2, 1, 2, 1]);
   });
 
+  it("refuses a sphere whose receivers all lie beyond the far end, or below the near end inside the cover, and keeps the rest (R14.T1.c)", () => {
+    // The view axis is the light's x, so a sphere's depth is its x; y is across the cover too.
+    const pass = cascade({ receivers: RECEIVERS });
+    const refuses = (x: number, y = -20, r = 1, p = pass): boolean =>
+      receiversRefuse(p, X, { x, y, z: 0 }, r, 0);
+    expect([
+      // Beyond: x − r − 3 past 200.
+      refuses(204.1),
+      refuses(203.9),
+      // Below 40 by x + r + 5, inside the cover by |x − 10| + r + 2 ≤ 60 across both axes.
+      refuses(33.9),
+      refuses(34.1),
+      refuses(33.9, -20 + 56.9),
+      refuses(33.9, -20 + 57.1),
+      // In the band, or with no cover below, or off.
+      refuses(100),
+      refuses(33.9, -20, 1, cascade({ receivers: { ...RECEIVERS, coveredBelow: null } })),
+      refuses(1e6, -20, 1, cascade()),
+    ]).toEqual([true, false, true, false, true, false, false, false, false]);
+    // The kernel's allowance narrows each test by a centimetre and some ulps of the lengths.
+    expect(receiversRefuse(pass, X, { x: 204.1 + RECEIVER_ROUNDING_M, y: 0, z: 0 }, 1)).toBe(true);
+    expect(receiversRefuse(pass, X, { x: 204.005, y: 0, z: 0 }, 1)).toBe(false);
+  });
+
   it("appends each kept cluster to its pass's bucket of its shape and stride, and nothing of a pass its instance may not enter", () => {
     const records = [
       record({ x: 0, y: 0, z: 0 }, 1),
@@ -280,6 +341,7 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
         { bucketBase: 8, listBase: 100 },
       ],
       templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
     });
     expect(Object.fromEntries([...buckets].toSorted(([a], [b]) => a - b))).toEqual({
       // Pass 0: instance 0 at stride 8 (block bucket 3, strip bucket 7), instance 1 at 1.

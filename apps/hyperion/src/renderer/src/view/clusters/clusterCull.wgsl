@@ -22,6 +22,14 @@
 //   `unclippedDepth`, clamped to the cleared depth, which the comparison leaves as it is. The side
 //   towards the light is the instance's own test's: a cluster cut there would change a pancaked
 //   caster's texels.
+// - _Its receivers' depths_ (T1.c; `clusters/receivers.ts`, where `scalars.w` is 1): a cascade's
+//   receivers sample it only at view depths in (fadeStart of the next nearer cascade, its own far
+//   end], or below them by falling through a next nearer cascade that does not cover them
+//   (`cascadeShadow.wgsl`). A caster's receivers lie within its sphere's depths widened by the
+//   pass's reaches, nearer and farther, and across the light within its radius and the pass's
+//   reach across. The cluster is refused where all of them lie beyond the far end, or all at or
+//   below the near end and inside the next nearer cascade's covered square, each test narrowed by
+//   the same allowance, so that it writes no texel any receiver reads.
 // - _The stride_: the coarsest s = 2^l, l up to the pass's cap, with s × the unit within the pass's
 //   tolerance, in `f32` as the twin forms it; s = 1 where none is.
 // - _The bucket_: the record's shape (its flags' bits 0–3) × STRIDE_LEVELS + l, from the pass's
@@ -71,6 +79,8 @@ const CULL_GROUP : u32 = 64u;
 // 2⁻²⁴ each), and a metre.
 const ROUNDING_FRACTION : f32 = 1e-6;
 const ROUNDING_M : f32 = 1.0;
+// The receivers' tests' least allowance, m: their lengths' ulps are the fraction's.
+const RECEIVER_ROUNDING_M : f32 = 0.01;
 
 @group(0) @binding(0) var<uniform> params : CullParams;
 @group(0) @binding(1) var<uniform> passes : array<CullPass, 8>;
@@ -92,6 +102,27 @@ fn cascade_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
   let slack = ROUNDING_FRACTION * (length(centre) + length(cull_pass.centre.xyz) + cull_pass.scalars.y) + ROUNDING_M;
   let reach = cull_pass.scalars.y + radius + slack;
   return abs(v.x) <= reach && abs(v.y) <= reach && v.z >= -(cull_pass.scalars.z + radius + slack);
+}
+
+// Whether no receiver of cascade `pass` can read a texel the sphere at `centre`, camera-relative,
+// of radius `radius` writes (see the module's head); never where the pass's receivers' cull is off.
+fn receivers_refuse(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
+  if (cull_pass.scalars.w == 0.0) {
+    return false;
+  }
+  let depths = cull_pass.receivers;
+  let below = cull_pass.covered;
+  let d = dot(centre, params.viewAxis);
+  let slack = ROUNDING_FRACTION * (length(centre) + abs(depths.x) + abs(depths.y) + length(below.xy) + abs(below.z)) + RECEIVER_ROUNDING_M;
+  if (d - radius - depths.z - slack > depths.y) {
+    return true;
+  }
+  if (below.z <= 0.0 || d + radius + depths.w + slack > depths.x) {
+    return false;
+  }
+  let across = vec2f(dot(centre, cull_pass.axisX.xyz), dot(centre, cull_pass.axisY.xyz)) - below.xy;
+  let reach = radius + below.w + slack;
+  return abs(across.x) + reach <= below.z && abs(across.y) + reach <= below.z;
 }
 
 // The coarsest stride's level, up to the pass's cap, whose 2^l × `unit` is within its tolerance.
@@ -145,7 +176,11 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         continue;
       }
       let cull_pass = passes[p];
-      if (cull_pass.header.x != PASS_CASCADE || !cascade_keeps(cull_pass, centre, record.radius)) {
+      if (
+        cull_pass.header.x != PASS_CASCADE ||
+        !cascade_keeps(cull_pass, centre, record.radius) ||
+        receivers_refuse(cull_pass, centre, record.radius)
+      ) {
         continue;
       }
       let t = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);

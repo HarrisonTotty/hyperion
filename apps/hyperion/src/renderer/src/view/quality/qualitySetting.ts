@@ -232,7 +232,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     geometry: {
       clusterPath: true,
-      casterDepthCull: false,
+      casterDepthCull: true,
       casterStrideCap: 1,
       overlayDepth: "redraw",
     },
@@ -258,7 +258,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     geometry: {
       clusterPath: true,
-      casterDepthCull: false,
+      casterDepthCull: true,
       casterStrideCap: 1,
       overlayDepth: "redraw",
     },

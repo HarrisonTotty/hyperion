@@ -9,7 +9,9 @@
  * bucket must be the doubly widened twin's: so no cluster the `f64` test keeps is refused, and none
  * is kept that the test with the kernel's allowance would not keep. The strides take the pass's cap
  * of 8 at random tolerances, so that every template's bucket is filled; a bucket's count is its
- * entries'. The buckets' order varies with the appends', so each is compared as a set.
+ * entries'. The first pass culls by its box alone, the others by their receivers' depths too
+ * (R14.T1.c), the second with no cover below. The buckets' order varies with the appends', so each
+ * is compared as a set.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -17,6 +19,7 @@ import { ClusterBuckets } from "../view/clusters/buckets";
 import { CLUSTER_CULL_KERNEL, cullTwin, type CullTwinInput } from "../view/clusters/cull";
 import {
   type CascadeCullPass,
+  type CullReceivers,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
   MAX_CULL_PASSES,
@@ -71,6 +74,28 @@ function frame(next: () => number): readonly [Vec3, Vec3, Vec3] {
   const x = { x: xRaw.x / n, y: xRaw.y / n, z: xRaw.z / n };
   const y = { x: z.y * x.z - z.z * x.y, y: z.z * x.x - z.x * x.z, z: z.x * x.y - z.y * x.x };
   return [x, y, z];
+}
+
+/** Random receivers of pass `k`, about the instances' depths; the second pass's without a cover. */
+function receiversOf(next: () => number, k: number): CullReceivers {
+  const near = 8_000 * (next() - 0.5);
+  return {
+    depthM: [near, near + 8_000 * next()],
+    reachM: [500 * next(), 500 * next()],
+    coveredBelow:
+      k === 1
+        ? null
+        : {
+            centreM: [4_000 * (next() - 0.5), 4_000 * (next() - 0.5)],
+            halfSideM: 2_000 * 2 ** k * next(),
+            reachM: 50 * next(),
+          },
+  };
+}
+
+/** The entries of every bucket of `twin`. */
+function entriesOf(twin: ReadonlyMap<number, ReadonlyArray<number>>): number {
+  return [...twin.values()].reduce((sum, list) => sum + list.length, 0);
 }
 
 /** The device's buckets: each bucket's entries, as the twin keys them, from its lists and counts. */
@@ -139,8 +164,9 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     depthFarM: 2_000 * 2 ** k,
     toleranceM: 4 * next(),
     strideCap: 8,
-    receivers: null,
+    receivers: k === 0 ? null : receiversOf(next, k),
   }));
+  const viewAxis = unit(next);
   const buckets = new ClusterBuckets(
     engine,
     "smoke clusters",
@@ -194,7 +220,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
         passes: PASSES,
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
-        viewAxis: { x: 0, y: 0, z: -1 },
+        viewAxis,
       },
       paramBytes,
     );
@@ -242,9 +268,15 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       passes,
       places,
       templates: templates.length,
+      viewAxis,
     };
     const exact = cullTwin(input, 0);
     const widened = cullTwin(input, 2);
+    const boxes: CascadeCullPass[] = [];
+    for (const pass of passes) {
+      boxes.push({ ...pass, receivers: null });
+    }
+    const byReceivers = entriesOf(cullTwin({ ...input, passes: boxes }, 0)) - entriesOf(exact);
     let missing = 0;
     let extra = 0;
     let kept = 0;
@@ -263,9 +295,13 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       }
     }
     checks.check(
-      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses",
-      missing === 0 && extra === 0 && kept > 0 && filled.size === templates.length,
-      `${String(kept)} entries kept of ${String(INSTANCES * CLUSTERS * PASSES)} tested, in ${String(filled.size)} of ${String(templates.length)} templates; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses, its receivers' cull (R14.T1.c) on three of its passes",
+      missing === 0 &&
+        extra === 0 &&
+        kept > 0 &&
+        filled.size === templates.length &&
+        byReceivers > 0,
+      `${String(kept)} entries kept of ${String(INSTANCES * CLUSTERS * PASSES)} tested, in ${String(filled.size)} of ${String(templates.length)} templates, ${String(byReceivers)} refused by the receivers' depths; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
     );
   } finally {
     for (const handle of made) {

@@ -124,11 +124,11 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its later levers off, and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       expect(SETTINGS[setting].geometry).toEqual({
         clusterPath: true,
-        casterDepthCull: false,
+        casterDepthCull: true,
         casterStrideCap: 1,
         overlayDepth: "redraw",
       });

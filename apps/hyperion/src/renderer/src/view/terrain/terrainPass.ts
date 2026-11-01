@@ -78,15 +78,15 @@ import { conjugate, multiply, quaternionFromRows, rotationRows } from "../camera
 import type { ViewId } from "../camera/state";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { BucketDrawBase, ClusterBuckets } from "../clusters/buckets";
-import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { CLUSTER_CULL_KERNEL, receiversRefuse } from "../clusters/cull";
 import {
-  type CascadeCullPass,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
   MAX_CULL_PASSES,
   packCullParams,
   packCullPasses,
 } from "../clusters/cullPass";
+import { cascadeCullPasses } from "../clusters/receivers";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
@@ -3306,6 +3306,12 @@ export class TerrainPass {
    * through the cluster caster. A layer's depth is its casters' nearest whatever their order, and a
    * cluster is refused only where it can write no texel of the layer, so the layers are those the
    * lit mesh draws.
+   *
+   * With `GeometrySettings.casterDepthCull` (plan R14, R14.T1.c; `clusters/receivers.ts`), a patch,
+   * and on the cluster path each of its clusters, is also refused from a cascade where no receiver
+   * that samples the cascade can read a texel it writes, by the view depths the receivers sample it
+   * at and the next nearer cascade's cover. The layers then differ only where no receiver samples,
+   * and the frame not at all. A stand-in casts by `castsInto` alone.
    */
   #drawCasters(
     device: Device,
@@ -3347,6 +3353,12 @@ export class TerrainPass {
     // Each patch's centre less the camera, body-fixed, in `f64`, as the fit placed the cascades.
     const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
     const radiusM = this.#planet.figure.equatorialRadiusM;
+    // T1.c's receivers' cull of each patch, in the same body-fixed frame: a stand-in's sub-patch is
+    // left to `castsInto` alone, as its draw is left to the edge path.
+    const viewAxis = rotateToBodyFixed(input.view.rotation, viewAxisOf(input.view.orientation));
+    const receivers = this.#geometry.casterDepthCull
+      ? cascadeCullPasses(set, [set.basis.x, set.basis.y, set.basis.z], viewAxis, 1, true)
+      : null;
     for (const [records, drawn, interior] of [
       [state.instances, state.drawn, false],
       [state.interior, state.interiorDrawn, true],
@@ -3354,13 +3366,19 @@ export class TerrainPass {
       for (let record = 0; record < drawn.length; record += 1) {
         const drawnIndex = drawn[record];
         // A record whose patch the draw set no longer holds casts nothing.
-        const patch = drawnIndex === undefined ? undefined : drawSet.patches[drawnIndex]?.patch;
+        const entry = drawnIndex === undefined ? undefined : drawSet.patches[drawnIndex];
+        const patch = entry?.patch;
         let mask = 0;
         if (patch !== undefined) {
           const o = patch.originM;
           const fromCamera = { x: o.x - camera.x, y: o.y - camera.y, z: o.z - camera.z };
+          const culled = entry?.standIn === true ? null : receivers;
           for (const index of CASCADES) {
-            if (castsInto(set, index, fromCamera, patch.boundingRadiusM)) {
+            if (
+              castsInto(set, index, fromCamera, patch.boundingRadiusM) &&
+              (culled === null ||
+                !receiversRefuse(culled[index], viewAxis, fromCamera, patch.boundingRadiusM))
+            ) {
               mask |= 1 << index;
             }
           }
@@ -3477,8 +3495,9 @@ export class TerrainPass {
 
   /**
    * Culls view `state`'s interior patches' clusters into `set`'s cascades' buckets (plan R14,
-   * R14.T1.b): writes each record's cull input, the cascades as the cull's passes, at stride 1, and
-   * the dispatch's parameters, clears the buckets and dispatches the cull, a workgroup a record, its
+   * R14.T1.b and T1.c): writes each record's cull input, the cascades as the cull's passes, at
+   * stride 1 and with their receivers' cull where `casterDepthCull` is on, and the dispatch's
+   * parameters, clears the buckets and dispatches the cull, a workgroup a record, its
    * submission before the caster passes'; and, behind the measurement switch, samples the
    * buckets' counts.
    */
@@ -3501,19 +3520,8 @@ export class TerrainPass {
       z: r2.x * v.x + r2.y * v.y + r2.z * v.z,
     });
     const axes = [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)] as const;
-    const passes = CASCADES.map((index): CascadeCullPass => {
-      const cascade = set.cascades[index];
-      return {
-        kind: "cascade",
-        axes,
-        centreFromCameraLightM: cascade.centreFromCameraLightM,
-        radiusM: cascade.radiusM,
-        depthFarM: cascade.depthFarM,
-        toleranceM: cascade.texelM,
-        strideCap: 1,
-        receivers: null,
-      };
-    });
+    const viewAxis = viewAxisOf(input.view.orientation);
+    const passes = cascadeCullPasses(set, axes, viewAxis, 1, this.#geometry.casterDepthCull);
     const { buckets } = clusters;
     packCullPasses(
       passes,
@@ -3533,7 +3541,7 @@ export class TerrainPass {
         passes: CLUSTER_CASTER_PASSES,
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
-        viewAxis: viewAxisOf(input.view.orientation),
+        viewAxis,
       },
       casters.cullParams,
     );

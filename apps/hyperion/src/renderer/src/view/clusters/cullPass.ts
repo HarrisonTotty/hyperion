@@ -15,7 +15,10 @@
  * first bucket; its first list entry), `scalars` (the tolerance, m; the cascade's radius r, m; the
  * far plane's distance from its centre, away from the light, m; the receivers' cull, 1 on and 0
  * off, T1.c), the light's axes x_L, y_L and z_L (towards the light), the cascade's centre less the
- * camera in those axes, m, and two `vec4f` of T1.c's receivers' cull (`receivers`, `covered`).
+ * camera in those axes, m, and two `vec4f` of T1.c's receivers' cull: `receivers` (the depths
+ * receivers sample the cascade between, m, and their reach nearer and farther than a caster, m) and
+ * `covered` (the next nearer cascade's covered square's centre x and y and half-side, −1 for none,
+ * and the receivers' reach across the light, m).
  *
  * `CullParams`, 144 B: the page's axes into the instances' frame by column (terrain: the body's
  * rotation), `counts` (instances, `u32` words an instance record, clusters a page, passes), the
@@ -39,28 +42,34 @@ export const CULL_PARAMS_BYTES = 144;
 export const MAX_PASS_TEMPLATES = 8;
 
 /**
- * T1.c's receivers' cull of a cascade (plan R14, R14.T1.c): the view depths its receivers sample
- * it at, and the square below it that covers the receivers that would fall through to it.
+ * T1.c's receivers' cull of a cascade (plan R14, R14.T1.c; `clusters/receivers.ts`): the view
+ * depths its receivers sample it at, how far beyond a caster's sphere its receivers reach, and the
+ * square below it that holds the receivers that would fall through to it.
  */
 export interface CullReceivers {
-  /** The view axis in the instances' frame, the camera's forward. */
-  readonly viewAxis: Vec3;
-  /** The view depths, m along the view axis, at which receivers sample this cascade. */
-  readonly depthM: readonly [near: number, far: number];
-  /** s, the sun's direction on the view axis, and ℓ, the set's caster reach, m. */
-  readonly sunOnViewAxis: number;
-  readonly casterReachM: number;
   /**
-   * The next nearer cascade's covered square in this pass's light axes, a centre (x, y) less the
-   * camera, m, and a half-side, m, within which every receiver is that cascade's; `null` for the
-   * nearest, where nothing falls through.
+   * The next nearer cascade's fade start and this cascade's far end, m along the view axis:
+   * receivers sample this cascade only between them, or below the first by falling through; 0 for
+   * the nearest's first, below which nothing falls through.
+   */
+  readonly depthM: readonly [near: number, far: number];
+  /**
+   * How far a caster's receivers may lie nearer and farther than its sphere along the view axis, m:
+   * ℓ max(0, s) and ℓ max(0, −s), ℓ the set's caster reach and s the light's axis on the view axis,
+   * each with a receiver's normal offset and filter reach.
+   */
+  readonly reachM: readonly [nearer: number, farther: number];
+  /**
+   * The next nearer cascade's covered square, its centre (x, y) less the camera in this pass's light
+   * axes, m, and its half-side, m, within which that cascade covers every receiver with its
+   * footprint; and how far beyond a caster's sphere its receivers may lie across the light, m.
+   * `null` for the nearest, where nothing falls through.
    */
   readonly coveredBelow: {
     readonly centreM: readonly [number, number];
     readonly halfSideM: number;
+    readonly reachM: number;
   } | null;
-  /** The margin a receiver's own offset and filter reach add about a caster, m. */
-  readonly marginM: number;
 }
 
 /** A pass the cull culls for (see the module's remarks). */
@@ -140,13 +149,13 @@ export function packCullPasses(
     if (receivers !== null) {
       view.setFloat32(at + 96, receivers.depthM[0], true);
       view.setFloat32(at + 100, receivers.depthM[1], true);
-      view.setFloat32(at + 104, receivers.sunOnViewAxis, true);
-      view.setFloat32(at + 108, receivers.casterReachM, true);
+      view.setFloat32(at + 104, receivers.reachM[0], true);
+      view.setFloat32(at + 108, receivers.reachM[1], true);
       const below = receivers.coveredBelow;
       view.setFloat32(at + 112, below?.centreM[0] ?? 0, true);
       view.setFloat32(at + 116, below?.centreM[1] ?? 0, true);
       view.setFloat32(at + 120, below === null ? -1 : below.halfSideM, true);
-      view.setFloat32(at + 124, receivers.marginM, true);
+      view.setFloat32(at + 124, below?.reachM ?? 0, true);
     }
   });
 }
