@@ -25,9 +25,12 @@ import {
   primaryLabelBlock,
   renderViewDisplay,
   settle,
+  submittedBy,
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import { TONEMAP_PASS } from "../../view/post/tonemap";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
 import { type InspectionOpening, inspectionOption } from "./ViewSceneProvider";
 
@@ -166,6 +169,28 @@ async function fieldHeldBeforeSurvey(
   await settle();
   return earthFieldAsks(view);
 }
+
+describe("the inspection's first frames (fix-view-light)", () => {
+  it("holds its first photorealistic frame back until a reading, so that none shows at MAN's -1", async () => {
+    const fake = timedEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    await settle();
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    const primary = fake.submissions.filter((each) => submittedBy(each) === "view");
+    const firstTonemap = primary.findIndex((each) => each.label === TONEMAP_PASS);
+    const histogramsBefore = primary
+      .slice(0, firstTonemap)
+      .filter((each) => each.label === PHOTOREAL_PASS_LABELS.histogram).length;
+    expect(histogramsBefore).toBeGreaterThanOrEqual(2);
+  });
+});
 
 describe("VIEW's body inspection (the owner's request)", () => {
   it("opens on BODY INSPECTION, photorealistic, framed on the body from a free camera", async () => {

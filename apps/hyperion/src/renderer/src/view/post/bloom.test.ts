@@ -125,13 +125,13 @@ describe("bloomKernel", () => {
 });
 
 describe("bloomExcessOf (fix-view-light)", () => {
-  it("leaves a host disc's texel out of the chain, and takes every other's excess whole", () => {
-    expect([
-      bloomExcessOf(100, METER_CLASS.hostDisc, 16),
-      bloomExcessOf(100, METER_CLASS.other, 16),
-      bloomExcessOf(100, METER_CLASS.litBody, 16),
-      bloomExcessOf(100, 0.25, 16),
-    ]).toEqual([0, 84, 84, 21]);
+  it.each([
+    { name: "a host disc's texel", alpha: METER_CLASS.hostDisc, excess: 0 },
+    { name: "the sky's", alpha: METER_CLASS.other, excess: 84 },
+    { name: "a lit body's", alpha: METER_CLASS.litBody, excess: 84 },
+    { name: "a filtered texel a quarter off the disc", alpha: 0.25, excess: 21 },
+  ])("gives the chain $excess of $name light 100 over a threshold of 16", ({ alpha, excess }) => {
+    expect(bloomExcessOf(100, alpha, 16)).toBe(excess);
   });
 });
 

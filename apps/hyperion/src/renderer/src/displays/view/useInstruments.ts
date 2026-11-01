@@ -221,6 +221,11 @@ export interface InstrumentsFrame {
   readonly setting: QualitySetting;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
+  /**
+   * Whether the primary's frame is presented: an instrument holds its photorealistic frames back
+   * while the primary's exposure awaits a cut's reading (`AutoExposure.holds`; fix-view-light).
+   */
+  readonly present: boolean;
   readonly stars: ReadonlyArray<ViewStar>;
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
@@ -804,6 +809,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           availability: inputs.availability,
           // The primary is the exposure's source: an instrument meters nothing (Design note 11).
           meter: null,
+          present: each.present,
           // The terrain session's, as the primary's frame read them (R10.T16.a).
           classMaps: session?.classMaps,
           reliefs: session?.reliefs,
@@ -831,9 +837,12 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         loop.terrain = drawn?.terrain ?? null;
         loop.contourIntervalM = drawn?.contourIntervalM ?? null;
         if (drawn !== null) {
-          loop.anchors = drawn.anchors;
-          loop.drawnStyle = drawn.drawnStyle;
-          loop.sceneStars = drawn.sceneStars;
+          // A frame held back leaves the slot showing the last one presented, with its marks.
+          if (!(drawn.drawnStyle === "photorealistic" && !each.present)) {
+            loop.anchors = drawn.anchors;
+            loop.drawnStyle = drawn.drawnStyle;
+            loop.sceneStars = drawn.sceneStars;
+          }
           loop.surveyEdges = drawn.surveyEdges;
           // What it drew, for the terrain session's next step (R10.T16.a).
           if (loop.reportedTo !== session) {

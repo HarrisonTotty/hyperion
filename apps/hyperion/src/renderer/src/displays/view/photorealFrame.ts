@@ -42,7 +42,7 @@ import type {
   PhotorealOverlay,
 } from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
-import type { QualitySetting } from "../../view/quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
@@ -309,6 +309,19 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       }
     }
   }
+  const litBodies = litBodiesOf(
+    scene,
+    pose,
+    discs,
+    inputs.classMaps,
+    { reliefs: inputs.reliefs, terrain: inputs.terrain },
+    inputs.groundFields,
+  );
+  // A disc's glare is of the light that reaches the camera past the frame's bodies.
+  const occluders = litBodies.map((body) => ({
+    centreM: body.centreM,
+    radiusM: Math.sqrt(body.figure.equatorialRadiusM * body.figure.polarRadiusM),
+  }));
   return {
     camera,
     viewport,
@@ -319,16 +332,15 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     sky: [...(band === null ? [] : [band]), ...(inputs.cube === null ? [] : [inputs.cube])],
     starSprites: [...inputs.list.sprites.map(starRecord), ...hostSprites],
     hostDraws,
-    glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
-    lights,
-    bodies: litBodiesOf(
-      scene,
-      pose,
-      discs,
-      inputs.classMaps,
-      { reliefs: inputs.reliefs, terrain: inputs.terrain },
-      inputs.groundFields,
+    glareSources: inputs.discs.glareSources(
+      camera,
+      viewport,
+      run.camera.role,
+      occluders,
+      SETTINGS[inputs.setting].photoreal.discAnnuli,
     ),
+    lights,
+    bodies: litBodies,
     // A body handed over to terrain writes depth as a mesh does (`drawnAsMesh`), its footprint
     // counted by its regime (R10.T16.c); lit craft will add theirs.
     depthWriters: [],

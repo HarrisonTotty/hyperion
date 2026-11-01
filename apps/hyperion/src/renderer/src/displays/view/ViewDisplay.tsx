@@ -1177,6 +1177,8 @@ function ViewStage({
     let animationFrame = -1;
     let primaryMs: number | null = null;
     let drawnStyle: RenderStyle = "wireframe";
+    // Whether the last frame drawn drew the photorealistic image, presented or held back.
+    let imageDrawn = false;
     let sceneStars = false;
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
@@ -1436,15 +1438,20 @@ function ViewStage({
       if (drawer !== null && frameInputs !== null) {
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
-          anchors = drawn.anchors;
-          lineOfSightPx = drawn.lineOfSight?.boxPx ?? null;
+          imageDrawn = drawn.drawnStyle === "photorealistic";
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
           atmosphereReport = drawn.atmosphere;
-          // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
-          drawnStyle = drawn.drawnStyle;
-          sceneStars = drawn.sceneStars;
+          // A frame held back leaves the view showing the last one presented, its marks' labels
+          // and its style with it (fix-view-light).
+          if (!(imageDrawn && frameInputs.present === false)) {
+            anchors = drawn.anchors;
+            lineOfSightPx = drawn.lineOfSight?.boxPx ?? null;
+            // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
+            drawnStyle = drawn.drawnStyle;
+            sceneStars = drawn.sceneStars;
+          }
           placeMarkLabels(
             labelsRef.current,
             anchors,
@@ -1456,9 +1463,10 @@ function ViewStage({
           );
         }
       }
-      // What the meter says is true of the frame just drawn: an image coming to be drawn opens
-      // the window before its first histogram, and one gone has nothing to meter (R07.T16.b).
-      auto.noteImage(drawnStyle === "photorealistic");
+      // What the meter says is true of the frame just drawn, held back or not: an image coming to
+      // be drawn opens the window before its first histogram, and one gone has nothing to meter
+      // (R07.T16.b).
+      auto.noteImage(imageDrawn);
       // The readouts change at 4 Hz, every view's in the same frame, so React renders them once:
       // a frame the instruments draw in too, at their 30 Hz, so that every view's block states
       // what it drew in that frame, one interval among them where they stand at one pose
@@ -1474,7 +1482,10 @@ function ViewStage({
         primary: runRef.current,
         budgets: paced.budgets,
         setting: paced.setting,
-        exposure: inputs.exposure,
+        // The primary's applied exposure, and its hold, so that no instrument shows a cut's new
+        // scene at the exposure from before it (fix-view-light).
+        exposure: reading.control,
+        present: !auto.holds,
         stars: inputs.stars,
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,

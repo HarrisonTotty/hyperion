@@ -152,10 +152,11 @@ export const SMOOTHING_SPEED_EV_PER_S = 24;
 export const SMOOTHING_BAND_EV = 1.5;
 
 /**
- * The most drawn frames a cut holds back while it waits for a reading inside the histogram's range:
- * nine, three readings each the reader's three frames late at most (`HISTOGRAM_RING`).
+ * The longest a cut holds the view's image back while it waits for a reading inside the
+ * histogram's range, s: 0.15, nine frames at 60 Hz, three readings each the reader's three frames
+ * late at most (`HISTOGRAM_RING`); each frame counts at most {@link METER_STEP_MAX_S}.
  */
-export const CUT_HOLD_MAX_FRAMES = 9;
+export const CUT_HOLD_MAX_S = 0.15;
 
 /**
  * The fraction of a reading's weighed counts in the histogram's top bin above which the reading is
@@ -364,8 +365,9 @@ export class AutoExposure {
   #opensAtMeter: boolean;
   // Whether a cut waits for a reading inside the histogram's range, which ends it.
   #cut = false;
-  // The drawn frames held back since the cut began (`holds`).
-  #heldFrames = 0;
+  // Whether the cut's frames are still held back (`holds`), and for how long they have been, s.
+  #holding = false;
+  #heldS = 0;
 
   constructor(options: AutoExposureOptions) {
     this.#source = options.source;
@@ -435,9 +437,6 @@ export class AutoExposure {
       this.#openWindow();
       this.#startCut();
     }
-    if (drawn && this.holds) {
-      this.#heldFrames += 1;
-    }
     this.#imageDrawn = drawn;
   }
 
@@ -451,8 +450,10 @@ export class AutoExposure {
    * meter), it holds the image's first frame, and every frame of a cut until a reading lies inside
    * the histogram's range: the frame is drawn into the scene target, which the histogram reads, but
    * not presented, so the view shows the image it last showed. A cut toward a brighter scene costs
-   * the read-back's one to three frames, a clipped one up to {@link CUT_HOLD_MAX_FRAMES}, past which
-   * the frame is shown as it is. `MAN` and the operator's `INHIBIT` hold nothing.
+   * the read-back's one to three frames, a clipped one up to {@link CUT_HOLD_MAX_S}, past which the
+   * frame is shown as it is, as it is at once when a reading weighs nothing (`NO LIT SIDE`). `MAN`
+   * the operator has set and the operator's `INHIBIT` hold nothing; the display's default `MAN`
+   * holds where the view opens at its meter.
    */
   get holds(): boolean {
     const control = this.#control;
@@ -460,13 +461,14 @@ export class AutoExposure {
       this.#opensAtMeter ||
       control.kind === "auto" ||
       (control.kind === "inhibited" && control.reason !== "operator");
-    return follows && (this.#cut || !this.#imageDrawn) && this.#heldFrames < CUT_HOLD_MAX_FRAMES;
+    return follows && (this.#holding || !this.#imageDrawn) && this.#heldS < CUT_HOLD_MAX_S;
   }
 
   /** Begins a cut: the next readings snap, and its frames are held from the first. */
   #startCut(): void {
     this.#cut = true;
-    this.#heldFrames = 0;
+    this.#holding = true;
+    this.#heldS = 0;
   }
 
   /**
@@ -506,6 +508,9 @@ export class AutoExposure {
    * @param dtS - The frame's duration, s.
    */
   step(h: Histogram | undefined, dtS: number): ExposureReading {
+    if (this.#imageDrawn && this.holds) {
+      this.#heldS += Math.min(dtS, METER_STEP_MAX_S);
+    }
     const histogram = this.#imageDrawn ? h : undefined;
     const average = histogram === undefined ? null : meteredAverage(histogram, this.#window);
     // The range of this step's reading where it weighs a pixel: a frame below the range metered at
@@ -516,6 +521,10 @@ export class AutoExposure {
         : average === EMPTY_FRAME_CD_M2
           ? "inside"
           : readingRange(histogram);
+    if (histogram !== undefined && average === null) {
+      // A reading that weighs nothing ends a cut's hold: no reading of its scene is coming.
+      this.#holding = false;
+    }
     if (average === null) {
       // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
       // the meter holds its value until the timeout, then says why it has none.
@@ -584,6 +593,7 @@ export class AutoExposure {
     switch (range) {
       case "inside":
         this.#cut = false;
+        this.#holding = false;
         ev = meteredEv;
         break;
       case "above":

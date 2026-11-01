@@ -35,6 +35,7 @@ import type {
   RenderEngine,
   WgslMaterialSpec,
 } from "../engine/types";
+import { DISC_ANNULI_HIGH, eclipseVisible, type Occluder } from "../lighting/annuli";
 import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
 import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import type { GlareSource } from "../post/glare";
@@ -82,6 +83,21 @@ export const DISC_MIN_DIAMETER_PX = 3;
 
 /** How far outside an eye view's frame a disc still casts glare into it, rad: 45°. */
 export const EYE_GLARE_REACH_RAD = Math.PI / 4;
+
+/**
+ * The last part of {@link EYE_GLARE_REACH_RAD} across which a disc's glare fades out, rad: 10°, so
+ * that its haze over the frame does not stop in one frame as the disc passes the reach (the UX
+ * review's flash rule; fix-view-light).
+ */
+export const EYE_GLARE_FADE_RAD = Math.PI / 18;
+
+/** The share of a disc's glare an eye view takes from it `outsideRad` beyond its frame: 1 to 0. */
+export function eyeGlareShare(outsideRad: number): number {
+  const t = (EYE_GLARE_REACH_RAD - outsideRad) / EYE_GLARE_FADE_RAD;
+  const c = Math.min(1, Math.max(0, t));
+  // Smoothstep, so that the haze's rate of change is continuous at both ends.
+  return c * c * (3 - 2 * c);
+}
 
 /** A host star where the scene draws it. */
 export interface HostPlacement {
@@ -372,24 +388,64 @@ export class HostDiscLayer {
    * @remarks
    * Each carries the disc's light above the bloom threshold: the disc's texels, meter class 0, are
    * kept out of R07's bloom chain, so that its glare is the closed form's alone (fix-view-light).
+   * An eye view's share of a disc beyond its frame fades out over the reach's last
+   * {@link EYE_GLARE_FADE_RAD} ({@link eyeGlareShare}), its light and its excess alike; and every
+   * view takes only the share of the disc's light that `occluders`, the frame's bodies, leave the
+   * camera (`eclipseVisible`, by `annuli` annuli), so that a disc behind a limb casts no glare.
+   * Air between them is not taken: a setting star's glare is not dimmed by it.
    * A host drawn as a sprite casts none: its light is in the sprite, which the target holds, and
    * the bloom chain spreads it.
+   *
+   * @param occluders - The frame's bodies, their centres in the camera-relative frame of the discs'
+   *   directions, m.
    */
-  glareSources(camera: ProjectionCamera, viewport: Viewport, role: ViewRole): GlareSource[] {
+  glareSources(
+    camera: ProjectionCamera,
+    viewport: Viewport,
+    role: ViewRole,
+    occluders: ReadonlyArray<Occluder> = [],
+    annuli: number = DISC_ANNULI_HIGH,
+  ): GlareSource[] {
     const reach = role === "eye" ? EYE_GLARE_REACH_RAD : 0;
     const sources: GlareSource[] = [];
     for (const { host, direction, distanceM } of this.#discs) {
       const axis = normalise(direction);
       const rho = angularRadiusRad(host.radius_m, distanceM);
-      if (angleOutsideFrameRad(axis, camera, viewport) - rho > reach) {
+      const outside = angleOutsideFrameRad(axis, camera, viewport) - rho;
+      if (outside > reach) {
         continue;
       }
+      // An eye view's share fades out over the reach's last 10°; a camera's is whole. Either is of
+      // the disc's light the frame's bodies leave the camera, by each channel's limb law.
+      const share = role === "eye" ? eyeGlareShare(outside) : 1;
+      const centreM = scale(axis, distanceM);
+      const [sr, sg, sb] = rgbOfBvr([0, 1, 2]).map((band) => {
+        const law = host.limb[band];
+        return law === undefined
+          ? share
+          : share *
+              eclipseVisible(
+                { centreM, radiusM: host.radius_m, limbC: law.c, limbAlpha: law.alpha },
+                vec3(0, 0, 0),
+                occluders,
+                annuli,
+              );
+      });
+      const seen: Rgb = [sr ?? share, sg ?? share, sb ?? share];
+      if (seen[0] + seen[1] + seen[2] === 0) {
+        continue;
+      }
+      // Its light above the display's range: its texels are kept out of the bloom chain.
+      const [er, eg, eb] = discLuminanceAboveRgb(
+        host,
+        BLOOM_THRESHOLD_EXPOSED / this.#exposureScale,
+      );
+      const [lr, lg, lb] = rgbOfBvr(host.mean_luminance_cd_m2);
       sources.push({
         direction: axis,
         angularRadiusRad: rho,
-        // Its light above the display's range: its texels are kept out of the bloom chain.
-        excessLuminance: discLuminanceAboveRgb(host, BLOOM_THRESHOLD_EXPOSED / this.#exposureScale),
-        luminance: rgbOfBvr(host.mean_luminance_cd_m2),
+        excessLuminance: [seen[0] * er, seen[1] * eg, seen[2] * eb],
+        luminance: [seen[0] * lr, seen[1] * lg, seen[2] * lb],
       });
     }
     return sources;

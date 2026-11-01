@@ -15,7 +15,6 @@
 import type { HostDiscDto } from "@hyperion/protocol";
 
 import type { Rgb } from "../photometry/toneCurve";
-import { HALF_MAX } from "./half";
 
 /** A disc's angular radius, rad: asin(R ÷ d). */
 export function angularRadiusRad(radiusM: number, distanceM: number): number {
@@ -49,16 +48,6 @@ export function discIlluminanceRgbLx(host: HostDiscDto, radiusRad: number): Rgb 
 
 /** Rings the disc's excess is integrated over, centre to limb. */
 const EXCESS_RINGS = 256;
-
-/**
- * The luminance a target holding at most 65,504 after pre-exposure cannot store, per channel,
- * cd/m², averaged over the disc ({@link discLuminanceAboveRgb} above 65,504 ÷ the scale).
- *
- * @param exposureScale - The frame's pre-exposure scale (R02's `exposureScale`).
- */
-export function discExcessLuminanceRgb(host: HostDiscDto, exposureScale: number): Rgb {
-  return discLuminanceAboveRgb(host, HALF_MAX / exposureScale);
-}
 
 /**
  * The disc's luminance above `levelCdM2`, per channel, cd/m², averaged over the disc: R07's

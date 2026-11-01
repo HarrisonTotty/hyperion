@@ -15,6 +15,7 @@ import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
   DISC_MIN_DIAMETER_PX,
+  eyeGlareShare,
   HostDiscLayer,
   type HostPlacement,
   hostDiscRecord,
@@ -23,7 +24,6 @@ import {
 } from "./disc";
 import {
   angularRadiusRad,
-  discExcessLuminanceRgb,
   discLuminanceAboveRgb,
   discIlluminanceRgbLx,
   discLuminanceRgb,
@@ -153,7 +153,7 @@ describe("the host discs", () => {
     expect(DISC_MIN_DIAMETER_PX).toBe(3);
   });
 
-  it("hand R07 the light above the bloom threshold, none below it (fix-view-light)", async () => {
+  it("hand R07 a disc's light above the bloom threshold (fix-view-light)", async () => {
     const engine = await countingRenderEngine();
     const layer = new HostDiscLayer(engine);
     const host = sunHost();
@@ -168,13 +168,12 @@ describe("the host discs", () => {
     expect(source?.excessLuminance).toEqual(
       discLuminanceAboveRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale),
     );
-    expect(discLuminanceAboveRgb(host, 1e12)).toEqual([0, 0, 0]);
   });
 
-  it("hand R07 the light above a half's 65,504, and none while the disc fits", () => {
+  it("hold a disc's light above a level, and none while the disc is below it", () => {
     const host = sunHost();
-    expect(discExcessLuminanceRgb(host, 1e-6)).toEqual([0, 0, 0]);
-    const [, excess] = discExcessLuminanceRgb(host, 1);
+    expect(discLuminanceAboveRgb(host, HALF_FLOAT_MAX / 1e-6)).toEqual([0, 0, 0]);
+    const [, excess] = discLuminanceAboveRgb(host, HALF_FLOAT_MAX);
     // Almost all of the mean is above 65,504 cd/m² at a scale of 1.
     expect(Math.abs(excess / (2e9 - 65_504) - 1)).toBeLessThan(0.01);
   });
@@ -208,6 +207,38 @@ describe("the host discs", () => {
     ]).toEqual([1, 0, 1, 0, 0, 1]);
   });
 
+  it.each([
+    { outsideDeg: 30, share: 1 },
+    { outsideDeg: 40, share: 0.5 },
+    { outsideDeg: 45, share: 0 },
+  ])(
+    "fade an eye view's glare from a disc $outsideDeg° outside its frame to a share of $share (fix-view-light)",
+    ({ outsideDeg, share }) => {
+      expect(eyeGlareShare((outsideDeg * Math.PI) / 180)).toBeCloseTo(share, 12);
+    },
+  );
+
+  it.each([
+    { name: "a disc behind a planet's limb casts no glare", offsetRad: 0, sources: 0 },
+    { name: "a disc clear of the planet casts its whole glare", offsetRad: 0.1, sources: 1 },
+  ])("$name (fix-view-light)", async ({ offsetRad, sources }) => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
+    layer.frame(
+      [{ host: sunHost(), direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      1,
+    );
+    // An Earth 10⁸ m off, 3.6° across, against the Sun's 0.53°.
+    const planet = {
+      centreM: vec3(1e8 * Math.sin(offsetRad), 0, -1e8 * Math.cos(offsetRad)),
+      radiusM: 6.371e6,
+    };
+    const cast = layer.glareSources(LOOK, VIEWPORT, "eye", [planet], 4);
+    expect(cast.length).toBe(sources);
+  });
+
   it("cast no glare source from a host drawn as a sprite", async () => {
     const engine = await countingRenderEngine();
     const layer = new HostDiscLayer(engine);
@@ -220,7 +251,7 @@ describe("the host discs", () => {
     expect(layer.glareSources(LOOK, VIEWPORT, "eye")).toEqual([]);
   });
 
-  it("hand R07 the excess of a partly clamped disc as a fine integration gives it", () => {
+  it("hold the light above a level inside the disc as a fine integration gives it", () => {
     const host = sunHost();
     const centralG = host.central_luminance_cd_m2[1];
     // The limit falls inside the disc: 65,504 ÷ exposureScale = 0.6 I(1).
@@ -232,7 +263,7 @@ describe("the host discs", () => {
       const [, g] = discLuminanceRgb(host, Math.sqrt(1 - r * r));
       reference += Math.max(0, g - 0.6 * centralG) * ((2 * r) / rings);
     }
-    const [, excess] = discExcessLuminanceRgb(host, exposureScale);
+    const [, excess] = discLuminanceAboveRgb(host, HALF_FLOAT_MAX / exposureScale);
     expect(Math.abs(excess / reference - 1)).toBeLessThan(0.01);
   });
 });

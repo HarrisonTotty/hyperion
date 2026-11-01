@@ -29,7 +29,7 @@ import {
   meterStatus,
   METER_STEP_MAX_S,
   METER_TIMEOUT_S,
-  CUT_HOLD_MAX_FRAMES,
+  CUT_HOLD_MAX_S,
   readingRange,
   SMOOTHING_SPEED_EV_PER_S,
   smoothEv,
@@ -980,34 +980,48 @@ describe("a cut's hold (fix-view-light)", () => {
     (latency) => {
       const exposure = staged({ kind: "auto", ev100: -10 });
       exposure.cut();
-      const { held, ev100 } = firstPresented(exposure, SUNLIT, latency);
-      expect([held >= latency, Math.abs(ev100 - settled) < 0.25]).toEqual([true, true]);
+      expect(firstPresented(exposure, SUNLIT, latency).ev100).toBeCloseTo(settled, 0);
     },
   );
 
-  it("holds a clipped cut's frames until a reading lands inside the range", () => {
-    const exposure = staged({ kind: "auto", ev100: -14 });
-    exposure.cut();
-    const { held, ev100 } = firstPresented(exposure, SUNLIT, 2);
-    expect([held, Math.abs(ev100 - settled) < 0.25]).toEqual([4, true]);
+  it.each([
+    // From a starfield's -10 or -14 the first reading clips, a bound; the frame drawn at it
+    // lands inside the range two frames later.
+    { name: "a cut from -10", control: { kind: "auto", ev100: -10 }, opens: false, held: 4 },
+    { name: "a cut from -14", control: { kind: "auto", ev100: -14 }, opens: false, held: 4 },
+    { name: "an opening at its meter", control: DEFAULT_MAN, opens: true, held: 2 },
+  ] as const)("holds $held frames of $name at a latency of 2", ({ control, opens, held }) => {
+    const exposure = staged(control, opens);
+    if (!opens) {
+      exposure.cut();
+    }
+    expect(firstPresented(exposure, SUNLIT, 2).held).toBe(held);
   });
 
-  it("holds an opening at its meter until its first reading, from the default MAN", () => {
-    const exposure = staged(DEFAULT_MAN, true);
-    const { held, ev100 } = firstPresented(exposure, SUNLIT, 1);
-    expect([held, Math.abs(ev100 - settled) < 0.25]).toEqual([1, true]);
-  });
-
-  it(`holds no more than ${String(CUT_HOLD_MAX_FRAMES)} frames when no reading comes`, () => {
+  it(`holds no longer than ${String(CUT_HOLD_MAX_S)} s of drawn frames when no reading comes`, () => {
     const exposure = staged({ kind: "auto", ev100: 3 });
+    exposure.noteImage(true);
     exposure.cut();
-    let held = 0;
-    for (let frame = 0; frame < 30 && exposure.holds; frame += 1) {
+    let heldS = 0;
+    for (let frame = 0; frame < 60 && exposure.holds; frame += 1) {
       exposure.step(undefined, 1 / 60);
       exposure.noteImage(true);
-      held += 1;
+      heldS += 1 / 60;
     }
-    expect(held).toBe(CUT_HOLD_MAX_FRAMES);
+    expect(heldS).toBeCloseTo(CUT_HOLD_MAX_S, 9);
+  });
+
+  it("ends the hold at a reading that weighs nothing, as under LIT with no lit side", () => {
+    const exposure = new AutoExposure({
+      source: SOURCE,
+      program: VIEW_CAMERA,
+      control: { kind: "auto", ev100: 3 },
+      meter: "lit",
+    });
+    exposure.noteImage(true);
+    exposure.cut();
+    exposure.step(frameHistogram([[binCentreLuminance(120), METER_CLASS.other]], "lit"), 1 / 60);
+    expect(exposure.holds).toBe(false);
   });
 
   it.each([
