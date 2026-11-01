@@ -1,6 +1,7 @@
-//! The tests of P09.T37.a's source: the classes' member layers, held by every member of each class's first cells
+//! The tests of P09.T37.a's source and its hold, `CLASS_SOURCE_VERSION`: its tripwire and the
+//! version's rules; the classes' member layers, held by every member of each class's first cells
 //! with entries; the census's expected hosts, exact over the cells' bounds, in each class's layers;
-//! under every 26 hold, a host of each class returned by the range query at its place at two
+//! under every 27 hold, a host of each class returned by the range query at its place at two
 //! times, with its origin, as plan 03 resolves it, and none outside its sphere; the census lines
 //! and the hits whatever the cell cache holds and the order queries come in; and no grid twin left
 //! for the source to suppress.
@@ -13,6 +14,7 @@ use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
@@ -27,6 +29,7 @@ use crate::galaxy::placement::{CellCache, CellKey, NoCache, SystemOrigin, genera
 use crate::galaxy::query::{MassFloor, RangePlan, RangeQuery, RangeResult, hit_at, range_query};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{CatalogueSystemId, SystemId, SystemIdKind};
+use crate::planetary::testing::with_every_27_hold;
 
 /// The seed of the hold's Milky Way fixture.
 const SEED: u64 = 0x0937_0000_0000_0001;
@@ -38,10 +41,24 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
         .with_full_potential()
 }
 
-/// The fixture under every 26 hold: the grid gives the classes their hosts.
-fn claimed() -> &'static Galaxy {
+/// The fixture under every 27 hold: the range query registers the classes.
+fn at_27() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
+}
+
+/// The fixture under every 26 hold: the grid gives the classes their hosts, and the range query
+/// does not register them.
+fn at_26() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_26_hold(),
+        )
+        .expect("the Milky Way fixture builds")
+    })
 }
 
 /// One class of the production lookup.
@@ -158,12 +175,44 @@ fn census_lines(result: &RangeResult) -> (Option<Layer>, String, Vec<u64>, Vec<S
     )
 }
 
+/// P09.T37.a is held until the 26 → 27 bump: the rules in force are version 26's and before, under
+/// which a galaxy registers no class source.
+#[test]
+fn the_class_source_is_held_only_until_the_27_bump() {
+    assert!(
+        GENERATOR_VERSION < CLASS_SOURCE_VERSION,
+        "the 26 → 27 bump puts P09.T37.a on the record: the range query registers the catalogue \
+         classes beside the grid. Delete `CLASS_SOURCE_VERSION`, `ClassSourceRules` with its \
+         `Unregistered` arm, `GalaxyRules::class_source`, the `match` in \
+         `CatalogueClassSource::registered_in` (which then always gives the source) and this \
+         test, in the bump's own checkpoint commit, and re-bless what the classes' hosts move"
+    );
+    assert_eq!(
+        GalaxyRules::of_version(GENERATOR_VERSION).class_source,
+        ClassSourceRules::Unregistered
+    );
+    let held = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture builds");
+    assert_eq!(CatalogueClassSource::registered_in(&held), None);
+}
+
+/// A galaxy under every 26 hold registers no source, so its range query takes the grid and the
+/// features' members alone, as before; one under every 27 hold registers the production lookup's.
+#[test]
+fn a_galaxy_registers_the_source_from_27() {
+    assert_eq!(CatalogueClassSource::registered_in(at_26()), None);
+    assert_eq!(
+        CatalogueClassSource::registered_in(at_27()),
+        Some(CatalogueClassSource::new())
+    );
+}
+
 /// Every class the production lookup has a process for has its member layers, and every member of
 /// the entries of each one's first cells with entries is counted in its slot's layers, with no more
 /// members than slots. The tidal-disruption victims have no process, so the source skips them.
 #[test]
 fn every_class_s_members_keep_to_their_layers() {
-    let galaxy = claimed();
+    let galaxy = at_27();
     let classes = registered_classes(galaxy);
     assert_eq!(classes.len(), 8, "{classes:?}");
     assert!(!classes.contains(&ClassId::TIDAL_DISRUPTION_VICTIM));
@@ -206,7 +255,7 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
             process.bound(self.galaxy, &self.key).value()
         }
     }
-    let galaxy = claimed();
+    let galaxy = at_27();
     let sphere = |centre: [f64; 3], radius: f64| {
         let centre = GalacticPosition::from_light_years(centre).expect("in the cube");
         QuerySphere::new(
@@ -291,7 +340,7 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
     );
 }
 
-/// Under every 26 hold, a host of each class is returned by the range query at its place: within a
+/// Under every 27 hold, a host of each class is returned by the range query at its place: within a
 /// sphere of 1 ly about where its class's motion puts it, at the epoch and four centuries on, with
 /// its record, of origin [`SystemOrigin::CatalogueSystem`] of its class, and its position, bit for
 /// bit as plan 03 resolves and moves it ([`hit_at`]); and not by a sphere of 1 ly whose centre is
@@ -299,67 +348,69 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
 /// record. Each query walks its class's cells alone, about a host as far from the galactic centre
 /// as one could be found, where its walk is cheapest.
 #[test]
-fn under_every_26_hold_a_host_of_each_class_is_returned_at_its_place() {
-    let galaxy = claimed();
+fn under_every_27_hold_a_host_of_each_class_is_returned_at_its_place() {
+    let galaxy = at_27();
     let source = |class| CatalogueClassSource::with_lookup(Only(class));
-    for class in registered_classes(galaxy) {
-        let hosts = first_hosts(galaxy, class, 1);
-        let host = hosts
-            .iter()
-            .find(|host| host.member == 0)
-            .expect("an entry has member 0");
-        let source = source(class);
-        let sources: [&dyn SystemSource; 1] = [&source];
-        for t in [UniverseTime::EPOCH, at(400)] {
-            let place = host.system.position_at(t);
-            let query = RangeQuery::builder(place, LightYears::new(1.0))
-                .time(t)
-                .build()
-                .expect("a query");
-            let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
-            let hit = result
-                .systems()
+    with_every_27_hold(|| {
+        for class in registered_classes(galaxy) {
+            let hosts = first_hosts(galaxy, class, 1);
+            let host = hosts
                 .iter()
-                .find(|hit| hit.id() == SystemId::from(host.id))
-                .unwrap_or_else(|| panic!("{class}'s host {:?} at {t}", host.id));
-            let resolved = system_of(galaxy, host.id).expect("the host resolves");
-            assert_eq!(hit.record(), resolved.record());
-            assert_eq!(hit.record().origin(), SystemOrigin::CatalogueSystem(class));
-            assert_eq!(hit.position(), &place);
-            let sphere = QuerySphere::new(place, LightYears::new(1.0), t, LightYears::ZERO)
-                .expect("a sphere");
-            for hit in result.systems() {
-                if let SystemIdKind::Catalogue(id) = hit.id().kind() {
-                    assert_eq!(ClassId::from_value(id.class()), Some(class));
-                    assert_eq!(hit_at(galaxy, hit.record(), &sphere).as_ref(), Some(hit));
+                .find(|host| host.member == 0)
+                .expect("an entry has member 0");
+            let source = source(class);
+            let sources: [&dyn SystemSource; 1] = [&source];
+            for t in [UniverseTime::EPOCH, at(400)] {
+                let place = host.system.position_at(t);
+                let query = RangeQuery::builder(place, LightYears::new(1.0))
+                    .time(t)
+                    .build()
+                    .expect("a query");
+                let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
+                let hit = result
+                    .systems()
+                    .iter()
+                    .find(|hit| hit.id() == SystemId::from(host.id))
+                    .unwrap_or_else(|| panic!("{class}'s host {:?} at {t}", host.id));
+                let resolved = system_of(galaxy, host.id).expect("the host resolves");
+                assert_eq!(hit.record(), resolved.record());
+                assert_eq!(hit.record().origin(), SystemOrigin::CatalogueSystem(class));
+                assert_eq!(hit.position(), &place);
+                let sphere = QuerySphere::new(place, LightYears::new(1.0), t, LightYears::ZERO)
+                    .expect("a sphere");
+                for hit in result.systems() {
+                    if let SystemIdKind::Catalogue(id) = hit.id().kind() {
+                        assert_eq!(ClassId::from_value(id.class()), Some(class));
+                        assert_eq!(hit_at(galaxy, hit.record(), &sphere).as_ref(), Some(hit));
+                    }
                 }
+                // A sphere that misses the host by half a light-year.
+                let [x, y, z] = place.to_light_years_f64();
+                let beside = GalacticPosition::from_light_years([x + 1.5, y, z]).expect("in");
+                let query = RangeQuery::builder(beside, LightYears::new(1.0))
+                    .time(t)
+                    .build()
+                    .expect("a query");
+                let mut out = Vec::new();
+                source.systems_in_sphere(
+                    galaxy,
+                    &QuerySphere::new(beside, LightYears::new(1.0), t, LightYears::ZERO)
+                        .expect("a sphere"),
+                    RangePlan::new(galaxy, &sources, &query).census().layers(),
+                    &mut out,
+                );
+                assert!(out.iter().all(|hit| hit.id() != SystemId::from(host.id)));
             }
-            // A sphere that misses the host by half a light-year.
-            let [x, y, z] = place.to_light_years_f64();
-            let beside = GalacticPosition::from_light_years([x + 1.5, y, z]).expect("in");
-            let query = RangeQuery::builder(beside, LightYears::new(1.0))
-                .time(t)
-                .build()
-                .expect("a query");
-            let mut out = Vec::new();
-            source.systems_in_sphere(
-                galaxy,
-                &QuerySphere::new(beside, LightYears::new(1.0), t, LightYears::ZERO)
-                    .expect("a sphere"),
-                RangePlan::new(galaxy, &sources, &query).census().layers(),
-                &mut out,
-            );
-            assert!(out.iter().all(|hit| hit.id() != SystemId::from(host.id)));
         }
-    }
+    });
 }
 
-/// Under every 26 hold, a Type Ia's survivor, member 1 of its entry, is returned by the range query
+/// Under every 27 hold, a Type Ia's survivor, member 1 of its entry, is returned by the range query
 /// at its own place once its progenitor has exploded, flung from the site on its own line, with
 /// its own record, counted in its own star's layer.
 #[test]
-fn under_every_26_hold_a_type_ia_s_survivor_is_returned_at_its_place() {
-    let galaxy = claimed();
+fn under_every_27_hold_a_type_ia_s_survivor_is_returned_at_its_place() {
+    let galaxy = at_27();
     let source = CatalogueClassSource::with_lookup(Only(ClassId::TYPE_IA));
     let sources: [&dyn SystemSource; 1] = [&source];
     let hosts = hosts_until(galaxy, ClassId::TYPE_IA, |cell| {
@@ -372,23 +423,25 @@ fn under_every_26_hold_a_type_ia_s_survivor_is_returned_at_its_place() {
     let progenitor = system_of(galaxy, entry_of(survivor.id)).expect("member 0");
     assert_eq!(survivor.system.motion().at(), progenitor.motion().at());
     assert!(survivor.system.motion().at() < UniverseTime::EPOCH);
-    for t in [UniverseTime::EPOCH, at(-700)] {
-        let place = survivor.system.position_at(t);
-        assert_ne!(place, progenitor.position_at(t));
-        let query = RangeQuery::builder(place, LightYears::new(1.0))
-            .time(t)
-            .build()
-            .expect("a query");
-        let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
-        let hit = result
-            .systems()
-            .iter()
-            .find(|hit| hit.id() == SystemId::from(survivor.id))
-            .expect("the survivor is found");
-        assert_eq!(hit.record(), survivor.system.record());
-        assert_eq!(hit.position(), &place);
-        assert!(SURVIVOR_LAYERS.contains(hit.record().layer()));
-    }
+    with_every_27_hold(|| {
+        for t in [UniverseTime::EPOCH, at(-700)] {
+            let place = survivor.system.position_at(t);
+            assert_ne!(place, progenitor.position_at(t));
+            let query = RangeQuery::builder(place, LightYears::new(1.0))
+                .time(t)
+                .build()
+                .expect("a query");
+            let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
+            let hit = result
+                .systems()
+                .iter()
+                .find(|hit| hit.id() == SystemId::from(survivor.id))
+                .expect("the survivor is found");
+            assert_eq!(hit.record(), survivor.system.record());
+            assert_eq!(hit.position(), &place);
+            assert!(SURVIVOR_LAYERS.contains(hit.record().layer()));
+        }
+    });
 }
 
 /// The layers a Type Ia's survivor is counted in.
@@ -425,7 +478,7 @@ impl CellCache for Keep {
 /// outer disc, where the classes' walks are cheapest.
 #[test]
 fn the_census_lines_do_not_depend_on_what_is_cached() {
-    let galaxy = claimed();
+    let galaxy = at_27();
     let source = CatalogueClassSource::new();
     let sources: [&dyn SystemSource; 1] = [&source];
     let query = |centre: [f64; 3], radius: f64, years: i64| {
@@ -477,13 +530,13 @@ fn the_census_lines_do_not_depend_on_what_is_cached() {
     });
 }
 
-/// The grid keeps no twin of a class host under every 26 hold, so the source suppresses nothing:
+/// The grid keeps no twin of a class host under every 27 hold, so the source suppresses nothing:
 /// no layer-E system a 100 ly query at the Sun-like point finds in the grid is one the core
 /// collapses or the luminous blue variables would claim (P09.T35's carve-out), and the source
 /// suppresses none of the grid's systems.
 #[test]
 fn the_grid_keeps_no_host_s_twin_and_the_source_suppresses_nothing() {
-    let galaxy = claimed();
+    let galaxy = at_27();
     let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
     let query = RangeQuery::builder(sun, LightYears::new(100.0))
         .mass_floor(MassFloor::LayerE)

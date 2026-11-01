@@ -15,6 +15,11 @@
 //! as one pool job on a pool of 1, 4 and 8 workers, as the served job ran it before P09.T40.a's
 //! parallel cells; and served so (`served_range_query`), its cold cells generated across the
 //! workers ahead of its walk.
+//!
+//! `classes_at_27` is the Sun-like 50 ly query cold under generator version 27's rules, where the
+//! catalogue classes' hosts are registered beside the members (P09.T37.a): with every source, and
+//! each class's source alone, its census and its hits, for each class's share. The classes' source
+//! keeps nothing, so it is cold whatever the caches hold.
 
 use std::hint::black_box;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -35,13 +40,22 @@ use hyperion_server::limits::{
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::{
+    ALL_CLASSES, CatalogueClassSource, ClassId, ClassLookup, ClassVisitor, ProductionClasses,
+};
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
-use hyperion_sim::galaxy::query::{RangeQuery, RangeResult, SystemSource, range_query};
+use hyperion_sim::galaxy::imf::MassFunctionKind;
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::query::{
+    LayerSet, QuerySphere, RangeQuery, RangeResult, SystemSource, range_query,
+};
+use hyperion_sim::id::Layer;
+use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::LightYears;
-use hyperion_sim::{GENERATOR_VERSION, Seed};
+use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The seed of the galaxy every query here runs over: the server tests' universe.
 const SEED: u64 = 0x4d2;
@@ -69,12 +83,15 @@ impl Caches {
     }
 
     /// `query` as the served `systems_in_range` job runs it: one kept view of the interiors for
-    /// the job, the features' members beside the grid.
+    /// the job, the features' members beside the grid, and from generator version 27 the
+    /// catalogue classes' hosts beside them.
     fn query(&self, galaxy: &Galaxy, key: GalaxyKey, query: &RangeQuery) -> RangeResult {
         let mut cells = self.cells.handle(key);
         let (features, interiors) = (self.features.handle(key), self.interiors.kept(key));
         let members = FeatureMemberSource::new(&features, &interiors);
-        let sources: [&dyn SystemSource; 1] = [&members];
+        let classes = CatalogueClassSource::registered_in(galaxy);
+        let mut sources: Vec<&dyn SystemSource> = vec![&members];
+        sources.extend(classes.as_ref().map(|classes| classes as &dyn SystemSource));
         range_query(galaxy, &mut cells, &sources, query)
     }
 }
@@ -242,5 +259,69 @@ fn served_on_the_pool(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, served, served_on_the_pool);
+/// One class of the production lookup, for its share of the classes' source.
+#[derive(Debug, Clone, Copy)]
+struct Only(ClassId);
+
+impl ClassLookup for Only {
+    fn visit_class<V: ClassVisitor>(
+        &self,
+        galaxy: &Galaxy,
+        class: ClassId,
+        visitor: V,
+    ) -> Option<V::Output> {
+        if class == self.0 {
+            ProductionClasses.visit_class(galaxy, class, visitor)
+        } else {
+            None
+        }
+    }
+}
+
+/// The Sun-like 50 ly query cold under generator version 27's rules, with every source and each
+/// class's source alone (module documentation).
+fn classes_at_27(c: &mut Criterion) {
+    let seed = Seed::new(SEED);
+    let version = GeneratorVersion::new(27);
+    let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+    let galaxy = Galaxy::from_params_at_version(seed, params, version)
+        .expect("a drawn galaxy builds")
+        .with_full_potential();
+    let key = GalaxyKey::new(SEED, version);
+    let query = query_at(sun_like(), 50.0);
+    let sphere = QuerySphere::new(
+        sun_like(),
+        LightYears::new(50.0),
+        UniverseTime::EPOCH,
+        LightYears::ZERO,
+    )
+    .expect("a sphere");
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let mut group = c.benchmark_group("classes_at_27");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(60));
+    group.bench_function("Sun-like 50 ly, every source (cold)", |b| {
+        b.iter_batched_ref(
+            Caches::new,
+            |caches| caches.query(&galaxy, key, black_box(&query)),
+            BatchSize::PerIteration,
+        );
+    });
+    for class in ALL_CLASSES {
+        let source = CatalogueClassSource::with_lookup(Only(class));
+        group.bench_function(format!("Sun-like 50 ly, {class} alone"), |b| {
+            b.iter(|| {
+                let counts = source.expected_in_sphere(&galaxy, black_box(&sphere));
+                let mut hits = Vec::new();
+                source.systems_in_sphere(&galaxy, &sphere, stellar, &mut hits);
+                (counts, hits)
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, served, served_on_the_pool, classes_at_27);
 criterion_main!(benches);

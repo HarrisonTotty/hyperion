@@ -1504,6 +1504,10 @@ cached; a query at the very centre reports that nothing fits at 50 ly and a comp
 ly; bench: the brainstorm's 50 ly query at Sun-like density stays under 5 ms cold with all sources
 registered.
 
+_T37.a, the grid's classes, built behind its hold (lane `p09-t37`, 2026-11-01, at
+`GENERATOR_VERSION` 24, no output moved): see Risks, "P09.T37.a, as built". T37.b, the centre's
+source and the two centre tests, waits on P09.T31 (lean, 2026-11-01)._
+
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
 Slow tests. **Complementarity:** for 10⁵ sampled mark sets around the interval's ends and across the
@@ -5502,3 +5506,30 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   neutron-star or black-hole class, the only ones whose low-mode kick reads it. Each attempt seeks
   its own words, so nothing else moves. The 50 ly globular-core query reaches 19.8 ms warm under
   every 26 hold (20 ms target).
+- **P09.T37.a, as built (lane `p09-t37`, 2026-11-01, at `GENERATOR_VERSION` 24, behind
+  `CLASS_SOURCE_VERSION` = 27; no output moved).**
+  - _Split (lean, 2026-11-01; decision-galaxy-25-train §3)._ T37.a is the grid's classes; T37.b is
+    `CentreMemberSource`'s registration and the two centre tests, after P09.T31. P10.T10.b
+    registers `GlobalListSource` in its own task.
+  - _Source._ `catalogue_classes::CatalogueClassSource<L: ClassLookup = ProductionClasses>`:
+    `new()`, `with_lookup(L)`, and `registered_in(&Galaxy) -> Option<Self>`, the hold's one read.
+    Census: per class, Σ bound × the cell's overlap with the unpadded sphere's cube, in each layer
+    of its `member_layers` row (one set per member). A newly registered class needs a row, or the
+    census panics. Hits: `cells_in_sphere` (the 4,096 ly reach, so it pads the Type Ia's survivor),
+    each candidate through `resolve_entry` and `ClassProcess::system`. A further member is listed
+    from its entry's break. `suppresses` is false, since the grid keeps no twin from 26 (tested).
+  - _Processes._ They are built once a call (the census and the hits), not once an entry. A build
+    costs microseconds once the galaxy holds its Type Ia delays.
+  - _Hold._ `GalaxyRules::class_source` (`ClassSourceRules::{Unregistered, Registered}`) and
+    `GalaxyRules::every_27_hold()`, the first galaxy 27 hold; its tests run inside
+    `with_every_27_hold`. The server's `compute::range::beside_the_grid` puts the source after
+    `FeatureMemberSource`; held members take no source. The 27 bump deletes the hold, the field,
+    the `match` in `registered_in` and `the_class_source_is_held_only_until_the_27_bump`. It
+    re-blesses the server's `systems_in_range` and `systems_in_range_briefs` goldens, whose
+    census moves.
+  - _Cost (a finding)._ Bench `classes_at_27` (server, `feature_range_query`): the Sun-like 50 ly
+    query cold with every source registered takes 30.3 s, against 5 ms (pod, 16 vCPU). Each class
+    alone: the slow accreting white dwarfs 15.6 s, the fast 12.0 s, the stellar mergers 6.0 s, the
+    core collapses 0.32 s, and the other four under 45 ms. For T40: the cache is the lever. So is a
+    reach per class: the accreting white dwarfs', the two merger classes' and the luminous blue
+    variables' entries sit in their cells at the epoch, and need only the cells within R + v|t|.

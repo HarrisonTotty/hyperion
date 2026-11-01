@@ -19,6 +19,7 @@ use hyperion_protocol::{
 };
 use hyperion_server::FeatureMembers;
 use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::interior::{ClassKind, Generation, MemberClass, Multiplicity};
@@ -80,7 +81,8 @@ async fn ask(client: &mut TestClient, body: RequestBody) -> SystemsInRange {
     }
 }
 
-/// The sim's own answer to [`inside_the_globular`] at `years`, through `sources`.
+/// The sim's own answer to [`inside_the_globular`] at `years`, through `sources` and, beside
+/// any, the catalogue classes' where the galaxy registers them, as a served query takes them.
 fn sim_answer(years: i64, sources: &[&dyn SystemSource]) -> RangeResult {
     let query = RangeQuery::builder(
         *a_globular().feature().position(),
@@ -94,7 +96,11 @@ fn sim_answer(years: i64, sources: &[&dyn SystemSource]) -> RangeResult {
     .cell_budget(hyperion_server::limits::MAX_QUERY_CELLS)
     .build()
     .expect("a query");
-    range_query(galaxy(), &mut NoCache::new(), sources, &query)
+    // Served, the catalogue classes' hosts join the members under the 27 arm alone (P09.T37.a).
+    let classes = CatalogueClassSource::registered_in(galaxy()).filter(|_| !sources.is_empty());
+    let mut sources = sources.to_vec();
+    sources.extend(classes.iter().map(|classes| classes as &dyn SystemSource));
+    range_query(galaxy(), &mut NoCache::new(), &sources, &query)
 }
 
 /// The IDs of `answer`'s rows, in its order.

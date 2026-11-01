@@ -55,6 +55,10 @@
 //!   P15.T10.b): the binary classes read plan 15's fitted samplers and share rows. It is read where
 //!   the galaxy is built, which installs the share matrix's class shares; `Galaxy::with_rules`
 //!   installs them again, and refuses to change it under the field share, which reads them too.
+//! - [`class_source`](GalaxyRules::class_source), at [`CLASS_SOURCE_VERSION`] (plan 09,
+//!   P09.T37.a): the range query takes the catalogue classes' hosts beside the grid. It is read
+//!   where a caller asks for the query's sources (`CatalogueClassSource::registered_in`), and
+//!   reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -68,6 +72,7 @@ use crate::galaxy::catalogue_classes::binary::{
     BINARY_TABLES_VERSION, BinaryTableRules, MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION,
     MergerChannelRules, MergerClassRules,
 };
+use crate::galaxy::catalogue_classes::source::{CLASS_SOURCE_VERSION, ClassSourceRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
@@ -109,6 +114,8 @@ pub(crate) struct GalaxyRules {
     pub(crate) merger_channels: MergerChannelRules,
     /// Which tables the binary classes read: the scratch ones or plan 15's fitted ones (P15.T10.b).
     pub(crate) binary_tables: BinaryTableRules,
+    /// Whether the range query registers the catalogue classes beside the grid (P09.T37.a).
+    pub(crate) class_source: ClassSourceRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -174,6 +181,11 @@ impl GalaxyRules {
             } else {
                 BinaryTableRules::Scratch
             },
+            class_source: if version.get() >= CLASS_SOURCE_VERSION.get() {
+                ClassSourceRules::Registered
+            } else {
+                ClassSourceRules::Unregistered
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -196,9 +208,9 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
     /// hold ([`GalaxyRules::every_26_hold`]) and the galaxy's at 27 (`orphan_streams`, P15.T11.b,
-    /// `merger_channels`, P11.T8.c's missing channel, and `binary_tables`, P15.T10.b). The
-    /// planetary stage's holds at 27 are switched on the thread instead
-    /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these.
+    /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, and
+    /// `class_source`, P09.T37.a). The planetary stage's holds at 27 are switched on the thread
+    /// instead (`planetary::testing::with_every_27_hold`), around a galaxy built under these.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.
@@ -408,6 +420,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold().binary_tables,
             BinaryTableRules::Fitted
+        );
+        let source = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).class_source;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(source(v), ClassSourceRules::Unregistered, "{v}");
+        }
+        assert_eq!(source(27), ClassSourceRules::Registered);
+        assert_eq!(
+            GalaxyRules::every_26_hold().class_source,
+            ClassSourceRules::Unregistered
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().class_source,
+            ClassSourceRules::Registered
         );
     }
 }

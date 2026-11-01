@@ -43,6 +43,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::placement::CellKey;
@@ -255,8 +256,8 @@ enum Sourced {
     Left(Arc<RangePlan>, Planned),
 }
 
-/// `f` of the feature member source over `caches` and the sources it is beside the grid as, with
-/// the kept view of the interiors it reads.
+/// `f` of the feature member source over `caches` and the sources it is beside the grid as
+/// ([`beside_the_grid`]), with the kept view of the interiors it reads.
 ///
 /// One kept view for the whole job: its census, its hits and its rows' members read the same
 /// interiors, each built at most once whatever the shared cache's budget.
@@ -270,12 +271,31 @@ fn with_sources<R>(
         caches.interiors.kept(served.key),
     );
     let source = FeatureMemberSource::new(&features, &interiors);
-    // Held, no sources: the grid is the whole answer, as in plan 04 (P09.T40.a's gate).
-    let sources: &[&dyn SystemSource] = match served.members {
-        FeatureMembers::Held => &[],
-        FeatureMembers::Served => &[&source],
-    };
-    f(sources, &interiors)
+    beside_the_grid(&served.galaxy, served.members, &source, |sources| {
+        f(sources, &interiors)
+    })
+}
+
+/// `f` of the sources a range query in `galaxy` takes beside the grid as `members` says: held,
+/// none, and the grid is the whole answer, as in plan 04 (P09.T40.a's gate); served, the
+/// features' `members`, and from generator version 27 the catalogue classes' hosts beside them
+/// ([`CatalogueClassSource::registered_in`], P09.T37.a; below it there are none).
+///
+/// The classes' source keeps nothing and has no cells to read ahead: a cold query generates every
+/// class cell about it on the job that asks the sources for their hits (P09.T40's class-cell
+/// cache is its lever).
+pub(crate) fn beside_the_grid<R>(
+    galaxy: &Galaxy,
+    members: FeatureMembers,
+    features: &dyn SystemSource,
+    f: impl FnOnce(&[&dyn SystemSource]) -> R,
+) -> R {
+    let classes = CatalogueClassSource::registered_in(galaxy);
+    match (members, &classes) {
+        (FeatureMembers::Held, _) => f(&[]),
+        (FeatureMembers::Served, None) => f(&[features]),
+        (FeatureMembers::Served, Some(classes)) => f(&[features, classes]),
+    }
 }
 
 /// `plan` with `sources`, made from it if `planned` says it was made without them: the plan
@@ -563,11 +583,7 @@ mod tests {
     /// `f` of the sources beside the grid as `members` says, through no cache.
     fn with_sources<R>(members: FeatureMembers, f: impl FnOnce(&[&dyn SystemSource]) -> R) -> R {
         let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
-        let sources: &[&dyn SystemSource] = match members {
-            FeatureMembers::Held => &[],
-            FeatureMembers::Served => &[&source],
-        };
-        f(sources)
+        beside_the_grid(galaxy(), members, &source, f)
     }
 
     /// `query`'s result as the sim's range query gives it through no cache, with the feature
@@ -763,6 +779,63 @@ mod tests {
             "{held} of {walked} cells held before, the rest walked ahead"
         );
         pool.shutdown().await.unwrap();
+    }
+
+    /// The server tests' galaxy as `version`'s rules build it, every hold that version turns on in
+    /// force.
+    fn galaxy_at(version: u32) -> Galaxy {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::imf::MassFunctionKind;
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        let seed = Seed::new(SEED);
+        Galaxy::from_params_at_version(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            GeneratorVersion::new(version),
+        )
+        .expect("a drawn galaxy builds")
+    }
+
+    /// A served query takes the catalogue classes' hosts beside the features' members under the 27
+    /// arm alone (P09.T37.a): at the version in force and under every 26 hold the members' source
+    /// is the only one, as before, and from 27 the classes' follows it, counting what
+    /// [`CatalogueClassSource`] counts; held, there is none. The finish and the cells' jobs ask the
+    /// same list (`super::with_sources`).
+    #[test]
+    fn from_27_a_served_query_takes_the_classes_beside_the_members() {
+        use hyperion_sim::galaxy::query::QuerySphere;
+        let caches = caches(1 << 20);
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
+        let sphere = QuerySphere::new(
+            sun,
+            LightYears::new(50.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        // How many sources, and the last one's counts about the Sun-like point.
+        let asked = |galaxy: Galaxy, members: FeatureMembers| {
+            let served = ServedQuery::new(Arc::new(galaxy), key(), sun_like(0), members);
+            super::with_sources(&caches, &served, |sources, _| {
+                let last = sources.last().map(|source| {
+                    let counts = source.expected_in_sphere(&served.galaxy, &sphere);
+                    counts.to_array().map(f64::to_bits)
+                });
+                (sources.len(), last)
+            })
+        };
+        assert_eq!(asked(galaxy().clone(), FeatureMembers::Served).0, 1);
+        assert_eq!(asked(galaxy_at(26), FeatureMembers::Served).0, 1);
+        let at_27 = galaxy_at(27);
+        let classes = CatalogueClassSource::new()
+            .expected_in_sphere(&at_27, &sphere)
+            .to_array()
+            .map(f64::to_bits);
+        assert_eq!(
+            asked(at_27.clone(), FeatureMembers::Served),
+            (2, Some(classes))
+        );
+        assert_eq!(asked(at_27, FeatureMembers::Held), (0, None));
     }
 
     /// The seed the tests' universes are of.

@@ -248,7 +248,8 @@ pub(crate) async fn extinction(
 ///
 /// Once P09.T40.a's gate is open ([`FeatureMembers::Served`]), the query takes plan 09's feature
 /// members from a [`FeatureMemberSource`] beside the grid, reading the server's feature cells and
-/// interiors, and every row carries its origin, a member's with its class and its own velocity
+/// interiors, and from generator version 27 the catalogue classes' hosts beside them (P09.T37.a),
+/// and every row carries its origin, a member's with its class and its own velocity
 /// ([`RowOrigins::Sent`]); both caches hold epoch state alone, so they change no byte either.
 /// Held, the default until P09.T2.c's version, the grid is the whole answer, as in plan 04.
 ///

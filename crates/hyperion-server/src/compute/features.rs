@@ -623,7 +623,9 @@ mod tests {
     use hyperion_sim::id::SystemIdKind;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
+    use super::super::range::beside_the_grid;
     use super::*;
+    use crate::FeatureMembers;
     use crate::cache::ENTRY_OVERHEAD_BYTES;
     use crate::convert::origins::{SEED, galaxy};
 
@@ -800,7 +802,7 @@ mod tests {
     }
 
     /// The features' members as the range query finds them about `feature`, through `cells` and
-    /// `interiors`.
+    /// `interiors`, beside the sources a served query takes with them (from 27, the classes').
     fn members_about(
         feature: &FeatureRecord,
         cells: &dyn FeatureCellCache,
@@ -810,7 +812,9 @@ mod tests {
         let query = RangeQuery::builder(*feature.position(), LightYears::new(2.0))
             .build()
             .expect("a query");
-        range_query(galaxy(), &mut NoCache::new(), &[&source], &query)
+        beside_the_grid(galaxy(), FeatureMembers::Served, &source, |sources| {
+            range_query(galaxy(), &mut NoCache::new(), sources, &query)
+        })
     }
 
     /// The census, bit for bit, and the hits of queries about a cluster do not depend on the order
@@ -831,7 +835,9 @@ mod tests {
         hyperion_testkit::order::assert_order_independent(&queries, |query| {
             let (cells, interiors) = (cells.handle(key()), interiors.handle(key()));
             let source = FeatureMemberSource::new(&cells, &interiors);
-            let result = range_query(galaxy(), &mut NoCache::new(), &[&source], query);
+            let result = beside_the_grid(galaxy(), FeatureMembers::Served, &source, |sources| {
+                range_query(galaxy(), &mut NoCache::new(), sources, query)
+            });
             let census: Vec<u64> = result
                 .census()
                 .expected()

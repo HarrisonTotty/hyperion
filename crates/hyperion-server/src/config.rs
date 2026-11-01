@@ -374,8 +374,9 @@ pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(26);
 /// Served, the range query registers the catalogue features' members as a source beside the grid
 /// (`FeatureMemberSource`, over the server's feature caches), every row carries its `origin`, and
 /// the sky's sightlines take the features' gas (`FeatureGas`). Held, the server answers as before
-/// P09.T40.a, bit for bit. The galactic centre's members and the catalogue classes' systems are not
-/// among them: their sources wait on P09.T29's and P09.T37's tasks.
+/// P09.T40.a, bit for bit. The catalogue classes' hosts join the members from generator version 27
+/// (`CatalogueClassSource::registered_in`, P09.T37.a); the galactic centre's members wait on
+/// P09.T37.b.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FeatureMembers {
     /// No feature member is served, and no row carries an origin: the server's answer below

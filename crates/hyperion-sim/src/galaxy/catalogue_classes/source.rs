@@ -37,12 +37,17 @@
 //! The source keeps nothing between calls, so a cold query generates every class cell about it
 //! (P09.T40's `CatalogueClassCellCache` is the lever). Sums run in a fixed order: the classes in
 //! [`ALL_CLASSES`] order, then their cells in the walk's order.
+//!
+//! The range query registers the source from generator version 27, the hold's
+//! (`CLASS_SOURCE_VERSION`; [`CatalogueClassSource::registered_in`]); below it a query takes the
+//! grid and the features' members as before, bit for bit.
 
 #[cfg(test)]
 mod tests;
 
 use super::grid::{ClassLookup, ClassProcess, ClassVisitor, ProductionClasses, candidate_count};
 use super::{ALL_CLASSES, CatalogueCellKey, ClassId, cells_in_sphere, resolve_entry};
+use crate::GeneratorVersion;
 use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{Existence, SystemRecord};
@@ -50,6 +55,28 @@ use crate::galaxy::query::{LayerCounts, LayerSet, QuerySphere, SystemHit, System
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
+
+/// The generator version from which the range query registers the catalogue classes beside the
+/// grid (plan 09, P09.T37.a; the hold of [`ClassSourceRules`]).
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`ClassSourceRules::Unregistered`]: [`CatalogueClassSource::registered_in`] gives no source, so
+/// a query's census and hits are the grid's and the features' members', bit for bit. The tests
+/// reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`. The bump to 27
+/// deletes this hold, [`ClassSourceRules`] with its `Unregistered` arm, `GalaxyRules::class_source`,
+/// the `match` in [`CatalogueClassSource::registered_in`] (which then always gives the source) and
+/// the tripwire (`the_class_source_is_held_only_until_the_27_bump`).
+pub(crate) const CLASS_SOURCE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether the range query registers the catalogue classes beside the grid (the hold of
+/// [`CLASS_SOURCE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ClassSourceRules {
+    /// Version 26's and before: the classes' hosts reach a player through plan 12's alerts alone.
+    Unregistered,
+    /// Version 27's: [`CatalogueClassSource`] beside the grid (P09.T37.a).
+    Registered,
+}
 
 /// The catalogue classes as a source of the range query (module documentation), over the
 /// processes of `L`, the production lookup unless a test gives its own.
@@ -69,8 +96,9 @@ use crate::units::LightYears;
 /// let galaxy = Galaxy::new(Seed::new(9)).with_full_potential();
 /// let here = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).ok_or("in range")?;
 /// let query = RangeQuery::builder(here, LightYears::new(50.0)).build()?;
-/// let classes = CatalogueClassSource::new();
-/// let sources: [&dyn SystemSource; 1] = [&classes];
+/// // A server takes the source where the galaxy's rules register it, from generator version 27.
+/// let classes = CatalogueClassSource::registered_in(&galaxy);
+/// let sources: Vec<&dyn SystemSource> = classes.iter().map(|s| s as _).collect();
 /// let result = range_query(&galaxy, &mut NoCache::new(), &sources, &query);
 /// // Each class host found is a catalogue system, whose ID resolves to its entry and its shell.
 /// for hit in result.systems() {
@@ -87,14 +115,27 @@ pub struct CatalogueClassSource<L = ProductionClasses> {
 }
 
 impl CatalogueClassSource {
-    /// The source over every class the production lookup has a process for.
+    /// The source over every class the production lookup has a process for, whatever a galaxy's
+    /// rules: what a query in a galaxy of generator version 27 or later registers.
     ///
-    /// Before generator version 26's carve-out the grid holds the classes' hosts itself, so a
-    /// query in such a galaxy that takes this source counts them twice.
+    /// Below 27 the grid may hold the classes' hosts itself (before 26's carve-out) and the range
+    /// query does not register it; a caller that serves queries asks
+    /// [`registered_in`](Self::registered_in).
     #[must_use]
     pub const fn new() -> Self {
         Self {
             lookup: ProductionClasses,
+        }
+    }
+
+    /// The source a range query in `galaxy` registers beside the grid: [`new`](Self::new)'s from
+    /// generator version 27 (P09.T37.a's hold), and `None` below it, where the query takes the grid
+    /// and the features' members alone.
+    #[must_use]
+    pub const fn registered_in(galaxy: &Galaxy) -> Option<Self> {
+        match galaxy.rules().class_source {
+            ClassSourceRules::Unregistered => None,
+            ClassSourceRules::Registered => Some(Self::new()),
         }
     }
 }
