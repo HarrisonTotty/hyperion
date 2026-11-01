@@ -138,19 +138,19 @@ pub(super) fn draw(
     let band = key.band();
     match (band, picked) {
         (MassBand::E, Picked::Field(pick)) => {
-            Some(stay(galaxy, table, id, position, pick.component))
+            Some(stay(galaxy, table, id, position, pick.component()))
         }
         (MassBand::D | MassBand::E, Picked::Displaced(class)) => {
             Some(displaced_marks(galaxy, displaced, band, id, class))
         }
-        (MassBand::D, Picked::Field(pick)) if ejects(table.component_source(pick.component)) => {
+        (MassBand::D, Picked::Field(pick)) if ejects(table.component_source(pick.component())) => {
             Some(runaway_reduction(
                 galaxy,
                 table,
                 key,
                 id,
                 position,
-                pick.component,
+                pick.component(),
             ))
         }
         (_, Picked::Field(_) | Picked::Displaced(_)) => None,

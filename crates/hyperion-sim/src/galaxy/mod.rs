@@ -235,7 +235,8 @@ pub struct Galaxy {
     /// under the held arm, where the field is the budget.
     field_share: Option<Box<FieldShare>>,
     /// What the field keeps of each component's layer D, in the fields' order, from generator
-    /// version 26 (P09.T35): 1 less its ancient Type Ia; none under the held arm.
+    /// version 26 (P09.T35): 1 less its ancient Type Ia, and with plan 08's displaced classes
+    /// `1 − a ÷ stay_D` of the stay's slice (`with_displaced_classes`); none under the held arm.
     layer_d_kept: Option<Box<[f64]>>,
     rules: GalaxyRules,
 }
@@ -499,7 +500,9 @@ impl Galaxy {
     /// thinning (P09.T2.c), after the pick, takes φ. Layer D's carve-out (P09.T35) keeps `1 − a`
     /// of the budget's layer D, its ancient Type Ia `a` all among the dead, which stay; inside the
     /// stay's slice of the pick, which has already given the runaways and walkaways to their
-    /// classes, it keeps `1 − a ÷ stay`, so that the field loses its ancient Type Ia exactly.
+    /// classes, it keeps `1 − a ÷ stay`, so that the field loses its ancient Type Ia exactly. It
+    /// keeps 0 should `a` pass the stay; the carve-out's D3 test holds every component of the Milky
+    /// Way fixture above that.
     fn with_displaced_classes(self) -> Result<Self, BuildGalaxyError> {
         let displaced = DisplacedFields::new(&self, &FormTable::committed())
             .map_err(BuildGalaxyError::DisplacedForm)?;

@@ -175,6 +175,20 @@ fn with_rules_refuses_another_displaced_arm() {
         .with_rules(GalaxyRules::every_26_hold());
 }
 
+/// `with_rules` refuses other stellar rules for a galaxy that holds the classes, whose class table
+/// read the kick law under its own.
+#[test]
+#[should_panic(
+    expected = "the displaced classes' table was built under the galaxy's stellar rules"
+)]
+fn with_rules_refuses_other_stellar_rules_once_the_classes_are_installed() {
+    let galaxy = displaced();
+    let _ = galaxy.clone().with_rules(GalaxyRules {
+        stellar: crate::stellar::rules::StellarRules::of_version(GENERATOR_VERSION),
+        ..galaxy.rules()
+    });
+}
+
 /// D4: the same seed twice under every 26 hold gives the same galaxy, classes, shares and
 /// densities.
 #[test]

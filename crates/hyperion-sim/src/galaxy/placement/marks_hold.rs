@@ -4,22 +4,26 @@
 //! record alive and unconstrained; the kick loop's attempts; the count of `lifetime` calls; and
 //! layer E's living share and mass histogram at the Sun-like point against the class table.
 
-use hyperion_testkit::stats::{assert_p_value, chi_square_gof};
+use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::stats::{assert_p_value, chi_square_gof, normal_cdf};
 
 use super::candidate::{Pick, Picked, pick_of};
 use super::marks::{self, LIFETIME_CALLS};
 use super::{CandidateOutcome, generate_cell, generate_cell_where};
 use super::{CellKey, STELLAR_LAYERS, SystemRecord, candidate_count, evaluate_candidate};
 use crate::coords::GalacticPosition;
+use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::displaced::class_table::{ClassKey, keeps_own_form};
-use crate::galaxy::displaced::hold::{displaced, held};
+use crate::galaxy::displaced::hold::{MILKY_WAY_SEED, displaced, held};
 use crate::galaxy::displaced::marks::{StayCategory, age_bin_years, kind_index};
-use crate::galaxy::displaced::site::{explosion_site, explosion_site_knowing};
+use crate::galaxy::displaced::site::{CarveOutRules, explosion_site, explosion_site_knowing};
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass, SPEED_EDGES};
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemIdKind};
-use crate::rng::PiecewiseLinear;
+use crate::rng::{PiecewiseLinear, Seed};
 use crate::stellar::brief::{BriefModel, BriefRoute};
 use crate::stellar::multiplicity::{RedrawAttempt, draw_hierarchy_of_composition, draw_star_count};
 use crate::stellar::sse::lifetime_under;
@@ -215,13 +219,15 @@ fn a_retained_record_s_kick_lies_in_its_bin() {
 /// `primary_model`'s, the range brief's is that star's brief (with the first attempt's count on
 /// the paired route), the lens masses' primary is it, and plan 11's hierarchy reads its stripped
 /// mark. The kept attempt is not the record's own for some of them, and its stripped mark not the
-/// record's own for a few, so the test bites.
+/// record's own for a few, so the test bites. The brief and the system's stars are the same in any
+/// order of reading.
 #[test]
 fn every_reader_of_a_constrained_primary_sees_the_kept_attempt() {
     let galaxy = displaced();
     let mut cells = row(Layer::E, &sunlike(), 8);
     cells.extend(row(Layer::E, &diagonal(3_200.0), 1));
     let (mut retained, mut remnants, mut moved, mut marks) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut constrained = Vec::new();
     for (_, record) in records(galaxy, &cells) {
         let count = match record.placement_class() {
             PlacementClass::Retained { .. } => &mut retained,
@@ -236,6 +242,7 @@ fn every_reader_of_a_constrained_primary_sees_the_kept_attempt() {
         }
         *count += 1;
         assert!(record.kick_range(galaxy).is_some(), "{:?}", record.id());
+        constrained.push(record);
         let composition = draw_metallicity(galaxy, &record);
         let (kept, attempts) = primary_model(galaxy, &record, composition);
         let stars = SystemStars::generate(galaxy, &record);
@@ -299,6 +306,14 @@ fn every_reader_of_a_constrained_primary_sees_the_kept_attempt() {
          another stripped mark"
     );
     assert!(retained > 0 && remnants > 0 && moved > 0 && marks > 0);
+    let readers = |record: &SystemRecord| {
+        (
+            BriefModel::new(galaxy, record).brief_at(UniverseTime::EPOCH),
+            SystemStars::generate(galaxy, record).primary().clone(),
+        )
+    };
+    let sampled: Vec<SystemRecord> = constrained.iter().step_by(12).copied().collect();
+    assert_order_independent(&sampled, readers);
 }
 
 /// A living layer-E record is alive at the epoch in the stellar stage, by construction (Design
@@ -474,7 +489,7 @@ fn the_kick_loop_s_mean_over_displaced_remnants_is_six_to_ten_attempts() {
 
 /// The kick loop over 10⁷ displaced remnants of layer E, galaxy-wide by class (Design note 17),
 /// on every core the machine has: its mean is within 6–10 attempts, and the share that reaches the
-/// cap is pinned where it stands, 2,184 of 9,996,081 (a finding against the plan's none: iron-core
+/// cap is pinned where it stands, 2,081 of 9,996,081 (a finding against the plan's none: iron-core
 /// progenitors at 8–14 and 25–42 M☉ whose own track, built with its stripped mark or between the
 /// class table's mass nodes, gives their bin almost no weight; their kicks are scaled into it).
 /// Natively only: under wasip1 it would take a day on one thread, and the loop's bits are the fast
@@ -536,8 +551,8 @@ fn the_kick_loop_over_ten_million_displaced_remnants() {
     }
     assert!((6.0..=10.0).contains(&mean), "mean {mean}");
     assert!(
-        capped.len() <= 2_184,
-        "{} reached the cap, more than the 2,184 pinned",
+        capped.len() <= 2_081,
+        "{} reached the cap, more than the 2,081 pinned",
         capped.len()
     );
 }
@@ -615,10 +630,16 @@ fn mass_bin(m: f64) -> usize {
 /// chi-square at the 1% level. Some 0.1% of layer E's systems
 /// there are alive, so it reads 10,000 cells, a block of 100 × 100 in the plane about it, each
 /// record's expectation taken at its own position.
+///
+/// The marks are the budget's, so the field share φ (P09.T2.c), which thins the young field after
+/// them, and the carve-out (P09.T35), whose luminous blue variables take living hosts, are held
+/// back ([`marks_rules`]); `the_field_share_thins_layer_e_s_living_field_records_by_age` holds
+/// φ's composition.
 #[test]
 #[ignore = "slow: 10,000 layer-E cells at the Sun-like point, some 300,000 records"]
 fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
-    let galaxy = displaced();
+    let budget = milky_way_under(marks_rules());
+    let galaxy = &budget;
     let fields = galaxy.fields();
     let classes = fields.displaced().expect("the classes are installed");
     let table = classes.class_table();
@@ -626,14 +647,7 @@ fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
     let (mut alive, mut expected_alive) = (0_u64, 0.0);
     let mut observed = [0_u64; MASS_EDGES.len()];
     let mut expected = [0.0; MASS_EDGES.len()];
-    let sun = CellKey::containing(Layer::E, &sunlike()).expect("in the cube");
-    let [cell_x, cell_y, cell_z] = sun.gen_cell().to_array();
-    let block: Vec<CellKey> = (-50..50)
-        .flat_map(|dx| (-50..50).map(move |dy| (dx, dy)))
-        .map(|(dx, dy)| {
-            CellKey::new(Layer::E, [cell_x + dx, cell_y + dy, cell_z]).expect("in the cube")
-        })
-        .collect();
+    let block = sun_block();
     let mut sampled = 0_usize;
     for (_, record) in records(galaxy, &block) {
         sampled += 1;
@@ -717,6 +731,88 @@ fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
     assert_p_value("layer E's living share at the Sun", share.p_value, 0.01);
     let fit = chi_square_gof(&observed, &expected);
     assert_p_value("layer E's living masses at the Sun", fit.p_value, 0.01);
+}
+
+/// Every 26 hold but the field share and the carve-out, which thin and claim layer E's records
+/// after their marks: the rules under which the marks are the budget's.
+const fn marks_rules() -> GalaxyRules {
+    GalaxyRules {
+        field_share: FieldShareRules::None,
+        carve_out: CarveOutRules::Unclaimed,
+        ..GalaxyRules::every_26_hold()
+    }
+}
+
+/// Layer E's 10,000 cells about the Sun-like point, a block of 100 × 100 in the plane.
+fn sun_block() -> Vec<CellKey> {
+    let sun = CellKey::containing(Layer::E, &sunlike()).expect("in the cube");
+    let [cell_x, cell_y, cell_z] = sun.gen_cell().to_array();
+    (-50..50)
+        .flat_map(|dx| (-50..50).map(move |dy| (dx, dy)))
+        .map(|(dx, dy)| {
+            CellKey::new(Layer::E, [cell_x + dx, cell_y + dy, cell_z]).expect("in the cube")
+        })
+        .collect()
+}
+
+/// P09.T2.c's composition with the marks: under the field share a living field record of layer E
+/// is kept with its field's share at its own age, the lowest slice of its acceptance mark, and a
+/// displaced one always, so over every fourth cell of [`sun_block`] the living field records
+/// number the sum of those shares, by a normal test at the 1% level.
+#[test]
+#[ignore = "slow: 2,500 layer-E cells at the Sun-like point, twice"]
+fn the_field_share_thins_layer_e_s_living_field_records_by_age() {
+    let budget = milky_way_under(marks_rules());
+    let phi = milky_way_under(GalaxyRules {
+        field_share: FieldShareRules::Phi,
+        ..marks_rules()
+    });
+    let (kept, mean, variance) = living_field_under_phi(&budget, &phi, &sun_block());
+    let z = (f64::from(kept) - mean) / variance.sqrt();
+    println!("under the field share: {kept} living field records against {mean:.1}, z = {z:.2}");
+    assert!(kept > 0, "the field keeps some living records");
+    assert_p_value(
+        "the living field records under the field share",
+        2.0 * normal_cdf(-z.abs()),
+        0.01,
+    );
+}
+
+/// The Milky Way fixture of the displaced classes' tests under `rules`.
+fn milky_way_under(rules: GalaxyRules) -> Galaxy {
+    Galaxy::from_params_with_rules(
+        Seed::new(MILKY_WAY_SEED),
+        GalaxyParams::milky_way_like(),
+        rules,
+    )
+    .expect("the Milky Way fixture builds its displaced classes")
+}
+
+/// Over every fourth cell of `block`: the living field records of `phi`, the field share's
+/// galaxy, and the mean and variance of their count from `budget`'s, the same galaxy without the
+/// field share, each kept with its field's share at its own age.
+fn living_field_under_phi(budget: &Galaxy, phi: &Galaxy, block: &[CellKey]) -> (u32, f64, f64) {
+    let field = phi.field_share().expect("the field share is installed");
+    let living = |cell: &[SystemRecord]| {
+        cell.iter()
+            .filter(|r| r.placement_class() == PlacementClass::Alive)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    let (mut kept, mut mean, mut variance) = (0_u32, 0.0, 0.0);
+    let mut cell = Vec::new();
+    for &key in block.iter().step_by(4) {
+        generate_cell(budget, key, &mut cell);
+        for record in living(&cell) {
+            let component = record.component().expect("a grid record");
+            let f = field.keeps(component, MassBand::E, record.age_at_epoch());
+            mean += f;
+            variance += f * (1.0 - f);
+        }
+        generate_cell(phi, key, &mut cell);
+        kept += u32::try_from(living(&cell).len()).expect("a count");
+    }
+    (kept, mean, variance)
 }
 
 /// The share of a mass density in each of [`MASS_EDGES`]' bins.

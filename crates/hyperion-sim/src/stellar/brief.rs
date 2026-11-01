@@ -72,7 +72,9 @@ use crate::stellar::binary::pair_keeps_own_models;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::fates::{FateRoute, FittedFate, FittedFates, stripped_mark_matters};
-use crate::stellar::multiplicity::{MultiplicityContext, StarIndex, drawn_single, first_attempt};
+use crate::stellar::multiplicity::{
+    KeptPrimary, MultiplicityContext, StarIndex, drawn_single, first_attempt,
+};
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
@@ -310,12 +312,18 @@ impl BriefModel {
     #[must_use]
     pub fn certifies(galaxy: &Galaxy, record: &SystemRecord) -> bool {
         let composition = draw_metallicity(galaxy, record);
+        let kept = record
+            .kick_range(galaxy)
+            .map(|_| primary_model(galaxy, record, composition).0);
+        let primary = kept
+            .as_ref()
+            .map_or(KeptPrimary::FromRecord, KeptPrimary::Model);
         gate(
             galaxy,
             record,
             &composition,
             grid_multiplicity(record),
-            None,
+            primary,
         )
         .certified
     }
@@ -423,11 +431,22 @@ impl BriefModel {
         let Gate {
             star_count,
             certified,
-        } = gate(galaxy, record, &composition, ctx, kept.as_ref());
+        } = gate(
+            galaxy,
+            record,
+            &composition,
+            ctx,
+            kept.as_ref()
+                .map_or(KeptPrimary::FromRecord, KeptPrimary::Model),
+        );
         if !certified {
             // `SystemStars::generate` for a grid record, `MemberRecord::stars` for a member: the
-            // same composition and context, so the same system.
-            let stars = SystemStars::generate_with(galaxy, record, &composition, ctx);
+            // same composition and context, so the same system, from the kept primary where it
+            // is built already.
+            let stars = match kept {
+                Some(primary) => SystemStars::generate_of_primary(galaxy, record, primary, ctx),
+                None => SystemStars::generate_with(galaxy, record, &composition, ctx),
+            };
             return Self {
                 primary: Primary::Paired(Box::new(stars)),
                 star_count,
@@ -712,15 +731,15 @@ struct Gate {
 /// times across the window. The pair-light and reach tables the test reads are the version's
 /// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified.
 ///
-/// `primary` is the primary's model where the caller holds it, whose stripped mark the hierarchy
-/// reads: the kick loop's kept attempt, for a record whose class constrains its kick (P08.T12.c).
+/// `primary` says where the hierarchy reads the primary's stripped mark: the kick loop's kept
+/// attempt, for a record whose class constrains its kick (P08.T12.c).
 #[must_use]
 fn gate(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: &Composition,
     ctx: MultiplicityContext,
-    primary: Option<&StarModel>,
+    primary: KeptPrimary<'_>,
 ) -> Gate {
     if drawn_single(
         galaxy,

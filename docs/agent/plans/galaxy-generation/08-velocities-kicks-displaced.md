@@ -2166,9 +2166,11 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     the stripped window the kept verdict differs from the record's own for 296 of 786 displaced
     remnants and 81 of 173 retained records, and moves the track of none of them.
   - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
-    chi-square are slow, run by name. The kick loop's cap is reached by 2,184 of 9,996,081
-    remnants, against none: that is pinned and logged as a finding, and those kicks are scaled
-    into their bin. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
+    chi-square are slow, run by name. The kick loop's cap is reached by 2,081 of 9,996,081
+    remnants (2,184 before the tip's 26 stellar holds), against none: that is pinned and logged as
+    a finding, and those kicks are scaled into their bin. The living-share test holds back φ and
+    the carve-out; `the_field_share_thins_layer_e_s_living_field_records_by_age` (slow) checks φ's
+    thinning of the living field records. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
     years rounds to a minute. `DISPLACED_CELLS_DIGEST` now pins the marks too.
 
 - **P08.T12.d as built (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24).**

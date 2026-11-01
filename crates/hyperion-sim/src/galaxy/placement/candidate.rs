@@ -184,9 +184,17 @@ pub(super) fn evaluate_with_hook(
 /// sum of the weights before it, and its own weight, systems per cubic light-year.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Pick {
-    pub(super) component: ComponentId,
+    component: ComponentId,
     below: f64,
     weight: f64,
+}
+
+impl Pick {
+    /// The component picked.
+    #[must_use]
+    pub(super) const fn component(&self) -> ComponentId {
+        self.component
+    }
 }
 
 #[cfg(test)]
@@ -219,7 +227,8 @@ impl Pick {
 /// In layer D, from version 26 under P09.T35's carve-out (`displaced::site::CARVE_OUT_VERSION`),
 /// `f` is also times what the field keeps of the component's layer D, 1 less its ancient Type Ia
 /// ([`Galaxy::layer_d_kept`]), in the same slice: layer D's share less `ancient_share`, with only
-/// counts moving. Under both holds' held arms it keeps every candidate, the code of version 25.
+/// counts moving. With plan 08's displaced classes the slice is the stay's, and the share kept of
+/// it `1 − ancient_share ÷ stay_D` (P08.T12.a). Under both holds' held arms it keeps every candidate, the code of version 25.
 #[must_use]
 fn in_the_field(
     galaxy: &Galaxy,

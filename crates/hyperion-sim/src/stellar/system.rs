@@ -1863,6 +1863,20 @@ impl SystemStars {
         ctx: MultiplicityContext,
     ) -> Self {
         let (primary, _) = primary_model(galaxy, record, *composition);
+        Self::generate_of_primary(galaxy, record, primary, ctx)
+    }
+
+    /// [`generate_with`](Self::generate_with) from the primary's model, `primary`, which must be
+    /// [`primary_model`]'s at the system's composition: for a caller that has built it already,
+    /// the range brief of a record whose class constrains its kick (P08.T12.c), so that its track
+    /// and kick loop are not built twice.
+    #[must_use]
+    pub(crate) fn generate_of_primary(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        primary: StarModel,
+        ctx: MultiplicityContext,
+    ) -> Self {
         let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
         let mut attempt = GRID_ATTEMPT;
         loop {
@@ -2615,8 +2629,8 @@ pub fn grid_multiplicity(record: &SystemRecord) -> MultiplicityContext {
 }
 
 /// The attempts plan 08's kick loop makes before it keeps the last, its kick scaled into the range
-/// (Design note 17). The mean over displaced systems is about the number of speed bins (9.4
-/// galaxy-wide); 2,184 of 10⁷ reach the cap, against Design note 17's none, a finding pinned by
+/// (Design note 17). The mean over displaced systems is about the number of speed bins (9.3
+/// galaxy-wide); 2,081 of 10⁷ reach the cap, against Design note 17's none, a finding pinned by
 /// P08.T12.c's test.
 pub(crate) const KICK_LOOP_CAP: u32 = 4_096;
 

@@ -738,7 +738,8 @@ const PRE_PIN_CELLS: [[i32; 3]; 3] = [[147, 56, 0], [-68, 141, 0], [87, 168, 0]]
 /// The pre-pin's premise: each of its cells holds a record that the core collapses claim under
 /// every 26 hold but plan 08's displaced classes, so that the bump cannot leave its golden unmoved.
 /// The classes redraw every layer-E record's marks (P08.T12.c), which moves the pre-pin's cells
-/// at the bump in any case, and under them its first cell holds no claimed death.
+/// at the bump in any case (checked under every 26 hold), and under them its first cell holds no
+/// claimed death.
 #[test]
 fn the_pre_pin_s_cells_hold_claimed_deaths() {
     let field_only = |carve_out| {
@@ -751,6 +752,7 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
         field_only(CarveOutRules::Unclaimed),
         field_only(CarveOutRules::Claimed),
     );
+    let every_26 = claimed();
     for cell in PRE_PIN_CELLS {
         let key = CellKey::new(Layer::E, cell).unwrap();
         let claimed = carved(&off, &on, &[key]);
@@ -760,6 +762,13 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
                 .any(|(_, class)| *class == Class::CoreCollapse),
             "{cell:?}: {claimed:?}"
         );
+        // Under every 26 hold, the classes too, the cell's records move from the version's.
+        let records = |galaxy: &Galaxy| {
+            let mut out = Vec::new();
+            generate_cell(galaxy, key, &mut out);
+            out
+        };
+        assert_ne!(records(held()), records(every_26), "{cell:?}");
     }
 }
 

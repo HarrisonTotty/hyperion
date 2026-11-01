@@ -59,7 +59,7 @@ pub use hierarchy::{
     draw_hierarchy, draw_hierarchy_of_composition, draw_star_count, draw_star_count_of_composition,
     stripped_mark_min_mass,
 };
-pub(crate) use hierarchy::{draw_hierarchy_of_primary, drawn_single};
+pub(crate) use hierarchy::{KeptPrimary, draw_hierarchy_of_primary, drawn_single};
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
 pub use positions::{star_positions_at, star_states_at};
 pub use quadrature::{

@@ -702,7 +702,15 @@ pub(super) fn draw_hierarchy_with(
     attempt: RedrawAttempt,
     correction: &[[f64; 8]; 4],
 ) -> SystemHierarchy {
-    RecordDraw::new(galaxy, record, composition, ctx, correction, None).stars_at(attempt)
+    RecordDraw::new(
+        galaxy,
+        record,
+        composition,
+        ctx,
+        correction,
+        KeptPrimary::FromRecord,
+    )
+    .stars_at(attempt)
 }
 
 /// [`draw_hierarchy_of_composition`] of the system of `primary`, `record`'s primary's model, at
@@ -724,7 +732,7 @@ pub(crate) fn draw_hierarchy_of_primary(
         Some(primary.composition()),
         ctx,
         &PERIOD_CORRECTION,
-        Some(primary),
+        KeptPrimary::Model(primary),
     )
     .stars_at(attempt);
     substellar::with_companion(galaxy, record, ctx, attempt, stars)
@@ -768,8 +776,7 @@ impl fmt::Debug for RecordDraw<'_> {
 impl<'a> RecordDraw<'a> {
     /// The draw of `record`'s stars under `ctx`, at `composition` if given and otherwise at the
     /// record's [`draw_metallicity`], with the direct companions' period law corrected by
-    /// `correction`, and `primary`, the primary's model where the caller holds it, whose stripped
-    /// mark it reads (`innermost`).
+    /// `correction`, with the primary's stripped mark read where `primary` says (`innermost`).
     #[must_use]
     pub(super) fn new(
         galaxy: &'a Galaxy,
@@ -777,7 +784,7 @@ impl<'a> RecordDraw<'a> {
         composition: Option<&Composition>,
         ctx: MultiplicityContext,
         correction: &'a [[f64; 8]; 4],
-        primary: Option<&StarModel>,
+        primary: KeptPrimary<'_>,
     ) -> Self {
         Self {
             galaxy,
@@ -922,7 +929,14 @@ fn star_count_with(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> u8 {
-    if drawn_single(galaxy, record, composition, ctx, attempt, None) {
+    if drawn_single(
+        galaxy,
+        record,
+        composition,
+        ctx,
+        attempt,
+        KeptPrimary::FromRecord,
+    ) {
         return 1;
     }
     let stars = draw_hierarchy_with(
@@ -940,8 +954,8 @@ fn star_count_with(
 /// and otherwise at the record's [`draw_metallicity`]: no companion to try and no brown dwarf, from
 /// the count words alone, as [`draw_star_count`] decides before it builds any orbit. Where it is
 /// not, the hierarchy is drawn in full (plan 11, P11.T11.a: the range brief's gate then reads that
-/// draw's attempt 0 for its count and its pairs at once). `primary` is the primary's model where
-/// the caller holds it, whose stripped mark it reads (`innermost`).
+/// draw's attempt 0 for its count and its pairs at once). The primary's stripped mark is read
+/// where `primary` says (`innermost`).
 #[must_use]
 pub(crate) fn drawn_single(
     galaxy: &Galaxy,
@@ -949,7 +963,7 @@ pub(crate) fn drawn_single(
     composition: Option<&Composition>,
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
-    primary: Option<&StarModel>,
+    primary: KeptPrimary<'_>,
 ) -> bool {
     let model = MultiplicityModel::default_v1();
     let streams = Streams::new(galaxy, record.id(), attempt);
@@ -968,21 +982,31 @@ pub(crate) fn drawn_single(
         && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
 }
 
+/// Where the hierarchy reads the primary's companion-stripped mark: from the kick loop's kept
+/// attempt (plan 08, P08.T12.c), as [`SystemStars`](crate::stellar::system::SystemStars) keeps
+/// the primary's draws.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum KeptPrimary<'a> {
+    /// The primary's model, which the caller holds: the system stage's or the range brief's.
+    Model(&'a StarModel),
+    /// From the record: its own attempt's mark, or, for a record whose class constrains its
+    /// kick, the kept attempt's, which builds the primary's track
+    /// (`primary_kept_stripped_mark`).
+    FromRecord,
+}
+
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),
 /// at `composition` if given and otherwise at the record's [`draw_metallicity`], which is a grid
 /// record's alone. The mark is the primary's own, as
-/// [`SystemStars`](crate::stellar::system::SystemStars) keeps its draws: `primary`'s, the
-/// primary's model where the caller holds it, and otherwise read at the attempt its record
-/// carries (a grid record's mark attempt, a feature member's conditional-draw attempt), or for a
-/// record whose class constrains its kick at the attempt plan 08's kick loop keeps, which builds
-/// the primary's track (`primary_kept_stripped_mark`, P08.T12.c).
+/// [`SystemStars`](crate::stellar::system::SystemStars) keeps its draws, read where `primary`
+/// says ([`KeptPrimary`]).
 #[must_use]
 fn innermost(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: Option<&Composition>,
     ctx: MultiplicityContext,
-    primary: Option<&StarModel>,
+    primary: KeptPrimary<'_>,
 ) -> Innermost {
     match ctx {
         MultiplicityContext::ForcedSingle => return Innermost::Free,
@@ -996,10 +1020,10 @@ fn innermost(
     if m1 < stripped_mark_min_mass(&comp) {
         return Innermost::Free;
     }
-    let mark = primary.map_or_else(
-        || primary_kept_stripped_mark(galaxy, record, &comp),
-        |primary| primary.draws().stripped(),
-    );
+    let mark = match primary {
+        KeptPrimary::Model(model) => model.draws().stripped(),
+        KeptPrimary::FromRecord => primary_kept_stripped_mark(galaxy, record, &comp),
+    };
     // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
     // on the share it would read, its exact path's track under the galaxy's stellar rules, as the
     // primary's own track's mark reads it.
@@ -1573,7 +1597,7 @@ pub(super) fn direct_tries(
             galaxy.potential(),
             PointLy::from(record.epoch_position()),
             None,
-            innermost(galaxy, record, None, ctx, None),
+            innermost(galaxy, record, None, ctx, KeptPrimary::FromRecord),
         ),
     };
     let m0 = record.primary_initial_mass();
@@ -2285,7 +2309,7 @@ mod tests {
                 None,
                 ctx,
                 &PERIOD_CORRECTION,
-                None,
+                KeptPrimary::FromRecord,
             ));
             assert_order_independent(&attempts, |&attempt| shared.borrow_mut().stars_at(attempt));
             for &attempt in &attempts {

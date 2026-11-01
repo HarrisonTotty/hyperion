@@ -216,7 +216,9 @@ impl Galaxy {
 
     /// What the field keeps of component `id`'s layer D from generator version 26: 1 less its
     /// population's ancient Type Ia, the share of its layer D that exploded before the supernova
-    /// test's interval and left nothing (plan 09, P09.T35; module documentation). `None` under the
+    /// test's interval and left nothing (plan 09, P09.T35; module documentation). In a galaxy that
+    /// holds plan 08's displaced classes it is the share of the stay's slice, `1 − a ÷ stay_D`,
+    /// since the classes take the rest of layer D's budget first (P08.T12.a). `None` under the
     /// carve-out's held arm, where layer D is the budget's.
     ///
     /// # Panics

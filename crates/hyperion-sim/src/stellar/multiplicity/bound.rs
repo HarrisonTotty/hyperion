@@ -16,8 +16,8 @@
 
 use super::direct::PERIOD_CORRECTION;
 use super::hierarchy::{
-    HierarchyNode, MultiplicityContext, NodeIndex, RecordDraw, RedrawAttempt, SlotKind, StarIndex,
-    StarSlot, SystemHierarchy,
+    HierarchyNode, KeptPrimary, MultiplicityContext, NodeIndex, RecordDraw, RedrawAttempt,
+    SlotKind, StarIndex, StarSlot, SystemHierarchy,
 };
 use super::substellar;
 use crate::galaxy::Galaxy;
@@ -26,7 +26,7 @@ use crate::stellar::Composition;
 use crate::stellar::binary::carve::grid_redraws;
 #[cfg(doc)]
 use crate::stellar::system::SystemStars;
-use crate::stellar::system::{StarModel, grid_multiplicity};
+use crate::stellar::system::grid_multiplicity;
 use crate::units::Metres;
 
 /// The hierarchy of every redraw attempt that [`SystemStars::generate`] can keep for `record`, at
@@ -115,7 +115,7 @@ fn bound_in(
         Some(composition),
         ctx,
         &PERIOD_CORRECTION,
-        None,
+        KeptPrimary::FromRecord,
     );
     let mut attempts = Vec::with_capacity(1);
     let mut attempt = RedrawAttempt::FIRST;
@@ -158,8 +158,8 @@ fn attempt_at(
 }
 
 /// The first redraw attempt of `record`'s system at `composition` under `ctx`, as the bound lists
-/// it (plan 11, P11.T11.a), with `primary`, the primary's model where the caller holds it, whose
-/// companion-stripped seam the draw reads (plan 08's kept attempt, P08.T12.c).
+/// it (plan 11, P11.T11.a), with the primary's companion-stripped seam read where `primary` says
+/// (plan 08's kept attempt, P08.T12.c).
 ///
 /// It is the generator's own draw there, bit for bit, with the pairs the binary engine may run.
 /// The range brief's gate reads it alone: it keeps a primary on its single-star routes only where
@@ -171,7 +171,7 @@ pub(crate) fn first_attempt(
     record: &SystemRecord,
     composition: &Composition,
     ctx: MultiplicityContext,
-    primary: Option<&StarModel>,
+    primary: KeptPrimary<'_>,
 ) -> AttemptBound {
     let mut draw = RecordDraw::new(
         galaxy,
@@ -872,7 +872,7 @@ mod tests {
                 let composition = draw_metallicity(&galaxy, &record);
                 for ctx in [MultiplicityContext::Free, forced] {
                     assert_eq!(
-                        first_attempt(&galaxy, &record, &composition, ctx, None),
+                        first_attempt(&galaxy, &record, &composition, ctx, KeptPrimary::FromRecord),
                         bound_in(&galaxy, &record, &composition, ctx).attempts()[0],
                         "{:?} under {ctx:?}",
                         record.id()
