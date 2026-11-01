@@ -24424,3 +24424,14 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _Not adopted:_ the bins' channel weighting with a continuum ratio, which the blue channel's
     negative weights over a methane-free red continuum push to 1.89; and a smoothing of J over μ₀ at
     the horizon, whose answer moved threefold with its width (a tuned parameter, not a lever).
+  - _Lever 1 retargeted, the limb's curved streams: built._ `bake.ts`'s `curvedStreamShares`: where
+    the source is formed, each diffuse stream's intensity takes its curved path's share of the
+    plane-parallel path's opacity, an upward stream's ray traced back to its tangent radius
+    (`sphericalBeam.ts` at −μ; 1 where it meets the ground), a downward one's climbing ray to the
+    top. `BakeBandOptions.curvedStreams`, `curvedStreams` on the ask, jobs and `bakeKeptCase`;
+    `bakedAtOwnWavelengths` is now `bakedAsHaze`, the cache's option `bakedAsHaze`, setting both
+    haze levers. Off, every bake is bit for bit as before.
+  - _titan-class through both:_ `vectorGate.json` format 9 adds `titanClass.curvedStreams`; 160 pass,
+    25 miss, 175 refused, every limb view within the gate (10H 1.04, 3H 1.05). Left: the horizon's 21,
+    s30's two red views (within the gate at m < 8, measured with the read's modes widened by hand),
+    s80's forward red (0.92) and the disc's at p60 (1.07).

@@ -102,6 +102,11 @@ export type OpticsRequest =
        * route's (`thick/bake.ts`'s remarks, "Own wavelengths"; R08.T14.d.4): none where absent.
        */
       readonly ownWavelengths?: boolean;
+      /**
+       * Whether its diffuse streams take their curved paths' shares, a haze route's
+       * (`thick/bake.ts`'s remarks, "Curved streams"; R08.T14.d.4): none where absent.
+       */
+      readonly curvedStreams?: boolean;
     }
   | {
       readonly kind: "thick-bake-bins";
@@ -115,6 +120,8 @@ export type OpticsRequest =
       readonly kept?: KeptBakeLights;
       /** As `thick-bake`'s; the share with bin 0 bakes the own channels' points beside its bins. */
       readonly ownWavelengths?: boolean;
+      /** As `thick-bake`'s. */
+      readonly curvedStreams?: boolean;
       /** The bake bins baked, ascending. */
       readonly bins: ReadonlyArray<number>;
     }

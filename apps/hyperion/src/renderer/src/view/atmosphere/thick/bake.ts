@@ -100,6 +100,17 @@
  * left Rec. 709 (methane's red past some 20 times a Titan-class column), which no sum of
  * exponentials carries and the bins' signed conversion does.
  *
+ * **Curved streams** (R08.T14.d.4's Titan-class gate; a haze route's bake alone,
+ * {@link BakeBandOptions.curvedStreams}). The column is plane-parallel, so a stream that reaches a
+ * point from below at a shallow angle has crossed the whole column beneath it, where on the sphere
+ * its ray, traced back, falls only to its tangent radius and climbs out again through thin air; and
+ * one from above has crossed τ ÷ μ above it, where on the sphere it climbs more steeply through each
+ * shell. Where the source is formed, each diffuse stream's intensity takes its curved path's share
+ * of the plane-parallel path's opacity ({@link curvedStreamShares}), the first order in the
+ * sphere's curvature of the radiance its path gathers: the plane-parallel diffuse field at altitude,
+ * which a limb view reads, is otherwise lit from a full slab below (Loughman et al. 2004's limb
+ * error, above). The beam and the solve are unchanged.
+ *
  * **Spectral** (Design note 5): each absorber in each bin is an exponential sum fitted to its bin
  * curve (`expSum.ts`), each layer reading k at its own Curtis–Godson pressure; several absorbers in
  * a bin overlap at random (the product of their sums, Lacis and Oinas 1991), one solve a product
@@ -183,7 +194,7 @@ import {
   type SpectralPhase,
   type SpectralTermOptics,
 } from "./spectralColumn";
-import { log } from "../../../lib/pinnedMath";
+import { expm1, log } from "../../../lib/pinnedMath";
 
 /**
  * The bake's ceiling, s a world: 5 s on the UHD 620's host, timed by the owner (R08.T14.d); a
@@ -1572,6 +1583,69 @@ export interface BakeBandOptions {
    * sky-lit radiance at its own modes). The table holds J to {@link THICK_BAKE_MODES} whatever.
    */
   readonly solveModes?: number;
+  /**
+   * Whether each diffuse stream takes its curved path's share where the source is formed, as a haze
+   * route's bake does (the module's remarks, "Curved streams"; R08.T14.d.4): none by default.
+   */
+  readonly curvedStreams?: boolean;
+}
+
+/**
+ * Each diffuse stream's curved path's share of the plane-parallel path's opacity at every interface
+ * from the top down (the module's remarks, "Curved streams"), `[q × cosines + j]`: for a stream
+ * travelling `up` at μ_j, (1 − e^(−τ_c)) ÷ (1 − e^(−τ_↓ ÷ μ_j)), τ_c the optical depth of its ray
+ * traced back through the shells, down to its tangent radius and up to the top (`sphericalBeam.ts`'s
+ * path at −μ_j, below the horizontal) and τ_↓ the column below the interface, and 1 where that ray
+ * meets the ground, crossing the column the plane-parallel path crosses; for one travelling `down`,
+ * (1 − e^(−τ_s)) ÷ (1 − e^(−τ_↑ ÷ μ_j)), τ_s the climbing ray's to the top at μ_j and τ_↑ the
+ * column above. 1 where the plane-parallel path holds no depth.
+ *
+ * @param radiusM - The band's ground sphere, m.
+ * @param interfaceHeightsM - The interfaces' h\*, m, from the top down: L + 1.
+ * @param depths - Each layer's vertical optical depth from the top, the solve's: L.
+ * @param cosines - The streams' cosines, each in (0, 1].
+ */
+export function curvedStreamShares(
+  radiusM: number,
+  interfaceHeightsM: Float64Array,
+  depths: Float64Array,
+  cosines: ArrayLike<number>,
+  travel: "up" | "down",
+): Float64Array {
+  const layers = depths.length;
+  const count = cosines.length;
+  // The plane-parallel column below each interface, or above it.
+  const column = new Float64Array(layers + 1);
+  switch (travel) {
+    case "up":
+      for (let q = layers - 1; q >= 0; q -= 1) {
+        column[q] = (column[q + 1] ?? 0) + (depths[q] ?? Number.NaN);
+      }
+      break;
+    case "down":
+      for (let q = 1; q <= layers; q += 1) {
+        column[q] = (column[q - 1] ?? 0) + (depths[q - 1] ?? Number.NaN);
+      }
+      break;
+  }
+  const shares = new Float64Array((layers + 1) * count).fill(1);
+  for (let j = 0; j < count; j += 1) {
+    const mu = cosines[j] ?? Number.NaN;
+    const path = sphericalBeamPath(
+      radiusM,
+      interfaceHeightsM,
+      depths,
+      travel === "up" ? -mu : mu,
+    ).slantOpticalDepth;
+    for (let q = 0; q <= layers; q += 1) {
+      const flat = -expm1(-(column[q] ?? 0) / mu);
+      const slant = path[q] ?? Number.POSITIVE_INFINITY;
+      if (flat > 0 && Number.isFinite(slant)) {
+        shares[q * count + j] = -expm1(-slant) / flat;
+      }
+    }
+  }
+  return shares;
 }
 
 /**
@@ -1599,6 +1673,7 @@ export function bakeBinSolve(
     ground,
     THICK_BAKE_MODES,
     "every",
+    false,
   );
 }
 
@@ -1635,6 +1710,7 @@ function solveOf(
   ground: BakeGround | undefined,
   solveModes: number,
   interfaces: SolveInterfaces,
+  curved: boolean,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -1683,6 +1759,13 @@ function solveOf(
   const light = new Float64Array(altitudes * suns);
   const { nodes, weights } = solution.quadrature;
   const n = nodes.length;
+  // Each stream's curved path's share (the module's remarks, "Curved streams"), or none.
+  const sharesOf = (cosines: ArrayLike<number>, travel: "up" | "down"): Float64Array | null =>
+    curved ? curvedStreamShares(radius, interfaceHeightsM, scaledDepths, cosines, travel) : null;
+  const nodesUp = sharesOf(nodes, "up");
+  const nodesDown = sharesOf(nodes, "down");
+  const usersUp = sharesOf(grid.upwardCosines, "up");
+  const usersDown = sharesOf(grid.upwardCosines, "down");
   const half = new Float64Array(order);
   // Per mode w_n Λ_l(μ_n), and per point and mode (2l + 1) χ_l Λ_l(μ_u): the products the sums
   // below took term by term, formed once as they formed them (R08.T14.b's lever).
@@ -1742,8 +1825,10 @@ function solveOf(
           for (let j = 0; j < n; j += 1) {
             sum +=
               (weightedNodeL[l * n + j] ?? Number.NaN) *
-              ((mode.quadratureUp[k * n + j] ?? Number.NaN) +
-                sign * (mode.quadratureDown[k * n + j] ?? Number.NaN));
+              ((mode.quadratureUp[k * n + j] ?? Number.NaN) * (nodesUp?.[k * n + j] ?? 1) +
+                sign *
+                  (mode.quadratureDown[k * n + j] ?? Number.NaN) *
+                  (nodesDown?.[k * n + j] ?? 1));
           }
           half[l] = sum;
         }
@@ -1767,8 +1852,10 @@ function solveOf(
           // Upward at +μ_u: ½ Σ c H, and the beam at −μ₀ through (−1)^{l+m}; downward the reverse.
           const smoothUp = 0.5 * (even + odd) + azimuthal * (beamEven - beamOdd) * aureole;
           const smoothDown = 0.5 * (even - odd) + azimuthal * (beamEven + beamOdd) * aureole;
-          const intensityUp = mode.userUp[k * views + u] ?? Number.NaN;
-          const intensityDown = mode.userDown[k * views + u] ?? Number.NaN;
+          const intensityUp =
+            (mode.userUp[k * views + u] ?? Number.NaN) * (usersUp?.[k * views + u] ?? 1);
+          const intensityDown =
+            (mode.userDown[k * views + u] ?? Number.NaN) * (usersDown?.[k * views + u] ?? 1);
           const cell = (a * suns + s) * v2;
           const up = (cell + views + u) * THICK_BAKE_MODES + m;
           const down = (cell + views - 1 - u) * THICK_BAKE_MODES + m;
@@ -1996,6 +2083,7 @@ export function bakeBins(
             options?.ground,
             solveModes,
             "table",
+            options?.curvedStreams === true,
           );
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);

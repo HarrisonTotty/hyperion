@@ -79,6 +79,7 @@ import {
 import type { BakeSpectrum } from "./spectralColour";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
+  type BakeBandOptions,
   bakeBins,
   bakeMultipleScattering,
   bakePointsOf,
@@ -225,7 +226,9 @@ export class OpticsJobs {
         reply = {
           kind: "thick-baked",
           id: request.id,
-          tables: request.bands.map((band) => bakeMultipleScattering(prepared, request.body, band)),
+          tables: request.bands.map((band) =>
+            bakeMultipleScattering(prepared, request.body, band, bandOptionsOf(request)),
+          ),
         };
         break;
       }
@@ -249,7 +252,7 @@ export class OpticsJobs {
         reply = {
           kind: "thick-bins-baked",
           id: request.id,
-          share: bakeBins(prepared, request.body, band),
+          share: bakeBins(prepared, request.body, band, bandOptionsOf(request)),
         };
         break;
       }
@@ -569,6 +572,11 @@ function ownChannelsOf(
   lights: ReadonlyArray<ThickBakeLight>,
 ): OwnChannels {
   return request.ownWavelengths === true ? ownWavelengthChannels(lights) : NO_OWN_CHANNELS;
+}
+
+/** A thick bake's request's band options: its streams' curved paths where it asks them (R08.T14.d.4). */
+function bandOptionsOf(request: { readonly curvedStreams?: boolean }): BakeBandOptions {
+  return request.curvedStreams === true ? { curvedStreams: true } : {};
 }
 
 /** A share's one band, or a refusal: a share is of one band. */

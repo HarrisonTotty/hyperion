@@ -31,6 +31,7 @@ import {
   bakeMultipleScattering,
   bakePointsOf,
   binGroundAlbedo,
+  curvedStreamShares,
   EVERY_BAKE_BIN,
   gatherBins,
   NO_OWN_CHANNELS,
@@ -932,4 +933,78 @@ describe("the bake's channels at their own wavelengths (R08.T14.d.4)", () => {
       }),
     ).toEqual(["refused", "refused"]);
   });
+});
+
+/** An exponential column of `tau` over 16 layers of one scale height in 10, its interfaces' h, m. */
+function exponentialColumn(tau: number): {
+  readonly heights: Float64Array;
+  readonly depths: Float64Array;
+} {
+  const scaleM = 20_000;
+  const layers = 16;
+  const heights = Float64Array.from({ length: layers + 1 }, (_, q) => (layers - q) * scaleM);
+  const above = (h: number): number => tau * Math.exp(-h / scaleM);
+  const depths = Float64Array.from(
+    { length: layers },
+    (_, q) => above(heights[q + 1] ?? 0) - above(heights[q] ?? 0),
+  );
+  return { heights, depths };
+}
+
+describe("the bake's curved streams (R08.T14.d.4)", () => {
+  const cosines = Float64Array.of(0.02, 0.1, 0.5, 1);
+
+  it("takes every share as 1 on a sphere so large that it is plane-parallel, either way, to 10⁻⁵", () => {
+    const { heights, depths } = exponentialColumn(10);
+    const shares = [
+      ...curvedStreamShares(1e13, heights, depths, cosines, "up"),
+      ...curvedStreamShares(1e13, heights, depths, cosines, "down"),
+    ];
+    expect(Math.max(...shares.map((share) => Math.abs(share - 1)))).toBeLessThan(1e-5);
+  });
+
+  it("takes a shallow stream up at altitude as its chord's thin share on a Titan-sized sphere, and 1 at the ground and deep in the column", () => {
+    const { heights, depths } = exponentialColumn(10);
+    const up = curvedStreamShares(2_575_000, heights, depths, cosines, "up");
+    const count = cosines.length;
+    const top = up[0] ?? Number.NaN;
+    const ground = up[16 * count + 0] ?? Number.NaN;
+    const deep = up[14 * count + 3] ?? Number.NaN;
+    expect([top < 0.1, top > 0, ground, deep]).toEqual([true, true, 1, expect.closeTo(1, 6)]);
+  });
+
+  it("takes a shallow stream down below a thin top as its climbing ray's Chapman share, under 1", () => {
+    const { heights, depths } = exponentialColumn(10);
+    const down = curvedStreamShares(2_575_000, heights, depths, cosines, "down");
+    const count = cosines.length;
+    // At 8 scale heights, τ above some 3.4 × 10⁻³: the grazing stream's slant is the shorter.
+    const high = down[8 * count + 0] ?? Number.NaN;
+    const steep = down[8 * count + 3] ?? Number.NaN;
+    expect([high < 1, high > 0.01, steep]).toEqual([true, true, expect.closeTo(1, 6)]);
+  });
+
+  it(
+    "bakes to the bit without them, and moves the table with them",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      const fixture = titanClassFixture();
+      const column: SpectralColumn = {
+        ...fixture.column,
+        terms: fixture.column.terms.filter((term) => term.source.kind !== "aerosol"),
+      };
+      const prepared = prepareBake(column, [lightOf(fixture)], smallGrid(Float64Array.of(0.25)));
+      const plain = slotOf(bakeMultipleScattering(prepared, fixture.body, 0)).values;
+      const off = slotOf(
+        bakeMultipleScattering(prepared, fixture.body, 0, { curvedStreams: false }),
+      ).values;
+      const on = slotOf(
+        bakeMultipleScattering(prepared, fixture.body, 0, { curvedStreams: true }),
+      ).values;
+      expect([
+        off.every((value, i) => Object.is(value, plain[i])),
+        on.some((value, i) => value !== plain[i]),
+        on.every(Number.isFinite),
+      ]).toEqual([true, true, true]);
+    },
+  );
 });

@@ -2908,7 +2908,7 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
   async function bakingOverPool(
     options: {
       readonly corrects?: (column: SpectralColumn) => boolean;
-      readonly ownWavelengths?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+      readonly bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
     } = {},
   ): Promise<OverPool> {
     const seam = new BodyDetailSeam();
@@ -2930,7 +2930,7 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
       // the disc table's (R08.T16.b).
       corrects: options.corrects ?? (() => false),
       discs: () => false,
-      ...(options.ownWavelengths === undefined ? {} : { ownWavelengths: options.ownWavelengths }),
+      ...(options.bakedAsHaze === undefined ? {} : { bakedAsHaze: options.bakedAsHaze }),
     });
     onTestFinished(() => {
       cache.dispose();
@@ -2956,18 +2956,18 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
   }
 
-  it("posts the bake asking its channels at their own wavelengths where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
+  it("posts the bake as a haze route's, its channels at their own wavelengths and its streams' curved paths, where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
     const asked = async (
-      ownWavelengths?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
+      bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
     ): Promise<unknown> => {
-      const over = await bakingOverPool(ownWavelengths === undefined ? {} : { ownWavelengths });
+      const over = await bakingOverPool(bakedAsHaze === undefined ? {} : { bakedAsHaze });
       const bake = lastPosted(workerAt(over.workers, 0));
-      return bake.kind === "thick-bake" ? bake.ownWavelengths : bake.kind;
+      return bake.kind === "thick-bake" ? [bake.ownWavelengths, bake.curvedStreams] : bake.kind;
     };
     expect([await asked(() => true), await asked(() => false), await asked()]).toEqual([
-      true,
-      undefined,
-      undefined,
+      [true, true],
+      [undefined, undefined],
+      [undefined, undefined],
     ]);
   });
 

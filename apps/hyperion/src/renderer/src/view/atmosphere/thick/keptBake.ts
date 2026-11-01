@@ -83,6 +83,11 @@ export interface KeptBakeOptions {
    * route's does (`bake.ts`'s remarks, "Own wavelengths"; R08.T14.d.4): none by default.
    */
   readonly ownWavelengths?: boolean;
+  /**
+   * Whether its diffuse streams take their curved paths' shares, as a haze route's bake does
+   * (`bake.ts`'s remarks, "Curved streams"; R08.T14.d.4): none by default.
+   */
+  readonly curvedStreams?: boolean;
 }
 
 /**
@@ -90,7 +95,7 @@ export interface KeptBakeOptions {
  * `lights` in theirs: `prepareBake` of its column under the lights' bin curves, as the optics
  * worker forms them (`bake.ts`'s `thickBakeLights`), with the channels they allow at their own
  * wavelengths where `options.ownWavelengths` asks it (`bake.ts`'s `ownWavelengthChannels`), then
- * `bakeMultipleScattering` a band.
+ * `bakeMultipleScattering` a band, its streams' curved paths where `options.curvedStreams` asks them.
  *
  * @throws RangeError as {@link keptColumnOf}, `thickBakeLights`, `prepareBake` and
  *   `bakeMultipleScattering` refuse their inputs (a band the body does not have).
@@ -114,7 +119,8 @@ export function bakeKeptCase(
     own,
   );
   const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
-  return bands.map((band) => bakeMultipleScattering(prepared, body, band));
+  const bandOptions = options.curvedStreams === true ? { curvedStreams: true } : {};
+  return bands.map((band) => bakeMultipleScattering(prepared, body, band, bandOptions));
 }
 
 /**

@@ -180,6 +180,11 @@ export interface ThickBakeAsk {
    * points: none where absent.
    */
   readonly ownWavelengths?: boolean;
+  /**
+   * Whether its diffuse streams take their curved paths' shares, a haze route's (`thick/bake.ts`'s
+   * remarks, "Curved streams"; R08.T14.d.4): none where absent.
+   */
+  readonly curvedStreams?: boolean;
 }
 
 /** How a thick bake ended. */
