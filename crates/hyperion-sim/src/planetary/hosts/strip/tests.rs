@@ -222,11 +222,19 @@ fn solar_systems() -> Vec<SystemRecord> {
 
 // The hold.
 
-/// Under the hold every context is version 24's and 25's to the bit: plan 02's radius at the epoch
-/// position, even in the Kepler regime and for a feature member, no encounter environment, and an
-/// environment given to a synthetic host not applied.
+/// Under the hold, the tests' oracle, every context is version 24's and 25's to the bit: plan 02's
+/// radius at the epoch position, even in the Kepler regime and for a feature member, no encounter
+/// environment, and an environment given to a synthetic host not applied.
 #[test]
 fn under_the_hold_every_context_is_version_24_s() {
+    with_stripping(
+        StripRules::Held,
+        under_the_hold_every_context_is_version_24_s_on_this_thread,
+    );
+}
+
+/// [`under_the_hold_every_context_is_version_24_s`]'s body, under the rules the thread sets.
+fn under_the_hold_every_context_is_version_24_s_on_this_thread() {
     let galaxy = kepler_galaxy();
     let mut records: Vec<SystemRecord> = kepler_regime_systems().iter().take(8).copied().collect();
     records.extend(
@@ -461,15 +469,20 @@ fn a_field_star_at_26_000_ly_is_unaffected_inside_10_4_au() {
     let galaxy = kepler_galaxy();
     for record in solar_systems() {
         assert_eq!(regime_of(galaxy, &record), Regime::Straight);
-        let held = SystemContext::from_record(galaxy, &record);
-        let stripped = { SystemContext::from_record(galaxy, &record) };
+        let held = with_stripping(StripRules::Held, || {
+            SystemContext::from_record(galaxy, &record)
+        });
+        let stripped = SystemContext::from_record(galaxy, &record);
         assert_eq!(stripped, held);
         let strip = stripped.strip_radius();
-        assert_same_bits(strip.value(), held.strip_radius().value());
+        assert_same_bits(
+            strip.value(),
+            with_stripping(StripRules::Held, || held.strip_radius()).value(),
+        );
         assert!(in_au(strip) > 1e4, "{} au", in_au(strip));
         assert_eq!(
             generate_planets(SEED, &stripped),
-            generate_planets(SEED, &held)
+            with_stripping(StripRules::Held, || generate_planets(SEED, &held))
         );
     }
 }
@@ -674,16 +687,20 @@ fn the_stripping_is_the_same_in_every_run_and_every_order() {
 fn movers(galaxy: &Galaxy, records: &[SystemRecord], generated: usize) -> (usize, f64, usize) {
     let (mut cut, mut least, mut moved) = (0, f64::INFINITY, 0);
     for (i, record) in records.iter().enumerate() {
-        let held = SystemContext::from_record(galaxy, record);
-        let stripped = { SystemContext::from_record(galaxy, record) };
+        let held = with_stripping(StripRules::Held, || {
+            SystemContext::from_record(galaxy, record)
+        });
+        let held_strip = with_stripping(StripRules::Held, || held.strip_radius());
+        let stripped = SystemContext::from_record(galaxy, record);
         let strip = stripped.strip_radius();
-        assert!(strip <= held.strip_radius(), "{:?}", record.id());
-        if bits(strip.value()) != bits(held.strip_radius().value()) {
+        assert!(strip <= held_strip, "{:?}", record.id());
+        if bits(strip.value()) != bits(held_strip.value()) {
             cut += 1;
             least = least.min(in_au(strip));
             if i < generated {
-                let after = { generate_planets(SEED, &stripped).bodies().to_vec() };
-                if after != generate_planets(SEED, &held).bodies() {
+                let after = generate_planets(SEED, &stripped).bodies().to_vec();
+                let before = with_stripping(StripRules::Held, || generate_planets(SEED, &held));
+                if after != before.bodies() {
                     moved += 1;
                 }
             }
