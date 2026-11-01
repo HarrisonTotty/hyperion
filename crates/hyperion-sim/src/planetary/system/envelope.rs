@@ -295,7 +295,7 @@ pub(crate) fn envelope_of(
         equilibrium_temperature: of.equilibrium_temperature,
         gravity: of.gravity,
         fe_h: of.fe_h,
-        grey: GreyProfile::ADOPTED,
+        grey: GreyProfile::in_force(),
         starlit: of.starlit,
     })
     .map_err(DeriveEnvelopeError::Atmosphere)?;

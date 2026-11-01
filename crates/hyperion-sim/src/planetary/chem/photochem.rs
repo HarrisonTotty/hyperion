@@ -1,5 +1,6 @@
 //! An envelope's photochemical rules (plan 14, P14.T52.b; decision-composition §1.3): its
-//! photochemical SO₂, its sulphur, hydrocarbon, ice-giant and chromophore hazes, and the thermal
+//! photochemical SO₂, its sulphur, hydrocarbon, ice-giant and chromophore hazes, the haze above a
+//! cold giant's ammonia cloud (P14.T24.h.b part 6, held at 27), and the thermal
 //! dissociation of H₂O, TiO and VO on ultra-hot daysides, each with its source and range, on the
 //! Surface path.
 //!
@@ -21,6 +22,7 @@
 //! | [`soot`], [`hydrocarbon_share`] | Gao et al. 2020 | `T_eq` below 950 K | a soot haze from 1 µbar |
 //! | [`ice_giant_haze`] | Irwin et al. 2022 | a CH₄ layer | a haze above it |
 //! | [`chromophore`] | Braude et al. 2020 | an NH₃ layer | a red layer at 0.2 bar or above |
+//! | [`ammonia_haze`] | fitted on Jupiter | an NH₃ layer | an NH₃-ice haze above it, to 0.1 bar |
 //! | [`Dissociating`] | Parmentier et al. 2018 | 2,000–4,000 K, 1 µbar–200 bar | H₂O, TiO and VO remaining |
 //!
 //! - **Photochemical SO₂** (S.-M. Tsai et al., "Photochemically produced SO2 in the atmosphere of
@@ -56,7 +58,13 @@
 //!   bars in the Great Red Spot and 0.7 ± 0.1 bars elsewhere on Jupiter", a Gaussian layer in ln p
 //!   above the ammonia cloud. Braude et al. retrieve it on Jupiter alone; the rule takes any giant
 //!   with an ammonia layer for a cold giant like it, with the Great Red Spot's depth (the plan's
-//!   "no deeper than about 0.2 bar") and column, Jupiter's reddest ([`CHROMOPHORE_COLUMN`]).
+//!   "no deeper than about 0.2 bar") and column, Jupiter's reddest ([`CHROMOPHORE_COLUMN`]). From
+//!   generator version 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold) it takes the disc's
+//!   typical column instead ([`CHROMOPHORE_DISC_COLUMN`]), the one a whole-disc albedo reads.
+//! - **The ammonia cloud's haze** (P14.T24.h.b part 6, held at 27): small NH₃-ice particles from
+//!   a cold giant's ammonia cloud to its tropopause, of Braude et al.'s 1 µm "cloud radius", whose
+//!   τ(550) is fitted on Jupiter's measured Bond albedo ([`AMMONIA_HAZE_OPTICAL_DEPTH`]). It is the
+//!   NH₃ deck's second mode, not a haze of its own material, and lies where the chromophore does.
 //! - **Thermal dissociation** (V. Parmentier et al., "From thermal dissociation to condensation in
 //!   the atmospheres of ultra hot Jupiters: WASP-121b in context", A&A 617, A110, 2018,
 //!   arXiv:1805.00096v2; J. D. Lothringer, T. Barman and T. Koskinen, "Extremely irradiated hot
@@ -90,6 +98,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::math;
+use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::substance::{CondensedPhase, Element, SizeDistribution, SubstanceId, by_key};
 use crate::units::{
     Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Micrometres, Pascals,
@@ -418,6 +427,8 @@ pub enum HazeRule {
     IceGiant,
     /// [`chromophore`]: a cold giant's red layer.
     Chromophore,
+    /// [`ammonia_haze`]: the NH₃-ice haze above a cold giant's ammonia cloud.
+    Ammonia,
 }
 
 /// A haze's vertical extent.
@@ -475,7 +486,7 @@ impl Haze {
         self.rule
     }
 
-    /// Its material, a registry row: `S8`, `soot`, `ice_giant_haze` or `chromophore`.
+    /// Its material, a registry row: `S8`, `soot`, `ice_giant_haze`, `chromophore` or `NH3`.
     #[must_use]
     pub const fn material(&self) -> SubstanceId {
         self.material
@@ -844,6 +855,21 @@ pub const CHROMOPHORE_WIDTH: f64 = 0.25;
 /// disc-typical alternative.
 pub const CHROMOPHORE_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(6.3e-4);
 
+/// The chromophore's column from generator version 27 (P14.T24.h.b part 6), kg m⁻²: 24 µg cm⁻²,
+/// the middle of Sromovsky et al.'s (2017, Icarus 291, 232) 18–30 µg cm⁻² for most of Jupiter's
+/// features, the column a whole-disc albedo reads where [`CHROMOPHORE_COLUMN`] is its reddest
+/// spot's.
+pub const CHROMOPHORE_DISC_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(2.4e-4);
+
+/// The chromophore's column under the rules in force: [`CHROMOPHORE_COLUMN`] to 26 and
+/// [`CHROMOPHORE_DISC_COLUMN`] from P14.T24.h.b's `ENVELOPE_BOND_VERSION`, whose hold it shares.
+fn chromophore_column() -> KilogramsPerSquareMetre {
+    match EnvelopeBondRules::in_force() {
+        EnvelopeBondRules::ClassTable => CHROMOPHORE_COLUMN,
+        EnvelopeBondRules::Own => CHROMOPHORE_DISC_COLUMN,
+    }
+}
+
 /// The chromophore's particles: Braude et al.'s selected `r_c` = 0.05 µm, a gamma distribution of
 /// "fixed variance of 0.05" (their §4.1; their Table 2 prints 0.1).
 pub const CHROMOPHORE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
@@ -889,8 +915,85 @@ pub fn chromophore(ammonia_layer: Pascals) -> Result<Haze, EvaluateRuleError> {
             peak,
             width: CHROMOPHORE_WIDTH,
         },
-        amount: HazeAmount::ColumnMass(CHROMOPHORE_COLUMN),
+        amount: HazeAmount::ColumnMass(chromophore_column()),
     })
+}
+
+/// The top of the ammonia cloud's haze, 0.1 bar: the tropopause Robinson and Catling (2014, Nature
+/// Geoscience 7, 12) find common to thick atmospheres, Jupiter's and Saturn's among them.
+pub const AMMONIA_HAZE_TOP: Pascals = Pascals::new(1.0e4);
+
+/// The ammonia cloud's haze's particles: Braude et al.'s (2020) "cloud radius" of 1 µm, whose real
+/// index, 1.42, is NH₃ ice's (the client's chromophore file reads both from the preprint's source,
+/// arXiv:1912.00918v1), a gamma distribution of their fixed variance 0.05.
+pub const AMMONIA_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(1.0), 0.05);
+
+/// The ammonia cloud's haze's τ(550) where its layer spans an e-fold of pressure or more: 10,
+/// fitted (P14.T24.h.b part 6) so that the Solar System table's Jupiter, its chromophore at
+/// [`CHROMOPHORE_DISC_COLUMN`], takes its own column's Bond albedo within its measured 0.503 ±
+/// 0.012 (Li et al. 2018, Nature Communications 9, 3709): 10 gives 0.500 and 10.5 0.503, and 10
+/// keeps κ₁'s refit on Jupiter (`GreyProfile::in_force`) mid-way in its third figure. It stands
+/// for the bright cloud the column reads above its floor, where the decks' large particles,
+/// forward-scattering, leave Jupiter dark.
+///
+/// Saturn under the same rule is its check: its own Bond albedo, 0.402, against Wang et al.'s
+/// (2024) 0.41 ± 0.02 and Hanel et al.'s (1983) 0.342 ± 0.030, and the haze's τ against the plan's
+/// ~10 for its tropospheric haze (Karkoschka and Tomasko 2005).
+pub const AMMONIA_HAZE_OPTICAL_DEPTH: f64 = 10.0;
+
+/// The haze above a cold giant's ammonia cloud, whose base (P14.T52.c's NH₃ deck's) lies at
+/// `ammonia_layer` (P14.T24.h.b part 6, held at 27): NH₃-ice particles ([`AMMONIA_HAZE_PARTICLES`])
+/// well mixed from the layer to [`AMMONIA_HAZE_TOP`], of τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH`],
+/// tapered linearly in ln p where the layer spans less than an e-fold of pressure (the builder's
+/// choice, so that the haze thins as the cloud nears the tropopause), or `None` where the layer is no
+/// deeper than the top.
+///
+/// It is the NH₃ deck's own second mode: a haze's mode names its material as its deck, and NH₃
+/// condenses as the deck it lies above, so the record and the wire count it with that deck.
+///
+/// # Errors
+///
+/// [`EvaluateRuleError::Pressure`] unless `ammonia_layer` is finite and positive.
+///
+/// # Examples
+///
+/// Jupiter's ammonia cloud near 0.7 bar carries the whole haze:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::photochem::{HazeAmount, ammonia_haze};
+/// use hyperion_sim::units::Pascals;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let haze = ammonia_haze(Pascals::new(7e4))?.ok_or("a haze")?;
+/// assert!(matches!(
+///     haze.amount(),
+///     HazeAmount::OpticalDepth { optical_depth, .. } if (optical_depth - 10.0).abs() < 1e-12
+/// ));
+/// # Ok(())
+/// # }
+/// ```
+pub fn ammonia_haze(ammonia_layer: Pascals) -> Result<Option<Haze>, EvaluateRuleError> {
+    let base = check_pressure(ammonia_layer)?;
+    let span = math::ln(base / AMMONIA_HAZE_TOP.value());
+    if span <= 0.0 {
+        return Ok(None);
+    }
+    let share = if span >= 1.0 { 1.0 } else { span };
+    let (radius, variance) = AMMONIA_HAZE_PARTICLES;
+    Ok(Some(Haze {
+        rule: HazeRule::Ammonia,
+        material: row("NH3"),
+        size: gamma(radius, variance),
+        profile: HazeProfile::Layer {
+            base: ammonia_layer,
+            top: AMMONIA_HAZE_TOP,
+            exponent: 0.0,
+        },
+        amount: HazeAmount::OpticalDepth {
+            optical_depth: AMMONIA_HAZE_OPTICAL_DEPTH * share,
+            wavelength: Micrometres::new(0.55),
+        },
+    }))
 }
 
 /// The temperatures and pressures Parmentier et al.'s (2018) fit is stated for: "Valid for a

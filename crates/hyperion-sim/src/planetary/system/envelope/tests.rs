@@ -2344,3 +2344,78 @@ fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo()
     let p = a.geometric_albedo();
     assert!(p.b > 0.0 && p.v > 0.0 && p.r > 0.0, "{p:?}");
 }
+
+/// P14.T24.h.b part 6: under every 27 hold the table's Jupiter and Saturn carry their ammonia
+/// cloud's haze as the NH₃ deck's second mode, NH₃ ice of 1 µm well mixed from the deck's base to
+/// 0.1 bar at τ(550) 10, after the decks' modes and before the hazes', counted in the deck's τ and
+/// not in the hazes'; their chromophore takes the disc's typical column. Uranus and Neptune, a CH₄
+/// deck above any NH₃, carry no such haze, and at 26 no giant does.
+#[test]
+fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
+    use crate::planetary::chem::photochem::{CHROMOPHORE_COLUMN, CHROMOPHORE_DISC_COLUMN};
+    use crate::planetary::hooks::EnvelopeAtmosphere;
+    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+    use crate::units::KilogramsPerSquareMetre;
+    let ammonia = by_key("NH3").expect("a row");
+    let chromophore = by_key("chromophore").expect("a row");
+    let haze = |atmosphere: &EnvelopeAtmosphere| -> Vec<usize> {
+        let modes = atmosphere.modes();
+        (0..modes.len())
+            .filter(|&k| modes[k].material() == ammonia && modes[k].profile().exponent() <= 0.0)
+            .collect()
+    };
+    for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
+        let (_, held) = with_every_26_hold(|| table_envelope(name));
+        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let (held, own) = (held.atmosphere(), own.atmosphere());
+        assert!(haze(held).is_empty(), "{name} at 26");
+        let column = |atmosphere: &EnvelopeAtmosphere| {
+            atmosphere
+                .modes()
+                .iter()
+                .find(|m| m.material() == chromophore)
+                .and_then(AerosolMode::column_mass)
+                .map(KilogramsPerSquareMetre::value)
+        };
+        if matches!(name, "Uranus" | "Neptune") {
+            assert!(haze(own).is_empty(), "{name} at 27");
+            assert_eq!(column(own), None, "{name}");
+            continue;
+        }
+        assert_same_bits(column(held).expect("a column"), CHROMOPHORE_COLUMN.value());
+        assert_same_bits(
+            column(own).expect("a column"),
+            CHROMOPHORE_DISC_COLUMN.value(),
+        );
+        let found = haze(own);
+        assert_eq!(found.len(), 1, "{name}: {found:?}");
+        let k = found[0];
+        let modes = own.modes();
+        let mode = &modes[k];
+        let deck = own
+            .decks()
+            .iter()
+            .find(|d| d.condensate() == ammonia)
+            .expect("an NH₃ deck");
+        assert_eq!(mode.deck(), ammonia);
+        assert_same_bits(mode.profile().base().value(), deck.base().value());
+        assert_same_bits(mode.profile().top().value(), 1.0e4);
+        let tau = mode.optical_depth().expect("a τ").value();
+        assert!((tau - 10.0).abs() < 1e-9, "{name}: {tau}");
+        let names_a_deck = |m: &AerosolMode| own.decks().iter().any(|d| d.condensate() == m.deck());
+        assert!(modes[..k].iter().all(names_a_deck), "{name}");
+        assert!(!modes[k + 1..].iter().any(names_a_deck), "{name}");
+        let hazes: f64 = modes[k + 1..]
+            .iter()
+            .filter_map(|m| m.optical_depth().ok())
+            .map(|d| d.value())
+            .sum();
+        assert!((own.haze_optical_depth() - hazes).abs() < 1e-12, "{name}");
+        let deck_tau = own.deck_optical_depth(ammonia).expect("a τ");
+        assert!(deck_tau > tau, "{name}: {deck_tau}");
+        eprintln!(
+            "{name} at 27: NH₃ deck τ {deck_tau:.3} with its haze's {tau:.3}, the hazes' {:.3}",
+            own.haze_optical_depth()
+        );
+    }
+}

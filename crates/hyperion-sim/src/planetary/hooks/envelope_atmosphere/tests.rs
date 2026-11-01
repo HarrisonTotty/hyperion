@@ -21,7 +21,8 @@ use crate::planetary::hooks::aerosols::{
 };
 use crate::planetary::hooks::structure::envelope::{
     EnvelopeProfile, EnvelopeProfileInputs, GreyProfile, MEAN_REDISTRIBUTION, OPACITY_RATIO,
-    OPTICAL_DEPTH_EXPONENT, THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG, irradiation_temperature,
+    OPTICAL_DEPTH_EXPONENT, THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
+    THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG, irradiation_temperature,
 };
 use crate::substance::aloft::laws_aloft;
 use crate::substance::{Element, SubstanceId, by_key};
@@ -268,12 +269,11 @@ fn an_input_out_of_range_is_refused_by_its_own_variant() {
     ));
 }
 
-/// κ₁ is fitted through this module on the table's Jupiter, its hydrogen and helium (P14.T50.b's He
-/// ÷ H₂), its record's `T_int` and `T_eq`, to the Galileo probe's 166.1 K at 1 bar (Seiff et al.
-/// 1998): the fit lies within decision-p14-t24d-profile's 2.7–3.0 × 10⁻³ m² kg⁻¹ (its own check
-/// 2.866 × 10⁻³), and [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] is it to three figures.
-#[test]
-fn the_thermal_opacity_is_fitted_on_jupiter() {
+/// κ₁ fitted through this module on the table's Jupiter as the rules in force derive it, its
+/// hydrogen and helium (P14.T50.b's He ÷ H₂), its record's `T_int` and `T_eq`: the κ₁ whose
+/// profile puts it at the Galileo probe's 166.1 K at 1 bar (Seiff et al. 1998), by 40 bisections
+/// in ln κ₁ over 10⁻³–10⁻² m² kg⁻¹.
+fn kappa_fitted_on_jupiter() -> f64 {
     let one_bar = |kappa: f64| {
         let grey = GreyProfile::new(
             kappa,
@@ -294,21 +294,34 @@ fn the_thermal_opacity_is_fitted_on_jupiter() {
             high = mid;
         }
     }
-    let fit = math::exp(f64::midpoint(low, high));
+    math::exp(f64::midpoint(low, high))
+}
+
+/// The fit [`kappa_fitted_on_jupiter`] lies within decision-p14-t24d-profile's 2.7–3.0 × 10⁻³ m²
+/// kg⁻¹ and `adopted` is it to three figures.
+fn assert_kappa_is_its_fit(adopted: f64) {
+    let fit = kappa_fitted_on_jupiter();
     assert!((2.7e-3..3.0e-3).contains(&fit), "κ₁ fits at {fit}");
     let rounded = (fit * 1e5).round() / 1e5;
     assert!(
-        (THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG - rounded).abs() < 1e-12,
-        "κ₁ fits at {fit:.5e}, against the adopted {THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG:e}"
+        (adopted - rounded).abs() < 1e-12,
+        "κ₁ fits at {fit:.5e}, against the adopted {adopted:e}"
     );
 }
 
-/// The table's Jupiter on the adopted parameters matches the probe: 166.1 K at 1 bar to 0.5 K, its
-/// 22 bar within 2 K of 427.7 K (decision-p14-t24d-profile: 427.0 K), 0.1 bar at 100–120 K (110.2
-/// K) and its join at 0.5–1.5 bar (0.902 bar).
+/// κ₁ is fitted through this module on the table's Jupiter to the Galileo probe's 166.1 K at 1
+/// bar: the fit lies within decision-p14-t24d-profile's 2.7–3.0 × 10⁻³ m² kg⁻¹ (its own check
+/// 2.866 × 10⁻³), and [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] is it to three figures.
 #[test]
-fn the_table_s_jupiter_follows_the_galileo_probe() {
-    let jupiter = table_profile("Jupiter", GreyProfile::ADOPTED);
+fn the_thermal_opacity_is_fitted_on_jupiter() {
+    assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
+}
+
+/// The table's Jupiter on the grey parameters `grey` matches the probe: 166.1 K at 1 bar to 0.5 K,
+/// its 22 bar within 2 K of 427.7 K (decision-p14-t24d-profile: 427.0 K), 0.1 bar at 100–120 K
+/// (110.2 K) and its join at 0.5–1.5 bar (0.902 bar).
+fn assert_jupiter_follows_the_probe(grey: GreyProfile) {
+    let jupiter = table_profile("Jupiter", grey);
     let (one, deep, high) = (
         at_bar(&jupiter, 1.0),
         at_bar(&jupiter, 22.0),
@@ -319,6 +332,24 @@ fn the_table_s_jupiter_follows_the_galileo_probe() {
     assert!((deep - 427.7).abs() < 2.0, "T(22 bar) {deep} K");
     assert!((100.0..120.0).contains(&high), "T(0.1 bar) {high} K");
     assert!((0.5..1.5).contains(&join), "the join at {join} bar");
+}
+
+/// The table's Jupiter on the adopted parameters matches the probe.
+#[test]
+fn the_table_s_jupiter_follows_the_galileo_probe() {
+    assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
+}
+
+/// Under every 27 hold (P14.T24.h.b part 6) κ₁ is refitted on the table's Jupiter at its own
+/// column's Bond albedo, [`THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG`] the fit to three
+/// figures, and the table's Jupiter on the parameters in force follows the probe as at 26.
+#[test]
+fn under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG);
+        assert_jupiter_follows_the_probe(GreyProfile::in_force());
+    });
 }
 
 /// The cold giants run warm at 1 bar on the grey profile, recorded (decision-p14-t24d-profile §1.5:

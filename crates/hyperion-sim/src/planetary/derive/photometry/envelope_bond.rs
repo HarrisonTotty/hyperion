@@ -3,6 +3,12 @@
 //! 10, in place of T51.b's class table ([`giant_bond`](super::area_mix::giant_bond)), from generator
 //! version 27 ([`ENVELOPE_BOND_VERSION`]), on the snapshot path ([`gas_envelope_bond`]).
 //!
+//! The same hold carries part 6, the cold giants' clouds the albedo reads, on the record and in
+//! the closed form alike: the chromophore at the disc's typical column
+//! (`photochem::CHROMOPHORE_DISC_COLUMN`), the haze above a Jupiter-like ammonia cloud
+//! (`photochem::ammonia_haze`), whose τ(550) is fitted on Jupiter's measured Bond albedo, and κ₁
+//! refitted to the Galileo probe at that albedo (`GreyProfile::in_force`).
+//!
 //! # The column
 //!
 //! The snapshot path cannot derive an envelope: P14.T52.d's chain costs 20–27 ms a giant, 13–22 ms
@@ -78,19 +84,21 @@ mod tests;
 /// The generator version from which a gas envelope's Bond albedo is its own column's (P14.T24.h.b
 /// part 5): 27, the planetary train after 26's.
 ///
-/// It is this part's one hold. Below it [`EnvelopeBondRules::in_force`] is
-/// [`EnvelopeBondRules::ClassTable`]: every gas envelope takes T51.b's table, as to 26, bit for
-/// bit. 27's bump deletes this hold, [`EnvelopeBondRules`] with its `ClassTable` arm, the guards
-/// that read it, the tests' switch and its tripwire
+/// It is parts 5 and 6's one hold. Below it [`EnvelopeBondRules::in_force`] is
+/// [`EnvelopeBondRules::ClassTable`]: every gas envelope takes T51.b's table, the chromophore the
+/// Great Red Spot's column, no ammonia cloud a haze and κ₁ its fit at the table's albedo, as to 26,
+/// bit for bit. 27's bump deletes this hold, [`EnvelopeBondRules`] with its `ClassTable` arm, the
+/// guards that read it (here, in `photochem`'s chromophore column, P14.T52.d's photochemistry, the
+/// closed form's hazes and `GreyProfile::in_force`), the tests' switch and its tripwire
 /// (`the_envelope_bond_is_held_only_until_the_27_bump`).
 pub(crate) const ENVELOPE_BOND_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Where a gas envelope's Bond albedo comes from (its hold, [`ENVELOPE_BOND_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum EnvelopeBondRules {
-    /// Version 26's and before: T51.b's class table.
+    /// Version 26's and before: T51.b's class table (and the clouds and κ₁ as they were).
     ClassTable,
-    /// Version 27's: its own column's ([`column::snapshot_bond`]).
+    /// Version 27's: its own column's ([`column::snapshot_bond`]), with part 6's clouds and κ₁.
     Own,
 }
 

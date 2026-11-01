@@ -261,6 +261,66 @@ fn the_chromophore_lies_no_deeper_than_0_2_bar() {
     }
 }
 
+/// From 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold) the chromophore takes the disc's
+/// typical column, 24 µg cm⁻² (Sromovsky et al. 2017's 18–30), at the same depth and width.
+#[test]
+fn from_27_the_chromophore_takes_the_disc_s_column() {
+    use crate::planetary::derive::photometry::envelope_bond::{
+        EnvelopeBondRules, with_envelope_bond,
+    };
+    let layer = Pascals::new(0.7 * PASCALS_PER_BAR);
+    let held = chromophore(layer).expect("a haze");
+    let own = with_envelope_bond(EnvelopeBondRules::Own, || chromophore(layer)).expect("a haze");
+    assert_eq!(held.amount(), HazeAmount::ColumnMass(CHROMOPHORE_COLUMN));
+    assert_eq!(
+        own.amount(),
+        HazeAmount::ColumnMass(CHROMOPHORE_DISC_COLUMN)
+    );
+    assert_eq!(held.profile(), own.profile());
+    // 24 µg cm⁻² is 24 × 10⁻⁹ kg in 10⁻⁴ m².
+    assert!((CHROMOPHORE_DISC_COLUMN.value() - 24e-9 / 1e-4).abs() < 1e-18);
+}
+
+/// The ammonia cloud's haze (P14.T24.h.b part 6): NH₃ ice of Braude et al.'s 1 µm, well mixed from
+/// the cloud's base to the 0.1-bar tropopause, of τ(550) 10 where the layer spans an e-fold of
+/// pressure or more, tapered linearly in ln p below that, and none from 0.1 bar up.
+#[test]
+fn the_ammonia_haze_lies_above_the_ammonia_cloud() {
+    for bar in [0.28, 0.7, 1.3, 3.0] {
+        let layer = Pascals::new(bar * PASCALS_PER_BAR);
+        let haze = ammonia_haze(layer).expect("in range").expect("a haze");
+        assert_eq!(haze.rule(), HazeRule::Ammonia);
+        assert_eq!(haze.material(), by_key("NH3").expect("a row"));
+        assert_eq!(
+            haze.profile(),
+            HazeProfile::Layer {
+                base: layer,
+                top: Pascals::new(1.0e4),
+                exponent: 0.0
+            }
+        );
+        assert_eq!(
+            haze.amount(),
+            HazeAmount::OpticalDepth {
+                optical_depth: 10.0,
+                wavelength: Micrometres::new(0.55)
+            }
+        );
+        assert!((haze.size().effective_radius().value() - 1e-6).abs() < 1e-18);
+    }
+    let half = ammonia_haze(Pascals::new(1.0e4 * math::exp(0.5)))
+        .expect("in range")
+        .expect("a haze");
+    match half.amount() {
+        HazeAmount::OpticalDepth { optical_depth, .. } => {
+            assert!((optical_depth - 5.0).abs() < 1e-12, "{optical_depth}");
+        }
+        HazeAmount::ColumnMass(_) => panic!("an optical depth"),
+    }
+    assert_eq!(ammonia_haze(Pascals::new(1.0e4)), Ok(None));
+    assert_eq!(ammonia_haze(Pascals::new(5.0e3)), Ok(None));
+}
+
 /// A value as printed, and half a unit of its last printed digit: "2.8e-3" is 2.8 × 10⁻³ ± 5 ×
 /// 10⁻⁵.
 fn printed(text: &str) -> (f64, f64) {
@@ -465,6 +525,15 @@ fn each_rule_is_continuous_in_its_inputs() {
         HazeProfile::Gaussian { .. } => panic!("a layer"),
     };
     scan("the ice giants' haze's base", &base, 4.0, 5.5, 0.001);
+    let ammonia = |dex: f64| match ammonia_haze(Pascals::new(math::exp10(dex)))
+        .expect("in range")
+        .map(|haze| haze.amount())
+    {
+        Some(HazeAmount::OpticalDepth { optical_depth, .. }) => optical_depth,
+        Some(HazeAmount::ColumnMass(_)) => panic!("an optical depth"),
+        None => 0.0,
+    };
+    scan("the ammonia cloud's haze", &ammonia, 3.5, 5.5, 0.001);
     for molecule in Dissociating::ALL {
         let at = |t: f64| {
             molecule
@@ -538,6 +607,10 @@ fn each_refusal_names_its_cause() {
     assert_eq!(
         chromophore(Pascals::new(0.0)),
         Err(EvaluateRuleError::Pressure(Pascals::new(0.0)))
+    );
+    assert_eq!(
+        ammonia_haze(Pascals::new(-1.0)),
+        Err(EvaluateRuleError::Pressure(Pascals::new(-1.0)))
     );
     assert_eq!(
         ice_giant_haze(Pascals::new(f64::NAN)).map_err(|e| e.to_string()),

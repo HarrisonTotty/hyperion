@@ -228,7 +228,10 @@
 //!   and **the chromophore** ([`chromophore`], Braude et al. 2020) at the NH₃ deck's, on a
 //!   Jupiter-like ammonia cloud alone: an NH₃ deck with no CH₄ deck above it (stated; Braude et al.
 //!   retrieve it on Jupiter alone). Each appears with its deck at full strength, a state change at
-//!   the deck's onset, as P14.T52.b's record leaves it (no taper: none is sourced).
+//!   the deck's onset, as P14.T52.b's record leaves it (no taper: none is sourced). From 27 the
+//!   chromophore takes the disc's typical column, and the same cloud carries **its haze**
+//!   ([`ammonia_haze`], P14.T24.h.b part 6): small NH₃-ice particles to the tropopause, the NH₃
+//!   deck's second mode, which leads the hazes' modes and is not counted in their τ.
 //!
 //! Each haze is a mode of its own material ([`AerosolMode`], its deck its material, the whole sky
 //! covered), its sizes its rule's (already volume-to-area radii), its τ(550) P14.T49.e's mass
@@ -239,7 +242,8 @@
 //! Gaussian in ln p is a well-mixed slab between its 1/e points, `p_peak` e^±w. The ice giants' haze's
 //! optical depth, 0.035 at 0.8 µm, is taken as its τ(550): P14.T49.e's table is 550 nm's alone, and
 //! a small absorbing haze is thicker in the blue, so this is a lower bound.
-//! [`EnvelopeAtmosphere::haze_optical_depth`] is the hazes' τ(550) summed over those modelled.
+//! [`EnvelopeAtmosphere::haze_optical_depth`] is the hazes' τ(550) summed over those modelled, the
+//! modes that name no deck.
 //!
 //! ## What is not modelled
 //!
@@ -302,12 +306,13 @@ use crate::planetary::chem::condense::{
 use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::equilibrium::{GasEquilibrium, Network, SolveEquilibriumError};
 use crate::planetary::chem::photochem::{
-    EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, chromophore, ice_giant_haze,
-    soot, sulphur_dioxide, sulphur_haze,
+    EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, ammonia_haze, chromophore,
+    ice_giant_haze, soot, sulphur_dioxide, sulphur_haze,
 };
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
 };
+use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::planetary::derive::radius::giant_share;
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, BuildAbsorberError, CLOUD_EDDY_DIFFUSION, DECK_WIDTH,
@@ -1259,7 +1264,11 @@ impl EnvelopeAtmosphere {
         let (hazes, sulphur_dioxide) =
             hazes(&profile, &upper_gas, upper_molar_mass_g_per_mol, &decks)?;
         let mut haze_optical_depth = 0.0;
-        for haze in &hazes {
+        // The ammonia cloud's haze (from 27) names its deck, so it is the deck's, not a haze's.
+        for haze in hazes
+            .iter()
+            .filter(|haze| !decks.iter().any(|deck| deck.condensate() == haze.deck()))
+        {
             // A haze whose optics are not modelled (none of the rules' materials, today) carries its
             // reason on its mode rather than a τ; it adds nothing here, as no number is known.
             if let Ok(depth) = haze.optical_depth() {
@@ -1792,12 +1801,20 @@ fn photochemistry(
     }
     // The chromophore on a Jupiter-like ammonia cloud alone, no methane deck above it: Braude et al.
     // 2020 retrieve it on Jupiter.
-    if let Some(ammonia) = deck("NH3")
-        && methane.is_none_or(|m| m.base().value() >= ammonia.base().value())
-    {
+    let cloud = deck("NH3")
+        .filter(|ammonia| methane.is_none_or(|m| m.base().value() >= ammonia.base().value()));
+    if let Some(ammonia) = cloud {
         hazes.push((chromophore(ammonia.base())?, 1.0));
     }
-    let mut modes = Vec::with_capacity(hazes.len());
+    let mut modes = Vec::with_capacity(hazes.len() + 1);
+    // From 27 the same cloud carries its haze (P14.T24.h.b part 6), the NH₃ deck's second mode, so
+    // it leads the hazes: a deck's modes come before theirs.
+    if let Some(ammonia) = cloud
+        && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
+        && let Some(haze) = ammonia_haze(ammonia.base())?
+    {
+        modes.push(haze_mode(&haze, 1.0, profile)?);
+    }
     for (haze, weight) in &hazes {
         modes.push(haze_mode(haze, *weight, profile)?);
     }

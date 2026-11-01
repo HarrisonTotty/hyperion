@@ -35,7 +35,8 @@
 //!   crossing is unique and the join moves continuously with its inputs.
 //! - **f = ¼** ([`MEAN_REDISTRIBUTION`]), the whole planet's mean.
 //! - **κ₁** ([`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`]), fitted through this module on the Solar System
-//!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule.
+//!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule;
+//!   from 27 refitted at Jupiter's own Bond albedo (`GreyProfile::in_force`, P14.T24.h.b part 6).
 //!
 //! `T_irr` is Guillot's T* (R* ÷ D)^½ (his Eq. 1, with `T_eq`⁴ = `T_irr`⁴ ÷ 4 for no albedo, Eq.
 //! 2), here of the starlight absorbed: `T_irr`⁴ = 4 `T_eq`⁴ ([`irradiation_temperature`]), `T_eq`
@@ -111,6 +112,7 @@ use super::{
     is_positive, segment_count,
 };
 use crate::math;
+use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::substance::{SubstanceId, mixture_entropy_over_r, mixture_heat_capacity_over_r_at};
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals};
 
@@ -143,6 +145,12 @@ pub const OPACITY_RATIO: f64 = 0.4;
 /// (decision-p14-t24d-profile §1.3, its check 2.866 × 10⁻³; Robinson and Catling 2012 give
 /// 2.46 × 10⁻³ and their 2014 Table 1 3.12 × 10⁻³).
 pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.87e-3;
+
+/// κ₁ from generator version 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold), m² kg⁻¹:
+/// fitted as [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] is, to the Galileo probe's 166.1 K at 1 bar,
+/// on the table's Jupiter at its own column's Bond albedo (0.500, its measured 0.503 ± 0.012) in
+/// place of T51.b's class table's 0.480, at 2.9182 × 10⁻³.
+pub const THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG: f64 = 2.92e-3;
 
 /// The deepest level of the published adiabat, `p_bottom`: 100 bar (10⁷ Pa; science-r08-gases-2.md
 /// §1.7.3). Deeper, [`EnvelopeProfile::temperature_at`] takes the last segment's exponent.
@@ -225,6 +233,20 @@ impl GreyProfile {
         opacity_ratio: OPACITY_RATIO,
         redistribution: MEAN_REDISTRIBUTION,
     };
+
+    /// Every envelope's parameters under the rules in force: [`Self::ADOPTED`] to 26, and from
+    /// P14.T24.h.b's `ENVELOPE_BOND_VERSION` its κ₁ refitted at the giants' own Bond albedos
+    /// ([`THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG`]), whose hold it shares.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        match EnvelopeBondRules::in_force() {
+            EnvelopeBondRules::ClassTable => Self::ADOPTED,
+            EnvelopeBondRules::Own => Self {
+                thermal_opacity_m2_per_kg: THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG,
+                ..Self::ADOPTED
+            },
+        }
+    }
 
     /// The parameters: `thermal_opacity_m2_per_kg` κ₁, m² kg⁻¹, at [`REFERENCE_PRESSURE`];
     /// `optical_depth_exponent` n, τ ∝ pⁿ, from 1 (a constant opacity, which never joins) to 2

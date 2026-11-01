@@ -169,13 +169,19 @@ pub(crate) fn hot_jupiter_inputs() -> AtmosphereInputs {
 /// Saturn's 0.342 ± 0.030 (Hanel et al. 1983, Icarus 53, 262), Uranus's 0.300 ± 0.049 (Pearl et
 /// al. 1990, Icarus 84, 12) and Neptune's 0.290 ± 0.067 (Pearl and Conrath 1991, JGR 96, 18921),
 /// each from memory as plan 14 cites it, with the albedo the closed form gives each under every
-/// 27 hold, pinned.
+/// 27 hold, pinned: part 6's chromophore and ammonia haze bring Jupiter within its measurement
+/// (from part 5's 0.2859) and Saturn to 0.4017 (from 0.1899), within Wang et al.'s (2024) 0.41 ±
+/// 0.02; the ice giants' miss is their CH₄ deck's (findings).
 const GIANTS: [(&str, (f64, f64), f64); 4] = [
-    ("Jupiter", (0.503, 0.012), 0.2859),
-    ("Saturn", (0.342, 0.030), 0.1899),
-    ("Uranus", (0.300, 0.049), 0.4827),
-    ("Neptune", (0.290, 0.067), 0.5250),
+    ("Jupiter", (0.503, 0.012), JUPITER),
+    ("Saturn", (0.342, 0.030), 0.4017),
+    ("Uranus", (0.300, 0.049), 0.4829),
+    ("Neptune", (0.290, 0.067), 0.5255),
 ];
+
+/// Jupiter's own Bond albedo under every 27 hold, pinned: 0.5003, the ammonia haze's fit
+/// (`photochem::AMMONIA_HAZE_OPTICAL_DEPTH`).
+const JUPITER: f64 = 0.5003;
 
 /// The hot fixture's own Bond albedo about a Sun, pinned: 0.1323, near HD 209458 b's dark dayside
 /// (its geometric albedo 0.038 ± 0.045 over 400–700 nm, Rowe et al. 2008, ApJ 689, 1345, and
@@ -189,8 +195,10 @@ fn the_envelope_bond_is_held_only_until_the_27_bump() {
     use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < ENVELOPE_BOND_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b part 5 on the record: delete `ENVELOPE_BOND_VERSION`, \
-         `EnvelopeBondRules` with its `ClassTable` arm and the guard in `gas_envelope_bond`, the \
+        "the 26 → 27 bump puts P14.T24.h.b parts 5 and 6 on the record: delete \
+         `ENVELOPE_BOND_VERSION`, `EnvelopeBondRules` with its `ClassTable` arm and the guards in \
+         `gas_envelope_bond`, `photochem`'s chromophore column, P14.T52.d's photochemistry, the \
+         closed form's hazes and `GreyProfile::in_force` (κ₁ then 2.92e-3 in `ADOPTED`), the \
          tests' `with_envelope_bond`, its switch in `with_every_27_hold`, the `ClassTable` arms \
          of these tests, and this test"
     );
@@ -329,7 +337,8 @@ const AVOGADRO_PER_MOL: f64 = MOLAR_GAS_CONSTANT / BOLTZMANN_CONSTANT;
 
 /// The table's giants under every 27 hold take their own columns' albedos, each pinned and stated
 /// against its measurement (a miss is a finding, the outbox's), and the hot fixture its own, near
-/// 0.1. Every one lies in (0, 1).
+/// 0.1. Every one lies in (0, 1); Jupiter's within its measured 0.503 ± 0.012 (Li et al. 2018),
+/// at an effective temperature in P14.T50.b's 123–128 K about its measured 125.57 K.
 #[test]
 fn the_giants_own_albedos_are_pinned_against_their_measurements() {
     use crate::planetary::derive::solar::{found, solar_system};
@@ -350,6 +359,10 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
         );
         assert!(0.0 < albedo && albedo < 1.0);
     }
+    let jupiter = found(&own, "Jupiter");
+    assert!((jupiter.albedo().value() - 0.503).abs() <= 0.012);
+    let t_eff = jupiter.effective_temperature().expect("a giant's").value();
+    assert!((123.0..=128.0).contains(&t_eff), "{t_eff} K");
     let hot = with_every_27_hold(|| column::snapshot_bond(&hot_jupiter_inputs(), &sun()))
         .expect("the fixture's column");
     eprintln!("the hot fixture: own Bond albedo {hot:.4}");
@@ -358,23 +371,23 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
 }
 
 /// The snapshot's closed form follows the record's own envelope read alike: on the table's four
-/// giants (at every 26 hold's state) and the hot fixture, each Bond albedo about a Sun within 0.04
-/// of the one the record's decks and hazes give ([`record_column`]); their differences are the
-/// closed form's departures, stated.
+/// giants and the hot fixture, both at every 27 hold's state (the record's ammonia haze and κ₁
+/// part 6's), each Bond albedo about a Sun within 0.04 of the one the record's decks and hazes give
+/// ([`record_column`]); their differences are the closed form's departures, stated.
 #[test]
 fn the_closed_form_follows_the_record_s_own_envelope() {
     use crate::planetary::derive::solar::{found, solar_system};
     use crate::planetary::system::envelope::tests::{fixture_hot_jupiter, table_envelope};
-    use crate::planetary::testing::{envelope_by_hand, with_every_26_hold, with_every_27_hold};
-    let table = with_every_26_hold(solar_system);
+    use crate::planetary::testing::{envelope_by_hand, with_every_27_hold};
+    let table = with_every_27_hold(solar_system);
     let mut cases = Vec::new();
     for (name, ..) in GIANTS {
         let inputs = giant_inputs(found(&table, name));
-        let (of, envelope) = with_every_26_hold(|| table_envelope(name));
+        let (of, envelope) = with_every_27_hold(|| table_envelope(name));
         let record = record_column(envelope.atmosphere(), of.gravity.value());
         cases.push((name, inputs, record));
     }
-    let hot = with_every_26_hold(|| envelope_by_hand(&fixture_hot_jupiter()).expect("an envelope"));
+    let hot = with_every_27_hold(|| envelope_by_hand(&fixture_hot_jupiter()).expect("an envelope"));
     cases.push((
         "the hot fixture",
         hot_jupiter_inputs(),

@@ -31,7 +31,8 @@
 //!   cut on a hot dayside as P14.T52.h cuts it.
 //! - **The hazes**: P14.T52.b's rules on that gas, as P14.T52.d reads them: the S₈ haze, soot
 //!   (by [`soot_weight`]), the ice giants' haze on a CH₄ deck and the chromophore on an NH₃ deck
-//!   with no CH₄ deck above it.
+//!   with no CH₄ deck above it, and that cloud's NH₃-ice haze ([`ammonia_haze`], part 6), as the
+//!   record draws them from 27.
 //! - **The absorbers**: each layer's CH₄, H₂O, Na and K, held above its deck's base (or 100 bar's,
 //!   for a trapped one) to its saturation there.
 
@@ -42,7 +43,7 @@ use crate::planetary::chem::condense::{
 };
 use crate::planetary::chem::envelope_abundances::{EnvelopeAbundances, EnvelopeInputs};
 use crate::planetary::chem::photochem::{
-    UpperAtmosphere, chromophore, ice_giant_haze, soot, sulphur_haze,
+    UpperAtmosphere, ammonia_haze, chromophore, ice_giant_haze, soot, sulphur_haze,
 };
 use crate::planetary::chem::quench::MixingColumn;
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
@@ -73,7 +74,8 @@ use crate::units::{
 };
 
 use super::{
-    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeColumn, assemble, column_bond, particle_table,
+    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeBondRules, EnvelopeColumn, assemble, column_bond,
+    particle_table,
 };
 
 /// The rows whose decks the closed form draws, in their condensation order on a solar gas
@@ -288,7 +290,7 @@ fn profile(
     gravity: MetresPerSecondSquared,
     mixture: &[(SubstanceId, f64)],
 ) -> Option<Profile> {
-    let grey = GreyProfile::ADOPTED;
+    let grey = GreyProfile::in_force();
     let irradiation = irradiation_temperature(equilibrium);
     let mut profile = Profile {
         grey,
@@ -703,7 +705,7 @@ fn profile_free_one_bar(
     equilibrium: Kelvin,
     gravity: MetresPerSecondSquared,
 ) -> f64 {
-    let grey = GreyProfile::ADOPTED;
+    let grey = GreyProfile::in_force();
     let tau = grey.optical_depth(Pascals::new(1.0e5), gravity);
     grey.temperature(tau, internal, irradiation_temperature(equilibrium))
         .value()
@@ -989,9 +991,16 @@ fn hazes(
     {
         hazes.push((haze, 1.0));
     }
-    if let Some(ammonia) = base(Species::Ammonia)
-        && methane.is_none_or(|m| m >= ammonia)
+    let cloud = base(Species::Ammonia).filter(|&ammonia| methane.is_none_or(|m| m >= ammonia));
+    if let Some(ammonia) = cloud
         && let Ok(haze) = chromophore(Pascals::new(ammonia))
+    {
+        hazes.push((haze, 1.0));
+    }
+    // The cloud's haze from 27 (part 6), the NH₃ deck's second mode on the record.
+    if let Some(ammonia) = cloud
+        && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
+        && let Ok(Some(haze)) = ammonia_haze(Pascals::new(ammonia))
     {
         hazes.push((haze, 1.0));
     }
