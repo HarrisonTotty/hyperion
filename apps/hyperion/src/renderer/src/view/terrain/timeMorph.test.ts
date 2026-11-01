@@ -295,7 +295,7 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     const [first, second] = CHILDREN;
     const cache = cacheWith([ROOT]);
     const resolver = new DrawSetResolver(cache);
-    // A refine moving the ground 40 px, and a rebake 1,000 px.
+    // A refine moving the ground 40 px, and a rebake 1,000 px, past the longest span.
     const morph = new TimeMorph(32, MORPH_IN_MS, { morphPx: () => 40, risePx: () => 0 });
     morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
     morph.footprintsAt(0);
@@ -317,7 +317,7 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
       morph.takeReleased(),
       footprints(morph, 1_000 + MORPH_MAX_MS),
       morph.takeReleased(),
-    ]).toEqual([25, [[patchKeyString(first), 0.5]], 0, [], [], [7]]);
+    ]).toEqual([37.5, [[patchKeyString(first), 0.5]], 0, [], [], [7]]);
   });
 
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {

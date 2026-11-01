@@ -12,10 +12,13 @@ import { PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { lawFor } from "../appearance/phase";
 import type { LitRegime } from "../bodies/regime";
-import { project } from "../camera/projection";
+import { project, type Viewport } from "../camera/projection";
+import type { Quaternion } from "../camera/pose";
+import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
+import { rotateToBodyFixed } from "../coords/rotation";
 import { relativeToCamera } from "../coords/relative";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { cameraSceneOf, type ViewBody } from "../scene/model";
+import { cameraSceneOf } from "../scene/model";
 import {
   TERRAIN_TEST_SCRIPT,
   TERRAIN_TEST_UNIVERSE,
@@ -55,7 +58,12 @@ import type { Selection, SelectionInput, ViewSelectionInput } from "./select";
 import { SELECTION_MARGIN } from "./selectionTolerance";
 import { TerrainSession, terrainPassViewOf, type TerrainViewReport } from "./session";
 import { decodeOctahedral } from "./shadingNormal";
-import { effectiveTauPx, morphRangeM, type TerrainViewFrameInput } from "./terrainPass";
+import {
+  effectiveTauPx,
+  morphRangeM,
+  type TerrainPassView,
+  type TerrainViewFrameInput,
+} from "./terrainPass";
 import { MORPH_IN_MS } from "./timeMorph";
 import { answerRequest, type HeightModule, WorkerFields } from "./workers/heightBake";
 import type { BakedPatch, HeightWorkerReply, HeightWorkerRequest } from "./workers/messages";
@@ -256,6 +264,25 @@ interface DrawnArea {
 interface Camera {
   readonly view: ViewSelectionInput;
   readonly bands: Float64Array;
+}
+
+/** A frame's camera as its draw has it, body-fixed: the per-frame layer's (R10.T16.i). */
+interface FrameCamera {
+  readonly positionM: Vec3;
+  readonly orientation: Quaternion;
+  readonly fovXRad: number;
+  readonly viewport: Viewport;
+}
+
+/** The body-fixed camera of a pass view's draw, as the pass's selection takes it. */
+function frameCameraOf(passView: TerrainPassView): FrameCamera {
+  const { rotation, cameraM, orientation, fovXRad, viewport } = passView.view;
+  return {
+    positionM: rotateToBodyFixed(rotation, cameraM),
+    orientation: multiply(conjugate(quaternionFromRows(rotation.rows)), orientation),
+    fovXRad,
+    viewport,
+  };
 }
 
 /** The drawn height of `held` at its vertex (x, y): own and morph mixed by CDLOD's k; 0 off survey. */
@@ -575,11 +602,11 @@ interface DrawnPlace {
 /** The drawn ground of a frame's instances seen from one camera: each vertex made once. */
 class DrawnSurfaces {
   readonly #figure: BodyFigure;
-  readonly #cam: Camera;
+  readonly #cam: FrameCamera;
   readonly #masks: SurveyMasks;
   readonly #made = new Map<DrawnInstance, Float64Array>();
 
-  constructor(figure: BodyFigure, cam: Camera, masks: SurveyMasks) {
+  constructor(figure: BodyFigure, cam: FrameCamera, masks: SurveyMasks) {
     this.#figure = figure;
     this.#cam = cam;
     this.#masks = masks;
@@ -611,7 +638,7 @@ class DrawnSurfaces {
         morph += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 1), u, v) : 0) - morph);
       }
       const p = surfacePoint(this.#figure, vertexDir(inst.area, x, y), own);
-      const d = norm(sub(vec3(p[0], p[1], p[2]), this.#cam.view.camera.positionM));
+      const d = norm(sub(vec3(p[0], p[1], p[2]), this.#cam.positionM));
       const span = inst.endM - inst.startM;
       const cdlod = span > 0 ? Math.min(1, Math.max(0, (d - inst.startM) / span)) : 0;
       const k = fadedMorph(inst.holds, inst.edgeFades, inst.cornerFades, inst.ownFade, x, y, cdlod);
@@ -712,16 +739,12 @@ function coverOf(
  * Whether ground `rel` from `cam`'s camera, whose datum's normal is `up`, falls in its viewport, in
  * front of it, and faces it: the camera above its tangent plane, as no ground past the horizon is.
  */
-function onScreen(cam: Camera, rel: Vec3, up: Vec3): boolean {
+function onScreen(cam: FrameCamera, rel: Vec3, up: Vec3): boolean {
   if (rel.x * up.x + rel.y * up.y + rel.z * up.z >= 0) {
     return false;
   }
-  const { widthPx, heightPx } = cam.view.viewport;
-  const at = project(
-    rel,
-    { orientation: cam.view.camera.orientation, fovXRad: cam.view.fovXRad },
-    cam.view.viewport,
-  );
+  const { widthPx, heightPx } = cam.viewport;
+  const at = project(rel, { orientation: cam.orientation, fovXRad: cam.fovXRad }, cam.viewport);
   return at.inFront && at.xPx >= 0 && at.xPx <= widthPx && at.yPx >= 0 && at.yPx <= heightPx;
 }
 
@@ -746,8 +769,8 @@ function frameLines(): number[] {
 function frameChangeOf(
   figure: BodyFigure,
   masks: SurveyMasks,
-  cam: Camera,
-  camBefore: Camera,
+  cam: FrameCamera,
+  camBefore: FrameCamera,
   before: ReadonlyMap<string, DrawnInstance>,
   now: ReadonlyMap<string, DrawnInstance>,
   tS: number,
@@ -756,7 +779,7 @@ function frameChangeOf(
   const surfaces = new DrawnSurfaces(figure, cam, masks);
   const ancestors = ancestorsOf(before);
   const lines = frameLines();
-  const pxPerRad = cam.view.viewport.widthPx / 2 / Math.tan(cam.view.fovXRad / 2);
+  const pxPerRad = cam.viewport.widthPx / 2 / Math.tan(cam.fovXRad / 2);
   let measured = 0;
   let movePx = 0;
   let normalDeg = 0;
@@ -782,7 +805,7 @@ function frameChangeOf(
         const datum = vec3(n[0], n[1], n[2]);
         const drawn = surfaces.at(inst, x, y, datum);
         const p = surfacePoint(figure, dir, drawn.h);
-        const rel = sub(vec3(p[0], p[1], p[2]), cam.view.camera.positionM);
+        const rel = sub(vec3(p[0], p[1], p[2]), cam.positionM);
         if (!onScreen(cam, rel, datum)) {
           continue;
         }
@@ -794,7 +817,7 @@ function frameChangeOf(
         } else {
           // Nothing drew this ground the frame before: the reference surface did, where seen.
           const q = surfacePoint(figure, dir, 0);
-          const back = sub(vec3(q[0], q[1], q[2]), camBefore.view.camera.positionM);
+          const back = sub(vec3(q[0], q[1], q[2]), camBefore.positionM);
           if (!onScreen(camBefore, back, datum)) {
             continue;
           }
@@ -863,16 +886,8 @@ function causeOf(inst: DrawnInstance, was: DrawnInstance): SeamPopCause {
   return was.held === inst.held ? "fade" : "rebake";
 }
 
-/** The primary view's frame of `viewReport` drawn at `tS`: its view, a sun overhead, no lights. */
-function frameInputOf(
-  viewReport: TerrainViewReport,
-  body: ViewBody,
-  tS: number,
-): TerrainViewFrameInput | null {
-  const passView = terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, body);
-  if (passView === null) {
-    return null;
-  }
+/** The primary view's frame of `passView` drawn at `tS`: its view, a sun overhead, no lights. */
+function frameInputOf(passView: TerrainPassView, tS: number): TerrainViewFrameInput {
   return {
     view: passView.view,
     sunDirectionBodyFixed: { x: 0, y: 0, z: 1 },
@@ -1016,6 +1031,8 @@ async function play(options: ProbeOptions): Promise<Played> {
   const pops: SeamPop[] = [];
   const masks = new SurveyMasks();
   let drawnBefore = new Map<string, DrawnInstance>();
+  // The camera the frame before drew from.
+  let drawnCamera: FrameCamera | null = null;
   const firstDemandS = new Map<string, number>();
   const rebaked: Array<{ readonly old: Held; readonly now: Held }> = [];
   let lastDrawn = new Map<string, DrawnArea>();
@@ -1128,7 +1145,6 @@ async function play(options: ProbeOptions): Promise<Played> {
       const viewReport = reportAt(tS);
       session.noteView(PRIMARY_VIEW_ID, viewReport);
       rebaked.length = 0;
-      const camBefore = latest.cam;
       session.step();
       watch();
       // The step's draw in the primary view, as the app draws it, and its change from the frame
@@ -1139,13 +1155,17 @@ async function play(options: ProbeOptions): Promise<Played> {
       engine.targetFrames.length = 0;
       engine.depthLayerRenders.length = 0;
       const seenBody = viewReport.scene.bodies.find((b) => b.id === body);
-      const input = seenBody === undefined ? null : frameInputOf(viewReport, seenBody, tS);
+      const passView =
+        seenBody === undefined ? null : terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, seenBody);
       const drawnNow =
-        input !== null && session.drawTerrain(PRIMARY_VIEW_ID, body, input) !== null
+        passView !== null &&
+        session.drawTerrain(PRIMARY_VIEW_ID, body, frameInputOf(passView, tS)) !== null
           ? instancesOf(engine, slots)
           : new Map<string, DrawnInstance>();
       const drawingPass = session.pass(body);
-      const camNow = latest.cam;
+      const camBefore = drawnCamera;
+      const camNow = passView === null ? null : frameCameraOf(passView);
+      drawnCamera = camNow;
       if (drawingPass !== null && camNow !== null && camBefore !== null && drawnBefore.size > 0) {
         const change = frameChangeOf(
           drawingPass.planet.figure,
