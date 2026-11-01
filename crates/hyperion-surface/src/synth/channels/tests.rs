@@ -452,6 +452,10 @@ fn every_segment_descends_to_its_parent_within_the_minimum_slope() {
     }
 }
 
+/// A tributary's profile is stream power on Hack's areas: its slope `k_s` A^−θ times one scale all
+/// along it, the scale that makes it accordant with its parent at its join (R09.T6.i), its bed's
+/// fall that slope, and its head Hack's length; its `k_s` its coarse cell's interpolated at its key
+/// point (R09.T6.i), so no longer the cell's own.
 #[test]
 fn a_tributary_s_profile_is_stream_power_with_hack_s_areas() {
     let field = earth();
@@ -464,14 +468,20 @@ fn a_tributary_s_profile_is_stream_power_with_hack_s_areas() {
                 continue;
             };
             let k_s = segment.steepness_m0_9().unwrap();
-            assert_same_bits(k_s, tributary_steepness_of(field.cell(c).unwrap()).unwrap());
+            assert!(k_s > 0.0, "{cell:?}: {k_s}");
             let length = segment.length().value();
-            for t in [0.1, 0.5, 0.9] {
+            let law_at = |t: f64| {
                 let area = segment.area_at(t).value();
                 assert_same_bits(area, hack_area(segment.main_stream_at(t)).value());
-                let law = k_s * math::powf(area, -LogSteepness::THETA);
+                k_s * math::powf(area, -LogSteepness::THETA)
+            };
+            let scale = segment.slope_at(0.5) / law_at(0.5);
+            for t in [0.1, 0.5, 0.9] {
                 let slope = segment.slope_at(t);
-                assert!((slope / law - 1.0).abs() < 1e-12, "{cell:?}: {slope} {law}");
+                assert!(
+                    (slope / (scale * law_at(t)) - 1.0).abs() < 1e-12,
+                    "{cell:?}: {slope} at {t}"
+                );
                 // The bed's fall per metre along the segment, by a central difference.
                 let dt = 1e-4;
                 let fall = (segment.bed_at(t - dt).value() - segment.bed_at(t + dt).value())
@@ -483,9 +493,11 @@ fn a_tributary_s_profile_is_stream_power_with_hack_s_areas() {
             }
             let head = head_length(field.header().radius(), cell.level());
             assert_same_bits(segment.main_stream_at(0.0).value(), head.value());
-            assert_same_bits(
-                segment.bed_from().value(),
-                segment.bed_to().value() + tributary_rise(k_s, head, segment.length()).value(),
+            let rise = segment.bed_from().value() - segment.bed_to().value();
+            let expected = scale * tributary_rise(k_s, head, segment.length()).value();
+            assert!(
+                (rise - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+                "{cell:?}: {rise} against {expected}"
             );
             checked += 1;
         }

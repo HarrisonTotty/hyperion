@@ -123,21 +123,16 @@ fn a_cell_under_water_carries_no_incision_at_any_level() {
 
 /// Part (b): every dry trunk's valley is the cell's held to a share of its height above its base
 /// level, its receiver's water, a playa's pit's ground or the sea (R09.T6.f, R09.T6.g), some of the
-/// trunks running into pits, and the groove and
-/// the synthesis's closed form read the one depth G: its trunk level is its own trunk's half, faded
-/// into water, and its donors' halves, each at its own groove's depth.
+/// trunks running into pits; from 26 it grades along its second chord to its receiver's valley,
+/// held so to its own base level (R09.T6.i), so that nowhere along it is it deeper than the deeper
+/// of the two. The grooves and the closed form that read it are R09.T6.i's own tests'.
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one sweep of the trunks, each checked against its hold, groove and closed form"
-)]
 fn no_trunk_s_valley_is_cut_below_its_base_level() {
     let field = earth();
     let header = field.header();
     let first = header.level().get();
     let channels = Channels::new(header, SEED);
     let body = channels.body();
-    let r = body.radius.value();
     let sea = header.sea_level();
     let mut network = channels.network(field);
     let trunks = spread(
@@ -146,8 +141,7 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
         }),
         1_500,
     );
-    let (mut checked, mut held, mut into_water, mut with_donors, mut into_pits) = (0, 0, 0, 0, 0);
-    let cap = groove_cap_m(r, first);
+    let (mut checked, mut held, mut into_water, mut into_pits) = (0, 0, 0, 0);
     for c in trunks {
         let record = field.cell(c).unwrap();
         let Some(trunk) = network.segment(c).unwrap() else {
@@ -171,7 +165,7 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
         let room = record.water_surface().value() - base;
         let from_the_cell = tributary_steepness_of(record)
             .map_or(0.0, |k| valley_depth(k, body.radius, first).value());
-        let valley = trunk.below_top(0.5).value();
+        let valley = trunk.below_top(0.0).value();
         assert_eq!(
             bits(valley),
             bits(num::min(
@@ -184,53 +178,14 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
             valley <= VALLEY_RELIEF_SHARE * num::max(room, 0.0),
             "{c:?}: {valley} m in {room} m"
         );
-        let g = trunk_depth_m(valley, trunk.bankfull_depth().value(), cap);
-        match Groove::of(&trunk, r) {
-            Some(groove) => assert_eq!(groove.depth, Depth::Constant(g), "{c:?}"),
-            None => assert!(g <= 0.0, "{c:?}"),
-        }
-        // The trunk level's halves: its own, then each donor's in the edges' order, each the
-        // depth its own groove cuts.
-        let fade = if receiver.is_under_water() {
-            INTO_WATER_FADE
-        } else {
-            UNFADED
-        };
-        let mut halves: Vec<TrunkHalf> = (g > 0.0)
-            .then_some(TrunkHalf {
-                depth_m: g,
-                end_m: g,
-                floor_m: 0.5 * trunk.bankfull_width().value(),
-                fade,
-            })
-            .into_iter()
-            .collect();
-        for edge in Edge::ALL {
-            let (n, back) = c.edge_neighbour_and_back(edge);
-            let donor = field.cell(n).unwrap();
-            if donor.is_under_water() || donor.flow.edge() != Some(back) {
-                continue;
-            }
-            let Some(segment) = network.segment(n).unwrap() else {
-                continue;
-            };
-            let depth = trunk_depth_m(
-                segment.below_top(0.5).value(),
-                segment.bankfull_depth().value(),
-                cap,
+        let end = trunk.below_top(1.0).value();
+        for t in [0.25, 0.5, 0.75] {
+            let depth = trunk.below_top(t).value();
+            assert!(
+                depth <= num::max(valley, end) && depth >= num::min(valley, end),
+                "{c:?}: {depth} m at {t} outside {valley}–{end} m"
             );
-            halves.push(TrunkHalf {
-                depth_m: depth,
-                end_m: depth,
-                floor_m: 0.5 * segment.bankfull_width().value(),
-                fade: UNFADED,
-            });
-            with_donors += 1;
         }
-        let (_, terms) = synthesised_terms(field, c).unwrap();
-        let wall = VALLEY_WALL_SHARE * mean_cell_width(r, first);
-        let expected = trunk_term(first, &halves, mean_cell_width(r, first), wall);
-        assert_eq!(terms.first(), Some(&expected), "{c:?}");
         held += usize::from(valley < from_the_cell);
         into_water += usize::from(receiver.is_under_water());
         into_pits += usize::from(into_pit);
@@ -238,8 +193,8 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
     }
     assert!(checked > 1_000, "{checked}");
     assert!(
-        held > 50 && into_water > 20 && with_donors > 100 && into_pits > 0,
-        "{held}, {into_water}, {with_donors}, {into_pits}"
+        held > 50 && into_water > 20 && into_pits > 0,
+        "{held}, {into_water}, {into_pits}"
     );
 }
 

@@ -236,11 +236,11 @@ pub(super) fn earth_cell() -> PatchKey {
     .unwrap()
 }
 
-/// The fixture's patch: (896, 675) of face +x at the Earth-like world's finest level, 19, in
+/// The fixture's patch: (926, 651) of face +x at the Earth-like world's finest level, 19, in
 /// [`earth_cell`], whose ground is soil, sand and a channel's sediment of the continental crust's
-/// granite.
+/// granite (from 26; to 25 (896, 675), whose channel R09.T6.i's bent trunks moved away).
 pub(super) fn earth_patch() -> PatchKey {
-    PatchKey::new(Face::PosX, 19, 896, 675).unwrap()
+    PatchKey::new(Face::PosX, 19, 926, 651).unwrap()
 }
 
 /// The Earth-like fixture: [`earth_cell`] surveyed at 50 m with its margin, in the fixture's blocks.
@@ -2356,6 +2356,36 @@ pub(super) fn surveyed_about(
     (fields, cells)
 }
 
+/// The worker's fields of `field` surveyed over the 3 × 3 coarse cells about `dir`'s, with their
+/// margin, so that a point on its cell's edge is surveyed with every cell the synthesis reads
+/// about it.
+fn surveyed_around(field: &CoarseField, dir: [f64; 3]) -> WorkerFields {
+    let level = field.header().level().get();
+    let home = PatchKey::containing(level, dir).unwrap();
+    let cells: BTreeSet<PatchKey> = (0..3)
+        .flat_map(|a| (0..3).map(move |b| (a, b)))
+        .map(|(a, b)| {
+            PatchKey::new(home.face(), level, home.i() + a - 1, home.j() + b - 1).unwrap()
+        })
+        .collect();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    let body = field.header().body();
+    let mut fields = WorkerFields::new();
+    fields
+        .init(body, &blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
+    for block in &blocks[1..] {
+        fields.chunk(body, block).unwrap();
+    }
+    fields
+}
+
 /// A drawn photometry's bits: its albedos, its law and its L(0).
 fn drawn_bits(d: DrawnPhotometry) -> ([u64; 3], PhaseLaw, u64) {
     (
@@ -2821,7 +2851,9 @@ fn earth_glacier() -> [f64; 3] {
 /// reading's elevation by the classifier's expression, `T_sea − Γ (h − sea level)`, bit for bit; the
 /// month is `month_at` the season's mean anomaly, month k − 1 just below edge k and month k at it;
 /// the friction is `interface_friction` at that temperature and depends on it; and with no season
-/// there is no temperature, so no friction, `PAD FRICTION —` with no `AT`.
+/// there is no temperature, so no friction, `PAD FRICTION —` with no `AT`. The survey is the 3 × 3
+/// cells about the glacier's, so that a point at its cell's edge has every cell the synthesis reads
+/// about it: from 26 it reads five king moves (R09.T6.i), past a 2 × 2 survey's margin there.
 #[test]
 fn worker_ground_readout_takes_the_month_s_temperature_on_glacier_ice() {
     let field = world(SyntheticWorld::EarthLike);
@@ -2829,7 +2861,7 @@ fn worker_ground_readout_takes_the_month_s_temperature_on_glacier_ice() {
     assert_eq!(header.months(), 12);
     assert!(header.lapse_rate_k_per_m() > 0.0, "a lapse rate to carry");
     let dir = earth_glacier();
-    let (mut fields, _) = surveyed_about(field, dir);
+    let mut fields = surveyed_around(field, dir);
     let body = header.body();
     let origin = header.figure().surface_point(dir, 20_000.0);
     let sight = (origin, origin.map(|x| -x));
