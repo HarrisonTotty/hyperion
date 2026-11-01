@@ -618,6 +618,9 @@ fn spec_selection(population: MapPopulation) -> MapSelection {
     match population {
         MapPopulation::All => MapSelection::AllSystems,
         MapPopulation::Young => MapSelection::YoungOnly,
+        // Every map of a galaxy that holds no displaced class, every one below version 26, is
+        // empty under it: the sim's map is 0 everywhere (P08.T15.b).
+        MapPopulation::LayerERemnants => MapSelection::LayerERemnants,
     }
 }
 
@@ -838,6 +841,14 @@ mod tests {
 
     /// A pool of `workers` workers and a service over it, with room for every map.
     fn service(workers: usize) -> (Arc<CpuPool>, DensityMapService) {
+        service_of(galaxy, workers)
+    }
+
+    /// [`service`] over the galaxy `galaxy` gives.
+    fn service_of(
+        galaxy: fn() -> &'static Galaxy,
+        workers: usize,
+    ) -> (Arc<CpuPool>, DensityMapService) {
         let pool = Arc::new(
             CpuPool::new(
                 NonZeroUsize::new(workers).expect("a test asks for at least one worker"),
@@ -846,11 +857,29 @@ mod tests {
             )
             .expect("the pool starts"),
         );
-        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), |_| {
+        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), move |_| {
             galaxy().clone()
         }));
         let service = DensityMapService::new(Arc::clone(&pool), galaxies, ROOMY);
         (pool, service)
+    }
+
+    /// The test galaxy's seed under version 26's rules, every hold at 26 in force, so that it
+    /// holds plan 08's displaced classes.
+    fn galaxy_26() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            use hyperion_sim::GeneratorVersion;
+            use hyperion_sim::galaxy::imf::MassFunctionKind;
+            use hyperion_sim::galaxy::params::GalaxyParams;
+            let seed = Seed::new(SEED);
+            Galaxy::from_params_at_version(
+                seed,
+                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+                GeneratorVersion::new(26),
+            )
+            .expect("a drawn galaxy builds")
+        })
     }
 
     /// The key of a 128-pixel map of the test galaxy.
@@ -1095,6 +1124,54 @@ mod tests {
             std::cmp::Ordering::Equal,
             "the centre pixel is the map's ceiling, {centre} against {largest}"
         );
+        pool.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn each_population_is_the_sims_selection() {
+        assert_eq!(spec_selection(MapPopulation::All), MapSelection::AllSystems);
+        assert_eq!(
+            spec_selection(MapPopulation::Young),
+            MapSelection::YoungOnly
+        );
+        assert_eq!(
+            spec_selection(MapPopulation::LayerERemnants),
+            MapSelection::LayerERemnants
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_remnants_map_of_a_galaxy_without_displaced_classes_is_empty() {
+        // Below version 26 no galaxy holds plan 08's classes (P08.T15.b's lean, 2026-11-01).
+        assert!(galaxy().fields().displaced().is_none());
+        let (pool, service) = service(4);
+        for view in [MapView::FaceOn, MapView::EdgeOn] {
+            let map = get(&service, key(view, MapPopulation::LayerERemnants)).await;
+            assert!(map.log10().iter().all(|&value| value == EMPTY), "{view:?}");
+            // Plan 04's map with no systems: floor and ceiling 0, and every code 0.
+            let quantised = quantise_map(&map, view, CodeDepth::Sixteen);
+            assert_same_bits(quantised.floor_log10, 0.0);
+            assert_same_bits(quantised.ceiling_log10, 0.0);
+            assert!(quantised.bytes.iter().all(|&byte| byte == 0), "{view:?}");
+        }
+        pool.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn under_every_26_hold_the_remnants_map_counts_some_of_every_systems_column() {
+        // Face-on alone: the edge-on remnants map integrates each class across a pixel, 117 s for
+        // 128 pixels on 16 workers (2026-11-01), too long for the fast suite.
+        let (pool, service) = service_of(galaxy_26, 4);
+        let remnants = get(
+            &service,
+            key(MapView::FaceOn, MapPopulation::LayerERemnants),
+        )
+        .await;
+        let all = get(&service, key(MapView::FaceOn, MapPopulation::All)).await;
+        for (&part, &whole) in remnants.log10().iter().zip(all.log10()) {
+            assert!(part.is_finite(), "every column holds some remnant");
+            assert!(part < whole, "{part} of {whole}");
+        }
         pool.shutdown().await.unwrap();
     }
 

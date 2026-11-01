@@ -31,11 +31,14 @@ import { useGalaxyFeatures } from "./useGalaxyFeatures";
  *
  * @remarks
  * `young` counts the young thin disc alone (plan 04's `MapPopulation`), so it takes that
- * population's one name, as `PARAMETERS` shows it.
+ * population's one name, as `PARAMETERS` shows it. `REMNANTS` counts layer E's displaced remnants
+ * alone, for the checks by eye of plan 08's classes (P08.T15.b): a galaxy below generator version
+ * 26 holds none, and its maps are empty.
  */
 const POPULATION_LABEL: Readonly<Record<MapPopulation, string>> = {
   all: "ALL",
   young: populationLabel("young_thin_disc"),
+  layer_e_remnants: "REMNANTS",
 };
 
 function isMapPopulation(key: string): key is MapPopulation {
@@ -105,7 +108,8 @@ interface GalaxyMapPanelProps {
  * extents of plan 04, design note 12), so both are at one scale, and one scale bar and one frame
  * name serve them. Each view's words (title, key hint, density under the cursor, legend) stand in a
  * column beside its picture, so that the pictures take the page's height. `ALL` counts every
- * system; `YOUNG THIN DISC` the population where the arms show. The page owns the population;
+ * system; `YOUNG THIN DISC` the population where the arms show; `REMNANTS` layer E's displaced
+ * remnants, which kicks carried out of their populations (plan 08, P08.T15.b). The page owns the population;
  * changing it asks for both maps again. It needs the server, so while the link is down it is held
  * back, described by the link's reason, and the maps on show stay, marked stale (plan 05's T11
  * ruling (8); decision-gg-port-a2 §3). The link's reason stands in the page's one line for the

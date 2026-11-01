@@ -190,8 +190,10 @@ fn measurement_time(view: MapView, population: MapPopulation, workers: NonZeroUs
         // About 2 s a build on eight workers and 6.6 s on one: 0.025 ms a pixel over 262,144.
         (MapView::FaceOn, MapPopulation::All, 1) => 90,
         (MapView::FaceOn, MapPopulation::All, _) => 30,
-        // 37 ms and 117 ms: a young-only map integrates the young thin disc alone.
-        (MapView::FaceOn, MapPopulation::Young, _) => 10,
+        // 37 ms and 117 ms: a young-only map integrates the young thin disc alone. The remnants
+        // map is not measured: it is empty below generator version 26, which holds no displaced
+        // class, and the benchmark builds the version in force (plan 08, P08.T15.b).
+        (MapView::FaceOn, MapPopulation::Young, _) | (_, MapPopulation::LayerERemnants, _) => 10,
         // About 13 s on eight workers and 53 s on one: 0.40 ms a pixel over 131,072, plan 02's
         // line-of-sight integral per spheroid component.
         (MapView::EdgeOn, MapPopulation::All, 1) => 700,
@@ -251,6 +253,7 @@ fn population_label(population: MapPopulation) -> &'static str {
     match population {
         MapPopulation::All => "all systems",
         MapPopulation::Young => "young only",
+        MapPopulation::LayerERemnants => "layer E remnants",
     }
 }
 

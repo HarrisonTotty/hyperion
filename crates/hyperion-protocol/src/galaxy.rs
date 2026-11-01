@@ -156,6 +156,13 @@ pub enum MapPopulation {
     All,
     /// The young thin disc only, which is where the spiral arms show.
     Young,
+    /// Layer E's displaced remnants alone, the remnants whose natal kicks carried them out of
+    /// their populations' volumes (plan 08, P08.T15.b): edge-on, a flared layer and a faint halo.
+    ///
+    /// A galaxy that holds none of plan 08's displaced classes, every galaxy below generator
+    /// version 26, has no displaced remnant, so its map is a map with no systems: floor and
+    /// ceiling 0 and every code 0.
+    LayerERemnants,
 }
 
 /// Asks for a column-density map of a universe's galaxy (`density_map`), answered with a
@@ -827,7 +834,11 @@ mod tests {
 
     #[test]
     fn map_population_strings() {
-        assert_wire_strings(&[(MapPopulation::All, "all"), (MapPopulation::Young, "young")]);
+        assert_wire_strings(&[
+            (MapPopulation::All, "all"),
+            (MapPopulation::Young, "young"),
+            (MapPopulation::LayerERemnants, "layer_e_remnants"),
+        ]);
     }
 
     fn chart_centre() -> GalacticPosition {

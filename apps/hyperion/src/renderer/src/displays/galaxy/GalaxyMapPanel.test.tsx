@@ -46,6 +46,19 @@ function mapFor(body: RequestOf<"density_map">): ResponseFor<"density_map"> {
   });
 }
 
+/** Plan 04's map with no systems for the request: floor and ceiling 0, and every code 0. */
+function emptyMapFor(body: RequestOf<"density_map">): ResponseFor<"density_map"> {
+  const heightPx = body.view === "face_on" ? 8 : 4;
+  return aDensityMap({
+    codes: Array.from({ length: 8 * heightPx }, () => 0),
+    heightPx,
+    view: body.view,
+    population: body.population,
+    floorLog10PerLy2: 0,
+    ceilingLog10PerLy2: 0,
+  });
+}
+
 /** An extinction map for the request, of the density map's size and extents. */
 function extinctionFor(body: RequestOf<"extinction_map">): ResponseFor<"extinction_map"> {
   const heightPx = body.view === "face_on" ? 8 : 4;
@@ -197,6 +210,12 @@ describe("GalaxyMapPanel", () => {
     const group = within(panel()).getByRole("group", { name: "POPULATION" });
     expect(within(group).getByRole("radio", { name: "ALL" })).toBeChecked();
     expect(within(group).getByRole("radio", { name: "YOUNG THIN DISC" })).not.toBeChecked();
+    expect(within(group).getByRole("radio", { name: "REMNANTS" })).not.toBeChecked();
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((radio) => radio.getAttribute("value")),
+    ).toEqual(["all", "young", "layer_e_remnants"]);
   });
 
   it("asks for both views of every system at first, at the resolution the pictures need", async () => {
@@ -227,6 +246,37 @@ describe("GalaxyMapPanel", () => {
       ["face_on", "young"],
       ["edge_on", "young"],
     ]);
+  });
+
+  it("asks for both views of layer E's displaced remnants when REMNANTS is chosen (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    await user.click(within(panel()).getByRole("radio", { name: "REMNANTS" }));
+
+    const requests = socket.requestsOfKind("density_map").map(({ body }) => body);
+    expect(requests.slice(2).map((body) => [body.view, body.population])).toEqual([
+      ["face_on", "layer_e_remnants"],
+      ["edge_on", "layer_e_remnants"],
+    ]);
+  });
+
+  it("draws a galaxy's empty REMNANTS maps, as below version 26, saying they hold no systems", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+    await user.click(within(panel()).getByRole("radio", { name: "REMNANTS" }));
+
+    await server(() => {
+      socket.serverAnswers("density_map", emptyMapFor);
+      socket.serverAnswers("density_map", emptyMapFor);
+    });
+
+    expect(within(panel()).getAllByText("NO SYSTEMS IN MAP")).toHaveLength(2);
+    expect(
+      within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+    ).toBeInTheDocument();
   });
 
   it("holds the population back while the link is down, and keeps the maps on show, stale", async () => {

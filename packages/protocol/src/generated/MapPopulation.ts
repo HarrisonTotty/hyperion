@@ -3,4 +3,4 @@
 /**
  * Which systems a density map counts.
  */
-export type MapPopulation = "all" | "young";
+export type MapPopulation = "all" | "young" | "layer_e_remnants";

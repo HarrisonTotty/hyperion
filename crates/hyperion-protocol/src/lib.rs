@@ -214,6 +214,12 @@ pub use universe::{
 /// generator version 26, which a client reads as a row that does not say, and an older client
 /// ignores it. [`PlacementKind`] is closed, and carries
 /// every one of the sim's placement classes from the first build that sends a value of it.
+///
+/// So does [`MapPopulation`]'s `layer_e_remnants` (galaxy plan 08, P08.T15.b), although the enum is
+/// closed and sent: a server sends the string only in the map answering a request that names it,
+/// which no client built before it asks, as `partial_response` is sent only in answer to a `sky`;
+/// a server built before it refuses such a request as `bad_request`, which the client shows as the
+/// map's refusal.
 pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]

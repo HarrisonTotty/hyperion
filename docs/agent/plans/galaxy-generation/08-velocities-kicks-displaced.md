@@ -1395,8 +1395,9 @@ constants of Design notes 9, 10 and 24, with the figure.
 
 ### P08.T15 Protocol and display: placement class
 
-**P08.T15.a built** (2026-11-01, at `GENERATOR_VERSION` 24 and `PROTOCOL_VERSION` 3; no output
-moves): see "P08.T15, as built" under [Risks](#risks-and-open-points).
+**P08.T15.a–b built** (2026-11-01, at `GENERATOR_VERSION` 24 and `PROTOCOL_VERSION` 3; no output
+moves): see "P08.T15, as built" under [Risks](#risks-and-open-points). The checks by eye wait for
+26's rules served.
 
 - **P08.T15.a Placement in the record.** `SystemRecord.placement: PlacementKind`, `snake_case` on
   the wire, with a pinned wire-form test and `just gen-protocol`; the readout's `ORIGIN` line
@@ -2224,3 +2225,11 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     `ORIGIN OLD THIN DISC · DISPLACED REMNANT`, its origin sent or not (only a grid row carries
     one), and the list's row name repeats it. The UX guide gains `HYPERVELOCITY SURVIVOR`; it
     already had the other five terms.
+  - T15.b: `MapPopulation::LayerERemnants` (`layer_e_remnants`) maps to
+    `MapSelection::LayerERemnants`; `REMNANTS` is the selector's third option. No bump: the
+    string is sent only in answer to a request that names it, and an older server answers
+    `bad_request`.
+  - Lean (2026-11-01): below 26 the remnants map is plan 04's empty map (floor and ceiling 0, every
+    code 0), since the wire's map has no `not_modelled`. The client reads `NO SYSTEMS IN MAP`.
+  - The checks by eye (the 2,000 ly chart 3,000 ly above the plane, the edge-on `REMNANTS` map)
+    are not run: the server serves no 26 rules. Pending 26.
