@@ -111,7 +111,7 @@ import {
   envelopeFloorM,
   THICK_REASON,
 } from "./thick/regime";
-import { correctionRouted, TWILIGHT_REASON } from "./thick/routing";
+import { correctionRouted, LOW_SUN_REASON, LOW_SUN_SINE, TWILIGHT_REASON } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
 /** A build the scripted builder holds, landed by the test. */
@@ -348,6 +348,7 @@ function harness(
   rowBytes?: number,
   routes: ((regime: AtmosphereRegime) => boolean) | "product" = routesNone,
   corrects: ((column: SpectralColumn) => boolean) | "product" = routesNone,
+  bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
 ): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
@@ -359,6 +360,7 @@ function harness(
     builder,
     ...(routes === "product" ? {} : { routes }),
     ...(corrects === "product" ? {} : { corrects }),
+    ...(bakedAsHaze === undefined ? {} : { bakedAsHaze }),
     tables: (built, slots) => {
       if (factory.throws !== null) {
         throw factory.throws;
@@ -3167,6 +3169,35 @@ describe("the product's route (R08.T14.d.4)", () => {
       at(2, 0.05).reasons.get(A),
       at(2e6, -0.05).reasons.get(A),
     ]).toEqual([[["atmosphereApproximate"], [[A, [TWILIGHT_REASON]]]], undefined, undefined]);
+  });
+
+  it("says a world baked as a haze has its low sun past its range, the camera in its air, to a sine of 0.35 over the horizontal, and leaves a kept-range world's unchanged", async () => {
+    const reasonsAt = async (haze: boolean): Promise<unknown> => {
+      const h = harness(undefined, "product", "product", haze ? (): boolean => true : undefined);
+      keptFrame(h, [[A, EARTH, undefined]]);
+      await landBake(h);
+      await landCorrectionOfA(h);
+      const at = (heightM: number, lightElevationSine: number): AtmosphereViewReport =>
+        keptFrame(h, [[A, EARTH, { heightM, lightElevationSine }]]);
+      const low = at(2, 0.3);
+      return [
+        [low.labels, [...low.reasons]],
+        at(2, 0.4).reasons.get(A),
+        at(2, LOW_SUN_SINE).reasons.get(A),
+        at(2, -0.05).reasons.get(A),
+        at(2e6, 0.3).reasons.get(A),
+      ];
+    };
+    expect([await reasonsAt(true), await reasonsAt(false)]).toEqual([
+      [
+        [["atmosphereApproximate"], [[A, [LOW_SUN_REASON]]]],
+        undefined,
+        [LOW_SUN_REASON],
+        [TWILIGHT_REASON],
+        undefined,
+      ],
+      [[[], []], undefined, undefined, [TWILIGHT_REASON], undefined],
+    ]);
   });
 
   it("shows COMPUTING in twilight while the bake runs, and nothing of twilight", () => {

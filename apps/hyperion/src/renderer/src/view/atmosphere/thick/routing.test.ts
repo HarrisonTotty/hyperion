@@ -17,6 +17,7 @@ import * as cases from "../reference/cases";
 import { giantDeckReferenceCase, titanClassReferenceCase } from "../reference/thickCases";
 import committedGate from "../reference/vectorGate.json" with { type: "json" };
 import type { AtmosphereMedium } from "../medium";
+import { HORIZON_SUN_COSINE } from "./bake";
 import { spectralColumnOf } from "./columnLayout";
 import { upperMediumOf } from "./deckRead";
 import {
@@ -42,6 +43,7 @@ import {
   HAZE_GATE_TALLIES,
   HAZE_ROUTE_RANGE,
   hazeGatePasses,
+  LOW_SUN_SINE,
   THICK_ROUTE_RANGE,
   THICK_ROUTE_RANGES,
   thickBakeRouted,
@@ -454,6 +456,12 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
     },
     180_000,
   );
+});
+
+describe("a haze's low sun (R08.T14.d.4)", () => {
+  it("labels a haze's sky from the sun of the bake's horizon rows, HORIZON_SUN_COSINE", () => {
+    expect(LOW_SUN_SINE).toBe(HORIZON_SUN_COSINE);
+  });
 });
 
 describe("correctionRouted (R08.T14.f, R08.T14.d.4)", () => {

@@ -115,9 +115,11 @@
  * view gives a routed body's observer ({@link AtmosphereFrameBody.observer}), its bake landed, the
  * camera within its air and its brightest light below the camera's local horizontal, the view's
  * report adds `atmosphereApproximate` with `thick/routing.ts`'s `TWILIGHT_REASON` for it, per view,
- * never in its entry. It is a reason the correction leaves, so it stands in the correction's
- * `atmosphereComputing`'s place; while the bake itself runs, `atmosphereComputing` stands as
- * before.
+ * never in its entry. A body baked as a haze takes it from a lower sun, as low as `LOW_SUN_SINE`
+ * over the horizontal, with `LOW_SUN_REASON` while its light stands at or above the horizontal
+ * (main's ruling of 2026-11-01: the haze's gate judges no image there). It is a reason the
+ * correction leaves, so it stands in the correction's `atmosphereComputing`'s place; while the bake
+ * itself runs, `atmosphereComputing` stands as before.
  *
  * **The disc's table** (R08.T16.b; `thick/discBake.ts`). Every drawn body with air that has sources
  * to bake from ({@link AtmosphereCacheOptions.discs}) has its disc reflectance table asked once its
@@ -231,6 +233,8 @@ import {
   correctionRouted,
   deckRouted,
   discTableRouted,
+  LOW_SUN_REASON,
+  LOW_SUN_SINE,
   thickBakeRouted,
   TWILIGHT_REASON,
 } from "./thick/routing";
@@ -403,7 +407,7 @@ export interface AtmosphereScene {
 
 /**
  * Where a view's camera stands at a lit body (plan R08, R08.T14.d.4): what a routed world's
- * twilight reason reads (`thick/routing.ts`'s `TWILIGHT_REASON`).
+ * twilight reason reads (`thick/routing.ts`'s `TWILIGHT_REASON` and `LOW_SUN_REASON`).
  */
 export interface AtmosphereObserver {
   /** The camera's geodetic height above the body's datum, m. */
@@ -742,6 +746,11 @@ interface HeldBody<T> {
    * so that its tables made again after an eviction or a loss are sliced as they were; 0 before.
    */
   drawnThickSlots: number;
+  /**
+   * Whether the drawn entry's thick bake was last asked as a haze route's (R08.T14.d.4), whose low
+   * sun {@link twilightReasonOf} reads; `false` before one is, and for a deck's.
+   */
+  bakedAsHaze: boolean;
   /** The drawn entry's thick bake; `null` where none is asked, or nothing is drawn. */
   bake: HeldBake<T> | null;
   /** The drawn entry's polarisation correction; `null` where none is asked, or nothing is drawn. */
@@ -949,23 +958,29 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
 }
 
 /**
- * Whether a view stands in a routed thick world's deep twilight (R08.T14.d.4; the module's
- * remarks): the world's bake landed, the camera in its air, and its brightest light below the
- * camera's local horizontal, where the route's gates pass no view (`thick/routing.ts`'s
- * `TWILIGHT_REASON`).
+ * The reason a view stands in a routed thick world's deep twilight, or `null` where it does not
+ * (R08.T14.d.4; the module's remarks): the world's bake landed, the camera in its air, and its
+ * brightest light below the camera's local horizontal (`thick/routing.ts`'s `TWILIGHT_REASON`),
+ * or, for a world baked as a haze, at most `LOW_SUN_SINE` over it (`LOW_SUN_REASON`), where the
+ * route's gates pass no view.
  */
-function inDeepTwilight(
+function twilightReasonOf(
   held: HeldBody<unknown>,
   observer: AtmosphereObserver | undefined,
-): boolean {
+): string | null {
   const built = held.drawn?.built ?? null;
-  return (
-    observer !== undefined &&
-    built !== null &&
-    held.bake?.state.kind === "baked" &&
-    observer.heightM < built.medium.topHeightM &&
-    observer.lightElevationSine < 0
-  );
+  if (
+    observer === undefined ||
+    built === null ||
+    held.bake?.state.kind !== "baked" ||
+    !(observer.heightM < built.medium.topHeightM)
+  ) {
+    return null;
+  }
+  if (observer.lightElevationSine < 0) {
+    return TWILIGHT_REASON;
+  }
+  return held.bakedAsHaze && observer.lightElevationSine <= LOW_SUN_SINE ? LOW_SUN_REASON : null;
 }
 
 /**
@@ -1490,7 +1505,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       } else if (held.drawn !== null) {
         const { drawn } = held;
         const shown = drawn.labels.includes("atmosphereApproximate") ? drawn.reasons : [];
-        if (inDeepTwilight(held, wanted.get(id)?.observer)) {
+        const twilight = twilightReasonOf(held, wanted.get(id)?.observer);
+        if (twilight !== null) {
           // A reason the correction leaves: it stands in the correction's COMPUTING's place.
           for (const label of drawn.labels) {
             if (label !== "atmosphereComputing") {
@@ -1498,7 +1514,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
             }
           }
           labels.add("atmosphereApproximate");
-          reasons.set(id, [...shown, TWILIGHT_REASON]);
+          reasons.set(id, [...shown, twilight]);
         } else {
           for (const label of drawn.labels) {
             labels.add(label);
@@ -1541,6 +1557,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       build: null,
       drawn: null,
       drawnThickSlots: 0,
+      bakedAsHaze: false,
       bake: null,
       correction: null,
       disc: null,
@@ -1903,6 +1920,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     let ask: ThickBakeAsk | null;
     let handle: ThickBake;
+    held.bakedAsHaze = haze;
     try {
       ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, haze);
       if (ask === null) {
@@ -1986,6 +2004,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     let handle: DeckBake;
+    held.bakedAsHaze = false;
     try {
       const thick = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, false);
       if (thick === null) {

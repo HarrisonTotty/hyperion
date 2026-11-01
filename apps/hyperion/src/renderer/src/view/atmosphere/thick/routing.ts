@@ -366,6 +366,27 @@ export const TWILIGHT_REASON =
   "multiple scattering: computed beyond its checked range, the brightest star below the local horizontal";
 
 /**
+ * The largest sine of the brightest light's elevation over the camera's local horizontal at which a
+ * body baked as a haze ({@link bakedAsHaze}) reads {@link LOW_SUN_REASON}, the camera in its air
+ * (R08.T14.d.4; main's ruling of 2026-11-01): `bake.ts`'s `HORIZON_SUN_COSINE`, μ₀ 0.35, an
+ * elevation of 20.5°, held to it by the test, so that the cache needn't load the bake's module.
+ * Below it a haze's pseudo-spherical sky is past the model's limit: the reference's own
+ * pseudo-spherical arm reads s90 red at 0.69–0.84 of the spherical sky (research-titan-horizon),
+ * and the haze's gate judges no image whose sun stands there.
+ */
+export const LOW_SUN_SINE = 0.35;
+
+/**
+ * Why a body baked as a haze carries `atmosphereApproximate` where its brightest light stands at
+ * most {@link LOW_SUN_SINE} over the camera's local horizontal and at or above it, the camera in
+ * its air (R08.T14.d.4; main's ruling of 2026-11-01), as player text in {@link TWILIGHT_REASON}'s
+ * form; below the horizontal, {@link TWILIGHT_REASON} stands (lean, 2026-11-01). Its words await
+ * the owner's UX sign-off.
+ */
+export const LOW_SUN_REASON =
+  "multiple scattering: computed beyond its checked range, the brightest star low over the local horizontal";
+
+/**
  * Whether the product asks a world with air its polarisation correction (plan R08, R08.T14.f): on
  * since R08.T14.d.4's route, by main's ruling with T14.d's split, for thin worlds and routed thick
  * worlds alone, which the atmosphere cache decides with the route (an unrouted thick world takes
