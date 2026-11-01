@@ -1730,3 +1730,95 @@ fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
     assert_same_bits(ComplexRigidity::POROUS_CORE.real.value(), 1e7);
     assert_same_bits(ComplexRigidity::POROUS_CORE.imaginary.value(), 8e6);
 }
+
+/// P14.T55.j's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's helper reach
+/// the radiated surface, and 26's helper does not.
+#[test]
+fn the_surface_heat_is_held_only_until_the_27_bump() {
+    use SurfaceHeatRules::{Held, Radiated};
+    assert!(
+        crate::GENERATOR_VERSION < SURFACE_HEAT_VERSION,
+        "the 26 → 27 bump makes a moon's surface radiate its internal heat in its tides (P14.T55.j): \
+         delete `SURFACE_HEAT_VERSION`, `SurfaceHeatRules` with its `Held` arm in \
+         `with_radiating_surface`, the tests' `with_surface_heat`, its switch in \
+         `with_every_27_hold`, and this test; re-bless the movers plan 14's record of P14.T55.j \
+         lists"
+    );
+    assert_eq!(SurfaceHeatRules::in_force(), Held);
+    assert_eq!(
+        with_surface_heat(Radiated, SurfaceHeatRules::in_force),
+        Radiated
+    );
+    assert_eq!(with_every_27_hold(SurfaceHeatRules::in_force), Radiated);
+    assert_eq!(with_every_26_hold(SurfaceHeatRules::in_force), Held);
+    assert_eq!(
+        with_every_27_hold(|| with_surface_heat(Held, SurfaceHeatRules::in_force)),
+        Held
+    );
+    assert_eq!(SurfaceHeatRules::in_force(), Held);
+}
+
+/// P14.T55.j: under every 27 hold a moon on each branch radiates its surface heat, its measured
+/// surface read as its equilibrium temperature: the Moon cold, Enceladus on its porous core's ocean
+/// and Io heated, each with σ `T_s`⁴ − σ `T_eq`⁴ = F, its tides' whole heat flow, to 10⁻⁹. Recorded:
+/// each surface's rise, Io's and Enceladus's at their measured e among them.
+#[test]
+fn under_every_27_hold_a_moon_on_each_branch_radiates_its_surface_heat() {
+    for (name, branch) in [
+        ("Moon", TidalBranch::Cold),
+        ("Enceladus", TidalBranch::Ocean),
+        ("Io", TidalBranch::Heated),
+    ] {
+        let body = moon(name);
+        let ammonia = name == "Enceladus";
+        let (tides, _, surface) = with_every_27_hold(|| {
+            with_radiating_surface(&body.inputs(), |inputs| {
+                MoonTides::with_ocean(inputs, &body.solutes(ammonia))
+            })
+        });
+        let f = tides.heat_flow().value();
+        let radiated =
+            STEFAN_BOLTZMANN * (math::powi(surface.value(), 4) - math::powi(body.surface, 4));
+        eprintln!(
+            "{name} under every 27 hold: {:?} at {f:.4e} W m⁻², its surface {} → {:.4} K (+{:.4} K)",
+            tides.branch(),
+            body.surface,
+            surface.value(),
+            surface.value() - body.surface
+        );
+        assert_eq!(tides.branch(), branch, "{name}");
+        assert!(
+            (radiated - f).abs() <= 1e-9 * f,
+            "{name}: {radiated} against {f} W m⁻²"
+        );
+    }
+}
+
+/// P14.T55.j: a faint heat flow raises a surface by its linear rise F ÷ (4σ `T_eq`³), to 10⁻⁶ K
+/// below 10⁻³ W m⁻² at 100–300 K, and none leaves it at its equilibrium temperature to the bit.
+/// The brief's "`T_s` = `T_eq` to 10⁻⁶ K below 10⁻³ W m⁻²" holds only below some 2 × 10⁻⁷ W m⁻² at
+/// 100 K: at 10⁻³ W m⁻² the rise is 4.4 mK there, and 69 mK at 40 K (recorded).
+#[test]
+fn a_faint_heat_flow_raises_a_surface_by_its_linear_rise() {
+    for t_eq in [100.0, 150.0, 250.0, 300.0] {
+        let t = Kelvin::new(t_eq);
+        assert_same_bits(
+            radiating_surface_temperature(t, WattsPerSquareMetre::new(0.0)).value(),
+            t_eq,
+        );
+        for f in [1e-9, 1e-6, 1e-4, 1e-3] {
+            let rise = radiating_surface_temperature(t, WattsPerSquareMetre::new(f)).value() - t_eq;
+            let linear = f / (4.0 * STEFAN_BOLTZMANN * math::powi(t_eq, 3));
+            assert!(
+                (rise - linear).abs() <= 1e-6,
+                "{t_eq} K, {f} W m⁻²: {rise} against {linear}"
+            );
+        }
+    }
+    let cold = radiating_surface_temperature(Kelvin::new(40.0), WattsPerSquareMetre::new(1e-3));
+    eprintln!(
+        "at 40 K, 10⁻³ W m⁻² raises a surface by {:.4} K",
+        cold.value() - 40.0
+    );
+    assert!(cold.value() - 40.0 < 0.07, "{cold:?}");
+}

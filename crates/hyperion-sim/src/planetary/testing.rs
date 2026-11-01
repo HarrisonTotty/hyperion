@@ -598,6 +598,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `EccentricityDampingRules::Damped` through `with_eccentricity_damping`: a forced
 ///   eccentricity only in a resonance that holds, at its budget, and a free one damped by its
 ///   moon's own heat.
+/// - a moon's surface that radiates its internal heat, `SURFACE_HEAT_VERSION` (P14.T55.j), at
+///   `SurfaceHeatRules::Radiated` through `with_surface_heat`: its tides' shell read at
+///   σ `T_s`⁴ = σ `T_eq`⁴ + F.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -617,13 +620,16 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::moons::eccentricity::{
         EccentricityDampingRules, with_eccentricity_damping,
     };
-    use crate::planetary::moons::tides::{PorousCoreRules, with_porous_core};
+    use crate::planetary::moons::tides::{
+        PorousCoreRules, SurfaceHeatRules, with_porous_core, with_surface_heat,
+    };
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_core_share(CoreShareRules::Host, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
     let run = move || with_porous_core(PorousCoreRules::Porous, run);
     let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
+    let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 

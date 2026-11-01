@@ -34071,3 +34071,19 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     moves). Measure again under every 27 hold.
     `planetary/systems` golden but `t_tauri`, and the server's `scene_systems`. Measure again
     under every 27 hold.
+- **Deviations in P14.T55.j's surface heat, as built (lane `fix-moon-surface-heat`, 2026-11-01).**
+  Held at 27 (`moons::tides::SURFACE_HEAT_VERSION`; `SurfaceHeatRules::{Held, Radiated}`,
+  `with_surface_heat`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _New items:_ in `tides`, `radiating_surface_temperature`, `with_radiating_surface` and
+    `SURFACE_HEAT_ITERATIONS` (11).
+  - _The readers:_ a moon's tides (`TideModel::solve`, so `own_tides` and the damping's models)
+    and its shell's top and Maxwell profile read `T_s` = (`T_eq`⁴ + F ÷ σ)^¼, F its tides' whole
+    heat flow. The air, the surface state and the record's surface conditions still read `T_eq`.
+  - _Leans (2026-11-01):_ moons only, in their tides; the published surface temperature stays the
+    sunlight's; a moon with no balance on either branch (2 of 5,000 at 100 Myr) takes the branch
+    the fixed count ends on, the cold one.
+  - _The brief's figure:_ below 10⁻³ W m⁻² `T_s` is `T_eq` plus its linear rise F ÷ (4σ`T_eq`³)
+    to 10⁻⁶ K, not `T_eq` to 10⁻⁶ K (4.4 mK at 100 K).
+  - _For 27's bump:_ delete what `the_surface_heat_is_held_only_until_the_27_bump` lists; restate
+    `under_every_27_hold_the_generated_moons_a_porous_core_moves_are_recorded` without its
+    surface-heat switch (2 of its held-e ocean moons leave the branch).

@@ -68,6 +68,16 @@
 //! Only an ocean frees the core to deform: under a shell frozen to it, ice some 350 times stiffer
 //! holds it, so the heated and cold branches read no core.
 //!
+//! # The surface's own heat (P14.T55.j, from generator version 27)
+//!
+//! A generated moon's tides read its equilibrium temperature, its sunlight's, as its surface's.
+//! From 27 (`SURFACE_HEAT_VERSION`) its surface radiates its whole heat flow F too,
+//! σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]), and its shell's top and Maxwell
+//! profile read that surface (`with_radiating_surface`, by a fixed count of iterations,
+//! [`SURFACE_HEAT_ITERATIONS`]). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by
+//! 0.35 K. The air and the record's surface conditions still read the sunlight alone (ruling
+//! 112.7's split; lean, 2026-11-01).
+//!
 //! Every function here is pure and deterministic: the shell's modulus is a fixed midpoint sum
 //! ([`SHELL_QUADRATURE_NODES`]) and the root is refined by a fixed count of bisections
 //! ([`ROOT_STEPS`]).
@@ -89,7 +99,7 @@ use crate::planetary::params::{
     SURFACE_MELT_HEAT_FLOW,
 };
 use crate::substance::phase::MOLAR_GAS_CONSTANT;
-use crate::units::consts::GRAVITATIONAL_CONSTANT;
+use crate::units::consts::{GRAVITATIONAL_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre,
@@ -301,6 +311,182 @@ pub(crate) fn with_porous_core<R>(rules: PorousCoreRules, run: impl FnOnce() -> 
     }
     let _restore = Restore(POROUS_CORE_RULES.with(|cell| cell.replace(Some(rules))));
     run()
+}
+
+/// The generator version from which a moon's surface radiates its internal heat as well as its
+/// sunlight, in its tides' reading of it (P14.T55.j): 27, with P14.T55.j.a's damping and P14.T56.e's
+/// porous core. It does not ride 26: it landed after 26's membership.
+///
+/// It is the rule's one hold. Below it [`SurfaceHeatRules::in_force`] is
+/// [`SurfaceHeatRules::Held`]: a moon's tides read its equilibrium temperature as its surface's,
+/// and every figure is version 24's, 25's and 26's bit for bit. 27's bump deletes this hold,
+/// [`SurfaceHeatRules`] with its `Held` arm, the tests' switch and its tripwire
+/// (`the_surface_heat_is_held_only_until_the_27_bump`).
+pub(crate) const SURFACE_HEAT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether a moon's surface radiates its internal heat in its tides (its hold,
+/// [`SURFACE_HEAT_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SurfaceHeatRules {
+    /// Version 26's and before: the surface at the equilibrium temperature alone.
+    Held,
+    /// Version 27's: σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]).
+    Radiated,
+}
+
+impl SurfaceHeatRules {
+    /// The rules this generator version gives: the radiated surface from
+    /// [`SURFACE_HEAT_VERSION`], the equilibrium temperature below it; in the tests, the rules a
+    /// test's switch sets on its thread ([`with_surface_heat`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = SURFACE_HEAT_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= SURFACE_HEAT_VERSION {
+            Self::Radiated
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The surface heat's rules a test sets on its thread, `None` for the version's.
+    static SURFACE_HEAT_RULES: core::cell::Cell<Option<SurfaceHeatRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the surface heat's rules `rules` on this thread, for the tests to reach
+/// P14.T55.j ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_surface_heat<R>(rules: SurfaceHeatRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<SurfaceHeatRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SURFACE_HEAT_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(SURFACE_HEAT_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The surface temperature of a solid body of equilibrium temperature `equilibrium` that also
+/// radiates the heat flow `heat_flow` it brings to its surface from within:
+/// σ `T_s`⁴ = σ `T_eq`⁴ + F, so `T_s` = (`T_eq`⁴ + F ÷ σ)^¼ (P14.T55.j), with σ the
+/// Stefan–Boltzmann constant. `T_eq` itself for a flow that is not positive.
+///
+/// Io's 2.2 W m⁻² raises a 110 K surface by some 7 K, Enceladus's 34 mW m⁻² a 75 K one by 0.35 K,
+/// and 413 W m⁻² sets it at 292 K or more whatever its sunlight.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::moons::tides::radiating_surface_temperature;
+/// use hyperion_sim::units::{Kelvin, WattsPerSquareMetre};
+///
+/// let io = radiating_surface_temperature(Kelvin::new(110.0), WattsPerSquareMetre::new(2.2));
+/// assert!((io.value() - 116.6).abs() < 0.1, "{io:?}");
+/// let hot = radiating_surface_temperature(Kelvin::new(0.0), WattsPerSquareMetre::new(413.0));
+/// assert!((hot.value() - 292.2).abs() < 0.1, "{hot:?}");
+/// ```
+#[must_use]
+pub fn radiating_surface_temperature(
+    equilibrium: Kelvin,
+    heat_flow: WattsPerSquareMetre,
+) -> Kelvin {
+    let f = heat_flow.value();
+    if f.is_nan() || f <= 0.0 {
+        return equilibrium;
+    }
+    let t4 = math::powi(equilibrium.value(), 4) + f / STEFAN_BOLTZMANN;
+    Kelvin::new(t4.sqrt().sqrt())
+}
+
+/// The iterations of `with_radiating_surface`: 11, from the equilibrium temperature, which
+/// converge every moon of P14.T55.j's census at the Sun's age (11) and at 100 Myr (10) to 10⁻⁹ of
+/// its heat flow. An ocean-branch moon's converges geometrically, its worst by about 8 an
+/// iteration; a cold or heated moon's heat does not read its surface, so its balance holds after
+/// one. Of 5,000 moons at 100 Myr, 2 have no balance: their ocean's 80–92 W m⁻² warms their surface
+/// past their shell's edge, and the cold branch's 0.04–0.06 W m⁻² cools it again. Their solves
+/// alternate, and at this count they take the cold branch (P14.T55.k's open-ocean states are the
+/// lever).
+pub const SURFACE_HEAT_ITERATIONS: u32 = 11;
+
+/// The tides `solve` gives the moon of `inputs`, whose surface temperature there is its
+/// equilibrium temperature, and the surface temperature they are read at: from
+/// [`SURFACE_HEAT_VERSION`] the surface radiates the moon's whole heat flow too, F its tides'
+/// ([`MoonTides::heat_flow`]: the ocean branch's root, or the rock's heat with its tidal flux),
+/// which its shell's depth and top read in turn. So [`SURFACE_HEAT_ITERATIONS`] times, from
+/// `T_s` = `T_eq`, the surface takes [`radiating_surface_temperature`] at the last solve's F, and
+/// the moon is solved again there; the iteration stops early only where `T_s` repeats to the bit,
+/// which every later step would repeat. Below the hold, `solve` at `inputs` and their surface.
+#[must_use]
+pub(crate) fn with_radiating_surface(
+    inputs: &TideInputs,
+    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+) -> (MoonTides, Subsurface, Kelvin) {
+    radiating_after(
+        inputs,
+        solve,
+        match SurfaceHeatRules::in_force() {
+            SurfaceHeatRules::Held => 0,
+            SurfaceHeatRules::Radiated => SURFACE_HEAT_ITERATIONS,
+        },
+    )
+}
+
+/// The heat flows and branches of [`radiating_after`]'s solves, one for each of `iterations` + 1,
+/// with no early stop: the census's measure of the balance's convergence.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn radiating_flows(
+    inputs: &TideInputs,
+    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+    iterations: u32,
+) -> Vec<(f64, TidalBranch)> {
+    let equilibrium = inputs.surface_temperature;
+    let first = solve(inputs).0;
+    let mut flows = vec![(first.heat_flow().value(), first.branch())];
+    for _ in 0..iterations {
+        let last = WattsPerSquareMetre::new(flows.last().expect("the first solve is in").0);
+        let surface = radiating_surface_temperature(equilibrium, last);
+        let next = solve(&TideInputs {
+            surface_temperature: surface,
+            ..*inputs
+        })
+        .0;
+        flows.push((next.heat_flow().value(), next.branch()));
+    }
+    flows
+}
+
+/// [`with_radiating_surface`] after `iterations` iterations.
+#[must_use]
+pub(crate) fn radiating_after(
+    inputs: &TideInputs,
+    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+    iterations: u32,
+) -> (MoonTides, Subsurface, Kelvin) {
+    let equilibrium = inputs.surface_temperature;
+    let mut surface = equilibrium;
+    let (mut tides, mut subsurface) = solve(inputs);
+    for _ in 0..iterations {
+        let next = radiating_surface_temperature(equilibrium, tides.heat_flow());
+        if next.value().total_cmp(&surface.value()).is_eq() {
+            break;
+        }
+        surface = next;
+        (tides, subsurface) = solve(&TideInputs {
+            surface_temperature: surface,
+            ..*inputs
+        });
+    }
+    (tides, subsurface, surface)
 }
 
 /// A complex shear modulus μ̃ = `real` + i `imaginary`, Pa, whose imaginary part dissipates (the
