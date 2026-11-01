@@ -30,7 +30,13 @@ import { type AtmosphereMedium, phaseAt } from "../medium";
 import { kernelMedium, tablesPlanOf } from "../tables";
 import { thickBakeBands, type ThickBakeBody } from "./bake";
 import { deckGroundInto, deckReadScratch, packDeckTable } from "./deckRead";
-import { decodedThickLayer, decodedThickRead, discAirMarcher, discSunFloorOf } from "./discBake";
+import {
+  decodedThickLayer,
+  decodedThickRead,
+  discAirMarcher,
+  discSunFloorOf,
+  DISC_VIEW_STEPS,
+} from "./discBake";
 import {
   addThickLayer,
   packThickTable,
@@ -158,10 +164,13 @@ describe("the disc's bake's march (R08.T16.b)", () => {
     const source = packThickTable(patternedThickBake(plan.bands, medium, 1), medium);
     const deck = packDeckTable(patternedDeckTables(plan.bands, medium, 1, 1_000));
     const lnBands = Float64Array.of(0);
-    const bare = discAirMarcher({ medium, curves: [], bands: plan.bands, source }, 0);
+    // One step count on both sides, so that the deck's read alone sets them apart.
+    const steps = { viewSteps: DISC_VIEW_STEPS };
+    const bare = discAirMarcher({ medium, curves: [], bands: plan.bands, source }, 0, steps);
     const decked = discAirMarcher(
       { medium, curves: [], bands: plan.bands, source, deck: { table: deck, lnBands } },
       0,
+      steps,
     );
     const scratch = deckReadScratch();
     const reflected: [number, number, number] = [0, 0, 0];
