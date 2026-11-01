@@ -19,8 +19,9 @@
 //!   light in a band, plan 09's supernova templates band by band and plan 11's binary events'
 //!   curves (P12.T5.b);
 //! - the one-shot classes' walk ([`oneshot`]), the supernovae and the mergers' red novae and
-//!   kilonovae (P12.T5.b), and the recurrent classes' ([`recurrent`]), so far the core collapses'
-//!   magnetars (P12.T5.c);
+//!   kilonovae (P12.T5.b), and the recurrent classes' ([`recurrent`]): the core collapses'
+//!   magnetars, the accreting white dwarfs' novae and the X-ray binaries' outbursts and bursts
+//!   (P12.T5.c);
 //! - the galactic centre's walk ([`centre`]), its black hole's flares and tidal disruptions, and
 //!   the local events of a range query's systems ([`local`](mod@local), P12.T5.e);
 //! - "what went off?" ([`alerts_in`], [`census`]): the census per class (Design note 7), each
@@ -79,12 +80,16 @@ pub use reach::{
 pub use recurrent::{
     BuildMagnetarHostError, MAGNETAR_ACTIVE_SPAN, MAGNETAR_BURST_XRAY_SHARE,
     MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, NoMagnetarCells,
-    StarRecipe, magnetar_detections, magnetar_scan_cell, magnetar_scan_plan, scan_cell, scan_plan,
+    StarRecipe, magnetar_detections, magnetar_scan_cell, magnetar_scan_plan, nova_scan_cell,
+    recurrent_detections, recurrent_reach, recurrent_scan_plan, scan_cell, scan_plan,
+    xray_binary_scan_cell,
 };
 pub use registry::{
-    CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, GIANT_ERUPTION_PEAK, LightCurveSource,
-    LongestDuration, LongestRise, MAGNETAR_BURST_PEAK, MAGNETAR_BURST_XRAY_PEAK, PeakBound, Route,
-    TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK, TransientKind, TransientRow, class_longest_rise,
+    BEX_OUTBURST_BAND_PEAKS, CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, DWARF_NOVA_BAND_PEAKS,
+    GIANT_ERUPTION_PEAK, LightCurveSource, LongestDuration, LongestRise, MAGNETAR_BURST_PEAK,
+    MAGNETAR_BURST_XRAY_PEAK, NOVA_BAND_PEAKS, PeakBound, Route, TYPE_IA_BAND_PEAKS, TYPE_IA_PEAK,
+    TransientKind, TransientRow, XRAY_BURST_BAND_PEAKS, XRAY_TRANSIENT_BAND_PEAKS,
+    class_longest_rise,
 };
 
 /// How many bands there are: plan 07's ten photometric bands and X-rays.

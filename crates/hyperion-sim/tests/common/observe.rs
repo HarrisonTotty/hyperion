@@ -1,6 +1,7 @@
-//! The alerts' oracle (plan 12's Test helpers, P12.T5.b and P12.T5.c): every one-shot entry, and
-//! every magnetar host, of a box of class cells about the observer, each event evaluated directly,
-//! against which the walks' detections are compared as sets.
+//! The alerts' oracle (plan 12's Test helpers, P12.T5.b and P12.T5.c): every one-shot entry, every
+//! magnetar host and every host of plan 11's binary classes, of a box of class cells about the
+//! observer, each event evaluated directly, against which the walks' detections are compared as
+//! sets.
 //!
 //! The brute force opens every cell of the box of side 2 × (reach + 4,096 ly) and a cell about the
 //! observer, with no sphere test and no reach, and evaluates each entry's event from its own
@@ -13,19 +14,30 @@
 
 use std::collections::BTreeMap;
 
+use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, MAGNETAR_BURST_XRAY_SHARE,
-    MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, OneShotCells,
-    OneShotClass, OneShotEvent, OneShotLight, TransientKind, binary_luminosity, binary_peak, flux,
-    inverse_square_flux, kind_reach, supernova_luminosity, supernova_peak,
+    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, LongestDuration,
+    MAGNETAR_BURST_XRAY_SHARE, MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass,
+    MagnetarHost, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, TransientKind,
+    binary_luminosity, binary_peak, flux, inverse_square_flux, kind_reach, supernova_luminosity,
+    supernova_peak,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
 use hyperion_sim::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
-use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId,
+};
 use hyperion_sim::id::{EventId, SystemId};
 use hyperion_sim::observe::{Motion, bearing, light_time};
+use hyperion_sim::stellar::binary::events::{
+    BinaryEvent, BinaryEventKind, BinarySystem, events_in, light_curve, xray_luminosity,
+};
+use hyperion_sim::stellar::binary::scan::{
+    AwdScanMarks, XrbScanMarks, scan_cell as scan_marks_cell,
+};
 use hyperion_sim::stellar::events::magnetar::{MAX_BURST_DURATION, MagnetarModel, MagnetarSeries};
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::consts::SPEED_OF_LIGHT;
@@ -506,6 +518,301 @@ fn wide_interval(
     TimeWindow::new(
         at(window.start(), -(longest + s_hi + 86_400.0)),
         at(window.end(), -(s_lo - 86_400.0)),
+    )
+    .unwrap()
+}
+
+/// A host of plan 11's binary classes as the oracle reads it: its scan marks.
+#[derive(Debug, Clone, Copy)]
+enum BinaryHost {
+    Awd(AwdScanMarks),
+    Xrb(XrbScanMarks),
+}
+
+impl BinaryHost {
+    fn system(&self, seed: Seed) -> BinarySystem<'_> {
+        match self {
+            Self::Awd(marks) => BinarySystem::accreting_white_dwarf_scan(seed, marks),
+            Self::Xrb(marks) => BinarySystem::xray_binary(seed, marks),
+        }
+    }
+
+    fn id(&self) -> SystemId {
+        match self {
+            Self::Awd(marks) => SystemId::from(marks.id()),
+            Self::Xrb(marks) => SystemId::from(marks.id()),
+        }
+    }
+
+    fn motion(&self) -> CatalogueMotion {
+        match self {
+            Self::Awd(marks) => CatalogueMotion::straight(*marks.position(), marks.velocity()),
+            Self::Xrb(marks) => CatalogueMotion::straight(*marks.position(), marks.velocity()),
+        }
+    }
+}
+
+/// The registry's kind of plan 11's `kind`, for the binary classes the oracle walks.
+fn binary_kind(kind: BinaryEventKind) -> TransientKind {
+    match kind {
+        BinaryEventKind::Nova => TransientKind::Nova,
+        BinaryEventKind::XrayTransient => TransientKind::XrayTransient,
+        BinaryEventKind::XrayBurst => TransientKind::XrayBurst,
+        BinaryEventKind::BeXGiantOutburst => TransientKind::BeXOutburst,
+        other => panic!("{other:?} is not walked with its class"),
+    }
+}
+
+/// The kinds the recurrent walk finds over `class`'s hosts, plan 11's binary classes'.
+fn binary_kinds(class: ClassId) -> &'static [TransientKind] {
+    if class == ClassId::XRAY_BINARY {
+        &[
+            TransientKind::XrayTransient,
+            TransientKind::XrayBurst,
+            TransientKind::BeXOutburst,
+        ]
+    } else {
+        assert!(
+            [
+                ClassId::ACCRETING_WHITE_DWARF,
+                ClassId::ACCRETING_WHITE_DWARF_SLOW
+            ]
+            .contains(&class),
+            "{class} is no binary class of the walk"
+        );
+        &[TransientKind::Nova]
+    }
+}
+
+/// Every recurrent detection of plan 11's binary `class`, an accreting white dwarf class or the
+/// X-ray binaries, by `query`'s sensor (P12.T5.c), sorted: every host of the box of cells about the
+/// observer by its scan marks, its events listed by plan 11 over an interval wide enough by its
+/// speed alone and the class's longest event, each evaluated directly from plan 11's light curve
+/// functions (`light_curve`, `xray_luminosity`).
+///
+/// An event is an onset where its light arrives in the window, seen by its peak, and in progress
+/// where it arrived before the window and is not over at its start (plan 11's `duration`), seen by
+/// its light then. The line of sight is the walk's rule, from the host's position at the start of
+/// the Julian year that holds each onset, so that fluxes compare bit for bit. No slow host is
+/// passed over by the eruptions its marks carry.
+///
+/// # Panics
+///
+/// As [`brute_force_detections`], and for a class that is no binary class of the walk.
+pub fn brute_force_binary_detections(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    class: ClassId,
+    query: &AlertQuery,
+) -> Vec<Seen> {
+    if !query.classes().contains(class) {
+        return Vec::new();
+    }
+    let kinds = binary_kinds(class);
+    let reach = kinds
+        .iter()
+        .map(|&kind| kind_reach(kind, query.sensor()).value())
+        .fold(0.0, f64::max);
+    if reach <= 0.0 {
+        return Vec::new();
+    }
+    let longest = kinds
+        .iter()
+        .map(|&kind| match kind.row().duration() {
+            Some(LongestDuration::AtMost(span)) => span.as_seconds_f64(),
+            other => panic!("{kind:?} lasts {other:?}"),
+        })
+        .fold(0.0, f64::max);
+    let observer = query.observer_position();
+    let centre = CatalogueCellKey::containing(class, observer).expect("a cell of the cube");
+    let edge = f64::from(centre.edge_ly());
+    let half = ((reach + LIFETIME_REACH.value()) / edge).ceil();
+    assert!(half < 1e3, "a box of {half} cells about the observer");
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a whole number under 1,000"
+    )]
+    let half = half as i32 + 1;
+    let [cx, cy, cz] = centre.cell();
+    let (fast, slow, xrb) = (
+        AwdProcess::new(galaxy, AwdSide::Fast),
+        AwdProcess::new(galaxy, AwdSide::Slow),
+        XrayBinaries::new(galaxy),
+    );
+    let mut seen = Vec::new();
+    let mut events = Vec::new();
+    for x in cx - half..=cx + half {
+        for y in cy - half..=cy + half {
+            for z in cz - half..=cz + half {
+                let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
+                    continue;
+                };
+                let hosts: Vec<BinaryHost> = if class == ClassId::XRAY_BINARY {
+                    let mut marks = Vec::new();
+                    scan_marks_cell(galaxy, &xrb, key, &mut marks);
+                    marks.into_iter().map(BinaryHost::Xrb).collect()
+                } else {
+                    let process = if class == ClassId::ACCRETING_WHITE_DWARF {
+                        &fast
+                    } else {
+                        &slow
+                    };
+                    let mut marks = Vec::new();
+                    scan_marks_cell(galaxy, process, key, &mut marks);
+                    marks.into_iter().map(BinaryHost::Awd).collect()
+                };
+                for host in &hosts {
+                    let motion = host.motion();
+                    let interval = wide_line_interval(&motion, observer, query.window(), longest);
+                    events.clear();
+                    events_in(&host.system(galaxy.seed()), interval, &mut events);
+                    seen.extend(binary_seen(
+                        galaxy,
+                        context,
+                        query,
+                        class,
+                        host.id(),
+                        &motion,
+                        &events,
+                    ));
+                }
+            }
+        }
+    }
+    seen.sort();
+    seen
+}
+
+/// `events` of `host` moving by `motion` as `query`'s sensor sees them, evaluated directly.
+fn binary_seen(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    class: ClassId,
+    host: SystemId,
+    motion: &CatalogueMotion,
+    events: &[BinaryEvent],
+) -> Vec<Seen> {
+    let observer = query.observer_position();
+    let window = query.window();
+    let mut lines = BTreeMap::new();
+    let mut seen = Vec::new();
+    for event in events {
+        let onset = event.onset();
+        let site = motion.position_at(onset);
+        let distance = site.distance_to(observer);
+        let arrival = onset.checked_add(light_time(distance)).unwrap();
+        let (phase, age) = if window.start() <= arrival && arrival < window.end() {
+            (DetectionPhase::Onset, event.curve().peak())
+        } else if arrival < window.start()
+            && window.start().checked_since(arrival).unwrap() < event.duration()
+        {
+            (
+                DetectionPhase::InProgress,
+                window.start().checked_since(arrival).unwrap(),
+            )
+        } else {
+            continue;
+        };
+        let light = |band| match band {
+            AlertBand::Photometric(band) => light_curve(event, age, band),
+            AlertBand::XRay => xray_luminosity(event, age),
+        };
+        let bare = query.sensor().bands().any(|(band, limits)| {
+            inverse_square_flux(light(band), distance).is_some_and(|f| f >= limits.detect())
+        });
+        if !bare {
+            continue;
+        }
+        let year = onset.seconds().div_euclid(31_557_600) * 31_557_600;
+        let line = lines.entry(year).or_insert_with(|| {
+            let from = motion.position_at(UniverseTime::new(year, 0).unwrap());
+            context.sightline(galaxy, &from, observer)
+        });
+        let mut best = None;
+        for band in AlertBand::ALL {
+            let Some(limits) = query.sensor().limits(band) else {
+                continue;
+            };
+            let Some(f) = flux(light(band), distance, line, band) else {
+                continue;
+            };
+            let over = f.value() / limits.detect().value();
+            let better = match best {
+                None => over >= 1.0,
+                Some((_, _, most)) => over > most,
+            };
+            if better {
+                best = Some((band, f, over));
+            }
+        }
+        let Some((band, f, _)) = best else {
+            continue;
+        };
+        let resolve = query.sensor().limits(band).unwrap().resolve();
+        let to = bearing(observer, &site).unwrap();
+        let present = motion.position_at(arrival);
+        seen.push(Seen {
+            arrival,
+            event: event.id(),
+            host,
+            class: Some(class),
+            kind: binary_kind(event.kind()),
+            emitted: onset,
+            phase,
+            band,
+            flux: bits(f.value()),
+            resolvable: f >= resolve,
+            bearing: [bits(to.azimuth().value()), bits(to.elevation().value())],
+            apparent: position_bits(&site),
+            light_age: light_time(distance),
+            distance_now: bits(LightYears::from(observer.distance_to(&present)).value()),
+            velocity_then: motion.velocity_at(onset).metres_per_second().map(bits),
+            motion: Motion::Drift,
+        });
+    }
+    seen
+}
+
+/// The emission interval wide enough, by the speed of a host moving by `motion` alone, to hold
+/// every event of at most `longest` seconds whose light reaches `observer` in `window` or is
+/// arriving at its start: the window less the light time from the host's position at the window's
+/// start, widened by β (s + window + 2 × longest + 2 days) ÷ (1 ∓ β), twice the longest event and
+/// a day either side, from bounds alone.
+fn wide_line_interval(
+    motion: &CatalogueMotion,
+    observer: &GalacticPosition,
+    window: TimeWindow,
+    longest: f64,
+) -> TimeWindow {
+    let beta = motion.velocity_at(UniverseTime::EPOCH).speed().value() / SPEED_OF_LIGHT;
+    let s0 = motion
+        .position_at(window.start())
+        .distance_to(observer)
+        .value()
+        / SPEED_OF_LIGHT;
+    let width = window
+        .end()
+        .checked_since(window.start())
+        .unwrap()
+        .as_seconds_f64();
+    let reach = beta * (s0 + width + 2.0 * longest + 2.0 * 86_400.0);
+    let (s_hi, s_lo) = (
+        (s0 + reach) / (1.0 - beta),
+        ((s0 - reach) / (1.0 + beta)).max(0.0),
+    );
+    let at = |t: UniverseTime, seconds: f64| {
+        let span = Span::from_seconds_f64(seconds.abs()).unwrap();
+        if seconds < 0.0 {
+            t.checked_sub(span)
+        } else {
+            t.checked_add(span)
+        }
+        .unwrap()
+    };
+    TimeWindow::new(
+        at(window.start(), -(2.0 * longest + s_hi + 2.0 * 86_400.0)),
+        at(window.end(), -(s_lo - 2.0 * 86_400.0)),
     )
     .unwrap()
 }

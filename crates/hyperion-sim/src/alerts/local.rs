@@ -10,9 +10,10 @@
 //! - FU Orionis outbursts ([`fu_orionis`], P06.T28.d), [`TransientKind::FuOrionisOutburst`];
 //! - pulsar glitches, Crab-like and Vela-like ([`glitches`], P06.T28.b), [`TransientKind::Glitch`].
 //!
-//! Two local kinds wait for plan 11's binary events, P11.T9, whose rows in the registry are
-//! pending on it, and are not listed: [`TransientKind::DwarfNova`] and, while its row is local,
-//! [`TransientKind::XrayBurst`]. Magnetar bursts are walked with the core collapses (P12.T5.c).
+//! Dwarf novae ([`TransientKind::DwarfNova`]), plan 11's one local kind, are not listed: plan 11
+//! gives them only to an accreting white dwarf entry (P11.T9.b), whose orbit its scan marks lack,
+//! and a range query's rows hold no catalogue class's host yet (below). Magnetar bursts and X-ray
+//! bursts are walked with the core collapses and the X-ray binaries (P12.T5.c).
 //!
 //! # The window
 //!

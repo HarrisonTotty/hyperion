@@ -1,19 +1,20 @@
 //! The recurrent classes' walk (plan 12, P12.T5.c): the events a catalogue class's hosts repeat,
-//! each in the window its light arrives in. So far the core collapses' magnetars.
+//! each in the window its light arrives in.
 //!
-//! # What is built
+//! # The classes
 //!
-//! Plan 12's T5.c walks five classes. One is built: the magnetars of the core collapses' entries
-//! (plan 06, P06.T28.c), walked over [`ClassId::CORE_COLLAPSE`] (main's ruling of 2026-10-30). The
-//! others wait on their sources, and [`scan_plan`] and [`scan_cell`] give them nothing until then:
+//! Plan 12's T5.c walks these, each through [`scan_plan`] and [`scan_cell`]:
 //!
-//! - the accreting white dwarfs, fast and slow, their novae, on plan 11's scan marks and their two
-//!   classes (P11.T8.a: `AwdScanMarks`, `scan_marks`, `engine_calls`) and their light curves
-//!   (P11.T9);
-//! - the X-ray binaries, their transients, X-ray bursts and Be/X outbursts, on P11.T8.b's class and
-//!   `XrbScanMarks`, and P11.T9;
-//! - the luminous blue variables on their class's process, P09.T43 (plan 06's giant eruptions,
-//!   their events, are built).
+//! - the magnetars of the core collapses' entries (plan 06, P06.T28.c), walked over
+//!   [`ClassId::CORE_COLLAPSE`] (main's ruling of 2026-10-30; below);
+//! - the accreting white dwarfs, fast and slow, their novae, and the X-ray binaries, their
+//!   transients, X-ray bursts and Be/X outbursts, through plan 11's scan marks alone (P11.T8.a–b,
+//!   P11.T9; [`nova_scan_cell`], [`xray_binary_scan_cell`]).
+//!
+//! The luminous blue variables (P09.T43) wait for their walk. A class with no recurrent kind plans
+//! and scans nothing. Each class is walked over its cells within the reach of its recurrent kinds
+//! ([`recurrent_scan_plan`], the magnetars' [`magnetar_scan_plan`]), not widened by Design note 5's
+//! 1%, as T5.b's walk is not, and [`recurrent_detections`] merges a sphere's cells for any of them.
 //!
 //! # The magnetars
 //!
@@ -69,6 +70,7 @@ use std::fmt;
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
@@ -93,8 +95,13 @@ use crate::units::{Gauss, LightYears, Metres, SolarMasses, Watts, Years};
 
 use super::arriving::{ArrivingLight, DetectionLight};
 use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
-use super::registry::TransientKind;
-use super::{AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase};
+use super::registry::{Route, TransientKind};
+use super::{AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, SensorHorizon};
+
+mod binaries;
+mod lit;
+
+pub use binaries::{nova_scan_cell, xray_binary_scan_cell};
 
 /// The longest a magnetar stays one after its neutron star's birth, Julian years: 10¹⁹ G yr ÷
 /// `B_Q`, 227,272.7, which a field born far above the critical field approaches (plan 06's
@@ -404,36 +411,49 @@ impl MagnetarCells for NoMagnetarCells {
 }
 
 /// The cells a background scan of `class` walks for `query` in `_galaxy`, in key order: for the
-/// core collapses, their magnetars' ([`magnetar_scan_plan`]); none for a class the query does not
-/// ask about, a recurrent class whose source is not built (module documentation) or a class with
-/// no recurrent kind.
+/// core collapses, their magnetars' ([`magnetar_scan_plan`]); for the accreting white dwarfs and
+/// the X-ray binaries, their cells within the reach of their recurrent kinds
+/// ([`recurrent_scan_plan`]); none for a class the query does not ask about or a class with no
+/// recurrent kind walked here.
 ///
-/// The galaxy is the plan's Provides': the magnetars' cells need none, and the accreting white
-/// dwarfs' scan marks (P11.T8.a) may.
+/// The galaxy is the plan's Provides': no class's cells need it.
 ///
 /// # Panics
 ///
-/// As [`magnetar_scan_plan`].
+/// As [`recurrent_scan_plan`].
 #[must_use]
 pub fn scan_plan(_galaxy: &Galaxy, class: ClassId, query: &AlertQuery) -> Vec<CatalogueCellKey> {
-    // P11.T8.a, P11.T8.b and P09.T43 build the other recurrent classes' sources; the rest of the
-    // classes have no recurrent kind.
     if class == ClassId::CORE_COLLAPSE {
         magnetar_scan_plan(class, query)
+    } else if is_walked(class) {
+        recurrent_scan_plan(class, query)
     } else {
         Vec::new()
     }
 }
 
+/// Whether [`scan_cell`] walks `class` through plan 11's scan marks.
+#[must_use]
+fn is_walked(class: ClassId) -> bool {
+    [
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+        ClassId::XRAY_BINARY,
+    ]
+    .contains(&class)
+}
+
 /// Appends to `out` the recurrent events of `class`'s hosts in `cell` that `query`'s sensor sees in
 /// its window, sorted by arrival and then by event: for the core collapses, their magnetars'
-/// ([`magnetar_scan_cell`] with plan 09's process); nothing for the other classes (module
-/// documentation). A pure function of one catalogue cell, which a background scan runs in chunks
-/// (Design note 8).
+/// ([`magnetar_scan_cell`] with plan 09's process); for the accreting white dwarfs, their novae
+/// ([`nova_scan_cell`]), and for the X-ray binaries, their outbursts and bursts
+/// ([`xray_binary_scan_cell`]), each with its class's process; nothing for the other classes
+/// (module documentation). A pure function of one catalogue cell, which a background scan runs in
+/// chunks (Design note 8).
 ///
 /// # Panics
 ///
-/// As [`magnetar_scan_cell`].
+/// As the class's walk does.
 ///
 /// # Examples
 ///
@@ -478,18 +498,153 @@ pub fn scan_cell(
     query: &AlertQuery,
     out: &mut Vec<Detection>,
 ) {
-    // P11.T8.a, P11.T8.b and P09.T43 build the other recurrent classes' sources; the rest of the
-    // classes have no recurrent kind.
-    if class == ClassId::CORE_COLLAPSE {
-        magnetar_scan_cell(
-            galaxy,
-            ctx,
-            query,
-            &CoreCollapseProcess::new(galaxy),
-            cell,
-            out,
-        );
+    if cell.class() != class {
+        return;
     }
+    match class {
+        ClassId::CORE_COLLAPSE => {
+            let process = CoreCollapseProcess::new(galaxy);
+            magnetar_scan_cell(galaxy, ctx, query, &process, cell, out);
+        }
+        ClassId::ACCRETING_WHITE_DWARF => {
+            let process = AwdProcess::new(galaxy, AwdSide::Fast);
+            nova_scan_cell(galaxy, ctx, query, &process, cell, out);
+        }
+        ClassId::ACCRETING_WHITE_DWARF_SLOW => {
+            let process = AwdProcess::new(galaxy, AwdSide::Slow);
+            nova_scan_cell(galaxy, ctx, query, &process, cell, out);
+        }
+        ClassId::XRAY_BINARY => {
+            let process = XrayBinaries::new(galaxy);
+            xray_binary_scan_cell(galaxy, ctx, query, &process, cell, out);
+        }
+        // The other classes have no recurrent kind walked here.
+        _ => {}
+    }
+}
+
+/// The detections of every recurrent event of `class`'s hosts that `query`'s sensor sees in its
+/// window, appended to `out` by arrival and then by event: [`scan_cell`] over each cell of
+/// [`scan_plan`], merged, as a background scan's chunks merge (Design note 8).
+///
+/// # Panics
+///
+/// As [`scan_cell`].
+///
+/// # Examples
+///
+/// The novae a visual sensor at the Sun-like point sees begin over a decade, to twelfth magnitude
+/// in V: a nova on a heavy white dwarf outshines that across the cube, so the walk takes every cell
+/// of the fast hosts' class, and the dust decides which are seen.
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::alerts::{
+///     AlertBand, AlertContext, AlertQuery, BandLimits, DetectionPhase, SensorHorizon,
+///     recurrent_detections,
+/// };
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::events::TimeWindow;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::catalogue_classes::ClassId;
+/// use hyperion_sim::galaxy::gas::ccm::Band;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::WattsPerSquareMetre;
+///
+/// let galaxy = Galaxy::new(Seed::new(9));
+/// // V = 12: Vega's 3.631 × 10⁻⁸ W m⁻² µm⁻¹ through the V band's 0.084 µm, 10^4.8 fainter.
+/// let limit = WattsPerSquareMetre::new(3.631e-8 * 0.084 * 1.584_893e-5);
+/// let v = BandLimits::new(limit, limit)?;
+/// let sensor = SensorHorizon::new([(AlertBand::Photometric(Band::V), v)])?;
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).ok_or("in the cube")?;
+/// let decade = TimeWindow::new(UniverseTime::EPOCH, UniverseTime::from_julian_years(10).ok_or("on the clock")?)?;
+/// let query = AlertQuery::builder(sun, decade, sensor).build()?;
+/// let mut noise = NoiseCache::with_capacity(4_096);
+/// let mut context = AlertContext::new(&mut noise, &NoModifiers);
+/// let mut novae = Vec::new();
+/// recurrent_detections(&galaxy, &mut context, ClassId::ACCRETING_WHITE_DWARF, &query, &mut novae);
+/// let begun = novae.iter().filter(|d| d.phase() == DetectionPhase::Onset).count();
+/// # let _ = begun;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn recurrent_detections(
+    galaxy: &Galaxy,
+    ctx: &mut AlertContext<'_>,
+    class: ClassId,
+    query: &AlertQuery,
+    out: &mut Vec<Detection>,
+) {
+    let start = out.len();
+    for cell in scan_plan(galaxy, class, query) {
+        scan_cell(galaxy, ctx, class, cell, query, out);
+    }
+    sort_detections(&mut out[start..]);
+}
+
+/// How far `sensor` can see the events of `class`'s hosts that the recurrent walk finds: the
+/// largest [`kind_reach`] of the recurrent kinds whose hosts are the class's, with no extinction
+/// (Design note 5); zero for a class with none.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::alerts::{AlertBand, BandLimits, SensorHorizon, recurrent_reach};
+/// use hyperion_sim::galaxy::catalogue_classes::ClassId;
+/// use hyperion_sim::units::WattsPerSquareMetre;
+///
+/// let limit = WattsPerSquareMetre::new(1e-6);
+/// let xray = SensorHorizon::new([(AlertBand::XRay, BandLimits::new(limit, limit)?)])?;
+/// // An X-ray transient at a 15 M☉ black hole's Eddington luminosity, 1.0282 × 10³² W in
+/// // 2–10 keV, falls to a microwatt per square metre at some 300 ly.
+/// let transients = recurrent_reach(ClassId::XRAY_BINARY, &xray).value();
+/// assert!((290.0..310.0).contains(&transients));
+/// // A nova gives no X-rays.
+/// assert_eq!(recurrent_reach(ClassId::ACCRETING_WHITE_DWARF, &xray).value(), 0.0);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn recurrent_reach(class: ClassId, sensor: &SensorHorizon) -> LightYears {
+    TransientKind::ALL
+        .into_iter()
+        .filter(|kind| {
+            let row = kind.row();
+            row.route() == Route::Recurrent && row.classes().contains(class)
+        })
+        .map(|kind| kind_reach(kind, sensor))
+        .fold(
+            LightYears::ZERO,
+            |far, reach| if reach > far { reach } else { far },
+        )
+}
+
+/// The cells of `class`'s grid whose hosts' recurrent events `query`'s sensor can see: the class's
+/// cells within [`recurrent_reach`], in key order; none if the query does not ask about the class
+/// or the sensor sees none of its events. Every host stays within the class grid's 4,096 ly of its
+/// cell at every time the lookup serves (plan 09's rule 5), so no host whose event's light could
+/// reach the sensor's limit is left out.
+///
+/// # Panics
+///
+/// If the reach is not finite, which [`kind_reach`] never gives.
+#[must_use]
+pub fn recurrent_scan_plan(class: ClassId, query: &AlertQuery) -> Vec<CatalogueCellKey> {
+    if !query.classes().contains(class) {
+        return Vec::new();
+    }
+    let reach = recurrent_reach(class, query.sensor());
+    if reach <= LightYears::ZERO {
+        return Vec::new();
+    }
+    let sphere = QuerySphere::new(
+        *query.observer_position(),
+        reach,
+        query.window().start(),
+        LightYears::ZERO,
+    )
+    .expect("a reach is a positive length within the cube's diagonal");
+    cells_in_sphere(class, &sphere).collect()
 }
 
 /// The cells of `class`'s grid whose entries' magnetars `query`'s sensor can see: the class's cells
@@ -966,10 +1121,11 @@ mod tests {
         );
     }
 
-    /// The classes whose sources are not built, and those with no recurrent kind, plan and scan
-    /// nothing; a query that does not ask about the core collapses plans nothing for them.
+    /// The classes with no recurrent kind walked here, and those whose recurrent kinds a sensor
+    /// cannot see, plan and scan nothing: an X-ray sensor sees no nova and no giant eruption, but
+    /// the X-ray binaries' transients; a query that does not ask about a class plans nothing for it.
     #[test]
-    fn classes_without_a_built_recurrent_source_scan_nothing() {
+    fn classes_without_a_walked_kind_the_sensor_sees_scan_nothing() {
         let galaxy = Galaxy::new(Seed::new(9));
         let w = WattsPerSquareMetre::new;
         let xray = BandLimits::new(w(0.04), w(0.4)).unwrap();
@@ -988,7 +1144,6 @@ mod tests {
         for class in [
             ClassId::ACCRETING_WHITE_DWARF,
             ClassId::ACCRETING_WHITE_DWARF_SLOW,
-            ClassId::XRAY_BINARY,
             ClassId::LUMINOUS_BLUE_VARIABLE,
             ClassId::TYPE_IA,
             ClassId::STELLAR_MERGER,
@@ -999,11 +1154,19 @@ mod tests {
             scan_cell(&galaxy, &mut context, class, cell, &query, &mut out);
             assert_eq!(out, [], "{class}");
         }
-        assert_ne!(scan_plan(&galaxy, ClassId::CORE_COLLAPSE, &query).len(), 0);
+        for class in [ClassId::CORE_COLLAPSE, ClassId::XRAY_BINARY] {
+            assert_ne!(scan_plan(&galaxy, class, &query).len(), 0, "{class}");
+        }
+        assert_eq!(
+            recurrent_scan_plan(ClassId::CORE_COLLAPSE, &query),
+            magnetar_scan_plan(ClassId::CORE_COLLAPSE, &query)
+        );
         let others = AlertQuery::builder(sun, year, sensor)
             .classes(ClassSet::of(ClassId::TYPE_IA))
             .build()
             .unwrap();
-        assert_eq!(scan_plan(&galaxy, ClassId::CORE_COLLAPSE, &others), []);
+        for class in [ClassId::CORE_COLLAPSE, ClassId::XRAY_BINARY] {
+            assert_eq!(scan_plan(&galaxy, class, &others), [], "{class}");
+        }
     }
 }

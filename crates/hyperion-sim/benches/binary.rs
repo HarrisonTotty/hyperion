@@ -14,12 +14,23 @@
 //! slow hosts apart, over the entries of a run of cells about the solar circle in the Milky Way
 //! fixture with its kinematic tables: the target is under 300 ns a host. A slow host's marks hold
 //! its eruptions in the source horizon, the monotone phase's crossings, most of its cost.
+//!
+//! `binary/awd_scan_marks_cell` times plan 12's recurrent walk of the same cells (P12.T5.c,
+//! `alerts::scan_cell`), a cell an element, for a visual sensor at the Sun-like point over a year
+//! whose novae reach 2,000 ly: each host's scan marks, its emission interval, and a fast host's
+//! novae asked of its phase or a slow host's tested on the eruptions it carries. A background scan
+//! of a class walks some 640,000 such cells of the disc (`awd_scan_cold`, seconds).
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use hyperion_sim::Seed;
+use hyperion_sim::alerts::{
+    AlertBand, AlertContext, AlertQuery, BandLimits, NOVA_BAND_PEAKS, SensorHorizon, scan_cell,
+};
+use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::binary::{
     AccretingWdFast, AccretingWdSlow, AwdProcess, AwdSide,
@@ -27,6 +38,9 @@ use hyperion_sim::galaxy::catalogue_classes::binary::{
 use hyperion_sim::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueEntry,
 };
+use hyperion_sim::galaxy::gas::ccm::Band;
+use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -36,9 +50,11 @@ use hyperion_sim::stellar::binary::{
     BinaryInput, BinaryParams, PairLight, can_interact, evolve, pair_light_bound,
 };
 use hyperion_sim::stellar::draws::StarDraws;
-use hyperion_sim::units::consts::SOLAR_RADIUS_M;
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SOLAR_RADIUS_M};
 use hyperion_sim::units::{
-    Dex, GravitationalParameter, HeliumExcess, Metres, Radians, Seconds, SolarMasses, Years,
+    Dex, GravitationalParameter, HeliumExcess, Metres, Radians, Seconds, SolarMasses,
+    WattsPerSquareMetre, Years,
 };
 
 /// The age each pair is run to, years.
@@ -278,12 +294,60 @@ fn awd_scan_marks(c: &mut Criterion) {
     group.finish();
 }
 
+/// Plan 12's recurrent walk of one accreting white dwarf cell, a cell an element, for each class:
+/// the twelve cells along the solar circle of `awd_scan_marks`, for a visual sensor at the
+/// Sun-like point over a year whose novae reach 2,000 ly.
+fn awd_scan_marks_cell(c: &mut Criterion) {
+    let galaxy = Galaxy::from_params(Seed::new(0x0b17_08a0), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential();
+    let v = AlertBand::Photometric(Band::V);
+    let d = 2_000.0 * METRES_PER_LIGHT_YEAR;
+    let limit = NOVA_BAND_PEAKS[2].value() / (4.0 * std::f64::consts::PI * d * d);
+    let w = WattsPerSquareMetre::new;
+    let limits = BandLimits::new(w(limit), w(10.0 * limit)).expect("positive limits");
+    let sensor = SensorHorizon::new([(v, limits)]).expect("one band");
+    let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
+    let year = TimeWindow::new(
+        UniverseTime::EPOCH,
+        UniverseTime::from_julian_years(1).expect("on the clock"),
+    )
+    .expect("a year");
+    let query = AlertQuery::builder(sun, year, sensor)
+        .build()
+        .expect("a query");
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut group = c.benchmark_group("binary/awd_scan_marks_cell");
+    for side in [AwdSide::Fast, AwdSide::Slow] {
+        let class = side.class();
+        let cells: Vec<_> = (-6..6)
+            .map(|x| CatalogueCellKey::new(class, [x, 50, 0]).expect("a cell"))
+            .collect();
+        group.throughput(Throughput::Elements(
+            u64::try_from(cells.len()).expect("twelve cells"),
+        ));
+        let mut out = Vec::new();
+        group.bench_function(format!("{side:?}").to_lowercase(), |bench| {
+            bench.iter(|| {
+                let mut context = AlertContext::new(&mut noise, &NoModifiers);
+                out.clear();
+                for &cell in &cells {
+                    scan_cell(&galaxy, &mut context, class, cell, &query, &mut out);
+                }
+                black_box(out.len())
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     binary,
     exp_reference,
     examples,
     distribution,
     light_bound,
-    awd_scan_marks
+    awd_scan_marks,
+    awd_scan_marks_cell
 );
 criterion_main!(binary);

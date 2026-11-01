@@ -10,8 +10,10 @@
 //!
 //! - A supernova's light is its template's in the band ([`supernova_luminosity`]) at its age since
 //!   its onset arrived, as the one-shot walk reads it ([`oneshot`](super::oneshot)).
-//! - A merger's luminous red nova or kilonova is plan 11's curve in the band while the event is
-//!   active ([`binary_luminosity`]), the same walk's.
+//! - A binary event of plan 11's is its curve in the band while the event is active
+//!   ([`binary_luminosity`]), the walk's own: a merger's luminous red nova or kilonova (the
+//!   one-shot walk), or a nova, an X-ray transient's outburst, a Type I burst or a Be/X outburst
+//!   (the recurrent walk).
 //! - A star's flare or FU Orionis outburst is its own light, (factor − 1) times the star's
 //!   quiescent luminosity, times the kind's share of it in the band, emitted one light time before
 //!   ([`local`](super::local)).
