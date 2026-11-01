@@ -57,13 +57,17 @@ export const SMOKE_WATCHDOG_BASE_MS = 180_000;
  * R10.T14.e's spike settle: the comparison 179.6 / 176.9 s, the ascent 160.5 / 162.2 s, the
  * terrain 2.6 / 4.8 s, the spike 211.9 / 212.6 s, the occultation 21.8 / 21.6 s, the eclipse
  * 28.1 / 28.2 s and the far limb 62.7 / 64.6 s: 667.2 / 670.9 s in all, and part 1 757.9 /
- * 756.1 s. Twice 670.9 s is 1,341.8 s, 23 minutes rounded up.
+ * 756.1 s. Twice 670.9 s is 1,341.8 s, 23 minutes rounded up. fix-view-light's two groups, measured
+ * since on a lane's pod (SwiftShader, the default variant alone, its watchdog scale 2), the view's
+ * light with the Sun in frame 53.4 s and the Sun's glare through the air 192.8 s (2026-11-02), add
+ * twice their 246.2 s: 1,834.2 s, 31 minutes rounded up, until the development machine measures
+ * them.
  *
  * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`
  * (each times the same scale, {@link SmokeWatchdogInputs.scale}), so that the outer limit stays
  * 120 s over the watchdog; `result.test.ts` holds the two equal.
  */
-export const CAPTURES_WATCHDOG_MS = 1_380_000;
+export const CAPTURES_WATCHDOG_MS = 1_860_000;
 
 /**
  * What part 1's watchdog gains when the run lifts timestamp quantization (`--smoke-gpu-timing=1`,

@@ -118,6 +118,7 @@ import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture }
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
+import { captureViewLightAir } from "./viewLightAir";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
@@ -713,6 +714,12 @@ async function run(
   if (captures) {
     await group(1, "fix-view-light the view's light with the Sun in frame", async () => {
       images = [...images, ...(await captureViewLight(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await group(1, "fix-view-light the Sun's glare through the air", async () => {
+      images = [...images, ...(await captureViewLightAir(engine, checks))];
     });
   }
 

@@ -107,7 +107,7 @@ fi
 # `CAPTURES_WATCHDOG_MS` (`result.test.ts` holds the allowance equal to it). The scale stretches
 # the watchdog's share of each limit and leaves the margin as it is.
 outer_limit_s=300
-captures_allowance_s=1380
+captures_allowance_s=1860
 outer_margin_s=120
 
 # The watchdogs' scale, and its largest (`src/smoke/result.ts`'s `SMOKE_WATCHDOG_SCALE_MAX`).
