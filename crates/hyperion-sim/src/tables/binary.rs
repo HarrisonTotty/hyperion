@@ -12,7 +12,7 @@
 //!
 //! @provisional: hand-made scratch values (plan 11, Design note 13), not written by
 //! `hyperion-fit`, so not in [`MANIFEST`](super::MANIFEST) until plan 15's task for them exists.
-//! since-generator-version: 16 (the batch that lands P11.T7)
+//! since-generator-version: 26 (the formed mass restated at 26; 16, the batch that lands P11.T7)
 //! source: the brainstorm's counts at Milky Way parameters (plan 11, P11.T7): 9 × 10⁶ accreting
 //!   white dwarfs (Pala et al. 2020, MNRAS 494, 3799; the brainstorm's 6–12 × 10⁶, split in
 //!   halves by design note 12), 10⁴ X-ray binaries (Corral-Santana et al. 2016, A&A 587, A61),
@@ -56,7 +56,7 @@ use crate::units::Years;
 
 /// The Milky Way fixture's initial mass formed, M☉, that the scratch rates are scaled to: its
 /// components' systems (with those not yet born) times the mass formed per system.
-pub const MILKY_WAY_FORMED_MASS: f64 = 9.376_830_704_125_888e10;
+pub const MILKY_WAY_FORMED_MASS: f64 = 9.430_766_802_241_24e10;
 
 /// One carved class's row of [`ClassShareTable`].
 #[derive(Debug, Clone, Copy, PartialEq)]
