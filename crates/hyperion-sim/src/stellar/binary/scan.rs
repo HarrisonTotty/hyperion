@@ -10,7 +10,8 @@
 //! (`AccretingWdFast` and `AccretingWdSlow` in
 //! [`catalogue_classes::binary`](crate::galaxy::catalogue_classes::binary) draw the same marks
 //! first and then the rest). The catalogue's own test cannot refuse a candidate the scan keeps: its
-//! one way of refusing one, its recurrence on the other side of L, is the scan's own last check.
+//! ways of refusing one, its recurrence on the other side of L and, from 27, a fast host fed helium,
+//! are the scan's own last checks.
 //!
 //! The X-ray binaries' marks ([`XrbScanMarks`], P11.T8.b) are their kind, their place and motion
 //! at the epoch and a low-mass transient's outburst recurrence. [`scan_marks`] and [`scan_cell`]
@@ -30,7 +31,9 @@
 //! its class's side of L (the class's sampler's ranks below or above L's), then the white dwarf's
 //! mass given it, and the rate is the fit inverted at that mass (`transfer_rate_for`); `P_rec` is
 //! then recomputed from the mass and the rate by the very function `carved_class` reads, so that
-//! the scan and the class's test split the hosts on the same number.
+//! the scan and the class's test split the hosts on the same number. From 27 (P11.T5's fix) a
+//! white dwarf fed helium has no nova, and the test puts it on the slow side whatever its rate:
+//! the fast side's scan reads its donor's kind, its binary's first draw, and refuses it.
 //!
 //! # Novae
 //!
@@ -816,7 +819,7 @@ fn awd_scan_marks(
 /// The scan marks of an accreting white dwarf of `process`'s class at `host`, after its site:
 /// its recurrence on the class's side of L, the white dwarf's mass and the rate, its velocity, its
 /// nova series and clock, and a slow host's eruptions in the source horizon; `None` if the
-/// recurrence lands on the other side. A catalogue candidate's ([`scan_marks`]) and a feature's
+/// recurrence lands on the other side or, from 27, a fast host is fed helium. A catalogue candidate's ([`scan_marks`]) and a feature's
 /// list entry's (P11.T8.f), on the same draws keyed by each one's system.
 #[must_use]
 pub(crate) fn awd_marks_at(
@@ -840,6 +843,10 @@ pub(crate) fn awd_marks_at(
     let transfer_rate = transfer_rate_for(white_dwarf_mass, drawn);
     let recurrence = nova_recurrence_period(white_dwarf_mass, transfer_rate);
     if recurrence_class(recurrence.value()) != process.side().carved() {
+        return None;
+    }
+    // From 27 a white dwarf fed helium has no nova, so the class's test puts it on the slow side.
+    if process.side() == AwdSide::Fast && process.has_no_nova(galaxy, key) {
         return None;
     }
     let clock = nova_clock(recurrence, stream.uniform());

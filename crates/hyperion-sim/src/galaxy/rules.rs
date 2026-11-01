@@ -268,8 +268,8 @@ impl GalaxyRules {
     /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
     /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
     /// P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules' `ia_explosion`, P11.T6,
-    /// `ns_accretion` and `heavy_donor`, P11.T4, `binary_kicks`, P11.T10, and `merger_mass`,
-    /// P11.T4.d ([`StellarRules::every_27_hold`]).
+    /// `ns_accretion` and `heavy_donor`, P11.T4, `awd_donors`, P11.T5's fix, `binary_kicks`,
+    /// P11.T10, and `merger_mass`, P11.T4.d ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -546,6 +546,10 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold().stellar.merger_mass,
             StellarRules::every_26_hold_with_its_retargets().merger_mass
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().stellar,
+            StellarRules::every_27_hold()
         );
     }
 }

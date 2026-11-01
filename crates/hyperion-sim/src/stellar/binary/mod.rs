@@ -30,6 +30,7 @@
 //! the pair-light tables ([`pair_light`]), sampled through the engine, whether a star of the pair
 //! may depart from its own model or a product live, and how bright it can be.
 
+pub(crate) mod awd_donors;
 pub(crate) mod carve;
 pub(crate) mod class_merger;
 mod classify;
@@ -71,6 +72,8 @@ pub use classify::{
     SYMBIOTIC_MIN_LUMINOSITY, SYMBIOTIC_XRB_MIN_LUMINOSITY, XRB_MIN_LUMINOSITY, XrbKind,
     carved_class, classify,
 };
+#[cfg(test)]
+pub(crate) use classify::{nova_recurrence_period, nova_recurrence_under};
 #[cfg(test)]
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};

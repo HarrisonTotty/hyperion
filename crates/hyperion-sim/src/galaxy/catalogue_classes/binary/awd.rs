@@ -74,7 +74,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
-use crate::rng::{Stream, tags};
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::sampler::ClassSampler;
 use crate::stellar::binary::scan::{AwdScanMarks, scan_marks};
 use crate::stellar::binary::{
@@ -252,6 +252,29 @@ impl AwdProcess {
         self.sampler
     }
 
+    /// Whether candidate `key`'s white dwarf has no nova under `galaxy`'s stellar rules: from 27
+    /// one fed helium has none (`AwdDonorRules::has_novae`, P11.T5's fix), so it is never a fast
+    /// host. Its donor's kind is read only then, from its binary's stream as
+    /// [`candidate`](Self::candidate) reads it ([`donor_draw`](Self::donor_draw)).
+    #[must_use]
+    pub(crate) fn has_no_nova(&self, galaxy: &Galaxy, key: ObjectKey) -> bool {
+        !galaxy
+            .rules()
+            .stellar
+            .awd_donors
+            .has_novae(|| self.donor_draw(galaxy.seed(), key).0 == AwdDonorKind::Helium)
+    }
+
+    /// Candidate `key`'s donor's kind, the first draw of its binary's stream
+    /// (`class.awd.binary`), and the stream after it, from which the candidate draws the rest of
+    /// its binary.
+    #[must_use]
+    fn donor_draw(&self, seed: Seed, key: ObjectKey) -> (AwdDonorKind, Stream) {
+        let mut stream = Stream::open(seed, tags::CLASS_AWD_BINARY, key);
+        let kind = AwdDonorKind::ALL[self.sampler.pick(AwdPick::DonorKind, &mut stream)];
+        (kind, stream)
+    }
+
     /// The ranks of the sampler's recurrence on the class's side of L.
     #[must_use]
     pub const fn recurrence_ranks(&self) -> (f64, f64) {
@@ -356,8 +379,7 @@ impl AwdProcess {
         let key = scan.host().key();
         let sampler = self.sampler;
         // 2. The binary now.
-        let mut stream = Stream::open(seed, tags::CLASS_AWD_BINARY, key);
-        let donor_kind = AwdDonorKind::ALL[sampler.pick(AwdPick::DonorKind, &mut stream)];
+        let (donor_kind, mut stream) = self.donor_draw(seed, key);
         let (period_mark, mass_mark) = match donor_kind {
             AwdDonorKind::MainSequence => {
                 (AwdMark::MainSequencePeriod, AwdMark::MainSequenceDonorMass)

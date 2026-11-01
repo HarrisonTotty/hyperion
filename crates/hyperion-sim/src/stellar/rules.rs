@@ -61,6 +61,12 @@
 //!   trials and its corotation through the engine's input's rules. The fitted tables keep the
 //!   version's rules until the bump refits them (`stellar/rules/heavy_donor_hold.rs` lists the
 //!   movers).
+//! - [`awd_donors`](StellarRules::awd_donors), at [`AWD_DONORS_VERSION`] (plan 11, P11.T5's fix):
+//!   which donors give an accreting white dwarf its novae, every donor below it and a hydrogen
+//!   donor alone from it, read at one choke point, `classify::nova_recurrence_under`, through each
+//!   timeline's rules, by `carved_class` and the census's marks. The catalogue's own timelines,
+//!   built from marks, take the version's rules (`stellar/rules/awd_donors_hold.rs` lists the
+//!   movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -70,6 +76,7 @@
 //! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
 
 use crate::GeneratorVersion;
+use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
@@ -101,6 +108,8 @@ pub(crate) struct StellarRules {
     /// compact accretor and books the transfer's angular momentum, the hold of
     /// [`HEAVY_DONOR_VERSION`].
     pub(crate) heavy_donor: HeavyDonorRules,
+    /// Which donors give an accreting white dwarf its novae, the hold of [`AWD_DONORS_VERSION`].
+    pub(crate) awd_donors: AwdDonorRules,
 }
 
 impl StellarRules {
@@ -136,6 +145,11 @@ impl StellarRules {
             } else {
                 HeavyDonorRules::Nuclear
             },
+            awd_donors: if version.get() >= AWD_DONORS_VERSION.get() {
+                AwdDonorRules::HydrogenDonors
+            } else {
+                AwdDonorRules::EveryDonor
+            },
         }
     }
 
@@ -155,7 +169,8 @@ impl StellarRules {
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
-    /// `heavy_donor`, P11.T4.d's `merger_mass`, and P11.T10's `binary_kicks`).
+    /// `heavy_donor`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors`, and P11.T10's
+    /// `binary_kicks`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -178,6 +193,8 @@ impl StellarRules {
     }
 }
 
+#[cfg(test)]
+mod awd_donors_hold;
 #[cfg(test)]
 mod binary_kicks_hold;
 #[cfg(test)]

@@ -7297,3 +7297,31 @@ galaxy_sweeps`.
     - two expect every companion shown:
       `stellar_system::{every_companion_is_its_slots_star_with_the_systems_composition_and_age,
 a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
+- **P11.T5's helium donors, held at 27** (lane `fix-p11-t5-awd-helium`, 2026-11-01;
+  research-p15-t10b-rates; at versions 24–26 nothing moves).
+  - _The hold._ `AWD_DONORS_VERSION` = 27 (`stellar/binary/awd_donors.rs`),
+    `StellarRules::awd_donors` (`AwdDonorRules::{EveryDonor, HydrogenDonors}`), in
+    `StellarRules::every_27_hold` and so `GalaxyRules::every_27_hold`. Its one `match` is
+    `AwdDonorRules::has_novae`; the held arm is the code verbatim.
+  - _From 27_ a white dwarf fed helium (a donor of HeMS, HeHG, HeGB or HeWD, BSE's types 7–10, as
+    `AccretingMarks::donor_kind` reads it) has no nova: `classify::nova_recurrence_under` gives it
+    an infinite recurrence through the timeline's rules, read by `carved_class` and the census's
+    marks, so it is a slow host. No helium-flash law (the brief's lean): the class's novae are
+    hydrogen's; V445 Pup's helium nova is left out, far under 1% of the Galaxy's novae.
+  - _The catalogue._ Its timelines, built from marks, take the version's rules, so under every 27
+    hold its test keeps every donor's novae. The fast side's scan reads the donor's kind, the
+    binary's first draw (`AwdProcess::donor_draw`), under the galaxy's rules and refuses one fed
+    helium (`has_no_nova`), so the scan keeps exactly the entries at the bump as well.
+    _Finding, pinned:_ a slow host fed helium keeps the hydrogen nova clock its scan draws from
+    the sampler's recurrence before its kind (17 of 129 slow sample entries under the arm, 5 of
+    them erupting in the source horizon). Giving it none needs scan marks without a nova (here) or
+    a recurrence drawn after the kind (the refit's).
+  - _Measured_ (10⁶ slab records, every 27 hold against every 27 hold but this one): 182 fast
+    hosts, 8 fed helium (4.4%), which made 59.2% of their novae; under the arm 174, and the novae a
+    year a fast host fall from 1.53 × 10⁻⁴ to 6.52 × 10⁻⁵.
+  - _Movers_ (the arm forced on at 24): the golden `catalogue_classes/accreting_white_dwarfs`,
+    `awd::tests::the_hosts_layers_against_the_share_rows` and, slow,
+    `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`'s pinned misses (the fast
+    hosts fed helium leave the class); the hold's own version-arm tests. The bump re-blesses them.
+  - _Acceptance:_ `cargo test -p hyperion-sim awd_donors` (the hold's tests and
+    `stellar::binary::awd_donors`'); slow, `the_helium_fed_hosts_leave_the_fast_class_in_a_census`.

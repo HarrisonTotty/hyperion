@@ -274,6 +274,12 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(/^galaxy::placement::fates_hold::the_two_arms_remnants_have_alike_masses_and_deaths_through_the_stellar_stage$/)"
 threads-required = 4
 
+# P11.T5's helium-donor hold runs its two censuses of 10⁶ records on sixteen threads of their own
+# (`awd_donors_hold::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::awd_donors_hold::the_helium_fed_hosts_leave_the_fast_class_in_a_census)"
+threads-required = 16
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"

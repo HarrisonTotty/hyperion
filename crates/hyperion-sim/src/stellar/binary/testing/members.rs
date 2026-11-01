@@ -11,7 +11,7 @@ use crate::orbit::{Eccentricity, KeplerElements};
 use crate::rng::Threshold;
 use crate::stellar::Phase;
 use crate::stellar::binary::classify::{
-    MAGNETIC_CV_SHARE, nova_recurrence_period, white_dwarf_feeding, xray_binary_reading, xrb_line,
+    MAGNETIC_CV_SHARE, nova_recurrence_under, white_dwarf_feeding, xray_binary_reading, xrb_line,
 };
 use crate::stellar::binary::{
     BinaryClass, BinaryTimeline, CarvedClass, HmxbKind, XrbKind, carved_class,
@@ -39,7 +39,8 @@ pub struct AccretingMarks {
     pub period: Option<Seconds>,
     /// The rate onto the white dwarf, M☉ yr⁻¹.
     pub transfer_rate: SolarMassesPerYear,
-    /// The nova recurrence period, Julian years.
+    /// The nova recurrence period, Julian years, as [`carved_class`] reads it under the pair's
+    /// rules: infinite for none (from 27 a white dwarf fed helium has none).
     pub recurrence: Years,
     /// Whether the white dwarf is magnetic, by its own draw.
     pub magnetic: bool,
@@ -582,7 +583,12 @@ pub(super) fn accreting_marks(
         donor_phase: donor.phase(),
         period: state.orbit().map(KeplerElements::period),
         transfer_rate: rate,
-        recurrence: nova_recurrence_period(white_dwarf.mass(), rate),
+        recurrence: nova_recurrence_under(
+            white_dwarf.mass(),
+            rate,
+            donor.phase(),
+            timeline.context().rules(),
+        ),
         magnetic,
         white_dwarf_initial_mass: initial[a],
         donor_initial_mass: initial[1 - a],
