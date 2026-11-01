@@ -107,6 +107,7 @@ import {
   factorBand,
   factorDense,
   solveBand,
+  solveBandColumns,
   solveDense,
   solveLower,
   solveLowerTransposed,
@@ -703,24 +704,55 @@ function layerMode(
   };
 }
 
-/** The beam's particular solution per unit transmission at the layer's top: Z⁺ and Z⁻. */
-interface Particular {
+/**
+ * The scratch of one layer's particular solution, reused layer by layer and beam by beam: n long,
+ * but for the user cosines' sources, U long. `up` and `down` hold Z⁺ and Z⁻ per unit transmission at
+ * the layer's top once {@link particularInto} returns.
+ */
+interface ParticularScratch {
+  readonly q: Float64Array;
+  readonly p: Float64Array;
+  readonly lInvP: Float64Array;
+  readonly t: Float64Array;
+  readonly coefficients: Float64Array;
+  readonly yc: Float64Array;
+  readonly difference: Float64Array;
   readonly up: Float64Array;
   readonly down: Float64Array;
+  readonly sourceUp: Float64Array;
+  readonly sourceDown: Float64Array;
+}
+
+function particularScratch(n: number, users: number): ParticularScratch {
+  return {
+    q: new Float64Array(n),
+    p: new Float64Array(n),
+    lInvP: new Float64Array(n),
+    t: new Float64Array(n),
+    coefficients: new Float64Array(n),
+    yc: new Float64Array(n),
+    difference: new Float64Array(n),
+    up: new Float64Array(n),
+    down: new Float64Array(n),
+    sourceUp: new Float64Array(users),
+    sourceDown: new Float64Array(users),
+  };
 }
 
 /**
  * Z^± for the source (ω ÷ 4π)(2 − δ_m0) Σ (2l + 1) χ_l Λ_l(μ) Λ_l(−μ₀) e^{−λt} (the module's
- * remarks): Zs = D L Y (K² − λ²)⁻¹ Yᵀ (Lᵀq − λL⁻¹p) and Zd = −D L⁻ᵀ(λ Y c − L⁻¹p), with
- * q = W^{½}M^{−½}Xs, p = W^{½}M^{−½}Xd and c the bracketed coefficients.
+ * remarks), into `scratch.up` and `scratch.down`: Zs = D L Y (K² − λ²)⁻¹ Yᵀ (Lᵀq − λL⁻¹p) and
+ * Zd = −D L⁻ᵀ(λ Y c − L⁻¹p), with q = W^{½}M^{−½}Xs, p = W^{½}M^{−½}Xd and c the bracketed
+ * coefficients.
  */
-function particular(
+function particularInto(
   lm: LayerMode,
   quadrature: DoubleGaussQuadrature,
   nodeLegendre: Float64Array,
   beamLegendre: Float64Array,
   slant: number,
-): Particular {
+  scratch: ParticularScratch,
+): void {
   const { nodes, weights, streams } = quadrature;
   const n = nodes.length;
   const lmax = streams - 1;
@@ -728,8 +760,7 @@ function particular(
   const { omega, moments } = lm.layer;
   const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
   // q and p from X0± at the nodes: X0⁺_i = c Σ (−1)^{l+m} (…) and X0⁻_i = c Σ (…).
-  const q = new Float64Array(n);
-  const p = new Float64Array(n);
+  const { q, p, lInvP, t, coefficients, yc, difference, up, down } = scratch;
   for (let i = 0; i < n; i += 1) {
     let even = 0;
     let odd = 0;
@@ -746,9 +777,8 @@ function particular(
     p[i] = -factor * 2 * strength * odd;
   }
   const { cholesky, eigenvectors: y, decayRatesSquared, scale } = lm;
-  const lInvP = Float64Array.from(p);
+  lInvP.set(p);
   solveLower(cholesky, n, lInvP);
-  const t = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
     let sum = 0;
     for (let r = i; r < n; r += 1) {
@@ -757,7 +787,6 @@ function particular(
     t[i] = sum - slant * at(lInvP, i);
   }
   const lambda2 = slant * slant;
-  const coefficients = new Float64Array(n);
   for (let k = 0; k < n; k += 1) {
     let sum = 0;
     for (let i = 0; i < n; i += 1) {
@@ -765,7 +794,6 @@ function particular(
     }
     coefficients[k] = sum / (at(decayRatesSquared, k) - lambda2);
   }
-  const yc = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
     let sum = 0;
     for (let k = 0; k < n; k += 1) {
@@ -773,13 +801,10 @@ function particular(
     }
     yc[i] = sum;
   }
-  const difference = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
     difference[i] = slant * at(yc, i) - at(lInvP, i);
   }
   solveLowerTransposed(cholesky, n, difference);
-  const up = new Float64Array(n);
-  const down = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
     let lyc = 0;
     for (let r = 0; r <= i; r += 1) {
@@ -790,7 +815,6 @@ function particular(
     up[i] = (sum + diff) / 2;
     down[i] = (sum - diff) / 2;
   }
-  return { up, down };
 }
 
 /** Whether layer `lm`'s slant factor lies within the resonance window of one of its k_n. */
@@ -1432,8 +1456,8 @@ export function solveDiscreteOrdinates(
         ? undefined
         : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
     const context = modeContext(m, quadrature, layers, userCosines, problem.groundAlbedo, ground);
-    beams.forEach((beam, b) => {
-      perBeam[b]?.push(solveBeamMode(context, beam));
+    solveBeamModes(context, beams).forEach((mode, b) => {
+      perBeam[b]?.push(mode);
     });
     if (m === 0 && planck !== undefined) {
       const mode = solveThermalMode(context, planck.interfaces, planck.ground);
@@ -1558,108 +1582,181 @@ function modeContext(
   };
 }
 
-/**
- * One beam's mode: solved once, or, where a layer's λ is resonant, at λ(1 ∓ 2h) in those layers
- * and averaged (the module's remarks, "A beam at an eigenvalue").
- */
-function solveBeamMode(context: ModeContext, beam: PreparedBeam): ModeIntensities {
-  const resonant = context.layerModes.map(
-    (lm, p) =>
-      at(beam.topTransmission, p) > 0 &&
-      lm.layer.omega > 0 &&
-      isResonant(lm, at(beam.slantFactor, p)),
-  );
-  if (!resonant.includes(true)) {
-    return solveBeamModeAt(context, beam, beam.slantFactor);
-  }
-  const shifted = (sign: number): Float64Array =>
-    beam.slantFactor.map((lambda, p) =>
-      resonant[p] === true ? lambda * (1 + sign * 2 * RESONANCE_HALF_WIDTH) : lambda,
-    );
-  const below = solveBeamModeAt(context, beam, shifted(-1));
-  const above = solveBeamModeAt(context, beam, shifted(1));
-  const mean = (x: Float64Array, y: Float64Array): Float64Array =>
-    x.map((value, i) => (value + at(y, i)) / 2);
-  return {
-    mode: below.mode,
-    quadratureUp: mean(below.quadratureUp, above.quadratureUp),
-    quadratureDown: mean(below.quadratureDown, above.quadratureDown),
-    userUp: mean(below.userUp, above.userUp),
-    userDown: mean(below.userDown, above.userDown),
-  };
+/** One solve of a mode for a beam: its own slant factors, or one side's shifted about a resonance. */
+interface BeamSolve {
+  readonly beam: PreparedBeam;
+  readonly slantFactor: Float64Array;
 }
 
-function solveBeamModeAt(
+/**
+ * Every beam's mode on the mode's one factorisation: each beam solved once, or, where a layer's λ
+ * is resonant, at λ(1 ∓ 2h) in those layers and averaged (the module's remarks, "A beam at an
+ * eigenvalue"), and every solve's right-hand side taken in one pass over the factors
+ * (`linearAlgebra.ts`'s `solveBandColumns`), each to the bit of its own solve.
+ */
+function solveBeamModes(
   context: ModeContext,
-  beam: PreparedBeam,
-  slantFactor: Float64Array,
-): ModeIntensities {
-  const { m, quadrature, layerModes, nodeLegendre, userLegendre } = context;
-  const { userCosines, groundAlbedo, ground } = context;
+  beams: ReadonlyArray<PreparedBeam>,
+): ModeIntensities[] {
+  const { m, quadrature, layerModes, userCosines, stack } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
   const layerCount = layerModes.length;
+  const solves: BeamSolve[] = [];
+  // Per beam, its first solve's index, and whether a second, shifted the other way, follows it.
+  const firstSolve: number[] = [];
+  const resonantBeam: boolean[] = [];
+  for (const beam of beams) {
+    const resonant = layerModes.map(
+      (lm, p) =>
+        at(beam.topTransmission, p) > 0 &&
+        lm.layer.omega > 0 &&
+        isResonant(lm, at(beam.slantFactor, p)),
+    );
+    firstSolve.push(solves.length);
+    if (!resonant.includes(true)) {
+      solves.push({ beam, slantFactor: beam.slantFactor });
+      resonantBeam.push(false);
+      continue;
+    }
+    const shifted = (sign: number): Float64Array =>
+      beam.slantFactor.map((lambda, p) =>
+        resonant[p] === true ? lambda * (1 + sign * 2 * RESONANCE_HALF_WIDTH) : lambda,
+      );
+    solves.push({ beam, slantFactor: shifted(-1) }, { beam, slantFactor: shifted(1) });
+    resonantBeam.push(true);
+  }
+  const columns = solves.length;
+  if (columns === 0) {
+    return [];
+  }
+  const rows = span * layerCount;
+  const rightHandSides = new Float64Array(rows * columns);
+  const scratch = particularScratch(n, users);
   const beamLegendre = new Float64Array(quadrature.streams);
-  legendreInto(m, quadrature.streams - 1, beam.cosine, beamLegendre, 0, 1);
+  const particulars = solves.map((solve, j): ModeParticulars => {
+    legendreInto(m, quadrature.streams - 1, solve.beam.cosine, beamLegendre, 0, 1);
+    const parts = modeParticulars(layerCount, span, users);
+    beamParticularsInto(context, solve.beam, solve.slantFactor, beamLegendre, scratch, parts);
+    rightHandSideInto(
+      stack,
+      parts,
+      beamGroundSource(context, solve.beam),
+      rightHandSides,
+      j,
+      columns,
+    );
+    return parts;
+  });
+  solveBandColumns(stack.lu, rightHandSides, columns);
+  const coefficients = new Float64Array(rows);
+  const fields = solves.map((solve, j): ModeIntensities => {
+    for (let r = 0; r < rows; r += 1) {
+      coefficients[r] = at(rightHandSides, r * columns + j);
+    }
+    const parts = particulars[j];
+    if (parts === undefined) {
+      throw new Error(`solve ${j} has no particular solutions`);
+    }
+    return modeField(context, parts, coefficients, beamGroundUserUp(context, solve.beam));
+  });
+  const mean = (x: Float64Array, y: Float64Array): Float64Array =>
+    x.map((value, i) => (value + at(y, i)) / 2);
+  return beams.map((_, b): ModeIntensities => {
+    const first = fields[firstSolve[b] ?? -1];
+    if (first === undefined) {
+      throw new Error(`beam ${b} has no solve`);
+    }
+    if (resonantBeam[b] !== true) {
+      return first;
+    }
+    const above = fields[(firstSolve[b] ?? -1) + 1];
+    if (above === undefined) {
+      throw new Error(`beam ${b} has no second solve`);
+    }
+    return {
+      mode: first.mode,
+      quadratureUp: mean(first.quadratureUp, above.quadratureUp),
+      quadratureDown: mean(first.quadratureDown, above.quadratureDown),
+      userUp: mean(first.userUp, above.userUp),
+      userDown: mean(first.userDown, above.userDown),
+    };
+  });
+}
 
-  const particularTop: Float64Array[] = [];
-  const particularBottom: Float64Array[] = [];
-  const particularUserUp: Float64Array[] = [];
-  const particularUserDown: Float64Array[] = [];
-  const sourceUp = new Float64Array(users);
-  const sourceDown = new Float64Array(users);
+/**
+ * A beam's particular solutions in every layer at its slant factors, into `out` (zeros where the
+ * beam does not reach or the layer does not scatter), with the source they and the beam itself give
+ * the user streams.
+ */
+function beamParticularsInto(
+  context: ModeContext,
+  beam: PreparedBeam,
+  slantFactor: Float64Array,
+  beamLegendre: Float64Array,
+  scratch: ParticularScratch,
+  out: ModeParticulars,
+): void {
+  const { m, quadrature, layerModes, nodeLegendre, userLegendre, userCosines } = context;
+  const n = quadrature.nodes.length;
+  const span = 2 * n;
+  const users = userCosines.length;
+  const { sourceUp, sourceDown } = scratch;
   layerModes.forEach((lm, p) => {
-    const top = new Float64Array(span);
-    const bottom = new Float64Array(span);
-    const userUp = new Float64Array(users);
-    const userDown = new Float64Array(users);
     const transmission = at(beam.topTransmission, p);
     const lambda = at(slantFactor, p);
     const { omega, opticalDepth: depth, moments } = lm.layer;
-    if (transmission > 0 && omega > 0) {
-      const z = particular(lm, quadrature, nodeLegendre, beamLegendre, lambda);
-      const through = exp(-lambda * depth);
-      for (let i = 0; i < n; i += 1) {
-        top[i] = transmission * at(z.up, i);
-        top[n + i] = transmission * at(z.down, i);
-        bottom[i] = transmission * through * at(z.up, i);
-        bottom[n + i] = transmission * through * at(z.down, i);
-      }
-      // The source at the user cosines: the scattered particular solution and the beam itself,
-      // X0(+μ_u) = c Σ (2l + 1) χ_l (−1)^{l+m} Λ_l(μ_u) Λ_l(μ₀) and X0(−μ_u) without the sign.
-      userSource(lm, quadrature, nodeLegendre, userLegendre, z.up, z.down, sourceUp, sourceDown);
-      const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
-      for (let l = m; l < quadrature.streams; l += 1) {
-        const sign = (l + m) % 2 === 0 ? 1 : -1;
-        const c = strength * (2 * l + 1) * at(moments, l) * at(beamLegendre, l);
-        if (c === 0) {
-          continue;
-        }
-        for (let u = 0; u < users; u += 1) {
-          const term = c * at(userLegendre, l * users + u);
-          sourceUp[u] = at(sourceUp, u) + sign * term;
-          sourceDown[u] = at(sourceDown, u) + term;
-        }
+    if (!(transmission > 0 && omega > 0)) {
+      return;
+    }
+    particularInto(lm, quadrature, nodeLegendre, beamLegendre, lambda, scratch);
+    const zUp = scratch.up;
+    const zDown = scratch.down;
+    const through = exp(-lambda * depth);
+    const face = p * span;
+    for (let i = 0; i < n; i += 1) {
+      out.top[face + i] = transmission * at(zUp, i);
+      out.top[face + n + i] = transmission * at(zDown, i);
+      out.bottom[face + i] = transmission * through * at(zUp, i);
+      out.bottom[face + n + i] = transmission * through * at(zDown, i);
+    }
+    // The source at the user cosines: the scattered particular solution and the beam itself,
+    // X0(+μ_u) = c Σ (2l + 1) χ_l (−1)^{l+m} Λ_l(μ_u) Λ_l(μ₀) and X0(−μ_u) without the sign.
+    userSource(lm, quadrature, nodeLegendre, userLegendre, zUp, zDown, sourceUp, sourceDown);
+    const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
+    for (let l = m; l < quadrature.streams; l += 1) {
+      const sign = (l + m) % 2 === 0 ? 1 : -1;
+      const c = strength * (2 * l + 1) * at(moments, l) * at(beamLegendre, l);
+      if (c === 0) {
+        continue;
       }
       for (let u = 0; u < users; u += 1) {
-        const inverse = 1 / at(userCosines, u);
-        userUp[u] = transmission * at(sourceUp, u) * inverse * phi(lambda + inverse, depth);
-        userDown[u] = transmission * at(sourceDown, u) * inverse * psi(lambda, inverse, depth);
+        const term = c * at(userLegendre, l * users + u);
+        sourceUp[u] = at(sourceUp, u) + sign * term;
+        sourceDown[u] = at(sourceDown, u) + term;
       }
     }
-    particularTop.push(top);
-    particularBottom.push(bottom);
-    particularUserUp.push(userUp);
-    particularUserDown.push(userDown);
+    const row = p * users;
+    for (let u = 0; u < users; u += 1) {
+      const inverse = 1 / at(userCosines, u);
+      out.userUp[row + u] = transmission * at(sourceUp, u) * inverse * phi(lambda + inverse, depth);
+      out.userDown[row + u] =
+        transmission * at(sourceDown, u) * inverse * psi(lambda, inverse, depth);
+    }
   });
+}
 
-  const groundBeam =
-    m === 0 && groundAlbedo > 0
-      ? (groundAlbedo / Math.PI) * beam.cosine * beam.groundTransmission
-      : 0;
+/**
+ * The ground's own upward intensities at the nodes for a beam, its reflection of the direct beam:
+ * Lambertian at mode 0, or a ground other than Lambertian's (μ₀ T_L ÷ π) ρ^m(μ, μ₀); `undefined`
+ * for none.
+ */
+function beamGroundSource(context: ModeContext, beam: PreparedBeam): Float64Array | undefined {
+  const { ground } = context;
+  const n = context.quadrature.nodes.length;
+  const groundBeam = lambertianBeam(context, beam);
   let groundSource = groundBeam > 0 ? new Float64Array(n).fill(groundBeam) : undefined;
-  // A ground other than Lambertian: its reflection of the beam, (μ₀ T_L ÷ π) ρ^m(μ, μ₀).
   const reflectedBeam = ground?.beams[beam.index];
   if (reflectedBeam !== undefined) {
     groundSource = Float64Array.from(
@@ -1667,49 +1764,105 @@ function solveBeamModeAt(
       (_, i) => at(reflectedBeam, i) * beam.cosine * beam.groundTransmission,
     );
   }
-  return assembledMode(
-    context,
-    {
-      top: particularTop,
-      bottom: particularBottom,
-      userUp: particularUserUp,
-      userDown: particularUserDown,
-    },
-    groundSource,
-    (quadratureDown, userUp) => {
-      if (m === 0 && groundAlbedo > 0) {
-        let flux = 0;
-        for (let j = 0; j < n; j += 1) {
-          flux +=
-            at(quadrature.weights, j) *
-            at(quadrature.nodes, j) *
-            at(quadratureDown, layerCount * n + j);
-        }
-        userUp.fill(2 * groundAlbedo * flux + groundBeam, layerCount * users);
-      }
-      if (ground !== undefined && reflectedBeam !== undefined) {
-        for (let u = 0; u < users; u += 1) {
-          let value = at(reflectedBeam, n + u) * beam.cosine * beam.groundTransmission;
-          for (let j = 0; j < n; j += 1) {
-            value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
-          }
-          userUp[layerCount * users + u] = value;
-        }
-      }
-    },
-  );
+  return groundSource;
 }
 
-/** Each layer's particular solution at its faces and its user streams' share of it. */
+/** A Lambertian ground's reflection of the direct beam at mode 0, (A ÷ π) μ₀ T_L; 0 past it. */
+function lambertianBeam(context: ModeContext, beam: PreparedBeam): number {
+  const { m, groundAlbedo } = context;
+  return m === 0 && groundAlbedo > 0
+    ? (groundAlbedo / Math.PI) * beam.cosine * beam.groundTransmission
+    : 0;
+}
+
+/** The ground's upward user intensities for a beam, from the field's downward ones at the ground. */
+function beamGroundUserUp(context: ModeContext, beam: PreparedBeam): GroundUserUp {
+  const { m, quadrature, layerModes, userCosines, groundAlbedo, ground } = context;
+  const n = quadrature.nodes.length;
+  const users = userCosines.length;
+  const layerCount = layerModes.length;
+  const groundBeam = lambertianBeam(context, beam);
+  const reflectedBeam = ground?.beams[beam.index];
+  return (quadratureDown, userUp) => {
+    if (m === 0 && groundAlbedo > 0) {
+      let flux = 0;
+      for (let j = 0; j < n; j += 1) {
+        flux +=
+          at(quadrature.weights, j) *
+          at(quadrature.nodes, j) *
+          at(quadratureDown, layerCount * n + j);
+      }
+      userUp.fill(2 * groundAlbedo * flux + groundBeam, layerCount * users);
+    }
+    if (ground !== undefined && reflectedBeam !== undefined) {
+      for (let u = 0; u < users; u += 1) {
+        let value = at(reflectedBeam, n + u) * beam.cosine * beam.groundTransmission;
+        for (let j = 0; j < n; j += 1) {
+          value += at(ground.users, u * n + j) * at(quadratureDown, layerCount * n + j);
+        }
+        userUp[layerCount * users + u] = value;
+      }
+    }
+  };
+}
+
+/** Each layer's particular solution at its faces and its user streams' share of it, one source's. */
 interface ModeParticulars {
-  /** Per layer, at its top: 2n, the upward streams then the downward. */
-  readonly top: ReadonlyArray<Float64Array>;
+  /** Per layer p, at its top, 2n at `p × 2n`: the upward streams then the downward. */
+  readonly top: Float64Array;
   /** The same at its bottom. */
-  readonly bottom: ReadonlyArray<Float64Array>;
-  /** Per layer, its source integrated along each upward user stream to its top: U. */
-  readonly userUp: ReadonlyArray<Float64Array>;
+  readonly bottom: Float64Array;
+  /** Per layer p, its source integrated along each upward user stream to its top, U at `p × U`. */
+  readonly userUp: Float64Array;
   /** The same along each downward user stream to its bottom. */
-  readonly userDown: ReadonlyArray<Float64Array>;
+  readonly userDown: Float64Array;
+}
+
+/** A source's particular solutions, every one 0. */
+function modeParticulars(layerCount: number, span: number, users: number): ModeParticulars {
+  return {
+    top: new Float64Array(layerCount * span),
+    bottom: new Float64Array(layerCount * span),
+    userUp: new Float64Array(layerCount * users),
+    userDown: new Float64Array(layerCount * users),
+  };
+}
+
+/**
+ * Writes one source's right-hand side of the stack's problem as column `column` of `columns` in
+ * `out` (row-major): {@link layerStackRightHandSide}'s of the same particular solutions, to the bit.
+ */
+function rightHandSideInto(
+  stack: LayerStack,
+  particulars: ModeParticulars,
+  groundSource: Float64Array | undefined,
+  out: Float64Array,
+  column: number,
+  columns: number,
+): void {
+  const { hemisphereStreams: n, layerCount, reflection } = stack;
+  const span = 2 * n;
+  const { top, bottom } = particulars;
+  for (let i = 0; i < n; i += 1) {
+    out[i * columns + column] = -at(top, n + i);
+  }
+  for (let p = 0; p + 1 < layerCount; p += 1) {
+    for (let r = 0; r < span; r += 1) {
+      out[(n + span * p + r) * columns + column] =
+        at(top, span * (p + 1) + r) - at(bottom, span * p + r);
+    }
+  }
+  const last = span * (layerCount - 1);
+  const base = n + span * (layerCount - 1);
+  for (let i = 0; i < n; i += 1) {
+    let value = (groundSource === undefined ? 0 : at(groundSource, i)) - at(bottom, last + i);
+    if (reflection !== undefined) {
+      for (let j = 0; j < n; j += 1) {
+        value += at(reflection, i * n + j) * at(bottom, last + n + j);
+      }
+    }
+    out[(base + i) * columns + column] = value;
+  }
 }
 
 /**
@@ -1719,43 +1872,34 @@ interface ModeParticulars {
 type GroundUserUp = (quadratureDown: Float64Array, userUp: Float64Array) => void;
 
 /**
- * One source's mode from its particular solutions (a beam's or the thermal emission's): the stack
- * solved, the intensities at the nodes at every interface, and those at the user cosines
- * integrated down from the top and up from the ground.
+ * One source's mode from its particular solutions and the stack's solved coefficients, layer p's
+ * solution s at `2n p + s` (a beam's or the thermal emission's): the intensities at the nodes at
+ * every interface, and those at the user cosines integrated down from the top and up from the
+ * ground.
  */
-function assembledMode(
+function modeField(
   context: ModeContext,
   particulars: ModeParticulars,
-  groundSource: Float64Array | undefined,
+  coefficients: Float64Array,
   groundUserUp: GroundUserUp,
 ): ModeIntensities {
-  const { m, quadrature, layerModes, faces, transfers, stack, userCosines } = context;
+  const { m, quadrature, layerModes, faces, transfers, userCosines } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
   const layerCount = layerModes.length;
-  const {
-    top: particularTop,
-    bottom: particularBottom,
-    userUp: particularUserUp,
-    userDown: particularUserDown,
-  } = particulars;
-  const coefficients = solveLayerStack(
-    stack,
-    layerStackRightHandSide(stack, particularTop, particularBottom, groundSource),
-  );
-
   const quadratureUp = new Float64Array((layerCount + 1) * n);
   const quadratureDown = new Float64Array((layerCount + 1) * n);
   for (let k = 0; k <= layerCount; k += 1) {
     const p = Math.min(k, layerCount - 1);
     const face = faceAt(faces, p);
     const values = k < layerCount ? face.top : face.bottom;
-    const part = (k < layerCount ? particularTop : particularBottom)[p] ?? new Float64Array(span);
+    const part = k < layerCount ? particulars.top : particulars.bottom;
+    const offset = span * p;
     for (let r = 0; r < span; r += 1) {
-      let sum = at(part, r);
+      let sum = at(part, offset + r);
       for (let s = 0; s < span; s += 1) {
-        sum += at(values, r * span + s) * at(coefficients, span * p + s);
+        sum += at(values, r * span + s) * at(coefficients, offset + s);
       }
       if (r < n) {
         quadratureUp[k * n + r] = sum;
@@ -1769,12 +1913,13 @@ function assembledMode(
   const userDown = new Float64Array((layerCount + 1) * users);
   for (let p = 0; p < layerCount; p += 1) {
     const transfer = transfers[p];
-    const part = particularUserDown[p];
-    if (transfer === undefined || part === undefined) {
+    if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);
     }
     for (let u = 0; u < users; u += 1) {
-      let value = at(userDown, p * users + u) * at(transfer.attenuation, u) + at(part, u);
+      let value =
+        at(userDown, p * users + u) * at(transfer.attenuation, u) +
+        at(particulars.userDown, p * users + u);
       for (let s = 0; s < span; s += 1) {
         value += at(coefficients, span * p + s) * at(transfer.down, s * users + u);
       }
@@ -1784,12 +1929,13 @@ function assembledMode(
   groundUserUp(quadratureDown, userUp);
   for (let p = layerCount - 1; p >= 0; p -= 1) {
     const transfer = transfers[p];
-    const part = particularUserUp[p];
-    if (transfer === undefined || part === undefined) {
+    if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);
     }
     for (let u = 0; u < users; u += 1) {
-      let value = at(userUp, (p + 1) * users + u) * at(transfer.attenuation, u) + at(part, u);
+      let value =
+        at(userUp, (p + 1) * users + u) * at(transfer.attenuation, u) +
+        at(particulars.userUp, p * users + u);
       for (let s = 0; s < span; s += 1) {
         value += at(coefficients, span * p + s) * at(transfer.up, s * users + u);
       }
@@ -1915,15 +2061,8 @@ function solveThermalMode(
   const constantDown = new Float64Array(users);
   const slopeUp = new Float64Array(users);
   const slopeDown = new Float64Array(users);
-  const particularTop: Float64Array[] = [];
-  const particularBottom: Float64Array[] = [];
-  const particularUserUp: Float64Array[] = [];
-  const particularUserDown: Float64Array[] = [];
+  const particulars = modeParticulars(layerCount, span, users);
   layerModes.forEach((lm, p) => {
-    const top = new Float64Array(span);
-    const bottom = new Float64Array(span);
-    const userUp = new Float64Array(users);
-    const userDown = new Float64Array(users);
     const { omega, opticalDepth: depth } = lm.layer;
     const b0 = at(planck, p);
     const b1 = depth > 0 ? (at(planck, p + 1) - b0) / depth : 0;
@@ -1931,8 +2070,8 @@ function solveThermalMode(
     if (omega < 1 && (b0 !== 0 || b1 !== 0)) {
       const z = thermalSlope(lm, quadrature, nodeLegendre);
       for (let r = 0; r < span; r += 1) {
-        top[r] = b0 + b1 * at(z, r);
-        bottom[r] = b0 + b1 * depth + b1 * at(z, r);
+        particulars.top[p * span + r] = b0 + b1 * at(z, r);
+        particulars.bottom[p * span + r] = b0 + b1 * depth + b1 * at(z, r);
       }
       // The source at the user cosines: (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z, ω̃ the constant's.
       userSource(lm, quadrature, nodeLegendre, userLegendre, ones, ones, constantUp, constantDown);
@@ -1958,23 +2097,13 @@ function solveThermalMode(
         const kDown = 1 - omega + at(constantDown, u);
         // ∫₀^Δ (a + ct) e^(−t ÷ μ) dt ÷ μ up to the top, and ∫₀^Δ (a + ct) e^(−(Δ − t) ÷ μ) dt ÷ μ
         // down to the bottom.
-        userUp[u] =
+        particulars.userUp[p * users + u] =
           (kUp * b0 + b1 * at(slopeUp, u)) * passed + kUp * b1 * (mu * passed - depth * e);
-        userDown[u] =
+        particulars.userDown[p * users + u] =
           (kDown * b0 + b1 * at(slopeDown, u)) * passed + kDown * b1 * (depth - mu * passed);
       }
     }
-    particularTop.push(top);
-    particularBottom.push(bottom);
-    particularUserUp.push(userUp);
-    particularUserDown.push(userDown);
   });
-  const particulars: ModeParticulars = {
-    top: particularTop,
-    bottom: particularBottom,
-    userUp: particularUserUp,
-    userDown: particularUserDown,
-  };
   // The ground emits (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature: Σ_j R_ij.
   const groundNodes = ground?.nodes;
   const emissionAt = (row: Float64Array | undefined, i: number): number => {
@@ -1991,7 +2120,10 @@ function solveThermalMode(
     groundPlanck > 0
       ? Float64Array.from({ length: n }, (_, i) => emissionAt(groundNodes, i))
       : undefined;
-  return assembledMode(context, particulars, groundSource, (quadratureDown, userUp) => {
+  const coefficients = new Float64Array(span * layerCount);
+  rightHandSideInto(context.stack, particulars, groundSource, coefficients, 0, 1);
+  solveBandColumns(context.stack.lu, coefficients, 1);
+  return modeField(context, particulars, coefficients, (quadratureDown, userUp) => {
     const downAt = (j: number): number => at(quadratureDown, layerCount * n + j);
     for (let u = 0; u < users; u += 1) {
       let value: number;

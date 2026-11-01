@@ -348,6 +348,71 @@ export function solveBand(lu: BandLu, b: Float64Array): void {
   }
 }
 
+/**
+ * Solves A X = B in place for `columns` right-hand sides at once from {@link factorBand}'s factors,
+ * B row-major with entry (r, j) at `r * columns + j`: each column takes {@link solveBand}'s
+ * arithmetic on it alone, in the same order, so that it is that solve's to the bit, while the
+ * factors are read once for all of them (plan R08, R08.T14.b's lever: a mode's beams solved
+ * together).
+ *
+ * @remarks
+ * A column whose entry k is 0 at elimination step k is left as {@link solveBand} leaves it, so that
+ * a signed zero below it keeps its sign.
+ *
+ * @throws RangeError if `columns` is not a whole number of at least 1, or `b` does not hold the
+ *   matrix's order times `columns` entries.
+ */
+export function solveBandColumns(lu: BandLu, b: Float64Array, columns: number): void {
+  const { order: n, lower: ml, upper: mu, width: w, entries: a } = lu.factors;
+  if (!Number.isInteger(columns) || columns < 1 || b.length !== n * columns) {
+    throw new RangeError(
+      `${b.length} entries for ${columns} right-hand sides of an order-${n} matrix`,
+    );
+  }
+  for (let k = 0; k < n; k += 1) {
+    const p = lu.pivots[k] ?? k;
+    const kRow = k * columns;
+    if (p !== k) {
+      const pRow = p * columns;
+      for (let j = 0; j < columns; j += 1) {
+        const held = at(b, kRow + j);
+        b[kRow + j] = at(b, pRow + j);
+        b[pRow + j] = held;
+      }
+    }
+    const last = Math.min(n - 1, k + ml);
+    for (let r = k + 1; r <= last; r += 1) {
+      const multiplier = at(a, r * w + (k - r + ml));
+      const rRow = r * columns;
+      for (let j = 0; j < columns; j += 1) {
+        const bk = at(b, kRow + j);
+        if (bk !== 0) {
+          b[rRow + j] = at(b, rRow + j) - multiplier * bk;
+        }
+      }
+    }
+  }
+  const sums = new Float64Array(columns);
+  for (let k = n - 1; k >= 0; k -= 1) {
+    const columnEnd = Math.min(n - 1, k + ml + mu);
+    const kRow = k * columns;
+    for (let j = 0; j < columns; j += 1) {
+      sums[j] = at(b, kRow + j);
+    }
+    for (let c = k + 1; c <= columnEnd; c += 1) {
+      const u = at(a, k * w + (c - k + ml));
+      const cRow = c * columns;
+      for (let j = 0; j < columns; j += 1) {
+        sums[j] = at(sums, j) - u * at(b, cRow + j);
+      }
+    }
+    const pivot = at(a, k * w + ml);
+    for (let j = 0; j < columns; j += 1) {
+      b[kRow + j] = at(sums, j) / pivot;
+    }
+  }
+}
+
 /** A dense matrix factorised by {@link factorDense}: P A = L U, with its row interchanges. */
 export interface DenseLu {
   /** n, its order. */

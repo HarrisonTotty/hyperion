@@ -10,6 +10,7 @@ import {
   realEigen,
   type RealEigensystem,
   solveBand,
+  solveBandColumns,
   solveDense,
   solveLower,
   solveLowerTransposed,
@@ -189,6 +190,28 @@ describe("banded elimination with partial pivoting", () => {
         expect(value).toBeCloseTo(entry(x, i), 11);
       });
     }
+  });
+
+  it("solves right-hand sides together, each column to the bit of its solve alone (R08.T14.b)", () => {
+    const n = 40;
+    const columns = 5;
+    const lu = factorBand(needsPivots(n, 3, 5));
+    const together = Float64Array.from({ length: n * columns }, (_, k) =>
+      k % 7 === 3 ? 0 : Math.sin(0.37 * k) - 0.1,
+    );
+    const alone = Array.from({ length: columns }, (_column, j) =>
+      Float64Array.from({ length: n }, (_row, r) => entry(together, r * columns + j)),
+    );
+    solveBandColumns(lu, together, columns);
+    alone.forEach((b, j) => {
+      solveBand(lu, b);
+      b.forEach((value, r) => {
+        expect(Object.is(entry(together, r * columns + j), value)).toBe(true);
+      });
+    });
+    expect(() => {
+      solveBandColumns(lu, new Float64Array(n * columns), columns + 1);
+    }).toThrow(RangeError);
   });
 
   it("refuses a singular matrix", () => {

@@ -400,7 +400,49 @@ describe("layering (d) and one factorisation (e)", () => {
       expect(largestMiss(beamAt(together, b), beamAt(alone, 0))).toBeLessThanOrEqual(1e-13);
     });
   });
+
+  it("solves each beam among the others to the bit of it solved alone, one at an eigenvalue's reciprocal (R08.T14.b)", () => {
+    const forward: OrdinateLayer = {
+      opticalDepth: 2,
+      singleScatteringAlbedo: 0.95,
+      moments: henyeyGreenstein(0.8),
+    };
+    const layers: OrdinateLayer[] = [
+      { opticalDepth: 0.3, singleScatteringAlbedo: 0.99, moments: RAYLEIGH },
+      forward,
+      { opticalDepth: 0.7, singleScatteringAlbedo: 0.5, moments: henyeyGreenstein(0.3) },
+    ];
+    const rates = homogeneousSolution(forward, 1, doubleGaussQuadrature()).decayRates;
+    const rate = Array.from(rates).find((k) => k > 1.5 && k < 4);
+    if (rate === undefined) {
+      throw new Error("no decay rate between 1.5 and 4");
+    }
+    // Their right-hand sides solved together (`linearAlgebra.ts`'s `solveBandColumns`), the
+    // resonant beam's two shifted solves among them.
+    const beamCosines = [0.1, 1 / rate, 0.5, 0.8, 1];
+    const base = { layers, groundAlbedo: 0.3, userCosines: [0.2, 0.7], maxMode: 3 };
+    const together = solveDiscreteOrdinates({ ...base, beamCosines });
+    beamCosines.forEach((mu0, b) => {
+      const alone = beamAt(solveDiscreteOrdinates({ ...base, beamCosines: [mu0] }), 0);
+      const among = beamAt(together, b);
+      expect(bitsOf(among.fluxes)).toEqual(bitsOf(alone.fluxes));
+      among.modes.forEach((mode, m) => {
+        expect(bitsOf(mode)).toEqual(bitsOf(alone.modes[m] ?? mode));
+      });
+    });
+  });
 });
+
+/** Every typed array of `value`, by key, as its bytes: two equal are equal to the bit. */
+function bitsOf(value: object): Record<string, Uint8Array> {
+  const out: Record<string, Uint8Array> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (field instanceof Float64Array) {
+      out[key] = new Uint8Array(field.buffer, field.byteOffset, field.byteLength);
+    }
+  }
+  return out;
+}
 
 /** A slab of τ 1,000 at ω, as `count` layers, lit at three μ₀. */
 function thickSlab(omega: number, count: number): ReadonlyArray<BeamSolution> {
