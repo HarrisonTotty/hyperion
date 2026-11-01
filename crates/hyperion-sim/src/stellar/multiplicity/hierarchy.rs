@@ -258,6 +258,17 @@ impl NodeIndex {
     pub const fn get(self) -> u8 {
         self.0
     }
+
+    /// This node's index in the hierarchy of the part under `part` ([`SystemHierarchy::part`]),
+    /// for a node under it.
+    ///
+    /// # Panics
+    ///
+    /// If this node lies before `part` in the depth-first list.
+    #[must_use]
+    pub(crate) const fn in_part(self, part: Self) -> Self {
+        Self(self.0 - part.0)
+    }
 }
 
 /// What kind of object a [`StarSlot`] holds.
@@ -2062,6 +2073,63 @@ impl SystemHierarchy {
                 },
             ],
             node_masses: vec![mass, m0, m1],
+            dropped: 0,
+        }
+    }
+
+    /// The part of this hierarchy under `node`, a node whose first star is the primary, as a
+    /// hierarchy of its own: its nodes, depth first from `node` and renumbered from it, its stars
+    /// 0 to its count less one, which keep their bodies, and their orbits as drawn (plan 11,
+    /// P11.T10's fix: what a system shows once an orbit above it is unbound).
+    ///
+    /// The nodes under a node are contiguous in the depth-first list and the stars under one on
+    /// the primary's inner chain are the first, so nothing is renumbered but the nodes.
+    ///
+    /// # Panics
+    ///
+    /// If `node` is not a node of this hierarchy or its first star is not the primary.
+    #[must_use]
+    pub(crate) fn part(&self, node: NodeIndex) -> Self {
+        assert_eq!(
+            self.first_star(node),
+            StarIndex::PRIMARY,
+            "a shown part holds the primary"
+        );
+        let start = usize::from(node.0);
+        // Depth first, a node is followed by everything under it.
+        let mut end = start;
+        let mut open = 1_usize;
+        while open > 0 {
+            match self.nodes[end] {
+                HierarchyNode::Star(_) => open -= 1,
+                HierarchyNode::Pair { .. } => open += 1,
+            }
+            end += 1;
+        }
+        let shift = |n: NodeIndex| n.in_part(node);
+        let nodes: Vec<HierarchyNode> = self.nodes[start..end]
+            .iter()
+            .map(|n| match *n {
+                HierarchyNode::Star(star) => HierarchyNode::Star(star),
+                HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                } => HierarchyNode::Pair {
+                    inner: shift(inner),
+                    outer: shift(outer),
+                    orbit,
+                },
+            })
+            .collect();
+        let count = nodes
+            .iter()
+            .filter(|n| matches!(n, HierarchyNode::Star(_)))
+            .count();
+        Self {
+            nodes,
+            stars: self.stars[..count].to_vec(),
+            node_masses: self.node_masses[start..end].to_vec(),
             dropped: 0,
         }
     }

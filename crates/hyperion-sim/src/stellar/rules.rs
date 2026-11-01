@@ -73,10 +73,12 @@
 //!   built from marks, take the version's rules (`stellar/rules/awd_donors_hold.rs` lists the
 //!   movers).
 //! - [`collapses`](StellarRules::collapses), at [`COLLAPSES_VERSION`] (plan 11, P11.T10's fix):
-//!   whether a core collapse acts on the orbit of a pair the pre-test passes over, drawn below
-//!   it, and from it such a pair run through the engine where a star of it collapses by its age,
-//!   read at one choke point, `evolve`'s pre-test, through the engine's input's rules
-//!   (`stellar/rules/collapses_hold.rs` lists the movers).
+//!   whether a core collapse acts on the orbits the engine does not otherwise run, a pair the
+//!   pre-test passes over and the outer orbits above a run pair, both drawn below it, and from it
+//!   a pair a star of which collapses by its age run through the engine and each run pair's
+//!   supernova applied to the orbits above it, read at two choke points, `evolve`'s pre-test through the engine's input's
+//!   rules and `SystemStars`' outer releases through the primary's, which
+//!   [`SystemStars::shown_at`] reads (`stellar/rules/collapses_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of

@@ -367,6 +367,7 @@ fn under_the_arm_every_route_counts_the_stars_shown() {
         let shown = match stars.shown_at(now) {
             Shown::Drawn => model.star_count(),
             Shown::Pair(_) => 2,
+            Shown::Part { stars, .. } => stars,
             Shown::Alone => 1,
         };
         assert_eq!(

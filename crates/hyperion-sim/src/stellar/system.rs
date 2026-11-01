@@ -37,6 +37,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::Component as PairComponent;
+use crate::stellar::binary::collapses::{CollapseRules, OuterOrbit, PointLoss, outer_orbit_after};
 use crate::stellar::binary::ia::{IaExplosionMark, IaExplosionRules, marked_explosion};
 use crate::stellar::binary::{
     BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, PooledIaEvent, SegmentKind,
@@ -1714,6 +1715,15 @@ pub(crate) enum Shown {
     /// The primary and star 1 on the drawn pair `node`, which is all a supernova left of the
     /// system by unbinding its other pair.
     Pair(NodeIndex),
+    /// The part of the drawn hierarchy under `node`, of `stars` stars, three or more, the primary
+    /// and the stars that follow it: all a supernova left of the system by unbinding an orbit
+    /// above it (P11.T10's fix, [`SystemHierarchy::part`]).
+    Part {
+        /// The part's node in the drawn hierarchy, on the primary's inner chain.
+        node: NodeIndex,
+        /// Its stars.
+        stars: u8,
+    },
     /// The primary alone.
     Alone,
 }
@@ -1725,6 +1735,7 @@ impl Shown {
         match self {
             Self::Drawn => true,
             Self::Pair(_) => index <= 1,
+            Self::Part { stars, .. } => index < stars,
             Self::Alone => index == 0,
         }
     }
@@ -1922,6 +1933,8 @@ pub struct SystemStars {
     hierarchy: SystemHierarchy,
     stars: Vec<StarModel>,
     pairs: Vec<PairTimeline>,
+    /// The outer orbits its pairs' supernovae unbind (P11.T10's fix, from version 27), by age.
+    releases: Vec<OuterRelease>,
     attempt: RedrawAttempt,
     /// The seed of the galaxy the stars were generated in, from which each star's own event
     /// streams are opened (P06.T24.b's pulses, T28.g's events), so that the summary and the brief
@@ -2064,11 +2077,13 @@ impl SystemStars {
         );
         let (hierarchy, stars) = models_at(galaxy, record, primary, ctx, attempt);
         let pairs = run_pairs(&hierarchy, &stars, galaxy.rules().stellar);
+        let releases = outer_releases(&hierarchy, &stars, &pairs, galaxy.rules().stellar.collapses);
         Self {
             record: *record,
             hierarchy,
             stars,
             pairs,
+            releases,
             attempt,
             seed: galaxy.seed(),
         }
@@ -2098,6 +2113,7 @@ impl SystemStars {
             ),
             stars: vec![primary],
             pairs: Vec::new(),
+            releases: Vec::new(),
             attempt,
             seed,
         }
@@ -2137,6 +2153,8 @@ impl SystemStars {
                 stars: [StarIndex::PRIMARY, second],
                 timeline,
             }],
+            // A pair of two stars has no orbit above it.
+            releases: Vec::new(),
             attempt: GRID_ATTEMPT,
             seed,
         }
@@ -2250,7 +2268,9 @@ impl SystemStars {
             |bytes, star| bytes + star.heap_bytes(),
         );
         self.pairs.iter().fold(
-            stars + self.pairs.capacity() * size_of::<PairTimeline>(),
+            stars
+                + self.pairs.capacity() * size_of::<PairTimeline>()
+                + self.releases.capacity() * size_of::<OuterRelease>(),
             |bytes, pair| bytes + pair.timeline.heap_bytes(),
         )
     }
@@ -2362,6 +2382,7 @@ impl SystemStars {
         let count = match self.shown_at(t) {
             Shown::Drawn => self.star_count(),
             Shown::Pair(_) => 2,
+            Shown::Part { stars, .. } => stars,
             Shown::Alone => 1,
         };
         Some(StellarBrief::of(
@@ -2466,14 +2487,18 @@ impl SystemStars {
             .filter(|&(node, _)| match shown {
                 Shown::Drawn => true,
                 Shown::Pair(kept) => node == kept,
+                Shown::Part { node: kept, stars } => {
+                    node >= kept && stars_under(&self.hierarchy, node) >> stars == 0
+                }
                 Shown::Alone => false,
             })
             .map(|(node, orbit)| {
                 // Each pair by its node in the shown hierarchy: the shown pair is the root of its
-                // own (`hierarchy_at`).
+                // own (`hierarchy_at`), and a shown part's nodes are renumbered from its root.
                 let shown_node = match shown {
                     Shown::Drawn | Shown::Alone => node,
                     Shown::Pair(_) => NodeIndex::ROOT,
+                    Shown::Part { node: kept, .. } => node.in_part(kept),
                 };
                 match self
                     .pair_timeline(node)
@@ -2548,6 +2573,14 @@ impl SystemStars {
     /// inner pair, has no shape of its own, and its outer star has lost the pair's mass from its
     /// orbit).
     ///
+    /// Under the stellar rules of P11.T10's fix (from version 27, [`CollapseRules::Applied`]) an
+    /// outer orbit a supernova of a pair below it unbinds ([`OuterRelease`]) takes from the system
+    /// its member that does not hold the primary, or both where neither does
+    /// ([`SystemStars::released_by`]). What is left is shown as above, the primary's own pair where
+    /// stars 0 and 1 are all that is left, and otherwise the largest drawn part of the hierarchy
+    /// on the primary's inner chain that it holds ([`Shown::Part`] for three stars or more; the
+    /// primary alone if none).
+    ///
     /// The released star is plan 08's independent object where it is of 2.5 M☉ or more, and left
     /// out where it is lighter ([`BinaryKicksRules`]); the remnant a companion leaves is not, a
     /// death the catalogue does not list (design note 16). A white dwarf's birth that unbinds a
@@ -2575,6 +2608,9 @@ impl SystemStars {
                         held &= !(1_u32 << star.get());
                     }
                 }
+                for release in self.releases.iter().filter(|r| r.age <= age) {
+                    held &= !self.released_by(release);
+                }
                 if held == all {
                     return Shown::Drawn;
                 }
@@ -2591,11 +2627,72 @@ impl SystemStars {
                     .then_some(node)
                 });
                 match primary_pair {
-                    Some(node) if held == 0b11 => Shown::Pair(node),
-                    Some(_) | None => Shown::Alone,
+                    Some(node) if held == 0b11 => return Shown::Pair(node),
+                    Some(_) | None => {}
                 }
+                // Only an outer orbit's release leaves a part of three stars or more, or one beside
+                // a star the shown hierarchy cannot hold.
+                if self.releases.is_empty() {
+                    return Shown::Alone;
+                }
+                self.shown_part(held)
             }
         }
+    }
+
+    /// The stars, a bit for each, that the outer orbit `release` unbinds takes from the system
+    /// ([`SystemStars::shown_at`]): its member that does not hold the primary, where one does, and
+    /// otherwise both.
+    #[must_use]
+    pub(crate) fn released_by(&self, release: &OuterRelease) -> u32 {
+        let HierarchyNode::Pair { inner, outer, .. } = *self.hierarchy.node(release.node) else {
+            unreachable!("a release is of a pair's orbit, as `outer_releases` makes it");
+        };
+        let [a, b] = [inner, outer].map(|n| stars_under(&self.hierarchy, n));
+        if a & 1 == 1 {
+            b
+        } else if b & 1 == 1 {
+            a
+        } else {
+            a | b
+        }
+    }
+
+    /// What the system shows of the stars `held`, a bit for each, the primary among them, once an
+    /// outer orbit's release has taken the others ([`SystemStars::shown_at`]): the drawn part
+    /// under the first node of the primary's inner chain, from the root down, all of whose stars
+    /// are held. Where the held stars are such a part, it is all of them. Otherwise a star the
+    /// shown hierarchy cannot hold without a gap in its bodies is left out with the rest (a lean of
+    /// 2026-11-01), as `outer_releases` does where the primary's member escapes an orbit but not
+    /// the one above it.
+    #[must_use]
+    fn shown_part(&self, held: u32) -> Shown {
+        let mut node = NodeIndex::ROOT;
+        loop {
+            let under = stars_under(&self.hierarchy, node);
+            match *self.hierarchy.node(node) {
+                HierarchyNode::Star(_) => return Shown::Alone,
+                HierarchyNode::Pair { .. } if under & !held == 0 => {
+                    return if under == 0b11 {
+                        Shown::Pair(node)
+                    } else {
+                        Shown::Part {
+                            node,
+                            stars: u8::try_from(under.count_ones()).expect("16 stars at most"),
+                        }
+                    };
+                }
+                HierarchyNode::Pair { inner, .. } => node = inner,
+            }
+        }
+    }
+
+    /// The outer orbits its pairs' supernovae unbind, by age (P11.T10's fix; none under the held
+    /// arm).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn releases(&self) -> &[OuterRelease] {
+        &self.releases
     }
 
     /// The hierarchy the system shows at `t` (plan 11, P11.T10).
@@ -2630,6 +2727,7 @@ impl SystemStars {
                     orbit,
                 )
             }
+            Shown::Part { node, .. } => self.hierarchy.part(node),
             Shown::Alone => {
                 SystemHierarchy::single(self.record.id(), primary.initial_mass(), primary.kind())
             }
@@ -2920,6 +3018,296 @@ fn run_pairs(
             })
         })
         .collect()
+}
+
+/// An orbit of a system's hierarchy that a supernova of a pair below it unbinds (P11.T10's fix,
+/// from version 27: `collapses.rs`): its node, the system's age then, and each member's velocity
+/// after in the frame of the orbit's barycentre before, inner member first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct OuterRelease {
+    node: NodeIndex,
+    age: Years,
+    velocities: [SystemVelocity; 2],
+}
+
+impl OuterRelease {
+    /// The unbound orbit's node.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn node(&self) -> NodeIndex {
+        self.node
+    }
+
+    /// The system's age at the supernova that unbinds it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn age(&self) -> Years {
+        self.age
+    }
+
+    /// Each member's velocity after, inner member first, in the frame of the orbit's barycentre
+    /// before.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn velocities(&self) -> [SystemVelocity; 2] {
+        self.velocities
+    }
+}
+
+/// The stars under `node` of `hierarchy`, a bit for each (16 stars at most, `StarIndex`).
+#[must_use]
+pub(crate) fn stars_under(hierarchy: &SystemHierarchy, node: NodeIndex) -> u32 {
+    match *hierarchy.node(node) {
+        HierarchyNode::Star(star) => 1_u32 << star.get(),
+        HierarchyNode::Pair { inner, outer, .. } => {
+            stars_under(hierarchy, inner) | stars_under(hierarchy, outer)
+        }
+    }
+}
+
+/// One supernova of a run pair, as it acts on the orbit above the pair: the system's age, the
+/// orbit's node, and the pair as a point mass ([`PointLoss`]).
+#[derive(Debug, Clone, Copy)]
+struct OuterLoss {
+    age: Years,
+    node: NodeIndex,
+    loss: PointLoss,
+}
+
+/// What [`outer_releases`] reads of a system: its hierarchy, each node's parent, its stars and its
+/// run pairs.
+struct Outer<'a> {
+    hierarchy: &'a SystemHierarchy,
+    /// Each node's parent, and which member of it the node is: 0 the inner, 1 the outer.
+    parents: Vec<(NodeIndex, NodeIndex, usize)>,
+    stars: &'a [StarModel],
+    pairs: &'a [PairTimeline],
+}
+
+impl Outer<'_> {
+    /// The parent of `child`, and which member of it `child` is, or `None` for the root.
+    #[must_use]
+    fn parent_of(&self, child: NodeIndex) -> Option<(NodeIndex, usize)> {
+        self.parents
+            .iter()
+            .find(|&&(c, _, _)| c == child)
+            .map(|&(_, parent, member)| (parent, member))
+    }
+
+    /// The mass of star `k` at the system's age `age`, M☉: its pair's word on it where the engine
+    /// ran it to then, and otherwise its own model's.
+    #[must_use]
+    fn star_mass(&self, k: u8, age: Years) -> f64 {
+        let paired = self.pairs.iter().find_map(|pair| {
+            pair.component_of(StarIndex::from_body(k)?)
+                .map(|c| (pair, c))
+        });
+        match paired {
+            Some((pair, c)) if age <= pair.timeline.until() => pair.timeline.state_at(age).stars()
+                [c.index()]
+            .mass()
+            .value(),
+            Some(_) | None => {
+                let star = &self.stars[usize::from(k)];
+                star.state_at(on_the_clock(star.age_at_epoch(), age))
+                    .map_or(0.0, |state| state.mass().value())
+            }
+        }
+    }
+
+    /// The mass of the stars under `node` at the system's age `age`, M☉, summed in body order.
+    #[must_use]
+    fn mass_under(&self, node: NodeIndex, age: Years) -> f64 {
+        let under = stars_under(self.hierarchy, node);
+        (0..16_u8)
+            .filter(|k| under & (1_u32 << k) != 0)
+            .map(|k| self.star_mass(k, age))
+            .sum()
+    }
+
+    /// Applies `first`, a supernova below an orbit, to that orbit and the ones above it as
+    /// [`outer_releases`] says, pushing each orbit it unbinds onto `releases`, which holds the
+    /// earlier supernovae's.
+    fn apply(&self, first: OuterLoss, releases: &mut Vec<OuterRelease>) {
+        let OuterLoss {
+            age,
+            mut node,
+            mut loss,
+        } = first;
+        let hierarchy = self.hierarchy;
+        let t = on_the_clock(self.stars[0].age_at_epoch(), age);
+        while !releases.iter().any(|r| r.node == node) {
+            let HierarchyNode::Pair {
+                inner,
+                outer: other_member,
+                orbit,
+            } = *hierarchy.node(node)
+            else {
+                unreachable!("an outer orbit is a pair's");
+            };
+            let other = if loss.member == 0 {
+                other_member
+            } else {
+                inner
+            };
+            loss.before_msun[1 - loss.member] = self.mass_under(other, age);
+            let initial = hierarchy.node_mass(node).value();
+            match outer_orbit_after(&orbit, t, initial, loss) {
+                OuterOrbit::Unbound(velocities) => {
+                    releases.push(OuterRelease {
+                        node,
+                        age,
+                        velocities,
+                    });
+                    // The primary's member leaves as a point mass of its own, at its velocity,
+                    // which the orbit above takes as its kick and may be unbound by in turn.
+                    let held = [inner, other_member]
+                        .iter()
+                        .position(|&n| stars_under(hierarchy, n) & 1 == 1);
+                    let (Some(side), Some((parent, member))) = (held, self.parent_of(node)) else {
+                        break;
+                    };
+                    let before: f64 = loss.before_msun.iter().sum();
+                    let left = if loss.member == side {
+                        loss.after_msun
+                    } else {
+                        loss.before_msun[side]
+                    };
+                    let mut before_msun = [0.0; 2];
+                    before_msun[member] = before;
+                    (node, loss) = (
+                        parent,
+                        PointLoss {
+                            member,
+                            before_msun,
+                            after_msun: left,
+                            kick: velocities[side],
+                        },
+                    );
+                }
+                OuterOrbit::Bound(recoil) => {
+                    let Some((parent, member)) = self.parent_of(node) else {
+                        break;
+                    };
+                    let before: f64 = loss.before_msun.iter().sum();
+                    let lost = loss.before_msun[loss.member] - loss.after_msun;
+                    let mut before_msun = [0.0; 2];
+                    before_msun[member] = before;
+                    (node, loss) = (
+                        parent,
+                        PointLoss {
+                            member,
+                            before_msun,
+                            after_msun: before - lost,
+                            kick: recoil,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// The supernovae of `pair` that act on the orbit above it ([`outer_releases`]), in its
+    /// records' order: none for a pair at the root.
+    #[must_use]
+    fn losses(&self, pair: &PairTimeline) -> Vec<OuterLoss> {
+        let Some((node, member)) = self.parent_of(pair.node) else {
+            return Vec::new();
+        };
+        let mut losses = Vec::new();
+        for sn in pair.timeline.supernovae() {
+            let before = pair
+                .timeline
+                .state_at(Years::new(sn.age().value() * (1.0 - 1e-9)));
+            let exploding = sn.component().index();
+            let alone = before.stars()[1 - exploding].phase() == Phase::NoRemnant;
+            let kick = match (before.orbit().is_some(), sn.bound(), alone) {
+                (true, true, _) => sn.velocities()[0],
+                // A merged product's collapse, all the pair has left.
+                (false, _, true) => sn.velocities()[exploding],
+                // The pair disrupted now or before.
+                (true, false, _) | (false, _, false) => break,
+            };
+            let mass = before.total_mass().value();
+            let lost = before.stars()[exploding].mass().value() - sn.remnant().mass().value();
+            let mut before_msun = [0.0; 2];
+            before_msun[member] = mass;
+            losses.push(OuterLoss {
+                age: sn.age(),
+                node,
+                loss: PointLoss {
+                    member,
+                    before_msun,
+                    after_msun: mass - if lost > 0.0 { lost } else { 0.0 },
+                    kick,
+                },
+            });
+        }
+        losses
+    }
+}
+
+/// The clock time at which a system `age_at_epoch` old at the epoch is `age` old, for an age by
+/// its age at +H ([`clock_time_of_death`]).
+#[must_use]
+fn on_the_clock(age_at_epoch: Years, age: Years) -> UniverseTime {
+    clock_time_of_death(age_at_epoch, age)
+        .expect("an age by +H lies within the clock's ±2.9 × 10¹¹ years of the epoch")
+}
+
+/// The outer orbits of `hierarchy` that the supernovae of its run pairs `pairs` unbind, by age
+/// (P11.T10's fix, `collapses.rs`): none under the held arm of `rules`.
+///
+/// Each supernova of a pair, while the pair is bound just before it or is all its merged product,
+/// acts on the orbit of the pair's parent node with the node's other member, the pair a point mass
+/// ([`outer_orbit_after`]): its stars' masses just before the explosion, those less what the
+/// exploding star lost just after it, and its barycentre's recoil, the record's velocity for a
+/// pair that stays bound and the exploding star's own for a product alone. An orbit it leaves
+/// bound acts so in turn, with its own masses and recoil, on the orbit of its parent, and so on
+/// up. An orbit it unbinds that holds the primary leaves its primary's member to go on alone, a
+/// point mass of that member's mass at its velocity after, which the orbit above takes as its
+/// loss and kick, and so on up while each comes out unbound. A pair's disruption ends its
+/// supernovae's effect on the orbits above (the system shows it, [`disrupting_supernova`]), and an
+/// orbit unbound takes no later supernova. Every other member's
+/// mass is its stars' at the explosion, each from its pair's timeline where the engine ran it, and
+/// otherwise from its own model.
+#[must_use]
+fn outer_releases(
+    hierarchy: &SystemHierarchy,
+    stars: &[StarModel],
+    pairs: &[PairTimeline],
+    rules: CollapseRules,
+) -> Vec<OuterRelease> {
+    if !rules.acts_on_outer_orbits() || pairs.is_empty() {
+        return Vec::new();
+    }
+    let parents = hierarchy
+        .pairs()
+        .flat_map(|(node, _)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
+                unreachable!("pairs are pairs");
+            };
+            [(inner, node, 0), (outer, node, 1)]
+        })
+        .collect();
+    let outer = Outer {
+        hierarchy,
+        parents,
+        stars,
+        pairs,
+    };
+    let mut losses: Vec<OuterLoss> = pairs.iter().flat_map(|p| outer.losses(p)).collect();
+    // In age order, a pair's own in its records' order, so that an orbit takes its first.
+    debug_assert!(
+        losses.iter().all(|l| l.age.value().is_finite()),
+        "a supernova's age is finite"
+    );
+    losses.sort_by(|a, b| a.age.value().total_cmp(&b.age.value()));
+    let mut releases: Vec<OuterRelease> = Vec::new();
+    for loss in losses {
+        outer.apply(loss, &mut releases);
+    }
+    releases
 }
 
 /// The multiplicity context of the grid record `record`: [`MultiplicityContext::Free`] for a

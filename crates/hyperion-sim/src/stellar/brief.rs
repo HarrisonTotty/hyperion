@@ -647,7 +647,7 @@ impl BriefModel {
             // and a pair with a supernova keeps no own models.
             Primary::Paired(stars) => stars.brief_at(t).map(|brief| match stars.shown_at(t) {
                 Shown::Drawn => brief.with_star_count(self.star_count),
-                Shown::Pair(_) | Shown::Alone => brief,
+                Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => brief,
             }),
         }
     }
