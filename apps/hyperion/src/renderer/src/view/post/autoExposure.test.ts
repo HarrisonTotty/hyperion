@@ -29,6 +29,7 @@ import {
   meterStatus,
   METER_STEP_MAX_S,
   METER_TIMEOUT_S,
+  CUT_HOLD_MAX_FRAMES,
   readingRange,
   SMOOTHING_SPEED_EV_PER_S,
   smoothEv,
@@ -929,5 +930,95 @@ describe("settling within a scene, with no cut (fix-view-light)", () => {
         1 / 60 + 1e-9,
       );
     }
+  });
+});
+
+/**
+ * Runs the view's loop at 60 Hz over `scene` as the stage does: each frame steps the controller,
+ * is presented or held back as it says, is drawn at its exposure and noted, its histogram arriving
+ * `latency` frames later.
+ *
+ * @returns The frames held back, and the applied EV100 of the first frame presented.
+ */
+function firstPresented(
+  exposure: AutoExposure,
+  scene: ReadonlyArray<readonly [number, number]>,
+  latency: number,
+): { readonly held: number; readonly ev100: number } {
+  const inFlight: Histogram[] = [];
+  let held = 0;
+  for (let frame = 0; frame < 60; frame += 1) {
+    const arrived = inFlight.length >= latency ? inFlight.shift() : undefined;
+    const reading = exposure.step(arrived, 1 / 60);
+    const holds = exposure.holds;
+    inFlight.push(drawnAt(scene, reading.ev100));
+    exposure.noteImage(true);
+    if (!holds) {
+      return { held, ev100: reading.ev100 };
+    }
+    held += 1;
+  }
+  return { held, ev100: Number.NaN };
+}
+
+/** A controller under `control`, its image not yet drawn, as a new stage makes it. */
+function staged(control: ExposureControl, opensAtMeter = false): AutoExposure {
+  return new AutoExposure({
+    source: SOURCE,
+    program: VIEW_CAMERA,
+    control,
+    meter: "average",
+    opensAtMeter,
+  });
+}
+
+describe("a cut's hold (fix-view-light)", () => {
+  const settled = settledEv(SUNLIT);
+
+  it.each([1, 2, 3])(
+    "shows no frame of a sunlit body at the starfield's exposure: the first presented is metered (latency %d)",
+    (latency) => {
+      const exposure = staged({ kind: "auto", ev100: -10 });
+      exposure.cut();
+      const { held, ev100 } = firstPresented(exposure, SUNLIT, latency);
+      expect([held >= latency, Math.abs(ev100 - settled) < 0.25]).toEqual([true, true]);
+    },
+  );
+
+  it("holds a clipped cut's frames until a reading lands inside the range", () => {
+    const exposure = staged({ kind: "auto", ev100: -14 });
+    exposure.cut();
+    const { held, ev100 } = firstPresented(exposure, SUNLIT, 2);
+    expect([held, Math.abs(ev100 - settled) < 0.25]).toEqual([4, true]);
+  });
+
+  it("holds an opening at its meter until its first reading, from the default MAN", () => {
+    const exposure = staged(DEFAULT_MAN, true);
+    const { held, ev100 } = firstPresented(exposure, SUNLIT, 1);
+    expect([held, Math.abs(ev100 - settled) < 0.25]).toEqual([1, true]);
+  });
+
+  it(`holds no more than ${String(CUT_HOLD_MAX_FRAMES)} frames when no reading comes`, () => {
+    const exposure = staged({ kind: "auto", ev100: 3 });
+    exposure.cut();
+    let held = 0;
+    for (let frame = 0; frame < 30 && exposure.holds; frame += 1) {
+      exposure.step(undefined, 1 / 60);
+      exposure.noteImage(true);
+      held += 1;
+    }
+    expect(held).toBe(CUT_HOLD_MAX_FRAMES);
+  });
+
+  it.each([
+    { name: "MAN", control: DEFAULT_MAN },
+    {
+      name: "the operator's INHIBIT",
+      control: { kind: "inhibited", ev100: 3, reason: "operator" },
+    },
+  ] as const)("holds nothing under $name", ({ control }) => {
+    const exposure = staged(control);
+    exposure.cut();
+    expect(exposure.holds).toBe(false);
   });
 });

@@ -248,6 +248,12 @@ export interface PhotorealFrame {
    */
   readonly meter: MeterMode | null;
   /**
+   * Whether the frame is presented: `false` draws the scene target and takes its histogram, then
+   * draws nothing onto the view, which keeps the image it shows, while a cut's exposure awaits its
+   * reading (`AutoExposure.holds`; fix-view-light); presented where absent.
+   */
+  readonly present?: boolean | undefined;
+  /**
    * The atmospheres of the frame's lit bodies that have them drawn (plan R08, R08.T10.b): each
    * body's tables lighting its surface through the air, and its composite over everything opaque
    * drawn before it; none, or absent, draws no atmosphere.
@@ -839,6 +845,10 @@ export class PhotorealRenderer {
           terms,
         },
       });
+    }
+    if (frame.present === false) {
+      // Held back: no frame of a cut is shown at the exposure from before it.
+      return plan;
     }
     // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
     const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);

@@ -534,6 +534,20 @@ describe("a view's datum inside its bodies' figures over the image (R10.T16.g)",
     }).toEqual({ style: "photorealistic", datum: true, inside });
   });
 
+  it("holds a photorealistic frame back when told, drawing nothing onto its view (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = view.frames.length;
+    const drawn = drawer.draw({ ...inputsIn("photorealistic"), present: false });
+    drawer.dispose();
+    expect([drawn?.drawnStyle, view.frames.length - from]).toEqual(["photorealistic", 0]);
+  });
+
   it("builds a wireframe frame's list with the datum centred on the limb", async () => {
     const centred = bodyRows(false);
     const inside = bodyRows(true);

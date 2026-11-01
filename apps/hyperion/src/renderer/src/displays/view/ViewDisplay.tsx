@@ -1396,6 +1396,8 @@ function ViewStage({
           availability: inputs.availability,
           // The exposure's source: its frames take the histogram its meter reads (Design note 11).
           meter: auto.meter,
+          // A cut's frames are held back until its reading (fix-view-light).
+          present: !auto.holds,
           // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
           classMaps: session?.classMaps,
           reliefs: session?.reliefs,

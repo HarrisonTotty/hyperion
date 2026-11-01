@@ -1332,6 +1332,15 @@ describe("the photorealistic renderer's histogram", () => {
     expect(written >= 0 && written < (histogram?.writesBefore ?? -1)).toBe(true);
   });
 
+  it("is taken of a frame held back, which draws nothing onto the view (fix-view-light)", async () => {
+    const { engine, renderer } = await ready();
+    const view = new RecordingView();
+    renderer.render(view, { ...frameWith([]), present: false });
+    const histograms = engine.dispatched.filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
+    expect([histograms.length, view.frames.length]).toEqual([1, 0]);
+    renderer.dispose();
+  });
+
   it("is not taken on a frame that meters nothing, as an instrument's (R07.T19.c)", async () => {
     const { engine, renderer } = await ready();
     renderer.render(new RecordingView(), { ...frameWith([]), meter: null });

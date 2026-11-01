@@ -152,6 +152,12 @@ export const SMOOTHING_SPEED_EV_PER_S = 24;
 export const SMOOTHING_BAND_EV = 1.5;
 
 /**
+ * The most drawn frames a cut holds back while it waits for a reading inside the histogram's range:
+ * nine, three readings each the reader's three frames late at most (`HISTOGRAM_RING`).
+ */
+export const CUT_HOLD_MAX_FRAMES = 9;
+
+/**
  * The fraction of a reading's weighed counts in the histogram's top bin above which the reading is
  * clipped: 0.5%. Those texels hold at least 60,404 after pre-exposure (2^15.88, the top bin's
  * floor), up to `rgba16float`'s clamp at 65,504 and the veil's light beyond it, all metered at the
@@ -328,7 +334,8 @@ export interface AutoExposureOptions {
  * ({@link readingRange}) each sets it to its bound, never back past an earlier one, until one lies
  * inside the range. A reading above the range moves the exposure at least 19.2 EV, so `MAN`'s
  * 56 EV needs at most three toward a brighter scene; one below it moves 10.74 EV, so toward a
- * darker one up to six. The frames drawn before the first draw at the exposure as it stood.
+ * darker one up to six. The frames drawn before a reading inside the range are held back
+ * ({@link AutoExposure.holds}).
  *
  * Each frame the owner calls {@link AutoExposure.step} with the histogram that arrived, then draws
  * at the reading's control, then tells the controller whether that frame drew the photorealistic
@@ -357,6 +364,8 @@ export class AutoExposure {
   #opensAtMeter: boolean;
   // Whether a cut waits for a reading inside the histogram's range, which ends it.
   #cut = false;
+  // The drawn frames held back since the cut began (`holds`).
+  #heldFrames = 0;
 
   constructor(options: AutoExposureOptions) {
     this.#source = options.source;
@@ -424,9 +433,40 @@ export class AutoExposure {
   noteImage(drawn: boolean): void {
     if (drawn && !this.#imageDrawn) {
       this.#openWindow();
-      this.#cut = true;
+      this.#startCut();
+    }
+    if (drawn && this.holds) {
+      this.#heldFrames += 1;
     }
     this.#imageDrawn = drawn;
+  }
+
+  /**
+   * Whether the view holds back the frame it draws now, presenting nothing new, so that no frame of
+   * a new scene or framing is shown at the exposure from before it (the UX guide's flash rule over
+   * the brief's frames at the old exposure; fix-view-light, 2026-11-02).
+   *
+   * @remarks
+   * While the control follows the meter (`AUTO`, a system inhibit, or a view that opens at its
+   * meter), it holds the image's first frame, and every frame of a cut until a reading lies inside
+   * the histogram's range: the frame is drawn into the scene target, which the histogram reads, but
+   * not presented, so the view shows the image it last showed. A cut toward a brighter scene costs
+   * the read-back's one to three frames, a clipped one up to {@link CUT_HOLD_MAX_FRAMES}, past which
+   * the frame is shown as it is. `MAN` and the operator's `INHIBIT` hold nothing.
+   */
+  get holds(): boolean {
+    const control = this.#control;
+    const follows =
+      this.#opensAtMeter ||
+      control.kind === "auto" ||
+      (control.kind === "inhibited" && control.reason !== "operator");
+    return follows && (this.#cut || !this.#imageDrawn) && this.#heldFrames < CUT_HOLD_MAX_FRAMES;
+  }
+
+  /** Begins a cut: the next readings snap, and its frames are held from the first. */
+  #startCut(): void {
+    this.#cut = true;
+    this.#heldFrames = 0;
   }
 
   /**
@@ -435,7 +475,7 @@ export class AutoExposure {
    * after it until a reading lies inside the histogram's range (the class's remarks).
    */
   cut(): void {
-    this.#cut = true;
+    this.#startCut();
   }
 
   /**
@@ -450,7 +490,7 @@ export class AutoExposure {
       return false;
     }
     if (result.control.kind === "auto" && this.#control.kind !== "auto") {
-      this.#cut = true;
+      this.#startCut();
     }
     this.#control = result.control;
     // The operator's command decides the exposure from here.

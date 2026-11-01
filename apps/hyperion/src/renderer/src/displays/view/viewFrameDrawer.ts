@@ -118,6 +118,12 @@ export interface ViewFrameInputs {
    */
   readonly meter: MeterMode | null;
   /**
+   * Whether a photorealistic frame is presented, or held back while its exposure's cut awaits its
+   * reading (`AutoExposure.holds`; fix-view-light), the scene target drawn and its histogram taken;
+   * presented where absent.
+   */
+  readonly present?: boolean | undefined;
+  /**
    * The class maps its lit bodies' discs shade with (plan R10, R10.T10.d), made on the drawer's
    * engine: the terrain session's (R10.T16.a), every view's alike; absent, every disc is uniform.
    */
@@ -632,6 +638,7 @@ export class ViewFrameDrawer {
           previousRegimes: this.#regimes,
           previousTabled: this.#tabled,
           meter: inputs.meter,
+          present: inputs.present,
           classMaps: inputs.classMaps,
           reliefs: inputs.reliefs,
           terrain,

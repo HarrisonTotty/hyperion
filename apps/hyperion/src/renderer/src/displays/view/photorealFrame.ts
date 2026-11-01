@@ -94,6 +94,8 @@ export interface PhotorealInputs {
   readonly overlay: PhotorealOverlay | null;
   /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
   readonly meter: MeterMode | null;
+  /** Whether the frame is presented (`PhotorealFrame.present`): presented where absent. */
+  readonly present?: boolean | undefined;
   /**
    * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d; `ClassMapStore`), the
    * terrain session's (R10.T16.a), or absent, every disc then its photometry's uniform law.
@@ -335,6 +337,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     terrain: inputs.terrain,
     overlay: inputs.overlay,
     meter: inputs.meter,
+    present: inputs.present,
     atmospheres,
     onAtmosphereFailed: inputs.atmosphereFailed,
   };
