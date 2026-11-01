@@ -35,9 +35,10 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::Component as PairComponent;
+use crate::stellar::binary::ia::{IaExplosionMark, IaExplosionRules, marked_explosion};
 use crate::stellar::binary::{
-    BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, can_interact_with_tracks,
-    carved_class, evolve_with_tracks,
+    BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, PooledIaEvent,
+    can_interact_with_tracks, carved_class, evolve_with_tracks,
 };
 use crate::stellar::classify::{
     ClassExtras, Classification, DredgeUp, HeliumSurface, LuminosityClass, PeculiarClass,
@@ -64,6 +65,7 @@ use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, PhasePredicate, Track, TrackOptions};
 use crate::stellar::variability::{Variability, VariabilityInputs, variability};
 use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
+use crate::tables::binary::IA_YIELD;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
@@ -1890,7 +1892,7 @@ impl SystemStars {
         let mut attempt = GRID_ATTEMPT;
         loop {
             let drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
-            if !carves || drawn.carved_pair().is_none() {
+            if !carves || (drawn.carved_pair().is_none() && drawn.exploded_pair().is_none()) {
                 // The carve-out takes no recent Type Ia from the grid, so a kept grid system has
                 // none at or before +H (plan 09, P09.T35's requirement of plan 11's P11.T6).
                 debug_assert!(
@@ -2010,9 +2012,34 @@ impl SystemStars {
             .find_map(|pair| carved_class(&pair.timeline, age).map(|class| (pair.node, class)))
     }
 
+    /// The first pair, depth first, whose pooled Type Ia candidate its explosion mark explodes,
+    /// with that candidate (plan 11, P11.T6): an explosion at or before +H, the age the pairs are
+    /// run to. The mark is the pair's at the system's attempt ([`IaExplosionMark`], read from the
+    /// pair's key), against the scratch [`IA_YIELD`]. `None` under the held arm of P11.T6's hold
+    /// (`IA_EXPLOSION_VERSION`), read from the primary's stellar rules, and for a system with no
+    /// pooled candidate.
+    ///
+    /// A grid system redraws an attempt for which it is `Some`, as for a carved pair
+    /// ([`carved_pair`](Self::carved_pair)), so that no grid system keeps a Type Ia by +H: plan
+    /// 09's class holds every one (design notes 8 and 9; P09.T35's requirement).
+    #[must_use]
+    pub fn exploded_pair(&self) -> Option<(NodeIndex, PooledIaEvent)> {
+        match self.primary().rules().ia_explosion {
+            IaExplosionRules::Pooled => None,
+            IaExplosionRules::Marked => self.pairs.iter().find_map(|pair| {
+                // The mark is read only for a pair with a candidate: most pairs have none.
+                pair.timeline.pooled_ia()?;
+                let key = self.hierarchy.pair_key(pair.node)?;
+                let mark = IaExplosionMark::of(self.seed, key, self.attempt);
+                marked_explosion(&pair.timeline, mark, &IA_YIELD).map(|event| (pair.node, event))
+            }),
+        }
+    }
+
     /// The redraw attempt the system's companions were drawn at (plan 11, design note 9): the
     /// first for nearly every system, a later one for a grid system whose earlier attempts fell
-    /// into a carved class.
+    /// into a carved class or, under P11.T6's hold, exploded as a Type Ia
+    /// ([`exploded_pair`](Self::exploded_pair)).
     #[must_use]
     pub const fn attempt(&self) -> RedrawAttempt {
         self.attempt

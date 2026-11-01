@@ -40,12 +40,13 @@ use crate::units::Metres;
 /// lists is the generated one, not an interval about it.
 ///
 /// **The cover.** The generator keeps the first attempt with no pair in a carved class
-/// ([`SystemStars::carved_pair`]), and only a pair that the binary engine runs can be carved: one
-/// of two stars, neither a brown dwarf ([`AttemptBound::pairs`]). So attempt n + 1 can be kept
-/// only if attempt n holds such a pair ([`AttemptBound::may_carve`]). The bound lists attempt 0,
-/// then attempt n + 1 for as long as attempt n may carve, through the last attempt, 7. If that one
-/// may carve too, it lists the single star that the generator keeps after its last attempt, the
-/// primary ([`HierarchyBound::fallback`]). A record that the grid does not redraw (a feature
+/// ([`SystemStars::carved_pair`]), nor, under P11.T6's hold, one whose Type Ia candidate explodes
+/// ([`SystemStars::exploded_pair`]), and only a pair that the binary engine runs can be carved or
+/// pool a candidate: one of two stars, neither a brown dwarf ([`AttemptBound::pairs`]). So
+/// attempt n + 1 can be kept only if attempt n holds such a pair ([`AttemptBound::may_carve`]).
+/// The bound lists attempt 0, then attempt n + 1 for as long as attempt n may carve, through the
+/// last attempt, 7. If that one may carve too, it lists the single star that the generator keeps
+/// after its last attempt, the primary ([`HierarchyBound::fallback`]). A record that the grid does not redraw (a feature
 /// member, or a brown dwarf or rogue planet, which is single) lists attempt 0 alone. So it lists
 /// every attempt the generator can keep, and may list some it does not, never fewer; within an
 /// attempt the stability test's tries are the draw's own, so it lists the try the draw keeps.

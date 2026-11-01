@@ -85,6 +85,11 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
+//! - [`ia_explosion`](StellarRules::ia_explosion), at [`IA_EXPLOSION_VERSION`] (plan 11, P11.T6):
+//!   whether the binary engine's pooled Type Ia candidates take their explosion mark. From it the
+//!   grid redraws a binary whose candidate the mark explodes at or before +H, in one test,
+//!   `SystemStars::exploded_pair`, which the system stage's redraw and P09.T35's hook read
+//!   (`stellar/rules/ia_hold.rs`).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -97,6 +102,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
+use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
@@ -139,6 +145,9 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
+    /// Whether the system stage reads the Type Ia explosion mark and redraws a binary it explodes
+    /// by +H, the hold of [`IA_EXPLOSION_VERSION`].
+    pub(crate) ia_explosion: IaExplosionRules,
 }
 
 impl StellarRules {
@@ -189,6 +198,11 @@ impl StellarRules {
             } else {
                 MergerMassRules::ThermalLimit
             },
+            ia_explosion: if version.get() >= IA_EXPLOSION_VERSION.get() {
+                IaExplosionRules::Marked
+            } else {
+                IaExplosionRules::Pooled
+            },
         }
     }
 
@@ -200,6 +214,17 @@ impl StellarRules {
     #[must_use]
     pub(crate) const fn every_26_hold() -> Self {
         Self::of_version(GeneratorVersion::new(26))
+    }
+
+    /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
+    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`).
+    ///
+    /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
+    /// with nothing to edit.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_27_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(27))
     }
 
     /// The test-only second table in place of the committed one
@@ -223,6 +248,8 @@ mod events_hold;
 mod hd_limit_hold;
 #[cfg(test)]
 mod helium_hold;
+#[cfg(test)]
+mod ia_hold;
 #[cfg(test)]
 mod merger_mass_hold;
 #[cfg(test)]

@@ -1,13 +1,16 @@
 //! The grid's half of the carve (plan 11, P11.T7, design notes 8 and 9): a grid system one of
 //! whose pairs falls into a carved catalogue class at any age of the source horizon
 //! ([`carved_class`](super::carved_class)) is redrawn on its next attempt, in
-//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate).
+//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate). Under P11.T6's hold
+//! so is one whose pair's pooled Type Ia candidate its explosion mark explodes, at or before +H
+//! ([`SystemStars::exploded_pair`](crate::stellar::system::SystemStars::exploded_pair)): plan 09's
+//! Type Ia class holds every recent one.
 //!
 //! The redraw is rejection sampling of the system's binaries: attempt n draws the hierarchy on
 //! words 64n to 64n + 63 of its streams and each companion on its own
 //! [`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt) n, and the first
-//! attempt with no carved pair is kept. So the grid holds exactly the binaries of the model
-//! conditioned on not being in a class, and the catalogue (P11.T8) holds those that are; the
+//! attempt with no carved or exploded pair is kept. So the grid holds exactly the binaries of the
+//! model conditioned on not being in a class, and the catalogue (P11.T8) holds those that are; the
 //! classes' observed shares leave the field through the share matrix
 //! ([`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES)). The primary is never redrawn: its
 //! draws, track, death and kick stay plan 06's and plan 08's.

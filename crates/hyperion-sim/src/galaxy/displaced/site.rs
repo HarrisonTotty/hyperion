@@ -428,11 +428,13 @@ pub(crate) fn recent_death_claim(rules: CarveOutRules) -> Option<RecentDeathClai
 /// Type Ia class holds every one. `SystemStars::generate_with` asserts it of every grid system it
 /// keeps, in debug builds.
 ///
-/// Until P11.T6 marks a pooled event as exploded, no binary explodes and this is false; P11.T6
-/// wires it to `carved_class`, whose redraw then keeps it false.
+/// It is the carve's Type Ia test (P11.T6): whether a pair's pooled Type Ia candidate is one its
+/// explosion mark explodes ([`SystemStars::exploded_pair`]), the test the grid's redraw reads
+/// beside `carved_class`, so the redraw keeps it false. Under the held arm of P11.T6's hold no
+/// candidate explodes and it is false for every system.
 #[must_use]
-pub(crate) const fn keeps_a_recent_type_ia(_stars: &SystemStars) -> bool {
-    false
+pub(crate) fn keeps_a_recent_type_ia(stars: &SystemStars) -> bool {
+    stars.exploded_pair().is_some()
 }
 
 /// The predicate's core: [`death_in_interval`] of a primary of initial mass `m0` and age at the
