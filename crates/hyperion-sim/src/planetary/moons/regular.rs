@@ -1776,16 +1776,17 @@ pub(crate) struct DampedMoon {
     /// eccentricity: `None` where it has no ranks or its derivation refused it, so that it kept
     /// its eccentricity.
     pub(crate) model: Option<TideModel>,
-    /// The chain of resonances that holds it, `None` for a free moon.
-    pub(crate) chain: Option<ChainBudget>,
+    /// Whether a 2:1 pair that holds forces its eccentricity ([`damping`]'s pairs); a free moon's
+    /// is damped by its own tides.
+    pub(crate) forced: bool,
 }
 
-/// A chain of resonances that holds, as its moons read it ([`DampedMoon::chain`]): its first moon,
-/// its budget and the planet's k₂ ÷ Q the budget read.
+/// A 2:1 pair of regular moons that holds ([`damping`]): its inner moon's index, its budget and
+/// the planet's k₂ ÷ Q the budget read.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ChainBudget {
-    /// The index of its first moon.
-    pub(crate) start: usize,
+pub(crate) struct PairBudget {
+    /// The index of its inner moon; its outer is the next.
+    pub(crate) inner: usize,
     /// Its budget B.
     pub(crate) budget: Watts,
     /// The planet's k₂ ÷ Q at which B is read.
@@ -1796,21 +1797,23 @@ pub(crate) struct ChainBudget {
 /// from their tides at the parent's moon generators' time `tides`, each derived at the ranks
 /// `ranks(i, moon)` gives the i-th moon, from 0 (P14.T55.j.a; [`eccentricity`]'s rules):
 ///
-/// 1. **A forced eccentricity only in a resonance that holds.** The chains of 2:1 resonances
-///    among the moons kept are each a moon at twice its inner neighbour's period with that
-///    neighbour kept, two moons or more. A chain whose budget B is positive holds; every other
-///    moon takes its free eccentricity ([`RegularMoon::unforced_eccentricity`]).
+/// 1. **A forced eccentricity only in a resonance that holds.** A 2:1 pair among the moons kept is
+///    a moon at twice its inner neighbour's period with that neighbour kept. A pair whose budget
+///    B is positive holds, B at the parent's locking k₂ ÷ Q at its inner moon under its ceiling
+///    ([`budget_tidal_response`]); a moon in no pair that holds takes its free eccentricity
+///    ([`RegularMoon::unforced_eccentricity`]).
 /// 2. **A free eccentricity at its age** ([`free_eccentricity`]), its damping time read from its
 ///    own tides at each eccentricity.
-/// 3. **A forced eccentricity at its chain's budget** ([`forced_scale`]): every moon of a chain
-///    that holds takes one scale of its eccentricity, B at the parent's one locking k₂ ÷ Q at the
-///    chain's inner moon, under its ceiling ([`budget_tidal_response`]).
+/// 3. **A forced eccentricity at its pair's budget** ([`forced_scale`]): both moons of a pair that
+///    holds take one scale of their eccentricities; a moon in two pairs takes the smaller of its
+///    pairs' scales (lean, 2026-11-01, research-leans-20), so that neither pair dissipates over its
+///    budget.
 ///
 /// Each moon's tides are its model's ([`TideModel`]): P14.T17.b's derivation of it as a regular
 /// moon in `tides`' nursery and sky ([`derive_regular_moon`]'s, the passes' stand-in), on its
 /// orbit before the damping, at the age the time gives, so that each tide is one solve at its
 /// eccentricity's forcing. A moon with no ranks, or whose derivation is refused, keeps its
-/// eccentricity, and its chain with it. Each moon's orbit keeps its axis, angles and mean anomaly
+/// eccentricity, and its pairs with it. Each moon's orbit keeps its axis, angles and mean anomaly
 /// to the bit ([`RegularMoon::with_eccentricity`]): no draw is made.
 #[must_use]
 pub(crate) fn damped_regular_moons(
@@ -1822,6 +1825,7 @@ pub(crate) fn damped_regular_moons(
     RegularMoons {
         drawn_mass: moons.drawn_mass,
         moons: damping(moons.moons(), parent, tides, ranks)
+            .0
             .into_iter()
             .map(|damped| damped.moon)
             .collect(),
@@ -1829,14 +1833,15 @@ pub(crate) fn damped_regular_moons(
     }
 }
 
-/// [`damped_regular_moons`]' moons with what decided each.
+/// [`damped_regular_moons`]' moons with what decided each, inside out, and the 2:1 pairs whose
+/// budget is positive, inside out.
 #[must_use]
 pub(crate) fn damping(
     moons: &[RegularMoon],
     parent: &MoonParent,
     tides: &RegularTides,
     ranks: impl Fn(usize, &RegularMoon) -> Option<MoonRanks>,
-) -> Vec<DampedMoon> {
+) -> (Vec<DampedMoon>, Vec<PairBudget>) {
     let planet = Kilograms::from(parent.mass());
     let age_now = tides.age.value() + tides.t.since_epoch().as_julian_years_f64();
     let age = Seconds::new(age_now * SECONDS_PER_JULIAN_YEAR);
@@ -1845,102 +1850,92 @@ pub(crate) fn damping(
         a: moon.orbit.semi_major_axis(),
         mean_motion_rad_per_s: core::f64::consts::TAU / moon.orbit.period().value(),
     };
-    let chains: Vec<(core::ops::Range<usize>, ChainBudget)> = resonant_chains(moons)
+    let pairs: Vec<PairBudget> = resonant_pairs(moons)
         .into_iter()
-        .filter_map(|chain| {
-            let orbits: Vec<ResonantOrbit> = moons[chain.clone()].iter().map(orbit).collect();
+        .filter_map(|inner| {
+            let orbits = [orbit(&moons[inner]), orbit(&moons[inner + 1])];
             let response =
                 budget_tidal_response(planet, parent.radius(), tides.love_number, &orbits[0], age);
             let budget = resonance_budget(parent.radius(), response.value(), &orbits);
-            let held = ChainBudget {
-                start: chain.start,
+            (budget.value() > 0.0).then_some(PairBudget {
+                inner,
                 budget,
                 response,
-            };
-            (budget.value() > 0.0).then_some((chain, held))
+            })
         })
         .collect();
-    let chain_of = |i: usize| {
-        chains
+    let forced = |i: usize| {
+        pairs
             .iter()
-            .find(|(chain, _)| chain.contains(&i))
-            .map(|(_, held)| *held)
+            .any(|pair| pair.inner == i || pair.inner + 1 == i)
     };
+    let e_of = |moon: &RegularMoon| moon.orbit.eccentricity().value();
     let mut damped: Vec<DampedMoon> = moons
         .iter()
         .enumerate()
         .map(|(i, moon)| {
-            let chain = chain_of(i);
+            let forced = forced(i);
             let unforced = moon.unforced_eccentricity();
-            let moon = if chain.is_none()
-                && unforced
-                    .total_cmp(&moon.orbit.eccentricity().value())
-                    .is_ne()
-            {
+            let moon = if !forced && unforced.total_cmp(&e_of(moon)).is_ne() {
                 moon.with_eccentricity(unforced)
             } else {
                 *moon
             };
             let model = ranks(i, &moon)
                 .and_then(|ranks| regular_tide_model(&moon, parent, tides, ranks).ok());
-            DampedMoon { moon, model, chain }
+            DampedMoon {
+                moon,
+                model,
+                forced,
+            }
         })
         .collect();
     for at in &mut damped {
-        if let (None, Some(model)) = (at.chain, &at.model) {
-            let drawn = at.moon.orbit.eccentricity().value();
+        if let (false, Some(model)) = (at.forced, &at.model) {
+            let drawn = e_of(&at.moon);
             let e = free_eccentricity(drawn, age, |e| model.damping_time(e));
             if e.total_cmp(&drawn).is_ne() {
                 at.moon = at.moon.with_eccentricity(e);
             }
         }
     }
-    for (chain, held) in &chains {
-        let members: Option<Vec<(TideModel, f64)>> = damped[chain.clone()]
-            .iter()
-            .map(|at| Some((at.model?, at.moon.orbit.eccentricity().value())))
-            .collect();
-        let Some(members) = members else {
+    // Each pair's scale on its moons' forced eccentricities, all read before any is scaled.
+    let mut least = vec![1.0_f64; damped.len()];
+    for pair in &pairs {
+        let (inner, outer) = (&damped[pair.inner], &damped[pair.inner + 1]);
+        let (Some(a), Some(b)) = (inner.model, outer.model) else {
             continue;
         };
-        let heat = |s: f64| {
-            Watts::new(
-                members
-                    .iter()
-                    .map(|(model, e)| model.heat(s * e).value())
-                    .sum(),
-            )
-        };
-        let scale = forced_scale(held.budget, heat);
-        if scale < 1.0 {
-            for (at, (_, e)) in damped[chain.clone()].iter_mut().zip(&members) {
-                at.moon = at.moon.with_eccentricity(scale * e);
+        let (ea, eb) = (e_of(&inner.moon), e_of(&outer.moon));
+        let scale = forced_scale(pair.budget, |s| {
+            Watts::new(a.heat(s * ea).value() + b.heat(s * eb).value())
+        });
+        for i in [pair.inner, pair.inner + 1] {
+            if scale < least[i] {
+                least[i] = scale;
             }
         }
     }
-    damped
+    for (at, &scale) in damped.iter_mut().zip(&least) {
+        if scale < 1.0 {
+            at.moon = at.moon.with_eccentricity(scale * e_of(&at.moon));
+        }
+    }
+    (damped, pairs)
 }
 
-/// The chains of 2:1 resonances among `moons`, inside out, as ranges of their indices: each moon
-/// after a chain's first at twice its inner neighbour's period ([`Resonance::TwoToOneWithInner`]),
-/// with that neighbour, the moon of the ordinal below, kept; two moons or more.
+/// The 2:1 pairs among `moons`, inside out, as their inner moons' indices: a moon at twice its
+/// inner neighbour's period ([`Resonance::TwoToOneWithInner`]) with that neighbour, the moon of
+/// the ordinal below, kept.
 #[must_use]
-fn resonant_chains(moons: &[RegularMoon]) -> Vec<core::ops::Range<usize>> {
-    let linked = |i: usize| {
-        moons[i].resonance == Resonance::TwoToOneWithInner
-            && moons[i - 1].ordinal.checked_add(1) == Some(moons[i].ordinal)
-    };
-    let mut chains = Vec::new();
-    let mut start = 0;
-    for i in 1..=moons.len() {
-        if i == moons.len() || !linked(i) {
-            if i - start >= 2 {
-                chains.push(start..i);
-            }
-            start = i;
-        }
-    }
-    chains
+fn resonant_pairs(moons: &[RegularMoon]) -> Vec<usize> {
+    (1..moons.len())
+        .filter(|&i| {
+            moons[i].resonance == Resonance::TwoToOneWithInner
+                && moons[i - 1].ordinal.checked_add(1) == Some(moons[i].ordinal)
+        })
+        .map(|i| i - 1)
+        .collect()
 }
 
 /// The tide model of the regular moon `moon` of `parent` at the ranks `ranks`, derived as
@@ -5116,7 +5111,7 @@ mod tests {
     }
 
     /// P14.T55.j.a's step 1: under its rule a generated moon keeps a forced eccentricity only in
-    /// a chain of 2:1 resonances among the moons kept, and every other moon its free one, so that
+    /// a 2:1 pair among the moons kept, and every other moon its free one, so that
     /// its eccentricity falls or stays; the moons kept, their axes, angles and resonances are the
     /// drawn system's to the bit.
     #[test]
@@ -5131,7 +5126,7 @@ mod tests {
                 regular_moons(Seed::new(14), &p)
             });
             assert_eq!(held.moons().len(), damped.moons().len());
-            let chains = resonant_chains(damped.moons());
+            let pairs = resonant_pairs(damped.moons());
             for (i, (a, b)) in held.moons().iter().zip(damped.moons()).enumerate() {
                 let (x, y) = (a.orbit(), b.orbit());
                 assert_eq!((a.ordinal(), a.resonance()), (b.ordinal(), b.resonance()));
@@ -5142,7 +5137,7 @@ mod tests {
                     y.mean_anomaly_at_epoch().value(),
                 );
                 let (e0, e) = (x.eccentricity().value(), y.eccentricity().value());
-                if chains.iter().any(|chain| chain.contains(&i)) {
+                if pairs.iter().any(|&inner| inner == i || inner + 1 == i) {
                     assert_same_bits(e0, e);
                 } else {
                     assert!(e <= e0 && e <= b.free_eccentricity, "{e} {e0} {b:?}");
@@ -5179,53 +5174,33 @@ mod tests {
         );
     }
 
-    /// P14.T55.j.a's census: 5,000 generated regular moons under every 27 hold, with P14.T56.e's
-    /// porous core, at their eccentricities at their age. On the damping's own tide models each
-    /// chain of resonances that holds dissipates no more than its budget, to 10⁻⁹, and each free
-    /// moon's damping time reaches the Sun's age or its orbit is circular; and no moon, derived
-    /// afresh on its damped orbit, is at 10 W m⁻² or more.
-    ///
-    /// Recorded: the moons it damps and circularises, the chains it holds at their budget and
-    /// those whose budget the k₂ ÷ Q ceiling binds (none of whose moons is at 10 W m⁻² or more),
-    /// the counts at 1 and at 0.1 W m⁻² or more, the largest flux, and the ocean branch's size
-    /// against the drawn eccentricities'. A moon damped to where its ocean freezes sits at the
-    /// branch's edge, where the heat jumps, so a fresh derivation on its damped orbit, whose
-    /// insolation reads its eccentricity, may keep the ocean: recorded, the moons that do, the largest ratio
-    /// of a fresh chain's heat to its budget and the smallest of a fresh free moon's damping time
-    /// to the age, each held within 1% (1.000000 and 1.000000 as built).
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "5,000 moons generated, damped and derived twice, each chain and moon checked"
-    )]
-    fn under_every_27_hold_the_generated_moons_take_their_eccentricities_at_their_age() {
-        use crate::planetary::moons::eccentricity::{
-            EccentricityDampingRules, damping_time, with_eccentricity_damping,
-        };
-        use crate::planetary::moons::tides::TidalBranch;
-        use crate::planetary::testing::with_every_27_hold;
-        /// One moon of the census: its system, what decided its eccentricity, its tides, heat and
-        /// flux derived afresh on its damped orbit, and its drawn eccentricity's tides and
-        /// eccentricity.
-        struct Row {
-            system: u32,
-            at: DampedMoon,
-            own: MoonTides,
-            heat: Watts,
-            flux: WattsPerSquareMetre,
-            drawn: (MoonTides, f64),
-            planet: Kilograms,
-        }
-        /// A chain's system and first moon; its budget; its heat on its models and afresh, W; and
-        /// its moons' largest flux afresh, W m⁻².
-        type Chain = ((u32, usize), ChainBudget, f64, f64, f64);
-        const MOONS: usize = 5_000;
-        let age = Seconds::new(SOLAR_AGE.value() * SECONDS_PER_JULIAN_YEAR);
-        let giants = table_giants();
-        let love = |slot: u8| {
-            let names = ["Jupiter", "Saturn", "Uranus", "Neptune"];
-            let name = names[usize::from(slot - 5)];
-            let (_, derived) = derived_parent(name, planet_id(0, slot));
+    /// One giant of P14.T55.j.a's census: its name, its parent as its moons read it, their nursery
+    /// and sky, its class's Love number, and whether its moons are held under 10 W m⁻² on every
+    /// branch from 1 Gyr.
+    struct CensusGiant {
+        name: &'static str,
+        parent: MoonParent,
+        nursery: MoonNursery,
+        sky: MoonSky,
+        love: f64,
+        tail: HeatedTail,
+    }
+
+    /// Whether the census holds a giant's moons under 10 W m⁻² on every branch from 1 Gyr.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum HeatedTail {
+        /// The table's giants: none at 10 W m⁻² or more from 1 Gyr.
+        Bounded,
+        /// The 13 Jupiter-mass giant's, whose budget pays its inner moon some 10 W m⁻² at the
+        /// Sun's age (research-leans-20: up to 11.6): recorded.
+        Recorded,
+    }
+
+    /// The census's giants: the table's Jupiter, Saturn, Uranus and Neptune, and `giants`' 13
+    /// Jupiter-mass giant at 1 au from the Sun (research-leans-20), derived there as P14.T16
+    /// derives a planet, at the median rank, in the Sun's disc.
+    fn census_giants() -> Vec<CensusGiant> {
+        let love = |derived: &DerivedBody| {
             crate::planetary::derive::rotation::tides(
                 derived.class(),
                 derived.mass(),
@@ -5234,135 +5209,368 @@ mod tests {
             )
             .0
         };
-        let mut rows: Vec<Row> = Vec::with_capacity(MOONS + 6);
+        let mut giants: Vec<CensusGiant> =
+            [("Jupiter", 5), ("Saturn", 6), ("Uranus", 7), ("Neptune", 8)]
+                .into_iter()
+                .map(|(name, slot)| {
+                    let (parent, nursery, sky) = table_giant(name, slot, None);
+                    let (_, derived) = derived_parent(name, planet_id(0, slot));
+                    CensusGiant {
+                        name,
+                        parent,
+                        nursery,
+                        sky,
+                        love: love(&derived),
+                        tail: HeatedTail::Bounded,
+                    }
+                })
+                .collect();
+        let disc = solar::solar_disc();
+        let lights = [solar::sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let orbit = solar::orbit(1.0, 0.05);
+        let a = orbit.semi_major_axis();
+        let placed =
+            PlacedBody::new(EarthMasses::new(4_131.0), orbit, a, UnitUniform::HALF).unwrap();
+        let derived = crate::planetary::derive::derive_body(
+            &placed,
+            &hosts,
+            &disc,
+            SOLAR_AGE,
+            UniverseTime::EPOCH,
+        )
+        .unwrap();
+        let parent = MoonParent::from_derived(
+            planet_id(0, 2),
+            ParentKind::Planet,
+            &derived,
+            orbit,
+            Kilograms::new(SOLAR_MASS_KG),
+        )
+        .unwrap();
+        giants.push(CensusGiant {
+            name: "13 MJ at 1 au",
+            nursery: MoonNursery::new(&parent, &Composition::SOLAR, &disc, a).unwrap(),
+            sky: MoonSky::new(&derived, &orbit, &hosts).unwrap(),
+            love: love(&derived),
+            parent,
+            tail: HeatedTail::Recorded,
+        });
+        giants
+    }
+
+    /// One moon of P14.T55.j.a's census: its giant, what decided its eccentricity, its
+    /// tides, heat and flux derived afresh on its damped orbit, and, where the census read them,
+    /// its drawn eccentricity's tides and the eccentricity.
+    struct CensusMoon {
+        giant: usize,
+        at: DampedMoon,
+        own: MoonTides,
+        heat: Watts,
+        flux: WattsPerSquareMetre,
+        drawn: Option<(MoonTides, f64)>,
+    }
+
+    /// One 2:1 pair of P14.T55.j.a's census that holds: its giant, and its moons' places in the
+    /// census, with its budget.
+    struct CensusPair {
+        giant: usize,
+        moons: (usize, usize),
+        budget: PairBudget,
+    }
+
+    /// P14.T55.j.a's census of `count` generated regular moons, at least, under every 27 hold
+    /// with P14.T56.e's porous core, about `giants` in turn, at their eccentricities at the age
+    /// `age`, each derived afresh on its damped orbit and, where `drawn`, on its drawn one: the
+    /// moons, the pairs that hold, and per giant the pairs found.
+    fn damping_census(
+        giants: &[CensusGiant],
+        age: Years,
+        count: usize,
+        drawn: bool,
+    ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
+        use crate::planetary::moons::eccentricity::{
+            EccentricityDampingRules, with_eccentricity_damping,
+        };
+        use crate::planetary::testing::with_every_27_hold;
+        let (mut moons, mut pairs) = (Vec::with_capacity(count + 6), Vec::new());
+        let mut found = vec![0_u32; giants.len()];
         with_every_27_hold(|| {
-            let mut system = 0_u32;
-            'giants: for i in 0..1_000 {
-                for giant in &giants {
-                    let slot = giant.0.id().body_index().to_be_bytes()[0];
-                    let p = renamed(&giant.0, i, slot);
+            'giants: for i in 0..2_000 {
+                for (g, giant) in giants.iter().enumerate() {
+                    let slot = giant.parent.id().body_index().to_be_bytes()[0];
+                    let p = renamed(&giant.parent, i, slot);
                     let held = with_eccentricity_damping(EccentricityDampingRules::Held, || {
                         regular_moons(Seed::new(12), &p)
                     });
-                    let drawn = regular_moons(Seed::new(12), &p);
+                    let system_moons = regular_moons(Seed::new(12), &p);
                     let tides = RegularTides {
-                        nursery: giant.1,
-                        sky: giant.2.clone(),
-                        love_number: love(slot),
-                        age: SOLAR_AGE,
+                        nursery: giant.nursery,
+                        sky: giant.sky.clone(),
+                        love_number: giant.love,
+                        age,
                         t: UniverseTime::EPOCH,
                     };
-                    let base = u32::try_from(rows.len()).unwrap();
+                    let base = u32::try_from(moons.len()).unwrap();
                     let rank = |k: usize| spread_rank(base + u32::try_from(k).unwrap());
                     let ranks =
                         |k: usize, _: &RegularMoon| Some((rank(k), MoonVolatiles::SHARED.draws));
-                    let damped = damping(drawn.moons(), &p, &tides, ranks);
+                    let (damped, held_pairs) = damping(system_moons.moons(), &p, &tides, ranks);
+                    found[g] += u32::try_from(resonant_pairs(system_moons.moons()).len()).unwrap();
+                    let start = moons.len();
+                    for pair in &held_pairs {
+                        pairs.push(CensusPair {
+                            giant: g,
+                            moons: (start + pair.inner, start + pair.inner + 1),
+                            budget: *pair,
+                        });
+                    }
+                    let census = (&giant.parent, &giant.nursery, &giant.sky);
+                    let derive = |moon: &RegularMoon, k: usize| {
+                        derive_regular_moon(
+                            moon,
+                            census.0,
+                            census.1,
+                            census.2,
+                            rank(k),
+                            MoonVolatiles::SHARED.draws,
+                            age,
+                            UniverseTime::EPOCH,
+                        )
+                        .unwrap()
+                    };
                     for (k, (at, before)) in damped.iter().zip(held.moons()).enumerate() {
-                        let own = regular_derived(&at.moon, &p, giant, rank(k), SOLAR_AGE);
-                        let was = regular_derived(before, &p, giant, rank(k), SOLAR_AGE);
-                        rows.push(Row {
-                            system,
+                        let own = derive(&at.moon, k);
+                        moons.push(CensusMoon {
+                            giant: g,
                             at: *at,
                             own: own.tides(),
                             heat: own.tidal_heating(),
                             flux: own.heat_flux(),
-                            drawn: (was.tides(), before.orbit().eccentricity().value()),
-                            planet: Kilograms::from(p.mass()),
+                            drawn: drawn.then(|| {
+                                (
+                                    derive(before, k).tides(),
+                                    before.orbit().eccentricity().value(),
+                                )
+                            }),
                         });
                     }
-                    system += 1;
-                    if rows.len() >= MOONS {
+                    if moons.len() >= count {
                         break 'giants;
                     }
                 }
             }
         });
-        assert!(rows.len() >= MOONS, "{}", rows.len());
-        let e_of = |row: &Row| row.at.moon.orbit().eccentricity().value();
-        let model_of = |row: &Row| row.at.model.expect("every generated moon derives");
-        // The chains, by system and first moon: their budget, and their heat on their models and
-        // afresh, and their moons' largest flux afresh.
-        let mut chains: Vec<Chain> = Vec::new();
-        for row in &rows {
-            let Some(held) = row.at.chain else {
-                continue;
-            };
-            let key = (row.system, held.start);
-            let modelled = model_of(row).heat(e_of(row)).value();
-            let (fresh, flux) = (row.heat.value(), row.flux.value());
-            match chains.iter_mut().find(|(k, ..)| *k == key) {
-                Some((_, _, model, heat, most)) => {
-                    *model += modelled;
-                    *heat += fresh;
-                    *most = most.max(flux);
-                }
-                None => chains.push((key, held, modelled, fresh, flux)),
-            }
-        }
-        let (mut at_budget, mut capped, mut fresh_ratio) = (0_u32, 0_u32, 0.0_f64);
-        for (key, held, model, fresh, most) in &chains {
-            let budget = held.budget.value();
+        (moons, pairs, found)
+    }
+
+    /// What P14.T55.j.a's census asserts at one age `age`, and what it records: on the damping's
+    /// own tide models each 2:1 pair that holds dissipates no more than its budget, to 10⁻⁹, a
+    /// moon in two pairs included, and each free moon's damping time reaches the age or its orbit
+    /// is circular; no ocean-branch moon is at 10 W m⁻² or more, and from 1 Gyr no moon of the
+    /// table's giants on any branch ([`HeatedTail`]). Returned: the census's lines, the largest
+    /// ratio of a fresh pair's heat to its budget, the smallest of a fresh free moon's damping time
+    /// to the age, and the moons at 10 W m⁻² or more.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "every pair's budget and every moon's age, branch and flux checked and tallied"
+    )]
+    fn census_checks(
+        giants: &[CensusGiant],
+        age: Years,
+        (moons, pairs, found): &(Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>),
+    ) -> (String, f64, f64, u32) {
+        use crate::planetary::moons::eccentricity::damping_time;
+        use crate::planetary::moons::tides::TidalBranch;
+        use core::fmt::Write as _;
+        let seconds = Seconds::new(age.value() * SECONDS_PER_JULIAN_YEAR);
+        let e_of = |moon: &CensusMoon| moon.at.moon.orbit().eccentricity().value();
+        let model_of = |moon: &CensusMoon| moon.at.model.expect("every generated moon derives");
+        let mut fresh_ratio = 0.0_f64;
+        let mut by_giant = vec![(0_u32, 0_u32, 0_u32); giants.len()];
+        for pair in pairs {
+            let (inner, outer) = (&moons[pair.moons.0], &moons[pair.moons.1]);
+            let modelled = model_of(inner).heat(e_of(inner)).value()
+                + model_of(outer).heat(e_of(outer)).value();
+            let budget = pair.budget.budget.value();
             assert!(
-                *model <= budget * (1.0 + 1e-9),
-                "{key:?}: {model} W against {held:?}"
+                modelled <= budget * (1.0 + 1e-9),
+                "{modelled} W against {:?}: {:?} {:?}",
+                pair.budget,
+                inner.at,
+                outer.at
             );
-            at_budget += u32::from(*model > 0.999 * budget);
-            fresh_ratio = fresh_ratio.max(fresh / budget);
-            if let BudgetResponse::Ceiling(_) = held.response {
-                capped += 1;
-                assert!(*most < 10.0, "{key:?} under the ceiling: {most} W m⁻²");
-            }
+            fresh_ratio = fresh_ratio.max((inner.heat.value() + outer.heat.value()) / budget);
+            let tally = &mut by_giant[pair.giant];
+            tally.0 += 1;
+            tally.1 += u32::from(modelled > 0.999 * budget);
+            tally.2 += u32::from(matches!(pair.budget.response, BudgetResponse::Ceiling(_)));
         }
-        let (mut free, mut damped, mut circular, mut flipped) = (0_u32, 0_u32, 0_u32, 0_u32);
-        let (mut past, mut ocean, mut drawn_ocean) = ([0_u32; 2], 0_u32, 0_u32);
-        let (mut largest, mut fresh_tau) = (None::<(f64, f64, f64)>, f64::INFINITY);
-        for row in &rows {
-            let (e, model) = (e_of(row), model_of(row));
-            if row.at.chain.is_none() {
+        let (mut free, mut circular, mut fresh_tau) = (0_u32, 0_u32, f64::INFINITY);
+        let (mut past, mut heated, mut ocean) = ([0_u32; 2], (0_u32, 0.0_f64), 0_u32);
+        let mut largest = None::<(f64, f64, f64, TidalBranch)>;
+        let mut tails = vec![(0_u32, 0.0_f64); giants.len()];
+        for moon in moons {
+            let (e, model) = (e_of(moon), model_of(moon));
+            if !moon.at.forced {
                 free += 1;
                 assert!(
-                    e == 0.0 || model.damping_time(e).value() >= age.value(),
+                    e == 0.0 || model.damping_time(e).value() >= seconds.value(),
                     "{:?}: τ_e {:?}",
-                    row.at,
+                    moon.at,
                     model.damping_time(e)
                 );
                 if e > 0.0 {
-                    let mass = Kilograms::from(row.at.moon.mass());
-                    let a = row.at.moon.orbit().semi_major_axis();
-                    let tau = damping_time(row.planet, mass, a, e, row.heat);
-                    fresh_tau = fresh_tau.min(tau.value() / age.value());
+                    let planet = Kilograms::from(giants[moon.giant].parent.mass());
+                    let (mass, a) = (
+                        Kilograms::from(moon.at.moon.mass()),
+                        moon.at.moon.orbit().semi_major_axis(),
+                    );
+                    let tau = damping_time(planet, mass, a, e, moon.heat);
+                    fresh_tau = fresh_tau.min(tau.value() / seconds.value());
                 }
             }
-            damped += u32::from(e < row.drawn.1);
             circular += u32::from(e == 0.0);
-            flipped += u32::from(row.own.branch() != model.tides_branch(e));
-            let f = row.flux.value();
-            assert!(f.is_finite() && f < 10.0, "{:?}: {f} W m⁻²", row.at);
-            past[0] += u32::from(f >= 1.0);
-            past[1] += u32::from(f >= 0.1);
-            ocean += u32::from(row.own.branch() == TidalBranch::Ocean);
-            drawn_ocean += u32::from(row.drawn.0.branch() == TidalBranch::Ocean);
+            let (f, branch) = (moon.flux.value(), moon.own.branch());
+            assert!(f.is_finite(), "{:?}: {f} W m⁻²", moon.at);
+            assert!(
+                !(f >= 10.0 && branch == TidalBranch::Ocean),
+                "{:?}: {f} W m⁻² on the ocean branch at {age:?}",
+                moon.at
+            );
+            let giant = &giants[moon.giant];
+            assert!(
+                f < 10.0 || age.value() < 1e9 || giant.tail == HeatedTail::Recorded,
+                "{:?}: {f} W m⁻² ({branch:?}) at {age:?}",
+                moon.at
+            );
+            if f >= 10.0 {
+                let tally = &mut tails[moon.giant];
+                tally.0 += 1;
+                tally.1 = tally.1.max(f);
+            }
+            past[0] += u32::from(f >= 10.0);
+            past[1] += u32::from(f >= 1.0);
+            if f >= 10.0 && branch == TidalBranch::Heated {
+                heated.0 += 1;
+                heated.1 = heated.1.max(f);
+            }
+            ocean += u32::from(branch == TidalBranch::Ocean);
             if largest.is_none_or(|(most, ..)| f > most) {
-                largest = Some((f, model.radius().value() / 1e3, e));
+                largest = Some((f, model.radius().value() / 1e3, e, branch));
             }
         }
-        eprintln!(
-            "{} moons under every 27 hold at their age: {free} free, {damped} damped, {circular} \
-             circular; {} chains held, {at_budget} at their budget, {capped} under the k2/Q \
-             ceiling; {} at 1 W m⁻² or more, {} at \
-             0.1 or more, the largest {largest:?} (W m⁻², km, e); {ocean} on the ocean branch \
-             against {drawn_ocean} at the drawn e. Derived afresh on the damped orbits: {flipped} \
-             moons on another branch than their model's, a chain's heat at most \
-             {fresh_ratio:.6} of its budget, a free moon's damping time at least {fresh_tau:.6} \
-             of the age",
-            rows.len(),
-            chains.len(),
+        let mut lines = String::new();
+        let _ = writeln!(
+            lines,
+            "{} moons at {:.3e} yr: {free} free, {circular} circular, {} forced in {} pairs that \
+             hold; {} at 10 W m⁻² or more ({} heated, the largest heated {:.2}), {} at 1 or more, \
+             the largest {largest:?} (W m⁻², km, e, branch); {ocean} on the ocean branch",
+            moons.len(),
+            age.value(),
+            moons.len() - usize::try_from(free).unwrap(),
+            pairs.len(),
             past[0],
+            heated.0,
+            heated.1,
             past[1]
         );
-        assert!(damped > 0 && circular > 0, "{damped} {circular}");
+        for (g, giant) in giants.iter().enumerate() {
+            let (held, at_budget, ceiling) = by_giant[g];
+            let _ = writeln!(
+                lines,
+                "  {}: {} pairs, {held} hold ({} with B ≤ 0), {at_budget} at their budget, \
+                 {ceiling} under the k2/Q ceiling ({:.1}% of those that hold); {} moons at 10 W \
+                 m⁻² or more, the largest {:.2}",
+                giant.name,
+                found[g],
+                found[g] - held,
+                100.0 * f64::from(ceiling) / f64::from(held.max(1)),
+                tails[g].0,
+                tails[g].1
+            );
+        }
+        (lines, fresh_ratio, fresh_tau, past[0])
+    }
+
+    /// P14.T55.j.a's census at the Sun's age: 5,000 generated regular moons under every 27 hold,
+    /// with P14.T56.e's porous core, at their eccentricities at their age, about the table's four
+    /// giants and a 13 Jupiter-mass giant at 1 au ([`census_checks`]' assertions).
+    ///
+    /// Recorded: the moons damped and circularised, the pairs that hold and those with B ≤ 0, at
+    /// their budget and under the k₂ ÷ Q ceiling, per giant (research-leans-20: about 30% of a
+    /// gas giant's pairs, half an ice giant's; about 9% with B ≤ 0), the counts at 10 and 1 W m⁻²
+    /// or more, the largest flux, and the ocean branch's size against the drawn eccentricities'.
+    /// A moon damped to where its ocean freezes sits at the branch's edge, where the heat jumps,
+    /// so a fresh derivation on its damped orbit, whose insolation reads its eccentricity, may
+    /// keep the ocean: the largest ratio of a fresh pair's heat to its budget and the smallest of a
+    /// fresh free moon's damping time to the age are held within 1% (1.000000 and 1.000000 as
+    /// built).
+    #[test]
+    fn under_every_27_hold_the_generated_moons_take_their_eccentricities_at_their_age() {
+        use crate::planetary::moons::tides::TidalBranch;
+        let giants = census_giants();
+        let census = damping_census(&giants, SOLAR_AGE, 5_000, true);
+        let (lines, fresh_ratio, fresh_tau, _) = census_checks(&giants, SOLAR_AGE, &census);
+        let moons = &census.0;
+        let damped = moons
+            .iter()
+            .filter(|m| {
+                m.drawn
+                    .is_some_and(|(_, e0)| m.at.moon.orbit().eccentricity().value() < e0)
+            })
+            .count();
+        let drawn_ocean = moons
+            .iter()
+            .filter(|m| {
+                m.drawn
+                    .is_some_and(|(t, _)| t.branch() == TidalBranch::Ocean)
+            })
+            .count();
+        let flipped = moons
+            .iter()
+            .filter(|m| {
+                let e = m.at.moon.orbit().eccentricity().value();
+                m.at.model
+                    .is_some_and(|model| model.tides_branch(e) != m.own.branch())
+            })
+            .count();
+        eprintln!(
+            "{lines}  {damped} damped; {drawn_ocean} on the ocean branch at the drawn e. Derived \
+             afresh on the damped orbits: {flipped} moons on another branch than their model's, a \
+             pair's heat at most {fresh_ratio:.6} of its budget, a free moon's damping time at \
+             least {fresh_tau:.6} of the age"
+        );
+        assert!(moons.len() >= 5_000, "{}", moons.len());
+        assert!(damped > 0, "{damped}");
         assert!(fresh_ratio <= 1.01, "{fresh_ratio}");
         assert!(fresh_tau >= 0.99, "{fresh_tau}");
+    }
+
+    /// P14.T55.j.a's census at 10 Myr, 100 Myr, 1 Gyr and 10 Gyr ([`census_checks`]' assertions;
+    /// research-leans-20): the budget grows as 1 ÷ t, so below about 300 Myr the gas giants'
+    /// heavy, close inner moons keep their drawn eccentricities. Recorded: that heated tail below
+    /// 1 Gyr, paid for by the budget, so not a wrong state of the rule (its size is the heated
+    /// branch's, P14.T55.j's), with the pairs, their shares and the largest fluxes at each age.
+    #[test]
+    fn under_every_27_hold_the_generated_moons_hold_their_budgets_at_every_age() {
+        let giants = census_giants();
+        for years in [1e7, 1e8, 1e9, 1e10] {
+            let age = Years::new(years);
+            let census = damping_census(&giants, age, 5_000, false);
+            let (lines, fresh_ratio, fresh_tau, tail) = census_checks(&giants, age, &census);
+            eprintln!(
+                "{lines}  derived afresh: a pair's heat at most {fresh_ratio:.6} of its budget, a \
+                 free moon's damping time at least {fresh_tau:.6} of the age; {tail} at 10 W m⁻² \
+                 or more"
+            );
+        }
     }
 
     /// P14.T17.b's test (b) as amended, its second half (decision-p14-moons §3.4 (a)): the share

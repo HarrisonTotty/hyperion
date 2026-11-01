@@ -8843,13 +8843,13 @@ Each is labelled "not yet modelled" where a console could show it:
     - A forced e only in a 2:1 resonance that holds; any other moon takes its free e.
     - A free e damped to the largest e ≤ the drawn one at which τ_e = G `M_p` m e² ÷ (a H(e)
       (1 − e²)) reaches the age, H the moon's own tide solve at e.
-    - A chain's forced e scaled by one s ≤ 1 to its budget B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ Σ Lᵢ
+    - A pair's forced e scaled by one s ≤ 1 to its budget B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ Σ Lᵢ
       (Meyer and Wisdom 2007), at the parent's locking k₂ ÷ Q at the inner moon, capped at
-      k₂ ÷ 100. B ≤ 0: the free rule.
+      k₂ ÷ 100; a moon in two pairs takes the smaller s. B ≤ 0: the free rule.
     - The record, positions, events and tides read the one damped e, with no draw.
     - _Tests:_ the budget at Q = 18,000 (1.0–1.3 GW); the locking k₂ ÷ Q within 2σ of Lainey
       et al. 2009 and 2017; Enceladus–Dione 10–20 GW; Enceladus in its pair keeps an ocean; the
-      5,000-moon census under every 27 hold.
+      5,000-moon census under every 27 hold, at five ages from 10 Myr to 10 Gyr.
     - _Files:_ `planetary/moons/{eccentricity, regular}.rs`, `planetary/{satellites, system}.rs`.
     - _Accept:_ `cargo test -p hyperion-sim planetary::moons`.
 - **P14.T55.k** ice shells beyond P14.T51.g's conductive steady state
@@ -34040,10 +34040,24 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     Laplace band's), before the captures' clearance. The model is P14.T17.b's stand-in
     derivation in the parent's nursery and sky at `parent_time`, on the orbit as placed. A rogue
     planet's moons, not derived, keep their drawn e.
-  - _Leans (2026-11-01):_ a chain of more than two 2:1 moons is one group, its budget the pair's
-    sums, at the inner moon's k₂ ÷ Q; a chain with B ≤ 0 frees its moons' forced e; a free moon
-    that keeps no e goes circular (e = 0); the budget's k₂ ÷ Q is capped at the planet's class
-    k₂ ÷ 100 (research-leans-19).
+  - _Leans (2026-11-01):_ each 2:1 pair has its own budget, and a moon in two pairs takes the
+    smaller s (research-leans-20); a pair with B ≤ 0 frees its moons' forced e; a free moon that
+    keeps no e goes circular (e = 0); the budget's k₂ ÷ Q is capped at the planet's class k₂ ÷ 100
+    (research-leans-19); a 13 Jupiter-mass giant's heated tail is recorded, not bounded (11.1 W m⁻²
+    at the Sun's age; the heated branch's Im k₂ is P14.T55.j's).
   - _The edge:_ a damped moon often sits where its ocean freezes. Derived afresh on its damped
-    orbit (its insolation reads e), 203 of 5,000 take the other branch, yet keep their budget and
+    orbit (its insolation reads e), 143 of 5,000 take the other branch, yet keep their budget and
     age to 10⁻⁶. The record's own passes (its law, a kept or lagged bulk) are not the model's.
+  - _For 27's bump:_ delete what `the_eccentricity_damping_is_held_only_until_the_27_bump` lists;
+    restate `a_forced_eccentricity_holds_only_in_a_resonance_that_holds` (its held arm),
+    `neighbouring_moons_satisfy_the_floor_about_their_planet_and_resonant_ones_sit_at_two_to_one`
+    (the innermost's bracket reads its placed e), `the_moon_mass_limit_drops_moons_from_the_outside_in`
+    (a dropped partner frees its inner moon's e), `the_weathered_area_mix_s_census`
+    (42002cb1ffc00009.0301 no longer young) and
+    `under_the_batch_the_photometry_states_the_derivation_s_albedo` (25 of 954 jump, against 24);
+    with P14.T56.e's, `under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor`
+    raises 8, not 11. Re-bless, with P14.T56.e's (measured on 24's rules, both holds):
+    `planetary/moons`, `planetary/resources`, the `planetary/systems` goldens `filler_b`,
+    `hierarchical_triple` and `subgiant`, `planetary/habitability`, `planetary/system_events` and
+    `planetary/surface_conditions_published` (02000b2ca0000001.0d01; T56.e's .0601 no longer
+    moves). Measure again under every 27 hold.

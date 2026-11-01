@@ -21,27 +21,35 @@
 //!
 //! # A forced eccentricity
 //!
-//! The moons of a chain of 2:1 resonances, each at twice its inner neighbour's period, are held
-//! there by their planet's tides, which push the inner moon out faster than the outer. The orbits
-//! then expand at one fractional rate, so the torques Γᵢ pay for the orbits' energy and the moons'
-//! heat ([`resonance_budget`]): Σ H ≤ B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ (Σ Lᵢ), with Lᵢ = mᵢnᵢaᵢ²
-//! and Γᵢ = (3 ÷ 2)(k₂ ÷ Q) G mᵢ² `R_p`⁵ ÷ aᵢ⁶ (for one pair as Meyer and Wisdom 2007, Icarus 188,
-//! 535, give Enceladus's and Dione's equilibrium heating; from memory). The parent's k₂ ÷ Q is
-//! the one at which the chain's inner moon migrates over the system's age
-//! ([`locking_tidal_response`]): resonance locking (Fuller, Luan and Quataert 2016, MNRAS 458,
-//! 3867; from memory), capped at the planet's own k₂ ÷ [`RESONANCE_LEAST_TIDAL_Q`]
-//! ([`budget_tidal_response`]; lean, 2026-11-01, research-leans-19). Every moon of the chain takes
-//! one scale s ≤ 1 of its e, Σ Hᵢ(s eᵢ) ≤ B, by [`SCALE_BISECTIONS`] bisections in ln s
-//! ([`forced_scale`]). Where B ≤ 0 the outer moon's tide outruns the inner's, no tidal resonance
-//! holds the chain, and its moons take the free rule.
+//! The two moons of a 2:1 resonance, the outer at twice the inner's period, are held there by their
+//! planet's tides, which push the inner moon out faster than the outer. The orbits then expand at
+//! one fractional rate, so the torques Γᵢ pay for the orbits' energy and the moons' heat
+//! ([`resonance_budget`]): H₁ + H₂ ≤ B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ (Σ Lᵢ), with Lᵢ = mᵢnᵢaᵢ² and
+//! Γᵢ = (3 ÷ 2)(k₂ ÷ Q) G mᵢ² `R_p`⁵ ÷ aᵢ⁶ (as Meyer and Wisdom 2007, Icarus 188, 535, give
+//! Enceladus's and Dione's equilibrium heating; from memory). The parent's k₂ ÷ Q is the one at
+//! which the pair's inner moon migrates over the system's age ([`locking_tidal_response`]): the
+//! present-day rate at the inner moon's frequency, as resonance locking reads it (Fuller, Luan and
+//! Quataert 2016, MNRAS 458, 3867; from memory), bounded at Q ≥ [`RESONANCE_LEAST_TIDAL_Q`], the
+//! planet's own k₂ ÷ 100 ([`budget_tidal_response`]; lean, 2026-11-01, research-leans-19 and -20).
+//! Both moons take one scale s ≤ 1 of their e, H₁(s e₁) + H₂(s e₂) ≤ B, by [`SCALE_BISECTIONS`]
+//! bisections in ln s ([`forced_scale`]); a moon in two pairs, the middle of a 1:2:4 chain, takes
+//! the smaller of its pairs' scales, so that neither pair dissipates over its budget (lean,
+//! 2026-11-01, research-leans-20). Where B ≤ 0 the outer moon's tide outruns the inner's, as
+//! where the outer is over some 20 times the inner's mass, no tidal resonance holds the pair, and
+//! a moon in no other pair takes the free rule.
 //!
-//! One k₂ ÷ Q serves every moon of a chain, by design. At each moon's own locking rate every orbit
+//! One k₂ ÷ Q serves both moons of a pair, by design. At each moon's own locking rate both orbits
 //! would expand at one fractional rate already, and B would be exactly 0 (Enceladus and Dione's
-//! 13.8 GW at one shared value is 0 with one each): the shared value is what gives a chain a
+//! 13.8 GW at one shared value is 0 with one each): the shared value is what gives a pair a
 //! budget.
 //!
-//! The rule reads the planet's present Q, not its time average: a time-averaged Q, the generator's
-//! `GIANT_TIDAL_Q`, gives Enceladus and Dione 0.25 GW, and nearly every porous ocean would freeze.
+//! The rule reads the planet's present-day rate, not its age-averaged Q: the generator's
+//! `GIANT_TIDAL_Q`, which the moon limit and a planet's spin read as that average, gives Enceladus
+//! and Dione 0.25 GW, and nearly every porous ocean would freeze. Where the moon limit binds,
+//! about a close-in giant, no 2:1 pair forms, so the two never read one system's pair. The budget
+//! grows as 1 ÷ t, so in a system younger than some 300 Myr a gas giant's heavy, close inner moons
+//! keep their drawn e and run hot on the heated branch, paid for by the budget (the heated
+//! branch's Im k₂ is P14.T55.j's).
 //!
 //! # The hold
 //!
@@ -128,7 +136,7 @@ pub const FREE_ECCENTRICITY_FLOOR: f64 = 1e-3;
 /// The least tidal Q of a planet's tide in a resonance's budget: 100 ([`budget_tidal_response`];
 /// lean, 2026-11-01, research-leans-19). The locking k₂ ÷ Q grows as (a ÷ `R_p`)^6.5 ÷ m without
 /// bound, so about a Saturn-mass planet a 10²⁰ kg inner moon at 15 planetary radii would take
-/// Q < 1, and its chain's budget would pay any heat. Q = 100 is about the strongest effective
+/// Q < 1, and its pair's budget would pay any heat. Q = 100 is about the strongest effective
 /// dissipation measured: Titan recedes at 11.3 ± 2.0 cm yr⁻¹ (Lainey et al. 2020, Nature Astronomy
 /// 4, 1053; from memory), 2.4 times the age's rate, Q ≈ 120 at Saturn's k₂ of 0.382. It does not
 /// bind for Enceladus's 2.2 × 10⁻⁴ or Io's 8.5 × 10⁻⁶.
@@ -144,7 +152,7 @@ pub const SCALE_BISECTIONS: u32 = 20;
 
 /// The halvings by which [`forced_scale`] steps its bracket's low end down from its first guess
 /// where that guess still dissipates over the budget: 16, to 1.5 × 10⁻⁵ of it, below which the
-/// chain's orbits are circular.
+/// pair's orbits are circular.
 pub const SCALE_HALVINGS: u32 = 16;
 
 /// The time, s, on which a moon of mass `moon` on an orbit of semi-major axis `a` and eccentricity
@@ -206,7 +214,7 @@ pub struct ResonantOrbit {
 /// at Enceladus, 2.2 × 10⁻⁴ over 4.57 Gyr against (1.59 ± 0.74) × 10⁻⁴ (Lainey et al. 2017,
 /// Icarus 281, 286), and Jupiter's at Io, 8.5 × 10⁻⁶ against (1.102 ± 0.203) × 10⁻⁵ (Lainey et
 /// al. 2009, Nature 459, 957), −1.2σ; both from memory, since the pod reached neither paper. It
-/// is P14.T55.j.a's lean for a chain's budget (2026-11-01), which caps it
+/// is P14.T55.j.a's lean for a pair's budget (2026-11-01), which caps it
 /// ([`budget_tidal_response`]).
 ///
 /// # Examples
@@ -237,8 +245,9 @@ pub fn locking_tidal_response(
         / (3.0 * inner.mass.value() * inner.mean_motion_rad_per_s * age.value())
 }
 
-/// The planet's k₂ ÷ Q a chain's budget reads ([`budget_tidal_response`]): the locking value, or
-/// the ceiling where that binds.
+/// The planet's k₂ ÷ Q a pair's budget reads ([`budget_tidal_response`]): the locking value, or
+/// the ceiling where that binds, which it does for about a quarter of a gas giant's pairs and half
+/// an ice giant's at the Sun's age, more in a younger system.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum BudgetResponse {
     /// The locking value ([`locking_tidal_response`]), dimensionless.
@@ -259,10 +268,10 @@ impl BudgetResponse {
 }
 
 /// The k₂ ÷ Q of a planet of mass `planet`, radius `radius` and Love number `love_number` (its
-/// class's) that the budget of a chain whose inner moon is `inner` reads over the time `age`: the
-/// locking value ([`locking_tidal_response`]), capped at k₂ ÷ [`RESONANCE_LEAST_TIDAL_Q`]
-/// (P14.T55.j.a; lean, 2026-11-01, research-leans-19). One value serves the chain's every moon
-/// (see the [module](self) documentation).
+/// class's) that the budget of a pair whose inner moon is `inner` reads over the time `age`: the
+/// locking value ([`locking_tidal_response`]), the present-day rate at that moon's frequency,
+/// capped at k₂ ÷ [`RESONANCE_LEAST_TIDAL_Q`] (P14.T55.j.a; lean, 2026-11-01, research-leans-19).
+/// One value serves both moons of the pair (see the [module](self) documentation).
 ///
 /// # Examples
 ///
@@ -307,6 +316,7 @@ pub fn budget_tidal_response(
 /// B = Σ Γᵢnᵢ − (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ (Σ Lᵢ), with Lᵢ = mᵢnᵢaᵢ² and Γᵢ = (3 ÷ 2)(k₂ ÷ Q) G mᵢ² `R_p`⁵ ÷
 /// aᵢ⁶ (see the [module](self) documentation). Not positive where the outer moons' tides outrun
 /// the inner's, so that no tidal resonance holds them; zero for a chain of fewer than two moons.
+/// The damping reads it pair by pair, a chain of two.
 ///
 /// The torques do work Σ Γᵢnᵢ on the orbits. Held in resonance, the orbits expand at one
 /// fractional rate, α = 2 Σ Γᵢ ÷ Σ Lᵢ, so their energy grows at Σ nᵢ L̇ᵢ = (Σ Γᵢ)(Σ Lᵢnᵢ) ÷ Σ Lᵢ,
@@ -405,12 +415,12 @@ pub fn free_eccentricity(drawn: f64, age: Seconds, mut damping: impl FnMut(f64) 
     lo
 }
 
-/// The scale s ∈ [0, 1] of a resonant chain's eccentricities at which its moons dissipate at most
-/// their budget `budget`, whose heat in all at a scale s is `heat(s)` (Σ Hᵢ(s eᵢ)): 1 where
+/// The scale s ∈ [0, 1] of a resonant pair's eccentricities at which its moons dissipate at most
+/// their budget `budget`, whose heat in all at a scale s is `heat(s)` (H₁(s e₁) + H₂(s e₂)): 1 where
 /// `heat(1)` ≤ `budget`; otherwise the largest s found by [`SCALE_BISECTIONS`] bisections in ln s
 /// below 1, from a first guess √(B ÷ H(1)), exact at a fixed Im k₂ where H ∝ e², halved at most
 /// [`SCALE_HALVINGS`] times until it dissipates no more than the budget; 0, circular orbits, where
-/// none does. At the scale returned `heat(s)` ≤ `budget`, so that a chain never dissipates over its
+/// none does. At the scale returned `heat(s)` ≤ `budget`, so that a pair never dissipates over its
 /// budget.
 ///
 /// Where the heat is not monotonic in s, the bisection keeps a crossing of the budget, not always

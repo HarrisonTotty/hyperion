@@ -176,6 +176,11 @@ pub const GIANT_LOVE_NUMBER: f64 = 0.4;
 /// The tidal quality factor Q of a gas giant: 10⁵ (P14.T14.b), which the `GasGiant` class takes
 /// ([`tides`](crate::planetary::derive::rotation::tides)).
 ///
+/// It is the age-averaged Q, which the moon limit and a planet's spin read; a 2:1 pair's budget
+/// reads the present-day rate at its inner moon's frequency instead
+/// ([`budget_tidal_response`](crate::planetary::moons::eccentricity::budget_tidal_response),
+/// P14.T55.j.a).
+///
 /// It is Goldreich and Soter's (1966) lower bound for Jupiter, Q ≥ 10⁵ at their k₂ of 1.5, so
 /// Q ÷ k₂ ≥ 6.7 × 10⁴ (as Zhang and Hamilton 2008, Table 4, quote it). With
 /// [`GIANT_LOVE_NUMBER`] the pair's Q′ = 3Q ÷ 2k₂ is 3.75 × 10⁵, inside Yoder and Peale's
