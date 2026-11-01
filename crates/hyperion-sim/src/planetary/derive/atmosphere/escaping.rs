@@ -78,7 +78,9 @@ use crate::planetary::chem::escape::{
 };
 use crate::planetary::chem::partition::{CriticalColumn, Ground};
 use crate::planetary::chem::tenuous::holds_tenuous_air;
+use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
 use crate::planetary::derive::pass_record::OpenWater;
+use crate::planetary::derive::photometry::area_mix::step_anti_greenhouse;
 use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::params::THIN_ENVELOPE_FRACTION;
 use crate::substance::{Element, MOLAR_GAS_CONSTANT, heat_capacity_over_r_at};
@@ -1492,6 +1494,20 @@ pub(super) fn climate_class(inputs: &AtmosphereInputs, published: PublishedState
     present_state(division_state(inputs), inputs, (published, None))
 }
 
+/// The share of the light it receives that the body `inputs` describe absorbs, 1 − A, at the
+/// albedo its pass reads: (`T_eq` ÷ `T_eq`(0))⁴, `T_eq`(0) at zero albedo under the same flux; 0
+/// with no light (P14.T24.h.b's anti-greenhouse reads it).
+#[must_use]
+fn absorbed_share(inputs: &AtmosphereInputs) -> f64 {
+    let black = equilibrium_temperature(inputs.flux, BondAlbedo::from_fraction(0.0)).value();
+    if black <= 0.0 {
+        return 0.0;
+    }
+    let ratio = inputs.equilibrium.value() / black;
+    let square = ratio * ratio;
+    square * square
+}
+
 /// The batch's greenhouse of one body: the partition's partial pressures over the step climate of
 /// each airborne inventory's own column, as before ([`partitioned_greenhouse`]).
 struct Solver<'a, 'b> {
@@ -1555,9 +1571,14 @@ impl<'b> Solver<'_, 'b> {
         };
         #[cfg(test)]
         let evaluated = crate::planetary::chem::partition::exit_counts().evaluations;
+        let shade = surface_mix::pass_shade(self.surface, inputs);
+        let lit = (self.ground.gravity(), inputs.hottest_host);
+        let absorbed = absorbed_share(inputs);
+        let anti =
+            |partials: &PartialPressures| step_anti_greenhouse(partials, lit, &shade, absorbed);
         let (t, partials, tau, supercritical) = partitioned_greenhouse(
             &inventory,
-            self.body.base,
+            (self.body.base, &anti),
             &|t| self.body.saturate(t),
             &climate_of,
             (&self.ground, self.body.ceiling),
@@ -2258,6 +2279,7 @@ fn published_air_surface(
     partials: &PartialPressures,
     gravity: MetresPerSecondSquared,
 ) -> (Kelvin, f64) {
+    // A molten body's air holds no methane haze: its anti-greenhouse is 1 (P14.T24.h.b).
     let constants = GreenhouseConstants::in_force();
     let tau = constants.optical_depth(partials, body.base, gravity);
     let grey = body

@@ -1043,6 +1043,16 @@ pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Ke
     }
 }
 
+/// The light of the pass over `surface` of the body `inputs` describes: its hosts' shade, or the
+/// hottest host's for a single pass with none ([`PassLight`]).
+#[must_use]
+pub(super) fn pass_shade(surface: &PassSurface<'_>, inputs: &AtmosphereInputs) -> HostShade {
+    match surface.light {
+        PassLight::Shade(shade) => *shade,
+        PassLight::HottestHost => HostShade::of_host(inputs.hottest_host),
+    }
+}
+
 /// The surface heat flow a pass over `surface` reads: its context's, the previous pass's figures',
 /// under the body's own climate, and none for a climate given, the passes' stand-in, which reads
 /// no heat flow ([`airless_mean`]'s floor; P14.T53.c's ice temperature).
@@ -1073,7 +1083,9 @@ fn surface_gravity(inputs: &AtmosphereInputs) -> Option<MetresPerSecondSquared> 
 /// [`area_mix::RayleighAddingRules::Added`]) the layer is laid over the clear sky's ground `ground`
 /// instead ([`area_mix::rayleigh_added`]), under its cloud of fraction `cloud` and albedo
 /// `cloud_albedo`, which lies above it (the lane's lean, 2026-10-31): a runaway's deck keeps
-/// Venus's measured 0.76 whole, where the layer laid over it would count its air twice.
+/// Venus's measured 0.76 whole, where the layer laid over it would count its air twice. Under the
+/// haze layer (P14.T24.h.b's third part, [`area_mix::HazeLayerRules::Absorbing`]) a hazy air's
+/// haze lies over all of it ([`area_mix::hazed`]).
 #[must_use]
 fn floored(
     (albedo, ground, cloud, cloud_albedo): (f64, f64, f64, f64),
@@ -1100,7 +1112,7 @@ fn floored(
     let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
     #[cfg(test)]
     floor_read::record(floor);
-    match area_mix::RayleighAddingRules::in_force() {
+    let layered = match area_mix::RayleighAddingRules::in_force() {
         area_mix::RayleighAddingRules::Max => {
             if floor > albedo {
                 floor
@@ -1111,7 +1123,9 @@ fn floored(
         area_mix::RayleighAddingRules::Added => {
             area_mix::under_cloud(area_mix::rayleigh_added(floor, ground), cloud, cloud_albedo)
         }
-    }
+    };
+    let haze = area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host);
+    area_mix::hazed(layered, haze, shade)
 }
 
 /// The floor the last floored pass on a thread read (P14.T24.h.a's tests): the published pass's,

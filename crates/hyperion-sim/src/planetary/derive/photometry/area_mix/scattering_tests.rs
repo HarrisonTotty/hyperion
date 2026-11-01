@@ -370,3 +370,96 @@ fn under_the_adding_rule_the_table_s_airless_bodies_and_venus_keep_their_bonds()
         }
     }
 }
+
+/// P14.T24.h.b's third part is held until the 25 → 26 bump: the rules in force are version 25's
+/// and before, no haze layer, and 26's helper reaches it.
+#[test]
+fn the_haze_layer_is_held_only_until_the_26_bump() {
+    use crate::planetary::testing::with_every_26_hold;
+    assert!(
+        GENERATOR_VERSION < HAZE_LAYER_VERSION,
+        "the 25 → 26 bump puts P14.T24.h.b's haze layer on the record (decision-p14-t51-batch \
+         §9.4): delete `HAZE_LAYER_VERSION`, `HazeLayerRules` with its `Clear` arm and the guards \
+         that read it in `hazed`, `anti_greenhouse_factor` and `step_anti_greenhouse`, the tests' \
+         `with_haze_layer`, its switch in `with_every_26_hold` and in `with_scattering_held` (and \
+         the helpers, if no other 26 hold is left), the `Clear` arms of `scattering_tests`, and \
+         this test"
+    );
+    assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
+    assert_eq!(
+        with_every_26_hold(HazeLayerRules::in_force),
+        HazeLayerRules::Absorbing
+    );
+    assert_eq!(
+        with_every_26_hold(|| with_haze_layer(HazeLayerRules::Clear, HazeLayerRules::in_force)),
+        HazeLayerRules::Clear
+    );
+    assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
+}
+
+/// The δ-Eddington layer: conservative and isotropic it is the Eddington closure's diffuse R =
+/// ¾τ ÷ (1 + ¾τ) with T = 1 − R; an absorbing one keeps R + T under 1 and both in [0, 1],
+/// darkening as ω falls; none at τ 0; and the aggregate's optics interpolate the optool nodes,
+/// held beyond them.
+#[test]
+fn the_haze_layer_takes_its_closed_form() {
+    for tau in [0.0, 0.1, 1.0, 8.1, 40.0] {
+        let (r, t) = two_stream_layer(tau, 1.0, 0.0);
+        let by_hand = 0.75 * tau / (1.0 + 0.75 * tau);
+        assert!(
+            (r - by_hand).abs() < 1e-12 && (r + t - 1.0).abs() < 1e-12,
+            "{tau}"
+        );
+        let mut last = r;
+        for omega in [0.99, 0.95, 0.8, 0.5] {
+            let (r, t) = two_stream_layer(tau, omega, 0.81);
+            assert!(
+                (0.0..=1.0).contains(&r) && (0.0..=1.0).contains(&t),
+                "{tau} {omega}"
+            );
+            assert!(r + t <= 1.0 + 1e-12, "{tau} {omega}: {r} + {t}");
+            assert!(r <= last + 1e-12, "{tau} {omega}: {r} over {last}");
+            last = r;
+        }
+    }
+    let (r, t) = two_stream_layer(0.0, 0.9, 0.8);
+    assert!(r.abs() < 1e-15 && (t - 1.0).abs() < 1e-15);
+    assert_same_bits(haze_aggregate_at(550.0).0, 15.8321 / 16.5393);
+    assert_same_bits(haze_aggregate_at(300.0).0, haze_aggregate_at(380.0).0);
+    assert_same_bits(haze_aggregate_at(4_000.0).1, haze_aggregate_at(780.0).1);
+    let (omega, _) = haze_aggregate_at(495.0);
+    assert!(omega > haze_aggregate_at(440.0).0 && omega < haze_aggregate_at(550.0).0);
+    assert!((haze_spectral_shape(550.0) - 1.0).abs() < 1e-15);
+    assert!(haze_spectral_shape(400.0) > 1.0 && haze_spectral_shape(1_000.0) < 1.0);
+}
+
+/// Titan's haze about a Sun: over its dark sediment and its Rayleigh layer the haze layer's Bond
+/// albedo and the share of the light it absorbs, stated; the anti-greenhouse's factor (1 − γ ÷
+/// 2)^¼ by hand; and under `Clear`, with no haze or with no light, the disc as it is to the bit.
+#[test]
+fn titan_s_haze_absorbs_and_cools_its_surface() {
+    use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
+    let sun = HostShade::sun();
+    let haze = TITAN_HAZE_OPTICAL_DEPTH;
+    let below = rayleigh_added(0.27, solid_bond(id("tholin"), &sun.bands).bond);
+    assert_same_bits(hazed(below, haze, &sun), below);
+    assert_same_bits(anti_greenhouse_factor(0.3, 0.7), 1.0);
+    with_haze_layer(HazeLayerRules::Absorbing, || {
+        let total = hazed(below, haze, &sun);
+        let absorbed = haze_absorbed(haze, &sun);
+        let gamma = absorbed / (1.0 - total);
+        let factor = anti_greenhouse_factor(absorbed, 1.0 - total);
+        eprintln!(
+            "Titan's haze over {below:.4}: Bond {total:.4}, absorbed {absorbed:.4} over black, γ \
+             {gamma:.3}, the anti-greenhouse's factor {factor:.4} ({:.1} K off 94 K)",
+            94.0 * (1.0 / factor - 1.0)
+        );
+        assert!((0.1..0.6).contains(&absorbed), "{absorbed}");
+        assert!((factor - math::powf(1.0 - gamma / 2.0, 0.25)).abs() < 1e-15);
+        assert!(factor < 1.0);
+        assert_same_bits(hazed(below, 0.0, &sun), below);
+        assert_same_bits(anti_greenhouse_factor(0.0, 0.7), 1.0);
+        assert_same_bits(anti_greenhouse_factor(0.3, 0.0), 1.0);
+        assert!((anti_greenhouse_factor(0.9, 0.5) - math::powf(0.5, 0.25)).abs() < 1e-15);
+    });
+}

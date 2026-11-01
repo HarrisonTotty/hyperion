@@ -3362,7 +3362,7 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 #[must_use]
 fn partitioned_greenhouse(
     inventory: &ColumnInventory,
-    base: Kelvin,
+    (base, anti): (Kelvin, &AntiGreenhouse<'_>),
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
     ground: (&Ground, GreenhouseCeiling),
@@ -3371,19 +3371,24 @@ fn partitioned_greenhouse(
     #[cfg(test)]
     if let Some(checked) = crate::planetary::chem::partition::checked_exits(
         crate::planetary::chem::partition::ExitsChecked::Greenhouse,
-        || greenhouse_steps(inventory, base, saturate, climate, ground, steps),
+        || greenhouse_steps(inventory, (base, anti), saturate, climate, ground, steps),
         same_greenhouse,
     ) {
         return checked;
     }
-    greenhouse_steps(inventory, base, saturate, climate, ground, steps)
+    greenhouse_steps(inventory, (base, anti), saturate, climate, ground, steps)
 }
+
+/// The anti-greenhouse's factor on a step's grey surface, of its partial pressures (P14.T24.h.b's
+/// third part; `area_mix::anti_greenhouse_factor`): 1 exactly for an air with no haze and under the
+/// haze layer's hold, so that its steps are version 25's to the bit.
+pub(crate) type AntiGreenhouse<'a> = dyn Fn(&PartialPressures) -> f64 + 'a;
 
 /// [`partitioned_greenhouse`]'s steps, at most `steps` of them, from the base temperature `base`.
 #[must_use]
 fn greenhouse_steps(
     inventory: &ColumnInventory,
-    base: Kelvin,
+    (base, anti): (Kelvin, &AntiGreenhouse<'_>),
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
     (ground, ceiling): (&Ground, GreenhouseCeiling),
@@ -3415,7 +3420,7 @@ fn greenhouse_steps(
         let next = partitioned_partials(inventory, &span, ground, &mut weights);
         let tau = constants.optical_depth(&next, base, ground.gravity());
         let grey = ceiling.surface_temperature(&constants, (&next, tau), base, ground.gravity());
-        let next_t = saturate(grey.value()).value();
+        let next_t = saturate(anti_greenhouse(grey, anti(&next))).value();
         let settled = next_t.total_cmp(&t).is_eq() && same_partials(&next, &partials);
         t = next_t;
         partials = next;
@@ -3434,6 +3439,17 @@ fn greenhouse_steps(
     let tau = constants.optical_depth(&partials, base, ground.gravity());
     let reservoir = weights.supercritical_column(&span, inventory);
     (t, partials, tau, reservoir)
+}
+
+/// The grey surface `grey` under the anti-greenhouse's factor `factor` (P14.T24.h.b's third part):
+/// `grey` to the bit at a factor of 1.
+#[must_use]
+pub(crate) fn anti_greenhouse(grey: Kelvin, factor: f64) -> f64 {
+    if factor.total_cmp(&1.0).is_eq() {
+        grey.value()
+    } else {
+        grey.value() * factor
+    }
 }
 
 /// Whether the partial pressures `a` and `b` are the same, bit for bit.

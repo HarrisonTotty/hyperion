@@ -3591,13 +3591,14 @@ mod tests {
 
     /// P14.T24.h.b's Titan under every 26 hold (decision-p14-t51-batch §9.4), at every radius rank:
     /// its methane cloud covers Titan's 0.2–0.6% (Bouchez and Brown 2005), its haze's sediment its
-    /// solid ground (Tomasko et al. 2005), 0.89 of it at the rank that keeps its measured radius,
-    /// whose air holds 0.89 of Titan's column, a `Snowball`. Its Bond albedo, 0.32–0.33, misses Li
-    /// et al. 2011's 0.265 ± 0.03 by up to 0.04, and its surface temperature, 98–100 K, Huygens's 94
-    /// ± 3 K: the haze's absorption and its anti-greenhouse are a part left (pinned as they stand,
-    /// deferred findings). With P14.T24.h.b's holds set back it is 24's Titan under its 0.67 cloud.
+    /// solid ground (Tomasko et al. 2005), 0.80 of it at the rank that keeps its measured radius;
+    /// its haze's anti-greenhouse (McKay, Pollack and Courtin 1991) holds its surface inside 94 ±
+    /// 3 K (Huygens's 93.7 K, Fulchignoni et al. 2005, from memory), at 91.3–92.8 K, a `Snowball`.
+    /// Its Bond albedo, 0.336–0.342, misses Li et al. 2011's 0.265 ± 0.03 by about 0.04 without its
+    /// methane's near-infrared bands (pinned as it stands, a deferred finding). With P14.T24.h.b's
+    /// holds set back it is 24's Titan under its 0.67 cloud.
     #[test]
-    fn under_every_26_hold_titan_takes_its_methane_cloud_and_its_sediment() {
+    fn under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze() {
         use crate::planetary::derive::atmosphere::SurfaceState;
         use crate::planetary::derive::photometry::area_mix::{
             sediment_share, snapshot_haze_optical_depth, with_scattering_held,
@@ -3639,13 +3640,12 @@ mod tests {
                 air.published_state(),
             );
             assert!((0.002..=0.006).contains(&cloud), "{cloud}");
-            if rank == keep {
-                assert!(sediment > 0.85, "{sediment}");
-            }
-            assert!(sediment > 0.3, "{sediment}");
-            // Li et al. 2011's 0.265 ± 0.03 is missed by up to 0.04 without the haze's absorption
-            // (a part left): pinned as it stands, a deferred finding.
-            assert!((0.31..=0.34).contains(&bond), "{bond}");
+            assert!(sediment > 0.4, "{sediment}");
+            let t_s = air.surface_temperature().value();
+            assert!((t_s - 94.0).abs() <= 3.0, "{t_s} K");
+            // Li et al. 2011's 0.265 ± 0.03 is missed by about 0.04 without the air's methane
+            // bands (T24.h.a's deferred absorbers): pinned as it stands, a deferred finding.
+            assert!((0.33..=0.35).contains(&bond), "{bond}");
             assert_eq!(air.published_state(), SurfaceState::Snowball);
             assert!(held.atmosphere().cloud_fraction() > 0.5);
         }
