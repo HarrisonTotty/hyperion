@@ -11,7 +11,12 @@ import {
   TITAN_FRACTIONS,
   URANUS_SPHEROID,
 } from "../../../test/atmosphereFixtures";
-import { absorberBinCurves, type AbsorberBinCurves } from "../absorbers";
+import {
+  ABSORBER_TRANSMITTANCE_FLOOR,
+  absorberBinCurves,
+  type AbsorberBinCurves,
+  type AbsorberCurve,
+} from "../absorbers";
 import { mediumTableRadiusM } from "../assemble";
 import { MARS_FIT_COLUMN } from "../channels";
 import { BAKE_BIN_COUNT, BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "../medium";
@@ -20,10 +25,19 @@ import { normalizedAssociatedLegendre } from "./discreteOrdinates";
 import { tablesPlanOf } from "../tables";
 import {
   BAKE_CEILING_S,
+  bakeBins,
   bakeBinSolve,
   bakeLayering,
   bakeMultipleScattering,
+  bakePointsOf,
   binGroundAlbedo,
+  EVERY_BAKE_BIN,
+  gatherBins,
+  NO_OWN_CHANNELS,
+  OWN_WAVELENGTH_COLUMNS,
+  type OwnChannels,
+  ownChannelPoint,
+  ownWavelengthChannels,
   type MsSourceTable,
   prepareBake,
   type PreparedBake,
@@ -36,6 +50,7 @@ import {
   type ThickBakeBody,
   type ThickBakeGrid,
   type ThickBakeLight,
+  thickBakeLights,
 } from "./bake";
 import {
   lightOf,
@@ -751,5 +766,170 @@ describe("the bake's span and layout (R08.T15's deck split)", () => {
     expect(() =>
       prepareBake(column(), [UNABSORBED], grid, undefined, { layering, fitLayering: other }),
     ).toThrow(RangeError);
+  });
+});
+
+/** A curve of one row whose channels' −ln T rise linearly in ln u, each to the floor at `floorAtU`. */
+function curveReaching(floorAtU: readonly [number, number, number]): AbsorberCurve {
+  const nodes = 61;
+  const logColumns = Float64Array.from({ length: nodes }, (_, j) => (j - 30) * (Math.log(10) / 10));
+  const floor = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
+  const depthOf = (at: number): Float64Array =>
+    logColumns.map((lnU) => Math.min(floor, Math.max(0, (floor * (lnU + 7)) / (Math.log(at) + 7))));
+  const depths = [depthOf(floorAtU[0]), depthOf(floorAtU[1]), depthOf(floorAtU[2])] as const;
+  return {
+    kind: "column",
+    logColumns,
+    logPressures: Float64Array.of(Math.log(1e5)),
+    readTopLogPressure: Math.log(1e7),
+    transmittance: [
+      depths[0].map((d) => Math.exp(-d)),
+      depths[1].map((d) => Math.exp(-d)),
+      depths[2].map((d) => Math.exp(-d)),
+    ],
+    opticalDepth: depths,
+  };
+}
+
+describe("the bake's channels at their own wavelengths (R08.T14.d.4)", () => {
+  /** The Titan-class fixture's air and methane without its haze: cheap optics, a strong gas. */
+  const methane = once(() => {
+    const fixture = titanClassFixture();
+    const column: SpectralColumn = {
+      ...fixture.column,
+      terms: fixture.column.terms.filter((term) => term.source.kind !== "aerosol"),
+    };
+    return { fixture, column, lights: thickBakeLights(column, fixture.specs, [fixture.sun]) };
+  });
+  const grid = smallGrid(Float64Array.of(0.25, 0.75));
+  /** Green and blue at their own wavelengths, red by the bins: the Titan-class column's rule. */
+  const OWN: OwnChannels = [false, true, true];
+
+  it("takes a channel at its own wavelength where its curves stay off the floor out to 100 U, under every light", () => {
+    const light = (at: readonly [number, number, number]): ThickBakeLight => ({
+      ...UNABSORBED,
+      absorbers: [],
+      channels: [curveReaching(at)],
+    });
+    const past = OWN_WAVELENGTH_COLUMNS * 1.5;
+    const short = OWN_WAVELENGTH_COLUMNS / 5;
+    expect([
+      ownWavelengthChannels([light([short, past, Number.POSITIVE_INFINITY])]),
+      ownWavelengthChannels([light([past, past, past]), light([past, short, past])]),
+      ownWavelengthChannels([{ ...UNABSORBED, channels: [] }]),
+      ownWavelengthChannels([UNABSORBED]),
+      ownWavelengthChannels([]),
+    ]).toEqual([
+      [false, true, true],
+      [true, false, true],
+      [true, true, true],
+      [false, false, false],
+      [false, false, false],
+    ]);
+  });
+
+  it("keeps the Titan-class methane's red on the bins and takes its green and blue at their own wavelengths", () => {
+    expect(ownWavelengthChannels(methane().lights)).toEqual(OWN);
+  });
+
+  it("solves no point and changes no bit where no channel is own", () => {
+    expect(bakePointsOf(NO_OWN_CHANNELS)).toEqual(EVERY_BAKE_BIN);
+  });
+
+  it(
+    "stores an own channel's J as its point's, E over its kernel scattering at the channel's wavelength, and a bins channel's to the bit",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      const { fixture, column, lights } = methane();
+      const own = prepareBake(column, lights, grid, undefined, undefined, bakePointsOf(OWN), OWN);
+      const bins = prepareBake(column, lights, grid);
+      const band = thickBakeBands(fixture.body)[0];
+      if (band === undefined) {
+        throw new Error("the Titan-class body has one band");
+      }
+      const ownValues = slotOf(bakeMultipleScattering(own, fixture.body, 0)).values;
+      const binValues = slotOf(bakeMultipleScattering(bins, fixture.body, 0)).values;
+      const perAltitude = ownValues.length / 3 / own.altitudesM.length;
+      // Green's and blue's J from their points' solves alone.
+      const expected = new Float64Array(ownValues.length);
+      for (const c of [1, 2] as const) {
+        const point = ownChannelPoint(c);
+        for (const term of own.lights[0]?.bins[point]?.terms ?? []) {
+          for (const [i, emission] of bakeBinSolve(own, band, point, term).source.entries()) {
+            const optics = own.pointOptics[point]?.[Math.floor(i / perAltitude)];
+            const kernel =
+              (optics?.scatteringPerM ?? Number.NaN) * (1 - (optics?.forwardDelta ?? 0));
+            expected[i * 3 + c] =
+              (expected[i * 3 + c] ?? 0) + (kernel > 0 ? (term.weight * emission) / kernel : 0);
+          }
+        }
+      }
+      let largest = 0;
+      let worst = 0;
+      let redSame = true;
+      for (let i = 0; i < ownValues.length; i += 1) {
+        if (i % 3 === 0) {
+          redSame &&= Object.is(ownValues[i], binValues[i]);
+          continue;
+        }
+        const want = expected[i] ?? Number.NaN;
+        largest = Math.max(largest, Math.abs(want));
+        worst = Math.max(worst, Math.abs((ownValues[i] ?? Number.NaN) - want));
+      }
+      expect([
+        own.lights[0]?.bins.length,
+        Array.from(own.groundAlbedo.slice(BAKE_BIN_COUNT)),
+        redSame,
+        largest > 0,
+        worst <= 1e-6 * largest,
+      ]).toEqual([BAKE_BIN_COUNT + 3, [0.3, 0.3, 0.3], true, true, true]);
+    },
+  );
+
+  it(
+    "gathers shares that bake the points beside bin 0 to the whole bake's bits",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      const { fixture, column, lights } = methane();
+      const points = bakePointsOf(OWN).filter((b) => b >= BAKE_BIN_COUNT);
+      const share = (bins: ReadonlyArray<number>): ReturnType<typeof bakeBins> =>
+        bakeBins(
+          prepareBake(column, lights, grid, undefined, undefined, bins, OWN),
+          fixture.body,
+          0,
+        );
+      const whole = bakeMultipleScattering(
+        prepareBake(column, lights, grid, undefined, undefined, bakePointsOf(OWN), OWN),
+        fixture.body,
+        0,
+      );
+      const gathered = gatherBins([
+        share([...EVERY_BAKE_BIN.filter((b) => b % 2 === 0), ...points]),
+        share(EVERY_BAKE_BIN.filter((b) => b % 2 === 1)),
+      ]);
+      expect(gathered).toEqual(whole);
+    },
+  );
+
+  it("refuses a channel's point unless the channel is own, and an own channel under a light without channel curves", () => {
+    const { column, lights } = methane();
+    const light = lights[0];
+    if (light === undefined) {
+      throw new Error("the methane column bakes under one light");
+    }
+    const { channels: _, ...bare } = light;
+    expect(
+      [
+        () => prepareBake(column, lights, grid, undefined, undefined, [0, ownChannelPoint(0)], OWN),
+        () => prepareBake(column, [bare], grid, undefined, undefined, bakePointsOf(OWN), OWN),
+      ].map((make) => {
+        try {
+          make();
+          return "made";
+        } catch (error: unknown) {
+          return error instanceof RangeError ? "refused" : "threw";
+        }
+      }),
+    ).toEqual(["refused", "refused"]);
   });
 });

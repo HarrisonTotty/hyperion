@@ -168,32 +168,34 @@ export function deckGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean 
 
 /**
  * `titan-class`'s recorded verdict by image through its route (R08.T14.d.4): `vectorGate.json`'s
- * `titanClass.routed.images`, its whole column baked at m ≤ 2 with its correction, against the
- * re-traced reference's vector I (R08.T12.h's), held to the file by the test. 140 of its 360 values
- * pass, 45 miss and 175 are refused, so the route stays closed ({@link THICK_ROUTE_RANGES}):
+ * `titanClass.routed.images`, its whole column baked at m ≤ 2 with its correction, its green and blue
+ * at their own wavelengths (`bake.ts`'s "Own wavelengths"), against the re-traced reference's vector I
+ * (R08.T12.h's), held to the file by the test. 155 of its 360 values pass, 30 miss and 175 are
+ * refused, so the route stays closed ({@link THICK_ROUTE_RANGES}); every miss is red but the limb's:
  *
  * - twilight at the horizon, `ground-s90`, dim in red in all 21 of its views (0.76–0.88 of the
- *   reference; green and blue refused), at every mode count, on a sphere some 120 scale heights in
- *   radius (Earth's some 750), where the pseudo-spherical beam stands at its limit;
- * - the limb, bright at 0.3H, 3H and 10H (to 1.87 of the reference at 10H, red), which the bake's
- *   m = 2 moves most (2.33 at m ≤ 1);
- * - the daylit sky, bright at s0–s60, mostly in blue (to 1.18), and the disc at p60 and p75 (to
- *   1.09), at every mode count;
- * - the forward views at s80 (a0, from 0.92), dim.
+ *   reference; green and blue refused, as dim), at every mode count, on a sphere some 120 scale
+ *   heights in radius (Earth's some 750), where the plane-parallel column's diffuse field stands
+ *   lit from no air sunward of it;
+ * - the limb, bright at 0.3H, 3H and 10H (to 1.87 of the reference at 10H, red), as bright with
+ *   every mode the solve holds (1.92 at m < 16): the plane-parallel diffuse field at altitude;
+ * - the sky at s30 (v30, a45 and a180, to 1.10) and the disc at p60 (1.08), bright in red, the red
+ *   still the bins' (its methane's curve at the floor);
+ * - the forward view at s80 (v60, a0: 0.92), dim.
  */
 export const HAZE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
-  { image: "ground-s0", comparisons: 12, passes: 10, misses: 2, refusals: 0 },
-  { image: "ground-s30", comparisons: 60, passes: 42, misses: 8, refusals: 10 },
-  { image: "ground-s60", comparisons: 60, passes: 35, misses: 1, refusals: 24 },
-  { image: "ground-s80", comparisons: 63, passes: 30, misses: 4, refusals: 29 },
+  { image: "ground-s0", comparisons: 12, passes: 12, misses: 0, refusals: 0 },
+  { image: "ground-s30", comparisons: 60, passes: 48, misses: 2, refusals: 10 },
+  { image: "ground-s60", comparisons: 60, passes: 36, misses: 0, refusals: 24 },
+  { image: "ground-s80", comparisons: 63, passes: 33, misses: 1, refusals: 29 },
   { image: "ground-s90", comparisons: 63, passes: 0, misses: 21, refusals: 42 },
   { image: "ground-s95", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
   { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "disc-p60", comparisons: 3, passes: 1, misses: 2, refusals: 0 },
-  { image: "disc-p75", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
+  { image: "disc-p60", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
+  { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "limb", comparisons: 15, passes: 6, misses: 6, refusals: 3 },
+  { image: "limb", comparisons: 15, passes: 7, misses: 5, refusals: 3 },
   { image: "aerial", comparisons: 9, passes: 5, misses: 0, refusals: 4 },
 ];
 
@@ -255,6 +257,22 @@ export function thickRouteRangesOf(
  */
 export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> =
   thickRouteRangesOf(HAZE_GATE_TALLIES);
+
+/**
+ * Whether a body routed `regime` bakes the channels its lights allow at their own wavelengths
+ * (`bake.ts`'s remarks, "Own wavelengths"; R08.T14.d.4): a `thickScattering` world that `ranges`
+ * route outside {@link THICK_ROUTE_RANGE}, by the haze's range, whose gate was baked so; never one
+ * {@link THICK_ROUTE_RANGE} holds, whose kept cases' gates were baked by the bins.
+ *
+ * @param ranges - The ranges its gates pass over: {@link THICK_ROUTE_RANGES}, or a test's.
+ */
+export function bakedAtOwnWavelengths(
+  regime: AtmosphereRegime,
+  medium: AtmosphereMedium,
+  ranges: ReadonlyArray<ThickRouteRange> = THICK_ROUTE_RANGES,
+): boolean {
+  return thickBakeRouted(regime, medium, ranges) && !withinRouteRange(medium, THICK_ROUTE_RANGE);
+}
 
 /**
  * The range a gas envelope routes over once `giant-deck`'s envelope variant passes (R08.T16.a.2;

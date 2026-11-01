@@ -81,8 +81,12 @@ import type { PolarisationTable } from "./thick/polarisation";
 import {
   bakeBins,
   bakeMultipleScattering,
+  bakePointsOf,
   gatherBins,
   type MsSourceTable,
+  NO_OWN_CHANNELS,
+  type OwnChannels,
+  ownWavelengthChannels,
   prepareBake,
   THICK_BAKE_REFERENCE_BIN,
   type ThickBakeBand,
@@ -108,7 +112,7 @@ import {
   polarisationChannel,
   preparePolarisation,
 } from "./thick/polarisation";
-import { CHANNEL_WAVELENGTHS_NM } from "./medium";
+import { BAKE_BIN_COUNT, CHANNEL_WAVELENGTHS_NM } from "./medium";
 
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
 export const OPTICS_MEDIA_KEPT = 2;
@@ -208,7 +212,16 @@ export class OpticsJobs {
       }
       case "thick-bake": {
         const lights = this.#bakeLights(request, options);
-        const prepared = prepareBake(request.column, lights);
+        const own = ownChannelsOf(request, lights);
+        const prepared = prepareBake(
+          request.column,
+          lights,
+          undefined,
+          undefined,
+          undefined,
+          bakePointsOf(own),
+          own,
+        );
         reply = {
           kind: "thick-baked",
           id: request.id,
@@ -219,13 +232,19 @@ export class OpticsJobs {
       case "thick-bake-bins": {
         const band = oneBandOf(request.bands);
         const lights = this.#bakeLights(request, options);
+        const own = ownChannelsOf(request, lights);
+        // The share with bin 0 bakes the own channels' points beside its bins.
+        const points = request.bins.includes(0)
+          ? bakePointsOf(own).filter((b) => b >= BAKE_BIN_COUNT)
+          : [];
         const prepared = prepareBake(
           request.column,
           lights,
           undefined,
           undefined,
           undefined,
-          request.bins,
+          [...request.bins, ...points],
+          own,
         );
         reply = {
           kind: "thick-bins-baked",
@@ -539,6 +558,17 @@ export class OpticsJobs {
     );
     return tables.flat();
   }
+}
+
+/**
+ * The channels a thick bake's request solves at their own wavelengths: those its lights allow where
+ * it asks them (`thick/bake.ts`'s `ownWavelengthChannels`, R08.T14.d.4), none where it does not.
+ */
+function ownChannelsOf(
+  request: { readonly ownWavelengths?: boolean },
+  lights: ReadonlyArray<ThickBakeLight>,
+): OwnChannels {
+  return request.ownWavelengths === true ? ownWavelengthChannels(lights) : NO_OWN_CHANNELS;
 }
 
 /** A share's one band, or a refusal: a share is of one band. */

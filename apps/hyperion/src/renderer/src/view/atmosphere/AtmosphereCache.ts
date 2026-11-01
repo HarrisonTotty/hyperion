@@ -227,6 +227,7 @@ import {
   THICK_REASON,
 } from "./thick/regime";
 import {
+  bakedAtOwnWavelengths,
   correctionRouted,
   deckRouted,
   discTableRouted,
@@ -529,6 +530,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
     medium: AtmosphereMedium,
     envelope: boolean,
   ) => boolean;
+  /**
+   * Whether a routed body in `regime` from `medium` bakes the channels its lights allow at their own
+   * wavelengths (R08.T14.d.4; `thick/bake.ts`'s remarks, "Own wavelengths"): `thick/routing.ts`'s
+   * `bakedAtOwnWavelengths` if absent, a haze route's, none yet; a test's choice otherwise.
+   */
+  readonly ownWavelengths?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   /**
    * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
    * `thick/routing.ts`'s `correctionRouted` if absent, every world with air since R08.T14.d.4's
@@ -1081,6 +1088,8 @@ function bakeBodyOf(tables: CachedTables): ThickBakeBody {
  *
  * @param input - A server body's build's input; `null` for a kept body.
  * @param lights - The body's lights as last noted, a kept body's spectra.
+ * @param ownWavelengths - Whether the bake solves the channels its lights allow at their own
+ *   wavelengths, a haze route's (R08.T14.d.4); carried by the ask where so.
  * @throws RangeError as `spectralColumnOf` refuses the sources: a bug in what the body was built
  *   from.
  */
@@ -1090,6 +1099,7 @@ function thickBakeAskOf(
   sources: ReadonlyArray<SpectralSource>,
   tables: CachedTables,
   lights: ReadonlyArray<BodyLight>,
+  ownWavelengths: boolean,
 ): ThickBakeAsk | null {
   // A self-luminous medium's column carries its temperature, so that the bake solves its thermal
   // field beside its beams (R08.T18.b).
@@ -1100,7 +1110,9 @@ function thickBakeAskOf(
     // The tables' row counted these slots when they were made (`AtmosphereCache`'s
     // `#thickSlotsOf`).
     const slots = input.kind === "record" ? input.lights.map((_, slot) => slot) : [];
-    return slots.length === 0 ? null : { input, slots, bands, column, body };
+    return slots.length === 0
+      ? null
+      : { input, slots, bands, column, body, ...(ownWavelengths ? { ownWavelengths } : {}) };
   }
   const spectra =
     lights.length > 0 ? lights.map((light) => light.spectrum) : [REFERENCE_SUN_BAKE_SPECTRUM];
@@ -1111,6 +1123,7 @@ function thickBakeAskOf(
     column,
     body,
     kept: keptBakeLightsOf(built.medium, spectra),
+    ...(ownWavelengths ? { ownWavelengths } : {}),
   };
 }
 
@@ -1165,7 +1178,8 @@ function discBakeAskOf(
   if (built.sources === undefined) {
     return null;
   }
-  const ask = thickBakeAskOf(input, built, built.sources, tables, lights);
+  // A routed body's disc reads its landed bake's J; one solved here is the bins'.
+  const ask = thickBakeAskOf(input, built, built.sources, tables, lights, false);
   if (ask === null) {
     return null;
   }
@@ -1281,6 +1295,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     medium: AtmosphereMedium,
     envelope: boolean,
   ) => boolean;
+  readonly #ownWavelengths: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
   readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
@@ -1300,6 +1315,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       opts.routes ??
       ((regime, medium, envelope): boolean =>
         thickBakeRouted(regime, medium) || deckRouted(regime, medium, envelope));
+    this.#ownWavelengths =
+      opts.ownWavelengths ?? ((regime, medium): boolean => bakedAtOwnWavelengths(regime, medium));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
     this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
   }
@@ -1844,7 +1861,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           entry.regime !== null &&
           this.#routes(entry.regime, entry.built.medium, entry.envelope)
         ) {
-          this.#bake(held, entry, entry.built, tables);
+          this.#bake(
+            held,
+            entry,
+            entry.built,
+            tables,
+            this.#ownWavelengths(entry.regime, entry.built.medium),
+          );
         }
         if (tables !== null && entry.built !== null) {
           this.#correct(held, entry, entry.built, tables);
@@ -1869,7 +1892,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
    * `atmosphereComputing`; a kept medium with no sources to bake from, or a request that cannot be
    * formed or asked, is a failed bake, with one `console.warn` or `console.error`.
    */
-  #bake(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, tables: T): void {
+  #bake(
+    held: HeldBody<T>,
+    entry: ToDraw,
+    built: BuiltAtmosphere,
+    tables: T,
+    ownWavelengths: boolean,
+  ): void {
     const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
     if (built.sources === undefined) {
       console.warn(
@@ -1881,7 +1910,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     let ask: ThickBakeAsk | null;
     let handle: ThickBake;
     try {
-      ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, ownWavelengths);
       if (ask === null) {
         // No light to bake under: drawn as a body the router does not route.
         return;
@@ -1964,7 +1993,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     let handle: DeckBake;
     try {
-      const thick = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      const thick = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, false);
       if (thick === null) {
         return;
       }
@@ -2161,7 +2190,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       if (!this.#asksCorrection(entry, built)) {
         return;
       }
-      const ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights);
+      const ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, false);
       if (ask === null) {
         // No light to bake under: drawn uncorrected, as a body that needs none.
         return;

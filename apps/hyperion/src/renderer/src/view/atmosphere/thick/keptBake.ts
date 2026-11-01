@@ -18,7 +18,10 @@ import { bodyGravity } from "../oblate";
 import type { KeptBakeLights } from "../opticsMessages";
 import {
   bakeMultipleScattering,
+  bakePointsOf,
   type MsSourceTable,
+  NO_OWN_CHANNELS,
+  ownWavelengthChannels,
   prepareBake,
   THICK_BAKE_GRID,
   type ThickBakeBody,
@@ -75,12 +78,19 @@ export interface KeptBakeOptions {
    * (R08.T14.d.2), for the bake and the correction alike.
    */
   readonly grid?: ThickBakeGrid;
+  /**
+   * Whether the bake solves the channels its lights allow at their own wavelengths, as a haze
+   * route's does (`bake.ts`'s remarks, "Own wavelengths"; R08.T14.d.4): none by default.
+   */
+  readonly ownWavelengths?: boolean;
 }
 
 /**
  * A kept medium's thick tables, one a band asked in its order, each with a slot a light of
  * `lights` in theirs: `prepareBake` of its column under the lights' bin curves, as the optics
- * worker forms them (`bake.ts`'s `thickBakeLights`), then `bakeMultipleScattering` a band.
+ * worker forms them (`bake.ts`'s `thickBakeLights`), with the channels they allow at their own
+ * wavelengths where `options.ownWavelengths` asks it (`bake.ts`'s `ownWavelengthChannels`), then
+ * `bakeMultipleScattering` a band.
  *
  * @throws RangeError as {@link keptColumnOf}, `thickBakeLights`, `prepareBake` and
  *   `bakeMultipleScattering` refuse their inputs (a band the body does not have).
@@ -92,10 +102,16 @@ export function bakeKeptCase(
   options: KeptBakeOptions = {},
 ): ReadonlyArray<MsSourceTable> {
   const column = keptColumnOf(kept);
+  const bakeLights = thickBakeLights(column, lights.absorbers, lights.spectra);
+  const own = options.ownWavelengths === true ? ownWavelengthChannels(bakeLights) : NO_OWN_CHANNELS;
   const prepared = prepareBake(
     column,
-    thickBakeLights(column, lights.absorbers, lights.spectra),
+    bakeLights,
     options.grid ?? THICK_BAKE_GRID,
+    undefined,
+    undefined,
+    bakePointsOf(own),
+    own,
   );
   const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
   return bands.map((band) => bakeMultipleScattering(prepared, body, band));

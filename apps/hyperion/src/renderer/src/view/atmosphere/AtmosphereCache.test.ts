@@ -72,7 +72,7 @@ import {
   clampedGroundAlbedo,
 } from "./atmosphereInput";
 import { EARTH_COLUMN, R05_EARTH_REFERENCE } from "./earth";
-import type { MediumTerm } from "./medium";
+import type { AtmosphereMedium, MediumTerm } from "./medium";
 import { ATMOSPHERE_ANSWER_UNREADABLE, type AtmosphereLabel } from "./labels";
 import { keptBakeLightsOf, type OpticsRequest } from "./opticsMessages";
 import {
@@ -2906,7 +2906,10 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
    * bake posted to the worker.
    */
   async function bakingOverPool(
-    options: { readonly corrects?: (column: SpectralColumn) => boolean } = {},
+    options: {
+      readonly corrects?: (column: SpectralColumn) => boolean;
+      readonly ownWavelengths?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+    } = {},
   ): Promise<OverPool> {
     const seam = new BodyDetailSeam();
     const workers: ScriptedOpticsWorker[] = [];
@@ -2927,6 +2930,7 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
       // the disc table's (R08.T16.b).
       corrects: options.corrects ?? (() => false),
       discs: () => false,
+      ...(options.ownWavelengths === undefined ? {} : { ownWavelengths: options.ownWavelengths }),
     });
     onTestFinished(() => {
       cache.dispose();
@@ -2951,6 +2955,21 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     await microtasks();
     return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
   }
+
+  it("posts the bake asking its channels at their own wavelengths where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
+    const asked = async (
+      ownWavelengths?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
+    ): Promise<unknown> => {
+      const over = await bakingOverPool(ownWavelengths === undefined ? {} : { ownWavelengths });
+      const bake = lastPosted(workerAt(over.workers, 0));
+      return bake.kind === "thick-bake" ? bake.ownWavelengths : bake.kind;
+    };
+    expect([await asked(() => true), await asked(() => false), await asked()]).toEqual([
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
 
   it("posts the polarisation correction after the bake, every band in one polarisation-bake request, and gives APPROXIMATE with its reason alone where it is answered failed (R08.T14.f)", async () => {
     const over = await bakingOverPool({

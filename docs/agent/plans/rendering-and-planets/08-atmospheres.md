@@ -24403,3 +24403,24 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
       channel's J off its wavelength in the haze's absorbing blue (T14.d.1's deferred finding).
     - s80's forward views (a0), dim from 0.92: the aureole, as Mars's precondition 2.
   - _Pending, the owner's RTX run_: a routed Titan's frame against 16.67 ms, once it passes.
+- **R08.T14.d.4's Titan-class levers** (2026-11-01; lane `r08-titan-route`, its second brief; each
+  lever's tallies and bake times in the lane's outbox).
+  - _Lever 1, the bake's modes: measured, not built._ The mode series converges by m ≈ 8, and with
+    every mode the 16-stream solve holds (m < 16) the limb reads brighter, 1.92 at 10H: the limb's
+    excess is the plane-parallel diffuse field at altitude, not the modes. m = 3 alone gives 41
+    misses against 45, by the series' truncation (m < 5 gives 43). No second texel is built.
+  - _Lever 3, own wavelengths: built._ `bake.ts`'s `OwnChannels`, `ownWavelengthChannels` (a
+    channel whose gases' channel curves stay off the floor out to `OWN_WAVELENGTH_COLUMNS`, 100 U),
+    `ownChannelPoint` (points 15–17) and `bakePointsOf`; `prepareBake`'s 7th parameter `own`;
+    `ThickBakeLight.channels`. The flag rides `ThickBakeAsk`, `thick-bake` and `thick-bake-bins`
+    (`ownWavelengths`; the share with bin 0 bakes the points), set by `AtmosphereCache`'s
+    `ownWavelengths` option, `thick/routing.ts`'s `bakedAtOwnWavelengths` by default: a world routed
+    outside `THICK_ROUTE_RANGE` alone, none while the haze's range is closed. The disc, deck and
+    correction asks take none. Every other bake is bit for bit as before.
+  - _titan-class through lever 3:_ green and blue at their own wavelengths, red by the bins (its
+    methane's curve reaches the floor near 20 U). `vectorGate.json` format 8 adds
+    `titanClass.ownWavelengths`; 155 pass, 30 miss, 175 refused (`HAZE_GATE_TALLIES`). Every daylit
+    blue miss and the disc's at p75 clear.
+  - _Not adopted:_ the bins' channel weighting with a continuum ratio, which the blue channel's
+    negative weights over a methane-free red continuum push to 1.89; and a smoothing of J over μ₀ at
+    the horizon, whose answer moved threefold with its width (a tuned parameter, not a lever).

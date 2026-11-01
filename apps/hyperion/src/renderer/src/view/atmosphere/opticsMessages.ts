@@ -97,6 +97,11 @@ export type OpticsRequest =
       readonly body: ThickBakeBody;
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
+      /**
+       * Whether the bake solves the channels its lights allow at their own wavelengths, a haze
+       * route's (`thick/bake.ts`'s remarks, "Own wavelengths"; R08.T14.d.4): none where absent.
+       */
+      readonly ownWavelengths?: boolean;
     }
   | {
       readonly kind: "thick-bake-bins";
@@ -108,6 +113,8 @@ export type OpticsRequest =
       readonly body: ThickBakeBody;
       /** A kept body's absorber specs and light spectra, in place of the input's. */
       readonly kept?: KeptBakeLights;
+      /** As `thick-bake`'s; the share with bin 0 bakes the own channels' points beside its bins. */
+      readonly ownWavelengths?: boolean;
       /** The bake bins baked, ascending. */
       readonly bins: ReadonlyArray<number>;
     }

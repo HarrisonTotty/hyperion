@@ -86,6 +86,20 @@
  * channel reads J off its wavelength (`saturn-oblate`'s s0 blue 0.97 of its reference; Earth's red
  * at μ₀ 1/64 some 0.74 of a solve at 645 nm, plan R08's record of T14.d.1).
  *
+ * **Own wavelengths** (R08.T14.d.4's Titan-class gate; a haze route's bake alone,
+ * {@link OwnChannels}). A channel may take its J from one more solve point instead, at the
+ * channel's own wavelength (`medium.ts`'s `CHANNEL_WAVELENGTHS_NM`), its terms' optics there and its
+ * gases' channel curves (`absorbers.ts`'s `AbsorberCurve`, the curves the kernels and the
+ * references read) fitted as a bin's are, its J stored as it is. The conversion's signed weights
+ * otherwise reach past the channel: the blue channel's are negative over 500–620 nm, where a
+ * Titan-class column's methane absorbs and its haze's ω̄ rises, and a channel curve clamped at 1 there
+ * (`absorbers.ts`'s `channelTransmittance`) reads no methane at all, so the bins' blue is bright
+ * where the reference's is not. A channel takes its own wavelength only where every absorber's
+ * channel curve, under every light, stays off the curves' floor out to {@link OWN_WAVELENGTH_COLUMNS}
+ * times its vertical amount ({@link ownWavelengthChannels}): a curve at the floor is light that has
+ * left Rec. 709 (methane's red past some 20 times a Titan-class column), which no sum of
+ * exponentials carries and the bins' signed conversion does.
+ *
  * **Spectral** (Design note 5): each absorber in each bin is an exponential sum fitted to its bin
  * curve (`expSum.ts`), each layer reading k at its own Curtis–Godson pressure; several absorbers in
  * a bin overlap at random (the product of their sums, Lacis and Oinas 1991), one solve a product
@@ -113,14 +127,22 @@
  */
 
 import type { Rgb } from "../../photometry/toneCurve";
-import { type AbsorberBinCurves, absorberCurvesBySun, type AbsorberSpec } from "../absorbers";
+import {
+  ABSORBER_TRANSMITTANCE_FLOOR,
+  type AbsorberBinCurves,
+  type AbsorberCurve,
+  absorberCurvesBySun,
+  type AbsorberSpec,
+} from "../absorbers";
 import { gaussLegendre } from "../irradianceQuadrature";
 import {
   ABSORBER_PRESSURE_REFERENCE_PA,
   BAKE_BIN_COUNT,
   BAKE_WAVELENGTHS_NM,
+  CHANNEL_WAVELENGTHS_NM,
   columnLengthM,
   densityAt,
+  type RenderChannel,
   type TabulatedDensity,
 } from "../medium";
 import { bandLatitudeRad, type BodyGravity, principalRadiiM, type SpheroidFigure } from "../oblate";
@@ -377,6 +399,12 @@ export interface ThickBakeLight {
    * each bin under this light (`absorbers.ts`'s `absorberBinCurves` or `absorberCurves`).
    */
   readonly absorbers: ReadonlyArray<AbsorberBinCurves>;
+  /**
+   * The same terms' channel curves under this light, in the same order (`absorbers.ts`'s
+   * `AbsorberCurve`), which a channel at its own wavelength takes (the module's remarks, "Own
+   * wavelengths"); absent, no channel may.
+   */
+  readonly channels?: ReadonlyArray<AbsorberCurve>;
 }
 
 /**
@@ -413,7 +441,125 @@ export function thickBakeLights(
       }
       return bins;
     }),
+    channels: curves.map((bySun) => {
+      const channels = bySun[j]?.channels;
+      if (channels === undefined) {
+        throw new RangeError(`an absorber has no channel curves for light ${j}`);
+      }
+      return channels;
+    }),
   }));
+}
+
+/**
+ * The render channels a bake solves at their own wavelengths, red, green and blue (the module's
+ * remarks, "Own wavelengths"): each such channel's J is its solve point's
+ * ({@link ownChannelPoint}), the others' the bins' converted.
+ */
+export type OwnChannels = readonly [boolean, boolean, boolean];
+
+/** No channel at its own wavelength: every bake's but a haze route's (R08.T14.d.4). */
+export const NO_OWN_CHANNELS: OwnChannels = [false, false, false];
+
+/** The solve point of channel `c` at its own wavelength: after the 15 bins, 15 + c. */
+export function ownChannelPoint(c: RenderChannel): number {
+  return BAKE_BIN_COUNT + c;
+}
+
+/**
+ * The columns out to which a channel's curves stay off their floor for the channel to take its own
+ * wavelength, in units of each curve's vertical amount U: 100 U, over three times the grazing beam's
+ * column on a body of R ÷ H 120 (Chapman's √(2πR ÷ H), some 28 U), past the columns a bake's beams
+ * cross (the module's remarks, "Own wavelengths").
+ */
+export const OWN_WAVELENGTH_COLUMNS = 100;
+
+/**
+ * Which channels `lights` let a bake solve at their own wavelengths (the module's remarks, "Own
+ * wavelengths"): each channel in which every absorber's channel curve under every light stays above
+ * `absorbers.ts`'s `ABSORBER_TRANSMITTANCE_FLOOR` at every pressure row and node out to
+ * {@link OWN_WAVELENGTH_COLUMNS} U, the curve's middle node; none for lights without channel curves.
+ */
+export function ownWavelengthChannels(lights: ReadonlyArray<ThickBakeLight>): OwnChannels {
+  const floorDepth = -log(ABSORBER_TRANSMITTANCE_FLOOR);
+  const own = (c: RenderChannel): boolean =>
+    lights.length > 0 &&
+    lights.every(
+      (light) =>
+        light.channels !== undefined &&
+        light.channels.every((curve) => {
+          const nodes = curve.logColumns.length;
+          const vertical = curve.logColumns[(nodes - 1) >> 1] ?? Number.NaN;
+          const reach = vertical + log(OWN_WAVELENGTH_COLUMNS);
+          const depths = curve.opticalDepth[c];
+          const rows = depths.length / nodes;
+          for (let r = 0; r < rows; r += 1) {
+            for (let j = 0; j < nodes && (curve.logColumns[j] ?? Number.NaN) <= reach; j += 1) {
+              if (!((depths[r * nodes + j] ?? Number.NaN) < floorDepth)) {
+                return false;
+              }
+            }
+          }
+          return true;
+        }),
+    );
+  return [own(0), own(1), own(2)];
+}
+
+/** The solve points of a bake with `own` channels: every bin, then each own channel's point. */
+export function bakePointsOf(own: OwnChannels): ReadonlyArray<number> {
+  return [
+    ...EVERY_BAKE_BIN,
+    ...([0, 1, 2] as const).filter((c) => own[c]).map((c) => ownChannelPoint(c)),
+  ];
+}
+
+/** The channel whose own wavelength's point `point` is ({@link ownChannelPoint}), or `null` for a bin. */
+function ownPointChannel(point: number): RenderChannel | null {
+  switch (point - BAKE_BIN_COUNT) {
+    case 0:
+      return 0;
+    case 1:
+      return 1;
+    case 2:
+      return 2;
+    default:
+      return null;
+  }
+}
+
+/** A solve point's wavelength, nm: a bin's middle, or a channel's own (the module's remarks). */
+function pointWavelengthNm(point: number): number {
+  return point < BAKE_BIN_COUNT
+    ? (BAKE_WAVELENGTHS_NM[point] ?? Number.NaN)
+    : (CHANNEL_WAVELENGTHS_NM[point - BAKE_BIN_COUNT] ?? Number.NaN);
+}
+
+/**
+ * A light's conversion with its `own` channels at their points: the bins' converted factors for the
+ * others, 0 at the points, and each own channel's point alone; the conversion itself where none is.
+ */
+function withOwnChannels(conversion: BinConversion, own: OwnChannels): BinConversion {
+  if (!own.some(Boolean)) {
+    return conversion;
+  }
+  const factorsOf = (c: RenderChannel): Float64Array => {
+    const out = new Float64Array(BAKE_BIN_COUNT + 3);
+    if (own[c]) {
+      out[ownChannelPoint(c)] = 1;
+    } else {
+      out.set(conversion.factors[c]);
+    }
+    return out;
+  };
+  return {
+    factors: [factorsOf(0), factorsOf(1), factorsOf(2)],
+    guarded: [
+      conversion.guarded[0] && !own[0],
+      conversion.guarded[1] && !own[1],
+      conversion.guarded[2] && !own[2],
+    ],
+  };
 }
 
 /** A term's optics in one bin, at relative density 1. */
@@ -672,9 +818,44 @@ function overlapped(sets: ReadonlyArray<ReadonlyArray<BinTerm>>, layers: number)
  * An absorber's vertical bin optical depth at its vertical amount and its fit's reference row: the
  * curve's own −ln T, which `absorbers.ts` keeps finite however deep.
  */
-function verticalBinDepth(curves: AbsorberBinCurves, bin: number, row: number): number {
+function verticalBinDepth(curves: PointCurve, row: number): number {
   const nodes = curves.logColumns.length;
-  return curves.opticalDepth[bin]?.[row * nodes + ((nodes - 1) >> 1)] ?? 0;
+  return curves.opticalDepth[row * nodes + ((nodes - 1) >> 1)] ?? 0;
+}
+
+/** An absorber's curve at one solve point: a bin's, or a channel's at its own wavelength. */
+interface PointCurve {
+  readonly logColumns: Float64Array;
+  readonly logPressures: Float64Array;
+  readonly readTopLogPressure: number;
+  readonly transmittance: Float64Array;
+  readonly opticalDepth: Float64Array;
+}
+
+/**
+ * Absorber `a`'s curve under `light` at solve point `point` (the module's remarks, "Own
+ * wavelengths"), or `undefined` where the light holds none there.
+ */
+function pointCurveOf(light: ThickBakeLight, a: number, point: number): PointCurve | undefined {
+  if (point < BAKE_BIN_COUNT) {
+    const curves = light.absorbers[a];
+    const transmittance = curves?.transmittance[point];
+    const opticalDepth = curves?.opticalDepth[point];
+    return curves === undefined || transmittance === undefined || opticalDepth === undefined
+      ? undefined
+      : { ...curves, transmittance, opticalDepth };
+  }
+  const curve = light.channels?.[a];
+  const c = ownPointChannel(point);
+  return curve === undefined || c === null
+    ? undefined
+    : {
+        logColumns: curve.logColumns,
+        logPressures: curve.logPressures,
+        readTopLogPressure: curve.readTopLogPressure,
+        transmittance: curve.transmittance[c],
+        opticalDepth: curve.opticalDepth[c],
+      };
 }
 
 /** One light's bins `bins`, in their order (the module's remarks, "Spectral"). */
@@ -691,10 +872,9 @@ function lightBins(
       return { terms: none, largestFitError: 0, readFitError: 0, crossedRows: 0 };
     }
     const fitsOf = (maxTerms: number, a: number): ExpSumFit => {
-      const curves = light.absorbers[a];
+      const curves = pointCurveOf(light, a, b);
       const absorber = absorberTerms[a];
-      const transmittance = curves?.transmittance[b];
-      if (curves === undefined || absorber === undefined || transmittance === undefined) {
+      if (curves === undefined || absorber === undefined) {
         throw new RangeError(`absorber ${a} has no curve in bin ${b}`);
       }
       return fitExpSum(
@@ -702,7 +882,7 @@ function lightBins(
           logColumns: curves.logColumns,
           logPressures: curves.logPressures,
           readTopLogPressure: curves.readTopLogPressure,
-          transmittance,
+          transmittance: curves.transmittance,
         },
         absorber.columnPressurePa === undefined
           ? (curves.logPressures[0] ?? Number.NaN)
@@ -715,8 +895,8 @@ function lightBins(
     // Past the cap, the weakest absorber with more than one term is taken as one, then the next.
     const byDepth = Array.from(absorberTerms.keys()).toSorted((x, y) => {
       const depth = (a: number): number => {
-        const curves = light.absorbers[a];
-        return curves === undefined ? 0 : verticalBinDepth(curves, b, fits[a]?.referenceRow ?? 0);
+        const curves = pointCurveOf(light, a, b);
+        return curves === undefined ? 0 : verticalBinDepth(curves, fits[a]?.referenceRow ?? 0);
       };
       return depth(x) - depth(y);
     });
@@ -801,12 +981,15 @@ export function deltaMLayer(
  * @param layout - The layers laid by the caller (R08.T15's deck split), in place of the whole
  *   column's on the grid; absent, the bake's own.
  * @param bins - The bins prepared, ascending: every bin, or a share of them for a job that bakes
- *   those alone ({@link bakeBins}), the reference bin's optics taken for the layers whatever.
+ *   those alone ({@link bakeBins}), the reference bin's optics taken for the layers whatever; and
+ *   after them, of `own`'s channels, their points ({@link ownChannelPoint}).
+ * @param own - The channels solved at their own wavelengths (the module's remarks, "Own
+ *   wavelengths"), whose points the conversion reads in every share: none by default.
  * @throws RangeError for a grid that is not whole, a light whose absorbers do not match the
  *   column's absorber terms in count and kind, a curve with pressure rows on a column with no
  *   pressure profile, a `layout` whose table does not hold the grid's layers or whose fit does not
- *   begin with them, bins that are not ascending whole bins each once, or as the column's optics
- *   refuse.
+ *   begin with them, bins that are not ascending whole bins each once or points of channels not
+ *   `own`, an `own` channel under a light with no channel curves, or as the column's optics refuse.
  */
 export function prepareBake(
   column: SpectralColumn,
@@ -815,24 +998,29 @@ export function prepareBake(
   options: ExpSumOptions = EXP_SUM_OPTIONS,
   layout?: BakeLayout,
   bins: ReadonlyArray<number> = EVERY_BAKE_BIN,
+  own: OwnChannels = NO_OWN_CHANNELS,
 ): PreparedBake {
   checkBakeInputs(column, lights, grid);
   if (layout !== undefined) {
     checkBakeLayout(layout, grid);
   }
-  checkBakeBins(bins);
+  checkBakeBins(bins, own);
+  if (own.some(Boolean) && lights.some((light) => light.channels === undefined)) {
+    throw new RangeError(
+      "a bake's channels at their own wavelengths take every light's channel curves",
+    );
+  }
+  // The solve points the arrays by bin hold: the bins, and the channels' after them where any is own.
+  const pointCount = own.some(Boolean) ? BAKE_BIN_COUNT + 3 : BAKE_BIN_COUNT;
   const whole = bins.length === BAKE_BIN_COUNT;
   // The bins prepared, and the reference bin where the layers are placed by it.
   const needed =
     whole || layout !== undefined
       ? bins
       : [...new Set([...bins, THICK_BAKE_REFERENCE_BIN])].toSorted((p, q) => p - q);
-  const opticsOf = spectralOptics(
-    column,
-    needed.map((b) => BAKE_WAVELENGTHS_NM[b] ?? Number.NaN),
-  );
+  const opticsOf = spectralOptics(column, needed.map(pointWavelengthNm));
   const optics = Array.from(
-    { length: BAKE_BIN_COUNT },
+    { length: pointCount },
     (_, b): ReadonlyArray<SpectralTermOptics> => opticsOf[needed.indexOf(b)] ?? [],
   );
   const order = THICK_BAKE_STREAMS;
@@ -893,9 +1081,9 @@ export function prepareBake(
   const interfacePlanck =
     temperature === undefined
       ? undefined
-      : BAKE_WAVELENGTHS_NM.map((nm) =>
+      : Array.from({ length: pointCount }, (_, b) =>
           Float64Array.from(interfaceHeightsM, (h) =>
-            planckRadiance(nm, mediumTemperatureK(temperature, h)),
+            planckRadiance(pointWavelengthNm(b), mediumTemperatureK(temperature, h)),
           ),
         );
   return {
@@ -906,8 +1094,8 @@ export function prepareBake(
     ...(interfacePlanck === undefined ? {} : { interfacePlanck }),
     binOptics,
     binPhases: optics.map((terms) => terms.map((t) => t.phase)),
-    groundAlbedo: Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
-      binGroundAlbedo(column.groundAlbedo, nm),
+    groundAlbedo: Float64Array.from({ length: pointCount }, (_, b) =>
+      binGroundAlbedo(column.groundAlbedo, pointWavelengthNm(b)),
     ),
     layerColumnsM,
     pointOptics,
@@ -921,7 +1109,10 @@ export function prepareBake(
           byBin[b] = bin;
         }
       }
-      return { conversion: binConversion(light.spectrum), bins: whole ? fittedBins : byBin };
+      return {
+        conversion: withOwnChannels(binConversion(light.spectrum), own),
+        bins: whole ? fittedBins : byBin,
+      };
     }),
     bins,
   };
@@ -933,20 +1124,24 @@ export const EVERY_BAKE_BIN: ReadonlyArray<number> = Array.from(
   (_, b) => b,
 );
 
-/** Refuses a share of bake bins that is not ascending whole bins, each once, at least one. */
-function checkBakeBins(bins: ReadonlyArray<number>): void {
+/**
+ * Refuses a share of bake bins that is not ascending whole bins, each once, at least one, with only
+ * `own`'s channels' points after them.
+ */
+function checkBakeBins(bins: ReadonlyArray<number>, own: OwnChannels): void {
+  const isPoint = (b: number): boolean => {
+    const c = ownPointChannel(b);
+    return b < BAKE_BIN_COUNT || (c !== null && own[c]);
+  };
   if (
     bins.length === 0 ||
     bins.some(
       (b, i) =>
-        !Number.isInteger(b) ||
-        b < 0 ||
-        b >= BAKE_BIN_COUNT ||
-        (i > 0 && !(b > (bins[i - 1] ?? b))),
+        !Number.isInteger(b) || b < 0 || !isPoint(b) || (i > 0 && !(b > (bins[i - 1] ?? b))),
     )
   ) {
     throw new RangeError(
-      `a bake's bins are ascending, each once, of 0 to ${BAKE_BIN_COUNT - 1}, not ${bins.join(", ")}`,
+      `a bake's bins are ascending, each once, of 0 to ${BAKE_BIN_COUNT - 1} and its own channels' points, not ${bins.join(", ")}`,
     );
   }
 }
@@ -1877,12 +2072,13 @@ export function bakeBins(
 }
 
 /**
- * A band's thick table from its bin shares ({@link bakeBins}), which together hold every bin once:
- * each bin's J converted to the channels in the bins' order and the records over every bin, so that
- * a band baked a share of its bins a job is the bits of one baked whole.
+ * A band's thick table from its bin shares ({@link bakeBins}), which together hold every bin once,
+ * and each point a channel at its own wavelength reads (the module's remarks, "Own wavelengths"):
+ * each bin's and point's J converted to the channels in their order and the records over every one,
+ * so that a band baked a share of its bins a job is the bits of one baked whole.
  *
- * @throws RangeError for shares that do not hold every bin once, or of other bands, grids, lights
- *   or thermal fields than the first's.
+ * @throws RangeError for shares that do not hold every bin and read point once, or of other bands,
+ *   grids, lights or thermal fields than the first's.
  */
 export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
   const first = shares[0];
@@ -1908,27 +2104,34 @@ export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
       byBin[part.bin] = part;
     }
   }
-  const parts = Array.from({ length: BAKE_BIN_COUNT }, (_, b): MsBinPart => {
+  // The points the conversions read: the bins, and each channel's own where a light reads it.
+  const pointCount = first.conversions[0]?.[0].length ?? BAKE_BIN_COUNT;
+  const read = (b: number): boolean =>
+    b < BAKE_BIN_COUNT ||
+    first.conversions.some((factors) => factors.some((channel) => (channel[b] ?? 0) !== 0));
+  const parts = Array.from({ length: pointCount }, (_, b): MsBinPart | undefined => {
     const part = byBin[b];
-    if (part === undefined) {
+    if (part === undefined && read(b)) {
       throw new RangeError(`a band's bin shares hold no bin ${b}`);
     }
     return part;
   });
+  const held = parts.filter((part): part is MsBinPart => part !== undefined);
   const altitudes = first.altitudesM.length;
   const suns = first.sunCosines.length;
   const views = first.travelCosines.length;
   const points = altitudes * suns * views * THICK_BAKE_MODES;
   const perAltitude = suns * views * THICK_BAKE_MODES;
-  const perScattering = parts.map((part) => part.perScattering);
+  const perScattering = parts.map((part) => part?.perScattering);
   const slots = first.conversions.map((factors, slot): MsSourceSlot => {
     const lights = parts.map((part) => {
-      const light = part.lights[slot];
-      if (light === undefined) {
+      const light = part?.lights[slot];
+      if (part !== undefined && light === undefined) {
         throw new RangeError(`bin ${part.bin} holds no light ${slot}`);
       }
       return light;
     });
+    const heldLights = lights.filter((light): light is MsBinLight => light !== undefined);
     const values = new Float32Array(points * 3);
     const [red, green, blue] = factors;
     for (let i = 0; i < points; i += 1) {
@@ -1936,7 +2139,10 @@ export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
       let r = 0;
       let g = 0;
       let bl = 0;
-      for (let b = 0; b < BAKE_BIN_COUNT; b += 1) {
+      for (let b = 0; b < pointCount; b += 1) {
+        if (lights[b] === undefined) {
+          continue;
+        }
         const x = (lights[b]?.values[i] ?? Number.NaN) * (perScattering[b]?.[a] ?? Number.NaN);
         r += (red[b] ?? Number.NaN) * x;
         g += (green[b] ?? Number.NaN) * x;
@@ -1948,18 +2154,20 @@ export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
     }
     return {
       values,
-      bins: lights.map((light) => light.record),
-      solves: lights.reduce((sum, light) => sum + light.solves, 0),
-      doubleForwardShare: lights.reduce((most, light) => Math.max(most, light.leftOutShare), 0),
-      flooredSlantFactors: lights.reduce((sum, light) => sum + light.floored, 0),
-      largestBeamDeficit: lights.reduce((most, light) => Math.max(most, light.deficit), 0),
+      bins: heldLights.map((light) => light.record),
+      solves: heldLights.reduce((sum, light) => sum + light.solves, 0),
+      doubleForwardShare: heldLights.reduce((most, light) => Math.max(most, light.leftOutShare), 0),
+      flooredSlantFactors: heldLights.reduce((sum, light) => sum + light.floored, 0),
+      largestBeamDeficit: heldLights.reduce((most, light) => Math.max(most, light.deficit), 0),
     };
   });
+  // The scattered thermal light and the depths are the bins' alone, as before any point.
+  const bins = held.filter((part) => part.bin < BAKE_BIN_COUNT);
   const thermal = first.thermal
     ? thermalScatteringOf(
         first.altitudesM,
-        parts.map((part) => part.thermal ?? new Float64Array(altitudes * views)),
-        perScattering,
+        bins.map((part) => part.thermal ?? new Float64Array(altitudes * views)),
+        bins.map((part) => part.perScattering),
         views,
       )
     : undefined;
@@ -1969,7 +2177,7 @@ export function gatherBins(shares: ReadonlyArray<MsBinShare>): MsSourceTable {
     sunCosines: first.sunCosines.slice(),
     travelCosines: first.travelCosines.slice(),
     modes: THICK_BAKE_MODES,
-    verticalOpticalDepth: Float64Array.from(parts, (part) => part.verticalOpticalDepth),
+    verticalOpticalDepth: Float64Array.from(bins, (part) => part.verticalOpticalDepth),
     slots,
     ...(thermal === undefined ? {} : { thermal }),
   };

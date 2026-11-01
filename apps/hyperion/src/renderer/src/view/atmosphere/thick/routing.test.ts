@@ -27,6 +27,7 @@ import {
   regimeChannels,
 } from "./regime";
 import {
+  bakedAtOwnWavelengths,
   BELOW_THE_HORIZON_IMAGES,
   CORRECTION_ROUTED,
   correctionRouted,
@@ -409,6 +410,19 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
       [true, true, true, false, false, false],
     ]);
   });
+
+  it("bakes a haze-routed world's channels at their own wavelengths, and no world the kept cases' range routes", () => {
+    const { medium, regime } = titan();
+    const opened = thickRouteRangesOf(passing);
+    const earth = cases.EARTH_CASE.medium;
+    const earthRegime = classifyRegime(earth, CLEAR_COVER);
+    expect([
+      bakedAtOwnWavelengths(regime, medium),
+      bakedAtOwnWavelengths(regime, medium, opened),
+      bakedAtOwnWavelengths(earthRegime, earth, opened),
+      bakedAtOwnWavelengths({ kind: "thin" }, medium, opened),
+    ]).toEqual([false, true, false, false]);
+  }, 180_000);
 
   it("judges no image whose sun stands below the horizon, and closes on a miss at the horizon or an image refused throughout", () => {
     const twilit = passing.map((image) =>
