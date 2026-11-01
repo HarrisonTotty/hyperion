@@ -24,8 +24,11 @@ import type {
   HandoverSharedMeans,
   HandoverSwitchName,
   HandoverTexelRecord,
+  InspectionTimingBytes,
+  InspectionTimingMemory,
   InspectionTimingPass,
   InspectionTimingRecord,
+  InspectionTimingUpload,
   InspectionTimingWindow,
   InspectionTimingWindowName,
   TerrainCheckBytes,
@@ -1220,6 +1223,38 @@ function timingPass(value: unknown): InspectionTimingPass | null {
   return typeof label === "string" && label.length > 0 && ms !== null ? { label, ms } : null;
 }
 
+/** A count and its bytes, each a count. */
+function timingBytes(value: unknown): InspectionTimingBytes | null {
+  return isRecord(value) && isCount(value["count"]) && isCount(value["bytes"])
+    ? { count: value["count"], bytes: value["bytes"] }
+    : null;
+}
+
+/** One resource's writes: its name, a count and its bytes. */
+function timingUpload(value: unknown): InspectionTimingUpload | null {
+  const sum = timingBytes(value);
+  const name = isRecord(value) ? value["name"] : undefined;
+  return sum !== null && typeof name === "string" && name.length > 0 ? { name, ...sum } : null;
+}
+
+/** A profiled window's writes, allocations and releases, and at most ten resources' writes. */
+function timingMemory(value: unknown): InspectionTimingMemory | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const uploaded = timingBytes(value["uploaded"]);
+  const created = timingBytes(value["created"]);
+  const destroyed = timingBytes(value["destroyed"]);
+  const uploads = listOf(value["uploads"], timingUpload);
+  return uploaded === null ||
+    created === null ||
+    destroyed === null ||
+    uploads === null ||
+    uploads.length > 10
+    ? null
+    : { uploaded, created, destroyed, uploads };
+}
+
 /**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
  * each pass's as many as the frames timed in full, each label once.
@@ -1237,6 +1272,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const gpuMs = times(value["gpuMs"]);
   const passes = listOf(value["passes"], timingPass);
   const statements = strings(value["statements"]);
+  const memory = timingMemory(value["memory"]);
   const { startMs, endMs, untimedFrames, position } = value;
   if (
     name === null ||
@@ -1253,6 +1289,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     passes.some((pass) => pass.ms.length !== gpuMs.length) ||
     new Set(passes.map((pass) => pass.label)).size !== passes.length ||
     !isCount(untimedFrames) ||
+    memory === null ||
     !isTextOrNull(position) ||
     statements === null
   ) {
@@ -1270,6 +1307,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     gpuMs,
     passes,
     untimedFrames,
+    memory,
     position,
     statements,
   };

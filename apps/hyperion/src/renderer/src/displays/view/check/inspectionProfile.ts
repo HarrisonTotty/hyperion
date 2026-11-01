@@ -45,7 +45,10 @@ export const INSPECTION_PROFILE_TIMING: InspectionProfileTiming = {
 /** What the profile measures with. */
 export interface InspectionProfileDeps {
   readonly api: Pick<ViewsCheckApi, "startProfile" | "endProfile" | "writeTimingResults">;
-  readonly views: Pick<ViewsProbe, "drawTimes" | "window" | "passTimes" | "timer">;
+  readonly views: Pick<
+    ViewsProbe,
+    "drawTimes" | "window" | "passTimes" | "memoryTraffic" | "timer"
+  >;
   /** Marks a window in the trace as a `performance.measure` span. */
   readonly markWindow: (window: ViewsCheckWindow) => void;
   readonly nowMs: () => number;
@@ -120,6 +123,7 @@ export class InspectionProfiler {
       gpuMs: figures.frameGpuMs,
       passes: views.passTimes(startMs, endMs),
       untimedFrames: figures.untimedFrames,
+      memory: views.memoryTraffic(startMs, endMs),
       position: said.position,
       statements: said.statements,
     });

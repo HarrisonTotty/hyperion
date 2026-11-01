@@ -1875,13 +1875,43 @@ export type InspectionTimingWindowName = "orbit" | "close";
 
 /** One pass label's GPU time in a profiled window. */
 export interface InspectionTimingPass {
-  /** The pass's label, as R01's pass timer reports it (`sky`, `atmosphere view`, `tonemap`). */
+  /**
+   * The pass's label, as R01's pass timer reports it (`sky`, `atmosphere view`, `tonemap`), and a
+   * label a frame repeats numbered in its order from the second (`atmosphere view #2`, the
+   * atmosphere's sky view, aerial perspective and ray march being one label's dispatches, and the
+   * shadow cascades' four `terrain shadows`).
+   */
   readonly label: string;
   /**
    * Its time in each frame of the window whose passes were all timed, ms, in the frames' order,
    * every pass of the label in the frame summed and 0 in a frame that has none.
    */
   readonly ms: ReadonlyArray<number>;
+}
+
+/** Bytes a count of the engine's writes or allocations came to. */
+export interface InspectionTimingBytes {
+  readonly count: number;
+  readonly bytes: number;
+}
+
+/** One resource's writes over a profiled window. */
+export interface InspectionTimingUpload extends InspectionTimingBytes {
+  /** The buffer's or texture's name, as made (`view star sprites`, `view:hdr`). */
+  readonly name: string;
+}
+
+/**
+ * What the engine wrote to the GPU and made or released over a profiled window (the owner's
+ * report, 2026-11-01): every `writeBuffer` and `writeTexture`, the buffers and textures made and
+ * those released, and the writes by resource, the most bytes first.
+ */
+export interface InspectionTimingMemory {
+  readonly uploaded: InspectionTimingBytes;
+  readonly created: InspectionTimingBytes;
+  readonly destroyed: InspectionTimingBytes;
+  /** The resources written most over the window, by bytes, at most ten. */
+  readonly uploads: ReadonlyArray<InspectionTimingUpload>;
 }
 
 /** What the renderer measured over one profiled window of the inspection run. */
@@ -1906,6 +1936,8 @@ export interface InspectionTimingWindow {
   readonly passes: ReadonlyArray<InspectionTimingPass>;
   /** Frames with a resolve whose times never arrived, left out of `gpuMs` and `passes`. */
   readonly untimedFrames: number;
+  /** What the engine wrote to the GPU and made or released over the window. */
+  readonly memory: InspectionTimingMemory;
   /** The primary's `POSITION` line as the window ended, or `null`. */
   readonly position: string | null;
   /** The primary's statements as the window ended (`ATMOSPHERE: APPROXIMATE`, `TERRAIN: …`). */

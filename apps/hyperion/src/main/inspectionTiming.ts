@@ -27,6 +27,7 @@ import { join } from "node:path";
 import type { TraceConfig } from "electron";
 
 import type {
+  InspectionTimingMemory,
   InspectionTimingRecord,
   InspectionTimingWindow,
   InspectionTimingWindowName,
@@ -524,6 +525,15 @@ export interface InspectionTimingWindowResults {
   /** Each pass label's GPU time, the dearest by its mean first. */
   readonly passes: ReadonlyArray<PassFigures>;
   readonly untimedFrames: number;
+  /**
+   * The share of the frames' GPU time in the passes that draw the terrain (the lit terrain and
+   * the mesh bodies' figures, its shadow cascades, and the symbology over it with the terrain's
+   * depth), 0 to 1, or `null` with no frame timed: the terrain's items, which the cluster path
+   * changes (R14), told apart from the rest.
+   */
+  readonly terrainShareOfGpu: number | null;
+  /** What the engine wrote to the GPU and made or released over the window. */
+  readonly memory: InspectionTimingMemory;
   /** The window's trace, reduced, or why it is missing. */
   readonly trace: Measured<ProfileTraceFigures>;
   /** The renderer's own times, as it measured them. */
@@ -563,6 +573,14 @@ export interface InspectionTimingInput {
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
 }
 
+/**
+ * The pass labels whose passes draw the terrain (`photoreal/passes.ts`' order): the bodies pass,
+ * which draws the mesh bodies' figures and the terrain handed over after them; the shadow
+ * cascades' caster passes, numbered from the second; and the symbology's canvas pass, which draws
+ * the terrain's depth before its marks. The renderer's labels, repeated here across the bundles.
+ */
+export const TERRAIN_PASS_LABELS = /^(?:bodies|terrain shadows(?: #\d+)?|symbology)$/u;
+
 /** One window's figures from the renderer's record and its trace. */
 function windowResults(
   window: InspectionTimingWindow,
@@ -586,6 +604,9 @@ function windowResults(
       };
     })
     .toSorted((a, b) => (b.meanMs ?? 0) - (a.meanMs ?? 0));
+  const terrainMeanMs = passes
+    .filter((pass) => TERRAIN_PASS_LABELS.test(pass.label))
+    .reduce((sum, pass) => sum + (pass.meanMs ?? 0), 0);
   return {
     name: window.name,
     durationMs,
@@ -603,6 +624,8 @@ function windowResults(
     },
     passes,
     untimedFrames: window.untimedFrames,
+    terrainShareOfGpu: gpu.meanMs === null || !(gpu.meanMs > 0) ? null : terrainMeanMs / gpu.meanMs,
+    memory: window.memory,
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
@@ -649,6 +672,11 @@ function msText(ms: number | null, digits = 1): string {
   return ms === null ? "—" : ms.toFixed(digits);
 }
 
+/** A count of writes or allocations and their bytes, as the summary writes them. */
+function bytesText(sum: { readonly count: number; readonly bytes: number }): string {
+  return `${String(sum.count)}, ${(sum.bytes / 1_048_576).toFixed(2)} MiB`;
+}
+
 /** A summary's row: median, p95, mean and max. */
 function summaryRow(name: string, summary: TimeSummary): string {
   return `| ${name} | ${String(summary.count)} | ${msText(summary.medianMs)} | ${msText(summary.p95Ms)} | ${msText(summary.meanMs)} | ${msText(summary.maxMs)} |`;
@@ -689,8 +717,8 @@ function functionsMarkdown(thread: ProfiledThread): string[] {
 function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   const trace = window.trace;
   const threads = trace.value?.threads ?? [];
-  const perDraw = (ms: number): string =>
-    window.draws === 0 ? "—" : (ms / window.draws).toFixed(1);
+  const perDraw = (total: number): string =>
+    window.draws === 0 ? "—" : (total / window.draws).toFixed(1);
   const sampled = threads.filter((thread) => thread.self.length > 0).slice(0, LISTED_THREADS);
   return [
     `## ${window.name}: ${String(window.draws)} draws in ${(window.durationMs / 1000).toFixed(1)} s, ${window.drawsPerSecond.toFixed(2)} a second`,
@@ -716,6 +744,22 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
           ...window.passes.map(
             (pass) =>
               `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} |`,
+          ),
+        ]),
+    "",
+    `The terrain's passes (\`bodies\`, \`terrain shadows\`, \`symbology\`) take ${window.terrainShareOfGpu === null ? "—" : `${(100 * window.terrainShareOfGpu).toFixed(1)}%`} of the GPU's time; the rest is the sky, the discs, the atmosphere and the post-processing.`,
+    "",
+    "### Uploads and allocations",
+    "",
+    `- **Written:** ${bytesText(window.memory.uploaded)} (${perDraw(window.memory.uploaded.bytes / 1024)} KiB a draw); **made:** ${bytesText(window.memory.created)}; **released:** ${bytesText(window.memory.destroyed)}`,
+    ...(window.memory.uploads.length === 0
+      ? []
+      : [
+          "",
+          "| Written to | Writes | Bytes |",
+          "| --- | --- | --- |",
+          ...window.memory.uploads.map(
+            (each) => `| ${cell(each.name)} | ${String(each.count)} | ${String(each.bytes)} |`,
           ),
         ]),
     "",

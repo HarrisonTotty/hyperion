@@ -166,6 +166,12 @@ const RECORD: InspectionTimingRecord = {
         { label: "atmosphere view", ms: [600, 800] },
       ],
       untimedFrames: 1,
+      memory: {
+        uploaded: { count: 4, bytes: 2_097_152 },
+        created: { count: 1, bytes: 1_024 },
+        destroyed: { count: 0, bytes: 0 },
+        uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
+      },
       position: "6.69 Mm 023° -12°",
       statements: ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
     },

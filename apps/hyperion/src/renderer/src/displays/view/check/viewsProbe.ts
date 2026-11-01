@@ -18,6 +18,7 @@
  */
 
 import type {
+  InspectionTimingMemory,
   InspectionTimingPass,
   ViewsCheckCanvas,
   ViewsCheckPhaseName,
@@ -109,6 +110,17 @@ export interface TimedAllocation {
   readonly name: string;
 }
 
+/** One of the engine's writes, allocations or releases, timed, with its bytes. */
+interface TimedTraffic {
+  readonly atMs: number;
+  readonly kind: "created" | "destroyed" | "uploaded";
+  readonly name: string;
+  readonly bytes: number;
+}
+
+/** The resources a window's memory traffic lists by their writes. */
+const LISTED_UPLOADS = 10;
+
 /**
  * The materials' preparations the views' renderers made (R10.T14.d): how many, how many have not
  * settled, and when the last settled, ms.
@@ -130,6 +142,8 @@ export class ViewsProbe implements EngineProbe {
   readonly #resolves = new Map<string, ResolveEntry>();
   readonly #times = new Map<string, PassTimes>();
   readonly #allocations: TimedAllocation[] = [];
+  /** Every write, allocation and release with its bytes, for the frame profile's windows. */
+  readonly #traffic: TimedTraffic[] = [];
   readonly #faults: string[] = [];
   readonly #timedFaults: TimedFault[] = [];
   readonly #restoresAtMs: number[] = [];
@@ -422,7 +436,9 @@ export class ViewsProbe implements EngineProbe {
    * made a resolve and whose resolves all reported, ms, every view's and target's passes of the
    * label in the frame summed, 0 in a frame without one: the frames of
    * {@link ViewsProbe.window}'s `frameGpuMs`, in the same order, labels in the order first seen (the
-   * inspection run's frame profile; the owner's report, 2026-11-01).
+   * inspection run's frame profile; the owner's report, 2026-11-01). A label a frame repeats is
+   * numbered from its second pass in the frame's order (`atmosphere view #2`), so that one label's
+   * several dispatches, or the shadow cascades' four passes, are told apart.
    */
   passTimes(startMs: number, endMs: number): ReadonlyArray<InspectionTimingPass> {
     const frames = [...this.#frames.values()]
@@ -436,12 +452,17 @@ export class ViewsProbe implements EngineProbe {
       if (keys.length === 0 || resolves.some((times) => times === undefined)) {
         continue;
       }
+      // A label the frame repeats is numbered from its second pass, in the frame's order.
+      const seen = new Map<string, number>();
       for (const times of resolves) {
         for (const pass of times?.passes ?? []) {
-          let ms = byLabel.get(pass.label);
+          const nth = (seen.get(pass.label) ?? 0) + 1;
+          seen.set(pass.label, nth);
+          const label = nth === 1 ? pass.label : `${pass.label} #${String(nth)}`;
+          let ms = byLabel.get(label);
           if (ms === undefined) {
             ms = Array.from({ length: timed + 1 }, () => 0);
-            byLabel.set(pass.label, ms);
+            byLabel.set(label, ms);
           }
           ms[timed] = (ms[timed] ?? 0) + pass.ns / 1e6;
         }
@@ -456,6 +477,35 @@ export class ViewsProbe implements EngineProbe {
     return [...byLabel].map(([label, ms]) => ({ label, ms }));
   }
 
+  /**
+   * The engine's writes, allocations and releases from `startMs` up to `endMs`, each a count and
+   * its bytes, and the resources written most (the inspection run's frame profile).
+   */
+  memoryTraffic(startMs: number, endMs: number): InspectionTimingMemory {
+    const inside = this.#traffic.filter((each) => each.atMs >= startMs && each.atMs < endMs);
+    const total = (kind: TimedTraffic["kind"]): { count: number; bytes: number } => {
+      const of = inside.filter((each) => each.kind === kind);
+      return { count: of.length, bytes: of.reduce((sum, each) => sum + each.bytes, 0) };
+    };
+    const byName = new Map<string, { readonly name: string; count: number; bytes: number }>();
+    for (const each of inside) {
+      if (each.kind === "uploaded") {
+        const held = byName.get(each.name) ?? { name: each.name, count: 0, bytes: 0 };
+        held.count += 1;
+        held.bytes += each.bytes;
+        byName.set(each.name, held);
+      }
+    }
+    return {
+      uploaded: total("uploaded"),
+      created: total("created"),
+      destroyed: total("destroyed"),
+      uploads: [...byName.values()]
+        .toSorted((a, b) => b.bytes - a.bytes || (a.name < b.name ? -1 : 1))
+        .slice(0, LISTED_UPLOADS),
+    };
+  }
+
   #attach(engine: RenderEngine): RenderEngine {
     this.#generation += 1;
     // Each listener lives as long as its engine, whose disposal drops it.
@@ -464,8 +514,10 @@ export class ViewsProbe implements EngineProbe {
       this.#times.set(this.#key(times.frame), times);
     });
     engine.onAllocation((event) => {
+      const atMs = this.#nowMs();
+      this.#traffic.push({ atMs, kind: event.kind, name: event.name, bytes: event.bytes });
       if (event.kind !== "uploaded") {
-        this.#allocations.push({ atMs: this.#nowMs(), kind: event.kind, name: event.name });
+        this.#allocations.push({ atMs, kind: event.kind, name: event.name });
       }
     });
     engine.onFault((fault) => {

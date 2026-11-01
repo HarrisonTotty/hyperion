@@ -66,6 +66,12 @@ function profiler(drawMs: number): {
         Array.from({ length: Math.floor((nowMs - fromMs) / drawMs) }, (_, i) => fromMs + i),
       window: figures,
       passTimes: () => [{ label: "atmosphere view", ms: [30] }],
+      memoryTraffic: () => ({
+        uploaded: { count: 3, bytes: 96 },
+        created: { count: 0, bytes: 0 },
+        destroyed: { count: 0, bytes: 0 },
+        uploads: [{ name: "view star sprites", count: 3, bytes: 96 }],
+      }),
       timer: () => "quantized",
     },
     markWindow: (span) => {
@@ -102,6 +108,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       intervalsMs: [33],
       gpuMs: [40],
       passes: [{ label: "atmosphere view", ms: [30] }],
+      memory: { uploaded: { count: 3, bytes: 96 } },
       position: "28.9 Mm 268° +49°",
     });
   });

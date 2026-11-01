@@ -172,6 +172,12 @@ export class FakeRenderEngine implements RenderEngine {
       this.#passTimeListeners.delete(listener);
     };
   }
+  /** Reports an allocation, a release or a write, as the WebGPU engine does as it makes them. */
+  reportAllocation(event: AllocationEvent): void {
+    for (const listener of this.#allocationListeners) {
+      listener(event);
+    }
+  }
   /** Reports a resolve's times, as the WebGPU engine does once their read settles. */
   reportPassTimes(times: PassTimes): void {
     for (const listener of this.#passTimeListeners) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../../view/engine/status";
+import type { AllocationEvent } from "../../../view/engine/memory";
 import type { FrameSubmission, RenderEngine } from "../../../view/engine/types";
 import { timedEngineSource } from "../../../test/viewDisplayHarness";
 import { viewOf, ViewsProbe } from "./viewsProbe";
@@ -147,6 +148,50 @@ describe("the views probe", () => {
     expect(probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs).toEqual([
       2.5, 1,
     ]);
+  });
+
+  it("numbers a label its frame repeats, in the frame's order (the owner's report)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 100, heightPx: 50 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("atmosphere view"));
+      target.render(frame("atmosphere view"));
+      target.render(frame("atmosphere view"));
+    });
+    timed.deliver(() => 2);
+    expect(probe.passTimes(0, 200).map((pass) => pass.label)).toEqual([
+      "view:hdr",
+      "view:hdr #2",
+      "view:hdr #3",
+    ]);
+  });
+
+  it("sums the engine's writes, allocations and releases within a window, by resource (the owner's report)", async () => {
+    const { probe, page, timed } = await probed();
+    const engine = timed.engines[0];
+    const report = (atMs: number, event: AllocationEvent): void => {
+      page.nowMs = atMs;
+      engine?.reportAllocation(event);
+    };
+    report(50, { kind: "created", name: "early", bytes: 64, category: "other" });
+    report(100, { kind: "created", name: "view star sprites", bytes: 256, category: "other" });
+    report(110, { kind: "uploaded", name: "view star sprites", bytes: 64 });
+    report(120, { kind: "uploaded", name: "view star sprites", bytes: 32 });
+    report(130, { kind: "destroyed", name: "early", bytes: 64, category: "other" });
+    report(300, { kind: "uploaded", name: "view star sprites", bytes: 16 });
+    expect(probe.memoryTraffic(100, 200)).toEqual({
+      uploaded: { count: 2, bytes: 96 },
+      created: { count: 1, bytes: 256 },
+      destroyed: { count: 1, bytes: 64 },
+      uploads: [{ name: "view star sprites", count: 2, bytes: 96 }],
+    });
   });
 
   it("counts a resolve that never reports as a drop, and leaves its frame untimed", async () => {
