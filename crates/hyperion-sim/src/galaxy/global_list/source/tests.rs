@@ -233,6 +233,66 @@ fn a_query_that_touches_no_shell_builds_no_table() {
     }
 }
 
+/// P10.T10.b's registration: a range query reads only the streams [`GlobalListSource::streams_read`]
+/// names, so a server that builds those tables first leaves none for the query to build. Through a
+/// lookup that records the streams it hands out, on `pal5_like`'s axis at the epoch and a
+/// millennium on and inside every shell's hole a millennium back, under either shell rule; below 26
+/// it names every stream.
+#[test]
+fn a_query_reads_only_the_streams_it_is_said_to() {
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
+
+    /// A lookup that records the streams whose tables it hands out.
+    struct Recording<'a> {
+        inner: &'a Lookup,
+        read: Mutex<BTreeSet<u16>>,
+    }
+
+    impl TubeLookup for Recording<'_> {
+        fn global_list(&self) -> &GlobalList {
+            self.inner.global_list()
+        }
+
+        fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+            self.read.lock().expect("not poisoned").insert(stream.get());
+            self.inner.tube(stream)
+        }
+    }
+
+    let lookup = lookup();
+    let on_axis = lookup.tubes[0].locate(0.5, 0.0, 0.0);
+    let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
+    for at_26 in [true, false] {
+        let galaxy = galaxy(at_26);
+        for (centre, years) in [(on_axis, 0), (on_axis, 1_000), (inner, -1_000)] {
+            let recording = Recording {
+                inner: lookup,
+                read: Mutex::default(),
+            };
+            let source = GlobalListSource::new(galaxy, &recording, &NoCentreOrbitCache)
+                .expect("no centre to build");
+            let query = RangeQuery::builder(centre, LightYears::new(50.0))
+                .time(UniverseTime::from_julian_years(years).expect("in the clock window"))
+                .build()
+                .expect("a query in the cube");
+            let _ = range_query(galaxy, &mut NoCache::new(), &[&source], &query);
+            let said: BTreeSet<u16> = GlobalListSource::streams_read(galaxy, &lookup.list, &query)
+                .iter()
+                .map(|number| number.get())
+                .collect();
+            let read = recording.read.into_inner().expect("not poisoned");
+            assert!(
+                read.is_subset(&said),
+                "{at_26} {years}: read {read:?}, said {said:?}"
+            );
+            if !at_26 {
+                assert_eq!(said.len(), lookup.list.debris().streams().len());
+            }
+        }
+    }
+}
+
 /// P10.T9: the census is the exact sum of the touched cells' means band by band, the same through
 /// a lookup that keeps its tables and through one that rebuilds them on every call, and at any
 /// time the query is asked at (the census is the epoch's); it is the cells' sum by hand.

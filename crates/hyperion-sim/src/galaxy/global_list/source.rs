@@ -55,15 +55,20 @@ use crate::galaxy::features::centre::{BuildCentreError, CentreMemberSource, Cent
 use crate::galaxy::features::members::local_offset;
 use crate::galaxy::features::members::source::{band_reach, hit_at};
 use crate::galaxy::imf::MassBand;
-use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::placement::{ResolveSystemError, SystemRecord};
 use crate::galaxy::query::{
-    LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, UNBOUND_PAD_SPEED, pad_for,
+    LayerCounts, LayerSet, QuerySphere, RangeQuery, SystemHit, SystemSource, UNBOUND_PAD_SPEED,
+    pad_for,
 };
+use crate::id::{SystemId, SystemIdKind};
 use crate::time::UniverseTime;
 use crate::units::{LightYears, Seconds};
 
-use super::dwarf_core::DwarfCoreModel;
-use super::members::{GlobalMemberRecord, StreamBandShares, expected_members, stream_cell_members};
+use super::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
+use super::members::{
+    GlobalMemberRecord, StreamBandShares, expected_members, resolve_stream_member,
+    stream_cell_members,
+};
 use super::{
     BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, StreamShellRules, TubeLookup,
     TubeTable, in_stream_shell,
@@ -249,6 +254,65 @@ impl<'a> GlobalListSource<'a> {
         }
     }
 
+    /// The centre's source it holds and asks, if the list holds the centre.
+    #[must_use]
+    pub fn centre(&self) -> Option<&CentreMemberSource<'a>> {
+        self.centre.as_ref()
+    }
+
+    /// The stream's or dwarf core's member `id` names, with what converting one of the source's
+    /// hits needs beside its record: its class, composition and velocity. It is
+    /// [`resolve_list_member_with`](crate::galaxy::placement::resolve_list_member_with)'s member,
+    /// read through the source's lookup, band shares and cores' models rather than the galaxy's
+    /// debris planned again.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveSystemError::KindNotGenerated`] for an ID of neither kind, and
+    /// [`ResolveSystemError::NoSuchSystem`] for a stream or core the list lacks or does not play,
+    /// and as [`resolve_stream_member`] and [`resolve_dwarf_core_member`] for a member, a stream's
+    /// outside its shell among them under the galaxy's rules.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the source's own, and as the lookup's [`TubeLookup::tube`].
+    pub fn member(
+        &self,
+        galaxy: &Galaxy,
+        id: SystemId,
+    ) -> Result<GlobalMemberRecord, ResolveSystemError> {
+        self.check(galaxy);
+        match id.kind() {
+            SystemIdKind::Stream(member) => {
+                let number = StreamNumber::from(member);
+                let entry = self
+                    .list()
+                    .stream_entry(number)
+                    .ok_or(ResolveSystemError::NoSuchSystem)?;
+                let tube = self.lookup.tube(number);
+                let found = resolve_stream_member(galaxy, &tube, self.shares(number), member)?;
+                if in_stream_shell(galaxy, &entry.shell(), found.record().epoch_position()) {
+                    Ok(found)
+                } else {
+                    Err(ResolveSystemError::NoSuchSystem)
+                }
+            }
+            SystemIdKind::DwarfCore(member) => {
+                let core = self
+                    .cores
+                    .get(usize::from(member.number()))
+                    .and_then(Option::as_ref)
+                    .ok_or(ResolveSystemError::NoSuchSystem)?;
+                resolve_dwarf_core_member(galaxy, core, member)
+            }
+            SystemIdKind::Grid(_)
+            | SystemIdKind::FeatureMember(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Pinned(_)
+            | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
+        }
+    }
+
     /// Panics unless `galaxy` is the source's own.
     fn check(&self, galaxy: &Galaxy) {
         assert!(
@@ -284,16 +348,39 @@ impl<'a> GlobalListSource<'a> {
         &'s self,
         sphere: &'s QuerySphere,
     ) -> impl Iterator<Item = (GlobalEntryKind, BoundingShell)> + 's {
-        let every_stream = self.galaxy.rules().stream_shell == StreamShellRules::Unbounded;
-        self.list()
-            .entries()
-            .iter()
-            .filter(move |e| match e.kind() {
-                GlobalEntryKind::Centre => false,
-                GlobalEntryKind::Stream(_) => every_stream || e.shell().touches(sphere),
-                GlobalEntryKind::DwarfCore(_) => e.shell().touches(sphere),
+        entries_near(self.galaxy, self.list(), sphere)
+    }
+
+    /// The streams of `list`, `galaxy`'s global list, whose tube tables the source reads to answer
+    /// a range query of `query`, in number order: those whose shells its sphere meets at its time,
+    /// padded at [`UNBOUND_PAD_SPEED`] as its hits are, which holds every stream its census at the
+    /// epoch reads too; under [`StreamShellRules::Unbounded`] every stream.
+    ///
+    /// A caller that builds tables off the query's own thread, as a server's pool does, builds
+    /// these before it asks, so that the query reads no table cold.
+    ///
+    /// # Panics
+    ///
+    /// Never: a built query's radius is finite and positive, and its pad a few light-years.
+    #[must_use]
+    pub fn streams_read(
+        galaxy: &Galaxy,
+        list: &GlobalList,
+        query: &RangeQuery,
+    ) -> Vec<StreamNumber> {
+        let padded = QuerySphere::new(
+            *query.centre(),
+            query.radius(),
+            query.time(),
+            pad_for(query.time(), UNBOUND_PAD_SPEED),
+        )
+        .expect("a built query's radius is finite and positive, and the pad a few light-years");
+        entries_near(galaxy, list, &padded)
+            .filter_map(|(kind, _)| match kind {
+                GlobalEntryKind::Stream(number) => Some(number),
+                GlobalEntryKind::DwarfCore(_) | GlobalEntryKind::Centre => None,
             })
-            .map(|e| (e.kind(), e.shell()))
+            .collect()
     }
 
     /// Core `number`'s model, if it is played.
@@ -433,6 +520,25 @@ impl SystemSource for GlobalListSource<'_> {
         self.check(galaxy);
         false
     }
+}
+
+/// The streams and the cores of `list`, `galaxy`'s, whose shells `sphere`, out to its padded
+/// radius, meets, in list order, each with its shell; under [`StreamShellRules::Unbounded`] every
+/// stream ([`GlobalListSource::entries_near`]).
+fn entries_near<'s>(
+    galaxy: &Galaxy,
+    list: &'s GlobalList,
+    sphere: &'s QuerySphere,
+) -> impl Iterator<Item = (GlobalEntryKind, BoundingShell)> + 's {
+    let every_stream = galaxy.rules().stream_shell == StreamShellRules::Unbounded;
+    list.entries()
+        .iter()
+        .filter(move |e| match e.kind() {
+            GlobalEntryKind::Centre => false,
+            GlobalEntryKind::Stream(_) => every_stream || e.shell().touches(sphere),
+            GlobalEntryKind::DwarfCore(_) => e.shell().touches(sphere),
+        })
+        .map(|e| (e.kind(), e.shell()))
 }
 
 /// What [`stream_hits`] asks of a stream: its shell, the query's sphere and the layers asked.

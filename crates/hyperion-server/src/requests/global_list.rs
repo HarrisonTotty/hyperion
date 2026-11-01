@@ -79,7 +79,7 @@ pub(crate) async fn track(
 
 /// The refusal of a request whose stream `number`'s table could not be built: as a pool job's
 /// error, or `internal` for a table the sim refused ([`tube_not_built`]).
-fn tube_refused(number: StreamNumber, error: &BuildTubeOnPoolError) -> RequestError {
+pub(crate) fn tube_refused(number: StreamNumber, error: &BuildTubeOnPoolError) -> RequestError {
     match error {
         BuildTubeOnPoolError::Compute(error) => (*error).into(),
         BuildTubeOnPoolError::Table(error) => tube_not_built(number, error),

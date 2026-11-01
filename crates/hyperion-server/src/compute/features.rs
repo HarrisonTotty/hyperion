@@ -816,9 +816,9 @@ mod tests {
         beside_the_grid(
             galaxy(),
             FeatureMembers::Served,
-            &source,
-            &NoClassCellCache,
-            |sources| range_query(galaxy(), &mut NoCache::new(), sources, &query),
+            (&source, &NoClassCellCache),
+            None,
+            |sources, _| range_query(galaxy(), &mut NoCache::new(), sources, &query),
         )
     }
 
@@ -844,9 +844,9 @@ mod tests {
             let result = beside_the_grid(
                 galaxy(),
                 FeatureMembers::Served,
-                &source,
-                &classes,
-                |sources| range_query(galaxy(), &mut NoCache::new(), sources, query),
+                (&source, &classes),
+                None,
+                |sources, _| range_query(galaxy(), &mut NoCache::new(), sources, query),
             );
             let census: Vec<u64> = result
                 .census()

@@ -7,15 +7,17 @@
 //! module sends only the variants that exist.
 
 use hyperion_protocol::{
-    CatalogueClassWire, ClassKindWire, FeatureIdHex, GenerationWire, MemberClassWire,
-    MultiplicityWire, SystemOriginWire,
+    CatalogueClassWire, CentreTracerWire, ClassKindWire, FeatureIdHex, GenerationWire,
+    MemberClassWire, MultiplicityWire, SystemOriginWire,
 };
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 use hyperion_sim::galaxy::features::FeatureId;
+use hyperion_sim::galaxy::features::centre::members::CentreMemberRecord;
+use hyperion_sim::galaxy::features::centre::{CentreClass, CentreClassKind, CentreTracer};
 use hyperion_sim::galaxy::features::interior::{ClassKind, Generation, MemberClass, Multiplicity};
 use hyperion_sim::galaxy::global_list::StreamNumber;
 use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
-use hyperion_sim::id::SystemIdKind;
+use hyperion_sim::id::{CentreMemberId, MemberSlot, SystemIdKind};
 
 use super::mass_layer;
 
@@ -29,18 +31,19 @@ pub(crate) fn feature_id_hex(feature: FeatureId) -> FeatureIdHex {
 /// What placed `record`'s system, as a range row carries it once P09.T40.a's gate is open.
 ///
 /// A grid system is `grid`, and a catalogue feature's member `feature_member` with its feature. A
-/// member of the galactic centre is `centre_member`: no source the server registers places one yet
-/// (P09.T29's `CentreMemberSource` waits on P09.T37), so no row carries it until one does. A member
-/// of the global list is `stream` with its stream's number or `dwarf_core` with its core's, which
-/// its ID carries (plan 10, P10.T10.b): no row carries either until `GlobalListSource` is
-/// registered (P10.T10.b's registration member, with P09.T37).
+/// member of the galactic centre is `centre_member`, and a member of the global list `stream` with
+/// its stream's number or `dwarf_core` with its core's, which its ID carries (plan 10, P10.T10.b):
+/// rows carry them from generator version 27, whose range query registers the list's source with
+/// the centre's (P10.T10.b's registration member and P09.T37.b). A catalogue class's host is
+/// `catalogue_system` with its class (P09.T33.a), from 27 too (P09.T37.a).
 ///
 /// # Panics
 ///
 /// For an origin the sim adds later, which [`SystemOrigin`]'s `#[non_exhaustive]` lets it add
-/// without this crate knowing: the task that registers its source gives it a wire variant here
-/// (P09.T33.a's `catalogue_system`), since the enum grows. And for a global-list member whose ID is
-/// neither a stream's nor a dwarf core's, which the sim never makes.
+/// without this crate knowing: the task that registers its source gives it a wire variant here,
+/// since the enum grows. For a global-list member whose ID is neither a stream's nor a dwarf
+/// core's, which the sim never makes; and for a catalogue class the registry allocates after plan
+/// 09's nine, which has no wire string ([`catalogue_class`]).
 #[must_use]
 pub(crate) fn system_origin(record: &SystemRecord) -> SystemOriginWire {
     match record.origin() {
@@ -49,6 +52,10 @@ pub(crate) fn system_origin(record: &SystemRecord) -> SystemOriginWire {
             feature: feature_id_hex(feature.feature()),
         },
         SystemOrigin::CentreMember { .. } => SystemOriginWire::CentreMember,
+        SystemOrigin::CatalogueSystem(class) => SystemOriginWire::CatalogueSystem {
+            class: catalogue_class(class)
+                .expect("every class the sim places has a wire string (its registry's test)"),
+        },
         SystemOrigin::GlobalListMember { .. } => match record.id().kind() {
             SystemIdKind::Stream(member) => SystemOriginWire::Stream {
                 stream: StreamNumber::from(member).get(),
@@ -68,6 +75,50 @@ pub(crate) fn system_origin(record: &SystemRecord) -> SystemOriginWire {
             "no source the server registers places a system of origin {other:?}: the task that \
              registers one gives it a wire variant (plan 04's reserved list: the origin grows)"
         ),
+    }
+}
+
+/// A galactic-centre member's class as the wire carries it (plan 09, P09.T37.b): a member of the
+/// centre's grid its centre class's ([`centre_class`]); a member of the centre's feature-level list
+/// after the black hole the list's class, which for the members the centre's source places, the
+/// tidal disruptions' victims (P09.T30.b), is theirs; and the black hole, member zero, none.
+///
+/// The recently dead and luminous blue variables of P09.T36.b's list follow the victims on it, and
+/// the centre's source places none of them yet; the task that has it place them names their
+/// classes here.
+#[must_use]
+pub(crate) fn centre_member_class(
+    id: CentreMemberId,
+    member: &CentreMemberRecord,
+) -> Option<MemberClassWire> {
+    match id.slot() {
+        MemberSlot::InCell { .. } => member.class().map(centre_class),
+        MemberSlot::FeatureLevel { index: 0 } => None,
+        MemberSlot::FeatureLevel { .. } => Some(MemberClassWire::Listed {
+            class: CatalogueClassWire::TidalDisruptionVictim,
+        }),
+    }
+}
+
+/// One of the centre's classes as the wire carries it: its kind, its band's layer, its episode and
+/// the distribution function its orbits are drawn from.
+#[must_use]
+pub(crate) fn centre_class(class: &CentreClass) -> MemberClassWire {
+    MemberClassWire::Centre {
+        kind: match class.kind {
+            CentreClassKind::Living => class_kind(ClassKind::Living),
+            CentreClassKind::WhiteDwarf => class_kind(ClassKind::WhiteDwarf),
+            CentreClassKind::NeutronStar => class_kind(ClassKind::NeutronStar),
+            CentreClassKind::BlackHole => class_kind(ClassKind::BlackHole),
+        },
+        band: mass_layer(class.band.layer()),
+        episode: class.component,
+        tracer: match class.tracer {
+            CentreTracer::Stars => CentreTracerWire::Stars,
+            CentreTracer::BlackHoles => CentreTracerWire::BlackHoles,
+            CentreTracer::YoungDisc => CentreTracerWire::YoungDisc,
+            CentreTracer::YoungIsotropic => CentreTracerWire::YoungIsotropic,
+        },
     }
 }
 

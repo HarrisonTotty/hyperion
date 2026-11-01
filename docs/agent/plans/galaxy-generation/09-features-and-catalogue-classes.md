@@ -1511,7 +1511,8 @@ registered.
 
 _T37.a, the grid's classes, built behind its hold (lane `p09-t37`, 2026-11-01, at
 `GENERATOR_VERSION` 24, no output moved): see Risks, "P09.T37.a, as built". T37.b, the centre's
-source and the two centre tests, waits on P09.T31 (lean, 2026-11-01)._
+source and the two centre tests, built behind P10.T10.b's hold (lane `p10-list-registration`,
+2026-11-01, at 24, no output moved): see Risks, "P09.T37.b, as built"._
 
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
@@ -5731,3 +5732,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     its draw's attempts there, the debug assertion P09.T36.b met at 24 (a finding).
   - _Pinned as measured (findings)._ The spacing at 3 ly, 0.0443 ly; the eccentricities' mean is in
     0.6–0.72 but not thermal by Kolmogorov–Smirnov, which the test prints and does not assert.
+- **P09.T37.b, as built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24,
+  behind `LIST_SOURCE_VERSION` = 27 with P10.T10.b's registration; no output moved).**
+  - _Registration._ The centre's source is served inside `GlobalListSource` (plan 10's
+    "P10.T10.b's registration member as built"), whose census adds the centre's expected counts
+    before the census decision; `CentreMemberSource` is never registered alone.
+  - _Cache._ `compute::SharedCentreOrbitCache` (`CentreOrbitHandle`), keyed by galaxy, band and
+    cell, of `limits::CENTRE_ORBIT_CACHE_BYTES`, 128 MiB; `RangeCaches::new`'s fourth argument is
+    `(classes, centre)`.
+  - _Rows._ `convert::features::centre_member_class`: a cell member its centre class, a victim
+    `listed` as a tidal disruption's, the black hole none; the row's velocity is the epoch's
+    (lean, 2026-11-01). The recent dead of P09.T36.b's list are not placed by the source yet.
+  - _Bench._ `feature_range_query`'s `list_at_27`; the figures, and the 5 ms miss, are in the
+    lane's outbox.

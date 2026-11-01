@@ -45,7 +45,9 @@ use std::sync::Arc;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassCellCache, CatalogueClassSource};
 use hyperion_sim::galaxy::features::FeatureProcess;
+use hyperion_sim::galaxy::features::centre::CentreOrbitCache;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
+use hyperion_sim::galaxy::global_list::{GlobalListSource, TubeLookup};
 use hyperion_sim::galaxy::placement::CellKey;
 use hyperion_sim::galaxy::query::{
     RangePlan, RangeQuery, RangeResult, SourceHits, SystemSource, WalkedCells,
@@ -53,9 +55,9 @@ use hyperion_sim::galaxy::query::{
 use hyperion_sim::id::FeatureCell;
 
 use super::{
-    CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, KeptInteriors, Priority,
-    SharedCellCache, SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache,
-    SubmitJobError,
+    CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, KeptInteriors,
+    ListedTubes, Priority, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, SubmitJobError,
 };
 use crate::FeatureMembers;
 
@@ -79,47 +81,54 @@ const GRID_JOBS_PER_WORKER: usize = 2;
 /// all of them took 0.13 ms, a tenth of the warm query (measured 2026-10-31, pod, 16 vCPU).
 const LACKING_SAMPLE_STRIDE: usize = 16;
 
-/// The caches a served range query reads: the grid's cells, the feature cells and the features'
-/// interiors, shared with the jobs that generate cells for it.
+/// The caches a served range query reads: the grid's cells, the feature cells, the features'
+/// interiors, the catalogue classes' cells and the galactic centre's orbits, shared with the jobs
+/// that generate cells for it.
 #[derive(Debug, Clone)]
 pub struct RangeCaches {
     cells: Arc<SharedCellCache>,
     features: Arc<SharedFeatureCellCache>,
     interiors: Arc<SharedClusterModelCache>,
     classes: Arc<SharedClassCellCache>,
+    centre: Arc<SharedCentreOrbitCache>,
 }
 
 impl RangeCaches {
     /// The caches a query reads, as the server holds them: the grid's cells, the feature cells,
-    /// the features' interiors and the catalogue classes' cells (P09.T40).
+    /// the features' interiors, the catalogue classes' cells (P09.T40) and the galactic centre's
+    /// cells of members and their orbits (P09.T37.b).
     #[must_use]
     pub fn new(
         cells: Arc<SharedCellCache>,
         features: Arc<SharedFeatureCellCache>,
         interiors: Arc<SharedClusterModelCache>,
-        classes: Arc<SharedClassCellCache>,
+        (classes, centre): (Arc<SharedClassCellCache>, Arc<SharedCentreOrbitCache>),
     ) -> Self {
         Self {
             cells,
             features,
             interiors,
             classes,
+            centre,
         }
     }
 }
 
-/// One served range query: the galaxy its universe names and that galaxy's key, the query, and
-/// whether the features' members are served beside the grid.
+/// One served range query: the galaxy its universe names and that galaxy's key, the query,
+/// whether the features' members are served beside the grid, and the galaxy's global list with its
+/// tube tables if the query takes the list's members.
 #[derive(Debug, Clone)]
 pub struct ServedQuery {
     galaxy: Arc<Galaxy>,
     key: GalaxyKey,
     query: RangeQuery,
     members: FeatureMembers,
+    list: Option<ListedTubes>,
 }
 
 impl ServedQuery {
-    /// `query` in `galaxy`, the galaxy `key` names, with the feature members `members` says.
+    /// `query` in `galaxy`, the galaxy `key` names, with the feature members `members` says, and
+    /// without the global list's.
     #[must_use]
     pub fn new(
         galaxy: Arc<Galaxy>,
@@ -132,15 +141,79 @@ impl ServedQuery {
             key,
             query,
             members,
+            list: None,
         }
+    }
+
+    /// The same query reading the global list through `list`, the galaxy's list and tube tables:
+    /// from generator version 27 the list's members, the centre's among them, are served beside
+    /// the grid in place of the centre's bare source (P10.T10.b's registration, P09.T37.b), and
+    /// below it `list` is read for nothing ([`beside_the_grid`]).
+    ///
+    /// The list is built on the pool before the query, since a job never waits on another, so the
+    /// caller takes it from the [`GlobalListService`](super::GlobalListService) first, with the
+    /// tables of the streams the query reads ([`GlobalListSource::streams_read`]).
+    #[must_use]
+    pub fn with_list(self, list: ListedTubes) -> Self {
+        Self {
+            list: Some(list),
+            ..self
+        }
+    }
+}
+
+/// What a served query's rows are converted with beyond its hits: the features' interiors, kept
+/// for the whole job, and the global list's source if the query took it, which resolves the
+/// list's members' rows (P10.T10.b).
+pub struct RowReads<'a> {
+    interiors: &'a KeptInteriors<'a>,
+    list: Option<&'a GlobalListSource<'a>>,
+}
+
+impl<'a> RowReads<'a> {
+    /// The features' interiors the query's members are resolved through.
+    #[must_use]
+    pub fn interiors(&self) -> &'a KeptInteriors<'a> {
+        self.interiors
+    }
+
+    /// The global list's source the query took, if it took one.
+    #[must_use]
+    pub fn list(&self) -> Option<&'a GlobalListSource<'a>> {
+        self.list
+    }
+}
+
+impl std::fmt::Debug for RowReads<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RowReads")
+            .field("list", &self.list.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a range query in a galaxy reads its global list through: the galaxy's list and its tube
+/// tables, and the galactic centre's cells of members and their orbits (P10.T10.b, P09.T37.b).
+#[derive(Clone, Copy)]
+pub(crate) struct ListReads<'a> {
+    tubes: &'a dyn TubeLookup,
+    orbits: &'a dyn CentreOrbitCache,
+}
+
+impl<'a> ListReads<'a> {
+    /// The list and tables of `tubes`, and the centre's orbits through `orbits`.
+    #[must_use]
+    pub(crate) fn new(tubes: &'a dyn TubeLookup, orbits: &'a dyn CentreOrbitCache) -> Self {
+        Self { tubes, orbits }
     }
 }
 
 /// The answer to `served` from `answer` over the query's result, its cells generated and walked
 /// first on `pool`'s workers into `caches` (module documentation).
 ///
-/// `answer` runs on the job that finishes the query, with the galaxy, the result and the job's
-/// kept view of the interiors. The result is
+/// `answer` runs on the job that finishes the query, with the galaxy, the result and what its rows
+/// are converted with: the job's kept view of the interiors and the global list's source, if the
+/// query took it ([`RowReads`]). The result is
 /// [`range_query`](hyperion_sim::galaxy::query::range_query)'s over the same caches and sources,
 /// bit for bit, at any number of workers.
 ///
@@ -160,7 +233,7 @@ pub async fn served_range_query<T, F>(
     answer: F,
 ) -> Result<T, ComputeError>
 where
-    F: FnOnce(&Galaxy, RangeResult, &KeptInteriors<'_>) -> T + Send + 'static,
+    F: FnOnce(&Galaxy, RangeResult, &RowReads<'_>) -> T + Send + 'static,
     T: Send + 'static,
 {
     let (job_caches, job_served, workers) = (caches.clone(), served.clone(), pool.workers());
@@ -262,14 +335,14 @@ enum Sourced {
 }
 
 /// `f` of the feature member source over `caches` and the sources it is beside the grid as
-/// ([`beside_the_grid`]), with the kept view of the interiors it reads.
+/// ([`beside_the_grid`]), with what the query's rows are converted with ([`RowReads`]).
 ///
 /// One kept view for the whole job: its census, its hits and its rows' members read the same
 /// interiors, each built at most once whatever the shared cache's budget.
 fn with_sources<R>(
     caches: &RangeCaches,
     served: &ServedQuery,
-    f: impl FnOnce(&[&dyn SystemSource], &KeptInteriors<'_>) -> R,
+    f: impl FnOnce(&[&dyn SystemSource], &RowReads<'_>) -> R,
 ) -> R {
     let (features, interiors) = (
         caches.features.handle(served.key),
@@ -277,36 +350,90 @@ fn with_sources<R>(
     );
     let source = FeatureMemberSource::new(&features, &interiors);
     let classes = caches.classes.handle(served.key);
+    let orbits = caches.centre.handle(served.key);
+    let list = served
+        .list
+        .as_ref()
+        .map(|tubes| ListReads::new(tubes, &orbits));
     beside_the_grid(
         &served.galaxy,
         served.members,
-        &source,
-        &classes,
-        |sources| f(sources, &interiors),
+        (&source, &classes),
+        list,
+        |sources, list| {
+            f(
+                sources,
+                &RowReads {
+                    interiors: &interiors,
+                    list,
+                },
+            )
+        },
     )
 }
 
-/// `f` of the sources a range query in `galaxy` takes beside the grid as `members` says: held,
-/// none, and the grid is the whole answer, as in plan 04 (P09.T40.a's gate); served, the
-/// features' `members`, and from generator version 27 the catalogue classes' hosts beside them
-/// ([`CatalogueClassSource::registered_in`], P09.T37.a; below it there are none).
+/// `f` of the sources `served` takes beside the grid over `caches`, as each of its jobs takes
+/// them: for a test that asks them for their hits alone.
+#[cfg(test)]
+pub(crate) fn served_sources<R>(
+    caches: &RangeCaches,
+    served: &ServedQuery,
+    f: impl FnOnce(&[&dyn SystemSource]) -> R,
+) -> R {
+    with_sources(caches, served, |sources, _| f(sources))
+}
+
+/// `f` of what `served`'s rows are converted with over `caches` ([`RowReads`]), as the jobs that
+/// answered it had them: for a job of the request's after the query's own, which converts its rows
+/// in chunks.
+pub(crate) fn with_row_reads<R>(
+    caches: &RangeCaches,
+    served: &ServedQuery,
+    f: impl FnOnce(&RowReads<'_>) -> R,
+) -> R {
+    with_sources(caches, served, |_, reads| f(reads))
+}
+
+/// `f` of the sources a range query in `galaxy` takes beside the grid as `members` says, and of
+/// the global list's source among them: held, none, and the grid is the whole answer, as in plan
+/// 04 (P09.T40.a's gate); served, the features' members (`sources`' first); from generator version
+/// 27 the global list's members, the galactic centre's among them, beside them, read through `list`
+/// if the caller took the list ([`GlobalListSource::is_registered_in`], P10.T10.b's registration
+/// and P09.T37.b), in place of the centre's bare source and never beside it, since their IDs would
+/// repeat; and from 27 the catalogue classes' hosts ([`CatalogueClassSource::registered_in`],
+/// P09.T37.a). Below 27 there are neither, and `list` is read for nothing.
 ///
-/// The classes' source reads its class cells through `class_cells` (P09.T40): a cold query makes
-/// each cell it reads on the job that asks the sources for their hits, and a warm one finds them
-/// held.
+/// The classes' source reads its class cells through `sources`' second (P09.T40): a cold query
+/// makes each cell it reads on the job that asks the sources for their hits, and a warm one finds
+/// them held. The list's source reads its tube tables and the centre's orbits through `list`.
+///
+/// # Panics
+///
+/// If the galaxy's centre cannot be built ([`GlobalListSource::new`]), which no galaxy the server
+/// builds reaches, as [`Galaxy::centre`]'s documentation says.
 pub(crate) fn beside_the_grid<R>(
     galaxy: &Galaxy,
     members: FeatureMembers,
-    features: &dyn SystemSource,
-    class_cells: &dyn CatalogueClassCellCache,
-    f: impl FnOnce(&[&dyn SystemSource]) -> R,
+    (features, class_cells): (&dyn SystemSource, &dyn CatalogueClassCellCache),
+    list: Option<ListReads<'_>>,
+    f: impl FnOnce(&[&dyn SystemSource], Option<&GlobalListSource<'_>>) -> R,
 ) -> R {
+    if members == FeatureMembers::Held {
+        return f(&[], None);
+    }
     let classes =
         CatalogueClassSource::registered_in(galaxy).map(|classes| classes.with_cells(class_cells));
-    match (members, &classes) {
-        (FeatureMembers::Held, _) => f(&[]),
-        (FeatureMembers::Served, None) => f(&[features]),
-        (FeatureMembers::Served, Some(classes)) => f(&[features, classes]),
+    let listed = list
+        .filter(|_| GlobalListSource::is_registered_in(galaxy))
+        .map(|reads| {
+            GlobalListSource::new(galaxy, reads.tubes, reads.orbits)
+                .expect("a galaxy the server builds has a centre that builds")
+        });
+    match (&listed, &classes) {
+        (None, None) => f(&[features], None),
+        (None, Some(classes)) => f(&[features, classes], None),
+        (Some(listed), None) => f(&[features, listed], Some(listed)),
+        (Some(listed), Some(classes)) => f(&[features, listed, classes], Some(listed)),
     }
 }
 
@@ -334,10 +461,10 @@ fn ask<T, F>(
     answer: F,
 ) -> Asked<T, F>
 where
-    F: FnOnce(&Galaxy, RangeResult, &KeptInteriors<'_>) -> T,
+    F: FnOnce(&Galaxy, RangeResult, &RowReads<'_>) -> T,
 {
     let (galaxy, key, query) = (served.galaxy.as_ref(), served.key, &served.query);
-    with_sources(caches, served, |sources, interiors| {
+    with_sources(caches, served, |sources, reads| {
         let mut features: Vec<_> = match served.members {
             FeatureMembers::Held => Vec::new(),
             FeatureMembers::Served => FeatureMemberSource::feature_cells(galaxy, query)
@@ -363,7 +490,7 @@ where
             && grid.len() < AHEAD_GRID_CELLS
         {
             let result = plan.run(galaxy, &mut caches.cells.handle(key), sources);
-            return Asked::Answered(answer(galaxy, result, interiors));
+            return Asked::Answered(answer(galaxy, result, reads));
         }
         // A feature cell read through more processes costs more, a whole one near the Sun some
         // 0.65 ms against 0.1 ms through the clusters alone, so they are dealt out from the
@@ -383,11 +510,11 @@ where
 /// grid's walked parts merged with them ([`RangePlan::finish`]), and the answer.
 fn finish<T, F>(caches: &RangeCaches, served: &ServedQuery, ahead: Ahead, answer: F) -> T
 where
-    F: FnOnce(&Galaxy, RangeResult, &KeptInteriors<'_>) -> T,
+    F: FnOnce(&Galaxy, RangeResult, &RowReads<'_>) -> T,
 {
     let (galaxy, key) = (served.galaxy.as_ref(), served.key);
     let Ahead { parts, sourced } = ahead;
-    with_sources(caches, served, |sources, interiors| {
+    with_sources(caches, served, |sources, reads| {
         let (plan, hits) = match sourced {
             Sourced::Made(made) => *made,
             Sourced::Left(plan, planned) => {
@@ -397,7 +524,7 @@ where
             }
         };
         let result = plan.finish(galaxy, &mut caches.cells.handle(key), sources, &parts, hits);
-        answer(galaxy, result, interiors)
+        answer(galaxy, result, reads)
     })
 }
 
@@ -581,7 +708,10 @@ mod tests {
             Arc::new(SharedCellCache::new(bytes)),
             Arc::new(SharedFeatureCellCache::new(bytes)),
             Arc::new(SharedClusterModelCache::new(bytes)),
-            Arc::new(SharedClassCellCache::new(bytes)),
+            (
+                Arc::new(SharedClassCellCache::new(bytes)),
+                Arc::new(SharedCentreOrbitCache::new(bytes)),
+            ),
         )
     }
 
@@ -597,7 +727,13 @@ mod tests {
     /// `f` of the sources beside the grid as `members` says, through no cache.
     fn with_sources<R>(members: FeatureMembers, f: impl FnOnce(&[&dyn SystemSource]) -> R) -> R {
         let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
-        beside_the_grid(galaxy(), members, &source, &NoClassCellCache, f)
+        beside_the_grid(
+            galaxy(),
+            members,
+            (&source, &NoClassCellCache),
+            None,
+            |sources, _| f(sources),
+        )
     }
 
     /// `query`'s result as the sim's range query gives it through no cache, with the feature
@@ -761,7 +897,7 @@ mod tests {
             Arc::new(SharedCellCache::new(64 << 20)),
             Arc::clone(&warm.features),
             Arc::clone(&warm.interiors),
-            Arc::clone(&warm.classes),
+            (Arc::clone(&warm.classes), Arc::clone(&warm.centre)),
         );
         assert_eq!(served_on(&pool, &grid_cold, &served).await, expected);
         let counters = grid_cold.cells.counters();
@@ -815,7 +951,9 @@ mod tests {
     /// arm alone (P09.T37.a): at the version in force and under every 26 hold the members' source
     /// is the only one, as before, and from 27 the classes' follows it, counting what
     /// [`CatalogueClassSource`] counts; held, there is none. The finish and the cells' jobs ask the
-    /// same list (`super::with_sources`).
+    /// same list (`super::with_sources`). With the global list taken, from 27 its source is beside
+    /// them, in place of the centre's bare one (P10.T10.b's registration), the rows read it, and
+    /// its census is the list's own; below 27 the list is read for nothing.
     #[test]
     fn from_27_a_served_query_takes_the_classes_beside_the_members() {
         use hyperion_sim::galaxy::query::QuerySphere;
@@ -850,7 +988,35 @@ mod tests {
             asked(at_27.clone(), FeatureMembers::Served),
             (2, Some(classes))
         );
-        assert_eq!(asked(at_27, FeatureMembers::Held), (0, None));
+        assert_eq!(asked(at_27.clone(), FeatureMembers::Held), (0, None));
+        // With the list taken: an empty one, whose source holds no centre and counts nothing.
+        let listed = |galaxy: Galaxy, members: FeatureMembers| {
+            let galaxy = Arc::new(galaxy);
+            let list = ListedTubes::new(
+                (Arc::clone(&galaxy), key()),
+                Arc::new(super::super::HeldGlobalList::default()),
+                Arc::new(super::super::TubeTableCache::new(0)),
+            );
+            let served = ServedQuery::new(galaxy, key(), sun_like(0), members).with_list(list);
+            super::with_sources(&caches, &served, |sources, reads| {
+                let counts: Vec<_> = sources
+                    .iter()
+                    .map(|source| source.expected_in_sphere(&served.galaxy, &sphere))
+                    .collect();
+                (sources.len(), reads.list().is_some(), counts)
+            })
+        };
+        let (n, read, counts) = listed(at_27.clone(), FeatureMembers::Served);
+        assert_eq!((n, read), (3, true));
+        assert_eq!(counts[1], hyperion_sim::galaxy::query::LayerCounts::ZERO);
+        assert_eq!(
+            counts[2].to_array().map(f64::to_bits),
+            classes,
+            "the classes' census, beside the list's"
+        );
+        assert_eq!(listed(at_27, FeatureMembers::Held).0, 0);
+        let (n, read, _) = listed(galaxy_at(26), FeatureMembers::Served);
+        assert_eq!((n, read), (1, false));
     }
 
     /// The seed the tests' universes are of.

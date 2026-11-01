@@ -16,22 +16,24 @@ use hyperion_protocol::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
-use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, resolve};
+use hyperion_sim::galaxy::global_list::GlobalListSource;
+use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, SystemOrigin, resolve};
 use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, RangeResult, SystemHit};
 use hyperion_sim::observe::{Observer, TraceMotionError};
 use hyperion_sim::time::UniverseTime;
 
+use super::global_list::tube_refused;
 use super::observe::observe_row;
 use super::universe::openable_universe;
 use crate::compute::{
-    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, KeptInteriors, LineGas, Priority,
-    RangeCaches, ServedQuery, SharedBriefCache, SharedSystemCache, quantise_map,
-    quantise_map_with_floor, served_range_query,
+    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, GlobalListService, JobError, LineGas,
+    ListedTubes, Priority, RangeCaches, RowReads, ServedQuery, SharedBriefCache, SharedSystemCache,
+    TubeTableCache, quantise_map, quantise_map_with_floor, served_range_query, with_row_reads,
 };
 use crate::convert::{
-    ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, RowOrigins, brief_dto,
-    density_map, extinction_map as extinction_map_answer, extinction_result, galaxy_parameters,
-    system_motion, systems_in_range, target_extinction, untraced,
+    ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, RowOrigins, RowPlacers,
+    brief_dto, density_map, extinction_map as extinction_map_answer, extinction_result,
+    galaxy_parameters, system_motion, systems_in_range, target_extinction, untraced,
 };
 use crate::limits::BRIEF_CHUNK_ROWS;
 use crate::{AppState, FeatureMembers};
@@ -248,20 +250,29 @@ pub(crate) async fn extinction(
 ///
 /// Once P09.T40.a's gate is open ([`FeatureMembers::Served`]), the query takes plan 09's feature
 /// members from a [`FeatureMemberSource`] beside the grid, reading the server's feature cells and
-/// interiors, and from generator version 27 the catalogue classes' hosts beside them (P09.T37.a),
-/// and every row carries its origin, a member's with its class and its own velocity
-/// ([`RowOrigins::Sent`]); both caches hold epoch state alone, so they change no byte either.
-/// Held, the default until P09.T2.c's version, the grid is the whole answer, as in plan 04.
+/// interiors, and from generator version 27 the catalogue classes' hosts beside them (P09.T37.a)
+/// and plan 10's global list's members, the galactic centre's among them (P10.T10.b's registration,
+/// P09.T37.b), and every row carries its origin, a member's with its class and its own velocity
+/// ([`RowOrigins::Sent`]); every cache holds epoch state alone, so they change no byte either.
+/// The list is built on the pool before the query if no request has built it, with the tube tables
+/// of the streams the query reads ([`list_for`]): the answer waits for them rather than leave them
+/// out, so it is the same whatever the server has built. Held, the default until P09.T2.c's
+/// version, the grid is the whole answer, as in plan 04.
+///
+/// From 27 a row of a member of the galactic centre or the global list carries no brief: the
+/// centre's stars wait for its composition, and a list member's are its member record's, which the
+/// brief cache does not build yet (lean, 2026-11-01).
 ///
 /// # Errors
 ///
 /// Those of [`openable_universe`] for a universe this server cannot serve, `bad_request` naming
 /// `time`, `centre`, `radius_ly`, `limit` or `mode` for a field it cannot use (design note 24),
 /// those of [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built,
-/// `queue_full` if the interactive queue has no room for the query (a chunk, queued after the query
-/// has run, waits for room instead), `bad_request` naming `mode` if the observed answer would hold
-/// a system whose motion the sim cannot trace yet (a member of the galactic centre, which this
-/// query's grid never places), `internal` if the pool is shutting down or a job panics, and
+/// those of [`list_for`] if its global list or a tube table it reads cannot be, `queue_full` if
+/// the interactive queue has no room for the query (a chunk, queued after the query has run, waits
+/// for room instead), `bad_request` naming `mode` if the observed answer would hold a system whose
+/// motion the sim cannot trace yet (a member of the galactic centre or the global list, or a
+/// catalogue class's host), `internal` if the pool is shutting down or a job panics, and
 /// `cancelled` if the client gave up before a job ran.
 pub(crate) async fn systems(
     state: Arc<AppState>,
@@ -274,20 +285,15 @@ pub(crate) async fn systems(
     let key = universe.key();
     let work = RowWork::of(&request, &query);
     let shared = Arc::clone(&state);
-    let served = ServedQuery::new(
-        Arc::clone(&galaxy),
-        key,
-        query.clone(),
-        state.feature_members,
-    );
+    let served = served_query(&state, (&galaxy, key), &query).await?;
     // Observed mode finds the same systems (plan 12, Design note 4).
-    let queried = move |job_galaxy: &Galaxy, result: RangeResult, interiors: &KeptInteriors<'_>| {
+    let queried = move |job_galaxy: &Galaxy, result: RangeResult, reads: &RowReads<'_>| {
         if work.is_needed() && result.systems().len() > BRIEF_CHUNK_ROWS {
             return Ok(Queried::Chunked(Box::new((request, query, result))));
         }
         let extras = work
             .run(
-                (&shared.briefs, &shared.systems, interiors),
+                (&shared.briefs, &shared.systems, reads.interiors()),
                 key,
                 job_galaxy,
                 result.systems(),
@@ -300,15 +306,10 @@ pub(crate) async fn systems(
             &result,
             extras.briefs,
             extras.observed,
-            row_origins(shared.feature_members, interiors),
+            row_origins(shared.feature_members, reads),
         )))
     };
-    let caches = RangeCaches::new(
-        Arc::clone(&state.cells),
-        Arc::clone(&state.feature_cells),
-        Arc::clone(&state.cluster_models),
-        Arc::clone(&state.class_cells),
-    );
+    let caches = range_caches(&state);
     let answered = served_range_query(&state.pool, &caches, &served, &token, queried).await?;
     let (request, query, result) = match answered? {
         Queried::Answered(answer) => return Ok(ResponseBody::SystemsInRange(answer)),
@@ -346,18 +347,19 @@ pub(crate) async fn systems(
                 .map_err(untraced)?,
         );
     }
-    let shared = Arc::clone(&state);
+    let members = state.feature_members;
     let convert = move |_: &CancelToken| {
-        let interiors = shared.cluster_models.kept(key);
-        systems_in_range(
-            &galaxy,
-            request,
-            &query,
-            &result,
-            extras.briefs,
-            extras.observed,
-            row_origins(shared.feature_members, &interiors),
-        )
+        with_row_reads(&caches, &served, |reads| {
+            systems_in_range(
+                &galaxy,
+                request,
+                &query,
+                &result,
+                extras.briefs,
+                extras.observed,
+                row_origins(members, reads),
+            )
+        })
     };
     // As a chunk does, the conversion waits for room rather than refusing a query that has run.
     let answered = state
@@ -369,15 +371,101 @@ pub(crate) async fn systems(
     Ok(ResponseBody::SystemsInRange(answered))
 }
 
+/// The caches a range query reads, as the server holds them.
+#[must_use]
+fn range_caches(state: &AppState) -> RangeCaches {
+    RangeCaches::new(
+        Arc::clone(&state.cells),
+        Arc::clone(&state.feature_cells),
+        Arc::clone(&state.cluster_models),
+        (
+            Arc::clone(&state.class_cells),
+            Arc::clone(&state.centre_orbits),
+        ),
+    )
+}
+
+/// `query` in `galaxy`, the galaxy `key` names, as the server serves it: with the feature members
+/// its gate says, and from generator version 27 the global list's ([`list_for`]).
+///
+/// # Errors
+///
+/// As [`list_for`].
+async fn served_query(
+    state: &AppState,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    query: &RangeQuery,
+) -> Result<ServedQuery, RequestError> {
+    let served = ServedQuery::new(
+        Arc::clone(galaxy),
+        key,
+        query.clone(),
+        state.feature_members,
+    );
+    let lists = (&state.global_lists, &state.tube_tables);
+    Ok(
+        match list_for(lists, state.feature_members, (galaxy, key), query).await? {
+            Some(list) => served.with_list(list),
+            None => served,
+        },
+    )
+}
+
 /// What a range answer's rows say of what placed them under the gate `members`: nothing while it
 /// holds the feature members back, and every row's origin once it serves them, a member's resolved
-/// through `interiors` (P09.T40.a).
+/// through `reads`, the query's interiors and its global list's source (P09.T40.a, P10.T10.b).
 #[must_use]
-fn row_origins(members: FeatureMembers, interiors: &dyn FeatureInteriorCache) -> RowOrigins<'_> {
+fn row_origins<'a>(members: FeatureMembers, reads: &RowReads<'a>) -> RowOrigins<'a> {
     match members {
         FeatureMembers::Held => RowOrigins::Unsent,
-        FeatureMembers::Served => RowOrigins::Sent(interiors),
+        FeatureMembers::Served => {
+            RowOrigins::Sent(RowPlacers::new(reads.interiors(), reads.list()))
+        }
     }
+}
+
+/// The global list a range query of `query` in `galaxy`, the galaxy `key` names, reads from
+/// `lists`, the server's service and its tube tables, with the table of every stream it reads built
+/// on the pool's workers and kept first ([`GlobalListSource::streams_read`]): from generator
+/// version 27, whose query takes the list's members, the galactic centre's among them (P10.T10.b's
+/// registration, P09.T37.b), and `None` below it or while `members` holds the feature members back,
+/// when the query takes none.
+///
+/// The list is built at bulk priority on its first request, as the list's handlers build it, and
+/// the tables at interactive priority, as `stream_track` builds one: some 0.2–0.5 s a stream on the
+/// pool, each once, and none for a query a warm-up has gone before. The query then reads every
+/// table warm, since a job never waits on another.
+///
+/// # Errors
+///
+/// As [`GlobalListService::get`](crate::compute::GlobalListService::get) for the list, and for a
+/// table as `stream_track` refuses it: a pool's error as its jobs', and `internal` for a stream the
+/// sim cannot build a tube for.
+pub(crate) async fn list_for(
+    (lists, tubes): (&GlobalListService, &Arc<TubeTableCache>),
+    members: FeatureMembers,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    query: &RangeQuery,
+) -> Result<Option<ListedTubes>, RequestError> {
+    if members == FeatureMembers::Held || !GlobalListSource::is_registered_in(galaxy) {
+        return Ok(None);
+    }
+    let held = lists.get(key).await?;
+    for number in GlobalListSource::streams_read(galaxy, held.list(), query) {
+        let spec = held
+            .list()
+            .stream(number)
+            .expect("the list names its own streams");
+        lists
+            .tube((galaxy, key), spec, Priority::Interactive)
+            .await
+            .map_err(|error| tube_refused(number, &error))?;
+    }
+    Ok(Some(ListedTubes::new(
+        (Arc::clone(galaxy), key),
+        held,
+        Arc::clone(tubes),
+    )))
 }
 
 /// What the query's job hands back: the answer, or the parts of one whose rows are chunked.
@@ -525,6 +613,16 @@ fn briefs_of(
     hits.iter()
         .map(|hit| match hit.record().kind() {
             SystemKind::RoguePlanet => None,
+            // A member of the galactic centre's or the global list's has no brief yet (the
+            // handler's documentation, lean 2026-11-01): the cache's model builds neither's stars.
+            SystemKind::Stellar | SystemKind::BrownDwarf
+                if matches!(
+                    hit.record().origin(),
+                    SystemOrigin::CentreMember { .. } | SystemOrigin::GlobalListMember { .. }
+                ) =>
+            {
+                None
+            }
             SystemKind::Stellar | SystemKind::BrownDwarf => {
                 match cache.get_or_build(key, galaxy, hit.record()) {
                     Ok(model) => model.brief_at(time).map(|brief| brief_dto(&brief)),
@@ -540,6 +638,9 @@ fn briefs_of(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod registration;
 
 #[cfg(test)]
 mod tests {

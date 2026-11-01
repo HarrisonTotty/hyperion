@@ -28,12 +28,12 @@
 
 use hyperion_protocol::{
     AssociationStructure, BlackHoleLuminosityWire, BlackHoleState, BlackHoleStateRequest,
-    CentreStructure, CentreTracerWire, ClassCountWire, CloudStructure, ClusterStructure,
-    DisruptionOutcomeWire, EmissionClassWire, ErrorCode, FeatureDetail, FeatureDetailRequest,
-    FeatureIdHex, FeatureKindCensus, FeatureKindStatus, FeatureKindWire, FeatureStructure,
-    FeatureSummary, FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
-    MapFeatureKindWire, MapFeatureList, MapFeatures, MapShells, MemberClassWire, RequestError,
-    SystemIdHex, TidalDisruptionWire,
+    CentreStructure, ClassCountWire, CloudStructure, ClusterStructure, DisruptionOutcomeWire,
+    EmissionClassWire, ErrorCode, FeatureDetail, FeatureDetailRequest, FeatureIdHex,
+    FeatureKindCensus, FeatureKindStatus, FeatureKindWire, FeatureStructure, FeatureSummary,
+    FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
+    MapFeatureKindWire, MapFeatureList, MapFeatures, MapShells, RequestError, SystemIdHex,
+    TidalDisruptionWire,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
@@ -44,13 +44,11 @@ use hyperion_sim::galaxy::features::catalogue::{
 use hyperion_sim::galaxy::features::centre::events::{
     CentreLuminosityModel, DisruptionOutcome, DisruptionTail, luminosity_at,
 };
-use hyperion_sim::galaxy::features::centre::{
-    BuildCentreError, CentreClass, CentreClassKind, CentreModel, CentreTracer,
-};
+use hyperion_sim::galaxy::features::centre::{BuildCentreError, CentreClass, CentreModel};
 use hyperion_sim::galaxy::features::cluster::ClusterModel;
 use hyperion_sim::galaxy::features::emission::EmissionClass;
+use hyperion_sim::galaxy::features::interior::MemberClass;
 use hyperion_sim::galaxy::features::interior::counts::{ClassCounts, class_counts};
-use hyperion_sim::galaxy::features::interior::{ClassKind, MemberClass};
 use hyperion_sim::galaxy::features::kinds::cloud::{
     PLUMMER_HALF_MASS_RATIO, plummer_central_density,
 };
@@ -62,9 +60,9 @@ use hyperion_sim::id::{CentreMemberId, FeatureCell, SystemId, SystemIdKind};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{LightYears, Megayears, Seconds, SolarMasses, Years};
 
-use super::features::{class_kind, feature_id_hex, member_class};
+use super::features::{centre_class as centre_class_wire, feature_id_hex, member_class};
 use super::stellar::wire_time;
-use super::{ConvertRequestError, galactic_position, mass_layer, query_centre, query_radius};
+use super::{ConvertRequestError, galactic_position, query_centre, query_radius};
 use crate::compute::{MapGlobulars, counted_members, expected_members_of};
 use crate::limits::MAX_FEATURE_CELLS;
 
@@ -784,22 +782,7 @@ fn centre_structure(centre: &CentreModel, galaxy: &Galaxy) -> FeatureStructure {
 fn centre_class(class: &CentreClass) -> ClassCountWire {
     let (low, high) = class.initial_mass_range;
     ClassCountWire {
-        class: MemberClassWire::Centre {
-            kind: match class.kind {
-                CentreClassKind::Living => class_kind(ClassKind::Living),
-                CentreClassKind::WhiteDwarf => class_kind(ClassKind::WhiteDwarf),
-                CentreClassKind::NeutronStar => class_kind(ClassKind::NeutronStar),
-                CentreClassKind::BlackHole => class_kind(ClassKind::BlackHole),
-            },
-            band: mass_layer(class.band.layer()),
-            episode: class.component,
-            tracer: match class.tracer {
-                CentreTracer::Stars => CentreTracerWire::Stars,
-                CentreTracer::BlackHoles => CentreTracerWire::BlackHoles,
-                CentreTracer::YoungDisc => CentreTracerWire::YoungDisc,
-                CentreTracer::YoungIsotropic => CentreTracerWire::YoungIsotropic,
-            },
-        },
+        class: centre_class_wire(class),
         initial_mass_min_msun: low.value(),
         initial_mass_max_msun: high.value(),
         mean_mass_msun: class.mean_mass.value(),

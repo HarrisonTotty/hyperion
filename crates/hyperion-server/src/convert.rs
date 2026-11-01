@@ -40,9 +40,12 @@ use hyperion_protocol::{
     SystemsInRange, SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity, LyCell};
+use hyperion_sim::galaxy::catalogue_classes::system_of_record;
+use hyperion_sim::galaxy::features::centre::members::resolve_centre_member;
 use hyperion_sim::galaxy::features::members::resolve_member;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::gas::params::GasParams;
+use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
@@ -501,8 +504,9 @@ pub(crate) fn systems_in_range(
             let observed = observed.as_mut().and_then(Iterator::next);
             match origins {
                 RowOrigins::Unsent => system_record(galaxy, hit, query.time(), stellar, observed),
-                RowOrigins::Sent(interiors) => {
-                    let (velocity, origin, member_class) = placed_by(galaxy, interiors, hit);
+                RowOrigins::Sent(placers) => {
+                    let (velocity, origin, member_class) =
+                        placed_by(galaxy, placers, hit, query.time());
                     hyperion_protocol::SystemRecord {
                         origin: Some(origin),
                         member_class,
@@ -535,17 +539,16 @@ pub(crate) enum RowOrigins<'a> {
     /// No row carries an origin: P09.T40.a's gate holds the feature members back, so every row is
     /// a grid system's, with plan 08's velocity, and the answer is the bytes it was before P09.T40.
     Unsent,
-    /// Every row carries its origin, as the growing [`SystemOriginWire`] gives it. A feature
-    /// member's row carries its class too, and moves at its own velocity, its cluster's motion and
-    /// its own: both are its member record's, which it is resolved to again through `interiors`,
-    /// the server's feature interiors, since a range hit carries its record alone.
+    /// Every row carries its origin, as the growing [`SystemOriginWire`] gives it, and a member's
+    /// row its class and its own velocity ([`placed_by`]), resolved again through the
+    /// [`RowPlacers`], since a range hit carries its record alone.
     ///
-    /// A member of the galactic centre, or a system of an origin the sim adds later, panics: no
-    /// source the server registers places one yet ([`system_origin`]).
+    /// A system of an origin the sim adds later panics: no source the server registers places one
+    /// yet ([`system_origin`]).
     ///
     /// [`SystemOriginWire`]: hyperion_protocol::SystemOriginWire
     /// [`system_origin`]: features::system_origin
-    Sent(&'a dyn FeatureInteriorCache),
+    Sent(RowPlacers<'a>),
 }
 
 impl fmt::Debug for RowOrigins<'_> {
@@ -557,19 +560,53 @@ impl fmt::Debug for RowOrigins<'_> {
     }
 }
 
-/// The velocity `hit`'s row carries, what placed it, and its member class if it is a feature's
-/// member ([`RowOrigins::Sent`]).
+/// What a range answer's member rows are resolved through again ([`RowOrigins::Sent`]): the
+/// server's feature interiors, and the global list's source if the query took it (plan 10,
+/// P10.T10.b), whose tables, band shares and cores' models resolve a stream's or a dwarf core's
+/// member without planning the galaxy's debris again.
+#[derive(Clone, Copy)]
+pub(crate) struct RowPlacers<'a> {
+    interiors: &'a dyn FeatureInteriorCache,
+    list: Option<&'a GlobalListSource<'a>>,
+}
+
+impl<'a> RowPlacers<'a> {
+    /// The placers of a query whose members are resolved through `interiors`, and its list's
+    /// members through `list`, the source it took.
+    #[must_use]
+    pub(crate) fn new(
+        interiors: &'a dyn FeatureInteriorCache,
+        list: Option<&'a GlobalListSource<'a>>,
+    ) -> Self {
+        Self { interiors, list }
+    }
+}
+
+/// The velocity `hit`'s row carries at the query's time `t`, what placed it, and its member class
+/// if it is a member ([`RowOrigins::Sent`]).
+///
+/// - A grid system moves at plan 08's epoch velocity, and has no class.
+/// - A catalogue feature's member, and a stream's or a dwarf core's, at its member record's
+///   velocity, its cluster's or its tube's motion and its own, with its member class.
+/// - A member of the galactic centre at its epoch velocity, its orbit's start (plan 09, P09.T37.b):
+///   the row is the state at the epoch but for the position and the age, as a grid row is, and a
+///   member's orbit, unlike their lines, turns its velocity from that start (lean, 2026-11-01). A
+///   member of the centre's grid carries its centre class, a tidal disruption's victim, on the
+///   centre's feature-level list, the list's class, and the black hole none.
+/// - A catalogue class's host at its class's velocity at `t`, which is its remnant's after its
+///   explosion as its place is, and no member class: it is not a feature's member.
 ///
 /// # Panics
 ///
-/// For a member of the galactic centre or an origin the sim adds later, which no registered
-/// source places yet, and for a feature member that does not resolve in `galaxy`, which only a
-/// hit of another galaxy can be.
+/// For an origin the sim adds later, which no registered source places yet; for a member that
+/// does not resolve in `galaxy`, which only a hit of another galaxy can be; and for a list member
+/// of a query that took no list, which no registered source places.
 #[must_use]
 fn placed_by(
     galaxy: &Galaxy,
-    interiors: &dyn FeatureInteriorCache,
+    placers: RowPlacers<'_>,
     hit: &SystemHit,
+    t: UniverseTime,
 ) -> (
     GalacticVelocity,
     hyperion_protocol::SystemOriginWire,
@@ -583,7 +620,7 @@ fn placed_by(
             let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                 unreachable!("a feature member's record is built with a member ID")
             };
-            let member = resolve_member(galaxy, interiors, id)
+            let member = resolve_member(galaxy, placers.interiors, id)
                 .expect("a feature member found by the range query resolves in its galaxy");
             (
                 member.velocity(),
@@ -591,6 +628,36 @@ fn placed_by(
                 Some(features::member_class(member.class())),
             )
         }
+        SystemOrigin::CentreMember { .. } => {
+            let SystemIdKind::Centre(id) = record.id().kind() else {
+                unreachable!("a centre member's record is built with a centre ID")
+            };
+            let member = resolve_centre_member(galaxy, id)
+                .expect("a centre member found by the range query resolves in its galaxy");
+            (
+                member.velocity(),
+                origin,
+                features::centre_member_class(id, &member),
+            )
+        }
+        SystemOrigin::GlobalListMember { .. } => {
+            let list = placers
+                .list
+                .expect("only the global list's source places a list member, and it is the rows'");
+            let member = list
+                .member(galaxy, record.id())
+                .expect("a list member found by the range query resolves through its source");
+            (
+                member.velocity(),
+                origin,
+                Some(features::member_class(member.class())),
+            )
+        }
+        SystemOrigin::CatalogueSystem(_) => (
+            system_of_record(galaxy, record).motion().velocity_at(t),
+            origin,
+            None,
+        ),
         other => unreachable!(
             "no source the server registers places a range row of origin {other:?} (P09.T40.a)"
         ),

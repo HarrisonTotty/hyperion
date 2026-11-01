@@ -43,15 +43,16 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     BulkGate, CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
-    GlobalListService, SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClassCellCache,
-    SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache,
-    SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService,
-    StartPoolError, TubeTableCache,
+    GlobalListService, SharedBodyCache, SharedBriefCache, SharedCellCache, SharedCentreOrbitCache,
+    SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache,
+    SharedSkyCellCache, SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps,
+    SkyTablesService, StartPoolError, TubeTableCache,
 };
 use crate::connections::Connections;
 use crate::limits::{
-    BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, GLOBAL_LIST_CACHE_BYTES,
-    INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES, TUBE_TABLE_CACHE_BYTES,
+    BULK_QUEUE_CAPACITY, CENTRE_ORBIT_CACHE_BYTES, GALAXY_FEATURES_CACHE_BYTES,
+    GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
+    TUBE_TABLE_CACHE_BYTES,
 };
 use crate::requests::{Handler, Handlers};
 use crate::scene::SceneService;
@@ -133,12 +134,19 @@ pub(crate) struct AppState {
     /// Plan 09's catalogue class cells made so far, in the configured byte budget: what the
     /// range query's class hosts are read from, from generator version 27 (P09.T40).
     pub(crate) class_cells: Arc<SharedClassCellCache>,
+    /// The galactic centre's cells of members and their orbits made so far, in
+    /// [`CENTRE_ORBIT_CACHE_BYTES`]: what the range query's centre members are read from, from
+    /// generator version 27 (P09.T37.b).
+    pub(crate) centre_orbits: Arc<SharedCentreOrbitCache>,
     /// The galaxy map's globulars of every galaxy asked for, found once each in a bulk job and kept
     /// (P09.T40.b).
     pub(crate) galaxy_features: GalaxyFeaturesService,
     /// Plan 10's global list of every galaxy asked for, built once each in a bulk job and kept
     /// (P10.T10.a), and its streams' tube tables, kept in their own byte budget (P10.T10.b).
     pub(crate) global_lists: GlobalListService,
+    /// The tube tables the [`GlobalListService`] keeps, which a range query reads its streams'
+    /// members through ([`ListedTubes`](compute::ListedTubes), P10.T10.b's registration).
+    pub(crate) tube_tables: Arc<TubeTableCache>,
     /// Whether an open starts its galaxy's global list and warms its tube tables (P10.T10.b).
     pub(crate) global_list_warm_up: GlobalListWarmUp,
     /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
@@ -234,8 +242,14 @@ impl Server {
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = Arc::new(SharedCellCache::new(config.cell_cache_bytes()));
-        let (feature_cells, cluster_models, class_cells, map_lists, global_lists) =
-            feature_caches(&config, Arc::clone(&pool), Arc::clone(&galaxies));
+        let tube_tables = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
+        let (feature_cells, cluster_models, class_cells, map_lists, global_lists) = feature_caches(
+            &config,
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            Arc::clone(&tube_tables),
+        );
+        let centre_orbits = Arc::new(SharedCentreOrbitCache::new(CENTRE_ORBIT_CACHE_BYTES));
         let (systems, briefs) = system_caches(&config, &cluster_models);
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
@@ -262,8 +276,10 @@ impl Server {
                 feature_cells,
                 cluster_models,
                 class_cells,
+                centre_orbits,
                 galaxy_features: map_lists,
                 global_lists,
+                tube_tables,
                 global_list_warm_up: config.global_list_warm_up(),
                 feature_members: config.feature_members(),
                 handler,
@@ -415,12 +431,14 @@ fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
 /// its catalogue class cells (P09.T40), the galaxy map's
 /// feature lists (P09.T40.b), and plan 10's global lists (P10.T10.a) with their streams' tube tables
-/// (P10.T10.b), each list and table found on `pool` from the galaxies of `galaxies`.
+/// in `tube_tables` (P10.T10.b), each list and table found on `pool` from the galaxies of
+/// `galaxies`.
 #[must_use]
 fn feature_caches(
     config: &ServerConfig,
     pool: Arc<CpuPool>,
     galaxies: Arc<GalaxyCache>,
+    tube_tables: Arc<TubeTableCache>,
 ) -> (
     Arc<SharedFeatureCellCache>,
     Arc<SharedClusterModelCache>,
@@ -444,7 +462,7 @@ fn feature_caches(
             galaxies,
             (
                 Arc::new(SharedSprayForces::new(SPRAY_FORCE_CACHE_BYTES)),
-                Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES)),
+                tube_tables,
             ),
             GLOBAL_LIST_CACHE_BYTES,
         ),

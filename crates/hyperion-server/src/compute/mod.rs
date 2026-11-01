@@ -16,8 +16,10 @@
 //! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
 //! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
 //! request marches (P07.T10.c). [`SharedFeatureCellCache`] holds plan 09's feature cells and
-//! [`SharedClusterModelCache`] their interiors (P09.T40.a), and [`served_range_query`] generates a
-//! cold range query's cells into those caches on the pool's workers before it walks them.
+//! [`SharedClusterModelCache`] their interiors (P09.T40.a), [`SharedCentreOrbitCache`] the
+//! galactic centre's cells of members and their orbits (P09.T37.b), and [`served_range_query`]
+//! generates a cold range query's cells into those caches on the pool's workers before it walks
+//! them.
 //! [`global_list_on`] and [`tube_table_on`] make plan 10's global list and a stream's tube table
 //! on the pool's workers, each galaxy's spray table kept in [`SharedSprayForces`] (P10.T5.b). A sky's
 //! caps, census, band and limit
@@ -28,6 +30,7 @@
 mod bodies;
 mod cancel;
 mod cells;
+mod centre_orbits;
 mod class_cells;
 mod density_map;
 mod error;
@@ -50,6 +53,7 @@ mod tube_tables;
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
+pub use centre_orbits::{CentreOrbitHandle, SharedCentreOrbitCache};
 pub use class_cells::{ClassCellHandle, SharedClassCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
@@ -77,7 +81,10 @@ pub use pool::{
     BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, Promotion, ShutDownPoolError,
     StartPoolError, SubmitJobError,
 };
-pub use range::{RangeCaches, ServedQuery, served_range_query};
+#[cfg(test)]
+pub(crate) use range::served_sources;
+pub(crate) use range::with_row_reads;
+pub use range::{RangeCaches, RowReads, ServedQuery, served_range_query};
 pub use sightlines::{LineGas, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};

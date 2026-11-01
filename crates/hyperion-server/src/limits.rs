@@ -191,6 +191,14 @@ pub const GLOBAL_LIST_CACHE_BYTES: usize = 4 << 20;
 /// evicted is built again, to the same bits, by the request that reads it.
 pub const TUBE_TABLE_CACHE_BYTES: usize = 64 << 20;
 
+/// The byte budget of the galactic centre's cells of members and their orbits, of every galaxy the
+/// server holds (plan 09, P09.T37.b's `SharedCentreOrbitCache`): some 840 bytes a member under the
+/// exact orbit's law, so this holds some 160,000 members' cells, twice over the 62,443 members a
+/// query a century from the epoch scans in full about the black hole (plan 09's Risks, "P09.T29 as
+/// built"), so that its warm query places none again. A query at ±1,000 years scans some two million,
+/// more than any budget the server should give them: it is cold whatever the cache holds.
+pub const CENTRE_ORBIT_CACHE_BYTES: usize = 128 << 20;
+
 /// The byte budget of the galaxies' spray tables, which the global lists' shell orbits and every
 /// tube's spray step in (P10.T5.b's `SharedSprayForces`): some 160 kB a galaxy, so this holds
 /// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.

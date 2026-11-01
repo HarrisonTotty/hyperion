@@ -251,6 +251,12 @@ threads-required = 3
 filter = "package(hyperion-sim) & test(=galaxy::features::centre::over_time::the_centre_keeps_its_profile_and_flattening_over_a_millennium)"
 threads-required = 6
 
+# P10.T10.b's registration test serves its queries on a pool of eight workers of its own
+# (`requests::galaxy::registration`'s `WORKERS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-server) & test(=requests::galaxy::registration::from_27_a_range_query_serves_the_list_s_members_and_the_centre_s)"
+threads-required = 8
+
 # P11.T17.c's verdicts against the engine check their pairs on eight threads of their own.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"

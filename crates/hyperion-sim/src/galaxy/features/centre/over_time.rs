@@ -129,7 +129,12 @@ fn layer_set(layers: &[Layer]) -> LayerSet {
 fn in_a_cell(hit: &SystemHit) -> bool {
     match hit.id().kind() {
         SystemIdKind::Centre(id) => matches!(id.slot(), MemberSlot::InCell { .. }),
-        _ => false,
+        SystemIdKind::Grid(_)
+        | SystemIdKind::FeatureMember(_)
+        | SystemIdKind::Stream(_)
+        | SystemIdKind::DwarfCore(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => false,
     }
 }
 

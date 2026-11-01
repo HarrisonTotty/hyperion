@@ -729,7 +729,8 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
 
 _T10.a built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24); see "P10.T10.a as built"
 in Risks. T10.b's additions built (lane `p10-t10b-t11`, 2026-11-01, at 24); see "P10.T10.b's additions
-as built". Its registration member is not._
+as built". Its registration member built behind its hold (lane `p10-list-registration`, 2026-11-01,
+at 24, no output moved); see "P10.T10.b's registration member as built"._
 
 - **P10.T10.a Protocol.** New kinds of plan 04's `RequestBody` and `ResponseBody`, added to
   `REQUEST_KINDS`: `GlobalFeatures { universe }` → `GlobalEntryWire` list (kind, number, mass,
@@ -2365,3 +2366,25 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `set_class_shares` and before the field share is built; `discrete_share` is it at the
     version's streams per globular.
   - _Test._ Slow, by name: `galaxy::global_list::share::tests::the_discrete_share_census`.
+- **P10.T10.b's registration member as built (lane `p10-list-registration`, 2026-11-01, at
+  `GENERATOR_VERSION` 24, behind `LIST_SOURCE_VERSION` = 27, with P09.T37.b; no output moved).**
+  - _The hold._ `GalaxyRules::list_source`, P10.T3.d.b's ("P10.T3.d.b as built"), read here by
+    `GlobalListSource::is_registered_in`.
+  - _The sources._ `compute::range::beside_the_grid` takes the features' source and the class
+    cells as a pair and the list's reads (`ListReads`): from 27, with the list taken, the sources
+    are `[features, GlobalListSource, classes]`, the centre's source inside the list's and never
+    beside it; its `f` gets the list's source too.
+    `ServedQuery::with_list(ListedTubes)`; `served_range_query`'s answer gets `RowReads` (the
+    interiors and the list's source), and `with_row_reads` gives them to the chunked conversion.
+  - _Before the job._ `requests::galaxy::list_for` awaits the list and builds, on the pool, the
+    tables of `GlobalListSource::streams_read` (new): an answer waits for the list rather than
+    leaving it out, so it never depends on what is built (lean, 2026-11-01).
+  - _Rows._ `convert::placed_by` resolves a list member through `GlobalListSource::member` (new;
+    its velocity and member class), a centre member (P09.T37.b) and a catalogue host
+    (`catalogue_system`, its class's velocity at the row's time, no class; `system_origin` gains
+    the arm). Centre and list rows carry no brief yet (lean, 2026-11-01). `AppState::tube_tables`
+    holds the service's cache.
+  - _Left._ `convert::system_motion` and observed mode refuse centre and list members; the sky's
+    census takes no list source.
+  - _Test._ Slow, by name, on eight workers:
+    `requests::galaxy::registration::from_27_a_range_query_serves_the_list_s_members_and_the_centre_s`.

@@ -18,27 +18,36 @@
 //!
 //! `classes_at_27` is the Sun-like query of 50 ly and of 1 ly under generator version 27's rules,
 //! where the catalogue classes' hosts are registered beside the members (P09.T37.a), cold and warm
-//! with every source, the classes' cells read through the server's class cell cache (P09.T40); and
-//! at 50 ly each class's source alone, its census and its hits through no cache, for each class's
-//! share.
+//! with the members and the classes, the classes' cells read through the server's class cell cache
+//! (P09.T40); and at 50 ly each class's source alone, its census and its hits through no cache, for
+//! each class's share.
+//!
+//! `list_at_27` is the Sun-like query of 50 ly and of 1 ly, and the query of 50 ly at the black
+//! hole, where nothing fits, at the epoch under 27's rules with every source, the global list's
+//! among them (P10.T10.b's registration and P09.T37.b), cold and warm: the list's tube tables
+//! built before, as the server builds them ahead of a query, and the centre's orbits read through
+//! the server's centre orbit cache; and at 50 ly the list's source alone through no orbit cache.
 
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hyperion_server::FeatureMembers;
 use hyperion_server::compute::{
     CancelToken, CpuPool, GalaxyKey, Priority, RangeCaches, ServedQuery, SharedCellCache,
-    SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache, served_range_query,
+    SharedCentreOrbitCache, SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache,
+    served_range_query,
 };
 use hyperion_server::config::{
     DEFAULT_CELL_CACHE_MIB, DEFAULT_CLASS_CELL_CACHE_MIB, DEFAULT_CLUSTER_MODEL_CACHE_MIB,
     DEFAULT_FEATURE_CACHE_MIB,
 };
 use hyperion_server::limits::{
-    BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY, MAX_CENSUS_LIMIT, MAX_QUERY_CELLS,
+    BULK_QUEUE_CAPACITY, CENTRE_ORBIT_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, MAX_CENSUS_LIMIT,
+    MAX_QUERY_CELLS,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
@@ -47,8 +56,12 @@ use hyperion_sim::galaxy::catalogue_classes::{
 };
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
+use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
 use hyperion_sim::galaxy::features::members::FeatureInterior;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
+use hyperion_sim::galaxy::global_list::{
+    GlobalList, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
+};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::query::{
@@ -72,6 +85,7 @@ struct Caches {
     features: Arc<SharedFeatureCellCache>,
     interiors: Arc<SharedClusterModelCache>,
     classes: Arc<SharedClassCellCache>,
+    centre: Arc<SharedCentreOrbitCache>,
 }
 
 impl Caches {
@@ -85,7 +99,28 @@ impl Caches {
             classes: Arc::new(SharedClassCellCache::new(
                 DEFAULT_CLASS_CELL_CACHE_MIB * MIB,
             )),
+            centre: Arc::new(SharedCentreOrbitCache::new(CENTRE_ORBIT_CACHE_BYTES)),
         }
+    }
+
+    /// `query` with every source a served query takes from generator version 27: the members, the
+    /// global list's through `list`, the centre's orbits read through the centre orbit cache, and
+    /// the catalogue classes'.
+    fn query_listed(
+        &self,
+        galaxy: &Galaxy,
+        key: GalaxyKey,
+        query: &RangeQuery,
+        list: &dyn TubeLookup,
+    ) -> RangeResult {
+        let mut cells = self.cells.handle(key);
+        let (features, interiors) = (self.features.handle(key), self.interiors.kept(key));
+        let members = FeatureMemberSource::new(&features, &interiors);
+        let class_cells = self.classes.handle(key);
+        let classes = CatalogueClassSource::new().with_cells(&class_cells);
+        let orbits = self.centre.handle(key);
+        let listed = GlobalListSource::new(galaxy, list, &orbits).expect("the centre builds");
+        range_query(galaxy, &mut cells, &[&members, &listed, &classes], query)
     }
 
     /// `query` as the served `systems_in_range` job runs it: one kept view of the interiors for
@@ -196,9 +231,12 @@ fn range_caches() -> RangeCaches {
         Arc::new(SharedClusterModelCache::new(
             DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB,
         )),
-        Arc::new(SharedClassCellCache::new(
-            DEFAULT_CLASS_CELL_CACHE_MIB * MIB,
-        )),
+        (
+            Arc::new(SharedClassCellCache::new(
+                DEFAULT_CLASS_CELL_CACHE_MIB * MIB,
+            )),
+            Arc::new(SharedCentreOrbitCache::new(CENTRE_ORBIT_CACHE_BYTES)),
+        ),
     )
 }
 
@@ -381,5 +419,117 @@ fn classes_at_27(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, served, served_on_the_pool, classes_at_27);
+/// A lookup that keeps every tube table it builds, as the server's warm-up keeps a galaxy's.
+struct KeepTubes<'a> {
+    galaxy: &'a Galaxy,
+    list: GlobalList,
+    tubes: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+}
+
+impl TubeLookup for KeepTubes<'_> {
+    fn global_list(&self) -> &GlobalList {
+        &self.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        let spec = self.list.stream(stream).expect("a stream of the list");
+        let mut tubes = self.tubes.lock().expect("not poisoned");
+        Arc::clone(tubes.entry(stream).or_insert_with(|| {
+            Arc::new(TubeTable::build(self.galaxy, spec).expect("the full potential"))
+        }))
+    }
+}
+
+/// The queries under generator version 27's rules with every source, the global list's among
+/// them (module documentation).
+fn list_at_27(c: &mut Criterion) {
+    let seed = Seed::new(SEED);
+    let version = GeneratorVersion::new(27);
+    let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+    let galaxy = Galaxy::from_params_at_version(seed, params, version)
+        .expect("a drawn galaxy builds")
+        .with_full_potential();
+    let key = GalaxyKey::new(SEED, version);
+    let lookup = KeepTubes {
+        galaxy: &galaxy,
+        list: GlobalList::build(&galaxy),
+        tubes: Mutex::default(),
+    };
+    // Not the black hole's 0.05 ly, whose complete census walks the grid's cells about the origin,
+    // some 3 × 10⁶ candidates in layers C to E: some 600 s cold on one thread a century on
+    // (measured 2026-11-01, pod, release), too long to sample. At 50 ly nothing fits, and the
+    // query is its census.
+    let queries = [
+        ("Sun-like 50 ly", query_at(sun_like(), 50.0)),
+        ("Sun-like 1 ly", query_at(sun_like(), 1.0)),
+        (
+            "the black hole 50 ly",
+            query_at(GalacticPosition::ORIGIN, 50.0),
+        ),
+    ];
+    for (name, query) in &queries {
+        let streams = GlobalListSource::streams_read(&galaxy, &lookup.list, query);
+        for &number in &streams {
+            drop(lookup.tube(number));
+        }
+        println!("list_at_27: {name} reads {} streams' tables", streams.len());
+    }
+    let mut group = c.benchmark_group("list_at_27");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(20));
+    for (name, query) in &queries {
+        group.bench_function(format!("{name}, every source (cold)"), |b| {
+            b.iter_batched_ref(
+                Caches::new,
+                |caches| caches.query_listed(&galaxy, key, black_box(query), &lookup),
+                BatchSize::PerIteration,
+            );
+        });
+        let warm = Caches::new();
+        let result = warm.query_listed(&galaxy, key, query, &lookup);
+        println!(
+            "list_at_27: {name}: {} systems, complete down to {:?}",
+            result.systems().len(),
+            result.census().complete_down_to()
+        );
+        group.bench_function(format!("{name}, every source (warm)"), |b| {
+            b.iter(|| warm.query_listed(&galaxy, key, black_box(query), &lookup));
+        });
+    }
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let sphere = QuerySphere::new(
+        sun_like(),
+        LightYears::new(50.0),
+        UniverseTime::EPOCH,
+        LightYears::ZERO,
+    )
+    .expect("a sphere");
+    let listed =
+        GlobalListSource::new(&galaxy, &lookup, &NoCentreOrbitCache).expect("the centre builds");
+    group.bench_function("Sun-like 50 ly, the list alone", |b| {
+        b.iter(|| {
+            let counts = listed.expected_in_sphere(&galaxy, black_box(&sphere));
+            let mut hits = Vec::new();
+            listed.systems_in_sphere(&galaxy, &sphere, stellar, &mut hits);
+            (counts, hits)
+        });
+    });
+    group.bench_function("the list's source, made", |b| {
+        b.iter(|| {
+            GlobalListSource::new(&galaxy, black_box(&lookup), &NoCentreOrbitCache)
+                .expect("the centre builds")
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    served,
+    served_on_the_pool,
+    classes_at_27,
+    list_at_27
+);
 criterion_main!(benches);
