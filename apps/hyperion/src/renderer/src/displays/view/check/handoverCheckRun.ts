@@ -56,6 +56,7 @@ import type {
 import { norm, type Vec3 } from "../../../geometry/vec3";
 import type { NormalMapTexels } from "../../../view/bodies/discNormals";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
+import { selectionViewport } from "../../../view/terrain/handover";
 import { PHASE_SCENE_NAME } from "../../../view/scenes/phaseScene";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import { SERVER_SCENE_NAME } from "../viewRun";
@@ -696,8 +697,13 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
     const canvas = deps.views.canvasOf(PRIMARY_VIEW_NAME);
     const target = deps.views.canvasOf(SCENE_TARGET);
     // The hand-over's own pixel and τ at the primary's canvas, the presented size
-    // (decision-r10-t16-leans §13), as the terrain run's `terrainHandover` takes them.
-    const { rangeM, tauPx, radPerPx } = handoverRangeAtM(world, deps.setting, canvas.widthPx);
+    // (decision-r10-t16-leans §13), at its CSS px, the selection's (fix-retina-frame), as the
+    // terrain run's `terrainHandover` takes them.
+    const { rangeM, tauPx, radPerPx } = handoverRangeAtM(
+      world,
+      deps.setting,
+      selectionViewport(canvas, deps.devicePixelRatio).widthPx,
+    );
     scenes.setRangeM(rangeM);
     const looks = await runFrom(0);
     return {

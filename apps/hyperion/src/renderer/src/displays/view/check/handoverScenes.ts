@@ -480,9 +480,10 @@ export interface HandoverRange {
 }
 
 /**
- * `world`'s hand-over range on a canvas `widthPx` wide at the default field of view on `setting`:
- * its relief at the photorealistic style's τ over the canvas's centre pixel (`pixelAngleRad`),
- * as `handOverRegimes` on the presented pixel and the terrain run's `terrainHandover` take it.
+ * `world`'s hand-over range on a selection `widthPx` wide (a canvas's CSS px, `selectionViewport`)
+ * at the default field of view on `setting`: its relief at the photorealistic style's τ over its
+ * centre pixel (`pixelAngleRad`), as `handOverRegimes` and the terrain run's `terrainHandover`
+ * take it.
  */
 export function handoverRangeAtM(
   world: HandoverWorld,

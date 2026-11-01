@@ -20,7 +20,12 @@ import {
   terrainTestGolden,
 } from "../../../view/scenes/terrainScene";
 import { TERRAIN_COMPUTATION_FAILED } from "../../../view/terrain/annunciation";
-import { runTerrainCheck, type TerrainCheckDeps, type TerrainCheckTiming } from "./terrainCheckRun";
+import {
+  runTerrainCheck,
+  type TerrainCheckDeps,
+  type TerrainCheckTiming,
+  terrainHandover,
+} from "./terrainCheckRun";
 import type { MaskReading, QuietSpan, TerrainMark, WatchedSession } from "./terrainProbe";
 import type { ShownView } from "./viewsProbe";
 import { WHOLE_LOOKS, wholeLookDistanceM } from "./wholeLooks";
@@ -427,7 +432,10 @@ function fakeProbe(
 }
 
 /** The run over a fake `VIEW` and probe on the test's clock, to its end, on `fixture`'s field. */
-async function run(fixture: TerrainCheckDeps["fixture"] = "terrain-test"): Promise<{
+async function run(
+  fixture: TerrainCheckDeps["fixture"] = "terrain-test",
+  devicePixelRatio = 1,
+): Promise<{
   readonly record: Awaited<ReturnType<typeof runTerrainCheck>>;
   readonly calls: ReadonlyArray<string>;
   readonly seen: Seen;
@@ -494,7 +502,7 @@ async function run(fixture: TerrainCheckDeps["fixture"] = "terrain-test"): Promi
       return Promise.resolve();
     },
     signal: new AbortController().signal,
-    devicePixelRatio: 1,
+    devicePixelRatio,
   });
   return { record, calls, seen, view };
 }
@@ -614,6 +622,11 @@ describe("the terrain run's script (R10.T16.d)", () => {
     expect(record.faults).toHaveLength(1);
     expect(record.teardown).toMatchObject({ disposed: true, workersLive: 0 });
     expect(record.handover?.scriptS).toBeGreaterThan(0);
+  });
+
+  it("records the hand-over at its canvas's CSS px at a device-pixel ratio of 2 (fix-retina-frame)", async () => {
+    const { record } = await run("terrain-test", 2);
+    expect(record.handover).toEqual(terrainHandover(TARGET.widthPx / 2, "high"));
   });
 
   it("records the terrain session's faults as the probe saw them (R10.T16.e)", async () => {

@@ -77,6 +77,7 @@ import {
   handoverTauPx,
   limbDistanceM,
   pixelAngleRad,
+  selectionViewport,
 } from "../../../view/terrain/handover";
 import { SETTINGS } from "../../../view/quality/qualitySetting";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
@@ -300,10 +301,11 @@ export interface TerrainCheckDeps {
 }
 
 /**
- * `TEST MOON`'s hand-over range at a canvas `widthPx` wide at the default field of view on
- * `setting`, m (`handoverRangeM` of the field's relief, against the camera's distance to the limb),
- * and the script's time at which the descent crosses it, s, by bisection over the descent; on
- * `fixture`'s field, `TERRAIN TEST`'s own unless given.
+ * `TEST MOON`'s hand-over range at a selection `widthPx` wide (a canvas's CSS px,
+ * `selectionViewport`) at the default field of view on `setting`, m (`handoverRangeM` of the
+ * field's relief, against the camera's distance to the limb), and the script's time at which the
+ * descent crosses it, s, by bisection over the descent; on `fixture`'s field, `TERRAIN TEST`'s own
+ * unless given.
  */
 export function terrainHandover(
   widthPx: number,
@@ -880,8 +882,9 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     restoresAtMs: deps.views.restoresAtMs(),
     loss,
     teardown: terrain.teardown(),
+    // At the canvas's CSS px, at which the hand-over measures its pixel (fix-retina-frame).
     handover: terrainHandover(
-      deps.views.canvasOf(PRIMARY_VIEW_NAME).widthPx,
+      selectionViewport(deps.views.canvasOf(PRIMARY_VIEW_NAME), deps.devicePixelRatio).widthPx,
       deps.setting,
       deps.fixture,
     ),

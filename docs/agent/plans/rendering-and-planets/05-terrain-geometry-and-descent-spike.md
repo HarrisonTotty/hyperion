@@ -8299,4 +8299,5 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   `TerrainViewReport`, `PhotorealInputs`, `PhotorealFrame`, `BodyFrameOptions`,
   `LiveFrameTerrainInput` and `WireframeTerrainInput`, absent meaning `presentedPx`;
   `TerrainView.viewport` and `ViewSelectionInput.viewport` carry it. Bit for bit at DPR 1. The
-  descent spike still selects at its canvas's device px.
+  views check's `terrainHandover` and `handoverRangeAtM` take the selection's width. The descent
+  spike still selects at its canvas's device px.

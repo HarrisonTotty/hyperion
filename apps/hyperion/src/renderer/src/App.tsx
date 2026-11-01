@@ -41,6 +41,7 @@ import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
+import { selectionViewport } from "./view/terrain/handover";
 import type { GeometryOverride, ServedWorldNames, ViewsCheckLaunch } from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
@@ -148,12 +149,17 @@ function checkProbesOf(
     case "handover": {
       const world = served ?? terrainTestHandoverWorld(launch.fixture);
       // A look chosen by hand before the run measures the primary is drawn at the range of a
-      // canvas the window's width, and measures nothing (`HandoverScenes`).
+      // canvas the window's width, at its selection's CSS px, and measures nothing
+      // (`HandoverScenes`).
       const windowPx = Math.max(1, Math.round(window.innerWidth * window.devicePixelRatio));
+      const selection = selectionViewport(
+        { widthPx: windowPx, heightPx: windowPx },
+        window.devicePixelRatio,
+      );
       const scenes = new HandoverScenes(
         world,
         launch.smoke ? HANDOVER_APPROACH.smoke : HANDOVER_APPROACH.full,
-        handoverRangeAtM(world, launch.setting, windowPx).rangeM,
+        handoverRangeAtM(world, launch.setting, selection.widthPx).rangeM,
       );
       run = { kind: "handover", terrain: terrainProbe(scenes.sceneOptions), scenes };
       break;
