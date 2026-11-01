@@ -80,6 +80,12 @@
 //!   supernova applied to the orbits above it, read at two choke points, `evolve`'s pre-test through the engine's input's
 //!   rules and `SystemStars`' outer releases through the primary's, which
 //!   [`SystemStars::shown_at`] reads (`stellar/rules/collapses_hold.rs` lists the movers).
+//! - [`pinned_white_dwarfs`](StellarRules::pinned_white_dwarfs), at
+//!   [`PINNED_WHITE_DWARFS_VERSION`] (plan 11, P11.T4's fix): whether a pinned primary, its pin
+//!   pending, that its binary would make a white dwarf is born one below it or held at its core's
+//!   last living state until its pin from it, read through the engine's input's rules at one
+//!   `match`, [`PinnedWhiteDwarfRules::holds`], by the strip (`Engine::stripped_member_at`)
+//!   (`stellar/rules/pinned_white_dwarfs_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -95,6 +101,9 @@ use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
+use crate::stellar::binary::pinned_white_dwarfs::{
+    PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
+};
 use crate::stellar::binary::xrb_class::{XRB_CLASS_VERSION, XrbClassRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::system::{BINARY_KICKS_VERSION, BinaryKicksRules};
@@ -130,6 +139,9 @@ pub(crate) struct StellarRules {
     /// Whether a core collapse acts on the orbits the binary engine does not otherwise run, the
     /// hold of [`COLLAPSES_VERSION`].
     pub(crate) collapses: CollapseRules,
+    /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is
+    /// held until its pin, the hold of [`PINNED_WHITE_DWARFS_VERSION`].
+    pub(crate) pinned_white_dwarfs: PinnedWhiteDwarfRules,
 }
 
 impl StellarRules {
@@ -180,6 +192,11 @@ impl StellarRules {
             } else {
                 CollapseRules::Gated
             },
+            pinned_white_dwarfs: if version.get() >= PINNED_WHITE_DWARFS_VERSION.get() {
+                PinnedWhiteDwarfRules::Held
+            } else {
+                PinnedWhiteDwarfRules::Born
+            },
         }
     }
 
@@ -198,9 +215,9 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
-    /// `heavy_donor`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, and P11.T10's
-    /// `binary_kicks` and `collapses`).
+    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion`, `heavy_donor`
+    /// and `pinned_white_dwarfs`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`,
+    /// and P11.T10's `binary_kicks` and `collapses`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -241,6 +258,8 @@ mod ia_hold;
 mod merger_mass_hold;
 #[cfg(test)]
 mod ns_accretion_hold;
+#[cfg(test)]
+mod pinned_white_dwarfs_hold;
 #[cfg(test)]
 mod stripping_hold;
 #[cfg(test)]

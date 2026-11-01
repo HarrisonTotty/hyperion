@@ -36,13 +36,13 @@
 
 use std::sync::Arc;
 
-use crate::stellar::Phase;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
 use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
-use crate::units::{Megayears, SolarMasses, Years};
+use crate::stellar::{Phase, StarState, StarStateParts};
+use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::evolve::{Engine, clock_resolution_years, roche_lobe, track_mass};
+use super::evolve::{Engine, roche_lobe, track_mass};
 use super::merger_mass::MergerMassRules;
 use super::params::BinaryParams;
 use super::rlof::{dynamical, kelvin_helmholtz};
@@ -319,11 +319,18 @@ impl Engine {
     /// the engine's age: for the pinned hold, which strips a bare core at its last living age
     /// (P11.T4.g), where the track itself has already died. `None` where the member has no
     /// envelope to lose and stays as it is.
+    ///
+    /// Under [`PinnedWhiteDwarfRules::Held`] (P11.T4's fix, at 27) a pinned primary whose pin is
+    /// pending is held at its bare core's last living state whether the core collapses or is a
+    /// white dwarf's; below it, a white dwarf's core is born one.
+    ///
+    /// [`PinnedWhiteDwarfRules::Held`]: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Held
     #[must_use]
     pub(super) fn stripped_member_at(&self, i: usize, track_age: f64) -> Option<(Member, bool)> {
         let age = self.age;
         let (track, offset) = self.members[i].track()?;
         let (mass, _) = self.current(i);
+        let pinned = i == 0 && self.pin_pending();
         let member = match track.remains_at(
             track_age,
             mass,
@@ -350,23 +357,7 @@ impl Engine {
             }
             Remains::Ended {
                 core, core_radius, ..
-            } if i == 0
-                && self.pin.is_some_and(|p| {
-                    p.death.age().value() >= age - clock_resolution_years(age)
-                }) =>
-            {
-                let state = crate::stellar::StarState::new(crate::stellar::StarStateParts {
-                    phase: core.phase(),
-                    age: core.age(),
-                    mass: core.mass(),
-                    core_mass: core.core_mass(),
-                    luminosity: core.luminosity(),
-                    radius: core.radius(),
-                    mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
-                    phase_fraction: core.phase_fraction(),
-                });
-                return Some((Member::Frozen { state, core_radius }, false));
-            }
+            } if pinned => return Some((held_core(&core, core_radius), false)),
             Remains::Ended { track, .. } => {
                 return Some((
                     Member::Track {
@@ -377,9 +368,15 @@ impl Engine {
                 ));
             }
             Remains::WhiteDwarf {
+                core, core_radius, ..
+            } if pinned && self.ctx.rules().pinned_white_dwarfs.holds() => {
+                return Some((held_core(&core, core_radius), false));
+            }
+            Remains::WhiteDwarf {
                 phase,
                 mass,
                 last_luminosity,
+                ..
             } => Member::Remnant {
                 phase,
                 birth: age,
@@ -1360,6 +1357,23 @@ impl Engine {
             mass: Path::starting(self.age, m),
         })
     }
+}
+
+/// The pinned primary held at its bare core's last living state `core`, with its structure's
+/// `core_radius`, until its pin collapses it (plan 11, design note 16; P11.T4.g).
+#[must_use]
+fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
+    let state = StarState::new(StarStateParts {
+        phase: core.phase(),
+        age: core.age(),
+        mass: core.mass(),
+        core_mass: core.core_mass(),
+        luminosity: core.luminosity(),
+        radius: core.radius(),
+        mass_loss_rate: SolarMassesPerYear::ZERO,
+        phase_fraction: core.phase_fraction(),
+    });
+    Member::Frozen { state, core_radius }
 }
 
 /// What a common envelope whose cores coalesce leaves to the merger: the envelope's binding

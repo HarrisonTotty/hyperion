@@ -48,6 +48,7 @@ pub(crate) mod merger_mass;
 pub(crate) mod ns_accretion;
 pub mod pair_light;
 mod params;
+pub(crate) mod pinned_white_dwarfs;
 pub mod reach;
 mod recycling;
 mod rlof;
