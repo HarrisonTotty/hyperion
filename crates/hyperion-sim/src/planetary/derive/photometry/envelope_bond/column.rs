@@ -39,8 +39,7 @@
 
 use crate::math;
 use crate::planetary::chem::condense::{
-    DeckProfileRules, Mode, ModeProfile, SCAN_STEP_LN_P, Sedimentation, TOP_FRACTION, deck_phase,
-    settling_size_at,
+    Mode, ModeProfile, SCAN_STEP_LN_P, Sedimentation, TOP_FRACTION, deck_phase, settling_size_at,
 };
 use crate::planetary::chem::envelope_abundances::{EnvelopeAbundances, EnvelopeInputs};
 use crate::planetary::chem::photochem::{
@@ -842,10 +841,7 @@ fn deck_mode(
                 .max(LEAST_SEDIMENTATION_EFFICIENCY)
         });
     let mass = epsilon * fraction * base * slope / (gravity * (slope + 1.0) * (efficiency + 1.0));
-    let exponent = match DeckProfileRules::in_force() {
-        DeckProfileRules::Held => efficiency,
-        DeckProfileRules::Saturation => efficiency.min(slope),
-    };
+    let exponent = efficiency.min(slope);
     let top = if exponent > 0.0 {
         (base * math::powf(TOP_FRACTION, 1.0 / exponent)).max(COLUMN_TOP_PA)
     } else {

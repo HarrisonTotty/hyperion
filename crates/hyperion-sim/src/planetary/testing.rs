@@ -447,9 +447,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
-/// - a loop deck's mode drawn on its own column, `DECK_PROFILE_VERSION` (P14.T52.g), at
-///   `DeckProfileRules::Saturation` through `with_deck_profile`: its profile's exponent the
-///   smaller of its deck's `f_sed` and its saturation's log-slope at the base;
 /// - a hot envelope's dayside above 1 bar, `DAYSIDE_DECKS_VERSION` (P14.T52.h), at
 ///   `DaysideDecksRules::Cleared` through `with_dayside_decks`: each refractory, sulphide or salt
 ///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
@@ -466,7 +463,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::chem::condense::{DeckProfileRules, with_deck_profile};
     use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
     use crate::planetary::derive::atmosphere::{
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
@@ -487,7 +483,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
-    let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
     let run = move || {
@@ -786,25 +781,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it and
-    /// where a test sets it back.
-    #[test]
-    fn the_deck_profile_hold_is_in_force_inside_26_s_helper_alone() {
-        use crate::planetary::chem::condense::{DeckProfileRules, with_deck_profile};
-        assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
-        assert_eq!(
-            with_every_26_hold(DeckProfileRules::in_force),
-            DeckProfileRules::Saturation
-        );
-        assert_eq!(
-            with_every_26_hold(|| {
-                with_deck_profile(DeckProfileRules::Held, DeckProfileRules::in_force)
-            }),
-            DeckProfileRules::Held
-        );
-        assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
     }
 
     /// 26's dayside decks' switch (P14.T52.h): in force inside 26's helper, held outside it and

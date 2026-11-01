@@ -57,7 +57,7 @@
 //!   exceeds `f_sed`. Its vapour above is `q_v` at the top, the cold trap's.
 //! - **The mode's profile** is P14.T24.c's vertical profile (P. Mollière et al., A&A 640, A131,
 //!   2020, eq. 3's form): its mixing ratio goes as (p ÷ `p_base`)^f between the deck's base and
-//!   top. To generator version 25 f is the deck's `f_sed`; from 26 (`DECK_PROFILE_VERSION`,
+//!   top. To generator version 25 f is the deck's `f_sed`; from 26 (P14.T52.g, from 26;
 //!   P14.T52.g) it is the smaller of `f_sed` and s, the saturated mole fraction's mean log-slope
 //!   over the scan step above the base (`saturation_slope`), so that a volatile deck is drawn over
 //!   its column's own depth rather than as a sheet at its base. That is the balance's asymptote
@@ -168,6 +168,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::quench::MixingColumn;
+use crate::math;
 use crate::substance::aerosol::{
     BuildSizeDistributionError, ExtinctionBasis, ResolveAerosolError, SizeDistribution,
     aerosol_optics, density_variant,
@@ -176,7 +177,6 @@ use crate::substance::aloft::{LawAloft, SaturationLaw, Vapour, laws_aloft};
 use crate::substance::{CondensedPhase, MOLAR_GAS_CONSTANT, SubstanceId, SubstanceKey};
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 /// The scan's step in ln p: the column is evaluated at levels this far apart, from its bottom to
 /// its top, where each base is bracketed and each deck's vapour is kept.
@@ -256,51 +256,6 @@ const ALPHA_FIT_WIDTH: f64 = 1.1;
 /// Grams per kilogram.
 const GRAMS_PER_KILOGRAM: f64 = 1_000.0;
 
-/// The generator version from which a loop deck's mode is drawn on its own column (P14.T52.g): 26,
-/// the planetary bump after 25's (research-r08-t16a §1, main's ruling of 2026-10-30).
-///
-/// It is P14.T52.g's one hold. Below it [`DeckProfileRules::in_force`] is
-/// [`DeckProfileRules::Held`]: every loop mode's exponent is its deck's `f_sed`, and every deck,
-/// mode and golden is version 25's bit for bit. 26's bump deletes this hold,
-/// [`DeckProfileRules`] with its `Held` arm, the tests' switch, its line in
-/// `with_every_26_hold` and its tripwire (`the_deck_profile_is_held_only_until_the_26_bump`).
-pub(crate) const DECK_PROFILE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Which exponent a loop deck's mode takes (P14.T52.g's hold, [`DECK_PROFILE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum DeckProfileRules {
-    /// Version 25's and before: its deck's `f_sed`.
-    Held,
-    /// Version 26's: the smaller of its deck's `f_sed` and its saturation's log-slope at the base
-    /// ([`profile_exponent`]).
-    Saturation,
-}
-
-impl DeckProfileRules {
-    /// The rules this generator version gives: the saturation's slope from
-    /// [`DECK_PROFILE_VERSION`], held below it; in the tests, the rules a test's switch sets on
-    /// its thread ([`with_deck_profile`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = DECK_PROFILE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= DECK_PROFILE_VERSION {
-            Self::Saturation
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The deck profile's rules a test sets on its thread, `None` for the version's.
-    static DECK_PROFILE_RULES: core::cell::Cell<Option<DeckProfileRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
 #[cfg(test)]
 thread_local! {
     /// The decks the loop places on this thread while a test captures them ([`capturing_decks`]).
@@ -326,23 +281,6 @@ pub(crate) fn capturing_decks<R>(run: impl FnOnce() -> R) -> (R, Vec<Deck>) {
     let decks = CAPTURED.with(core::cell::Cell::take).unwrap_or_default();
     drop(restore);
     (result, decks)
-}
-
-/// `run`'s result with the deck profile's rules `rules` on this thread, for the tests to reach
-/// 26's profiles ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_deck_profile<R>(rules: DeckProfileRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<DeckProfileRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            DECK_PROFILE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(DECK_PROFILE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// Ackerman and Marley's two free parameters of a deck: its sedimentation efficiency `f_sed`
@@ -625,7 +563,7 @@ impl Error for ResolveOpticalDepthError {
 /// A mode's vertical profile (P14.T24.c): its base and its top, between which its mixing ratio
 /// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes). The
 /// loop's modes take their deck's base and top, and its `f_sed`, or from generator version 26 the
-/// smaller of that and its saturation's log-slope at the base (`DECK_PROFILE_VERSION`,
+/// smaller of that and its saturation's log-slope at the base (P14.T52.g, from 26;
 /// P14.T52.g).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ModeProfile {
@@ -1017,7 +955,7 @@ impl Deck {
 
     /// The deck's `f_sed`, the sedimentation efficiency its column's balance takes: its mode's
     /// profile exponent to generator version 25, and from 26 the bound on it, the smaller of it
-    /// and the saturation's log-slope at the base being the exponent (`DECK_PROFILE_VERSION`).
+    /// and the saturation's log-slope at the base being the exponent (P14.T52.g, from 26).
     #[must_use]
     pub const fn sedimentation(&self) -> f64 {
         self.sedimentation
@@ -1595,7 +1533,6 @@ impl Condensation {
             coverage,
             background: background(&mixture),
             substeps,
-            profile: DeckProfileRules::in_force(),
             particles,
         };
         let mut placed: Vec<Placed> = Vec::new();
@@ -1710,8 +1647,6 @@ struct Context<'a> {
     background: Option<SubstanceId>,
     /// The integration steps of a deck's column to each scan step ([`SUBSTEPS`]).
     substeps: u32,
-    /// The rules of the decks' modes' profiles, read once as the loop runs (P14.T52.g).
-    profile: DeckProfileRules,
     /// Whether the decks form their particles ([`Condensation::derive_vapours`]).
     particles: Particles,
 }
@@ -2153,7 +2088,7 @@ fn place(
             excess,
         )
     };
-    let exponent = profile_exponent(context.profile, efficiency, || {
+    let exponent = profile_exponent(efficiency, || {
         saturation_slope(base.u, |ln_p| {
             saturation((ln_p, Pascals::new(math::exp(ln_p))))
         })
@@ -2264,25 +2199,19 @@ fn capture(deck: &Deck) {
     });
 }
 
-/// The exponent of a loop deck's mode's profile (P14.T52.g): under [`DeckProfileRules::Saturation`]
-/// the smaller of the deck's `f_sed` `efficiency` and the saturation's log-slope `slope` at its
-/// base ([`saturation_slope`], taken only there), and the `f_sed` where that slope is not finite
-/// and positive; under [`DeckProfileRules::Held`] the `f_sed`. It is the balance's asymptote above
-/// the base, the slower of its two exponentials (the [module](self)'s documentation).
+/// The exponent of a loop deck's mode's profile (P14.T52.g, from generator version 26): the
+/// smaller of the deck's `f_sed` `efficiency` and the saturation's log-slope `slope` at its base
+/// ([`saturation_slope`], taken only there), and the `f_sed` where that slope is not finite and
+/// positive. It is the balance's asymptote above the base, the slower of its two exponentials (the
+/// [module](self)'s documentation).
 #[must_use]
-fn profile_exponent(rules: DeckProfileRules, efficiency: f64, slope: impl FnOnce() -> f64) -> f64 {
-    match rules {
-        DeckProfileRules::Held => efficiency,
-        DeckProfileRules::Saturation => {
-            let s = slope();
-            // A comparison, not `min`, so that a slope that is not finite and positive is never
-            // taken.
-            if s.is_finite() && s > 0.0 && s < efficiency {
-                s
-            } else {
-                efficiency
-            }
-        }
+fn profile_exponent(efficiency: f64, slope: impl FnOnce() -> f64) -> f64 {
+    let s = slope();
+    // A comparison, not `min`, so that a slope that is not finite and positive is never taken.
+    if s.is_finite() && s > 0.0 && s < efficiency {
+        s
+    } else {
+        efficiency
     }
 }
 

@@ -1810,12 +1810,10 @@ fn pin_mode(w: &mut hyperion_testkit::golden::GoldenWriter, tag: &str, mode: &Ae
 /// envelope is derived inside the switch.
 #[test]
 fn under_the_deck_profile_the_giants_volatile_decks_are_drawn_on_their_columns() {
-    use crate::planetary::chem::condense::{DeckProfileRules, capturing_decks, with_deck_profile};
+    use crate::planetary::chem::condense::capturing_decks;
     let mut checked = 0;
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (atmosphere, placed) = with_deck_profile(DeckProfileRules::Saturation, || {
-            capturing_decks(|| table_case(name).atmosphere())
-        });
+        let (atmosphere, placed) = { capturing_decks(|| table_case(name).atmosphere()) };
         for deck in atmosphere.decks() {
             let condensate = deck.condensate();
             if DeckKind::of(condensate) != Some(DeckKind::Volatile) {

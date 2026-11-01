@@ -1307,51 +1307,9 @@ fn under_every_26_hold_jupiter_s_decks_keep_their_sizes_within_1e_12() {
     eprintln!("Jupiter's decks under every 26 hold: the largest move {worst:e}");
 }
 
-/// P14.T52.g is held until the 25 → 26 bump: the rules in force are version 25's, every loop
-/// mode's exponent its deck's `f_sed`, and the tests' switch reaches 26's.
-#[test]
-fn the_deck_profile_is_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < DECK_PROFILE_VERSION,
-        "the 25 → 26 bump draws a loop deck's mode on its own column (P14.T52.g, \
-         research-r08-t16a §1): delete `DECK_PROFILE_VERSION`, `DeckProfileRules` with its `Held` \
-         arm and `profile_exponent`'s match on it, `Context`'s `profile`, the tests' \
-         `with_deck_profile`, its switch in `with_every_26_hold` (and the helper, if no other 26 \
-         hold is left) with its test `the_deck_profile_hold_is_in_force_inside_26_s_helper_alone`, \
-         this test and `a_panic_inside_the_deck_profile_switch_sets_the_rules_back`; restate \
-         without the switch the tests that set it (`rainy_jupiter`'s, the hooks' two \
-         `under_the_deck_profile_*`, `system/envelope/tests.rs`'s `golden_records_at_26` and \
-         census, which compare the arms, and `locked_climate_tests.rs`'s \
-         `with_the_locked_deck_alone`); re-bless what pins a loop mode's exponent, \
-         `planetary/envelope_atmosphere`, `planetary/aerosols` and the protocol's \
-         `planetary.json` (the server's `the_fixture_s_envelopes_are_the_generator_s`)"
-    );
-    assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
-    assert_eq!(
-        with_deck_profile(DeckProfileRules::Saturation, DeckProfileRules::in_force),
-        DeckProfileRules::Saturation
-    );
-    assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
-}
-
-/// The switch sets the version's rules back when its closure panics. Native only: on
-/// wasm32-wasip1 a panic aborts the whole test binary (panic = abort), so `catch_unwind` cannot
-/// catch it, and no rules are left to set back.
-#[test]
-#[cfg(not(target_family = "wasm"))]
-fn a_panic_inside_the_deck_profile_switch_sets_the_rules_back() {
-    let unwound = std::panic::catch_unwind(|| {
-        with_deck_profile(DeckProfileRules::Saturation, || panic!("inside the switch"));
-    });
-    let payload = unwound.expect_err("the closure panics");
-    assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the switch"));
-    assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
-}
-
 /// The exponent's pieces (P14.T52.g): under `Saturation` a deck whose `f_sed` exceeds its
 /// saturation's slope s takes s, to the bit of its own difference, one whose `f_sed` is below it
-/// takes its `f_sed`, and a slope that is not finite or not positive gives the `f_sed`; under
-/// `Held` every deck takes its `f_sed`, and the slope is not taken.
+/// takes its `f_sed`, and a slope that is not finite or not positive gives the `f_sed`.
 #[test]
 fn a_loop_mode_takes_the_smaller_of_its_f_sed_and_its_saturation_s_slope() {
     let base = math::ln(0.7e5);
@@ -1359,11 +1317,10 @@ fn a_loop_mode_takes_the_smaller_of_its_f_sed_and_its_saturation_s_slope() {
     let s = (math::ln(falling(base)) - math::ln(falling(base - SCAN_STEP_LN_P))) / SCAN_STEP_LN_P;
     assert_same_bits(saturation_slope(base, falling), s);
     assert!((s - 6.5).abs() < 1e-9, "{s}");
-    let rules = DeckProfileRules::Saturation;
-    assert_same_bits(profile_exponent(rules, 411.0, || s), s);
-    assert_same_bits(profile_exponent(rules, 3.0, || s), 3.0);
+    assert_same_bits(profile_exponent(411.0, || s), s);
+    assert_same_bits(profile_exponent(3.0, || s), 3.0);
     for slope in [0.0, -2.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
-        assert_same_bits(profile_exponent(rules, 411.0, || slope), 411.0);
+        assert_same_bits(profile_exponent(411.0, || slope), 411.0);
     }
     // A saturation that cannot condense at either end, or that underflows above the base.
     let never = |_: f64| f64::INFINITY;
@@ -1373,76 +1330,57 @@ fn a_loop_mode_takes_the_smaller_of_its_f_sed_and_its_saturation_s_slope() {
         saturation_slope(base, underflows),
     ] {
         assert!(!slope.is_finite() || slope <= 0.0, "{slope}");
-        assert_same_bits(profile_exponent(rules, 411.0, || slope), 411.0);
+        assert_same_bits(profile_exponent(411.0, || slope), 411.0);
     }
-    let held = profile_exponent(DeckProfileRules::Held, 411.0, || {
-        panic!("the held rule takes no slope")
-    });
-    assert_same_bits(held, 411.0);
 }
 
-/// Jupiter's clouds at `f_sed` 1,000, under the deck profile's rules `rules`.
-fn rainy_jupiter(rules: DeckProfileRules) -> Condensation {
-    with_deck_profile(rules, || {
-        Condensation::derive(
-            jupiter_gas(),
-            jupiter,
-            &jupiter_column(),
-            with(1_000.0),
-            1.0,
-        )
-        .expect("Jupiter's clouds")
-    })
+/// Jupiter's clouds at `f_sed` 1,000.
+fn rainy_jupiter() -> Condensation {
+    Condensation::derive(
+        jupiter_gas(),
+        jupiter,
+        &jupiter_column(),
+        with(1_000.0),
+        1.0,
+    )
+    .expect("Jupiter's clouds")
 }
 
-/// Under `Saturation` each deck of Jupiter's clouds at `f_sed` 1,000 is its held twin's to the bit
-/// but for its mode's exponent: its base, top, vapours, column, `f_sed` (`Deck::sedimentation`,
-/// under both arms), size and τ the same, and its mode's exponent its saturation's slope, under
-/// its `f_sed`; the ammonia's about 6.5, its saturation's over Jupiter's adiabat. At Ackerman and
-/// Marley's baseline, `f_sed` 3, the ammonia's is its `f_sed`, under its slope.
+/// Each deck of Jupiter's clouds at `f_sed` 1,000 keeps its `f_sed` (`Deck::sedimentation`) and its
+/// mode's exponent is its saturation's slope, under its `f_sed`; the ammonia's about 6.5, its
+/// saturation's over Jupiter's adiabat. At Ackerman and Marley's baseline, `f_sed` 3, the
+/// ammonia's is its `f_sed`, under its slope.
 #[test]
 fn the_deck_profile_moves_a_loop_mode_s_exponent_alone() {
-    let held = rainy_jupiter(DeckProfileRules::Held);
-    let drawn = rainy_jupiter(DeckProfileRules::Saturation);
-    assert_eq!(held.decks().len(), drawn.decks().len());
-    for (was, now) in held.decks().iter().zip(drawn.decks()) {
-        let key = was.condensate().substance().key();
-        assert_same_bits(was.sedimentation(), 1_000.0);
+    let drawn = rainy_jupiter();
+    for now in drawn.decks() {
+        let key = now.condensate().substance().key();
         assert_same_bits(now.sedimentation(), 1_000.0);
-        assert_same_bits(was.modes()[0].profile().exponent(), 1_000.0);
         let exponent = now.modes()[0].profile().exponent();
         assert!(exponent > 0.0 && exponent < 1_000.0, "{key}: {exponent}");
-        let mut again = now.clone();
-        again.modes[0].profile.exponent = 1_000.0;
-        assert_eq!(format!("{was:?}"), format!("{again:?}"), "{key}");
     }
     let ammonia = deck(&drawn, "NH3").modes()[0].profile().exponent();
     assert!((6.0..7.0).contains(&ammonia), "{ammonia}");
-    let baseline_jupiter = with_deck_profile(DeckProfileRules::Saturation, jupiter_clouds);
+    let baseline_jupiter = jupiter_clouds();
     assert_same_bits(
         deck(&baseline_jupiter, "NH3").modes()[0]
             .profile()
             .exponent(),
         Sedimentation::BASELINE.efficiency(),
     );
-    assert_eq!(held.not_formed(), drawn.not_formed());
 }
 
-/// The loop gives the same bits twice under each of the deck profile's arms.
+/// The loop gives the same bits twice.
 #[test]
-fn the_condensation_is_the_same_twice_under_each_deck_profile() {
-    for rules in [DeckProfileRules::Held, DeckProfileRules::Saturation] {
-        assert_eq!(
-            format!("{:?}", rainy_jupiter(rules)),
-            format!("{:?}", rainy_jupiter(rules)),
-            "{rules:?}"
-        );
-        assert_eq!(
-            format!("{:?}", with_deck_profile(rules, venus_clouds)),
-            format!("{:?}", with_deck_profile(rules, venus_clouds)),
-            "{rules:?}"
-        );
-    }
+fn the_condensation_is_the_same_twice_under_the_deck_profile() {
+    assert_eq!(
+        format!("{:?}", rainy_jupiter()),
+        format!("{:?}", rainy_jupiter())
+    );
+    assert_eq!(
+        format!("{:?}", venus_clouds()),
+        format!("{:?}", venus_clouds())
+    );
 }
 
 /// A deck's own column, its level masses, holds its column mass, and its half-mass level lies

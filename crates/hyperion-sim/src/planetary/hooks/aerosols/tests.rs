@@ -1693,17 +1693,17 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
 /// switch.
 #[test]
 fn under_the_deck_profile_the_surface_airs_volatile_decks_are_drawn_on_their_columns() {
-    use crate::planetary::chem::condense::{DeckProfileRules, capturing_decks, with_deck_profile};
+    use crate::planetary::chem::condense::capturing_decks;
     use crate::planetary::hooks::envelope_atmosphere::DeckKind;
     let mut checked = Vec::new();
     for name in ["Earth", "Titan"] {
-        let (inventory, placed) = with_deck_profile(DeckProfileRules::Saturation, || {
+        let (inventory, placed) = {
             capturing_decks(|| {
                 let (body, conditions, structure) = table_air(name);
                 AerosolInventory::derive(&inputs_of(&body, &conditions, &structure, 1.0))
                     .unwrap_or_else(|e| panic!("{name}: {e}"))
             })
-        });
+        };
         for deck in inventory.decks() {
             let condensate = deck.condensate();
             if DeckKind::of(condensate) != Some(DeckKind::Volatile) {
