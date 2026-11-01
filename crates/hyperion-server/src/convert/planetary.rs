@@ -11,14 +11,14 @@
 use hyperion_protocol::{
     AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,
     AerosolTauBasisDto, ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto,
-    BeltDto, BeltGapDto, BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest,
-    BodyEnvelopeDto, BodyFigureDto, BodyGrantDto, BodyHooksDto, BodyIdHex, BodyKindDto,
-    BodyOrbitDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
-    BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
-    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
-    CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto, DetailLevelDto,
-    DetailSeedHex, DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto,
-    GuillotProfileDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto,
+    BeltDto, BeltGapDto, BeltKindDto, BeltSiteDto, BiosphereDto, BiosphereFluxDto, BodyDetailDto,
+    BodyDetailRequest, BodyEnvelopeDto, BodyFigureDto, BodyGrantDto, BodyHooksDto, BodyIdHex,
+    BodyKindDto, BodyOrbitDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto,
+    BodySummaryDto, BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto,
+    CometaryHaloDto, CondensateDeckDto, CraterContractDto, CraterScreeningDto,
+    CraterTargetClassDto, CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto,
+    DetailLevelDto, DetailSeedHex, DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto,
+    GasShareDto, GuillotProfileDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto,
     MixingRatioNodeDto, Modelled, MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto,
     OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto,
     ProfileNodeDto, ProtoplanetaryDiscDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto,
@@ -59,9 +59,9 @@ use hyperion_sim::planetary::hooks::{
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
-    BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, DiscRecord, Envelope,
-    Hooks, Modelled as RecordModelled, MoonOrigin, Population, Section, Surface, SystemSnapshot,
-    TaxonomicClass,
+    BeltKind, Biosphere, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, DiscRecord,
+    Envelope, Hooks, Modelled as RecordModelled, MoonOrigin, Population, Section, Surface,
+    SystemSnapshot, TaxonomicClass,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
 use hyperion_sim::planetary::satellites::moon_index;
@@ -944,6 +944,23 @@ fn key(substance: SubstanceId) -> String {
     substance.substance().key().as_str().to_owned()
 }
 
+/// A biosphere's net surface fluxes as the wire carries them (P14.T53.d), each gas by its registry
+/// key with its flux in units of Earth's present biotic flux of it, in the biosphere's order. No
+/// record holds one until a life plan exists.
+#[must_use]
+fn biosphere(biosphere: &Biosphere) -> BiosphereDto {
+    BiosphereDto {
+        fluxes: biosphere
+            .fluxes()
+            .iter()
+            .map(|&(species, flux_earth)| BiosphereFluxDto {
+                species: key(species),
+                flux_earth,
+            })
+            .collect(),
+    }
+}
+
 /// A mixture of gases as the wire carries it, in the record's order.
 #[must_use]
 fn gas_shares(gases: &[(SubstanceId, f64)]) -> Vec<GasShareDto> {
@@ -1183,7 +1200,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
             Some(surface_modifiers(modifiers))
         }),
         taxonomic_class: taxonomic_class_member(surface.taxonomic_class()),
-        biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
+        biosphere: later(surface.biosphere(), |fluxes| Some(biosphere(fluxes))),
         // P14.T55.b's: the record holds no such member, so every server sends it absent until
         // then (P14.T35.f).
         silicate_vapour: Modelled::NotModelled,
@@ -2087,6 +2104,32 @@ mod tests {
             "{structures} structures, {inventories} inventories"
         );
         eprintln!("regular moons whose ocean is not computed: {absent:?}");
+    }
+
+    /// P14.T53.d: a biosphere, which only a life plan gives, is sent as its fluxes, each gas by its
+    /// registry key with its flux to the bit, in the biosphere's order (its keys'), a net sink
+    /// negative: Earth's O₂ flux, half its CH₄ and a net N₂O sink, built by hand through the sim's
+    /// public API; and an empty biosphere as no fluxes.
+    #[test]
+    fn a_biosphere_is_sent_as_its_fluxes_by_key() {
+        let gas = |key| substance::by_key(key).expect("a registry gas");
+        let fluxes = Biosphere::new([(gas("O2"), 1.0), (gas("N2O"), -0.25), (gas("CH4"), 0.5)])
+            .expect("three gases with finite fluxes");
+        let sent = |dto: &BiosphereDto| {
+            dto.fluxes
+                .iter()
+                .map(|flux| (flux.species.clone(), flux.flux_earth.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            sent(&biosphere(&fluxes)),
+            [("CH4", 0.5), ("N2O", -0.25), ("O2", 1.0)]
+                .map(|(key, flux): (&str, f64)| (key.to_owned(), flux.to_bits()))
+        );
+        assert_eq!(
+            sent(&biosphere(&Biosphere::default())),
+            Vec::<(String, u64)>::new()
+        );
     }
 
     /// P14.T54.b.c: a surface's modifiers are sent as the record holds them, each scalar to the bit

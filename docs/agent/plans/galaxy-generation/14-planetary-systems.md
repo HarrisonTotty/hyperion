@@ -8184,6 +8184,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - fluxes with no sinks stated are refused.
   - _Files:_ `planetary/hooks/biosphere.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::biosphere`.
+  - _Built_ 2026-11-01, pure, the member absent: Risks, "Deviations in P14.T53.d, as built".
 - **P14.T53.e The state from the present climate** (after 24, the first planetary bump it is ready
   for; lane p14-escape after T53.c, else a free slot; decision-bump-plan-after-22, "Rulings before
   T53.a lands", R1.5).
@@ -33749,3 +33750,28 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     under every 26 hold the cap gives 829.80 Pa (590.25 Pa of CO₂), above water's triple point,
     so `BelowTriplePoint` does not fire (the cap pilot's 565.8 Pa was its CO₂ alone).
     `planetary/habitability` pins the four on an `_added_limits` line, so the older lines stand.
+  - _Gap (lean, 2026-11-01):_ the closed list names no limit for a molten surface, or a dry one
+    above the triple point (the table's Mars is `Marginal` with none).
+- **Deviations in P14.T53.d, as built (lane p14-t53d, 2026-11-01).** Pure: no record moves
+  (`golden_diff.py`: no golden changed), no `BodyHooks` field (the record's `Surface::biosphere`
+  is the slot, still `NotModelled`), and the wire's `BiosphereDto` as it was, which the server's
+  `convert::planetary::biosphere` now fills.
+  - _API:_ `hooks::biosphere`'s `Biosphere`, `BioticAir`, `BioticAirInputs`, `OxygenSinks`,
+    `Cover`, `methane_lifetime` and `nitrous_oxide_lifetime`; `record::Biosphere` is the hook's
+    (the empty enum is gone); `aerosols::ozone_column` is T24.c's `N_⊕` F U, shared, and
+    `PRESENT_OXYGEN_COLUMN` public.
+  - _Sinks (lean, 2026-11-01):_ the world states O₂'s (`OxygenSinks`: reductants, and weathering
+    as r^½ at 1 PAL; `EARTH` is COPSE's); CH₄'s and N₂O's are lifetimes the module states, CH₄'s
+    over 10⁻³–1.5 PAL (Cooke et al. 2022's ratios × 9.1 yr), N₂O's 116 yr over 0.5–1.5 PAL.
+    Outside them, or for any other gas, a flux is refused (`NoSink`, `SinkOutOfRange`), and a
+    negative CH₄ or N₂O flux is `NetSink`.
+  - _Units:_ each flux is per unit of Earth's surface (Earth's global flux over 4πR⊕²), present,
+    not pre-industrial (the life brainstorm's request 2 is not taken); the O₂ level is by column,
+    as T24.c reads it.
+  - _The `biological` flag (lean, 2026-11-01):_ `Cover { substance, biological }`, on the server
+    alone; the palette's `PaletteRole::Cover` and the surface payload are unchanged (the layout
+    froze at 24; the life brainstorm's request 3).
+  - _For a life plan:_ the abiotic air's own gases are kept, not re-equilibrated; the biotic air's
+    gases feed T24.c's inventory as they are; CH₄'s lifetime is extrapolated, not refused, beyond
+    Cooke's 0.8 ppmv; the anoxic CH₄ state, O₂'s bistability, the seasons and the biotic gases'
+    greenhouse are not built.

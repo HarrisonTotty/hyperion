@@ -212,7 +212,7 @@ pub fn sedimentation_for_supply(
 const GRAMS_PER_KILOGRAM: f64 = 1_000.0;
 
 /// Avogadro's number, mol⁻¹: R ÷ k, both exact in the 2019 SI.
-const AVOGADRO: f64 = MOLAR_GAS_CONSTANT / crate::units::consts::BOLTZMANN_CONSTANT;
+pub(crate) const AVOGADRO: f64 = MOLAR_GAS_CONSTANT / crate::units::consts::BOLTZMANN_CONSTANT;
 
 /// One Dobson unit, molecules m⁻²: 2.687 × 10²⁰ (WMO/UNEP, _Twenty Questions and Answers About the
 /// Ozone Layer: 2018 Update_, glossary), rendering plan R08's `DOBSON_UNIT_PER_M2`.
@@ -292,8 +292,9 @@ const PASCALS_PER_MILLIBAR: f64 = 100.0;
 /// (PAL), and the ozone template's nodes move to equal overhead O₂ columns (Chapman 1930).
 const EARTH_OXYGEN_PER_PASCAL: f64 = 0.209_476 * AVOGADRO / (28.964_4e-3 * 9.806_65);
 
-/// Earth's O₂ column at its 1,013.25 mb, molecules m⁻²: 1 PAL.
-const PRESENT_OXYGEN_COLUMN: f64 = EARTH_OXYGEN_PER_PASCAL * 101_325.0;
+/// Earth's O₂ column at its 1,013.25 mb, molecules m⁻²: 1 PAL, the level P14.T53.d's biotic air
+/// reads too.
+pub const PRESENT_OXYGEN_COLUMN: f64 = EARTH_OXYGEN_PER_PASCAL * 101_325.0;
 
 /// The ozone column over its value at 1 PAL against the O₂ level (PAL), F of P14.T24.c's rule:
 /// Segura et al. 2003's photochemical columns about the Sun (Astrobiology 3, 689, Table 1: 8.36 ×
@@ -422,7 +423,7 @@ pub fn saltation_threshold(
 /// in ln y against ln x between them, and beyond the last node the last segment's power law.
 /// Below the first node it is the caller's.
 #[must_use]
-fn log_log(nodes: &[(f64, f64)], x: f64) -> f64 {
+pub(super) fn log_log(nodes: &[(f64, f64)], x: f64) -> f64 {
     let pair = nodes
         .windows(2)
         .find(|w| x <= w[1].0)
@@ -472,6 +473,16 @@ pub fn ozone_star_factor(star: Kelvin) -> f64 {
     u0 + (u1 - u0) * (t - t0) / (t1 - t0)
 }
 
+/// The ozone column of an air of O₂ level `level` (its O₂ column over Earth's present one, PAL)
+/// about a host of effective temperature `star`, molecules m⁻²: P14.T24.c's `N_⊕` F(r) U(star)
+/// ([`EARTH_OZONE_COLUMN`], [`ozone_oxygen_factor`], [`ozone_star_factor`]), the column its
+/// profile scales and P14.T53.d's biotic air reads: 0 for a level that is not finite and positive,
+/// and beyond [`OZONE_BY_OXYGEN`]'s last node the extrapolation [`ozone_oxygen_factor`] states.
+#[must_use]
+pub fn ozone_column(level: f64, star: Kelvin) -> f64 {
+    EARTH_OZONE_COLUMN * ozone_oxygen_factor(level) * ozone_star_factor(star)
+}
+
 /// The ozone of an air of O₂ mole fraction `oxygen` at the ground (P14.T24.c's rule): `N_⊕` F(r)
 /// U(star), r its O₂ column over Earth's, on the AFGL template ([`AFGL_US_STANDARD_OZONE`]) with
 /// each node moved to the pressure at which the O₂ column above it equals the node's on Earth (the
@@ -493,7 +504,7 @@ fn ozone(inputs: &AerosolInputs<'_>, oxygen: f64) -> Result<Option<Absorber>, Bu
         / (inputs.mean_molar_mass_g_per_mol / GRAMS_PER_KILOGRAM * inputs.gravity.value());
     let p_s = inputs.surface_pressure.value();
     let level = per_pascal * p_s / PRESENT_OXYGEN_COLUMN;
-    let column = EARTH_OZONE_COLUMN * ozone_oxygen_factor(level) * ozone_star_factor(star);
+    let column = ozone_column(level, star);
     let scale = EARTH_OXYGEN_PER_PASCAL / per_pascal;
     let moved: Vec<(f64, f64)> = AFGL_US_STANDARD_OZONE
         .iter()

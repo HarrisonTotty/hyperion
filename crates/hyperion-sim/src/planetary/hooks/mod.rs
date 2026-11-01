@@ -1,8 +1,8 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T25, T48.a–d, T48.f, T52.d; the rendering
-//! plans' R09.T1.b):
+//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T25, T48.a–d, T48.f, T52.d, T53.d; the
+//! rendering plans' R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -57,6 +57,12 @@
 //!   liquid water stands on or under its surface and its limits from a closed list, read from its
 //!   record, its seasonal orbit's place in its zone and its zone's stars. It says nothing about
 //!   life, and it is not on the record.
+//! - [`biosphere`]: a biosphere's net surface fluxes of O₂, CH₄ and N₂O ([`Biosphere`], P14.T53.d),
+//!   the chemistry that takes them as sources against their stated sinks
+//!   ([`BioticAir`](biosphere::BioticAir)), and the palette's cover with its `biological` flag
+//!   ([`Cover`](biosphere::Cover)). It is pure, and no rule makes life: the record's surface
+//!   section holds the biosphere as a member not modelled until a life plan exists, so it needs no
+//!   field here.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
@@ -74,6 +80,7 @@
 //! [`DetailSeed`] in the surface seed's place (R09.T1.b), and nothing server-only.
 
 pub mod aerosols;
+pub mod biosphere;
 pub mod cold_traps;
 pub mod crust;
 pub mod envelope_atmosphere;
@@ -88,6 +95,7 @@ pub mod sulphur;
 pub mod surface;
 
 pub use aerosols::AerosolInventory;
+pub use biosphere::Biosphere;
 pub use crust::{CrustComposition, CrustCompositionInputs, CrustLithology, DeriveCrustError};
 pub use envelope_atmosphere::{
     DeckKind, DeriveEnvelopeAtmosphereError, DeriveInternalTemperatureError, EnvelopeAtmosphere,

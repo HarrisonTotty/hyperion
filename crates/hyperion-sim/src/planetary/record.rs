@@ -54,6 +54,7 @@ use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 pub use crate::planetary::hooks::AerosolInventory;
+pub use crate::planetary::hooks::Biosphere;
 use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 pub use crate::planetary::hooks::SurfaceModifiers;
@@ -920,7 +921,8 @@ impl Surface {
         self.modifiers.as_ref()
     }
 
-    /// The biosphere's fluxes (P14.T53.d), not modelled until they land.
+    /// The biosphere's net surface fluxes ([`Biosphere`], P14.T53.d): not modelled on every
+    /// record, since no rule in plan 14 makes life; a life plan's to give.
     #[must_use]
     pub const fn biosphere(&self) -> Modelled<&Biosphere> {
         self.biosphere.as_ref()
@@ -977,10 +979,6 @@ impl<T> Modelled<T> {
         }
     }
 }
-
-/// A biosphere's fluxes (P14.T53.d), which no task builds yet, so the type has no value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Biosphere {}
 
 /// The contents of an envelope section: a gas-envelope body's visible atmosphere (P14.T24.d's
 /// profile and internal heat, P14.T52.d's chemistry, decks, hazes and absorbers, on P14.T50.b's
