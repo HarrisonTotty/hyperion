@@ -34,7 +34,7 @@
 //! terms are read apart too ([`SupernovaTerms`]), so that plan 12's alerts can weight each by its
 //! share of the light in a band (P12.T5.b).
 
-use crate::coords::GalacticVelocity;
+use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::type_ia::{IaChannel, IaLeftover, IaProgenitor};
 use crate::galaxy::displaced::ExplosionSite;
@@ -1081,6 +1081,42 @@ pub fn effective_window(
         .window_caps()
         .cut(surroundings.environment(), window)
         .ended_at(lifetime_cap(marks.fastest_member_speed()))
+}
+
+/// An upper bound, Julian years, on the window `W_eff` that [`effective_window`] cuts for every
+/// single star's core-collapse death of `system` at `position` in the field's surroundings
+/// ([`Surroundings::Field`]), read before the star is built (plan 09, P09.T33.b's screen).
+///
+/// A core collapse's energy is `system`'s `snr.energy` draw through the standard law or, for an
+/// electron-capture death, through that law ([`EnergyLaw::of_death`]); so its window is one of
+/// the two [`shell_window`]s of the site's smooth gas and metallicity at those two energies, ended
+/// at the field's cap, as [`effective_window`] reads them, and the marks' [`lifetime_cap`] only
+/// ends it sooner. The greater of the two bounds it, and [`SupernovaInterval::of_window`] is
+/// monotone in the window, so a death at or before its interval's start is claimed by no window
+/// its star could have.
+#[must_use]
+pub(crate) fn field_window_bound(
+    galaxy: &Galaxy,
+    position: &GalacticPosition,
+    system: SystemId,
+) -> Years {
+    let metallicity = galaxy.gas().metallicity_at(position);
+    let mut cache = NoiseCache::with_capacity(SITE_CACHE_SLOTS);
+    let gas = SiteGas::at(galaxy.gas(), position, &mut cache);
+    let [standard, capture] = [EnergyLaw::Standard, EnergyLaw::ElectronCapture].map(|law| {
+        galaxy
+            .window_caps()
+            .cut(
+                ShellEnvironment::Field,
+                shell_window(&gas, drawn_energy(galaxy, system, law), metallicity),
+            )
+            .duration()
+    });
+    if capture.value() > standard.value() {
+        capture
+    } else {
+        standard
+    }
 }
 
 /// The supernova test with a clock (plan 09, P09.T17): whether the death `marks` at `site` is a

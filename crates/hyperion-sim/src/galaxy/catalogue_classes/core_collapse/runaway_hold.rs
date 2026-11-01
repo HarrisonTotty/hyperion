@@ -50,6 +50,7 @@ use crate::galaxy::placement::{CellKey, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::id::{FeatureMemberId, MemberSlot, SystemIdKind};
+use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{draw_metallicity, primary_draws};
 
 /// The seed of the Milky Way fixture, P09.T33.a's tests'.
@@ -1013,6 +1014,48 @@ fn the_grid_s_runaways_and_the_class_agree_on_their_deaths_and_claims() {
     assert!(dying > 20 && claimed >= 5, "{seen} {dying} {claimed}");
 }
 
+/// The screen refuses no entry: in the centre's cell and the sample cells, under every 27 hold,
+/// each candidate the unscreened thinning keeps and the shared test passes is screened through,
+/// to the same entry bit for bit, and the screened cells hold those entries alone. At the centre
+/// the screen refuses most of the candidates the test would refuse.
+#[test]
+fn the_screen_refuses_no_entry() {
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
+    let cells: Vec<CatalogueCellKey> = sample_cells().into_iter().step_by(3).collect();
+    let (mut tested, mut refused, mut kept) = (0_u32, 0_u32, 0_u32);
+    for cell in cells.iter().chain([&key([0, 0, 0])]) {
+        let bound = process.bound(galaxy, cell);
+        let mut expected = Vec::new();
+        for index in 0..candidate_count(galaxy.seed(), cell, bound) {
+            let id = cell.candidate_id(index, 0).unwrap();
+            let Some(candidate) = process.unscreened_candidate(galaxy, cell, id, bound) else {
+                continue;
+            };
+            tested += 1;
+            let screened = process.candidate(galaxy, cell, id, bound);
+            refused += u32::from(screened.is_none());
+            let Some(entry) = process.test(galaxy, candidate.clone()) else {
+                continue;
+            };
+            kept += 1;
+            assert_eq!(screened.as_ref(), Some(&candidate), "{id:?}");
+            expected.push((id, entry));
+        }
+        let generated: Vec<_> = CatalogueClassCell::generate(galaxy, &process, *cell)
+            .into_entries()
+            .into_iter()
+            .map(|entry| (entry.id(), *entry.value()))
+            .collect();
+        assert_eq!(generated, expected, "{cell:?}");
+    }
+    eprintln!("{tested} candidates tested, {refused} refused by the screen, {kept} kept");
+    assert!(
+        kept > 20 && refused > (tested - kept) / 2,
+        "{tested} {refused} {kept}"
+    );
+}
+
 /// The cells under every 27 hold do not depend on the order they are generated in, nor on what was
 /// resolved between them.
 #[test]
@@ -1191,7 +1234,8 @@ fn ejected_census(galaxy: &Galaxy) -> [f64; 4] {
                 }
                 for index in 0..candidate_count(galaxy.seed(), &cell, bound) {
                     let id = cell.candidate_id(index, 0).unwrap();
-                    let Some(candidate) = process.candidate(galaxy, &cell, id, bound) else {
+                    let Some(candidate) = process.unscreened_candidate(galaxy, &cell, id, bound)
+                    else {
                         continue;
                     };
                     let source = table.component_source(candidate.component);

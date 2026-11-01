@@ -107,6 +107,13 @@
 //!   its mass in it by the mass function, then thins against its interval's bounds. Below 100 Myr
 //!   the young disc's age density rises tenfold, while band E dies within some 50 Myr, so held to
 //!   its densest the field thinned away some 85% of the candidates that had paid for a lifetime.
+//! - **The screen.** A candidate the shared test cannot keep is refused before its star is built,
+//!   by two bounds on the test that read no star: after the site's pick, a death T at or before
+//!   the start of the interval of the longest window the field could cut at the site for either of
+//!   the system's core-collapse energies (`field_window_bound`); and at step 3, whose lifetime is
+//!   now its death's (`death_under`, the same build), a death that makes no supernova. Neither
+//!   refuses a candidate the test keeps, so the entries are the same bit for bit; at the centre's
+//!   cell they refuse 286 of the 287 the test would, which had cost a lifetime and a star each.
 //!
 //! So each star's deaths split between the field term, the features and the classes at its mass
 //! exactly as the model's shares do: the field drops what the classes take and the features drop
@@ -131,8 +138,8 @@ use super::grid::{CatalogueMember, ClassProcess};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
 use super::supernova::{
-    DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window, claims,
-    lifetime_cap,
+    DeathMarks, SupernovaEntry, SupernovaInterval, SupernovaKind, Surroundings, claimed_window,
+    claims, field_window_bound, lifetime_cap,
 };
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::GeneratorVersion;
@@ -161,7 +168,7 @@ use crate::rng::{DomainTag, Mark, ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
-use crate::stellar::sse::lifetime_under;
+use crate::stellar::sse::death_under;
 use crate::stellar::system::{SystemStars, track_mass_of};
 use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
 use crate::units::{
@@ -703,6 +710,20 @@ impl CoreCollapseProcess {
             + self.ejected.capacity() * size_of::<EjectedTerm>()
     }
 
+    /// [`ClassProcess::candidate`] with no screen ([`Screening::Off`]): every candidate the
+    /// thinning keeps, which the class's tests of its candidates' shares count.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn unscreened_candidate(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+    ) -> Option<CoreCollapseCandidate> {
+        self.screened_candidate(galaxy, cell, id, bound, Screening::Off)
+    }
+
     /// The runaway and walkaway terms the class follows: none under the held arm (from 27,
     /// P09.T33.b; module documentation).
     #[cfg(test)]
@@ -746,6 +767,23 @@ impl CoreCollapseProcess {
         }
     }
 }
+
+/// Whether a candidate is screened by the shared test's cheaper bounds before its star is built
+/// (from 27, P09.T33.b; [`CoreCollapseProcess::screened_candidate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screening {
+    /// Under the new arm, refuse where the shared test cannot keep the candidate: the cells' and
+    /// every lookup's.
+    Shared,
+    /// Draw every candidate the thinning keeps: the class's own tests of its candidates' shares.
+    #[cfg(test)]
+    Off,
+}
+
+/// The margin on a candidate's drawn T, a Julian year, by which
+/// [`CoreCollapseProcess::out_of_reach`] allows for its death's own T: lifetime − (lifetime − T)
+/// in years, rounded off by some 10⁻⁸ yr on a lifetime of 10⁷ yr.
+const SCREEN_MARGIN: Span = Span::from_seconds(31_557_600);
 
 /// The index `mark` picks among `weights` against `bound`, as [`Mark::pick_weighted`] picks over a
 /// slice: the first whose running total's ratio to the bound lies above the mark, or `None` past
@@ -1179,112 +1217,8 @@ impl ClassProcess for CoreCollapseProcess {
         id: CatalogueSystemId,
         bound: PerCubicLightYear,
     ) -> Option<CoreCollapseCandidate> {
-        let seed = galaxy.seed();
-        let system = SystemId::from(id);
-        let key = ObjectKey::from(system);
-        // 1. The site, thinned on the envelope there, the mark picking the component.
-        if bound.value().is_nan() || bound.value() <= 0.0 {
-            return None;
-        }
-        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_SITE, key);
-        let site =
-            cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
-        let point = PointLy::from(&site);
-        let mut weights = [0.0; MAX_COMPONENTS];
-        let n = self.weights(galaxy, &point, &mut weights);
-        let mark = stream.mark();
-        let displaced = self.ejecting(galaxy);
-        let picked = match displaced {
-            None => mark.pick_weighted(&weights[..n], bound.value())?,
-            // From 27 the same mark picks a runaway or walkaway term after the components. The
-            // terms' forms read the point's radius and arm point, found once, when the pick first
-            // reaches a term, the same bits as each form's own: a rejected candidate reads every
-            // term, and at the centre's cell this cut a candidate's pick from 2.2 to 1.5 µs
-            // (release, pod, 16 vCPU; P09.T33.b's cost).
-            Some(displaced) => {
-                let at = LazyCell::new(|| {
-                    FormPoint::new(&point, Some(young_disc(galaxy.fields()).1.geometry()))
-                });
-                pick_lazily(
-                    mark,
-                    weights[..n].iter().copied().chain(
-                        self.ejected
-                            .iter()
-                            .map(|term| term.weight_at(displaced, &at)),
-                    ),
-                    bound.value(),
-                )?
-            }
-        };
-        if let (Some(displaced), Some(term)) = (displaced, picked.checked_sub(n)) {
-            return self.ejected_candidate(galaxy, displaced, (id, site), &self.ejected[term]);
-        }
-        let young = &self.components[picked];
-        let component = young.id;
-        let laws = galaxy.fields().component(component);
-        // 2. The primary's initial mass and its [Fe/H]; from 27 the mass by its interval's death
-        //    rate bound (`MassRates`), whose bound step 5 thins against.
-        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_MASS, key);
-        let (mass, rate) = young.mass(galaxy, displaced, &mut stream)?;
-        // From 27 its ejection marks: a death after an ejection is a runaway's or a walkaway's
-        // term's, not the field's (P09.T33.b).
-        if let Some(displaced) = displaced {
-            let table = displaced.class_table();
-            let mut ejection = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_EJECTION, key);
-            if ejection_before_death(
-                table,
-                table.component_source(component),
-                mass,
-                &mut ejection,
-            )
-            .is_some()
-            {
-                return None;
-            }
-        }
-        let feh = laws.metallicity(&point, Years::ZERO);
-        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_METALLICITY, key);
-        let composition = Composition::from_fe_h(
-            Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
-            HeliumExcess::ZERO,
-        );
-        // 3. The primary's draws, at attempt 0 as its record reads them, and its lifetime, as plan
-        //    08's predicate's exact tier computes it, under the galaxy's stellar rules.
-        let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let lifetime = lifetime_under(
-            track_mass_of(mass),
-            &composition,
-            &draws,
-            galaxy.rules().stellar,
-        );
-        let life = lifetime.value();
-        // 4. T across the field's interval, and the age at the epoch it implies.
-        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
-        let death = self.death_at(stream.uniform());
-        let age_at_epoch = Years::new(life - death.since_epoch().as_julian_years_f64());
-        // 5. Thinned on the component's death rate at that age: its age density, as deaths per
-        //    system over the interval, against the component's largest, from 27 its mass
-        //    interval's.
-        let deaths = galaxy.field_ages(component).pdf(age_at_epoch)
-            * self.interval.length().as_julian_years_f64();
-        if !stream.decide(Threshold::from_ratio(deaths, rate)) {
-            return None;
-        }
-        // 6. The one velocity.
-        let velocity = site_velocity(galaxy, component, &site, key);
-        Some(CoreCollapseCandidate {
-            id,
-            site,
-            component,
-            population: laws.population(),
-            mass,
-            composition,
-            draws,
-            lifetime,
-            age_at_epoch,
-            velocity,
-            ejection: None,
-        })
+        // From 27 screened by the shared test's cheaper bounds, which refuse no entry.
+        self.screened_candidate(galaxy, cell, id, bound, Screening::Shared)
     }
 
     /// Its death time T, read first (rule 10): word 0 of `class.core_collapse.death`, placed in
@@ -1415,6 +1349,122 @@ impl CoreCollapseCandidate {
 }
 
 impl CoreCollapseProcess {
+    /// Candidate `id` of `cell` under the envelope `bound`, by the module documentation's steps;
+    /// from 27 (P09.T33.b), under [`Screening::Shared`], none where the shared test cannot keep it
+    /// by bounds that cost no star: its death T past every window the field could cut at its site
+    /// ([`out_of_reach`](Self::out_of_reach)), read after the site's pick, and its death no
+    /// supernova, read from the lifetime's own build ([`death_under`]). The test refuses either,
+    /// so the entries are the same; the candidates the class's own tests count are
+    /// [`Screening::Off`]'s.
+    #[must_use]
+    fn screened_candidate(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+        screening: Screening,
+    ) -> Option<CoreCollapseCandidate> {
+        let seed = galaxy.seed();
+        let system = SystemId::from(id);
+        let key = ObjectKey::from(system);
+        // 1. The site, thinned on the envelope there, the mark picking the component.
+        if bound.value().is_nan() || bound.value() <= 0.0 {
+            return None;
+        }
+        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_SITE, key);
+        let site =
+            cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
+        let point = PointLy::from(&site);
+        let displaced = self.ejecting(galaxy);
+        let (picked, n) = self.pick(galaxy, displaced, &point, stream.mark(), bound)?;
+        // From 27 a death no window at the site can reach is no entry: refused before any star.
+        let screened = displaced.filter(|_| screening == Screening::Shared);
+        if screened.is_some() && self.out_of_reach(galaxy, &site, system, key) {
+            return None;
+        }
+        if let (Some(displaced), Some(term)) = (displaced, picked.checked_sub(n)) {
+            return self.ejected_candidate(
+                galaxy,
+                displaced,
+                (id, site),
+                &self.ejected[term],
+                screening,
+            );
+        }
+        let young = &self.components[picked];
+        let component = young.id;
+        let laws = galaxy.fields().component(component);
+        // 2. The primary's initial mass and its [Fe/H]; from 27 the mass by its interval's death
+        //    rate bound (`MassRates`), whose bound step 5 thins against.
+        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_MASS, key);
+        let (mass, rate) = young.mass(galaxy, displaced, &mut stream)?;
+        // From 27 its ejection marks: a death after an ejection is a runaway's or a walkaway's
+        // term's, not the field's (P09.T33.b).
+        if let Some(displaced) = displaced {
+            let table = displaced.class_table();
+            let mut ejection = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_EJECTION, key);
+            if ejection_before_death(
+                table,
+                table.component_source(component),
+                mass,
+                &mut ejection,
+            )
+            .is_some()
+            {
+                return None;
+            }
+        }
+        let feh = laws.metallicity(&point, Years::ZERO);
+        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_METALLICITY, key);
+        let composition = Composition::from_fe_h(
+            Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
+            HeliumExcess::ZERO,
+        );
+        // 3. The primary's draws, at attempt 0 as its record reads them, and its lifetime, as plan
+        //    08's predicate's exact tier computes it, under the galaxy's stellar rules: its
+        //    death's age, from 27 refused where that death makes no supernova.
+        let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
+        let primary = death_under(
+            track_mass_of(mass),
+            &composition,
+            &draws,
+            galaxy.rules().stellar,
+        );
+        if screened.is_some() && SupernovaKind::of_death(&primary).is_none() {
+            return None;
+        }
+        let lifetime = primary.age();
+        let life = lifetime.value();
+        // 4. T across the field's interval, and the age at the epoch it implies.
+        let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
+        let death = self.death_at(stream.uniform());
+        let age_at_epoch = Years::new(life - death.since_epoch().as_julian_years_f64());
+        // 5. Thinned on the component's death rate at that age: its age density, as deaths per
+        //    system over the interval, against the component's largest, from 27 its mass
+        //    interval's.
+        let deaths = galaxy.field_ages(component).pdf(age_at_epoch)
+            * self.interval.length().as_julian_years_f64();
+        if !stream.decide(Threshold::from_ratio(deaths, rate)) {
+            return None;
+        }
+        // 6. The one velocity.
+        let velocity = site_velocity(galaxy, component, &site, key);
+        Some(CoreCollapseCandidate {
+            id,
+            site,
+            component,
+            population: laws.population(),
+            mass,
+            composition,
+            draws,
+            lifetime,
+            age_at_epoch,
+            velocity,
+            ejection: None,
+        })
+    }
+
     /// Candidate `id`'s marks at its `site` as a death of the runaway or walkaway term `term` of
     /// `displaced`'s classes, after the site's mark picked it (from 27, P09.T33.b; module
     /// documentation), on the field candidate's streams and `class.core_collapse.ejection`:
@@ -1422,11 +1472,11 @@ impl CoreCollapseProcess {
     /// 2. its primary's initial mass in band E, its mass interval by the term's odds (the mass
     ///    stream's word 0) and its mass in it by the mass function (word 1), thinned on the
     ///    class's share of that mass's deaths as the term's kind against the interval's bound
-    ///    (word 2); then
-    ///    its ejection age among the kind's by their shares (ejection word 0), its speed inside the
-    ///    class's bin (word 1) and an azimuth (word 2); and its \[Fe/H\] from its component's law
-    ///    at its source's reference site, at age zero;
-    /// 3. its primary's draws and lifetime, as a field candidate's;
+    ///    (word 2); then its ejection age among the kind's by their shares (ejection word 0), its
+    ///    speed inside the class's bin (word 1) and an azimuth (word 2); and its \[Fe/H\] from its
+    ///    component's law at its source's reference site, at age zero;
+    /// 3. its primary's draws and lifetime, as a field candidate's, and under `screening` its
+    ///    screen on the death's supernova;
     /// 4. T across the interval, and its age at the epoch;
     /// 5. thinned on the age density at that age of the term's systems, the component's budget's
     ///    for a runaway and its field's for a walkaway, against its interval's bound, as a field
@@ -1442,6 +1492,7 @@ impl CoreCollapseProcess {
         displaced: &DisplacedFields,
         (id, site): (CatalogueSystemId, GalacticPosition),
         term: &EjectedTerm,
+        screening: Screening,
     ) -> Option<CoreCollapseCandidate> {
         let seed = galaxy.seed();
         let system = SystemId::from(id);
@@ -1483,14 +1534,19 @@ impl CoreCollapseProcess {
             Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
             HeliumExcess::ZERO,
         );
-        // 3. The primary's draws and lifetime.
+        // 3. The primary's draws and lifetime, its death's age, refused where that death makes no
+        //    supernova.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let lifetime = lifetime_under(
+        let primary = death_under(
             track_mass_of(mass),
             &composition,
             &draws,
             galaxy.rules().stellar,
         );
+        if screening == Screening::Shared && SupernovaKind::of_death(&primary).is_none() {
+            return None;
+        }
+        let lifetime = primary.age();
         let life = lifetime.value();
         // 4–5. T, the age, and the death rate there of the term's systems: the budget's ages for
         //      a runaway, the field's for a walkaway.
@@ -1539,6 +1595,70 @@ impl CoreCollapseProcess {
                 speed: ejection_speed,
             }),
         })
+    }
+
+    /// The envelope's term `mark` picks at `point` against `bound`, and the number of the
+    /// components', which come first: a component's index below it, a runaway or walkaway term's
+    /// from it on (from 27, `displaced`'s classes); `None` past them all (step 1).
+    #[must_use]
+    fn pick(
+        &self,
+        galaxy: &Galaxy,
+        displaced: Option<&DisplacedFields>,
+        point: &PointLy,
+        mark: Mark,
+        bound: PerCubicLightYear,
+    ) -> Option<(usize, usize)> {
+        let mut weights = [0.0; MAX_COMPONENTS];
+        let n = self.weights(galaxy, point, &mut weights);
+        let picked = match displaced {
+            None => mark.pick_weighted(&weights[..n], bound.value())?,
+            // From 27 the same mark picks a runaway or walkaway term after the components. The
+            // terms' forms read the point's radius and arm point, found once, when the pick first
+            // reaches a term, the same bits as each form's own: a rejected candidate reads every
+            // term, and at the centre's cell this cut a candidate's pick from 2.2 to 1.5 µs
+            // (release, pod, 16 vCPU; P09.T33.b's cost).
+            Some(displaced) => {
+                let at = LazyCell::new(|| {
+                    FormPoint::new(point, Some(young_disc(galaxy.fields()).1.geometry()))
+                });
+                pick_lazily(
+                    mark,
+                    weights[..n].iter().copied().chain(
+                        self.ejected
+                            .iter()
+                            .map(|term| term.weight_at(displaced, &at)),
+                    ),
+                    bound.value(),
+                )?
+            }
+        };
+        Some((picked, n))
+    }
+
+    /// Whether the shared test claims no death of candidate `system` at `site` whose T the death
+    /// stream's word 0 draws (the candidate's step 4, read first as [`event_time`] reads it): T,
+    /// plus [`SCREEN_MARGIN`] for its death's own rounding, at or before the start of the interval
+    /// of [`field_window_bound`], the longest window the field could cut there for any of its
+    /// core collapses (from 27, P09.T33.b's screen). At the centre's cell it refuses some seven in
+    /// ten of the candidates the shared test would refuse, and the supernova screen the rest but
+    /// one (2026-11-01).
+    ///
+    /// [`event_time`]: ClassProcess::event_time
+    #[must_use]
+    fn out_of_reach(
+        &self,
+        galaxy: &Galaxy,
+        site: &GalacticPosition,
+        system: SystemId,
+        key: ObjectKey,
+    ) -> bool {
+        let mut stream = Stream::open(galaxy.seed(), tags::CLASS_CORE_COLLAPSE_DEATH, key);
+        let death = self.death_at(stream.uniform());
+        let start = SupernovaInterval::of_window(field_window_bound(galaxy, site, system)).start();
+        death
+            .checked_add(SCREEN_MARGIN)
+            .is_some_and(|late| late <= start)
     }
 
     /// The death time a uniform `u` in [0, 1) places in the interval: +H less `u` × its length,
@@ -1693,7 +1813,7 @@ pub(crate) fn test_on_grid_marks(
     let mass = record.primary_initial_mass();
     let composition = crate::stellar::system::draw_metallicity(galaxy, record);
     let draws = crate::stellar::system::primary_draws(galaxy, record);
-    let lifetime = lifetime_under(
+    let lifetime = crate::stellar::sse::lifetime_under(
         track_mass_of(mass),
         &composition,
         &draws,
