@@ -10021,14 +10021,22 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `PhotorealRenderer.dropHistograms` drop the histograms of frames before an in-scene cut. VIEW
     cuts at each stage's start, a system jump, an uneased preset or target (`commandCutsImage`),
     the inspection's framing, the image coming to be drawn and AUTO entered from another level.
-    The frames before the first reading draw at the old exposure, as the brief asks; the UX review
-    holds a cut onto a brighter scene to the guide's flash rule (QUESTION for main).
+    A cut's frames are held back until a reading lies inside the range (`AutoExposure.holds`,
+    at most `CUT_HOLD_MAX_S`, 0.15 s): drawn and metered but not presented
+    (`PhotorealFrame.present`, `ViewFrameInputs.present`, `InstrumentsFrame.present`), the view
+    keeping its last presented frame's marks and style; the instruments draw at the primary's
+    applied exposure. Main's ruling (2026-11-02): the guide's flash rule over the brief's frames
+    at the old exposure.
   - _The speeds, settled._ `SMOOTHING_SPEED_EV_PER_S` is one number, 24 EV/s either way (was
     `{ brighten: 3, darken: 1 }`), a camera's AE; the eye's adaptation is not modelled.
   - _The inspection's opening at its meter_ (owner-view-body's `opensAtMeter`) is a cut's first
     reading: a clipped one is a bound the next readings snap past. This lane's own VIEW BODY lean
     was dropped for it.
-  - _Next:_ a held host disc's glare goes through the bloom chain, whose coarsest level takes the
-    eye PSF's far tail: at `AVG`'s exposure the Sun's halo is a plateau to about 8°. Routing a glare
-    source's light above the bloom threshold through the closed form would fix it (findings).
+  - _R07.T14's glare, a host disc's in closed form alone._ A host disc's texels (meter class 0)
+    stay out of the bloom chain (`bloom_excess_of`, `bloomExcessOf`), and
+    `GlareSource.excessLuminance` is the disc's light above the bloom threshold
+    (`discLuminanceAboveRgb`), not above 65,504: the Provides' "cd/m² above 65,504" changes.
+    `discExcessLuminanceRgb` is gone. An eye view's sources fade over the reach's last 10°
+    (`EYE_GLARE_FADE_RAD`, `eyeGlareShare`); each source takes the share of its disc the frame's
+    bodies leave the camera (`glareSources`' `occluders` and `annuli`). Air between is not taken.
   - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
