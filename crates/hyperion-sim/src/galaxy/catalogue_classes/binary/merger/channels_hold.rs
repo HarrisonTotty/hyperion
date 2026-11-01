@@ -472,9 +472,10 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
 
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass,
 /// as measured (2026-11-01; 41.9, 12.0 and 65.3 for version 24's contact-only class against the
-/// version's engine): all over P15.T10.b's 3.1, a finding.
+/// version's engine), re-pinned at generator version 25 (14.23, 12.14 and 16.02 at 24): all over
+/// P15.T10.b's 3.1, a finding.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    14.228_190_907_849_914,
-    12.142_134_904_433_062,
-    16.023_765_912_665_29,
+    14.457_938_333_046_59,
+    12.036_500_197_682_503,
+    16.413_379_905_962_18,
 ];
