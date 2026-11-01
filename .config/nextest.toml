@@ -305,6 +305,12 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(=stellar::rules::ns_accretion_hold::census_of_the_neutron_star_accretion)"
 threads-required = 16
 
+# P11.T4's heavy-donor census runs its two slab censuses the same way, so it reserves sixteen slots
+# too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::heavy_donor_hold::census_of_the_heavy_donors)"
+threads-required = 16
+
 # P09.T36.a's census walks every catalogue feature's list and two classes' cells in sixteen shares of
 # its own (`in_shares`), so it reserves sixteen slots too.
 [[profile.slow.overrides]]

@@ -16,9 +16,9 @@
 //! slow pulsars' (Tauris, Langer and Kramer 2012, MNRAS 425, 1601; Antoniadis et al. 2016,
 //! arXiv:1605.01665). From 27 a neutron star keeps a share [`NS_ACCRETION_EFFICIENCY`] of the
 //! transfer, never more than its Eddington rate, and the rest leaves the pair. Its accretion is
-//! marked as lost from the accretor, as the super-Eddington excess is, though the transfer's step
-//! books every loss with the donor's specific angular momentum (`Engine::transfer_trial` reads no
-//! such mark), so the orbit's response is the held arm's for the same loss.
+//! marked as lost from the accretor, as the super-Eddington excess is; the transfer's step books it
+//! so only under the heavy-donor hold, also at 27 ([`heavy_donor`](super::heavy_donor)), and with
+//! the donor's specific angular momentum otherwise, as it books every loss.
 
 use crate::GeneratorVersion;
 use crate::stellar::rules::StellarRules;

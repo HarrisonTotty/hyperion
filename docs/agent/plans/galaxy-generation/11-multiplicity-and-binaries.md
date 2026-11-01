@@ -7236,3 +7236,15 @@ galaxy_sweeps`.
   `testing::census::slab_census` (10⁷ slab records in 64 parts) and
   `testing::remnant_pair::donor_onto_remnant`. Left: `Accretion::from_accretor` is set but
   `transfer_trial` never reads it, so every loss leaves with the donor's angular momentum.
+- **P11.T4's heavy donors and the transfer's angular momentum, held at 27** (lane
+  `fix-p11-t4-heavy-donor-cvs`, 2026-11-01; at version 24 no golden moves). The cause is the
+  engine's: `transfer_trial` never read `Accretion::from_accretor`, and returned the donor's
+  transferred spin to the orbit while `corotate_donor` restored the donor's spin with nothing drawn
+  from it, so a heavier donor's orbit widened and it transferred at a nuclear rate. From
+  `HEAVY_DONOR_VERSION` = 27 (`stellar/binary/heavy_donor.rs`, `StellarRules::heavy_donor`) the
+  marked loss takes the accretor's specific angular momentum, the corotation onto a compact
+  accretor is `synchronise`'s (the pair's total kept; onto any other the held book stays, lean,
+  2026-11-01), and a main-sequence donor heavier than its compact accretor is held to
+  M ÷ `τ_KH` and transfers at it wherever a step at it leaves it overfilling (lean, 2026-11-01: a
+  cap alone never binds on the engine's equilibrium radii). Test helper:
+  `testing::remnant_pair::thermal_rate`.

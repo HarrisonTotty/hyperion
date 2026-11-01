@@ -561,7 +561,7 @@ fn members_of(
 /// An accreting white dwarf's marks where [`carved_class`] reads them, the pair's stars of initial
 /// masses `initial` in the engine's order, or `None` for a pair whose white dwarf no age of the
 /// horizon feeds.
-fn accreting_marks(
+pub(super) fn accreting_marks(
     timeline: &BinaryTimeline,
     age_at_epoch: Years,
     initial: [SolarMasses; 2],

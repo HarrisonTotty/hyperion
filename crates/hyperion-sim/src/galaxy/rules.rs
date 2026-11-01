@@ -278,8 +278,8 @@ impl GalaxyRules {
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
     /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
     /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, and `placement_fates`, P08.T12 at 27) and the
-    /// stellar rules' `ia_explosion`, P11.T6, `ns_accretion`, P11.T4, and `binary_kicks`, P11.T10
-    /// ([`StellarRules::every_27_hold`]).
+    /// stellar rules' `ia_explosion`, P11.T6, `ns_accretion` and `heavy_donor`, P11.T4, and
+    /// `binary_kicks`, P11.T10 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.

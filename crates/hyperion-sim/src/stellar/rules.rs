@@ -101,6 +101,12 @@
 //!   stars of the drawn hierarchy below it, from it only the stars it still holds, chosen at one
 //!   choke point, [`SystemStars::shown_at`], which the system's summary, state and brief and the
 //!   range brief's paired route read (`stellar/rules/binary_kicks_hold.rs` lists the movers).
+//! - [`heavy_donor`](StellarRules::heavy_donor), at [`HEAVY_DONOR_VERSION`] (plan 11, P11.T4's
+//!   fix): stable transfer from a main-sequence donor heavier than its compact accretor at its
+//!   thermal rate, and the transfer's angular momentum kept, read by the transfer's step, its
+//!   trials and its corotation through the engine's input's rules. The fitted tables keep the
+//!   version's rules until the bump refits them (`stellar/rules/heavy_donor_hold.rs` lists the
+//!   movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -116,6 +122,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
+use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
@@ -170,6 +177,10 @@ pub(crate) struct StellarRules {
     /// Whether a system that a supernova has unbound goes on showing the star it released, the
     /// hold of [`BINARY_KICKS_VERSION`].
     pub(crate) binary_kicks: BinaryKicksRules,
+    /// How the binary engine's stable transfer treats a main-sequence donor heavier than its
+    /// compact accretor and books the transfer's angular momentum, the hold of
+    /// [`HEAVY_DONOR_VERSION`].
+    pub(crate) heavy_donor: HeavyDonorRules,
 }
 
 impl StellarRules {
@@ -235,6 +246,11 @@ impl StellarRules {
             } else {
                 BinaryKicksRules::Paired
             },
+            heavy_donor: if version.get() >= HEAVY_DONOR_VERSION.get() {
+                HeavyDonorRules::Thermal
+            } else {
+                HeavyDonorRules::Nuclear
+            },
         }
     }
 
@@ -250,7 +266,7 @@ impl StellarRules {
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
-    /// P11.T10's `binary_kicks`).
+    /// `heavy_donor`, and P11.T10's `binary_kicks`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -281,6 +297,8 @@ mod classes_hold;
 mod events_hold;
 #[cfg(test)]
 mod hd_limit_hold;
+#[cfg(test)]
+mod heavy_donor_hold;
 #[cfg(test)]
 mod helium_hold;
 #[cfg(test)]

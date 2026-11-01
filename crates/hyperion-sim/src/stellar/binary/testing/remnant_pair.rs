@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::binary::evolve::{Engine, LiveOrbit, roche_lobe};
-use crate::stellar::binary::star::{Member, Path, cooling_origin};
+use crate::stellar::binary::rlof::kelvin_helmholtz;
+use crate::stellar::binary::star::{Kind, Member, Path, cooling_origin};
 use crate::stellar::binary::timeline::Context;
 use crate::stellar::binary::{BinaryInput, BinaryTimeline};
 use crate::stellar::draws::StarDraws;
@@ -91,4 +92,31 @@ pub(crate) fn donor_onto_remnant(
     engine.roche_onset(0);
     engine.run();
     (engine.finish(), a)
+}
+
+/// The thermal rate, M☉ yr⁻¹, of a solar main-sequence donor of `donor` M☉ at fractional age `tau`
+/// as the engine carries it: M ÷ `τ_KH` (Hurley, Tout and Pols 2002, equations 60 and 61).
+///
+/// # Panics
+///
+/// If `donor` lies outside the stars' 0.08–150 M☉, or the donor has no structure.
+#[must_use]
+pub(crate) fn thermal_rate(donor: f64, tau: f64) -> f64 {
+    let (timeline, _) = donor_onto_remnant(
+        donor,
+        tau,
+        Phase::CarbonOxygenWhiteDwarf,
+        0.6,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        1.0,
+    );
+    let star = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(ONSET_AGE, donor),
+        tau: Path::starting(ONSET_AGE, tau),
+    };
+    let s = star
+        .evaluate(timeline.context(), 0, ONSET_AGE, donor, tau)
+        .expect("a main-sequence donor has a structure");
+    donor / kelvin_helmholtz(&s, Kind::of(s.state.phase(), donor))
 }

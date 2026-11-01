@@ -123,10 +123,10 @@ const PINNED_FIGURES: [(f64, f64); 3] = [
 ];
 
 /// Under the held arm the pinned pair's neutron star takes the donor's first transfer whole and
-/// passes `MAX_NEUTRON_STAR_MASS` into a black hole; under the arm alone and under every 27 hold it
-/// keeps [`NS_ACCRETION_EFFICIENCY`] of what the donor gives (its wind gives none on the main
-/// sequence), to a part in 10⁶, and is a neutron star 12 Gyr on, having gained less than
-/// [`MOST_GAINED`].
+/// passes `MAX_NEUTRON_STAR_MASS` into a black hole; under the arm alone it keeps
+/// [`NS_ACCRETION_EFFICIENCY`] of what the donor gives (its wind gives none on the main sequence),
+/// to a part in 10⁶, and under every 27 hold less, the Eddington rate cutting the donor's thermal
+/// rate; under both it is a neutron star 12 Gyr on, having gained less than [`MOST_GAINED`].
 #[test]
 fn the_pinned_neutron_star_keeps_a_tenth_under_the_arm() {
     let (donor, _, star) = PINNED;
@@ -165,10 +165,14 @@ fn the_pinned_neutron_star_keeps_a_tenth_under_the_arm() {
             assert!((gained / given - 1.0).abs() < 1e-6, "{gained} of {given}");
             assert_eq!(compact.phase(), Phase::BlackHole);
         } else {
-            assert!(
-                (gained / given / NS_ACCRETION_EFFICIENCY - 1.0).abs() < 1e-6,
-                "{gained} of {given}"
-            );
+            // Under every 27 hold the donor, the heavier, transfers at its thermal rate at first
+            // (`heavy_donor`), over the star's Eddington rate, which then cuts its share.
+            let share = gained / given / NS_ACCRETION_EFFICIENCY;
+            if k == 1 {
+                assert!((share - 1.0).abs() < 1e-6, "{gained} of {given}");
+            } else {
+                assert!(share < 1.0, "{gained} of {given}");
+            }
             assert_eq!(compact.phase(), Phase::NeutronStar);
             assert!(compact.mass().value() - star < MOST_GAINED);
         }

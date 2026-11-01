@@ -24,7 +24,7 @@ use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_d
 use crate::units::SolarMasses;
 
 use super::Mix;
-use super::members::{XrayMarks, xray_marks};
+use super::members::{AccretingMarks, XrayMarks, accreting_marks, xray_marks};
 
 /// The parts a census's records are split into, each with its own stream of cells.
 pub(crate) const PARTS: usize = 64;
@@ -46,6 +46,8 @@ const HALF_THICKNESS_LY: i32 = 1_500;
 pub(crate) struct CensusMember {
     /// The pair's timeline.
     pub(crate) timeline: BinaryTimeline,
+    /// An accreting white dwarf's marks where its class reads them.
+    pub(crate) accreting: Option<AccretingMarks>,
     /// An X-ray binary's marks where its class reads them.
     pub(crate) xray: Option<XrayMarks>,
 }
@@ -173,6 +175,7 @@ fn members_of(
             .map(|star| stars.stars()[usize::from(star.get())].initial_mass());
         out.push(CensusMember {
             timeline: timeline.clone(),
+            accreting: accreting_marks(timeline, age, initial),
             xray: (class == CarvedClass::XrayBinary)
                 .then(|| xray_marks(timeline, age, initial))
                 .flatten(),
