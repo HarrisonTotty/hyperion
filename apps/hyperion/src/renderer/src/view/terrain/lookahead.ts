@@ -7,8 +7,7 @@
  * 0.1 rad), and the streaming gate lets selection reach one level below what is baked, so a
  * moving view waits about a bake round trip for each level it needs. At each selection the terrain
  * pass therefore selects a second time, by the same pure `selectPatches`, for each view that moves
- * faster than {@link RESELECT_MOVE_FRACTION} × d_min a second ({@link movesFast}), at its pose
- * extrapolated by v × L ({@link aheadPositionM}): v its velocity over the last two steps, L the
+ * ({@link moving}), at its pose extrapolated by v × L ({@link aheadPositionM}): v its velocity over the last two steps, L the
  * pass's own demand → resident p50 over its last {@link LOOKAHEAD_SAMPLES} bakes
  * ({@link lookaheadSeconds}). That selection is never drawn: its demand joins the pass's at
  * {@link LOOKAHEAD_DEMAND_WEIGHT} of each view's weight (`priority.ts`' `joinDemand`), its patches
@@ -24,9 +23,8 @@ import type { PatchKey } from "./patchKey";
 import { type PlanetGeometry, surfacePoint } from "./planet";
 import { LOOKAHEAD_DEMAND_WEIGHT } from "./priority";
 import type { SelectionInput, ViewSelectionInput } from "./select";
-import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 
-/** The least lookahead L, s: about four frames at 60 Hz, below which a bake cannot land anyway. */
+/** The least lookahead L, s: fifteen frames at 60 Hz, a hand value. */
 export const LOOKAHEAD_MIN_S = 0.25;
 
 /**
@@ -105,13 +103,19 @@ export function lookaheadSeconds(roundTripsS: ReadonlyArray<number>): number {
 }
 
 /**
- * Whether a view moves fast enough to select ahead: faster than {@link RESELECT_MOVE_FRACTION} ×
- * d_min a second, so that it would select again within a second at that speed; never with no
- * nearest ground known.
+ * Whether a view selects ahead: it moved since its last step, with its nearest ground known.
+ *
+ * @remarks
+ * At any speed (lean, 2026-11-01), not only faster than `RESELECT_MOVE_FRACTION` × d_min a
+ * second: a view closing on the ground even at a few per cent of its height a second has a split
+ * cross its tolerance at the pose ahead first, and its children asked a round trip early. TERRAIN
+ * TEST's descent closes at 8.25% of its height a second at most, below that rule's 9.09%, and
+ * looking ahead at its every motion cuts its frames with a stand-in from 36% to 24% (40–180 s, high,
+ * 3 × 41 ms). A still view selects nothing more, and the cadence bounds the cost.
  */
-export function movesFast(motion: ViewMotion): boolean {
+export function moving(motion: ViewMotion): boolean {
   const { velocityMps: v, nearestM } = motion;
-  return Number.isFinite(nearestM) && Math.hypot(v.x, v.y, v.z) > RESELECT_MOVE_FRACTION * nearestM;
+  return Number.isFinite(nearestM) && (v.x !== 0 || v.y !== 0 || v.z !== 0);
 }
 
 /**
@@ -136,9 +140,9 @@ export function aheadPositionM(positionM: Vec3, motion: ViewMotion, aheadS: numb
 }
 
 /**
- * The lookahead's selection input: `input` with each view that {@link movesFast} at its
- * {@link aheadPositionM}, its weight × {@link LOOKAHEAD_DEMAND_WEIGHT}, and the views that do not
- * left out; `null` where none moves fast, when nothing more is asked.
+ * The lookahead's selection input: `input` with each view that is {@link moving} at its
+ * {@link aheadPositionM}, its weight × {@link LOOKAHEAD_DEMAND_WEIGHT}, and the views that are not
+ * left out; `null` where none moves, when nothing more is asked.
  *
  * @param motions - Each view's motion, in `input.views`' order, `null` for a view with none yet.
  * @param aheadS - L, s ({@link lookaheadSeconds}).
@@ -152,7 +156,7 @@ export function lookaheadInput(
   for (let n = 0; n < input.views.length; n += 1) {
     const view = input.views[n];
     const motion = motions[n] ?? null;
-    if (view === undefined || motion === null || !movesFast(motion)) {
+    if (view === undefined || motion === null || !moving(motion)) {
       continue;
     }
     views.push({

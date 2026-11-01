@@ -26,7 +26,6 @@ import {
 import type { GroundContact } from "./grounded";
 import { lookaheadInput } from "./lookahead";
 import { joinDemand } from "./priority";
-import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 import {
   levelBoundM,
   levelHeightRangeM,
@@ -915,16 +914,14 @@ describe("the lookahead's selection (R10.T14.b)", () => {
     expect(selected.demand.some((r) => !asked.has(patchKeyString(r.key)))).toBe(true);
   });
 
-  it("asks nothing more of a still camera, of one too slow, or of one with no motion yet", () => {
+  it("asks nothing more of a still camera, or of one with no motion yet, and selects ahead of a slow one", () => {
     const own = inputAt(LOW);
     const still = { velocityMps: vec3(0, 0, 0), nearestM: 1_500 };
-    const slow = {
-      velocityMps: scale(east, 0.99 * RESELECT_MOVE_FRACTION * 1_500),
-      nearestM: 1_500,
-    };
+    // Closing at 8% of its height a second, as TERRAIN TEST's descent does at its fastest.
+    const slow = { velocityMps: scale(up, -0.08 * 1_500), nearestM: 1_500 };
     expect(lookaheadInput(own, [still], 2)).toBeNull();
-    expect(lookaheadInput(own, [slow], 2)).toBeNull();
     expect(lookaheadInput(own, [null], 2)).toBeNull();
+    expect(lookaheadInput(own, [slow], 2)).not.toBeNull();
     // At the camera's own pose its demand, at half the weight, joins nothing to the selection's.
     const here = lookaheadInput(own, [motion], 0);
     if (here === null) {

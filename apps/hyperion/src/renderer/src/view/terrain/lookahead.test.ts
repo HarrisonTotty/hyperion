@@ -10,13 +10,12 @@ import {
   LOOKAHEAD_MAX_S,
   LOOKAHEAD_MIN_S,
   lookaheadSeconds,
-  movesFast,
+  moving,
   slowSelection,
   timeToNeedS,
 } from "./lookahead";
 import type { PatchKey } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 // About 0.6 km wide, so that its neighbours along its row are reached within 2 s at 1 km/s.
@@ -47,9 +46,9 @@ describe("the lookahead's L", () => {
   });
 });
 
-/** Whether a view at `speedMps` moves fast, 1 km from its nearest ground. */
-function movesFastAt(speedMps: number): boolean {
-  return movesFast({ velocityMps: vec3(0, speedMps, 0), nearestM: 1_000 });
+/** Whether a view at `speedMps`, 1 km from its nearest ground, looks ahead. */
+function movingAt(speedMps: number): boolean {
+  return moving({ velocityMps: vec3(0, speedMps, 0), nearestM: 1_000 });
 }
 
 /** 64 steps' selection times, ms: `slow` of them at 2.5 ms, the rest at 0.5. */
@@ -57,15 +56,15 @@ function stepsWithSlow(slow: number): number[] {
   return Array.from({ length: 64 }, (_, n) => (n < slow ? 2.5 : 0.5));
 }
 
-describe("a view that moves fast", () => {
-  it("is one faster than m ÷ (1 + m) of its nearest ground a second", () => {
-    expect(movesFastAt(RESELECT_MOVE_FRACTION * 1_000 * 1.01)).toBe(true);
-    expect(movesFastAt(RESELECT_MOVE_FRACTION * 1_000 * 0.99)).toBe(false);
-    expect(movesFastAt(0)).toBe(false);
+describe("a view that looks ahead", () => {
+  it("is one that moved at all since its last step, a still one not", () => {
+    // 1 mm a second, and 82.5 m: TERRAIN TEST's descent at its fastest, 1 km up.
+    expect([movingAt(1e-3), movingAt(82.5), movingAt(1e6)]).toEqual([true, true, true]);
+    expect(movingAt(0)).toBe(false);
   });
 
   it("is never one with no nearest ground known", () => {
-    expect(movesFast({ velocityMps: vec3(1e6, 0, 0), nearestM: Number.POSITIVE_INFINITY })).toBe(
+    expect(moving({ velocityMps: vec3(1e6, 0, 0), nearestM: Number.POSITIVE_INFINITY })).toBe(
       false,
     );
   });

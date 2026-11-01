@@ -152,7 +152,7 @@ import {
   lookaheadInput,
   lookaheadSeconds,
   type MovingCamera,
-  movesFast,
+  moving,
   slowSelection,
   timeToNeedS,
   type ViewMotion,
@@ -575,7 +575,7 @@ export interface TerrainPassOptions {
   readonly reliefM?: () => number | null;
   /**
    * The clock the pass looks ahead of its views' motion by, monotonic milliseconds (plan R10,
-   * R10.T14.b; `lookahead.ts`): at each selection it selects again for each view moving fast, at its
+   * R10.T14.b; `lookahead.ts`): at each selection it selects again for each view that moves, at its
    * pose L ahead, and asks for that selection's demand at half the view's weight, never drawing it.
    * It times each step's views' velocities and each bake's demand → resident time, L's samples.
    * Absent, the pass looks ahead of nothing and asks for its selection's demand alone, as R05's
@@ -1112,7 +1112,7 @@ export class TerrainPass {
   #stepCostMs = 0;
   /** Selections since the lookahead last selected, for its cadence while selection is slow. */
   #sinceAhead = LOOKAHEAD_SLOW_EVERY;
-  /** The lookahead's last demand, or `null` where its views did not move fast. */
+  /** The lookahead's last demand, or `null` where its views did not move. */
   #aheadDemand: ReadonlyArray<PatchRequest> | null = null;
   readonly #offRestored: () => void;
   readonly #shading: TerrainShading;
@@ -2481,8 +2481,8 @@ export class TerrainPass {
 
   /**
    * `selection`'s demand joined by its lookahead's (`lookahead.ts`; plan R10, R10.T14.b), or its
-   * own: with no lookahead clock, at the pass's first step, and where no view moves fast. The
-   * lookahead selects by `selectPatches` over `input` with each fast view at its pose L ahead, at
+   * own: with no lookahead clock, at the pass's first step, and where no view moves. The
+   * lookahead selects by `selectPatches` over `input` with each moving view at its pose L ahead, at
    * half its weight; while a step's selection time over the latest steps is above 2 ms at p95, at
    * most every fourth selection, the last lookahead's demand asked in between.
    */
@@ -2534,7 +2534,7 @@ export class TerrainPass {
     for (let n = 0; n < views.length; n += 1) {
       const view = views[n];
       const motion = motions[n] ?? null;
-      if (view !== undefined && motion !== null && movesFast(motion)) {
+      if (view !== undefined && motion !== null && moving(motion)) {
         cameras.push({ positionM: view.cameraBodyFixedM, velocityMps: motion.velocityMps });
       }
     }
