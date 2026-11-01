@@ -2172,15 +2172,18 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     The guard: where the built track read the mark (`Track::companion_mark_read`, from the build's
     `Outcome`), every attempt keeps the track's (`StarDraws::with_stripped`). `Track`'s `Debug` is
     written by hand to leave that field out, since the binary engine's pinned timelines hash a
-    track's print. Test (slow): `every_kept_stripped_mark_builds_the_track_built`.
+    track's print. Tests: `the_build_reads_the_companion_mark_only_where_the_windows_disagree`
+    (8.1 M☉ at Z = 0.02 is in the band) and, slow, `every_kept_stripped_mark_builds_the_track_built`
+    (of 200,000 remnants and 508 retained records, 2,855 tracks read the mark and 144,680 kept
+    another mark, each the same track). The guard moves no kick: the cap count and the mean stand.
   - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
-    chi-square are slow, run by name. The kick loop's cap is reached by 2,081 of 9,996,081
-    remnants (2,184 before the tip's 26 stellar holds), against none: that is pinned and logged as
-    a finding, and those kicks are scaled into their bin. The living-share test holds back φ and
-    the carve-out; `the_field_share_thins_layer_e_s_living_field_records_by_age` (slow) checks φ's
-    thinning of the living field records. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
+    chi-square are slow, run by name. The kick loop's cap is reached by 2,081 of 9,996,081 remnants
+    (2,184 before the tip's 26 stellar holds; 2,081 under ruling 93.2's guard too), against none:
+    that is pinned and logged as a finding, and those kicks are scaled into their bin. The
+    living-share test holds back φ and the carve-out;
+    `the_field_share_thins_layer_e_s_living_field_records_by_age` (slow) checks φ's thinning of the
+    living field records. The death test allows a second or 16 ulps of the age, since an age of 10¹⁰
     years rounds to a minute. `DISPLACED_CELLS_DIGEST` now pins the marks too.
-
 - **P08.T12.d as built (2026-10-31, behind `DISPLACED_VERSION` = 26; no output moves at 24).**
   - `kinematics/displaced.rs`: `draw` gives a displaced record its class's law. The ballistic
     bins (the thin disc's age bins 0–1) take v_c at the epoch radius plus the kick, with the
