@@ -566,6 +566,7 @@ fn an_unborn_system_s_bodies_are_all_not_yet_formed() {
 
 #[test]
 fn a_snapshot_is_body_at_body_by_body() {
+    let (mut moons, mut rings) = (0_u32, 0_u32);
     for (ctx, system) in whole().iter().take(80) {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
@@ -573,6 +574,9 @@ fn a_snapshot_is_body_at_body_by_body() {
             assert_eq!(snapshot.time(), t);
             assert_eq!(snapshot.bodies().len(), system.indices().len());
             for (record, index) in snapshot.bodies().iter().zip(system.indices()) {
+                let kind = record.identity().kind();
+                moons += u32::from(matches!(kind, BodyKind::Moon(_)));
+                rings += u32::from(matches!(kind, BodyKind::Ring));
                 let alone = system.body_at(ctx, index, t).unwrap();
                 assert_eq!(record, &alone);
                 // Bit for bit, signed zeros included: the surface section's floats with the rest.
@@ -584,6 +588,9 @@ fn a_snapshot_is_body_at_body_by_body() {
             }
         }
     }
+    // The satellites' checks over whole systems read their records from snapshots
+    // (`tests/planetary_properties.rs`), so the agreement holds for moons and rings too.
+    assert!(moons > 0 && rings > 0, "{moons} moons, {rings} rings");
 }
 
 /// P14.T28.a's and T28.d's disc bodies, from generator version 26: populations with no orbit
