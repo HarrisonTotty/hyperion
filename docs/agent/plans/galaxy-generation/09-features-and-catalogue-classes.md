@@ -5650,5 +5650,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     grid and the members alone take 215 ms cold.
   - _Next levers._ The core collapses' window prefilter ("P09.T33.a as built", _Cost_), and a
     place bound for the X-ray binaries: the site plus the recoil's flight.
-  - _Fixed._ From 27 the X-ray binaries count in layers D and E: P15.T10.b's fitted sampler draws
-    compact stars' progenitors from 3.2 M☉.
+  - _Fixed._ Under the 27 hold's fitted tables the X-ray binaries count in layers D and E
+    (`member_layers(class, BinaryTableRules)`): P15.T10.b's engine-fitted sampler draws compact
+    stars' progenitors from 3.2 M☉. Its accretors grew past the core-collapse mass, so the layers
+    widen with it rather than the fit being bounded. Under the scratch tables the class stays at
+    E.
