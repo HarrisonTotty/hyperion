@@ -167,7 +167,6 @@ use crate::units::{
     Kelvin, Metres, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
     WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) mod deck;
 pub mod regime;
@@ -2473,19 +2472,12 @@ pub(crate) fn below_the_line(partials: &PartialPressures) -> bool {
     partials.total() < AIRLESS_PRESSURE
 }
 
-/// The generator version from which a rotator's permanent CO₂ cap holds its air at the cap's own
-/// energy balance: 26, the planetary bump after 25's (P14.T53.h; main, 2026-10-31).
-///
-/// It is P14.T53.h's one hold. Below it [`CapBalanceRules::in_force`] is
-/// [`CapBalanceRules::Held`]: no climate carries a cap and every figure is version 24's and 25's
-/// bit for bit. 26's bump deletes this hold, [`CapBalanceRules`] with its `Held` arm, the tests'
-/// switch and its tripwire (`the_cap_balance_is_held_only_until_the_26_bump`).
-pub(crate) const CAP_BALANCE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T53.h's CO₂ cap is in force (its hold, [`CAP_BALANCE_VERSION`]).
+/// Whether P14.T53.h's CO₂ cap is in force: from generator version 26, and in the tests its held
+/// arm, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CapBalanceRules {
-    /// Version 25's and before: CO₂'s cold trap is the coldest zone.
+    /// Version 25's and before: CO₂'s cold trap is the coldest zone; the tests' oracle
+    /// ([`with_cap_balance`]).
     Held,
     /// Version 26's: a rotator's CO₂ air is cold-trapped by its cap's balance too
     /// ([`carbon_dioxide_cap`]).
@@ -2493,33 +2485,27 @@ pub(crate) enum CapBalanceRules {
 }
 
 impl CapBalanceRules {
-    /// The rules this generator version gives: the cap's balance from [`CAP_BALANCE_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_cap_balance`]).
+    /// The rules in force: the cap's balance; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_cap_balance`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = CAP_BALANCE_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= CAP_BALANCE_VERSION {
-            Self::Balanced
-        } else {
-            Self::Held
-        }
+        Self::Balanced
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The cap balance's rules a test sets on its thread, `None` for the version's.
+    /// The cap balance's rules a test sets on its thread, `None` for the cap's balance.
     static CAP_BALANCE_RULES: core::cell::Cell<Option<CapBalanceRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the cap balance's rules `rules` on this thread, for the tests to reach the
-/// cap ahead of the bump; the version's rules are set back after, a panic in `run` included. 26's
-/// bump deletes it with the hold.
+/// `run`'s result with the cap balance's rules `rules` on this thread, the held arm the tests'
+/// oracle; the cap's balance is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_cap_balance<R>(rules: CapBalanceRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2616,8 +2602,8 @@ pub(crate) struct CapBody {
 /// [`CAP_ROSSBY_RATIO`], c the column's gravity waves' speed (Koll 2022, §3.1); where the column
 /// holds no airborne CO₂; where another gas's partial pressure exceeds CO₂'s inventory as a column
 /// weight ([`CapBody::carbon_dioxide_inventory`]), the CO₂ the cap could hold before any of it
-/// condensed; on a body that does not turn ([`rotates`]) or whose surface is molten; and under
-/// version 25's rules and before ([`CapBalanceRules`]).
+/// condensed; on a body that does not turn ([`rotates`]) or whose surface is molten; and in the
+/// tests under the held arm, version 25's rules ([`CapBalanceRules`]).
 ///
 /// The scope reads CO₂'s inventory, not its airborne partial pressure, because the cap sets that
 /// partial pressure: read on it, a cap that drew CO₂ under N₂ switched itself off, the CO₂ came

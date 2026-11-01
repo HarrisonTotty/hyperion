@@ -1078,73 +1078,70 @@ fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
 fn under_the_cap_balance_the_table_s_mars_over_its_record_holds_its_passes_co2_ice() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::derive::passes::Convergence;
-    use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
-    with_cap_balance(CapBalanceRules::Balanced, || {
-        let (_, mars, read) = over_its_record("Mars");
-        let air = mars.atmosphere();
-        let co2 = Gas::CarbonDioxide.substance();
-        let partitioned = read
-            .partition
-            .of(co2)
-            .expect("Mars's partition holds its CO2");
-        let pass = read
-            .conditions
-            .as_ref()
-            .expect("Mars's pass reads its climate");
-        let spun = mars.spun().expect("derived over its record");
-        let context = spun.context();
-        let conditions = SurfaceConditions::derive(&SurfaceInputs {
-            atmosphere: air,
-            equilibrium_temperature: mars.equilibrium_temperature(),
-            surface_gravity: mars.surface_gravity(),
-            radius: Metres::from(mars.radius()),
-            material: SurfaceMaterial::of(&mars.fractions()),
-            lid: context.lid().map(|lid| lid.lithology),
-            stellar_flux: WattsPerSquareMetre::from(mars.flux()),
-            xuv_flux: mars.xuv_flux(),
-            spin: spin_of("Mars"),
-            heat_flow: context.heat_flow(),
-            ocean_weight: spun.ocean_weight(),
-            holds_liquid_water: air.lists_liquid_water(),
-        })
-        .expect("Mars has a surface");
-        let cap = pass.carbon_dioxide_cap().expect("Mars's pass holds a cap");
-        eprintln!(
-            "the table's Mars over its record under the cap: {:?} {:.3} K, CO2 {:.4} Pa of its \
-             column's {:.4}, the cap {:.3} K (coldest zone {:.3} K), {} passes; entries {:?}",
-            air.state(),
-            air.surface_temperature().value(),
-            partitioned.airborne().value(),
-            partitioned.inventory().value(),
-            cap.value(),
-            pass.climate_range().0.value(),
-            mars.atmosphere_passes(),
-            read.condensates
-                .entries()
-                .iter()
-                .map(|e| format!("{} {:?}", e.substance().substance().key(), e.phase()))
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(mars.convergence(), Convergence::Converged);
-        assert_same_bits(
-            partitioned.airborne().value(),
-            air.partial_pressures().of(Gas::CarbonDioxide).value(),
-        );
-        assert!(partitioned.condensed().value() > 0.0, "{partitioned:?}");
-        assert!(
-            read.condensates
-                .entry(co2, CondensatePhase::Solid)
-                .is_some(),
-            "Mars lists its CO2 ice"
-        );
-        assert_same_bits(
-            conditions
-                .carbon_dioxide_cap()
-                .expect("the record's cap")
-                .value(),
-            cap.value(),
-        );
-    });
+    let (_, mars, read) = over_its_record("Mars");
+    let air = mars.atmosphere();
+    let co2 = Gas::CarbonDioxide.substance();
+    let partitioned = read
+        .partition
+        .of(co2)
+        .expect("Mars's partition holds its CO2");
+    let pass = read
+        .conditions
+        .as_ref()
+        .expect("Mars's pass reads its climate");
+    let spun = mars.spun().expect("derived over its record");
+    let context = spun.context();
+    let conditions = SurfaceConditions::derive(&SurfaceInputs {
+        atmosphere: air,
+        equilibrium_temperature: mars.equilibrium_temperature(),
+        surface_gravity: mars.surface_gravity(),
+        radius: Metres::from(mars.radius()),
+        material: SurfaceMaterial::of(&mars.fractions()),
+        lid: context.lid().map(|lid| lid.lithology),
+        stellar_flux: WattsPerSquareMetre::from(mars.flux()),
+        xuv_flux: mars.xuv_flux(),
+        spin: spin_of("Mars"),
+        heat_flow: context.heat_flow(),
+        ocean_weight: spun.ocean_weight(),
+        holds_liquid_water: air.lists_liquid_water(),
+    })
+    .expect("Mars has a surface");
+    let cap = pass.carbon_dioxide_cap().expect("Mars's pass holds a cap");
+    eprintln!(
+        "the table's Mars over its record under the cap: {:?} {:.3} K, CO2 {:.4} Pa of its \
+         column's {:.4}, the cap {:.3} K (coldest zone {:.3} K), {} passes; entries {:?}",
+        air.state(),
+        air.surface_temperature().value(),
+        partitioned.airborne().value(),
+        partitioned.inventory().value(),
+        cap.value(),
+        pass.climate_range().0.value(),
+        mars.atmosphere_passes(),
+        read.condensates
+            .entries()
+            .iter()
+            .map(|e| format!("{} {:?}", e.substance().substance().key(), e.phase()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(mars.convergence(), Convergence::Converged);
+    assert_same_bits(
+        partitioned.airborne().value(),
+        air.partial_pressures().of(Gas::CarbonDioxide).value(),
+    );
+    assert!(partitioned.condensed().value() > 0.0, "{partitioned:?}");
+    assert!(
+        read.condensates
+            .entry(co2, CondensatePhase::Solid)
+            .is_some(),
+        "Mars lists its CO2 ice"
+    );
+    assert_same_bits(
+        conditions
+            .carbon_dioxide_cap()
+            .expect("the record's cap")
+            .value(),
+        cap.value(),
+    );
 }
 
 /// decision-p14-t54b-f-coldtraps §9 test 8: the delivered traps survive L2. The table's Moon,
