@@ -200,6 +200,7 @@ pub(crate) fn heights<F: FieldView>(
 /// bake of the heights 18.7 ms against 21.7 ms before on the Earth-like world at L + 4, 27.0 ms
 /// against 31.7 ms at 19 and 15.5 ms against 16.7 ms on the Moon-like world's rim at L + 4, its
 /// 1,089 parent-level queries sharing their vertices' work.
+#[derive(Debug, Clone)]
 pub(crate) struct PairedQueries {
     key: PatchKey,
     /// Each even vertex's parent-level answer, row by row, until it is asked.
