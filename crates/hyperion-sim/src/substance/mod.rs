@@ -430,7 +430,7 @@ const CARRIERS_FROM: usize = 115;
 /// (P14.T52.e): 27, the planetary bump after 26's.
 ///
 /// They are rows 115 on: SH, OH, S⁺, C⁺, H⁺, N⁺ and O⁺, the hot giants' and ultra-hot
-/// photospheres' missing carriers, which
+/// photospheres' missing carriers, then P, P₂, PO, PH₂ and Cl, which
 /// [`planetary::chem::equilibrium`](crate::planetary::chem::equilibrium)'s network carries. Since
 /// the network is every gas row with a record, a row's joining moves its output, a
 /// generator-version change.
@@ -693,7 +693,9 @@ mod tests {
     ];
 
     /// P14.T52.e's carriers, rows 115 on, in force from generator version 27.
-    const CARRIERS: [&str; 7] = ["SH", "OH", "S+", "C+", "H+", "N+", "O+"];
+    const CARRIERS: [&str; 12] = [
+        "SH", "OH", "S+", "C+", "H+", "N+", "O+", "P", "P2", "PO", "PH2", "Cl",
+    ];
 
     /// P14.T52.e's carriers follow row 114 under 27's registry, and below it no id, key or index
     /// reaches them: the registry is version 26's.

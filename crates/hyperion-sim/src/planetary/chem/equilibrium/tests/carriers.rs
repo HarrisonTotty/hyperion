@@ -17,10 +17,13 @@ use super::*;
 use crate::planetary::testing::with_every_27_hold;
 
 /// P14.T52.e's carriers, rows 115 on.
-const CARRIERS: [&str; 7] = ["SH", "OH", "S+", "C+", "H+", "N+", "O+"];
+const CARRIERS: [&str; 12] = [
+    "SH", "OH", "S+", "C+", "H+", "N+", "O+", "P", "P2", "PO", "PH2", "Cl",
+];
 
-/// Under 27's registry the network carries every carrier as a major species (each holds only
-/// H, C, N, O and S), over the same 300–6,000 K; 26's network carries none.
+/// Under 27's registry the network carries every carrier as a species of its solved elements
+/// (each holds only H, C, N, O, S, P and Cl), over the same 300–6,000 K; 26's network carries
+/// none.
 #[test]
 fn under_27_the_network_carries_the_carriers() {
     let held: Vec<SubstanceId> = network().species().collect();
@@ -383,6 +386,74 @@ const CASES_27: [Case; 11] = [
         ],
     },
 ];
+
+/// Phosphorus at a hot Jupiter's photosphere, carried as FastChem's run carries it under 27's
+/// network (P, P₂, PO, PH₂ and PH₃), against the matched run with condensation, P and Cl among its
+/// elements (every element but Ni):
+///
+/// - **1,500 K and 10 mbar** (HD 209458 b's photosphere): P₂ the largest carrier, as in FastChem's
+///   full network (0.718, beside PO 0.093, PH₂ 0.072 and PS 0.067); the matched run's P₂ 0.7990,
+///   the P atom 0.02443 and PH₃ 0.00458 within 5% (here +3.5%, +2.7% and +2.6%), and PO's 0.0965
+///   within 20% (+16.5%: the silicates FastChem condenses there hold 6.7% of the oxygen, which this
+///   gas network keeps; against its gas-only run's 0.1074, +4.7%).
+/// - **2,000 K and 10 mbar**: the P atom the largest, then PO, as in the full run (0.517 and 0.332,
+///   PH 0.068); the matched run's P 0.5823 and PO 0.3729 within 2% (+1.0% and +1.6%) and P₂'s
+///   0.0213 within 5% (+1.0%). Nothing condenses there.
+///
+/// At both, PH₂ is 0.4–0.5 of the run's (0.0306 against 0.0755, 0.0116 against 0.0233): CEA's PH₂
+/// record is Gurvich 1989's, FastChem's a fit to NIST-JANAF (Chase 1998), and their K differ by
+/// that much; PH₂ holds under 8% of the phosphorus at either, so its share is held within a factor
+/// of 3.
+#[test]
+fn under_27_phosphorus_at_a_hot_jupiter_photosphere_is_the_run_s() {
+    with_every_27_hold(|| {
+        let network = network();
+        let g = gas(1.0, None, None);
+        let photosphere = solve_at(&network, &g, 1_500.0, 0.01);
+        let p = |got: &GasEquilibrium, key: &str| share(got, row(key), Element::P);
+        for other in ["PO", "PH2", "PH3", "P"] {
+            assert!(
+                p(&photosphere, "P2") > p(&photosphere, other),
+                "P2 against {other}"
+            );
+        }
+        for (key, want, tolerance) in [
+            ("P2", 0.799_044, 0.05),
+            ("P", 0.024_43, 0.05),
+            ("PH3", 0.004_58, 0.05),
+            ("PO", 0.096_472, 0.2),
+        ] {
+            let have = p(&photosphere, key);
+            assert!(
+                (have / want - 1.0).abs() < tolerance,
+                "1,500 K: {key} {have} against FastChem's {want}"
+            );
+        }
+        let hotter = solve_at(&network, &g, 2_000.0, 0.01);
+        for other in ["PO", "PH2", "PH3", "P2"] {
+            assert!(p(&hotter, "P") > p(&hotter, other), "P against {other}");
+        }
+        assert!(p(&hotter, "PO") > p(&hotter, "P2"));
+        for (key, want, tolerance) in [
+            ("P", 0.582_342, 0.02),
+            ("PO", 0.372_926, 0.02),
+            ("P2", 0.021_296, 0.05),
+        ] {
+            let have = p(&hotter, key);
+            assert!(
+                (have / want - 1.0).abs() < tolerance,
+                "2,000 K: {key} {have} against FastChem's {want}"
+            );
+        }
+        for (got, want) in [(&photosphere, 0.075_474), (&hotter, 0.023_259)] {
+            let ratio = p(got, "PH2") / want;
+            assert!(
+                (1.0 / 3.0..3.0).contains(&ratio),
+                "PH2 at {ratio} of the run's"
+            );
+        }
+    });
+}
 
 /// Hydrogen alone keeps H⁺ and its electrons under 27's network, and H⁻ with them; every other
 /// species is zero.

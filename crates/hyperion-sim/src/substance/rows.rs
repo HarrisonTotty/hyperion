@@ -54,7 +54,7 @@ use super::thermo::{
 use super::{Basis, ClientOptics, Element, Source, Substance, SubstanceKey, SubstanceKind};
 
 /// The rows, in registry order.
-pub(super) static ROWS: [Substance; 122] = [
+pub(super) static ROWS: [Substance; 127] = [
     HYDROGEN,
     HELIUM,
     WATER,
@@ -177,6 +177,11 @@ pub(super) static ROWS: [Substance; 122] = [
     PROTON,
     NITROGEN_ION,
     OXYGEN_ION,
+    ATOMIC_PHOSPHORUS,
+    DIPHOSPHORUS,
+    PHOSPHORUS_MONOXIDE,
+    PHOSPHINO,
+    ATOMIC_CHLORINE,
 ];
 
 /// The molar masses' source: P14.T13's `Gas::molar_mass_g_per_mol` for rows 0–8, and for every
@@ -3524,6 +3529,171 @@ const OXYGEN_ION: Substance = Substance {
     optics: AWAITING_CLIENT_OPTICS,
     sources: IDENTITY,
 };
+
+/// Row 122, atomic phosphorus, which holds the phosphorus of the hottest daysides (P14.T52.e).
+const ATOMIC_PHOSPHORUS: Substance = Substance {
+    key: SubstanceKey::new_const("P"),
+    kind: SubstanceKind::Atom,
+    elements: &[(Element::P, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(30.974),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &ATOMIC_PHOSPHORUS_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 3 levels below 15,000 cm⁻¹ (Martin, Zalubas and Musgrove 1985, J. Phys. Chem. Ref. Data 14, 751; NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs). Its `c_p` meets CEA's within 0.03 per cent to 1,500 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// The P atom's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹ above the
+/// ground (Martin, Zalubas and Musgrove 1985, as NIST's Atomic Spectra Database lists them): the
+/// ⁴S°₃/₂ ground and ²D°₃/₂ and ²D°₅/₂, with ²P° above the cut at 18,722.71 cm⁻¹.
+const ATOMIC_PHOSPHORUS_LEVELS: [Level; 3] = [
+    level(0.0, 4.0),
+    level(11_361.02, 4.0),
+    level(11_376.63, 6.0),
+];
+
+/// Row 123, diphosphorus P₂, which holds most of a hot Jupiter's phosphorus at its photosphere
+/// (P14.T52.e).
+const DIPHOSPHORUS: Substance = Substance {
+    key: SubstanceKey::new_const("P2"),
+    kind: SubstanceKind::Molecule,
+    elements: &[(Element::P, 2)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(61.948),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::Linear,
+            vibrations: &[vibration(775.1, 1)],
+            levels: &[],
+        },
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X¹Σg⁺'s ω_e 780.77 and ω_e x_e 2.835 cm⁻¹, so the fundamental is 775.10 cm⁻¹; its ground alone lies below 15,000 cm⁻¹ (a³Σu⁺ at 18,794.5). Its `c_p` meets CEA's within 0.41 per cent to 700 K and 0.62 per cent to 1,000 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// Row 124, phosphorus monoxide PO, up to 78% of the phosphorus at 1,500 K and 10⁻⁶ bar
+/// (P14.T52.e).
+const PHOSPHORUS_MONOXIDE: Substance = Substance {
+    key: SubstanceKey::new_const("PO"),
+    kind: SubstanceKind::Molecule,
+    elements: &[(Element::P, 1), (Element::O, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(46.973),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::Linear,
+            vibrations: &[vibration(1_220.22, 1)],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &PHOSPHORUS_MONOXIDE_STATES,
+            }],
+        },
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X²Πr's ω_e 1,233.34 and ω_e x_e 6.56 cm⁻¹, so the fundamental is 1,220.22 cm⁻¹; its ²Π₁/₂ ground and ²Π₃/₂ at A₀ = 224.03 cm⁻¹ (Verma and Singhal 1975, H&H's note 19), each g = 2; B²Σ⁺ at 30,730.88 cm⁻¹ lies above the cut. Its `c_p` meets CEA's within 0.33 per cent to 700 K and 0.55 per cent to 1,000 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// PO's spin–orbit pair, `(energy, g)` in cm⁻¹ above the ground: X²Π₁/₂ and X²Π₃/₂ at A₀ (Huber
+/// and Herzberg 1979, note 19: `A_v` = 224.03 + 0.18 v − 0.013 v², Verma and Singhal 1975).
+const PHOSPHORUS_MONOXIDE_STATES: [Level; 2] = [level(0.0, 2.0), level(224.03, 2.0)];
+
+/// Row 125, the phosphino radical PH₂, up to 66% of the phosphorus at 2,500 K and 100 bar
+/// (P14.T52.e).
+const PHOSPHINO: Substance = Substance {
+    key: SubstanceKey::new_const("PH2"),
+    kind: SubstanceKind::Molecule,
+    elements: &[(Element::P, 1), (Element::H, 2)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(32.99),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::NonLinear,
+            vibrations: &[
+                vibration(2_383.0, 1),
+                vibration(2_371.0, 1),
+                vibration(1_154.0, 1),
+            ],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &PHOSPHINO_STATES,
+            }],
+        },
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "the fundamentals 2,383, 2,371 and 1,154 cm⁻¹ and the ²B₁ ground of statistical weight 2, its Ã²A₁ at 18,276.6 cm⁻¹ above the cut (Burcat and Ruscic's Third Millennium Thermodynamic Database, ANL-05/20 and TAE 960, 2005, its PH2 entry, which takes its heat of formation from Burcat's G3B3 calculation), as harmonic oscillators; a non-linear rotor. Its `c_p` meets CEA's (Gurvich 1989's) within 0.94 per cent to 700 K and 0.88 per cent to 1,000 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// PH₂'s ground, `(energy, g)`: its ²B₁ alone below 15,000 cm⁻¹ (Burcat and Ruscic 2005).
+const PHOSPHINO_STATES: [Level; 1] = [level(0.0, 2.0)];
+
+/// Row 126, atomic chlorine, which holds the chlorine above about 3,000 K (P14.T52.e).
+const ATOMIC_CHLORINE: Substance = Substance {
+    key: SubstanceKey::new_const("Cl"),
+    kind: SubstanceKind::Atom,
+    elements: &[(Element::Cl, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(35.45),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &ATOMIC_CHLORINE_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 2 levels below 15,000 cm⁻¹ (Radziemski and Kaufman 1969, J. Opt. Soc. Am. 59, 424; NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs). Its `c_p` meets CEA's within 0.01 per cent to 1,500 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// The Cl atom's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹ above the
+/// ground (Radziemski and Kaufman 1969, as NIST's Atomic Spectra Database lists them): the
+/// ²P°₃/₂ ground and ²P°₁/₂, with ⁴P above the cut at 71,958.363 cm⁻¹.
+const ATOMIC_CHLORINE_LEVELS: [Level; 2] = [level(0.0, 4.0), level(882.351_5, 2.0)];
 
 /// What a material with no single formula is, and where the generator takes it from: its identity's
 /// source, since it has no stoichiometry or molar mass (decision-composition §1.1).

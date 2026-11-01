@@ -61,9 +61,9 @@
 //!
 //! `FeH` has no CEA record ([`NOT_MODELLED`]; a closed set, for the composition audit), so P14.T52.d
 //! takes its thermochemistry from elsewhere or labels it. P14.T52.e's carriers (SH, OH, S⁺, C⁺,
-//! H⁺, N⁺ and O⁺), rows from generator version 27, take their records from `tables::thermo_27`
-//! until then; the P and Cl atoms and their ions are not registry rows: CEA holds them, and a row
-//! added later takes its record by a refit.
+//! H⁺, N⁺, O⁺, P, P₂, PO, PH₂ and Cl), rows from generator version 27, take their records
+//! from `tables::thermo_27` until then (P₂ its reference gas's); P⁺ and Cl⁺ are not registry rows:
+//! CEA holds them, and a row added later takes its record by a refit.
 //!
 //! # A second thermochemistry
 //!
@@ -98,9 +98,10 @@ pub const NOT_MODELLED: [(&str, &str); 1] = [(
 )];
 
 /// Each gas row's record, by key, in registry order: every gas row but [`NOT_MODELLED`]'s, with
-/// P14.T52.e's carriers last, from their own table (`tables::thermo_27`), which join the registry
-/// at generator version 27 (`CARRIERS_VERSION`); until then no id reaches theirs.
-const RECORDS: [(&str, &[Interval]); 67] = [
+/// P14.T52.e's carriers last, from their own table (`tables::thermo_27`; P₂'s is phosphorus's
+/// reference gas), which join the registry at generator version 27 (`CARRIERS_VERSION`); until
+/// then no id reaches theirs.
+const RECORDS: [(&str, &[Interval]); 72] = [
     ("H2", &table::H2),
     ("He", &table::HE),
     ("H2O", &table::H2O),
@@ -168,6 +169,11 @@ const RECORDS: [(&str, &[Interval]); 67] = [
     ("H+", &carriers::H_PLUS),
     ("N+", &carriers::N_PLUS),
     ("O+", &carriers::O_PLUS),
+    ("P", &carriers::P),
+    ("P2", &table::P2),
+    ("PO", &carriers::PO),
+    ("PH2", &carriers::PH2),
+    ("Cl", &carriers::CL),
 ];
 
 /// G ÷ RT of piecewise `intervals` at `t` kelvin, from the first interval that holds it (the lower
@@ -621,7 +627,7 @@ mod tests {
     /// byte for byte. A metal's atom has `K_f` = 1 by definition above its switch, so it is taken
     /// below it: at 500 K, at its switch rounded down to 100 K, and midway; every other row at
     /// 500, 2,500 and 5,000 K. P14.T52.e's carriers are last (2026-11-01).
-    const CEA: [(&str, [f64; 3], [f64; 3]); 67] = [
+    const CEA: [(&str, [f64; 3], [f64; 3]); 72] = [
         ("H2", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         ("He", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         (
@@ -1153,6 +1159,47 @@ mod tests {
                 -10.154_521_287_362_25,
             ],
         ),
+        (
+            "P",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -26.754_108_958_032_557,
+                -2.078_064_024_850_694,
+                0.584_275_024_197_809_5,
+            ],
+        ),
+        (
+            "P2",
+            [500.0, 2_500.0, 5_000.0],
+            [-8.130_161_471_822_309, 0.0, 0.0],
+        ),
+        (
+            "PO",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                6.950_768_419_329_123,
+                2.683_308_018_484_936,
+                1.623_514_796_936_985,
+            ],
+        ),
+        (
+            "PH2",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -10.510_149_165_624_883,
+                -2.770_500_453_371_984,
+                -2.310_290_724_990_738_7,
+            ],
+        ),
+        (
+            "Cl",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -9.840_943_668_911_18,
+                0.533_333_348_116_524_7,
+                1.872_323_728_318_436_2,
+            ],
+        ),
     ];
 
     /// Three values per species to 10⁻⁴ in log K (the plan's test): CEA's records as the
@@ -1212,7 +1259,7 @@ mod tests {
     const NOT_ROWS: [&str; 5] = ["P", "Cl", "P+", "Cl+", "OH"];
 
     /// Those of [`NOT_ROWS`] that P14.T52.e's carriers make rows at 27.
-    const ROWS_AT_27: [&str; 1] = ["OH"];
+    const ROWS_AT_27: [&str; 3] = ["P", "Cl", "OH"];
 
     /// Every gas row that T52.a or T52.b names has an entry, but `FeH`, which CEA does not hold (and
     /// the species that are not rows); and every gas row of the registry has one but `FeH`, the

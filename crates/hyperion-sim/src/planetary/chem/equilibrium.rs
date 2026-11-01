@@ -198,7 +198,13 @@
 //!   phosphorus or more, at 1 bar or more to 1,200 K and at 100 bar to 1,500 K; HCl roughly from
 //!   1,200 to 3,000 K at the middle pressures. Elsewhere P₂, PO, PH₂ and P, and Cl and the
 //!   chloride gases, carry them, and PH₃ and HCl are published beyond their validity, a stated
-//!   miss for trace elements.
+//!   miss for trace elements. From 27 the network carries P, P₂, PO and PH₂ and the Cl atom, P
+//!   and Cl solved: at 1,500 K and 10 mbar P₂ holds the phosphorus within 4% of FastChem's
+//!   (the tests' `carriers`); PS, PH and the chlorides stay uncarried.
+//! - **`SiS`** stays uncarried at 27 though the plan lists it: a gas-only artefact below the
+//!   silicate decks (`condensed` in [`NOT_CARRIED`]), it would take a fifth of the sulphur at
+//!   1,000–1,200 K and 1 bar (FastChem's gas-only run) and most of it at the held floor, where
+//!   P14.T52.c traps the silicon far below, so H₂S, the NH₄SH deck's sulphur, would be wrong.
 //! - **Titanium and vanadium**: TiO₂ and VO₂, not carried, hold 27–42% of the titanium and
 //!   53–68% of the vanadium at 1,500 K, and most of both below, under P14.T52.c's CaTiO₃ trap; TiO
 //!   and VO are overstated by up to about 2× at 1,500 K.
@@ -343,7 +349,7 @@ pub struct NotCarried {
 ///
 /// It is sorted by formula, charge and isomer. P14.T52.e adds rows from it, and each entry goes
 /// as its row joins: its carriers' entries, which the network carries from generator version 27,
-/// are [`CARRIED_FROM_27`]'s (62 entries before it, 55 after).
+/// are [`CARRIED_FROM_27`]'s (62 entries before it, 50 after).
 ///
 /// The set is closed by a rule, not by hand (decision-p14-t52a-rows): every gas species of
 /// FastChem 4.0.3's full network (its `logK.dat`, gas phase only, the 25 elements at the
@@ -357,7 +363,7 @@ pub struct NotCarried {
 /// cases (the tests' documentation). FeH, a registry row with no record, is
 /// [`formation::NOT_MODELLED`](crate::substance::formation::NOT_MODELLED)'s, not this set's; it
 /// holds at most 2.8% of the iron (5,000 K, 100 bar).
-pub const NOT_CARRIED: [NotCarried; 55] = [
+pub const NOT_CARRIED: [NotCarried; 50] = [
     NotCarried {
         formula: "Al2O",
         isomer: None,
@@ -491,16 +497,6 @@ pub const NOT_CARRIED: [NotCarried; 55] = [
     NotCarried {
         formula: "Cl",
         isomer: None,
-        charge: 0,
-        element: Element::Cl,
-        largest_share: 1.0,
-        temperature: Kelvin::new(3000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "Cl",
-        isomer: None,
         charge: 1,
         element: Element::Cl,
         largest_share: 0.41,
@@ -617,16 +613,6 @@ pub const NOT_CARRIED: [NotCarried; 55] = [
         temperature: Kelvin::new(300.0),
         pressure: Pascals::new(1e7),
         condensed: true,
-    },
-    NotCarried {
-        formula: "H2P",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 0.66,
-        temperature: Kelvin::new(2500.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
     },
     NotCarried {
         formula: "H3Si",
@@ -829,26 +815,6 @@ pub const NOT_CARRIED: [NotCarried; 55] = [
         condensed: true,
     },
     NotCarried {
-        formula: "OP",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 0.78,
-        temperature: Kelvin::new(1500.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "P",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 1.0,
-        temperature: Kelvin::new(3000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
         formula: "P",
         isomer: None,
         charge: 1,
@@ -857,16 +823,6 @@ pub const NOT_CARRIED: [NotCarried; 55] = [
         temperature: Kelvin::new(6000.0),
         pressure: Pascals::new(1e-1),
         condensed: false,
-    },
-    NotCarried {
-        formula: "P2",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 1.0,
-        temperature: Kelvin::new(800.0),
-        pressure: Pascals::new(1e-1),
-        condensed: true,
     },
     NotCarried {
         formula: "PS",
@@ -913,7 +869,7 @@ pub const NOT_CARRIED: [NotCarried; 55] = [
 /// The species of [`NOT_CARRIED`]'s rule that P14.T52.e's rows carry from generator version 27
 /// (`CARRIERS_VERSION`), with the shares the run gave them uncarried: below 27 they are not carried,
 /// and [`not_carried`] lists them with the rest. Sorted as [`NOT_CARRIED`]; 27's bump deletes it.
-pub const CARRIED_FROM_27: [NotCarried; 7] = [
+pub const CARRIED_FROM_27: [NotCarried; 12] = [
     NotCarried {
         formula: "C",
         isomer: None,
@@ -925,6 +881,16 @@ pub const CARRIED_FROM_27: [NotCarried; 7] = [
         condensed: false,
     },
     NotCarried {
+        formula: "Cl",
+        isomer: None,
+        charge: 0,
+        element: Element::Cl,
+        largest_share: 1.0,
+        temperature: Kelvin::new(3000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
         formula: "H",
         isomer: None,
         charge: 1,
@@ -932,6 +898,16 @@ pub const CARRIED_FROM_27: [NotCarried; 7] = [
         largest_share: 0.062,
         temperature: Kelvin::new(6000.0),
         pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "H2P",
+        isomer: None,
+        charge: 0,
+        element: Element::P,
+        largest_share: 0.66,
+        temperature: Kelvin::new(2500.0),
+        pressure: Pascals::new(1e7),
         condensed: false,
     },
     NotCarried {
@@ -973,6 +949,36 @@ pub const CARRIED_FROM_27: [NotCarried; 7] = [
         temperature: Kelvin::new(6000.0),
         pressure: Pascals::new(1e-1),
         condensed: false,
+    },
+    NotCarried {
+        formula: "OP",
+        isomer: None,
+        charge: 0,
+        element: Element::P,
+        largest_share: 0.78,
+        temperature: Kelvin::new(1500.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "P",
+        isomer: None,
+        charge: 0,
+        element: Element::P,
+        largest_share: 1.0,
+        temperature: Kelvin::new(3000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "P2",
+        isomer: None,
+        charge: 0,
+        element: Element::P,
+        largest_share: 1.0,
+        temperature: Kelvin::new(800.0),
+        pressure: Pascals::new(1e-1),
+        condensed: true,
     },
     NotCarried {
         formula: "S",

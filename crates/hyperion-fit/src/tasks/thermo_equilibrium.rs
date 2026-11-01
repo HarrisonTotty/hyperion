@@ -1527,7 +1527,7 @@ pub const CARRIERS_REVISION: u32 = 0;
 
 /// P14.T52.e's carriers, the rows that join the registry at generator version 27, in registry
 /// order: each row's key and its CEA record's name.
-pub const CARRIERS: [(&str, &str); 7] = [
+pub const CARRIERS: [(&str, &str); 12] = [
     ("SH", "SH"),
     ("OH", "OH"),
     ("S+", "S+"),
@@ -1535,10 +1535,18 @@ pub const CARRIERS: [(&str, &str); 7] = [
     ("H+", "H+"),
     ("N+", "N+"),
     ("O+", "O+"),
+    ("P", "P"),
+    ("P2", "P2"),
+    ("PO", "PO"),
+    ("PH2", "PH2"),
+    ("Cl", "CL"),
 ];
 
-/// The second table's items, in order: [`CARRIERS`]' records.
-pub const CARRIER_ITEMS: [&str; 7] = ["SH", "OH", "S_PLUS", "C_PLUS", "H_PLUS", "N_PLUS", "O_PLUS"];
+/// The second table's items, in order: [`CARRIERS`]' records but P₂'s, which the first table
+/// holds already as phosphorus's reference gas ([`REFERENCE_GASES`]).
+pub const CARRIER_ITEMS: [&str; 11] = [
+    "SH", "OH", "S_PLUS", "C_PLUS", "H_PLUS", "N_PLUS", "O_PLUS", "P", "PO", "PH2", "CL",
+];
 
 /// The carriers' items, each checked against its row's stoichiometry and charge.
 ///
@@ -1576,6 +1584,13 @@ pub fn fit_carriers(library: &[Record]) -> Result<Fit, FitThermoError> {
                 found,
                 expected,
             });
+        }
+        // A reference gas's record is the first table's already.
+        if REFERENCE_GASES
+            .iter()
+            .any(|&(_, reference)| reference == name)
+        {
+            continue;
         }
         let item = item_name(key);
         items.push(Item::Record {
@@ -1622,8 +1637,9 @@ fn carriers_acceptance(fit: &Fit) -> String {
         })
         .sum();
     format!(
-        "{} carriers of P14.T52.e, the registry's gas rows from generator version 27, {} items of \
-         {intervals} intervals re-emitted from the records to the bit; dropped as empty: {}",
+        "{} carriers of P14.T52.e, the registry's gas rows from generator version 27 (`P2`'s record \
+         the first table's reference gas), {} items of {intervals} intervals re-emitted from the \
+         records to the bit; dropped as empty: {}",
         CARRIERS.len(),
         fit.items.len(),
         if fit.dropped.is_empty() {
@@ -1824,12 +1840,12 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
         assert_eq!(parse(&bound), malformed(5, "a field is not a number"));
     }
 
-    /// Every item is found in the committed library (its 120 records, P14.T52.e's carriers'
+    /// Every item is found in the committed library (its 124 records, P14.T52.e's carriers'
     /// among them), in the task's order, and the only empty intervals are `Si(cr)`'s and `Ca(a)`'s.
     #[test]
     fn thermo_equilibrium_the_library_holds_every_item() {
         let library = library();
-        assert_eq!(library.len(), 120);
+        assert_eq!(library.len(), 124);
         let fitted = fit(&library).unwrap();
         let names: Vec<&str> = fitted.items().iter().map(Item::name).collect();
         assert_eq!(names, ITEMS);
@@ -1847,7 +1863,8 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
     }
 
     /// The second table's items are found in the committed library too, P14.T52.e's carriers in
-    /// the registry's order, each checked against its row, with no interval dropped.
+    /// the registry's order, each checked against its row, with no interval dropped, and P₂'s
+    /// record left to the first table, phosphorus's reference gas.
     #[test]
     fn thermo_equilibrium_the_library_holds_every_carrier() {
         let library = library();
@@ -1860,7 +1877,8 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
             .map(|id| id.substance().key().as_str().to_owned())
             .collect();
         assert_eq!(rows, keys);
-        for (&(key, _), name) in CARRIERS.iter().zip(CARRIER_ITEMS) {
+        let emitted = CARRIERS.iter().filter(|&&(key, _)| key != "P2");
+        for (&(key, _), name) in emitted.zip(CARRIER_ITEMS) {
             assert_eq!(item_name(key), name);
         }
         assert_eq!(render_carriers(&fitted).item_names(), CARRIER_ITEMS);
