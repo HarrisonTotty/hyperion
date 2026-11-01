@@ -1097,6 +1097,35 @@ fn keep<P: ClassProcess>(
     })
 }
 
+/// The systems of the members of candidate `id`'s entry, in member order, kept in cell `key` under
+/// `bound` ([`ClassProcess::system`]), or none if the class does not keep it: what
+/// [`resolve_entry`] and the system of each member's ID give, bit for bit, from one bound, one
+/// candidate and one test, where each member's resolve costs them all again.
+///
+/// The caller holds `bound` as `process`'s bound over `key`, and `id` as one of the cell's
+/// candidates, member 0, an index under the cell's count: so the resolve of each member's ID,
+/// which takes the same cell and bound and keeps the same candidate, reaches the same entry.
+#[must_use]
+pub(crate) fn entry_systems_in<P: ClassProcess>(
+    galaxy: &Galaxy,
+    process: &P,
+    key: &CatalogueCellKey,
+    id: CatalogueSystemId,
+    bound: PerCubicLightYear,
+) -> Vec<CatalogueSystem> {
+    debug_assert_eq!(id.member(), 0, "an entry is kept by its member 0's ID");
+    let Some(entry) = keep(galaxy, process, key, id, bound) else {
+        return Vec::new();
+    };
+    let mut member = CatalogueMember { entry, member: 0 };
+    (0..member.entry.members)
+        .map(|k| {
+            member.member = k;
+            process.system(galaxy, &member)
+        })
+        .collect()
+}
+
 /// The expected number of candidates in `key` under `bound`: the bound × the cell's volume, the
 /// count's Poisson mean.
 #[must_use]

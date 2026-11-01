@@ -21,7 +21,7 @@ use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
 use crate::galaxy::catalogue_classes::ids::entry_of;
 use crate::galaxy::catalogue_classes::lbv::lbv_claims;
 use crate::galaxy::catalogue_classes::{
-    CatalogueClassCell, CatalogueSystem, ClassProcess, system_of,
+    CatalogueClassCell, CatalogueSystem, ClassProcess, occupied_cells, system_of,
 };
 use crate::galaxy::displaced::site::explosion_site;
 use crate::galaxy::params::GalaxyParams;
@@ -948,4 +948,69 @@ fn the_cells_read_ahead_are_every_cell_the_hits_read() {
             .count();
     }
     assert!(hits >= 2, "{hits} class hosts among the answers");
+}
+
+/// The members of class cell `key`'s entries resolved one ID at a time ([`entry_systems`]), each
+/// candidate in index order, as plan 03's resolve finds them.
+struct Resolved<'a> {
+    galaxy: &'a Galaxy,
+    key: CatalogueCellKey,
+}
+
+impl ClassVisitor for Resolved<'_> {
+    type Output = Vec<CatalogueSystem>;
+    fn visit<P: ClassProcess>(self, process: &P) -> Vec<CatalogueSystem> {
+        let candidates = occupied_cells(self.galaxy, process, [self.key])
+            .first()
+            .map_or(0, |&(_, count)| count);
+        (0..candidates)
+            .flat_map(|index| {
+                let id = self
+                    .key
+                    .candidate_id(index, 0)
+                    .expect("an index of the cell");
+                entry_systems(self.galaxy, process, id)
+            })
+            .collect()
+    }
+}
+
+/// A cell's systems are its members' resolves, bit for bit (P09.T37's bench): each entry of the
+/// cells holding the first hosts of each class that reads no place, and the cell of the first Type
+/// Ia's survivor, kept under the cell's one bound, as each member's ID resolves it.
+#[test]
+fn a_cell_s_systems_are_its_members_resolves() {
+    let galaxy = at_27();
+    let mut members = 0;
+    let survivor = hosts_until(galaxy, ClassId::TYPE_IA, |cell| {
+        cell.iter().any(|host| host.member == 1)
+    })
+    .into_iter()
+    .find(|host| host.member == 1)
+    .expect("a survivor in the plane");
+    for class in [
+        ClassId::CORE_COLLAPSE,
+        ClassId::TYPE_IA,
+        ClassId::XRAY_BINARY,
+    ] {
+        let mut cells: std::collections::BTreeSet<_> = first_hosts(galaxy, class, 3)
+            .iter()
+            .map(|host| CatalogueCellKey::of(host.id).expect("a host's cell"))
+            .collect();
+        if class == ClassId::TYPE_IA {
+            cells.insert(CatalogueCellKey::of(survivor.id).expect("a host's cell"));
+        }
+        for key in cells {
+            let made = ProductionClasses
+                .visit_class(galaxy, class, Made { galaxy, key })
+                .expect("a registered class");
+            let resolved = ProductionClasses
+                .visit_class(galaxy, class, Resolved { galaxy, key })
+                .expect("a registered class");
+            assert!(!resolved.is_empty(), "{key:?}");
+            assert_eq!(made.members(), &resolved[..], "{key:?}");
+            members += resolved.len();
+        }
+    }
+    assert!(members > 9, "{members}");
 }

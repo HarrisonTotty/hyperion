@@ -17,7 +17,7 @@
 //! - **Hits.** The class's cells whose entries can lie in the sphere at any time
 //!   ([`cells_in_sphere`], padded by the class's reach of 4,096 ly, which bounds every member's
 //!   travel over its entry's lifetime, so no layer's walk pad applies: a Type Ia's survivor, which
-//!   outruns layer D's, is found as its record asks) that draw any candidate ([`occupied_cells`]),
+//!   outruns layer D's, is found as its record asks) that draw any candidate ([`occupied_cells`](super::occupied_cells)),
 //!   each candidate kept as the cell keeps it, and each member a system ([`ClassProcess::system`])
 //!   tested at the sphere's time. A class that reads its candidates' place first
 //!   ([`ClassProcess::epoch_place`], the grid's rule 11) has only those built whose place lies
@@ -62,10 +62,11 @@ mod tests;
 use std::sync::Arc;
 
 use super::binary::BinaryTableRules;
-use super::grid::{ClassLookup, ClassProcess, ClassVisitor, ProductionClasses};
+use super::grid::{
+    ClassLookup, ClassProcess, ClassVisitor, ProductionClasses, candidate_count, entry_systems_in,
+};
 use super::{
-    ALL_CLASSES, CatalogueCellKey, CatalogueSystem, ClassId, cells_in_sphere, occupied_cells,
-    resolve_entry,
+    ALL_CLASSES, CatalogueCellKey, CatalogueSystem, ClassId, cells_in_sphere, resolve_entry,
 };
 use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -367,12 +368,19 @@ impl ClassCellSystems {
             + self.members.capacity() * size_of::<CatalogueSystem>()
     }
 
-    /// The systems of cell `key` of `process`'s class (module documentation, "Hits").
+    /// The systems of cell `key` of `process`'s class (module documentation, "Hits"): one bound
+    /// for the cell, as [`occupied_cells`](super::occupied_cells) takes it, and each entry kept
+    /// under it
+    /// ([`entry_systems_in`]), as its members' resolves would keep it.
     #[must_use]
     fn of<P: ClassProcess>(galaxy: &Galaxy, process: &P, key: CatalogueCellKey) -> Self {
-        let candidates = occupied_cells(galaxy, process, [key])
-            .first()
-            .map_or(0, |&(_, count)| count);
+        assert_eq!(
+            key.class(),
+            process.class(),
+            "a cell of the process's own class"
+        );
+        let bound = process.bound(galaxy, &key);
+        let candidates = candidate_count(galaxy.seed(), &key, bound);
         let (mut places, mut members) = (Vec::new(), Vec::new());
         for index in 0..candidates {
             let id = key
@@ -386,7 +394,7 @@ impl ClassCellSystems {
             );
             match place {
                 Some(place) => places.push((index, place)),
-                None => members.extend(entry_systems(galaxy, process, id)),
+                None => members.extend(entry_systems_in(galaxy, process, &key, id, bound)),
             }
         }
         places.shrink_to_fit();
