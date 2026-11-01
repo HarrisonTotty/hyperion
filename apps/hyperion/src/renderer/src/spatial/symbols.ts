@@ -123,6 +123,32 @@ const GREEK_CROSS = (() => {
 })();
 
 /**
+ * How far in the four-point star's waist lies, its concave corners' distance from its centre as a
+ * share of its points' (plan 12, P12.T12).
+ *
+ * @remarks
+ * 0.4, so that the star reads apart from the diamond, whose points lie on the same four axes and
+ * whose sides pass 0.707 from its centre: at the transient's 1 rem the waist stands 2.2 px inside
+ * the diamond's side at 100%. All eight sides lie one distance from the centre, 0.367 of its
+ * reach ({@link unitInradius}), so that an outline shift moves each by the shift, its points out by
+ * 2.7 times it, at most 1.1 device px at a ratio of 0.78125.
+ */
+export const TRANSIENT_WAIST_SHARE = 0.4;
+
+/**
+ * The four-point star, a transient's mark, the source of a sensor detection (plan 12, P12.T12):
+ * its points up, right, down and left on the unit circle, its concave corners between them at
+ * {@link TRANSIENT_WAIST_SHARE}, traced clockwise from the top.
+ */
+const TRANSIENT = closed(
+  Array.from({ length: 8 }, (_, index) => {
+    const angle = (index * Math.PI) / 4;
+    const reach = index % 2 === 0 ? 1 : TRANSIENT_WAIST_SHARE;
+    return { x: reach * Math.sin(angle), y: -reach * Math.cos(angle) };
+  }),
+);
+
+/**
  * How far out the ringed circle's disc reaches, as a share of its ring's radius.
  *
  * @remarks
@@ -147,6 +173,7 @@ const OUTLINES: Readonly<Record<SymbolShape, SymbolOutline>> = {
   pentagon: { kind: "polygon", points: PENTAGON },
   hexagon: { kind: "polygon", points: HEXAGON },
   "greek-cross": { kind: "polygon", points: GREEK_CROSS },
+  transient: { kind: "polygon", points: TRANSIENT },
 };
 
 /**
@@ -172,9 +199,10 @@ export function symbolOutline(shape: SymbolShape): SymbolOutline {
  * (each about its centre, the triangles about their centroids). The Greek cross's is its arms'
  * half-width, 0.316, so its arms' sides move out by δ and its arms' ends by three times that, at
  * most 1.25 device px (at a ratio of 0.78125), which keeps its hole as built and lengthens its arms
- * by no more. An
- * outline added later whose sides lie at no one distance and that cannot take that, such as a
- * four-point star, needs each side offset instead.
+ * by no more. The
+ * four-point star's eight sides all lie 0.367 from its centre, so it moves exactly
+ * ({@link TRANSIENT_WAIST_SHARE}). An outline added later whose sides lie at no one distance and
+ * that cannot take that needs each side offset instead.
  */
 export function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
   let nearest = Infinity;

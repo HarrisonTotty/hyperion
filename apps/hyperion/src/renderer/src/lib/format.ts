@@ -182,6 +182,28 @@ export function formatSignedDeg(angleDeg: number): string {
   return `${fixed(angleDeg, 0, "always", 2)}°`;
 }
 
+/**
+ * What a direction's azimuth runs from: `local`, the observer's `COREWARD` through `SPINWARD`, or,
+ * within a light-year of the galactic axis, `galactic_x`, galactic +x through +y (plan 12, Design
+ * note 12).
+ */
+export type BearingFrom = "local" | "galactic_x";
+
+/**
+ * Formats a direction from the ship as an azimuth and a signed elevation, `047° +12°`, and
+ * `047° +12° FROM +X` where the azimuth runs from galactic +x (plan 12, P12.T12).
+ *
+ * @remarks
+ * The guide's direction: the azimuth by the bearing rule ({@link formatBearingDeg}), the elevation
+ * signed and zero-padded to two digits ({@link formatSignedDeg}), positive north.
+ *
+ * @param elevationDeg - From -90 to +90.
+ */
+export function formatBearing(azimuthDeg: number, elevationDeg: number, from: BearingFrom): string {
+  const direction = `${formatBearingDeg(azimuthDeg)} ${formatSignedDeg(elevationDeg)}`;
+  return from === "galactic_x" ? `${direction} FROM +X` : direction;
+}
+
 /** Unit of an age as {@link formatAge} writes it. */
 export type AgeUnit = "Myr" | "Gyr";
 

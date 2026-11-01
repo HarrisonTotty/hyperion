@@ -4,6 +4,7 @@ import { RINGED_CIRCLE_MIN_SIZE_CLASS } from "../../lib/galaxy/starSymbols";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
+import { TRANSIENT_LABEL, TRANSIENT_SIZE_CLASS } from "./alertMarks";
 import { FEATURE_SIZE_CLASS, formatBandMsun, type LayerBand, OBSERVER_LABEL } from "./chartModel";
 import { StarShapeLegend } from "./StarShapeLegend";
 
@@ -36,6 +37,41 @@ interface SymbolLegendProps {
    * (plan 09, P09.T41.a); `false` when absent.
    */
   readonly features?: boolean;
+  /**
+   * Whether the chart on show draws a transient's four-point star on a resolved host (plan 12,
+   * P12.T12); `false` when absent.
+   */
+  readonly transients?: boolean;
+  /**
+   * Whether the chart on show draws a contact's bearing ray from the observer (plan 12, P12.T12);
+   * `false` when absent.
+   */
+  readonly bearings?: boolean;
+}
+
+/**
+ * What the legend calls a bearing ray in words (plan 12, P12.T12): a solid line from the observer
+ * towards a contact, ending at the display's edge with its label, or with its range at the place
+ * a resolved host's light left it.
+ */
+export const BEARING_LEGEND = "SOLID BEARING TO TRANSIENT";
+
+/**
+ * A bearing ray as the chart draws it: a solid 1 px `--text` line, at the line scale, from the
+ * observer's side.
+ */
+function BearingSample() {
+  return (
+    <svg
+      className="symbol-legend__mark symbol-legend__bearing"
+      style={{ width: "1.5rem", height: "0.5rem" }}
+      viewBox="0 0 24 8"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M 0 4 H 24" />
+    </svg>
+  );
 }
 
 /** What the legend calls a feature's mark, the Greek cross (plan 09, P09.T41.a). */
@@ -133,6 +169,8 @@ function ApparentSample() {
  * draw (plan 12, P12.T11): `OBSERVER`, and `TICK APPARENT POSITION, DASHED TO PRESENT`. So does a
  * chart that draws a large feature (plan 09, P09.T41.a): `FEATURE` beside the Greek cross, at its
  * size, and `TRUE RADIUS` beside an arc of the circle a feature, or a superbubble, is drawn at.
+ * And so does a chart that marks a sensor detection (plan 12, P12.T12): `TRANSIENT` beside the
+ * four-point star, at its size, and `SOLID BEARING TO TRANSIENT` beside a ray's sample.
  */
 export function SymbolLegend({
   bands,
@@ -140,6 +178,8 @@ export function SymbolLegend({
   observed = false,
   unlistedLayer = false,
   features = false,
+  transients = false,
+  bearings = false,
 }: SymbolLegendProps) {
   const lightest = bands?.[0];
   const heaviest = bands?.at(-1);
@@ -211,6 +251,22 @@ export function SymbolLegend({
             {TRUE_RADIUS_LEGEND}
           </p>
         </>
+      ) : null}
+      {transients ? (
+        <p className="symbol-legend__item">
+          <LegendSymbol
+            shape="transient"
+            diameterRem={SIZE_CLASS_REM[TRANSIENT_SIZE_CLASS]}
+            filled
+          />
+          {TRANSIENT_LABEL}
+        </p>
+      ) : null}
+      {bearings ? (
+        <p className="symbol-legend__item">
+          <BearingSample />
+          {BEARING_LEGEND}
+        </p>
       ) : null}
       {observed ? (
         <>

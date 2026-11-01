@@ -940,6 +940,15 @@ export const SEGMENT_DASH_PX: DashPx = { onPx: 6, offPx: 4 };
 export const SEGMENT_TICK_REM = 0.5;
 
 /**
+ * How far apart, in `rem`, the further places a segment's end label tries back along its line are,
+ * where its end has no room (P12.T12): a line of label text, so that each place is a new one.
+ */
+const SEGMENT_LABEL_STEP_REM = 1;
+
+/** How many such places it tries, the end's included: within 8 rem of the display's edge. */
+const SEGMENT_LABEL_STEPS = 8;
+
+/**
  * The `markId` of the observer's stalk, so that the labels keep clear of it as they do of a mark's
  * (`markInksPx`); no system's ID, which is sixteen hex digits.
  */
@@ -1042,7 +1051,11 @@ function outsideCircle(
  * A scene's segments on the screen (plan 12, P12.T11): each one whose length there, its
  * {@link apparentOffset}, exceeds its least, cut where it leaves its mark's outline and clipped to
  * the viewport, then the tick across its `to` end, square to it, where that end lies outside the
- * outline. Lines, with no mark of their own, so that none is picked.
+ * outline. Lines, with no mark of their own, so that none is picked. A segment that leaves the
+ * observer ({@link OBSERVER_MARK_ID}) is cut at the eye's half-width, as one that leaves a mark is
+ * at its outline. A segment with an end label has it at its end as drawn, where it leaves the view
+ * if `to` lies outside it, beside that point as a path's label stands beside its anchor, or, where
+ * that has no room, beside the line up to {@link SEGMENT_LABEL_STEPS} rem back along it (P12.T12).
  */
 function segmentOps(
   scene: SpatialScene,
@@ -1050,12 +1063,20 @@ function segmentOps(
   basis: ViewBasis,
   camera: Camera,
   viewport: Viewport,
-): LineOp[] {
+): { readonly ops: LineOp[]; readonly labels: RingLabel[] } {
   const ops: LineOp[] = [];
+  const labels: RingLabel[] = [];
   const segments = scene.segments ?? [];
   if (segments.length === 0) {
-    return ops;
+    return { ops, labels };
   }
+  const observer =
+    scene.observer === undefined
+      ? null
+      : {
+          centre: screen(project(scene.observer.position, basis, camera, viewport)),
+          radiusPx: OBSERVER_HALF_WIDTH_REM * viewport.remPx,
+        };
   // By ID, once per list: a chart observed has a segment for each of up to a few thousand marks,
   // and a drag builds the list at every frame.
   const marks = new Map(placed.map((entry) => [entry.mark.id, entry]));
@@ -1082,8 +1103,10 @@ function segmentOps(
     const from = screen(project(segment.from, basis, camera, viewport));
     const to: ScreenPoint = { xPx: from.xPx + offset.dxPx, yPx: from.yPx + offset.dyPx };
     const leaves = segment.fromMark === undefined ? undefined : marks.get(segment.fromMark);
-    const centre = leaves === undefined ? null : screen(leaves.at);
-    const radiusPx = leaves === undefined ? 0 : outerRadiusPx(leaves.mark, viewport);
+    const fromObserver = segment.fromMark === OBSERVER_MARK_ID ? observer : null;
+    const centre = fromObserver?.centre ?? (leaves === undefined ? null : screen(leaves.at));
+    const radiusPx =
+      fromObserver?.radiusPx ?? (leaves === undefined ? 0 : outerRadiusPx(leaves.mark, viewport));
     const pieces: ReadonlyArray<readonly [number, number]> =
       centre === null ? [[0, 1]] : outsideCircle(from, to, centre, radiusPx);
     for (const [start, end] of pieces) {
@@ -1102,8 +1125,32 @@ function segmentOps(
         false,
       );
     }
+    const endLabel = segment.endLabel ?? "";
+    const drawn = endLabel.length === 0 ? null : clipToViewport(from, to, viewport);
+    if (drawn !== null) {
+      const [start, end] = drawn;
+      const lengthDrawnPx = Math.hypot(end.xPx - start.xPx, end.yPx - start.yPx);
+      const stepPx = SEGMENT_LABEL_STEP_REM * viewport.remPx;
+      const steps = Math.min(SEGMENT_LABEL_STEPS, Math.floor(lengthDrawnPx / stepPx));
+      labels.push({
+        key: `segment:${segment.id}`,
+        text: endLabel,
+        placement: "ring",
+        xPx: end.xPx,
+        yPx: end.yPx,
+        stack: 0,
+        // Where its end has no room, the label stands beside the line further back along it.
+        ...(steps === 0
+          ? {}
+          : {
+              alongPx: Array.from({ length: steps }, (_, index) =>
+                along(end, start, ((index + 1) * stepPx) / lengthDrawnPx),
+              ),
+            }),
+      });
+    }
   }
-  return ops;
+  return { ops, labels };
 }
 
 /**
@@ -1264,7 +1311,8 @@ function observerOps(
  * the screen annotations: its stalk, then its eye, a polyline at a mark's outline, filled above the
  * plane; its label follows the paths' in the curve labels and stands 0.25 rem outside the place of
  * a selection's bracket about it, as a mark's label does. Neither gives an anchor, so neither is
- * picked.
+ * picked. A segment's end label, a bearing ray's at the display's edge (P12.T12), follows the
+ * observer's in the curve labels.
  *
  * A scene's features and shells (plan 09, P09.T41.a) change nothing else in the order either. A
  * feature's mark is a point mark, the Greek cross, placed, stalked, filled, ordered and anchored
@@ -1310,7 +1358,8 @@ export function buildDrawList(
   // The circles at true radius first, so that every mark and line lies on top of them; then, before
   // every mark, the segments, so that a joiner never crosses another system's symbol.
   const trueRadii = trueRadiusOps(features, scene, basis, camera, viewport);
-  const ops: DrawOp[] = [...trueRadii.ops, ...segmentOps(scene, placed, basis, camera, viewport)];
+  const segments = segmentOps(scene, placed, basis, camera, viewport);
+  const ops: DrawOp[] = [...trueRadii.ops, ...segments.ops];
   for (const piece of farPieces) {
     ops.push(pathOp(piece, basis, camera, viewport));
   }
@@ -1345,6 +1394,7 @@ export function buildDrawList(
       ...ringLabels(scene, basis, camera, viewport),
       ...markCurveLabels(scene, basis, camera, viewport),
       ...observer.labels,
+      ...segments.labels,
     ],
   };
 }

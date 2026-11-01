@@ -1,15 +1,17 @@
 import type { UniverseIdHex } from "@hyperion/protocol";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
+import { useAlerts } from "../../lib/useAlerts";
 import { useUniverse } from "../../lib/universe";
 import type { SystemTarget } from "../system/systemTarget";
+import { alertMarks, transientHost, withAlertMarks } from "./alertMarks";
 import { CentreEntry } from "./CentreEntry";
 import { type GalaxyPage, GalaxyPages } from "./GalaxyPages";
 import { SystemsPanel } from "./SystemsPanel";
 import { UniversePanel } from "./UniversePanel";
-import { useLocalChart } from "./useLocalChart";
+import { type LocalChartState, useLocalChart } from "./useLocalChart";
 
 /** Where the map cursor starts: the galactic centre. */
 const ORIGIN_LY: CentreLy = [0, 0, 0];
@@ -48,7 +50,38 @@ function GalaxyPanels({ onOpenSystem }: GalaxyDisplayProps) {
   const [cursorLy, setCursorLy] = useState<CentreLy>(ORIGIN_LY);
   // Chosen on the map and charted by the local chart, so held by the display both are part of.
   const [chartCentreLy, setChartCentreLy] = useState<CentreLy | null>(null);
-  const chart = useLocalChart(chartCentreLy);
+  const local = useLocalChart(chartCentreLy);
+  // The detections are seen from the chart's observer at the chart's time, once one is chosen
+  // (plan 12, P12.T12): the observer stands in for the ship (Design note 9).
+  const alerts = useAlerts(
+    openId,
+    local.observerLy === null ? null : { positionLy: local.observerLy, timeYr: local.timeYr },
+  );
+  const { contacts } = alerts;
+  // Kept while neither the answer nor the contacts change, as the chart's own scene is, so that an
+  // idle chart paints nothing.
+  const marks = useMemo(
+    () => (local.result === null ? null : alertMarks(contacts, local.result)),
+    [contacts, local.result],
+  );
+  const localScene = local.scene;
+  const scene = useMemo(
+    () => (localScene === null || marks === null ? localScene : withAlertMarks(localScene, marks)),
+    [localScene, marks],
+  );
+  const chart: LocalChartState = {
+    ...local,
+    scene,
+    // A transient's star picked on the chart selects the host it stands on.
+    selectMark: (markId) => {
+      const host = transientHost(markId, contacts);
+      if (host === null) {
+        local.selectMark(markId);
+      } else {
+        local.select(host);
+      }
+    },
+  };
   // Whole while no universe is open, and while a create's result is unconfirmed, so that its
   // report is seen; folded once one is open.
   const universeExpanded =
@@ -92,7 +125,9 @@ function GalaxyPanels({ onOpenSystem }: GalaxyDisplayProps) {
             heldBack={linkDownReason(status)}
           />
         )}
-        {open === null ? null : <SystemsPanel chart={chart} onOpenSystem={onOpenSystem} />}
+        {open === null ? null : (
+          <SystemsPanel chart={chart} alerts={alerts} onOpenSystem={onOpenSystem} />
+        )}
       </div>
     </div>
   );
@@ -107,10 +142,13 @@ function GalaxyPanels({ onOpenSystem }: GalaxyDisplayProps) {
  * it the `PARAMETERS`, `GALAXY MAP` and `LOCAL CHART` pages, which share a panel; `UNIVERSE` shown
  * whole takes the column, and the pages are out of view until it folds again. The second holds the
  * `CURSOR` panel, beside the map and after it in reading order, and `SYSTEMS`, the list and readout
- * the chart is paired with. The display holds the map cursor, which the map and `CURSOR` share, the
- * chart's centre, which `CENTRE CHART` sets, the page on show, which `CENTRE CHART` turns to the
- * chart, and, through `useLocalChart`, the chart itself, since its picture and its list stand in
- * different columns. All of it lasts across a visit to another display (plan 05, design note D1).
+ * the chart is paired with, whose third list is the station's alert list (plan 12, P12.T12). The
+ * display holds the map cursor, which the map and `CURSOR` share, the chart's centre, which
+ * `CENTRE CHART` sets, the page on show, which `CENTRE CHART` turns to the chart, and, through
+ * `useLocalChart`, the chart itself, since its picture and its list stand in
+ * different columns, and the sensor detections seen from the chart's observer, which the chart
+ * marks and `SYSTEMS` lists (`useAlerts`). All of it lasts across a visit to another display (plan
+ * 05, design note D1).
  * With no universe open, `UNIVERSE` is whole and says `NO UNIVERSE OPEN`, and nothing else is shown.
  * Memoised: its one prop, the way to open the `SYSTEM` display, is stable, and it reads the server
  * link and the universe from context, so a latency update, which re-renders `App`, does not

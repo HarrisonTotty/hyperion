@@ -363,3 +363,64 @@ describe("the observer's eye's box, which the marks' labels keep off (plan 12, P
     expect(observerBoxPx(observed(local(0, 100, 0)), TOP, VIEWPORT)).toBeNull();
   });
 });
+
+describe("a segment's end label and a ray from the observer (plan 12, P12.T12)", () => {
+  const endLabels = (scene: SpatialScene) =>
+    buildDrawList(scene, TOP, VIEWPORT, GAP_PX).curveLabels.filter((label) =>
+      label.key.startsWith("segment:"),
+    );
+
+  it("labels a ray to a far point where it leaves the view, beside that point", () => {
+    const ray = segment(local(0, 0, 0), local(0, 10_000, 0), { endLabel: "TRANSIENT" });
+
+    const [label] = endLabels(sceneOf({ segments: [ray] }));
+
+    expect(label).toMatchObject({ key: "segment:segment", text: "TRANSIENT", placement: "ring" });
+    expect(nanopixels(label)).toEqual({ xPx: 800, yPx: 300 });
+  });
+
+  it("offers places back along the line, a rem apart, where its end has no room", () => {
+    const ray = segment(local(0, 0, 0), local(0, 10_000, 0), { endLabel: "TRANSIENT" });
+
+    const [label] = endLabels(sceneOf({ segments: [ray] }));
+    const along = label?.placement === "ring" ? (label.alongPx ?? []) : [];
+
+    expect(along.map((point) => nanopixels(point))).toEqual(
+      Array.from({ length: 8 }, (_, index) => ({ xPx: 800 - 16 * (index + 1), yPx: 300 })),
+    );
+  });
+
+  it("labels a segment at its end where that lies in the view", () => {
+    const short = segment(local(0, 0, 0), local(10, 20, 0), { endLabel: "120 ly" });
+
+    expect(nanopixels(endLabels(sceneOf({ segments: [short] }))[0])).toEqual({
+      xPx: 500,
+      yPx: 250,
+    });
+  });
+
+  it("labels nothing for a segment with no end label, an empty one or one outside the view", () => {
+    const scene = sceneOf({
+      segments: [
+        segment(local(0, 0, 0), local(10, 0, 0), { id: "bare" }),
+        segment(local(0, 0, 0), local(-10, 0, 0), { id: "empty", endLabel: "" }),
+        segment(local(0, 100, 0), local(10, 200, 0), { id: "out", endLabel: "OUT" }),
+      ],
+    });
+
+    expect(endLabels(scene)).toEqual([]);
+  });
+
+  it("starts a ray that leaves the observer outside the eye's half-width", () => {
+    const scene = sceneOf({
+      observer: { position: local(0, 0, 0), label: "OBSERVER" },
+      segments: [segment(local(0, 0, 0), local(0, 10_000, 0), { fromMark: OBSERVER_MARK_ID })],
+    });
+
+    const ray = lines(addedOps(scene)).find((line) => line.markId === null);
+
+    expect(ray).toBeDefined();
+    expectPoint(ray?.from, 400 + VIEWPORT.remPx / 2, 300);
+    expectPoint(ray?.to, 800, 300);
+  });
+});

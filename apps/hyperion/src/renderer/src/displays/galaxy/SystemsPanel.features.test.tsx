@@ -21,6 +21,7 @@ import {
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { anOpenedUniverse, aSystemsInRange, aUniverseList } from "../../test/galaxyFixtures";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { useAlerts } from "../../lib/useAlerts";
 import { statusLine } from "../../test/statusLine";
 import { featureMarkId } from "./chartModel";
 import { SystemsPanel } from "./SystemsPanel";
@@ -44,6 +45,8 @@ async function server(play: () => void): Promise<void> {
  */
 function Chart() {
   const chart = useLocalChart(CENTRE);
+  // No detections: the panel's alert list is not what these tests read.
+  const alerts = useAlerts(null, null);
   return (
     <>
       <button
@@ -62,7 +65,7 @@ function Chart() {
       >
         CHART AT +100 yr
       </button>
-      <SystemsPanel chart={chart} onOpenSystem={() => undefined} />
+      <SystemsPanel chart={chart} alerts={alerts} onOpenSystem={() => undefined} />
     </>
   );
 }

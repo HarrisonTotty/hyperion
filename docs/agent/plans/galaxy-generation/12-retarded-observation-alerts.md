@@ -2933,3 +2933,24 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `pending`, and its `expected_hosts` an `f64`).
   - _Tests._ `tests/alerts_census.rs`, on toy classes and the Milky Way fixture's centre. The
     shared re-observation test runs on the centre's flares while the novae wait on P11.T9 (lean).
+- **P12.T12 as built (lane `p12-t12`, 2026-11-01; client only, no wire or version moves).**
+  - _The hook._ `useAlerts(universe, observer)` reads the requests from the server link, as
+    `useScene` does, not as a parameter. `observer` is the chart's observer and time
+    (`AlertObserver`); with none the status is `no_observer` and nothing is asked. A push
+    numbered at or before the last is dropped, and a gap resubscribes. An `alerts_acknowledge`
+    answered `ok` marks the contact acknowledged, since no push follows for a contact the
+    universe had acknowledged already.
+  - _The sensor stand-in (lean, 2026-11-01)._ `STAND_IN_SENSOR` in `lib/useAlerts.ts`: V detects
+    at magnitude 17 and resolves at 12; X-rays detect at 10 mCrab and resolve at 1 Crab. Every
+    class is asked for, at the server's host limit. The sensor consoles replace it.
+  - _The list's place (lean, 2026-11-01)._ The `SYSTEMS` panel's third list, `ALERTS`, beside
+    `SYSTEMS` and `FEATURES`, with the census per class under it. Making a resolved row active
+    selects its host.
+  - _For T8.c._ The wire cannot tell a contact that has cleared, so the list shows every contact
+    the subscription holds. For a cleared contact to leave the list (Design note 11), T8.c's
+    notification has to say it has cleared.
+  - _Spatial._ `SegmentMark.endLabel` labels a segment at its drawn end, or up to 8 rem back along
+    it. A segment whose `fromMark` is `OBSERVER_MARK_ID` is cut at the eye. The `transient`
+    `SymbolShape` is a four-point star whose waist is at `TRANSIENT_WAIST_SHARE`. Rays are drawn
+    only in observed mode, from the drawn observer; a resolved host's star is drawn in both modes.
+  - _Pending._ The by-eye check against the pinned nova waits on T8.b–c and P12.T9.b.

@@ -1,15 +1,20 @@
 import {
+  type ContactDto,
   type FeatureKindCensus,
   type RequestKind,
+  type UniverseIdHex,
   universeTimeFromYears,
 } from "@hyperion/protocol";
 import { type ReactNode, useId, useState } from "react";
 
+import { AlertList, type AlertSort } from "../../components/AlertList";
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import { featureKindAbbreviation, notYetModelledWords } from "../../lib/galaxy/featureWords";
 import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
+import { linkDownReason } from "../../lib/serverLink";
+import type { AlertsView } from "../../lib/useAlerts";
 import { useUniverse } from "../../lib/universe";
 import type { RequestState } from "../../lib/useServerRequest";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
@@ -29,14 +34,21 @@ import type { LocalChartState } from "./useLocalChart";
  */
 const NO_SUCH_SYSTEM = "EXTINCTION REJECTED: no such system";
 
-/** Which of the chart's two lists the panel shows (plan 09, P09.T41.c). */
-type ChartList = "systems" | "features";
+/**
+ * Which of the panel's lists it shows: the chart's two (plan 09, P09.T41.c), and the station's
+ * alert list (plan 12, P12.T12).
+ */
+type ChartList = "systems" | "features" | "alerts";
 
 /** Each list's choice, in the order offered. */
 const LISTS: ReadonlyArray<{ readonly list: ChartList; readonly label: string }> = [
   { list: "systems", label: "SYSTEMS" },
   { list: "features", label: "FEATURES" },
+  { list: "alerts", label: "ALERTS" },
 ];
+
+/** Why the alert list is empty with no observer: the detections are seen from it (P12.T12). */
+export const NO_OBSERVER = "NO OBSERVER: choose OBSERVED on the LOCAL CHART";
 
 /**
  * What the features' census says beyond the list (plan 09, P09.T41.c), or `null` with nothing to
@@ -70,8 +82,16 @@ function failedState(state: RequestState<RequestKind>): boolean {
   return state.kind === "rejected" || state.kind === "timed_out";
 }
 
+/** The alert list's active row, and the universe whose contact it is. */
+interface ActiveAlert {
+  readonly universe: UniverseIdHex | null;
+  readonly contact: number;
+}
+
 interface SystemsPanelProps {
   readonly chart: LocalChartState;
+  /** The sensor detections seen from the chart's observer, the alert list's (plan 12, P12.T12). */
+  readonly alerts: AlertsView;
   /** Opens the `SYSTEM` display on the selected system, at the chart's time. */
   readonly onOpenSystem: (target: SystemTarget) => void;
 }
@@ -128,8 +148,16 @@ interface SystemsPanelProps {
  * galactic centre its black hole (`black_hole_state`), each request's state said after it, its
  * subject `STRUCTURE` or `BLACK HOLE` before it. A feature is no system to open, so `OPEN SYSTEM`
  * says `NO SYSTEM SELECTED` meanwhile.
+ *
+ * The third list is the station's alert list (plan 12, P12.T12; {@link AlertList}): the sensor
+ * detections seen from the chart's observer, in the column beside the chart that marks them, as
+ * the guide's "every station has an alert list" allows, with the census of each class under it.
+ * Where the detections stand is said above it, `NO OBSERVER` until the chart has one. Making a
+ * resolved alert's row active selects its host, which the readout then reads and the chart
+ * brackets, and the list stays on show; an unresolved one, whose host is not known, selects
+ * nothing. A selection made on the chart, as elsewhere, shows the list it is in.
  */
-export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
+export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
   const reasonId = useId();
   const { open } = useUniverse();
@@ -137,6 +165,15 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const selected = chart.selected;
   const selectedFeature = chart.selectedFeature;
   const [listChoice, setListChoice] = useState<ChartList>("systems");
+  const [alertSort, setAlertSort] = useState<AlertSort>("priority");
+  // A contact's number is its universe's alone, so the active alert lasts until another opens.
+  const [activeChoice, setActiveChoice] = useState<ActiveAlert | null>(null);
+  const activeContact =
+    activeChoice !== null && activeChoice.universe === (open?.id ?? null)
+      ? activeChoice.contact
+      : null;
+  const activeAlert = alerts.contacts.find((contact) => contact.contact === activeContact) ?? null;
+  const activeHost = activeAlert?.level === "resolved" ? activeAlert.host : null;
   // A selection made on the chart shows the list it is in, so that it is shown in both places: the
   // operator's selection, which stays while the chart's two answers arrive apart.
   const selectionKey = chart.selection === null ? null : selectionMarkId(chart.selection);
@@ -146,7 +183,12 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
     setSeenSelection(selectionKey);
     const wanted: ChartList | null =
       chart.selection === null ? null : chart.selection.kind === "feature" ? "features" : "systems";
-    if (wanted !== null && wanted !== listChoice) {
+    // The host an active alert selected is shown where it was chosen, in the alert list.
+    const fromAlerts =
+      listChoice === "alerts" &&
+      chart.selection?.kind === "system" &&
+      chart.selection.id === activeHost;
+    if (wanted !== null && wanted !== listChoice && !fromAlerts) {
       list = wanted;
       setListChoice(wanted);
     }
@@ -278,7 +320,9 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
                   return;
                 }
                 event.preventDefault();
-                const other: ChartList = each === "systems" ? "features" : "systems";
+                const index = LISTS.findIndex((option) => option.list === each);
+                const step = event.key === "ArrowRight" ? 1 : LISTS.length - 1;
+                const other = LISTS[(index + step) % LISTS.length]?.list ?? each;
                 setListChoice(other);
                 const group = event.currentTarget.parentElement;
                 group?.querySelector<HTMLButtonElement>(`[data-list="${other}"]`)?.focus();
@@ -290,7 +334,21 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           ))}
         </fieldset>
       </div>
-      {result === null ? (
+      {list === "alerts" ? (
+        <AlertListPart
+          alerts={alerts}
+          heldBack={chart.heldBack}
+          sort={alertSort}
+          onSort={setAlertSort}
+          activeContact={activeContact}
+          onActivate={(contact) => {
+            setActiveChoice({ universe: open?.id ?? null, contact: contact.contact });
+            if (contact.level === "resolved") {
+              chart.select(contact.host);
+            }
+          }}
+        />
+      ) : result === null ? (
         <p className="panel__empty">
           <StatusText
             text={
@@ -430,6 +488,94 @@ function FeatureListPart({ chart }: FeatureListPartProps) {
           <StatusText text={censusWords} />
         </p>
       )}
+    </>
+  );
+}
+
+interface AlertListPartProps {
+  readonly alerts: AlertsView;
+  /** Why the commands that ask the server are held back, such as `NO CARRIER`; `null` when they act. */
+  readonly heldBack: string | null;
+  readonly sort: AlertSort;
+  readonly onSort: (sort: AlertSort) => void;
+  readonly activeContact: number | null;
+  readonly onActivate: (contact: ContactDto) => void;
+}
+
+/**
+ * The station's alert list, as the panel shows it (plan 12, P12.T12): where its detections stand,
+ * `NO OBSERVER` until the chart has one, `ALERTS PENDING` while the subscription opens, a refusal or
+ * a timeout with `RETRY`, a move of the observer the server did not accept, and the list itself,
+ * stale with the link, as soon as it has opened.
+ */
+function AlertListPart({
+  alerts,
+  heldBack,
+  sort,
+  onSort,
+  activeContact,
+  onActivate,
+}: AlertListPartProps) {
+  const { status } = alerts;
+  let state: RequestState<RequestKind> | null;
+  switch (status.kind) {
+    case "idle":
+    case "live":
+      state = null;
+      break;
+    case "no_observer":
+      return (
+        <p className="panel__empty">
+          <StatusText text={NO_OBSERVER} />
+        </p>
+      );
+    case "pending":
+      state = { kind: "pending" };
+      break;
+    case "stale":
+      state = status.reason === "resubscribing" ? { kind: "pending" } : null;
+      break;
+    case "link_down":
+      state = { kind: "link_down", reason: heldBack ?? linkDownReason("disconnected") ?? "" };
+      break;
+    case "rejected":
+      state = { kind: "rejected", code: status.code, reason: status.reason };
+      break;
+    case "timed_out":
+      state = { kind: "timed_out" };
+      break;
+  }
+  const opened = status.kind === "live" || status.kind === "stale";
+  const { observerFault } = alerts;
+  return (
+    <>
+      {state === null ? null : (
+        <RequestStatus state={state} subject="ALERTS" onRetry={alerts.retry} />
+      )}
+      {observerFault === null ? null : (
+        <StatusLine
+          text={
+            observerFault.kind === "refused"
+              ? `OBSERVER REJECTED: ${observerFault.reason}`
+              : "OBSERVER TIMED OUT"
+          }
+          standing={observerFault.kind === "refused" ? "refused" : "fault"}
+        />
+      )}
+      {opened ? (
+        <AlertList
+          contacts={alerts.contacts}
+          census={alerts.census}
+          acknowledgements={alerts.acknowledgements}
+          sort={sort}
+          onSort={onSort}
+          activeContact={activeContact}
+          onActivate={onActivate}
+          onAcknowledge={alerts.acknowledge}
+          heldBack={heldBack}
+          stale={status.kind === "stale"}
+        />
+      ) : null}
     </>
   );
 }

@@ -9,6 +9,7 @@ import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import type { ScaleUnit } from "../../spatial/scale";
 import { SpatialView } from "../../spatial/SpatialView";
 import { vec3 } from "../../geometry/vec3";
+import { alertLegendOf } from "./alertMarks";
 import { CensusReadout } from "./CensusReadout";
 import { chartLayout, controlsGiveWay } from "./chartLayout";
 import { answeredMode } from "./chartModel";
@@ -100,6 +101,8 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
   // The mode the answer on show was given in, which the furniture and the legend state.
   const answered = result === null ? null : answeredMode(result);
+  // What the chart draws of the sensor detections, which the legend names (plan 12, P12.T12).
+  const alertLegend = alertLegendOf(scene);
 
   return (
     <div
@@ -183,6 +186,8 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         // Of the systems the `STARS` filter shows, as the list and the HR diagram read them.
         unlistedLayer={chart.systems.some((system) => system.kind === "unknown")}
         features={(chart.features?.features.length ?? 0) > 0}
+        transients={alertLegend.transients}
+        bearings={alertLegend.bearings}
       />
     </div>
   );

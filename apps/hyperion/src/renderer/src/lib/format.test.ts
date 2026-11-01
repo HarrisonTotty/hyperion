@@ -9,6 +9,7 @@ import {
   formatAge,
   formatCountdown,
   formatBearingCapacity,
+  formatBearing,
   formatBearingDeg,
   formatBodyDistance,
   formatBodySpan,
@@ -169,6 +170,21 @@ describe("formatSignedDeg", () => {
     [4.6, "+05°"],
   ])("formats %f° as %s", (angleDeg, expected) => {
     expect(formatSignedDeg(angleDeg)).toBe(expected);
+  });
+});
+
+describe("formatBearing (plan 12, P12.T12)", () => {
+  it.each([
+    [47, 12, "047° +12°"],
+    [359.6, -0.4, "000° +00°"],
+    [270, -90, "270° -90°"],
+    [0, 90, "000° +90°"],
+  ])("writes azimuth %f° and elevation %f° as %s", (azimuthDeg, elevationDeg, expected) => {
+    expect(formatBearing(azimuthDeg, elevationDeg, "local")).toBe(expected);
+  });
+
+  it("says FROM +X where the azimuth runs from galactic +x", () => {
+    expect(formatBearing(90, 5, "galactic_x")).toBe("090° +05° FROM +X");
   });
 });
 

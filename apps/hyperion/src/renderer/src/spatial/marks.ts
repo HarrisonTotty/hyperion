@@ -9,10 +9,11 @@ import type { ColourToken } from "./drawList";
  * One meaning per shape on every spatial display. `circle` is a star system; `diamond`, `square`
  * and `triangle` are drawn now and given their meaning by plan 06. Later plans add their own
  * shapes to this union: plan 06 the `ringed-circle` (a giant), plan 13 the `triangle-down` (a
- * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact), and plan 09
- * the `greek-cross` (a feature, a group of systems or a cloud of gas: {@link FeatureMark}). Each is
- * drawn here before the display that gives it its meaning is built, and every one is closed, since
- * a mark is filled above the reference plane and open below it.
+ * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact), plan 09
+ * the `greek-cross` (a feature, a group of systems or a cloud of gas: {@link FeatureMark}), and plan
+ * 12 the `transient`, a four-point star (the source of a sensor detection, P12.T12). Each is drawn
+ * here before the display that gives it its meaning is built, and every one is closed, since a mark
+ * is filled above the reference plane and open below it.
  */
 export type SymbolShape =
   | "circle"
@@ -23,7 +24,8 @@ export type SymbolShape =
   | "triangle-down"
   | "pentagon"
   | "hexagon"
-  | "greek-cross";
+  | "greek-cross"
+  | "transient";
 
 /** The size of a mark, 0 (smallest) to 4, which encodes a class and never depth. */
 export type SizeClass = 0 | 1 | 2 | 3 | 4;
@@ -204,7 +206,8 @@ export type SegmentLine = "solid" | "dashed";
 
 /**
  * A straight line between two scene points, such as the dashed joiner from a system's mark to its
- * apparent position (plan 12, P12.T11): drawn, clipped to the view, and never picked.
+ * apparent position (plan 12, P12.T11) or a contact's solid bearing ray from the observer (P12.T12):
+ * drawn, clipped to the view, and never picked.
  *
  * @remarks
  * Its width and dash are CSS px, which `paint` draws at the line scale, never under 2 device px
@@ -237,6 +240,12 @@ export interface SegmentMark {
    * The length on the screen, CSS px, that it must exceed to be drawn at all; 0 when absent.
    */
   readonly minLengthPx?: number | undefined;
+  /**
+   * Text of a label beside its end as drawn: at `to` where that lies in the view, else where the
+   * line leaves the view, so that a ray drawn to a far point ends at the display's edge with its
+   * label, as a bearing without a range does (plan 12, P12.T12). None when absent.
+   */
+  readonly endLabel?: string | undefined;
 }
 
 /**

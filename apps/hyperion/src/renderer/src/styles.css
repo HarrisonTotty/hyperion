@@ -2323,7 +2323,8 @@ body {
  * P12.T11; R07.T16.f).
  */
 .symbol-legend__apparent path,
-.symbol-legend__true-radius path {
+.symbol-legend__true-radius path,
+.symbol-legend__bearing path {
   stroke-width: calc(1px * var(--line-scale));
 }
 
@@ -2782,6 +2783,175 @@ body {
   flex: none;
   margin: 0;
   color: var(--text-muted);
+}
+
+/*
+ * The station's alert list (plan 12, P12.T12), the SYSTEMS panel's third list: its order's choice,
+ * the rows, the position, the acknowledgement command and the census per class. It takes the
+ * list's half of the panel as the systems' list does, its scrolling region never under three rows.
+ */
+.alert-list {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+}
+
+.alert-list__head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.alert-list__sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+  margin: 0;
+}
+
+.alert-list__sort > legend {
+  margin-right: 0.25rem;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.alert-list__empty {
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
+.alert-list__scroll {
+  flex: 1 1 0;
+  min-height: 9rem;
+  overflow-y: auto;
+}
+
+.alert-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* As tall as every row, so that the scrollbar measures the whole list, not the window rendered. */
+.alert-list__rows {
+  position: relative;
+}
+
+/*
+ * Three 1 rem lines: the alert's text across the row; what it is, and its acknowledgement at the
+ * right; when it was raised, and its flux at the right with the row's one stale slot. Each line
+ * lays out its own parts, so that the first line's length takes no room from the others'.
+ */
+.alert-list__row {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 0;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  height: 3rem;
+  padding: 0 0.125rem;
+  line-height: 1rem;
+  cursor: pointer;
+}
+
+.alert-list__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0 0.5rem;
+  min-width: 0;
+  height: 1rem;
+}
+
+.alert-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* The active row carries a rule down its edge, a shape as well as its surface. */
+.alert-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+/* An Advisory alert is coloured text in the alert list (the guide's "Alerts"). */
+.alert-list__text {
+  overflow: hidden;
+  color: var(--status-advisory);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-list__what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-list__ack {
+  flex: none;
+  letter-spacing: 0.15em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.alert-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.alert-list__flux {
+  display: flex;
+}
+
+/* A snapshot the link no longer backs: muted, the alert's colour with it, each row's S at its end. */
+.alert-list--stale :is(.alert-list__scroll, .alert-list__text) {
+  color: var(--text-muted);
+}
+
+.alert-list__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.alert-list__reason {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.alert-list__result {
+  letter-spacing: 0.15em;
+}
+
+/* A census line per class, each kept whole and the lines set one after another. */
+.alert-list__census {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  list-style: none;
+  letter-spacing: 0.1em;
+}
+
+.alert-list__census > li {
+  white-space: nowrap;
+}
+
+/* What stands in the census's place before a scan is a sentence, and wraps as one. */
+.alert-list__census > .alert-list__census-none {
+  white-space: normal;
 }
 
 /* The panel's title, and beside it the choice of which of the chart's lists it shows. */
