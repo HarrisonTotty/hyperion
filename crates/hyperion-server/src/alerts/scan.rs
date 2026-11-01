@@ -27,9 +27,9 @@ use std::sync::Arc;
 
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BuildAlertQueryError, ClassCensus, ClassSet, ClassStatus,
-    Detection, LocalEventsCache, LongestRise, ProductionAlertClasses, Route, TransientKind,
-    TransientRow, alerts_in_with, class_longest_rise, class_reach, kind_reach, magnetar_scan_cell,
-    one_shot_scan_cell,
+    Detection, LocalEventsCache, LongestRise, ProductionAlertClasses, RecurrentProcess, Route,
+    TransientKind, TransientRow, alerts_in_with, class_longest_rise, class_reach, kind_reach,
+    magnetar_scan_cell, one_shot_scan_cell, recurrent_reach,
 };
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
@@ -58,10 +58,13 @@ use crate::{AppState, FeatureMembers};
 /// out reaches few sensors' limits, and a wider query reads every one of its stars at each scan.
 pub(crate) const LOCAL_EVENTS_RADIUS: LightYears = LightYears::new(10.0);
 
-/// The x-slabs of a background class's sphere each job sweeps: 4, so 64 jobs over the root cube's
-/// 256 slabs of 512 ly cells, each some 0.1 s of bounds and counts at 24 ms a slab
-/// (research-alerts-galaxy-scan, pod, 16 vCPU), long beside a job's round trip.
-pub(crate) const SLABS_PER_JOB: usize = 4;
+/// The x-slabs of a background class's sphere each job sweeps: 1, so 256 jobs over the root cube's
+/// 256 slabs of 512 ly cells, each some 24 ms of bounds and counts (research-alerts-galaxy-scan),
+/// long beside a job's round trip. Four a job left the dense slabs about the centre to a few
+/// workers: on 47 workers a whole-cube scan took 12.65 s of the fast white dwarfs, 0.69 s of the
+/// magnetars and 0.25 s of the supernovae, one a job 7.78 s, 0.38 s and 0.20 s (`awd_scan_cold`
+/// and `oneshot_scan_galaxy`, pod, 48 vCPU, 2026-11-01).
+pub(crate) const SLABS_PER_JOB: usize = 1;
 
 /// The most jobs a background walk is split into: 256 (the brief for P12.T8.b.2), more slabs to a
 /// job past it.
@@ -405,13 +408,21 @@ pub(crate) fn walk_interactive(
 }
 
 /// A class's process as a background walk builds it once and lends it to every job (P12.T8.b.2):
-/// the classes `ProductionAlertClasses` walks in cells, the core collapses with their magnetars.
+/// every class `ProductionAlertClasses` walks in cells, so every class its census can send to the
+/// background. The one-shot classes, the core collapses with their magnetars; and the classes
+/// walked through their recurrent events alone, the accreting white dwarfs, the X-ray binaries and
+/// the luminous blue variables (P12.T5.c).
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one is built a walk, behind an `Arc` its jobs share, never held in bulk"
+)]
 pub(crate) enum BackgroundProcess {
     CoreCollapse(CoreCollapseProcess),
     TypeIa(TypeIaProcess),
     StellarMergers(StellarMergers),
     NeutronStarMergers(NeutronStarMergers),
+    Recurrent(RecurrentProcess),
 }
 
 impl BackgroundProcess {
@@ -426,7 +437,19 @@ impl BackgroundProcess {
             ClassId::NEUTRON_STAR_MERGER => {
                 Some(Self::NeutronStarMergers(NeutronStarMergers::new(galaxy)))
             }
-            _ => None,
+            _ => RecurrentProcess::of(galaxy, class).map(Self::Recurrent),
+        }
+    }
+
+    /// The class.
+    #[must_use]
+    fn class(&self) -> ClassId {
+        match self {
+            Self::CoreCollapse(_) => ClassId::CORE_COLLAPSE,
+            Self::TypeIa(_) => ClassId::TYPE_IA,
+            Self::StellarMergers(_) => ClassId::STELLAR_MERGER,
+            Self::NeutronStarMergers(_) => ClassId::NEUTRON_STAR_MERGER,
+            Self::Recurrent(process) => process.class(),
         }
     }
 }
@@ -503,12 +526,11 @@ pub(crate) struct SlabsWalked {
     drawn: u64,
 }
 
-/// Whether `kind`'s events of `key`'s cell can reach `query`'s sensor: its box within the kind's
-/// reach and [`LIFETIME_REACH`] of the observer, and a light-year more for the rounding. A cell
+/// Whether events of `key`'s cell seen within `reach` can reach `query`'s sensor: its box within
+/// the reach and [`LIFETIME_REACH`] of the observer, and a light-year more for the rounding. A cell
 /// beyond adds nothing to its kind's walk, so walking a few more changes no detection.
 #[must_use]
-fn reaches(query: &AlertQuery, kind: TransientKind, key: &CatalogueCellKey) -> bool {
-    let reach = kind_reach(kind, query.sensor());
+fn reaches(query: &AlertQuery, reach: LightYears, key: &CatalogueCellKey) -> bool {
     if reach <= LightYears::ZERO {
         return false;
     }
@@ -527,7 +549,9 @@ fn reaches(query: &AlertQuery, kind: TransientKind, key: &CatalogueCellKey) -> b
 /// Walks the slabs `slabs` of `plan` for `spec` in `galaxy`, on a pool worker: every occupied cell
 /// of each slab ([`occupied_cells`]), its one-shot events and, for the core collapses, its
 /// magnetars, each kind where it can reach the sensor, cut to the candidates whose time read first
-/// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`). `None` if `token` was
+/// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`); or, for a class walked
+/// through its recurrent events alone, those events where they can reach the sensor
+/// (`RecurrentProcess::scan_cell`, every candidate read). `None` if `token` was
 /// cancelled before the last cell.
 ///
 /// Over every job of the plan, in any order, the tracks are the class's own in
@@ -548,13 +572,14 @@ pub(crate) fn walk_slabs(
     let mut detections = Vec::new();
     let mut drawn: u64 = 0;
     let process = plan.process.as_ref();
-    let class = match process {
-        BackgroundProcess::CoreCollapse(_) => ClassId::CORE_COLLAPSE,
-        BackgroundProcess::TypeIa(_) => ClassId::TYPE_IA,
-        BackgroundProcess::StellarMergers(_) => ClassId::STELLAR_MERGER,
-        BackgroundProcess::NeutronStarMergers(_) => ClassId::NEUTRON_STAR_MERGER,
-    };
+    let class = process.class();
     let query = spec.class_query(class);
+    let sensor = query.sensor();
+    let (supernovae, magnetars, recurrent) = (
+        kind_reach(TransientKind::CoreCollapse, sensor),
+        kind_reach(TransientKind::MagnetarBurst, sensor),
+        recurrent_reach(class, sensor),
+    );
     let Some(sphere) = plan.sphere.as_ref() else {
         return Some(SlabsWalked::default());
     };
@@ -568,6 +593,7 @@ pub(crate) fn walk_slabs(
             BackgroundProcess::TypeIa(p) => occupied_cells(galaxy, p, cells),
             BackgroundProcess::StellarMergers(p) => occupied_cells(galaxy, p, cells),
             BackgroundProcess::NeutronStarMergers(p) => occupied_cells(galaxy, p, cells),
+            BackgroundProcess::Recurrent(p) => p.occupied_cells(galaxy, cells),
         };
         for (cell, count) in occupied {
             if token.is_cancelled() {
@@ -577,10 +603,10 @@ pub(crate) fn walk_slabs(
             let out = &mut detections;
             match process {
                 BackgroundProcess::CoreCollapse(p) => {
-                    if reaches(&query, TransientKind::CoreCollapse, &cell) {
+                    if reaches(&query, supernovae, &cell) {
                         one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
                     }
-                    if reaches(&query, TransientKind::MagnetarBurst, &cell) {
+                    if reaches(&query, magnetars, &cell) {
                         magnetar_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
                     }
                 }
@@ -592,6 +618,11 @@ pub(crate) fn walk_slabs(
                 }
                 BackgroundProcess::NeutronStarMergers(p) => {
                     one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
+                BackgroundProcess::Recurrent(p) => {
+                    if reaches(&query, recurrent, &cell) {
+                        p.scan_cell(galaxy, &mut ctx, cell, &query, out);
+                    }
                 }
             }
         }

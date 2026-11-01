@@ -82,9 +82,9 @@ pub use recurrent::{
     BuildEruptionHostError, BuildMagnetarHostError, EruptionClass, EruptionHost,
     GIANT_ERUPTION_SHARES, MAGNETAR_ACTIVE_SPAN, MAGNETAR_BURST_XRAY_SHARE,
     MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, NoMagnetarCells,
-    StarRecipe, giant_eruption_scan_cell, magnetar_detections, magnetar_scan_cell,
-    magnetar_scan_plan, recurrent_detections, recurrent_reach, recurrent_scan_plan, scan_cell,
-    scan_plan,
+    RecurrentProcess, StarRecipe, giant_eruption_scan_cell, magnetar_detections,
+    magnetar_scan_cell, magnetar_scan_plan, recurrent_detections, recurrent_reach,
+    recurrent_scan_plan, scan_cell, scan_plan,
 };
 pub use registry::{
     BEX_OUTBURST_BAND_PEAKS, CORE_COLLAPSE_BAND_PEAKS, CORE_COLLAPSE_PEAK, DWARF_NOVA_BAND_PEAKS,

@@ -183,6 +183,26 @@ pub fn subscribe_to(
     universe: &UniverseIdHex,
     at: &SimPosition,
     t: SimTime,
+    limits: (f64, f64),
+    classes: &[CatalogueClassWire],
+    host_limit: Option<u32>,
+) -> RequestBody {
+    subscribe_in(
+        universe,
+        (at, t),
+        AlertBandDto::V,
+        limits,
+        classes,
+        host_limit,
+    )
+}
+
+/// An alerts subscription to `classes` at `at` and `t`, through limits of `detect` and `resolve`,
+/// W m⁻², in `band`, at the host limit `host_limit` or the server's.
+pub fn subscribe_in(
+    universe: &UniverseIdHex,
+    (at, t): (&SimPosition, SimTime),
+    band: AlertBandDto,
     (detect, resolve): (f64, f64),
     classes: &[CatalogueClassWire],
     host_limit: Option<u32>,
@@ -194,7 +214,7 @@ pub fn subscribe_to(
             time: wire_time(t),
             sensor: SensorDto {
                 bands: vec![BandLimitsDto {
-                    band: AlertBandDto::V,
+                    band,
                     detect_w_m2: detect,
                     resolve_w_m2: resolve,
                 }],

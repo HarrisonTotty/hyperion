@@ -217,15 +217,15 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
 }
 
 /// A sensor that sees across the galaxy, V 10⁻¹² W m⁻², plans its core collapses as the root
-/// cube's 256 x-slabs of 512 ly cells, in order and without a gap: 64 jobs of 4 slabs, or at most
-/// 256 jobs however few slabs a job is asked to take. The plan holds the slabs, never a list of the
+/// cube's 256 x-slabs of 512 ly cells, in order and without a gap: 256 jobs of the service's one
+/// slab, 64 of four, and at most 256 however few slabs a job is asked to take. The plan holds the slabs, never a list of the
 /// cube's 2²⁴ cell keys. A class no background walk reads in cells has no plan.
 #[test]
 fn a_whole_galaxy_plan_is_the_cubes_slabs_and_no_list_of_its_keys() {
     let (subscription, first) = core_collapses(sun(), UniverseTime::EPOCH, v_sensor(1e-12, 1e-10));
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let class = ClassId::CORE_COLLAPSE;
-    for (per_job, jobs) in [(SLABS_PER_JOB, 64), (1, 256), (0, 256)] {
+    for (per_job, jobs) in [(SLABS_PER_JOB, 256), (4, 64), (0, 256)] {
         let plan = background_plan(galaxy(), &spec, class, per_job).unwrap();
         assert_eq!(plan.jobs().len(), jobs, "{per_job} slabs a job");
         assert_eq!(plan.jobs().first().map(|slabs| slabs.start), Some(-128));
@@ -238,7 +238,7 @@ fn a_whole_galaxy_plan_is_the_cubes_slabs_and_no_list_of_its_keys() {
             plan.jobs()
         );
     }
-    assert!(background_plan(galaxy(), &spec, ClassId::LUMINOUS_BLUE_VARIABLE, 1).is_none());
+    assert!(background_plan(galaxy(), &spec, ClassId::TIDAL_DISRUPTION_VICTIM, 1).is_none());
 }
 
 /// A class the sensor cannot see, the core collapses through a radio sensor, in which no supernova
@@ -307,5 +307,68 @@ async fn a_merger_class_in_slab_jobs_gives_its_interactive_walks_tracks() {
         events
     };
     assert_eq!(events(walked.tracks()), events(&interactive));
+    server.shutdown().await.unwrap();
+}
+
+/// Every class `ProductionAlertClasses` walks has a background plan, so that none its census sends
+/// to the background walks nothing and reads `complete` (P12.T8.b.2, after P12.T5.c): the one-shot
+/// classes and the recurrent alike, all but the centre's victims, which are walked through the
+/// global list. And the X-ray binaries through an X-ray sensor reaching 30,000 ly, the socket
+/// test's, are sent there.
+#[tokio::test]
+async fn every_class_the_census_walks_has_a_background_plan() {
+    let (server, _data_dir) = server(|config| config).await;
+    let state = server.state();
+    let w = WattsPerSquareMetre::new;
+    let sensor = SensorHorizon::new([
+        (
+            AlertBand::Photometric(Band::V),
+            BandLimits::new(w(1e-12), w(1e-10)).unwrap(),
+        ),
+        (
+            AlertBand::XRay,
+            BandLimits::new(w(1e-12), w(1e-10)).unwrap(),
+        ),
+    ])
+    .unwrap();
+    let (subscription, first) = Subscription::new(
+        Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
+        sensor,
+        ClassSet::ALL,
+        hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
+    );
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    for class in ClassSet::ALL.iter() {
+        let plan = background_plan(galaxy(), &spec, class, SLABS_PER_JOB);
+        assert_eq!(
+            plan.is_some(),
+            class != ClassId::TIDAL_DISRUPTION_VICTIM,
+            "{class}'s background plan"
+        );
+    }
+
+    let probe = SensorHorizon::new([(AlertBand::XRay, BandLimits::new(w(1e-6), w(1e-6)).unwrap())])
+        .unwrap();
+    let ratio = class_reach(ClassId::XRAY_BINARY, &probe).value() / 30_000.0;
+    let detect = 1e-6 * ratio * ratio;
+    let xray = SensorHorizon::new([(
+        AlertBand::XRay,
+        BandLimits::new(w(detect), w(detect * 100.0)).unwrap(),
+    )])
+    .unwrap();
+    let (subscription, first) = Subscription::new(
+        Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
+        xray,
+        ClassSet::of(ClassId::XRAY_BINARY),
+        hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
+    );
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let interactive = walk_interactive(state, galaxy(), &spec, &mut LocalEventsCache::default());
+    assert_eq!(
+        interactive.background().collect::<Vec<_>>(),
+        [ClassId::XRAY_BINARY],
+        "{:?}",
+        interactive.census()
+    );
     server.shutdown().await.unwrap();
 }

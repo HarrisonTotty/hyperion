@@ -10,8 +10,9 @@ use std::sync::OnceLock;
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, Detection, DetectionPhase,
-    OneShotClass, SensorHorizon, TransientKind, kind_reach, magnetar_detections,
-    magnetar_scan_cell, one_shot_detections, one_shot_scan_cell,
+    OneShotClass, RecurrentProcess, SensorHorizon, TransientKind, class_reach, kind_reach,
+    magnetar_detections, magnetar_scan_cell, one_shot_detections, one_shot_scan_cell,
+    recurrent_detections,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
@@ -396,5 +397,66 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_type_ia_as_the_walk_as_built() {
     assert_eq!(onsets.len(), 2, "{onsets:?}");
     for (onset, expected) in onsets.iter().zip([198.9, 747.6]) {
         assert!((onset - expected).abs() < 0.05, "{onsets:?}");
+    }
+}
+
+/// A recurrent class's walk as built for `query`, its plan's cells each scanned with a process
+/// built for it, and the walk over each slab's occupied cells of the class sphere with one process
+/// built once (`RecurrentProcess`), in seed 9's galaxy.
+fn recurrent_both(class: ClassId, query: &AlertQuery) -> (Vec<Detection>, Vec<Detection>) {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+    let mut built = Vec::new();
+    recurrent_detections(&galaxy, &mut ctx, class, query, &mut built);
+    let process = RecurrentProcess::of(&galaxy, class).expect("a recurrent class");
+    let sphere = QuerySphere::new(
+        sun(),
+        class_reach(class, query.sensor()),
+        query.window().start(),
+        LightYears::ZERO,
+    )
+    .unwrap();
+    let mut cut = Vec::new();
+    for x in class_slabs(class, &sphere) {
+        for (cell, _) in process.occupied_cells(&galaxy, cells_in_slab(class, &sphere, x)) {
+            process.scan_cell(&galaxy, &mut ctx, cell, query, &mut cut);
+        }
+    }
+    (built, sorted(cut))
+}
+
+/// The X-ray binaries' walk over each slab's occupied cells, one process lent to every cell, is
+/// their walk as built, through an X-ray sensor reaching 30,000 ly over the first year from the
+/// Sun-like point of seed 9's galaxy: what the server's background walk of the class reads.
+#[test]
+fn alerts_galaxy_scan_walks_the_x_ray_binaries_occupied_cells_as_built() {
+    let xray = reaching(AlertBand::XRay, TransientKind::XrayTransient, 30_000.0);
+    let class = ClassId::XRAY_BINARY;
+    let (built, cut) = recurrent_both(class, &query(sun(), class, xray, 0, 1));
+    assert!(!built.is_empty(), "the X-ray binaries outburst and burst");
+    assert_eq!(first_difference(&cut, &built), None);
+}
+
+/// As the X-ray binaries' fast test, for both accreting white dwarf classes' novae and the
+/// luminous blue variables' giant eruptions, over the whole cube: through a V limit of twelfth
+/// magnitude over the first decade (the sim's own example of the novae), 91 fast novae, 11 slow
+/// and one eruption (measured 2026-11-01).
+#[test]
+#[ignore = "slow: scans every cell of the three classes across the cube twice, some 6 minutes"]
+fn alerts_galaxy_scan_walks_the_novae_and_eruptions_occupied_cells_as_built() {
+    // V = 12: Vega's 3.631 × 10⁻⁸ W m⁻² µm⁻¹ through the V band's 0.084 µm, 10^4.8 fainter.
+    let twelfth = sensor(
+        AlertBand::Photometric(Band::V),
+        3.631e-8 * 0.084 * 1.584_893e-5,
+    );
+    for (class, seen) in [
+        (ClassId::ACCRETING_WHITE_DWARF, 91),
+        (ClassId::ACCRETING_WHITE_DWARF_SLOW, 11),
+        (ClassId::LUMINOUS_BLUE_VARIABLE, 1),
+    ] {
+        let (built, cut) = recurrent_both(class, &query(sun(), class, twelfth.clone(), 0, 10));
+        assert_eq!(first_difference(&cut, &built), None, "{class}");
+        assert_eq!(built.len(), seen, "{class}");
     }
 }

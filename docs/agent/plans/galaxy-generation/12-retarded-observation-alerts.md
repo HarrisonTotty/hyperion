@@ -3050,11 +3050,14 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Names._ `ClassProcess::event_time` (rule 10; the core collapses' and the Type Ia's),
     `entries_when`, `class_slabs`, `cells_in_slab`, `occupied_cells` and
     `OneShotClass::cell_events_when`. `one_shot_scan_cell` and `magnetar_scan_cell` build only the
-    candidates whose time can light the window (`alerts/cut.rs`). The server's `background_plan`
-    builds the process once and splits the slabs into at most 256 bulk jobs (`walk_slabs`,
-    `SLABS_PER_JOB` = 4).
+    candidates whose time can light the window (`alerts/cut.rs`). `RecurrentProcess` (both white
+    dwarf classes, the X-ray binaries, the LBVs) lends one process to each cell's `scan_cell`. The
+    server's `background_plan` builds the process once and splits the slabs into at most 256 bulk
+    jobs (`walk_slabs`, `SLABS_PER_JOB` = 1): every class the census can send there, one-shot and
+    recurrent alike.
   - _The census._ T8.b's 2²⁰-cell refusal is gone: a whole-galaxy class reads `complete`, its
     `expected_hosts` the candidates its walk drew (lean). Past the host limit it reads `over_limit`
-    and merges nothing.
+    and merges nothing. A class with no plan, the centre's victims, reads `unwalked`.
+  - _Benches._ `oneshot_scan_galaxy` and `awd_scan_cold` (the plan's), on the default workers.
   - _Leans (2026-11-01)._ No cache of occupied cells: a rescan sweeps the slabs again. Each kind is
     walked only on cells within its reach, so a V-only sensor walks no magnetar.

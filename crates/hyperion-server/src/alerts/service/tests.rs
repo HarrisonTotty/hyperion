@@ -225,8 +225,9 @@ async fn a_background_walk_given_up_among_its_jobs_walks_no_slab() {
     server.shutdown().await.unwrap();
 }
 
-/// The background walk of a class no background walk reads in cells, the luminous blue variables,
-/// draws nothing and is kept as such: its census then reads `unwalked`.
+/// The background walk of a class no background walk reads in cells, the centre's victims, which
+/// are walked through the global list, draws nothing and is kept as such: its census then reads
+/// `unwalked`, never `complete`.
 #[tokio::test]
 async fn a_background_walk_of_a_class_read_in_no_cells_draws_nothing() {
     let (server, _data_dir) = server(|config| config).await;
@@ -234,7 +235,7 @@ async fn a_background_walk_of_a_class_read_in_no_cells_draws_nothing() {
     let spec = nothing_at(UniverseTime::EPOCH, xray(1e-12));
     let walked = state
         .alert_scans
-        .background(state, galaxy(), &spec, ClassId::LUMINOUS_BLUE_VARIABLE)
+        .background(state, galaxy(), &spec, ClassId::TIDAL_DISRUPTION_VICTIM)
         .await
         .unwrap();
     assert_eq!((walked.drawn(), walked.tracks().len()), (None, 0));

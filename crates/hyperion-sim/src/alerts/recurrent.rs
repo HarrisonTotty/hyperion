@@ -72,12 +72,12 @@ use std::fmt;
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
-use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
+use crate::galaxy::catalogue_classes::binary::{AccretingWdFast, AccretingWdSlow, XrayBinaries};
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
 use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
-    entries_when,
+    entries_when, occupied_cells,
 };
 use crate::galaxy::gas::extinction::Sightline;
 use crate::galaxy::placement::SystemRecord;
@@ -541,29 +541,116 @@ pub fn scan_cell(
     if cell.class() != class {
         return;
     }
-    match class {
-        ClassId::CORE_COLLAPSE => {
-            let process = CoreCollapseProcess::new(galaxy);
-            magnetar_scan_cell(galaxy, ctx, query, &process, cell, out);
+    if class == ClassId::CORE_COLLAPSE {
+        let process = CoreCollapseProcess::new(galaxy);
+        magnetar_scan_cell(galaxy, ctx, query, &process, cell, out);
+    } else if let Some(process) = RecurrentProcess::of(galaxy, class) {
+        process.scan_cell(galaxy, ctx, cell, query, out);
+    }
+}
+
+/// The process of a class walked through its recurrent events alone: both accreting white dwarf
+/// classes, the X-ray binaries and the luminous blue variables. A scan of many cells builds it once
+/// and lends it to each cell's walk ([`scan_cell`](Self::scan_cell)), as [`scan_cell`] would build
+/// it for every cell (plan 12, P12.T8.b.2). The core collapses' magnetars are walked with their
+/// own process ([`magnetar_scan_cell`]).
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one is built a walk and lent to every cell, never held in bulk"
+)]
+pub enum RecurrentProcess {
+    /// The fast accreting white dwarfs, their novae.
+    AccretingWdFast(AccretingWdFast),
+    /// The slow accreting white dwarfs, their novae.
+    AccretingWdSlow(AccretingWdSlow),
+    /// The X-ray binaries, their outbursts and bursts.
+    XrayBinaries(XrayBinaries),
+    /// The luminous blue variables, their giant eruptions.
+    LuminousBlueVariables(LbvProcess),
+}
+
+impl RecurrentProcess {
+    /// `class`'s process in `galaxy`, or `None` for a class not walked through its recurrent
+    /// events alone.
+    #[must_use]
+    pub fn of(galaxy: &Galaxy, class: ClassId) -> Option<Self> {
+        match class {
+            ClassId::ACCRETING_WHITE_DWARF => {
+                Some(Self::AccretingWdFast(AccretingWdFast::new(galaxy)))
+            }
+            ClassId::ACCRETING_WHITE_DWARF_SLOW => {
+                Some(Self::AccretingWdSlow(AccretingWdSlow::new(galaxy)))
+            }
+            ClassId::XRAY_BINARY => Some(Self::XrayBinaries(XrayBinaries::new(galaxy))),
+            ClassId::LUMINOUS_BLUE_VARIABLE => {
+                Some(Self::LuminousBlueVariables(LbvProcess::new(galaxy)))
+            }
+            _ => None,
         }
-        ClassId::ACCRETING_WHITE_DWARF => {
-            let process = AwdProcess::new(galaxy, AwdSide::Fast);
-            nova_scan_cell(galaxy, ctx, query, &process, cell, out);
+    }
+
+    /// The class.
+    #[must_use]
+    pub fn class(&self) -> ClassId {
+        match self {
+            Self::AccretingWdFast(process) => process.class(),
+            Self::AccretingWdSlow(process) => process.class(),
+            Self::XrayBinaries(process) => process.class(),
+            Self::LuminousBlueVariables(process) => process.class(),
         }
-        ClassId::ACCRETING_WHITE_DWARF_SLOW => {
-            let process = AwdProcess::new(galaxy, AwdSide::Slow);
-            nova_scan_cell(galaxy, ctx, query, &process, cell, out);
+    }
+
+    /// Each of `cells` that draws any candidate, with its count ([`occupied_cells`]): on these
+    /// alone the walk can find a host, since each class's scan draws its candidates from the same
+    /// bound and count.
+    ///
+    /// # Panics
+    ///
+    /// As [`occupied_cells`].
+    #[must_use]
+    pub fn occupied_cells(
+        &self,
+        galaxy: &Galaxy,
+        cells: impl IntoIterator<Item = CatalogueCellKey>,
+    ) -> Vec<(CatalogueCellKey, u32)> {
+        match self {
+            Self::AccretingWdFast(process) => occupied_cells(galaxy, process, cells),
+            Self::AccretingWdSlow(process) => occupied_cells(galaxy, process, cells),
+            Self::XrayBinaries(process) => occupied_cells(galaxy, process, cells),
+            Self::LuminousBlueVariables(process) => occupied_cells(galaxy, process, cells),
         }
-        ClassId::XRAY_BINARY => {
-            let process = XrayBinaries::new(galaxy);
-            xray_binary_scan_cell(galaxy, ctx, query, &process, cell, out);
+    }
+
+    /// Appends to `out` the recurrent events of the class's hosts in `cell` that `query`'s sensor
+    /// sees in its window, sorted by arrival and then by event: [`scan_cell`]'s, with this
+    /// process.
+    ///
+    /// # Panics
+    ///
+    /// As the class's walk does.
+    pub fn scan_cell(
+        &self,
+        galaxy: &Galaxy,
+        ctx: &mut AlertContext<'_>,
+        cell: CatalogueCellKey,
+        query: &AlertQuery,
+        out: &mut Vec<Detection>,
+    ) {
+        match self {
+            Self::AccretingWdFast(process) => {
+                nova_scan_cell(galaxy, ctx, query, process.hosts(), cell, out);
+            }
+            Self::AccretingWdSlow(process) => {
+                nova_scan_cell(galaxy, ctx, query, process.hosts(), cell, out);
+            }
+            Self::XrayBinaries(process) => {
+                xray_binary_scan_cell(galaxy, ctx, query, process, cell, out);
+            }
+            Self::LuminousBlueVariables(process) => {
+                giant_eruption_scan_cell(galaxy, ctx, query, process, cell, out);
+            }
         }
-        ClassId::LUMINOUS_BLUE_VARIABLE => {
-            let process = LbvProcess::new(galaxy);
-            giant_eruption_scan_cell(galaxy, ctx, query, &process, cell, out);
-        }
-        // The other classes have no recurrent kind walked here.
-        _ => {}
     }
 }
 

@@ -1,6 +1,6 @@
 //! Benchmarks of a background alert scan that reaches the whole galaxy (plan 12, P12.T8.b.2), on
 //! the CPU pool's default workers, as the alert service walks one: the class's process built once
-//! and shared, and the root cube's 256 x-slabs of 512 ly cells in 64 bulk jobs of four, each
+//! and shared, and the root cube's 256 x-slabs of 512 ly cells in 256 bulk jobs of one, each
 //! sweeping its slabs' occupied cells and building only the candidates whose event time, read
 //! first, can light the window. CI compiles these and never runs them.
 //!
@@ -40,7 +40,7 @@ use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
 /// The slabs of each job, the alert service's (`SLABS_PER_JOB`).
-const SLABS_PER_JOB: usize = 4;
+const SLABS_PER_JOB: usize = 1;
 
 /// The query of the core collapses from the Sun-like point through one band's detection limit,
 /// W m⁻², over `[0, years)`.
@@ -97,7 +97,7 @@ fn walk(
     runtime.block_on(async {
         let token = CancelToken::new();
         let mut jobs = Vec::new();
-        let step = i32::try_from(SLABS_PER_JOB).expect("four fits in i32");
+        let step = i32::try_from(SLABS_PER_JOB).expect("one fits in i32");
         for first in slabs.clone().step_by(SLABS_PER_JOB) {
             let range: Range<i32> = first..(first + step).min(slabs.end);
             let (galaxy, process, query) =

@@ -1,8 +1,10 @@
 //! The alert service's scans over a socket (plan 12, P12.T8.b and P12.T9.b): a subscription near a
 //! pinned supernova is told of it at `bearing` as its light rises past the sensor's detection
 //! limit, and then, moved close, of the same contact `resolved` with its host; a class walked in
-//! the background whose walk is given up stays `pending` and delivers nothing; and one walked across
-//! the whole galaxy reads `complete` with the candidates it drew (P12.T8.b.2).
+//! the background whose walk is given up stays `pending` and delivers nothing; one walked across
+//! the whole galaxy reads `complete` with the candidates it drew, one past its host limit reads
+//! `over_limit` and delivers nothing, and a recurrent class sent to the background is walked and
+//! its detections arrive (P12.T8.b.2).
 //!
 //! P12.T9.b's test is to watch a pinned recurrent nova. Plan 11's novae are not walked yet, so a
 //! supernova stands in, as the brief allows (`common::alerts`).
@@ -12,11 +14,11 @@ mod common;
 use common::TestServer;
 use common::alerts::{
     DAY, FAR_LY, SEED, after, arrival, beside, contacts_until, contacts_until_answered, light_at,
-    move_to, opened, opened_with, peak, pinned, subscribe, subscribe_to, v_sensor,
+    move_to, opened, opened_with, peak, pinned, subscribe, subscribe_in, subscribe_to, v_sensor,
 };
 use hyperion_protocol::{
-    CatalogueClassWire, ClassCensusStatusDto, ContactDto, NotificationBody, RequestBody,
-    ResponseBody, UnsubscribeRequest,
+    AlertBandDto, CatalogueClassWire, ClassCensusStatusDto, ContactDto, NotificationBody,
+    RequestBody, ResponseBody, UnsubscribeRequest,
 };
 use hyperion_server::compute::BulkGate;
 use hyperion_server::knowledge::PersistedKnowledge;
@@ -267,6 +269,81 @@ async fn alerts_scans_yield_nothing_of_a_background_class_over_its_host_limit() 
     );
     let id = move_to(&mut client, subscription, &far, after(start, 60 * DAY)).await;
     assert_eq!(contacts_until_answered(&mut client, id).await, []);
+    client.close().await;
+    server.stop().await;
+}
+
+/// A recurrent class over the background threshold is walked, and its detections arrive (P12.T8.b.2,
+/// after P12.T5.c): the X-ray binaries through an X-ray sensor that reaches 30,000 ly from the
+/// Sun-like point, more cells than an interactive walk takes, open `pending`, are walked in the
+/// background to `complete`, and a day on, the outbursts and bursts lit at the start or crossing
+/// the limit that day are the subscriber's contacts (some 3,600 detections over the year, measured
+/// 2026-11-01).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_detections() {
+    let sun =
+        hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).unwrap();
+    let probe = 1e-6;
+    let xray = hyperion_sim::alerts::SensorHorizon::new([(
+        hyperion_sim::alerts::AlertBand::XRay,
+        hyperion_sim::alerts::BandLimits::new(
+            hyperion_sim::units::WattsPerSquareMetre::new(probe),
+            hyperion_sim::units::WattsPerSquareMetre::new(probe),
+        )
+        .unwrap(),
+    )])
+    .unwrap();
+    let ratio = class_reach(ClassId::XRAY_BINARY, &xray).value() / 30_000.0;
+    let detect = probe * ratio * ratio;
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client
+        .create_universe("Alerts: X-ray binaries", SEED)
+        .await
+        .id;
+    let start = hyperion_sim::time::UniverseTime::EPOCH;
+    let request = subscribe_in(
+        &universe,
+        (&sun, start),
+        AlertBandDto::XRay,
+        (detect, detect * 100.0),
+        &[CatalogueClassWire::XrayBinary],
+        None,
+    );
+    let (subscription, contacts, census) = opened_with(&mut client, request).await;
+    assert_eq!(contacts, []);
+    assert_eq!(
+        census
+            .iter()
+            .map(|line| (line.class, line.status))
+            .collect::<Vec<_>>(),
+        [(
+            CatalogueClassWire::XrayBinary,
+            ClassCensusStatusDto::Pending
+        )]
+    );
+    let settled = loop {
+        let (_, NotificationBody::Alerts(notification)) = client.next_notification().await else {
+            panic!("an alerts notification");
+        };
+        if let [line] = notification.census[..]
+            && line.status != ClassCensusStatusDto::Pending
+        {
+            break line;
+        }
+    };
+    assert_eq!(
+        settled.status,
+        ClassCensusStatusDto::Complete,
+        "{settled:?}"
+    );
+    assert!(
+        settled.expected_hosts.is_some_and(|hosts| hosts > 0.0),
+        "{settled:?}"
+    );
+    let id = move_to(&mut client, subscription, &sun, after(start, DAY)).await;
+    let arrived = contacts_until_answered(&mut client, id).await;
+    assert!(!arrived.is_empty(), "the X-ray binaries' detections arrive");
     client.close().await;
     server.stop().await;
 }
