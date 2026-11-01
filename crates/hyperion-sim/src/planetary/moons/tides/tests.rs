@@ -1389,8 +1389,8 @@ fn under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean() {
         let tidal = enceladus.forcing().value() * tides.loss() * enceladus.area();
         eprintln!(
             "Enceladus ({ammonia:?}) under every 27 hold: {:?}, {:.2} GW ({:.2} of it tidal) under \
-             {shell:?} m of shell, k2 {:.4}, Q {:.2}; its core at {:.1} MPa, ρ {:.0} kg m⁻³, r {:.1} \
-             km",
+             {shell:?} m of shell, k2 {:.4}, Q {:.2}; its core at {:.1} MPa, ρ {:.0} kg m⁻³, \
+             r {:.1} km",
             tides.branch(),
             watts / 1e9,
             tidal / 1e9,
@@ -1410,7 +1410,7 @@ fn under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean() {
     }
 }
 
-/// P14.T56.e: Ganymede's, Titan's, Callisto's and Europa's cores are compacted, at 3–15 GPa, so
+/// P14.T56.e: Ganymede's, Titan's, Callisto's and Europa's cores are compacted, at 2.7–15 GPa, so
 /// under every 27 hold their tides and their branch's ocean are the rigid mantle's to the bit; so
 /// are the dry moons' and Triton's, on no ocean.
 #[test]
@@ -1492,9 +1492,9 @@ fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
 
 /// The membrane over a deformable core (P14.T56.e) keeps Beuthe's (2015) relations, for complex Λ
 /// over |Λ| 10⁻³–10³ and its argument 0–π ÷ 2, cores of |s| 10⁻⁶–0.5 dissipating or not, and ρ̄
-/// 1,100–3,500 kg m⁻³: with h₂ (his eq. 42's) (1 + Λ)h₂ = 1 + k₂ (his eq. 34) to 10⁻¹²; at s = 0 it is
-/// the rigid mantle's [`membrane_love_number`] (his eq. 43) to 10⁻¹²; its loss is the core's and
-/// the shell's, −Im k₂ = −Im s |1 + ξh₂|² + ξ|h₂|² Im Λ (the shell's his eq. 101), to 10⁻¹²; and a
+/// 1,100–3,500 kg m⁻³: (1 + Λ)h₂ = 1 + k₂ (his eq. 34) to 10⁻¹²; at s = 0 it is the rigid
+/// mantle's [`membrane_love_number`] (his eq. 43) to 10⁻¹²; its loss is the core's and the
+/// shell's, −Im k₂ = −Im s |1 + ξh₂|² + ξ|h₂|² Im Λ (the shell's his eq. 101), to 10⁻¹²; and a
 /// stiff shell leaves the core's tide, k₂ → s.
 #[test]
 fn the_membrane_over_a_deformable_core_keeps_beuthe_s_relations() {
@@ -1555,10 +1555,10 @@ fn the_membrane_over_a_deformable_core_keeps_beuthe_s_relations() {
 }
 
 /// The core term's limits (P14.T56.e): with no ocean over it (`ρ_w` → 0, so ρ̄ R³ = `ρ_c` `r_c`³)
-/// it is Kelvin's homogeneous elastic sphere's k₂, (3 ÷ 2) ÷ (1 + 19μ ÷ 2`ρ_c` `g_c` `r_c`), seen from R,
-/// times y⁵, here at the water's density taken as a vanishing share of the core's; it vanishes as
-/// the core stiffens, and its loss is negative for no core that does not dissipate. The porous
-/// rigidity is Choblet et al.'s 10⁷ Pa with a dissipation function of 0.8.
+/// it is Kelvin's homogeneous elastic sphere's k₂, (3 ÷ 2) ÷ (1 + 19μ ÷ 2`ρ_c` `g_c` `r_c`), seen
+/// from R, times y⁵, here at the water's density taken as a vanishing share of the core's; it
+/// vanishes as the core stiffens, and only a core that dissipates has a loss. The porous rigidity
+/// is Choblet et al.'s 10⁷ Pa with a dissipation function of 0.8.
 #[test]
 fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
     // A core 10⁶ times denser than water, under an ocean of no weight to speak of: the water's

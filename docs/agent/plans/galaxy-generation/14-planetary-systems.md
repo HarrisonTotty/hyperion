@@ -33935,3 +33935,27 @@ FRACTION OF OUTER LAYERS`, `IRON GROUP`, `LIGHT LITHOPHILES`, `RARE EARTHS`, `PL
     the model leaves their sources out. The guide wants Missing, so before the gate opens the
     sim should say which layer it read (`OuterLayer`) and the wire should make those values
     optional. Nothing sends the type before 27, so its shape can still change.
+- **Deviations in P14.T56.e, as built (lane `p14-t56e`, 2026-11-01).** Held at 27
+  (`moons::tides::POROUS_CORE_VERSION`; `PorousCoreRules::{Held, Porous}`, `with_porous_core`, a
+  line in `with_every_27_hold`). Nothing moves at 24, 25 or 26; no contract or signature changes.
+  - _New items:_ `tides::{OceanCore, CoreCompaction, ComplexRigidity}` and
+    `tides::{core_love_number, deformable_membrane_love_number}`; `params::POROUS_CORE_RIGIDITY`
+    (1.0 × 10⁷ Pa),
+    `POROUS_CORE_DISSIPATION` (Q⁻¹ = Im μ ÷ Re μ = 0.8) and `CORE_COMPACTION_PRESSURE` (100 MPa).
+    `ShellBranch` reads the core; the planar `ocean_heat_flow` and `stiff_shell_gain` stay the
+    rigid mantle's.
+  - _The formula (lean, 2026-11-01):_ derived, not read (the pod reached no copy of Beuthe 2015):
+    k₂ = (k° + s(1 + ξh°)Λ) ÷ (1 + (1 + ξh°)Λ) over a homogeneous incompressible core's term s;
+    it is eq. 43 at s = 0. The lane's science draft is in its outbox for main's ruling.
+  - _The rule (lean, 2026-11-01):_ a core is porous below 100 MPa of effective pressure at its
+    centre, (2π ÷ 3) G `ρ_c` (`ρ_c` − `ρ_w`) `r_c`² over the solve's column; only the ocean branch
+    reads it. Enceladus 27.1 GW under a 22.6 km shell; Dione and Mimas take oceans (recorded).
+  - _For P14.T55.j:_ a core's heat does not fall as its shell thins, so at a held e generated
+    moons reach 115 W m⁻² (29 of 5,000 at 10 W m⁻² or more), against the rigid mantle's 3.46.
+  - _For 27's bump:_ delete what `the_porous_core_is_held_only_until_the_27_bump` lists; restate
+    `mimas_stays_cold_at_its_own_period`, `a_dione_past_x_one_takes_the_thin_shell_branch` and
+    `under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor` (11 → 12
+    raised); re-bless (measured on 24's rules) `planetary/moon_tides`,
+    `planetary/moon_tides_on_their_shell`, `planetary/systems/hierarchical_triple` (.1101, .1102),
+    `planetary/habitability`, `planetary/system_events` and `planetary/surface_conditions_published`
+    (01fffb2c9fff0000.0601, which 25's and 26's holds return). Measure again under every 27 hold.

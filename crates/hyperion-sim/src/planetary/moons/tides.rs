@@ -244,11 +244,11 @@ pub fn membrane_love_number(ocean: f64, lambda: MembraneStiffness) -> ComplexLov
 /// (P14.T56.e; decision-p14-t56d-membrane §2.4, decision-pre-23-review item 4): 27. It does not
 /// ride 26: it landed after 26's membership.
 ///
-/// It is P14.T56.e's one hold. Below it [`PorousCoreRules::in_force`] is [`PorousCoreRules::Held`]:
-/// every ocean-branch moon's shell floats on a rigid mantle ([`membrane_love_number`]), as P14.T56.d
-/// built it, and every figure is version 24's, 25's and 26's bit for bit. 27's bump deletes this
-/// hold, [`PorousCoreRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_porous_core_is_held_only_until_the_27_bump`).
+/// It is P14.T56.e's one hold. Below it [`PorousCoreRules::in_force`] is
+/// [`PorousCoreRules::Held`]: every ocean-branch moon's shell floats on a rigid mantle
+/// ([`membrane_love_number`]), as P14.T56.d built it, and every figure is version 24's, 25's and
+/// 26's bit for bit. 27's bump deletes this hold, [`PorousCoreRules`] with its `Held` arm, the
+/// tests' switch and its tripwire (`the_porous_core_is_held_only_until_the_27_bump`).
 pub(crate) const POROUS_CORE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether an ocean-branch moon's rock core may be porous (its hold, [`POROUS_CORE_VERSION`]).
@@ -338,8 +338,8 @@ pub enum CoreCompaction {
 /// ice shell's water included, as the solve's column spreads it
 /// (P14.T51.g.b's `WaterColumn`).
 ///
-/// The fields are plain values whose invariant, a core denser than water, [`under`](Self::under)
-/// checks, so they are public.
+/// The fields carry no invariant its tide relies on, so they are public; [`under`](Self::under)
+/// gives the generator's, a core denser than water.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct OceanCore {
     /// Its radius `r_c`, the water's base.
@@ -350,16 +350,17 @@ pub struct OceanCore {
 
 impl OceanCore {
     /// The rock under the water of a body of radius `radius` and mass `mass` whose water's base is
-    /// at the radius `base`: the mass M − (4π ÷ 3) `ρ_w` (R³ − `r_w`³) within `r_w`, the body's rock
-    /// (1 − x) M for a water fraction x. `None` where it is not denser than water, or a radius or
-    /// mass is not positive and finite.
+    /// at the radius `base`: the mass M − (4π ÷ 3) `ρ_w` (R³ − `r_w`³) within `r_w`, the body's
+    /// rock (1 − x) M for a water fraction x. `None` where it is not denser than water, or its base
+    /// is not a positive radius within the body's.
     #[must_use]
     pub fn under(radius: Metres, mass: Kilograms, base: Metres) -> Option<Self> {
         let (big_r, r_c) = (radius.value(), base.value());
         let sphere = |r: f64| 4.0 / 3.0 * core::f64::consts::PI * math::powi(r, 3);
         let rock = mass.value() - WATER_DENSITY.value() * (sphere(big_r) - sphere(r_c));
         let density = rock / sphere(r_c);
-        (density.is_finite() && density > WATER_DENSITY.value() && r_c > 0.0).then(|| Self {
+        let within = r_c > 0.0 && r_c <= big_r;
+        (within && density.is_finite() && density > WATER_DENSITY.value()).then(|| Self {
             radius: base,
             density: KilogramsPerCubicMetre::new(density),
         })
@@ -402,10 +403,12 @@ struct Complex {
 }
 
 impl Complex {
+    #[must_use]
     const fn real(re: f64) -> Self {
         Self { re, im: 0.0 }
     }
 
+    #[must_use]
     fn scaled(self, x: f64) -> Self {
         Self {
             re: self.re * x,
@@ -413,6 +416,8 @@ impl Complex {
         }
     }
 
+    /// Its squared modulus.
+    #[must_use]
     fn norm(self) -> f64 {
         self.re * self.re + self.im * self.im
     }
@@ -485,16 +490,17 @@ impl From<Complex> for ComplexLoveNumber {
 ///
 /// The core is a homogeneous, incompressible sphere of radius `r_c` = y R, density `ρ_c` and
 /// rigidity μ̃, under water at [`WATER_DENSITY`] to the surface. Its interface's displacement
-/// answers its effective load (`ρ_c` − `ρ_w`)(Φ′ − `g_c` u) at Kelvin's homogeneous elastic sphere's
-/// 5 `r_c` ÷ 19μ̃ per unit of pressure (Love 1911; [`elastic_love_number`]'s 19μ ÷ 2ρgR), where Φ′
-/// is the perturbing potential there, the tide's and the two displaced surfaces', and the
-/// incompressible core has no density change within. Solved with the ocean's surface held:
+/// answers its effective load (`ρ_c` − `ρ_w`)(Φ′ − `g_c` u) at Kelvin's homogeneous elastic
+/// sphere's 5 `r_c` ÷ 19μ̃ per unit of pressure (Love 1911; [`elastic_love_number`]'s
+/// 19μ ÷ 2ρgR), where Φ′ is the perturbing potential there, the tide's and the two displaced
+/// surfaces', and the incompressible core has no density change within. Solved with the ocean's
+/// surface held:
 ///
 /// s = 3 Δρ² y⁷ ÷ (19 μ̃ ρ̄ ÷ (g R) + Δρ y² (2`ρ_c` + 3`ρ_w`)), with Δρ = `ρ_c` − `ρ_w`.
 ///
 /// It is 0 for a rigid core (μ̃ → ∞) and for one of the ocean's density; with no ocean over it
-/// (`ρ_w` → 0) it is Kelvin's (3 ÷ 2) ÷ (1 + 19μ̃ ÷ 2`ρ_c` `g_c` `r_c`) times y⁵, the core's own k₂ seen
-/// from R; a fluid core gives the two-layer fluid body's.
+/// (`ρ_w` → 0) it is Kelvin's (3 ÷ 2) ÷ (1 + 19μ̃ ÷ 2`ρ_c` `g_c` `r_c`) times y⁵, the core's own
+/// k₂ seen from R; a fluid core gives the two-layer fluid body's.
 ///
 /// # Examples
 ///

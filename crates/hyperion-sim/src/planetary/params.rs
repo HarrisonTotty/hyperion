@@ -578,6 +578,6 @@ pub const POROUS_CORE_DISSIPATION: f64 = 0.8;
 /// effective pressures of about 75–400 MPa (Zhang, Wong and Davis 1990, JGR 95, 341; recalled, not
 /// read in the pod), so a core of 20–30% porosity, Choblet et al.'s (2017), keeps it below some
 /// 10² MPa. Enceladus's core, at 21 MPa, stays porous, as the literature has it (Choblet et al.
-/// 2017); Titan's, Ganymede's, Callisto's and Europa's, at 3–15 GPa, are compacted, as the plan's
+/// 2017); Titan's, Ganymede's, Callisto's and Europa's, at 2.7–15 GPa, are compacted, as the plan's
 /// rule requires; Dione's and Rhea's, at 78–93 MPa, lie just under it.
 pub const CORE_COMPACTION_PRESSURE: Pascals = Pascals::new(1.0e8);
