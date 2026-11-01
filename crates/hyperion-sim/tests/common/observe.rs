@@ -5,7 +5,8 @@
 //! The brute force opens every cell of the box of side 2 × (reach + 4,096 ly) and a cell about the
 //! observer, with no sphere test and no reach, and evaluates each entry's event from its own
 //! definition: its arrival T + d ÷ c, its phase in the window, its light in each of the sensor's
-//! bands (its peak for an onset, its light at the window's start for one in progress), its flux
+//! bands (its peak for an onset, its light at the window's start for one in progress: a
+//! supernova's template or a merger's binary curve), its flux
 //! through plan 07's line of sight, and the band in which it stands highest over the detection
 //! limit. A line's transmission is at most 1, so an event whose unextinguished flux misses every
 //! band's limit is missed through any line, and no line is marched for it.
@@ -15,8 +16,8 @@ use std::collections::BTreeMap;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, MAGNETAR_BURST_XRAY_SHARE,
     MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, OneShotCells,
-    OneShotClass, OneShotEvent, TransientKind, flux, inverse_square_flux, kind_reach,
-    supernova_luminosity, supernova_peak,
+    OneShotClass, OneShotEvent, OneShotLight, TransientKind, binary_luminosity, binary_peak, flux,
+    inverse_square_flux, kind_reach, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
@@ -97,21 +98,33 @@ fn position_bits(position: &GalacticPosition) -> ([i32; 3], [u64; 3]) {
 pub struct KeepCells(BTreeMap<CatalogueCellKey, Vec<OneShotEvent>>);
 
 impl KeepCells {
-    /// The events of `process`'s cell `key` in `galaxy`, generated on first asking.
+    /// The events of `process`'s cell `key` in `galaxy`, generated on first asking from the cell's
+    /// entries, each entry's own event, whatever the class's walk reads them from.
     pub fn events<P: OneShotClass>(
         &mut self,
         galaxy: &Galaxy,
         process: &P,
         key: CatalogueCellKey,
     ) -> &[OneShotEvent] {
-        self.0.entry(key).or_insert_with(|| {
-            CatalogueClassCell::generate(galaxy, process, key)
-                .entries()
-                .iter()
-                .map(|entry| process.event(entry.value()))
-                .collect()
-        })
+        self.0
+            .entry(key)
+            .or_insert_with(|| entry_events(galaxy, process, key))
     }
+}
+
+/// The events of `process`'s cell `key` in `galaxy` from its entries, in index order: each
+/// entry's [`OneShotClass::event`].
+#[must_use]
+pub fn entry_events<P: OneShotClass>(
+    galaxy: &Galaxy,
+    process: &P,
+    key: CatalogueCellKey,
+) -> Vec<OneShotEvent> {
+    CatalogueClassCell::generate(galaxy, process, key)
+        .entries()
+        .iter()
+        .filter_map(|entry| process.event(galaxy, entry.value()))
+        .collect()
 }
 
 impl OneShotCells for KeepCells {
@@ -200,15 +213,17 @@ fn evaluated(
     } else {
         return None;
     };
-    let light = |band| match phase {
-        DetectionPhase::Onset => supernova_peak(event.supernova(), band),
-        DetectionPhase::InProgress => {
+    let light = |band| match (phase, *event.light()) {
+        (DetectionPhase::Onset, OneShotLight::Supernova(kind)) => supernova_peak(kind, band),
+        (DetectionPhase::Onset, OneShotLight::Binary(curve)) => binary_peak(&curve, band),
+        (DetectionPhase::InProgress, light) => {
             let age = window.start().checked_since(arrival).unwrap();
-            supernova_luminosity(
-                event.supernova(),
-                Years::new(age.as_julian_years_f64()),
-                band,
-            )
+            match light {
+                OneShotLight::Supernova(kind) => {
+                    supernova_luminosity(kind, Years::new(age.as_julian_years_f64()), band)
+                }
+                OneShotLight::Binary(curve) => binary_luminosity(&curve, age, band),
+            }
         }
     };
     let bare = query.sensor().bands().any(|(band, limits)| {

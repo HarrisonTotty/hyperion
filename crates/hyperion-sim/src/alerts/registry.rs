@@ -3,13 +3,16 @@
 //! curve (plan 12, P12.T5.a, P12.T5.a.2 and P12.T5.b).
 //!
 //! The rows read their sources' own constants where the sources state them. Plan 09's supernova
-//! templates and plan 06's giant eruptions and magnetar outbursts state no peak, so their bounds
-//! are restated here and held to their sources by tests. The nine rows that are built:
+//! templates, plan 11's binary curves and plan 06's giant eruptions and magnetar outbursts state no
+//! peak, so their bounds are restated here and held to their sources by tests. The eleven rows that
+//! are built:
 //!
 //! | Kind                | Route     | Photometric     | X-ray           | D        | Curve      |
 //! | ------------------- | --------- | --------------- | --------------- | -------- | ---------- |
 //! | `CoreCollapse`      | one-shot  | per band        | 8.0931 × 10³⁶ W | unending | supernova  |
 //! | `TypeIa`            | one-shot  | per band        | none            | unending | supernova  |
+//! | `LuminousRedNova`   | one-shot  | per band        | none            | 280 d    | binary     |
+//! | `Kilonova`          | one-shot  | per band        | none            | 35 d     | binary     |
 //! | `GiantEruption`     | recurrent | 1.2106 × 10³⁴ W | none            | 20 yr    | eruption   |
 //! | `TidalDisruption`   | centre    | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
 //! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
@@ -19,11 +22,13 @@
 //! | `FuOrionisOutburst` | local     | per host        | none            | 500 yr   | outburst   |
 //!
 //! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
-//! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]). The other seven rows wait on
-//! plan 11's sources, P11.T9 (below): `LuminousRedNova` and `Kilonova` (one-shot), `Nova`,
-//! `XrayTransient`, `XrayBurst` and `BeXOutburst` (recurrent) and `DwarfNova` (local). X-ray bursts
-//! are seen across the Galaxy, so they are walked over the X-ray binaries, as the magnetars are
-//! over the core collapses (main's ruling of 2026-10-30; P12.T5.b).
+//! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]), and the mergers' is
+//! 5.1990 × 10³⁵ W for a luminous red nova and 4.6816 × 10³³ W for a kilonova
+//! ([`LUMINOUS_RED_NOVA_BAND_PEAKS`], [`KILONOVA_BAND_PEAKS`]; P12.T5.b). The other five rows wait on
+//! plan 11's sources, P11.T9 (below): `Nova`, `XrayTransient`, `XrayBurst` and `BeXOutburst`
+//! (recurrent) and `DwarfNova` (local). X-ray bursts are seen across the Galaxy, so they are walked
+//! over the X-ray binaries, as the magnetars are over the core collapses (main's ruling of
+//! 2026-10-30; P12.T5.b).
 //!
 //! A kind's hosts are a class's ([`TransientRow::classes`]): the supernovae are the two supernova
 //! classes', plan 11's kinds its classes' (novae and dwarf novae both accreting white dwarf
@@ -31,9 +36,19 @@
 //! collapses', whose neutron stars the magnetars are, and the disruptions their victims'. The
 //! centre's flares and the local kinds of ordinary stars have none.
 //!
+//! # The mergers' rows
+//!
+//! A merger's event is plan 11's curve (P11.T9.a) of its marks: a red nova's of the pair's total
+//! mass, a kilonova's of its ejecta (P11.T9.b). Each kind's bound is its curve's peak at the top of
+//! its mass range, through the curve's colour band by band ([`binary_peak`](super::binary_peak)):
+//! the heaviest merger the stellar mergers draw, two of the tracks' 150 M☉ stars, and the most a
+//! neutron-star merger ejects, two neutron stars' 0.05 M☉. Its D is the longest an event lasts,
+//! until its light stays under 1% of its peak (plan 11's `ACTIVE_SHARE`), after which the alerts
+//! count none of it ([`binary_luminosity`](super::binary_luminosity)).
+//!
 //! # Rows whose source is not built
 //!
-//! Plan 11's light curves and X-ray luminosities (P11.T9) do not exist yet. Their rows keep their
+//! Plan 11's other light curves and X-ray luminosities wait on P11.T9's walks. Their rows keep their
 //! kind, classes and route, and every other part is `None`, with [`TransientRow::pending`] naming
 //! the task whose source fills it (the galaxy plans' slice rule). Such a kind has no bound, so it
 //! adds nothing to its classes' reach, which is true while no event of it can be generated; the
@@ -93,6 +108,10 @@ use super::{AlertBand, BAND_COUNT, ClassSet};
 use crate::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
 #[cfg(doc)]
 use crate::galaxy::features::centre::events::{CentreFlare, DisruptionTail};
+#[cfg(doc)]
+use crate::stellar::binary::light_curves::{BinaryLightCurve, LuminousRedNovaCurve};
+#[cfg(doc)]
+use crate::stellar::binary::scan::NsbhOutflow;
 #[cfg(doc)]
 use crate::stellar::events::{
     flares::Flare,
@@ -312,6 +331,11 @@ pub enum LightCurveSource {
     /// ([`Burst::mean_luminosity_watts`], [`GiantFlare::mean_luminosity_watts`]), since plan 06
     /// gives no shape: the event's whole output, in no one band (P06.T28.c).
     MagnetarBurst,
+    /// Plan 11's curve of a merger's event (P11.T9.a), [`BinaryLightCurve::in_band`] and
+    /// [`BinaryLightCurve::xray_luminosity`] since its onset, while the event is active
+    /// ([`binary_luminosity`](super::binary_luminosity), P12.T5.b): a luminous red nova or a
+    /// kilonova.
+    BinaryCurve,
 }
 
 /// One kind's row of the registry (plan 12, P12.T5.a): its classes, how its events are found,
@@ -547,6 +571,74 @@ pub const TYPE_IA_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::ZERO,
 ];
 
+/// The bound on a luminous red nova's light in each band, W, in [`AlertBand::ALL`]'s order: plan
+/// 11's curve (P11.T9.a) at its peak through its 4,500 K colour ([`binary_peak`](super::binary_peak))
+/// for the heaviest merger the stellar mergers draw, two of the tracks' 150 M☉ stars on their main
+/// sequences, which is the top of the curve's range ([`LuminousRedNovaCurve::of`]), rounded up at
+/// the fifth figure (P12.T5.b). The curve's peak grows as the merger's mass to the 2.5, so the
+/// bound is 1.70 × 10¹⁰ L☉ bolometric, 6.4963 × 10³⁶ W, far above the brightest red novae seen (a
+/// finding).
+///
+/// | Band  | Bound (W)       |
+/// | ----- | --------------- |
+/// | U     | 1.5668 × 10³⁵   |
+/// | B     | 3.9150 × 10³⁵   |
+/// | V     | 5.1990 × 10³⁵   |
+/// | R     | 1.0350 × 10³⁶   |
+/// | I     | 9.2710 × 10³⁵   |
+/// | J     | 7.5469 × 10³⁵   |
+/// | H     | 4.2180 × 10³⁵   |
+/// | K     | 2.5810 × 10³⁵   |
+/// | N     | 1.4620 × 10³⁴   |
+/// | radio | none            |
+/// | X     | none            |
+pub const LUMINOUS_RED_NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(1.5668e35),
+    Watts::new(3.9150e35),
+    Watts::new(5.1990e35),
+    Watts::new(1.0350e36),
+    Watts::new(9.2710e35),
+    Watts::new(7.5469e35),
+    Watts::new(4.2180e35),
+    Watts::new(2.5810e35),
+    Watts::new(1.4620e34),
+    Watts::ZERO,
+    Watts::ZERO,
+];
+
+/// The bound on a kilonova's light in each band, W, in [`AlertBand::ALL`]'s order: plan 11's curve
+/// (P11.T9.a) at its peak through its 5,000 K colour ([`binary_peak`](super::binary_peak)) for the
+/// most a neutron-star merger ejects, two neutron stars' GW170817 0.05 M☉ (P11.T9.b; a black hole
+/// ejects at most 0.026 M☉ of its neutron star, [`NsbhOutflow`]), rounded up at the fifth figure
+/// (P12.T5.b). The curve's peak grows as the ejecta's mass to the 0.35.
+///
+/// | Band  | Bound (W)       |
+/// | ----- | --------------- |
+/// | U     | 1.9013 × 10³³   |
+/// | B     | 4.0589 × 10³³   |
+/// | V     | 4.6816 × 10³³   |
+/// | R     | 8.6275 × 10³³   |
+/// | I     | 7.0573 × 10³³   |
+/// | J     | 5.0297 × 10³³   |
+/// | H     | 2.6705 × 10³³   |
+/// | K     | 1.5757 × 10³³   |
+/// | N     | 8.3017 × 10³¹   |
+/// | radio | none            |
+/// | X     | none            |
+pub const KILONOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(1.9013e33),
+    Watts::new(4.0589e33),
+    Watts::new(4.6816e33),
+    Watts::new(8.6275e33),
+    Watts::new(7.0573e33),
+    Watts::new(5.0297e33),
+    Watts::new(2.6705e33),
+    Watts::new(1.5757e33),
+    Watts::new(8.3017e31),
+    Watts::ZERO,
+    Watts::ZERO,
+];
+
 /// The bound on a giant eruption's own light in any band, W: 1.2106 × 10³⁴, 10^7.5 L☉, the top of
 /// plan 06's law for its peak ([`lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES`]) with the IAU's
 /// nominal solar luminosity, 3.828 × 10²⁶ W, rounded up at the fifth figure. The eruption's own
@@ -609,6 +701,23 @@ const CORE_COLLAPSE_RISE: Span = Span::from_seconds(78 * 86_400);
 /// template's, which peaks 15.15 days in on the grid ([`light`](super::light)), rounded up as
 /// [`CORE_COLLAPSE_RISE`] is. The Type Iax's peaks at 10.45 days.
 const TYPE_IA_RISE: Span = Span::from_seconds(16 * 86_400);
+
+/// The longest a luminous red nova lasts: 280 days, plan 11's 10-day rise and 200-day plateau, the
+/// longest, which mergers of 4 M☉ and up hold, and its 15-day e-folding fade to 1% of its peak
+/// (plan 11's `ACTIVE_SHARE`), 69.08 days: 279.08 days, rounded up to the day.
+const LUMINOUS_RED_NOVA_DURATION: Span = Span::from_seconds(280 * 86_400);
+
+/// The longest a kilonova lasts: 35 days, plan 11's power-law fade to 1% of its peak (plan 11's
+/// `ACTIVE_SHARE`) from its peak a day after the merger for the most a merger ejects, 0.05 M☉,
+/// 34.55 days, rounded up to the day. A kilonova of less ejecta peaks and fades sooner.
+const KILONOVA_DURATION: Span = Span::from_seconds(35 * 86_400);
+
+/// The longest a luminous red nova's light rises: plan 11's 10 days, at every mass.
+const LUMINOUS_RED_NOVA_RISE: Span = Span::from_seconds(10 * 86_400);
+
+/// The longest a kilonova's light rises: a day, plan 11's diffusion time for GW170817's ejecta,
+/// the most a merger ejects; less ejecta peak sooner, as the mass's square root.
+const KILONOVA_RISE: Span = Span::from_seconds(86_400);
 
 /// The longest a giant eruption's light rises: a quarter of its duration ([`lbv::RISE_SHARE`]),
 /// which is at most [`lbv::MAX_DURATION`], 20 Julian years, so five years.
@@ -691,18 +800,28 @@ static ROWS: [TransientRow; 16] = [
             light_curve: Some(LightCurveSource::SupernovaTemplate),
         },
     },
-    TransientRow::pending_on(
-        TransientKind::LuminousRedNova,
-        ClassSet::of(ClassId::STELLAR_MERGER),
-        Route::OneShot,
-        "P11.T9",
-    ),
-    TransientRow::pending_on(
-        TransientKind::Kilonova,
-        ClassSet::of(ClassId::NEUTRON_STAR_MERGER),
-        Route::OneShot,
-        "P11.T9",
-    ),
+    TransientRow {
+        kind: TransientKind::LuminousRedNova,
+        classes: ClassSet::of(ClassId::STELLAR_MERGER),
+        route: Route::OneShot,
+        source: RowSource::Built {
+            bounds: band_by_band(LUMINOUS_RED_NOVA_BAND_PEAKS),
+            duration: LongestDuration::AtMost(LUMINOUS_RED_NOVA_DURATION),
+            rise: LongestRise::AtMost(LUMINOUS_RED_NOVA_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
+    TransientRow {
+        kind: TransientKind::Kilonova,
+        classes: ClassSet::of(ClassId::NEUTRON_STAR_MERGER),
+        route: Route::OneShot,
+        source: RowSource::Built {
+            bounds: band_by_band(KILONOVA_BAND_PEAKS),
+            duration: LongestDuration::AtMost(KILONOVA_DURATION),
+            rise: LongestRise::AtMost(KILONOVA_RISE),
+            light_curve: Some(LightCurveSource::BinaryCurve),
+        },
+    },
     TransientRow::pending_on(
         TransientKind::Nova,
         ACCRETING_WHITE_DWARFS,
@@ -839,7 +958,14 @@ mod tests {
 
     use super::super::light;
     use super::super::reach::{ROOT_CUBE_DIAGONAL, class_reach, kind_reach, reach};
-    use super::super::{BandLimits, SensorHorizon, supernova_luminosity, supernova_peak};
+    use super::super::{
+        BandLimits, SensorHorizon, binary_luminosity, binary_peak, supernova_luminosity,
+        supernova_peak,
+    };
+    use crate::stellar::binary::light_curves::{
+        BinaryLightCurve, GW170817_EJECTA_MASS, KilonovaCurve, LuminousRedNovaCurve,
+    };
+    use crate::stellar::binary::scan::NsbhOutflow;
 
     #[test]
     fn every_kind_has_its_own_row_in_order() {
@@ -873,7 +999,7 @@ mod tests {
                 .into_iter()
                 .filter(|kind| kind.row().pending().is_some())
                 .count(),
-            7
+            5
         );
     }
 
@@ -1239,6 +1365,8 @@ mod tests {
             [
                 TransientKind::CoreCollapse,
                 TransientKind::TypeIa,
+                TransientKind::LuminousRedNova,
+                TransientKind::Kilonova,
                 TransientKind::GiantEruption,
                 TransientKind::MagnetarBurst,
             ]
@@ -1316,7 +1444,124 @@ mod tests {
                 );
             }
         }
+        for (kind, curve) in [
+            (TransientKind::LuminousRedNova, red_nova(2.0)),
+            (TransientKind::LuminousRedNova, red_nova(300.0)),
+            (
+                TransientKind::Kilonova,
+                kilonova(GW170817_EJECTA_MASS.value()),
+            ),
+            (TransientKind::Kilonova, kilonova(0.01)),
+        ] {
+            let mass = match curve {
+                BinaryLightCurve::LuminousRedNova(red) => red.merger_mass(),
+                BinaryLightCurve::Kilonova(kilonova) => kilonova.ejecta_mass(),
+                BinaryLightCurve::Nova(_)
+                | BinaryLightCurve::DwarfNova(_)
+                | BinaryLightCurve::XrayTransient(_)
+                | BinaryLightCurve::XrayBurst(_)
+                | BinaryLightCurve::BeXOutburst(_) => unreachable!("a merger's curve"),
+            };
+            let day = Span::from_seconds(86_400);
+            for band in AlertBand::ALL {
+                w.f64(
+                    &format!("{kind:?} of {} M☉ peak in {band:?}", mass.value()),
+                    binary_peak(&curve, band).value(),
+                );
+                w.f64(
+                    &format!("{kind:?} of {} M☉ at 1 d in {band:?}", mass.value()),
+                    binary_luminosity(&curve, day, band).value(),
+                );
+            }
+        }
         golden!("alerts/registry", w.as_str());
+    }
+
+    /// A luminous red nova's curve of a merger of `mass` M☉.
+    fn red_nova(mass: f64) -> BinaryLightCurve {
+        LuminousRedNovaCurve::of(SolarMasses::new(mass))
+            .unwrap()
+            .into()
+    }
+
+    /// A kilonova's curve of `mass` M☉ of ejecta.
+    fn kilonova(mass: f64) -> BinaryLightCurve {
+        KilonovaCurve::of(SolarMasses::new(mass)).unwrap().into()
+    }
+
+    /// The mergers' curves across what the classes draw: red novae of 0.1 to 300 M☉, the class's
+    /// heaviest, and kilonovae of two neutron stars' ejecta and of black holes' across the class's
+    /// pairs, every one that ejects anything.
+    fn merger_curves() -> Vec<(TransientKind, BinaryLightCurve)> {
+        let mut out = Vec::new();
+        for k in 0..=64 {
+            let mass = 0.1 * math::powf(3_000.0, f64::from(k) / 64.0);
+            out.push((TransientKind::LuminousRedNova, red_nova(mass)));
+        }
+        out.push((
+            TransientKind::Kilonova,
+            kilonova(GW170817_EJECTA_MASS.value()),
+        ));
+        for i in 0..=40 {
+            let hole = 3.0 * math::powf(20.0 / 3.0, f64::from(i) / 40.0);
+            for j in 0..=40 {
+                let star = 1.13 + 0.87 * f64::from(j) / 40.0;
+                let outflow = NsbhOutflow::of(SolarMasses::new(hole), SolarMasses::new(star));
+                if outflow.ejecta().value() > 0.0 {
+                    out.push((TransientKind::Kilonova, kilonova(outflow.ejecta().value())));
+                }
+            }
+        }
+        out
+    }
+
+    /// The mergers' rows bound their curves (P12.T5.b): every red nova and kilonova the classes
+    /// draw peaks at or under its row's bound in every band and is over within its row's D, and
+    /// at the top of each kind's mass range the bound and D are its curve's peak, within 10⁻⁴,
+    /// and its duration, within a day. The red novae last longest from 4 M☉ on, on their longest
+    /// plateau.
+    #[test]
+    fn the_merger_rows_bound_their_curves() {
+        let at_most = |kind: TransientKind| match kind.row().duration() {
+            Some(LongestDuration::AtMost(span)) => span,
+            other => panic!("{kind:?} lasts {other:?}"),
+        };
+        for (kind, curve) in merger_curves() {
+            let row = kind.row();
+            assert_eq!(row.light_curve(), Some(LightCurveSource::BinaryCurve));
+            for band in AlertBand::ALL {
+                let peak = binary_peak(&curve, band);
+                match row.peak_bound(band) {
+                    Some(PeakBound::Watts(bound)) => {
+                        assert!(peak <= bound, "{kind:?} {band:?}: {curve:?}");
+                    }
+                    None => assert_same_bits(peak.value(), 0.0),
+                    other => panic!("{kind:?} {band:?}: {other:?}"),
+                }
+            }
+            assert!(light::binary_duration(&curve) <= at_most(kind), "{curve:?}");
+        }
+        let day = 86_400.0;
+        for (kind, top) in [
+            (TransientKind::LuminousRedNova, red_nova(300.0)),
+            (
+                TransientKind::Kilonova,
+                kilonova(GW170817_EJECTA_MASS.value()),
+            ),
+        ] {
+            for band in AlertBand::ALL {
+                let peak = binary_peak(&top, band).value();
+                if let Some(PeakBound::Watts(bound)) = kind.row().peak_bound(band) {
+                    assert!(bound.value() / peak - 1.0 < 1e-4, "{kind:?} {band:?}");
+                }
+            }
+            let lasts = light::binary_duration(&top).as_seconds_f64();
+            assert!(at_most(kind).as_seconds_f64() - lasts < day, "{kind:?}");
+        }
+        assert_eq!(
+            light::binary_duration(&red_nova(4.0)),
+            light::binary_duration(&red_nova(300.0))
+        );
     }
 
     /// The local kinds keep their sources' look-backs as their longest durations.
@@ -1395,6 +1640,14 @@ mod tests {
         }
         let eruption = lbv::MAX_DURATION.as_seconds_f64() * lbv::RISE_SHARE;
         assert!(eruption <= at_most(TransientKind::GiantEruption));
+        // A merger's curve peaks at its rise: the red novae's ten days, and a kilonova's day at the
+        // most a merger ejects.
+        for (kind, curve) in merger_curves() {
+            assert!(
+                curve.peak().as_seconds_f64() <= at_most(kind),
+                "{kind:?} {curve:?}"
+            );
+        }
         // A top hat and a glitch are at their light at once.
         assert_eq!(at_most(TransientKind::MagnetarBurst), 0.0);
         assert_eq!(at_most(TransientKind::Glitch), 0.0);

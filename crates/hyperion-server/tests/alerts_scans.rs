@@ -60,7 +60,7 @@ fn pinned(galaxy: &Galaxy) -> OneShotEvent {
     CatalogueClassCell::generate(galaxy, &process, key)
         .entries()
         .iter()
-        .map(|entry| process.event(entry.value()))
+        .filter_map(|entry| process.event(galaxy, entry.value()))
         .filter(|event| {
             let years = event.emitted().since_epoch().as_julian_years_f64();
             (0.0..990.0).contains(&years)

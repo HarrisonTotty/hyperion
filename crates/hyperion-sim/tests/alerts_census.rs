@@ -32,6 +32,7 @@ use hyperion_sim::alerts::{
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
+use hyperion_sim::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
 use hyperion_sim::galaxy::catalogue_classes::type_ia::{IaChannel, TypeIaProcess};
@@ -201,8 +202,8 @@ impl OneShotClass for Toy {
         }
     }
 
-    fn event(&self, entry: &Self::Entry) -> OneShotEvent {
-        OneShotEvent::of_supernova(&entry.0, entry.1)
+    fn event(&self, _: &Galaxy, entry: &Self::Entry) -> Option<OneShotEvent> {
+        Some(OneShotEvent::of_supernova(&entry.0, entry.1))
     }
 }
 
@@ -1007,9 +1008,9 @@ fn alerts_re_observe_a_flare_from_further_on_its_line_and_its_hosts_earlier_ones
     }
 }
 
-/// The production classes at a bright visual limit near the Sun: the supernova classes complete,
-/// their detections the walks' own; the others not built, each naming its task; the centre not
-/// walked without the global list (slow).
+/// The production classes at a bright visual limit near the Sun: the supernova and merger classes
+/// complete, their detections the walks' own; the others not built, each naming its task; the
+/// centre not walked without the global list (slow).
 #[test]
 #[ignore = "slow: walks the core collapses' cells about the Sun"]
 fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
@@ -1036,13 +1037,13 @@ fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
     let status = |class| result.class_census(class).unwrap().status();
     assert_eq!(status(ClassId::CORE_COLLAPSE), ClassStatus::Complete);
     assert_eq!(status(ClassId::TYPE_IA), ClassStatus::Complete);
+    assert_eq!(status(ClassId::STELLAR_MERGER), ClassStatus::Complete);
+    assert_eq!(status(ClassId::NEUTRON_STAR_MERGER), ClassStatus::Complete);
     for (class, task) in [
         (ClassId::LUMINOUS_BLUE_VARIABLE, "P12.T5.c"),
         (ClassId::XRAY_BINARY, "P11.T8.b"),
         (ClassId::ACCRETING_WHITE_DWARF, "P11.T9"),
         (ClassId::ACCRETING_WHITE_DWARF_SLOW, "P11.T9"),
-        (ClassId::STELLAR_MERGER, "P11.T9"),
-        (ClassId::NEUTRON_STAR_MERGER, "P11.T9"),
     ] {
         assert_eq!(
             status(class),
@@ -1065,6 +1066,20 @@ fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
         &mut ctx,
         &query,
         &TypeIaProcess::new(galaxy),
+        &mut walks,
+    );
+    one_shot_detections(
+        galaxy,
+        &mut ctx,
+        &query,
+        &StellarMergers::new(galaxy),
+        &mut walks,
+    );
+    one_shot_detections(
+        galaxy,
+        &mut ctx,
+        &query,
+        &NeutronStarMergers::new(galaxy),
         &mut walks,
     );
     assert_eq!(seen(result.detections()), seen(&walks));

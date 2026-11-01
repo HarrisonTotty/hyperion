@@ -2972,3 +2972,21 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _T9.b on a supernova (lean, 2026-11-01)._ The novae are not walked (P11.T9), so the test pins
     seed 9's IIP at +874 yr in core-collapse cell [-3, 48, 0]. Not built: the `awd_scan_cold`
     bench (no accreting white dwarfs).
+- **P12.T5.b's other three classes as built (lane `p12-t5b-classes`, 2026-10-31, at
+  `GENERATOR_VERSION` 24).** No generated output moves; `alerts/registry.golden` re-blessed by name.
+  - _The event's light._ `OneShotEvent::light() -> &OneShotLight` replaces `supernova()`:
+    `Supernova(SupernovaKind)` or `Binary(BinaryLightCurve)`, with `peaks()` and
+    `luminosities(Span)`; `OneShotEvent::of_binary(&BinaryEvent, host, motion)`. New
+    `alerts::{binary_luminosity, binary_peak}`: a binary event's light is its curve's until it stays
+    under plan 11's `ACTIVE_SHARE` of its peak, then none (lean, 2026-10-31). Its `ArrivingLight`'s
+    knots are its arrival, peak, plateau's end and end.
+  - _The trait._ `OneShotClass::event(&self, galaxy, entry) -> Option<OneShotEvent>`, and a
+    provided `cell_events(galaxy, key)`, which the merger classes take from their scan marks.
+    Implemented for `StellarMergers` and `NeutronStarMergers`.
+  - _The rows._ `LuminousRedNova` at 300 M☉, the class's heaviest: V 5.1990 × 10³⁵ W, D 280 d, rise
+    10 d. `Kilonova` at 0.05 M☉, the class's most, not the curve's 1 M☉ (lean, 2026-10-31): V
+    4.6816 × 10³³ W, D 35 d, rise 1 d. `LightCurveSource::BinaryCurve`.
+    Five rows stay pending on P11.T9.
+  - _Rebased onto P12.T5.d (2026-11-01)._ The Type Ia's `OneShotClass` is T5.d's, on the new
+    signature; `one_shot_scan_cell` reads `cell_events`. `ProductionAlertClasses` walks
+    `STELLAR_MERGER` and `NEUTRON_STAR_MERGER` with `one_shot_detections`; neither is `Unwalked`.

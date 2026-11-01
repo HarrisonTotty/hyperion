@@ -227,9 +227,10 @@ impl BinaryEvent {
     }
 }
 
-/// How long an event of `curve` is active ([`BinaryEvent::duration`]).
+/// How long an event of `curve` is active ([`BinaryEvent::duration`]), which plan 12's alerts read
+/// as how long it gives light.
 #[must_use]
-fn active_duration(curve: &BinaryLightCurve) -> Span {
+pub(crate) fn active_duration(curve: &BinaryLightCurve) -> Span {
     curve
         .fades_below(ACTIVE_SHARE)
         .expect("a binary event's light fades below a hundredth of its peak within the clock")
@@ -300,7 +301,7 @@ impl<'a> BinarySystem<'a> {
     }
 
     /// A neutron-star merger of the universe of `seed` by its scan marks (P11.T8.d): its kilonova
-    /// at its merger.
+    /// at its merger, or none where it ejects nothing ([`NsmScanMarks::ejecta_mass`]).
     #[must_use]
     pub const fn neutron_star_merger(seed: Seed, scan: &'a NsmScanMarks) -> Self {
         Self {

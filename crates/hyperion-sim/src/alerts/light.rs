@@ -1,5 +1,6 @@
 //! A source's light in each band (plan 12, P12.T5.b): what a band's luminosity is, a blackbody's
-//! share of its light in a band, and plan 09's supernova templates band by band.
+//! share of its light in a band, plan 09's supernova templates band by band, and plan 11's binary
+//! events' curves in an alert's bands ([`binary_luminosity`]).
 //!
 //! # A band's luminosity
 //!
@@ -81,8 +82,11 @@ use std::f64::consts::PI;
 use crate::galaxy::catalogue_classes::supernova::{LightCurve, SupernovaKind};
 use crate::galaxy::catalogue_classes::type_ia::IaChannel;
 use crate::galaxy::gas::ccm::Band;
+use crate::stellar::binary::events::active_duration;
+use crate::stellar::binary::light_curves::BinaryLightCurve;
 use crate::stellar::remnant::SupernovaType;
 use crate::substance::thermo::SECOND_RADIATION_CONSTANT_CM_K;
+use crate::time::Span;
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, Watts, Years};
 
@@ -733,6 +737,75 @@ pub(super) fn peak_grid() -> impl Iterator<Item = Years> {
         .map(|hour| f64::from(hour) / 24.0)
         .chain((20..21_920).map(|twentieth| f64::from(twentieth) / 20.0));
     days.map(|day| Years::new(day / 365.25))
+}
+
+/// The light in `band` of a binary event of `curve`, `age` after its onset (P12.T5.b): plan 11's
+/// curve in the band ([`BinaryLightCurve::in_band`], and [`BinaryLightCurve::xray_luminosity`] in
+/// X-rays) while the event is active, and none before its onset or once it is over.
+///
+/// Plan 11's curves fade as power laws and exponentials, never to zero. An event of them is over
+/// once its light stays under [`ACTIVE_SHARE`] of its peak (plan 11's `BinaryEvent::duration`),
+/// and the alerts take it to give no light after (lean, 2026-10-31), as no
+/// supernova template gives any 228 years on. So an event in progress is one still active at a
+/// window's start, and its arriving light is zero after its last knot
+/// ([`ArrivingLight::knots`]). Its tail goes on fading in truth, so a sensor that sees the event's
+/// peak from inside a tenth of its reach loses it while its tail is still above the limit: a
+/// kilonova at 1% of its peak is still near an absolute bolometric magnitude of −10.5.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::alerts::{AlertBand, binary_luminosity, binary_peak};
+/// use hyperion_sim::galaxy::gas::ccm::Band;
+/// use hyperion_sim::stellar::binary::light_curves::{
+///     BinaryLightCurve, GW170817_EJECTA_MASS, KilonovaCurve,
+/// };
+/// use hyperion_sim::time::Span;
+///
+/// let kilonova = BinaryLightCurve::from(KilonovaCurve::of(GW170817_EJECTA_MASS)?);
+/// let v = AlertBand::Photometric(Band::V);
+/// let day = Span::from_seconds(86_400);
+/// assert!(binary_luminosity(&kilonova, day, v) <= binary_peak(&kilonova, v));
+/// // A kilonova is over in some five weeks, and gives no X-rays.
+/// let weeks = Span::from_seconds(40 * 86_400);
+/// assert!(binary_luminosity(&kilonova, weeks, v).value() < f64::MIN_POSITIVE);
+/// assert!(binary_peak(&kilonova, AlertBand::XRay).value() < f64::MIN_POSITIVE);
+/// # Ok::<(), hyperion_sim::stellar::binary::light_curves::BuildLightCurveError>(())
+/// ```
+///
+/// [`ArrivingLight::knots`]: super::ArrivingLight::knots
+/// [`ACTIVE_SHARE`]: crate::stellar::binary::events::ACTIVE_SHARE
+#[must_use]
+pub fn binary_luminosity(curve: &BinaryLightCurve, age: Span, band: AlertBand) -> Watts {
+    if age >= binary_duration(curve) {
+        return Watts::ZERO;
+    }
+    match band {
+        AlertBand::Photometric(band) => curve.in_band(age, band),
+        AlertBand::XRay => curve.xray_luminosity(age),
+    }
+}
+
+/// The peak in `band` of a binary event of `curve` (P12.T5.b): its curve's at its peak
+/// ([`BinaryLightCurve::peak_in_band`], and [`BinaryLightCurve::peak_xray_luminosity`] in X-rays),
+/// the event's flux at its brightest that a detection reports, as [`supernova_peak`] is a
+/// supernova's.
+#[must_use]
+pub fn binary_peak(curve: &BinaryLightCurve, band: AlertBand) -> Watts {
+    match band {
+        AlertBand::Photometric(band) => curve.peak_in_band(band),
+        AlertBand::XRay => curve.peak_xray_luminosity(),
+    }
+}
+
+/// How long a binary event of `curve` gives light ([`binary_luminosity`]): plan 11's
+/// `BinaryEvent::duration`, until its light stays under [`ACTIVE_SHARE`] of its peak, read from
+/// plan 11 so that the alerts and the event listings agree on when an event is over.
+///
+/// [`ACTIVE_SHARE`]: crate::stellar::binary::events::ACTIVE_SHARE
+#[must_use]
+pub(super) fn binary_duration(curve: &BinaryLightCurve) -> Span {
+    active_duration(curve)
 }
 
 #[cfg(test)]

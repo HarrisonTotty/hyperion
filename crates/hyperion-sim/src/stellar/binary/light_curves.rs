@@ -1299,6 +1299,25 @@ impl BinaryLightCurve {
         Watts::new(self.shape().peak_w)
     }
 
+    /// The event's light in `band` at its peak, the greatest of [`in_band`](Self::in_band): the
+    /// peak luminosity times the kind's colour's share in the band, as `in_band` gives it on a
+    /// plateau, bit for bit.
+    #[must_use]
+    pub fn peak_in_band(&self, band: Band) -> Watts {
+        self.optical().map_or(Watts::ZERO, |(colour, share)| {
+            self.peak_luminosity() * (share * colour.share(band))
+        })
+    }
+
+    /// The event's 2–10 keV luminosity at its peak, the greatest of
+    /// [`xray_luminosity`](Self::xray_luminosity): zero for a kind with no X-rays.
+    #[must_use]
+    pub fn peak_xray_luminosity(&self) -> Watts {
+        self.xrays().map_or(Watts::ZERO, |(colour, share)| {
+            self.peak_luminosity() * (share * colour.share())
+        })
+    }
+
     /// The light the event radiates from its onset on, J: the bolometric luminosity's integral, a
     /// closed form.
     #[must_use]
@@ -1711,6 +1730,44 @@ mod tests {
                 }
                 assert!(total <= bolometric, "{name} at {t:e} s");
                 assert_same_bits(curve.in_band(dt, Band::Radio).value(), 0.0);
+            }
+        }
+    }
+
+    /// The peak in a band bounds the band's light at every time and is its light at the peak, to
+    /// the nanosecond the peak is floored to, and on a red nova's plateau bit for bit.
+    #[test]
+    fn the_peak_in_a_band_is_the_band_s_greatest() {
+        for (name, curve) in curves() {
+            let peaks = Band::ALL.map(|band| curve.peak_in_band(band));
+            let xray = curve.peak_xray_luminosity();
+            for t in times(curve.shape()) {
+                let Some(dt) = Span::from_seconds_f64(t) else {
+                    continue;
+                };
+                for (band, peak) in Band::ALL.into_iter().zip(peaks) {
+                    assert!(
+                        curve.in_band(dt, band) <= peak,
+                        "{name} {band:?} at {t:e} s"
+                    );
+                }
+                assert!(curve.xray_luminosity(dt) <= xray, "{name} at {t:e} s");
+            }
+            let at_peak = curve.peak();
+            for (band, peak) in Band::ALL.into_iter().zip(peaks) {
+                let light = curve.in_band(at_peak, band).value();
+                assert!(light >= peak.value() * (1.0 - 1e-9), "{name} {band:?}");
+            }
+            let light = curve.xray_luminosity(at_peak).value();
+            assert!(light >= xray.value() * (1.0 - 1e-9), "{name}");
+            if let BinaryLightCurve::LuminousRedNova(red) = curve {
+                let plateau = Span::from_seconds_f64(
+                    curve.shape().rise_s + red.plateau().value() * SECONDS_PER_DAY / 2.0,
+                )
+                .unwrap();
+                for (band, peak) in Band::ALL.into_iter().zip(peaks) {
+                    assert_same_bits(curve.in_band(plateau, band).value(), peak.value());
+                }
             }
         }
     }

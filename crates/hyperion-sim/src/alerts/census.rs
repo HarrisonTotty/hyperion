@@ -47,6 +47,7 @@
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{ClassId, ClassProcess, cells_in_sphere};
@@ -182,9 +183,12 @@ pub trait AlertClasses {
 /// - [`ClassId::CORE_COLLAPSE`]: its supernovae ([`one_shot_detections`], P12.T5.b) and its
 ///   magnetars ([`magnetar_detections`], P12.T5.c), on plan 09's process;
 /// - [`ClassId::TYPE_IA`]: its supernovae, on plan 09's process (P09.T34.a);
+/// - [`ClassId::STELLAR_MERGER`] and [`ClassId::NEUTRON_STAR_MERGER`]: their luminous red novae
+///   and kilonovae ([`one_shot_detections`], P12.T5.b), on plan 11's processes, read from their
+///   scan marks;
 /// - not built, [`Unwalked::NotBuilt`]: the luminous blue variables' giant eruptions (P12.T5.c's
-///   walk), the X-ray binaries (P11.T8.b's class) and plan 11's other four classes, whose rows
-///   wait on P11.T9.
+///   walk), the X-ray binaries (P11.T8.b's class) and the two accreting white dwarf classes,
+///   whose rows wait on P11.T9.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProductionAlertClasses;
 
@@ -213,14 +217,23 @@ impl AlertClasses for ProductionAlertClasses {
                     one_shot_detections(galaxy, ctx, query, process, out);
                 })
             }
+            ClassId::STELLAR_MERGER => {
+                let process = || StellarMergers::new(galaxy);
+                class_alerts(galaxy, query, class, process, |process| {
+                    one_shot_detections(galaxy, ctx, query, process, out);
+                })
+            }
+            ClassId::NEUTRON_STAR_MERGER => {
+                let process = || NeutronStarMergers::new(galaxy);
+                class_alerts(galaxy, query, class, process, |process| {
+                    one_shot_detections(galaxy, ctx, query, process, out);
+                })
+            }
             ClassId::LUMINOUS_BLUE_VARIABLE => {
                 unwalked_class(class, query, Unwalked::NotBuilt("P12.T5.c"))
             }
             ClassId::XRAY_BINARY => unwalked_class(class, query, Unwalked::NotBuilt("P11.T8.b")),
-            ClassId::ACCRETING_WHITE_DWARF
-            | ClassId::ACCRETING_WHITE_DWARF_SLOW
-            | ClassId::STELLAR_MERGER
-            | ClassId::NEUTRON_STAR_MERGER => {
+            ClassId::ACCRETING_WHITE_DWARF | ClassId::ACCRETING_WHITE_DWARF_SLOW => {
                 unwalked_class(class, query, Unwalked::NotBuilt("P11.T9"))
             }
             // The victims are the centre's, walked through the global list (trait
@@ -696,8 +709,6 @@ mod tests {
                 ClassId::ACCRETING_WHITE_DWARF_SLOW,
                 Unwalked::NotBuilt("P11.T9"),
             ),
-            (ClassId::STELLAR_MERGER, Unwalked::NotBuilt("P11.T9")),
-            (ClassId::NEUTRON_STAR_MERGER, Unwalked::NotBuilt("P11.T9")),
             (ClassId::TIDAL_DISRUPTION_VICTIM, Unwalked::NoGlobalList),
         ] {
             let mut out = Vec::new();

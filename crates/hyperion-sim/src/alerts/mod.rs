@@ -16,9 +16,11 @@
 //!   the flux at the observer with plan 07's extinction, and the X-ray band's optical depth
 //!   (Design note 14);
 //! - a source's light in each band ([`light`]): the bands' top hats, a blackbody's share of its
-//!   light in a band, and plan 09's supernova templates band by band (P12.T5.b);
-//! - the one-shot classes' walk ([`oneshot`]), the supernovae (P12.T5.b), and the recurrent
-//!   classes' ([`recurrent`]), so far the core collapses' magnetars (P12.T5.c);
+//!   light in a band, plan 09's supernova templates band by band and plan 11's binary events'
+//!   curves (P12.T5.b);
+//! - the one-shot classes' walk ([`oneshot`]), the supernovae and the mergers' red novae and
+//!   kilonovae (P12.T5.b), and the recurrent classes' ([`recurrent`]), so far the core collapses'
+//!   magnetars (P12.T5.c);
 //! - the galactic centre's walk ([`centre`]), its black hole's flares and tidal disruptions, and
 //!   the local events of a range query's systems ([`local`](mod@local), P12.T5.e);
 //! - "what went off?" ([`alerts_in`], [`census`]): the census per class (Design note 7), each
@@ -64,10 +66,10 @@ pub use census::{
     SourceStatus, alerts_in, alerts_in_with, class_alerts, unwalked_class,
 };
 pub use centre::{TAIL_TEMPERATURE, centre_detections};
-pub use light::{band_share, supernova_luminosity, supernova_peak};
+pub use light::{band_share, binary_luminosity, binary_peak, supernova_luminosity, supernova_peak};
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{
-    NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections,
+    NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, one_shot_detections,
     one_shot_scan_cell, one_shot_scan_plan,
 };
 pub use reach::{

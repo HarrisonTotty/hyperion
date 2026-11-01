@@ -10,6 +10,8 @@
 //!
 //! - A supernova's light is its template's in the band ([`supernova_luminosity`]) at its age since
 //!   its onset arrived, as the one-shot walk reads it ([`oneshot`](super::oneshot)).
+//! - A merger's luminous red nova or kilonova is plan 11's curve in the band while the event is
+//!   active ([`binary_luminosity`]), the same walk's.
 //! - A star's flare or FU Orionis outburst is its own light, (factor − 1) times the star's
 //!   quiescent luminosity, times the kind's share of it in the band, emitted one light time before
 //!   ([`local`](super::local)).
@@ -31,6 +33,7 @@
 use crate::galaxy::catalogue_classes::supernova::SupernovaKind;
 use crate::galaxy::features::centre::events::{CentreFlare, DisruptionTail};
 use crate::observe::light_time;
+use crate::stellar::binary::light_curves::BinaryLightCurve;
 use crate::stellar::events::flares::Flare;
 use crate::stellar::events::fu_orionis::Outburst;
 use crate::time::{ClockWindow, Span, UniverseTime};
@@ -38,7 +41,7 @@ use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Metres, Watts, WattsPerSquareMetre, Years};
 
 use super::AlertBand;
-use super::light::{peak_grid, supernova_luminosity};
+use super::light::{binary_duration, binary_luminosity, peak_grid, supernova_luminosity};
 use super::reach::inverse_square_flux;
 
 /// How long after its explosion a supernova's template is followed: 228 Julian years, after which
@@ -77,6 +80,8 @@ pub struct ArrivingLight {
 enum Source {
     /// A supernova of this kind, which went off at this time.
     Supernova(SupernovaKind, UniverseTime),
+    /// A merger's binary event of this curve, whose onset was at this time.
+    Binary(BinaryLightCurve, UniverseTime),
     /// A star's flare, the star's quiescent luminosity, and the flare's share of its light in the
     /// band.
     Flare(Flare, Watts, f64),
@@ -106,6 +111,26 @@ impl ArrivingLight {
     ) -> Self {
         Self {
             source: Source::Supernova(kind, onset),
+            band,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
+    /// The light in `band` of a merger's binary event of `curve` whose onset was at `onset`,
+    /// `distance` away through a line of sight of `transmission` in the band: its light arrives
+    /// one [`light_time`] after it left.
+    #[must_use]
+    pub(super) fn binary(
+        curve: BinaryLightCurve,
+        onset: UniverseTime,
+        band: AlertBand,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Binary(curve, onset),
             band,
             delay: light_time(distance),
             distance,
@@ -228,6 +253,15 @@ impl ArrivingLight {
                     .as_julian_years_f64();
                 supernova_luminosity(kind, Years::new(age), self.band)
             }
+            Source::Binary(curve, onset) => {
+                let arrival = onset
+                    .checked_add(self.delay)
+                    .expect("a light time across the cube keeps a time on the clock");
+                let age = t
+                    .checked_since(arrival)
+                    .expect("two clock times are a span apart");
+                binary_luminosity(&curve, age, self.band)
+            }
             Source::Flare(flare, quiescent, share) => {
                 let factor = flare.luminosity_factor_at(self.emitted(t));
                 Watts::new((factor - 1.0) * quiescent.value() * share)
@@ -265,6 +299,10 @@ impl ArrivingLight {
     /// rounded up to the nanosecond so that it holds the peak and not the dark before it, and from
     /// which it falls for ever under either of the tails' laws ([`DisruptionTail`]), so its last is
     /// the clock window's end, past which no observer's time lies, if the peak arrives before it. A
+    /// merger's binary event's are its onset, its peak and its plateau's end, which a kilonova has
+    /// none of, and its end, after which it gives no light ([`binary_luminosity`]): it rises
+    /// linearly, holds its plateau and fades, monotone between them but for the nanosecond its
+    /// peak is floored to. A
     /// supernova's are its arrival and the ages of the grid its peak is taken on (the explosion,
     /// every hour of the first day, and every twentieth of a day to 1,096 days;
     /// [`light`](super::light)), then 228 years, when no template gives light. Every template
@@ -325,6 +363,19 @@ impl ArrivingLight {
                 }
                 knots
             }
+            Source::Binary(curve, onset) => {
+                let arrival = arrive(onset);
+                let top = curve
+                    .fades_below(1.0)
+                    .expect("a binary event's plateau ends within the clock");
+                increasing(
+                    [Span::ZERO, curve.peak(), top, binary_duration(&curve)].map(|age| {
+                        arrival
+                            .checked_add(age)
+                            .expect("a binary event's light ends within the clock")
+                    }),
+                )
+            }
         }
     }
 
@@ -375,6 +426,81 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    /// A merger's light, red novae's and kilonovae's of the classes' least and most: zero before
+    /// its first knot and from its last, its peak's flux throughout a red nova's plateau, and
+    /// monotone between its knots to a part in 10¹² of its peak (its peak is floored to the
+    /// nanosecond), rising to its peak and falling after it.
+    #[test]
+    fn a_mergers_light_is_monotone_between_its_knots_and_gone_after_its_end() {
+        use crate::stellar::binary::light_curves::{
+            BinaryLightCurve, GW170817_EJECTA_MASS, KilonovaCurve, LuminousRedNovaCurve,
+        };
+        use crate::units::SolarMasses;
+        let red =
+            |m| BinaryLightCurve::from(LuminousRedNovaCurve::of(SolarMasses::new(m)).unwrap());
+        let kilonova = |m| BinaryLightCurve::from(KilonovaCurve::of(SolarMasses::new(m)).unwrap());
+        let curves = [
+            red(0.2),
+            red(300.0),
+            kilonova(GW170817_EJECTA_MASS.value()),
+            kilonova(1e-4),
+        ];
+        let distance = Metres::new(100.0 * crate::units::consts::METRES_PER_LIGHT_YEAR);
+        let year = Span::from_julian_years(1).unwrap();
+        for curve in curves {
+            for band in [V, AlertBand::Photometric(Band::K), AlertBand::XRay] {
+                let light = ArrivingLight::binary(curve, UniverseTime::EPOCH, band, distance, 0.5);
+                let knots = light.knots();
+                assert!(knots.windows(2).all(|pair| pair[0] < pair[1]), "{light:?}");
+                let first = knots[0];
+                let last = *knots.last().unwrap();
+                let nanosecond = Span::new(0, 1).unwrap();
+                assert_same_bits(
+                    light
+                        .flux_at(first.checked_sub(nanosecond).unwrap())
+                        .value(),
+                    0.0,
+                );
+                assert_same_bits(light.flux_at(last).value(), 0.0);
+                assert_same_bits(light.flux_at(last.checked_add(year).unwrap()).value(), 0.0);
+                let peak = super::super::light::binary_peak(&curve, band).value();
+                let flux = super::super::reach::inverse_square_flux(Watts::new(peak), distance)
+                    .unwrap()
+                    .value()
+                    * 0.5;
+                let slack = 1e-12 * flux;
+                for (k, pair) in knots.windows(2).enumerate() {
+                    let gap = pair[1].checked_since(pair[0]).unwrap().as_seconds_f64();
+                    let samples: Vec<f64> = (0..16)
+                        .map(|i| {
+                            let at = Span::from_seconds_f64(gap * f64::from(i) / 16.0).unwrap();
+                            light.flux_at(pair[0].checked_add(at).unwrap()).value()
+                        })
+                        .collect();
+                    assert!(samples.iter().all(|f| f.is_finite() && *f >= 0.0));
+                    let rising = k == 0;
+                    for step in samples.windows(2) {
+                        let ok = if rising {
+                            step[1] >= step[0] - slack
+                        } else {
+                            step[1] <= step[0] + slack
+                        };
+                        assert!(ok, "{light:?} between knots {k} and {}: {samples:?}", k + 1);
+                    }
+                    assert!(samples.iter().all(|f| *f <= flux + slack), "{light:?}");
+                }
+                if let BinaryLightCurve::LuminousRedNova(nova) = curve {
+                    let plateau = Span::from_seconds_f64(
+                        curve.peak().as_seconds_f64() + nova.plateau().value() * 43_200.0,
+                    )
+                    .unwrap();
+                    let middle = first.checked_add(plateau).unwrap();
+                    assert!((light.flux_at(middle).value() - flux).abs() <= slack);
+                }
+            }
+        }
     }
 
     /// Each light is zero before its first knot, finite and non-negative at and between its

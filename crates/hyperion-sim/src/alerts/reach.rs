@@ -622,7 +622,8 @@ mod tests {
     }
 
     /// A sensor's best band sets the reach; a band with no bound reaches nothing, a bound that
-    /// needs the galaxy reaches the diagonal, and an unbuilt class reaches nothing.
+    /// needs the galaxy reaches the diagonal, a merger class reaches as far as its event, and an
+    /// unbuilt class reaches nothing.
     #[test]
     fn the_best_band_sets_the_reach() {
         let both = sensor(&[(V, 1e-9), (AlertBand::XRay, 1e-15)]);
@@ -648,9 +649,17 @@ mod tests {
             kind_reach(TransientKind::GiantEruption, &both)
         );
         assert!(class_reach(ClassId::LUMINOUS_BLUE_VARIABLE, &both) > LightYears::ZERO);
+        // The mergers' red novae and kilonovae are built (P12.T5.b), and give no X-rays.
+        for (class, kind) in [
+            (ClassId::STELLAR_MERGER, TransientKind::LuminousRedNova),
+            (ClassId::NEUTRON_STAR_MERGER, TransientKind::Kilonova),
+        ] {
+            assert_eq!(class_reach(class, &both), kind_reach(kind, &both));
+            assert!(class_reach(class, &both) > LightYears::ZERO, "{class}");
+            let xray = sensor(&[(AlertBand::XRay, 1e-15)]);
+            assert_eq!(class_reach(class, &xray), LightYears::ZERO, "{class}");
+        }
         for class in [
-            ClassId::STELLAR_MERGER,
-            ClassId::NEUTRON_STAR_MERGER,
             ClassId::XRAY_BINARY,
             ClassId::ACCRETING_WHITE_DWARF,
             ClassId::ACCRETING_WHITE_DWARF_SLOW,

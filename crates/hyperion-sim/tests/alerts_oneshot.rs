@@ -2,7 +2,7 @@
 //! windows of a year and a century, the walk's detections are the brute force's, as sets, field by
 //! field and bit by bit (`common/observe.rs`).
 //!
-//! Three classes are walked:
+//! These classes are walked:
 //!
 //! - **A dense toy Type Ia class**, not physics, which stands in for P09.T34.a's process until it
 //!   lands, on the interface that task documents: entries on the Type Ia grid of 512 ly cells, each
@@ -15,6 +15,10 @@
 //!   and 50 ly from the one still to come (slow).
 //! - **A lone Type Ia**, a class of one entry, to see a slow riser at its onset and not while it
 //!   rises below the limit at a window's start.
+//! - **The production Type Ia, stellar mergers and neutron-star mergers** of the same galaxy,
+//!   each about two of its own events, a year and a century, and the year split in two (slow). The
+//!   walk reads the mergers' scan marks, and the brute force their entries, on caches of their own,
+//!   and a fast test holds the two to the same events.
 //!
 //! The walk also gives each query the same detections whatever it walked before with the same
 //! caches.
@@ -25,20 +29,22 @@ mod common;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use common::observe::{KeepCells, Seen, brute_force_detections, observer_at};
+use common::observe::{KeepCells, Seen, brute_force_detections, entry_events, observer_at};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionLight, DetectionPhase,
-    NoOneShotCells, OneShotClass, OneShotEvent, SensorHorizon, TransientKind, inverse_square_flux,
-    one_shot_detections, supernova_luminosity, supernova_peak,
+    NoOneShotCells, OneShotClass, OneShotEvent, OneShotLight, SensorHorizon, TransientKind,
+    inverse_square_flux, one_shot_detections, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
+use hyperion_sim::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
-use hyperion_sim::galaxy::catalogue_classes::type_ia::IaChannel;
+use hyperion_sim::galaxy::catalogue_classes::type_ia::{IaChannel, TypeIaProcess};
 use hyperion_sim::galaxy::catalogue_classes::{
-    CatalogueCellKey, CatalogueMember, CatalogueMotion, CatalogueSystem, ClassId, ClassProcess,
+    CatalogueCellKey, CatalogueClassCell, CatalogueMember, CatalogueMotion, CatalogueSystem,
+    ClassId, ClassProcess,
 };
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
@@ -49,6 +55,7 @@ use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{CatalogueSystemId, SystemId};
 use hyperion_sim::observe::light_time;
 use hyperion_sim::rng::{ObjectKey, Stream, tags};
+use hyperion_sim::stellar::binary::light_curves::BinaryLightCurve;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{
     Dex, HydrogenPerCm3, KelvinPerCm3, PerCubicLightYear, SolarMasses, WattsPerSquareMetre, Years,
@@ -240,8 +247,8 @@ impl OneShotClass for ToyTypeIa {
         TransientKind::TypeIa
     }
 
-    fn event(&self, entry: &Self::Entry) -> OneShotEvent {
-        OneShotEvent::of_supernova(&entry.0, entry.1)
+    fn event(&self, _: &Galaxy, entry: &Self::Entry) -> Option<OneShotEvent> {
+        Some(OneShotEvent::of_supernova(&entry.0, entry.1))
     }
 }
 
@@ -634,8 +641,8 @@ impl OneShotClass for Lone {
         TransientKind::TypeIa
     }
 
-    fn event(&self, entry: &Self::Entry) -> OneShotEvent {
-        OneShotEvent::of_supernova(&entry.0, entry.1)
+    fn event(&self, _: &Galaxy, entry: &Self::Entry) -> Option<OneShotEvent> {
+        Some(OneShotEvent::of_supernova(&entry.0, entry.1))
     }
 }
 
@@ -820,4 +827,394 @@ fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
             );
         }
     }
+}
+
+/// The merger classes' walk reads each cell's events from its scan marks, and they are its
+/// entries' own events, event for event: the stellar mergers of a stretch of the solar circle and
+/// every neutron-star merger cell of the galaxy, where a black hole's merger that ejects nothing
+/// lists none.
+#[test]
+fn the_merger_classes_scan_marks_give_their_entries_events() {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let mergers = StellarMergers::new(&galaxy);
+    let mut seen = 0;
+    for x in -2..2 {
+        let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 6, 0]).unwrap();
+        let events = mergers.cell_events(&galaxy, key);
+        assert_eq!(events, entry_events(&galaxy, &mergers, key), "{key:?}");
+        assert!(events.iter().all(|event| matches!(
+            event.light(),
+            OneShotLight::Binary(BinaryLightCurve::LuminousRedNova(_))
+        )));
+        seen += events.len();
+    }
+    assert!(seen > 100, "{seen} red novae");
+    let neutron_stars = NeutronStarMergers::new(&galaxy);
+    let (mut events, mut entries) = (0, 0);
+    for x in -16..16 {
+        for y in -16..16 {
+            for z in -16..16 {
+                let key = CatalogueCellKey::new(ClassId::NEUTRON_STAR_MERGER, [x, y, z]).unwrap();
+                let listed = neutron_stars.cell_events(&galaxy, key);
+                assert_eq!(
+                    listed,
+                    entry_events(&galaxy, &neutron_stars, key),
+                    "{key:?}"
+                );
+                events += listed.len();
+                entries += CatalogueClassCell::generate(&galaxy, &neutron_stars, key)
+                    .entries()
+                    .len();
+            }
+        }
+    }
+    eprintln!("{events} kilonovae of {entries} neutron-star mergers");
+    assert!(events > 0 && events <= entries);
+}
+
+/// One observer of a production class's event: its direction from the event's site, how far, its
+/// two windows about the event's arrival there (each an offset and a length, Julian years), and how
+/// it sees the event.
+#[derive(Debug, Clone, Copy)]
+struct Watch {
+    direction: [f64; 3],
+    away: f64,
+    windows: [(f64, f64); 2],
+    phase: DetectionPhase,
+}
+
+/// The observer `away` light-years from `event`'s site along `direction`.
+fn placed(event: &OneShotEvent, direction: [f64; 3], away: f64) -> GalacticPosition {
+    let site = ly(&event.site());
+    observer_at([0, 1, 2].map(|axis| site[axis] + direction[axis] * away))
+}
+
+/// When `event`'s light reaches `at`, Julian years from the epoch.
+fn arrival_years(event: &OneShotEvent, at: &GalacticPosition) -> f64 {
+    let light = light_time(event.site().distance_to(at));
+    event
+        .emitted()
+        .checked_add(light)
+        .unwrap()
+        .since_epoch()
+        .as_julian_years_f64()
+}
+
+/// The walk's detections of `query` in full, each with its light: its light's knots strictly
+/// increase from its arrival, its flux is zero before them, and it is the walk's flux at the
+/// detection's own time, an onset's peak within 10⁻⁹ and an event in progress's window start bit
+/// for bit.
+fn assert_lights_are_the_walks<P: OneShotClass>(
+    galaxy: &Galaxy,
+    noise: &mut NoiseCache,
+    cells: &mut KeepCells,
+    process: &P,
+    query: &AlertQuery,
+) {
+    let mut context = AlertContext::new(noise, &NoModifiers).with_one_shot_cells(cells);
+    let mut out = Vec::new();
+    one_shot_detections(galaxy, &mut context, query, process, &mut out);
+    for d in &out {
+        let DetectionLight::Lit(light) = d.light() else {
+            panic!("a one-shot event gives light: {d:?}");
+        };
+        let knots = light.knots();
+        assert!(knots.windows(2).all(|pair| pair[0] < pair[1]), "{d:?}");
+        assert_eq!(knots[0], d.arrival());
+        let before = d.arrival().checked_sub(Span::new(0, 1).unwrap()).unwrap();
+        assert_same_bits(light.flux_at(before).value(), 0.0);
+        let flux = d.flux().value();
+        match d.phase() {
+            DetectionPhase::Onset => {
+                let peak = knots
+                    .iter()
+                    .map(|&t| light.flux_at(t).value())
+                    .fold(0.0, f64::max);
+                assert!((peak - flux).abs() <= 1e-9 * flux, "{d:?}: its peak {peak}");
+            }
+            DetectionPhase::InProgress => {
+                assert_same_bits(light.flux_at(query.window().start()).value(), flux);
+            }
+        }
+    }
+}
+
+/// `process`'s walk is the brute force's for each of `watches`, an observer about one of the
+/// class's events: over the watch's two windows, and its first split in two at its middle, as
+/// sets, with the walk and the oracle on caches of their own, and the walk's lights its flux at
+/// their own times. Each observer sees its event in its watch's phase over both windows, and the
+/// halves find the first window's onsets, each once.
+fn assert_the_walk_about_its_events<P: OneShotClass>(
+    galaxy: &Galaxy,
+    process: &P,
+    sensor: &SensorHorizon,
+    watches: &[(OneShotEvent, Watch)],
+) {
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let (mut walk_cells, mut oracle_cells) = (KeepCells::default(), KeepCells::default());
+    let mut run = |at: GalacticPosition, window: TimeWindow| {
+        let query = AlertQuery::builder(at, window, sensor.clone())
+            .build()
+            .unwrap();
+        let walk = walked(galaxy, &mut noise, &mut walk_cells, process, &query);
+        let oracle = brute(galaxy, &mut noise, &mut oracle_cells, process, &query);
+        eprintln!("{} detections over {window:?}: {walk:?}", walk.len());
+        assert_eq!(walk, oracle, "{at:?} over {window:?}");
+        assert_lights_are_the_walks(galaxy, &mut noise, &mut walk_cells, process, &query);
+        walk
+    };
+    let onsets = |seen: &[Seen]| -> BTreeSet<_> {
+        seen.iter()
+            .filter(|s| s.phase == DetectionPhase::Onset)
+            .map(|s| s.event)
+            .collect()
+    };
+    for (event, watch) in watches {
+        let at = placed(event, watch.direction, watch.away);
+        let arrival = arrival_years(event, &at);
+        for (k, (offset, years)) in watch.windows.into_iter().enumerate() {
+            let whole = window(arrival, offset, years);
+            let seen = run(at, whole);
+            assert!(
+                seen.iter()
+                    .any(|s| s.event == event.event() && s.phase == watch.phase),
+                "{event:?} is seen as {:?} from {at:?} over {whole:?}",
+                watch.phase
+            );
+            if k == 0 {
+                let middle = at_years(arrival + offset + years / 2.0);
+                let early = run(at, TimeWindow::new(whole.start(), middle).unwrap());
+                let late = run(at, TimeWindow::new(middle, whole.end()).unwrap());
+                let (early, late) = (onsets(&early), onsets(&late));
+                assert!(early.is_disjoint(&late));
+                assert_eq!(onsets(&seen), early.union(&late).copied().collect());
+            }
+        }
+    }
+}
+
+/// Above and beside one event to see it go off and in progress, and near another to see it go
+/// off: the three watches of a production class's slow test, at `above`, `beside` and `near`
+/// light-years, an event in progress seen `late` and twice `late` years after its onset arrives.
+fn three_watches(
+    first: OneShotEvent,
+    second: OneShotEvent,
+    (above, beside, near): (f64, f64, f64),
+    late: f64,
+) -> [(OneShotEvent, Watch); 3] {
+    let onset = [(-0.25, 1.0), (-60.0, 100.0)];
+    [
+        (
+            first,
+            Watch {
+                direction: [0.0, 0.0, 1.0],
+                away: above,
+                windows: onset,
+                phase: DetectionPhase::Onset,
+            },
+        ),
+        (
+            first,
+            Watch {
+                direction: [0.0, -1.0, 0.0],
+                away: beside,
+                windows: [(late, 1.0), (2.0 * late, 100.0)],
+                phase: DetectionPhase::InProgress,
+            },
+        ),
+        (
+            second,
+            Watch {
+                direction: [1.0, 0.0, 0.0],
+                away: near,
+                windows: onset,
+                phase: DetectionPhase::Onset,
+            },
+        ),
+    ]
+}
+
+/// The events of `process`'s cells in `cells` that went off in `years`, Julian years from the
+/// epoch, by time.
+fn events_between<P: OneShotClass>(
+    galaxy: &Galaxy,
+    process: &P,
+    cells: impl IntoIterator<Item = [i32; 3]>,
+    years: std::ops::Range<f64>,
+) -> Vec<OneShotEvent> {
+    let mut found = Vec::new();
+    for cell in cells {
+        let Ok(key) = CatalogueCellKey::new(process.class(), cell) else {
+            continue;
+        };
+        for event in process.cell_events(galaxy, key) {
+            let t = event.emitted().since_epoch().as_julian_years_f64();
+            if years.contains(&t) {
+                found.push(event);
+            }
+        }
+    }
+    found.sort_by_key(OneShotEvent::emitted);
+    found
+}
+
+/// The production Type Ia of seed 9's galaxy: two of the explosions of the disc within 30,000 ly
+/// of the centre in the last millennium or so and the next 700 years, the earliest and the latest,
+/// seen from 200 ly above the first go off, from 150 ly beside it in progress 20 and 40 days on,
+/// and from 50 ly beside the second go off, through V and K limits that reach some 1,100 and 650
+/// ly; the walk is the brute force's.
+#[test]
+#[ignore = "slow: generates the Type Ia class's cells of the disc and about three observers"]
+fn one_shot_alerts_of_the_type_ia_are_the_brute_forces() {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let process = TypeIaProcess::new(&galaxy);
+    let disc = (-60..60).flat_map(|y| (-60..60).flat_map(move |x| (-2..2).map(move |z| [x, y, z])));
+    let found = events_between(&galaxy, &process, disc, -1_050.0..700.0);
+    eprintln!("{} Type Ia: {found:?}", found.len());
+    let (Some(&first), Some(&second)) = (found.first(), found.last()) else {
+        panic!("two Type Ia in the disc");
+    };
+    assert_ne!(first.event(), second.event());
+    let sensor = sensor(&[
+        (AlertBand::Photometric(Band::V), 1.0e-4),
+        (AlertBand::Photometric(Band::K), 2.0e-5),
+    ]);
+    let watches = three_watches(first, second, (200.0, 150.0, 50.0), 20.0 / 365.25);
+    assert_the_walk_about_its_events(&galaxy, &process, &sensor, &watches);
+}
+
+/// The production stellar mergers of seed 9's galaxy: the two heaviest of a stretch of the solar
+/// circle that merge within the last millennium or so and the next 700 years, seen from 200 ly
+/// above the first go off, from 150 ly beside it on its plateau 20 and 40 days on, and from 50 ly
+/// beside the second go off, through V and K limits of 10⁻⁹ W m⁻². The red novae's bound, at the
+/// class's heaviest merger (P12.T5.b), takes the reach to the diagonal: the walk reads every
+/// merger's scan marks and the brute force every entry, and they agree.
+#[test]
+#[ignore = "slow: every stellar merger of the galaxy, as scan marks and as entries"]
+fn one_shot_alerts_of_the_stellar_mergers_are_the_brute_forces() {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let process = StellarMergers::new(&galaxy);
+    let stretch = (5..8).flat_map(|y| (-2..2).flat_map(move |x| [[x, y, -1], [x, y, 0]]));
+    let mut found = events_between(&galaxy, &process, stretch, -1_050.0..700.0);
+    let peak = |event: &OneShotEvent| match event.light() {
+        OneShotLight::Binary(curve) => curve.peak_luminosity().value(),
+        OneShotLight::Supernova(_) => unreachable!("a merger's red nova"),
+    };
+    found.sort_by(|a, b| peak(b).total_cmp(&peak(a)));
+    eprintln!("{} red novae: {found:?}", found.len());
+    let [first, second, ..] = found.as_slice() else {
+        panic!("two red novae by the solar circle");
+    };
+    let sensor = sensor(&[
+        (AlertBand::Photometric(Band::V), 1.0e-9),
+        (AlertBand::Photometric(Band::K), 1.0e-9),
+    ]);
+    let watches = three_watches(*first, *second, (200.0, 150.0, 50.0), 20.0 / 365.25);
+    assert_the_walk_about_its_events(&galaxy, &process, &sensor, &watches);
+}
+
+/// The two latest kilonovae of seed 9's galaxy, some ten neutron-star mergers in the source
+/// horizon, all but a few long ago, whose light reaches the clock window from tens of thousands of
+/// light-years: observers out of the plane above and below the first, to see it go off and in
+/// progress 5 and 10 days on, and one toward the cube's farthest corner from the second, to see it
+/// go off, each a century after the epoch; and a K limit of 2 × 10⁻¹¹ W m⁻², which reaches the
+/// diagonal.
+fn kilonova_watches(
+    galaxy: &Galaxy,
+    process: &NeutronStarMergers,
+) -> ([(OneShotEvent, Watch); 3], SensorHorizon) {
+    let every =
+        (-16..16).flat_map(|x| (-16..16).flat_map(move |y| (-16..16).map(move |z| [x, y, z])));
+    let found = events_between(galaxy, process, every, -1e9..1e9);
+    eprintln!("{} kilonovae: {found:?}", found.len());
+    let [.., second, first] = found.as_slice() else {
+        panic!("two kilonovae in the horizon");
+    };
+    let away = |event: &OneShotEvent| 100.0 - event.emitted().since_epoch().as_julian_years_f64();
+    let site = ly(&second.site());
+    let corner = [0, 1, 2].map(|axis| {
+        if site[axis] < 0.0 {
+            65_000.0
+        } else {
+            -65_000.0
+        }
+    });
+    let span = distance_ly(site, corner);
+    assert!(span > away(second) + 1_000.0, "{span} ly to the corner");
+    let toward = [0, 1, 2].map(|axis| (corner[axis] - site[axis]) / span);
+    let onset = [(-0.25, 1.0), (-60.0, 100.0)];
+    let day = 1.0 / 365.25;
+    let watch = |direction, away, windows, phase| Watch {
+        direction,
+        away,
+        windows,
+        phase,
+    };
+    let watches = [
+        (
+            *first,
+            watch([0.0, 0.0, 1.0], away(first), onset, DetectionPhase::Onset),
+        ),
+        (
+            *first,
+            watch(
+                [0.0, 0.0, -1.0],
+                away(first),
+                [(5.0 * day, 1.0), (10.0 * day, 100.0)],
+                DetectionPhase::InProgress,
+            ),
+        ),
+        (
+            *second,
+            watch(toward, away(second), onset, DetectionPhase::Onset),
+        ),
+    ];
+    (
+        watches,
+        sensor(&[(AlertBand::Photometric(Band::K), 2.0e-11)]),
+    )
+}
+
+/// The production neutron-star mergers of seed 9's galaxy, about their two latest kilonovae
+/// ([`kilonova_watches`]); the walk is the brute force's.
+#[test]
+#[ignore = "slow: every neutron-star merger cell of the galaxy, and lines of sight across it"]
+fn one_shot_alerts_of_the_neutron_star_mergers_are_the_brute_forces() {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let process = NeutronStarMergers::new(&galaxy);
+    let (watches, sensor) = kilonova_watches(&galaxy, &process);
+    assert_the_walk_about_its_events(&galaxy, &process, &sensor, &watches);
+}
+
+/// A merger class's walk, its cells' events read from their scan marks behind the cache, gives
+/// each of six queries about seed 9's two latest kilonovae ([`kilonova_watches`]), a year and a
+/// century from each observer, the same detections whatever it walked before with the same cell
+/// and noise caches, forwards, backwards, shuffled and alone; and the queries see some.
+#[test]
+fn one_shot_alerts_of_a_merger_class_do_not_depend_on_what_was_walked_before() {
+    let galaxy = Galaxy::new(Seed::new(9));
+    let process = NeutronStarMergers::new(&galaxy);
+    let (watches, sensor) = kilonova_watches(&galaxy, &process);
+    let queries: Vec<_> = watches
+        .iter()
+        .flat_map(|(event, watch)| {
+            let at = placed(event, watch.direction, watch.away);
+            let arrival = arrival_years(event, &at);
+            watch.windows.map(|(offset, years)| {
+                AlertQuery::builder(at, window(arrival, offset, years), sensor.clone())
+                    .build()
+                    .unwrap()
+            })
+        })
+        .collect();
+    let cells = RefCell::new(KeepCells::default());
+    let noise = RefCell::new(NoiseCache::with_capacity(4_096));
+    let seen = RefCell::new(0);
+    assert_order_independent(&queries, |query| {
+        let (mut noise, mut cells) = (noise.borrow_mut(), cells.borrow_mut());
+        let walk = walked(&galaxy, &mut noise, &mut cells, &process, query);
+        *seen.borrow_mut() += walk.len();
+        walk
+    });
+    assert!(*seen.borrow() > 0, "the queries see kilonovae");
 }

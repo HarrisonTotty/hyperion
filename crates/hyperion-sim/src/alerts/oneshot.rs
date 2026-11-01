@@ -1,5 +1,12 @@
-//! The one-shot classes' walk (plan 12, P12.T5.b): the supernovae a sensor sees go off in its
-//! window, each the explosion of one catalogue entry.
+//! The one-shot classes' walk (plan 12, P12.T5.b): the supernovae, luminous red novae and
+//! kilonovae a sensor sees go off in its window, each the one event of a catalogue entry.
+//!
+//! Four classes are one-shot ([`OneShotClass`]): plan 09's core collapses and Type Ia, whose
+//! entries explode ([`SupernovaEntry`]), and plan 11's stellar mergers and neutron-star mergers,
+//! each of whose entries makes one event at its merger, a luminous red nova or a kilonova
+//! (plan 11's [`BinarySystem::stellar_merger`] and [`BinarySystem::neutron_star_merger`] of the
+//! entry's scan marks). A merger of a black hole that swallows its neutron star whole makes none.
+//! Each event's light is a supernova template's or a binary curve's ([`OneShotLight`]).
 //!
 //! A one-shot entry makes one event, at its time T from its site (Design note 6). Its light reaches
 //! an observer at rest at `t_a` = T + |`x_s`(T) − `x_o`| ÷ c, a closed form with no step on the
@@ -17,14 +24,16 @@
 //!    ([`cells_in_sphere`], padded by the class grid's 4,096 ly). An entry stays within 4,096 ly of
 //!    its cell at every time the lookup serves, from −(H + L) on (P09.T32, rule 5). No template
 //!    gives light 228 years after its explosion (every term's exponential is then below the
-//!    smallest `f64`), so an entry the sensor can see has its light arriving after −H − 228 years,
-//!    and with at most the cube's diagonal to cross it exploded after −(H + L), when the rule holds
-//!    it. Design note 5's widening by `UNBOUND_PAD_SPEED` ÷ c is for hosts walked on their present
-//!    positions; the walk reads each entry's site at T.
+//!    smallest `f64`), and no binary event once it is over, some 280 days at most
+//!    ([`binary_luminosity`]), so an entry the sensor can see has its light arriving after −H −
+//!    228 years, and with at most the cube's diagonal to cross it went off after −(H + L), when the
+//!    rule holds it. A merger's T lies in the source horizon too. Design note 5's widening by
+//!    `UNBOUND_PAD_SPEED` ÷ c is for hosts walked on their present positions; the walk reads each
+//!    entry's site at T.
 //! 3. Each entry's arrival. One that arrives in the window is an [`Onset`], seen at its peak in
-//!    each band ([`supernova_peak`]); one that arrived before `t₁` is [`InProgress`] if its light
-//!    at `t₁`, `t₁` − `t_a` after its onset reached the observer
-//!    ([`supernova_luminosity`](super::supernova_luminosity)), is still above the limit. One that
+//!    each band ([`OneShotLight::peaks`]); one that arrived before `t₁` is [`InProgress`] if its
+//!    light at `t₁`, `t₁` − `t_a` after its onset reached the observer
+//!    ([`OneShotLight::luminosities`]), is still above the limit. One that
 //!    arrives at or after `t₂` is the next window's. So a window split in two finds each onset of
 //!    the whole once, and its first half the whole's events in progress; the second half finds in
 //!    progress the events that arrived before it and are still above the limit at its start,
@@ -43,19 +52,25 @@
 //!
 //! # What a detection reports
 //!
-//! The entry's explosion event ([`SupernovaEntry::explosion_event`], the same from any distance),
-//! its member 0 as the host, its class and kind, T and `t_a`; the band and flux above; the bearing
-//! of its site from the observer; the onset's light ([`Retardation`]: observed at `t_a`, emitted
-//! at T from the site, the host then moving at its velocity from T, its remnant's); whether the
-//! flux reaches the band's resolve limit; and the template's light in the band at every time
-//! ([`DetectionLight`], P12.T8.b.1), through the same line of sight from the site.
+//! The entry's event, the same from any distance: a supernova's explosion
+//! ([`SupernovaEntry::explosion_event`]), or a merger's red nova or kilonova (plan 11's
+//! [`BinaryEvent::id`], bin 0 and number 0 of its tag on the system); its member 0 as the host,
+//! its class and kind, T and `t_a`; the band and flux above; the bearing of its site from the
+//! observer; the onset's light ([`Retardation`]: observed at `t_a`, emitted at T from the site, the
+//! host then moving at its velocity from T, a supernova's remnant's); whether the flux reaches the
+//! band's resolve limit; and the event's light in the band at every time ([`DetectionLight`],
+//! P12.T8.b.1), through the same line of sight from the site.
 //!
 //! [`Onset`]: DetectionPhase::Onset
 //! [`InProgress`]: DetectionPhase::InProgress
 //! [`Retardation`]: crate::observe::Retardation
 
 use crate::coords::GalacticPosition;
+use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::{
+    MergerEntry, NeutronStarMergers, NsmEntry, StellarMergers,
+};
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
 use crate::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
 use crate::galaxy::catalogue_classes::type_ia::{TypeIaEntry, TypeIaProcess};
@@ -65,22 +80,63 @@ use crate::galaxy::catalogue_classes::{
 use crate::galaxy::query::QuerySphere;
 use crate::id::{EventId, SystemId};
 use crate::observe::{Retardation, bearing, light_time};
-use crate::time::UniverseTime;
+use crate::stellar::binary::events::{BinaryEvent, BinarySystem, events_in};
+use crate::stellar::binary::light_curves::BinaryLightCurve;
+use crate::stellar::binary::scan::{scan_merger_cell, scan_nsm_cell};
+use crate::time::{Span, UniverseTime};
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre, Years};
 
 use super::arriving::{ArrivingLight, DetectionLight};
-use super::light::{supernova_luminosities, supernova_peak};
+use super::light::{binary_luminosity, binary_peak, supernova_luminosities, supernova_peak};
 use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::TransientKind;
 use super::{AlertBand, AlertContext, AlertQuery, BAND_COUNT, Detection, DetectionPhase};
 
-/// One entry's one-shot event, as the walk reads it: the event, its host, what exploded, when, and
-/// how the host moves.
+/// A one-shot event's light (P12.T5.b): a supernova's template, or a merger's binary curve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OneShotLight {
+    /// A supernova of this kind: plan 09's template in each band ([`supernova_luminosity`]).
+    ///
+    /// [`supernova_luminosity`]: super::supernova_luminosity
+    Supernova(SupernovaKind),
+    /// A luminous red nova or a kilonova: plan 11's curve (P11.T9.a) in each band while the event
+    /// is active ([`binary_luminosity`]).
+    Binary(BinaryLightCurve),
+}
+
+impl OneShotLight {
+    /// The light's peak in each band, in [`AlertBand::ALL`]'s order: [`supernova_peak`] or
+    /// [`binary_peak`], which an onset reports.
+    #[must_use]
+    pub fn peaks(&self) -> [Watts; BAND_COUNT] {
+        match self {
+            Self::Supernova(kind) => AlertBand::ALL.map(|band| supernova_peak(*kind, band)),
+            Self::Binary(curve) => AlertBand::ALL.map(|band| binary_peak(curve, band)),
+        }
+    }
+
+    /// The light in each band `age` after its onset, in [`AlertBand::ALL`]'s order: a supernova's
+    /// template at `age` in Julian years, bit for bit as
+    /// [`supernova_luminosity`](super::supernova_luminosity) gives it band by band, or
+    /// [`binary_luminosity`].
+    #[must_use]
+    pub fn luminosities(&self, age: Span) -> [Watts; BAND_COUNT] {
+        match self {
+            Self::Supernova(kind) => {
+                supernova_luminosities(*kind, Years::new(age.as_julian_years_f64()))
+            }
+            Self::Binary(curve) => AlertBand::ALL.map(|band| binary_luminosity(curve, age, band)),
+        }
+    }
+}
+
+/// One entry's one-shot event, as the walk reads it: the event, its host, its light, when it went
+/// off, and how the host moves.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OneShotEvent {
     event: EventId,
     host: SystemId,
-    supernova: SupernovaKind,
+    light: OneShotLight,
     emitted: UniverseTime,
     motion: CatalogueMotion,
 }
@@ -92,13 +148,26 @@ impl OneShotEvent {
         Self {
             event: entry.explosion_event(),
             host: entry.system(),
-            supernova: entry.kind(),
+            light: OneShotLight::Supernova(entry.kind()),
             emitted: entry.explosion(),
             motion,
         }
     }
 
-    /// The event: the explosion's ID.
+    /// The binary event `event` of `host`, which moves by `motion`: a merger's luminous red nova or
+    /// kilonova, at its onset.
+    #[must_use]
+    pub const fn of_binary(event: &BinaryEvent, host: SystemId, motion: CatalogueMotion) -> Self {
+        Self {
+            event: event.id(),
+            host,
+            light: OneShotLight::Binary(*event.curve()),
+            emitted: event.onset(),
+            motion,
+        }
+    }
+
+    /// The event's ID: a supernova's explosion's, or a merger's binary event's.
     #[must_use]
     pub const fn event(&self) -> EventId {
         self.event
@@ -110,19 +179,19 @@ impl OneShotEvent {
         self.host
     }
 
-    /// What exploded.
+    /// Its light: what exploded, or the merger's curve.
     #[must_use]
-    pub const fn supernova(&self) -> SupernovaKind {
-        self.supernova
+    pub const fn light(&self) -> &OneShotLight {
+        &self.light
     }
 
-    /// When it exploded, T.
+    /// When it went off, T.
     #[must_use]
     pub const fn emitted(&self) -> UniverseTime {
         self.emitted
     }
 
-    /// Where it exploded: the host's position at T.
+    /// Where it went off: the host's position at T.
     #[must_use]
     pub fn site(&self) -> GalacticPosition {
         self.motion.position_at(self.emitted)
@@ -140,15 +209,33 @@ impl OneShotEvent {
 ///
 /// Implemented for plan 09's core collapses ([`CoreCollapseProcess`]) and its Type Ia
 /// ([`TypeIaProcess`], P09.T34.a), each from its entries' [`SupernovaEntry`] and member 0's
-/// motion; plan 11's two merger classes implement it from their own events (P11.T9).
+/// motion, and for plan 11's stellar mergers ([`StellarMergers`]) and neutron-star mergers
+/// ([`NeutronStarMergers`]), from each entry's one binary event of its scan marks (P11.T9.b), at
+/// its T and moving with the entry.
 pub trait OneShotClass: ClassProcess {
     /// The kind of event the class's entries make.
     #[must_use]
     fn kind(&self) -> TransientKind;
 
-    /// The event `entry` makes.
+    /// The event `entry` of `galaxy` makes, or `None` for one that makes none: a black hole's merger
+    /// that ejects nothing.
     #[must_use]
-    fn event(&self, entry: &Self::Entry) -> OneShotEvent;
+    fn event(&self, galaxy: &Galaxy, entry: &Self::Entry) -> Option<OneShotEvent>;
+
+    /// The events of the class's cell `key` of `galaxy`, in index order: by default each entry's
+    /// [`event`](Self::event). A class whose scan marks give its entries' events without building
+    /// the entries may read them so, and must give exactly the default's events, in its order.
+    #[must_use]
+    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent>
+    where
+        Self: Sized,
+    {
+        CatalogueClassCell::generate(galaxy, self, key)
+            .entries()
+            .iter()
+            .filter_map(|entry| self.event(galaxy, entry.value()))
+            .collect()
+    }
 }
 
 impl OneShotClass for CoreCollapseProcess {
@@ -156,8 +243,11 @@ impl OneShotClass for CoreCollapseProcess {
         TransientKind::CoreCollapse
     }
 
-    fn event(&self, entry: &CoreCollapseEntry) -> OneShotEvent {
-        OneShotEvent::of_supernova(entry.supernova(), *entry.motion())
+    fn event(&self, _: &Galaxy, entry: &CoreCollapseEntry) -> Option<OneShotEvent> {
+        Some(OneShotEvent::of_supernova(
+            entry.supernova(),
+            *entry.motion(),
+        ))
     }
 }
 
@@ -168,9 +258,119 @@ impl OneShotClass for TypeIaProcess {
 
     /// The explosion of the entry's [`SupernovaEntry`], member 0, the white dwarf's system, moving
     /// as it does before and after T.
-    fn event(&self, entry: &TypeIaEntry) -> OneShotEvent {
-        OneShotEvent::of_supernova(entry.supernova(), *entry.motion())
+    fn event(&self, _: &Galaxy, entry: &TypeIaEntry) -> Option<OneShotEvent> {
+        Some(OneShotEvent::of_supernova(
+            entry.supernova(),
+            *entry.motion(),
+        ))
     }
+}
+
+impl OneShotClass for StellarMergers {
+    fn kind(&self) -> TransientKind {
+        TransientKind::LuminousRedNova
+    }
+
+    fn event(&self, galaxy: &Galaxy, entry: &MergerEntry) -> Option<OneShotEvent> {
+        let scan = entry.scan();
+        let system = BinarySystem::stellar_merger(galaxy.seed(), scan);
+        merger_event(
+            &system,
+            scan.merger_time(),
+            entry.record().id(),
+            *entry.motion(),
+            &mut Vec::with_capacity(1),
+        )
+    }
+
+    /// The cell's events from its scan marks, which are its entries' exactly
+    /// ([`scan_merger_cell`]), without the contact pairs and merged stars the entries build.
+    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
+        let mut marks = Vec::new();
+        scan_merger_cell(galaxy, self, key, &mut marks);
+        let mut listed = Vec::with_capacity(1);
+        marks
+            .iter()
+            .filter_map(|scan| {
+                let motion = CatalogueMotion::straight(*scan.position(), scan.velocity());
+                let system = BinarySystem::stellar_merger(galaxy.seed(), scan);
+                merger_event(
+                    &system,
+                    scan.merger_time(),
+                    SystemId::from(scan.id()),
+                    motion,
+                    &mut listed,
+                )
+            })
+            .collect()
+    }
+}
+
+impl OneShotClass for NeutronStarMergers {
+    fn kind(&self) -> TransientKind {
+        TransientKind::Kilonova
+    }
+
+    fn event(&self, galaxy: &Galaxy, entry: &NsmEntry) -> Option<OneShotEvent> {
+        let scan = entry.scan();
+        let system = BinarySystem::neutron_star_merger(galaxy.seed(), scan);
+        merger_event(
+            &system,
+            scan.merger_time(),
+            entry.record().id(),
+            *entry.motion(),
+            &mut Vec::with_capacity(1),
+        )
+    }
+
+    /// The cell's events from its scan marks, which are its entries' exactly ([`scan_nsm_cell`]),
+    /// without the inspirals and remnants the entries build.
+    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
+        let mut marks = Vec::new();
+        scan_nsm_cell(galaxy, self, key, &mut marks);
+        let mut listed = Vec::with_capacity(1);
+        marks
+            .iter()
+            .filter_map(|scan| {
+                let motion = CatalogueMotion::straight(*scan.position(), scan.velocity());
+                let system = BinarySystem::neutron_star_merger(galaxy.seed(), scan);
+                merger_event(
+                    &system,
+                    scan.merger_time(),
+                    SystemId::from(scan.id()),
+                    motion,
+                    &mut listed,
+                )
+            })
+            .collect()
+    }
+}
+
+/// The one event of the merger `system`, of `host`, at its merger `at`, moving by `motion`: plan
+/// 11's listing over the nanosecond from `at`, into `events` (cleared first, a cell's walk lending
+/// the same vector to each of its mergers), or `None` where it lists none.
+///
+/// # Panics
+///
+/// Never: a nanosecond after a time in the source horizon is on the clock.
+#[must_use]
+fn merger_event(
+    system: &BinarySystem<'_>,
+    at: UniverseTime,
+    host: SystemId,
+    motion: CatalogueMotion,
+    events: &mut Vec<BinaryEvent>,
+) -> Option<OneShotEvent> {
+    let after = at
+        .checked_add(Span::new(0, 1).expect("a nanosecond is a span"))
+        .expect("a nanosecond after a merger in the source horizon is on the clock");
+    let window = TimeWindow::new(at, after).expect("a nanosecond's window runs forward");
+    events.clear();
+    events_in(system, window, events);
+    debug_assert!(events.len() <= 1, "a merger makes one event: {events:?}");
+    events
+        .first()
+        .map(|event| OneShotEvent::of_binary(event, host, motion))
 }
 
 /// Lends the one-shot walk a class cell's events, generating them if it has not got them (P12.T5.b).
@@ -230,20 +430,6 @@ impl OneShotCells for NoOneShotCells {
     ) {
         visit(&generate());
     }
-}
-
-/// The events of `process`'s cell `key` in `galaxy`, in index order.
-#[must_use]
-fn events_of<P: OneShotClass>(
-    galaxy: &Galaxy,
-    process: &P,
-    key: CatalogueCellKey,
-) -> Vec<OneShotEvent> {
-    CatalogueClassCell::generate(galaxy, process, key)
-        .entries()
-        .iter()
-        .map(|entry| process.event(entry.value()))
-        .collect()
 }
 
 /// An event the walk keeps for its line of sight: its arrival and phase, and its luminosity in
@@ -320,7 +506,7 @@ pub fn one_shot_detections<P: OneShotClass>(
     for key in cells_in_sphere(class, &sphere) {
         ctx.one_shot_events(
             key,
-            &mut || events_of(galaxy, process, key),
+            &mut || process.cell_events(galaxy, key),
             &mut |events| {
                 candidates.extend(
                     events
@@ -417,7 +603,7 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
     let mut candidates = Vec::new();
     ctx.one_shot_events(
         cell,
-        &mut || events_of(galaxy, process, cell),
+        &mut || process.cell_events(galaxy, cell),
         &mut |events| {
             candidates.extend(
                 events
@@ -466,17 +652,16 @@ fn candidate(
     };
     let age = match phase {
         DetectionPhase::Onset => None,
-        DetectionPhase::InProgress => Some(Years::new(
+        DetectionPhase::InProgress => Some(
             window
                 .start()
                 .checked_since(arrival)
-                .expect("two clock times are a span apart")
-                .as_julian_years_f64(),
-        )),
+                .expect("two clock times are a span apart"),
+        ),
     };
     let luminosity = match age {
-        None => AlertBand::ALL.map(|band| supernova_peak(event.supernova, band)),
-        Some(age) => supernova_luminosities(event.supernova, age),
+        None => event.light.peaks(),
+        Some(age) => event.light.luminosities(age),
     };
     let reaches = query.sensor().bands().any(|(band, limits)| {
         inverse_square_flux(luminosity[band.index()], distance)
@@ -536,13 +721,15 @@ fn detect<P: OneShotClass>(
         &present,
     );
     debug_assert_eq!(retardation.observed(), candidate.arrival);
-    let light = ArrivingLight::supernova(
-        event.supernova,
-        event.emitted,
-        band,
-        candidate.distance,
-        transmission(&line, band),
-    );
+    let through = transmission(&line, band);
+    let light = match event.light {
+        OneShotLight::Supernova(kind) => {
+            ArrivingLight::supernova(kind, event.emitted, band, candidate.distance, through)
+        }
+        OneShotLight::Binary(curve) => {
+            ArrivingLight::binary(curve, event.emitted, band, candidate.distance, through)
+        }
+    };
     debug_assert_eq!(
         event.emitted.checked_add(light_time(candidate.distance)),
         Some(candidate.arrival)

@@ -190,7 +190,9 @@ fn latest_death(galaxy: &Galaxy, process: &CoreCollapseProcess) -> OneShotEvent 
             for z in [-1, 0] {
                 let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, z]).unwrap();
                 for entry in CatalogueClassCell::generate(galaxy, process, key).entries() {
-                    let event = process.event(entry.value());
+                    let event = process
+                        .event(galaxy, entry.value())
+                        .expect("a core collapse makes its one event");
                     let t = event.emitted().since_epoch().as_julian_years_f64();
                     if (400.0..990.0).contains(&t)
                         && death.is_none_or(|last| event.emitted() > last.emitted())
