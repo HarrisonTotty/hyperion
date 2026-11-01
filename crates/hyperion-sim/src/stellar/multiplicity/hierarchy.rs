@@ -31,7 +31,7 @@ use crate::stellar::draws::ATTEMPT_WORDS;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::collapse::ElectronCaptureWindows;
 use crate::stellar::sse::ZCoeffs;
-use crate::stellar::system::{draw_metallicity, primary_draws};
+use crate::stellar::system::{StarModel, draw_metallicity, primary_kept_stripped_mark};
 use crate::units::consts::GM_SUN;
 use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, SolarMasses};
 
@@ -503,8 +503,9 @@ impl SystemHierarchy {
 /// lies outside the band, in the merger band, beyond it (Case C) or wide (ruling 123.5). Both are
 /// conditional draws, the orbit's by rejection among its tries, and they keep the share of
 /// stripped primaries at the mark's. The mark is the primary's own draws' (the system stage's
-/// `primary_draws`): attempt 0 for a grid record until plan 08's `SystemRecord::mark_attempt`
-/// exists (P11.T2.c's second seam), and a feature member's conditional-draw attempt.
+/// `primary_kept_stripped_mark`): a grid record's at its `SystemRecord::mark_attempt` (P11.T2.c's
+/// second seam), or at the attempt plan 08's kick loop keeps for a record whose class constrains
+/// its kick (P08.T12.c), and a feature member's conditional-draw attempt.
 /// [`draw_hierarchy_of_composition`] judges the mark at a feature member's own composition.
 ///
 /// P11.T2.c wires it into the system stage:
@@ -701,7 +702,32 @@ pub(super) fn draw_hierarchy_with(
     attempt: RedrawAttempt,
     correction: &[[f64; 8]; 4],
 ) -> SystemHierarchy {
-    RecordDraw::new(galaxy, record, composition, ctx, correction).stars_at(attempt)
+    RecordDraw::new(galaxy, record, composition, ctx, correction, None).stars_at(attempt)
+}
+
+/// [`draw_hierarchy_of_composition`] of the system of `primary`, `record`'s primary's model, at
+/// its composition: its stripped mark read from the model, the attempt the kick loop kept
+/// (P08.T12.c), so that the system stage, which holds the model, builds no track again. For the
+/// model [`SystemStars`](crate::stellar::system::SystemStars) keeps it is
+/// `draw_hierarchy_of_composition`, bit for bit.
+#[must_use]
+pub(crate) fn draw_hierarchy_of_primary(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    primary: &StarModel,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> SystemHierarchy {
+    let stars = RecordDraw::new(
+        galaxy,
+        record,
+        Some(primary.composition()),
+        ctx,
+        &PERIOD_CORRECTION,
+        Some(primary),
+    )
+    .stars_at(attempt);
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
 }
 
 /// One record's draw of its stars, attempt by attempt: [`draw_hierarchy_with`] with what every
@@ -742,7 +768,8 @@ impl fmt::Debug for RecordDraw<'_> {
 impl<'a> RecordDraw<'a> {
     /// The draw of `record`'s stars under `ctx`, at `composition` if given and otherwise at the
     /// record's [`draw_metallicity`], with the direct companions' period law corrected by
-    /// `correction`.
+    /// `correction`, and `primary`, the primary's model where the caller holds it, whose stripped
+    /// mark it reads (`innermost`).
     #[must_use]
     pub(super) fn new(
         galaxy: &'a Galaxy,
@@ -750,6 +777,7 @@ impl<'a> RecordDraw<'a> {
         composition: Option<&Composition>,
         ctx: MultiplicityContext,
         correction: &'a [[f64; 8]; 4],
+        primary: Option<&StarModel>,
     ) -> Self {
         Self {
             galaxy,
@@ -763,7 +791,7 @@ impl<'a> RecordDraw<'a> {
                     MultiplicityContext::ForcedMultiple { max_separation } => max_separation,
                     MultiplicityContext::Free | MultiplicityContext::ForcedSingle => None,
                 },
-                innermost(galaxy, record, composition, ctx),
+                innermost(galaxy, record, composition, ctx, primary),
             ),
             correction,
             direct_periods: None,
@@ -894,7 +922,7 @@ fn star_count_with(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> u8 {
-    if drawn_single(galaxy, record, composition, ctx, attempt) {
+    if drawn_single(galaxy, record, composition, ctx, attempt, None) {
         return 1;
     }
     let stars = draw_hierarchy_with(
@@ -912,7 +940,8 @@ fn star_count_with(
 /// and otherwise at the record's [`draw_metallicity`]: no companion to try and no brown dwarf, from
 /// the count words alone, as [`draw_star_count`] decides before it builds any orbit. Where it is
 /// not, the hierarchy is drawn in full (plan 11, P11.T11.a: the range brief's gate then reads that
-/// draw's attempt 0 for its count and its pairs at once).
+/// draw's attempt 0 for its count and its pairs at once). `primary` is the primary's model where
+/// the caller holds it, whose stripped mark it reads (`innermost`).
 #[must_use]
 pub(crate) fn drawn_single(
     galaxy: &Galaxy,
@@ -920,6 +949,7 @@ pub(crate) fn drawn_single(
     composition: Option<&Composition>,
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
+    primary: Option<&StarModel>,
 ) -> bool {
     let model = MultiplicityModel::default_v1();
     let streams = Streams::new(galaxy, record.id(), attempt);
@@ -931,7 +961,7 @@ pub(crate) fn drawn_single(
     };
     companion_count(
         &streams,
-        innermost(galaxy, record, composition, ctx),
+        innermost(galaxy, record, composition, ctx, primary),
         &pmf,
         ctx,
     ) == 0
@@ -940,15 +970,19 @@ pub(crate) fn drawn_single(
 
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),
 /// at `composition` if given and otherwise at the record's [`draw_metallicity`], which is a grid
-/// record's alone. The mark is the primary's own, read at the attempt its record carries (0 for a
-/// grid record, a feature member's conditional-draw attempt otherwise), as
-/// [`SystemStars`](crate::stellar::system::SystemStars) reads its draws.
+/// record's alone. The mark is the primary's own, as
+/// [`SystemStars`](crate::stellar::system::SystemStars) keeps its draws: `primary`'s, the
+/// primary's model where the caller holds it, and otherwise read at the attempt its record
+/// carries (a grid record's mark attempt, a feature member's conditional-draw attempt), or for a
+/// record whose class constrains its kick at the attempt plan 08's kick loop keeps, which builds
+/// the primary's track (`primary_kept_stripped_mark`, P08.T12.c).
 #[must_use]
 fn innermost(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: Option<&Composition>,
     ctx: MultiplicityContext,
+    primary: Option<&StarModel>,
 ) -> Innermost {
     match ctx {
         MultiplicityContext::ForcedSingle => return Innermost::Free,
@@ -962,7 +996,10 @@ fn innermost(
     if m1 < stripped_mark_min_mass(&comp) {
         return Innermost::Free;
     }
-    let mark = primary_draws(galaxy, record).stripped();
+    let mark = primary.map_or_else(
+        || primary_kept_stripped_mark(galaxy, record, &comp),
+        |primary| primary.draws().stripped(),
+    );
     // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
     // on the share it would read, its exact path's track under the galaxy's stellar rules, as the
     // primary's own track's mark reads it.
@@ -1536,7 +1573,7 @@ pub(super) fn direct_tries(
             galaxy.potential(),
             PointLy::from(record.epoch_position()),
             None,
-            innermost(galaxy, record, None, ctx),
+            innermost(galaxy, record, None, ctx, None),
         ),
     };
     let m0 = record.primary_initial_mass();
@@ -2248,6 +2285,7 @@ mod tests {
                 None,
                 ctx,
                 &PERIOD_CORRECTION,
+                None,
             ));
             assert_order_independent(&attempts, |&attempt| shared.borrow_mut().stars_at(attempt));
             for &attempt in &attempts {

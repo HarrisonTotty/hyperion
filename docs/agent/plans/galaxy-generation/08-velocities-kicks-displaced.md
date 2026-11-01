@@ -2140,11 +2140,19 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - The mass redraw fires wherever the first fate can give no kick in the bin: no remnant, or no
     iron core in a moving bin. Layer D's runaway reduction keeps its 255th attempt
     (`MAX_MARK_ATTEMPT`, a `u8`).
-  - Open point, for the bump (lean 2026-10-31): only `SystemStars::generate` reads the kick
-    loop's kept attempt. The range brief (`stellar/brief.rs`), the lensing walk's
-    `first_attempt_models` and plan 11's hierarchy (the stripped mark, `hierarchy.rs`) still read
-    a constrained record's attempt 0. Before the switch they must take the kept attempt from one
-    function, or the loop must hold `star.stripped`.
+  - The kept attempt's readers (main's ruling of 2026-10-31 on this lane's open point):
+    `primary_model` is the one reading of the kick loop's kept attempt. The range brief takes a
+    constrained record's primary from it (the exact route; its gate reads the kept stripped mark),
+    `first_attempt_models` (the lens mass) builds it, and plan 11's hierarchy reads its stripped
+    mark (`primary_kept_stripped_mark`, or the system stage's model through
+    `draw_hierarchy_of_primary`, so no second track). A retained record's range brief and census
+    bound now build its primary's track. Test:
+    `every_reader_of_a_constrained_primary_sees_the_kept_attempt`.
+  - Open (a question for the owner): the loop redraws `star.stripped`, against ruling 93.2 (T8's
+    records), since holding it put 196 of the fast sample's 1,995 remnants at the cap (8.0–10.7
+    M☉ in fast bins, which the class table weighs over the stripped mix), against none. Inside
+    the stripped window the kept verdict differs from the record's own for 296 of 786 displaced
+    remnants and 81 of 173 retained records, and moves the track of none of them.
   - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
     chi-square are slow, run by name. The kick loop's cap is reached by 2,184 of 9,996,081
     remnants, against none: that is pinned and logged as a finding, and those kicks are scaled

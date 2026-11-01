@@ -46,9 +46,11 @@ use crate::stellar::classify::{
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::events::thermal_pulse::ThermalPulseModel;
 use crate::stellar::events::{EventEffects, StarEvent, StarEventRules, StarEvents};
+#[cfg(doc)]
+use crate::stellar::multiplicity::draw_hierarchy_of_composition;
 use crate::stellar::multiplicity::{
     HierarchyNode, MultiplicityContext, NodeIndex, RedrawAttempt, SlotKind, StarIndex,
-    SystemHierarchy, draw_hierarchy_of_composition,
+    SystemHierarchy, draw_hierarchy_of_primary,
 };
 use crate::stellar::nebula::{self, PlanetaryNebula};
 use crate::stellar::photometry::{absolute_magnitude_v_under, colour_b_v_under};
@@ -2384,7 +2386,7 @@ fn models_at(
     attempt: RedrawAttempt,
 ) -> (SystemHierarchy, Vec<StarModel>) {
     let composition = *primary.composition();
-    let hierarchy = draw_hierarchy_of_composition(galaxy, record, &composition, ctx, attempt);
+    let hierarchy = draw_hierarchy_of_primary(galaxy, record, primary, ctx, attempt);
     let age = record.age_at_epoch();
     let mut stars = Vec::with_capacity(hierarchy.stars().len());
     stars.push(primary.clone());
@@ -2407,21 +2409,16 @@ fn models_at(
 /// first attempt's star count), at a certified range row's cost, for plan 12's lens masses
 /// (P12.T4). For the few systems
 /// the grid redraws (P11.T7) they are the first attempt's stars, and a pair's mass transfer is
-/// not in them (plan 11's Risks, "Deviations in P11.T11, as built").
+/// not in them (plan 11's Risks, "Deviations in P11.T11, as built"). The primary is
+/// [`primary_model`]'s, so a record whose class constrains its kick (plan 08, P08.T12.c) lends
+/// the lens the remnant of the kick loop's kept attempt, the one `SystemStars` keeps.
 ///
 /// # Panics
 ///
 /// As [`SystemStars::generate`].
 #[must_use]
 pub(crate) fn first_attempt_models(galaxy: &Galaxy, record: &SystemRecord) -> Vec<StarModel> {
-    let primary = StarModel::new_under(
-        record.primary_initial_mass(),
-        draw_metallicity(galaxy, record),
-        primary_draws(galaxy, record),
-        record.age_at_epoch(),
-        galaxy.rules().stellar,
-    )
-    .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+    let (primary, _) = primary_model(galaxy, record, draw_metallicity(galaxy, record));
     models_at(
         galaxy,
         record,
@@ -2635,6 +2632,13 @@ pub(crate) const KICK_LOOP_CAP: u32 = 4_096;
 /// costs a remnant and a kick and never a track, and the record's kick lies in its bin, which,
 /// given its mass, is exact.
 ///
+/// It is the one reading of the kept attempt: every reader of a constrained record's primary
+/// takes its star from here, so that each sees the star `SystemStars` keeps (P08.T12.c). The
+/// system stage, the range brief's single-star routes
+/// ([`BriefModel`](crate::stellar::brief::BriefModel)) and the lens masses
+/// ([`first_attempt_models`]) build it, and plan 11's hierarchy reads its stripped mark
+/// ([`primary_kept_stripped_mark`]), from the model where its caller holds one.
+///
 /// # Panics
 ///
 /// If the record's primary is not of 0.01–150 M☉ or its age is not finite, as
@@ -2661,6 +2665,26 @@ pub(crate) fn primary_model(
         (galaxy.seed(), BodyId::new(record.id(), 0)),
         record_attempt(record),
     )
+}
+
+/// The primary's companion-stripped mark at the kick loop's kept attempt, at `composition`: the
+/// mark of [`primary_model`]'s star, which plan 11's hierarchy reads (P08.T12.c). For a record
+/// that constrains no kick it is [`primary_draws`]'s, with no track built; for one that does it
+/// builds the primary's track and runs the loop, so a caller that holds the model reads the mark
+/// from it instead.
+#[must_use]
+pub(crate) fn primary_kept_stripped_mark(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+) -> Mark {
+    if record.kick_range(galaxy).is_none() {
+        return primary_draws(galaxy, record).stripped();
+    }
+    primary_model(galaxy, record, *composition)
+        .0
+        .draws()
+        .stripped()
 }
 
 /// The primary's draws: body 0's at the record's attempt, [`StarDraws::for_star`] at attempt 0.

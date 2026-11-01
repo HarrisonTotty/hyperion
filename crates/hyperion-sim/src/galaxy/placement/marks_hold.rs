@@ -20,9 +20,12 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemIdKind};
 use crate::rng::PiecewiseLinear;
+use crate::stellar::brief::{BriefModel, BriefRoute};
+use crate::stellar::multiplicity::{RedrawAttempt, draw_hierarchy_of_composition, draw_star_count};
 use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{
-    KICK_LOOP_CAP, SystemStars, draw_metallicity, primary_draws, primary_model,
+    KICK_LOOP_CAP, StarModel, SystemStars, draw_metallicity, first_attempt_models,
+    grid_multiplicity, primary_draws, primary_kept_stripped_mark, primary_model,
 };
 use crate::time::UniverseTime;
 use crate::units::KilometresPerSecond;
@@ -205,6 +208,97 @@ fn a_retained_record_s_kick_lies_in_its_bin() {
     }
     println!("{disc} disc and halo, {spheroid} bulge, bar and nuclear disc retained records");
     assert!(disc > 0 && spheroid > 0);
+}
+
+/// Every reader of a constrained record's primary sees the star the kick loop keeps (P08.T12.c):
+/// for retained records and displaced remnants of layer E, `SystemStars`' primary is
+/// `primary_model`'s, the range brief's is that star's brief (with the first attempt's count on
+/// the paired route), the lens masses' primary is it, and plan 11's hierarchy reads its stripped
+/// mark. The kept attempt is not the record's own for some of them, and its stripped mark not the
+/// record's own for a few, so the test bites.
+#[test]
+fn every_reader_of_a_constrained_primary_sees_the_kept_attempt() {
+    let galaxy = displaced();
+    let mut cells = row(Layer::E, &sunlike(), 8);
+    cells.extend(row(Layer::E, &diagonal(3_200.0), 1));
+    let (mut retained, mut remnants, mut moved, mut marks) = (0_u32, 0_u32, 0_u32, 0_u32);
+    for (_, record) in records(galaxy, &cells) {
+        let count = match record.placement_class() {
+            PlacementClass::Retained { .. } => &mut retained,
+            PlacementClass::Displaced {
+                kind: DisplacedKind::Remnant,
+                ..
+            } => &mut remnants,
+            PlacementClass::Alive | PlacementClass::Displaced { .. } => continue,
+        };
+        if *count >= 60 {
+            continue;
+        }
+        *count += 1;
+        assert!(record.kick_range(galaxy).is_some(), "{:?}", record.id());
+        let composition = draw_metallicity(galaxy, &record);
+        let (kept, attempts) = primary_model(galaxy, &record, composition);
+        let stars = SystemStars::generate(galaxy, &record);
+        assert_eq!(stars.primary(), &kept, "{:?}", record.id());
+        assert_eq!(
+            first_attempt_models(galaxy, &record).first(),
+            Some(&kept),
+            "the lens mass's primary, {:?}",
+            record.id()
+        );
+        let brief = BriefModel::new(galaxy, &record);
+        assert!(
+            matches!(brief.route(), BriefRoute::Exact | BriefRoute::Paired),
+            "{:?}: {:?}",
+            record.id(),
+            brief.route()
+        );
+        let ctx = grid_multiplicity(&record);
+        let count = draw_star_count(galaxy, &record, ctx, RedrawAttempt::FIRST);
+        for t in [
+            UniverseTime::EPOCH,
+            UniverseTime::from_julian_years(500_000).expect("inside the clock"),
+        ] {
+            assert_eq!(
+                brief.brief_at(t),
+                stars.brief_at(t).map(|b| b.with_star_count(count)),
+                "{:?} at {t:?}",
+                record.id()
+            );
+        }
+        assert_eq!(
+            primary_kept_stripped_mark(galaxy, &record, &composition),
+            kept.draws().stripped(),
+            "{:?}",
+            record.id()
+        );
+        if stars.attempt().next().is_some() || stars.hierarchy().star_count() > 1 {
+            assert_eq!(
+                stars.hierarchy(),
+                &draw_hierarchy_of_composition(galaxy, &record, &composition, ctx, stars.attempt()),
+                "the hierarchy reads the kept mark, {:?}",
+                record.id()
+            );
+        }
+        let first = primary_draws(galaxy, &record);
+        marks += u32::from(kept.draws().stripped() != first.stripped());
+        if attempts > 1 {
+            let own = StarModel::new_under(
+                record.primary_initial_mass(),
+                composition,
+                first,
+                record.age_at_epoch(),
+                galaxy.rules().stellar,
+            )
+            .expect("a grid record's primary");
+            moved += u32::from(own.natal_kick() != kept.natal_kick());
+        }
+    }
+    println!(
+        "{retained} retained and {remnants} displaced remnants, {moved} kept another kick, {marks} \
+         another stripped mark"
+    );
+    assert!(retained > 0 && remnants > 0 && moved > 0 && marks > 0);
 }
 
 /// A living layer-E record is alive at the epoch in the stellar stage, by construction (Design

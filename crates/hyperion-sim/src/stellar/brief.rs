@@ -34,7 +34,11 @@
 //!   rows in ten near the Sun.
 //! - **Exact** ([`BriefRoute::Exact`]): below 0.1 M☉, P06.T13's cooling fits; for a star the table
 //!   found dead but whose guard failed, its exact remnant from a build to its death that keeps no
-//!   other segment; and otherwise its [`StarModel`], as [`SystemStars::generate`] builds it.
+//!   other segment; and otherwise its [`StarModel`], as [`SystemStars::generate`] builds it. A
+//!   record whose class constrains its primary's kick (plan 08's retained and displaced
+//!   remnants, P08.T12.c) takes this route and no other: its model is the kick loop's kept
+//!   attempt, whose remnant the table and the remnant build, at the record's own attempt, need
+//!   not give.
 //!
 //! Every other system takes **the paired route** ([`BriefRoute::Paired`]): its [`SystemStars`],
 //! binary engine included, whose brief is the summary's primary by construction, a redrawn
@@ -78,7 +82,7 @@ use crate::stellar::sse::{
 };
 use crate::stellar::system::{
     GRID_ATTEMPT, Pulses, StarModel, StarStreams, StellarBrief, SystemStars, draw_metallicity,
-    grid_multiplicity, primary_draws, primary_eta, primary_rotation_draws,
+    grid_multiplicity, primary_draws, primary_eta, primary_model, primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, UniverseTime};
@@ -306,7 +310,14 @@ impl BriefModel {
     #[must_use]
     pub fn certifies(galaxy: &Galaxy, record: &SystemRecord) -> bool {
         let composition = draw_metallicity(galaxy, record);
-        gate(galaxy, record, &composition, grid_multiplicity(record)).certified
+        gate(
+            galaxy,
+            record,
+            &composition,
+            grid_multiplicity(record),
+            None,
+        )
+        .certified
     }
 
     /// The brief model of the feature member `member` in `galaxy` (plan 09, P09.T10): its
@@ -401,16 +412,34 @@ impl BriefModel {
         (composition, ctx): (Composition, MultiplicityContext),
         fates: &FittedFates<'_>,
     ) -> Self {
+        // A record whose class constrains its primary's kick (plan 08's retained and displaced
+        // remnants) takes the kick loop's kept attempt, the star `SystemStars` keeps (P08.T12.c):
+        // the gate reads its stripped mark, and a certified primary is its exact model, since the
+        // table's and the remnant build's routes read the remnant's draws of the record's own
+        // attempt.
+        let kept = record
+            .kick_range(galaxy)
+            .map(|_| primary_model(galaxy, record, composition).0);
         let Gate {
             star_count,
             certified,
-        } = gate(galaxy, record, &composition, ctx);
+        } = gate(galaxy, record, &composition, ctx, kept.as_ref());
         if !certified {
             // `SystemStars::generate` for a grid record, `MemberRecord::stars` for a member: the
             // same composition and context, so the same system.
             let stars = SystemStars::generate_with(galaxy, record, &composition, ctx);
             return Self {
                 primary: Primary::Paired(Box::new(stars)),
+                star_count,
+                rules: galaxy.rules().stellar,
+            };
+        }
+        if let Some(primary) = kept {
+            return Self {
+                primary: Primary::Exact(
+                    Box::new(primary),
+                    StarStreams::new(galaxy.seed(), BodyId::new(record.id(), 0)),
+                ),
                 star_count,
                 rules: galaxy.rules().stellar,
             };
@@ -682,20 +711,31 @@ struct Gate {
 /// whatever its pairs did. The tests check that every certified primary is its own model at
 /// times across the window. The pair-light and reach tables the test reads are the version's
 /// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified.
+///
+/// `primary` is the primary's model where the caller holds it, whose stripped mark the hierarchy
+/// reads: the kick loop's kept attempt, for a record whose class constrains its kick (P08.T12.c).
 #[must_use]
 fn gate(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: &Composition,
     ctx: MultiplicityContext,
+    primary: Option<&StarModel>,
 ) -> Gate {
-    if drawn_single(galaxy, record, Some(composition), ctx, GRID_ATTEMPT) {
+    if drawn_single(
+        galaxy,
+        record,
+        Some(composition),
+        ctx,
+        GRID_ATTEMPT,
+        primary,
+    ) {
         return Gate {
             star_count: 1,
             certified: true,
         };
     }
-    let attempt = first_attempt(galaxy, record, composition, ctx);
+    let attempt = first_attempt(galaxy, record, composition, ctx, primary);
     let age_at_epoch = record.age_at_epoch();
     let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
