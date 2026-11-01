@@ -5,15 +5,18 @@
 //! ([`PooledIaEvent`]: two white dwarfs merging, or an accreting white dwarf reaching ignition,
 //! sub-Chandrasekhar cases included) and carries on as if it had not exploded. The binary formulae
 //! do not set the rate, which they are known to underpredict several times over (Claeys et al.
-//! 2014, A&A 563, A83): an independent mark thins the pool to the observed rate, the observed
-//! merger rate being five to seven times the Type Ia rate (Maoz, Hallakoun and Badenes 2018, MNRAS
-//! 476, 2584; the brainstorm's "Supernova remnants: one route, not two"). A pooled event explodes
-//! when its pair's integer draw on `binary.ia_mark` ([`tags::BINARY_IA_MARK`]), at word 64n of
-//! redraw attempt n and keyed by the star the pair's orbit brings in
+//! 2014, A&A 563, A83): an independent mark thins the pool towards the observed rate (the
+//! brainstorm's "Supernova remnants: one route, not two"). Only a candidate that can detonate
+//! explodes ([`is_detonatable`], ruling 129.1's rule): a merger above the Chandrasekhar mass or
+//! with a dwarf of 0.85 M☉ or more, or an accretion onto a dwarf of 0.85 M☉ or more (Shen et al.
+//! 2018, ApJ 865, 15). Such a candidate explodes when its pair's integer draw on `binary.ia_mark`
+//! ([`tags::BINARY_IA_MARK`]), at word 64n of redraw attempt n and keyed by the star the pair's
+//! orbit brings in
 //! ([`SystemHierarchy::pair_key`](crate::stellar::multiplicity::SystemHierarchy::pair_key)), falls
 //! under η of the event's delay bin and channel ([`IaYieldTable`]; the scratch
-//! [`IA_YIELD`](crate::tables::binary::IA_YIELD) until P15.T9.b fits it). An unexploded pooled event stays what the engine made it: a massive
-//! white dwarf, an R Coronae Borealis star, a hot subdwarf.
+//! [`IA_YIELD`](crate::tables::binary::IA_YIELD) until P15.T9.b fits it). An unexploded pooled
+//! event, every merger too light to detonate among them (most helium-bearing ones), stays what the
+//! engine made it: a massive white dwarf, an R Coronae Borealis star, a hot subdwarf.
 //!
 //! The mark is a pure function of the seed, the pair's key and the attempt, and nothing else reads
 //! its stream, so it moves no other draw. The system stage reads it under P11.T6's hold (the
@@ -21,12 +24,15 @@
 //! before +H redraws, as the four binary classes do (design notes 8 and 9), since plan 09's Type
 //! Ia class holds every recent Type Ia.
 
-use super::timeline::{BinaryTimeline, PooledIaEvent};
+use super::classify::MIN_DETONATABLE_MASS;
+use super::timeline::{BinaryTimeline, IaPoolChannel, PooledIaEvent};
 use crate::GeneratorVersion;
 use crate::id::BodyId;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::multiplicity::RedrawAttempt;
+use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::tables::binary::IaYieldTable;
+use crate::units::SolarMasses;
 
 /// The generator version from which the grid redraws a binary whose pooled Type Ia candidate its
 /// explosion mark explodes at or before +H (plan 11, P11.T6): the hold of the stellar rules'
@@ -66,17 +72,47 @@ impl IaExplosionMark {
         }
     }
 
-    /// Whether `event` explodes: the mark is below η of its delay bin and channel in `table`.
+    /// Whether pooled `event` explodes as a Type Ia supernova: it can detonate
+    /// ([`is_detonatable`]), and the mark is below η of its delay bin and channel in `table`.
     #[must_use]
     pub fn explodes(self, event: &PooledIaEvent, table: &IaYieldTable) -> bool {
-        self.mark.is_below(Threshold::from_probability(
-            table.eta(event.age(), event.channel()),
-        ))
+        is_detonatable(event)
+            && self.mark.is_below(Threshold::from_probability(
+                table.eta(event.age(), event.channel()),
+            ))
+    }
+}
+
+/// Whether a pooled Type Ia candidate can detonate, by ruling 129.1's rule as the double
+/// degenerate class applies it
+/// ([`BinaryClass::TypeIaProgenitor`](super::BinaryClass::TypeIaProgenitor)):
+///
+/// - a merger whose two dwarfs together exceed the Chandrasekhar mass, or whose heavier is at
+///   least [`MIN_DETONATABLE_MASS`], 0.85 M☉ (Shen et al. 2018, ApJ 865, 15, section 4.1). A
+///   helium dwarf never reaches it (it ignites at 0.7 M☉), so the masses decide without the
+///   dwarfs' phases;
+/// - an accretion onto a dwarf ([`PooledIaEvent::masses`]' first) of at least
+///   [`MIN_DETONATABLE_MASS`]: the Chandrasekhar mass, or an edge-lit detonation on a
+///   carbon–oxygen dwarf of 0.85 M☉ or more, and not a helium dwarf's ignition at 0.7 M☉. The
+///   dwarf's mass at ignition is compared, its accreted helium shell (0.15 M☉ or more) included,
+///   since the event carries no core mass: a core of about 0.70 M☉ passes.
+///
+/// Every other candidate, a helium-bearing merger below the limit among them, stays what the
+/// engine made it.
+#[must_use]
+pub(crate) fn is_detonatable(event: &PooledIaEvent) -> bool {
+    let [m0, m1] = event.masses().map(SolarMasses::value);
+    match event.channel() {
+        IaPoolChannel::Merger => {
+            m0 + m1 > CHANDRASEKHAR_MASS.value() || m0.max(m1) >= MIN_DETONATABLE_MASS.value()
+        }
+        IaPoolChannel::Accretion => m0 >= MIN_DETONATABLE_MASS.value(),
     }
 }
 
 /// The pooled Type Ia candidate of `timeline` that explodes under `mark` and `table`, if it has
-/// one. Its age is the explosion's, at or before the age the timeline was run to.
+/// one ([`IaExplosionMark::explodes`]). Its age is the explosion's, at or before the age the
+/// timeline was run to.
 #[must_use]
 pub(crate) fn marked_explosion(
     timeline: &BinaryTimeline,
@@ -115,6 +151,10 @@ mod tests {
 
     const SEED: u64 = 0x0b17_0006_0000_0001;
 
+    /// A sixth in every delay bin and for both channels: the scratch yield before only
+    /// detonatable candidates exploded, which the mark's tests and its pinned labels read.
+    const SIXTH: IaYieldTable = IaYieldTable::new([[1.0 / 6.0; 2]; IA_DELAY_BINS]);
+
     /// The pair key of synthetic pair `k`: its secondary in candidate `k` of a layer-D cell.
     fn key(k: u32) -> BodyId {
         let cell = CellKey::new(Layer::D, [0, 406, 0]).expect("a cell of the root cube");
@@ -145,13 +185,13 @@ mod tests {
     }
 
     /// P11.T6: exploded ÷ pooled is η to Poisson accuracy, in every delay bin and for both
-    /// channels, over 2,000 synthetic pooled candidates each, every one on its own pair's mark;
-    /// and with η of 0 none explodes, with η of 1 every one.
+    /// channels, over 2,000 synthetic detonatable candidates each under [`SIXTH`], every one on
+    /// its own pair's mark; and with η of 0 none explodes, with η of 1 every one.
     #[test]
     fn exploded_over_pooled_is_eta_to_poisson_accuracy() {
         let seed = Seed::new(SEED);
         let per_bin = 2_000_u32;
-        let masses = [SolarMasses::new(0.8), SolarMasses::new(0.7)];
+        let masses = [SolarMasses::new(0.9), SolarMasses::new(0.6)];
         let (mut total, mut exploded) = (0_u32, 0_u64);
         for bin in 0..IA_DELAY_BINS {
             let delay = Years::new(f64::midpoint(DELAY_EDGES[bin], DELAY_EDGES[bin + 1]));
@@ -161,11 +201,11 @@ mod tests {
                 let count = (0..per_bin)
                     .filter(|&i| {
                         IaExplosionMark::of(seed, key(base + i), RedrawAttempt::FIRST)
-                            .explodes(&event, &IA_YIELD)
+                            .explodes(&event, &SIXTH)
                     })
                     .count();
                 let count = u64::try_from(count).expect("a count");
-                let eta = IA_YIELD.eta_in(bin, channel);
+                let eta = SIXTH.eta_in(bin, channel);
                 // α over the 48 cells together, so that each cell is tested at α ÷ 48.
                 assert_poisson_count(
                     &format!("bin {bin} {channel:?}"),
@@ -197,7 +237,7 @@ mod tests {
             IaPoolChannel::Accretion => 1,
         };
         let channels = [IaPoolChannel::Merger, IaPoolChannel::Accretion];
-        let masses = [SolarMasses::new(0.8), SolarMasses::new(0.7)];
+        let masses = [SolarMasses::new(0.9), SolarMasses::new(0.6)];
         let mark = IaExplosionMark::of(Seed::new(SEED), key(0), RedrawAttempt::FIRST);
         for bin in [0, 7, IA_DELAY_BINS - 1] {
             for channel in channels {
@@ -220,8 +260,8 @@ mod tests {
     }
 
     /// P11.T6: eight pairs' explosion marks at every attempt are pinned bit for bit, with whether
-    /// each explodes a candidate under the scratch yield: the tag, the key and the word are output
-    /// from version 27.
+    /// each explodes a candidate under [`SIXTH`] (the scratch yield's η of 1 would label every one
+    /// "explodes"): the tag, the key and the word are output from version 27.
     #[test]
     fn the_explosion_marks_are_pinned() {
         use hyperion_testkit::golden;
@@ -239,13 +279,110 @@ mod tests {
                     &format!(
                         "pair {k} attempt {}: explodes {}",
                         attempt.get(),
-                        mark.explodes(&event, &IA_YIELD)
+                        mark.explodes(&event, &SIXTH)
                     ),
                     mark.mark.get(),
                 );
             }
         }
         golden!("stellar/ia_marks", w.as_str());
+    }
+
+    /// A pooled candidate of `channel` at 1 Gyr, of `masses` M☉.
+    fn candidate(channel: IaPoolChannel, masses: [f64; 2]) -> PooledIaEvent {
+        PooledIaEvent::new(Years::new(1.0e9), channel, masses.map(SolarMasses::new))
+    }
+
+    /// P11.T6 and ruling 129.1: a merger detonates above the Chandrasekhar mass or with a dwarf of
+    /// 0.85 M☉ or more, and an accretion onto a dwarf of 0.85 M☉ or more, each at its edge.
+    #[test]
+    fn a_candidate_is_detonatable_by_ruling_129_1_s_rule() {
+        use IaPoolChannel::{Accretion, Merger};
+        let cases = [
+            (Merger, [0.90, 0.60], true),
+            (Merger, [0.30, 0.85], true),
+            (Merger, [0.84, 0.61], true),
+            (Merger, [0.84, 0.59], false),
+            (Merger, [0.677, 0.293], false),
+            (Merger, [0.45, 0.30], false),
+            (Accretion, [CHANDRASEKHAR_MASS.value(), 0.6], true),
+            (Accretion, [0.85, 0.3], true),
+            (Accretion, [0.84, 1.2], false),
+            (Accretion, [0.7, 0.4], false),
+        ];
+        for (channel, masses, detonatable) in cases {
+            assert_eq!(
+                is_detonatable(&candidate(channel, masses)),
+                detonatable,
+                "{channel:?} {masses:?}"
+            );
+        }
+    }
+
+    /// P11.T6: a 0.45 + 0.30 M☉ merger and a helium dwarf igniting at 0.7 M☉ never explode,
+    /// whatever the mark: not under the scratch yield's η of 1, at any attempt of 2,000 pairs,
+    /// where a detonatable candidate of the same delay and channel always does.
+    #[test]
+    fn a_candidate_that_cannot_detonate_never_explodes() {
+        let seed = Seed::new(SEED);
+        let light = [
+            candidate(IaPoolChannel::Merger, [0.45, 0.30]),
+            candidate(IaPoolChannel::Accretion, [0.7, 0.4]),
+        ];
+        let heavy = light.map(|event| candidate(event.channel(), [0.9, 0.6]));
+        for k in 0..2_000 {
+            for attempt in RedrawAttempt::all() {
+                let mark = IaExplosionMark::of(seed, key(k), attempt);
+                for (event, twin) in light.iter().zip(&heavy) {
+                    assert!(mark.explodes(twin, &IA_YIELD));
+                    assert!(
+                        !mark.explodes(event, &IA_YIELD),
+                        "{k} {attempt:?} {event:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// P11.T6: a 0.90 + 0.60 M☉ merger and an accretor at the Chandrasekhar mass explode exactly
+    /// when the mark is below η, under the scratch yield, [`SIXTH`] and a half, at every attempt
+    /// of 2,000 pairs; under [`SIXTH`] about a sixth of them do. Attempt n's answer is the same
+    /// whichever attempts were read before it.
+    #[test]
+    fn a_detonatable_candidate_explodes_exactly_when_its_mark_is_below_eta() {
+        let seed = Seed::new(SEED);
+        let heavy = [
+            candidate(IaPoolChannel::Merger, [0.90, 0.60]),
+            candidate(IaPoolChannel::Accretion, [CHANDRASEKHAR_MASS.value(), 0.6]),
+        ];
+        let half = IaYieldTable::new([[0.5; 2]; IA_DELAY_BINS]);
+        let attempts: Vec<RedrawAttempt> = RedrawAttempt::all().collect();
+        let mut exploded = [0_u64; 2];
+        for k in 0..2_000 {
+            let pair = key(k);
+            for &attempt in &attempts {
+                let mark = IaExplosionMark::of(seed, pair, attempt);
+                for (i, event) in heavy.iter().enumerate() {
+                    for (table, eta) in [(&IA_YIELD, 1.0), (&SIXTH, 1.0 / 6.0), (&half, 0.5)] {
+                        assert_eq!(
+                            mark.explodes(event, table),
+                            mark.mark.is_below(Threshold::from_probability(eta)),
+                            "{k} {attempt:?} {event:?} at η {eta}"
+                        );
+                    }
+                    if attempt == RedrawAttempt::FIRST {
+                        exploded[i] += u64::from(mark.explodes(event, &SIXTH));
+                    }
+                }
+            }
+            assert_order_independent(&attempts, |&attempt| {
+                let mark = IaExplosionMark::of(seed, pair, attempt);
+                heavy.map(|event| mark.explodes(&event, &SIXTH))
+            });
+        }
+        for (event, count) in heavy.iter().zip(exploded) {
+            assert_poisson_count(&format!("{event:?}"), count, 2_000.0 / 6.0, ALPHA / 2.0);
+        }
     }
 
     /// A white dwarf of `mass` M☉ as the engine holds one formed at `birth` years: helium below

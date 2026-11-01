@@ -5,15 +5,18 @@
 //! ([`marked_rules`]), so that the other holds move nothing it holds equal.
 //!
 //! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
-//! - Under the arm a pinned layer-D system, whose first attempt's two white dwarfs merge at
-//!   1.83 Gyr, a pooled candidate its mark explodes, is redrawn and keeps no Type Ia; under the
-//!   held arm it keeps its first attempt. The cell's other systems are the same under both arms.
-//!   Each attempt is reproducible alone.
+//! - Under the arm a pinned layer-D system, whose first attempt's white dwarf of 1.11 M☉ reaches
+//!   ignition by accretion at 180 Myr, a detonatable candidate its mark explodes, is redrawn and
+//!   keeps no Type Ia; under the held arm it keeps its first attempt. The cell's other systems are
+//!   the same under both arms but one, which the arm also redraws. Each attempt is reproducible
+//!   alone.
+//! - Under the arm a pooled merger too light to detonate, of 0.677 and 0.293 M☉, the system pinned
+//!   before only detonatable candidates exploded, is kept at its first attempt.
 //! - Slow, under every 27 hold on a Kroupa galaxy: over 10⁵ layer-D systems near the Sun none
-//!   keeps an exploded binary, and exploded ÷ pooled is η to Poisson accuracy; over the galaxy's
-//!   systems the share of layer D whose first attempt explodes, the grid's redraw rate, lies within
-//!   0.3–4.5%, and the pool's rate over the Type Ia rate is recorded against the observed five to
-//!   seven.
+//!   keeps an exploded binary, and exploded ÷ detonatable pooled is η to Poisson accuracy; over the
+//!   galaxy's systems the share of layer D whose first attempt explodes, the grid's redraw rate,
+//!   lies within 0.3–4.5%, and the pool's present rate over the Type Ia rate is recorded against
+//!   the observed 4.5–7.
 //!
 //! The movers under the arm, found by turning it on at the version (and back off), over the sim's,
 //! the server's and the fitting crate's tests and 31 slow tests of the binaries, the systems and
@@ -41,14 +44,23 @@ use crate::stellar::binary::IaPoolChannel;
 use crate::stellar::multiplicity::{NodeIndex, RedrawAttempt};
 use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity, primary_model};
 use crate::time::{ClockWindow, UniverseTime};
+use crate::units::SolarMasses;
 
 /// The seed of the Milky Way fixture the fast tests share.
 const SEED: u64 = 0x0b17_0006_0000_0003;
 
-/// The pinned system's cell and candidate index: a layer-D record of 2.54 M☉ and 1.93 Gyr whose
-/// first attempt's two white dwarfs, of 0.677 and 0.293 M☉, merge at 1.83 Gyr, a pooled candidate
-/// its mark explodes (found among the first 2,245 layer-D systems of the cells along x).
-const PINNED: ([i32; 3], usize) = ([24, 406, 0], 0);
+/// The pinned system's cell and candidate index: a layer-D record of 4.83 M☉ and 9.47 Gyr whose
+/// first attempt's white dwarf, of 1.11 M☉, reaches ignition by accretion from its 0.53 M☉
+/// companion at 180 Myr, a detonatable candidate its mark explodes. Found by search: the cells
+/// `[x, 406, 0]` from x = 0, each record in order, the first attempt under the arm read for an
+/// exploded root pair and no carved one; it is the first, the 39th system read (2026-11-01).
+const PINNED: ([i32; 3], usize) = ([2, 406, 0], 4);
+
+/// The cell and candidate index of the system pinned before only detonatable candidates exploded:
+/// a layer-D record of 2.54 M☉ and 1.93 Gyr whose first attempt's two white dwarfs, of 0.677 and
+/// 0.293 M☉, merge at 1.83 Gyr (found among the first 2,245 layer-D systems of the cells along x),
+/// which the mark at a sixth exploded.
+const TOO_LIGHT: ([i32; 3], usize) = ([24, 406, 0], 0);
 
 /// The version's galaxy rules.
 fn version() -> GalaxyRules {
@@ -82,15 +94,20 @@ fn marked() -> &'static Galaxy {
     GALAXY.get_or_init(|| held().clone().with_rules(marked_rules()))
 }
 
-/// The records of the pinned cell in `galaxy`.
-fn pinned_cell(galaxy: &Galaxy) -> Vec<SystemRecord> {
+/// The records of layer D's cell `at` in `galaxy`.
+fn cell_at(galaxy: &Galaxy, at: [i32; 3]) -> Vec<SystemRecord> {
     let mut cell = Vec::new();
     generate_cell(
         galaxy,
-        CellKey::new(Layer::D, PINNED.0).expect("a cell of the root cube"),
+        CellKey::new(Layer::D, at).expect("a cell of the root cube"),
         &mut cell,
     );
     cell
+}
+
+/// The records of the pinned cell in `galaxy`.
+fn pinned_cell(galaxy: &Galaxy) -> Vec<SystemRecord> {
+    cell_at(galaxy, PINNED.0)
 }
 
 /// The system of `record` at `attempt` in `galaxy`, from its primary's model.
@@ -131,10 +148,12 @@ fn the_type_ia_explosion_is_held_only_until_the_27_bump() {
     assert_eq!(held().rules(), version());
 }
 
-/// Under the arm the pinned system's first attempt has a pair of white dwarfs whose merger at
-/// 1.83 Gyr its mark explodes, so the grid redraws it and keeps an attempt with no Type Ia, the
-/// primary unchanged; P09.T35's hook says so of both. Under the held arm the same first attempt
-/// explodes nothing and is kept. Every other system of the cell is the same under both arms.
+/// Under the arm the pinned system's first attempt has a white dwarf whose ignition by accretion
+/// at 180 Myr, detonatable, its mark explodes, so the grid redraws it and keeps an attempt with no
+/// Type Ia, the primary unchanged; P09.T35's hook says so of both. Under the held arm the same
+/// first attempt explodes nothing and is kept. Every other system of the cell is the same under
+/// both arms unless the attempt the held arm keeps explodes under the arm (one does: record 9),
+/// which the arm redraws to a later attempt with no Type Ia.
 #[test]
 fn under_the_arm_the_pinned_system_redraws_its_exploded_binary() {
     let (held_cell, marked_cell) = (pinned_cell(held()), pinned_cell(marked()));
@@ -145,8 +164,12 @@ fn under_the_arm_the_pinned_system_redraws_its_exploded_binary() {
         .exploded_pair()
         .expect("the pinned first attempt explodes");
     assert_eq!(node, NodeIndex::ROOT);
-    assert_eq!(event.channel(), IaPoolChannel::Merger);
-    assert!((event.age().value() - 1.83e9).abs() < 1e7, "{event:?}");
+    assert_eq!(event.channel(), IaPoolChannel::Accretion);
+    assert!((event.age().value() - 1.804e8).abs() < 1e6, "{event:?}");
+    assert!(
+        (event.masses()[0].value() - 1.110).abs() < 1e-3,
+        "{event:?}"
+    );
     assert!(keeps_a_recent_type_ia(&first));
     let kept = SystemStars::generate(marked(), record);
     assert!(kept.attempt() > RedrawAttempt::FIRST);
@@ -164,10 +187,18 @@ fn under_the_arm_the_pinned_system_redraws_its_exploded_binary() {
     assert!(!keeps_a_recent_type_ia(&unmarked));
     assert_eq!(unmarked.hierarchy(), first.hierarchy());
     // The systems carry their rules; their attempts and states, which the record and every
-    // reader see, are the same.
+    // reader see, are the same, but for a system whose held attempt the arm explodes. Every
+    // attempt before the held one is carved, so the arm redraws it too.
+    let mut redrawn = Vec::new();
     for (i, record) in marked_cell.iter().enumerate() {
         if i != PINNED.1 {
             let [a, b] = [marked(), held()].map(|galaxy| SystemStars::generate(galaxy, record));
+            if at(marked(), record, b.attempt()).exploded_pair().is_some() {
+                assert!(a.attempt() > b.attempt(), "{:?}", record.id());
+                assert_eq!(a.exploded_pair(), None, "{:?}", record.id());
+                redrawn.push(i);
+                continue;
+            }
             assert_eq!(a.attempt(), b.attempt(), "{:?}", record.id());
             assert_eq!(a.hierarchy(), b.hierarchy(), "{:?}", record.id());
             for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
@@ -175,6 +206,36 @@ fn under_the_arm_the_pinned_system_redraws_its_exploded_binary() {
             }
         }
     }
+    assert_eq!(redrawn, [9], "the cell's other systems the arm redraws");
+}
+
+/// Under the arm the 0.677 + 0.293 M☉ merger at 1.83 Gyr of [`TOO_LIGHT`]'s first attempt, a
+/// pooled candidate too light to detonate, explodes under no mark: the grid keeps that attempt, as
+/// under the held arm, and P09.T35's hook sees no Type Ia.
+#[test]
+fn under_the_arm_a_merger_too_light_to_detonate_is_kept() {
+    let record = &cell_at(marked(), TOO_LIGHT.0)[TOO_LIGHT.1];
+    let first = at(marked(), record, RedrawAttempt::FIRST);
+    let pooled = first
+        .pairs()
+        .iter()
+        .find_map(|pair| pair.timeline().pooled_ia())
+        .expect("the first attempt pools a merger");
+    assert_eq!(pooled.channel(), IaPoolChannel::Merger);
+    assert!((pooled.age().value() - 1.83e9).abs() < 1e7, "{pooled:?}");
+    let [m0, m1] = pooled.masses().map(SolarMasses::value);
+    assert!(
+        (m0.max(m1) - 0.677).abs() < 1e-3 && (m0.min(m1) - 0.293).abs() < 1e-3,
+        "{pooled:?}"
+    );
+    assert_eq!(first.exploded_pair(), None);
+    let kept = SystemStars::generate(marked(), record);
+    assert_eq!(kept.attempt(), RedrawAttempt::FIRST);
+    assert!(!keeps_a_recent_type_ia(&kept));
+    assert_eq!(
+        kept.hierarchy(),
+        SystemStars::generate(held(), record).hierarchy()
+    );
 }
 
 /// Attempt n of the pinned system, its pairs and their explosion marks, is a pure function of the
@@ -207,11 +268,13 @@ mod slow {
     use crate::galaxy::fields::Component;
     use crate::galaxy::imf::{BandShares, MASS_BAND_EDGES, MassBand, MassFunctionKind};
     use crate::galaxy::placement::SystemOrigin;
+    use crate::stellar::Phase;
     use crate::stellar::binary::carve::redraws;
-    use crate::stellar::binary::ia::{IaExplosionMark, marked_explosion};
+    use crate::stellar::binary::ia::{IaExplosionMark, is_detonatable, marked_explosion};
+    use crate::stellar::binary::{BinaryTimeline, SegmentKind};
     use crate::stellar::testing::reference_position;
     use crate::tables::binary::IA_YIELD;
-    use crate::units::SolarMasses;
+    use crate::units::Years;
 
     /// The seed of the slow tests' Kroupa galaxy, and of their choice of records.
     const SLOW_SEED: u64 = 0x0b17_0006_0000_0004;
@@ -317,6 +380,51 @@ mod slow {
         records
     }
 
+    /// The years before a record's age over which the pool's present rate is counted: the last
+    /// Gyr.
+    const PRESENT_YEARS: f64 = 1.0e9;
+
+    /// Whether `phase` is a white dwarf's.
+    const fn is_white_dwarf(phase: Phase) -> bool {
+        matches!(
+            phase,
+            Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        )
+    }
+
+    /// The age at which `timeline`'s two white dwarfs come into contact, if they do: the
+    /// start of its first segment that is not detached once both stars are white dwarfs on an
+    /// orbit (sampled at each detached segment's two ends, before any merger or disruption), unless
+    /// that segment is a disruption. Stable transfer counts, as a merger does: Maoz, Hallakoun and
+    /// Badenes's rate is of double white dwarfs reaching contact by gravitational waves, whatever
+    /// follows.
+    fn contact_age(timeline: &BinaryTimeline) -> Option<Years> {
+        let segments = timeline.segments();
+        let until = timeline.until().value();
+        let both = |age: f64| {
+            let state = timeline.state_at(Years::new(age));
+            state.orbit().is_some() && state.stars().iter().all(|s| is_white_dwarf(s.phase()))
+        };
+        let formed = segments
+            .iter()
+            .take_while(|s| {
+                !matches!(
+                    s.kind(),
+                    SegmentKind::Merged | SegmentKind::Disrupted { .. }
+                )
+            })
+            .filter(|s| s.kind() == SegmentKind::Detached)
+            .find_map(|s| {
+                [s.start().value(), s.end().value().min(until)]
+                    .into_iter()
+                    .find(|&age| both(age))
+            })?;
+        let next = segments
+            .iter()
+            .find(|s| s.start().value() >= formed && s.kind() != SegmentKind::Detached)?;
+        (!matches!(next.kind(), SegmentKind::Disrupted { .. })).then(|| next.start())
+    }
+
     /// What a layer's records come to.
     #[derive(Debug, Default, Clone, Copy)]
     struct IaTally {
@@ -324,8 +432,19 @@ mod slow {
         grid: u64,
         /// Pairs of the first attempts with a pooled candidate, mergers then accretions.
         pooled: [u64; 2],
+        /// Those of them that can detonate ([`is_detonatable`]).
+        detonatable: [u64; 2],
+        /// Those of them by their record's age.
+        detonatable_to_date: [u64; 2],
+        /// η summed over the detonatable ones: the exploded count expected.
+        eta: f64,
         /// Those of them whose explosion mark explodes them.
         exploded: [u64; 2],
+        /// Pooled candidates in the last Gyr before their record's age, mergers then accretions.
+        present: [u64; 2],
+        /// First attempts' double white dwarfs reaching contact in the last Gyr before their
+        /// record's age ([`contact_age`]).
+        present_contacts: u64,
         /// Grid records whose first attempt explodes, which the grid redraws for it.
         redrawn: u64,
         /// Grid records whose first attempt has a carved pair and none exploded.
@@ -357,7 +476,11 @@ mod slow {
                 let exploded = first.exploded_pair().is_some();
                 tally.redrawn += u64::from(exploded);
                 tally.carved += u64::from(!exploded && first.carved_pair().is_some());
+                let age = record.age_at_epoch().value();
+                let present = |at: Years| at.value() <= age && at.value() > age - PRESENT_YEARS;
                 for pair in first.pairs() {
+                    tally.present_contacts +=
+                        u64::from(contact_age(pair.timeline()).is_some_and(present));
                     let Some(event) = pair.timeline().pooled_ia() else {
                         continue;
                     };
@@ -366,6 +489,12 @@ mod slow {
                         IaPoolChannel::Accretion => 1,
                     };
                     tally.pooled[c] += 1;
+                    tally.present[c] += u64::from(present(event.age()));
+                    if is_detonatable(&event) {
+                        tally.detonatable[c] += 1;
+                        tally.detonatable_to_date[c] += u64::from(event.age().value() <= age);
+                        tally.eta += IA_YIELD.eta(event.age(), event.channel());
+                    }
                     let key = first
                         .hierarchy()
                         .pair_key(pair.node())
@@ -382,8 +511,13 @@ mod slow {
             self.grid += other.grid;
             for c in 0..2 {
                 self.pooled[c] += other.pooled[c];
+                self.detonatable[c] += other.detonatable[c];
+                self.detonatable_to_date[c] += other.detonatable_to_date[c];
                 self.exploded[c] += other.exploded[c];
+                self.present[c] += other.present[c];
             }
+            self.eta += other.eta;
+            self.present_contacts += other.present_contacts;
             self.redrawn += other.redrawn;
             self.carved += other.carved;
             self.kept_exploded += other.kept_exploded;
@@ -412,20 +546,27 @@ mod slow {
     }
 
     /// Prints `t`, the tally of `records` of `layer` from `sample`, and asserts that none was kept
-    /// with an exploded binary and that exploded ÷ pooled is η, a sixth, to Poisson accuracy.
+    /// with an exploded binary and that exploded ÷ detonatable pooled is η to Poisson accuracy.
     fn check(sample: &str, layer: Layer, records: &[SystemRecord], t: &IaTally) {
-        let (pooled, exploded) = (t.pooled[0] + t.pooled[1], t.exploded[0] + t.exploded[1]);
+        let (pooled, detonatable, exploded) = (
+            t.pooled[0] + t.pooled[1],
+            t.detonatable[0] + t.detonatable[1],
+            t.exploded[0] + t.exploded[1],
+        );
         println!(
             "{sample}, layer {layer:?}: {} records, {} redrawn by the grid; {pooled} pooled \
-             candidates ({} mergers, {} accretions), {exploded} exploded ({} and {}); first \
-             attempts redrawn for a Type Ia {} ({:.3}%), for a carved class alone {}; kept with an \
-             exploded pair {}",
+             candidates ({} mergers, {} accretions), {detonatable} detonatable ({} and {}), \
+             {exploded} exploded ({} and {}) against {:.1} expected; first attempts redrawn for \
+             a Type Ia {} ({:.3}%), for a carved class alone {}; kept with an exploded pair {}",
             records.len(),
             t.grid,
             t.pooled[0],
             t.pooled[1],
+            t.detonatable[0],
+            t.detonatable[1],
             t.exploded[0],
             t.exploded[1],
+            t.eta,
             t.redrawn,
             100.0 * count_f64(t.redrawn) / count_f64(t.grid),
             t.carved,
@@ -438,17 +579,18 @@ mod slow {
         assert_poisson_count(
             &format!("{sample}: layer {layer:?}'s exploded candidates"),
             exploded,
-            count_f64(pooled) / 6.0,
+            t.eta,
             1e-3,
         );
     }
 
     /// P11.T6 under every 27 hold, on a drawn Kroupa galaxy with the scratch yield, over 10⁵ grid
     /// records of layer D, every record of cells drawn at random near the Sun-like point: no system
-    /// the grid keeps has an exploded binary at any t ≤ +H, and exploded ÷ pooled is η to Poisson
-    /// accuracy. The share whose first attempt explodes is printed: the solar neighbourhood's
-    /// redraw rate, 280 of 99,904, 0.280%, on 2026-11-01 (the galaxy's, which the plan's band
-    /// bounds, is the next test's).
+    /// the grid keeps has an exploded binary at any t ≤ +H, and exploded ÷ detonatable pooled is η
+    /// to Poisson accuracy. The share whose first attempt explodes is printed: the solar
+    /// neighbourhood's redraw rate, 1,183 of 99,896, 1.184%, on 2026-11-01, every one of the 1,183
+    /// detonatable candidates among 1,665 pooled (the galaxy's rate, which the plan's band bounds,
+    /// is the next test's).
     #[test]
     #[ignore = "slow: 10⁵ layer-D systems near the Sun under every 27 hold, their pairs run"]
     fn under_every_27_hold_no_grid_system_keeps_an_exploded_binary() {
@@ -463,17 +605,23 @@ mod slow {
     /// the scratch yield, over 10⁵ records of layer D, 3 × 10⁴ of C and 5,000 of E of the galaxy as
     /// a whole ([`galaxy_wide`]): the share of layer D whose first attempt explodes, the grid's
     /// Type Ia redraw rate, lies within 0.3–4.5% (the brainstorm's 2–4% once P11.T15 lands);
-    /// exploded ÷ pooled is η to Poisson accuracy and none is kept; and the pool's candidates to
-    /// date per solar mass formed, over the delay-time distribution's Type Ia to the same records'
-    /// ages, is recorded against the observed five to seven for the double white dwarf mergers
-    /// (Maoz, Hallakoun and Badenes 2018, MNRAS 476, 2584; plan 15 accepts 4.5–7). Layers C to E
-    /// are weighed by the mass function's band shares; A and B, below 0.75 M☉, make no white dwarf
-    /// within a Hubble time.
+    /// exploded ÷ detonatable pooled is η to Poisson accuracy and none is kept. The detonatable
+    /// pool to date over the delay-time distribution's Type Ia to the same records' ages is
+    /// printed, which [`IA_YIELD`]'s η of 1 reads while it is under 1. The pool's present rate
+    /// (its events in the last Gyr before each record's age, per Gyr and per solar mass formed)
+    /// over the delay-time distribution's ψ at the same ages is printed for the pooled mergers, for
+    /// every candidate and for every double white dwarf reaching contact ([`contact_age`]), the
+    /// last like for like with the observed 4.5–7 (Maoz, Hallakoun and Badenes 2018, MNRAS 476,
+    /// 2584, a present-day rate of contacts in the disc); it is recorded, not asserted, while the
+    /// engine's `α_CE` λ of 0.5 stands (the engine's contacts include helium dwarfs, which their
+    /// mostly carbon–oxygen sample underweights). Layers C to E are weighed by the mass function's
+    /// band shares; A and B, below 0.75 M☉, make no white dwarf within a Hubble time.
     ///
-    /// Measured on 2026-11-01: 333 of layer D's 10⁵ redrawn, 0.333%, near the band's floor; 344
-    /// of 1,940 candidates exploded; the pool 0.25 times the Type Ia for the mergers and 0.66 for
-    /// every candidate, so no η of at most 1 brings the grid's explosions to the observed rate
-    /// (plan 11's Risks, "Deviations in P11.T6, as built").
+    /// Measured on 2026-11-01: 1,398 of layer D's 10⁵ redrawn, 1.398%, every one of the 1,398
+    /// detonatable candidates among 1,881 pooled; the detonatable pool to date 0.354 times the
+    /// Type Ia to date (mergers 0.062, accretions 0.292); the present rates 0.81 times ψ for the
+    /// pooled mergers, 1.24 for every candidate and 1.00 for every contact, from 38, 80 and 73
+    /// events in the last Gyr (layer C's few, which its band share weighs most, set them).
     #[test]
     #[ignore = "slow: 1.35 × 10⁵ systems of the galaxy under every 27 hold, their pairs run"]
     fn under_every_27_hold_the_galaxy_s_type_ia_redraw_rate_is_in_its_band() {
@@ -484,38 +632,64 @@ mod slow {
             (Layer::D, MassBand::D, 100_000),
             (Layer::E, MassBand::E, 5_000),
         ];
-        let (mut per_formed, mut ia, mut d_rate) = ([0.0; 2], 0.0, 0.0);
+        // The present rates per Gyr: pooled mergers, every candidate and every contact, each as
+        // its band's share of the records times the band's share of the systems.
+        let (mut present, mut to_date, mut d_rate) = ([0.0; 3], [0.0; 2], 0.0);
+        let (mut psi, mut yield_to_date, mut aged) = (0.0, 0.0, 0.0);
         for (salt, &(layer, band, n)) in (1_u64..).zip(&strata) {
             let records = galaxy_wide(&galaxy, layer, band, n, salt);
             let t = tally(&galaxy, &records);
             check("galaxy-wide", layer, &records, &t);
+            println!(
+                "galaxy-wide, layer {layer:?}: in the last Gyr, {} pooled mergers, {} pooled \
+                 accretions, {} double white dwarf contacts",
+                t.present[0], t.present[1], t.present_contacts
+            );
             let all = count_f64(u64::try_from(records.len()).expect("a count"));
-            for (sum, pooled) in per_formed.iter_mut().zip(t.pooled) {
-                *sum += shares.share(band) * count_f64(pooled) / all;
+            let counts = [
+                t.present[0],
+                t.present[0] + t.present[1],
+                t.present_contacts,
+            ];
+            for (sum, count) in present.iter_mut().zip(counts) {
+                *sum += shares.share(band) * count_f64(count) / all;
+            }
+            for (sum, count) in to_date.iter_mut().zip(t.detonatable_to_date) {
+                *sum += shares.share(band) * count_f64(count) / all;
             }
             if layer == Layer::D {
                 d_rate = count_f64(t.redrawn) / count_f64(t.grid);
-                // Summed in the records' order, so the figure is the same on any threads.
-                let sum: f64 = records
-                    .iter()
-                    .map(|r| DelayTimeDistribution::cumulative_per_solar_mass(r.age_at_epoch()))
-                    .sum();
-                ia = sum / all;
             }
+            // Summed in the records' order, so the figure is the same on any threads; every
+            // layer's records, whose ages are drawn alike.
+            psi += records
+                .iter()
+                .map(|r| DelayTimeDistribution::rate_per_year_per_solar_mass(r.age_at_epoch()))
+                .sum::<f64>();
+            yield_to_date += records
+                .iter()
+                .map(|r| DelayTimeDistribution::cumulative_per_solar_mass(r.age_at_epoch()))
+                .sum::<f64>();
+            aged += all;
         }
         let formed = galaxy.mean_formed_mass().value();
-        let (mergers, both) = (
-            per_formed[0] / formed,
-            (per_formed[0] + per_formed[1]) / formed,
-        );
+        let (psi, yield_to_date) = (psi / aged * PRESENT_YEARS, yield_to_date / aged);
+        let [merged, accreted] = to_date.map(|count| count / formed / yield_to_date);
         println!(
-            "the pool to date: {mergers:.3e} double white dwarf mergers and {both:.3e} candidates \
-             per M☉ formed, against {ia:.3e} Type Ia: {:.2} and {:.2} times the Type Ia \
-             (observed: five to seven for the mergers)",
-            mergers / ia,
-            both / ia
+            "the detonatable pool to date over the Type Ia to date, {yield_to_date:.3e} per M☉ \
+             formed: {:.3} ({merged:.3} mergers, {accreted:.3} accretions), η = 1 while under 1",
+            merged + accreted
         );
-        assert!(ia > 0.0 && mergers > 0.0);
+        let [mergers, candidates, contacts] = present.map(|rate| rate / formed);
+        println!(
+            "the pool's present rate, per Gyr per M☉ formed, against ψ {psi:.3e}: pooled mergers \
+             {mergers:.3e} ({:.2} times), every candidate {candidates:.3e} ({:.2}), every double \
+             white dwarf contact {contacts:.3e} ({:.2}; observed 4.5–7)",
+            mergers / psi,
+            candidates / psi,
+            contacts / psi
+        );
+        assert!(psi > 0.0 && mergers > 0.0 && contacts > 0.0);
         assert!(
             (0.003..=0.045).contains(&d_rate),
             "layer D's Type Ia redraw rate {d_rate} lies outside 0.3–4.5%"

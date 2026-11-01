@@ -228,8 +228,8 @@ pub const BEX_MAX_PERIOD: Days = Days::new(1_000.0);
 /// The least mass at which the heavier of two merging carbon–oxygen or oxygen–neon white dwarfs
 /// makes the pair a Type Ia progenitor below the Chandrasekhar mass, M☉: 0.85, "the minimum
 /// detonatable WD mass may be ≃ 0.85 M⊙" (Shen et al. 2018, ApJ 865, 15, abstract and section
-/// 4.1; ruling 129.1). P11.T6's pool still holds every white-dwarf merger, since the Type Ia
-/// share η ≈ 1/6 is of all of them (Maoz, Hallakoun and Badenes 2018).
+/// 4.1; ruling 129.1). P11.T6's pool still holds every white-dwarf merger, and its explosion mark
+/// explodes only the detonatable ones, by this rule, or an accretion onto a dwarf of this mass.
 pub const MIN_DETONATABLE_MASS: SolarMasses = SolarMasses::new(0.85);
 
 /// The least accretion luminosity at which a white dwarf fed by a giant's wind is a symbiotic

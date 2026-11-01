@@ -2,11 +2,13 @@
 //! (P15.T9.b, P15.T10.b), which P11.T15 swaps in with a version bump.
 //!
 //! [`IA_YIELD`] (P11.T6) is the Type Ia explosion mark's yield η: the share of the binary engine's
-//! pooled Type Ia candidates that explode, by delay bin and channel. **Scratch:** a sixth
-//! everywhere (Design note 13), the observed double white dwarf merger rate being five to seven
-//! times the Type Ia rate (Maoz, Hallakoun and Badenes 2018, MNRAS 476, 2584); P15.T9.b fits it
-//! against the engine so that η times the pool's yield in each bin is the delay-time
-//! distribution's.
+//! detonatable pooled Type Ia candidates (ruling 129.1's rule) that explode, by delay bin and
+//! channel. **Scratch:** 1 everywhere. As built (`α_CE` λ = 0.5), the detonatable pool is about a
+//! third of the delay-time distribution's yield to date (0.354: mergers 0.062, accretions 0.292,
+//! galaxy-wide on a drawn Kroupa galaxy, printed by the slow test of `stellar/rules/ia_hold.rs` on
+//! 2026-11-01; research `research-p11-t6-ia-rate` measured 0.33 and no bin over its target), so
+//! P15.T9.b's η = min(1, target ÷ pool) is 1 in every bin; it fits it against the engine, in this
+//! shape.
 //!
 //! @provisional: hand-made scratch values (plan 11, Design note 13), not written by
 //! `hyperion-fit`, so not in [`MANIFEST`](super::MANIFEST) until plan 15's task for them exists.
@@ -241,9 +243,10 @@ pub fn ia_delay_bin(delay: Years) -> usize {
         .min(IA_DELAY_BINS - 1)
 }
 
-/// The scratch yield (module documentation; plan 11, Design note 13): a sixth in every delay bin
-/// and for both channels.
-pub const IA_YIELD: IaYieldTable = IaYieldTable::new([[1.0 / 6.0; 2]; IA_DELAY_BINS]);
+/// The scratch yield (module documentation; plan 11, Design note 13): 1 in every delay bin and
+/// for both channels, every detonatable candidate exploding, since the detonatable pool falls
+/// short of the yield in every bin.
+pub const IA_YIELD: IaYieldTable = IaYieldTable::new([[1.0; 2]; IA_DELAY_BINS]);
 
 /// A mark's median as a function of its condition (P11.T8): its value at 17 evenly spaced nodes
 /// from the first to the last value of the condition, linear between them and held beyond.
@@ -2079,13 +2082,13 @@ mod tests {
     use crate::galaxy::Galaxy;
     use crate::galaxy::params::GalaxyParams;
 
-    /// P11.T6: the scratch yield is a sixth in every delay bin and for both channels, and a delay
-    /// takes the bin of `DELAY_EDGES` that holds it, the ends held.
+    /// P11.T6: the scratch yield is 1 in every delay bin and for both channels, and a delay takes
+    /// the bin of `DELAY_EDGES` that holds it, the ends held.
     #[test]
-    fn the_scratch_ia_yield_is_a_sixth_everywhere() {
+    fn the_scratch_ia_yield_is_one_everywhere() {
         for bin in 0..IA_DELAY_BINS {
             for channel in [IaPoolChannel::Merger, IaPoolChannel::Accretion] {
-                assert_eq!(IA_YIELD.eta_in(bin, channel), 1.0 / 6.0);
+                assert_eq!(IA_YIELD.eta_in(bin, channel), 1.0);
             }
         }
         assert_eq!(IA_DELAY_BINS, 24);
