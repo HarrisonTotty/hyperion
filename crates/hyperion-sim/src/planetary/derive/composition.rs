@@ -34,8 +34,8 @@
 //! From generator version 27 (the core share by the host, `CORE_SHARE_HOST_VERSION`) the
 //! Earth-like core is Earth's about the body's host ([`CoreShareShift::about_host`] of 0.325): the
 //! Earth-like curve beyond the snow line, the core under its water and every envelope's core take
-//! the host's shift, as the rocky outcomes' draw does, and [`composition`], with no host, is the
-//! solve about the Sun's ratios.
+//! the host's shift, as the rocky outcomes' draw does, and so do a giant's heavy elements;
+//! [`composition`] and [`giant_composition`], with no host, are about the Sun's ratios.
 //!
 //! # Giants (P14.T11.d)
 //!
@@ -80,11 +80,6 @@ use crate::planetary::params::{
 };
 use crate::units::{EarthFluxes, EarthMasses, EarthRadii, JupiterMasses};
 
-/// The core of an icy body with the most water it can hold: [`OUTER_WATER_CAP`] of water on an
-/// Earth-like core.
-const ICY_CORE: CoreComposition =
-    CoreComposition::from_fractions(EARTH_CORE_MASS_FRACTION, OUTER_WATER_CAP);
-
 /// The Earth-like core about a host of shift `shift`: Earth's core mass fraction about the host
 /// ([`CoreShareShift::about_host`] of 0.325) and no water, [`CoreComposition::EARTH_LIKE`] for no
 /// shift.
@@ -93,8 +88,8 @@ fn earth_like_core(shift: CoreShareShift) -> CoreComposition {
     CoreComposition::from_fractions(shift.about_host(EARTH_CORE_MASS_FRACTION), 0.0)
 }
 
-/// [`ICY_CORE`] about a host of shift `shift`: [`OUTER_WATER_CAP`] of water on its Earth-like core
-/// ([`earth_like_core`]).
+/// The core of an icy body with the most water it can hold, about a host of shift `shift`:
+/// [`OUTER_WATER_CAP`] of water on its Earth-like core ([`earth_like_core`]).
 #[must_use]
 fn icy_core(shift: CoreShareShift) -> CoreComposition {
     CoreComposition::from_fractions(shift.about_host(EARTH_CORE_MASS_FRACTION), OUTER_WATER_CAP)
@@ -902,11 +897,26 @@ pub fn giant_composition(
     mass: EarthMasses,
     side: SnowLineSide,
 ) -> Result<GiantComposition, DeriveGiantError> {
+    giant_composition_about(mass, side, CoreShareShift::NONE)
+}
+
+/// [`giant_composition`] about a host of shift `shift` ([`CoreShareShift`]): its heavy elements'
+/// rock and iron are Earth's about the host ([`CoreShareShift::about_host`] of 0.325), as the
+/// solve's cores are; with no shift it is [`giant_composition`]'s, to the bit.
+///
+/// # Errors
+///
+/// As [`giant_composition`]'s.
+pub(crate) fn giant_composition_about(
+    mass: EarthMasses,
+    side: SnowLineSide,
+    shift: CoreShareShift,
+) -> Result<GiantComposition, DeriveGiantError> {
     giant_mass(mass)?;
     let heavy_elements = giant_heavy_elements(mass);
     let core = match side {
-        SnowLineSide::Inside => CoreComposition::EARTH_LIKE,
-        SnowLineSide::Beyond => ICY_CORE,
+        SnowLineSide::Inside => earth_like_core(shift),
+        SnowLineSide::Beyond => icy_core(shift),
     };
     Ok(GiantComposition {
         fractions: MassFractions::of(core, 1.0 - heavy_elements.value() / mass.value()),
@@ -1044,9 +1054,10 @@ mod tests {
 
     /// Under every 27 hold the solve's Earth-like core about a host is the host's Earth, 0.325
     /// moved by its shift: under water beyond the snow line, under an envelope on either side and
-    /// under the formation law's envelope; and the water beyond the snow line starts from none at
-    /// the host's Earth-like curve, the rocky outcomes' top. About the Sun's ratios the solve is
-    /// [`composition`]'s, to the bit.
+    /// under the formation law's envelope and under a giant's envelope; and the water beyond the
+    /// snow line starts from none at the host's Earth-like curve, the rocky outcomes' top. About
+    /// the Sun's ratios the solve is [`composition`]'s, to the bit, and a giant's
+    /// [`giant_composition`]'s.
     #[test]
     fn under_27_the_solve_s_earth_like_core_is_the_host_s() {
         use crate::planetary::testing::with_every_27_hold;
@@ -1089,6 +1100,14 @@ mod tests {
                 );
                 assert!(law.envelope_fraction() > 0.0);
                 assert!((core(&law) - earth).abs() < 1e-12, "{law:?}");
+                // A giant's heavy elements, on either side.
+                for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
+                    let giant =
+                        giant_composition_about(EarthMasses::new(318.0), side, shift).unwrap();
+                    let f = giant.fractions();
+                    let heavy = f.iron() / (f.iron() + f.rock());
+                    assert!((heavy - earth).abs() < 1e-12, "{side:?}: {heavy}");
+                }
             }
             let sun = CoreShareShift::of_host(
                 crate::planetary::chem::solar_magnesium_to_silicon(),
@@ -1108,6 +1127,11 @@ mod tests {
                     assert_eq!(
                         radius_window_about(mass, side, flux, sun),
                         radius_window(mass, side, flux)
+                    );
+                    let giant = EarthMasses::new(318.0);
+                    assert_eq!(
+                        giant_composition_about(giant, side, sun),
+                        giant_composition(giant, side)
                     );
                 }
             }
@@ -1347,7 +1371,7 @@ mod tests {
                     }
                     SnowLineSide::Beyond => {
                         assert!((f.water() / heavy - OUTER_WATER_CAP).abs() < 1e-12);
-                        assert_eq!(giant.core(), ICY_CORE);
+                        assert_eq!(giant.core(), icy_core(CoreShareShift::NONE));
                     }
                 }
             }

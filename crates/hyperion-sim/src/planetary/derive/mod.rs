@@ -1717,14 +1717,16 @@ impl BeforePasses {
 
         // T13.b, energy-limited escape, and T11, the radius at the time.
         let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
+        let shift =
+            rocky::CoreShareShift::of_host(hosts.host_magnesium_to_silicon(), hosts.alpha_fe());
         let (radius, fractions, core, giant) = at_the_time(
             escape.mass,
             formed,
             solved.as_ref(),
             escape.stripped(),
             sky.flux,
-            age_now,
-            hosts.composition(),
+            (age_now, hosts.composition()),
+            shift,
         )?;
         Ok(Self {
             age_now,
@@ -3336,15 +3338,16 @@ pub fn formation_composition(
 /// share `stripped` of its present mass `mass` that escape has left it (T13.b), or its solved
 /// envelope if escape took none (`None`); a giant's from
 /// plan 13's cooling at that age in a system of composition `composition`, inflated for its flux
-/// and blended into the envelope model's below 0.414 Jupiter masses.
+/// and blended into the envelope model's below 0.414 Jupiter masses, its heavy elements on the
+/// Earth-like core of a host of shift `shift` ([`composition::giant_composition_about`]).
 fn at_the_time(
     mass: EarthMasses,
     formed: SnowLineSide,
     solved: Option<&SolvedComposition>,
     stripped: Option<f64>,
     flux: EarthFluxes,
-    age: Years,
-    composition: &Composition,
+    (age, composition): (Years, &Composition),
+    shift: rocky::CoreShareShift,
 ) -> Result<
     (
         EarthRadii,
@@ -3370,7 +3373,7 @@ fn at_the_time(
     }
     let interior = giant_cooling(JupiterMasses::from(mass), age, composition)?;
     let giant = radius_giant(mass, &interior, flux)?;
-    let heavy = giant_composition(mass, formed)?;
+    let heavy = composition::giant_composition_about(mass, formed, shift)?;
     Ok(match solved {
         Some(s) => (
             giant.blended(envelope_radius(s, s.envelope_fraction())),
@@ -3508,8 +3511,17 @@ pub(crate) fn derive_alone(
     let (formed, _, solved) = formation_about(placed, born_about)?;
     let dark = EarthFluxes::new(0.0);
     let mass = placed.mass;
-    let (radius, fractions, core, giant) =
-        at_the_time(mass, formed, solved.as_ref(), None, dark, age, composition)?;
+    let shift =
+        rocky::CoreShareShift::of_host(born_about.magnesium_to_silicon, born_about.alpha_fe);
+    let (radius, fractions, core, giant) = at_the_time(
+        mass,
+        formed,
+        solved.as_ref(),
+        None,
+        dark,
+        (age, composition),
+        shift,
+    )?;
     let fractions = match metals {
         AloneMetals::DiscFormed => fractions,
         AloneMetals::Cloud => MassFractions::of(core, 1.0 - composition.z().value()),
@@ -4736,6 +4748,28 @@ mod tests {
                 }
             }
             assert!(watery > 100 && enveloped > 100, "{watery} {enveloped}");
+            // A giant's heavy elements, and a body blended into a giant's, through the derivation.
+            let disc = solar_disc();
+            let lights = [sun()];
+            let hosts = BodyHosts::new(
+                Kilograms::new(SOLAR_MASS_KG),
+                Composition::SOLAR,
+                &lights,
+                &[],
+            )
+            .unwrap()
+            .with_host_rock(solar, Dex::new(0.3));
+            for earths in [110.0, 318.0] {
+                let body = placed(earths * EARTH_MASS_KG, 5.2, 0.05, 0.5);
+                let derived =
+                    derive_body(&body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap();
+                let f = derived.fractions();
+                let core = f.iron() / (f.iron() + f.rock());
+                assert!(
+                    (core - radius::EARTH_CORE_MASS_FRACTION).abs() > 0.05,
+                    "{earths} M⊕: {core}"
+                );
+            }
         });
     }
 
