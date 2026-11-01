@@ -1729,10 +1729,11 @@ mod tests {
         }
     }
 
-    /// The Milky Way fixture's remnants maps under every 26 hold are the bits the direct
-    /// quadrature gave them before the band shared its work (lane `perf-remnants-map`,
-    /// 2026-11-01), on every target the suite runs on: digests of a 32 × 16 edge-on raster of the
-    /// whole cube, in bands of 5 rows and in its mirrored halves, and of a 16 × 16 face-on one.
+    /// The Milky Way fixture's remnants maps under every 26 hold are the bits the direct quadrature
+    /// gave them before the band shared its work (lane `perf-remnants-map`, 2026-11-01; at
+    /// generator version 25, measured again at the lane's base), on every target the suite runs on:
+    /// digests of a 32 × 16 edge-on raster of the whole cube, in bands of 5 rows and in its
+    /// mirrored halves, and of a 16 × 16 face-on one.
     #[test]
     fn the_remnants_maps_are_pinned_under_every_26_hold() {
         use hyperion_testkit::golden::f64_digest;
@@ -1748,7 +1749,7 @@ mod tests {
             render_rows(fields, &edge_on, first..(first + 5).min(16), &mut band);
             map.extend_from_slice(&band);
         }
-        assert_eq!(f64_digest(&map), 0x6638_eaef_3c31_3841, "edge-on in bands");
+        assert_eq!(f64_digest(&map), 0xa5ac_ef5c_338c_356d, "edge-on in bands");
         let mut halves = vec![0.0; map.len()];
         for first in (0..8).step_by(3) {
             let end = (first + 3).min(8);
@@ -1769,7 +1770,7 @@ mod tests {
             "edge-on in mirrored halves"
         );
         render_rows(fields, &face_on, 0..16, &mut map);
-        assert_eq!(f64_digest(&map), 0xd25f_80cb_a1c2_b6ed, "face-on");
+        assert_eq!(f64_digest(&map), 0x2045_ff50_a6fd_ec8d, "face-on");
     }
 
     /// Every class's density is even in z bit for bit, and reads `y` through the radius, which
