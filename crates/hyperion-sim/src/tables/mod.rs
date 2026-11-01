@@ -140,6 +140,12 @@ pub use hyperion_base::version::TableInfo;
 // @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.
 pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
+        name: "binary_awd",
+        revision: 0,
+        since_generator_version: 24,
+        provisional: false,
+    },
+    TableInfo {
         name: "binary_cooling_floor",
         revision: 0,
         since_generator_version: 21,

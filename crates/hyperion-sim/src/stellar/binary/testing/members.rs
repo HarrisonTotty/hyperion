@@ -2,9 +2,9 @@
 //! first-attempt binary of the grid that [`carved_class`] puts in a class, drawn with no carve-out,
 //! against which a class's sampler is checked (P11.T8) and plan 15's P15.T10.b fits it.
 
-use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+use crate::galaxy::{Galaxy, Population};
 use crate::id::Layer;
 use crate::orbit::{Eccentricity, KeplerElements};
 use crate::rng::Threshold;
@@ -15,7 +15,7 @@ use crate::stellar::binary::classify::{
 use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, carved_class};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
-use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::{AwdDonorKind, CLASS_SHARES};
 use crate::units::{MetresPerSecond, Seconds, SolarMasses, SolarMassesPerYear, Years};
 
 use super::Mix;
@@ -40,6 +40,41 @@ pub struct AccretingMarks {
     pub recurrence: Years,
     /// Whether the white dwarf is magnetic, by its own draw.
     pub magnetic: bool,
+    /// The white dwarf's progenitor's initial mass, M☉.
+    pub white_dwarf_initial_mass: SolarMasses,
+    /// The donor's initial mass, M☉.
+    pub donor_initial_mass: SolarMasses,
+}
+
+impl AccretingMarks {
+    /// The catalogue's kind of the donor ([`AwdDonorKind`]): a helium star's or a helium white
+    /// dwarf's [`Helium`](AwdDonorKind::Helium), a giant's [`Giant`](AwdDonorKind::Giant), and
+    /// any other's, a subgiant's or a brown dwarf's among them,
+    /// [`MainSequence`](AwdDonorKind::MainSequence).
+    #[must_use]
+    pub const fn donor_kind(&self) -> AwdDonorKind {
+        match self.donor_phase {
+            Phase::HeliumWhiteDwarf
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch => AwdDonorKind::Helium,
+            Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::PostAgb => AwdDonorKind::Giant,
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::Substellar
+            | Phase::HertzsprungGap
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant => AwdDonorKind::MainSequence,
+        }
+    }
 }
 
 /// What an X-ray binary member is where [`carved_class`] reads it (P11.T8.b): the marks its class's
@@ -68,13 +103,18 @@ pub struct XrayMarks {
     pub recoil_speed: Option<MetresPerSecond>,
     /// The years from the pair's last supernova to the age read.
     pub since_supernova: Option<Years>,
+    /// The compact star's progenitor's initial mass, M☉.
+    pub accretor_initial_mass: SolarMasses,
+    /// The donor's initial mass, M☉.
+    pub donor_initial_mass: SolarMasses,
 }
 
-/// One prior member of a carved class: the grid record it came from, its pair's timeline and,
-/// for an accreting white dwarf or an X-ray binary, its marks.
+/// One prior member of a carved class: the grid record it came from, its class, its pair's
+/// timeline and, for an accreting white dwarf or an X-ray binary, its marks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassMember {
     record: SystemRecord,
+    class: CarvedClass,
     timeline: BinaryTimeline,
     accreting: Option<AccretingMarks>,
     xray: Option<XrayMarks>,
@@ -85,6 +125,12 @@ impl ClassMember {
     #[must_use]
     pub const fn record(&self) -> &SystemRecord {
         &self.record
+    }
+
+    /// The carved class [`carved_class`] puts it in.
+    #[must_use]
+    pub const fn class(&self) -> CarvedClass {
+        self.class
     }
 
     /// The pair's timeline, from the engine.
@@ -167,7 +213,7 @@ pub fn brute_force_class_members_in(
             .expect("a cell of the grid");
             generate_cell(galaxy, key, &mut cell);
             for record in cell.iter().take(8) {
-                members_of(galaxy, record, class, &mut members);
+                members_of(galaxy, record, &[class], &mut members);
             }
         }
         members.truncate(start + wanted);
@@ -175,12 +221,211 @@ pub fn brute_force_class_members_in(
     members
 }
 
-/// The members of `class` among the first attempt's pairs of grid record `record`, of a stellar
+/// Where a census draws its grid records ([`class_census_in`]): the cells of its layer that meet a
+/// box about a point, within half-widths of it along x, y and z.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CensusSite {
+    centre_ly: [i32; 3],
+    half_widths_ly: [i32; 3],
+}
+
+impl CensusSite {
+    /// A slab of the disc about the solar circle: within 12,000 ly along x, 2,000 ly along y and
+    /// 1,500 ly along z of the point 26,000 ly out along +y, where [`brute_force_class_members`]
+    /// draws its members, wide enough that a census of 10⁷ records meets no cell twice.
+    pub const SOLAR_CIRCLE: Self = Self::new([0, 26_000, 0], [12_000, 2_000, 1_500]);
+
+    /// The cells within `half_widths_ly` of `centre_ly` along each axis.
+    #[must_use]
+    pub const fn new(centre_ly: [i32; 3], half_widths_ly: [i32; 3]) -> Self {
+        Self {
+            centre_ly,
+            half_widths_ly,
+        }
+    }
+
+    /// The site's cells of `layer`: the first cell's coordinates, and how many along each axis.
+    fn cells(&self, layer: Layer) -> ([i32; 3], [u64; 3]) {
+        let size = i32::try_from(layer.cell_size_ly()).expect("a small cell size");
+        let mut first = [0; 3];
+        let mut counts = [0; 3];
+        for axis in 0..3 {
+            let lo = (self.centre_ly[axis] - self.half_widths_ly[axis]).div_euclid(size);
+            let hi = (self.centre_ly[axis] + self.half_widths_ly[axis]).div_euclid(size);
+            first[axis] = lo;
+            counts[axis] = u64::try_from(hi - lo + 1).expect("a site's half-widths are positive");
+        }
+        (first, counts)
+    }
+}
+
+/// One part of a census ([`class_census_in`]): of a site's cells taken in a fixed order that
+/// spreads them over the site, those at positions `index`, `index + count`, `index + 2 count`, …,
+/// so that the parts of one count share no cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CensusPart {
+    index: u64,
+    count: u64,
+}
+
+impl CensusPart {
+    /// Part `index` of `count`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not below `count`.
+    #[must_use]
+    pub const fn new(index: u64, count: u64) -> Self {
+        assert!(index < count, "a part's index is below the parts' count");
+        Self { index, count }
+    }
+}
+
+/// What a census found ([`class_census_in`]): the records it ran, by population, and the members
+/// of the accreting white dwarf and X-ray binary classes among them, in the order it met them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassCensus {
+    band: MassBand,
+    scanned: [u64; 7],
+    members: Vec<ClassMember>,
+}
+
+impl ClassCensus {
+    /// The band whose layer's records it ran.
+    #[must_use]
+    pub const fn band(&self) -> MassBand {
+        self.band
+    }
+
+    /// The records of `population` it ran.
+    #[must_use]
+    pub const fn scanned(&self, population: Population) -> u64 {
+        self.scanned[population.index()]
+    }
+
+    /// The records it ran, in every population.
+    #[must_use]
+    pub fn scanned_total(&self) -> u64 {
+        self.scanned.iter().sum()
+    }
+
+    /// The members found, in the order met.
+    #[must_use]
+    pub fn members(&self) -> &[ClassMember] {
+        &self.members
+    }
+
+    /// The members found, in the order met, taken out of the census.
+    #[must_use]
+    pub fn into_members(self) -> Vec<ClassMember> {
+        self.members
+    }
+}
+
+/// The classes a census counts: both accreting white dwarf classes and the X-ray binaries.
+const CENSUS_CLASSES: [CarvedClass; 3] = [
+    CarvedClass::AccretingWdFast,
+    CarvedClass::AccretingWdSlow,
+    CarvedClass::XrayBinary,
+];
+
+/// A census of the carved classes' prior members among `records` grid records of `band`'s layer at
+/// `site`, of `population` alone or of all, from the cells of `part` (plan 15's P15.T10.b): each
+/// record of each cell taken in turn, its first attempt run through the engine with no carve-out
+/// as [`brute_force_class_members`] runs it, and every pair [`carved_class`] puts in an accreting
+/// white dwarf class or the X-ray binaries' kept. Where [`brute_force_class_members`] takes a fixed
+/// number of members a layer from random cells, a census takes a fixed number of records from
+/// cells it meets once each, so that the members it finds a record are each band's and
+/// population's rate, and two parts of one count are independent samples.
+///
+/// The site's cells are taken in the order of the stride ⌊φ⁻¹ N⌋ (lowered to the nearest number
+/// prime to N) through their N linear indices, x fastest, which spreads any run of them over the
+/// whole site. A part whose cells run out before it has its records stops there, so that a census
+/// of a few cells takes all their records ([`ClassCensus::scanned_total`] says how many).
+///
+/// # Panics
+///
+/// If `band` is substellar or the site's cells leave the root cube.
+#[must_use]
+pub fn class_census_in(
+    galaxy: &Galaxy,
+    band: MassBand,
+    site: CensusSite,
+    population: Option<Population>,
+    records: u64,
+    part: CensusPart,
+) -> ClassCensus {
+    assert!(band.is_stellar(), "a census runs a stellar layer");
+    let layer = Layer::from(band);
+    let (first, [nx, ny, nz]) = site.cells(layer);
+    let n = nx * ny * nz;
+    let stride = coprime_stride(n);
+    let mut scanned = [0_u64; 7];
+    let mut members = Vec::new();
+    let mut cell = Vec::new();
+    let mut ran = 0_u64;
+    let mut position = part.index;
+    while ran < records && position < n {
+        let linear = u64::try_from(u128::from(position) * u128::from(stride) % u128::from(n))
+            .expect("a residue below a u64 count");
+        let offset = |value: u64| i32::try_from(value).expect("a site's cell offset fits an i32");
+        let key = CellKey::new(
+            layer,
+            [
+                first[0] + offset(linear % nx),
+                first[1] + offset(linear / nx % ny),
+                first[2] + offset(linear / (nx * ny)),
+            ],
+        )
+        .expect("a census site's cells lie inside the root cube");
+        position += part.count;
+        generate_cell(galaxy, key, &mut cell);
+        for record in &cell {
+            if ran == records {
+                break;
+            }
+            if population.is_some_and(|p| p != record.population()) {
+                continue;
+            }
+            scanned[record.population().index()] += 1;
+            ran += 1;
+            members_of(galaxy, record, &CENSUS_CLASSES, &mut members);
+        }
+    }
+    ClassCensus {
+        band,
+        scanned,
+        members,
+    }
+}
+
+/// The stride a census walks `n` cells by: ⌊φ⁻¹ n⌋, lowered until it is prime to `n`, so that it
+/// meets every cell once in `n` steps.
+fn coprime_stride(n: u64) -> u64 {
+    const INVERSE_GOLDEN: u128 = 0x9e37_79b9_7f4a_7c15;
+    let mut stride = u64::try_from((u128::from(n) * INVERSE_GOLDEN) >> 64)
+        .expect("a fraction of a u64 count")
+        .max(1);
+    while gcd(stride, n) != 1 {
+        stride -= 1;
+    }
+    stride
+}
+
+/// The greatest common divisor of `a` and `b`.
+const fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// The members of `classes` among the first attempt's pairs of grid record `record`, of a stellar
 /// layer.
 fn members_of(
     galaxy: &Galaxy,
     record: &SystemRecord,
-    class: CarvedClass,
+    classes: &[CarvedClass],
     out: &mut Vec<ClassMember>,
 ) {
     let composition = draw_metallicity(galaxy, record);
@@ -202,23 +447,32 @@ fn members_of(
     );
     for pair in stars.pairs() {
         let timeline = pair.timeline();
-        if carved_class(timeline, age) != Some(class) {
+        let Some(class) = carved_class(timeline, age).filter(|c| classes.contains(c)) else {
             continue;
-        }
+        };
+        let initial = pair
+            .stars()
+            .map(|star| stars.stars()[usize::from(star.get())].initial_mass());
         out.push(ClassMember {
             record: *record,
+            class,
             timeline: timeline.clone(),
-            accreting: accreting_marks(timeline, age),
+            accreting: accreting_marks(timeline, age, initial),
             xray: (class == CarvedClass::XrayBinary)
-                .then(|| xray_marks(timeline, age))
+                .then(|| xray_marks(timeline, age, initial))
                 .flatten(),
         });
     }
 }
 
-/// An accreting white dwarf's marks where [`carved_class`] reads them, or `None` for a pair whose
-/// white dwarf no age of the horizon feeds.
-fn accreting_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<AccretingMarks> {
+/// An accreting white dwarf's marks where [`carved_class`] reads them, the pair's stars of initial
+/// masses `initial` in the engine's order, or `None` for a pair whose white dwarf no age of the
+/// horizon feeds.
+fn accreting_marks(
+    timeline: &BinaryTimeline,
+    age_at_epoch: Years,
+    initial: [SolarMasses; 2],
+) -> Option<AccretingMarks> {
     let (age, accretor, rate) = white_dwarf_feeding(timeline, age_at_epoch)?;
     let state = timeline.state_at(age);
     let a = accretor.index();
@@ -237,12 +491,18 @@ fn accreting_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<Acc
         transfer_rate: rate,
         recurrence: nova_recurrence_period(white_dwarf.mass(), rate),
         magnetic,
+        white_dwarf_initial_mass: initial[a],
+        donor_initial_mass: initial[1 - a],
     })
 }
 
-/// An X-ray binary's marks where [`carved_class`] reads them, or `None` for a pair that no age of
-/// the horizon makes one.
-fn xray_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<XrayMarks> {
+/// An X-ray binary's marks where [`carved_class`] reads them, the pair's stars of initial masses
+/// `initial` in the engine's order, or `None` for a pair that no age of the horizon makes one.
+fn xray_marks(
+    timeline: &BinaryTimeline,
+    age_at_epoch: Years,
+    initial: [SolarMasses; 2],
+) -> Option<XrayMarks> {
     let (age, class) = xray_binary_reading(timeline, age_at_epoch)?;
     let state = timeline.state_at(age);
     let compact = |p: Phase| matches!(p, Phase::NeutronStar | Phase::BlackHole);
@@ -266,5 +526,7 @@ fn xray_marks(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<XrayMark
         transfer_rate: state.transfer_rate(),
         recoil_speed: timeline.recoil().map(|v| v.speed()),
         since_supernova,
+        accretor_initial_mass: initial[a],
+        donor_initial_mass: initial[1 - a],
     })
 }

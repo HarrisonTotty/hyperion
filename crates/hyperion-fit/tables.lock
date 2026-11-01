@@ -2,6 +2,18 @@
 # `hyperion-fit check`. Do not edit.
 
 [[table]]
+name = "binary_awd"
+path = "binary.rs"
+task = "binary_awd"
+revision = 0
+inputs_sha256 = "fd589d224a26cbd7ae0d30563d4917dc8409e1817efb5db5ee17a0cbbc3a1470"
+body_sha256 = "8970fdf790c2f71f007cc4f1ef3ab0d09d12267fc4161b2babaa1ceb1c4f4f44"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 1.0960630250705998, 18.0, 2.0, 0.9942525425604096, 0.008045340234905107, 0.0000000000003980876494578313, 0.638184050985673, 1.3533460296140367, 0.00000000006017080135052314]
+since_generator_version = 24
+provisional = false
+acceptance = "fast: 1814 members, donors 0.934/0.042/0.024, layers C 0.477 D 0.512 E 0.011, rates a system 2.10e-6/3.93e-5/2.00e-5/2.03e-5/3.09e-5/3.02e-5/1.19e-5, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; slow: 15120 members, donors 0.315/0.682/0.003, layers C 0.372 D 0.613 E 0.015, rates a system 7.01e-7/3.10e-4/4.89e-4/3.30e-4/3.37e-4/2.88e-4/6.57e-4, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`"
+
+[[table]]
 name = "binary_cooling_floor"
 path = "binary_cooling_floor.rs"
 task = "binary_cooling_floor"

@@ -1919,8 +1919,9 @@ T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fi
 Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `HELIUM_VERSION`;
 Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
 decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
-scratch bits, no bump; Risks, "T10.a as built"), T11.a (`streams` registered, provisional;
-Risks, "T11.a as built") and T11.b (fitted, held for 27; Risks, "T11.b as built").
+scratch bits, no bump; Risks, "T10.a as built"), T10.b's accreting white dwarfs (held for 27;
+Risks, "T10.b as built"), T11.a (`streams` registered, provisional; Risks, "T11.a as built") and
+T11.b (fitted, held for 27; Risks, "T11.b as built").
 
 ## Verification
 
@@ -3249,3 +3250,24 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     at 5.4% against 4.5%) and its median window, then re-bless `galaxy/global_list/discrete_share`.
     `GLOBULAR_TUBES_INSIDE` still holds (its slow test passes at 27). No other golden of the sim's
     or the server's fast suites, or of the sim's slow `global_list` tests, moves.
+- **T10.b as built (lane `p15-t10b`, 2026-10-31, at 24; held at 27, no output moves).**
+  - _Task._ `binary_awd` (slow, revision 0; `tasks::binary_classes`) writes its block of
+    `tables/binary.rs` between `// @begin-table binary_awd` markers, before the tests;
+    `FitTask::shares_its_file` gives a task alone in a file a block of it. Its members are the
+    sim's `stellar::binary::testing::class_census_in` (`CensusSite`, `CensusPart`,
+    `ClassCensus`): parts 0–31 of 64, the sim's slow tests taking 32–63.
+  - _Hold._ `BINARY_TABLES_VERSION` = 27 (main's ruling of 2026-11-01: the nova rate, the
+    black-hole transients and the high-mass hosts are wrong states, for research),
+    `GalaxyRules::binary_tables` (`BinaryTableRules`, `catalogue_classes::binary`), in
+    `GalaxyRules::every_27_hold`, read in `Galaxy::build` and `AwdProcess::new`;
+    `Galaxy::with_rules` installs its class shares again, and refuses it under the field share.
+    Tests: `binary/tables_hold.rs`.
+  - _Shape (lean, 2026-10-31)._ A sampler a class, `AWD_FAST_SAMPLER_26` and
+    `AWD_SLOW_SAMPLER_26`, each recurrence on its side of L; `AwdProcess::sampler()` carries it.
+    `CLASS_SHARES_26`'s accreting rows rate each population from the engine, scaled to 9 × 10⁶.
+  - _For the bump:_ refit `binary_awd` at 27, rename the `_26` items (their names, and the
+    block's summary, still say 26: generated) over the scratch ones and delete the hold (the
+    tripwire lists it). From 26 the field gives up the class shares (P09.T2.c), so a census
+    galaxy reads the rows it refits: refit against the scratch rows' field, or iterate to a fixed
+    point (lean, 2026-11-01). _For P11.T8.f:_ the young thin disc's accreting rates are 1/19
+    (fast) and 1/440 (slow) of the old thin disc's.

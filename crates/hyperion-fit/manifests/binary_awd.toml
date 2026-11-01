@@ -1,0 +1,24 @@
+# The accreting white dwarfs' samplers and share rows (plan 15, P15.T10.b; read by plan 11's
+# P11.T8.a classes from generator version 26), fitted against plan 11's engine through the sim's
+# own census (`stellar::binary::testing::class_census_in`). The slab's census is 10^7 records of
+# layers C–E about the solar circle in the band shares' proportion; each population scarce there
+# has 3 × 10^5 records of its own at a site where it lies ([x, y, z, half-widths] in ly). The fit
+# takes parts 0–31 of 64 of every census's cells, and the sim's slow tests the rest. The rows are
+# scaled to the brainstorm's 9 × 10^6 hosts (Pala et al. 2020, MNRAS 494, 3799; its 6–12 × 10^6).
+# A slow host's recurrence is held at 10^10 years, under the universe clock's 2.9 × 10^11.
+task = "binary_awd"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+records = 10_000_000
+population_records = 300_000
+parts = 32
+part_count = 64
+young_thin_disc_site = [0, 0, 0, 40_000, 40_000, 600]
+bulge_site = [0, 0, 0, 5_000, 5_000, 2_000]
+long_bar_site = [0, 0, 0, 16_000, 4_000, 1_000]
+nuclear_disc_site = [0, 0, 0, 800, 800, 200]
+halo_site = [0, 0, 10_000, 10_000, 10_000, 5_000]
+total_hosts = 9.0e6
+min_members = 50
+max_log_recurrence = 10.0

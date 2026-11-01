@@ -13,7 +13,8 @@ mod mergers;
 pub use mergers::{MergerMember, brute_force_merger_members_in};
 
 pub use members::{
-    AccretingMarks, ClassMember, XrayMarks, brute_force_class_members, brute_force_class_members_in,
+    AccretingMarks, CensusPart, CensusSite, ClassCensus, ClassMember, XrayMarks,
+    brute_force_class_members, brute_force_class_members_in, class_census_in,
 };
 
 #[cfg(test)]

@@ -118,6 +118,14 @@ pub trait FitTask: Sync + std::fmt::Debug {
     /// Its table's file, relative to its crate's `src/tables/` ([`FitTask::table_crate`]).
     fn table_path(&self) -> &'static str;
 
+    /// Whether its table is one block of a file that holds code of its own besides, so that the
+    /// emitter rewrites only the task's block even while no other registered task writes the file
+    /// ([`Placement::Block`](crate::emit::Placement::Block)): `tables/binary.rs`, whose shapes and
+    /// scratch tables are plan 11's (P15.T10.b). False unless the task says otherwise.
+    fn shares_its_file(&self) -> bool {
+        false
+    }
+
     /// Its revision, bumped by hand when the algorithm changes: the inputs hash covers it and not
     /// the source code.
     fn revision(&self) -> u32;
@@ -138,7 +146,8 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 58] = [
+pub static REGISTRY: [&dyn FitTask; 59] = [
+    &tasks::binary_classes::BinaryAwdTask,
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -279,6 +288,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "binary_awd",
                 "binary_cooling_floor",
                 "binary_pair_light_c",
                 "binary_pair_light_d",

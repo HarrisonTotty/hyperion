@@ -13,7 +13,7 @@ use hyperion_fit::emit::{
     Destination, EmitTableError, Placement, RustTable, TableItem, Workspace, write_table,
 };
 use hyperion_fit::manifest::{LockFile, Manifest, SimFingerprint};
-use hyperion_fit::pipeline::{ManifestKind, manifest_path, prepare};
+use hyperion_fit::pipeline::{ManifestKind, manifest_path, placement_among, prepare};
 use hyperion_fit::task::{FitTask, RunTaskError, TableCrate, TaskClass, TaskOutput, registry};
 use hyperion_fit::{RunFitError, emit};
 use hyperion_sim::GENERATOR_VERSION;
@@ -27,6 +27,7 @@ struct Toy {
     name: &'static str,
     table_crate: TableCrate,
     path: &'static str,
+    shares_its_file: bool,
     probe: Mutex<f64>,
 }
 
@@ -45,6 +46,10 @@ impl FitTask for Toy {
 
     fn table_path(&self) -> &'static str {
         self.path
+    }
+
+    fn shares_its_file(&self) -> bool {
+        self.shares_its_file
     }
 
     fn revision(&self) -> u32 {
@@ -92,6 +97,18 @@ fn toy_in(table_crate: TableCrate, name: &'static str, path: &'static str) -> &'
         name,
         table_crate,
         path,
+        shares_its_file: false,
+        probe: Mutex::new(1.5),
+    }))
+}
+
+/// A toy task of the sim's tables whose block shares its file with code of its own.
+fn toy_beside_code(name: &'static str, path: &'static str) -> &'static Toy {
+    Box::leak(Box::new(Toy {
+        name,
+        table_crate: TableCrate::Sim,
+        path,
+        shares_its_file: true,
         probe: Mutex::new(1.5),
     }))
 }
@@ -505,6 +522,38 @@ fn two_tasks_share_a_file_without_touching_each_other() {
         lock.get("beta").unwrap().body_sha256
     );
     let report = check_at(&ws, &tasks, 12);
+    assert!(report.passed(), "{report}");
+}
+
+/// A task alone in writing a file that holds code of its own writes its block and nothing else:
+/// into its markers where they stand, before the code after them, and the check reads the block.
+#[test]
+fn a_lone_task_beside_code_writes_only_its_block() {
+    let t = toy_beside_code("gamma", "beside.rs");
+    let (_root, ws) = workspace(&[t]);
+    let tasks: [&'static dyn FitTask; 1] = [t];
+    assert_eq!(placement_among(&tasks, t), Placement::Block);
+    let path = ws.tables_dir(TableCrate::Sim).join("beside.rs");
+    let before =
+        "//! Shapes of a table, and its scratch values.\n\npub const SCRATCH: f64 = 1.0;\n\n";
+    let after = "\n#[cfg(test)]\nmod tests {}\n";
+    fs::write(
+        &path,
+        format!("{before}// @begin-table gamma\n// @end-table gamma\n{after}"),
+    )
+    .unwrap();
+    run(&ws, &tasks, t, Some(11), 11).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(
+        text.starts_with(&format!("{before}// @begin-table gamma\n// The toy")),
+        "{text}"
+    );
+    assert!(
+        text.ends_with(&format!("// @end-table gamma\n{after}")),
+        "{text}"
+    );
+    assert!(text.contains("    0.25,\n    0.5,\n"), "{text}");
+    let report = check_at(&ws, &tasks, 11);
     assert!(report.passed(), "{report}");
 }
 

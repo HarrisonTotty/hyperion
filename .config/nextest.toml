@@ -244,6 +244,12 @@ threads-required = 3
 filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"
 threads-required = 8
 
+# P15.T10.b's fitted samplers against the engine run their census of 10⁷ records through the
+# binary engine on sixteen threads of their own (`tables_hold::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::binary::tables_hold::the_.*_against_the_engine$/)"
+threads-required = 16
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"

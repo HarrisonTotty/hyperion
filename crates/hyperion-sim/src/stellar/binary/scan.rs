@@ -23,10 +23,10 @@
 //!
 //! The recurrence period `P_rec` is the nova ignition mass over the transfer rate (P11.T5's
 //! `nova_ignition_mass`, a fit to Yaron et al.'s 2005 grid). The sampler draws `P_rec` first, on
-//! its class's side of L ([`AWD_SAMPLER`]'s ranks below or above L's), then the white dwarf's mass
-//! given it, and the rate is the fit inverted at that mass (`transfer_rate_for`); `P_rec` is then
-//! recomputed from the mass and the rate by the very function `carved_class` reads, so that the
-//! scan and the class's test split the hosts on the same number.
+//! its class's side of L (the class's sampler's ranks below or above L's), then the white dwarf's
+//! mass given it, and the rate is the fit inverted at that mass (`transfer_rate_for`); `P_rec` is
+//! then recomputed from the mass and the rate by the very function `carved_class` reads, so that
+//! the scan and the class's test split the hosts on the same number.
 //!
 //! # Novae
 //!
@@ -69,7 +69,7 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::draws::isotropic;
-use crate::tables::binary::{AWD_SAMPLER, AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick};
+use crate::tables::binary::{AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
 use crate::units::consts::{
     SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR, SOLAR_MASS_KG, SPEED_OF_LIGHT,
@@ -98,9 +98,11 @@ pub const NOVA_NOISE_LATTICE_CYCLES: u32 = 1;
 /// of 1.03 × 10⁻⁷ above which a white dwarf burns steadily and erupts in no nova (Hurley, Tout and
 /// Pols 2002, section 2.6.6; P11.T5's `STEADY_BURNING_RATE`), where the recurrence would be
 /// infinite and a host's nova clock undefined. The recurrence falls as the rate rises
-/// (Ṁ^−1.29), so a held rate lengthens it; at [`AWD_SAMPLER`]'s recurrences, 28,000 years and
-/// more, the rate stays under 10⁻⁸ and the hold binds nowhere (a test holds it). Were it to bind,
-/// a fast host could recur beyond L, which the scan and the class's test would both refuse.
+/// (Ṁ^−1.29), so a held rate lengthens it; at the scratch
+/// [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER)'s recurrences, 28,000 years and more, the
+/// rate stays under 10⁻⁸ and the hold binds nowhere (a test holds it). Were it to bind, as it may
+/// on plan 15's fitted fast sampler's recurrent novae from version 27, a fast host could recur
+/// beyond L, which the scan and the class's test would both refuse.
 pub const MAX_NOVA_TRANSFER_RATE: SolarMassesPerYear = SolarMassesPerYear::new(1.0e-7);
 
 /// What a galaxy-wide scan reads of an accreting white dwarf host (plan 11's Provides; P11.T8.a):
@@ -772,7 +774,7 @@ fn awd_scan_marks(
     let seed = galaxy.seed();
     let system = SystemId::from(id);
     let key = ObjectKey::from(system);
-    let sampler = ClassSampler::new(&AWD_SAMPLER);
+    let sampler = process.sampler();
     let mut stream = Stream::open(seed, tags::CLASS_AWD_RECURRENCE, key);
     let drawn = sampler.draw_in_ranks(
         AwdMark::Recurrence,
@@ -902,7 +904,8 @@ pub fn nova_series(seed: Seed, system: SystemId) -> EventSeries {
 /// # Panics
 ///
 /// If the period is not a span of at least [`LinearClock::MIN_PERIOD`]: a catalogue host's
-/// recurrence is at least 28,000 years ([`AWD_SAMPLER`]'s least).
+/// recurrence is at least 28,000 years ([`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER)'s
+/// least), and from version 27 some years (plan 15's fitted fast sampler's).
 #[must_use]
 pub fn nova_clock(recurrence: Years, share: f64) -> LinearClock {
     let seconds = recurrence.value() * SECONDS_PER_JULIAN_YEAR;

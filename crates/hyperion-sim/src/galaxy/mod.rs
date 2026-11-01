@@ -344,9 +344,9 @@ impl Galaxy {
     ///
     /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
     /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
-    /// built reads its rules but the field share, the carve-out and the displaced classes' arm
-    /// (below; and, through the displaced classes' table, the stellar rules): each other held call
-    /// site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
+    /// built reads its rules but the field share, the carve-out, the displaced classes' arm and the
+    /// binary tables (below; and, through the displaced classes' table, the stellar rules): each
+    /// other held call site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
     /// reads only the parameters and the mass model, and the potential only the motion. It keeps
     /// the centre's model and the field's Type Ia delay-time distribution only if the stellar rules
     /// ([`GalaxyRules::stellar`]) stay as they were.
@@ -364,12 +364,15 @@ impl Galaxy {
     /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
     /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
     /// classes keeps its stellar rules too, whose kick law its class table was built with.
+    /// The binary tables (`GalaxyRules::binary_tables`, P15.T10.b) are read then too, into the
+    /// share matrix's class shares, which this installs again under `rules`, as a build does, and
+    /// into the field share, so they may change only where the field share is not in force.
     ///
     /// # Panics
     ///
     /// In debug builds, which every test profile is, if `rules` changes the field share, the
     /// carve-out or the displaced classes' arm, or the stellar rules of a galaxy that holds the
-    /// classes.
+    /// classes, or the binary tables of a galaxy under the field share.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
@@ -393,12 +396,25 @@ impl Galaxy {
             "the displaced classes' table was built under the galaxy's stellar rules, so a galaxy \
              under others is built with `Galaxy::from_params_with_rules`"
         );
+        let feature_shares = if rules.binary_tables == self.rules.binary_tables {
+            self.feature_shares
+        } else {
+            debug_assert!(
+                self.field_share.is_none(),
+                "the binary tables are read into the field share when a galaxy is built: build it \
+                 under the new rules with `Galaxy::from_params_with_rules`"
+            );
+            let mut shares = self.feature_shares;
+            shares.set_class_shares(rules.binary_tables.class_shares());
+            shares
+        };
         let (centre, type_ia_delays) = if rules.stellar == self.rules.stellar {
             (self.centre, self.type_ia_delays)
         } else {
             (CentreModelCell::default(), TypeIaDelaysCell::default())
         };
         Self {
+            feature_shares,
             centre,
             type_ia_delays,
             rules,
@@ -453,7 +469,7 @@ impl Galaxy {
             mass_function.as_dyn(),
             params.mean_formed_mass(),
         );
-        feature_shares.set_class_shares(&crate::tables::binary::CLASS_SHARES);
+        feature_shares.set_class_shares(rules.binary_tables.class_shares());
         let field_share = match rules.field_share {
             FieldShareRules::None => None,
             FieldShareRules::Phi => {

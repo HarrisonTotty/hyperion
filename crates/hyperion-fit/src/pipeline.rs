@@ -39,14 +39,15 @@ pub fn placement(task: &dyn FitTask) -> Placement {
 }
 
 /// How `task`'s table sits in its file among `tasks`: a file is shared by the tasks of one crate
-/// that name it.
+/// that name it, and by a task with code beside its block ([`FitTask::shares_its_file`]).
 #[must_use]
 pub fn placement_among(tasks: &[&'static dyn FitTask], task: &dyn FitTask) -> Placement {
-    let shared = tasks.iter().any(|other| {
-        other.name() != task.name()
-            && other.table_crate() == task.table_crate()
-            && other.table_path() == task.table_path()
-    });
+    let shared = task.shares_its_file()
+        || tasks.iter().any(|other| {
+            other.name() != task.name()
+                && other.table_crate() == task.table_crate()
+                && other.table_path() == task.table_path()
+        });
     if shared {
         Placement::Block
     } else {

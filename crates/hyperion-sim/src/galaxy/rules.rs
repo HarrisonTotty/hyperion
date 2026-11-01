@@ -51,6 +51,10 @@
 //!   P11.T8.c's missing channel, at 27): the stellar merger class adds the engine's dynamical
 //!   main-sequence mergers and draws an evolved donor's companion by its donor's kind. It is read
 //!   where a merger's scan marks are drawn, and reaches none of the galaxy's memos.
+//! - [`binary_tables`](GalaxyRules::binary_tables), at [`BINARY_TABLES_VERSION`] (plan 15,
+//!   P15.T10.b): the binary classes read plan 15's fitted samplers and share rows. It is read where
+//!   the galaxy is built, which installs the share matrix's class shares; `Galaxy::with_rules`
+//!   installs them again, and refuses to change it under the field share, which reads them too.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -61,7 +65,8 @@
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::catalogue_classes::binary::{
-    MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION, MergerChannelRules, MergerClassRules,
+    BINARY_TABLES_VERSION, BinaryTableRules, MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION,
+    MergerChannelRules, MergerClassRules,
 };
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
@@ -102,6 +107,8 @@ pub(crate) struct GalaxyRules {
     /// Which channels the stellar merger class draws under its engine's channels: contact and
     /// evolved donor, or with the dynamical main sequence (P11.T8.c's missing channel).
     pub(crate) merger_channels: MergerChannelRules,
+    /// Which tables the binary classes read: the scratch ones or plan 15's fitted ones (P15.T10.b).
+    pub(crate) binary_tables: BinaryTableRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -162,6 +169,11 @@ impl GalaxyRules {
             } else {
                 MergerChannelRules::ContactAndEvolved
             },
+            binary_tables: if version.get() >= BINARY_TABLES_VERSION.get() {
+                BinaryTableRules::Fitted
+            } else {
+                BinaryTableRules::Scratch
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -184,9 +196,9 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
     /// hold ([`GalaxyRules::every_26_hold`]) and the galaxy's at 27 (`orphan_streams`, P15.T11.b,
-    /// and `merger_channels`, P11.T8.c's missing channel). The planetary stage's holds at 27 are
-    /// switched on the thread instead (`planetary::testing::with_every_27_hold`), around a galaxy
-    /// built under these.
+    /// `merger_channels`, P11.T8.c's missing channel, and `binary_tables`, P15.T10.b). The
+    /// planetary stage's holds at 27 are switched on the thread instead
+    /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.
@@ -383,6 +395,19 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold().orphan_streams,
             OrphanStreamsRules::Fitted
+        );
+        let tables = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).binary_tables;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(tables(v), BinaryTableRules::Scratch, "{v}");
+        }
+        assert_eq!(tables(27), BinaryTableRules::Fitted);
+        assert_eq!(
+            GalaxyRules::every_26_hold().binary_tables,
+            BinaryTableRules::Scratch
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().binary_tables,
+            BinaryTableRules::Fitted
         );
     }
 }

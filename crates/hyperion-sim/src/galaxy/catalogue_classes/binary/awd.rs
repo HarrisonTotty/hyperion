@@ -4,9 +4,11 @@
 //!
 //! The grid redraws every binary that falls into a carved class (P11.T7), so these hosts are
 //! nowhere in the cells, and the share matrix gives up what the classes hold: each class's row of
-//! [`CLASS_SHARES`] (hosts per solar mass formed, by population). A class is a Poisson process of
-//! that intensity, placed by thinning on the class grid of plan 09 ([`ClassProcess`]), as P09.T33.a
-//! places the core collapses.
+//! [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) (hosts per solar mass formed, by
+//! population). A class is a Poisson process of that intensity, placed by thinning on the class
+//! grid of plan 09 ([`ClassProcess`]), as P09.T33.a places the core collapses. From generator
+//! version 27 both read plan 15's fitted tables in place of the scratch ones, each class its own
+//! sampler (the hold of [`BinaryTableRules`](super::BinaryTableRules)).
 //!
 //! # The envelope and a candidate
 //!
@@ -80,7 +82,7 @@ use crate::stellar::remnant::structure::white_dwarf_radius;
 use crate::stellar::sse::{ZCoeffs, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick, CLASS_SHARES};
+use crate::tables::binary::{AwdDonorKind, AwdMark, AwdPick};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::{SOLAR_EFFECTIVE_TEMPERATURE_K, SOLAR_RADIUS_M};
 use crate::units::{
@@ -172,15 +174,20 @@ impl AwdComponent {
 pub struct AwdProcess {
     side: AwdSide,
     components: Vec<AwdComponent>,
+    sampler: ClassSampler<AwdMark, AwdPick>,
     recurrence_ranks: (f64, f64),
 }
 
 impl AwdProcess {
-    /// The class of `side` in `galaxy`: its components, from its row of [`CLASS_SHARES`], and its
-    /// side's ranks of [`AWD_SAMPLER`]'s recurrence.
+    /// The class of `side` in `galaxy`: its components, from its row of the share table, and its
+    /// side's ranks of its sampler's recurrence. Below version 27 the table is
+    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and the sampler
+    /// [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER), split at L; from it, plan 15's fitted
+    /// tables, each side's sampler with its recurrence all on its side (the module's hold).
     #[must_use]
     pub fn new(galaxy: &Galaxy, side: AwdSide) -> Self {
-        let row = CLASS_SHARES.row(side.carved());
+        let tables = galaxy.rules().binary_tables;
+        let row = tables.class_shares().row(side.carved());
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let components = fields
@@ -196,7 +203,7 @@ impl AwdProcess {
                 })
             })
             .collect();
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
+        let sampler = ClassSampler::new(tables.awd_sampler(side));
         let split = sampler.rank_of(
             AwdMark::Recurrence,
             0.0,
@@ -209,6 +216,7 @@ impl AwdProcess {
         Self {
             side,
             components,
+            sampler,
             recurrence_ranks,
         }
     }
@@ -231,7 +239,14 @@ impl AwdProcess {
         &self.components
     }
 
-    /// The ranks of [`AWD_SAMPLER`]'s recurrence on the class's side of L.
+    /// The sampler the class draws from: [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER), or
+    /// from version 27 its side's fitted one.
+    #[must_use]
+    pub const fn sampler(&self) -> ClassSampler<AwdMark, AwdPick> {
+        self.sampler
+    }
+
+    /// The ranks of the sampler's recurrence on the class's side of L.
     #[must_use]
     pub const fn recurrence_ranks(&self) -> (f64, f64) {
         self.recurrence_ranks
@@ -336,7 +351,7 @@ impl AwdProcess {
         let seed = galaxy.seed();
         let system = SystemId::from(id);
         let key = ObjectKey::from(system);
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
+        let sampler = self.sampler;
         // 2. The binary now.
         let mut stream = Stream::open(seed, tags::CLASS_AWD_BINARY, key);
         let donor_kind = AwdDonorKind::ALL[sampler.pick(AwdPick::DonorKind, &mut stream)];
