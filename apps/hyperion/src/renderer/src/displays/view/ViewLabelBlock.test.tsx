@@ -841,3 +841,39 @@ describe("the PRIMARY view's upper plate in its room (R10.T12.b)", () => {
     });
   });
 });
+
+describe("ViewLabelBlock bare, while MAXIMIZE VIEW hides it (the owner's ruling, 2026-11-01)", () => {
+  /** A fault line, as the graphics' annunciation words one. */
+  const DEVICE_LOST = "GRAPHICS DEVICE LOST: re-creating";
+
+  it("stands a fault alone: no VIEW line and none of its own", () => {
+    const { container } = render(
+      <ViewLabelBlock lines={[]} statements={[]} countLine={null} faults={[DEVICE_LOST]} bare />,
+    );
+    expect([
+      screen.getByText(statusLine(DEVICE_LOST)),
+      screen.queryByText("VIEW"),
+      container.querySelector(".view-label")?.hasAttribute("hidden"),
+    ]).toEqual([expect.any(HTMLElement), null, false]);
+  });
+
+  it("stands a failed request alone", () => {
+    render(
+      <ViewLabelBlock
+        lines={[]}
+        statements={[{ text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" }]}
+        countLine={null}
+        faults={[]}
+        bare
+      />,
+    );
+    expect(screen.getByText(statusLine("ATMOSPHERE REJECTED: KX 4417 /2"))).toBeInTheDocument();
+  });
+
+  it("is hidden whole with no fault and no failed request, no box at all", () => {
+    const { container } = render(
+      <ViewLabelBlock lines={[]} statements={[]} countLine={null} faults={[]} bare />,
+    );
+    expect(container.querySelector(".view-label")?.hasAttribute("hidden")).toBe(true);
+  });
+});

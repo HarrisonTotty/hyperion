@@ -637,12 +637,6 @@ export interface LabelLine {
    * wireframe's `CONTOUR INTERVAL` (R10.T11).
    */
   readonly dotsLead?: true;
-  /**
-   * The least width of its reading, ch of B612 Mono, where it stands beside other readings on one
-   * line (the label block's summary): its longest value's, so that a change of the value never moves
-   * its neighbours (the guide's "Numbers"); absent on a line of its own.
-   */
-  readonly widthCh?: number;
 }
 
 /**
@@ -897,11 +891,6 @@ function isSentence(statement: LabelStatement): statement is SentenceStatement {
   return typeof statement !== "string" && statement.standing === "sentence";
 }
 
-/** Whether a statement is a request's status, a {@link StatusStatement}: refused, or failed. */
-function isRequestStatus(statement: LabelStatement): boolean {
-  return typeof statement !== "string" && statement.standing !== "sentence";
-}
-
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
 export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 
@@ -1047,9 +1036,8 @@ export interface StatementGroup {
 }
 
 /**
- * The statements in order as the plate sets them, each sentence with the note before it, so that
- * the reasons' fold and `MAXIMIZE VIEW`'s summary count one group alike (the owner's request,
- * 2026-11-01).
+ * The statements in order as the plate sets them, each sentence with the note before it, whose
+ * reasons the plate folds behind it (`LabelStatements`; the owner's request, 2026-11-01).
  */
 export function statementGroups(
   statements: ReadonlyArray<LabelStatement>,
@@ -1065,66 +1053,6 @@ export function statementGroups(
   }
   return groups;
 }
-
-/**
- * The lines the `PRIMARY` view's label block keeps in its summary while `MAXIMIZE VIEW` folds it
- * (the owner's request, 2026-11-01), the readings an operator acts on, each with its longest value's
- * width, ch: its style (`PHOTOREALISTIC`), `GRID OFF` while the grid is off, its camera with its
- * rate or look (`CHASE · LOOK 359° -90°`), its field of view (`120°`), and its exposure
- * (`EV100 -14.0 INHIBITED · NO IMAGE TO METER`). None of them is ever stale, so none needs room
- * for an `S`.
- */
-const SUMMARY_WIDTHS_CH: ReadonlyMap<string, number> = new Map([
-  ["STYLE", 14],
-  ["GRID", 3],
-  ["CAMERA", 22],
-  ["FOV", 4],
-  ["EXPOSURE", 41],
-]);
-
-/** The label block's lines its summary keeps, in their order, each at its fixed width. */
-export function summaryLines(lines: ReadonlyArray<LabelLine>): ReadonlyArray<LabelLine> {
-  return lines.flatMap((line) => {
-    const widthCh = SUMMARY_WIDTHS_CH.get(line.label);
-    return widthCh === undefined ? [] : [{ ...line, widthCh }];
-  });
-}
-
-/**
- * The statements of the `PRIMARY` view's label block's summary while `MAXIMIZE VIEW` folds it (the
- * owner's request, 2026-11-01): one line, `keyLine`, the key that shows the whole block, with after
- * a middle dot what the summary folds, the statements' groups counted as their fold counts them, a
- * note with its reasons as one (`STATEMENTS: 2 FOLDED`), and the lower plate while it folds too
- * (`TERRAIN READOUT FOLDED`); then each request's status as it stands.
- *
- * @remarks
- * A request's status (`ATMOSPHERE REJECTED`, the server's refusal in `--text` or its failure in
- * `--status-caution`) is never folded, so that a body whose air was refused is never read as
- * airless, and a failure stands as no fault line ever folds.
- *
- * @param terrainFolded - Whether the lower plate, the survey line, `DATUM` and the terrain readout,
- *   folds with the summary.
- */
-export function summaryStatements(
-  statements: ReadonlyArray<LabelStatement>,
-  keyLine: string,
-  terrainFolded: boolean,
-): ReadonlyArray<LabelStatement> {
-  const groups = statementGroups(statements);
-  const standing = groups
-    .filter(({ statement }) => isRequestStatus(statement))
-    .map(({ statement }) => statement);
-  const folded = groups.length - standing.length;
-  const parts = [
-    keyLine,
-    ...(folded === 0 ? [] : [`STATEMENTS: ${String(folded)} FOLDED`]),
-    ...(terrainFolded ? [TERRAIN_READOUT_FOLDED] : []),
-  ];
-  return [parts.join(" · "), ...standing];
-}
-
-/** What the summary says of the lower plate it folds: `TERRAIN READOUT FOLDED`. */
-export const TERRAIN_READOUT_FOLDED = "TERRAIN READOUT FOLDED";
 
 /**
  * Each body kind's name in the list's `KIND` column, as the guide's nomenclature names it (its

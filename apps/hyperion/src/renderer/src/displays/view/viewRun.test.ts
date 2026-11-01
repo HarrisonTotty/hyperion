@@ -78,8 +78,7 @@ import {
   startServerRun,
   stepRun,
   statementGroups,
-  summaryStatements,
-  TERRAIN_READOUT_FOLDED,
+  statementText,
   surveyEdgeNotes,
   withGridLine,
   withSceneStarsLine,
@@ -967,53 +966,29 @@ describe("an instrument's photorealistic statements (decision-r07-t19-layout, it
   });
 });
 
-describe("the label block's summary's statements under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
+describe("the statements' groups, by which the plate folds a note's reasons (2026-11-01)", () => {
   const note = "ATMOSPHERE: APPROXIMATE";
-  const thick: LabelStatement = {
-    text: "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
-    standing: "sentence",
-  };
   const water: LabelStatement = {
     text: "H2O: its absorption estimated, not measured, for KX 4417 /3",
     standing: "sentence",
   };
-  const albedo = "BODY PHOTOMETRY: NOT YET MODELLED";
   const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
-  const refused: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /3", standing: "refused" };
-  const KEY = "9 SHOWS LABEL BLOCK";
 
-  it("counts what it folds after the key line, on one line", () => {
-    expect(summaryStatements([POSITIONS_FROM_SHIP, albedo], KEY, false)).toEqual([
-      `${KEY} · STATEMENTS: 2 FOLDED`,
+  it("sets each sentence with the note before it", () => {
+    expect(
+      statementGroups([POSITIONS_FROM_SHIP, note, water, failed]).map(({ statement, reasons }) => [
+        statementText(statement),
+        reasons.length,
+      ]),
+    ).toEqual([
+      [POSITIONS_FROM_SHIP, 0],
+      [note, 1],
+      [failed.text, 0],
     ]);
   });
 
-  it("counts a note and its reasons as one, as their fold groups them", () => {
-    expect([
-      summaryStatements([albedo, note, water, thick], KEY, false),
-      statementGroups([albedo, note, water, thick]).map(({ reasons }) => reasons.length),
-    ]).toEqual([[`${KEY} · STATEMENTS: 2 FOLDED`], [0, 2]]);
-  });
-
-  it("names the lower plate it folds after the statements", () => {
-    expect(summaryStatements([albedo], KEY, true)).toEqual([
-      `${KEY} · STATEMENTS: 1 FOLDED · ${TERRAIN_READOUT_FOLDED}`,
-    ]);
-  });
-
-  it("keeps each request's status standing after the line, so that no body reads as airless", () => {
-    expect(summaryStatements([albedo, refused, failed, note, water], KEY, false)).toEqual([
-      `${KEY} · STATEMENTS: 2 FOLDED`,
-      refused,
-      failed,
-    ]);
-  });
-
-  it("states the key line alone where there is nothing to fold", () => {
-    expect([summaryStatements([], KEY, false), summaryStatements([failed], KEY, false)]).toEqual([
-      [KEY],
-      [KEY, failed],
-    ]);
+  it("sets a sentence after a request's status as a group of its own", () => {
+    expect(statementGroups([failed, water]).map(({ reasons }) => reasons.length)).toEqual([0, 0]);
   });
 });
 

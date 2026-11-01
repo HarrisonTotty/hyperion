@@ -55,11 +55,11 @@ export interface ViewLabelBlockProps {
   /** Receives the plate, which the display measures for its room (R10.T12.b). */
   readonly ref?: Ref<HTMLDivElement> | undefined;
   /**
-   * Whether the plate stands as its summary while `MAXIMIZE VIEW` folds it (the owner's request,
-   * 2026-11-01): `VIEW` and its lines on one line, wrapping between whole readings where it must,
-   * then its statements; none of its lines scroll.
+   * Whether the plate stands bare while `MAXIMIZE VIEW` hides it (the owner's ruling, 2026-11-01):
+   * no `VIEW` line and no line of its own, only the faults and statements it is given, a fault never
+   * hidden; and with none, hidden whole, no box at all.
    */
-  readonly summary?: boolean | undefined;
+  readonly bare?: boolean | undefined;
 }
 
 /** How a label block scrolls in its room ({@link ViewLabelBlockProps.scroll}). */
@@ -363,7 +363,7 @@ export function ViewLabelBlock({
   scroll,
   className,
   ref,
-  summary,
+  bare,
 }: ViewLabelBlockProps) {
   const ownFolds = useReasonFolds();
   const folds = given ?? ownFolds;
@@ -411,9 +411,7 @@ export function ViewLabelBlock({
   const lineOf = (line: LabelLine) => (
     <div className="field view-label__line view-label__line--whole" key={line.label}>
       <dt className="field__label">{line.label}</dt>
-      <dd
-        style={line.widthCh === undefined ? undefined : { minWidth: `${String(line.widthCh)}ch` }}
-      >
+      <dd>
         <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
           {readingParts(line.value, line.fields, { dotsLead: line.dotsLead === true })}
         </output>
@@ -421,14 +419,15 @@ export function ViewLabelBlock({
       </dd>
     </div>
   );
-  const classes = [
-    "view-label",
-    ...(className === undefined ? [] : [className]),
-    ...(summary === true ? ["view-label--summary"] : []),
-  ].join(" ");
+  const isBare = bare === true;
   return (
-    <div className={classes} id={id} ref={ref}>
-      <p className="view-label__class">VIEW</p>
+    <div
+      className={className === undefined ? "view-label" : `view-label ${className}`}
+      id={id}
+      ref={ref}
+      hidden={isBare && statements.length === 0 && faults.length === 0}
+    >
+      {isBare ? null : <p className="view-label__class">VIEW</p>}
       {/* A section is a region only while it is named: while it scrolls. */}
       <section
         className={bodyScrolls ? "view-label__body view-label__scroll" : "view-label__body"}
@@ -449,15 +448,7 @@ export function ViewLabelBlock({
         aria-label={bodyScrolls ? `${viewName} label block` : undefined}
       >
         {from === undefined ? (
-          summary === true ? (
-            // The summary's readings and its key line share one wrapping row, each reading a list
-            // of its own so that the row breaks only between them.
-            rest.map((line) => (
-              <dl className="view-label__lines" key={line.label}>
-                {lineOf(line)}
-              </dl>
-            ))
-          ) : (
+          rest.length === 0 ? null : (
             <dl className="view-label__lines">{rest.map(lineOf)}</dl>
           )
         ) : (

@@ -28,7 +28,6 @@ import {
   GRID_KEY,
   hiddenControlKeys,
   LABEL_BLOCK_KEY,
-  LABEL_BLOCK_KEYS,
   MAXIMIZE_KEY,
   MAXIMIZED_KEYS,
   viewDisplayKey,
@@ -306,6 +305,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       await view.user.keyboard("3");
       view.advance(300);
+      await pressLabelBlock(view);
       expect(readingIn(primaryLabelBlock(), "CAMERA")).toMatch(/^FREE/u);
     });
 
@@ -327,6 +327,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       await view.user.keyboard("4");
       await playFor(view, 4);
+      await pressLabelBlock(view);
       expect(readingIn(primaryLabelBlock(), "STYLE")).toBe("PHOTOREALISTIC");
     });
 
@@ -337,6 +338,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await playFor(view, 4);
       await view.user.keyboard(GRID_KEY);
       view.advance(300);
+      await pressLabelBlock(view);
       expect(readingIn(primaryLabelBlock(), "GRID")).toBe("OFF");
     });
 
@@ -346,6 +348,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await view.user.keyboard(GRID_KEY);
       await view.user.keyboard("4");
       await playFor(view, 4);
+      await pressLabelBlock(view);
       expect([
         readingIn(primaryLabelBlock(), "STYLE"),
         readingIn(primaryLabelBlock(), "GRID"),
@@ -365,6 +368,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       await view.user.keyboard(GRID_KEY);
       view.advance(300);
+      await pressLabelBlock(view);
       expect([
         readingIn(screen.getByRole("region", { name: "INSTRUMENT 1" }), "GRID"),
         readingIn(primaryLabelBlock(), "GRID"),
@@ -429,16 +433,6 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
   });
 
   describe("the primary's statements", () => {
-    it("folds them to one line while it is on, after the label block's key", async () => {
-      const view = await setup();
-      await view.user.keyboard("3");
-      view.advance(300);
-      await pressMaximize(view);
-      expect(primaryStatements()).toEqual([
-        expect.stringMatching(new RegExp(`^${LABEL_BLOCK_KEYS} · STATEMENTS: \\d+ FOLDED$`, "u")),
-      ]);
-    });
-
     it("states them whole again once it is off", async () => {
       const view = await setup();
       await view.user.keyboard("3");
@@ -457,116 +451,95 @@ function primaryLabels(): ReadonlyArray<string | null> {
     .map((term) => term.textContent);
 }
 
-/** The summary's lines' labels, with the grid on. */
-const SUMMARY = ["STYLE", "CAMERA", "FOV", "EXPOSURE"];
-
 /** Presses the label block's key, as from the page. */
 async function pressLabelBlock(view: ViewDisplayHarness): Promise<void> {
   await view.user.keyboard(LABEL_BLOCK_KEY);
   view.advance(300);
 }
 
-describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
-  it("folds to its summary once on: its style, camera, field of view and exposure", async () => {
-    const view = await setup();
-    await pressMaximize(view);
-    expect(primaryLabels()).toEqual(SUMMARY);
-  });
+/**
+ * The primary's upper label block as the canvas's description names it, which stands, hidden or
+ * not, in every state.
+ */
+function upperPlate(): HTMLElement {
+  const canvas = screen.getByRole("application", { name: /, PRIMARY, /u });
+  const id = (canvas.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .find((each) => each.endsWith("-label"));
+  const plate = id === undefined ? null : document.getElementById(id);
+  if (plate === null) {
+    throw new Error("the primary's canvas names no label block");
+  }
+  return plate;
+}
 
-  it("sets each of the summary's readings at its longest value's width, so that none moves another", async () => {
-    const view = await setup();
-    await pressMaximize(view);
-    expect(
-      within(primaryLabelBlock())
-        .getAllByRole("term")
-        .map((term) => [
-          term.textContent,
-          term.nextElementSibling instanceof HTMLElement
-            ? term.nextElementSibling.style.minWidth
-            : null,
-        ]),
-    ).toEqual([
-      ["STYLE", "14ch"],
-      ["CAMERA", "22ch"],
-      ["FOV", "4ch"],
-      ["EXPOSURE", "41ch"],
-    ]);
-  });
-
-  it("runs its readings and its key line along one row that wraps only between them", () => {
-    expect(stylesheetRule(".view-label--summary > .view-label__body")).toContain(
-      "flex-wrap: wrap;",
-    );
-  });
-
-  it("offers 9 LABEL BLOCK beside MAXIMIZE VIEW while on, pressed while the whole block shows", async () => {
-    const view = await setup();
-    const off = screen.queryByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` });
-    await pressMaximize(view);
-    const folded = screen
-      .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
-      .getAttribute("aria-pressed");
-    await view.user.click(screen.getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` }));
-    view.advance(300);
-    expect([
-      off,
-      folded,
-      screen
-        .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
-        .getAttribute("aria-pressed"),
-      primaryLabels().length > SUMMARY.length,
-    ]).toEqual([null, "false", "true", true]);
-  });
-
-  it("names on its summary the key that shows the whole block", async () => {
-    const view = await setup();
-    await pressMaximize(view);
-    expect(primaryStatements()[0]).toMatch(new RegExp(`^${LABEL_BLOCK_KEYS}`, "u"));
-  });
-
-  it("keeps the camera's rate in the summary in FREE", async () => {
+describe("the primary's upper label block under MAXIMIZE VIEW (the owner's ruling, 2026-11-01)", () => {
+  it("is hidden whole once on, no box and no line of it", async () => {
     const view = await setup();
     await view.user.keyboard("3");
     view.advance(300);
     await pressMaximize(view);
-    expect(readingIn(primaryLabelBlock(), "CAMERA")).toMatch(/^FREE · RATE /u);
+    expect([upperPlate().hidden, within(upperPlate()).queryAllByRole("term")]).toEqual([true, []]);
   });
 
-  it("keeps GRID OFF in the summary while the grid is off", async () => {
+  it("stands no VIEW line of its own while hidden", async () => {
     const view = await setup();
     await pressMaximize(view);
-    await view.user.keyboard("4");
-    await playFor(view, 4);
-    await view.user.keyboard(GRID_KEY);
-    view.advance(300);
-    expect(primaryLabels()).toEqual(["STYLE", "GRID", "CAMERA", "FOV", "EXPOSURE"]);
+    expect(within(upperPlate()).queryByText("VIEW")).toBeNull();
   });
 
-  it("shows the whole block by its key as it stands off, its lines and its statements", async () => {
+  it("shows whole by 9 as it stands off, its lines and its statements", async () => {
     const view = await setup();
     await view.user.keyboard("3");
     view.advance(300);
     const whole = [primaryLabels(), primaryStatements()];
     await pressMaximize(view);
     await pressLabelBlock(view);
-    expect([primaryLabels(), primaryStatements()]).toEqual(whole);
+    expect([upperPlate().hidden, primaryLabels(), primaryStatements()]).toEqual([false, ...whole]);
   });
 
-  it("folds the whole block again by its key", async () => {
+  it("is hidden again by a second press of 9", async () => {
     const view = await setup();
     await pressMaximize(view);
     await pressLabelBlock(view);
     await pressLabelBlock(view);
-    expect(primaryLabels()).toEqual(SUMMARY);
+    expect(upperPlate().hidden).toBe(true);
   });
 
-  it("folds it again each time MAXIMIZE VIEW is turned on", async () => {
+  it("is hidden again each time MAXIMIZE VIEW is turned on", async () => {
     const view = await setup();
     await pressMaximize(view);
     await pressLabelBlock(view);
     await pressMaximize(view);
     await pressMaximize(view);
-    expect(primaryLabels()).toEqual(SUMMARY);
+    expect(upperPlate().hidden).toBe(true);
+  });
+
+  it("offers 9 LABEL BLOCK beside MAXIMIZE VIEW while on, pressed while the block shows", async () => {
+    const view = await setup();
+    const off = screen.queryByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` });
+    await pressMaximize(view);
+    const hidden = screen
+      .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
+      .getAttribute("aria-pressed");
+    await view.user.click(screen.getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` }));
+    view.advance(300);
+    expect([
+      off,
+      hidden,
+      screen
+        .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
+        .getAttribute("aria-pressed"),
+      upperPlate().hidden,
+    ]).toEqual([null, "false", "true", false]);
+  });
+
+  it("names 9 on the strip with the other keys", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    expect(linePart(hiddenControlKeys(false))?.textContent).toContain(
+      `${LABEL_BLOCK_KEY} LABEL BLOCK`,
+    );
   });
 
   it("restores the whole block exactly once off", async () => {
@@ -576,10 +549,10 @@ describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 20
     const before = [primaryLabels(), primaryStatements()];
     await pressMaximize(view);
     await pressMaximize(view);
-    expect([primaryLabels(), primaryStatements()]).toEqual(before);
+    expect([upperPlate().hidden, primaryLabels(), primaryStatements()]).toEqual([false, ...before]);
   });
 
-  it("does nothing by its key while MAXIMIZE VIEW is off", async () => {
+  it("does nothing by 9 while MAXIMIZE VIEW is off", async () => {
     const view = await setup();
     const before = primaryLabels();
     await pressLabelBlock(view);
@@ -732,7 +705,7 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
       "grid",
       "enable",
       "inhibit",
-      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, 7 ENABLE, 8 INHIBIT, [/] TARGET, +/- FOV`,
+      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, 7 ENABLE, 8 INHIBIT, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`,
     ]);
   });
 

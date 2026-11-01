@@ -60,7 +60,7 @@ import {
 } from "../../view/scenes/terrainScene";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { TerrainFixture } from "./useTerrainSession";
-import { LABEL_BLOCK_KEY, MAXIMIZE_KEY } from "./displayKeys";
+import { MAXIMIZE_KEY } from "./displayKeys";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { GROUND_NOTE_NAME } from "./ViewMarkList";
 import { type ViewFrameDrawn, ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
@@ -70,7 +70,6 @@ import {
   ROTATION_NOT_RESOLVED,
   runPose,
   SCENE_OPTIONS,
-  TERRAIN_READOUT_FOLDED,
 } from "./viewRun";
 
 afterEach(() => {
@@ -1412,47 +1411,29 @@ function instrumentGroundNote(): HTMLElement | null {
   });
 }
 
-/** The primary's statements, as they read. */
-function primaryStatementTexts(): ReadonlyArray<string> {
-  return within(primaryLabelBlock())
-    .queryAllByText((_, element) => element?.classList.contains("view-label__statement") === true)
-    .map((line) => line.textContent);
-}
+describe("the primary's lower plate under MAXIMIZE VIEW (the owner's ruling, 2026-11-01)", () => {
+  /** The lower plate's labels, in order. */
+  function lowerLabels(): ReadonlyArray<string | null> {
+    return within(plate())
+      .queryAllByRole("term")
+      .map((term) => term.textContent);
+  }
 
-describe("the primary's lower plate under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
-  it("folds the lower plate with the label block's summary, which names it folded", async () => {
+  it("stands as it does off, no part of it growing or going", async () => {
     const view = await terrainTestReading();
     await readFor(view, 4);
-    const before = lowerPlate() !== null;
+    const off = lowerLabels();
     await view.user.keyboard(MAXIMIZE_KEY);
-    await readFor(view, 2);
-    expect([
-      before,
-      lowerPlate(),
-      primaryStatementTexts().some((line) => line.includes(TERRAIN_READOUT_FOLDED)),
-    ]).toEqual([true, null, true]);
+    await readFor(view, 4);
+    expect([off.length > 0, lowerLabels()]).toEqual([true, off]);
   });
 
-  it("draws no tripod while the lower plate is folded", async () => {
+  it("keeps its tripod with its readout", async () => {
     const view = await terrainTestReading();
     await readFor(view, 4);
     await view.user.keyboard(MAXIMIZE_KEY);
-    await readFor(view, 2);
-    const sights = sightsOver(view, 600).primary;
-    expect(sights.length > 0 && sights.every((point) => point === undefined)).toBe(true);
-  });
-
-  it("shows the lower plate whole by the label block's key, its tripod with its readout", async () => {
-    const view = await terrainTestReading();
     await readFor(view, 4);
-    await view.user.keyboard(MAXIMIZE_KEY);
-    await readFor(view, 2);
-    await view.user.keyboard(LABEL_BLOCK_KEY);
-    await readFor(view, 4);
-    expect([
-      lowerPlate() !== null,
-      sightsOver(view, 600).primary.some((point) => point !== undefined),
-    ]).toEqual([true, true]);
+    expect(sightsOver(view, 600).primary.some((point) => point !== undefined)).toBe(true);
   });
 });
 

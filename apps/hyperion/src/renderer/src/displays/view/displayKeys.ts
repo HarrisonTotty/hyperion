@@ -17,8 +17,8 @@ export const GRID_KEY = "5";
 export const MAXIMIZE_KEY = "6";
 
 /**
- * The key that shows the `PRIMARY` view's whole label block while `MAXIMIZE VIEW` folds it to its
- * summary, and folds it again: `9`.
+ * The key that shows the `PRIMARY` view's whole upper label block while `MAXIMIZE VIEW` hides it,
+ * and hides it again: `9`.
  */
 export const LABEL_BLOCK_KEY = "9";
 
@@ -68,9 +68,6 @@ export function viewDisplayKey(press: KeyPress): ViewDisplayKey | null {
   return key;
 }
 
-/** The label block's summary's key line: `9 SHOWS LABEL BLOCK`. */
-export const LABEL_BLOCK_KEYS = `${LABEL_BLOCK_KEY} SHOWS LABEL BLOCK`;
-
 /**
  * The head of the line under the key legend while `MAXIMIZE VIEW` is on, in the legend's form:
  * where its key acts, then the key and what it does, `MAXIMIZE VIEW: 6 SHOWS PANELS`.
@@ -81,7 +78,7 @@ export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
  * The keys of the controls `MAXIMIZE VIEW` hides, which they show on themselves, named as the key
  * legend names its keys, each key then what it does, so that every key is found by sight while the
  * controls are hidden: the camera's presets, the style, the `GRID` row while it stands, the
- * exposure's pair, the targets and the field of view.
+ * exposure's pair, the label block's key, the targets and the field of view.
  *
  * @param gridStands - Whether the `CONTROLS` view's `GRID` row stands (`gridRowStands`), and so its
  *   key acts.
@@ -95,6 +92,7 @@ export function hiddenControlKeys(gridStands: boolean): string {
     ...(gridStands ? [`${GRID_KEY} GRID`] : []),
     `${ENABLE_KEY} ENABLE`,
     `${INHIBIT_KEY} INHIBIT`,
+    `${LABEL_BLOCK_KEY} LABEL BLOCK`,
     "[/] TARGET",
     "+/- FOV",
   ].join(", ");

@@ -96,13 +96,7 @@ import {
   styleRefusals,
   withPermission,
 } from "./styleRefusals";
-import {
-  LABEL_BLOCK_KEY,
-  LABEL_BLOCK_KEYS,
-  MAXIMIZE_KEY,
-  maximizedKeys,
-  viewDisplayKey,
-} from "./displayKeys";
+import { LABEL_BLOCK_KEY, MAXIMIZE_KEY, maximizedKeys, viewDisplayKey } from "./displayKeys";
 import { InstrumentControls } from "./InstrumentControls";
 import { InstrumentsPanel, type InstrumentsPanelSlot, noRoomReason } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
@@ -243,8 +237,6 @@ import {
   type MarkRow,
   markRows,
   PRESET_NAMES,
-  summaryLines,
-  summaryStatements,
   rangesFromCamera,
   runPose,
   SCENE_OPTIONS,
@@ -441,8 +433,9 @@ interface ViewStageProps {
   /**
    * `MAXIMIZE VIEW` (the owner's request, 2026-11-01), held above the stage as the exposure is, so
    * that a new scene keeps it: on, the side columns are hidden, their panels kept as they stand, and
-   * the primary's label block stands as its summary while `folded`, as once turned on, or whole,
-   * with its statements folded to one line, until its key `9` folds it again.
+   * the primary's upper label block is `hidden`, as once turned on, its faults and failed requests
+   * alone standing at the stage's top edge, until its key `9` shows the whole `block`, and a second
+   * press hides it again.
    */
   readonly maximize: Maximize;
   /** Turns `MAXIMIZE VIEW` on, its label block folded, or off: its toggle's press. */
@@ -1028,14 +1021,8 @@ function ViewStage({
   // latest publish, on the lower plate; the tripod and the list's note only while the plate states
   // the readout (decision-r10-view-block-room §3).
   const terrainLines = useTerrainLines(ground, faults);
-  // While MAXIMIZE VIEW folds the label block to its summary, the lower plate folds with it, by
-  // the same rule and the same key, its tripod and its list note with its readout (the owner's
-  // request, 2026-11-01).
-  const summary = maximize === "folded";
-  const terrainParts = terrainLowerParts(terrainLines);
-  const lowerFolded = summary && terrainParts.length > 0;
-  const lowerParts = lowerFolded ? [] : terrainParts;
-  const readoutAnswer = lowerFolded ? null : standingReadout(terrainLines, room.readout);
+  const lowerParts = terrainLowerParts(terrainLines);
+  const readoutAnswer = standingReadout(terrainLines, room.readout);
   const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
   const hasPoint = sightPoint?.hasPoint;
   const pointRangeM = sightPoint?.rangeM ?? null;
@@ -1802,11 +1789,10 @@ function ViewStage({
   // operator acts on and the key that shows the whole block, with what it folds counted on that
   // key's line, and nothing that scrolls (the owner's request, 2026-11-01); whole, as off, its
   // reasons folded behind their notes as ever; its faults stand in either.
-  const plateLines = summary ? summaryLines(primaryLines) : primaryLines;
-  const plateStatements = summary
-    ? summaryStatements(primaryStatements, LABEL_BLOCK_KEYS, lowerFolded)
-    : primaryStatements;
-  const plateCount = summary ? null : primaryCount;
+  const bare = maximize === "hidden";
+  const plateLines = bare ? NO_LINES : primaryLines;
+  const plateStatements = bare ? failedRequests(primaryStatements) : primaryStatements;
+  const plateCount = bare ? null : primaryCount;
 
   // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
   // the DOM, an external system, and kept only where they changed.
@@ -2184,10 +2170,10 @@ function ViewStage({
                 countLine={plateCount}
                 faults={faults}
                 scroll={
-                  summary ? undefined : { from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }
+                  bare ? undefined : { from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }
                 }
                 className={plateClass}
-                summary={summary}
+                bare={bare}
               />
               {lowerParts.length === 0 ? null : (
                 <ViewLowerPlate
@@ -2268,7 +2254,7 @@ function ViewStage({
                     folds: primaryFolds,
                     countLine: plateCount,
                     faults,
-                    summary,
+                    bare,
                   }}
                   lower={lowerParts}
                   liveClass={plateClass}
@@ -2585,6 +2571,20 @@ function interimAt(
   return input;
 }
 
+/** No lines: the upper plate's while `MAXIMIZE VIEW` hides it. */
+const NO_LINES: ReadonlyArray<LabelLine> = [];
+
+/**
+ * The statements that stand while `MAXIMIZE VIEW` hides the upper label block: each request that
+ * failed (`ATMOSPHERE REJECTED` at `fault`, in `--status-caution`), as a fault is never hidden (the
+ * owner's ruling, 2026-11-01).
+ */
+function failedRequests(statements: ReadonlyArray<LabelStatement>): ReadonlyArray<LabelStatement> {
+  return statements.filter(
+    (statement) => typeof statement !== "string" && statement.standing === "fault",
+  );
+}
+
 /** The head of a held-back reason, as the guide's `NOT AVAILABLE` form words it. */
 const NOT_AVAILABLE = "NOT AVAILABLE";
 
@@ -2599,27 +2599,27 @@ interface KeyedRefusal {
 
 /**
  * `MAXIMIZE VIEW`'s setting (the owner's request, 2026-11-01): `off`; on with the primary's label
- * block `folded` to its summary; or on with the whole `block`.
+ * block `hidden`, its faults alone standing; or on with the whole `block`.
  */
-type Maximize = "off" | "folded" | "block";
+type Maximize = "off" | "hidden" | "block";
 
 /** `MAXIMIZE VIEW` turned on, its label block folded, or off. */
 function toggledMaximize(maximize: Maximize): Maximize {
-  return maximize === "off" ? "folded" : "off";
+  return maximize === "off" ? "hidden" : "off";
 }
 
-/** The label block's key under `MAXIMIZE VIEW`: the whole block or its summary; nothing while off. */
+/** The label block's key under `MAXIMIZE VIEW`: the whole block, or hidden again; nothing while off. */
 function toggledLabelBlock(maximize: Maximize): Maximize {
   let next: Maximize;
   switch (maximize) {
     case "off":
       next = "off";
       break;
-    case "folded":
+    case "hidden":
       next = "block";
       break;
     case "block":
-      next = "folded";
+      next = "hidden";
       break;
   }
   return next;
@@ -2654,7 +2654,7 @@ function ViewPanels({
   const [placePage, setPlacePage] = useState<PlacePage>("camera");
   // MAXIMIZE VIEW (the owner's request, 2026-11-01): off as the display mounts, VIEW's own, and kept
   // while it stays mounted, through every scene and while another display is shown; on, with the
-  // primary's label block folded to its summary, as each time it is turned on, or whole.
+  // primary's upper label block hidden, as each time it is turned on, or shown whole by its key.
   const [maximize, setMaximize] = useState<Maximize>("off");
   // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
   // label block's only while it is on.
@@ -2965,14 +2965,13 @@ function ViewPanels({
  * `MAXIMIZE VIEW`, its toggle at the end of the key legend's row and its key `6`, is an interim
  * layout until the panels are designed again (the owner's request, 2026-11-01). On, the stage takes
  * the display's whole body: the side columns are hidden, their panels kept as they stand, so that
- * off restores them as they were; the scene bar and the header strip stay; the primary's label
- * block folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera, its
- * field of view and its exposure, each at its longest value's width (`summaryLines`), then
- * `9 SHOWS LABEL BLOCK` with what it folds counted after it, its statements' groups as their fold
- * counts them and the lower plate, which folds with it (`summaryStatements`), until its key `9`, or
- * its `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows both plates whole as they stand off,
- * each note's reasons folded behind it, and folds them again; the instruments open stand in their
- * slots over the stage, which they are part of; and after the key legend, running on along its row
+ * off restores them as they were; the scene bar and the header strip stay; the primary's upper
+ * label block is hidden whole, no box and no line of it, but that a fault line or a failed request
+ * stands alone at the stage's top edge (the owner's ruling, 2026-11-01), until its key `9`, or its
+ * `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows the whole block as it stands off, each
+ * note's reasons folded behind it, and hides it again; the lower plate stands as it does off; the
+ * instruments open stand in their slots over the stage, which they are part of; and after the key
+ * legend, running on along its row
  * where they fit, a line names the key that shows the panels again, every hidden control's key
  * (`hiddenControlKeys`), the `CONTROLS` view where it is an instrument and that view's selection,
  * and the hidden panels' faults and statuses stand after it, as the compact layout's do under its
