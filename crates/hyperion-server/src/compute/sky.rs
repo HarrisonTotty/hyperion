@@ -103,7 +103,7 @@ use tokio::sync::oneshot::error::RecvError;
 
 use super::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, Priority,
-    SharedFeatureCellCache, SharedSkyCellCache,
+    Promotion, SharedFeatureCellCache, SharedSkyCellCache,
 };
 use crate::limits::BULK_QUEUE_CAPACITY;
 
@@ -570,6 +570,29 @@ where
     T: Send + 'static,
 {
     received(pool.submit(priority, token.clone(), job).await?).await
+}
+
+/// Runs `job` in the background queue under `token`, moved to the bulk queue once `promotion` is
+/// raised ([`CpuPool::submit_promotable`]), and waits for it.
+///
+/// # Errors
+///
+/// As [`bulk`].
+pub(crate) async fn promotable<F, T>(
+    pool: &CpuPool,
+    promotion: Promotion,
+    token: &CancelToken,
+    job: F,
+) -> Result<T, ComputeError>
+where
+    F: FnOnce(&CancelToken) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    received(
+        pool.submit_promotable(promotion, token.clone(), job)
+            .await?,
+    )
+    .await
 }
 
 /// What a job sent back, or why it sent nothing.

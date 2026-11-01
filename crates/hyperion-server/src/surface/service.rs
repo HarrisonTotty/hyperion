@@ -38,10 +38,10 @@ use tokio::task::{AbortHandle, JoinSet};
 
 use super::{FieldCache, FieldKey, InputsSource};
 use crate::cache::LruCounters;
-use crate::compute::sky::queued;
+use crate::compute::sky::{promotable, queued};
 use crate::compute::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, GeneratedSystem, JobError,
-    Priority, SingleFlight, SubmitJobError, panic_message,
+    Priority, Promotion, SingleFlight, SubmitJobError, panic_message,
 };
 use crate::knowledge::LoadKnowledgeError;
 use crate::knowledge::surveys::{RaisedRevisions, SurveyLog};
@@ -176,6 +176,10 @@ struct Fields {
     /// Woken whenever a pass's permit is freed ([`PassPermit`]), for the prefetches waiting to
     /// take one.
     released: Arc<Notify>,
+    /// The promotions of the prefetched passes in flight, by key ([`Registered`]): an asked request
+    /// that joins one raises it, so that its job moves from the background queue to the bulk queue
+    /// (R09.T17).
+    promotions: Arc<Mutex<HashMap<FieldKey, Promotion>>>,
     computed: Arc<AtomicU64>,
 }
 
@@ -232,6 +236,7 @@ impl SurfaceService {
                 passes: Arc::new(Semaphore::new(bound)),
                 bound,
                 released: Arc::new(Notify::new()),
+                promotions: Arc::new(Mutex::new(HashMap::new())),
                 computed: Arc::new(AtomicU64::new(0)),
             },
             prefetching: Mutex::new(JoinSet::new()),
@@ -530,6 +535,10 @@ impl Fields {
     /// inside the flight, has a permit of the bound of passes as `turn` says, then computes the
     /// field as one bulk job, which holds the permit, and keeps it. A flight joined, or one that
     /// finds the field held, drops a permit `turn` brings, which frees it.
+    ///
+    /// A prefetched pass's job waits in the background queue under a promotion registered for
+    /// `key` while its flight lives. An asked flight raises the promotion registered for its key,
+    /// so that a prefetched pass it joins, still queued, moves to the bulk queue (R09.T17).
     fn flight(
         self,
         key: FieldKey,
@@ -544,10 +553,16 @@ impl Fields {
             passes,
             bound: _,
             released,
+            promotions,
             computed,
         } = self;
         let system = Arc::clone(system);
-        flights.run(key, move || async move {
+        // Registered before the flight exists, so that no asked request can join it unseen; a
+        // flight that joins another drops it at once, which removes it.
+        let registered =
+            matches!(turn, Turn::Prefetched(_)).then(|| Registered::new(&promotions, key));
+        let asked_pool = matches!(turn, Turn::Asked).then(|| Arc::clone(&pool));
+        let flight = flights.run(key, move || async move {
             // As in `SkyTablesService::flight`: a caller can arrive just after another flight has
             // finished and left the registry, and the field it computed is worth more than a
             // second pass. The look is counted, since `SharedByteLru` has no uncounted lookup.
@@ -576,7 +591,7 @@ impl Fields {
                 ),
                 Turn::Prefetched(permit) => (permit, Priority::Background),
             };
-            let (field, pass) = queued(&pool, priority, &token, move |_: &CancelToken| {
+            let job = move |_: &CancelToken| {
                 // The job holds the permit, not the flight, so that it is freed when the job ends
                 // however it ends: run to its end, or panicked (dropped as the pool's
                 // `catch_unwind` unwinds), or dropped unrun (cancelled, refused, or with the pool).
@@ -585,9 +600,14 @@ impl Fields {
                 let _permit = permit;
                 let started = Instant::now();
                 compute(source.as_ref(), key, &system).map(|field| (field, started.elapsed()))
-            })
-            .await
-            .inspect_err(|error| log_refusal(key, *error))??;
+            };
+            let done = match &registered {
+                Some(registered) => {
+                    promotable(&pool, registered.promotion.clone(), &token, job).await
+                }
+                None => queued(&pool, priority, &token, job).await,
+            };
+            let (field, pass) = done.inspect_err(|error| log_refusal(key, *error))??;
             let field = Arc::new(field);
             computed.fetch_add(1, Ordering::Relaxed);
             tracing::info!(
@@ -604,7 +624,49 @@ impl Fields {
             // either way.
             drop(held.insert(key, Arc::clone(&field)));
             Ok(field)
-        })
+        });
+        if let Some(pool) = asked_pool {
+            let registered = lock(&promotions).get(&key).cloned();
+            if let Some(promotion) = registered {
+                pool.promote(&promotion);
+            }
+        }
+        flight
+    }
+}
+
+/// A prefetched flight's promotion, registered under its key in [`Fields::promotions`] while it
+/// lives, and removed when it is dropped, with the flight or in place of one that joins another.
+struct Registered {
+    promotions: Arc<Mutex<HashMap<FieldKey, Promotion>>>,
+    key: FieldKey,
+    promotion: Promotion,
+}
+
+impl Registered {
+    /// Registers a new promotion under `key` in `promotions`.
+    #[must_use]
+    fn new(promotions: &Arc<Mutex<HashMap<FieldKey, Promotion>>>, key: FieldKey) -> Self {
+        let promotion = Promotion::new();
+        lock(promotions).insert(key, promotion.clone());
+        Self {
+            promotions: Arc::clone(promotions),
+            key,
+            promotion,
+        }
+    }
+}
+
+impl Drop for Registered {
+    /// Removes the promotion, unless another flight's has taken its key since.
+    fn drop(&mut self) {
+        let mut promotions = lock(&self.promotions);
+        if promotions
+            .get(&self.key)
+            .is_some_and(|held| held.same_as(&self.promotion))
+        {
+            promotions.remove(&self.key);
+        }
     }
 }
 
@@ -2357,6 +2419,84 @@ mod tests {
         timeout(WAIT, asking).await.unwrap().unwrap().unwrap();
         until("the prefetched pass runs", || source.entered(order[2]) == 2).await;
         drop(prefetch);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// With every worker busy, an asked request that joins a prefetched pass still queued moves
+    /// that pass to the bulk queue: the first worker freed takes it before a bulk job queued after
+    /// the ask, which would otherwise run first, the pass waiting in the background queue
+    /// (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn an_asked_request_joining_a_queued_prefetched_pass_promotes_it_with_every_worker_busy()
+    {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "a prefetched pass runs and the next waits in the background queue",
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
+        )
+        .await;
+        let joined = order[2];
+        let asking = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(joined, &crowded().0).await })
+        };
+        until("the joined pass is promoted", || {
+            let counters = pool.counters();
+            (counters.queued_bulk(), counters.queued_background()) == (1, 0)
+        })
+        .await;
+        let after = Arc::new(AtomicUsize::new(0));
+        let later = {
+            let after = Arc::clone(&after);
+            pool.submit(
+                Priority::Bulk,
+                CancelToken::new(),
+                move |_: &CancelToken| {
+                    after.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .await
+            .unwrap()
+        };
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the joined pass runs", || source.entered(joined) == 2).await;
+        assert_eq!(
+            (after.load(Ordering::SeqCst), pool.counters().queued_bulk()),
+            (0, 1),
+            "the bulk job queued after the ask still waits"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        timeout(WAIT, asking).await.unwrap().unwrap().unwrap();
+        timeout(WAIT, later).await.unwrap().unwrap().unwrap();
+        drop(prefetch);
+        until("the prefetch's passes end", || {
+            service.fields.flights.is_empty() && pool.counters().running() == 0
+        })
+        .await;
+        assert!(lock(&service.fields.promotions).is_empty());
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 

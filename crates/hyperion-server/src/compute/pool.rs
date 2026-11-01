@@ -15,7 +15,9 @@
 //! - [`Priority::Background`]: work started before anyone asks, the surface prefetch's plans and
 //!   passes (rendering plan R09, R09.T17), taken only when neither other queue holds a job, so
 //!   that an asked pass queued after a prefetched one is taken first. It is as deep as the bulk
-//!   queue, and a submission waits for a slot.
+//!   queue, and a submission waits for a slot. A job queued with a [`Promotion`] moves to the back
+//!   of the bulk queue when the promotion is raised ([`CpuPool::promote`]), as an asked request
+//!   that joins a prefetched pass raises it, or goes there at once if it was raised first.
 //!
 //! Each queue is bounded by a [`Semaphore`]. A job holds a permit while it waits, and the permit
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs
@@ -38,6 +40,7 @@ use std::fmt;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -467,6 +470,55 @@ impl CpuPool {
         self.enqueue(priority, permit, token, job)
     }
 
+    /// Queues `job` in the background queue, waiting for room there, to be moved to the back of
+    /// the bulk queue when `promotion` is raised ([`promote`](Self::promote)), or queued there at
+    /// once if it was raised already.
+    ///
+    /// Cancellation-safe: if this future is dropped while it waits, nothing is queued.
+    ///
+    /// # Errors
+    ///
+    /// As [`submit`](Self::submit).
+    pub async fn submit_promotable<F, T>(
+        &self,
+        promotion: Promotion,
+        token: CancelToken,
+        job: F,
+    ) -> Result<JobReceiver<T>, SubmitJobError>
+    where
+        F: FnOnce(&CancelToken) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        if self.shared.is_faulted() {
+            return Err(SubmitJobError::Faulted);
+        }
+        let permit = Arc::clone(self.semaphore(Priority::Background))
+            .acquire_owned()
+            .await
+            .map_err(|_| SubmitJobError::ShutDown)?;
+        self.queue(Priority::Background, permit, token, Some(promotion), job)
+    }
+
+    /// Raises `promotion`: the background job queued with it moves to the back of the bulk queue,
+    /// to be taken as the bulk jobs queued before it are, and one queued with it later goes there
+    /// at once. A job a worker has taken already, or one never queued, is left as it is.
+    ///
+    /// The job keeps the background queue's place it holds until a worker takes it, so the bulk
+    /// queue may hold one job more than its depth for each promoted.
+    pub fn promote(&self, promotion: &Promotion) {
+        promotion.raised.store(true, AtomicOrdering::SeqCst);
+        let mut state = self.shared.lock();
+        let held = state
+            .background
+            .iter()
+            .position(|queued| queued.is_raised_by(promotion));
+        if let Some(mut queued) = held.and_then(|at| state.background.remove(at)) {
+            queued.priority = Priority::Bulk;
+            state.bulk.push_back(queued);
+            state.refresh_depths();
+        }
+    }
+
     /// Queues `job`, waiting for room in its queue.
     ///
     /// Cancellation-safe: if this future is dropped while it waits, nothing is queued.
@@ -562,10 +614,29 @@ impl CpuPool {
         F: FnOnce(&CancelToken) -> T + Send + 'static,
         T: Send + 'static,
     {
+        self.queue(priority, permit, token, None, job)
+    }
+
+    /// Queues `job` at `priority`, or in the bulk queue for a background job whose `promotion` is
+    /// raised, the flag read under the queues' lock so that [`promote`](Self::promote) either finds
+    /// the job queued or has raised the flag first.
+    fn queue<F, T>(
+        &self,
+        priority: Priority,
+        permit: OwnedSemaphorePermit,
+        token: CancelToken,
+        promotion: Option<Promotion>,
+        job: F,
+    ) -> Result<JobReceiver<T>, SubmitJobError>
+    where
+        F: FnOnce(&CancelToken) -> T + Send + 'static,
+        T: Send + 'static,
+    {
         let (sender, receiver) = oneshot::channel();
-        let queued = Queued {
+        let mut queued = Queued {
             permit,
             priority,
+            promotion,
             enqueued: Instant::now(),
             job: Box::new(Job {
                 token,
@@ -580,9 +651,17 @@ impl CpuPool {
             } else if state.stopping {
                 Some((queued, SubmitJobError::ShutDown))
             } else {
+                let raised = queued
+                    .promotion
+                    .as_ref()
+                    .is_some_and(|promotion| promotion.raised.load(AtomicOrdering::SeqCst));
                 match priority {
                     Priority::Interactive => state.interactive.push_back(queued),
                     Priority::Bulk => state.bulk.push_back(queued),
+                    Priority::Background if raised => {
+                        queued.priority = Priority::Bulk;
+                        state.bulk.push_back(queued);
+                    }
                     Priority::Background => state.background.push_back(queued),
                 }
                 state.refresh_depths();
@@ -887,8 +966,47 @@ enum Release {
 struct Queued {
     permit: OwnedSemaphorePermit,
     priority: Priority,
+    /// What moves a background job to the bulk queue ([`CpuPool::promote`]).
+    promotion: Option<Promotion>,
     enqueued: Instant,
     job: Box<dyn Runnable>,
+}
+
+impl Queued {
+    /// Whether this job was queued with `promotion`.
+    #[must_use]
+    fn is_raised_by(&self, promotion: &Promotion) -> bool {
+        self.promotion
+            .as_ref()
+            .is_some_and(|held| held.same_as(promotion))
+    }
+}
+
+/// A background job's claim to the bulk queue ([`CpuPool::submit_promotable`],
+/// [`CpuPool::promote`]): raised once, and never lowered. Clones are one promotion.
+#[derive(Debug, Clone, Default)]
+pub struct Promotion {
+    raised: Arc<AtomicBool>,
+}
+
+impl Promotion {
+    /// A promotion not yet raised.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether it has been raised.
+    #[must_use]
+    pub fn is_raised(&self) -> bool {
+        self.raised.load(AtomicOrdering::SeqCst)
+    }
+
+    /// Whether `other` is this promotion, or a clone of it.
+    #[must_use]
+    pub fn same_as(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.raised, &other.raised)
+    }
 }
 
 impl fmt::Debug for Queued {
@@ -1001,6 +1119,7 @@ fn work(shared: &Shared) {
         Queued {
             permit,
             priority,
+            promotion: _,
             enqueued,
             job,
         },
@@ -1232,6 +1351,84 @@ mod tests {
             *log.lock().unwrap(),
             ["interactive", "bulk", "background 1", "background 2"]
         );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A promoted background job moves to the back of the bulk queue: taken after the bulk jobs
+    /// queued before its promotion and before those queued after it, and before the background
+    /// jobs queued beside it (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn a_promoted_background_job_is_taken_as_a_bulk_job_queued_then() {
+        let pool = pool(1, 4, 4);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let held = hold(&pool).await;
+        let promotion = Promotion::new();
+        let mut receivers = vec![
+            pool.submit_promotable(
+                promotion.clone(),
+                CancelToken::new(),
+                record(&log, "promoted"),
+            )
+            .await
+            .unwrap(),
+        ];
+        for (priority, label) in [
+            (Priority::Background, "background"),
+            (Priority::Bulk, "bulk before"),
+        ] {
+            let job = record(&log, label);
+            receivers.push(
+                pool.submit(priority, CancelToken::new(), job)
+                    .await
+                    .unwrap(),
+            );
+        }
+        assert!(!promotion.is_raised());
+        pool.promote(&promotion);
+        assert!(promotion.is_raised());
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_bulk(), counters.queued_background()),
+            (2, 1)
+        );
+        let job = record(&log, "bulk after");
+        receivers.push(
+            pool.submit(Priority::Bulk, CancelToken::new(), job)
+                .await
+                .unwrap(),
+        );
+        held.release().await;
+        for receiver in receivers {
+            assert_eq!(result(receiver).await, Ok(()));
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["bulk before", "promoted", "bulk after", "background"]
+        );
+        // Raised again with its job done, it moves nothing.
+        pool.promote(&promotion);
+        assert_eq!(pool.counters().queued_bulk(), 0);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A promotion raised before its job is queued queues the job in the bulk queue at once.
+    #[tokio::test]
+    async fn a_promotion_raised_first_queues_its_job_in_the_bulk_queue() {
+        let pool = pool(1, 4, 4);
+        let held = hold(&pool).await;
+        let promotion = Promotion::new();
+        pool.promote(&promotion);
+        let receiver = pool
+            .submit_promotable(promotion, CancelToken::new(), |_| "promoted")
+            .await
+            .unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_bulk(), counters.queued_background()),
+            (1, 0)
+        );
+        held.release().await;
+        assert_eq!(result(receiver).await, Ok("promoted"));
         pool.shutdown().await.unwrap();
     }
 

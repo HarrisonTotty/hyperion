@@ -74,7 +74,7 @@ pub use global_list::{
 pub use global_list::{GlobalListService, HeldGlobalList};
 pub use key::GalaxyKey;
 pub use pool::{
-    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError,
+    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, Promotion, ShutDownPoolError,
     StartPoolError, SubmitJobError,
 };
 pub use range::{RangeCaches, ServedQuery, served_range_query};
