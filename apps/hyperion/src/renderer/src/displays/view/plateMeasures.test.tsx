@@ -15,10 +15,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   measureLowerForms,
+  measurePage,
   measureRoom,
   measureUpperPlate,
   NOT_MEASURED,
+  PAGE_NOT_MEASURED,
+  type PageMeasures,
   type RoomMeasures,
+  samePageMeasures,
   sameRoomMeasures,
 } from "./plateMeasures";
 import type { PlateMeasures, StageRoom } from "./viewRoom";
@@ -486,5 +490,134 @@ describe("two measures of the room alike (R10.T12.b)", () => {
 
   it("counts the same plates first measured at a stage as changed", () => {
     expect(sameRoomMeasures(takenAt(null), takenAt(STAGE))).toBe(false);
+  });
+});
+
+/**
+ * A side column laid out as the tests give it: the `Targets` panel `targetsPx` tall over its 160 px
+ * least height, its head `headPx` and its list the rest (or `listPx`) over its 104 px least, a panel
+ * stretched past them left empty under them, then the `GROUND` page's plate `platePx`
+ * tall, the column's box and content `clientPx` and `scrollPx`, and the page's forms 220, 120 and
+ * 60 px tall; in the compact layout's side, its column dissolved, where `compact`.
+ */
+function sideColumn({
+  targetsPx = 300,
+  headPx = 100,
+  listPx,
+  platePx = 250,
+  clientPx = 0,
+  scrollPx = 0,
+  compact = false,
+}: {
+  readonly targetsPx?: number;
+  readonly headPx?: number;
+  readonly listPx?: number;
+  readonly platePx?: number;
+  readonly clientPx?: number;
+  readonly scrollPx?: number;
+  readonly compact?: boolean;
+} = {}): {
+  readonly targets: HTMLElement;
+  readonly plate: HTMLElement;
+  readonly sizer: HTMLElement;
+} {
+  const side = laidOutPlate(
+    <div data-client-px={compact ? clientPx : 0} data-scroll-px={compact ? scrollPx : 0}>
+      <div
+        className="column"
+        style={compact ? { display: "contents" } : undefined}
+        data-client-px={compact ? 0 : clientPx}
+        data-scroll-px={compact ? 0 : scrollPx}
+      >
+        <section className="targets" data-px={targetsPx} style={{ minHeight: "160px" }}>
+          <p data-px={headPx} />
+          <div
+            className="view-list"
+            data-px={listPx ?? targetsPx - headPx}
+            style={{ minHeight: "104px" }}
+          />
+        </section>
+        <div className="plate" data-px={platePx} />
+        <div className="sizer">
+          <div data-form="whole">
+            <div className="view-label" data-px="220" />
+          </div>
+          <div data-form="readout">
+            <div className="view-label" data-px="120" />
+          </div>
+          <div data-form="survey">
+            <div className="view-label" data-px="60" />
+          </div>
+        </div>
+      </div>
+    </div>,
+  );
+  const find = (selector: string): HTMLElement => {
+    const found = side.querySelector(selector);
+    if (!(found instanceof HTMLElement)) {
+      throw new Error(`no ${selector} is laid out`);
+    }
+    return found;
+  };
+  return { targets: find(".targets"), plate: find(".plate"), sizer: find(".sizer") };
+}
+
+describe("an instrument's GROUND page as laid out (R10.T12.d)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads its forms' heights from their copies", () => {
+    const { targets, plate, sizer } = sideColumn();
+    expect(measurePage({ plate, sizer, targets }).lower).toEqual({
+      wholePx: 220,
+      readoutYieldedPx: 120,
+      surveyYieldedPx: 60,
+      passing: [],
+    });
+  });
+
+  it("reckons its room as its plate's height and what the list can still give", () => {
+    const { targets, plate, sizer } = sideColumn();
+    // The list's floor: 300 less its 200 px, with its 104 px least, 204 px; it can give 96 px.
+    expect(measurePage({ plate, sizer, targets }).roomPx).toBe(250 + 96);
+  });
+
+  it("counts the empty height of a panel stretched past its short list as given up too", () => {
+    const { targets, plate, sizer } = sideColumn({ targetsPx: 547, headPx: 24, listPx: 129.5 });
+    // Its content, 24 and 129.5 px; with the list at its 104 px least, 128 px, under the panel's
+    // 160 px least: it can give 387 px, the 393.5 px it was stretched past its content among them.
+    expect(measurePage({ plate, sizer, targets }).roomPx).toBe(250 + 387);
+  });
+
+  it("takes the panel's own least height where that is the higher floor", () => {
+    const { targets, plate, sizer } = sideColumn({ targetsPx: 180 });
+    // The list's floor, 180 less 80 with its 104 px least, 204 px, passes the panel's height:
+    // nothing more to give, whatever the panel's 160 px least.
+    expect(measurePage({ plate, sizer, targets }).roomPx).toBe(250);
+  });
+
+  it("leaves out what the column already runs past its box", () => {
+    const { targets, plate, sizer } = sideColumn({ clientPx: 500, scrollPx: 520 });
+    expect(measurePage({ plate, sizer, targets }).roomPx).toBe(250 + 96 - 20);
+  });
+
+  it("reads the compact layout's side as the box, its column dissolved", () => {
+    const { targets, plate, sizer } = sideColumn({ clientPx: 500, scrollPx: 530, compact: true });
+    expect(measurePage({ plate, sizer, targets }).roomPx).toBe(250 + 96 - 30);
+  });
+
+  it("reckons no room before its plate is laid out", () => {
+    const { targets, sizer } = sideColumn();
+    expect(measurePage({ plate: null, sizer, targets }).roomPx).toBeNull();
+  });
+
+  it("counts two measures within a twentieth of a pixel the same", () => {
+    const a: PageMeasures = { lower: null, roomPx: 300, remPx: 16 };
+    expect([
+      samePageMeasures(a, { ...a, roomPx: 300.04 }),
+      samePageMeasures(a, { ...a, roomPx: 300.1 }),
+      samePageMeasures(PAGE_NOT_MEASURED, PAGE_NOT_MEASURED),
+    ]).toEqual([true, false, true]);
   });
 });

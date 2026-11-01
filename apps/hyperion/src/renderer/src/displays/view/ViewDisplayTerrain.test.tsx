@@ -1074,7 +1074,7 @@ describe("the primary's terrain lines on its lower plate (R10.T12; decision-r10-
       slope: readingIn(plate(), "SLOPE")?.trim(),
     }).toEqual({
       elevation: `~2140 m${NO_BREAK_SPACE}±${NO_BREAK_SPACE}180 m Sstale`,
-      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° Sstale · BASELINE 2 m`,
+      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° Sstale · BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
     });
   });
 
@@ -1293,7 +1293,7 @@ describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decisi
     }).toEqual({
       before: [2],
       after: [5],
-      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
+      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE${NO_BREAK_SPACE}5${NO_BREAK_SPACE}m`,
       pressed: "5 m",
     });
   });
@@ -1334,27 +1334,205 @@ describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decisi
     await settle();
     view.advance(32);
     expect(readingIn(plate(), "SLOPE")?.trim()).toBe(
-      `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
+      `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE${NO_BREAK_SPACE}5${NO_BREAK_SPACE}m`,
     );
   });
 
-  it("leaves the row out with INSTRUMENT 1 as the CONTROLS view, and stands it again with its choice kept", async () => {
+  it("stands the row with INSTRUMENT 1 as the CONTROLS view, at the instrument's own 2 m (R10.T12.d)", async () => {
     const view = await terrainTestReading();
     const style = screen.getByRole("region", { name: "Style PRIMARY" });
     await view.user.click(within(style).getByRole("button", { name: "100 m" }));
     await openInstrument(view, "INSTRUMENT 1");
     await view.user.click(within(controlsRow()).getByRole("button", { name: "INSTRUMENT 1" }));
     view.advance(300);
-    const onInstrument = {
-      style: screen.queryByRole("region", { name: "Style INSTRUMENT 1" }) !== null,
-      row: baselineRow(),
-    };
+    const row = within(screen.getByRole("region", { name: "Style INSTRUMENT 1" })).getByRole(
+      "group",
+      { name: "BASELINE" },
+    );
+    expect(within(row).getByRole("button", { pressed: true }).textContent).toBe("2 m");
+  });
+
+  it("keeps the primary's choice while an instrument's is set, each view its own (R10.T12.d)", async () => {
+    const view = await terrainTestReading();
+    const primaryStyle = screen.getByRole("region", { name: "Style PRIMARY" });
+    await view.user.click(within(primaryStyle).getByRole("button", { name: "100 m" }));
+    await openInstrument(view, "INSTRUMENT 1");
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "INSTRUMENT 1" }));
+    view.advance(300);
+    const instrumentStyle = screen.getByRole("region", { name: "Style INSTRUMENT 1" });
+    await view.user.click(within(instrumentStyle).getByRole("button", { name: "5 m" }));
     await view.user.click(within(controlsRow()).getByRole("button", { name: "PRIMARY" }));
     view.advance(300);
-    expect({
-      onInstrument,
-      back: pressedBaseline(),
-    }).toEqual({ onInstrument: { style: true, row: null }, back: "100 m" });
+    const back = pressedBaseline();
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "INSTRUMENT 1" }));
+    view.advance(300);
+    expect([back, pressedBaseline()]).toEqual(["100 m", "5 m"]);
+  });
+});
+
+/** The camera panel's place's tabs while `CONTROLS` names `INSTRUMENT 1` (R10.T12.d). */
+function placeTabs(): HTMLElement {
+  return screen.getByRole("tablist", { name: "Place INSTRUMENT 1" });
+}
+
+/** Which of the place's tabs is selected, by its name. */
+function selectedTab(): string | null {
+  return within(placeTabs()).getByRole("tab", { selected: true }).textContent;
+}
+
+/** `INSTRUMENT 1`'s `GROUND` page, or `null` while it does not stand. */
+function groundPage(): HTMLElement | null {
+  return screen.queryByRole("region", { name: "Ground INSTRUMENT 1" });
+}
+
+/** The `GROUND` page's live plate, its forms' hidden copies apart, which a test expects to stand. */
+function pagePlate(): HTMLElement {
+  const live = groundPage()?.querySelector('[role="tabpanel"] > .view-label');
+  if (!(live instanceof HTMLElement)) {
+    throw new Error("the GROUND page does not stand");
+  }
+  return live;
+}
+
+/** `INSTRUMENT 1` as the `CONTROLS` view on `TERRAIN TEST`, its `GROUND` page pressed and read. */
+async function onGround(): Promise<ViewDisplayHarness> {
+  const view = await terrainTestReading();
+  await controlInstrument(view);
+  await view.user.click(within(placeTabs()).getByRole("tab", { name: "GROUND" }));
+  await readFor(view, 4);
+  return view;
+}
+
+/** `INSTRUMENT 1`'s list note of the terrain readout's point, or `null`. */
+function instrumentGroundNote(): HTMLElement | null {
+  return within(screen.getByRole("region", { name: "Targets INSTRUMENT 1" })).queryByRole("note", {
+    name: GROUND_NOTE_NAME,
+  });
+}
+
+describe("an instrument's GROUND page in the camera panel's place (R10.T12.d; draft D2)", () => {
+  it("selects CAMERA as the display mounts", async () => {
+    const view = await terrainTestReading();
+    await controlInstrument(view);
+    expect(selectedTab()).toBe("CAMERA");
+  });
+
+  it("states the instrument's survey line, DATUM and readout on its GROUND page", async () => {
+    await onGround();
+    expect([
+      readingIn(pagePlate(), "SURVEY COVERAGE") !== null,
+      readingIn(pagePlate(), "DATUM") !== null,
+      within(pagePlate()).getByText("GROUND AT LINE OF SIGHT").textContent,
+    ]).toEqual([true, true, "GROUND AT LINE OF SIGHT"]);
+  });
+
+  it("stands the GROUND page in the camera panel's place, the camera panel gone", async () => {
+    await onGround();
+    expect(screen.queryByRole("region", { name: "Camera INSTRUMENT 1" })).toBeNull();
+  });
+
+  it("keeps GROUND chosen across a change of CONTROLS", async () => {
+    const view = await onGround();
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "PRIMARY" }));
+    view.advance(300);
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "INSTRUMENT 1" }));
+    view.advance(300);
+    expect(selectedTab()).toBe("GROUND");
+  });
+
+  it("asks the instrument's readout only while its GROUND page shows", async () => {
+    const view = await terrainTestReading();
+    await controlInstrument(view);
+    const onCamera = await readFor(view, 4);
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "GROUND" }));
+    await readFor(view, 2);
+    const onPage = await readFor(view, 4);
+    expect(onPage).toBeGreaterThan(onCamera);
+  });
+
+  it("draws the instrument's tripod only while its GROUND page states the readout", async () => {
+    const view = await terrainTestReading();
+    await controlInstrument(view);
+    const onCamera = sightsOver(view, 600).instruments;
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "GROUND" }));
+    await readFor(view, 4);
+    const onPage = sightsOver(view, 600).instruments;
+    expect([
+      onCamera.length > 0 && onCamera.every((point) => point === undefined),
+      onPage.some((point) => point !== undefined),
+    ]).toEqual([true, true]);
+  });
+
+  it("notes the readout in the instrument's list only while its GROUND page states it", async () => {
+    const view = await terrainTestReading();
+    await controlInstrument(view);
+    await readFor(view, 4);
+    const onCamera = instrumentGroundNote();
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "GROUND" }));
+    await readFor(view, 4);
+    expect([onCamera, instrumentGroundNote() !== null]).toEqual([null, true]);
+  });
+
+  it("stops asking the instrument's readout once CONTROLS returns to PRIMARY", async () => {
+    const view = await onGround();
+    const onPage = await readFor(view, 4);
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "PRIMARY" }));
+    await readFor(view, 2);
+    expect(await readFor(view, 4)).toBeLessThan(onPage);
+  });
+
+  it("draws no instrument tripod once CONTROLS returns to PRIMARY", async () => {
+    const view = await onGround();
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "PRIMARY" }));
+    await readFor(view, 2);
+    const points = sightsOver(view, 600).instruments;
+    expect(points.length > 0 && points.every((point) => point === undefined)).toBe(true);
+  });
+
+  it("stops asking the instrument's readout once CAMERA is chosen again", async () => {
+    const view = await onGround();
+    const onPage = await readFor(view, 4);
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "CAMERA" }));
+    await readFor(view, 2);
+    expect(await readFor(view, 4)).toBeLessThan(onPage);
+  });
+
+  it("draws no instrument tripod once CAMERA is chosen again", async () => {
+    const view = await onGround();
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "CAMERA" }));
+    await readFor(view, 2);
+    const points = sightsOver(view, 600).instruments;
+    expect(points.length > 0 && points.every((point) => point === undefined)).toBe(true);
+  });
+
+  it("takes the readout's note out of the instrument's list once CAMERA is chosen again", async () => {
+    const view = await onGround();
+    await view.user.click(within(placeTabs()).getByRole("tab", { name: "CAMERA" }));
+    await readFor(view, 2);
+    expect(instrumentGroundNote()).toBeNull();
+  });
+
+  it("stops asking the instrument's readout once the instrument closes", async () => {
+    const view = await onGround();
+    const onPage = await readFor(view, 4);
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "CLOSE",
+      }),
+    );
+    await readFor(view, 2);
+    expect(await readFor(view, 4)).toBeLessThan(onPage);
+  });
+
+  it("reads the page's SLOPE over the instrument's own BASELINE, the primary's kept", async () => {
+    const view = await onGround();
+    const style = screen.getByRole("region", { name: "Style INSTRUMENT 1" });
+    await view.user.click(within(style).getByRole("button", { name: "5 m" }));
+    await readAtBaselinesFor(view, 4);
+    expect([readingIn(pagePlate(), "SLOPE")?.trim(), readingIn(plate(), "SLOPE")?.trim()]).toEqual([
+      `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE${NO_BREAK_SPACE}5${NO_BREAK_SPACE}m`,
+      `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
+    ]);
   });
 });
 

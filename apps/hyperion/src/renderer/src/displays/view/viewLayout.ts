@@ -46,12 +46,18 @@ export const FULL_MIN_WIDTH_REM = 99;
  * 425.5 px, its `AUTO NOT AVAILABLE: NO LIT SIDE` (or `NO DARK SIDE`, or `STAR DISC ONLY`) on two
  * lines and `INHIBIT` held back beside its three-line reason, since P05.T13 tracks their states;
  * the meter with its status in the reading's place, 168 px; and two gaps. 792 px is 49.5 rem.
- * - **The `BASELINE` row** (R10.T12.a) stands while the `PRIMARY` view is the `CONTROLS` view, so
- *   that with an instrument there, whose `QUALITY LOW` refusal is the other two-line one, the
- *   column is 752 px, 47 rem, as it was before the row. The row is 17.42 rem wide against the
- *   panel's 18.375 rem of content (B612's shipped metrics, no kerning, so it errs wide); were its
- *   buttons ever to wrap under its legend, the column would be 824 px, 51.5 rem, still within the
- *   bound.
+ * - **The `BASELINE` row** (R10.T12.a) stands for the `CONTROLS` view, the `PRIMARY` view or,
+ *   since R10.T12.d, an instrument on its `GROUND` page or not, so that with an instrument there,
+ *   whose `QUALITY LOW` refusal is the other two-line one, the column is 792 px too, 49.5 rem; it
+ *   was 752 px there before R10.T12.d. The row is 17.42 rem wide against the panel's 18.375 rem of
+ *   content (B612's shipped metrics, no kerning, so it errs wide); were its buttons ever to wrap
+ *   under its legend, the column would be 824 px, 51.5 rem, still within the bound.
+ * - **The `GRID` row** (the owner's request, 2026-10-31), 32 px under its 0.5 rem margin, stands
+ *   only while the photorealistic style is asked for and offered, so never beside the style's
+ *   reason (R10.T12.d's lean): the panel's tallest stays the reason with `BASELINE`, 182.5 px, the
+ *   `GRID` row with `BASELINE` 179.5 px. Beside the reason it would have made the column 832 px.
+ * - **The `GROUND` page** (R10.T12.d) stands in the camera panel's place in the first column, which
+ *   it never makes taller: its parts give way, with the list at its floor, before it would.
  * - **Before.** 752 px, 47 rem, before R10.T12.a; 731.5 px (45.75 rem) before P05.T13, the
  *   exposure then 365 px beside a two-line reason with the meter's `METERED`, which that state now
  *   reaches at 749 px.

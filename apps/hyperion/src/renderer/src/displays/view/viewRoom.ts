@@ -502,8 +502,13 @@ function bodyScrollAt(
   return { step: 6, upper: { kind: "body", heightPx } };
 }
 
-/** The lower plate's step in columns: the least that holds it in `roomPx`, a return with a line spare. */
-function lowerStepIn(
+/**
+ * How far the lower plate's parts give way standing alone in `roomPx`, px: the least step that holds
+ * them, a return to a step below `previousStep` only with a line (`sparePx`) to spare, and never
+ * below the width test's ({@link leastStepOf}); the furthest where none holds them. The plates in
+ * columns (R10.T12.c) and an instrument's `GROUND` page (R10.T12.d) give way by it.
+ */
+export function lowerStepIn(
   lower: LowerPlateMeasures | null,
   roomPx: number,
   sparePx: number,

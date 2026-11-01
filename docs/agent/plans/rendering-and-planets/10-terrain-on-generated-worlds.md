@@ -3010,13 +3010,50 @@ src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/ren
   - _Built 2026-10-31_ (lane `r10-t12c`, ahead of T15.b's served look; the plates in columns at the
     floor; guide rows C1–C4 built to drafts, pending the owner's sign-off: the record).
 
-- **R10.T12.d The instruments' ground readings** (new; after R10.T12.c; decision-r10-t12a-scope
-  §7 item 1; its scope ruled when T12.c lands, from T12.c's measured plates). Where an instrument's
-  survey line, `DATUM`, readout, tripod and note stand; an instrument whose `FRAME` body is not the
-  primary's; an instrument in a window of its own; and the `BASELINE` row following `CONTROLS` onto
-  an instrument (decision-r10-t12a-scope §2.1). The candidates: the side column while `CONTROLS`
-  names the instrument, a slot reckoned at the readout's tallest, or a window of its own. Until
-  then the guide's G3 stands: an instrument in its slot states none.
+- **R10.T12.d The instruments' ground readings, on a `GROUND` page** (new; after R10.T12.c;
+  decision-r10-t12a-scope §2.1 and §7 item 1; scope ruled from T12.c's measured plates by
+  research-leans-11 §3, 2026-10-31: the side column, the only form that fits every named size).
+  Client-only: no wire, payload, golden or version moves.
+  Records: [10-terrain-on-generated-worlds/records/R10.T12.d.md](10-terrain-on-generated-worlds/records/R10.T12.d.md).
+  - _Scope._ While `CONTROLS` names an instrument, its survey line, `DATUM`, readout, tripod and
+    note stand on a `GROUND` page in the camera panel's place, in both layouts; the slot keeps its
+    size and states none.
+    1. _The tabs._ `CAMERA` and `GROUND` head the place with the designator: display controls,
+       pressed and underlined as the `STYLE` buttons are, unless ux-reviewer rules otherwise (it
+       ruled a tab list: the record). `CAMERA` stands at mount; the choice is
+       the display's, kept in `ViewPanels`. In the compact layout they sit at the panel's top edge,
+       with no block padding above them or the presets.
+    2. _The page._ The lower plate's parts (`terrainLowerParts`, `SurveyLine`, `TerrainReadout`,
+       `TerrainReading`) for the instrument's own `FRAME` body, giving way and returning as the
+       lower plate's do, reckoned at their tallest against the place with the list at its floor.
+       `GROUND` is held back, with its reason, while the instrument states no body's terrain.
+    3. _The readout._ A `GroundReadouts` for the instrument's view, published only while its page
+       shows; its `lineOfSightPoint` to the instrument's frame drawer, its note to its `Targets`
+       list. Let go when `CONTROLS` moves, a tab or fold hides the page, or the slot goes.
+    4. _`BASELINE` follows `CONTROLS`._ Each view keeps its own, `2 m` at mount or when the
+       instrument opens, with T12.c's ask at once per view. `FULL_MIN_HEIGHT_REM` stays 49.5 rem.
+  - _Out._ An instrument in a window of its own (none exists); the slots' size and the room's
+    order; a nearer body on the line of sight (§7 item 3); T12.c's C1–C4.
+  - _Files._ In `displays/view/`: `InstrumentControls.tsx`, `CameraControls.tsx` (its head), a new
+    `GroundPage.tsx`, `ViewDisplay.tsx`, `useInstruments.ts`, `StyleControl.tsx`, `viewLayout.ts`,
+    `viewRoom.ts`, `plateMeasures.ts`, `ViewRoomSizers.tsx`; `styles.css`; the tests.
+  - _Tests_ (Vitest and Testing Library): the tabs, `CAMERA` at mount, the choice kept across
+    `CONTROLS`, the tab order; the page for the primary's body and another's, under its states;
+    `GROUND` held back; the query, the tripod point and the note only while the page shows; the
+    `BASELINE` row with an instrument as `CONTROLS`, each view's own; the page's give-way and
+    return; the full layout's least height and its bound; the console-ux checks. By arithmetic,
+    in the record: the page's rows and the place's heights at 1920 × 1080 at 100%, 125% and 150%
+    and at 1280 × 720 at 100%. By hand, hidden, in the software mode: `TERRAIN TEST` in `SEAT`
+    with `INSTRUMENT 1` as `CONTROLS` on `GROUND`, then both slots, in both styles, at those
+    sizes; stop at the floor if the camera page with its tabs leaves under 8 px.
+  - _The guide._ D1–D5 (research-leans-11), and D6, the `GRID` row (the lane's), built to as
+    drafts for the owner's sign-off.
+  - _Acceptance._
+    `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view src/renderer/src/view/terrain`
+    and `just test-render`.
+  - _Built 2026-10-31_ (lane `r10-t12d`, over the owner's view nits; the page stands whole at every
+    named size for `TERRAIN TEST`, the camera page fits at the floor; guide rows D1–D5, and D6 for
+    the `GRID` row, built to drafts, pending the owner's sign-off: the record).
 
 #### The drafts, for the owner
 

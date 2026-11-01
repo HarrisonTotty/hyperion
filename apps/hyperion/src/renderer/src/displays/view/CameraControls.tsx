@@ -21,6 +21,12 @@ export interface CameraControlsProps {
    * `INSTRUMENT 1`; R07.T19), or none.
    */
   readonly designator?: string | undefined;
+  /**
+   * Whether the controls stand bare, with no panel or title row of their own: as the body of the
+   * camera panel's place while `CONTROLS` names an instrument, whose panel and tabs stay mounted as
+   * its pages change (`PlacePanel`; plan R10, R10.T12.d).
+   */
+  readonly bare?: boolean | undefined;
   readonly preset: CameraPreset;
   /** The presets the scene offers: `FREE` alone where it has no own ship. */
   readonly offered: ReadonlyArray<CameraPreset>;
@@ -123,6 +129,7 @@ export function CameraControls({
   onAction,
   onEasedMovesChange,
   designator,
+  bare = false,
   id,
   hidden,
 }: CameraControlsProps) {
@@ -135,17 +142,8 @@ export function CameraControls({
   const slowest = rateStep <= 0;
   const fastest = rateStep >= maxRateStep;
   const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
-  return (
-    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
-      <h2 className="panel__title" id={titleId}>
-        Camera
-        {designator === undefined ? null : (
-          <>
-            {" "}
-            <span className="panel__designator">{designator}</span>
-          </>
-        )}
-      </h2>
+  const body = (
+    <>
       <fieldset className="preset-buttons" aria-label="Camera presets">
         {PRESET_KEYS.map(({ preset: each, key }) => {
           const heldBack = !offered.includes(each);
@@ -267,6 +265,23 @@ export function CameraControls({
           </span>
         ) : null}
       </div>
+    </>
+  );
+  if (bare) {
+    return body;
+  }
+  return (
+    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
+      <h2 className="panel__title" id={titleId}>
+        Camera
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
+      </h2>
+      {body}
     </section>
   );
 }

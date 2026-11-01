@@ -2,7 +2,8 @@
  * The `PRIMARY` view's plates as laid out, for `VIEW`'s room (plan R10, R10.T12.b): the live upper
  * plate, which always holds all its lines and only clips them while it scrolls, and the hidden
  * sizers' copies, the lower plate's three forms at its tallest and, while the slots are held for
- * the plates, both plates beside where the slots would stand (`ViewRoomSizers`).
+ * the plates, both plates beside where the slots would stand (`ViewRoomSizers`); and an
+ * instrument's `GROUND` page, its forms and its room (R10.T12.d).
  */
 import { rootRemPx } from "../../lib/useElementSize";
 import {
@@ -32,10 +33,15 @@ function hiddenPx(element: Element | null): number {
     : 0;
 }
 
-/** A position line's height with its margins, CSS px. */
-export function positionLinePx(element: Element): number {
+/** An element's height with its margins, CSS px. */
+function outerHeightOf(element: Element): number {
   const style = getComputedStyle(element);
   return heightOf(element) + lengthPx(style.marginTop) + lengthPx(style.marginBottom);
+}
+
+/** A position line's height with its margins, CSS px. */
+export function positionLinePx(element: Element): number {
+  return outerHeightOf(element);
 }
 
 /**
@@ -184,21 +190,24 @@ function samePx(a: number | null, b: number | null): boolean {
   return a === b || (a !== null && b !== null && Math.abs(a - b) < 0.05);
 }
 
+/** Whether two lower plates' forms measure alike, within a twentieth of a pixel. */
+function sameLowerForms(a: LowerPlateMeasures | null, b: LowerPlateMeasures | null): boolean {
+  return a === null || b === null
+    ? a === b
+    : samePx(a.wholePx, b.wholePx) &&
+        samePx(a.readoutYieldedPx, b.readoutYieldedPx) &&
+        samePx(a.surveyYieldedPx, b.surveyYieldedPx) &&
+        a.passing.join() === b.passing.join();
+}
+
 function samePlates(a: PlateMeasures | null, b: PlateMeasures | null): boolean {
   if (a === null || b === null) {
     return a === b;
   }
   const lines = a.upper.middleLinesPx;
   const otherLines = b.upper.middleLinesPx;
-  const sameLower =
-    a.lower === null || b.lower === null
-      ? a.lower === b.lower
-      : samePx(a.lower.wholePx, b.lower.wholePx) &&
-        samePx(a.lower.readoutYieldedPx, b.lower.readoutYieldedPx) &&
-        samePx(a.lower.surveyYieldedPx, b.lower.surveyYieldedPx) &&
-        a.lower.passing.join() === b.lower.passing.join();
   return (
-    sameLower &&
+    sameLowerForms(a.lower, b.lower) &&
     samePx(a.upper.wholePx, b.upper.wholePx) &&
     samePx(a.upper.bodyPx, b.upper.bodyPx) &&
     samePx(a.upper.positionPx, b.upper.positionPx) &&
@@ -215,4 +224,97 @@ export function sameRoomMeasures(a: RoomMeasures, b: RoomMeasures): boolean {
     samePlates(a.beside, b.beside) &&
     (a.stage === b.stage || sameStage(a.stage, b.stage))
   );
+}
+
+/**
+ * An instrument's `GROUND` page as laid out (plan R10, R10.T12.d): its plate's three forms at its
+ * tallest, and the room its plate has in the camera panel's place with the list at its floor.
+ */
+export interface PageMeasures {
+  readonly lower: LowerPlateMeasures | null;
+  /** The plate's room, px: its own height and what the list can still give; `null` before laid out. */
+  readonly roomPx: number | null;
+  /** CSS px to the rem as measured, by which a line to spare is reckoned. */
+  readonly remPx: number;
+}
+
+/** A page not yet laid out. */
+export const PAGE_NOT_MEASURED: PageMeasures = { lower: null, roomPx: null, remPx: 0 };
+
+/** What {@link measurePage} reads. */
+export interface PageMeasureInput {
+  /** The page's live plate, or `null` while it is not mounted. */
+  readonly plate: HTMLElement | null;
+  /** The root of its forms' hidden copies (`LowerForms`), at the plate's width, or `null`. */
+  readonly sizer: Element | null;
+  /** The instrument's `Targets` panel, whose list gives way down to its floor, or `null`. */
+  readonly targets: HTMLElement | null;
+}
+
+/**
+ * How tall `element`'s content stands, px: its children's heights and margins, the gaps between
+ * them and its own padding and border, however far a flex column has stretched it past them.
+ */
+function contentHeightOf(element: Element): number {
+  const style = getComputedStyle(element);
+  const children = [...element.children];
+  const gapPx = lengthPx(style.rowGap) * Math.max(0, children.length - 1);
+  const edgesPx = [
+    style.paddingTop,
+    style.paddingBottom,
+    style.borderTopWidth,
+    style.borderBottomWidth,
+  ].reduce((sum, length) => sum + lengthPx(length), 0);
+  return children.reduce((sum, child) => sum + outerHeightOf(child), gapPx + edgesPx);
+}
+
+/**
+ * How much the `Targets` panel can still give up, px: its height above its floor, the greater of
+ * its own least height (10 rem in the full layout) and its content with its list at the list's
+ * least (the compact layout's head, a row and its position). A panel stretched past a short list
+ * gives up the empty height under it too.
+ */
+function listSlackPx(targets: HTMLElement): number {
+  const height = heightOf(targets);
+  const list = targets.querySelector(".view-list");
+  const listFloor =
+    list === null
+      ? 0
+      : contentHeightOf(targets) - heightOf(list) + lengthPx(getComputedStyle(list).minHeight);
+  return Math.max(0, height - Math.max(lengthPx(getComputedStyle(targets).minHeight), listFloor));
+}
+
+/**
+ * The box the side column scrolls in, the panels' flex container: the column in the full layout,
+ * the side itself in the compact one, where the column's box is dissolved (`display: contents`).
+ */
+function columnBoxOf(targets: HTMLElement): Element | null {
+  const column = targets.parentElement;
+  if (column === null) {
+    return null;
+  }
+  return getComputedStyle(column).display === "contents" ? column.parentElement : column;
+}
+
+/**
+ * The `GROUND` page's measures (plan R10, R10.T12.d): its forms from their copies, and its plate's
+ * room, its height now with what the list can still give, less what the column already runs past
+ * its box, so that the page gives way as the lower plate does with the list at its floor.
+ */
+export function measurePage(input: PageMeasureInput): PageMeasures {
+  const { plate, sizer, targets } = input;
+  const lower = sizer === null ? null : measureLowerForms(sizer);
+  const remPx = rootRemPx();
+  if (plate === null || targets === null) {
+    return { lower, roomPx: null, remPx };
+  }
+  const box = columnBoxOf(targets);
+  const overflowPx =
+    box instanceof HTMLElement ? Math.max(0, box.scrollHeight - box.clientHeight) : 0;
+  return { lower, roomPx: heightOf(plate) + listSlackPx(targets) - overflowPx, remPx };
+}
+
+/** Whether two page measures would decide alike, to a twentieth of a pixel. */
+export function samePageMeasures(a: PageMeasures, b: PageMeasures): boolean {
+  return sameLowerForms(a.lower, b.lower) && samePx(a.roomPx, b.roomPx) && a.remPx === b.remPx;
 }

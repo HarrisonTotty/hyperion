@@ -349,7 +349,7 @@ describe("the terrain readout on the lower plate (R10.T12)", () => {
     expect(parts).toEqual([
       `view-label__part: ~12°${PM}4° ·`,
       " ",
-      "view-label__part: BASELINE 2 m",
+      `view-label__part: BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
     ]);
   });
 
@@ -468,7 +468,7 @@ describe("the terrain readout's breaks (R10.T12; the guide's ± row)", () => {
     const runs = [...parts.querySelectorAll(".view-label__run")].map((run) => run.textContent);
     expect([runs.some((text) => text.includes("BASELINE")), parts.textContent]).toEqual([
       false,
-      expect.stringContaining("BASELINE 2 m"),
+      expect.stringContaining(`BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`),
     ]);
   });
 

@@ -547,6 +547,52 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
   });
 });
 
+/**
+ * The stops from the instrument's list through its first preset, as Tab reaches them, a fold
+ * row's disclosure button marked as one, since the place's `CAMERA` tab shares its name.
+ */
+async function placeStops(view: ViewDisplayHarness): Promise<string[]> {
+  screen.getByRole("application", { name: /PRIMARY/ }).focus();
+  const stops: string[] = [];
+  for (let step = 0; step < 40 && stops.at(-1) !== "1 SEAT"; step += 1) {
+    // Each Tab moves on from where the last left the focus.
+    // oxlint-disable-next-line no-await-in-loop
+    await view.user.tab();
+    const focused = document.activeElement;
+    const name = focused?.getAttribute("aria-label") ?? focused?.textContent ?? "";
+    if (stops.length > 0 || name === "Marks in view") {
+      stops.push(focused?.hasAttribute("aria-expanded") === true ? `${name} (fold)` : name);
+    }
+  }
+  return stops;
+}
+
+describe("an instrument's place's tabs in both layouts (R10.T12.d; guide draft D2)", () => {
+  it("reaches the chosen page's tab alone after the list and before the presets in the full layout", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    expect(await placeStops(view)).toEqual(["Marks in view", "CAMERA", "1 SEAT"]);
+  });
+
+  it("reaches the chosen page's tab after the fold row and before the presets in the compact layout", async () => {
+    const view = await compact();
+    await view.user.click(disclosure("Instruments"));
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    // Folding INSTRUMENTS opens the camera panel's place again.
+    await view.user.click(disclosure("Instruments"));
+    expect(await placeStops(view)).toEqual([
+      "Marks in view",
+      "CAMERA (fold)",
+      "STYLE (fold)",
+      "EXPOSURE (fold)",
+      "CAMERA",
+      "1 SEAT",
+    ]);
+  });
+});
+
 describe("VIEW's label block at both sizes (R07.T19.b)", () => {
   it("states the free camera's rate on the CAMERA line in FREE", async () => {
     const view = await setup();

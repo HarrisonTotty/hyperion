@@ -1,7 +1,7 @@
 import type { ReactNode, Ref } from "react";
 
 import { ViewLabelBlock, type ViewLabelBlockProps } from "./ViewLabelBlock";
-import { ViewLowerPlate } from "./ViewLowerPlate";
+import { LowerForms } from "./LowerForms";
 import type { LowerPlatePart, UpperRoom } from "./viewRoom";
 
 /** The class of a plate beside the standing slots, which takes the width left of them. */
@@ -32,56 +32,8 @@ export interface ViewRoomSizersProps {
   readonly ref?: Ref<HTMLDivElement> | undefined;
 }
 
-/** Props of {@link LowerForms}. */
-interface LowerFormsProps {
-  readonly parts: ReadonlyArray<LowerPlatePart<ReactNode>>;
-  /** The plates' class beside the slots, or none at the full width. */
-  readonly className: string | undefined;
-}
-
 /** A block laid out whole. */
 const WHOLE: UpperRoom = { kind: "whole" };
-
-/** The lower plate's forms at its tallest: whole, its readout given way, and its survey too. */
-function LowerForms({ parts, className }: LowerFormsProps) {
-  const hasReadout = parts.some((part) => part.kind === "readout");
-  const hasSurvey = parts.some((part) => part.kind === "survey" || part.kind === "datum");
-  return (
-    <>
-      <div data-form="whole">
-        <ViewLowerPlate
-          parts={parts}
-          readout="stands"
-          survey="stands"
-          tallest
-          className={className}
-        />
-      </div>
-      {hasReadout ? (
-        <div data-form="readout">
-          <ViewLowerPlate
-            parts={parts}
-            readout="yields"
-            survey="stands"
-            tallest
-            className={className}
-          />
-        </div>
-      ) : null}
-      {hasSurvey ? (
-        <div data-form="survey">
-          <ViewLowerPlate
-            parts={parts}
-            readout="yields"
-            survey="yields"
-            tallest
-            className={className}
-          />
-        </div>
-      ) : null}
-    </>
-  );
-}
 
 /**
  * The hidden copies by which `VIEW`'s room is reckoned (plan R10, R10.T12.b;

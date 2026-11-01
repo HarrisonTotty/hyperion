@@ -756,10 +756,10 @@ describe("the terrain readout", () => {
     expect(readoutTexts(groundAt())).toEqual([
       "GROUND AT LINE OF SIGHT",
       `ELEVATION ~2140 m${PM}180 m`,
-      `SLOPE ~12°${PM}4° · BASELINE 2 m`,
+      `SLOPE ~12°${PM}4° · BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
       `SLANT RANGE ~41.2 km${PM}0.3 km`,
       "MATERIAL REGOLITH · Fe-RICH BASALT",
-      "ULTIMATE BEARING CAPACITY ~3.4 MPa · PAD WIDTH 1.0 m",
+      `ULTIMATE BEARING CAPACITY ~3.4 MPa · PAD WIDTH${NO_BREAK_SPACE}1.0${NO_BREAK_SPACE}m`,
       "PAD FRICTION ~0.20",
       "RESOLUTION 410 m",
     ]);
@@ -774,10 +774,10 @@ describe("the terrain readout", () => {
     expect(readoutTexts(resolved)).toEqual([
       "GROUND AT LINE OF SIGHT",
       "ELEVATION 2143.7 m",
-      "SLOPE 7° · BASELINE 2 m",
+      `SLOPE 7° · BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
       "SLANT RANGE 41.2 km",
       "MATERIAL REGOLITH · Fe-RICH BASALT",
-      "ULTIMATE BEARING CAPACITY 5.4 MPa · PAD WIDTH 1.0 m",
+      `ULTIMATE BEARING CAPACITY 5.4 MPa · PAD WIDTH${NO_BREAK_SPACE}1.0${NO_BREAK_SPACE}m`,
       "PAD FRICTION 0.20",
       "RESOLUTION 410 m",
     ]);
@@ -787,10 +787,10 @@ describe("the terrain readout", () => {
     expect(readoutTexts(groundAt(), { stale: true })).toEqual([
       "GROUND AT LINE OF SIGHT",
       `ELEVATION ~2140 m${PM}180 m S`,
-      `SLOPE ~12°${PM}4° S · BASELINE 2 m`,
+      `SLOPE ~12°${PM}4° S · BASELINE${NO_BREAK_SPACE}2${NO_BREAK_SPACE}m`,
       `SLANT RANGE ~41.2 km${PM}0.3 km S`,
       "MATERIAL REGOLITH S · Fe-RICH BASALT S",
-      "ULTIMATE BEARING CAPACITY ~3.4 MPa S · PAD WIDTH 1.0 m",
+      `ULTIMATE BEARING CAPACITY ~3.4 MPa S · PAD WIDTH${NO_BREAK_SPACE}1.0${NO_BREAK_SPACE}m`,
       "PAD FRICTION ~0.20 S",
       "RESOLUTION 410 m S",
     ]);
@@ -918,7 +918,7 @@ describe("the terrain readout", () => {
     const kept: ReadoutUnits = { ...NO_READOUT_UNITS, capacity: "MPa", slantRange: "km" };
     const shown = groundReadoutLines(near, HEADER, context(), kept);
     expect(readoutLineText(lineOf(shown.lines, "ULTIMATE BEARING CAPACITY"))).toBe(
-      "ULTIMATE BEARING CAPACITY ~0.96 MPa · PAD WIDTH 1.0 m",
+      `ULTIMATE BEARING CAPACITY ~0.96 MPa · PAD WIDTH${NO_BREAK_SPACE}1.0${NO_BREAK_SPACE}m`,
     );
     expect(shown.units).toEqual({
       finest: null,
@@ -962,10 +962,10 @@ describe("the readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1)", ()
 
   it("reckons the tallest SLOPE at the longest baseline, 100 m", () => {
     const slope = lineOf(tallestTerrainLines(HEADER, 1).readout, "SLOPE");
-    expect([LONGEST_BASELINE_M, readoutLineText(slope).endsWith("· BASELINE 100 m")]).toEqual([
-      100,
-      true,
-    ]);
+    expect([
+      LONGEST_BASELINE_M,
+      readoutLineText(slope).endsWith(`· BASELINE${NO_BREAK_SPACE}100${NO_BREAK_SPACE}m`),
+    ]).toEqual([100, true]);
   });
 
   it.each(SLOPE_BASELINES_M)(
@@ -976,7 +976,7 @@ describe("the readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1)", ()
         slope: textOfLine(readout, "SLOPE"),
         capacity: textOfLine(readout, "ULTIMATE BEARING CAPACITY"),
       }).toEqual({
-        slope: `SLOPE ~12°${PM}4° · BASELINE ${String(baselineM)} m`,
+        slope: `SLOPE ~12°${PM}4° · BASELINE${NO_BREAK_SPACE}${String(baselineM)}${NO_BREAK_SPACE}m`,
         capacity: textOfLine(groundAt(), "ULTIMATE BEARING CAPACITY"),
       });
     },

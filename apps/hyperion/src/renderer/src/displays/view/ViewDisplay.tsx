@@ -96,7 +96,12 @@ import {
 import { InstrumentControls } from "./InstrumentControls";
 import { InstrumentsPanel, type InstrumentsPanelSlot } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
-import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
+import {
+  type Instrument,
+  type InstrumentGround,
+  type InstrumentsFrame,
+  useInstruments,
+} from "./useInstruments";
 import {
   type InstrumentSlot,
   instrumentViewId,
@@ -132,6 +137,8 @@ import { ViewLabelBlock } from "./ViewLabelBlock";
 import { ViewLowerPlate } from "./ViewLowerPlate";
 import { InstrumentStub } from "./InstrumentStub";
 import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "./plateMeasures";
+import type { PlacePage } from "./PlaceTabs";
+import { useGroundPage } from "./useGroundPage";
 import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import {
   columnsFit,
@@ -396,6 +403,13 @@ interface ViewStageProps {
    */
   readonly slopeBaselineM: SlopeBaselineM;
   readonly onSlopeBaselineChange: (baselineM: SlopeBaselineM) => void;
+  /**
+   * The page chosen for the camera panel's place while `CONTROLS` names an instrument (plan R10,
+   * R10.T12.d): the display's own, `CAMERA` as it mounts, held above the stage so that it is kept
+   * across `CONTROLS` and every scene.
+   */
+  readonly placePage: PlacePage;
+  readonly onPlacePage: (page: PlacePage) => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
@@ -742,6 +756,8 @@ function ViewStage({
   onEasedMovesChange,
   slopeBaselineM,
   onSlopeBaselineChange,
+  placePage,
+  onPlacePage,
   stars,
   countLine,
   universe,
@@ -832,6 +848,9 @@ function ViewStage({
   // The instruments, and every view's budget on the setting (R07.T19).
   const [operated, setOperated] = useState<ViewId>(VIEW_ID);
   const primaryRun = useCallback((): ViewRun => runRef.current, []);
+  // The instrument whose GROUND page shows, and its tripod's point, for the loop (R10.T12.d): set
+  // after each commit, as the page stands.
+  const instrumentGroundRef = useRef<InstrumentGround | null>(null);
   const instruments = useInstruments({
     engineState,
     primaryRun,
@@ -842,6 +861,7 @@ function ViewStage({
     exposure,
     setting,
     modifier,
+    ground: instrumentGroundRef,
   });
   // The stage's room (plan R10, R10.T12.b; decision-r10-view-block-room §3): the slots by the
   // stage's size and their own heights, then the plates' parts in the ruled order beside those that
@@ -1681,6 +1701,33 @@ function ViewStage({
     exposure: `${legendId}-exposure`,
     meter: `${legendId}-meter`,
   };
+  // The operated instrument's GROUND page in the camera panel's place (plan R10, R10.T12.d).
+  const groundPage = useGroundPage({
+    instrument:
+      operatedView === null || controlledShown === null
+        ? null
+        : {
+            slot: operatedView.slot.slot,
+            name: operatedView.slot.name,
+            shown: controlledShown,
+            faults: operatedView.faults,
+          },
+    chosen: placePage,
+    folded: folded("camera"),
+  });
+  const { pagedSlot, pointHas: pageHasPoint, pointRangeM: pageRangeM } = groundPage;
+  useLayoutEffect(() => {
+    instrumentGroundRef.current =
+      pagedSlot === null
+        ? null
+        : {
+            slot: pagedSlot,
+            lineOfSightPoint:
+              pageHasPoint === undefined
+                ? undefined
+                : { hasPoint: pageHasPoint, rangeM: pageRangeM },
+          };
+  }, [pagedSlot, pageHasPoint, pageRangeM]);
   const foldOf = (target: EventTarget | null): FoldPanel | null => {
     const section = target instanceof Element ? target.closest("section") : null;
     return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
@@ -2052,6 +2099,9 @@ function ViewStage({
               }}
               folds={sideFolds}
               modifier={modifier}
+              place={{ ...groundPage, onPage: onPlacePage }}
+              targetsRef={groundPage.targetsRef}
+              groundNote={groundPage.groundNote}
             />
           )}
         </div>
@@ -2078,12 +2128,17 @@ function ViewStage({
                     },
                   }
             }
-            // The BASELINE row acts on the CONTROLS view's readout, which only the PRIMARY view
-            // states: left out with an instrument there (decision-r10-t12a-scope §3.1).
+            // The BASELINE row acts on the CONTROLS view's readout, the PRIMARY view's or an
+            // instrument's on its GROUND page, each view keeping its own (R10.T12.d; draft D4).
             baseline={
               operatedView === null
                 ? { chosen: slopeBaselineM, onBaseline: onSlopeBaselineChange }
-                : undefined
+                : {
+                    chosen: operatedView.slot.slopeBaselineM,
+                    onBaseline: (baselineM) => {
+                      instruments.setBaseline(operatedView.slot.slot, baselineM);
+                    },
+                  }
             }
           />
           <ExposurePanel
@@ -2238,6 +2293,9 @@ function ViewPanels({
   const [slopeBaselineM, setSlopeBaselineM] = useState<SlopeBaselineM>(
     GROUND_READOUT_OPTIONS.slopeBaselineM,
   );
+  // The camera panel's place's page while CONTROLS names an instrument (R10.T12.d; draft D2):
+  // CAMERA as the display mounts, the choice kept while it stays mounted, through every scene.
+  const [placePage, setPlacePage] = useState<PlacePage>("camera");
   const universe = useUniverse().open?.id ?? null;
   const standing = serverSceneStanding(scene);
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
@@ -2367,6 +2425,8 @@ function ViewPanels({
         onEasedMovesChange={setEasedMoves}
         slopeBaselineM={slopeBaselineM}
         onSlopeBaselineChange={setSlopeBaselineM}
+        placePage={placePage}
+        onPlacePage={setPlacePage}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}

@@ -1,12 +1,13 @@
 /**
- * The `PRIMARY` view's terrain readout, asked at its readouts' rate (plan R10, R10.T12;
- * decision-r10-live-path, D10; decision-r10-t12-leans §3, §5–§7): the loop's half, which asks the
- * terrain session for the ground at the view's line of sight and gives each publish what its label
- * block's terrain lines are made from.
+ * A view's terrain readout, the `PRIMARY` view's or an instrument's on its `GROUND` page, asked at
+ * its readouts' rate (plan R10, R10.T12; decision-r10-live-path, D10; decision-r10-t12-leans §3,
+ * §5–§7): the loop's half, which asks the terrain session for the ground at the view's line of
+ * sight and gives each publish what its label block's terrain lines are made from.
  *
  * @remarks
- * - **The primary alone** (§3). An instrument in its slot states no readout, so nothing here is
- *   asked for it.
+ * - **The primary, and an instrument on its page** (§3; R10.T12.d). An instrument in its slot
+ *   states no readout; one whose `GROUND` page shows has a `GroundReadouts` of its own, asked only
+ *   while the page shows.
  * - **The ask.** At each publish, the `FRAME` body (`frameBody`) where it is a lit body with a
  *   surface, its survey (`TerrainSession.survey`), the line of sight through the picture's centre
  *   (`lineOfSightOf`) and `TerrainSession.groundReadout` at the instant the view lights the body
@@ -200,7 +201,10 @@ export class GroundReadouts {
   /** Whether the query out was asked for a choice of baseline, so that its answer is due at once. */
   #chosen = false;
 
-  /** @param view - The view whose readout it asks: the primary's (decision-r10-t12-leans §3). */
+  /**
+   * @param view - The view whose readout it asks: the primary's, or an instrument's while its
+   *   `GROUND` page shows (R10.T12.d).
+   */
   constructor(view: ViewId) {
     this.#view = view;
   }

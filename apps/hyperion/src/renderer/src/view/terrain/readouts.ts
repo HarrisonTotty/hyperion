@@ -72,7 +72,12 @@ import type {
 /** The Missing value: an em dash, set in `--text-muted` (the guide's "Data states"). */
 export const MISSING = "—";
 
-/** The no-break space either side of `±` (the guide's `±` row), so that a reading never breaks. */
+/**
+ * The no-break space either side of `±` (the guide's `±` row), so that a reading never breaks, and
+ * before and after a console setting's figure (`BASELINE 2 m`, `PAD WIDTH 1.0 m`), so that a narrow
+ * plate, an instrument's `GROUND` page's, never breaks the setting from its figure or its unit
+ * (plan R10, R10.T12.d).
+ */
 export const NO_BREAK_SPACE = " ";
 
 /** The Estimated mark before a value (the guide's "Data states"). */
@@ -1022,7 +1027,11 @@ function capacityLine(
   return {
     line: reading(label, [
       valueSegment(value, CAPACITY_FIELD_CH, context.stale),
-      [consoleText(`PAD WIDTH ${formatTwoFigures(context.padWidthM)} m`)],
+      [
+        consoleText(
+          `PAD WIDTH${NO_BREAK_SPACE}${formatTwoFigures(context.padWidthM)}${NO_BREAK_SPACE}m`,
+        ),
+      ],
     ]),
     unit: shown.unit,
   };
@@ -1119,7 +1128,11 @@ export function groundReadoutLines(
     ]),
     reading("SLOPE", [
       uncertainSegment(slope, SLOPE_FIELD_CH, SLOPE_UNCERTAINTY_CH, stale),
-      [consoleText(`BASELINE ${formatNumber(point.slopeBaselineM, 0)} m`)],
+      [
+        consoleText(
+          `BASELINE${NO_BREAK_SPACE}${formatNumber(point.slopeBaselineM, 0)}${NO_BREAK_SPACE}m`,
+        ),
+      ],
     ]),
     reading(slantLabel(context.slantFromCamera), rangeSegments),
     materialLine(readout.material, header.palette, stale),
@@ -1379,7 +1392,11 @@ export function tallestTerrainLines(
     ]),
     reading("SLOPE", [
       uncertainSegment(estimated("90°", "90°"), SLOPE_FIELD_CH, SLOPE_UNCERTAINTY_CH, stale),
-      [consoleText(`BASELINE ${formatNumber(LONGEST_BASELINE_M, 0)} m`)],
+      [
+        consoleText(
+          `BASELINE${NO_BREAK_SPACE}${formatNumber(LONGEST_BASELINE_M, 0)}${NO_BREAK_SPACE}m`,
+        ),
+      ],
     ]),
     reading(slantLabel(true), [
       uncertainSegment(
@@ -1393,7 +1410,7 @@ export function tallestTerrainLines(
     reading("MATERIAL", [nameSegment(form, stale), nameSegment(substance, stale)]),
     reading("ULTIMATE BEARING CAPACITY", [
       valueSegment(`${ESTIMATED}0.95 MPa`, CAPACITY_FIELD_CH, stale),
-      [consoleText(`PAD WIDTH ${formatTwoFigures(padWidthM)} m`)],
+      [consoleText(`PAD WIDTH${NO_BREAK_SPACE}${formatTwoFigures(padWidthM)}${NO_BREAK_SPACE}m`)],
     ]),
     reading("PAD FRICTION", [
       valueSegment(`${ESTIMATED}0.71`, FRICTION_FIELD_CH, stale),

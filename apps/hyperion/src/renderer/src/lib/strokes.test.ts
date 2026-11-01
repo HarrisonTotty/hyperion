@@ -318,6 +318,10 @@ describe("the strokes changed here and --surface-2 (decision-thin-line-contrast,
       '.event-list__row[aria-selected="true"]',
       ".view-list__row:hover",
       '.view-list__row[aria-selected="true"]',
+      // An instrument's place's tabs, as GALAXY's, and the held-back GROUND's reason over the place:
+      // `--text-muted` text, 6.04:1 on `--surface-2`, with no stroke of these under them (R10.T12.d).
+      ".view-place__tab:hover",
+      ".view-place__reason",
     ]);
   });
 

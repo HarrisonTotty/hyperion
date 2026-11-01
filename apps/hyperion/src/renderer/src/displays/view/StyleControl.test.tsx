@@ -248,6 +248,22 @@ describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
     ]);
   });
 
+  it("is left out while PHOTOREALISTIC, asked for, is held back, the view drawing the wireframe (R10.T12.d)", () => {
+    render(
+      <StyleControl
+        renderStyle="photorealistic"
+        refusals={{
+          wireframe: null,
+          photorealistic: "NOT AVAILABLE: QUALITY LOW allows one photorealistic view",
+        }}
+        faulted={false}
+        onStyle={() => undefined}
+        grid={{ on: true, onGrid: () => undefined }}
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "GRID" })).toBeNull();
+  });
+
   it("is left out of the WIREFRAME, which draws its grid whatever it is", () => {
     render(
       <StyleControl

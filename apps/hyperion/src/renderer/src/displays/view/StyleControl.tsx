@@ -140,9 +140,12 @@ function BaselineRow({ baseline }: BaselineRowProps) {
  * words: the graphics' condition, or the photorealistic view's failure to make its pipelines
  * (`styleRefusals`). Mounted by R07.T8.a beside the camera controls.
  *
- * Under them, while the view draws `PHOTOREALISTIC` and `grid` is given, stands the `GRID` row,
- * whose `OFF` leaves each body's limb and graticule out of the image's overlay (the owner's
- * request, 2026-10-31).
+ * Under them, while the view's style is `PHOTOREALISTIC` and offered and `grid` is given, stands
+ * the `GRID` row, whose `OFF` leaves each body's limb and graticule out of the image's overlay (the
+ * owner's request, 2026-10-31). A style asked for and held back draws the wireframe, which has no
+ * image to clear, so the row never stands beside the reason, and the panel's tallest state, the
+ * reason and `BASELINE`, keeps the full layout's least height (plan R10, R10.T12.d; lean,
+ * 2026-10-31).
  *
  * After the style's buttons and their reason stands the `BASELINE` row while `baseline` is given
  * (R10.T12.a): the baseline `SLOPE` is read over on the view's terrain readout, which it sets
@@ -211,7 +214,11 @@ export function StyleControl({
           <StatusText text={reason} />
         </p>
       )}
-      {grid === undefined || renderStyle !== "photorealistic" ? null : <GridRow grid={grid} />}
+      {grid === undefined ||
+      renderStyle !== "photorealistic" ||
+      byStyle.photorealistic !== null ? null : (
+        <GridRow grid={grid} />
+      )}
       {baseline === undefined ? null : <BaselineRow baseline={baseline} />}
     </section>
   );

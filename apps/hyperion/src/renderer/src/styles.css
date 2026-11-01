@@ -4907,6 +4907,145 @@ body {
   margin: 0;
 }
 
+/*
+ * The camera panel's place's head while CONTROLS names an instrument (plan R10, R10.T12.d; guide
+ * draft D2): its CAMERA and GROUND page tabs, then the designator at the row's end.
+ */
+.view-place__head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+.view-place__head > .panel__designator {
+  margin-left: auto;
+}
+
+/* The page tabs: a tab list as GALAXY's pages' (ux-reviewer's ruling, 2026-10-31). */
+.view-place__tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/*
+ * A page's name: a display control, so no --line-strong outline. The chosen page's name is --accent
+ * over a 2px --accent rule, a shape as well as a colour, as GALAXY's page tabs are.
+ */
+.view-place__tab {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0 0.75rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.view-place__tab:first-child {
+  padding-left: 0;
+}
+
+.view-place__tab:hover {
+  background: var(--surface-2);
+}
+
+.view-place__tab:active {
+  background: var(--surface-0);
+}
+
+.view-place__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.view-place__tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A held-back GROUND: kept focusable so that it can say why, the pointer refused. */
+.view-place__tab[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.view-place__tab[aria-disabled="true"]:hover {
+  background: none;
+}
+
+/*
+ * The held-back GROUND's reason, over the place while its tab is hovered or focused, taking none of
+ * the place's room, which at the floor has no line to spare (guide draft D2; R10.T12.d's lean).
+ */
+.view-place__reason {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 0.25rem 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: normal;
+  text-transform: none;
+  visibility: hidden;
+}
+
+.view-place__head:has(.view-place__tab[aria-disabled="true"]:is(:hover, :focus-visible))
+  > .view-place__reason {
+  visibility: visible;
+}
+
+/*
+ * In the compact layout the tabs stand at the panel's top edge, with no block padding above them,
+ * and 0.25rem, the side's title margin, between them and the presets (T19.f's fallback; R10.T12.d).
+ */
+.view--compact .view__column > .view-camera:has(> .view-place__head) {
+  padding-top: 0;
+}
+
+/*
+ * An instrument's GROUND page (R10.T12.d): the lower plate's parts as the place's tab panel's content,
+ * set as the plate sets them but standing in the panel, not over a picture; its forms' copies laid
+ * out at the panel's width, the plate's, under it, never seen.
+ */
+.view-ground {
+  position: relative;
+}
+
+.view-label.view-ground__plate {
+  position: static;
+  max-width: none;
+  background: none;
+  padding: 0;
+}
+
+/*
+ * No height and clipped, so that the copies, laid out in full at the plate's width, add nothing to
+ * the column's scroll, which the page's room is reckoned against.
+ */
+.view-ground__sizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
 .view-style__reason {
   margin: 0.5rem 0 0;

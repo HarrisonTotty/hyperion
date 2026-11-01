@@ -1075,7 +1075,9 @@ function renderInstrument(
     style: "photorealistic",
     selection: null,
     grid: true,
+    slopeBaselineM: 2,
     shown: {
+      ground: null,
       run: startRun(phaseScene()),
       anchors: [],
       drawnStyle: "photorealistic",
