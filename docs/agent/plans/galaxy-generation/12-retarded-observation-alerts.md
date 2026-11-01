@@ -3066,3 +3066,6 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Benches._ `oneshot_scan_galaxy` and `awd_scan_cold` (the plan's), on the default workers.
   - _Leans (2026-11-01)._ No cache of occupied cells: a rescan sweeps the slabs again. Each kind is
     walked only on cells within its reach, so a V-only sensor walks no magnetar.
+- **P12.T12's `ALERTS` count as built (lane `alerts-count-and-desert`, 2026-11-01; client only).**
+  The count's place is four B612 Mono figures and a stale slot; a count past 999 reads `999+`, the
+  accessible name keeping it whole (lean, 2026-11-01: the wire bounds no subscription's contacts).

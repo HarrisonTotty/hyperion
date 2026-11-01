@@ -9,8 +9,10 @@ import { type ReactNode, useId, useState } from "react";
 
 import { AlertList, type AlertSort } from "../../components/AlertList";
 import { RequestStatus } from "../../components/RequestStatus";
+import { StaleSlot } from "../../components/StaleSlot";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
+import { formatNumber } from "../../lib/format";
 import { featureKindAbbreviation, notYetModelledWords } from "../../lib/galaxy/featureWords";
 import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
 import { linkDownReason } from "../../lib/serverLink";
@@ -50,6 +52,17 @@ const LISTS: ReadonlyArray<{ readonly list: ChartList; readonly label: string }>
 
 /** Why the alert list is empty with no observer: the detections are seen from it (P12.T12). */
 export const NO_OBSERVER = "NO OBSERVER: choose OBSERVED on the LOCAL CHART";
+
+/**
+ * The most unacknowledged alerts the `ALERTS` choice's count writes in full; more read `999+`, in
+ * the same four places (lean, 2026-11-01: the wire bounds no subscription's contacts).
+ */
+const ALERT_COUNT_MAX = 999;
+
+/** The `ALERTS` choice's count of unacknowledged alerts, in the place kept for it. */
+function alertCountFigure(count: number): string {
+  return count > ALERT_COUNT_MAX ? `${formatNumber(ALERT_COUNT_MAX, 0)}+` : formatNumber(count, 0);
+}
 
 /**
  * What the features' census says beyond the list (plan 09, P09.T41.c), or `null` with nothing to
@@ -155,7 +168,11 @@ interface SystemsPanelProps {
  * Where the detections stand is said above it, `NO OBSERVER` until the chart has one. Making a
  * resolved alert's row active selects its host, which the readout then reads and the chart
  * brackets, and the list stays on show; an unresolved one, whose host is not known, selects
- * nothing. A selection made on the chart, as elsewhere, shows the list it is in.
+ * nothing. A selection made on the chart, as elsewhere, shows the list it is in. While any alert is
+ * unacknowledged, the `ALERTS` choice carries their count after its name, `ALERTS 2`, named
+ * `ALERTS, 2 unacknowledged`, so that an Advisory arriving while another list shows is seen: in a
+ * place kept for it with its stale slot, empty with none, so that the choice never changes width,
+ * and stale with the list's rows (ux-calls-data's ruling 5).
  */
 export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -174,6 +191,9 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
       : null;
   const activeAlert = alerts.contacts.find((contact) => contact.contact === activeContact) ?? null;
   const activeHost = activeAlert?.level === "resolved" ? activeAlert.host : null;
+  // Counted as the server last confirmed them, so an acknowledgement in flight still counts.
+  const unacknowledged = alerts.contacts.filter((contact) => !contact.acknowledged).length;
+  const alertsStale = alerts.status.kind === "stale";
   // A selection made on the chart shows the list it is in, so that it is shown in both places: the
   // operator's selection, which stays while the chart's two answers arrive apart.
   const selectionKey = chart.selection === null ? null : selectionMarkId(chart.selection);
@@ -310,6 +330,11 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
               type="button"
               className="control mode-control__button"
               aria-pressed={each === list}
+              aria-label={
+                each === "alerts" && unacknowledged > 0
+                  ? `${label}, ${formatNumber(unacknowledged, 0)} unacknowledged${alertsStale ? ", stale" : ""}`
+                  : undefined
+              }
               // One stop in the tab order, the list shown's, the arrows moving between the two, so
               // that the list is still one `Tab` from the `CURSOR` fields beyond it.
               tabIndex={each === list ? 0 : -1}
@@ -331,6 +356,18 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
               data-list={each}
             >
               {label}
+              {each === "alerts" ? (
+                <span
+                  className={
+                    alertsStale ? "systems-panel__alert-count stale" : "systems-panel__alert-count"
+                  }
+                >
+                  <span className="systems-panel__alert-figure">
+                    {unacknowledged > 0 ? alertCountFigure(unacknowledged) : ""}
+                  </span>
+                  <StaleSlot stale={alertsStale && unacknowledged > 0} />
+                </span>
+              ) : null}
             </button>
           ))}
         </fieldset>

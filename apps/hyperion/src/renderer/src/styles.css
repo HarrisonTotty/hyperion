@@ -3045,6 +3045,24 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   margin: 0;
 }
 
+/*
+ * The `ALERTS` choice's count of unacknowledged alerts after its name, `ALERTS 2` (ux-calls-data's
+ * ruling 5): B612 Mono's tabular figures, untracked so that `ch` sizes them, in a place kept for
+ * four, `999+`, and the stale slot after it, both empty with none, so that the choice never
+ * changes width.
+ */
+.systems-panel__alert-count {
+  margin-left: 1ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.systems-panel__alert-figure {
+  display: inline-block;
+  width: 4ch;
+}
+
 .system-list__class {
   overflow: hidden;
   font-family: var(--font-mono);
