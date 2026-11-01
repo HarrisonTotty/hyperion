@@ -1159,7 +1159,13 @@ mod tests {
     #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]
     fn young_s_and_carbon_stars_galaxy_wide_at_milky_way_values() {
         let mut checks = Checks::default();
-        let galaxy = milky_way().with_rules(GalaxyRules::every_26_hold());
+        // Built so: the field share and the carve-out are read when a galaxy is built.
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_26_hold(),
+        )
+        .expect("Milky Way parameters build");
         let rules = StellarRules::every_26_hold();
         let t = galaxy_counts_with(&galaxy, 4_000, |inputs, ages, t| {
             observe_young_and_chemical(inputs, ages, rules, t);

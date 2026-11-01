@@ -305,7 +305,8 @@ fn the_full_arm_s_classes_are_the_same_in_any_order() {
 /// Both 26 holds on, as version 26 will have them: the carbon star's summary reads its class from
 /// the pulses its events built (`system::Pulses::Built`), which must be the class its own series
 /// gives (`Pulses::Opened`), as the system's brief and the range brief read it, at the epoch and at
-/// times across the clock window.
+/// times across the clock window. Every stellar 26 hold is on; the galaxy's stay the version's,
+/// since the field share and the carve-out are read when the galaxy is built.
 #[test]
 fn with_its_events_composed_the_carbon_star_s_class_is_its_brief_s() {
     // Built under every 26 hold, since the field share and the carve-out are read when a galaxy is
