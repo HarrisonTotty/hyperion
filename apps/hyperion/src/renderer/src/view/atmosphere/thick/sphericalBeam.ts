@@ -225,9 +225,9 @@ export interface BeamChords {
    * shells above k (q < k), below the horizontal through every shell from a lit interface; 0
    * elsewhere.
    */
-  readonly fromInterfaces: Float64Array;
+  readonly fromInterfacesM: Float64Array;
   /** Below the horizontal, the chords from the shadow height through each layer; else empty. */
-  readonly fromShadow: Float64Array;
+  readonly fromShadowM: Float64Array;
   /** The shadow height, m, h_s, below the horizontal (the module's remarks); else NaN. */
   readonly shadowM: number;
   /** Each layer's geometric slant, which a layer of τ 0 takes (the module's remarks); 1 in the shadow. */
@@ -291,13 +291,13 @@ function chordsOf(
 ): BeamChords {
   const layers = interfaceHeightsM.length - 1;
   const height = (k: number): number => interfaceHeightsM[k] ?? Number.NaN;
-  const fromInterfaces = new Float64Array((layers + 1) * layers);
+  const fromInterfacesM = new Float64Array((layers + 1) * layers);
   const emptySlant = new Float64Array(layers).fill(1);
   if (beamCosine > 0) {
     for (let k = 1; k <= layers; k += 1) {
       const from = height(k);
       for (let q = 0; q < k; q += 1) {
-        fromInterfaces[k * layers + q] =
+        fromInterfacesM[k * layers + q] =
           distanceTo(bottomRadiusM, from, height(q), beamCosine) -
           distanceTo(bottomRadiusM, from, height(q + 1), beamCosine);
       }
@@ -311,8 +311,8 @@ function chordsOf(
       bottomRadiusM,
       interfaceHeightsM,
       beamCosine,
-      fromInterfaces,
-      fromShadow: new Float64Array(0),
+      fromInterfacesM,
+      fromShadowM: new Float64Array(0),
       shadowM: Number.NaN,
       emptySlant,
     };
@@ -324,7 +324,7 @@ function chordsOf(
       continue;
     }
     for (let q = 0; q < layers; q += 1) {
-      fromInterfaces[k * layers + q] = chordBelowHorizon(
+      fromInterfacesM[k * layers + q] = chordBelowHorizon(
         bottomRadiusM,
         height(q),
         height(q + 1),
@@ -336,7 +336,7 @@ function chordsOf(
   // The shadow's edge: (R + h_s)² (1 − μ₀²) = R², h_s = R μ₀² ÷ (s (1 + s)), s = √(1 − μ₀²).
   const s = Math.sqrt((1 - beamCosine) * (1 + beamCosine));
   const shadowM = (bottomRadiusM * beamCosine * beamCosine) / (s * (1 + s));
-  let fromShadow = new Float64Array(0);
+  let fromShadowM = new Float64Array(0);
   for (let p = 0; p < layers && lit(height(p)); p += 1) {
     const top = height(p);
     const bottom = height(p + 1);
@@ -346,7 +346,7 @@ function chordsOf(
     }
     // The layer the shadow's edge cuts, the last the beam reaches.
     emptySlant[p] = crossing(bottomRadiusM, shadowM, shadowM, top, beamCosine) / (top - shadowM);
-    fromShadow = Float64Array.from({ length: layers }, (_, q) =>
+    fromShadowM = Float64Array.from({ length: layers }, (_, q) =>
       chordBelowHorizon(bottomRadiusM, height(q), height(q + 1), shadowM, beamCosine),
     );
   }
@@ -354,8 +354,8 @@ function chordsOf(
     bottomRadiusM,
     interfaceHeightsM,
     beamCosine,
-    fromInterfaces,
-    fromShadow,
+    fromInterfacesM,
+    fromShadowM,
     shadowM,
     emptySlant,
   };
@@ -426,7 +426,7 @@ export function sphericalBeamPath(
   if (!(beamCosine > 0)) {
     return beamBelowHorizon(geometry, height, depthOf, layers);
   }
-  const { fromInterfaces, emptySlant } = geometry;
+  const { fromInterfacesM, emptySlant } = geometry;
   const slant = new Float64Array(layers + 1);
   for (let k = 1; k <= layers; k += 1) {
     let sum = 0;
@@ -435,7 +435,7 @@ export function sphericalBeamPath(
       if (tau === 0) {
         continue;
       }
-      const chord = fromInterfaces[k * layers + q] ?? Number.NaN;
+      const chord = fromInterfacesM[k * layers + q] ?? Number.NaN;
       sum += (tau * chord) / (height(q) - height(q + 1));
     }
     slant[k] = sum;
@@ -541,12 +541,12 @@ function beamBelowHorizon(
   depthOf: (p: number) => number,
   layers: number,
 ): SphericalBeam {
-  const { bottomRadiusM, beamCosine, fromInterfaces, emptySlant, shadowM } = chords;
+  const { bottomRadiusM, beamCosine, fromInterfacesM, emptySlant, shadowM } = chords;
   const lit = litBelowHorizon(bottomRadiusM, beamCosine);
   const slant = new Float64Array(layers + 1);
   for (let k = 0; k <= layers; k += 1) {
     slant[k] = lit(height(k))
-      ? slantAlong(height, depthOf, layers, fromInterfaces, k * layers)
+      ? slantAlong(height, depthOf, layers, fromInterfacesM, k * layers)
       : Number.POSITIVE_INFINITY;
   }
   const topTransmission = new Float64Array(layers);
@@ -585,8 +585,8 @@ function beamBelowHorizon(
       slantFactor[p] = emptySlant[p] ?? Number.NaN;
     } else {
       const litDepth = tau * litShare;
-      const fromShadow = slantAlong(height, depthOf, layers, chords.fromShadow, 0);
-      const litLambda = Math.max((fromShadow - accumulated) / litDepth, SLANT_FACTOR_FLOOR);
+      const slantFromShadow = slantAlong(height, depthOf, layers, chords.fromShadowM, 0);
+      const litLambda = Math.max((slantFromShadow - accumulated) / litDepth, SLANT_FACTOR_FLOOR);
       const share = -expm1(-litLambda * litDepth) / (litLambda * tau);
       slantFactor[p] = edgeSlant(share, litLambda * tau) / tau;
     }

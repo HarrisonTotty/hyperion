@@ -298,11 +298,11 @@ function shellTermsOf(shell: Shell): ShellTerms {
  */
 interface SunPlace {
   /** The radius held in the shell, m, and its square, m². */
-  readonly r: number;
-  readonly r2: number;
-  /** The mapping's d_min, m, and d_max − d_min. */
-  readonly dMin: number;
-  readonly span: number;
+  readonly rM: number;
+  readonly rM2: number;
+  /** The mapping's d_min, m, and d_max − d_min, m. */
+  readonly dMinM: number;
+  readonly spanM: number;
   /** The table's radius row below the radius and the fraction of the way to the next. */
   readonly y0: number;
   readonly fy: number;
@@ -316,7 +316,7 @@ function sunPlaceOf(shell: Shell, terms: ShellTerms, rM: number): SunPlace {
   const dMin = shell.topRadiusM - r;
   const y = Math.min(Math.max(rho / terms.bigH, 0), 1) * (DISC_SUN_TABLE.radii - 1);
   const y0 = Math.min(Math.floor(y), DISC_SUN_TABLE.radii - 2);
-  return { r, r2: r * r, dMin, span: rho + terms.bigH - dMin, y0, fy: y - y0 };
+  return { rM: r, rM2: r * r, dMinM: dMin, spanM: rho + terms.bigH - dMin, y0, fy: y - y0 };
 }
 
 /** A band's ray integrals to the top at each node of the star's table, before any curve. */
@@ -404,7 +404,7 @@ function sunTransmittanceAtInto(
   mu: number,
   out: [number, number, number],
 ): void {
-  const { r, r2 } = place;
+  const { rM: r, rM2: r2 } = place;
   // `opticalDepth.ts`'s `intersectsGround`.
   if (mu < 0 && r2 * (mu * mu - 1) + table.bottom2 >= 0) {
     out[0] = 0;
@@ -414,7 +414,7 @@ function sunTransmittanceAtInto(
   }
   const cosines = DISC_SUN_TABLE.cosines;
   const d = Math.max(-r * mu + Math.sqrt(Math.max(r2 * (mu * mu - 1) + table.top2, 0)), 0);
-  const u = (d - place.dMin) / place.span;
+  const u = (d - place.dMinM) / place.spanM;
   const x = Math.min(Math.max(u, 0), 1) * (cosines - 1);
   const x0 = Math.min(Math.floor(x), cosines - 2);
   const fx = x - x0;

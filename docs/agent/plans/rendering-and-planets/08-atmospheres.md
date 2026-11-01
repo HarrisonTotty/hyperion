@@ -24366,8 +24366,9 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `bake.ts`: a band's solves make the table's interfaces alone (`bakeBinSolve` every one), as
     `onSolve`'s solution says; `mixedLayers`, `deltaMLayersOf`, `LayerTermOptics`, `MixedLayers` and
     `DeltaMLayers` exported, the deck's mixer folded into them.
-  - Left: the spherical beam's chords cached per band (bit for bit, about 2% of a bake); the
-    deck's 16 layers (8.2 → 6.3 s a Venus-class band), which moves figures.
+  - Left: the spherical beam's chords cached per band (bit for bit, about 2% of a bake; taken in
+    R08.T15.a's levers below); the deck's 16 layers (8.2 → 6.3 s a Venus-class band), which moves
+    figures.
   - The re-ask (owner-view-body's finding) is not one: the inspection run's "no PENDING" check
     passes before the body's first ask, on the frames before the first photorealistic plan.
 - **The correction's levers, as built** (R08.T14.e, 2026-11-01; lane `perf-thick-bake`).
@@ -24382,6 +24383,11 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `deckReflectance(…, streams, known?)` takes a known reflectance's modes at the cosines it holds:
     the bake's deck takes its coupling's modes 0–2 and solves 3–7 alone.
   - `deckColumnSolve(…, fields?)`: the table below asks its altitudes' fields alone.
+  - `sphericalBeamChords` and `sphericalBeamPath(…, chords?)`: a band's beams' chords once, traced
+    by the bake's bins and terms, the table below and the correction's channels.
+  - `LayerKeep` (the problem's `keepLayers` and `keptLayers`, `BakeBandOptions.keepLayers`,
+    `BinSolve.keptLayers`, `deckColumnSolve(…, chords?, kept?)`): the table below's whole-column
+    solve runs in the upper bake's `onSolve` and takes its leading layers.
 - **R08.T14.d.4's Titan-class gate** (2026-11-01; lane `r08-titan-route`; tallies and bake times
   in the lane's outbox). **It misses; nothing is routed.**
   - _The gate_: `vectorGate.json` format 7 adds `titanClass`: the whole column baked at m ≤ 2 with
@@ -24511,3 +24517,9 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   coverage 0 takes no term. `ATMOSPHERE_OPTICS_VERSION` is 6. A uniform medium still veils a broken
   deck's clear share, which R11's coverage field draws (Design note 10 there); the deck's term
   leaves the medium then, or it is counted twice.
+- **The giant's levers, as built** (R08.T16.b.2, 2026-11-01; lane `perf-thick-bake`, chained;
+  timings in its outbox). Every table is unchanged to the bit.
+  - `aerosol.ts`: `aerosolModeOptics` keeps 160 modes' optics (`MODE_OPTICS_KEPT`) and gives a copy;
+    `mie.ts`: `mieSphere(…, scratch?)` and `mieScratch`.
+  - `discBake.ts`: a view step holds its own terms; `decodedThickRead` takes `decodedReadScratch()`.
+  - Left: the hand Jupiter's deck, and its disc table at 768 steps, over `BAKE_CEILING_S`.
