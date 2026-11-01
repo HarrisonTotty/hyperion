@@ -148,7 +148,13 @@ impl Debris {
         in_list_order(&mut dwarfs);
         // Design note 1: when the drawn share is the smaller, the dwarfs' cold masses are scaled
         // down together to meet it, from the share's own figures (P10.T3.d.a).
-        let scale = ShareFigures::of(galaxy.params(), galaxy.potential(), &dwarfs).dwarf_scale();
+        let scale = ShareFigures::of(
+            galaxy.params(),
+            galaxy.potential(),
+            &dwarfs,
+            galaxy.rules().orphan_streams,
+        )
+        .dwarf_scale();
         scale_cold_masses(&mut dwarfs, scale);
         let limit = usize::from(StreamNumber::LIMIT);
         let dwarf_tubes = dwarfs.iter().filter(|d| d.tube.is_some()).count();
@@ -226,13 +232,16 @@ impl DebrisPlan {
         self.orphans.orphan(galaxy, k)
     }
 
-    /// Orphan `k`'s stream as [`orphan`](Self::orphan) draws it, for any `k`, numbered `number`:
-    /// what a galaxy whose multiplier of streams per globular draws more orphans than this one
-    /// would give as its orphan `k`, since each orphan's draws are keyed by `k` alone and the
+    /// Orphan `k`'s stream as [`orphan`](Self::orphan) draws it, for any `k`, numbered `number`.
+    ///
+    /// It is what a galaxy whose multiplier of streams per globular draws more orphans than this
+    /// one would give as its orphan `k`, since each orphan's draws are keyed by `k` alone and the
     /// multiplier sets only how many are drawn. Its list would number it after the living
     /// globulars, in the order the orphans are found ([`finish`](Self::finish)), and its spray's
-    /// draws are keyed by that number. Plan 15's fit of the multiplier (P15.T11.b) observes the
-    /// orphans of every multiplier on its grid through it; nothing generated reads it.
+    /// draws are keyed by that number. `None` as [`orphan`](Self::orphan) gives it, and also for
+    /// any `k` in a galaxy with no globular-born debris, which draws no orphan. Plan 15's fit of
+    /// the multiplier (P15.T11.b) observes the orphans of every multiplier on its grid through it;
+    /// nothing generated reads it.
     ///
     /// # Panics
     ///

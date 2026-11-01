@@ -3234,3 +3234,16 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     components' law without the 65,000 ly cut (lean, 2026-11-01). The census's 41 tracks with
     galstreams' 1 kpc placeholder distances (STREAMFINDER's) count as within 30 kpc (lean,
     2026-11-01).
+  - _The hold._ `ORPHAN_STREAMS_VERSION` = 27: `GalaxyRules::orphan_streams`
+    (`OrphanStreamsRules`) gives `orphans::expected_count` and `ShareFigures::of` their k, and
+    `GalaxyRules::every_27_hold()` turns it on (tripwire
+    `the_orphan_streams_are_held_only_until_the_27_bump`). `discrete_share` reads the version's
+    rules; P10.T3.d.b, when it stores the share, passes the galaxy's. P10.T12's tests read k through
+    the galaxy's rules, not the table's item.
+  - _For the 27 bump_ (measured with the hold turned on at 24): delete the hold and the held item
+    with its test; re-pin `the_milky_way_s_list_is_pinned_ordered_and_pure`'s 352 legs (496 at
+    2.11) and re-bless `galaxy/global_list/list`; widen the slow
+    `the_applied_share_over_2000_galaxies_is_summarised`'s `GLOBULAR_SHARE_PIN` (sweep galaxy 295
+    at 5.4% against 4.5%) and its median window, then re-bless `galaxy/global_list/discrete_share`.
+    `GLOBULAR_TUBES_INSIDE` still holds (its slow test passes at 27). No other golden of the sim's
+    or the server's fast suites, or of the sim's slow `global_list` tests, moves.

@@ -273,7 +273,12 @@ fn budget_of(n: u64) -> Budget {
     let tables = galaxy.potential();
     let mut debris = dwarfs(galaxy.seed(), galaxy.params(), tables);
     in_list_order(&mut debris);
-    let figures = ShareFigures::of(galaxy.params(), tables, &debris);
+    let figures = ShareFigures::of(
+        galaxy.params(),
+        tables,
+        &debris,
+        galaxy.rules().orphan_streams,
+    );
     let [globular_term, dwarfs_cold, _] = figures.parts_solar_masses();
     let force = SprayForce::new(tables).expect("the full potential");
     let few = SprayParams::new(std::num::NonZeroU32::new(SWEEP_TRACERS_PER_ARM).expect("not zero"));

@@ -43,6 +43,10 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
+//! - [`orphan_streams`](GalaxyRules::orphan_streams), at [`ORPHAN_STREAMS_VERSION`] (plan 15,
+//!   P15.T11.b): the orphans' count and the halo's discrete share take the fitted streams per
+//!   globular. It is read where a galaxy's debris is planned (`Debris::plan`, the orphans' draw
+//!   and the dwarfs' scale), and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -58,6 +62,7 @@ use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
+use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
 use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
 use crate::stellar::rules::StellarRules;
 
@@ -85,6 +90,9 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
+    /// The streams per globular the orphans and the discrete share read: the brainstorm's or
+    /// P15.T11.b's fit.
+    pub(crate) orphan_streams: OrphanStreamsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -135,6 +143,11 @@ impl GalaxyRules {
             } else {
                 DisplacedRules::FieldOnly
             },
+            orphan_streams: if version.get() >= ORPHAN_STREAMS_VERSION.get() {
+                OrphanStreamsRules::Fitted
+            } else {
+                OrphanStreamsRules::Brainstorm
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -153,6 +166,17 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_26_hold() -> Self {
         Self::of_version(GeneratorVersion::new(26))
+    }
+
+    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: 26's
+    /// holds and those that turn on at 27 (the galaxy's `orphan_streams`, P15.T11.b).
+    ///
+    /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
+    /// struct-update syntax over it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_27_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(27))
     }
 }
 
@@ -324,6 +348,24 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_26_hold().feature_classes,
             FeatureClassesRules::Listed
+        );
+    }
+
+    /// Each galaxy hold at 27 is held below it and new from it on, in every 27 hold.
+    #[test]
+    fn each_27_hold_turns_on_at_27() {
+        let orphans = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).orphan_streams;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(orphans(v), OrphanStreamsRules::Brainstorm, "{v}");
+        }
+        assert_eq!(orphans(27), OrphanStreamsRules::Fitted);
+        assert_eq!(
+            GalaxyRules::every_26_hold().orphan_streams,
+            OrphanStreamsRules::Brainstorm
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().orphan_streams,
+            OrphanStreamsRules::Fitted
         );
     }
 }

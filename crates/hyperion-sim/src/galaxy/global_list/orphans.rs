@@ -2,8 +2,10 @@
 //! Design note 10).
 //!
 //! - **Count**: Poisson with mean `max(0, k × expected globulars − living globulars with a tube)`,
-//!   `k` the streams per globular of [`tables::streams`](crate::tables::streams), 1.5, and the
-//!   expected globulars plan 02's untruncated count; so most globular streams are orphans.
+//!   `k` the streams per globular of [`tables::streams`](crate::tables::streams) that the galaxy's
+//!   `orphan_streams` hold reads: the brainstorm's 1.5, and from version 27 P15.T11.b's fit to the
+//!   known streams (`ORPHAN_STREAMS_VERSION`); the expected globulars are plan 02's untruncated
+//!   count, so most globular streams are orphans.
 //! - **Marks**, on `stream.orphan.marks` keyed by the orphan's place among the orphans: the mass,
 //!   log-normal about 10⁴ M☉ with the known thin streams' 0.5 dex of scatter, cut to 10³–10⁵ M☉
 //!   by inverse transform ([`MASS_LAW`]); the dissolution time as a uniform share of the
@@ -36,6 +38,7 @@
 //! The stripping time is Design note 5's with the tidal radius at the orphan's mass, and stops at
 //! the cluster's age.
 
+use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
@@ -49,7 +52,7 @@ use crate::galaxy::params::HaloComponentKind;
 use crate::galaxy::quad::gl16;
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
-use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR;
+use crate::tables::streams::{ORPHAN_STREAMS_PER_GLOBULAR, ORPHAN_STREAMS_PER_GLOBULAR_27};
 use crate::units::{Dex, LightYears, SolarMasses, Years};
 
 use super::spec::{ClusterStars, MassLoss, SphericalOrbit, StreamSpec, stripping_time};
@@ -115,11 +118,44 @@ pub const ORBIT_WORDS: u64 = 3 + VELOCITY_WORDS_PER_ATTEMPT * ESCAPE_CUT_ATTEMPT
 /// Knots of the radial law's cumulative function, in `ln(1 + r ÷ r_c)`.
 const RADIAL_KNOTS: u32 = 512;
 
+/// The generator version from which a galaxy's orphans, and the globular tubes its halo's discrete
+/// share counts, take P15.T11.b's fitted streams per globular, [`ORPHAN_STREAMS_PER_GLOBULAR_27`]
+/// (the hold of [`OrphanStreamsRules`]).
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`OrphanStreamsRules::Brainstorm`], the brainstorm's 1.5, so every generated value keeps its
+/// bits; the tests reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`.
+/// The bump to 27 deletes this hold, [`OrphanStreamsRules`] with its `Brainstorm` arm, the
+/// galaxy's `orphan_streams` field and its tripwire
+/// (`the_orphan_streams_are_held_only_until_the_27_bump`).
+pub(crate) const ORPHAN_STREAMS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// The streams per globular a galaxy's orphans and its halo's discrete share read (the hold of
+/// [`ORPHAN_STREAMS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OrphanStreamsRules {
+    /// Version 26's and before: the brainstorm's 1.5, [`ORPHAN_STREAMS_PER_GLOBULAR`].
+    Brainstorm,
+    /// Version 27's: P15.T11.b's fit to the known streams, [`ORPHAN_STREAMS_PER_GLOBULAR_27`].
+    Fitted,
+}
+
+impl OrphanStreamsRules {
+    /// The streams per globular k, living clusters' tubes and orphans together.
+    #[must_use]
+    pub(crate) const fn streams_per_globular(self) -> f64 {
+        match self {
+            Self::Brainstorm => ORPHAN_STREAMS_PER_GLOBULAR,
+            Self::Fitted => ORPHAN_STREAMS_PER_GLOBULAR_27,
+        }
+    }
+}
+
 /// The expected number of orphans in a galaxy of `globulars` expected globulars with `living`
-/// living ones given tubes (Design note 10).
+/// living ones given tubes, at `streams_per_globular` streams per globular (Design note 10).
 #[must_use]
-pub(crate) fn expected_count(globulars: f64, living: u32) -> f64 {
-    (ORPHAN_STREAMS_PER_GLOBULAR * globulars - f64::from(living)).max(0.0)
+pub(crate) fn expected_count(streams_per_globular: f64, globulars: f64, living: u32) -> f64 {
+    (streams_per_globular * globulars - f64::from(living)).max(0.0)
 }
 
 /// The orphans' draw in one galaxy before any orphan is drawn: how many attempts at an orphan it
@@ -146,7 +182,11 @@ impl OrphanDraw {
     pub(crate) fn new(galaxy: &Galaxy, living: u32) -> Self {
         let seed = galaxy.seed();
         let params = galaxy.params();
-        let mean = expected_count(f64::from(params.accretion().globular_count()), living);
+        let mean = expected_count(
+            galaxy.rules().orphan_streams.streams_per_globular(),
+            f64::from(params.accretion().globular_count()),
+            living,
+        );
         let count =
             Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
         let debris = debris_component(galaxy);
@@ -181,10 +221,12 @@ impl OrphanDraw {
         self.orphan_at(galaxy, k)
     }
 
-    /// Orphan `k`'s stream for any `k`, the count aside: what a draw of more orphans, under a
-    /// larger multiplier, would give as its orphan `k`, since every draw of an orphan is keyed by
-    /// `k` alone and the multiplier sets only how many there are (plan 15's fit of it,
-    /// P15.T11.b). `None` for a galaxy with no globular-born debris, which draws none.
+    /// Orphan `k`'s stream for any `k`, the count aside.
+    ///
+    /// It is what a draw of more orphans, under a larger multiplier, would give as its orphan `k`,
+    /// since every draw of an orphan is keyed by `k` alone and the multiplier sets only how many
+    /// there are (plan 15's fit of it, P15.T11.b). `None` for a galaxy with no globular-born
+    /// debris, which draws none, or for an orphan none of whose attempts finds an orbit.
     ///
     /// # Panics
     ///
@@ -358,9 +400,13 @@ impl RadialLaw {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
+    use crate::GENERATOR_VERSION;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::rules::GalaxyRules;
     use crate::rng::Seed;
 
     #[test]
@@ -445,7 +491,64 @@ mod tests {
 
     #[test]
     fn the_orphan_count_makes_up_the_streams_per_globular() {
-        assert!((expected_count(160.0, 40) - 200.0).abs() < 1e-12);
-        assert!(expected_count(10.0, 40).abs() < 1e-12);
+        assert!((expected_count(1.5, 160.0, 40) - 200.0).abs() < 1e-12);
+        assert!(expected_count(1.5, 10.0, 40).abs() < 1e-12);
+        assert!((expected_count(2.0, 160.0, 40) - 280.0).abs() < 1e-12);
+    }
+
+    /// Each arm reads its own item of the table: the held arm the brainstorm's 1.5, the 27 arm
+    /// P15.T11.b's fit, bit for bit.
+    #[test]
+    fn each_arm_reads_its_streams_per_globular() {
+        assert_same_bits(OrphanStreamsRules::Brainstorm.streams_per_globular(), 1.5);
+        assert_same_bits(
+            OrphanStreamsRules::Fitted.streams_per_globular(),
+            ORPHAN_STREAMS_PER_GLOBULAR_27,
+        );
+    }
+
+    /// A galaxy's orphans are drawn at its own rules' streams per globular: the count is the
+    /// Poisson draw of the galaxy's count stream at that mean, the version's and 27's.
+    #[test]
+    fn the_orphans_count_is_drawn_at_the_galaxy_s_streams_per_globular() {
+        let seed = Seed::new(0x0f11_b000_0000_0001);
+        let mut counts = Vec::new();
+        for rules in [
+            GalaxyRules::of_version(GENERATOR_VERSION),
+            GalaxyRules::every_27_hold(),
+        ] {
+            let galaxy =
+                Galaxy::from_params_with_rules(seed, GalaxyParams::milky_way_like(), rules)
+                    .expect("the Milky Way fixture builds");
+            let draw = OrphanDraw::new(&galaxy, 40);
+            let globulars = f64::from(galaxy.params().accretion().globular_count());
+            let k = rules.orphan_streams.streams_per_globular();
+            let mean = expected_count(k, globulars, 40);
+            let want =
+                Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
+            assert_eq!(draw.count(), want, "k {k}");
+            counts.push(draw.count());
+        }
+        assert!(counts[1] > counts[0], "{counts:?}");
+    }
+
+    /// The tripwire of the hold: below 27 every galaxy reads the brainstorm's 1.5.
+    #[test]
+    fn the_orphan_streams_are_held_only_until_the_27_bump() {
+        assert!(
+            GENERATOR_VERSION < ORPHAN_STREAMS_VERSION,
+            "the 26 → 27 bump puts P15.T11.b's fitted streams per globular on the record: the \
+             orphans' count, the numbers of the dwarfs' streams after them, the halo's discrete \
+             share and the dwarfs' scale move. Delete `ORPHAN_STREAMS_VERSION`, \
+             `OrphanStreamsRules` with its `Brainstorm` arm, `GalaxyRules::orphan_streams` and \
+             this test in the bump's own commit, with the `streams` table's held item and its \
+             test, measure `share::GLOBULAR_TUBES_INSIDE` again \
+             (`the_globular_tubes_inside_share_is_the_sweep_s_mean`), and re-bless the goldens \
+             plan 15's \"T11.b as built\" lists"
+        );
+        assert_eq!(
+            GalaxyRules::of_version(GENERATOR_VERSION).orphan_streams,
+            OrphanStreamsRules::Brainstorm
+        );
     }
 }
