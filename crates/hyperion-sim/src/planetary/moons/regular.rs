@@ -125,7 +125,7 @@ use crate::planetary::moons::eccentricity::{
     forced_scale, free_eccentricity, resonance_budget,
 };
 #[cfg(test)]
-use crate::planetary::moons::tides::radiating_flows;
+use crate::planetary::moons::tides::{BalanceEnd, radiating_balance};
 use crate::planetary::moons::tides::{
     MoonTides, SurfaceHeatRules, TidalBranch, TidalMaterial, TideInputs, TideSweep, mean_density,
     tidal_forcing, with_radiating_surface,
@@ -2954,20 +2954,11 @@ impl TideModel {
         self.inputs.surface_temperature
     }
 
-    /// Its tides at the eccentricity `e` and the surface temperature they read there
-    /// ([`solve`](Self::solve)).
+    /// Its tides at the eccentricity `e`, the surface temperature they read there and how its
+    /// balance ended, after so many solves ([`radiating_balance`]).
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn surface_at(&self, e: f64) -> (MoonTides, Kelvin) {
-        let (tides, _, surface, _) = self.solve_at_surface(e);
-        (tides, surface)
-    }
-
-    /// Its heat flows at the eccentricity `e` over `iterations` of its surface's balance, one for
-    /// each solve ([`radiating_flows`]).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn surface_flows(&self, e: f64, iterations: u32) -> Vec<(f64, TidalBranch)> {
+    pub(crate) fn surface_balance(&self, e: f64) -> (MoonTides, Kelvin, (BalanceEnd, u32)) {
         let inputs = TideInputs {
             forcing: tidal_forcing(
                 self.planet,
@@ -2978,17 +2969,14 @@ impl TideModel {
             ),
             ..self.inputs
         };
-        radiating_flows(
-            &inputs,
-            |inputs| {
-                if self.ocean_open {
-                    MoonTides::with_ocean(inputs, &self.solutes)
-                } else {
-                    (MoonTides::without_an_ocean(inputs), Subsurface::NoOcean)
-                }
-            },
-            iterations,
-        )
+        let (tides, _, surface, end) = radiating_balance(&inputs, |inputs| {
+            if self.ocean_open {
+                MoonTides::with_ocean(inputs, &self.solutes)
+            } else {
+                (MoonTides::without_an_ocean(inputs), Subsurface::NoOcean)
+            }
+        });
+        (tides, surface, end)
     }
 
     /// Its mean radius, at which its heat is spread.
@@ -5976,17 +5964,18 @@ mod tests {
     /// P14.T55.j's census at the age `age`: the generated moons of [`damping_census`] under every 27
     /// hold, their surfaces radiating their whole heat flow, against held at their equilibrium
     /// temperature. Each moon's balance, σ `T_s`⁴ = σ `T_eq`⁴ + F on its tide model at its
-    /// eccentricity, converges to 10⁻⁹ of F within [`SURFACE_HEAT_ITERATIONS`], whose count is the
-    /// census's own, but for at most 5 moons whose solves alternate between two branches: an ocean
-    /// whose heat warms its surface past its shell's edge, which the cold branch then lets cool,
-    /// with no balance on either (2 at 100 Myr, none at the Sun's age, as built). Recorded: the
-    /// moons that change branch, derived afresh, the largest rise of a surface and the counts at 1
-    /// and 10 K or more, the balance's residual after each iteration, and the cycling moons.
+    /// eccentricity, settles: at a root to [`SURFACE_HEAT_TOLERANCE`] of `T_s`, or, for at most 5
+    /// moons, on a jump with no root, an ocean whose heat warms its surface past its shell's edge,
+    /// which the cold branch then lets cool (2 at 100 Myr, none at the Sun's age, as built).
+    /// Recorded: the moons that change branch, derived afresh, the largest rise of a surface and
+    /// the counts at 1 and 10 K or more, the solves a balance took, the largest residual of the
+    /// balance as a share of F, and the moons on a jump.
     fn surface_heat_census(age: Years) {
         use crate::planetary::moons::tides::{
-            SURFACE_HEAT_ITERATIONS, SurfaceHeatRules, TidalBranch,
+            SURFACE_HEAT_TOLERANCE, SurfaceHeatRules, TidalBranch,
         };
         use crate::planetary::testing::with_every_27_hold;
+        use crate::units::consts::STEFAN_BOLTZMANN;
         let giants = census_giants();
         let index = |branch: TidalBranch| match branch {
             TidalBranch::Cold => 0,
@@ -5999,66 +5988,56 @@ mod tests {
         for (a, b) in held.0.iter().zip(&radiated.0) {
             moves[index(a.own.branch())][index(b.own.branch())] += 1;
         }
-        // The balance's residual after n iterations, the largest over the census, and the rise of
-        // each surface at the count built, read under the rules that damped the moons.
-        let (residuals, rise, past, cycles) = with_every_27_hold(|| {
-            let mut cycles = Vec::new();
-            let mut residuals = [0.0_f64; 13];
+        // Each moon's balance on its model, read under the rules that damped the moons.
+        let (rise, past, solves, residual, jumps) = with_every_27_hold(|| {
+            let mut jumps = Vec::new();
             let (mut rise, mut past) = (None::<(f64, f64, f64, TidalBranch)>, [0_u32; 2]);
+            let (mut solves, mut residual) = ([0_u32, 0, 0], 0.0_f64);
             for moon in &radiated.0 {
                 let model = moon.at.model.expect("every generated moon derives");
                 let e = moon.at.moon.orbit().eccentricity().value();
-                let flows = model.surface_flows(e, 12);
-                // A moon whose last solves alternate between two branches has no balance on
-                // either: its ocean's heat warms its surface past its shell's edge.
-                let cycling = flows[11].1 != flows[12].1;
-                if cycling {
-                    cycles.push((model.equilibrium().value(), flows[11], flows[12]));
+                let (tides, surface, (end, count)) = model.surface_balance(e);
+                let (t_s, t_eq, f) = (
+                    surface.value(),
+                    model.equilibrium().value(),
+                    tides.heat_flow().value(),
+                );
+                assert_ne!(end, BalanceEnd::Unsettled, "T_eq {t_eq} K: {tides:?}");
+                solves[0] += count;
+                solves[1] = solves[1].max(count);
+                solves[2] += 1;
+                if end == BalanceEnd::Jump {
+                    jumps.push((t_eq, t_s, f, tides.branch()));
                     continue;
                 }
-                for (residual, pair) in residuals.iter_mut().skip(1).zip(flows.windows(2)) {
-                    if pair[1].0 > 0.0 {
-                        *residual = residual.max((pair[1].0 - pair[0].0).abs() / pair[1].0);
-                    }
+                let radiated = STEFAN_BOLTZMANN * (math::powi(t_s, 4) - math::powi(t_eq, 4));
+                if f > 0.0 {
+                    residual = residual.max((radiated - f).abs() / f);
                 }
-                let (tides, surface) = model.surface_at(e);
-                let delta = surface.value() - model.equilibrium().value();
+                let delta = t_s - t_eq;
                 past[0] += u32::from(delta >= 1.0);
                 past[1] += u32::from(delta >= 10.0);
                 if rise.is_none_or(|(most, ..)| delta > most) {
-                    rise = Some((
-                        delta,
-                        model.equilibrium().value(),
-                        tides.heat_flow().value(),
-                        tides.branch(),
-                    ));
+                    rise = Some((delta, t_eq, f, tides.branch()));
                 }
             }
-            (residuals, rise, past, cycles)
+            (rise, past, solves, residual, jumps)
         });
-        let needed = residuals
-            .iter()
-            .skip(1)
-            .position(|&r| r <= 1e-9)
-            .map(|n| n + 1);
         eprintln!(
             "{} moons at {:.3e} yr, held → radiated surface, by branch afresh (cold, ocean, \
              heated): {moves:?}; the largest rise {rise:?} (K, T_eq K, W m⁻², branch); {} at 1 K \
-             or more, {} at 10 K or more; the balance's residual after n = 1..12: {:?}; {needed:?} \
-             iterations reach 10⁻⁹; {} moons cycling between two branches (T_eq K, the last two \
-             solves' W m⁻² and branch): {cycles:?}",
+             or more, {} at 10 K or more; {:.2} solves a balance, at most {}, to \
+             {SURFACE_HEAT_TOLERANCE:e} of T_s; the balance's largest residual {residual:.2e} of \
+             F; {} moons on a jump (T_eq K, T_s K, W m⁻², branch): {jumps:?}",
             radiated.0.len(),
             age.value(),
             past[0],
             past[1],
-            &residuals[1..],
-            cycles.len(),
+            f64::from(solves[0]) / f64::from(solves[2]),
+            solves[1],
+            jumps.len(),
         );
-        assert!(
-            needed.is_some_and(|n| n <= usize::try_from(SURFACE_HEAT_ITERATIONS).unwrap()),
-            "{needed:?} against {SURFACE_HEAT_ITERATIONS}: {residuals:?}"
-        );
-        assert!(cycles.len() <= 5, "{cycles:?}");
+        assert!(jumps.len() <= 5, "{jumps:?}");
     }
 
     /// P14.T55.j's census at the Sun's age ([`surface_heat_census`]).

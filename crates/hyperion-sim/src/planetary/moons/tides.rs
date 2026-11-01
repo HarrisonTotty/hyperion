@@ -73,9 +73,8 @@
 //! A generated moon's tides read its equilibrium temperature, its sunlight's, as its surface's.
 //! From 27 (`SURFACE_HEAT_VERSION`) its surface radiates its whole heat flow F too,
 //! σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]), and its shell's top and Maxwell
-//! profile read that surface (`with_radiating_surface`, by a fixed count of iterations,
-//! [`SURFACE_HEAT_ITERATIONS`]). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by
-//! 0.35 K. The air and the record's surface conditions still read the sunlight alone (ruling
+//! profile read that surface (`with_radiating_surface`, solved to [`SURFACE_HEAT_TOLERANCE`] of
+//! `T_s`). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by 0.35 K. The air and the record's surface conditions still read the sunlight alone (ruling
 //! 112.7's split; lean, 2026-11-01).
 //!
 //! Every function here is pure and deterministic: the shell's modulus is a fixed midpoint sum
@@ -409,86 +408,171 @@ pub fn radiating_surface_temperature(
     Kelvin::new(t4.sqrt().sqrt())
 }
 
-/// The iterations of `with_radiating_surface`: 11, from the equilibrium temperature, which
-/// converge every moon of P14.T55.j's census at the Sun's age (11) and at 100 Myr (10) to 10⁻⁹ of
-/// its heat flow. An ocean-branch moon's converges geometrically, its worst by about 8 an
-/// iteration; a cold or heated moon's heat does not read its surface, so its balance holds after
-/// one. Of 5,000 moons at 100 Myr, 2 have no balance: their ocean's 80–92 W m⁻² warms their surface
-/// past their shell's edge, and the cold branch's 0.04–0.06 W m⁻² cools it again. Their solves
-/// alternate, and at this count they take the cold branch (P14.T55.k's open-ocean states are the
-/// lever).
-pub const SURFACE_HEAT_ITERATIONS: u32 = 11;
+/// The relative tolerance on a moon's surface temperature to which `with_radiating_surface`
+/// solves its balance: 10⁻¹², so that the balance σ `T_s`⁴ − σ `T_eq`⁴ = F holds to 10⁻⁹ of F
+/// wherever F is at least 4 × 10⁻³ of σ `T_s`⁴ (Enceladus's is 2 × 10⁻²), some 10⁴ ulp of `T_s`,
+/// well above the arithmetic's own error.
+pub const SURFACE_HEAT_TOLERANCE: f64 = 1e-12;
+
+/// The most solves `with_radiating_surface` takes of a moon's balance: 64, beyond the 42
+/// halvings that close a bracket of 300 K to [`SURFACE_HEAT_TOLERANCE`] of 100 K. A balance on a
+/// jump took 49 at most over P14.T55.j's census, one on a root 9.
+pub const SURFACE_HEAT_SOLVES: u32 = 64;
+
+/// How a moon's surface balance ended ([`radiating_balance`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BalanceEnd {
+    /// At a root: its surface radiates the heat its tides make there, to
+    /// [`SURFACE_HEAT_TOLERANCE`].
+    Root,
+    /// At a jump with no root: its bracket closed to [`SURFACE_HEAT_TOLERANCE`] on a branch's edge,
+    /// its heat making the surface warm on one side and cool on the other, and it takes the side
+    /// on which its surface radiates more than its heat.
+    Jump,
+    /// At the last of [`SURFACE_HEAT_SOLVES`], at neither.
+    Unsettled,
+}
 
 /// The tides `solve` gives the moon of `inputs`, whose surface temperature there is its
 /// equilibrium temperature, and the surface temperature they are read at: from
 /// [`SURFACE_HEAT_VERSION`] the surface radiates the moon's whole heat flow too, F its tides'
 /// ([`MoonTides::heat_flow`]: the ocean branch's root, or the rock's heat with its tidal flux),
-/// which its shell's depth and top read in turn. So [`SURFACE_HEAT_ITERATIONS`] times, from
-/// `T_s` = `T_eq`, the surface takes [`radiating_surface_temperature`] at the last solve's F, and
-/// the moon is solved again there; the iteration stops early only where `T_s` repeats to the bit,
-/// which every later step would repeat. Below the hold, `solve` at `inputs` and their surface.
+/// which its shell's depth and top read in turn, solved to convergence ([`radiating_balance`]).
+/// Below the hold, `solve` at `inputs` and their surface.
 #[must_use]
 pub(crate) fn with_radiating_surface(
     inputs: &TideInputs,
-    solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
-) -> (MoonTides, Subsurface, Kelvin) {
-    radiating_after(
-        inputs,
-        solve,
-        match SurfaceHeatRules::in_force() {
-            SurfaceHeatRules::Held => 0,
-            SurfaceHeatRules::Radiated => SURFACE_HEAT_ITERATIONS,
-        },
-    )
-}
-
-/// The heat flows and branches of [`radiating_after`]'s solves, one for each of `iterations` + 1,
-/// with no early stop: the census's measure of the balance's convergence.
-#[cfg(test)]
-#[must_use]
-pub(crate) fn radiating_flows(
-    inputs: &TideInputs,
     mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
-    iterations: u32,
-) -> Vec<(f64, TidalBranch)> {
-    let equilibrium = inputs.surface_temperature;
-    let first = solve(inputs).0;
-    let mut flows = vec![(first.heat_flow().value(), first.branch())];
-    for _ in 0..iterations {
-        let last = WattsPerSquareMetre::new(flows.last().expect("the first solve is in").0);
-        let surface = radiating_surface_temperature(equilibrium, last);
-        let next = solve(&TideInputs {
-            surface_temperature: surface,
-            ..*inputs
-        })
-        .0;
-        flows.push((next.heat_flow().value(), next.branch()));
-    }
-    flows
-}
-
-/// [`with_radiating_surface`] after `iterations` iterations.
-#[must_use]
-pub(crate) fn radiating_after(
-    inputs: &TideInputs,
-    mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
-    iterations: u32,
 ) -> (MoonTides, Subsurface, Kelvin) {
-    let equilibrium = inputs.surface_temperature;
-    let mut surface = equilibrium;
-    let (mut tides, mut subsurface) = solve(inputs);
-    for _ in 0..iterations {
-        let next = radiating_surface_temperature(equilibrium, tides.heat_flow());
-        if next.value().total_cmp(&surface.value()).is_eq() {
-            break;
+    match SurfaceHeatRules::in_force() {
+        SurfaceHeatRules::Held => {
+            let (tides, subsurface) = solve(inputs);
+            (tides, subsurface, inputs.surface_temperature)
         }
-        surface = next;
-        (tides, subsurface) = solve(&TideInputs {
-            surface_temperature: surface,
+        SurfaceHeatRules::Radiated => {
+            let (tides, subsurface, surface, _) = radiating_balance(inputs, solve);
+            (tides, subsurface, surface)
+        }
+    }
+}
+
+/// The surface temperature `T_s` at which the moon of `inputs`, of equilibrium temperature
+/// `T_eq` their surface's, radiates the heat flow F(`T_s`) of the tides `solve` gives it there:
+/// the root of h(T) = T − g(T), g(T) = (`T_eq`⁴ + F(T) ÷ σ)^¼
+/// ([`radiating_surface_temperature`]), with the tides there, and how the solve ended, after so
+/// many solves.
+///
+/// From `T_eq`, where h ≤ 0, it steps to g(T) until h changes sign, by the secant through its
+/// last two solves where that rises past the last; then it closes the bracket by the Illinois
+/// method of false position, halving it where two steps left it more than half its width. It
+/// stops where |h| ≤ [`SURFACE_HEAT_TOLERANCE`] T ([`BalanceEnd::Root`]), where the bracket
+/// closes to that tolerance on a jump in F with no root ([`BalanceEnd::Jump`], its end where h > 0),
+/// or after [`SURFACE_HEAT_SOLVES`] ([`BalanceEnd::Unsettled`], its last solve). A cold or heated
+/// moon's heat reads no surface, so it settles at its second solve, h exactly 0.
+#[must_use]
+pub(crate) fn radiating_balance(
+    inputs: &TideInputs,
+    mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
+) -> (MoonTides, Subsurface, Kelvin, (BalanceEnd, u32)) {
+    /// One solve at a surface `t`, K, with its h, K.
+    #[derive(Clone, Copy)]
+    struct Probe {
+        t: f64,
+        excess: f64,
+        tides: MoonTides,
+        subsurface: Subsurface,
+    }
+    let equilibrium = inputs.surface_temperature;
+    let mut probe = |t: f64| {
+        let (tides, subsurface) = solve(&TideInputs {
+            surface_temperature: Kelvin::new(t),
             ..*inputs
         });
+        let radiated = radiating_surface_temperature(equilibrium, tides.heat_flow()).value();
+        Probe {
+            t,
+            excess: t - radiated,
+            tides,
+            subsurface,
+        }
+    };
+    let done = |p: Probe, end: BalanceEnd, solves: u32| {
+        (p.tides, p.subsurface, Kelvin::new(p.t), (end, solves))
+    };
+    let settled = |p: &Probe| p.excess.abs() <= SURFACE_HEAT_TOLERANCE * p.t;
+    // The secant through two solves' h, `None` where it is not finite.
+    let secant = |q: &Probe, p: &Probe| {
+        let t = p.t - p.excess * (p.t - q.t) / (p.excess - q.excess);
+        t.is_finite().then_some(t)
+    };
+    let mut last = probe(equilibrium.value());
+    let mut solves = 1;
+    if settled(&last) {
+        return done(last, BalanceEnd::Root, solves);
     }
-    (tides, subsurface, surface)
+    // Before a bracket: the solves so far, all with h < 0.
+    let mut previous: Option<Probe> = None;
+    // The bracket: its ends with h < 0 and h > 0, each with the h the false position reads.
+    let mut below = (last, last.excess);
+    let mut above: Option<(Probe, f64)> = None;
+    // Which end the last step kept, and the bracket's width two steps before.
+    let (mut kept_below, mut widths) = (None::<bool>, [f64::INFINITY; 2]);
+    while solves < SURFACE_HEAT_SOLVES {
+        let next = match above {
+            None => {
+                let fixed = last.t - last.excess;
+                previous
+                    .as_ref()
+                    .and_then(|q| secant(q, &last))
+                    .filter(|&t| t > last.t)
+                    .unwrap_or(fixed)
+            }
+            Some((hi, hi_excess)) => {
+                let (lo, lo_excess) = below;
+                let width = (hi.t - lo.t).abs();
+                if width <= SURFACE_HEAT_TOLERANCE * hi.t.max(lo.t) {
+                    return done(hi, BalanceEnd::Jump, solves);
+                }
+                let false_position = lo.t - lo_excess * (hi.t - lo.t) / (hi_excess - lo_excess);
+                let inside = (false_position - lo.t) * (false_position - hi.t) < 0.0;
+                // Before two steps in the bracket its width two steps back is infinite.
+                if inside && width <= 0.5 * widths[0] {
+                    false_position
+                } else {
+                    f64::midpoint(lo.t, hi.t)
+                }
+            }
+        };
+        let p = probe(next);
+        solves += 1;
+        if settled(&p) {
+            return done(p, BalanceEnd::Root, solves);
+        }
+        if let Some((hi, hi_excess)) = above {
+            widths = [widths[1], (hi.t - below.0.t).abs()];
+            // Illinois: an end kept twice running reads half its h.
+            if p.excess < 0.0 {
+                below = (p, p.excess);
+                if kept_below == Some(false) {
+                    above = Some((hi, 0.5 * hi_excess));
+                }
+                kept_below = Some(false);
+            } else {
+                above = Some((p, p.excess));
+                if kept_below == Some(true) {
+                    below.1 *= 0.5;
+                }
+                kept_below = Some(true);
+            }
+        } else if p.excess < 0.0 {
+            below = (p, p.excess);
+            previous = Some(last);
+        } else {
+            above = Some((p, p.excess));
+        }
+        last = p;
+    }
+    done(last, BalanceEnd::Unsettled, solves)
 }
 
 /// A complex shear modulus μ̃ = `real` + i `imaginary`, Pa, whose imaginary part dissipates (the

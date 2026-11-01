@@ -34108,3 +34108,13 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     and `Hydrosphere::conducting`. The ocean branch's halvings stop once the bracket stops moving.
   - _For 27's bump:_ `TideModel::solve_at_surface` loses its `SurfaceHeatRules::Held` arm with the
     hold; every solve then takes the sweep.
+- **P14.T55.j's balance solved to convergence (lane `perf-moon-damping`, 2026-11-01).** Behind
+  the same `SURFACE_HEAT_VERSION`; nothing moves at 24, 25 or 26.
+  - _Names:_ `SURFACE_HEAT_ITERATIONS` gives way to `SURFACE_HEAT_TOLERANCE` (10⁻¹² of `T_s`) and
+    `SURFACE_HEAT_SOLVES` (64); `radiating_after` and `radiating_flows` to `radiating_balance`
+    with `BalanceEnd`; the tests' `TideModel::surface_flows` and `surface_at` to
+    `surface_balance`.
+  - _Lean (2026-11-01):_ a moon with no root, its ocean's heat warming its surface past its
+    shell's edge, settles on the jump at the bracket's end that radiates more than its heat: the
+    cold branch at the edge (2 of 5,000 at 100 Myr, at 166 and 173 K). It replaces the fixed
+    count's lean.
