@@ -626,7 +626,14 @@ describe("the inspection run's frame profile (the owner's report)", () => {
         mainThreadMs: [10, 12],
         submitMs: [3, 4],
         gpuMs: [40, 44],
-        passes: [{ label: "atmosphere view", ms: [30, 33] }],
+        passes: [
+          {
+            label: "atmosphere view",
+            ms: [30, 33],
+            kernels: ["atmosphere ray march"],
+            workgroups: [100, 100],
+          },
+        ],
         untimedFrames: 0,
         memory: {
           uploaded: { count: 4, bytes: 2_097_152 },
@@ -634,6 +641,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
           destroyed: { count: 0, bytes: 0 },
           uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
         },
+        marchSamples: 36,
         position: "28.9 Mm 268° +49°",
         statements: ["ATMOSPHERE: APPROXIMATE"],
       },
@@ -1332,7 +1340,7 @@ describe("the views check's handlers", () => {
               mainThreadMs: [],
               submitMs: [],
               gpuMs: [1, 2],
-              passes: [{ label: "sky", ms: [1] }],
+              passes: [{ label: "sky", ms: [1], kernels: [], workgroups: [] }],
               untimedFrames: 0,
               memory: {
                 uploaded: { count: 4, bytes: 2_097_152 },
@@ -1340,6 +1348,7 @@ describe("the views check's handlers", () => {
                 destroyed: { count: 0, bytes: 0 },
                 uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
               },
+              marchSamples: 36,
               position: null,
               statements: [],
             },

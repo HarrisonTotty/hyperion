@@ -69,6 +69,14 @@ export interface EngineProbe {
   madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
   /** A material's preparation began, which settles with `prepared` (plan R10, R10.T14.d). */
   preparing(prepared: Promise<void>): void;
+  /**
+   * A kernel was dispatched under the pass label `pass` (the inspection run's frame profile; the
+   * owner's report, 2026-11-01).
+   *
+   * @param workgroups - Its workgroups, x × y × z, or `null` for an indirect dispatch, whose count
+   *   the GPU holds.
+   */
+  dispatched(kernel: string, workgroups: number | null, pass: string | undefined): void;
 }
 
 /** A view that reports its renders and sizes. */
@@ -357,6 +365,11 @@ export class ProbedEngine implements RenderEngine {
     pass?: string,
   ): void {
     this.#inner.dispatch(kernel, bindings, workgroups, pass);
+    this.#probe.dispatched(
+      kernel.name,
+      Array.isArray(workgroups) ? workgroups[0] * workgroups[1] * workgroups[2] : null,
+      pass,
+    );
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {

@@ -19,6 +19,9 @@ import type {
   ViewsCheckApi,
   ViewsCheckWindow,
 } from "../../../../../preload/api";
+import { TABLE_SIZES } from "../../../view/atmosphere/hillaire";
+import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
+import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import { PRIMARY_VIEW_NAME } from "../viewNames";
 import type { ViewsProbe } from "./viewsProbe";
 
@@ -55,6 +58,8 @@ export interface InspectionProfileDeps {
   /** A wait, which throws `STOPPED` once the run is stopped (`viewsCheckRun.ts`). */
   readonly sleep: (ms: number) => Promise<void>;
   readonly devicePixelRatio: number;
+  /** The launch's quality setting, whose march's samples a window's air takes unless stepped. */
+  readonly setting: QualitySetting;
   readonly timing: InspectionProfileTiming;
 }
 
@@ -124,6 +129,10 @@ export class InspectionProfiler {
       passes: views.passTimes(startMs, endMs),
       untimedFrames: figures.untimedFrames,
       memory: views.memoryTraffic(startMs, endMs),
+      // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
+      marchSamples:
+        TABLE_SIZES[said.statements.includes(IMAGE_DETAIL_LIMITED) ? "low" : this.#deps.setting]
+          .rayMarchSamples,
       position: said.position,
       statements: said.statements,
     });

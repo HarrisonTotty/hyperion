@@ -1213,14 +1213,30 @@ function times(value: unknown): ReadonlyArray<number> | null {
   return read !== null && read.every((each) => each >= 0) ? read : null;
 }
 
-/** One pass label's times over a profiled window: a label, and its times. */
+/**
+ * One pass label's times over a profiled window: a label, its times, and, for a dispatched one, its
+ * kernels' names and a workgroup count for each time; none of either for a render pass.
+ */
 function timingPass(value: unknown): InspectionTimingPass | null {
   if (!isRecord(value)) {
     return null;
   }
   const { label } = value;
   const ms = times(value["ms"]);
-  return typeof label === "string" && label.length > 0 && ms !== null ? { label, ms } : null;
+  const kernels = strings(value["kernels"]);
+  const workgroups = numbers(value["workgroups"]);
+  if (
+    typeof label !== "string" ||
+    label.length === 0 ||
+    ms === null ||
+    kernels === null ||
+    workgroups === null ||
+    !workgroups.every(isCount) ||
+    (kernels.length === 0 ? workgroups.length !== 0 : workgroups.length !== ms.length)
+  ) {
+    return null;
+  }
+  return { label, ms, kernels, workgroups };
 }
 
 /** A count and its bytes, each a count. */
@@ -1273,7 +1289,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const passes = listOf(value["passes"], timingPass);
   const statements = strings(value["statements"]);
   const memory = timingMemory(value["memory"]);
-  const { startMs, endMs, untimedFrames, position } = value;
+  const { startMs, endMs, untimedFrames, position, marchSamples } = value;
   if (
     name === null ||
     !isFiniteNumber(startMs) ||
@@ -1290,6 +1306,8 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     new Set(passes.map((pass) => pass.label)).size !== passes.length ||
     !isCount(untimedFrames) ||
     memory === null ||
+    !isCount(marchSamples) ||
+    marchSamples === 0 ||
     !isTextOrNull(position) ||
     statements === null
   ) {
@@ -1308,6 +1326,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     passes,
     untimedFrames,
     memory,
+    marchSamples,
     position,
     statements,
   };

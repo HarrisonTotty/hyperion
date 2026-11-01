@@ -1887,6 +1887,13 @@ export interface InspectionTimingPass {
    * every pass of the label in the frame summed and 0 in a frame that has none.
    */
   readonly ms: ReadonlyArray<number>;
+  /**
+   * Where the label's passes are a kernel's dispatches, the kernels' names, each once, and their
+   * workgroups in each of the same frames, 0 where none was dispatched (an indirect dispatch's
+   * count is the GPU's and is not counted); none, and an empty list, for a render pass.
+   */
+  readonly kernels: ReadonlyArray<string>;
+  readonly workgroups: ReadonlyArray<number>;
 }
 
 /** Bytes a count of the engine's writes or allocations came to. */
@@ -1938,6 +1945,13 @@ export interface InspectionTimingWindow {
   readonly untimedFrames: number;
   /** What the engine wrote to the GPU and made or released over the window. */
   readonly memory: InspectionTimingMemory;
+  /**
+   * The samples a ray of the atmosphere's march takes at the sizes its air was drawn at
+   * (`TableSizes.rayMarchSamples`: the setting's, or the low setting's while `IMAGE: DETAIL LIMITED`
+   * stands), by which its time a texel is read a step: nominal, the high setting's depth steps
+   * aside.
+   */
+  readonly marchSamples: number;
   /** The primary's `POSITION` line as the window ended, or `null`. */
   readonly position: string | null;
   /** The primary's statements as the window ended (`ATMOSPHERE: APPROXIMATE`, `TERRAIN: …`). */

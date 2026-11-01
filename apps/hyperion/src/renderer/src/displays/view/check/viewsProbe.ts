@@ -67,6 +67,12 @@ interface FrameEntry {
   readonly atMs: number;
   mainMs: number;
   readonly views: Map<string, FrameView>;
+  /** Its dispatches in their order: each one's pass label, kernel and workgroups (or `null`). */
+  readonly dispatches: Array<{
+    readonly pass: string;
+    readonly kernel: string;
+    readonly workgroups: number | null;
+  }>;
 }
 
 /** A view's scene target given a size: its scale against the view's canvas then. */
@@ -211,6 +217,13 @@ export class ViewsProbe implements EngineProbe {
     part.submitMs += cpuMs;
     part.resolves.push(...keys);
     frame.views.set(view, part);
+  }
+
+  dispatched(kernel: string, workgroups: number | null, pass: string | undefined): void {
+    const frameMs = this.#frameMs;
+    if (frameMs !== null && pass !== undefined) {
+      this.#frameAt(frameMs).dispatches.push({ pass, kernel, workgroups });
+    }
   }
 
   submitted(owner: string, frame: FrameSubmission): void {
@@ -438,13 +451,17 @@ export class ViewsProbe implements EngineProbe {
    * {@link ViewsProbe.window}'s `frameGpuMs`, in the same order, labels in the order first seen (the
    * inspection run's frame profile; the owner's report, 2026-11-01). A label a frame repeats is
    * numbered from its second pass in the frame's order (`atmosphere view #2`), so that one label's
-   * several dispatches, or the shadow cascades' four passes, are told apart.
+   * several dispatches, or the shadow cascades' four passes, are told apart; a label whose passes
+   * are dispatches carries their kernels and workgroups, by which its time a texel and a step is
+   * read (the march's, main's ask of 2026-11-01).
    */
   passTimes(startMs: number, endMs: number): ReadonlyArray<InspectionTimingPass> {
     const frames = [...this.#frames.values()]
       .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
       .toSorted((a, b) => a.atMs - b.atMs);
     const byLabel = new Map<string, number[]>();
+    const kernels = new Map<string, Set<string>>();
+    const groups = new Map<string, number[]>();
     let timed = 0;
     for (const frame of frames) {
       const keys = [...frame.views.values()].flatMap((part) => part.resolves);
@@ -467,14 +484,35 @@ export class ViewsProbe implements EngineProbe {
           ms[timed] = (ms[timed] ?? 0) + pass.ns / 1e6;
         }
       }
+      // The frame's dispatches, numbered by label as their passes are: one timed pass each.
+      const dispatched = new Map<string, number>();
+      for (const each of frame.dispatches) {
+        const nth = (dispatched.get(each.pass) ?? 0) + 1;
+        dispatched.set(each.pass, nth);
+        const label = nth === 1 ? each.pass : `${each.pass} #${String(nth)}`;
+        const names = kernels.get(label) ?? new Set<string>();
+        names.add(each.kernel);
+        kernels.set(label, names);
+        const counts = groups.get(label) ?? [];
+        while (counts.length < timed) {
+          counts.push(0);
+        }
+        counts[timed] = (counts[timed] ?? 0) + (each.workgroups ?? 0);
+        groups.set(label, counts);
+      }
       timed += 1;
-      for (const ms of byLabel.values()) {
-        while (ms.length < timed) {
-          ms.push(0);
+      for (const series of [...byLabel.values(), ...groups.values()]) {
+        while (series.length < timed) {
+          series.push(0);
         }
       }
     }
-    return [...byLabel].map(([label, ms]) => ({ label, ms }));
+    return [...byLabel].map(([label, ms]) => ({
+      label,
+      ms,
+      kernels: [...(kernels.get(label) ?? [])],
+      workgroups: kernels.has(label) ? (groups.get(label) ?? []) : [],
+    }));
   }
 
   /**
@@ -540,7 +578,7 @@ export class ViewsProbe implements EngineProbe {
     if (known !== undefined) {
       return known;
     }
-    const frame: FrameEntry = { atMs, mainMs: 0, views: new Map() };
+    const frame: FrameEntry = { atMs, mainMs: 0, views: new Map(), dispatches: [] };
     this.#frames.set(atMs, frame);
     return frame;
   }

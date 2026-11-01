@@ -6,6 +6,7 @@ import {
   inspectionTimingMarkdown,
   inspectionTimingTraceConfig,
   type InspectionTimingResults,
+  isMarchKernel,
   ProfileScan,
   profileFigures,
   summariseTimes,
@@ -162,8 +163,13 @@ const RECORD: InspectionTimingRecord = {
       submitMs: [8, 9],
       gpuMs: [900, 1_100],
       passes: [
-        { label: "tonemap", ms: [100, 100] },
-        { label: "atmosphere view", ms: [600, 800] },
+        { label: "tonemap", ms: [100, 100], kernels: [], workgroups: [] },
+        {
+          label: "atmosphere view",
+          ms: [600, 800],
+          kernels: ["atmosphere ray march (footprint)"],
+          workgroups: [1_000, 1_000],
+        },
       ],
       untimedFrames: 1,
       memory: {
@@ -172,6 +178,7 @@ const RECORD: InspectionTimingRecord = {
         destroyed: { count: 0, bytes: 0 },
         uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
       },
+      marchSamples: 36,
       position: "6.69 Mm 023° -12°",
       statements: ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
     },
@@ -252,6 +259,23 @@ describe("the frame profile's timing file (the owner's report)", () => {
       ["tonemap", 100, 0.1],
     ]);
     expect(window?.trace.value?.threads[0]?.thread).toBe("CrRendererMain");
+  });
+
+  it("times the ray march a workgroup, and a texel a step at the window's samples (main's ask)", () => {
+    const [window] = results().windows;
+    const march = window?.passes.find((pass) => pass.label === "atmosphere view");
+    const tonemap = window?.passes.find((pass) => pass.label === "tonemap");
+    // 600 ms over 1,000 workgroups of 64 texels, 36 samples a ray: 600 µs, 260.4 ns.
+    expect([march?.workgroupsMedian, march?.nsPerWorkgroup]).toEqual([1_000, 600_000]);
+    expect(march?.nsPerTexelStep).toBeCloseTo(600_000 / 64 / 36, 9);
+    expect([tonemap?.workgroupsMedian, tonemap?.nsPerTexelStep]).toEqual([null, null]);
+    expect(
+      [
+        "atmosphere ray march",
+        "atmosphere ray march by slot, thick",
+        "atmosphere ray march's fill",
+      ].map(isMarchKernel),
+    ).toEqual([true, true, false]);
   });
 
   it("summarises no times as none", () => {

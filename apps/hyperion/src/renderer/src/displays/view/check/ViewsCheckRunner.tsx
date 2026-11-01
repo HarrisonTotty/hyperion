@@ -185,6 +185,7 @@ export function ViewsCheckRunner({
                 nowMs: shared.nowMs,
                 sleep: shared.sleep,
                 devicePixelRatio: shared.devicePixelRatio,
+                setting: api.launch.setting,
                 timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
               })
             : null;

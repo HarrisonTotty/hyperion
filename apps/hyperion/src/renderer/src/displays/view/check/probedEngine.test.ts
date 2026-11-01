@@ -19,6 +19,7 @@ function recordingProbe(): RecordingProbe {
     submitted: vi.fn<EngineProbe["submitted"]>(),
     madeTarget: vi.fn<EngineProbe["madeTarget"]>(),
     preparing: vi.fn<EngineProbe["preparing"]>(),
+    dispatched: vi.fn<EngineProbe["dispatched"]>(),
   };
 }
 

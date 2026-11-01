@@ -497,6 +497,29 @@ export interface PassFigures {
   readonly meanMs: number | null;
   /** Its mean over the mean of the frames' GPU time, 0 to 1, or `null` with no frame timed. */
   readonly shareOfGpu: number | null;
+  /** The kernels its dispatches ran, each once; none for a render pass. */
+  readonly kernels: ReadonlyArray<string>;
+  /** Its dispatches' workgroups a frame, the median, or `null` for a render pass or none counted. */
+  readonly workgroupsMedian: number | null;
+  /** Its time a workgroup, ns, the median over the frames that dispatched any; `null` otherwise. */
+  readonly nsPerWorkgroup: number | null;
+  /**
+   * For the atmosphere's ray march ({@link isMarchKernel}), its time a texel a step, ns: a
+   * workgroup's over its 8 × 8 texels and the window's samples a ray (`marchSamples`); `null`
+   * for any other pass.
+   */
+  readonly nsPerTexelStep: number | null;
+}
+
+/** The texels of one of the atmosphere's 8 × 8 workgroups (`rayMarchFootprint.wgsl`'s). */
+export const MARCH_WORKGROUP_TEXELS = 64;
+
+/**
+ * Whether a kernel is the atmosphere's per-pixel ray march, of any of its forms (`hillaire.ts`'
+ * `atmosphere ray march…` kernels), but not its fill of the target's rest.
+ */
+export function isMarchKernel(name: string): boolean {
+  return name.startsWith("atmosphere ray march") && !name.startsWith("atmosphere ray march's");
 }
 
 /** One window's figures. */
@@ -510,6 +533,8 @@ export interface InspectionTimingWindowResults {
   readonly drawsPerSecond: number;
   readonly canvas: ViewsCheckCanvas;
   readonly scales: ReadonlyArray<number>;
+  /** The samples a ray of the atmosphere's march takes at the sizes its air was drawn at. */
+  readonly marchSamples: number;
   readonly position: string | null;
   readonly statements: ReadonlyArray<string>;
   readonly frame: {
@@ -592,6 +617,12 @@ function windowResults(
   const passes = window.passes
     .map((pass): PassFigures => {
       const summary = summariseTimes(pass.ms);
+      const dispatched = pass.workgroups.filter((count) => count > 0);
+      const perWorkgroup = pass.ms.flatMap((ms, i) => {
+        const count = pass.workgroups[i] ?? 0;
+        return count > 0 ? [(ms * 1e6) / count] : [];
+      });
+      const nsPerWorkgroup = summariseTimes(perWorkgroup).medianMs;
       return {
         label: pass.label,
         medianMs: summary.medianMs,
@@ -601,6 +632,13 @@ function windowResults(
           summary.meanMs === null || gpu.meanMs === null || !(gpu.meanMs > 0)
             ? null
             : summary.meanMs / gpu.meanMs,
+        kernels: pass.kernels,
+        workgroupsMedian: summariseTimes(dispatched).medianMs,
+        nsPerWorkgroup,
+        nsPerTexelStep:
+          nsPerWorkgroup !== null && pass.kernels.length > 0 && pass.kernels.every(isMarchKernel)
+            ? nsPerWorkgroup / MARCH_WORKGROUP_TEXELS / window.marchSamples
+            : null,
       };
     })
     .toSorted((a, b) => (b.meanMs ?? 0) - (a.meanMs ?? 0));
@@ -614,6 +652,7 @@ function windowResults(
     drawsPerSecond: durationMs > 0 ? (1000 * draws) / durationMs : 0,
     canvas: window.canvas,
     scales: window.scales,
+    marchSamples: window.marchSamples,
     position: window.position,
     statements: window.statements,
     frame: {
@@ -739,12 +778,14 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
     ...(window.passes.length === 0
       ? ["No pass was timed (the adapter has no `timestamp-query`, or no frame was timed in full)."]
       : [
-          "| Pass | Median (ms) | p95 (ms) | Mean (ms) | Share of GPU |",
-          "| --- | --- | --- | --- | --- |",
+          "| Pass | Median (ms) | p95 (ms) | Mean (ms) | Share of GPU | Kernels | Workgroups | µs a workgroup | ns a texel a step |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
           ...window.passes.map(
             (pass) =>
-              `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} |`,
+              `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} | ${pass.kernels.length === 0 ? "—" : cell(pass.kernels.join(", "))} | ${pass.workgroupsMedian === null ? "—" : pass.workgroupsMedian.toFixed(0)} | ${pass.nsPerWorkgroup === null ? "—" : (pass.nsPerWorkgroup / 1000).toFixed(2)} | ${pass.nsPerTexelStep === null ? "—" : pass.nsPerTexelStep.toFixed(1)} |`,
           ),
+          "",
+          `The atmosphere's ray march takes ${String(window.marchSamples)} samples a ray here; its time a texel a step is a workgroup's over its ${String(MARCH_WORKGROUP_TEXELS)} texels and those samples.`,
         ]),
     "",
     `The terrain's passes (\`bodies\`, \`terrain shadows\`, \`symbology\`) take ${window.terrainShareOfGpu === null ? "—" : `${(100 * window.terrainShareOfGpu).toFixed(1)}%`} of the GPU's time; the rest is the sky, the discs, the atmosphere and the post-processing.`,

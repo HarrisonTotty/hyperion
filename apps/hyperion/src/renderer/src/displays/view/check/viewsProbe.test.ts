@@ -141,9 +141,9 @@ describe("the views probe", () => {
       primary.render(frame("tonemap"));
     });
     expect(probe.passTimes(0, 200)).toEqual([
-      { label: "view:hdr", ms: [1, 0] },
-      { label: "view", ms: [1, 1] },
-      { label: "instrument-1", ms: [0.5, 0] },
+      { label: "view:hdr", ms: [1, 0], kernels: [], workgroups: [] },
+      { label: "view", ms: [1, 1], kernels: [], workgroups: [] },
+      { label: "instrument-1", ms: [0.5, 0], kernels: [], workgroups: [] },
     ]);
     expect(probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs).toEqual([
       2.5, 1,
@@ -170,6 +170,38 @@ describe("the views probe", () => {
       "view:hdr",
       "view:hdr #2",
       "view:hdr #3",
+    ]);
+  });
+
+  it("carries a dispatched label's kernels and workgroups, numbered as its passes are (main's ask)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const kernel = { kind: "compute", name: "atmosphere ray march", path: "reference" } as const;
+    const bindings = { buffers: {}, sampled: {}, uniforms: {}, storage: {} };
+    inFrame(page, 100, () => {
+      engine.dispatch(kernel, bindings, [4, 2, 1], "atmosphere view");
+      engine.dispatch(kernel, bindings, [10, 10, 1], "atmosphere view");
+      primary.render(frame("tonemap"));
+    });
+    // The render's resolve holds the dispatches' passes before its own, as R01's timer encodes them.
+    timed.engines[0]?.reportPassTimes({
+      frame: engine.passTimesFrame,
+      timer: "quantized",
+      passes: [
+        { label: "atmosphere view", ns: 2e6, bracketed: false },
+        { label: "atmosphere view", ns: 5e6, bracketed: false },
+        { label: "tonemap", ns: 1e6, bracketed: false },
+      ],
+    });
+    expect(probe.passTimes(0, 200)).toEqual([
+      { label: "atmosphere view", ms: [2], kernels: ["atmosphere ray march"], workgroups: [8] },
+      {
+        label: "atmosphere view #2",
+        ms: [5],
+        kernels: ["atmosphere ray march"],
+        workgroups: [100],
+      },
+      { label: "tonemap", ms: [1], kernels: [], workgroups: [] },
     ]);
   });
 

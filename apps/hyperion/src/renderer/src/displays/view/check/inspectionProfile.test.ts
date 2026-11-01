@@ -65,7 +65,9 @@ function profiler(drawMs: number): {
       drawTimes: (_view, fromMs) =>
         Array.from({ length: Math.floor((nowMs - fromMs) / drawMs) }, (_, i) => fromMs + i),
       window: figures,
-      passTimes: () => [{ label: "atmosphere view", ms: [30] }],
+      passTimes: () => [
+        { label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] },
+      ],
       memoryTraffic: () => ({
         uploaded: { count: 3, bytes: 96 },
         created: { count: 0, bytes: 0 },
@@ -83,6 +85,7 @@ function profiler(drawMs: number): {
       return Promise.resolve();
     },
     devicePixelRatio: 1,
+    setting: "high",
     timing: INSPECTION_PROFILE_TIMING,
   };
   return { profile: new InspectionProfiler(deps), calls, marked };
@@ -107,8 +110,9 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       scales: [0.85],
       intervalsMs: [33],
       gpuMs: [40],
-      passes: [{ label: "atmosphere view", ms: [30] }],
+      passes: [{ label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] }],
       memory: { uploaded: { count: 3, bytes: 96 } },
+      marchSamples: 36,
       position: "28.9 Mm 268° +49°",
     });
   });
