@@ -603,7 +603,13 @@ describe("the measurement over a stand-in session", () => {
     expect(lane?.settings).toEqual({
       vertexPath: "face-differences",
       normals: "mesh",
-      source: { kind: "body", body: golden.body, detailSeed: golden.seed, weights: "skipped" },
+      source: {
+        kind: "body",
+        body: golden.body,
+        detailSeed: golden.seed,
+        weights: "skipped",
+        normals: "skipped",
+      },
     });
     expect(lane?.terminated).toBe(true);
     expect(session.requested[0]).toEqual(measured.site.key);

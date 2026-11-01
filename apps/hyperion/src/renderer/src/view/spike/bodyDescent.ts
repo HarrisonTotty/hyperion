@@ -741,14 +741,16 @@ export function siteGroundOf(bake: BakedPatch): SiteGround {
 }
 
 /**
- * The floors' bakes of `body`: its heights alone, the weights and the horizon map skipped, since
- * the floors and the site read only the heights and the survey mask (decision-r10-t14c-leans §1).
+ * The floors' bakes of `body`: its heights alone, the weights, the horizon map and the normals
+ * skipped, since the floors and the site read only the heights, their range and the survey mask
+ * ({@link keyBakeOf}, {@link siteGroundOf}; decision-r10-t14c-leans §1; the normals' since
+ * R10.T11's `NormalsLayerSetting`).
  */
 export function floorBakeSettings(body: BodyIdHex, detailSeed: DetailSeedHex): BakeSettings {
   return {
     vertexPath: "face-differences",
     normals: "mesh",
-    source: { kind: "body", body, detailSeed, weights: "skipped" },
+    source: { kind: "body", body, detailSeed, weights: "skipped", normals: "skipped" },
   };
 }
 

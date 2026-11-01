@@ -37,6 +37,7 @@ import {
 } from "../terrain/planet";
 import { TerrainSession } from "../terrain/session";
 import type { HeightModule } from "../terrain/workers/heightBake";
+import type { BakedPatch, BakeSettings } from "../terrain/workers/messages";
 import {
   bakePatches,
   type BodyDescent,
@@ -225,6 +226,8 @@ describe("the descent's measurement over TERRAIN TEST's moon, through the terrai
   let datum: DescentProfile;
   let ground: SiteGround;
   const bakes = new Map<string, KeyBake>();
+  /** The floors' bakes themselves, by key. */
+  const raw = new Map<string, BakedPatch>();
   let finalKeys: ReadonlyArray<PatchKey>;
 
   beforeAll(async () => {
@@ -261,6 +264,7 @@ describe("the descent's measurement over TERRAIN TEST's moon, through the terrai
         [site.key, ...finalKeys],
         (bake) => {
           bakes.set(patchKeyString(bake.key), keyBakeOf(bake));
+          raw.set(patchKeyString(bake.key), bake);
           if (patchKeyString(bake.key) === patchKeyString(site.key)) {
             found.ground = siteGroundOf(bake);
           }
@@ -322,6 +326,50 @@ describe("the descent's measurement over TERRAIN TEST's moon, through the terrai
     expect(ground.heightM).toBeLessThanOrEqual(ground.rangeM[1]);
     expect(ground.neighbourhoodM[4]).toBe(ground.heightM);
   });
+
+  // R10.T14.c's floors skip their normals (R10.T11's `NormalsLayerSetting`): none is baked, and
+  // every array and figure a floor or the site reads is as the bake with them gives it, bit for bit.
+  it("bakes the floors without their normals, and every byte the floors read as with them", async () => {
+    const { session, world } = harness;
+    const settings = floorBakeSettings(world.body, held.detailSeed);
+    const withNormals: BakeSettings = {
+      ...settings,
+      source: { kind: "body", body: world.body, detailSeed: held.detailSeed, weights: "skipped" },
+    };
+    const lane = session.lane(withNormals);
+    if (lane === null) {
+      throw new Error("the session is live");
+    }
+    const keys = [site.key, ...finalKeys];
+    const before = new Map<string, BakedPatch>();
+    try {
+      await bakePatches(lane, keys, (bake) => before.set(patchKeyString(bake.key), bake), {
+        timeoutMs: 6_000,
+        ...pollClock(),
+      });
+    } finally {
+      lane.terminate();
+    }
+    /** What the floors and the site read of a bake, with its heights' bits. */
+    const read = (bake: BakedPatch | undefined): unknown =>
+      bake === undefined
+        ? null
+        : [
+            [...new Uint32Array(bake.heights.buffer, bake.heights.byteOffset, bake.heights.length)],
+            [...(bake.layers?.surveyMask ?? [])],
+            bake.heightRangeM,
+            keyBakeOf(bake),
+            patchKeyString(bake.key) === patchKeyString(site.key) ? siteGroundOf(bake) : null,
+          ];
+    expect([
+      settings.source.kind === "body" ? settings.source.normals : null,
+      keys.map((key) => raw.get(patchKeyString(key))?.normals.length),
+      keys.map((key) => (before.get(patchKeyString(key))?.normals.length ?? 0) > 0),
+    ]).toEqual(["skipped", keys.map(() => 0), keys.map(() => true)]);
+    expect(keys.map((key) => read(raw.get(patchKeyString(key))))).toEqual(
+      keys.map((key) => read(before.get(patchKeyString(key)))),
+    );
+  }, 60_000);
 
   it("bakes the final approach's patches wholly surveyed, so that its floor is baked", () => {
     expect(finalKeys.every((key) => bakes.get(patchKeyString(key))?.wholly === true)).toBe(true);
