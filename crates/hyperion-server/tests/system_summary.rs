@@ -481,6 +481,7 @@ async fn pinned_summaries_are_the_sims_and_refusals_name_their_field() {
     a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left(&server).await;
     an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre(&server)
         .await;
+    a_rogue_planet_s_summary_is_refused_until_the_26_bump(&server).await;
     server.stop().await;
 }
 
@@ -674,6 +675,42 @@ async fn an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_fo
     )
     .await;
     assert!(answer.observed.is_some(), "{answer:?}");
+    client.close().await;
+}
+
+/// P14.T27.b at generator version 24: a rogue planet's summary is refused in either mode,
+/// `unknown_system` naming `system`, as its bodies are, and nothing is generated or cached for it.
+/// 26's bump gives it bodies, and so a starless summary: `scene_free_floating.rs`'s summary tests
+/// then replace this one.
+///
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_rogue_planet_s_summary_is_refused_until_the_26_bump(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach: rogue planets").await;
+    let [_, rogue] = common::scene::free_floating();
+    let systems = server.stats().systems().entries();
+    let generated = server.stats().bodies().generated();
+    for mode in [QueryModeDto::Now, observed_from(COREWARD)] {
+        let error = refused(
+            &mut client,
+            request_in(&universe, rogue.to_u64(), at_years(0), mode),
+        )
+        .await;
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::UnknownSystem, Some("system")),
+            "{mode:?}: {error:?}"
+        );
+    }
+    assert_eq!(
+        server.stats().systems().entries(),
+        systems,
+        "nothing cached"
+    );
+    assert_eq!(
+        server.stats().bodies().generated(),
+        generated,
+        "nothing generated"
+    );
     client.close().await;
 }
 

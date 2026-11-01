@@ -136,9 +136,10 @@ pub(crate) fn system_summary(
 }
 
 /// The hosts of a system with no star, a rogue planet's (plan 14, P14.T27.b), as `system_bodies`
-/// and a scene's arrival send them: its existence and age at `time` and its \[Fe/H\], plan 13's,
-/// from its planetary context `ctx`, with no stars and a hierarchy of no nodes. `universe`, `system`
-/// and `time` are echoed from the request, as in [`system_summary`].
+/// and a scene's arrival send them and `system_summary` answers them in `now`: its existence and
+/// age at `time` and its \[Fe/H\], plan 13's, from its planetary context `ctx`, with no stars and a
+/// hierarchy of no nodes. `universe`, `system` and `time` are echoed from the request, as in
+/// [`system_summary`].
 #[must_use]
 pub(crate) fn starless_summary(
     request: SystemSummaryRequest,
@@ -158,6 +159,24 @@ pub(crate) fn starless_summary(
         stars: Vec::new(),
         hierarchy: HierarchyDto { nodes: Vec::new() },
         observed: None,
+    }
+}
+
+/// The answer to `system_summary` in observed mode for a system with no star, a rogue planet
+/// (P14.T27.b): its [`starless_summary`] at `retardation`'s emitted time, with what the observer
+/// receives, its stated curvature `error` included, as `observed`, as
+/// [`system_summary_observed`] answers a system with stars. `universe`, `system` and `time` are
+/// echoed from the request, so `time` is the observer's and the rest the emitted time's.
+#[must_use]
+pub(crate) fn starless_summary_observed(
+    request: SystemSummaryRequest,
+    ctx: &SystemContext,
+    retardation: &Retardation,
+    error: CurvatureError,
+) -> SystemSummaryDto {
+    SystemSummaryDto {
+        observed: Some(observed_dto(retardation, error)),
+        ..starless_summary(request, ctx, retardation.emitted())
     }
 }
 

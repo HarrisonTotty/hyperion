@@ -134,7 +134,12 @@ fn the_rogue_planets_are_held_only_until_the_26_bump() {
          `freeFloating`, which then holds nothing); delete `tests/substellar_placement.rs`'s \
          `a_free_floating_object_has_no_stellar_context_yet` with the brown dwarfs' half; turn \
          the server's `a_rogue_planet_s_bodies_are_refused_until_the_26_bump` into a test of its \
-         bodies; delete `admit_free_floating_hosts_in_this_process` with T27.a's hold, fold the \
+         bodies; move the server's `scene_free_floating.rs` summary tests, \
+         `a_rogue_planet_s_summary_is_the_hosts_of_its_bodies` and \
+         `a_rogue_planet_s_observed_summary_is_its_summary_when_its_light_left`, into \
+         `system_summary.rs` as plain tests, in place of its \
+         `a_rogue_planet_s_summary_is_refused_until_the_26_bump`; delete \
+         `admit_free_floating_hosts_in_this_process` with T27.a's hold, fold the rest of the \
          server's `scene_free_floating.rs` into `scene.rs` and turn `scene.rs`'s \
          `a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26` into a test of the \
          arrival; `frame_at` then walks layers F and G whatever the arms"

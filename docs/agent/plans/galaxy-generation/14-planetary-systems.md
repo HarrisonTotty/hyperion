@@ -33317,11 +33317,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _The starless scene:_ `convert::starless_summary` gives a rogue planet's hosts (no stars, no
     hierarchy nodes, its existence, age and [Fe/H]) to the scene's arrival and to
     `system_bodies`, which before this refused a rogue planet at 26 (its hosts read the stars
-    cache). A standalone `system_summary` of a rogue planet stays `unknown_system`.
+    cache). A standalone `system_summary` answers it too (the next sub-bullet).
+  - _The standalone summary (2026-11-01, supersedes "stays `unknown_system`"):_ `requests::system`'s
+    `summary` sends a layer-G ID to `starless`: the `bodies_of` context's `starless_summary`, so
+    at 24 it stays `unknown_system` in both modes and flips at 26 with the frame and the bodies.
+    Observed mode (lean, 2026-11-01): `convert::starless_summary_observed` at the emitted time of
+    `Drift::of_record`'s line, `resolve_system`'s own. At 26's bump the tripwire's list moves
+    `scene_free_floating.rs`'s two summary tests into `system_summary.rs`, replacing
+    `a_rogue_planet_s_summary_is_refused_until_the_26_bump`.
   - _For the client, at the bump:_ a rogue planet's `hosts.stars` and `hierarchy.nodes` are empty,
     its `zones` empty and `system_plane` absent, its belts and halo `not_applicable`; body
     `0x0000` is a planet with no parent and no orbit, at the origin; its moons are `0x0100`
-    upward and its rings `0x0080` upward, parented to `0x0000`; `system_summary` refuses it.
+    upward and its rings `0x0080` upward, parented to `0x0000`; `system_summary` answers its
+    hosts.
   - _For 26's bump:_ delete `admit_free_floating_hosts_in_this_process` and its static; fold
     `tests/scene_free_floating.rs` into `tests/scene.rs`, whose
     `a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26` becomes the arrival's

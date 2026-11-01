@@ -5,7 +5,8 @@
 //! Each starts from [`openable_universe`](super::universe::openable_universe), as every handler
 //! that names a universe does, checks the time and decodes the ID, and takes the universe's galaxy
 //! from the [`GalaxyCache`](crate::compute::GalaxyCache). A summary is then answered on the CPU
-//! pool from the [`SharedSystemCache`](crate::compute::SharedSystemCache). The planetary kinds take
+//! pool from the [`SharedSystemCache`](crate::compute::SharedSystemCache), a rogue planet's, which
+//! has no stars, from the body cache's context (P14.T27.b). The planetary kinds take
 //! the system from the [`SharedBodyCache`](crate::compute::SharedBodyCache), generated there on a
 //! miss from the stars the system cache holds, and are answered by a second pool job that evaluates
 //! it at the request's time; `body_events`, served from generator version 25, takes the system's
@@ -20,10 +21,10 @@ use hyperion_protocol::{
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::ResolveSystemError;
+use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::{Layer, SystemId};
-use hyperion_sim::observe::{Observer, curvature_error, summary_observed_in};
+use hyperion_sim::observe::{Drift, Observer, curvature_error, retarded, summary_observed_in};
 use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
 
 use super::universe::openable_universe;
@@ -33,8 +34,8 @@ use crate::compute::{
 };
 use crate::convert::{
     BodiesRequest, DetailRequest, EventsRequest, SummaryRequest, body_detail, body_events,
-    body_refusal, hosts_request, starless_summary, system_bodies, system_summary,
-    system_summary_observed, unknown_system, untraced,
+    body_refusal, hosts_request, starless_summary, starless_summary_observed, system_bodies,
+    system_summary, system_summary_observed, unknown_system, untraced,
 };
 
 /// Every star of one system at the request's time, and the orbits that hold them; in observed mode
@@ -53,6 +54,9 @@ use crate::convert::{
 /// curvature error as a range row does; the emitted time is never held to the clock window, only
 /// the request's time is.
 ///
+/// A rogue planet has no stars, so the system cache refuses every ID of its layer: its summary is
+/// [`starless`]'s, from the body cache, as its bodies' hosts are.
+///
 /// # Errors
 ///
 /// In the order they are checked: those of [`openable_universe`] for a universe this server cannot
@@ -62,9 +66,10 @@ use crate::convert::{
 /// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built;
 /// `queue_full` if the interactive queue has no room for the job; then, on the job,
 /// `unknown_system` naming `system` for an ID that plan 03's `resolve` refuses in this universe's
-/// galaxy, or whose stars are not generated (a member of the galactic centre, a rogue planet), in
-/// either mode; `internal` if the pool is shutting down or the job panics; and `cancelled` if the
-/// client gave up before it ran.
+/// galaxy, or whose stars are not generated (a member of the galactic centre), in either mode;
+/// `internal` if the pool is shutting down or the job panics; and `cancelled` if the client gave up
+/// before it ran. A rogue planet is refused as [`starless`] refuses it: `unknown_system` naming
+/// `system`, in either mode, below generator version 26 (P14.T27.b).
 pub(crate) async fn summary(
     state: Arc<AppState>,
     request: SystemSummaryRequest,
@@ -74,10 +79,13 @@ pub(crate) async fn summary(
     let wanted = SummaryRequest::try_from(&request)?;
     let galaxy = state.galaxies.get(universe.key()).await?;
     let key = universe.key();
+    if wanted.system().layer() == Some(Layer::RoguePlanet) {
+        return starless(&state, (key, galaxy), request, wanted, token).await;
+    }
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
-        // The cache's refusals come first, in either mode: a member of the galactic centre and a
-        // rogue planet have no stars generated.
+        // The cache's refusals come first, in either mode: a member of the galactic centre has no
+        // stars generated.
         let stars = shared
             .systems
             .get_or_generate(key, &galaxy, wanted.system())
@@ -98,6 +106,64 @@ pub(crate) async fn summary(
                         .map_err(untraced)?;
                 let error = curvature_error(&galaxy, observer.position(), &retardation);
                 system_summary_observed(request, &stars, &summary, &retardation, error)
+            }
+        };
+        Ok::<_, RequestError>(answered)
+    };
+    let receiver = state
+        .pool
+        .try_submit(Priority::Interactive, token, answer)?;
+    let answered = receiver
+        .await
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))??;
+    Ok(ResponseBody::SystemSummary(answered))
+}
+
+/// A rogue planet's summary (P14.T27.b): its [`starless_summary`] from the context the body cache
+/// holds ([`bodies_of`]), the hosts `system_bodies` sends with its bodies. The body cache holds a
+/// rogue planet only where the sim generates its bodies, from generator version 26, so the
+/// summary, the frame and the bodies are answered from the same version.
+///
+/// In observed mode it is the starless summary at the time the light the observer receives left
+/// the planet, with that light's `observed`, on the line `resolve_system` traces it on: a grid
+/// system's, from its record alone (lean, 2026-11-01). A second interactive job answers either
+/// mode; the answer is small and is serialised on the runtime.
+///
+/// # Errors
+///
+/// `unknown_system` naming `system` where [`bodies_of`] refuses the ID, in either mode: one that
+/// `resolve` refuses and, below generator version 26, every rogue planet; and `queue_full`,
+/// `internal` or `cancelled` from either job.
+async fn starless(
+    state: &Arc<AppState>,
+    (key, galaxy): (GalaxyKey, Arc<Galaxy>),
+    request: SystemSummaryRequest,
+    wanted: SummaryRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let system = bodies_of(state, key, &galaxy, wanted.system())
+        .await
+        .map_err(|error| match error {
+            GenerateBodiesError::NoSuchSystem(error) => unknown_system(&request.system, error),
+            GenerateBodiesError::Compute(error) => error.into(),
+        })?;
+    let answer = move |_: &CancelToken| {
+        let (ctx, _) = system.as_ref();
+        let time = wanted.time();
+        let answered = match wanted.mode() {
+            QueryMode::Now => starless_summary(request, ctx, time),
+            QueryMode::ObservedFrom(position) => {
+                let observer = Observer::new(position, time).expect(
+                    "the request's observer is in the root cube and its time in the clock window",
+                );
+                // The body cache holds only a system that resolved, and a grid system's line is
+                // always traced, so neither refusal is reached.
+                let record = resolve(&galaxy, ctx.id())
+                    .map_err(|error| unknown_system(&request.system, error))?;
+                let line = Drift::of_record(&galaxy, &record).map_err(untraced)?;
+                let retardation = retarded(&observer, &line);
+                let error = curvature_error(&galaxy, observer.position(), &retardation);
+                starless_summary_observed(request, ctx, &retardation, error)
             }
         };
         Ok::<_, RequestError>(answered)
