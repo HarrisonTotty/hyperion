@@ -113,8 +113,9 @@ export const PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 2;
  * bodies: clamp(max(⌊threads ÷ 4⌋, threads − {@link THREADS_LEFT_BESIDE_HEIGHT_WORKERS}), 1,
  * {@link MOST_HEIGHT_WORKERS}); or, where the OS tells performance cores from efficiency cores
  * (Apple silicon's, `HyperionApi.performanceThreads`), clamp(P −
- * {@link PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS}, 1, {@link MOST_HEIGHT_WORKERS}) of its P
- * performance threads (leans, 2026-11-01, plan R05's Risks).
+ * {@link PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS} + ⌊E ÷ 3⌋, 1, {@link MOST_HEIGHT_WORKERS})
+ * of its P performance and E efficiency threads, which the main process hands on as P + ⌊E ÷ 3⌋
+ * (leans, 2026-11-01, plan R05's Risks).
  *
  * @remarks
  * R05 Design note 11's clamp(⌊threads ÷ 4⌋, 1, 3) where a machine has eight threads or fewer (two
@@ -122,17 +123,18 @@ export const PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 2;
  * eight workers: eight on the target's 16. Bakes are bound by the CPU alone: on a pod with threads
  * to spare, N workers baked N times one worker's patches a second up to 24 (Earth-like L12, high,
  * 7.1 a second a worker). An Apple chip's efficiency cores, which `hardwareConcurrency` counts
- * with the rest, bake far slower, so its count is its performance cores' (an M1's four give two,
- * as its eight threads do; an M1 Pro's eight give six where its ten threads give two). The owner's
- * sweep on the target (`scripts/workerSweep.mjs`) confirms or lowers either.
+ * with the rest, bake far slower, so they count at a third of a performance core (an M5's four and
+ * six give four; an M1's four and four give three where its eight threads give two; an M1 Pro's
+ * eight and two give six where its ten threads give two). The owner's sweep on the target
+ * (`scripts/workerSweep.mjs`) confirms or lowers either.
  *
  * One pool runs them: the descent spike's (as `defaultSpikeWorkers`) and `VIEW`'s terrain session's
  * (plan R10, R10.T16.a). A thread count the browser does not report as a finite number takes the
  * least, one worker.
  *
  * @param hardwareConcurrency - The machine's logical processors, `navigator.hardwareConcurrency`.
- * @param performanceThreads - Its performance cores' threads, `HyperionApi.performanceThreads`,
- *   or `null` where its OS tells none apart.
+ * @param performanceThreads - Its performance cores' threads with a third of its efficiency
+ *   cores', `HyperionApi.performanceThreads`, or `null` where its OS tells none apart.
  */
 export function defaultHeightWorkers(
   hardwareConcurrency: number,

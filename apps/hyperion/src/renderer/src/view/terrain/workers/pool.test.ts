@@ -911,19 +911,33 @@ describe("the height-worker pool of the terrain session (R10.T16.a)", () => {
     ).toEqual([1, 1, 1, 2, 2, 4, 8, 8, 8]);
   });
 
-  it("runs an Apple chip's performance threads less two, up to eight, whatever its efficiency cores", () => {
-    // An M1's four of eight threads, an M3 Pro's six of twelve, an M1 Pro's eight of ten, an M3
-    // Max's twelve of sixteen.
+  it("runs an Apple chip's performance threads less two, up to eight", () => {
+    // The main process's P + ⌊E ÷ 3⌋ (`main/performanceThreads.ts`) of an M1 Pro's eight and two
+    // of ten threads, an M3 Pro's six and six of twelve, and an M3 Max's twelve and four of
+    // sixteen; and the least, one.
     expect(
       [
-        [8, 4],
-        [12, 6],
         [10, 8],
-        [16, 12],
+        [12, 8],
+        [16, 13],
         [2, 1],
       ].map(([threads, p]) => defaultHeightWorkers(threads ?? 0, p ?? null)),
-    ).toEqual([2, 4, 6, 8, 1]);
+    ).toEqual([6, 6, 8, 1]);
     expect(defaultHeightWorkers(10, null)).toBe(2);
+  });
+
+  it("counts an Apple chip's efficiency cores at a third of a performance core", () => {
+    // clamp(P − 2 + ⌊E ÷ 3⌋, 1, 8): an M5's four and six give four, an M1's four and four three,
+    // and an M1 Pro's eight and two six, as its performance cores alone did.
+    expect(
+      [
+        [10, 4, 6],
+        [8, 4, 4],
+        [10, 8, 2],
+      ].map(([threads, p, e]) =>
+        defaultHeightWorkers(threads ?? 0, (p ?? 0) + Math.floor((e ?? 0) / 3)),
+      ),
+    ).toEqual([4, 3, 6]);
   });
 
   it("runs one worker where the browser reports no thread count", () => {

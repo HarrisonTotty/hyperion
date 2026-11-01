@@ -190,8 +190,9 @@ export interface HyperionApi {
   readonly setting: QualitySettingName;
   /**
    * The machine's performance cores' hardware threads, where its OS tells them from its efficiency
-   * cores (Apple silicon's, `hw.perflevel0.logicalcpu`), which the height workers' default count
-   * reads (plan R10, R10.T6.a); `null` elsewhere.
+   * cores (Apple silicon's, `hw.perflevel0.logicalcpu`), with a third of its efficiency cores'
+   * (`hw.perflevel1.logicalcpu`) rounded down, which the height workers' default count reads (plan
+   * R10, R10.T6.a); `null` elsewhere.
    */
   readonly performanceThreads: number | null;
   readonly versions: {

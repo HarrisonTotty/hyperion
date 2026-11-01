@@ -8285,3 +8285,6 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   main process hands them to `HyperionApi.performanceThreads` (`main/performanceThreads.ts`,
   `preload/machineLaunch.ts`), and `defaultHeightWorkers` takes clamp(P − 2, 1, 8) of them; `null`
   elsewhere. Pending: the owner's Mac run of the same sweep.
+- **An Apple chip's efficiency cores counted at a third (lean, 2026-11-01; lane
+  perf-terrain-bakes-2).** clamp(P − 2 + ⌊E ÷ 3⌋, 1, 8), E from `hw.perflevel1.logicalcpu`: 4 on
+  the M5, 3 on an M1, unchanged where E ≤ 2. The owner's `workerSweep.mjs` on the Mac decides it.
