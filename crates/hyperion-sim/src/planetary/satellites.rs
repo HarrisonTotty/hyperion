@@ -21,7 +21,9 @@
 //!    which P14.T17.a's eccentricity halving leaves broken in about one planet in a million. On
 //!    the Laplace surface (P14.T56.a), they are then cut at the first that lies in the
 //!    eccentricity band of their parent's Laplace radius ([`laplace`]), dropped with every
-//!    regular moon beyond it, before the captures are cleared of them.
+//!    regular moon beyond it, before the captures are cleared of them. From generator version 27
+//!    (P14.T55.j.a) the regular moons every cut keeps then take their eccentricities at their
+//!    system's age, by their tides, before the captures are cleared of them too.
 //! 4. **Rings** (P14.T20, [`generate_rings`]), with the regular moons kept, whose resonances cut
 //!    their gaps; on the Laplace surface none that reaches into the band.
 //!

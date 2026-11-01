@@ -368,6 +368,21 @@ pub fn resonance_budget(radius: Metres, k2_over_q: f64, chain: &[ResonantOrbit])
 /// Where the damping time is not monotonic in e, as a soft shell's can be, the bisection keeps a
 /// crossing of the age, not always the largest. `damping` is read at most
 /// [`ECCENTRICITY_BISECTIONS`] + 2 times.
+///
+/// # Examples
+///
+/// A moon whose ocean dissipates enough to damp its eccentricity in 1 Myr above e = 0.003, and
+/// which freezes, keeping it 10 Gyr, below, keeps just under 0.003 of its drawn 0.02:
+///
+/// ```
+/// use hyperion_sim::planetary::moons::eccentricity::free_eccentricity;
+/// use hyperion_sim::units::Seconds;
+///
+/// let gyr = |n: f64| Seconds::new(n * 3.155_76e16);
+/// let damping = |e: f64| if e < 0.003 { gyr(10.0) } else { gyr(1e-3) };
+/// let e = free_eccentricity(0.02, gyr(4.5), damping);
+/// assert!(e < 0.003 && e > 0.002_99, "{e}");
+/// ```
 #[must_use]
 pub fn free_eccentricity(drawn: f64, age: Seconds, mut damping: impl FnMut(f64) -> Seconds) -> f64 {
     let lasts = |tau: Seconds| tau.value() >= age.value();
@@ -400,6 +415,18 @@ pub fn free_eccentricity(drawn: f64, age: Seconds, mut damping: impl FnMut(f64) 
 ///
 /// Where the heat is not monotonic in s, the bisection keeps a crossing of the budget, not always
 /// the largest.
+///
+/// # Examples
+///
+/// A pair at 16 GW whose heat goes as e², against a 4 GW budget, takes half its eccentricities:
+///
+/// ```
+/// use hyperion_sim::planetary::moons::eccentricity::forced_scale;
+/// use hyperion_sim::units::Watts;
+///
+/// let s = forced_scale(Watts::new(4e9), |s| Watts::new(16e9 * s * s));
+/// assert_eq!(s, 0.5);
+/// ```
 #[must_use]
 pub fn forced_scale(budget: Watts, mut heat: impl FnMut(f64) -> Watts) -> f64 {
     let b = budget.value();

@@ -382,6 +382,8 @@ impl RegularMoon {
     }
 
     /// The moon's orbit about its planet, referred to the planet's equator, with μ = G (`M_p` + m).
+    /// From generator version 27 its eccentricity is the one at its system's age, once its
+    /// parent's satellites have damped it (P14.T55.j.a).
     #[must_use]
     pub const fn orbit(&self) -> &KeplerElements {
         &self.orbit
