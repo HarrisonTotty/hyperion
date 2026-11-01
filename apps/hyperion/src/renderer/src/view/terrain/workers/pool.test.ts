@@ -904,8 +904,10 @@ describe("the height-worker pool of the terrain session (R10.T16.a)", () => {
     expect([kept, pool.keptFieldBytes]).toEqual([160, 10]);
   });
 
-  it("runs Design note 11's default count of workers, clamp(⌊threads ÷ 4⌋, 1, 3)", () => {
-    expect([1, 4, 7, 8, 12, 16, 32].map(defaultHeightWorkers)).toEqual([1, 1, 1, 2, 3, 3, 3]);
+  it("runs Design note 11's count up to eight threads, and every thread past eight up to eight", () => {
+    expect([1, 4, 7, 8, 10, 12, 16, 20, 32].map(defaultHeightWorkers)).toEqual([
+      1, 1, 1, 2, 2, 4, 8, 8, 8,
+    ]);
   });
 
   it("runs one worker where the browser reports no thread count", () => {

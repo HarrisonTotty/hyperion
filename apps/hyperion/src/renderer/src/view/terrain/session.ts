@@ -5,8 +5,8 @@
  * detail seed, with the reliefs by which a body hands over and the surveys the label block reads.
  *
  * @remarks
- * - **What it holds.** T7's {@link CoarseFieldStore} over one {@link HeightWorkerPool} of Design note
- *   11's default size ({@link defaultHeightWorkers}), one a session whatever the views and bodies;
+ * - **What it holds.** T7's {@link CoarseFieldStore} over one {@link HeightWorkerPool} of the default
+ *   size ({@link defaultHeightWorkers}), one a session whatever the views and bodies;
  *   for each wanted body a {@link CoverageMask} (T10.c), fed from the pool's `onFieldChange` (each
  *   block's newly surveyed cells, at once) and from the store's coverage, and forgotten when the
  *   workers drop the body's field; T10.d's {@link ClassMapStore}, which asks for a body's map once
@@ -220,7 +220,7 @@ export interface TerrainSessionOptions {
    */
   readonly createWorker: () => WorkerLike;
   /**
-   * How many height workers its pool runs to bake, at least one; Design note 11's default
+   * How many height workers its pool runs to bake, at least one; the default
    * ({@link defaultHeightWorkers} of `navigator.hardwareConcurrency`) where absent. The pool runs a
    * readout worker beside them (`HeightWorkerPoolOptions.readoutWorker`; R10.T12.c).
    */

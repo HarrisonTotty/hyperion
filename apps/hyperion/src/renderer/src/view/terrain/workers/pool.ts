@@ -93,11 +93,28 @@ export const MAX_IN_FLIGHT_PER_WORKER = 2;
  */
 export const MAX_CONSECUTIVE_WORKER_FAILURES = 3;
 
+/** The most height workers a pool runs by default. */
+export const MOST_HEIGHT_WORKERS = 8;
+
 /**
- * The default number of height workers (R05 Design note 11): clamp(⌊threads ÷ 4⌋, 1, 3), the
- * machine's budget for the terrain whatever the views and bodies.
+ * The hardware threads the default count leaves to everything but the height workers: the render
+ * thread, the GPU and browser processes, a local server and the optics workers.
+ */
+export const THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 8;
+
+/**
+ * The default number of height workers, the machine's budget for the terrain whatever the views and
+ * bodies: clamp(max(⌊threads ÷ 4⌋, threads − {@link THREADS_LEFT_BESIDE_HEIGHT_WORKERS}), 1,
+ * {@link MOST_HEIGHT_WORKERS}).
  *
  * @remarks
+ * R05 Design note 11's clamp(⌊threads ÷ 4⌋, 1, 3) where a machine has eight threads or fewer (two
+ * on the i7-8665U's eight, its budget's two cores), and above that every thread past eight, up to
+ * eight workers: eight on the target's 16 (lean, 2026-11-01, plan R10, R10.T6.a's records). Bakes
+ * are bound by the CPU alone: on a pod with threads to spare, N workers baked N times one worker's
+ * patches a second up to 24 (Earth-like L12, high, 7.1 a second a worker). The owner's sweep on the
+ * target (`scripts/workerSweep.mjs`) confirms or lowers it.
+ *
  * One pool runs them: the descent spike's (as `defaultSpikeWorkers`) and `VIEW`'s terrain session's
  * (plan R10, R10.T16.a). A thread count the browser does not report as a finite number takes the
  * least, one worker.
@@ -108,7 +125,11 @@ export function defaultHeightWorkers(hardwareConcurrency: number): number {
   if (!Number.isFinite(hardwareConcurrency)) {
     return 1;
   }
-  return Math.min(3, Math.max(1, Math.floor(hardwareConcurrency / 4)));
+  const spare = Math.max(
+    Math.floor(hardwareConcurrency / 4),
+    Math.floor(hardwareConcurrency) - THREADS_LEFT_BESIDE_HEIGHT_WORKERS,
+  );
+  return Math.min(MOST_HEIGHT_WORKERS, Math.max(1, spare));
 }
 
 /** What makes a pool. */

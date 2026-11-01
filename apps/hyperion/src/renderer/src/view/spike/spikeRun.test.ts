@@ -671,8 +671,8 @@ describe("the spike's run over a generated world (R10.T14.c)", () => {
 });
 
 describe("the default worker count", () => {
-  it("is a quarter of the threads, from one to three (Design note 11)", () => {
-    expect([2, 4, 8, 12, 16, 32].map(defaultSpikeWorkers)).toEqual([1, 1, 2, 3, 3, 3]);
+  it("is the terrain's own: Design note 11's up to eight threads, and every thread past eight up to eight", () => {
+    expect([2, 4, 8, 12, 16, 32].map(defaultSpikeWorkers)).toEqual([1, 1, 2, 4, 8, 8]);
   });
 });
 

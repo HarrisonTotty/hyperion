@@ -111,7 +111,7 @@ async function harness(options: { readonly workers?: number | "default" } = {}):
       workers.push(worker);
       return worker;
     },
-    // Two workers unless a test asks for Design note 11's default count.
+    // Two workers unless a test asks for the default count.
     ...(options.workers === "default" ? {} : { workers: options.workers ?? 2 }),
   });
   return {
@@ -678,17 +678,17 @@ describe("the terrain session's coverage masks (R10.T16.a)", () => {
 });
 
 describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
-  it("runs one pool of Design note 11's count, whatever the views and bodies", async () => {
+  it("runs one pool of the default count, whatever the views and bodies", async () => {
     vi.spyOn(globalThis.navigator, "hardwareConcurrency", "get").mockReturnValue(12);
     const h = await harness({ workers: "default" });
     h.session.noteView(PRIMARY, viewAt(5e6));
     h.session.noteView(INSTRUMENT, viewAt(8e6, "wireframe", { centreM: FIXTURE_PLANET_CENTRE_M }));
     h.session.step();
-    // Each view's local body, in the order the scene lists them; three bake workers and the
-    // readout worker (R10.T12.c).
+    // Each view's local body, in the order the scene lists them; four bake workers (the four
+    // threads past eight) and the readout worker (R10.T12.c).
     expect([h.workers.length, h.session.workerCount, [...h.session.wanted]]).toEqual([
-      4,
-      4,
+      5,
+      5,
       [PLANET, MOON],
     ]);
   });

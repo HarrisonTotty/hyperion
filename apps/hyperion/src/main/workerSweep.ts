@@ -8,8 +8,8 @@
  * @remarks
  * `scripts/workerSweep.mjs` flies the runs and writes the table. A sweep whose runs differ in any
  * other option, setting, seed, world or style is refused, so that the worker count is the one
- * thing it varies. `defaultHeightWorkers` (`workers/pool.ts`) changes only on such a table's gain at
- * the target's 16 threads.
+ * thing it varies. `defaultHeightWorkers` (`workers/pool.ts`) is R10.T6.a's lean, eight workers at
+ * the target's 16 threads, until such a table there confirms or lowers it.
  */
 
 import type { SpikeSizesBakeWindow } from "../preload/api";

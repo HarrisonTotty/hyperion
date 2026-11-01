@@ -173,9 +173,9 @@ export const SPIKE_VIEW_NAMES = {
 export const SPIKE_MAIN_VIEW_ID = viewId(SPIKE_VIEW_NAMES.main);
 
 /**
- * The default height-worker count (Design note 11): clamp(⌊threads ÷ 4⌋, 1, 3), the terrain's own
- * `defaultHeightWorkers` (`workers/pool.ts`, where R10.T16.a moved it for `VIEW`'s terrain session),
- * under the name the spike's launch reads.
+ * The default height-worker count, the terrain's own `defaultHeightWorkers` (`workers/pool.ts`,
+ * where R10.T16.a moved it for `VIEW`'s terrain session, and R10.T6.a's lean raised it past eight
+ * threads), under the name the spike's launch reads.
  */
 export function defaultSpikeWorkers(hardwareConcurrency: number): number {
   return defaultHeightWorkers(hardwareConcurrency);

@@ -8276,3 +8276,7 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     - the low setting with `baked-offsets` throws;
     - a high variant of `face-differences` with mesh normals reaches the pool, the material and
       `terrainSlotLayout`'s slot count, and keeps them through a restore.
+- **R05.T18's worker count, raised (lean, 2026-11-01; lane perf-terrain-bakes).**
+  `defaultHeightWorkers` is clamp(max(⌊t ÷ 4⌋, t − 8), 1, 8), t the hardware threads: eight at 16,
+  Design note 11's two at eight; the spike's default follows it. Pending: the owner's sweep at 16
+  threads (`scripts/workerSweep.mjs --workers 3,4,6,8`), which confirms or lowers it.
