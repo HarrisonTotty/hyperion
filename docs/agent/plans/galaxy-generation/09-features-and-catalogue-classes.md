@@ -5851,3 +5851,11 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Tests (slow):_ `verification::recent_in_range`'s `…_under_every_26_hold` and `…_27_hold`;
     if `feature_classes` moves to 27, the 26 test checks that no feature lists an entry.
   - _Finding._ Plan 11's listed binaries (P11.T8.f, 27) on the same lists have no source either.
+- **P09.T37, the centre's band-E draw (lane `fix-p09-recent-dead`, 2026-11-01, under
+  `list_source` (27); no output moved at 24–26).**
+  - _Cause._ `draw_star` drew a member's age once; at 24's rules every star of 52–100 M☉ dead by
+    3.3–4.0 Myr makes a black hole, so a continuous-component neutron star aged there exhausted
+    its 4,096 attempts (about 2% of them), the debug assertion of P09.T31's and T36.b's finding.
+  - _Fix._ From 27 a remnant class's attempt `k` draws its age on `centre.age` word `k` (attempt
+    0 unchanged); a living class still draws once. The 27 bump deletes the `match`. Test:
+    `centre::members::tests::a_centre_remnant_draws_its_age_with_each_attempt_from_27`.

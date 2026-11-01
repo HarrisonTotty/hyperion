@@ -35,7 +35,8 @@
 //! member's (P09.T10): its age uniform in its component's span (`centre.age`), its primary's
 //! initial mass from the galaxy's mass function in the class's range below the turn-off at that
 //! age for a living star and above it for a white dwarf, and for a remnant class the redraws,
-//! attempt after attempt on `centre.mass` (six words each, as `member.mass`), until its remnant is
+//! attempt after attempt on `centre.mass` (six words each, as `member.mass`), from generator
+//! version 27 each attempt `k` with its own age on word `k` of `centre.age` (P09.T37), until its remnant is
 //! of the class's kind with a kick below the local escape speed from the cluster `√(2Ψ_cluster)`
 //! (retained means bound to the cluster, not to the galaxy), a low-mode neutron star
 //! judged on its pair's systemic speed. Composition: the centre's [`CENTRE_FE_H`], no helium
@@ -80,6 +81,7 @@ use super::events::victims::CentreVictims;
 use super::profile::REACH;
 use super::recent::{list_claims, recent_member};
 use super::{CentreModel, DistributionFunction};
+use crate::galaxy::global_list::ListSourceRules;
 
 /// The width of the centre's finest cells: 1 ⁄ 256 ly (the brainstorm, "Dense features").
 pub const CENTRE_GRID_WIDTH: LightYears = LightYears::new(1.0 / 256.0);
@@ -669,6 +671,16 @@ fn galactic(p: &PointLy) -> GalacticPosition {
 /// A member's star of `class` (module documentation): its primary's initial mass, the attempt
 /// its draws are read at, and its age; `None` if the draw exhausts its attempts or the class's
 /// range is empty at the drawn age.
+///
+/// A remnant class's attempt `k` draws its age too, on word `k` of `centre.age`, from generator
+/// version 27 (P09.T37, under `list_source`, the hold of `LIST_SOURCE_VERSION`, with which the
+/// centre's members are first served): so the attempts draw a remnant's age and mass together, as
+/// its class's count integrates them, and not its mass at one age at which its class may hold no
+/// star, or none at all (a range empty at that age, which the held arm refuses). In the continuous component's first few million years only black holes are made (at 24's
+/// rules, every star of 52–100 M☉ that has died by 3.3–4.0 Myr), so a neutron star drawn at such
+/// an age exhausted its 4,096 attempts, some 2% of the component's (the debug assertion of
+/// P09.T31's and P09.T36.b's finding). Attempt 0 reads word 0, the age drawn before, so a member
+/// kept at its first attempt moves not at all. A living class still draws its age once.
 fn draw_star(
     galaxy: &Galaxy,
     class: &CentreClass,
@@ -678,34 +690,56 @@ fn draw_star(
     let seed = galaxy.seed();
     let key = ObjectKey::from(system);
     let component = age_components()[usize::from(class.component)];
-    let u = Stream::open(seed, tags::CENTRE_AGE, key).uniform();
-    let age = Years::new(
-        component.youngest.value() + u * (component.oldest.value() - component.youngest.value()),
-    );
+    let mut ages = Stream::open(seed, tags::CENTRE_AGE, key);
+    let age_at = |u: f64| {
+        Years::new(
+            component.youngest.value()
+                + u * (component.oldest.value() - component.youngest.value()),
+        )
+    };
+    let age = age_at(ages.uniform());
     let composition = centre_composition();
-    let m_to = turn_off_mass(Years::new(age.value().max(1e4)), &composition).value();
-    let (lo, hi) = (
-        class.initial_mass_range.0.value(),
-        class.initial_mass_range.1.value(),
-    );
-    let (lo, hi) = match class.kind {
-        CentreClassKind::Living => (lo, hi.min(m_to)),
-        CentreClassKind::WhiteDwarf | CentreClassKind::NeutronStar | CentreClassKind::BlackHole => {
-            (lo.max(m_to), hi)
+    let range = |age: Years| {
+        let m_to = turn_off_mass(Years::new(age.value().max(1e4)), &composition).value();
+        let (lo, hi) = (
+            class.initial_mass_range.0.value(),
+            class.initial_mass_range.1.value(),
+        );
+        match class.kind {
+            CentreClassKind::Living => (lo, hi.min(m_to)),
+            CentreClassKind::WhiteDwarf
+            | CentreClassKind::NeutronStar
+            | CentreClassKind::BlackHole => (lo.max(m_to), hi),
         }
     };
-    if hi <= lo {
-        return None;
-    }
     let kind = match class.kind {
         CentreClassKind::Living => ClassKind::Living,
         CentreClassKind::WhiteDwarf => ClassKind::WhiteDwarf,
         CentreClassKind::NeutronStar => ClassKind::NeutronStar,
         CentreClassKind::BlackHole => ClassKind::BlackHole,
     };
+    let ages_by_attempt = kind != ClassKind::Living
+        && match galaxy.rules().list_source {
+            ListSourceRules::Unregistered => false,
+            ListSourceRules::Registered => true,
+        };
+    let (lo, hi) = range(age);
+    if hi <= lo && !ages_by_attempt {
+        return None;
+    }
     let imf = galaxy.mass_function();
     let mut stream = Stream::open(seed, tags::CENTRE_MASS, key);
     for attempt in 0..MAX_ATTEMPTS {
+        let (age, (lo, hi)) = if ages_by_attempt && attempt > 0 {
+            ages.seek(u64::from(attempt));
+            let age = age_at(ages.uniform());
+            (age, range(age))
+        } else {
+            (age, (lo, hi))
+        };
+        if hi <= lo {
+            continue;
+        }
         stream.seek(ATTEMPT_WORDS * u64::from(attempt));
         let mass = imf.quantile_in(lo, hi, stream.uniform());
         let _mark = stream.mark();
@@ -1230,6 +1264,95 @@ mod tests {
         assert_eq!(
             resolve_centre_member(galaxy, CentreMemberId::CENTRAL_BLACK_HOLE),
             resolve_centre_member_with(galaxy, model, CentreMemberId::CENTRAL_BLACK_HOLE)
+        );
+    }
+
+    /// P09.T37, under `list_source`: from 27 a remnant class's attempts draw its age with its
+    /// mass. At 24's rules the continuous component makes only black holes in its first few
+    /// million years, so a neutron star whose first age falls there keeps none of its attempts at
+    /// that age (the held arm exhausts its 4,096, a debug assertion); drawn age by age it is kept
+    /// at a later attempt and another age, and a member kept at its first attempt is the held
+    /// arm's bit for bit.
+    #[test]
+    fn a_centre_remnant_draws_its_age_with_each_attempt_from_27() {
+        let held = milky_way_galaxy();
+        assert_eq!(held.rules().list_source, ListSourceRules::Unregistered);
+        let registered = Galaxy::from_params_with_rules(
+            held.seed(),
+            GalaxyParams::milky_way_like(),
+            crate::galaxy::rules::GalaxyRules {
+                list_source: ListSourceRules::Registered,
+                ..held.rules()
+            },
+        )
+        .expect("the fixture builds");
+        let model = milky_way_centre();
+        let class = *model
+            .classes()
+            .classes()
+            .iter()
+            .find(|c| {
+                c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::NeutronStar
+            })
+            .expect("the continuous component's neutron stars");
+        let component = age_components()[3];
+        let placement = CentrePlacement::new(model);
+        let cell = placement
+            .grid()
+            .owned_cells()
+            .next()
+            .expect("an owned cell");
+        let escape = model.profile().cluster_escape_speed(2.0).value();
+        let composition = centre_composition();
+        let first_age = |system: SystemId| {
+            let u = Stream::open(held.seed(), tags::CENTRE_AGE, ObjectKey::from(system)).uniform();
+            Years::new(
+                component.youngest.value()
+                    + u * (component.oldest.value() - component.youngest.value()),
+            )
+        };
+        // Whether any of the first 64 attempts at `age` keeps a neutron star, as `draw_star`'s.
+        let keeps_any = |system: SystemId, age: Years| {
+            let m_to = turn_off_mass(age, &composition).value();
+            let (lo, hi) = (class.initial_mass_range.0.value().max(m_to), 100.0);
+            let mut stream = Stream::open(held.seed(), tags::CENTRE_MASS, ObjectKey::from(system));
+            (0..64).any(|attempt| {
+                stream.seek(ATTEMPT_WORDS * u64::from(attempt));
+                let mass = held.mass_function().quantile_in(lo, hi, stream.uniform());
+                let _mark = stream.mark();
+                let systemic = systemic_speed(&mut stream);
+                remnant_fits(
+                    ClassKind::NeutronStar,
+                    mass,
+                    &composition,
+                    (held.seed(), system, attempt),
+                    age,
+                    (escape, systemic),
+                    held.rules().stellar,
+                )
+            })
+        };
+        let member = |index: u16| SystemId::from(placement.member_id(MassBand::E, cell, index));
+        let system = (0..MemberSlot::INDEX_LIMIT)
+            .map(member)
+            .find(|&s| (3.4e6..3.9e6).contains(&first_age(s).value()))
+            .expect("a first age at 3.4-3.9 Myr");
+        let age = first_age(system);
+        assert!(!keeps_any(system, age), "only black holes at {age:?}");
+        let (mass, attempt, drawn) =
+            draw_star(&registered, &class, system, escape).expect("kept at another age");
+        eprintln!(
+            "{system:?}: first age {age:?}; kept at attempt {attempt}, {drawn:?}, {mass} M_sun"
+        );
+        assert!(attempt > 0);
+        assert_ne!(drawn, age);
+        let first = (0..64)
+            .map(member)
+            .find(|&s| draw_star(held, &class, s, escape).is_some_and(|(_, k, _)| k == 0))
+            .expect("a neutron star kept at its first attempt");
+        assert_eq!(
+            draw_star(held, &class, first, escape),
+            draw_star(&registered, &class, first, escape)
         );
     }
 
