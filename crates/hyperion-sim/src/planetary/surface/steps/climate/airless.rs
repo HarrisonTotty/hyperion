@@ -123,14 +123,15 @@ use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::surface::{
-    COSMIC_BACKGROUND_TEMPERATURE, GroundInertia, REGOLITH_EMISSIVITY, night_floor,
+    COSMIC_BACKGROUND_TEMPERATURE, GroundInertia, REGOLITH_EMISSIVITY, night_floor, pores_of_air,
 };
 #[cfg(doc)]
 use crate::planetary::hooks::surface::{
     ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S, ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
 };
 use crate::planetary::surface::inputs::{CoarseInputs, CrustInputs, Forcing, LidCrust};
-use crate::substance::by_key;
+use crate::substance::thermal::Pores;
+use crate::substance::{SubstanceId, by_key};
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{EarthFluxes, Kelvin, Pascals, Radians};
 
@@ -245,8 +246,9 @@ pub(super) struct Regolith {
 impl Regolith {
     /// The regolith of the body of `inputs`: plan 14's emissivity; the inputs' ground inertia,
     /// the record's ([`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`]), or for inputs built by
-    /// hand the law at their crust's lid at their equilibrium temperature
-    /// ([`regolith_inertia_j_per_m2_k_sqrt_s`], [`equilibrium_temperature`]); its Bond albedo for
+    /// hand the law at their crust's lid at their equilibrium temperature, its pores holding their
+    /// air under P14.T49.l's hold ([`regolith_inertia_j_per_m2_k_sqrt_s`],
+    /// [`equilibrium_temperature`], [`pores_of_inputs`]); its Bond albedo for
     /// the surface state on its material; and the heat flow, a heat flow that is not positive
     /// taken as none, as [`night_floor`] takes it.
     #[must_use]
@@ -260,6 +262,7 @@ impl Regolith {
                     lid_lithology(inputs.crust()),
                     material,
                     equilibrium_temperature(inputs),
+                    &pores_of_inputs(inputs),
                 )
             });
         Self {
@@ -314,11 +317,12 @@ pub(crate) fn regolith_inertia_of(inputs: &CoarseInputs) -> f64 {
 }
 
 /// The thermal inertia Γ of a regolith whose crust's lid is `lid` on a bulk of `material`, at the
-/// temperature `temperature`, J m⁻² K⁻¹ s^−½ (P14.T54.a; decision-pre-23-review item 7): plan
-/// 14's ground's rule, P14.T49.j's law at the lid's row with P14.T24.a's constants as the fallback
-/// alone, the one the record's conditions read at the body's equilibrium temperature
-/// (`GroundInertia`). Under a thin air the law is a vacuum lower bound, with no pore gas
-/// (P14.T49.l's).
+/// temperature `temperature`, its pores holding `pores`, J m⁻² K⁻¹ s^−½ (P14.T54.a;
+/// decision-pre-23-review item 7): plan 14's ground's rule, P14.T49.j's law at the lid's row with
+/// P14.T24.a's constants as the fallback alone, the one the record's conditions read at the body's
+/// equilibrium temperature (`GroundInertia`). Below P14.T49.l's hold the law is a vacuum lower
+/// bound under a thin air, whatever `pores` holds; under it, the pores' gas adds its conduction
+/// (`GroundInertia::under`).
 ///
 /// [`Regolith::of`] reads it for inputs built by hand alone, at their equilibrium temperature
 /// ([`equilibrium_temperature`]), as the record takes its ground's: inputs read from the record
@@ -335,8 +339,30 @@ pub(crate) fn regolith_inertia_j_per_m2_k_sqrt_s(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
     temperature: Kelvin,
+    pores: &Pores,
 ) -> f64 {
-    GroundInertia::at_equilibrium(lid, material, temperature).inertia_j_per_m2_k_sqrt_s()
+    GroundInertia::at_equilibrium(lid, material, temperature)
+        .under(temperature, || *pores)
+        .inertia_j_per_m2_k_sqrt_s()
+}
+
+/// What fills the pores of the regolith of the body of `inputs` (P14.T49.l): its air at its
+/// surface pressure and mean surface temperature, as a column of that air would hold it
+/// (`pores_of_air`): nothing under the airless line, and nothing for a gas the registry does not
+/// hold. Its gases are taken largest first, ties by registry order, as a column lists them.
+#[must_use]
+fn pores_of_inputs(inputs: &CoarseInputs) -> Pores {
+    let mut gases: Vec<(SubstanceId, f64)> = inputs
+        .gases()
+        .iter()
+        .filter_map(|share| by_key(share.substance.as_str()).map(|id| (id, share.mole_fraction)))
+        .collect();
+    gases.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    pores_of_air(
+        inputs.surface_pressure(),
+        &gases,
+        inputs.mean_surface_temperature(),
+    )
 }
 
 /// The equilibrium temperature of the body of `inputs`, K: plan 14's
@@ -2318,7 +2344,12 @@ mod tests {
                 ),
             ] {
                 assert_same_bits(
-                    regolith_inertia_j_per_m2_k_sqrt_s(lid_lithology(unknown), material, mean),
+                    regolith_inertia_j_per_m2_k_sqrt_s(
+                        lid_lithology(unknown),
+                        material,
+                        mean,
+                        &Pores::Vacuum,
+                    ),
                     constant,
                 );
             }
@@ -2354,6 +2385,7 @@ mod tests {
             Some(CrustLithology::IronRichBasalt),
             SurfaceMaterial::Rock,
             mars.mean_surface_temperature(),
+            &pores_of_inputs(&mars),
         );
         eprintln!(
             "the reference Mars's lid's Γ {law:.3} at its T_eq {:.2} K, {at_mean:.3} at its mean \
@@ -2367,6 +2399,51 @@ mod tests {
             .build()
             .unwrap();
         assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);
+    }
+
+    /// Under P14.T49.l's pore gas (`with_regolith_inertia`, one of `with_every_26_hold`'s), R09's
+    /// reference worlds built by hand read the arm's Γ: the thin-aired Mars through the CO₂ in its
+    /// pores, and Europa through the outer system's ice; the Moon's and Ceres's silicate lids,
+    /// airless, hold to the bit, and the Earths read their air's Γ, which their energy balance does
+    /// not read. So R09's surface goldens that move under the arm are `mars_like` and `europa_like`
+    /// (P14.T49.l's records), R09's radiative model being the one that reads the regolith. The
+    /// reference Mars's Γ is pinned as it stands at 140–155 against Mars's global mode of 180–250
+    /// (Mellon et al. 2000; Putzig et al. 2005; neither re-read), and Europa's at 20–27 against its
+    /// 56 ± 17 (Lange et al. 2026, arXiv:2604.14374): the lane's `findings.txt`.
+    #[test]
+    fn under_the_pore_gas_r09_s_reference_worlds_move_as_listed() {
+        use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+        use hyperion_surface::field::ClimateModelKind;
+
+        let worlds = [
+            ("earth_like", reference::earth_like()),
+            ("mars_like", reference::mars_like()),
+            ("moon_like", reference::moon_like()),
+            ("ceres_like", reference::ceres_like()),
+            ("europa_like", reference::europa_like()),
+            ("locked_earth_like", reference::locked_earth_like()),
+        ];
+        let mut moved = Vec::new();
+        for (name, inputs) in &worlds {
+            let held = Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s;
+            let aired = with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
+                Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s
+            });
+            let radiative = inputs.climate().model == ClimateModelKind::RadiativeEquilibrium;
+            eprintln!(
+                "{name}: Γ {held:.3} held, {aired:.3} under the pore gas; radiative {radiative}"
+            );
+            assert!(aired.is_finite() && aired > 0.0, "{name}: {aired}");
+            if radiative && held.total_cmp(&aired).is_ne() {
+                moved.push(*name);
+            }
+            match *name {
+                "mars_like" => assert!((140.0..=155.0).contains(&aired), "{name}: {aired}"),
+                "europa_like" => assert!((20.0..=27.0).contains(&aired), "{name}: {aired}"),
+                _ => {}
+            }
+        }
+        assert_eq!(moved, ["mars_like", "europa_like"]);
     }
 
     /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1) over the systems `systems`: on

@@ -1,0 +1,165 @@
+//! P14.T49.l's census over the record: the regolith's pore gas and the outer system's ice, under
+//! every 26 hold against every 26 hold with the pore gas held, over P14.T53.c's thin-air census
+//! (the 400 sample systems, the golden systems and LOOK72's systems).
+
+use std::sync::OnceLock;
+use std::time::Instant;
+
+use super::cap_balance_tests::{id_of, same};
+use super::tests::{
+    GOLDEN_SYSTEMS_SEED, ThinAirBody, golden_systems, thin_air_census, thin_air_sets,
+};
+use super::*;
+use crate::planetary::testing::with_every_26_hold;
+use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+
+/// The records whose state the pore gas flips over the census (the census at the tip, 2026-10-31),
+/// by ID in the census's order, each `Tenuous` or `Snowball` → `Airless`: N₂ airs at or under the
+/// 100 Pa line on outer-system icy worlds at 35–52 K, whose water-ice lid's inertia the outer
+/// system's ice takes from about 56 to 3–5 J m⁻² K⁻¹ s^−½, its coldest zone 5–23 K colder, under
+/// its N₂'s cold trap. 01ffeb2d20000000.e101 is P14.T53.i's count (vii) world.
+const FLIPS: [&str; 9] = [
+    "01fffb2bdfff0001.0600",
+    "01ffdb2c1fff0000.e103",
+    "01ffdb2c1fff0000.e104",
+    "01ffeb2d20000000.e101",
+    "02002b2d1ffe0000.e104",
+    "41ffecb1ffc00007.0d01",
+    "01fffb2da0010000.e103",
+    "01ffcb2ba0010000.e101",
+    "01ffcb2ba0010000.e102",
+];
+
+/// How many of the census's 6,664 bodies the pore gas moves (2026-10-31): 2,118, 1,833 of them
+/// airless and 180 tenuous.
+const MOVED: usize = 2_118;
+
+/// The census's two walks, one body each in the same order: the pore gas held, and in force.
+struct Census {
+    held: Vec<ThinAirBody>,
+    aired: Vec<ThinAirBody>,
+}
+
+/// The census under every 26 hold, the pore gas held and in force, walked once a process.
+fn census() -> &'static Census {
+    static CENSUS: OnceLock<Census> = OnceLock::new();
+    CENSUS.get_or_init(|| {
+        let sets = thin_air_sets();
+        let start = Instant::now();
+        let held = with_every_26_hold(|| {
+            with_regolith_inertia(RegolithInertiaRules::Vacuum, || thin_air_census(&sets))
+        });
+        let walk_held = start.elapsed();
+        let start = Instant::now();
+        let aired = with_every_26_hold(|| thin_air_census(&sets));
+        eprintln!(
+            "the walks: the pore gas held {walk_held:?}, in force {:?}, {} bodies",
+            start.elapsed(),
+            aired.len()
+        );
+        assert_eq!(held.len(), aired.len(), "one walk's bodies, both rules");
+        Census { held, aired }
+    })
+}
+
+/// Under every 26 hold, P14.T49.l moves the census's records as listed ([`MOVED`], [`FLIPS`]):
+/// every mover's figures finite, and its largest moves and the airless movers' coldest zones
+/// printed.
+#[test]
+#[ignore = "slow: the thin-air census twice under every 26 hold, about 115 s on a pod"]
+fn under_every_26_hold_the_pore_gas_moves_the_census_as_listed() {
+    let census = census();
+    let mut movers = Vec::new();
+    let mut flips = Vec::new();
+    for (held, aired) in census.held.iter().zip(&census.aired) {
+        assert_eq!(held.label, aired.label, "one body each, in order");
+        assert!(
+            aired.t_s.is_finite() && aired.coldest.is_finite() && aired.p.is_finite(),
+            "{}: {}",
+            aired.label,
+            aired.line()
+        );
+        if same(held, aired) {
+            continue;
+        }
+        movers.push((held, aired));
+        if held.state != aired.state {
+            flips.push(id_of(aired));
+            eprintln!(
+                "FLIP {}\n  held  {}\n  aired {}",
+                aired.label,
+                held.line(),
+                aired.line()
+            );
+        }
+    }
+    let largest = |figure: fn(&ThinAirBody) -> f64| {
+        movers
+            .iter()
+            .map(|(h, a)| {
+                (
+                    (figure(a) - figure(h)).abs(),
+                    id_of(a),
+                    figure(h),
+                    figure(a),
+                )
+            })
+            .max_by(|x, y| x.0.total_cmp(&y.0))
+    };
+    eprintln!(
+        "P14.T49.l's census: {} of {} bodies move, {} change state; the largest moves: mean T_s \
+         {:?}, coldest zone {:?}, pressure {:?}",
+        movers.len(),
+        census.aired.len(),
+        flips.len(),
+        largest(|b| b.t_s),
+        largest(|b| b.coldest),
+        largest(|b| b.p),
+    );
+    let mut by_state = std::collections::BTreeMap::new();
+    for (_, aired) in &movers {
+        *by_state
+            .entry(format!("{:?}", aired.state))
+            .or_insert(0_u32) += 1;
+    }
+    let mut by_set = std::collections::BTreeMap::new();
+    for (_, aired) in &movers {
+        let set = aired.label.split(' ').next().unwrap_or_default().to_owned();
+        *by_set.entry(set).or_insert(0_u32) += 1;
+    }
+    eprintln!("movers by state: {by_state:?}; by set: {by_set:?}");
+    let airless: Vec<f64> = movers
+        .iter()
+        .filter(|(h, a)| {
+            h.state == crate::planetary::derive::atmosphere::SurfaceState::Airless
+                && a.state == h.state
+        })
+        .map(|(h, a)| a.coldest - h.coldest)
+        .collect();
+    let (colder, warmer) = airless
+        .iter()
+        .fold((0.0_f64, 0.0_f64), |(lo, hi), &d| (lo.min(d), hi.max(d)));
+    eprintln!(
+        "airless movers: {} coldest zones, from {colder:.2} K to {warmer:+.2} K",
+        airless.len()
+    );
+    assert_eq!(flips, FLIPS);
+    assert_eq!(movers.len(), MOVED);
+}
+
+/// Under every 26 hold with the pore gas in force, the golden systems generated twice give the
+/// same records, bit for bit.
+#[test]
+fn under_every_26_hold_the_pore_gas_repeats() {
+    let sets: Vec<(&str, Seed, SystemContext)> = golden_systems()
+        .iter()
+        .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone()))
+        .collect();
+    let first = with_every_26_hold(|| thin_air_census(&sets));
+    let second = with_every_26_hold(|| thin_air_census(&sets));
+    assert_eq!(first.len(), second.len());
+    for (a, b) in first.iter().zip(&second) {
+        assert!(same(a, b), "{}: {} against {}", a.label, a.line(), b.line());
+    }
+    assert!(!first.is_empty());
+}

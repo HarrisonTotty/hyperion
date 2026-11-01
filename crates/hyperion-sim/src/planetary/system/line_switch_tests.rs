@@ -1,7 +1,9 @@
 //! P14.T53.i's census over the record: the 100 Pa line read once by the steps and the record,
 //! under every 26 hold against every 26 hold with the line's switch held, over P14.T53.c's
 //! thin-air census (the 400 sample systems, the golden systems and LOOK72's systems), and count
-//! (vii)'s two records by name.
+//! (vii)'s two records by name. P14.T49.l's pore gas is set back in each walk
+//! ([`with_every_26_hold_but_the_pore_gas`]): its outer-system ice freezes count (vii)'s N₂ out
+//! (`pore_gas_tests`' flips), which its own census lists.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -13,6 +15,7 @@ use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Gas, LineSwitchRules, SurfaceState, settled_log, with_line_switch,
 };
 use crate::planetary::testing::with_every_26_hold;
+use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 use crate::units::Kelvin;
 use hyperion_testkit::float::assert_same_bits;
 
@@ -58,6 +61,12 @@ struct Census {
     switched: (Vec<ThinAirBody>, Vec<settled_log::Settled>),
 }
 
+/// `run`'s result under every 26 hold with P14.T49.l's pore gas set back to the vacuum, so that
+/// the line's census reads the line's switch alone.
+fn with_every_26_hold_but_the_pore_gas<R>(run: impl FnOnce() -> R) -> R {
+    with_every_26_hold(|| with_regolith_inertia(RegolithInertiaRules::Vacuum, run))
+}
+
 /// The census under every 26 hold, the line's switch held and in force, walked once a process,
 /// with the solves each walk published ([`settled_log`]).
 fn census() -> &'static Census {
@@ -66,13 +75,14 @@ fn census() -> &'static Census {
         let sets = thin_air_sets();
         let start = Instant::now();
         let held = settled_log::capture(|| {
-            with_every_26_hold(|| {
+            with_every_26_hold_but_the_pore_gas(|| {
                 with_line_switch(LineSwitchRules::Held, || thin_air_census(&sets))
             })
         });
         let walk_held = start.elapsed();
         let start = Instant::now();
-        let switched = settled_log::capture(|| with_every_26_hold(|| thin_air_census(&sets)));
+        let switched =
+            settled_log::capture(|| with_every_26_hold_but_the_pore_gas(|| thin_air_census(&sets)));
         eprintln!(
             "the walks: the line held {walk_held:?}, read once {:?}, {} bodies",
             start.elapsed(),
@@ -196,7 +206,7 @@ fn under_every_26_hold_the_line_is_read_once_by_the_steps_and_the_record() {
 }
 
 /// The census body `id` of the sample, its system generated afresh under every 26 hold with the
-/// line's rules `rules`, and the solve that published it ([`settled_log`]).
+/// line's rules `rules`, the pore gas set back, and the solve that published it ([`settled_log`]).
 fn named(id: &str, rules: LineSwitchRules) -> (ThinAirBody, settled_log::Settled) {
     let system = id.split('.').next().unwrap_or_default();
     let ctx = sample()
@@ -205,7 +215,7 @@ fn named(id: &str, rules: LineSwitchRules) -> (ThinAirBody, settled_log::Settled
         .unwrap_or_else(|| panic!("{id}'s system is in the sample"));
     let sets = [("sample", SEED, ctx.clone())];
     let (bodies, solves) = settled_log::capture(|| {
-        with_every_26_hold(|| with_line_switch(rules, || thin_air_census(&sets)))
+        with_every_26_hold_but_the_pore_gas(|| with_line_switch(rules, || thin_air_census(&sets)))
     });
     let body = bodies
         .into_iter()

@@ -769,6 +769,41 @@ fn mars_like_matches_its_golden() {
     );
 }
 
+/// Under every 26 hold, P14.T49.l's pore gas moves R09's `mars_like` and `europa_like` goldens and
+/// no other fast world's: each world's pass is built inside `with_every_26_hold`, with and without
+/// the pore gas set back to the vacuum, so that only this hold's movers are listed (P14.T49.l's
+/// records); the Moon's and Ceres's silicate lids, airless, hold to the bit.
+#[test]
+#[ignore = "slow: eight fast worlds' coarse passes, about 15 s in the test profile (pod, 16 vCPU)"]
+fn under_every_26_hold_the_pore_gas_moves_mars_and_europa() {
+    use crate::planetary::testing::with_every_26_hold;
+    use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+
+    let worlds = [
+        ("mars_like", reference::mars_like()),
+        ("europa_like", reference::europa_like()),
+        ("moon_like", reference::moon_like()),
+        ("ceres_like", reference::ceres_like()),
+    ];
+    let mut moved = Vec::new();
+    for (name, inputs) in &worlds {
+        let held = with_every_26_hold(|| {
+            with_regolith_inertia(RegolithInertiaRules::Vacuum, || fast_text(name, inputs))
+        });
+        let aired = with_every_26_hold(|| fast_text(name, inputs));
+        let changed = held
+            .lines()
+            .zip(aired.lines())
+            .filter(|(a, b)| a != b)
+            .count();
+        eprintln!("{name}: {changed} lines move under the pore gas");
+        if held != aired {
+            moved.push(*name);
+        }
+    }
+    assert_eq!(moved, ["mars_like", "europa_like"]);
+}
+
 /// The reference Earth's field, its solves' convergence, and R09.T12.a's three bands on its
 /// finished land hypsometry (`decision-r09-t12-coarse.md` item 1): the land mode within 300 m of
 /// +125 m, the ocean's modal bin among the centres −5,125 to −4,125 m, and the mean below −2 km

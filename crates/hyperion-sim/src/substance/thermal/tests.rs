@@ -985,3 +985,450 @@ fn substance_thermal_reduced_conductivities_are_their_arithmetic() {
     assert!((k("chondrite_cm", 200.0) - 1.61).abs() < 1e-12);
     assert!((k("chondrite_h", 200.0) - 2.18).abs() < 1e-12);
 }
+
+/// The air in a regolith's pores of the one gas `key` at `pressure_pa` and `t` kelvin (P14.T49.l):
+/// the registry's molar mass and ideal-gas `c_p` at the temperature, and the gas's Lennard-Jones
+/// constants.
+fn pure_gas(key: &str, pressure_pa: f64, t: f64) -> PoreGas {
+    use crate::planetary::chem::condense::COLLISION_CONSTANTS;
+    use crate::substance::mixture_heat_capacity_over_r_at;
+    let id = row(key);
+    let mu = id.substance().molar_mass_g_per_mol().unwrap();
+    let cp_over_r = mixture_heat_capacity_over_r_at(&[(id, 1.0)], Kelvin::new(t)).unwrap();
+    let collision = *COLLISION_CONSTANTS.iter().find(|c| c.key == key).unwrap();
+    PoreGas::new(
+        Pascals::new(pressure_pa),
+        mu,
+        cp_over_r * MOLAR_GAS_CONSTANT / (mu / GRAMS_PER_KILOGRAM),
+        collision,
+    )
+    .unwrap()
+}
+
+/// Mars's surface pressure, Pa: 610, the classical 6.1 mbar of Mars's old topographic datum, near
+/// water's triple point (Mariner 9's datum; not re-read), within the NASA Mars fact sheet's 4.0–8.7
+/// mb by season and 4 per cent below its 6.36 mb at the mean radius (not re-read), as a pure CO₂
+/// air.
+const MARS_PRESSURE_PA: f64 = 610.0;
+
+/// Mars's surface temperature at which T49.j's record states its `basalt_fe` lid, K: 214.
+const MARS_T_K: f64 = 214.0;
+
+/// Titan's surface pressure and temperature: 1,467 hPa and 93.65 K, Huygens's at its landing site
+/// (Fulchignoni et al. 2005, Nature 438, 785, abstract; not re-read).
+const TITAN: (f64, f64) = (1.467e5, 93.65);
+
+/// The inertia of `key` at its family's form under P14.T49.l's rules, its pores holding `pores`.
+fn under_pore_gas(key: &str, t: f64, pores: &Pores) -> RegolithInertia {
+    reference_regolith_thermal_inertia_under(
+        row(key),
+        Kelvin::new(t),
+        RegolithInertiaRules::PoreGas,
+        pores,
+    )
+    .unwrap_or_else(|e| panic!("{key} at {t} K: {e}"))
+}
+
+/// P14.T49.l is held until the 25 → 26 bump: the rules in force are P14.T49.j's vacuum, and the
+/// tests' switch and 26's helper reach the pore gas.
+#[test]
+fn the_pore_gas_is_held_only_until_the_26_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < PORE_GAS_VERSION,
+        "the 25 → 26 bump puts P14.T49.l's pore gas and outer-system ice on the record: delete \
+         `PORE_GAS_VERSION`, `RegolithInertiaRules` with its `Vacuum` arm and the rules of \
+         `reference_regolith_thermal_inertia_under` (its pores then always read), \
+         `GroundInertia::under`'s guard, the tests' `with_regolith_inertia`, its switch in \
+         `with_every_26_hold` (and the helper, if no other 26 hold is left), and this test; make \
+         `RegolithForm::reference`'s water-ice form the outer system's"
+    );
+    assert_eq!(
+        RegolithInertiaRules::in_force(),
+        RegolithInertiaRules::Vacuum
+    );
+    assert_eq!(
+        with_regolith_inertia(
+            RegolithInertiaRules::PoreGas,
+            RegolithInertiaRules::in_force
+        ),
+        RegolithInertiaRules::PoreGas
+    );
+    assert_eq!(
+        crate::planetary::testing::with_every_26_hold(RegolithInertiaRules::in_force),
+        RegolithInertiaRules::PoreGas
+    );
+    assert_eq!(
+        crate::planetary::testing::with_every_26_hold(|| {
+            with_regolith_inertia(RegolithInertiaRules::Vacuum, RegolithInertiaRules::in_force)
+        }),
+        RegolithInertiaRules::Vacuum
+    );
+    assert_eq!(
+        RegolithInertiaRules::in_force(),
+        RegolithInertiaRules::Vacuum
+    );
+}
+
+/// Every part of `a` is `b`'s, bit for bit.
+fn assert_same_parts(a: &RegolithInertia, b: &RegolithInertia) {
+    let parts = |x: &RegolithInertia| {
+        [
+            x.inertia_j_per_m2_k_sqrt_s(),
+            x.conductivity_w_per_m_k(),
+            x.contact_conductivity_w_per_m_k(),
+            x.radiative_conductivity_w_per_m_k(),
+            x.gas_conductivity_w_per_m_k(),
+            x.solid_conductivity_w_per_m_k(),
+            x.grain_density().value(),
+            x.bulk_density().value(),
+            x.heat_capacity_j_per_kg_k(),
+        ]
+    };
+    for (x, y) in parts(a).into_iter().zip(parts(b)) {
+        assert_same_bits(x, y);
+    }
+}
+
+/// Empty pores, a gas at zero pressure, and the vacuum's rules whatever the pores hold, each give
+/// P14.T49.j's law to the bit, for every row with a form at every pinned temperature; the gas term
+/// reads zero.
+#[test]
+fn substance_thermal_empty_pores_are_the_vacuum_s_to_the_bit() {
+    let mars = Pores::Gas(pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K));
+    let none = Pores::Gas(pure_gas("CO2", 0.0, MARS_T_K));
+    let mut compared = 0;
+    for (id, _) in rows() {
+        let family = id.substance().condensed().unwrap().mechanics();
+        let Some(form) = RegolithForm::reference(family) else {
+            continue;
+        };
+        for t in [40.0, 90.0, 150.0, 200.0, 273.15] {
+            let t = Kelvin::new(t);
+            let Ok(vacuum) = regolith_thermal_inertia(id, &form, t) else {
+                continue;
+            };
+            for pores in [&Pores::Vacuum, &none] {
+                let same = regolith_thermal_inertia_with_pores(id, &form, t, pores).unwrap();
+                assert_same_parts(&same, &vacuum);
+                assert_same_bits(same.gas_conductivity_w_per_m_k(), 0.0);
+            }
+            let held = reference_regolith_thermal_inertia_under(
+                id,
+                t,
+                RegolithInertiaRules::Vacuum,
+                &mars,
+            )
+            .unwrap();
+            assert_same_parts(&held, &reference_regolith_thermal_inertia(id, t).unwrap());
+            compared += 1;
+        }
+    }
+    assert!(compared > 50, "{compared} compared");
+}
+
+/// A pore gas at a pressure so small that its jump length overflows is the vacuum's, every part to
+/// the bit, and one just above it is finite with a gas term under 10⁻¹² W m⁻¹ K⁻¹: the term's
+/// p → 0 limit, never a NaN.
+#[test]
+fn substance_thermal_a_vanishing_pore_gas_is_the_vacuum() {
+    let silicate = RegolithForm::reference(MechanicsFamily::Silicate).unwrap();
+    let t = Kelvin::new(MARS_T_K);
+    let vacuum = regolith_thermal_inertia(row("basalt_fe"), &silicate, t).unwrap();
+    for p in [f64::MIN_POSITIVE, 5e-324, 1e-300, 1e-12] {
+        let gas = Pores::Gas(pure_gas("CO2", p, MARS_T_K));
+        let thin = regolith_thermal_inertia_with_pores(row("basalt_fe"), &silicate, t, &gas)
+            .unwrap_or_else(|e| panic!("{p} Pa: {e}"));
+        let k = thin.gas_conductivity_w_per_m_k();
+        assert!(k.is_finite() && (0.0..1e-12).contains(&k), "{p} Pa: {k}");
+        assert!(thin.inertia_j_per_m2_k_sqrt_s().is_finite(), "{p} Pa");
+        if p < 1e-307 {
+            assert_same_parts(&thin, &vacuum);
+        }
+    }
+}
+
+/// The cell's moments J₁ and J₂ agree across the series and the closed form at the bound, and
+/// with Simpson's rule over the cell, from a cell near the continuum's x → 1 to a dense bed's x <
+/// −1.
+#[test]
+fn substance_thermal_cell_moments_are_their_integrals() {
+    for x in [
+        -3.0, -1.2, -0.5, -0.25, -0.1, 0.0, 0.1, 0.249_999, 0.25, 0.5, 0.9, 0.999,
+    ] {
+        let (first, second) = cell_moments(x, 1.0 - x);
+        let simpson = |m: i32| {
+            let n = 20_000;
+            let h = 1.0 / f64::from(n);
+            let f = |s: f64| math::powi(s, m) / (1.0 - x * s);
+            let sum = (1..n).fold(0.0, |sum, k| {
+                let w = if k % 2 == 1 { 4.0 } else { 2.0 };
+                sum + w * f(f64::from(k) * h)
+            });
+            (f(0.0) + sum + f(1.0)) * h / 3.0
+        };
+        let tolerance = if x > 0.99 { 1e-6 } else { 1e-11 };
+        assert!((first - simpson(1)).abs() < tolerance, "J1 at {x}");
+        assert!((second - simpson(2)).abs() < tolerance, "J2 at {x}");
+    }
+    let below = cell_moments(0.25 - 1e-16, 0.75 + 1e-16);
+    let above = cell_moments(0.25, 0.75);
+    assert!((below.0 - above.0).abs() < 1e-13 && (below.1 - above.1).abs() < 1e-13);
+}
+
+/// With no jump, the packed bed is Zehner and Schlünder's continuum bed, whose closed form is
+/// 1 − √φ + 2√φ ÷ N [B (1 − 1 ÷ κ) ÷ N² · ln(κ ÷ B) − (B + 1) ÷ 2 − (B − 1) ÷ N], N = 1 − B ÷ κ
+/// (Zehner and Schlünder 1970; not re-read), the closed form's N = 0 avoided; and the bed's
+/// conduction falls to nothing as the jump grows, never above the continuum's.
+#[test]
+fn substance_thermal_packed_bed_is_zehner_and_schlunder_s() {
+    for porosity in [0.3_f64, 0.4, 0.5161, 0.64, 0.8] {
+        let shape = PACKED_BED_SHAPE_FACTOR * math::powf((1.0 - porosity) / porosity, 10.0 / 9.0);
+        for ratio in [3.0, 30.0, 200.0, 700.0] {
+            let n = 1.0 - shape / ratio;
+            let root = (1.0 - porosity).sqrt();
+            let closed = 1.0 - root
+                + 2.0 * root / n
+                    * (shape * (1.0 - 1.0 / ratio) / (n * n) * math::ln(ratio / shape)
+                        - f64::midpoint(shape, 1.0)
+                        - (shape - 1.0) / n);
+            let continuum = packed_bed_ratio(porosity, ratio, 0.0);
+            assert!(
+                (continuum - closed).abs() < 1e-9 * closed,
+                "ψ {porosity}, κ {ratio}: {continuum} against {closed}"
+            );
+            let mut last = continuum;
+            for jump in [1e-4, 1e-2, 0.1, 1.0, 10.0, 1e3] {
+                let bed = packed_bed_ratio(porosity, ratio, jump);
+                assert!(bed > 0.0 && bed < last, "ψ {porosity}, κ {ratio}, ℓ {jump}");
+                last = bed;
+            }
+            assert!(last < 1e-2 * continuum, "ψ {porosity}, κ {ratio}: {last}");
+        }
+    }
+}
+
+/// The pore gas's conductivity is the free gas's, Eucken's on Chapman and Enskog's viscosity: the
+/// same at every pressure, rising with the temperature, carbon dioxide's within 0.009–0.013 W m⁻¹
+/// K⁻¹ at Mars's 214 K and nitrogen's within 0.008–0.011 at Titan's 94 K (the measured gases'
+/// about 0.0105 and 0.0090, as the lane recalled them; not re-read); its jump length about 14 µm
+/// at Mars and under 0.1 µm at Titan, inversely as the pressure.
+#[test]
+fn substance_thermal_pore_gas_is_kinetic_theory_s() {
+    let mars = pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K);
+    let doubled = pure_gas("CO2", 2.0 * MARS_PRESSURE_PA, MARS_T_K);
+    let titan = pure_gas("N2", TITAN.0, TITAN.1);
+    let t = Kelvin::new(MARS_T_K);
+    let k = mars.conductivity_w_per_m_k(t);
+    assert!((0.009..=0.013).contains(&k), "CO₂ {k}");
+    assert_same_bits(doubled.conductivity_w_per_m_k(t), k);
+    assert!(mars.conductivity_w_per_m_k(Kelvin::new(250.0)) > k);
+    let k_titan = titan.conductivity_w_per_m_k(Kelvin::new(TITAN.1));
+    assert!((0.008..=0.011).contains(&k_titan), "N₂ {k_titan}");
+    let jump = mars.jump_length(t).value();
+    assert!((10e-6..=20e-6).contains(&jump), "Mars's jump {jump}");
+    assert!(
+        (doubled.jump_length(t).value() * 2.0 - jump).abs() < 1e-12 * jump,
+        "inversely as the pressure"
+    );
+    let titan_jump = titan.jump_length(Kelvin::new(TITAN.1)).value();
+    assert!(titan_jump < 1e-7, "Titan's jump {titan_jump}");
+    eprintln!(
+        "pore gas: CO₂ at {MARS_T_K} K k {k:.5}, η {:.4e}, jump {:.2} µm; N₂ at {} K k \
+         {k_titan:.5}, jump {:.1} nm",
+        mars.viscosity_pa_s(t),
+        jump * 1e6,
+        TITAN.1,
+        titan_jump * 1e9
+    );
+}
+
+/// Presley and Christensen's measured fit for particulate soils under Mars-like carbon dioxide, k =
+/// C P^0.6 d^(−0.11 log₁₀(P ÷ K)), C 0.0015, K 8.1 × 10⁴ torr, P in torr and d in µm (Presley and
+/// Christensen 1997, JGR 102, 6551, as the literature quotes it; not re-read), is matched within a
+/// factor of 1.5 by the joined law at the silicate form's porosity over 70–500 µm grains of
+/// `basalt_fe` at Mars's pressure, and both rise with the grain size.
+#[test]
+fn substance_thermal_pore_gas_matches_presley_and_christensen() {
+    let gas = Pores::Gas(pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K));
+    let silicate = RegolithForm::reference(MechanicsFamily::Silicate).unwrap();
+    let torr = MARS_PRESSURE_PA / 133.322_368;
+    let mut last = 0.0;
+    for d_um in [70.0, 100.0, 200.0, 500.0] {
+        let form = RegolithForm::new(
+            MechanicsFamily::Silicate,
+            silicate.porosity(),
+            Metres::new(d_um * 1e-6),
+        )
+        .unwrap();
+        let law = regolith_thermal_inertia_with_pores(
+            row("basalt_fe"),
+            &form,
+            Kelvin::new(MARS_T_K),
+            &gas,
+        )
+        .unwrap()
+        .conductivity_w_per_m_k();
+        let measured: f64 =
+            0.0015 * math::powf(torr, 0.6) * math::powf(d_um, -0.11 * math::log10(torr / 8.1e4));
+        eprintln!("Presley and Christensen at {d_um} µm: {measured:.4}, the law {law:.4}");
+        assert!(law > last, "rising with the grain size");
+        assert!(
+            (law / measured) > 1.0 / 1.5 && (law / measured) < 1.5,
+            "{d_um} µm: {law} against {measured}"
+        );
+        last = law;
+    }
+}
+
+/// At Titan's 1.5 bar the gas term barely depends on the grain size, within 10 per cent over
+/// 50 µm–2 mm (Piqueux and Christensen 2009, JGR 114, E09005; not re-read), the logarithm of the gas
+/// gap at the contacts all that is left of it, while at Mars's 6 mbar it rises by more than half
+/// over the same grains.
+#[test]
+fn substance_thermal_at_titan_s_pressure_the_gas_ignores_the_grain_size() {
+    let span = |key: &str, row_key: &str, family: MechanicsFamily, (p, t): (f64, f64)| {
+        let gas = Pores::Gas(pure_gas(key, p, t));
+        let porosity = RegolithForm::reference(family).unwrap().porosity();
+        let gas_term = |d: f64| {
+            let form = RegolithForm::new(family, porosity, Metres::new(d)).unwrap();
+            regolith_thermal_inertia_with_pores(row(row_key), &form, Kelvin::new(t), &gas)
+                .unwrap()
+                .gas_conductivity_w_per_m_k()
+        };
+        (gas_term(50e-6), gas_term(2e-3))
+    };
+    let (fine, coarse) = span("N2", "H2O", MechanicsFamily::WaterIce, TITAN);
+    assert!(
+        (coarse / fine - 1.0).abs() < 0.1,
+        "Titan: {fine} to {coarse}"
+    );
+    let (fine, coarse) = span(
+        "CO2",
+        "basalt_fe",
+        MechanicsFamily::Silicate,
+        (MARS_PRESSURE_PA, MARS_T_K),
+    );
+    assert!(coarse / fine > 1.5, "Mars: {fine} to {coarse}");
+}
+
+/// Under P14.T49.l's rules, the binding figures, J m⁻² K⁻¹ s^−½ (P14.T49.l's tests), each pinned as
+/// it stands where it misses its window (the lane's `findings.txt`):
+///
+/// - Mars's `basalt_fe` at the silicate form, 214 K under 6.1 mbar of CO₂: against the global
+///   mode's 180–250 (Mellon et al. 2000, Icarus 148, 437; Putzig et al. 2005, Icarus 173, 325;
+///   neither re-read), pinned at 145–153, the lunar form's 70 µm grains being finer than Mars's
+///   sand;
+/// - Titan's `H2O` at the outer system's form under Huygens's air: against MacKenzie et al. 2019's
+///   about 236 for its sand (JGR Planets 124, 1728; its tables not reachable from the lane, so not
+///   re-read), pinned at 50–58, Titan's sand being organic and the form fluffy ice;
+/// - the airless `H2O` form at Ganymede's 110 K, its equilibrium temperature at a Bond albedo of
+///   0.35: inside Ganymede's 20–40 (Bockelée-Morvan et al. 2024, A&A 681, A27; not re-read);
+/// - the airless `H2O` form at 40 K, a trans-Neptunian object's at 40–45 AU: against the
+///   trans-Neptunian mean's 2.5 ± 0.5 (Santos-Sanz et al. 2017, A&A 604, A95; not re-read), pinned
+///   at 3.3–3.6, one form's radiative term carrying no more of the temperature.
+#[test]
+fn substance_thermal_pore_gas_s_binding_figures() {
+    let mars_air = Pores::Gas(pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K));
+    let titan_air = Pores::Gas(pure_gas("N2", TITAN.0, TITAN.1));
+    let mars = under_pore_gas("basalt_fe", MARS_T_K, &mars_air);
+    let titan = under_pore_gas("H2O", TITAN.1, &titan_air);
+    let ganymede = under_pore_gas("H2O", 110.0, &Pores::Vacuum);
+    let tno = under_pore_gas("H2O", 40.0, &Pores::Vacuum);
+    let gamma = RegolithInertia::inertia_j_per_m2_k_sqrt_s;
+    eprintln!(
+        "P14.T49.l: Mars {:.2} (k {:.4}: gas {:.4}), Titan {:.2} (k {:.4}: gas {:.4}), Ganymede \
+         at 110 K {:.2}, a TNO at 40 K {:.3}",
+        gamma(&mars),
+        mars.conductivity_w_per_m_k(),
+        mars.gas_conductivity_w_per_m_k(),
+        gamma(&titan),
+        titan.conductivity_w_per_m_k(),
+        titan.gas_conductivity_w_per_m_k(),
+        gamma(&ganymede),
+        gamma(&tno)
+    );
+    assert!((145.0..=153.0).contains(&gamma(&mars)), "Mars {mars:?}");
+    assert!((50.0..=58.0).contains(&gamma(&titan)), "Titan {titan:?}");
+    assert!(
+        (20.0..=40.0).contains(&gamma(&ganymede)),
+        "Ganymede {ganymede:?}"
+    );
+    assert!((3.3..=3.6).contains(&gamma(&tno)), "a TNO {tno:?}");
+}
+
+/// Under P14.T49.l's rules the water-ice form is the outer system's, its own conductivity
+/// amorphous ice's, every other family's form P14.T49.j's; it names a source for each of its
+/// figures, its conductivity among them, and its radiative term carries Ganymede's inertia.
+#[test]
+fn substance_thermal_outer_system_ice_is_fluffy_amorphous_ice() {
+    for &family in MechanicsFamily::ALL {
+        let under = RegolithForm::reference_under(family, RegolithInertiaRules::PoreGas);
+        if family == MechanicsFamily::WaterIce {
+            continue;
+        }
+        assert_eq!(under, RegolithForm::reference(family), "{family:?}");
+    }
+    let outer =
+        RegolithForm::reference_under(MechanicsFamily::WaterIce, RegolithInertiaRules::PoreGas)
+            .unwrap();
+    assert_same_bits(outer.porosity(), OUTER_ICE_POROSITY);
+    assert_same_bits(outer.grain_diameter().value(), 2e-3);
+    let GrainConductivity::Form(own) = outer.grain_conductivity() else {
+        panic!("the outer system's ice conducts as amorphous ice");
+    };
+    assert_same_bits(own.evaluate(100.0), 2.34e-3 * 100.0 + 2.8e-2);
+    for value in [
+        "porosity",
+        "grain diameter",
+        "conductivity",
+        "emissivity",
+        "Young's modulus",
+        "Poisson's ratio",
+        "surface energy",
+    ] {
+        assert!(
+            outer.sources().iter().any(|s| !s.citation().is_empty()
+                && s.covers().split(", ").any(|covered| covered == value)),
+            "the outer system's ice's {value} names a source"
+        );
+    }
+    let ganymede = under_pore_gas("H2O", 110.0, &Pores::Vacuum);
+    assert!(
+        ganymede.radiative_conductivity_w_per_m_k()
+            > 10.0 * ganymede.contact_conductivity_w_per_m_k()
+    );
+    assert_same_bits(ganymede.solid_conductivity_w_per_m_k(), own.evaluate(110.0));
+}
+
+/// A pore gas refuses a pressure that is not finite and at least zero, a molar mass that is not
+/// positive, a specific heat that leaves no positive `c_v`, and constants that are not positive.
+#[test]
+fn substance_thermal_pore_gas_refuses_what_is_not_a_gas() {
+    use crate::planetary::chem::condense::COLLISION_CONSTANTS;
+    let co2 = COLLISION_CONSTANTS[6];
+    assert_eq!(co2.key, "CO2");
+    let p = Pascals::new(600.0);
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(
+            PoreGas::new(Pascals::new(bad), 44.0, 735.0, co2),
+            Err(BuildPoreGasError::Pressure { .. })
+        ));
+    }
+    assert!(matches!(
+        PoreGas::new(p, 0.0, 735.0, co2),
+        Err(BuildPoreGasError::MolarMass { .. })
+    ));
+    assert!(matches!(
+        PoreGas::new(p, 44.0, 150.0, co2),
+        Err(BuildPoreGasError::SpecificHeat { .. })
+    ));
+    let none = crate::planetary::chem::condense::CollisionConstants {
+        diameter_m: 0.0,
+        ..co2
+    };
+    assert!(matches!(
+        PoreGas::new(p, 44.0, 735.0, none),
+        Err(BuildPoreGasError::Collision { key: "CO2" })
+    ));
+    assert!(PoreGas::new(Pascals::ZERO, 44.0, 735.0, co2).is_ok());
+}

@@ -6956,6 +6956,8 @@ pub(crate) mod moon_ice;
 mod ocean_tests;
 pub(crate) mod planet_lag;
 #[cfg(test)]
+mod pore_gas_tests;
+#[cfg(test)]
 mod present_state_tests;
 mod rogue;
 mod second_generation;

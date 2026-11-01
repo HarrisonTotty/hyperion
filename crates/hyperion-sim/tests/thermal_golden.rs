@@ -12,7 +12,10 @@
 //! - `[inertia]`: for each row with thermal columns whose family has a form, the inertia Γ with
 //!   `k_eff`, its contact and radiative terms, `ρ_bulk` and c at [`PINNED_TEMPERATURES_K`], or the
 //!   error at each;
-//! - `[built form]`: the same for a few layers built at a caller's porosity and grain size.
+//! - `[built form]`: the same for a few layers built at a caller's porosity and grain size;
+//! - `[pore gas]` (P14.T49.l, held at 26): the outer system's ice form, a few airs in a regolith's
+//!   pores (their conductivity, viscosity and jump length), and the law at P14.T49.l's rules with
+//!   those airs in the pores, the gas term among its parts, at their temperatures.
 //!
 //! Nothing on the record reads the module until P14.T54.a, which wires the inertia at P14.T51.c's
 //! lid into P14.T24.a, so until then a change re-blesses this golden at the version in force
@@ -22,12 +25,17 @@
 //! share none with this one (main's brief, 2026-10-16).
 
 use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::planetary::chem::condense::COLLISION_CONSTANTS;
 use hyperion_sim::substance::thermal::{
-    self, Provenance, RegolithForm, RegolithInertia, SurfaceEnergy, ThermalColumn, ThermalForm,
-    reference_regolith_thermal_inertia, regolith_thermal_inertia,
+    self, GrainConductivity, PoreGas, Pores, Provenance, RegolithForm, RegolithInertia,
+    RegolithInertiaRules, SurfaceEnergy, ThermalColumn, ThermalForm,
+    reference_regolith_thermal_inertia, reference_regolith_thermal_inertia_under,
+    regolith_thermal_inertia,
 };
-use hyperion_sim::substance::{self, Basis, SubstanceId};
-use hyperion_sim::units::{Kelvin, Metres};
+use hyperion_sim::substance::{
+    self, Basis, MOLAR_GAS_CONSTANT, SubstanceId, mixture_heat_capacity_over_r_at,
+};
+use hyperion_sim::units::{Kelvin, Metres, Pascals};
 use hyperion_surface::field::MechanicsFamily;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::{GoldenWriter, f64_digest};
@@ -250,6 +258,108 @@ fn built_form_section(w: &mut GoldenWriter) {
     }
 }
 
+/// The air of the one gas `key` at `pressure_pa` in a regolith's pores at `t` kelvin: the
+/// registry's molar mass and ideal-gas `c_p` there, and its Lennard-Jones constants.
+fn pure_gas(key: &str, pressure_pa: f64, t: f64) -> PoreGas {
+    let id = substance::by_key(key).expect("the gas is a registry row");
+    let mu = id
+        .substance()
+        .molar_mass_g_per_mol()
+        .expect("a gas has a molar mass");
+    let cp_over_r = mixture_heat_capacity_over_r_at(&[(id, 1.0)], Kelvin::new(t))
+        .expect("a gas has an ideal-gas heat capacity");
+    let collision = *COLLISION_CONSTANTS
+        .iter()
+        .find(|c| c.key == key)
+        .expect("the gas has Lennard-Jones constants");
+    PoreGas::new(
+        Pascals::new(pressure_pa),
+        mu,
+        cp_over_r * MOLAR_GAS_CONSTANT / (mu / 1_000.0),
+        collision,
+    )
+    .expect("a registry gas at a pressure is a pore gas")
+}
+
+/// The golden's pore gas (P14.T49.l): the outer system's ice form; a few airs, each at the
+/// temperature of its regolith; and the law under P14.T49.l's rules at each, the gas term among its
+/// parts, with the airless ice form at the pinned temperatures.
+fn pore_gas_section(w: &mut GoldenWriter) {
+    w.line("[pore gas]");
+    let outer =
+        RegolithForm::reference_under(MechanicsFamily::WaterIce, RegolithInertiaRules::PoreGas)
+            .expect("water ice has a form");
+    let bases: Vec<String> = outer
+        .sources()
+        .iter()
+        .map(|s| format!("{} {}", s.covers(), basis_name(s.basis())))
+        .collect();
+    let label = "outer system's ice form";
+    w.line(&format!("{label}: sources {}", bases.join("; ")));
+    w.f64(&format!("{label}: porosity"), outer.porosity());
+    w.f64(
+        &format!("{label}: grain_diameter_m"),
+        outer.grain_diameter().value(),
+    );
+    match outer.grain_conductivity() {
+        GrainConductivity::Row => w.line(&format!("{label}: conductivity: the row's")),
+        GrainConductivity::Form(own) => {
+            w.line(&format!("{label}: conductivity: {}", form_line(own)));
+        }
+    }
+    let airs = [
+        ("CO2", 610.0, 214.0, "basalt_fe"),
+        ("CO2", 610.0, 200.0, "basalt_fe"),
+        ("N2", 1.467e5, 93.65, "H2O"),
+        ("N2", 1.0e5, 273.15, "feldspathic"),
+        ("N2", 1.0, 40.0, "H2O"),
+    ];
+    for (key, p, t, row_key) in airs {
+        let gas = pure_gas(key, p, t);
+        let at = format!("air {key} at {p} Pa, {t} K");
+        let kelvin = Kelvin::new(t);
+        w.f64(
+            &format!("{at}: conductivity_w_per_m_k"),
+            gas.conductivity_w_per_m_k(kelvin),
+        );
+        w.f64(&format!("{at}: viscosity_pa_s"), gas.viscosity_pa_s(kelvin));
+        w.f64(
+            &format!("{at}: jump_length_m"),
+            gas.jump_length(kelvin).value(),
+        );
+        let id = substance::by_key(row_key).expect("the row is a registry row");
+        let under = format!("{at}: {row_key}");
+        match reference_regolith_thermal_inertia_under(
+            id,
+            kelvin,
+            RegolithInertiaRules::PoreGas,
+            &Pores::Gas(gas),
+        ) {
+            Ok(inertia) => {
+                inertia_lines(w, &under, &inertia);
+                w.f64(
+                    &format!("{under}: gas_conductivity_w_per_m_k"),
+                    inertia.gas_conductivity_w_per_m_k(),
+                );
+            }
+            Err(e) => w.line(&format!("{under}: {e}")),
+        }
+    }
+    let ice = substance::by_key("H2O").expect("the registry holds water");
+    for t in PINNED_TEMPERATURES_K {
+        let at = format!("airless H2O at {t} K");
+        match reference_regolith_thermal_inertia_under(
+            ice,
+            Kelvin::new(t),
+            RegolithInertiaRules::PoreGas,
+            &Pores::Vacuum,
+        ) {
+            Ok(inertia) => inertia_lines(w, &at, &inertia),
+            Err(e) => w.line(&format!("{at}: {e}")),
+        }
+    }
+}
+
 #[test]
 fn substance_thermal_columns_and_inertias_are_pinned() {
     let mut w = GoldenWriter::new();
@@ -258,5 +368,6 @@ fn substance_thermal_columns_and_inertias_are_pinned() {
     form_section(&mut w);
     inertia_section(&mut w);
     built_form_section(&mut w);
+    pore_gas_section(&mut w);
     golden!("substance/thermal", &w.finish());
 }

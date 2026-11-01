@@ -6344,6 +6344,8 @@ rows' values.
     the law's callers (`planetary/hooks/surface.rs`'s ground inertia).
   - _Accept:_ `cargo test -p hyperion-sim substance::thermal`;
     `cargo test -p hyperion-sim --features testing --test thermal_golden`.
+  - _Built_ 2026-10-31, held at 26 (`PORE_GAS_VERSION`): Risks, "Deviations in P14.T49.l, as
+    built".
 - **P14.T49.m The icy lid's regolith** (before P14.T54.b wires the cold traps onto the regolith's
   albedo, P14.T51.i, else T54.b states the icy moons' traps; decision-p14-t54a-ganymede §1.5,
   2026-10-20).
@@ -33582,3 +33584,41 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `subgiant`, `red_giant` and `filler_b`; the server's by-hand fixtures do not move. The census
     (`under_every_26_hold_the_formation_draws_census`, ignored): 87 envelopes of 102 systems, 17
     newly not modelled and 6 newly modelled.
+- **Deviations in P14.T49.l, as built (2026-10-31).** Held at 26: `substance::thermal`'s
+  `PORE_GAS_VERSION`, `RegolithInertiaRules::{Vacuum, PoreGas}` (public), the tests'
+  `with_regolith_inertia` (a line in `with_every_26_hold`) and the tripwire
+  `the_pore_gas_is_held_only_until_the_26_bump`. Under `Vacuum` every figure is 24's and 25's bit
+  for bit.
+  - _The choke point:_ `reference_regolith_thermal_inertia_under(id, t, rules, &Pores)`, which
+    `hooks::surface::ground_inertia` reads at the rules in force; under `Vacuum` its pores are not
+    read. New public items: `PoreGas` (`new`, `viscosity_pa_s`, `conductivity_w_per_m_k`,
+    `jump_length`), `BuildPoreGasError`, `Pores::{Vacuum, Gas}`, `GrainConductivity::{Row, Form}`,
+    `RegolithForm::{reference_under, grain_conductivity}`, `RegolithInertia::gas_conductivity_w_per_m_k`
+    and `regolith_thermal_inertia_with_pores`. `condense::collision_integral` is `pub(crate)`.
+  - _The law's new inputs:_ the pores' gas (its pressure; the column's mean molar mass and `c_p`;
+    the Lennard-Jones constants of its most abundant gas that has them, so none for ammonia) and
+    the form's grain diameter, through Zehner, Bauer and Schlünder's packed bed with the
+    Smoluchowski jump (`C_f` 1.4, α 1), in parallel with Gundlach and Blum's terms. A column under
+    `AIRLESS_PRESSURE` holds no air, so a tenuous air's pores are empty.
+  - _The `H2O` form_ under `PoreGas` (one form, lean, 2026-10-31): porosity 0.80 (67P's), grains of
+    2 mm (67P's pebbles), amorphous ice's conductivity (Klinger 1980). Ganymede 23.7 at 110 K, a
+    TNO 3.42 at 40 K. `RegolithForm::new` keeps T49.j's forms. The 0.80 and 2 mm are an effective
+    radiative parameterisation, not a packing (lean, 2026-10-31): dense 2 mm grains pack at about
+    0.4, which would give Ganymede about 10.
+  - _The ground:_ `GroundInertia` keeps its lid and material (no temperature: one more `Kelvin`
+    trips `large_enum_variant` on `StepClimate`), and `under(equilibrium, || pores)` reads it again
+    under `PoreGas`, its pores built only then: per step in `step_climate` at the step's column
+    (`step_column` returns its `GasFractions`), and in `SurfaceConditions::derive` at the published
+    column (`pores_of`), so the published pass's ground and the record's agree (a test). R09's
+    hand-built inputs read `pores_of_air`; `regolith_inertia_j_per_m2_k_sqrt_s` takes `&Pores`.
+  - _The movers:_ R09's `mars_like` (Γ 46.91 → 147.38) and `europa_like` (56.57 → 23.50); the Moon
+    and Ceres hold; the Earths' Γ moves (52.0 → 368.6), which their energy balance does not read.
+    The census (`system/pore_gas_tests.rs`, P14.T53.c's sets): 2,118 of 6,664 bodies move, 1,824
+    airless coldest zones by −14.4 to +6.2 K, and nine N₂ airs at or under the line go `Airless`
+    (`FLIPS`).
+  - _Set back:_ P14.T53.i's `line_switch_tests` walk every 26 hold but the pore gas
+    (`with_every_26_hold_but_the_pore_gas`): its count (vii) world, 01ffeb2d20000000.e101, is a
+    flip. Every other 26 hold's census holds under the arm.
+  - _For 26's bump:_ the tripwire's list; re-bless `planetary/surface/{mars_like, europa_like}`,
+    `planetary/systems` and `substance/thermal` (its `[pore gas]` section then the reference); the
+    line switch's census then reads the pore gas.

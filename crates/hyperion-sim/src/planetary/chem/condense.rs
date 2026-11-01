@@ -2699,7 +2699,7 @@ impl Air {
 /// e^(−2.43787 T*), within 0.1% for 0.3 ≤ T* ≤ 100 ([`REDUCED_TEMPERATURE_RANGE`]), and held at
 /// its ends beyond them (an H₂O background below 243 K, SO₂ below 101 K, He above 1,022 K).
 #[must_use]
-fn collision_integral(reduced: f64) -> f64 {
+pub(crate) fn collision_integral(reduced: f64) -> f64 {
     let (low, high) = REDUCED_TEMPERATURE_RANGE;
     let reduced = reduced.clamp(low, high);
     1.161_45 * math::powf(reduced, -0.148_74)

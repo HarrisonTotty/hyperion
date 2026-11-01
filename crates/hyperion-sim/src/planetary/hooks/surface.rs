@@ -138,6 +138,7 @@ use hyperion_surface::field::MechanicsFamily;
 
 use crate::math;
 use crate::orbit::KeplerElements;
+use crate::planetary::chem::condense::COLLISION_CONSTANTS;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
@@ -152,7 +153,10 @@ use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::figures::GlobalFigures;
 #[cfg(doc)]
 use crate::substance::PhaseDiagram;
-use crate::substance::thermal::{EvaluateRegolithInertiaError, reference_regolith_thermal_inertia};
+use crate::substance::thermal::{
+    BuildPoreGasError, EvaluateRegolithInertiaError, PoreGas, Pores, RegolithInertiaRules,
+    reference_regolith_thermal_inertia_under,
+};
 use crate::substance::{
     Phase, SubstanceId, mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at, phase_at,
 };
@@ -554,7 +558,7 @@ pub const ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S: f64 = 20.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum InertiaSource {
     /// The law at the lid's row, at the temperature
-    /// ([`reference_regolith_thermal_inertia`]).
+    /// ([`reference_regolith_thermal_inertia_under`]).
     Law,
     /// No lid known (the passes' first context, the passes' stand-in, a body with no crust): the
     /// bulk material's constant.
@@ -580,10 +584,18 @@ pub(crate) enum InertiaSource {
 
 /// A ground's thermal inertia Γ with where it comes from (P14.T54.a; [`ground_inertia`]): what
 /// carries the day's heat into the night ([`ground_redistribution`]).
+///
+/// A ground read at a lid keeps the lid, so that a column's pore gas can read it once more under
+/// P14.T49.l's hold ([`under`](Self::under)). It keeps no temperature: one more `Kelvin` here
+/// takes `derive::atmosphere`'s `StepClimate` over Clippy's `large_enum_variant` bound (tried,
+/// 2026-10-31), so each caller passes the temperature it read the ground at.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GroundInertia {
     gamma: f64,
     source: InertiaSource,
+    /// The lid it was read at, `None` for no lid or no light.
+    lid: Option<CrustLithology>,
+    material: SurfaceMaterial,
 }
 
 impl GroundInertia {
@@ -594,6 +606,8 @@ impl GroundInertia {
         Self {
             gamma: material_inertia_j_per_m2_k_sqrt_s(material),
             source: InertiaSource::NoLid,
+            lid: None,
+            material,
         }
     }
 
@@ -610,12 +624,29 @@ impl GroundInertia {
     ) -> Self {
         let t = equilibrium.value();
         if t.is_finite() && t > 0.0 {
-            ground_inertia(lid, material, equilibrium)
+            ground_inertia(lid, material, equilibrium, &Pores::Vacuum)
         } else {
             Self {
                 gamma: material_inertia_j_per_m2_k_sqrt_s(material),
                 source: InertiaSource::Unlit,
+                lid: None,
+                material,
             }
+        }
+    }
+
+    /// The ground read at `equilibrium` ([`at_equilibrium`](Self::at_equilibrium)'s, the
+    /// caller's) under a column whose pores hold what `pores` gives ([`pores_of`]; P14.T49.l):
+    /// below the hold, or for a ground read at no lid or under no light, itself to the bit, `pores`
+    /// never called; under [`RegolithInertiaRules::PoreGas`], the law at its lid at `equilibrium`
+    /// read once more with the gas in its pores ([`ground_inertia`]), at every step that calls it.
+    #[must_use]
+    pub(crate) fn under(self, equilibrium: Kelvin, pores: impl FnOnce() -> Pores) -> Self {
+        match (RegolithInertiaRules::in_force(), self.lid) {
+            (RegolithInertiaRules::PoreGas, Some(lid)) => {
+                ground_inertia(Some(lid), self.material, equilibrium, &pores())
+            }
+            (RegolithInertiaRules::Vacuum, _) | (RegolithInertiaRules::PoreGas, None) => self,
         }
     }
 
@@ -644,11 +675,12 @@ const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
 }
 
 /// The thermal inertia of the ground of a body whose crust's lid is `lid` and whose bulk is of
-/// `material`, at `temperature` (P14.T54.a; decision-pre-23-review item 7;
-/// decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row
-/// ([`reference_regolith_thermal_inertia`], a dry regolith in vacuum of its family's reference
-/// form), and otherwise P14.T24.a's constants, [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]
-/// and [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], as its fallback ([`InertiaSource`]):
+/// `material`, at `temperature`, its pores holding `pores` (P14.T54.a; decision-pre-23-review item
+/// 7; decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row at the rules in force
+/// ([`reference_regolith_thermal_inertia_under`]; below P14.T49.l's hold, a dry regolith in vacuum
+/// of its family's reference form), and otherwise P14.T24.a's constants,
+/// [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`] and
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], as its fallback ([`InertiaSource`]):
 ///
 /// - no lid: the bulk material's constant, as P14.T24.a read it before the lid, to the bit;
 /// - a row with no thermal columns (`graphite`): rock's, 55;
@@ -657,13 +689,13 @@ const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
 /// - the law's other refusals, which a lid's row at a positive, finite temperature never gives:
 ///   the bulk material's constant, with a `debug_assert`.
 ///
-/// Under air the law is a vacuum lower bound, with no pore gas: gas in the pores raises a
-/// regolith's conductivity well above the vacuum's, which P14.T49.l's pore-gas conductivity adds
-/// (decision-pre-23-review item 7). Mars's measured 180–250 (Mellon et al. 2000, Icarus 148, 437;
-/// Putzig et al. 2005, Icarus 173, 325; neither re-read) lies against its `basalt_fe` lid's about
-/// 47 here at its `T_eq` (46.91 at the reference Mars's 206.9 K), and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728, as Batch D's science
-/// check gave it; not re-read: P14.T49.l re-reads MacKenzie 2019's tables before asserting it)
-/// against its ice's 57.
+/// Below P14.T49.l's hold the law under air is a vacuum lower bound, its pores unread: Mars's
+/// measured 180–250 (Mellon et al. 2000, Icarus 148, 437; Putzig et al. 2005, Icarus 173, 325;
+/// neither re-read) lies against its `basalt_fe` lid's about 47 here at its `T_eq` (46.91 at the
+/// reference Mars's 206.9 K), and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728;
+/// not re-read) against its ice's 57. Under the hold the gas in the pores adds its conduction
+/// (P14.T49.l): the reference Mars reads 147.4, and Titan's ice, at the outer system's form, about
+/// 54 at its 94 K surface.
 ///
 /// The lid is a [`CrustLithology`], T51.c's closed set, every row of which has condensed columns
 /// and takes its own family's form: so the law's refusal of a row with none, or of a form of
@@ -685,15 +717,23 @@ fn ground_inertia(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
     temperature: Kelvin,
+    pores: &Pores,
 ) -> GroundInertia {
     let Some(lid) = lid else {
         return GroundInertia::of_material(material);
     };
-    let error = match reference_regolith_thermal_inertia(lid.substance(), temperature) {
+    let error = match reference_regolith_thermal_inertia_under(
+        lid.substance(),
+        temperature,
+        RegolithInertiaRules::in_force(),
+        pores,
+    ) {
         Ok(inertia) => {
             return GroundInertia {
                 gamma: inertia.inertia_j_per_m2_k_sqrt_s(),
                 source: InertiaSource::Law,
+                lid: Some(lid),
+                material,
             };
         }
         Err(error) => error,
@@ -731,7 +771,98 @@ fn ground_inertia(
         InertiaSource::Unreachable,
         "{error}: a lid's row at a positive, finite temperature never gives it"
     );
-    GroundInertia { gamma, source }
+    GroundInertia {
+        gamma,
+        source,
+        lid: Some(lid),
+        material,
+    }
+}
+
+/// What fills the pores of a regolith under the column `column` of the gases `gases`, largest
+/// first (P14.T49.l): the column's air at its surface pressure, its mean molar mass and specific
+/// heat, with the Lennard-Jones constants of its most abundant gas that has them
+/// ([`COLLISION_CONSTANTS`]; ammonia has none); and nothing for a column that holds no air (an
+/// airless or tenuous one, under [`AIRLESS_PRESSURE`]), or whose gases have no constants.
+///
+/// The record's conditions and T13.c's passes read it from the same column, so that the published
+/// pass's ground and the record's agree. Its specific heat is the column's, at its mean surface
+/// temperature.
+#[must_use]
+pub(crate) fn pores_of(column: &Column, gases: &[(SubstanceId, f64)]) -> Pores {
+    pores_at(
+        column.surface_pressure,
+        column.molar_mass_g_per_mol,
+        column.specific_heat_j_per_kg_k,
+        gases,
+    )
+}
+
+/// What fills the pores of a regolith under an air of the gases `gases` (mole fractions, largest
+/// first) at the surface pressure `pressure` and mean surface temperature `surface_temperature`, as
+/// a column of that air holds it ([`pores_of`]): nothing under [`AIRLESS_PRESSURE`], where a column
+/// holds no air. For an air given by hand, as R09's reference worlds give theirs.
+#[must_use]
+pub(crate) fn pores_of_air(
+    pressure: Pascals,
+    gases: &[(SubstanceId, f64)],
+    surface_temperature: Kelvin,
+) -> Pores {
+    if pressure < AIRLESS_PRESSURE {
+        return Pores::Vacuum;
+    }
+    let (Some(mu), Some(cp)) = (
+        mean_molar_mass_g_per_mol(gases),
+        mixture_heat_capacity_over_r_at(gases, surface_temperature),
+    ) else {
+        return Pores::Vacuum;
+    };
+    pores_at(pressure, mu, specific_heat_j_per_kg_k(cp, mu), gases)
+}
+
+/// The pores' gas at `pressure` of mean molar mass `molar_mass_g_per_mol` and specific heat
+/// `specific_heat_j_per_kg_k` among the gases `gases`, largest first ([`pores_of`]).
+#[must_use]
+fn pores_at(
+    pressure: Pascals,
+    molar_mass_g_per_mol: f64,
+    specific_heat_j_per_kg_k: f64,
+    gases: &[(SubstanceId, f64)],
+) -> Pores {
+    if pressure.value() <= 0.0 {
+        return Pores::Vacuum;
+    }
+    let Some(collision) = gases.iter().find_map(|&(id, _)| {
+        let key = id.substance().key();
+        COLLISION_CONSTANTS
+            .iter()
+            .find(|constants| constants.key == key.as_str())
+            .copied()
+    }) else {
+        return Pores::Vacuum;
+    };
+    match PoreGas::new(
+        pressure,
+        molar_mass_g_per_mol,
+        specific_heat_j_per_kg_k,
+        collision,
+    ) {
+        Ok(gas) => Pores::Gas(gas),
+        // A column with air has a positive molar mass and a c_p above R ÷ M, but for gases over a
+        // surface at 0 K, whose c_p is zero and which absorbs no light: its pores are empty.
+        Err(BuildPoreGasError::SpecificHeat { .. }) => Pores::Vacuum,
+        // A column's pressure is finite (its partial pressures are, or it has no column), its
+        // molar mass positive where it holds air, and the collision table's constants positive:
+        // a bug, which a release build reads as empty pores.
+        Err(
+            error @ (BuildPoreGasError::Pressure { .. }
+            | BuildPoreGasError::MolarMass { .. }
+            | BuildPoreGasError::Collision { .. }),
+        ) => {
+            debug_assert!(false, "{error}: a column's air is always a pore gas");
+            Pores::Vacuum
+        }
+    }
 }
 
 /// The fit (a, n) of a regolith's redistribution ε = x ÷ (1 + x), x = a Θ^n: (0.635, 0.905),
@@ -1162,12 +1293,14 @@ impl SurfaceConditions {
             inputs.atmosphere.partial_pressures(),
         );
         let floor = night_floor(inputs.heat_flow);
-        // The ground's inertia, once: at its lid's row at the column's equilibrium temperature.
+        // The ground's inertia, once: at its lid's row at the column's equilibrium temperature, its
+        // pores holding the column's air under P14.T49.l's hold, as the published pass's step.
         let ground = GroundInertia::at_equilibrium(
             inputs.lid,
             inputs.material,
             inputs.equilibrium_temperature,
-        );
+        )
+        .under(inputs.equilibrium_temperature, || pores_of(&column, &gases));
         // A world locked 1:1 with open water takes its substellar deck in its column (P14.T24.j).
         let deck::Decked {
             column,
@@ -2142,7 +2275,8 @@ pub(crate) struct ClimateBody {
     /// The mean radius.
     pub(crate) radius: Metres,
     /// The thermal inertia of its ground, whose regolith carries the day's heat into the night
-    /// ([`GroundInertia::at_equilibrium`]).
+    /// ([`GroundInertia::at_equilibrium`]): read once a pass, and under P14.T49.l's hold read once
+    /// more at each step with that step's air in its pores ([`GroundInertia::under`]).
     pub(crate) ground: GroundInertia,
     /// How it turns under its seasonal host.
     pub(crate) spin: SeasonalSpin,
@@ -2193,10 +2327,14 @@ pub(crate) fn step_climate(
     surface_temperature: Kelvin,
     partials: &PartialPressures,
 ) -> ClimateSpan {
-    let Some(column) = step_column(body, surface_temperature, partials) else {
+    let Some((column, fractions)) = step_column(body, surface_temperature, partials) else {
         // A partial pressure that is not finite has no climate the contrasts can give.
         return ClimateSpan::isothermal(surface_temperature);
     };
+    // The pass's ground, its pores holding this step's air under P14.T49.l's hold.
+    let ground = body.ground.under(body.equilibrium_temperature, || {
+        pores_of(&column, fractions.as_slice())
+    });
     let cap = carbon_dioxide_cap(
         &CapBody {
             spin: body.spin,
@@ -2217,7 +2355,7 @@ pub(crate) fn step_climate(
             stellar_flux: body.stellar_flux,
             liquid_water: body.holds_liquid_water,
         },
-        |column| climate_of(column, &body.spin, ocean_weight, body.ground, floor),
+        |column| climate_of(column, &body.spin, ocean_weight, ground, floor),
     )
     .climate;
     let span = ClimateSpan::about(climate.range, surface_temperature);
@@ -2228,7 +2366,8 @@ pub(crate) fn step_climate(
 }
 
 /// The column of the body `body` at a step of T13.c's passes whose mean surface temperature is
-/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s).
+/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s), with its gases
+/// as mole fractions, largest first, which the step's pore gas reads ([`pores_of`]).
 ///
 /// It is airless below [`AIRLESS_PRESSURE`] of them ([`below_the_line`]); `None` where a partial
 /// pressure is not finite.
@@ -2237,7 +2376,7 @@ fn step_column(
     body: &ClimateBody,
     surface_temperature: Kelvin,
     partials: &PartialPressures,
-) -> Option<Column> {
+) -> Option<(Column, GasFractions)> {
     let surface_pressure = partials.total();
     let step = StepColumn {
         surface_temperature,
@@ -2255,7 +2394,7 @@ fn step_column(
         inventory: &body.inventory,
         ceiling: body.ceiling,
     };
-    step.column().ok().map(|(column, _)| column)
+    step.column().ok()
 }
 
 /// Whether a step over the partial pressures `partials` reads the airless climate, their total
@@ -2541,7 +2680,7 @@ pub(crate) fn step_cap_figures(
     surface_temperature: Kelvin,
     partials: &PartialPressures,
 ) -> Option<CapFigures> {
-    let column = step_column(body, surface_temperature, partials)?;
+    let (column, _) = step_column(body, surface_temperature, partials)?;
     let omega_rad_per_s = sidereal_rate_rad_per_s(&body.spin)?;
     let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
     let cap = CapBody {

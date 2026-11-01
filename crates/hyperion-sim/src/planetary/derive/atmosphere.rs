@@ -3519,7 +3519,8 @@ impl<'a> StepClimate<'a> {
                     surface_gravity: spun.record.surface_gravity,
                     radius: spun.record.radius,
                     // Once a pass: the ground's inertia at the context's lid, the previous pass's
-                    // own, at this pass's equilibrium temperature.
+                    // own, at this pass's equilibrium temperature (and under P14.T49.l's hold once
+                    // more at each step, its pores holding that step's air).
                     ground: GroundInertia::at_equilibrium(
                         spun.context.lid().map(|lid| lid.lithology),
                         spun.record.material,

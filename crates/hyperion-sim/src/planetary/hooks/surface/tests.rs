@@ -14,6 +14,7 @@ use crate::planetary::frames::FrameSpin;
 use crate::planetary::hooks::figures::cover::PERENNIAL_ICE_TEMPERATURE;
 use crate::planetary::hooks::figures::table_figures;
 use crate::stellar::draws::UnitUniform;
+use crate::substance::thermal::reference_regolith_thermal_inertia;
 use crate::units::consts::SECONDS_PER_DAY;
 use crate::units::{Degrees, EarthMasses, GravitationalParameter, Years};
 
@@ -3790,7 +3791,7 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
 #[test]
 fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
     let at = |lid: CrustLithology, material: SurfaceMaterial, t: f64| {
-        ground_inertia(Some(lid), material, Kelvin::new(t))
+        ground_inertia(Some(lid), material, Kelvin::new(t), &Pores::Vacuum)
     };
     let law = |lid: CrustLithology, t: f64| {
         reference_regolith_thermal_inertia(lid.substance(), Kelvin::new(t))
@@ -3838,7 +3839,7 @@ fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
         );
     }
     for (material, gamma) in [(SurfaceMaterial::Rock, rock), (SurfaceMaterial::Ice, ice)] {
-        let none = ground_inertia(None, material, Kelvin::new(214.0));
+        let none = ground_inertia(None, material, Kelvin::new(214.0), &Pores::Vacuum);
         assert_ground(none, InertiaSource::NoLid, gamma);
         assert_eq!(none, GroundInertia::of_material(material));
     }
@@ -3863,6 +3864,124 @@ fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
     );
 }
 
+/// Under P14.T49.l's pore gas (`with_regolith_inertia`), a ground reads its column's air
+/// ([`pores_of`]): the table's Mars's `basalt_fe` lid under its own CO₂, and Titan's water-ice lid
+/// under its nitrogen at the outer system's form, each at its equilibrium temperature, the law
+/// labelled; below the hold the pores change nothing, to the bit; and the record's conditions,
+/// given the lid, read the ground under their own column's pores (the passes' step reads the same,
+/// `under_the_pore_gas_the_passes_climate_is_the_record_s_range`). The table's Mars holds a
+/// thicker air than today's (its figures are printed); P14.T49.l's windows are asserted at today's
+/// airs in `substance::thermal`'s tests and at R09's reference Mars.
+#[test]
+fn under_the_pore_gas_a_ground_reads_its_column_s_air() {
+    use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+
+    let table = table();
+    for (name, lid) in [
+        ("Mars", CrustLithology::IronRichBasalt),
+        ("Titan", CrustLithology::Water),
+    ] {
+        let (_, body, _) = found(&table, name);
+        let inputs = SurfaceInputs {
+            lid: Some(lid),
+            ..inputs_of(body, spin_of(name))
+        };
+        let surface = Surface::of(&inputs).unwrap();
+        let pores = pores_of(&surface.column, &surface.gases);
+        assert!(matches!(pores, Pores::Gas(_)), "{name}'s column holds air");
+        let t = inputs.equilibrium_temperature;
+        let held = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
+        assert_eq!(held.under(t, || pores), held, "{name}");
+        assert_eq!(
+            ground_inertia(Some(lid), inputs.material, t, &pores),
+            held,
+            "{name}"
+        );
+        let (aired, conditions) = with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
+            (
+                GroundInertia::at_equilibrium(Some(lid), inputs.material, t).under(t, || pores),
+                SurfaceConditions::derive(&inputs).unwrap(),
+            )
+        });
+        assert_eq!(aired.source(), InertiaSource::Law, "{name}");
+        assert_eq!(conditions.ground(), aired, "{name}");
+        let gamma = aired.inertia_j_per_m2_k_sqrt_s();
+        eprintln!(
+            "{name} under its air at its T_eq {:.2} K, {:.1} Pa: Γ {gamma:.2}, against {:.2} held",
+            t.value(),
+            surface.column.surface_pressure.value(),
+            held.inertia_j_per_m2_k_sqrt_s()
+        );
+        assert!(gamma.is_finite() && gamma > 0.0, "{name}: {gamma}");
+    }
+    // An airless column's pores are empty, whatever its residue.
+    let (_, moon, _) = found(&table, "Moon");
+    let surface = Surface::of(&inputs_of(moon, spin_of("Moon"))).unwrap();
+    assert_eq!(pores_of(&surface.column, &surface.gases), Pores::Vacuum);
+}
+
+/// Under P14.T49.l's pore gas, T13.c's passes read the record's own range with a lid given
+/// (decision-p14-t51a-partition §6, condition 1, as `the_passes_climate_is_the_record_s_range`
+/// holds it with none): for each body of the table with a lid, the passes' climate at its own
+/// surface temperature and partial pressures, its ground read at the lid and re-read under the
+/// step's air, is the record's range, bit for bit, about its mean; and Mars's and Venus's grounds,
+/// under air, are not the vacuum's, so that the pores are read.
+#[test]
+fn under_the_pore_gas_the_passes_climate_is_the_record_s_range() {
+    use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+
+    let table = historic_table();
+    let mut aired = Vec::new();
+    for (name, lid) in [
+        ("Mars", CrustLithology::IronRichBasalt),
+        ("Titan", CrustLithology::Water),
+        ("Venus", CrustLithology::Basalt),
+        ("Earth", CrustLithology::Granite),
+        ("Moon", CrustLithology::Feldspathic),
+    ] {
+        let (_, body) = table.iter().find(|(n, _)| *n == name).unwrap();
+        let spin = spin_of(name);
+        let inputs = SurfaceInputs {
+            lid: Some(lid),
+            ..inputs_of(body, spin)
+        };
+        let climate = ClimateBody {
+            ground: GroundInertia::at_equilibrium(
+                Some(lid),
+                inputs.material,
+                inputs.equilibrium_temperature,
+            ),
+            ..climate_body(body, spin)
+        };
+        let air = body.atmosphere();
+        let (conditions, passes) = with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
+            (
+                SurfaceConditions::derive(&inputs).unwrap(),
+                step_climate(
+                    &climate,
+                    ocean_weight_of(body),
+                    air.surface_temperature(),
+                    air.partial_pressures(),
+                ),
+            )
+        });
+        let (cold, warm) = conditions.climate_range();
+        let mean = conditions.mean_surface_temperature();
+        assert_same_bits(passes.mean().value(), mean.value());
+        assert_same_bits(passes.coldest().value(), cold.value().min(mean.value()));
+        assert_same_bits(passes.warmest().value(), warm.value().max(mean.value()));
+        if conditions.ground() != climate.ground {
+            aired.push(name);
+        }
+    }
+    for name in ["Mars", "Venus"] {
+        assert!(
+            aired.contains(&name),
+            "{name}'s ground reads its air: {aired:?}"
+        );
+    }
+}
+
 /// Every lid T51.c can name takes the law or a named fallback at any positive temperature, never
 /// the unreachable one: each row has condensed columns, which `ground_inertia`'s type rests on
 /// (P14.T54.a; the C1 review's RC1-b and RC1-c).
@@ -3875,7 +3994,7 @@ fn every_lid_takes_the_law_or_a_named_fallback() {
         );
         for t in [20.0, 40.0, 100.0, 214.0, 300.0, 1_000.0, 3_000.0] {
             for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
-                let ground = ground_inertia(Some(lid), material, Kelvin::new(t));
+                let ground = ground_inertia(Some(lid), material, Kelvin::new(t), &Pores::Vacuum);
                 assert_ne!(
                     ground.source(),
                     InertiaSource::Unreachable,
@@ -3917,7 +4036,8 @@ fn an_unlit_ground_takes_its_material_s_constant() {
         ground_inertia(
             Some(CrustLithology::Basalt),
             SurfaceMaterial::Rock,
-            Kelvin::new(214.0)
+            Kelvin::new(214.0),
+            &Pores::Vacuum,
         )
     );
 }
@@ -3933,6 +4053,7 @@ fn an_unreachable_inertia_fails_its_debug_assertion() {
         Some(CrustLithology::Basalt),
         SurfaceMaterial::Rock,
         Kelvin::new(f64::NAN),
+        &Pores::Vacuum,
     );
     assert_eq!(ground.source(), InertiaSource::Unreachable);
 }

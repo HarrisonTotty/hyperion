@@ -563,6 +563,9 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - an envelope's formation draws, `FORMATION_DRAWS_VERSION` (P14.T50.d), at
 ///   `FormationDrawRules::Drawn` through `with_formation_draws`: its enrichment's scatter and its
 ///   solids' share, on its own stream.
+/// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
+///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
+///   outer system's fluffy amorphous ice as the water-ice form.
 ///
 /// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
@@ -615,6 +618,10 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, run);
     let run = move || with_second_generation(SecondGenerationRules::Planets, run);
     let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
+    let run = move || {
+        use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
+        with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
+    };
     with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
 }
 
