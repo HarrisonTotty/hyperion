@@ -129,7 +129,8 @@ use crate::planetary::derive::atmosphere::{
     pass_regolith, pass_resurfacing, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
-    SolveCompositionError, dry_composition, formed_with_envelope, radius_window_about,
+    SolveCompositionError, composition_about, dry_composition, formed_with_envelope,
+    radius_window_about,
 };
 use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
@@ -3220,13 +3221,15 @@ fn formation_about(
                         share,
                         radius_chen_kipping(mass, rank),
                         formation_flux,
+                        shift,
                     )
                 }
-                None => composition(
+                None => composition_about(
                     mass,
                     radius_chen_kipping(mass, rank),
                     formed,
                     formation_flux,
+                    shift,
                 )?,
             };
             Ok((formed, rank, Some(solved)))
@@ -3285,10 +3288,11 @@ fn rocky_branch(
         let share = (u - rocky) / enveloped;
         let above = rank(top + share * (greatest - top));
         let drawn = radius_chen_kipping(mass, above);
+        let shift = window.core_share_shift();
         let solved = if takes_formation_envelope(mass, SnowLineSide::Inside) {
-            formed_with_envelope(mass, share, drawn, flux)
+            formed_with_envelope(mass, share, drawn, flux, shift)
         } else {
-            composition(mass, drawn, SnowLineSide::Inside, flux)?
+            composition_about(mass, drawn, SnowLineSide::Inside, flux, shift)?
         };
         Ok((above, solved))
     }
@@ -4686,6 +4690,55 @@ mod tests {
         });
     }
 
+    /// Under every 27 hold no formation outcome about a host off the Sun's ratios keeps Earth's
+    /// own 0.325 core: water on the host's Earth-like core beyond the snow line, an envelope on it
+    /// (the formation law's, the M-dwarf branch's and Chen and Kipping's) and the rocky outcomes'
+    /// draw all take its shift; and about a host of \[α/Fe\] +0.3 no watery or enveloped outcome's
+    /// mantle clamps to no `FeO`.
+    #[test]
+    fn under_27_no_formation_outcome_about_a_host_keeps_earth_s_own_core() {
+        use crate::planetary::hooks::crust::mantle_iron_oxide_mass_fraction;
+        use crate::planetary::testing::with_every_27_hold;
+        with_every_27_hold(|| {
+            let solar = solar_magnesium_to_silicon();
+            let (mut watery, mut enveloped) = (0_u32, 0_u32);
+            for alpha in [0.3, -0.05] {
+                for (disc, a_au) in [
+                    (solar_disc(), 0.1),
+                    (solar_disc(), 1.0),
+                    (solar_disc(), 5.0),
+                    (disc_of(0.3), 0.03),
+                ] {
+                    let host = FormationHost::of_disc(&disc).with_host_rock(solar, Dex::new(alpha));
+                    for earths in [0.3, 1.0, 3.0, 8.0, 15.0] {
+                        for i in 1..100_u32 {
+                            let body =
+                                placed(earths * EARTH_MASS_KG, a_au, 0.0, f64::from(i) / 100.0);
+                            let (_, _, solved) = formation_about(&body, &host).unwrap();
+                            let f = solved.unwrap().fractions();
+                            let core = f.iron() / (f.iron() + f.rock());
+                            let label = format!("{alpha} {a_au} au {earths} M⊕ {i}");
+                            assert!(
+                                (core - radius::EARTH_CORE_MASS_FRACTION).abs() > 1e-6,
+                                "{label}: {core}"
+                            );
+                            let wet = f.water() > 0.0;
+                            let gas = f.envelope() > 0.0;
+                            watery += u32::from(wet && !gas);
+                            enveloped += u32::from(gas);
+                            if alpha > 0.0 && (wet || gas) {
+                                let feo =
+                                    mantle_iron_oxide_mass_fraction(core, solar, Dex::new(alpha));
+                                assert!(feo > 0.03, "{label}: {feo}");
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(watery > 100 && enveloped > 100, "{watery} {enveloped}");
+        });
+    }
+
     /// Under every 27 hold a body's hosts carry their rock into its formation: about a host of
     /// \[α/Fe\] +0.3 a rocky outcome, the M-dwarf branch's and a rogue's birth host's among them,
     /// takes the shifted draw at its rank, and about the Sun's ratios the population's, to the bit.
@@ -5038,6 +5091,7 @@ mod tests {
                             (confined.value() - top) / (greatest - top),
                             radius_chen_kipping(mass, confined),
                             flux,
+                            rocky::CoreShareShift::NONE,
                         )
                     }
                     None => composition(

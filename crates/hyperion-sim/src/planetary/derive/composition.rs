@@ -31,6 +31,12 @@
 //! The envelope is solved at [`COMPOSITION_REFERENCE_AGE`] and the flux the caller passes. Its
 //! radius at other ages, and its loss to escape (P14.T13), follow from the solved fraction.
 //!
+//! From generator version 27 (the core share by the host, `CORE_SHARE_HOST_VERSION`) the
+//! Earth-like core is Earth's about the body's host ([`CoreShareShift::about_host`] of 0.325): the
+//! Earth-like curve beyond the snow line, the core under its water and every envelope's core take
+//! the host's shift, as the rocky outcomes' draw does, and [`composition`], with no host, is the
+//! solve about the Sun's ratios.
+//!
 //! # Giants (P14.T11.d)
 //!
 //! From 0.414 Jupiter masses, Chen and Kipping's Jovian class, [`composition`] returns
@@ -78,6 +84,21 @@ use crate::units::{EarthFluxes, EarthMasses, EarthRadii, JupiterMasses};
 /// Earth-like core.
 const ICY_CORE: CoreComposition =
     CoreComposition::from_fractions(EARTH_CORE_MASS_FRACTION, OUTER_WATER_CAP);
+
+/// The Earth-like core about a host of shift `shift`: Earth's core mass fraction about the host
+/// ([`CoreShareShift::about_host`] of 0.325) and no water, [`CoreComposition::EARTH_LIKE`] for no
+/// shift.
+#[must_use]
+fn earth_like_core(shift: CoreShareShift) -> CoreComposition {
+    CoreComposition::from_fractions(shift.about_host(EARTH_CORE_MASS_FRACTION), 0.0)
+}
+
+/// [`ICY_CORE`] about a host of shift `shift`: [`OUTER_WATER_CAP`] of water on its Earth-like core
+/// ([`earth_like_core`]).
+#[must_use]
+fn icy_core(shift: CoreShareShift) -> CoreComposition {
+    CoreComposition::from_fractions(shift.about_host(EARTH_CORE_MASS_FRACTION), OUTER_WATER_CAP)
+}
 
 /// Which side of its host's snow line a body formed on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -301,6 +322,24 @@ pub fn composition(
     side: SnowLineSide,
     flux: EarthFluxes,
 ) -> Result<SolvedComposition, SolveCompositionError> {
+    composition_about(mass, radius, side, flux, CoreShareShift::NONE)
+}
+
+/// [`composition`] about a host of shift `shift` ([`CoreShareShift`]): its Earth-like core, the
+/// curve beyond the snow line above which a body is water on it, and the core under any envelope
+/// are Earth's about the host ([`CoreShareShift::about_host`] of 0.325); with no shift it is
+/// [`composition`]'s, to the bit.
+///
+/// # Errors
+///
+/// As [`composition`]'s.
+pub(crate) fn composition_about(
+    mass: EarthMasses,
+    radius: EarthRadii,
+    side: SnowLineSide,
+    flux: EarthFluxes,
+    shift: CoreShareShift,
+) -> Result<SolvedComposition, SolveCompositionError> {
     let (m, r) = (mass.value(), radius.value());
     if !(m.is_finite() && m > 0.0) {
         return Err(SolveCompositionError::MassNotPositive);
@@ -319,7 +358,8 @@ pub fn composition(
     if r < iron {
         return Ok(dry_body(1.0, iron, RadiusAdjustment::RaisedToIron));
     }
-    let earth = dry_radius(&dry, EARTH_CORE_MASS_FRACTION);
+    let earth_core = shift.about_host(EARTH_CORE_MASS_FRACTION);
+    let earth = dry_radius(&dry, earth_core);
     if r <= earth || (side == SnowLineSide::Inside && r <= rock) {
         return Ok(dry_body(
             dry_core_mass_fraction(&dry, r),
@@ -329,7 +369,7 @@ pub fn composition(
     }
     Ok(match side {
         SnowLineSide::Inside if m > ENVELOPE_CORE_FLOOR.value() => {
-            enveloped(mass, radius, CoreComposition::EARTH_LIKE, flux)
+            enveloped(mass, radius, earth_like_core(shift), flux)
         }
         SnowLineSide::Inside => watery(
             mass,
@@ -339,16 +379,17 @@ pub fn composition(
             RadiusAdjustment::ClampedToRock,
         ),
         SnowLineSide::Beyond => {
-            if r <= radius_zeng(mass, ICY_CORE).value() || m <= ENVELOPE_CORE_FLOOR.value() {
+            let icy = icy_core(shift);
+            if r <= radius_zeng(mass, icy).value() || m <= ENVELOPE_CORE_FLOOR.value() {
                 watery(
                     mass,
                     r,
-                    EARTH_CORE_MASS_FRACTION,
+                    earth_core,
                     OUTER_WATER_CAP,
                     RadiusAdjustment::ClampedToIce,
                 )
             } else {
-                enveloped(mass, radius, ICY_CORE, flux)
+                enveloped(mass, radius, icy, flux)
             }
         }
     })
@@ -499,7 +540,8 @@ impl RadiusWindow {
     /// The largest radius kept: the largest envelope the mass allows on the side's core
     /// ([`ENVELOPE_CORE_FLOOR`] of core left) where a body may take one and that is larger than the
     /// dry curve beneath it, and otherwise that curve (rock inside the snow line, [`OUTER_WATER_CAP`]
-    /// of water on an Earth-like core beyond it).
+    /// of water on an Earth-like core beyond it); the cores are Earth-like about the body's host
+    /// ([`core_share_shift`](Self::core_share_shift)).
     #[must_use]
     pub const fn greatest(&self) -> EarthRadii {
         self.greatest
@@ -542,7 +584,8 @@ pub fn radius_window(
 
 /// [`radius_window`] about a host of shift `shift` ([`CoreShareShift`]): beyond the snow line its
 /// top is the Zeng radius at Earth's core mass fraction about the host, which keeps the radius
-/// continuous at the top's rank; with no shift it is [`radius_window`]'s, to the bit.
+/// continuous at the top's rank, and its largest radius is [`composition_about`]'s on the host's
+/// Earth-like and icy cores; with no shift it is [`radius_window`]'s, to the bit.
 ///
 /// # Errors
 ///
@@ -574,10 +617,13 @@ pub(crate) fn radius_window_about(
     };
     let greatest = match side {
         SnowLineSide::Inside if m > ENVELOPE_CORE_FLOOR.value() => {
-            with_envelope(rock, CoreComposition::EARTH_LIKE)
+            with_envelope(rock, earth_like_core(shift))
         }
         SnowLineSide::Inside => rock,
-        SnowLineSide::Beyond => with_envelope(radius_zeng(mass, ICY_CORE).value(), ICY_CORE),
+        SnowLineSide::Beyond => {
+            let icy = icy_core(shift);
+            with_envelope(radius_zeng(mass, icy).value(), icy)
+        }
     };
     let (dry_top, dry_top_core_mass_fraction) = match side {
         SnowLineSide::Inside => (rock, 0.0),
@@ -710,15 +756,17 @@ pub fn formation_envelope(mass: EarthMasses, share: f64) -> f64 {
 /// Below [`FORMATION_ENVELOPE_HANDOVER`] the envelope is [`formation_envelope`]'s, on an
 /// Earth-like core (ruling 47.4), held to the largest the mass allows; above it, Chen and
 /// Kipping's radius solved as [`composition`] solves it; between, the two envelope fractions are
-/// blended linearly in the logarithm of the mass, at the same quantile.
+/// blended linearly in the logarithm of the mass, at the same quantile. The core is Earth's about
+/// a host of shift `shift` ([`CoreShareShift::about_host`] of 0.325), Earth's own for no shift.
 #[must_use]
 pub(crate) fn formed_with_envelope(
     mass: EarthMasses,
     share: f64,
     chen_kipping: EarthRadii,
     flux: EarthFluxes,
+    shift: CoreShareShift,
 ) -> SolvedComposition {
-    let core = CoreComposition::EARTH_LIKE;
+    let core = earth_like_core(shift);
     let (low, high) = (
         FORMATION_ENVELOPE_HANDOVER.0.value(),
         FORMATION_ENVELOPE_HANDOVER.1.value(),
@@ -943,6 +991,127 @@ mod tests {
                 mass: EarthMasses::new(200.0)
             })
         );
+    }
+
+    /// The hosts' shifts the tests of the core share by the host read, under every 27 hold: an
+    /// α-rich host's (\[α/Fe\] +0.3) and an iron-richer one's (−0.05), at the Sun's Mg/Si.
+    fn host_shifts() -> [CoreShareShift; 2] {
+        let solar = crate::planetary::chem::solar_magnesium_to_silicon();
+        [0.3, -0.05].map(|alpha| CoreShareShift::of_host(solar, crate::units::Dex::new(alpha)))
+    }
+
+    /// Under every 27 hold the window about a host is what the solve about it keeps: just inside
+    /// either edge the radius is kept, and just outside it moved, as about the Sun.
+    #[test]
+    fn under_27_the_window_about_a_host_is_what_the_solve_about_it_keeps() {
+        use crate::planetary::testing::with_every_27_hold;
+        with_every_27_hold(|| {
+            for shift in host_shifts() {
+                for m in [0.1, 1.0, 1.51, 3.0, 10.0, 40.0, 131.0] {
+                    let mass = EarthMasses::new(m);
+                    for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
+                        let flux = EarthFluxes::new(1.0);
+                        let window = radius_window_about(mass, side, flux, shift).unwrap();
+                        let at = |r: f64| {
+                            composition_about(mass, EarthRadii::new(r), side, flux, shift)
+                                .unwrap()
+                                .adjustment()
+                        };
+                        let (least, greatest) = (window.least().value(), window.greatest().value());
+                        let label = format!("{m} M⊕ {side:?} {shift:?}");
+                        assert_eq!(
+                            at(least * (1.0 + 1e-9)),
+                            RadiusAdjustment::Unchanged,
+                            "{label}"
+                        );
+                        assert_eq!(
+                            at(greatest * (1.0 - 1e-9)),
+                            RadiusAdjustment::Unchanged,
+                            "{label}"
+                        );
+                        if side == SnowLineSide::Beyond || m > ENVELOPE_CORE_FLOOR.value() {
+                            assert_ne!(
+                                at(greatest * (1.0 + 1e-9)),
+                                RadiusAdjustment::Unchanged,
+                                "{label}"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// Under every 27 hold the solve's Earth-like core about a host is the host's Earth, 0.325
+    /// moved by its shift: under water beyond the snow line, under an envelope on either side and
+    /// under the formation law's envelope; and the water beyond the snow line starts from none at
+    /// the host's Earth-like curve, the rocky outcomes' top. About the Sun's ratios the solve is
+    /// [`composition`]'s, to the bit.
+    #[test]
+    fn under_27_the_solve_s_earth_like_core_is_the_host_s() {
+        use crate::planetary::testing::with_every_27_hold;
+        with_every_27_hold(|| {
+            let flux = EarthFluxes::new(1.0);
+            for shift in host_shifts() {
+                let earth = shift.about_host(EARTH_CORE_MASS_FRACTION);
+                assert!((earth - EARTH_CORE_MASS_FRACTION).abs() > 0.01, "{earth}");
+                let core = |solved: &SolvedComposition| {
+                    let f = solved.fractions();
+                    f.iron() / (f.iron() + f.rock())
+                };
+                // Water on it beyond the snow line, from none at its curve.
+                let (mass, side) = (EarthMasses::new(1.0), SnowLineSide::Beyond);
+                let window = radius_window_about(mass, side, flux, shift).unwrap();
+                let top = window.dry_top().value();
+                let wet = composition_about(mass, EarthRadii::new(1.2), side, flux, shift).unwrap();
+                assert!(wet.fractions().water() > 0.0);
+                assert!((core(&wet) - earth).abs() < 1e-12, "{wet:?}");
+                let just =
+                    composition_about(mass, EarthRadii::new(top * (1.0 + 1e-9)), side, flux, shift)
+                        .unwrap();
+                assert!(just.fractions().water() < 1e-6, "{just:?}");
+                assert!((core(&just) - earth).abs() < 1e-6, "{just:?}");
+                // An envelope on it, on either side, and the formation law's.
+                for (side, radius) in [(SnowLineSide::Inside, 2.2), (SnowLineSide::Beyond, 3.0)] {
+                    let mass = EarthMasses::new(5.0);
+                    let enveloped =
+                        composition_about(mass, EarthRadii::new(radius), side, flux, shift)
+                            .unwrap();
+                    assert!(enveloped.envelope_fraction() > 0.0, "{side:?}");
+                    assert!((core(&enveloped) - earth).abs() < 1e-12, "{enveloped:?}");
+                }
+                let law = formed_with_envelope(
+                    EarthMasses::new(5.0),
+                    0.5,
+                    EarthRadii::new(2.2),
+                    flux,
+                    shift,
+                );
+                assert!(law.envelope_fraction() > 0.0);
+                assert!((core(&law) - earth).abs() < 1e-12, "{law:?}");
+            }
+            let sun = CoreShareShift::of_host(
+                crate::planetary::chem::solar_magnesium_to_silicon(),
+                crate::units::Dex::ZERO,
+            );
+            for m in MASSES {
+                let mass = EarthMasses::new(m);
+                for side in [SnowLineSide::Inside, SnowLineSide::Beyond] {
+                    for r in [0.2, 0.5, 0.9, 1.0, 1.1, 1.3, 2.0, 3.5, 8.0] {
+                        let radius = EarthRadii::new(r);
+                        assert_eq!(
+                            composition_about(mass, radius, side, flux, sun),
+                            composition(mass, radius, side, flux),
+                            "{m} M⊕ {side:?} {r}"
+                        );
+                    }
+                    assert_eq!(
+                        radius_window_about(mass, side, flux, sun),
+                        radius_window(mass, side, flux)
+                    );
+                }
+            }
+        });
     }
 
     /// Masses spanning the solve's range, M⊕.
