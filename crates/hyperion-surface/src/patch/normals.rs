@@ -143,18 +143,44 @@ pub(crate) fn bake_normals<S: HeightSource>(
     let figure = source.figure();
     let per_patch = scale.grid().quads();
     let side = scale.side();
+    let mut between = source
+        .heights(cache, &dirs_between(key, scale), key.level())
+        .into_iter();
     let mut out = Vec::with_capacity(2 * side * side);
     for y in 0..=per_patch {
         for x in 0..=per_patch {
             let dir = key.sample_dir(x, y, scale.grid());
             let sample = match vertex_of(scale, x, y) {
                 Some((vx, vy)) => vertices[vertex_index(vx, vy)],
-                None => source.height(cache, dir, key.level())?,
+                None => between
+                    .next()
+                    .expect("one answer a sample between the vertices")?,
             };
             out.extend(encode_octahedral_f32(sample_normal(&figure, dir, sample)));
         }
     }
     Ok(out)
+}
+
+/// The directions of `scale`'s samples between the vertices, row by row: those
+/// [`bake_normals`] and [`normals_between`] ask the source, in the order they ask them, all at once
+/// ([`HeightSource::heights`]).
+#[must_use]
+fn dirs_between(key: PatchKey, scale: NormalScale) -> Vec<[f64; 3]> {
+    let per_patch = scale.grid().quads();
+    let mut dirs = Vec::new();
+    match scale {
+        NormalScale::Mesh => {}
+        NormalScale::Double => dirs.reserve(NORMALS_BETWEEN),
+    }
+    for y in 0..=per_patch {
+        for x in 0..=per_patch {
+            if vertex_of(scale, x, y).is_none() {
+                dirs.push(key.sample_dir(x, y, scale.grid()));
+            }
+        }
+    }
+    dirs
 }
 
 /// The vertex that sample (`x`, `y`) of `scale`'s grid is, or `None` for a sample between the
@@ -259,20 +285,10 @@ pub(crate) fn normals_between<S: HeightSource>(
     cache: &mut S::Cache,
 ) -> Result<Vec<f32>, S::Error> {
     let figure = source.figure();
-    let per_patch = scale.grid().quads();
-    let mut out = Vec::new();
-    match scale {
-        NormalScale::Mesh => {}
-        NormalScale::Double => out.reserve(2 * NORMALS_BETWEEN),
-    }
-    for y in 0..=per_patch {
-        for x in 0..=per_patch {
-            if vertex_of(scale, x, y).is_none() {
-                let dir = key.sample_dir(x, y, scale.grid());
-                let sample = source.height(cache, dir, key.level())?;
-                out.extend(encode_octahedral_f32(sample_normal(&figure, dir, sample)));
-            }
-        }
+    let dirs = dirs_between(key, scale);
+    let mut out = Vec::with_capacity(2 * dirs.len());
+    for (dir, answer) in dirs.iter().zip(source.heights(cache, &dirs, key.level())) {
+        out.extend(encode_octahedral_f32(sample_normal(&figure, *dir, answer?)));
     }
     Ok(out)
 }

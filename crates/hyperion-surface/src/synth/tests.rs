@@ -310,6 +310,105 @@ fn a_height_pair_is_its_two_point_queries_bit_for_bit() {
 }
 
 #[test]
+fn rows_of_heights_and_pairs_are_their_point_queries_bit_for_bit() {
+    // The batches a bake asks (`heights_at`, `height_pairs_at`), their octaves walked several
+    // points at a time, answer each point as its point query and its pair do, bit for bit, at every
+    // level, through a bake's memo and a fresh cache; and over a view holding one cell with its
+    // margin, where a batch mixes refused points with answered ones.
+    for (k, &kind) in SyntheticWorld::ALL.iter().enumerate() {
+        let field = world(kind);
+        let synth = Synthesiser::new(field, SEED);
+        let coarse = field.header().level().get();
+        let mut rng = Lcg::new(0x726f_7773 + u64::try_from(k).unwrap());
+        let mut cells = random_cells(coarse, 2, &mut rng);
+        cells.extend(rim_cells(field, 1));
+        let held = Held {
+            inner: field,
+            held: king_distances(cells[0], SYNTHESIS_MARGIN_CELLS)
+                .into_keys()
+                .collect(),
+        };
+        let part = Synthesiser::new(&held, SEED);
+        let finest = (complete_level(&synth) + 1).min(MAX_LEVEL);
+        let (mut refused, mut answered) = (0, 0);
+        for &cell in &cells {
+            let mut baked = SynthCache::new();
+            bake::cover_patch(&synth, &mut baked, patch_in(cell, coarse + 2));
+            // Points of this cell and its neighbours' in one batch, past a whole number of lanes.
+            let mut dirs = random_points_in(cell, 2 * LANES + 1, &mut rng);
+            dirs.extend(random_points_in(cells[0], LANES + 2, &mut rng));
+            for n in 0..=finest {
+                let level = BandLevel::new(n).unwrap();
+                let mut fresh = SynthCache::new();
+                for (view, cache) in [(&synth, &mut baked), (&synth, &mut fresh)] {
+                    let rows = view.heights_at(cache, &dirs, level);
+                    for (dir, got) in dirs.iter().zip(rows) {
+                        let expected = view.height_at(&mut SynthCache::new(), *dir, level);
+                        assert_eq!(
+                            got.map(sample_bits),
+                            expected.map(sample_bits),
+                            "{kind:?} {level:?}"
+                        );
+                    }
+                }
+                let rows = part.heights_at(&mut SynthCache::new(), &dirs, level);
+                for (dir, got) in dirs.iter().zip(rows) {
+                    let expected = part.height_at(&mut SynthCache::new(), *dir, level);
+                    if expected.is_ok() {
+                        answered += 1;
+                    } else {
+                        refused += 1;
+                    }
+                    assert_eq!(
+                        got.map(sample_bits),
+                        expected.map(sample_bits),
+                        "part {kind:?} {level:?}"
+                    );
+                }
+                let Some(up) = n.checked_sub(1) else {
+                    continue;
+                };
+                let parent = BandLevel::new(up).unwrap();
+                let pairs = synth.height_pairs_at(&mut baked, &dirs, level, parent);
+                for (dir, (own, up)) in dirs.iter().zip(pairs) {
+                    let (e_own, e_up) =
+                        synth.height_pair_at(&mut SynthCache::new(), *dir, level, parent);
+                    assert_eq!(
+                        own.map(sample_bits),
+                        e_own.map(sample_bits),
+                        "{kind:?} {level:?}"
+                    );
+                    assert_eq!(
+                        up.map(sample_bits),
+                        e_up.map(sample_bits),
+                        "{kind:?} {parent:?}"
+                    );
+                }
+                let pairs = part.height_pairs_at(&mut SynthCache::new(), &dirs, level, parent);
+                for (dir, (own, up)) in dirs.iter().zip(pairs) {
+                    let (e_own, e_up) =
+                        part.height_pair_at(&mut SynthCache::new(), *dir, level, parent);
+                    assert_eq!(
+                        own.map(sample_bits),
+                        e_own.map(sample_bits),
+                        "part {kind:?} {level:?}"
+                    );
+                    assert_eq!(
+                        up.map(sample_bits),
+                        e_up.map(sample_bits),
+                        "part {kind:?} {parent:?}"
+                    );
+                }
+            }
+        }
+        assert!(
+            answered > 0 && refused > 0,
+            "{kind:?}: {answered} and {refused}"
+        );
+    }
+}
+
+#[test]
 fn no_height_depends_on_the_order_of_queries_or_the_cache() {
     // The Mars-like world's trunks are bent, each reading its cell's edge neighbours (R09.T6.h),
     // and the Earth-like world's trunks and tributaries too, reading their continuity (R09.T6.i).

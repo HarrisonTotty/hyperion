@@ -244,6 +244,22 @@ impl<F: FieldView> HeightSource for Synthesiser<'_, F> {
         self.height_at(cache, dir, band(level))
     }
 
+    /// [`Synthesiser::height_at`] at each of `dirs` at band level `level`, the structural octaves
+    /// walked several points at a time ([`Synthesiser::heights_at`]): the same answers, bit for
+    /// bit.
+    ///
+    /// # Panics
+    ///
+    /// As [`height`](HeightSource::height).
+    fn heights(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]],
+        level: u8,
+    ) -> Vec<Result<HeightSample, QueryHeightError>> {
+        self.heights_at(cache, dirs, band(level))
+    }
+
     /// R09.T8's level bound ([`crate::synth::level_bound_m`], from the bounds the synthesiser
     /// holds): hard in its structural and channel terms, and a 1 − 10⁻⁹ per-point quantile in its
     /// crater and rim terms ([`crate::synth::levels::CRATER_BOUND_TAIL`]).

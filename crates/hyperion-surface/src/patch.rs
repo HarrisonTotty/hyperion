@@ -71,6 +71,23 @@ pub trait HeightSource {
         level: u8,
     ) -> Result<HeightSample, Self::Error>;
 
+    /// The heights at each of the unit directions `dirs` at `level`, in their order, each
+    /// [`height`](Self::height)'s at its direction, bit for bit, its error included; the default
+    /// asks [`height`](Self::height) for each. A source that makes several points together
+    /// overrides it, as R09's synthesiser does ([`Synthesiser::heights_at`](crate::synth::Synthesiser)),
+    /// and every answer is made, an error's followers too, so that a caller stopping at the first
+    /// error meets the one [`height`](Self::height) would have met first.
+    fn heights(
+        &self,
+        cache: &mut Self::Cache,
+        dirs: &[[f64; 3]],
+        level: u8,
+    ) -> Vec<Result<HeightSample, Self::Error>> {
+        dirs.iter()
+            .map(|&dir| self.height(cache, dir, level))
+            .collect()
+    }
+
     /// The level's stated error bound against the finest level's mesh, metres (Design note 15): a
     /// bound on how far the level's height at a point lies from any finer level's.
     ///

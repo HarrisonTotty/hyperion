@@ -187,36 +187,72 @@ pub(crate) fn heights<F: FieldView>(
     cache: &mut SynthCache,
     key: PatchKey,
 ) -> Result<PatchHeights, QueryHeightError> {
-    let mut paired = PairedQueries::new(key);
+    let mut paired = PairedQueries::new(synth, cache, key);
     PatchHeights::from_queries(key, |q| paired.answer(synth, cache, q))
 }
 
 /// The answers to a patch's [`VertexQuery`]s, each [`Synthesiser::height_at`] at its query, bit
 /// for bit, its error included: each even vertex's own level and its parent's are made together
-/// ([`Synthesiser::height_pair_at`]) when its own is asked, and the parent's answer is kept for
-/// its turn, so that the two share their base elevation, styles, octaves and channels.
+/// ([`Synthesiser::height_pair_at`]), and the parent's answer is kept for its turn, so that the two
+/// share their base elevation, styles, octaves and channels.
 ///
 /// Measured on `bake/patch_65`'s patches (natively, one thread, pod, 16 vCPU, 2026-11-01): R09's
 /// bake of the heights 18.7 ms against 21.7 ms before on the Earth-like world at L + 4, 27.0 ms
 /// against 31.7 ms at 19 and 15.5 ms against 16.7 ms on the Moon-like world's rim at L + 4, its
 /// 1,089 parent-level queries sharing their vertices' work.
+///
+/// Every answer is made at the start, the pairs at the even vertices and the others each at its
+/// own level, several points at a time ([`Synthesiser::heights_at`] and
+/// [`Synthesiser::height_pairs_at`]), and handed out as the queries ask them.
 #[derive(Debug, Clone)]
 pub(crate) struct PairedQueries {
     key: PatchKey,
+    /// Each vertex's own-level answer, row by row, until it is asked.
+    own: Vec<Option<Result<HeightSample, QueryHeightError>>>,
     /// Each even vertex's parent-level answer, row by row, until it is asked.
     parents: Vec<Option<Result<HeightSample, QueryHeightError>>>,
 }
 
 impl PairedQueries {
-    /// None answered yet, for the queries of `key`.
+    /// Every answer to the queries of `key` made, none yet asked.
     #[must_use]
-    pub(crate) fn new(key: PatchKey) -> Self {
-        let parents = if key.level() == 0 {
-            Vec::new()
-        } else {
-            vec![None; PARENT_VERTICES * PARENT_VERTICES]
-        };
-        Self { key, parents }
+    pub(crate) fn new<F: FieldView>(
+        synth: &Synthesiser<'_, F>,
+        cache: &mut SynthCache,
+        key: PatchKey,
+    ) -> Self {
+        let level = band(key.level());
+        let parent = key.level().checked_sub(1).map(band);
+        let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
+        let (mut singles, mut single_at) = (Vec::new(), Vec::new());
+        let (mut pairs, mut pair_at) = (Vec::new(), Vec::new());
+        for y in 0..=quads {
+            for x in 0..=quads {
+                let dir = key.vertex_dir(x, y);
+                if parent.is_some() && x.is_multiple_of(2) && y.is_multiple_of(2) {
+                    pairs.push(dir);
+                    pair_at.push((x, y));
+                } else {
+                    singles.push(dir);
+                    single_at.push((x, y));
+                }
+            }
+        }
+        let mut own = vec![None; PATCH_VERTICES * PATCH_VERTICES];
+        let answers = synth.heights_at(cache, &singles, level);
+        for ((x, y), answer) in single_at.into_iter().zip(answers) {
+            own[vertex_index(x, y, PATCH_VERTICES)] = Some(answer);
+        }
+        let mut parents = Vec::new();
+        if let Some(parent) = parent {
+            parents.resize(PARENT_VERTICES * PARENT_VERTICES, None);
+            let answers = synth.height_pairs_at(cache, &pairs, level, parent);
+            for ((x, y), (answer, up)) in pair_at.into_iter().zip(answers) {
+                own[vertex_index(x, y, PATCH_VERTICES)] = Some(answer);
+                parents[vertex_index(x / 2, y / 2, PARENT_VERTICES)] = Some(up);
+            }
+        }
+        Self { key, own, parents }
     }
 
     /// The answer to `q`, one of the patch's queries, asked at most once each.
@@ -227,18 +263,14 @@ impl PairedQueries {
         q: VertexQuery,
     ) -> Result<HeightSample, QueryHeightError> {
         let even = q.x.is_multiple_of(2) && q.y.is_multiple_of(2);
-        let at = || vertex_index(q.x / 2, q.y / 2, PARENT_VERTICES);
-        match self.key.level().checked_sub(1) {
-            Some(parent) if even && q.level == self.key.level() => {
-                let (own, up) = synth.height_pair_at(cache, q.dir, band(q.level), band(parent));
-                self.parents[at()] = Some(up);
-                own
-            }
-            Some(parent) if q.level == parent => self.parents[at()]
-                .take()
-                .unwrap_or_else(|| synth.height_at(cache, q.dir, band(q.level))),
-            Some(_) | None => synth.height_at(cache, q.dir, band(q.level)),
-        }
+        let kept = if q.level == self.key.level() {
+            self.own[vertex_index(q.x, q.y, PATCH_VERTICES)].take()
+        } else if even && self.key.level().checked_sub(1) == Some(q.level) {
+            self.parents[vertex_index(q.x / 2, q.y / 2, PARENT_VERTICES)].take()
+        } else {
+            None
+        };
+        kept.unwrap_or_else(|| synth.height_at(cache, q.dir, band(q.level)))
     }
 }
 

@@ -522,19 +522,33 @@ impl LatticeCache {
 }
 
 /// The lattice index of the cell containing lattice coordinate `c`, ⌊c⌋.
+///
+/// It is ⌊c⌋ from the truncation towards zero, less one where that rounded up, which is the same
+/// integer as `c.floor()` at every coordinate the assertion allows, those whose floor is within
+/// [`MAX_LATTICE_INDEX`] (−M ≤ c < M + 1). x86-64's baseline has no rounding instruction (SSE4.1's
+/// `roundsd` is past it), so `floor` was a library call at each of a point's three axes an octave,
+/// and one the lanes of [`gradient_noise_lanes`] could not take side by side.
 #[must_use]
 fn lattice_index(c: f64) -> i64 {
-    let floor = c.floor();
     assert!(
-        floor.abs() <= MAX_LATTICE_INDEX,
+        (-MAX_LATTICE_INDEX..MAX_LATTICE_INDEX + 1.0).contains(&c),
         "lattice coordinate {c} is beyond the key's 32 bits"
     );
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "the floor is an integer asserted within ±2^31"
+        reason = "c is asserted within ±2^31, so its truncation is exact in i64"
     )]
-    let index = floor as i64;
-    index
+    let towards_zero = c as i64;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "an integer within ±2^31 is exact in f64"
+    )]
+    let rounded_up = towards_zero as f64 > c;
+    if rounded_up {
+        towards_zero - 1
+    } else {
+        towards_zero
+    }
 }
 
 /// The quintic fade 6t⁵ − 15t⁴ + 10t³ and its derivative 30t⁴ − 60t³ + 30t², Horner's form.
@@ -597,6 +611,100 @@ pub fn gradient_noise(
     (value, octave.gradient_to_body(grad))
 }
 
+/// [`gradient_noise`] of `octave` at `N` points at once, given axis by axis (`points[a][l]` is
+/// lane l's coordinate a): each lane's value and gradient [`gradient_noise`]'s at its point, bit
+/// for bit, and the result the same way, `(values, gradients)` with `gradients[a][l]` lane l's
+/// component a.
+///
+/// Each lane takes the scalar function's operations in its order, so that only the lanes run side
+/// by side: arrays of a fixed length that the compiler can carry in vector registers (SSE2 on
+/// x86-64, NEON on `aarch64`, `simd128` in the browser module where it is built with it), with no
+/// fused multiply-add, no reassociation and no relaxed instruction, none of which Rust emits
+/// unasked. The corners' gradient indices are looked up lane by lane, from the cache where it
+/// covers them.
+///
+/// # Panics
+///
+/// As [`gradient_noise`], at any lane.
+#[must_use]
+pub(crate) fn gradient_noise_lanes<const N: usize>(
+    points: &[[f64; N]; 3],
+    octave: &Octave,
+    cache: &mut LatticeCache,
+) -> ([f64; N], [[f64; N]; 3]) {
+    assert!(
+        points.iter().flatten().all(|c| c.is_finite()),
+        "a noise point must be finite, got {points:?}"
+    );
+    let rotation = &octave.rotation;
+    let lattice: [[f64; N]; 3] = std::array::from_fn(|n| {
+        let row = rotation[n];
+        std::array::from_fn(|l| {
+            (row[0] * points[0][l] + row[1] * points[1][l] + row[2] * points[2][l]) / octave.spacing
+                + octave.offset[n]
+        })
+    });
+    let cells: [[i64; N]; 3] = lattice.map(|axis| axis.map(lattice_index));
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a lattice index within ±2^31 is exact in f64"
+    )]
+    let frac: [[f64; N]; 3] =
+        std::array::from_fn(|a| std::array::from_fn(|l| lattice[a][l] - cells[a][l] as f64));
+    let fade_values: [[f64; N]; 3] = frac.map(|axis| axis.map(|t| fade(t).0));
+    let fade_slopes: [[f64; N]; 3] = frac.map(|axis| axis.map(|t| fade(t).1));
+    let gradients: [[u8; 8]; N] = std::array::from_fn(|l| {
+        cache.cell_gradients(octave, [cells[0][l], cells[1][l], cells[2][l]])
+    });
+
+    let mut value = [0.0; N];
+    let mut grad = [[0.0; N]; 3];
+    for corner in 0..8_u8 {
+        let bit = [corner & 1, (corner >> 1) & 1, (corner >> 2) & 1];
+        let towards: [[f64; N]; 3] = std::array::from_fn(|a| {
+            std::array::from_fn(|l| GRADIENTS[usize::from(gradients[l][usize::from(corner)])][a])
+        });
+        let offsets: [[f64; N]; 3] =
+            std::array::from_fn(|a| frac[a].map(|f| f - f64::from(bit[a])));
+        // The corner's weight along each axis and its derivative, as the scalar function takes
+        // them: f(t) towards the far corner and 1 − f(t) towards the near one.
+        let weights: [[f64; N]; 3] = std::array::from_fn(|a| {
+            if bit[a] == 1 {
+                fade_values[a]
+            } else {
+                fade_values[a].map(|f| 1.0 - f)
+            }
+        });
+        let slopes: [[f64; N]; 3] = std::array::from_fn(|a| {
+            if bit[a] == 1 {
+                fade_slopes[a]
+            } else {
+                fade_slopes[a].map(|df| -df)
+            }
+        });
+        for (l, value) in value.iter_mut().enumerate() {
+            let [g0, g1, g2] = [0, 1, 2].map(|a| towards[a][l]);
+            let [w0, w1, w2] = [0, 1, 2].map(|a| weights[a][l]);
+            let [s0, s1, s2] = [0, 1, 2].map(|a| slopes[a][l]);
+            let dot = g0 * offsets[0][l] + g1 * offsets[1][l] + g2 * offsets[2][l];
+            let weight = w0 * w1 * w2;
+            *value += weight * dot;
+            grad[0][l] += s0 * w1 * w2 * dot + weight * g0;
+            grad[1][l] += w0 * s1 * w2 * dot + weight * g1;
+            grad[2][l] += w0 * w1 * s2 * dot + weight * g2;
+        }
+    }
+    let to_body: [[f64; N]; 3] = std::array::from_fn(|n| {
+        std::array::from_fn(|l| {
+            (rotation[0][n] * grad[0][l]
+                + rotation[1][n] * grad[1][l]
+                + rotation[2][n] * grad[2][l])
+                / octave.spacing
+        })
+    });
+    (value, to_body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,6 +735,51 @@ mod tests {
 
     fn random_point(rng: &mut Lcg, half_width_m: f64) -> [f64; 3] {
         [0, 1, 2].map(|_| (rng.next_f64() * 2.0 - 1.0) * half_width_m)
+    }
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the floors compared are integers within ±2^31"
+    )]
+    fn the_lattice_index_is_the_floor_at_every_allowed_coordinate() {
+        let mut coordinates = vec![
+            0.0,
+            -0.0,
+            0.5,
+            -0.5,
+            MAX_LATTICE_INDEX,
+            -MAX_LATTICE_INDEX,
+            (MAX_LATTICE_INDEX + 1.0).next_down(),
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            -f64::from_bits(1),
+        ];
+        let mut rng = Lcg::new(0x0066_6c6f_6f72);
+        for _ in 0..20_000 {
+            let whole = (rng.next_f64() * 2.0 - 1.0) * MAX_LATTICE_INDEX;
+            let near = whole.round();
+            coordinates.extend([whole, near, near.next_up(), near.next_down()]);
+            let small = (rng.next_f64() * 2.0 - 1.0) * 4.0;
+            coordinates.extend([small, small.round().next_down(), small.round().next_up()]);
+        }
+        for c in coordinates {
+            if (-MAX_LATTICE_INDEX..MAX_LATTICE_INDEX + 1.0).contains(&c) {
+                assert_eq!(lattice_index(c), c.floor() as i64, "at {c:e}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "beyond the key's 32 bits")]
+    fn a_coordinate_whose_floor_passes_the_largest_index_is_refused() {
+        let _ = lattice_index(MAX_LATTICE_INDEX + 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "beyond the key's 32 bits")]
+    fn a_coordinate_whose_floor_passes_the_lowest_index_is_refused() {
+        let _ = lattice_index((-MAX_LATTICE_INDEX).next_down());
     }
 
     #[test]

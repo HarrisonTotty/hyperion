@@ -2342,3 +2342,84 @@ fn the_fused_pass_refuses_the_cell_the_base_elevation_refuses() {
         assert_eq!(styled, refused, "{dir:?}, styles");
     }
 }
+
+/// A style of `rng`'s choosing anywhere in the cells' ranges, its gradients too: a belt and a
+/// shear part of the way, so that a lane takes the ridged mix's own angle, the belt factor's lift
+/// and the warp's Jacobian, as few real points do.
+fn random_style(rng: &mut Lcg) -> StyleSample {
+    let mut smooth = |scale: f64| Smooth {
+        value: rng.next_f64() * scale,
+        gradient: [0, 1, 2].map(|_| (rng.next_f64() * 2.0 - 1.0) * 1e-5),
+    };
+    StyleSample {
+        amplitude: smooth(MAX_AMPLITUDE),
+        belt: smooth(1.0),
+        shear: smooth(1.0),
+    }
+}
+
+/// `N` lanes of points about a patch-sized neighbourhood of a random direction, in their real
+/// styles and in random ones, through each octave and with a parent's octaves through one coarser
+/// or none: each lane's samples [`Relief::at_in_style`]'s and [`Relief::at_in_style_pair`]'s, bit
+/// for bit.
+fn assert_lanes_are_the_point_walk_s<const N: usize>(seed: u64, rounds: usize) {
+    let mut rng = Lcg::new(seed);
+    for kind in [
+        SyntheticWorld::EarthLike,
+        SyntheticWorld::MarsLike,
+        SyntheticWorld::MoonLike,
+        SyntheticWorld::CeresLike,
+    ] {
+        let field = world(kind);
+        let header = field.header();
+        let relief = Relief::new(header, SEED);
+        let (first, finest) = (relief.first_octave(), relief.finest_octave());
+        let mut lattice = LatticeCache::new();
+        for round in 0..rounds {
+            let centre = uniform_points(rng.next_u64(), 1)[0];
+            let spread = math::powf(10.0, -1.0 - 5.0 * rng.next_f64());
+            let near = points_near(rng.next_u64(), centre, spread, N);
+            let dirs: [[f64; 3]; N] = std::array::from_fn(|l| near[l]);
+            let styles: [StyleSample; N] = if round % 2 == 0 {
+                dirs.map(|d| styles(field, d).unwrap())
+            } else {
+                std::array::from_fn(|_| random_style(&mut rng))
+            };
+            let span = u64::from(finest - first + 1);
+            let through = first + u8::try_from(rng.next_below(span)).unwrap();
+            let parent = (through > first && round % 3 != 0).then(|| through - 1);
+            let lanes =
+                relief.at_in_style_lanes(header, &dirs, through, parent, &styles, &mut lattice);
+            for (l, (own, up)) in lanes.iter().enumerate() {
+                let alone = &mut LatticeCache::new();
+                let point = relief.at_in_style(header, dirs[l], through, &styles[l], alone);
+                let context = format!("{kind:?}, round {round}, lane {l}, through {through}");
+                assert_same_bits(own.height_m, point.height_m);
+                for (a, b) in own.gradient.iter().zip(point.gradient) {
+                    assert_same_bits(*a, b);
+                }
+                match (parent, up) {
+                    (Some(p), Some(up)) => {
+                        let pair =
+                            relief.at_in_style_pair(header, dirs[l], through, p, &styles[l], alone);
+                        assert_eq!(pair.0, *own, "{context}");
+                        assert_same_bits(up.height_m, pair.1.height_m);
+                        for (a, b) in up.gradient.iter().zip(pair.1.gradient) {
+                            assert_same_bits(*a, b);
+                        }
+                    }
+                    (None, None) => {}
+                    _ => panic!("{context}: a parent's sample without its levels or the reverse"),
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn relief_lanes_are_the_point_walk_s_bits() {
+    assert_lanes_are_the_point_walk_s::<1>(0x6c61_6e65_0001, per_target(24, 4));
+    assert_lanes_are_the_point_walk_s::<2>(0x6c61_6e65_0002, per_target(24, 4));
+    assert_lanes_are_the_point_walk_s::<4>(0x6c61_6e65_0004, per_target(48, 6));
+    assert_lanes_are_the_point_walk_s::<8>(0x6c61_6e65_0008, per_target(24, 4));
+}

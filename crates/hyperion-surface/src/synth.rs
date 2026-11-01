@@ -145,6 +145,44 @@ const NOTHING: HeightSample = HeightSample {
     gradient: [0.0; 3],
 };
 
+/// The points a batch of queries walks the structural octaves at together
+/// ([`Synthesiser::heights_at`]): four. On a patch's double grid of Earth-like and Moon-like
+/// points at L + 4, natively, the walk took 316 ns a point at four lanes, against 694 ns for the
+/// point walk and 353 ns at both two and eight lanes (pod, 16 vCPU, 2026-11-01).
+pub(crate) const LANES: usize = 4;
+
+/// What a point query makes before its structural octaves
+/// ([`Synthesiser::contributions`]): the base elevation, and the relief's last octave and style
+/// where the level evaluates an octave.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BeforeRelief {
+    base: HeightSample,
+    relief: Option<(u8, relief::StyleSample)>,
+}
+
+/// What a pair's one pass makes before its structural octaves
+/// ([`Synthesiser::contributions_pair`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PairBeforeRelief {
+    /// Both levels' octaves from one walk, the level's through `through` and the parent's through
+    /// `up_through`, both from the one base and style.
+    Shared {
+        base: HeightSample,
+        style: relief::StyleSample,
+        through: u8,
+        up_through: u8,
+    },
+    /// The level's octaves alone, through `through`; the parent's base the point query's there.
+    Own {
+        base: HeightSample,
+        style: relief::StyleSample,
+        through: u8,
+        up_base: HeightSample,
+    },
+    /// Neither level's octaves: the one base elevation.
+    Neither { base: HeightSample },
+}
+
 impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// The synthesis over `field` with the body's detail seed `seed` (plan 14's
     /// `body.surface.detail`, R09.T1.b), from which the bands below the coarse cell draw.
@@ -282,11 +320,13 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// craters and the coarse craters' rims are band-limited at the level asked, and are made for
     /// each. Where a read is refused, or the two levels' sets do not nest, each is asked on its
     /// own. A bake asks it at each even vertex, whose morph target is its parent level's height
-    /// (R10.T6.a's lever, measured at `bake/patch_65`).
+    /// (R10.T6.a's lever, measured at `bake/patch_65`), several at a time
+    /// ([`height_pairs_at`](Self::height_pairs_at)), for which this point query is the tests' twin.
     ///
     /// # Panics
     ///
     /// As [`height_at`](Self::height_at).
+    #[cfg(test)]
     pub(crate) fn height_pair_at(
         &self,
         cache: &mut SynthCache,
@@ -308,6 +348,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
     /// [`height_pair_at`](Self::height_pair_at)'s one pass, or `None` where a read is refused or
     /// the levels' sets do not nest.
+    #[cfg(test)]
     fn shared_pair(
         &self,
         cache: &mut SynthCache,
@@ -394,30 +435,74 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         dir: [f64; 3],
         level: BandLevel,
     ) -> Result<Contributions, QueryHeightError> {
+        let before = self.before_relief(cache, dir, level)?;
+        let relief = match &before.relief {
+            Some((through, style)) => self.parts.relief.at_in_style(
+                self.field.header(),
+                dir,
+                *through,
+                style,
+                cache.lattice_mut(),
+            ),
+            None => NOTHING,
+        };
+        self.after_relief(cache, dir, level, before.base, relief)
+    }
+
+    /// [`contributions`](Self::contributions)' first stage: the base elevation, and the relief's
+    /// style and last octave where the level evaluates an octave.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell the base elevation reads that the
+    /// view does not hold.
+    fn before_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<BeforeRelief, QueryHeightError> {
         let field = self.field;
         let set = self.parts.bounds.set(level);
         // The base elevation and the relief's styles in one fused pass where the relief reads its
         // styles, each value's bits those of its own interpolation, through a bake's memo of their
         // control points from its cover on (R09.T8's follow-up; the measurement is at
         // `interp::ControlMemo`).
-        let (base, relief) = match set.relief_through() {
+        match set.relief_through() {
             Some(through) if self.parts.relief.evaluates(through) => {
-                let header = field.header();
                 let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
                     Some(memo) => relief::base_and_style(field, dir, memo)?,
                     None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
                 };
-                let relief = self.parts.relief.at_in_style(
-                    header,
-                    dir,
-                    through,
-                    &style,
-                    cache.lattice_mut(),
-                );
-                (base, relief)
+                Ok(BeforeRelief {
+                    base,
+                    relief: Some((through, style)),
+                })
             }
-            Some(_) | None => (interp::base_elevation(field, dir)?, NOTHING),
-        };
+            Some(_) | None => Ok(BeforeRelief {
+                base: interp::base_elevation(field, dir)?,
+                relief: None,
+            }),
+        }
+    }
+
+    /// [`contributions`](Self::contributions)' last stage: the channels, the small craters and the
+    /// coarse rims at `dir`, after the base elevation `base` and the structural octaves' `relief`.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell the channels or the rims read that
+    /// the view does not hold.
+    fn after_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        base: HeightSample,
+        relief: HeightSample,
+    ) -> Result<Contributions, QueryHeightError> {
+        let field = self.field;
+        let set = self.parts.bounds.set(level);
         let channels = match set.channels_through() {
             Some(through) => self
                 .parts
@@ -450,6 +535,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// # Errors
     ///
     /// [`QueryHeightError::NotSurveyed`] naming a cell read that the view does not hold.
+    #[cfg(test)]
     fn contributions_pair(
         &self,
         cache: &mut SynthCache,
@@ -457,48 +543,110 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         level: BandLevel,
         parent: BandLevel,
     ) -> Result<Option<(Contributions, Contributions)>, QueryHeightError> {
+        let Some(before) = self.pair_before_relief(cache, dir, level, parent)? else {
+            return Ok(None);
+        };
+        let header = self.field.header();
+        let relief = &self.parts.relief;
+        let (own, up) = match before {
+            PairBeforeRelief::Shared {
+                base,
+                style,
+                through,
+                up_through,
+            } => {
+                let lattice = cache.lattice_mut();
+                let (own, up) =
+                    relief.at_in_style_pair(header, dir, through, up_through, &style, lattice);
+                ((base, own), (base, up))
+            }
+            PairBeforeRelief::Own {
+                base,
+                style,
+                through,
+                up_base,
+            } => {
+                let own = relief.at_in_style(header, dir, through, &style, cache.lattice_mut());
+                ((base, own), (up_base, NOTHING))
+            }
+            PairBeforeRelief::Neither { base } => ((base, NOTHING), (base, NOTHING)),
+        };
+        self.pair_after_relief(cache, dir, level, parent, own, up)
+    }
+
+    /// [`contributions_pair`](Self::contributions_pair)'s first stage: the base elevations and the
+    /// relief's style and last octaves at both levels, or `None` where the levels' octaves do not
+    /// nest. The parent's base where only the level's octaves are evaluated is the point query's
+    /// there, alone.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming a cell the base elevation reads that the view does
+    /// not hold.
+    fn pair_before_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        parent: BandLevel,
+    ) -> Result<Option<PairBeforeRelief>, QueryHeightError> {
         let field = self.field;
         let (set, up) = (self.parts.bounds.set(level), self.parts.bounds.set(parent));
         let evaluated = |through: Option<u8>| through.filter(|&t| self.parts.relief.evaluates(t));
-        let ((base, relief), (up_base, up_relief)) = match (
+        match (
             evaluated(set.relief_through()),
             evaluated(up.relief_through()),
         ) {
             (Some(through), up_through) => {
-                let header = field.header();
                 let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
                     Some(memo) => relief::base_and_style(field, dir, memo)?,
                     None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
                 };
-                let lattice = cache.lattice_mut();
                 match up_through {
                     Some(up_through) if up_through <= through => {
-                        let (relief, up_relief) = self
-                            .parts
-                            .relief
-                            .at_in_style_pair(header, dir, through, up_through, &style, lattice);
-                        ((base, relief), (base, up_relief))
+                        Ok(Some(PairBeforeRelief::Shared {
+                            base,
+                            style,
+                            through,
+                            up_through,
+                        }))
                     }
-                    Some(_) => return Ok(None),
-                    None => {
-                        let relief = self
-                            .parts
-                            .relief
-                            .at_in_style(header, dir, through, &style, lattice);
-                        // The parent's base as the point query takes it there, alone.
-                        (
-                            (base, relief),
-                            (interp::base_elevation(field, dir)?, NOTHING),
-                        )
-                    }
+                    Some(_) => Ok(None),
+                    // The parent's base as the point query takes it there, alone.
+                    None => Ok(Some(PairBeforeRelief::Own {
+                        base,
+                        style,
+                        through,
+                        up_base: interp::base_elevation(field, dir)?,
+                    })),
                 }
             }
-            (None, Some(_)) => return Ok(None),
-            (None, None) => {
-                let base = interp::base_elevation(field, dir)?;
-                ((base, NOTHING), (base, NOTHING))
-            }
-        };
+            (None, Some(_)) => Ok(None),
+            (None, None) => Ok(Some(PairBeforeRelief::Neither {
+                base: interp::base_elevation(field, dir)?,
+            })),
+        }
+    }
+
+    /// [`contributions_pair`](Self::contributions_pair)'s last stage: the channels, the small
+    /// craters and the coarse rims at both levels, after each level's base elevation and
+    /// structural octaves, `own` and `up`; `None` where the levels' channels do not nest.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming a cell the channels or the rims read that the view
+    /// does not hold.
+    fn pair_after_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        parent: BandLevel,
+        (base, relief): (HeightSample, HeightSample),
+        (up_base, up_relief): (HeightSample, HeightSample),
+    ) -> Result<Option<(Contributions, Contributions)>, QueryHeightError> {
+        let field = self.field;
+        let (set, up) = (self.parts.bounds.set(level), self.parts.bounds.set(parent));
         let (channels, up_channels) = match (set.channels_through(), up.channels_through()) {
             (Some(through), Some(up_through)) if up_through <= through => self
                 .parts
@@ -540,6 +688,206 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 rims: up_rims,
             },
         )))
+    }
+
+    /// [`height_at`](Self::height_at) at each of `dirs` at `level`, in their order, each the point
+    /// query's answer bit for bit, its error included: the structural octaves walked [`LANES`]
+    /// points at a time ([`Relief::at_in_style_lanes`]), every other stage the point query's own,
+    /// point by point.
+    ///
+    /// Every answer is made, an error's followers too: a caller that stops at the first error
+    /// reads the point queries' first.
+    ///
+    /// # Panics
+    ///
+    /// As [`height_at`](Self::height_at).
+    pub(crate) fn heights_at(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]],
+        level: BandLevel,
+    ) -> Vec<Result<HeightSample, QueryHeightError>> {
+        let mut out = Vec::with_capacity(dirs.len());
+        let chunks = dirs.as_chunks::<LANES>();
+        for lanes in chunks.0 {
+            self.heights_lanes(cache, lanes, level, &mut out);
+        }
+        for dir in chunks.1 {
+            self.heights_lanes(cache, &[*dir], level, &mut out);
+        }
+        out
+    }
+
+    /// [`heights_at`](Self::heights_at) at `N` points, appended to `out`.
+    fn heights_lanes<const N: usize>(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]; N],
+        level: BandLevel,
+        out: &mut Vec<Result<HeightSample, QueryHeightError>>,
+    ) {
+        let before = dirs.map(|dir| self.before_relief(cache, dir, level));
+        let asks = before.each_ref().map(|b| {
+            b.as_ref()
+                .ok()
+                .and_then(|b| b.relief.map(|(through, style)| (through, None, style)))
+        });
+        let reliefs = self.relief_lanes(cache, dirs, &asks);
+        for ((dir, before), relief) in dirs.iter().zip(before).zip(reliefs) {
+            out.push(before.and_then(|before| {
+                let relief = relief.map_or(NOTHING, |(own, _)| own);
+                let parts = self.after_relief(cache, *dir, level, before.base, relief)?;
+                self.finish(cache, *dir, &parts)
+            }));
+        }
+    }
+
+    /// [`height_pair_at`](Self::height_pair_at) at each of `dirs` at `level` and `parent`, in
+    /// their order, each pair the point query's bit for bit, as
+    /// [`heights_at`](Self::heights_at) answers the point queries: the structural octaves of both
+    /// levels walked [`LANES`] points at a time, every other stage the pair's own, point by point.
+    ///
+    /// # Panics
+    ///
+    /// As [`height_at`](Self::height_at).
+    pub(crate) fn height_pairs_at(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]],
+        level: BandLevel,
+        parent: BandLevel,
+    ) -> Vec<(
+        Result<HeightSample, QueryHeightError>,
+        Result<HeightSample, QueryHeightError>,
+    )> {
+        let mut out = Vec::with_capacity(dirs.len());
+        let chunks = dirs.as_chunks::<LANES>();
+        for lanes in chunks.0 {
+            self.height_pairs_lanes(cache, lanes, level, parent, &mut out);
+        }
+        for dir in chunks.1 {
+            self.height_pairs_lanes(cache, &[*dir], level, parent, &mut out);
+        }
+        out
+    }
+
+    /// [`height_pairs_at`](Self::height_pairs_at) at `N` points, appended to `out`: each lane
+    /// whose one pass is refused anywhere, or whose levels do not nest, asked at each level on its
+    /// own, as [`height_pair_at`](Self::height_pair_at) asks it.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the pairs of answers height_pair_at gives, in a list"
+    )]
+    fn height_pairs_lanes<const N: usize>(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]; N],
+        level: BandLevel,
+        parent: BandLevel,
+        out: &mut Vec<(
+            Result<HeightSample, QueryHeightError>,
+            Result<HeightSample, QueryHeightError>,
+        )>,
+    ) {
+        // A refusal is dropped here, safely, as `shared_pair` drops it: the lane is then asked at
+        // each level on its own, whose answer carries its own error.
+        let before = dirs.map(|dir| {
+            self.pair_before_relief(cache, dir, level, parent)
+                .ok()
+                .flatten()
+        });
+        let asks = before.each_ref().map(|b| match b {
+            Some(PairBeforeRelief::Shared {
+                style,
+                through,
+                up_through,
+                ..
+            }) => Some((*through, Some(*up_through), *style)),
+            Some(PairBeforeRelief::Own { style, through, .. }) => Some((*through, None, *style)),
+            Some(PairBeforeRelief::Neither { .. }) | None => None,
+        });
+        let reliefs = self.relief_lanes(cache, dirs, &asks);
+        for ((dir, before), relief) in dirs.iter().zip(before).zip(reliefs) {
+            let shared = before.and_then(|before| {
+                let (own, up) = match (before, relief) {
+                    (PairBeforeRelief::Shared { base, .. }, Some((own, Some(up)))) => {
+                        ((base, own), (base, up))
+                    }
+                    (PairBeforeRelief::Own { base, up_base, .. }, Some((own, None))) => {
+                        ((base, own), (up_base, NOTHING))
+                    }
+                    (PairBeforeRelief::Neither { base }, None) => {
+                        ((base, NOTHING), (base, NOTHING))
+                    }
+                    _ => unreachable!("a lane's octaves are walked as its first stage asked"),
+                };
+                let (own, up) = self
+                    .pair_after_relief(cache, *dir, level, parent, own, up)
+                    .ok()??;
+                Some((
+                    self.finish(cache, *dir, &own).ok()?,
+                    self.finish(cache, *dir, &up).ok()?,
+                ))
+            });
+            out.push(match shared {
+                Some((own, up)) => (Ok(own), Ok(up)),
+                None => (
+                    self.height_at(cache, *dir, level),
+                    self.height_at(cache, *dir, parent),
+                ),
+            });
+        }
+    }
+
+    /// The structural octaves at each lane of `dirs` that `asks` asks them of, through its last
+    /// octave and its parent's where it gives one, in its style: the lanes that ask the same
+    /// octaves as the first that asks any walked together ([`Relief::at_in_style_lanes`]), the
+    /// others the point walk's own, each lane's samples the point walk's bit for bit. A lane that
+    /// asks none (`None`) is answered `None`.
+    fn relief_lanes<const N: usize>(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]; N],
+        asks: &[Option<(u8, Option<u8>, relief::StyleSample)>; N],
+    ) -> [Option<(HeightSample, Option<HeightSample>)>; N] {
+        let header = self.field.header();
+        let relief = &self.parts.relief;
+        let Some(first) = asks.iter().position(Option::is_some) else {
+            return [None; N];
+        };
+        let (through, up_through, _) = asks[first].expect("the first lane that asks");
+        let together = |l: usize| asks[l].is_some_and(|(t, u, _)| t == through && u == up_through);
+        // A lane that walks alone or asks nothing takes the first's place in the walk, and its
+        // samples there are dropped.
+        let lane_dirs: [[f64; 3]; N] =
+            std::array::from_fn(|l| dirs[if together(l) { l } else { first }]);
+        let lane_styles: [relief::StyleSample; N] = std::array::from_fn(|l| {
+            asks[if together(l) { l } else { first }]
+                .expect("a walked lane asks")
+                .2
+        });
+        let walked = relief.at_in_style_lanes(
+            header,
+            &lane_dirs,
+            through,
+            up_through,
+            &lane_styles,
+            cache.lattice_mut(),
+        );
+        std::array::from_fn(|l| match asks[l] {
+            Some(_) if together(l) => Some(walked[l]),
+            Some((through, Some(up_through), style)) => {
+                let lattice = cache.lattice_mut();
+                let (own, up) =
+                    relief.at_in_style_pair(header, dirs[l], through, up_through, &style, lattice);
+                Some((own, Some(up)))
+            }
+            Some((through, None, style)) => Some((
+                relief.at_in_style(header, dirs[l], through, &style, cache.lattice_mut()),
+                None,
+            )),
+            None => None,
+        })
     }
 
     /// The heights, parent-band heights and gradients of `patch`'s 65 × 65 vertices, in R05's bake

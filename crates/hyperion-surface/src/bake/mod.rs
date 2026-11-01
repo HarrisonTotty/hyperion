@@ -488,6 +488,21 @@ impl<F: SurveyView> HeightSource for SurveyedGround<'_, '_, F> {
         self.or_reference(answer, surveyed_at(self.synth.field(), dir))
     }
 
+    /// [`height`](Self::height) at each of `dirs`, R09's heights made several points at a time
+    /// ([`Synthesiser::heights_at`]), each answer then taken as [`height`](Self::height) takes it.
+    fn heights(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]],
+        level: u8,
+    ) -> Vec<Result<HeightSample, QueryHeightError>> {
+        let answers = self.synth.heights_at(cache, dirs, band(level));
+        dirs.iter()
+            .zip(answers)
+            .map(|(&dir, answer)| self.or_reference(answer, surveyed_at(self.synth.field(), dir)))
+            .collect()
+    }
+
     fn level_bound_m(&self, level: u8) -> f64 {
         HeightSource::level_bound_m(self.synth, level)
     }
@@ -507,7 +522,7 @@ impl<F: SurveyView> HeightSource for SurveyedGround<'_, '_, F> {
         cache: &mut SynthCache,
         key: PatchKey,
     ) -> Result<PatchHeights, QueryHeightError> {
-        let mut paired = PairedQueries::new(key);
+        let mut paired = PairedQueries::new(self.synth, cache, key);
         PatchHeights::from_queries(key, |q| {
             let n = usize::from(q.y) * PATCH_VERTICES + usize::from(q.x);
             let answer = paired.answer(self.synth, cache, q);

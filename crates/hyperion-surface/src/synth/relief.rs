@@ -1204,6 +1204,62 @@ impl Smooth {
     }
 }
 
+/// A [`Smooth`] at each of `N` lanes, structure of arrays: `value[l]` and `gradient[k][l]` are
+/// lane l's value and its gradient's component k.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SmoothLanes<const N: usize> {
+    value: [f64; N],
+    gradient: [[f64; N]; 3],
+}
+
+impl<const N: usize> SmoothLanes<N> {
+    /// Zero at every lane.
+    const ZERO: Self = Self {
+        value: [0.0; N],
+        gradient: [[0.0; N]; 3],
+    };
+
+    /// `component` of each lane's style.
+    #[must_use]
+    fn of(styles: &[StyleSample; N], component: impl Fn(&StyleSample) -> Smooth) -> Self {
+        let each = styles.each_ref().map(component);
+        Self {
+            value: each.map(|s| s.value),
+            gradient: std::array::from_fn(|k| each.map(|s| s.gradient[k])),
+        }
+    }
+}
+
+/// Each lane's ridged term `centred` weighted by the coarser octave's raw ridge `coarser`, as the
+/// scalar walk weights it: w r̂ ÷ W and its gradient.
+#[must_use]
+fn weighted_lanes<const N: usize>(
+    centred: &SmoothLanes<N>,
+    coarser: &SmoothLanes<N>,
+) -> SmoothLanes<N> {
+    let weights = coarser.value.map(ridge_weight_of_finite);
+    SmoothLanes {
+        value: std::array::from_fn(|l| weights[l].0 * centred.value[l] / RIDGE_WEIGHT_RMS),
+        gradient: std::array::from_fn(|k| {
+            std::array::from_fn(|l| {
+                (weights[l].0 * centred.gradient[k][l]
+                    + centred.value[l] * weights[l].1 * coarser.gradient[k][l])
+                    / RIDGE_WEIGHT_RMS
+            })
+        }),
+    }
+}
+
+/// [`ridge_weight`] of a raw ridge `r` known not to be a NaN, as a select the lanes can take side
+/// by side: `num::max(r, 0)` is `r` above zero and +0 at either zero and below, the same bits.
+#[must_use]
+fn ridge_weight_of_finite(r: f64) -> (f64, f64) {
+    let top = 1.0 - RIDGE_EPSILON;
+    let positive = if r > 0.0 { r } else { 0.0 };
+    let x = positive / top;
+    (x * x, 2.0 * x / top)
+}
+
 /// The interpolated style at a point.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct StyleSample {
@@ -1697,6 +1753,213 @@ impl Relief {
             gradient: as_function_of_direction(header, dir, gradient).map(num::assert_finite),
         };
         (sample((height, gradient)), sample(parent))
+    }
+
+    /// [`at_in_style`](Self::at_in_style) at `N` unit directions `dirs` at once, each in its own
+    /// style of `styles`, through `through`, and through `parent_through` too where it is given, as
+    /// [`at_in_style_pair`](Self::at_in_style_pair) takes it: each lane's samples those functions'
+    /// at its direction, bit for bit, the parent's `None` where `parent_through` is.
+    ///
+    /// The lanes walk the octaves together ([`gradient_noise_lanes`]), each taking the scalar
+    /// walk's operations in its order, so that a row of a bake's points shares one walk of the
+    /// octave table and the arithmetic runs side by side in vector registers.
+    ///
+    /// # Panics
+    ///
+    /// As [`at_in_style_pair`](Self::at_in_style_pair), at any lane.
+    pub(crate) fn at_in_style_lanes<const N: usize>(
+        &self,
+        header: &FieldHeader,
+        dirs: &[[f64; 3]; N],
+        through: u8,
+        parent_through: Option<u8>,
+        styles: &[StyleSample; N],
+        lattice: &mut LatticeCache,
+    ) -> [(HeightSample, Option<HeightSample>); N] {
+        debug_assert!(self.evaluates(through), "no octave through {through}");
+        debug_assert!(
+            parent_through.is_none_or(|p| p <= through && self.evaluates(p)),
+            "a parent's octaves through {parent_through:?} are not a prefix of those through \
+             {through}"
+        );
+        debug_assert_eq!(
+            first_octave(header.level()),
+            self.variance.first,
+            "a relief read with a field other than the one whose header made it"
+        );
+        let key = NoiseKey::Relief(self.seed);
+        let seed = self.seed;
+        let table = lattice.take_octaves(key, || octave_table(seed));
+        let figure = header.figure();
+        let points = dirs.map(|dir| figure.point(dir));
+        let last = through.min(self.variance.finest);
+        let parent_last = parent_through.map(|p| p.min(self.variance.finest));
+        let (own, parent) =
+            self.octave_walk_lanes(&table, &points, styles, last, parent_last, lattice);
+        lattice.restore_octaves(key, table);
+        let sample = |sums: &SmoothLanes<N>, l: usize| HeightSample {
+            height_m: num::assert_finite(sums.value[l]),
+            gradient: as_function_of_direction(
+                header,
+                dirs[l],
+                [
+                    sums.gradient[0][l],
+                    sums.gradient[1][l],
+                    sums.gradient[2][l],
+                ],
+            )
+            .map(num::assert_finite),
+        };
+        std::array::from_fn(|l| {
+            (
+                sample(&own, l),
+                parent.as_ref().map(|parent| sample(parent, l)),
+            )
+        })
+    }
+
+    /// The octaves' sum at the spheroid points `points` (metres) in the styles `styles`, octaves
+    /// [`first_octave`](Self::first_octave) to `last` of `table`, and the sum as it passes
+    /// `parent_last` where it is given: [`octave_terms`](Self::octave_terms)' heights and
+    /// gradients summed in octave order, lane by lane, each lane's every operation the scalar
+    /// walk's in its order (see the module documentation).
+    fn octave_walk_lanes<const N: usize>(
+        &self,
+        table: &[Octave],
+        points: &[[f64; 3]; N],
+        styles: &[StyleSample; N],
+        last: u8,
+        parent_last: Option<u8>,
+        lattice: &mut LatticeCache,
+    ) -> (SmoothLanes<N>, Option<SmoothLanes<N>>) {
+        let radius = self.radius_m;
+        let unit: [[f64; N]; 3] =
+            std::array::from_fn(|k| std::array::from_fn(|l| points[l][k] / radius));
+        let amplitude = SmoothLanes::of(styles, |s| s.amplitude);
+        let belt = SmoothLanes::of(styles, |s| s.belt);
+        let shear = SmoothLanes::of(styles, |s| s.shear);
+        let theta = belt.value.map(|b| FRAC_PI_2 * b);
+        let theta_gradient = belt.gradient.map(|axis| axis.map(|g| FRAC_PI_2 * g));
+        let full_mix = theta.map(sin_cos_at_zero);
+        let mut above = [SmoothLanes::<N>::ZERO; 3];
+        let mut coarser_ridge: Option<SmoothLanes<N>> = None;
+        let mut sum = SmoothLanes::<N>::ZERO;
+        let mut parent = None;
+        for m in self.variance.first..=last {
+            let noise =
+                self.warped_noise_lanes(m, &table[usize::from(m)], &unit, &shear, &above, lattice);
+            let plain = SmoothLanes {
+                value: noise.value.map(|v| v / NOISE_RMS),
+                gradient: noise.gradient.map(|axis| axis.map(|d| d / NOISE_RMS)),
+            };
+            let raw_ridges = noise.value.map(ridge);
+            let raw = raw_ridges.map(|(r, _)| r);
+            let raw_slope = raw_ridges.map(|(_, s)| s);
+            let centred = SmoothLanes {
+                value: raw.map(|r| (r - RIDGE_MEAN) / RIDGE_RMS),
+                gradient: noise
+                    .gradient
+                    .map(|axis| std::array::from_fn(|l| raw_slope[l] / RIDGE_RMS * axis[l])),
+            };
+            let ridged = match &coarser_ridge {
+                None => centred,
+                Some(coarser) => weighted_lanes(&centred, coarser),
+            };
+            // As the scalar walk's: the whole mix above the break, none at half of it and below,
+            // and its own angle in the one octave at most between.
+            let share = self.ridged_share[usize::from(m)];
+            let mix: [(f64, f64); N] = if share >= 1.0 {
+                full_mix
+            } else if share <= 0.0 {
+                [(0.0, 1.0); N]
+            } else {
+                theta.map(|t| sin_cos_at_zero(t * share))
+            };
+            let sin = mix.map(|(s, _)| s);
+            let cos = mix.map(|(_, c)| c);
+            let swing: [f64; N] =
+                std::array::from_fn(|l| cos[l] * ridged.value[l] - sin[l] * plain.value[l]);
+            let mixed = SmoothLanes::<N> {
+                value: std::array::from_fn(|l| cos[l] * plain.value[l] + sin[l] * ridged.value[l]),
+                gradient: std::array::from_fn(|k| {
+                    std::array::from_fn(|l| {
+                        cos[l] * plain.gradient[k][l]
+                            + sin[l] * ridged.gradient[k][l]
+                            + swing[l] * (theta_gradient[k][l] * share)
+                    })
+                }),
+            };
+            let sigma = self.variance.rms_m[usize::from(m)];
+            let log_factor = self.variance.belt_log_factor[usize::from(m)];
+            let lift = belt.value.map(|b| exp_at_zero(b * log_factor));
+            for (l, value) in sum.value.iter_mut().enumerate() {
+                *value += amplitude.value[l] * sigma * lift[l] * mixed.value[l];
+            }
+            for (k, out) in sum.gradient.iter_mut().enumerate() {
+                for (l, o) in out.iter_mut().enumerate() {
+                    *o += sigma
+                        * lift[l]
+                        * (mixed.value[l] * amplitude.gradient[k][l]
+                            + amplitude.value[l] * mixed.gradient[k][l]
+                            + amplitude.value[l]
+                                * mixed.value[l]
+                                * log_factor
+                                * belt.gradient[k][l]);
+                }
+            }
+            if parent_last == Some(m) {
+                parent = Some(sum);
+            }
+            above = [plain, above[0], above[1]];
+            coarser_ridge = Some(SmoothLanes {
+                value: raw,
+                gradient: noise
+                    .gradient
+                    .map(|axis| std::array::from_fn(|l| raw_slope[l] * axis[l])),
+            });
+        }
+        (sum, parent)
+    }
+
+    /// Octave `m`'s noise `octave` at each lane's unit point `unit` (radii), warped where the octave
+    /// is by the lane's shear `shear` and the three octaves `above` it, nearest first, and its
+    /// gradient per metre through the warp's Jacobian: [`octave_terms`](Self::octave_terms)' `n` and
+    /// its gradient, lane by lane.
+    fn warped_noise_lanes<const N: usize>(
+        &self,
+        m: u8,
+        octave: &Octave,
+        unit: &[[f64; N]; 3],
+        shear: &SmoothLanes<N>,
+        above: &[SmoothLanes<N>; 3],
+        lattice: &mut LatticeCache,
+    ) -> SmoothLanes<N> {
+        let radius = self.radius_m;
+        let warped = m - self.variance.first >= WARP_START;
+        let scale = WARP_SCALE * spacing_in_radii(m);
+        let at = if warped {
+            std::array::from_fn(|k| {
+                std::array::from_fn(|l| unit[k][l] + shear.value[l] * scale * above[k].value[l])
+            })
+        } else {
+            *unit
+        };
+        let (value, lattice_gradient) = noise::gradient_noise_lanes(&at, octave, lattice);
+        // ∂n/∂P = g ÷ R + J_Wᵀ g, as the scalar walk takes it.
+        let mut gradient = lattice_gradient.map(|axis| axis.map(|d| d / radius));
+        if warped {
+            for (k, along) in lattice_gradient.iter().enumerate() {
+                for (axis, out) in gradient.iter_mut().enumerate() {
+                    for (l, o) in out.iter_mut().enumerate() {
+                        *o += along[l]
+                            * scale
+                            * (shear.value[l] * above[k].gradient[axis][l]
+                                + above[k].value[l] * shear.gradient[axis][l]);
+                    }
+                }
+            }
+        }
+        SmoothLanes { value, gradient }
     }
 
     /// Each octave's term at `dir`, octaves [`first_octave`] to `through` (never past the finest)
