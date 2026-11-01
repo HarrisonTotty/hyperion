@@ -282,7 +282,7 @@ fn the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass() {
                 crate::stellar::binary::scan::NsbhOutflow::of(bh, ns).ejecta()
             }
         };
-        assert_eq!(scan.ejecta_mass(), ejecta);
+        hyperion_testkit::float::assert_same_bits(scan.ejecta_mass().value(), ejecta.value());
         for (star, phase) in value.pair().stars().iter().zip(scan.phases()) {
             assert_eq!(star.phase(), phase);
             assert!(star.luminosity().value().is_finite() && star.luminosity().value() >= 0.0);
@@ -482,7 +482,7 @@ fn neutron_star_merger_golden() {
 /// 8–140 of a black hole and a neutron star (Abbott et al. 2023, PRX 13, 011048, as
 /// `NSM_SAMPLER` cites them) are 0.9–147 and 0.7–12 a million years.
 #[test]
-fn the_kilonova_rate_of_the_milky_way_class() {
+fn swallowing_black_holes_lower_the_class_s_kilonova_rate() {
     use crate::stellar::binary::sampler::ClassSampler;
     use crate::stellar::binary::scan::NsbhOutflow;
     use crate::tables::binary::{NSM_SAMPLER, NsmMark};

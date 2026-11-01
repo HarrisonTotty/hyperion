@@ -20,7 +20,9 @@ use crate::galaxy::catalogue_classes::binary::{
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use crate::galaxy::params::GalaxyParams;
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
-use crate::stellar::binary::scan::{engine_calls, scan_cell, scan_merger_cell, scan_nsm_cell};
+use crate::stellar::binary::scan::{
+    NsbhOutflow, engine_calls, scan_cell, scan_merger_cell, scan_nsm_cell,
+};
 use crate::tables::binary::NsmPairKind;
 use crate::time::SourceHorizon;
 
@@ -566,7 +568,6 @@ fn a_merger_s_one_shot_is_bin_0_number_0_at_its_merger() {
     }
 }
 
-/// Listing events runs no engine.
 /// A black hole that swallows its neutron star whole lists no kilonova, at its merger or ever, and
 /// one that tears it apart lists one of its ejecta (P11.T9.b): the fixture's merger with the
 /// class's usual pair, a 6.65 M☉ hole at q 5, and with a 3 M☉ hole and a 1.2 M☉ neutron star.
@@ -576,7 +577,7 @@ fn a_black_hole_that_swallows_its_neutron_star_lists_no_kilonova() {
     let horizon = TimeWindow::new(SourceHorizon::START, SourceHorizon::END).unwrap();
     let m = SolarMasses::new;
     let whole = neutron_star_merger().with_black_hole_pair(m(6.65), m(1.33));
-    assert_eq!(whole.ejecta_mass().value(), 0.0);
+    hyperion_testkit::float::assert_same_bits(whole.ejecta_mass().value(), 0.0);
     let system = BinarySystem::neutron_star_merger(seed, &whole);
     assert_eq!(listing(&system, horizon), []);
     let mut active = Vec::new();
@@ -593,6 +594,7 @@ fn a_black_hole_that_swallows_its_neutron_star_lists_no_kilonova() {
     assert_eq!(kilonova.curve(), &BinaryLightCurve::from(curve));
 }
 
+/// Listing events runs no engine.
 #[test]
 fn listing_events_runs_no_engine() {
     let before = engine_calls();
@@ -659,6 +661,24 @@ fn binary_events_golden() {
         for event in listing(&system, window).iter().take(6) {
             pin(&mut w, name, event);
         }
+    }
+    // A black hole's outflow (P11.T9.b), bit for bit, and the torn pair's kilonova.
+    let m = SolarMasses::new;
+    for (hole, star) in [(3.0, 1.2), (3.6, 1.2), (7.0, 1.33)] {
+        let outflow = NsbhOutflow::of(m(hole), m(star));
+        let label = format!("outflow of {hole} M☉ and {star} M☉");
+        w.f64(&format!("{label}: remnant"), outflow.remnant().value());
+        w.f64(&format!("{label}: dynamical"), outflow.dynamical().value());
+        w.f64(&format!("{label}: disc"), outflow.disc().value());
+        w.f64(&format!("{label}: ejecta"), outflow.ejecta().value());
+    }
+    let torn = neutron_star_merger().with_black_hole_pair(m(3.0), m(1.2));
+    let horizon = TimeWindow::new(SourceHorizon::START, SourceHorizon::END).unwrap();
+    for event in &listing(
+        &BinarySystem::neutron_star_merger(galaxy().seed(), &torn),
+        horizon,
+    ) {
+        pin(&mut w, "torn kilonova", event);
     }
     golden!("stellar/binary_events", w.as_str());
 }

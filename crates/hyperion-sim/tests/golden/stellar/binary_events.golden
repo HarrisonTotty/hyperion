@@ -215,3 +215,21 @@ kilonova Kilonova peak = 0x472325cf0c668668  # 4.971024676745128e34
 kilonova Kilonova V = 0x46ecda29c73164cd  # 4.6815371042020206e33
 kilonova Kilonova K = 0x46d36bd9f70d9589  # 1.5756426110974636e33
 kilonova Kilonova xrays = 0x0000000000000000  # 0.0
+outflow of 3 M☉ and 1.2 M☉: remnant = 0x3fa800d3aa37c98d  # 0.046881308105997645
+outflow of 3 M☉ and 1.2 M☉: dynamical = 0x3f8787dc1e0dbf95  # 0.011489600817838933
+outflow of 3 M☉ and 1.2 M☉: disc = 0x3fa21edca2b459a8  # 0.035391707288158714
+outflow of 3 M☉ and 1.2 M☉: ejecta = 0x3f913396a63cfab0  # 0.01679835691106274
+outflow of 3.6 M☉ and 1.2 M☉: remnant = 0x3f9c921132c2ba12  # 0.027900952075180348
+outflow of 3.6 M☉ and 1.2 M☉: dynamical = 0x3f83bba96e97adac  # 0.009635280311122006
+outflow of 3.6 M☉ and 1.2 M☉: disc = 0x3f92b43c7b76e33c  # 0.01826567176405834
+outflow of 3.6 M☉ and 1.2 M☉: ejecta = 0x3f895821fa08250b  # 0.012375131075730758
+outflow of 7 M☉ and 1.33 M☉: remnant = 0x0000000000000000  # 0.0
+outflow of 7 M☉ and 1.33 M☉: dynamical = 0x0000000000000000  # 0.0
+outflow of 7 M☉ and 1.33 M☉: disc = 0x0000000000000000  # 0.0
+outflow of 7 M☉ and 1.33 M☉: ejecta = 0x0000000000000000  # 0.0
+torn kilonova Kilonova subject System(SystemId(0xfc34068780000000)) bin 0 number 0 onset -4076489992464 + 469238281 ns
+torn kilonova Kilonova peak at 50079 + 748882518 ns, duration 1730309 + 56753370 ns
+torn kilonova Kilonova peak = 0x471a248757ebcab8  # 3.3935152019956785e34
+torn kilonova Kilonova V = 0x46e3b23b41f52d0c  # 3.195893878003914e33
+torn kilonova Kilonova K = 0x46ca8428c001345e  # 1.0756267573333298e33
+torn kilonova Kilonova xrays = 0x0000000000000000  # 0.0

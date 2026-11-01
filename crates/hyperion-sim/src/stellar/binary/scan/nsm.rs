@@ -286,7 +286,8 @@ const FOUCART_2018_REMNANT: (f64, f64, f64, f64) = (0.406, 0.139, 0.255, 1.761);
 /// (7.115 951 54 × 10⁻³, 1.436 368 03 × 10⁻³, −2.762 029 90 × 10⁻², 0.863 604 211, 1.683 995 07).
 /// The paper could not be reached in this build: the constants are those that gwemlightcurves'
 /// `KrFo2019.FoucartEjecta` (Coughlin et al.'s kilonova code) and NMMA's `dynamic_mass_fitting`
-/// carry, read at source, which agree.
+/// carry, read at source, which agree; the range it was fitted over is unread, and every pair
+/// here that ejects anything lies inside Foucart et al.'s Q and C.
 const KRUGER_FOUCART_2020_DYNAMICAL: (f64, f64, f64, f64, f64) = (
     7.115_951_54e-3,
     1.436_368_03e-3,
@@ -310,10 +311,12 @@ const NON_SPINNING_ISCO: f64 = 6.0;
 const DISC_WIND_SHARE: f64 = 0.15;
 
 /// What a black hole leaves outside itself when it merges with a neutron star (P11.T9.b), at the
-/// hole's spin χ = 0 (`NON_SPINNING_ISCO`), M☉: the remnant outside the hole
-/// (`FOUCART_2018_REMNANT`), its dynamical ejecta (`KRUGER_FOUCART_2020_DYNAMICAL`, at most the
-/// remnant), the bound disc they leave, and the kilonova's ejecta, the dynamical ejecta and the
-/// disc's outflows (`DISC_WIND_SHARE`).
+/// hole's spin χ = 0 (lean), M☉: the remnant outside the hole (Foucart, Hinderer and Nissanke
+/// 2018, Phys. Rev. D 98, 081501(R), equation 4), its dynamical ejecta (Krüger and Foucart 2020,
+/// Phys. Rev. D 101, 103002, equation 9, at most the remnant), the bound disc they leave, and the
+/// kilonova's ejecta, the dynamical ejecta and 0.15 of the disc, its outflows (lean). The module's
+/// `FOUCART_2018_REMNANT`, `KRUGER_FOUCART_2020_DYNAMICAL`, `NON_SPINNING_ISCO` and
+/// `DISC_WIND_SHARE` hold the figures and their sources.
 ///
 /// The neutron star's radius is plan 06's, 12.2 km, at every mass, its compactness C = `GM_NS` ÷
 /// (R c²), and both fits scale with its baryonic mass, `M_NS` (1 + 0.6 C ÷ (1 − 0.5 C)) (Krüger and
@@ -328,7 +331,7 @@ const DISC_WIND_SHARE: f64 = 0.15;
 ///
 /// let m = SolarMasses::new;
 /// // The class's usual pair, a 7 M☉ hole and a 1.33 M☉ neutron star, ejects nothing.
-/// assert_eq!(NsbhOutflow::of(m(7.0), m(1.33)).ejecta(), m(0.0));
+/// assert!(NsbhOutflow::of(m(7.0), m(1.33)).ejecta().value() < f64::MIN_POSITIVE);
 /// // A light hole tears its neutron star apart and ejects a share of it.
 /// let light = NsbhOutflow::of(m(3.0), m(1.2));
 /// assert!(light.ejecta().value() > 0.01 && light.ejecta() < light.remnant());
@@ -343,8 +346,24 @@ pub struct NsbhOutflow {
 
 impl NsbhOutflow {
     /// The outflow of a black hole of `black_hole` merging with a neutron star of `neutron_star`.
+    ///
+    /// Both masses are positive and finite: the class draws holes of 3–20 M☉ and neutron stars of
+    /// 1.13–2.0 M☉ (`NSM_SAMPLER`). The fits were calibrated on Q of 1–7 and C of 0.13–0.182, and
+    /// leave nothing outside the hole well before either limit is passed, so a pair beyond them,
+    /// as many of the class's are, ejects nothing, as a hole that swallows its neutron star whole
+    /// does.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, for a mass that is not positive and finite.
     #[must_use]
     pub fn of(black_hole: SolarMasses, neutron_star: SolarMasses) -> Self {
+        debug_assert!(
+            [black_hole, neutron_star]
+                .iter()
+                .all(|m| m.value().is_finite() && m.value() > 0.0),
+            "a merger's masses are positive and finite: {black_hole:?}, {neutron_star:?}"
+        );
         let radius = neutron_star_radius(RemnantRecipe::default()).value() * SOLAR_RADIUS_M;
         let c = GM_SUN * neutron_star.value() / (radius * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
         let baryonic = neutron_star.value() * (1.0 + 0.6 * c / (1.0 - 0.5 * c));
@@ -387,8 +406,8 @@ impl NsbhOutflow {
         self.disc
     }
 
-    /// The kilonova's ejecta, the dynamical ejecta and `DISC_WIND_SHARE` of the disc, M☉: zero
-    /// where nothing is left outside the hole.
+    /// The kilonova's ejecta, the dynamical ejecta and 0.15 of the disc, M☉: zero where nothing
+    /// is left outside the hole.
     #[must_use]
     pub const fn ejecta(&self) -> SolarMasses {
         self.ejecta

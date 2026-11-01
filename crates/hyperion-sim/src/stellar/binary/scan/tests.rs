@@ -2,6 +2,8 @@
 //! and phase, and the engine counter. The class's own scan, against its cells, is tested beside
 //! the class (`galaxy::catalogue_classes::binary`).
 
+use hyperion_testkit::float::assert_same_bits;
+
 use super::*;
 use crate::stellar::binary::classify::STEADY_BURNING_RATE;
 use crate::stellar::binary::tests::pair;
@@ -108,11 +110,11 @@ fn a_black_hole_at_q_5_swallows_its_neutron_star_whole() {
     for k in 0..=17 {
         let ns = 1.15 + 0.05 * f64::from(k);
         let outflow = NsbhOutflow::of(SolarMasses::new(5.0 * ns), SolarMasses::new(ns));
-        assert_eq!(outflow.remnant().value(), 0.0, "{ns}");
-        assert_eq!(outflow.ejecta().value(), 0.0, "{ns}");
+        assert_same_bits(outflow.remnant().value(), 0.0);
+        assert_same_bits(outflow.ejecta().value(), 0.0);
     }
     let usual = NsbhOutflow::of(SolarMasses::new(7.0), SolarMasses::new(1.33));
-    assert_eq!(usual.ejecta().value(), 0.0);
+    assert_same_bits(usual.ejecta().value(), 0.0);
 }
 
 /// A light hole tears its neutron star apart: a 3 M☉ hole and a 1.2 M☉ neutron star (q 2.5, C
@@ -136,7 +138,7 @@ fn a_light_hole_ejects_a_stated_share_of_its_neutron_star() {
     assert!(near(outflow.ejecta(), EJECTA_AT_Q_2_5), "{outflow:?}");
     let sum = outflow.dynamical().value() + outflow.disc().value();
     assert!((sum - outflow.remnant().value()).abs() <= 1e-15);
-    // At q 3 a little is still left; nothing is dynamical there.
+    // At q 3 less is left, 0.028 M☉, about a third of it dynamical.
     let three = NsbhOutflow::of(SolarMasses::new(3.6), SolarMasses::new(1.2));
     assert!(
         three.ejecta().value() > 0.0 && three.ejecta() < outflow.ejecta(),
