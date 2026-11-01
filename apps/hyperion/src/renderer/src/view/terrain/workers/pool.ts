@@ -103,25 +103,51 @@ export const MOST_HEIGHT_WORKERS = 8;
 export const THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 8;
 
 /**
+ * The hardware threads of an Apple chip's performance cores that the default count leaves to the
+ * render thread and the GPU process.
+ */
+export const PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 2;
+
+/**
  * The default number of height workers, the machine's budget for the terrain whatever the views and
  * bodies: clamp(max(⌊threads ÷ 4⌋, threads − {@link THREADS_LEFT_BESIDE_HEIGHT_WORKERS}), 1,
- * {@link MOST_HEIGHT_WORKERS}).
+ * {@link MOST_HEIGHT_WORKERS}); or, where the OS tells performance cores from efficiency cores
+ * (Apple silicon's, `HyperionApi.performanceThreads`), clamp(P −
+ * {@link PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS}, 1, {@link MOST_HEIGHT_WORKERS}) of its P
+ * performance threads (leans, 2026-11-01, plan R05's Risks).
  *
  * @remarks
  * R05 Design note 11's clamp(⌊threads ÷ 4⌋, 1, 3) where a machine has eight threads or fewer (two
  * on the i7-8665U's eight, its budget's two cores), and above that every thread past eight, up to
- * eight workers: eight on the target's 16 (lean, 2026-11-01, plan R10, R10.T6.a's records). Bakes
- * are bound by the CPU alone: on a pod with threads to spare, N workers baked N times one worker's
- * patches a second up to 24 (Earth-like L12, high, 7.1 a second a worker). The owner's sweep on the
- * target (`scripts/workerSweep.mjs`) confirms or lowers it.
+ * eight workers: eight on the target's 16. Bakes are bound by the CPU alone: on a pod with threads
+ * to spare, N workers baked N times one worker's patches a second up to 24 (Earth-like L12, high,
+ * 7.1 a second a worker). An Apple chip's efficiency cores, which `hardwareConcurrency` counts
+ * with the rest, bake far slower, so its count is its performance cores' (an M1's four give two,
+ * as its eight threads do; an M1 Pro's eight give six where its ten threads give two). The owner's
+ * sweep on the target (`scripts/workerSweep.mjs`) confirms or lowers either.
  *
  * One pool runs them: the descent spike's (as `defaultSpikeWorkers`) and `VIEW`'s terrain session's
  * (plan R10, R10.T16.a). A thread count the browser does not report as a finite number takes the
  * least, one worker.
  *
  * @param hardwareConcurrency - The machine's logical processors, `navigator.hardwareConcurrency`.
+ * @param performanceThreads - Its performance cores' threads, `HyperionApi.performanceThreads`,
+ *   or `null` where its OS tells none apart.
  */
-export function defaultHeightWorkers(hardwareConcurrency: number): number {
+export function defaultHeightWorkers(
+  hardwareConcurrency: number,
+  performanceThreads: number | null = null,
+): number {
+  if (
+    performanceThreads !== null &&
+    Number.isInteger(performanceThreads) &&
+    performanceThreads >= 1
+  ) {
+    return Math.min(
+      MOST_HEIGHT_WORKERS,
+      Math.max(1, performanceThreads - PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS),
+    );
+  }
   if (!Number.isFinite(hardwareConcurrency)) {
     return 1;
   }

@@ -135,8 +135,13 @@ export interface TerrainSessionInput {
   readonly source: TerrainSessionSource | null;
   /** Starts one height worker, stable in identity: {@link browserHeightWorker} in the app. */
   readonly createWorker: () => WorkerLike;
-  /** The workers' count; Design note 11's default where absent (`TerrainSessionOptions.workers`). */
+  /** The workers' count; the default where absent (`TerrainSessionOptions.workers`). */
   readonly workers?: number | undefined;
+  /**
+   * The machine's performance cores' threads, which the default count reads
+   * (`TerrainSessionOptions.performanceThreads`); `null` where absent.
+   */
+  readonly performanceThreads?: number | null | undefined;
   /**
    * The quality setting `VIEW` draws at, the launch's, on which the session compiles its passes'
    * materials as it is made (`TerrainSessionOptions.setting`, R10.T14.d): a change makes it anew.
@@ -201,7 +206,8 @@ function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
  * caller unmounts.
  */
 export function useTerrainSession(input: TerrainSessionInput): TerrainSession | null {
-  const { engineState, source, createWorker, workers, setting, horizonMap } = input;
+  const { engineState, source, createWorker, workers, performanceThreads, setting, horizonMap } =
+    input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
   const requests = source?.kind === "server" ? source.requests : null;
@@ -223,6 +229,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
     }
     const counted = {
       ...(workers === undefined ? {} : { workers }),
+      ...(performanceThreads === undefined ? {} : { performanceThreads }),
       ...(horizonMap === undefined ? {} : { horizonMap }),
     };
     if (universe !== null && requests !== null) {
@@ -266,7 +273,18 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       made.dispose();
       link.close();
     };
-  }, [engine, universe, requests, fixture, createWorker, workers, setting, horizonMap, holder]);
+  }, [
+    engine,
+    universe,
+    requests,
+    fixture,
+    createWorker,
+    workers,
+    performanceThreads,
+    setting,
+    horizonMap,
+    holder,
+  ]);
 
   useEffect(() => {
     if (session !== null && fixture === null) {

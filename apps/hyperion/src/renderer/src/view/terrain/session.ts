@@ -226,6 +226,11 @@ export interface TerrainSessionOptions {
    */
   readonly workers?: number;
   /**
+   * The machine's performance cores' threads, `HyperionApi.performanceThreads`, which the default
+   * count reads where {@link TerrainSessionOptions.workers} is absent; `null` where absent.
+   */
+  readonly performanceThreads?: number | null;
+  /**
    * Whether its lit passes' bakes make the horizon map: `baked` where absent; `skipped` for the
    * descent spike's A/B (`--horizon off`, plan R10, R10.T15.b), whose run beside an ordinary one
    * gives the map's share of the workers' bake time. The wireframe's bakes skip it either way.
@@ -841,7 +846,11 @@ export class TerrainSession {
     this.#engine = options.engine;
     this.#textures = new SessionTextures(options.engine);
     const workers =
-      options.workers ?? defaultHeightWorkers(globalThis.navigator.hardwareConcurrency);
+      options.workers ??
+      defaultHeightWorkers(
+        globalThis.navigator.hardwareConcurrency,
+        options.performanceThreads ?? null,
+      );
     this.#horizonMap = options.horizonMap ?? "baked";
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE

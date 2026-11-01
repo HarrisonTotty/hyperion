@@ -8280,3 +8280,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   `defaultHeightWorkers` is clamp(max(⌊t ÷ 4⌋, t − 8), 1, 8), t the hardware threads: eight at 16,
   Design note 11's two at eight; the spike's default follows it. Pending: the owner's sweep at 16
   threads (`scripts/workerSweep.mjs --workers 3,4,6,8`), which confirms or lowers it.
+- **The worker count by performance cores (lean, 2026-11-01; lane perf-terrain-bakes).** Where
+  macOS names its performance level's processors (`hw.perflevel0.logicalcpu`, Apple silicon), the
+  main process hands them to `HyperionApi.performanceThreads` (`main/performanceThreads.ts`,
+  `preload/machineLaunch.ts`), and `defaultHeightWorkers` takes clamp(P − 2, 1, 8) of them; `null`
+  elsewhere. Pending: the owner's Mac run of the same sweep.

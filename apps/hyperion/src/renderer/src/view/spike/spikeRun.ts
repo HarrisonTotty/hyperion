@@ -177,8 +177,11 @@ export const SPIKE_MAIN_VIEW_ID = viewId(SPIKE_VIEW_NAMES.main);
  * where R10.T16.a moved it for `VIEW`'s terrain session, and R10.T6.a's lean raised it past eight
  * threads), under the name the spike's launch reads.
  */
-export function defaultSpikeWorkers(hardwareConcurrency: number): number {
-  return defaultHeightWorkers(hardwareConcurrency);
+export function defaultSpikeWorkers(
+  hardwareConcurrency: number,
+  performanceThreads: number | null = null,
+): number {
+  return defaultHeightWorkers(hardwareConcurrency, performanceThreads);
 }
 
 /** The spike's own workers and pool: the browser's by default, fakes in a test. */

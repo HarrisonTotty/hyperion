@@ -365,6 +365,11 @@ interface ViewDisplayProps {
    */
   readonly platform?: string | undefined;
   /**
+   * The machine's performance cores' threads, `window.hyperion.performanceThreads`, which the
+   * terrain session's default worker count reads (plan R10, R10.T6.a); none by default.
+   */
+  readonly performanceThreads?: number | null | undefined;
+  /**
    * Starts one of the terrain session's height workers (plan R10, R10.T16.a), stable in identity:
    * the renderer's module worker by default (`browserHeightWorker`), a fake in a test.
    */
@@ -2665,6 +2670,7 @@ function ViewPanels({
   engineSource = DEFAULT_ENGINE_SOURCE,
   setting = "high",
   platform = "linux",
+  performanceThreads = null,
   heightWorkers = browserHeightWorker,
   sceneOptions = SCENE_OPTIONS,
   watchTerrain,
@@ -2777,6 +2783,7 @@ function ViewPanels({
           },
     ),
     createWorker: heightWorkers,
+    performanceThreads,
     setting,
   });
   // The atmosphere cache of the stage's device (R08.T10.b), which asks a server scene's bodies'

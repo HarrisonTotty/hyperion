@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type { GpuProcessGoneReport, HyperionApi } from "./api";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
+import { performanceThreadsFromArgv } from "./machineLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
 import { serverUrlFromArgv } from "./serverUrl";
 import { spikeMember } from "./spikeApi";
@@ -21,6 +22,7 @@ const api: HyperionApi = {
     },
   },
   setting: qualityFromArgv(process.argv),
+  performanceThreads: performanceThreadsFromArgv(process.argv),
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

@@ -194,7 +194,9 @@ export function SpikeApp({
     seed: BigInt(launch.seed),
     setting: launch.setting,
     ridges: launch.ridged,
-    workers: launch.workers ?? defaultSpikeWorkers(navigator.hardwareConcurrency),
+    workers:
+      launch.workers ??
+      defaultSpikeWorkers(navigator.hardwareConcurrency, window.hyperion.performanceThreads),
     variant: harness.variant,
     // The test planet's launch has no style: its main view is the spike's own lit view.
     style: launch.style ?? undefined,

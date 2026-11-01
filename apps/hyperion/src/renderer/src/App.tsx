@@ -58,6 +58,8 @@ interface DisplayInputs {
   readonly setting: QualitySetting;
   /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
   readonly platform: string;
+  /** The machine's performance cores' threads, which `VIEW`'s height workers' count reads. */
+  readonly performanceThreads: number | null;
 }
 
 /**
@@ -204,6 +206,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           watchTerrain={inputs.checkedView?.terrain?.watchTerrain}
           setting={inputs.setting}
           platform={inputs.platform}
+          performanceThreads={inputs.performanceThreads}
         />
       );
       break;
@@ -369,6 +372,7 @@ export function App() {
     checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
     platform: window.hyperion.platform,
+    performanceThreads: window.hyperion.performanceThreads,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

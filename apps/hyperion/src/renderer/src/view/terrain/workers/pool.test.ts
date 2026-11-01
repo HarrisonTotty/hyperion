@@ -906,9 +906,24 @@ describe("the height-worker pool of the terrain session (R10.T16.a)", () => {
   });
 
   it("runs Design note 11's count up to eight threads, and every thread past eight up to eight", () => {
-    expect([1, 4, 7, 8, 10, 12, 16, 20, 32].map(defaultHeightWorkers)).toEqual([
-      1, 1, 1, 2, 2, 4, 8, 8, 8,
-    ]);
+    expect(
+      [1, 4, 7, 8, 10, 12, 16, 20, 32].map((threads) => defaultHeightWorkers(threads)),
+    ).toEqual([1, 1, 1, 2, 2, 4, 8, 8, 8]);
+  });
+
+  it("runs an Apple chip's performance threads less two, up to eight, whatever its efficiency cores", () => {
+    // An M1's four of eight threads, an M3 Pro's six of twelve, an M1 Pro's eight of ten, an M3
+    // Max's twelve of sixteen.
+    expect(
+      [
+        [8, 4],
+        [12, 6],
+        [10, 8],
+        [16, 12],
+        [2, 1],
+      ].map(([threads, p]) => defaultHeightWorkers(threads ?? 0, p ?? null)),
+    ).toEqual([2, 4, 6, 8, 1]);
+    expect(defaultHeightWorkers(10, null)).toBe(2);
   });
 
   it("runs one worker where the browser reports no thread count", () => {

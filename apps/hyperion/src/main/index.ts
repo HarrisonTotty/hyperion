@@ -19,6 +19,7 @@ import {
 
 import type { QualitySettingName, SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
+import { performanceThreadsSwitch } from "../preload/machineLaunch";
 import { qualitySwitch } from "../preload/qualityLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
@@ -58,6 +59,7 @@ import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { softwareModeRefusal } from "./graphics/softwareMode";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
+import { machinePerformanceThreads } from "./performanceThreads";
 import { denyPermissionRequests } from "./permissions";
 
 function reportLoadFailure(error: unknown): void {
@@ -155,6 +157,8 @@ function createWindow(
         serverUrlSwitch(serverUrl),
         ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
         qualitySwitch(setting),
+        // Read at each window's making: once a launch, a few milliseconds on macOS, none elsewhere.
+        performanceThreadsSwitch(machinePerformanceThreads()),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
       ],
