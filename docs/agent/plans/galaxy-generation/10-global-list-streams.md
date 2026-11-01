@@ -2254,10 +2254,12 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `unknown_feature` naming `stream`. `SystemOriginWire` gains `stream { stream }` and
     `dwarf_core { core }`. No dispersion on a track point: a later optional field.
   - _Server, taken from T10.b (lean, 2026-10-31)._ The two handlers. `compute::GlobalListService`
-    builds each galaxy's list on its first request, not when the universe opens, in a bulk job
-    (`GLOBAL_LIST_CACHE_BYTES`, 4 MiB). With no tube cache, every stream's `track` is `pending`
-    and `stream_track` builds its tube serially in the interactive job that asks, about 2 s a
-    request; T10.b's cache, warm-up and open-time build make them `ready`. A cloud's tube (an
+    builds each galaxy's list on its first request, not when the universe opens, through P10.T5.b's
+    `global_list_on` at bulk priority (`GLOBAL_LIST_CACHE_BYTES`, 4 MiB; the spray tables in a
+    `SharedSprayForces` of `SPRAY_FORCE_CACHE_BYTES`, 1 MiB). With no tube cache, every stream's
+    `track` is `pending`, and `stream_track` has its tube built for it through `tube_table_on` at
+    interactive priority (`GlobalListService::tube`), not kept; T10.b's cache, warm-up and
+    open-time build make them `ready`. A cloud's tube (an
     eccentric orphan near apocentre) is sent `ready` like any other. `convert::system_origin` has
     no arm for `GlobalListMember`, whose number is in its ID: T10.b's.
   - _Parameters._ `halo.discrete_share` is sent drawn in the `halo` group; both keys are out of

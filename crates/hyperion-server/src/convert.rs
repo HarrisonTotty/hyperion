@@ -76,7 +76,9 @@ pub(crate) use self::feature_answers::{
     FeatureRangeQuery, black_hole_state, black_hole_time, centre_not_built, detail_of,
     feature_detail_target, features_in_range, galaxy_features, galaxy_features_time,
 };
-pub(crate) use self::global_answers::{global_features, stream_track, stream_track_number};
+pub(crate) use self::global_answers::{
+    global_features, stream_track, stream_track_number, tube_not_built,
+};
 #[cfg(test)]
 pub(crate) use self::motion::origins;
 pub(crate) use self::motion::system_motion;

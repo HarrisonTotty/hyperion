@@ -1,7 +1,8 @@
 //! Plan 10's two global-list requests, checked, and their answers (P10.T10.a): `global_features`
 //! and `stream_track`.
 //!
-//! Both read the galaxy's global list as P10.T4 builds it ([`GlobalList::build`]), at the epoch:
+//! Both read the galaxy's global list as P10.T4 builds it, built on the pool's workers as
+//! [`GlobalList::build`] builds it (P10.T5.b), at the epoch:
 //!
 //! - **`global_features`** lists every entry in the list's order, each with its kind, number, mass
 //!   and bounding shell, a stream with the living globular it is stripped from, if it is; and the
@@ -9,9 +10,9 @@
 //!   recent ones in their history's order, each with the stream and the core it left, if any. The
 //!   lesser old progenitors are not listed: their debris is the halo's smooth components, whose
 //!   combined share `galaxy_parameters` sends.
-//! - **`stream_track`** resolves the stream's number in the list, builds its tube table
-//!   ([`TubeTable::build`], a second or two of spray in the job that asks) and sends each arm's
-//!   knots, thinned evenly to at most [`TRACK_POINTS`] with both ends kept.
+//! - **`stream_track`** resolves the stream's number in the list, has its tube table built on the
+//!   pool's workers (as [`TubeTable::build`] builds it, P10.T5.b's `tube_table_on`) and sends each
+//!   arm's knots, thinned evenly to at most [`TRACK_POINTS`] with both ends kept.
 //!
 //! This server holds no tube table between requests, so every stream's track status is `pending`
 //! and `stream_track` always builds; P10.T10.b's cache and warm-up hold them, and its tracks are
@@ -24,7 +25,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::global_list::spray::Arm;
-use hyperion_sim::galaxy::global_list::tube::TubeKnot;
+use hyperion_sim::galaxy::global_list::tube::{BuildTubeTableError, TubeKnot};
 use hyperion_sim::galaxy::global_list::{
     BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, StreamOrigin, TubeTable,
 };
@@ -161,36 +162,28 @@ pub(crate) fn stream_track_number(
         })
 }
 
-/// Stream `number`'s track on `list` as `stream_track` sends it, for `request`, its tube table
-/// built from `galaxy`.
-///
-/// # Errors
-///
-/// `internal` if the tube cannot be built, which no stream of a galaxy with the kinematic tables
-/// the server builds meets (plan 10's Risks, "P10.T6.a as built").
-///
-/// # Panics
-///
-/// If the list has no stream `number`, which [`stream_track_number`] checks first.
-pub(crate) fn stream_track(
-    galaxy: &Galaxy,
-    list: &GlobalList,
-    number: StreamNumber,
-    request: StreamTrackRequest,
-) -> Result<StreamTrackWire, RequestError> {
-    let spec = list.stream(number).expect("the stream was checked");
-    let tube = TubeTable::build(galaxy, spec).map_err(|error| RequestError {
-        code: ErrorCode::Internal,
-        message: format!("stream {}'s tube could not be built: {error}", number.get()),
-        field: None,
-    })?;
+/// The stream's track as `stream_track` sends it, for `request`, from its built `tube`.
+#[must_use]
+pub(crate) fn stream_track(tube: &TubeTable, request: StreamTrackRequest) -> StreamTrackWire {
     let [trailing, leading] =
         [Arm::Trailing, Arm::Leading].map(|arm| track_of(tube.arm(arm).knots()));
-    Ok(StreamTrackWire {
+    StreamTrackWire {
         universe: request.universe,
         stream: request.stream,
         track: TrackWire::Ready { trailing, leading },
-    })
+    }
+}
+
+/// The refusal of a stream's tube that could not be built, which is the server's own: `internal`.
+/// No stream of a galaxy with the kinematic tables the server builds meets it (plan 10's Risks,
+/// "P10.T6.a as built").
+#[must_use]
+pub(crate) fn tube_not_built(number: StreamNumber, error: &BuildTubeTableError) -> RequestError {
+    RequestError {
+        code: ErrorCode::Internal,
+        message: format!("stream {}'s tube could not be built: {error}", number.get()),
+        field: None,
+    }
 }
 
 /// The indices, in order, of the knots of an arm of `n` that its track sends: every one for an arm
@@ -359,12 +352,12 @@ mod tests {
             stream: 0,
         };
         let number = stream_track_number(list, &request).expect("stream 0 is listed");
-        let answer = stream_track(galaxy, list, number, request).expect("the tube builds");
+        let tube = TubeTable::build(galaxy, list.stream(number).expect("listed")).expect("builds");
+        let answer = stream_track(&tube, request);
         assert_eq!((answer.universe, answer.stream), (universe(), 0));
         let TrackWire::Ready { trailing, leading } = answer.track else {
             panic!("a built track is ready");
         };
-        let tube = TubeTable::build(galaxy, list.stream(number).expect("listed")).expect("builds");
         for (points, arm) in [(&trailing, Arm::Trailing), (&leading, Arm::Leading)] {
             let knots = tube.arm(arm).knots();
             assert_eq!(points.len(), TRACK_POINTS.min(knots.len()));
