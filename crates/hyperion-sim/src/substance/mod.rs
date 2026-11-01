@@ -761,8 +761,10 @@ mod tests {
         assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
     }
 
-    /// The switch sets the version's rules back when `run` panics.
+    /// The switch sets the version's rules back when `run` panics. Native only: on wasm32-wasip1 a
+    /// panic aborts the whole test binary (panic = abort), so `catch_unwind` cannot catch it.
     #[test]
+    #[cfg(not(target_family = "wasm"))]
     fn a_panic_inside_the_carriers_switch_sets_the_rules_back() {
         let caught = std::panic::catch_unwind(|| {
             with_carriers(CarriersRules::Carried, || panic!("inside the switch"));
