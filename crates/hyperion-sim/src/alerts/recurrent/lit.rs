@@ -1,9 +1,9 @@
-//! What the recurrent walk's classes other than the magnetars share (P12.T5.c): a host on a
-//! straight line, the interval its events are listed over, and the detection of each event from its
+//! What the recurrent walk's classes other than the magnetars share (P12.T5.c): a host and its
+//! motion, the interval its events are listed over, and the detection of each event from its
 //! light in each band.
 //!
 //! An event's light is its own source's at its age since its onset: plan 11's curve for a binary
-//! event ([`BinaryLightCurve`](crate::stellar::binary::light_curves::BinaryLightCurve)), and for a giant eruption its own light, as the registry's
+//! event ([`BinaryLightCurve`]), and for a giant eruption its own light, as the registry's
 //! [`LightCurveSource`](super::super::LightCurveSource) names them. It lasts from its onset for its
 //! duration, after which the event is over: plan 11's, until the light stays under a hundredth of
 //! its peak, and an eruption's own. The walk (module documentation of
@@ -23,6 +23,7 @@
 //!
 //! [`Onset`]: DetectionPhase::Onset
 //! [`InProgress`]: DetectionPhase::InProgress
+//! [`BinaryLightCurve`]: crate::stellar::binary::light_curves::BinaryLightCurve
 
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
@@ -32,8 +33,9 @@ use crate::galaxy::gas::extinction::Sightline;
 use crate::id::{EventId, SystemId};
 use crate::observe::{Retardation, bearing};
 use crate::stellar::binary::events::{BinaryEvent, BinaryEventKind};
+use crate::stellar::events::lbv::Eruption;
 use crate::time::{Span, UniverseTime};
-use crate::units::consts::{METRES_PER_LIGHT_YEAR, SPEED_OF_LIGHT};
+use crate::units::consts::{METRES_PER_LIGHT_YEAR, SOLAR_LUMINOSITY_W, SPEED_OF_LIGHT};
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre};
 
 use super::super::arriving::{ArrivingLight, DetectionLight};
@@ -41,9 +43,9 @@ use super::super::light::binary_luminosity;
 use super::super::reach::{flux, inverse_square_flux, transmission};
 use super::super::registry::{LongestDuration, TransientKind};
 use super::super::{AlertBand, AlertContext, AlertQuery, BAND_COUNT, Detection, DetectionPhase};
-use super::{DAY, arrival_of, year_start};
+use super::{DAY, GIANT_ERUPTION_SHARES, arrival_of, year_start};
 
-/// A host the walk reads: its system, its class and how it moves, on a straight line.
+/// A host the walk reads: its system, its class and how it moves.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct LitHost {
     pub(super) host: SystemId,
@@ -67,6 +69,8 @@ pub(super) struct LitEvent {
 enum EventLight {
     /// Plan 11's binary event, its curve.
     Binary(BinaryEvent),
+    /// Plan 06's giant eruption and the star's quiescent luminosity at its onset, W.
+    Eruption(Eruption, Watts),
 }
 
 impl LitEvent {
@@ -83,11 +87,34 @@ impl LitEvent {
         }
     }
 
+    /// Plan 06's giant `eruption`: its rise and its duration, and its own light above the star's
+    /// quiescent luminosity at its onset.
+    #[must_use]
+    pub(super) fn of_eruption(eruption: &Eruption) -> Self {
+        let quiescent = Watts::new(eruption.quiescent_luminosity().value() * SOLAR_LUMINOSITY_W);
+        Self {
+            id: eruption.id(),
+            kind: TransientKind::GiantEruption,
+            onset: eruption.onset(),
+            peak: eruption.rise(),
+            duration: eruption.duration(),
+            light: EventLight::Eruption(*eruption, quiescent),
+        }
+    }
+
     /// The event's light in `band` `age` after its onset, W.
     #[must_use]
     fn luminosity(&self, age: Span, band: AlertBand) -> Watts {
         match &self.light {
             EventLight::Binary(event) => binary_luminosity(event.curve(), age, band),
+            EventLight::Eruption(eruption, quiescent) => {
+                let at = self
+                    .onset
+                    .checked_add(age)
+                    .expect("an eruption's light ends within decades of a clock time");
+                let factor = eruption.luminosity_factor_at(at);
+                Watts::new((factor - 1.0) * quiescent.value() * GIANT_ERUPTION_SHARES[band.index()])
+            }
         }
     }
 
@@ -99,6 +126,12 @@ impl LitEvent {
             EventLight::Binary(event) => {
                 ArrivingLight::binary(*event.curve(), event.onset(), band, distance, transmission)
             }
+            EventLight::Eruption(eruption, quiescent) => ArrivingLight::eruption(
+                (*eruption, *quiescent, GIANT_ERUPTION_SHARES[band.index()]),
+                band,
+                distance,
+                transmission,
+            ),
         }
     }
 }
@@ -137,7 +170,8 @@ pub(super) fn longest(kind: TransientKind) -> Span {
 ///
 /// The interval is `[t₁ − s − ε − R, t₂ − s + ε + DAY)`, with s the light time from where the host
 /// is at its motion's own time, R twice `look_back` and a day, and ε = β (s + W + R) ÷ (1 − β), β
-/// the host's speed over light's and W the window's furthest end from that time. The light time
+/// the host's faster speed, before or after its motion's break, over light's, and W the window's
+/// furthest end from that time. The light time
 /// from wherever the host is at an onset in the interval lies within ε of s, so the interval holds
 /// every such onset, and each onset's own arrival then decides; a host is passed over only if
 /// s − ε, less a day, is beyond the reach. One distance and no step on the light cone, for the
@@ -156,7 +190,15 @@ pub(super) fn emission_interval(
     look_back: Span,
     reach: LightYears,
 ) -> Option<TimeWindow> {
-    let beta = motion.velocity_at(motion.at()).speed().value() / SPEED_OF_LIGHT;
+    let before = motion
+        .at()
+        .checked_sub(Span::from_seconds(1))
+        .unwrap_or(motion.at());
+    let speed = [before, motion.at()]
+        .map(|t| motion.velocity_at(t).speed().value())
+        .into_iter()
+        .fold(0.0, f64::max);
+    let beta = speed / SPEED_OF_LIGHT;
     let s = motion.point().distance_to(observer).value() / SPEED_OF_LIGHT;
     let from_motion = |t: UniverseTime| {
         t.checked_since(motion.at())

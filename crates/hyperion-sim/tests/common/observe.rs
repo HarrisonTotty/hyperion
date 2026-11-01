@@ -1,7 +1,7 @@
 //! The alerts' oracle (plan 12's Test helpers, P12.T5.b and P12.T5.c): every one-shot entry, every
-//! magnetar host and every host of plan 11's binary classes, of a box of class cells about the
-//! observer, each event evaluated directly, against which the walks' detections are compared as
-//! sets.
+//! magnetar host, every host of plan 11's binary classes and every luminous blue variable, of a box
+//! of class cells about the observer, each event evaluated directly, against which the walks'
+//! detections are compared as sets.
 //!
 //! The brute force opens every cell of the box of side 2 × (reach + 4,096 ly) and a cell about the
 //! observer, with no sphere test and no reach, and evaluates each entry's event from its own
@@ -16,14 +16,15 @@ use std::collections::BTreeMap;
 
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, LongestDuration,
-    MAGNETAR_BURST_XRAY_SHARE, MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass,
-    MagnetarHost, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, TransientKind,
-    binary_luminosity, binary_peak, flux, inverse_square_flux, kind_reach, supernova_luminosity,
-    supernova_peak,
+    AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, EruptionClass,
+    GIANT_ERUPTION_SHARES, LongestDuration, MAGNETAR_BURST_XRAY_SHARE,
+    MAGNETAR_GIANT_FLARE_XRAY_SHARE, MagnetarCells, MagnetarClass, MagnetarHost, OneShotCells,
+    OneShotClass, OneShotEvent, OneShotLight, TransientKind, binary_luminosity, binary_peak, flux,
+    inverse_square_flux, kind_reach, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
+use hyperion_sim::events::{EventSeries, tags as event_tags};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
 use hyperion_sim::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
@@ -38,8 +39,12 @@ use hyperion_sim::stellar::binary::events::{
 use hyperion_sim::stellar::binary::scan::{
     AwdScanMarks, XrbScanMarks, scan_cell as scan_marks_cell,
 };
+use hyperion_sim::stellar::events::lbv::{
+    Eruption, MAX_DURATION as LBV_MAX_DURATION, eruptions_in as lbv_eruptions_in,
+};
 use hyperion_sim::stellar::events::magnetar::{MAX_BURST_DURATION, MagnetarModel, MagnetarSeries};
 use hyperion_sim::time::{Span, UniverseTime};
+use hyperion_sim::units::consts::SOLAR_LUMINOSITY_W;
 use hyperion_sim::units::consts::SPEED_OF_LIGHT;
 use hyperion_sim::units::{LightYears, Watts, Years};
 use hyperion_testkit::float::bits;
@@ -815,4 +820,171 @@ fn wide_line_interval(
         at(window.end(), -(s_lo - 2.0 * 86_400.0)),
     )
     .unwrap()
+}
+
+/// Every giant eruption of `process`'s class, luminous blue variables, that `query`'s sensor sees
+/// (P12.T5.c), sorted: every host of the box of cells about the observer, its star built whatever
+/// its window, its eruptions listed by plan 06 over an interval wide enough by its speed alone and
+/// the longest eruption, each evaluated directly: its own light, (factor − 1) times the star's
+/// quiescent luminosity at its onset, times the eruptions' share in the band.
+///
+/// An eruption is an onset where its light arrives in the window, seen by its peak, and in progress
+/// where it arrived before the window and is not over at its start, seen by its light then. The
+/// line of sight is the walk's rule, as for the binary classes.
+///
+/// # Panics
+///
+/// As [`brute_force_detections`].
+pub fn brute_force_eruption_detections<P: EruptionClass>(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    process: &P,
+    query: &AlertQuery,
+) -> Vec<Seen> {
+    let class = process.class();
+    if !query.classes().contains(class) {
+        return Vec::new();
+    }
+    let reach = kind_reach(TransientKind::GiantEruption, query.sensor()).value();
+    if reach <= 0.0 {
+        return Vec::new();
+    }
+    let observer = query.observer_position();
+    let window = query.window();
+    let centre = CatalogueCellKey::containing(class, observer).expect("a cell of the cube");
+    let edge = f64::from(centre.edge_ly());
+    let half = ((reach + LIFETIME_REACH.value()) / edge).ceil();
+    assert!(half < 1e3, "a box of {half} cells about the observer");
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a whole number under 1,000"
+    )]
+    let half = half as i32 + 1;
+    let [cx, cy, cz] = centre.cell();
+    let mut seen = Vec::new();
+    let mut eruptions = Vec::new();
+    for x in cx - half..=cx + half {
+        for y in cy - half..=cy + half {
+            for z in cz - half..=cz + half {
+                let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
+                    continue;
+                };
+                for entry in CatalogueClassCell::generate(galaxy, process, key).entries() {
+                    let Some(host) = process.eruption_host(galaxy, entry.value()) else {
+                        continue;
+                    };
+                    let motion = *host.motion();
+                    let star = host.star().to_star();
+                    let interval = wide_line_interval(
+                        &motion,
+                        observer,
+                        window,
+                        LBV_MAX_DURATION.as_seconds_f64(),
+                    );
+                    let series = EventSeries::new(
+                        galaxy.seed(),
+                        event_tags::STAR_LBV_ERUPTION,
+                        host.body().into(),
+                    );
+                    eruptions.clear();
+                    lbv_eruptions_in(&star, &series, interval, &mut eruptions);
+                    for eruption in &eruptions {
+                        seen.extend(eruption_seen(
+                            galaxy,
+                            context,
+                            query,
+                            class,
+                            host.host(),
+                            &motion,
+                            eruption,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    seen.sort();
+    seen
+}
+
+/// `eruption` of `host` moving by `motion` as `query`'s sensor sees it, evaluated directly.
+fn eruption_seen(
+    galaxy: &Galaxy,
+    context: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    class: ClassId,
+    host: SystemId,
+    motion: &CatalogueMotion,
+    eruption: &Eruption,
+) -> Option<Seen> {
+    let observer = query.observer_position();
+    let window = query.window();
+    let onset = eruption.onset();
+    let site = motion.position_at(onset);
+    let distance = site.distance_to(observer);
+    let arrival = onset.checked_add(light_time(distance)).unwrap();
+    let (phase, emitted) = if window.start() <= arrival && arrival < window.end() {
+        (DetectionPhase::Onset, eruption.peak())
+    } else if arrival < window.start()
+        && window.start().checked_since(arrival).unwrap() < eruption.duration()
+    {
+        let age = window.start().checked_since(arrival).unwrap();
+        (DetectionPhase::InProgress, onset.checked_add(age).unwrap())
+    } else {
+        return None;
+    };
+    let quiescent = eruption.quiescent_luminosity().value() * SOLAR_LUMINOSITY_W;
+    let own = (eruption.luminosity_factor_at(emitted) - 1.0) * quiescent;
+    let light = |band: AlertBand| {
+        let i = AlertBand::ALL.iter().position(|&b| b == band).unwrap();
+        Watts::new(own * GIANT_ERUPTION_SHARES[i])
+    };
+    let bare = query.sensor().bands().any(|(band, limits)| {
+        inverse_square_flux(light(band), distance).is_some_and(|f| f >= limits.detect())
+    });
+    if !bare {
+        return None;
+    }
+    let year = onset.seconds().div_euclid(31_557_600) * 31_557_600;
+    let from = motion.position_at(UniverseTime::new(year, 0).unwrap());
+    let line = context.sightline(galaxy, &from, observer);
+    let mut best = None;
+    for band in AlertBand::ALL {
+        let Some(limits) = query.sensor().limits(band) else {
+            continue;
+        };
+        let Some(f) = flux(light(band), distance, &line, band) else {
+            continue;
+        };
+        let over = f.value() / limits.detect().value();
+        let better = match best {
+            None => over >= 1.0,
+            Some((_, _, most)) => over > most,
+        };
+        if better {
+            best = Some((band, f, over));
+        }
+    }
+    let (band, f, _) = best?;
+    let resolve = query.sensor().limits(band).unwrap().resolve();
+    let to = bearing(observer, &site).unwrap();
+    let present = motion.position_at(arrival);
+    Some(Seen {
+        arrival,
+        event: eruption.id(),
+        host,
+        class: Some(class),
+        kind: TransientKind::GiantEruption,
+        emitted: onset,
+        phase,
+        band,
+        flux: bits(f.value()),
+        resolvable: f >= resolve,
+        bearing: [bits(to.azimuth().value()), bits(to.elevation().value())],
+        apparent: position_bits(&site),
+        light_age: light_time(distance),
+        distance_now: bits(LightYears::from(observer.distance_to(&present)).value()),
+        velocity_then: motion.velocity_at(onset).metres_per_second().map(bits),
+        motion: Motion::Drift,
+    })
 }

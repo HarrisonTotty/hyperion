@@ -85,16 +85,15 @@ XrayBurst in XRay = 0x467ec8a1d0b2d179  # 3.9023e31
 BeXOutburst: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 8821735, nanos: 0 })), curve Some(BinaryCurve)
 BeXOutburst in XRay = 0x4642997559c4bb62  # 2.9472e30
 GiantEruption: Recurrent over ["LUMINOUS_BLUE_VARIABLE"], pending None, lasting Some(AtMost(Span { seconds: 631152000, nanos: 0 })), curve Some(GiantEruption)
-GiantEruption in Photometric(U) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(B) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(V) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(R) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(I) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(J) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(H) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(K) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(MidInfrared) = 0x4702a6f99d7c891f  # 1.2106e34
-GiantEruption in Photometric(Radio) = 0x4702a6f99d7c891f  # 1.2106e34
+GiantEruption in Photometric(U) = 0x46b6d3a10ffff2f1  # 4.6298e32
+GiantEruption in Photometric(B) = 0x46c85dae52b944d1  # 9.884e32
+GiantEruption in Photometric(V) = 0x46cc1b0ae42f9417  # 1.1401e33
+GiantEruption in Photometric(R) = 0x46d9e59648be548f  # 2.101e33
+GiantEruption in Photometric(I) = 0x46d52ef2062ef3d9  # 1.7186e33
+GiantEruption in Photometric(J) = 0x46ce31931f20a225  # 1.2248e33
+GiantEruption in Photometric(H) = 0x46c0080878131e36  # 6.5031e32
+GiantEruption in Photometric(K) = 0x46b2eaf991095e67  # 3.837e32
+GiantEruption in Photometric(MidInfrared) = 0x466fe52d686d8b22  # 2.0216e31
 TidalDisruption: Centre over ["TIDAL_DISRUPTION_VICTIM"], pending None, lasting Some(Unending), curve Some(DisruptionTail)
 TidalDisruption in Photometric(U), Eddington share = 0x3ff0000000000000  # 1.0
 TidalDisruption in Photometric(B), Eddington share = 0x3ff0000000000000  # 1.0

@@ -17,7 +17,7 @@
 //! | `XrayTransient`     | recurrent | per band        | 1.0282 × 10³² W | 143.2 d  | binary     |
 //! | `XrayBurst`         | recurrent | per band        | 3.9023 × 10³¹ W | 144 s    | binary     |
 //! | `BeXOutburst`       | recurrent | none            | 2.9472 × 10³⁰ W | 102.1 d  | binary     |
-//! | `GiantEruption`     | recurrent | 1.2106 × 10³⁴ W | none            | 20 yr    | eruption   |
+//! | `GiantEruption`     | recurrent | per band        | none            | 20 yr    | eruption   |
 //! | `TidalDisruption`   | centre    | `L_Edd` of M•   | `L_Edd` ÷ 15.8  | unending | tail       |
 //! | `CentralFlare`      | centre    | none            | 3.5965 × 10²⁸ W | 8,175 s  | flare      |
 //! | `Flare`             | local     | per host        | none            | 1 day    | star flare |
@@ -89,8 +89,9 @@
 //! [`BinaryLightCurve::fades_below`]: crate::stellar::binary::light_curves::BinaryLightCurve::fades_below
 //! [`MAX_NOVA_TRANSFER_RATE`]: crate::stellar::binary::scan::MAX_NOVA_TRANSFER_RATE
 //!
-//! The giant eruptions' row is built from its source, plan 06's (P06.T28.e); their class's process
-//! is P09.T43's.
+//! The giant eruptions' row is built from its source, plan 06's (P06.T28.e), and their class's
+//! process is P09.T43's, which the recurrent walk reads (P12.T5.c). Their bound is the top of plan
+//! 06's peak law band by band, at their 5,000 K colour ([`GIANT_ERUPTION_BAND_PEAKS`]).
 //!
 //! # Magnetars
 //!
@@ -114,12 +115,13 @@
 //! supernovae's are their templates' light band by band, each term weighted by its spectrum's share
 //! (P12.T5.b): their shock breakouts, bright but far in the ultraviolet, give V little, and the
 //! stripped stars' gives the core collapses their X-rays. Plan 11's kinds take their curves' own
-//! light band by band (above). Every other row bounds the photometric bands alike. Where its source is bolometric (the tails' bolometric light, the giant eruptions,
-//! the star flares and the FU Orionis outbursts) that is the bolometric bound, an upper bound on
-//! every band, so a reach from it errs long and the flux decides (Design note 5). The X-ray bound
-//! is also filled where the source models the 2–10 keV band itself, the centre's flares and its
-//! tails, and for the magnetars, whose energies are the event's whole output, so that their bound
-//! bounds the band too.
+//! light band by band (above), and the giant eruptions their colour's share of their peak's. Every
+//! other row bounds the photometric bands alike. Where its source is bolometric (the tails'
+//! bolometric light, the star flares and the FU Orionis outbursts) that is the bolometric bound,
+//! an upper bound on every band, so a reach from it errs long and the flux decides (Design note 5).
+//! The X-ray bound is also filled where the source models the 2–10 keV band itself, the centre's
+//! flares and its tails, and for the magnetars, whose energies are the event's whole output, so
+//! that their bound bounds the band too.
 //!
 //! # The centre's tails
 //!
@@ -688,12 +690,32 @@ pub const KILONOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::ZERO,
 ];
 
-/// The bound on a giant eruption's own light in any band, W: 1.2106 × 10³⁴, 10^7.5 L☉, the top of
-/// plan 06's law for its peak ([`lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES`]) with the IAU's
-/// nominal solar luminosity, 3.828 × 10²⁶ W, rounded up at the fifth figure. The eruption's own
-/// light is the drawn peak less the star's quiescent luminosity, so it stays under the bound. A
-/// constant, not a factor of the host's, since the peak law is absolute. Bolometric.
+/// The bound on a giant eruption's own light, W: 1.2106 × 10³⁴, 10^7.5 L☉, the top of plan 06's
+/// law for its peak ([`lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES`]) with the IAU's nominal solar
+/// luminosity, 3.828 × 10²⁶ W, rounded up at the fifth figure. The eruption's own light is the
+/// drawn peak less the star's quiescent luminosity, so it stays under the bound. A constant, not a
+/// factor of the host's, since the peak law is absolute. Bolometric: it bounds every band's bound
+/// ([`GIANT_ERUPTION_BAND_PEAKS`]), which the row takes.
 pub const GIANT_ERUPTION_PEAK: Watts = Watts::new(1.2106e34);
+
+/// The bound on a giant eruption's own light in each band, W, in [`AlertBand::ALL`]'s order:
+/// 10^7.5 L☉ times a 5,000 K blackbody's share in the band, the eruption's colour
+/// ([`GIANT_ERUPTION_SHARES`](super::recurrent::GIANT_ERUPTION_SHARES)), rounded up at the fifth
+/// figure (P12.T5.c, as P12.T5.a.2's record foresaw): 1.1401 × 10³³ W in V, which reaches 1,007
+/// ly at a V limit of 10⁻⁶ W m⁻². None in radio or X-rays.
+pub const GIANT_ERUPTION_BAND_PEAKS: [Watts; BAND_COUNT] = [
+    Watts::new(4.6298e32),
+    Watts::new(9.8840e32),
+    Watts::new(1.1401e33),
+    Watts::new(2.1010e33),
+    Watts::new(1.7186e33),
+    Watts::new(1.2248e33),
+    Watts::new(6.5031e32),
+    Watts::new(3.8370e32),
+    Watts::new(2.0216e31),
+    Watts::ZERO,
+    Watts::ZERO,
+];
 
 /// The bound on a magnetar outburst's whole output, W: 5 × 10⁴⁰ (5 × 10⁴⁷ erg/s), a giant flare's
 /// spike at the top of its energy law, 10⁴⁷ erg over [`magnetar::GIANT_FLARE_SPIKE`]'s 0.2 s. A
@@ -1080,7 +1102,7 @@ static ROWS: [TransientRow; 16] = [
         classes: ClassSet::of(ClassId::LUMINOUS_BLUE_VARIABLE),
         route: Route::Recurrent,
         source: RowSource::Built {
-            bounds: bands_alike(Some(PeakBound::Watts(GIANT_ERUPTION_PEAK)), None),
+            bounds: band_by_band(GIANT_ERUPTION_BAND_PEAKS),
             duration: LongestDuration::AtMost(lbv::MAX_DURATION),
             rise: LongestRise::AtMost(GIANT_ERUPTION_RISE),
             light_curve: Some(LightCurveSource::GiantEruption),
@@ -1513,7 +1535,8 @@ mod tests {
     }
 
     /// The giant-eruption row bounds the eruption's own light in every photometric band: the top of
-    /// plan 06's peak law, 10^7.5 L☉, is under the bound and within its fifth figure, and D is the
+    /// plan 06's peak law, 10^7.5 L☉, is under the bolometric bound and within its fifth figure,
+    /// and its 5,000 K share of it under each band's and within its fifth figure; and D is the
     /// eruptions' longest.
     #[test]
     fn the_giant_eruption_row_bounds_its_own_light() {
@@ -1523,13 +1546,23 @@ mod tests {
         let top = math::exp10(lbv::LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES.1) * SOLAR_LUMINOSITY_W;
         let bound = GIANT_ERUPTION_PEAK.value();
         assert!(top <= bound && top / bound > 0.999_9, "{top:e} W");
-        for band in Band::ALL {
-            assert_eq!(
-                row.peak_bound(AlertBand::Photometric(band)),
-                Some(PeakBound::Watts(GIANT_ERUPTION_PEAK))
-            );
+        let shares = super::super::recurrent::GIANT_ERUPTION_SHARES;
+        for (band, share) in AlertBand::ALL.into_iter().zip(shares) {
+            let light = top * share;
+            match row.peak_bound(band) {
+                Some(PeakBound::Watts(watts)) => {
+                    let watts = watts.value();
+                    assert!(light <= watts && watts / light - 1.0 < 1e-4, "{band:?}");
+                    assert!(watts < bound, "{band:?}");
+                }
+                other => {
+                    assert_eq!(other, None, "{band:?}");
+                    assert_same_bits(share, 0.0);
+                }
+            }
         }
         assert_eq!(row.peak_bound(AlertBand::XRay), None);
+        assert_eq!(row.peak_bound(AlertBand::Photometric(Band::Radio)), None);
         assert_eq!(
             row.duration(),
             Some(LongestDuration::AtMost(lbv::MAX_DURATION))

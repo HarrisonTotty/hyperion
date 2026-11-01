@@ -2,24 +2,25 @@
 //! binaries' transients, bursts and Be/X outbursts, through plan 11's scan marks alone (design note
 //! 10 of plan 11), so that a scan of millions of hosts runs no binary engine.
 //!
-//! A cell's hosts are its scan marks ([`scan::scan_cell`](crate::stellar::binary::scan::scan_cell)),
-//! the class's entries exactly, each on its straight line through its site at the epoch. Their
-//! events are plan 11's ([`events_in`], P11.T9.b) over each host's emission interval
-//! ([`lit`](super::lit)):
+//! A cell's hosts are its scan marks
+//! ([`scan::scan_cell`](crate::stellar::binary::scan::scan_cell)), the class's entries exactly,
+//! each on its straight line through its site at the epoch. Their events are plan 11's
+//! ([`events_in`], P11.T9.b) over each host's emission interval ([`lit`](super::lit)):
 //!
 //! - **Novae.** A fast host's (`ACCRETING_WHITE_DWARF`) novae are asked of the monotone phase its
-//!   marks carry, unless the phase's noise bound puts no cycle's crossing in the interval. A slow host's (`ACCRETING_WHITE_DWARF_SLOW`) recur more slowly than L, so its
-//!   marks carry its eruptions in the source horizon, at most two, and the host is passed over unless
-//!   one falls in the interval; its phase is asked then, for the eruption's ID. Every onset whose
-//!   light can arrive in a window inside the clock window is in the source horizon.
-//! - **X-ray binaries.** A low-mass transient's outbursts, a persistent neutron star's Type I bursts
-//!   (main's ruling of 2026-10-30: walked here, not locally) and a Be/X host's giant outbursts; a
-//!   persistent black hole and a supergiant host have none.
+//!   marks carry, unless the phase's noise bound puts no cycle's crossing in the interval. A slow
+//!   host's (`ACCRETING_WHITE_DWARF_SLOW`) recur more slowly than L, so its marks carry its
+//!   eruptions in the source horizon, at most two, and the host is passed over unless one falls
+//!   in the interval; its phase is asked then, for the eruption's ID. Every onset whose light can
+//!   arrive in a window inside the clock window is in the source horizon.
+//! - **X-ray binaries.** A low-mass transient's outbursts, a persistent neutron star's Type I
+//!   bursts (main's ruling of 2026-10-30: walked here, not locally) and a Be/X host's giant
+//!   outbursts; a persistent black hole and a supergiant host have none.
 //!
 //! Each host is asked back by its own kind's longest event (the registry's duration), so that a
 //! burster's seconds are not listed over a transient's months, and passed over unasked if it stays
-//! beyond its own kind's reach, so that a scan for transients lists no burster beyond the bursts'. Dwarf novae are local (P12.T5.e), as
-//! their row's route says, and are not walked here.
+//! beyond its own kind's reach, so that a scan for transients lists no burster beyond the bursts'.
+//! Dwarf novae are local (P12.T5.e), as their row's route says, and are not walked here.
 
 use crate::events::{PhaseClock, TimeWindow};
 use crate::galaxy::Galaxy;

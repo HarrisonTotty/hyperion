@@ -9,9 +9,11 @@
 //!   [`ClassId::CORE_COLLAPSE`] (main's ruling of 2026-10-30; below);
 //! - the accreting white dwarfs, fast and slow, their novae, and the X-ray binaries, their
 //!   transients, X-ray bursts and Be/X outbursts, through plan 11's scan marks alone (P11.T8.a–b,
-//!   P11.T9; [`nova_scan_cell`], [`xray_binary_scan_cell`]).
+//!   P11.T9; [`nova_scan_cell`], [`xray_binary_scan_cell`]);
+//! - the luminous blue variables of plan 09's class (P09.T43), plan 06's giant eruptions
+//!   (P06.T28.e; [`giant_eruption_scan_cell`]).
 //!
-//! The luminous blue variables (P09.T43) wait for their walk. A class with no recurrent kind plans
+//! A class with no recurrent kind plans
 //! and scans nothing. Each class is walked over its cells within the reach of its recurrent kinds
 //! ([`recurrent_scan_plan`], the magnetars' [`magnetar_scan_plan`]), not widened by Design note 5's
 //! 1%, as T5.b's walk is not, and [`recurrent_detections`] merges a sphere's cells for any of them.
@@ -72,6 +74,7 @@ use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
+use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
 };
@@ -96,12 +99,18 @@ use crate::units::{Gauss, LightYears, Metres, SolarMasses, Watts, Years};
 use super::arriving::{ArrivingLight, DetectionLight};
 use super::reach::{flux, inverse_square_flux, kind_reach, transmission};
 use super::registry::{Route, TransientKind};
-use super::{AlertBand, AlertContext, AlertQuery, Detection, DetectionPhase, SensorHorizon};
+use super::{
+    AlertBand, AlertContext, AlertQuery, BAND_COUNT, Detection, DetectionPhase, SensorHorizon,
+};
 
 mod binaries;
+mod eruptions;
 mod lit;
 
 pub use binaries::{nova_scan_cell, xray_binary_scan_cell};
+pub use eruptions::{
+    BuildEruptionHostError, EruptionClass, EruptionHost, giant_eruption_scan_cell,
+};
 
 /// The longest a magnetar stays one after its neutron star's birth, Julian years: 10¹⁹ G yr ÷
 /// `B_Q`, 227,272.7, which a field born far above the critical field approaches (plan 06's
@@ -115,6 +124,33 @@ pub const MAGNETAR_ACTIVE_SPAN: Years =
 /// al. (2011, ApJ 739, 87, §4.1.2) two of 3–7 and 10–20 keV, equal in fluence: 0.07–0.12 for the
 /// former's ends. Stored at full precision and recomputed by a test. Part of the generator version.
 pub const MAGNETAR_BURST_XRAY_SHARE: f64 = 0.106_281_566_995_235_85;
+
+/// The share of a luminous blue variable's giant eruption's own light in each band, in
+/// [`AlertBand::ALL`]'s order: a 5,000 K blackbody's through each band's top hat
+/// ([`band_share`](super::band_share)), none in radio or X-rays (P12.T5.c).
+///
+/// The light echoes of η Carinae's Great Eruption show an early G-type supergiant's spectrum at
+/// its peak (Prieto et al. 2014, ApJL 787, L8, read at source in its abstract), some 5,000 K:
+/// Rest et al. (2012, Nature 482, 375, "Light echoes reveal an unexpectedly cool η Carinae during
+/// its nineteenth-century Great Eruption"; the figure recalled, its title read at source) took it
+/// for a G2–G5 supergiant's, cooler than the 7,000 K or more an opaque wind was thought to show
+/// (Davidson 1987, ApJ 317, 760; recalled, not read at source). Plan 06's eruptions are
+/// bolometric, so the share puts 0.094 of their light in V. Held to `band_share`'s to 10⁻¹² by a
+/// test, with the bits of the integral they were first stored from. Part of the generator
+/// version.
+pub const GIANT_ERUPTION_SHARES: [f64; BAND_COUNT] = [
+    0.038_245_858_899_365_98,
+    0.081_650_643_015_884_41,
+    0.094_176_500_995_914_4,
+    0.173_555_117_530_767_24,
+    0.141_966_794_944_053_5,
+    0.101_178_469_007_729_46,
+    0.053_720_796_674_658_33,
+    0.031_696_535_695_516_76,
+    0.001_670_013_988_742_865_3,
+    0.0,
+    0.0,
+];
 
 /// The 2–10 keV share of a giant flare's spike's whole output: 0.0036, from Frederiks et al.'s
 /// (2007, Astron. Lett. 33, 1) cut-off power law for SGR 1806−20's spike, peaking near 850 keV,
@@ -411,10 +447,10 @@ impl MagnetarCells for NoMagnetarCells {
 }
 
 /// The cells a background scan of `class` walks for `query` in `_galaxy`, in key order: for the
-/// core collapses, their magnetars' ([`magnetar_scan_plan`]); for the accreting white dwarfs and
-/// the X-ray binaries, their cells within the reach of their recurrent kinds
-/// ([`recurrent_scan_plan`]); none for a class the query does not ask about or a class with no
-/// recurrent kind walked here.
+/// core collapses, their magnetars' ([`magnetar_scan_plan`]); for the accreting white dwarfs,
+/// the X-ray binaries and the luminous blue variables, their cells within the reach of their
+/// recurrent kinds ([`recurrent_scan_plan`]); none for a class the query does not ask about or a
+/// class with no recurrent kind walked here.
 ///
 /// The galaxy is the plan's Provides': no class's cells need it.
 ///
@@ -439,6 +475,7 @@ fn is_walked(class: ClassId) -> bool {
         ClassId::ACCRETING_WHITE_DWARF,
         ClassId::ACCRETING_WHITE_DWARF_SLOW,
         ClassId::XRAY_BINARY,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
     ]
     .contains(&class)
 }
@@ -446,8 +483,9 @@ fn is_walked(class: ClassId) -> bool {
 /// Appends to `out` the recurrent events of `class`'s hosts in `cell` that `query`'s sensor sees in
 /// its window, sorted by arrival and then by event: for the core collapses, their magnetars'
 /// ([`magnetar_scan_cell`] with plan 09's process); for the accreting white dwarfs, their novae
-/// ([`nova_scan_cell`]), and for the X-ray binaries, their outbursts and bursts
-/// ([`xray_binary_scan_cell`]), each with its class's process; nothing for the other classes
+/// ([`nova_scan_cell`]), for the X-ray binaries, their outbursts and bursts
+/// ([`xray_binary_scan_cell`]), and for the luminous blue variables, their giant eruptions
+/// ([`giant_eruption_scan_cell`]), each with its class's process; nothing for the other classes
 /// (module documentation). A pure function of one catalogue cell, which a background scan runs in
 /// chunks (Design note 8).
 ///
@@ -517,6 +555,10 @@ pub fn scan_cell(
         ClassId::XRAY_BINARY => {
             let process = XrayBinaries::new(galaxy);
             xray_binary_scan_cell(galaxy, ctx, query, &process, cell, out);
+        }
+        ClassId::LUMINOUS_BLUE_VARIABLE => {
+            let process = LbvProcess::new(galaxy);
+            giant_eruption_scan_cell(galaxy, ctx, query, &process, cell, out);
         }
         // The other classes have no recurrent kind walked here.
         _ => {}
@@ -1004,6 +1046,25 @@ mod tests {
     use crate::galaxy::gas::noise::NoiseCache;
     use crate::units::{Kelvin, WattsPerSquareMetre};
 
+    /// The giant eruptions' shares are a 5,000 K blackbody's through each band's top hat, to 10⁻¹²,
+    /// none in radio or X-rays, 0.094 in V.
+    #[test]
+    fn the_eruption_shares_are_a_5000_k_blackbodys() {
+        for (band, &stored) in AlertBand::ALL.iter().zip(&GIANT_ERUPTION_SHARES) {
+            let share = match band {
+                AlertBand::Photometric(_) => band_share(Kelvin::new(5_000.0), *band),
+                AlertBand::XRay => 0.0,
+            };
+            if share > 0.0 {
+                assert!((stored / share - 1.0).abs() <= 1e-12, "{band:?}");
+            } else {
+                assert_same_bits(stored, 0.0);
+            }
+        }
+        let v = AlertBand::Photometric(crate::galaxy::gas::ccm::Band::V).index();
+        assert!((GIANT_ERUPTION_SHARES[v] - 0.094).abs() < 5e-4);
+    }
+
     /// The bursts' share is the mean of two blackbodies' at kT = 5 and 10 keV, to the bit, inside
     /// the 0.066–0.12 Israel et al.'s ends give; the giant flares' is under it, as their spikes are
     /// far harder.
@@ -1123,7 +1184,8 @@ mod tests {
 
     /// The classes with no recurrent kind walked here, and those whose recurrent kinds a sensor
     /// cannot see, plan and scan nothing: an X-ray sensor sees no nova and no giant eruption, but
-    /// the X-ray binaries' transients; a query that does not ask about a class plans nothing for it.
+    /// the X-ray binaries' transients; a query that does not ask about a class plans nothing for
+    /// it.
     #[test]
     fn classes_without_a_walked_kind_the_sensor_sees_scan_nothing() {
         let galaxy = Galaxy::new(Seed::new(9));

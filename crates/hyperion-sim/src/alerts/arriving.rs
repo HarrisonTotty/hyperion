@@ -24,6 +24,8 @@
 //!   its own 2–10 keV light above the quiescence; a disruption's tail is its band's share of the
 //!   tail's whole light, the 2–10 keV share or a hot blackbody's in a photometric band. Both leave
 //!   the black hole at rest at the origin, so their light time is the detection's.
+//! - A luminous blue variable's giant eruption is its own light, as a flare's is, times the
+//!   eruption's share of it in the band (the recurrent walk).
 //! - A pulsar glitch gives no light a sensor counts as flux, which its light says
 //!   ([`DetectionLight::Unlit`]).
 //!
@@ -38,6 +40,7 @@ use crate::observe::light_time;
 use crate::stellar::binary::light_curves::BinaryLightCurve;
 use crate::stellar::events::flares::Flare;
 use crate::stellar::events::fu_orionis::Outburst;
+use crate::stellar::events::lbv::Eruption;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Metres, Watts, WattsPerSquareMetre, Years};
@@ -97,6 +100,9 @@ enum Source {
     CentreFlare(CentreFlare),
     /// A tidal disruption's tail, and its band's share of the tail's whole light.
     Tail(DisruptionTail, f64),
+    /// A giant eruption, the star's quiescent luminosity at its onset, and the eruption's share of
+    /// its light in the band.
+    Eruption(Eruption, Watts, f64),
 }
 
 impl ArrivingLight {
@@ -229,6 +235,25 @@ impl ArrivingLight {
         }
     }
 
+    /// The light in `band`, of `share` of its own light, of `eruption` of a star of `quiescent`
+    /// luminosity at its onset, `distance` away through a line of sight of `transmission`: it
+    /// arrives one [`light_time`] after it left.
+    #[must_use]
+    pub(super) fn eruption(
+        (eruption, quiescent, share): (Eruption, Watts, f64),
+        band: AlertBand,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Eruption(eruption, quiescent, share),
+            band,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
     /// The band the flux is in: the detection's.
     #[must_use]
     pub const fn band(&self) -> AlertBand {
@@ -284,6 +309,10 @@ impl ArrivingLight {
             Source::Tail(tail, share) => {
                 Watts::new(share * tail.bolometric_watts_at(self.emitted(t)))
             }
+            Source::Eruption(eruption, quiescent, share) => {
+                let factor = eruption.luminosity_factor_at(self.emitted(t));
+                Watts::new((factor - 1.0) * quiescent.value() * share)
+            }
         };
         inverse_square_flux(luminosity, self.distance)
             .map_or(WattsPerSquareMetre::new(0.0), |bare| {
@@ -294,17 +323,17 @@ impl ArrivingLight {
     /// The times on the observer's clock, strictly increasing, between which the light is
     /// monotone: zero before the first, and constant from the last.
     ///
-    /// A flare's and an outburst's are their onset, peak and end, arriving one light time later, and
-    /// a magnetar's top hat its onset and end, the light constant between and gone at the end. The
-    /// centre's flares' are their onset, peak and end too. A disruption's tail's are its
-    /// disruption, dark until its fallback time, then that time, at which the light is its peak,
-    /// rounded up to the nanosecond so that it holds the peak and not the dark before it, and from
-    /// which it falls for ever under either of the tails' laws ([`DisruptionTail`]), so its last is
-    /// the clock window's end, past which no observer's time lies, if the peak arrives before it. A
-    /// merger's binary event's are its onset, its peak and its plateau's end, which a kilonova has
-    /// none of, and its end, after which it gives no light ([`binary_luminosity`]): it rises
-    /// linearly, holds its plateau and fades, monotone between them but for the nanosecond its
-    /// peak is floored to. A
+    /// A flare's, an outburst's and a giant eruption's are their onset, peak and end, arriving one
+    /// light time later, and a magnetar's top hat its onset and end, the light constant between
+    /// and gone at the end. The centre's flares' are their onset, peak and end too. A disruption's
+    /// tail's are its disruption, dark until its fallback time, then that time, at which the light
+    /// is its peak, rounded up to the nanosecond so that it holds the peak and not the dark before
+    /// it, and from which it falls for ever under either of the tails' laws ([`DisruptionTail`]),
+    /// so its last is the clock window's end, past which no observer's time lies, if the peak
+    /// arrives before it. A binary event's are its onset, its peak and its plateau's end, which a
+    /// kilonova or a nova has none of, and its end, after which it gives no light
+    /// ([`binary_luminosity`]): it rises linearly, holds its plateau and fades, monotone between
+    /// them but for the nanosecond its peak is floored to. A
     /// supernova's are its arrival and the ages of the grid its peak is taken on (the explosion,
     /// every hour of the first day, and every twentieth of a day to 1,096 days;
     /// [`light`](super::light)), then 228 years, when no template gives light. Every template
@@ -364,6 +393,9 @@ impl ArrivingLight {
                     knots.push(ClockWindow::END);
                 }
                 knots
+            }
+            Source::Eruption(eruption, ..) => {
+                increasing([eruption.onset(), eruption.peak(), eruption.end()].map(arrive))
             }
             Source::Binary(curve, onset) => {
                 let arrival = arrive(onset);
