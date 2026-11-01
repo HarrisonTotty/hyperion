@@ -392,12 +392,12 @@ filter = "package(hyperion-sim) & test(/^planetary::system::census_tests::compos
 threads-required = 8
 priority = 100
 
-# The million-system satellite check shares its cells among its own threads: it takes four slots
+# The million-system satellite check shares its cells among its own threads: it takes sixteen slots
 # rather than a nominal one, so its threads do not slow the tests beside it, and it is capped at
-# four threads to match (`check_all` in `planetary_properties.rs`).
+# sixteen threads to match (`SLOW_THREADS` in `planetary_properties.rs`).
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(planetary_properties) & test(=satellites::moons_inside_hill_spheres_and_rings_inside_roche_limits_slow)"
-threads-required = 4
+threads-required = 16
 priority = 90
 
 [[profile.slow.overrides]]

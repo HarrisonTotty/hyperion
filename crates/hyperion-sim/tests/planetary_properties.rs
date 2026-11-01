@@ -669,7 +669,7 @@ mod satellites {
     use hyperion_sim::planetary::moons::irregular::KOZAI_GAP;
     use hyperion_sim::planetary::moons::{CaptureKind, MoonParent};
     use hyperion_sim::planetary::placement::mutual_hill_radius;
-    use hyperion_sim::planetary::record::{BodyRecord, Population, Section};
+    use hyperion_sim::planetary::record::{BodyRecord, Population, Section, SystemSnapshot};
     use hyperion_sim::planetary::satellites::{Satellite, SatelliteMoon, Satellites};
     use hyperion_sim::planetary::{PlanetarySystem, SystemContext, generate};
     use hyperion_sim::time::{ClockWindow, UniverseTime};
@@ -778,27 +778,24 @@ mod satellites {
         }
     }
 
-    /// Asserts P14.T22.b's properties for one planet's satellites `found` in `system` at `t`.
+    /// Asserts P14.T22.b's properties for one planet's satellites `found` at the time of
+    /// `snapshot`, its system's snapshot, which holds their records.
     fn check(
         ctx: &SystemContext,
-        system: &PlanetarySystem,
+        snapshot: &SystemSnapshot,
         found: &Satellites,
-        t: UniverseTime,
         counts: &mut Counts,
     ) {
+        let t = snapshot.time();
         let Some(parent) = found.parent() else {
             return;
         };
-        let record = |index| {
-            system
-                .body_at(ctx, index, t)
-                .expect("a generated body resolves")
-        };
+        let record = |index| snapshot.body(index).expect("a generated body resolves");
         let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
         let mut ordered: Vec<(KeplerElements, &Satellite)> = Vec::new();
         for moon in found.moons() {
             let r = record(moon.index());
-            if !present(&r) {
+            if !present(r) {
                 continue;
             }
             let orbit = *r
@@ -855,7 +852,7 @@ mod satellites {
                 "{:?} crosses {:?} in {:?} at {t:?}: {inner:?} {outer:?} {mi:?} {mo:?} {parent:?}",
                 mi.index(),
                 mo.index(),
-                system.system()
+                snapshot.system()
             );
         }
         // Ruling 83.8: each irregular clears every other moon and avoids the Kozai gap.
@@ -885,25 +882,24 @@ mod satellites {
             );
             counts.irregulars += 1;
         }
-        check_rings(ctx, system, found, parent, t, counts);
+        check_rings(snapshot, found, parent, counts);
     }
 
-    /// Asserts that `found`'s rings about `parent` lie inside its Roche limits at `t` (P14.T20).
+    /// Asserts that `found`'s rings about `parent` lie inside its Roche limits at the time of
+    /// `snapshot`, which holds their records (P14.T20).
     fn check_rings(
-        ctx: &SystemContext,
-        system: &PlanetarySystem,
+        snapshot: &SystemSnapshot,
         found: &Satellites,
         parent: &MoonParent,
-        t: UniverseTime,
         counts: &mut Counts,
     ) {
         let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
         // Rings inside Roche limits (P14.T20).
         for ring in found.rings() {
-            let r = system
-                .body_at(ctx, ring.index(), t)
+            let r = snapshot
+                .body(ring.index())
                 .expect("a generated body resolves");
-            if !present(&r) {
+            if !present(r) {
                 continue;
             }
             let Section::Ok(Population::Ring(ring)) = r.population() else {
@@ -916,12 +912,19 @@ mod satellites {
     }
 
     /// Checks every planet's satellites of the first `count` systems of [`each_system`] at −H,
-    /// the epoch and +H.
+    /// the epoch and +H, on [`SLOW_THREADS`] threads.
     pub(super) fn check_all(seed: Seed, count: usize) -> Counts {
         let galaxy = galaxy(seed);
         let plan = plan(&galaxy, count);
-        check_shares(&galaxy, &plan)
+        check_shares(&galaxy, &plan, SLOW_THREADS)
     }
+
+    /// The threads [`check_all`] checks its systems on: the slots `.config/nextest.toml` reserves
+    /// for the million-system run, or the fewer a run grants.
+    const SLOW_THREADS: usize = 16;
+
+    /// The threads [`check_cells`] checks its chunk on, or the fewer a run grants.
+    const CHUNK_THREADS: usize = 4;
 
     /// A chunk of a plan's cells, in walk order.
     #[derive(Debug, Clone, Copy)]
@@ -942,10 +945,15 @@ mod satellites {
             Cells::FirstThird => &plan[..cut],
             Cells::OtherTwoThirds => &plan[cut..],
         };
-        check_shares(&galaxy, chunk)
+        check_shares(&galaxy, chunk, CHUNK_THREADS)
     }
 
     /// Checks the systems of the `k`th of `shares` shares of `plan`, every `shares`th cell.
+    ///
+    /// A system with a moon or a ring is checked at each time from its snapshot then, whose
+    /// records are [`PlanetarySystem::body_at`]'s body by body: a satellite's own record derives
+    /// its planet's record again, so the snapshot, which derives each body once, costs about half
+    /// as much.
     fn check_share(galaxy: &Galaxy, plan: &[(CellKey, usize)], k: usize, shares: usize) -> Counts {
         let mut counts = Counts::default();
         let mut records: Vec<SystemRecord> = Vec::new();
@@ -954,9 +962,18 @@ mod satellites {
             for record in records.iter().take(take) {
                 let ctx = SystemContext::from_record(galaxy, record);
                 let system = generate(galaxy.seed(), &ctx);
-                for found in system.satellites() {
-                    for t in window() {
-                        check(&ctx, &system, found, t, &mut counts);
+                // A planet with no moon and no ring, or with no parent, has nothing to check.
+                let checked = system.satellites().iter().any(|found| {
+                    found.parent().is_some()
+                        && !(found.moons().is_empty() && found.rings().is_empty())
+                });
+                if !checked {
+                    continue;
+                }
+                for t in window() {
+                    let snapshot = system.snapshot_at(&ctx, t);
+                    for found in system.satellites() {
+                        check(&ctx, &snapshot, found, &mut counts);
                     }
                 }
             }
@@ -966,10 +983,10 @@ mod satellites {
 
     /// The cells are shared out among threads, each counting its own; the checks are per system
     /// and the counts are summed, so the result is the same on any number of threads. At most
-    /// four, the slots `.config/nextest.toml` gives the slow run, or the fewer a run grants.
+    /// `reserved`, the slots `.config/nextest.toml` gives the run, or the fewer a run grants.
     #[cfg(not(target_family = "wasm"))]
-    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
-        let granted = hyperion_testkit::threads::granted(4);
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)], reserved: usize) -> Counts {
+        let granted = hyperion_testkit::threads::granted(reserved);
         // A machine whose parallelism cannot be read runs the grant: the counts are the same on any
         // number of threads.
         let threads =
@@ -992,7 +1009,7 @@ mod satellites {
 
     /// wasm32-wasip1 has no threads, so the whole plan is one share on this thread.
     #[cfg(target_family = "wasm")]
-    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)], _reserved: usize) -> Counts {
         check_share(galaxy, plan, 0, 1)
     }
 
