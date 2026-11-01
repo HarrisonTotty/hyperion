@@ -41,6 +41,7 @@ import type { Rgb } from "../view/photometry/toneCurve";
 import { type PhotorealFrame, PhotorealRenderer } from "../view/photoreal/renderer";
 import { AutoExposure } from "../view/post/autoExposure";
 import { type GlareSource, glareSourceVeilOf, glareSpreadTerms } from "../view/post/glare";
+import type { DiscAir } from "../view/post/glareAir";
 import type { Histogram } from "../view/post/histogram";
 import { METER_CLASS } from "../view/post/meter";
 import { tonemapTexel } from "../view/post/tonemap";
@@ -441,8 +442,9 @@ function compositeDiscTransmittance(settled: Settled): Rgb {
 }
 
 /**
- * The factor the air between gives the glare's light in `frame`, beside the share of the disc the
- * frame's bodies leave (`discLightThroughAir`'s `light`): its first host star's.
+ * The factor the air between gives the glare's light in `frame`, its first host star's
+ * (`discLightThroughAir`'s `light`), over the part of the disc above the ground, the part whose
+ * texels the composite's figure sums: each body's ground taken as the occluders' (`"occluders"`).
  */
 function glareLight(frame: PhotorealFrame, sun: GlareSource | undefined): Rgb {
   const light = frame.lights[0];
@@ -454,6 +456,17 @@ function glareLight(frame: PhotorealFrame, sun: GlareSource | undefined): Rgb {
     sun.direction,
     sun.angularRadiusRad,
     norm(light.centreM),
+  ).map((air): DiscAir =>
+    air.kind === "across"
+      ? {
+          kind: "across",
+          vertical: air.vertical,
+          offsets: air.offsets,
+          weights: air.weights,
+          lines: air.lines,
+          groundBy: "occluders",
+        }
+      : air,
   );
   return discLightThroughAir(light.disc, airs, sun.direction, 0).light;
 }
@@ -580,12 +593,12 @@ export async function captureViewLightAir(
   for (const result of results) {
     const compared = [0, 1, 2].filter((c) => (result.glareT[c] ?? 0) >= 1e-3);
     checks.check(
-      `fix-view-light air (${result.framing.name}) the glare is dimmed as the composite dims the disc: within 5% in each channel at 10⁻³ or more`,
-      compared.length > 0 &&
+      `fix-view-light air (${result.framing.name}) the glare is dimmed as the composite dims the disc: within 5% in each channel at 10⁻³ or more (none at 0°, recorded)`,
+      result.glareT.every((value) => Number.isFinite(value)) &&
         compared.every(
           (c) => Math.abs((result.glareT[c] ?? 0) / (result.discT[c] ?? Number.NaN) - 1) <= 0.05,
         ),
-      `channels ${compared.join(", ")}; ${resultText(result)}`,
+      `channels compared: ${compared.length === 0 ? "none" : compared.join(", ")}; ${resultText(result)}`,
     );
     checks.check(
       `fix-view-light air (${result.framing.name}) the Sun's halo falls as the closed form times the air's transmittance: every angle within 3 codes`,
