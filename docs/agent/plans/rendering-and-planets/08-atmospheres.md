@@ -24496,4 +24496,5 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   lane `fix-atmosphere-opaque`): `assemble.ts`'s `modesOf` gives each mode's term its record τ(550)
   times its `coverage`, as `bodyCoverOf` and an envelope's floor already took it; a mode of
   coverage 0 takes no term. `ATMOSPHERE_OPTICS_VERSION` is 6. A uniform medium still veils a broken
-  deck's clear share, which R11's coverage field draws (Design note 10 there).
+  deck's clear share, which R11's coverage field draws (Design note 10 there); the deck's term
+  leaves the medium then, or it is counted twice.

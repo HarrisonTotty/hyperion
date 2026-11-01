@@ -40,9 +40,11 @@
  *   τ(550) over the whole sky, the record's in-cloud τ times its coverage (`envelope.ts`'
  *   `skyOpticalDepth550`), since the medium is the same at every place on the body (the owner's
  *   report, 2026-11-01: the in-cloud τ drew a deck of 47–67% coverage as an overcast over the whole
- *   body, and its ground opaque under it);
+ *   body, and its ground opaque under it). The sky's τ keeps the deck's column, not its clear share:
+ *   the uniform term still veils the ground the broken deck leaves clear (Cahalan et al. 1994,
+ *   J. Atmos. Sci. 51, 2434, the plane-parallel bias), which plan R11's coverage field draws;
  * - at most `MAX_TERMS` (8) terms: the molecular term, then the others of greatest vertical depth
- *   (an absorber by `absorberRankingDepth`, a mode by its own τ(550), Thomson by σ_T U, the earlier
+ *   (an absorber by `absorberRankingDepth`, a mode by its sky's τ(550), Thomson by σ_T U, the earlier
  *   listed first on a tie), the rest left out and reported.
  *
  * **The reasons** behind `ATMOSPHERE: APPROXIMATE` are player text, each naming its substance by
