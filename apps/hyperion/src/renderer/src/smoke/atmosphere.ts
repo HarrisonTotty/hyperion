@@ -2422,6 +2422,7 @@ export async function checkBelowDeckFrameTwins(
           frame.suns,
           frame.surfaceM,
         );
+        // The frame's outputs are read back before the next frame draws over them.
         // oxlint-disable-next-line no-await-in-loop
         const gpu = await readFrameOutputs(engine, atmosphere);
         void ordered.later((later) => {
