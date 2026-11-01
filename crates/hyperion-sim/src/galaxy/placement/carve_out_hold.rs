@@ -732,12 +732,12 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
 
 /// P09.T38's complementarity on the carve-out's field half, for sampled records: under every 26
 /// hold the core-collapse claim on a grid record is the one shared test on the record's own marks,
-/// taken afresh through its parts, plan 08's `death_in_interval` on its initial mass, metallicity
-/// draw, η and draws, the site at its epoch position moved along its velocity to the death,
-/// `DeathMarks::of` on its stars at that velocity and `claims` in the field; and the carve-out
-/// claims it exactly then or for its window. The records are the ridge's and young-disc records
-/// re-massed and re-aged to die inside the interval and past +H, so that the test both claims and
-/// keeps.
+/// taken afresh through its parts, plan 08's `death_in_interval` under the galaxy's stellar rules
+/// on its initial mass, metallicity draw, η and draws, the site at its epoch position moved along
+/// its velocity to the death, `DeathMarks::of` on its stars at that velocity and `claims` in the
+/// field; and the carve-out claims it exactly then or for its window. The records are the ridge's
+/// and young-disc records re-massed and re-aged to die inside the interval and past +H, so that the
+/// test both claims and keeps.
 ///
 /// Each side keys its stars' draws on its own system's ID, so a class candidate has no grid twin
 /// with its marks: the test is per mark set, as P09.T38's is, and P09.T43's
@@ -746,17 +746,18 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
 #[test]
 fn the_core_collapses_claim_is_the_one_shared_test_on_sampled_records() {
     use crate::galaxy::catalogue_classes::supernova::{DeathMarks, Surroundings, claims};
-    use crate::galaxy::displaced::death_in_interval;
+    use crate::galaxy::displaced::death_in_interval_under;
     use crate::stellar::system::{draw_metallicity, primary_draws, primary_eta};
     let on = claimed();
     let shared = |r: &SystemRecord| {
         let composition = draw_metallicity(on, r);
-        let Some(death) = death_in_interval(
+        let Some(death) = death_in_interval_under(
             r.primary_initial_mass(),
             &composition,
             primary_eta(on, r),
             r.age_at_epoch(),
             || primary_draws(on, r),
+            on.rules().stellar,
         ) else {
             return false;
         };

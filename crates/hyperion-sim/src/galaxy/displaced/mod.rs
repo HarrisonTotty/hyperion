@@ -32,6 +32,7 @@ pub mod scales;
 pub mod site;
 
 pub use scales::GalaxyScales;
+pub(crate) use site::death_in_interval_under;
 pub use site::{ExplosionSite, death_in_interval, explosion_site};
 
 /// The number of speed bins of the class table: edges at 0.25, 0.5, 0.85, 1.3, 1.75, 2.2 and 2.8

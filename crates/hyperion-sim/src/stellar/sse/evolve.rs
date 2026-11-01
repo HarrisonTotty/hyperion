@@ -78,6 +78,30 @@ pub fn lifetime(m0: SolarMasses, composition: &Composition, draws: &StarDraws) -
     track::lifetime_of(m0, composition, draws, TrackOptions::default())
 }
 
+/// [`lifetime`] under the stellar stage's `rules` in place of the generator version's.
+///
+/// It is the lifetime of a star generated in a galaxy, under `galaxy.rules().stellar`, which is
+/// its [`StarModel`](crate::stellar::system::StarModel)'s track's, bit for bit. Under the
+/// version's rules it is [`lifetime`].
+///
+/// # Panics
+///
+/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
+#[must_use]
+pub(crate) fn lifetime_under(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> Years {
+    track::lifetime_of(
+        m0,
+        composition,
+        draws,
+        TrackOptions::default().with_rules(rules),
+    )
+}
+
 /// The state at `age` of a star on a main sequence without knots: [`Track::state_at`] of its
 /// track, bit for bit, at the cost of the main sequence's closed forms alone (plan 06, P06.T38.b),
 /// or `None` where the star is not on such a main sequence at `age`.

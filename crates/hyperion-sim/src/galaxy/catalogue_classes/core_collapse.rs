@@ -72,6 +72,8 @@
 //! record's epoch position is where that puts it at the epoch. Its record is a catalogue system's
 //! ([`SystemOrigin::CatalogueSystem`]), its stars plan 06's at its composition with the model's own
 //! multiplicity.
+//!
+//! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
 use super::grid::{CatalogueMember, ClassProcess};
 use super::ids::CatalogueCellKey;
@@ -84,7 +86,7 @@ use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::ages::YOUNG_AGE_LIMIT;
 use crate::galaxy::bounds::CellBox;
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw_on;
@@ -94,10 +96,11 @@ use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::rng::{DomainTag, ObjectKey, Stream, Threshold, tags};
+use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{SystemStars, track_mass_of};
-use crate::stellar::{Composition, lifetime};
 use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, PerCubicLightYear, SolarMasses, Years};
 
@@ -394,9 +397,15 @@ impl ClassProcess for CoreCollapseProcess {
             HeliumExcess::ZERO,
         );
         // 3. The primary's draws, at attempt 0 as its record reads them, and its lifetime, as plan
-        //    08's predicate's exact tier computes it.
+        //    08's predicate's exact tier computes it, under the galaxy's stellar rules.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let life = lifetime(track_mass_of(mass), &composition, &draws).value();
+        let life = lifetime_under(
+            track_mass_of(mass),
+            &composition,
+            &draws,
+            galaxy.rules().stellar,
+        )
+        .value();
         // 4. T across the field's interval, and the age at the epoch it implies.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
         let death = self.death_at(stream.uniform());
@@ -450,18 +459,19 @@ struct RecentDeath {
 }
 
 impl RecentDeath {
-    /// The death of `candidate`'s primary, if plan 08's
-    /// [`death_in_interval`] puts it in the interval
-    /// and it makes a shell ([`DeathMarks::of`]).
+    /// The death of `candidate`'s primary, if plan 08's interval predicate
+    /// ([`death_in_interval_under`]) puts it in the interval, under the galaxy's stellar rules as
+    /// its stars are, and it makes a shell ([`DeathMarks::of`]).
     #[must_use]
     fn of(galaxy: &Galaxy, candidate: &CoreCollapseCandidate) -> Option<Self> {
         let draws = &candidate.draws;
-        let death = death_in_interval(
+        let death = death_in_interval_under(
             candidate.mass,
             &candidate.composition,
             draws.eta(),
             candidate.age_at_epoch,
             || draws.clone(),
+            galaxy.rules().stellar,
         )?;
         // The primary, on a record at the site: it reads no position, and the record the entry
         // keeps is moved to the epoch once the kick is known. Its companions are no members of the
@@ -601,6 +611,8 @@ pub(super) fn class_site_velocity(
 /// record of `galaxy`; and in debug builds, as [`DeathMarks::of`], if `site`'s death is not the
 /// primary's, and if the record moves fast enough to outrun the reach before its death
 /// ([`lifetime_cap`]'s edge, about 4,649 km/s).
+///
+/// [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 #[must_use]
 pub(crate) fn recent_death_claims(
     galaxy: &Galaxy,

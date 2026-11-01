@@ -401,14 +401,15 @@ fn every_entry_is_the_shared_test_s() {
                 CatalogueCellKey::containing(ClassId::CORE_COLLAPSE, site.position()),
                 Some(*cell)
             );
-            // The predicate, on the record's own marks.
+            // The predicate, on the record's own marks, under the galaxy's stellar rules.
             let draws = StarDraws::for_star(galaxy.seed(), BodyId::new(system, 0));
-            let death = death_in_interval(
+            let death = death_in_interval_under(
                 record.primary_initial_mass(),
                 value.composition(),
                 draws.eta(),
                 record.age_at_epoch(),
                 || draws.clone(),
+                galaxy.rules().stellar,
             );
             assert_eq!(death, Some(site.death()));
             assert_eq!(value.supernova().explosion(), site.death());

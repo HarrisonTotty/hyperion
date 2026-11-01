@@ -90,6 +90,7 @@
 //!
 //! [`is_luminous_blue_variable`]: crate::stellar::classify::is_luminous_blue_variable
 //! [`tables::lbv`]: crate::tables::lbv
+//! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
 use super::core_collapse::class_site_velocity;
 use super::grid::{CatalogueMember, ClassProcess};
@@ -99,7 +100,7 @@ use super::supernova::{DeathMarks, Surroundings, claims};
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::bounds::{BOUND_MARGIN, CellBox};
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
@@ -665,10 +666,11 @@ impl LbvCandidate {
 /// stars are `stars` at `composition` and whose velocity is `velocity`: the one shared test on the
 /// grid's terms (P09.T33.a, P09.T35).
 ///
-/// Plan 08's [`death_in_interval`] on the primary's marks gives T; the explosion site is the
-/// epoch position moved along `velocity` to T by straight line, as plan 08's `explosion_site`
-/// moves a grid record's; and the class claims the death if [`DeathMarks::of`] gives it a shell
-/// and [`claims`] keeps it in the field.
+/// Plan 08's interval predicate on the primary's marks ([`death_in_interval_under`]), under the
+/// galaxy's stellar rules as `stars` are, gives T; the explosion site is the epoch position moved
+/// along `velocity` to T by straight line, as plan 08's `explosion_site` moves a grid record's;
+/// and the class claims the death if [`DeathMarks::of`] gives it a shell and [`claims`] keeps it
+/// in the field.
 ///
 /// # Panics
 ///
@@ -682,12 +684,13 @@ fn core_collapse_claims(
     stars: &SystemStars,
     velocity: GalacticVelocity,
 ) -> bool {
-    let Some(death) = death_in_interval(
+    let Some(death) = death_in_interval_under(
         record.primary_initial_mass(),
         composition,
         primary_eta(galaxy, record),
         record.age_at_epoch(),
         || primary_draws(galaxy, record),
+        galaxy.rules().stellar,
     ) else {
         return false;
     };

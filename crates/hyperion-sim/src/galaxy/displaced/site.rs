@@ -7,9 +7,10 @@
 //! such system", so that nothing is counted twice. This module is the grid side's half of it:
 //!
 //! - [`death_in_interval`] decides, from a primary's own marks, whether its death falls in the
-//!   interval (−(`W_cap` + L + H), +H], and when. It is the first half of the one shared test.
-//!   Every side that keeps or claims a recently dead system calls it on its own candidate's
-//!   primary, and plan 09's `claims` is the second half (P09.T17).
+//!   interval (−(`W_cap` + L + H), +H], and when, under the generator version's stellar rules. It
+//!   is the first half of the one shared test. Every side that keeps or claims a recently dead
+//!   system asks it on its own candidate's primary, inside the crate under its galaxy's stellar
+//!   rules (`death_in_interval_under`), and plan 09's `claims` is the second half (P09.T17).
 //! - [`explosion_site`] is that predicate on a grid record's marks, with the site the record's
 //!   epoch position moved along its velocity to the death (Design note 22's x + v T).
 //! - `recent_death_claim` is the gate: the claim plan 03's carve-out hook passes each site to.
@@ -39,16 +40,17 @@
 //!    composition with a helium excess, which shortens a life and which the bracket is built
 //!    without (no grid star has one; plan 09's members may). It decides nearly every layer-E
 //!    record, since they are old and long dead.
-//! 2. **The fate table** at the star's composition and η, [`FittedFates::fate_fitted`], where it
-//!    answers and the companion-stripped mark cannot move the fate ([`stripped_mark_matters`],
-//!    whose draws are read only inside [`STRIPPED_WINDOW`]). With d its death age and m the range
-//!    brief's margin, max([`STATED_FACTOR`] × the age's bound, [`DEAD_MARGIN_FLOOR`]), the bracket
-//!    is d ÷ (1 + m) to d ÷ (1 − m): the table's bound is relative to the exact value
-//!    (`hyperion-fit`'s `stellar_fates`, its error's column 0), and that bracket is what it
-//!    implies.
+//! 2. **The fate table** at the star's composition and η, [`FittedFates::fate_fitted`], under the
+//!    Humphreys–Davidson arm it was fitted for, where it answers and the companion-stripped mark
+//!    cannot move the fate ([`stripped_mark_matters`], whose draws are read only inside
+//!    [`STRIPPED_WINDOW`]). With d its death age and m the range brief's margin,
+//!    max([`STATED_FACTOR`] × the age's bound, [`DEAD_MARGIN_FLOOR`]), the bracket is d ÷ (1 + m)
+//!    to d ÷ (1 − m): the table's bound is relative to the exact value (`hyperion-fit`'s
+//!    `stellar_fates`, its error's column 0), and that bracket is what it implies.
 //! 3. **The exact lifetime**: `stellar::lifetime` at the track mass (held to 150 M☉, as
 //!    [`StarModel`](crate::stellar::system::StarModel) holds it), the composition and the full
-//!    draws. Its death time is [`SystemStars::death_time`]'s, bit for bit.
+//!    draws, under the stellar rules the stars are generated under (a galaxy's, for a grid record
+//!    or a catalogue candidate). Its death time is [`SystemStars::death_time`]'s, bit for bit.
 //!
 //! The comparisons are in the clock's own [`UniverseTime`], never in `f64` years: each bracket end
 //! is converted to a clock time as the death itself is, and an end the clock cannot hold lies
@@ -74,7 +76,6 @@
 
 use std::cell::LazyCell;
 
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
@@ -82,18 +83,20 @@ use crate::galaxy::displaced::marks::LifetimeBracket;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::epoch_velocity;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
+use crate::stellar::Composition;
 use crate::stellar::brief::{DEAD_MARGIN_FLOOR, STATED_FACTOR};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::fates::{FittedFate, FittedFates, STRIPPED_WINDOW, stripped_mark_matters};
-use crate::stellar::sse::MIN_INITIAL_MASS;
+use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::{MIN_INITIAL_MASS, lifetime_under};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{
     clock_time_of_death, draw_metallicity, primary_draws, primary_eta, track_mass_of,
 };
-use crate::stellar::{Composition, lifetime};
 use crate::time::{CLOCK_WINDOW_H, ClockWindow, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Seconds, SolarMasses, Years};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// Where and when a primary died, or will die, inside the interval (−(`W_cap` + L + H), +H] (plan
 /// 08, P08.T13): what plan 09's supernova test reads of an explosion (P09.T17).
@@ -151,16 +154,17 @@ impl ExplosionSite {
 /// The primary is given by its marks: its initial mass `m0` (M☉), its `composition`, its Reimers η
 /// `eta`, its age at the epoch `age_at_epoch` (Julian years since its onset of collapse) and its
 /// full draws, which `draws` makes. The death time is the clock's EPOCH + (lifetime − age at the
-/// epoch) × 31,557,600 s, floored to the nanosecond, the time
-/// [`SystemStars::death_time`] gives for the same marks, bit for bit. `None` also below 0.1 M☉,
-/// where nothing dies, and where the clock cannot hold the death.
+/// epoch) × 31,557,600 s, floored to the nanosecond, the time [`SystemStars::death_time`] gives
+/// for the same marks under the generator version's stellar rules, bit for bit. `None` also below
+/// 0.1 M☉, where nothing dies, and where the clock cannot hold the death.
 ///
 /// It decides in the module's three tiers, cheapest first: the mass bracket, the fate table and
 /// the exact lifetime. The brackets are validated, not proved, so a `None` can be wrong at a rate
 /// the soundness test bounds below 3 × 10⁻⁴ per death in the interval; a `Some` never is. That is
-/// why every side of the shared test calls this one function and none tests a death against the
-/// interval by another route: the grid's carve-out through [`explosion_site`], and plan 09's field
-/// candidates, runaways, walkaways and feature members on their own primaries' marks. A candidate
+/// why every side of the shared test decides through this predicate's one core and none tests a
+/// death against the interval by another route: the grid's carve-out through [`explosion_site`],
+/// and plan 09's field candidates, runaways, walkaways and feature members on their own
+/// primaries' marks, each under its galaxy's stellar rules, as its stars are. A candidate
 /// whose death was drawn inside the interval but which this puts outside is dropped by the
 /// catalogue, because the grid keeps that system.
 ///
@@ -204,11 +208,45 @@ pub fn death_in_interval(
     age_at_epoch: Years,
     draws: impl FnOnce() -> StarDraws,
 ) -> Option<UniverseTime> {
+    death_in_interval_under(
+        m0,
+        composition,
+        eta,
+        age_at_epoch,
+        draws,
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`death_in_interval`] under the stellar stage's `rules` in place of the generator version's.
+///
+/// It is the predicate a side asks whose primary's stars are generated in a galaxy, with
+/// `galaxy.rules().stellar`, so that its exact tier's death is those stars'
+/// [`SystemStars::death_time`], bit for bit, under every arm. Under the version's rules it is
+/// [`death_in_interval`].
+///
+/// Under a Humphreys–Davidson arm the fate table was not fitted for (`HdLimitRules`'
+/// `fitted_tables_hold`) its tier is skipped, as the range brief skips it, and the mass bracket
+/// and the exact lifetime decide.
+///
+/// # Panics
+///
+/// As [`death_in_interval`] does.
+#[must_use]
+pub(crate) fn death_in_interval_under(
+    m0: SolarMasses,
+    composition: &Composition,
+    eta: StandardNormal,
+    age_at_epoch: Years,
+    draws: impl FnOnce() -> StarDraws,
+    rules: StellarRules,
+) -> Option<UniverseTime> {
     decide(
         m0,
         age_at_epoch,
         &given_marks(composition, eta, draws),
-        lifetime,
+        rules,
+        |m, composition, draws| lifetime_under(m, composition, draws, rules),
     )
 }
 
@@ -222,6 +260,9 @@ pub fn death_in_interval(
 /// every one, opens no stream: the metallicity and η cost three quarters of the hook for such a
 /// record, where they are not needed (P08.T13's measurement). The grid's metallicity draw gives
 /// no helium excess, so the mass bracket asks it nothing.
+///
+/// It decides under the galaxy's stellar rules, the rules its record's [`SystemStars`] are
+/// generated under, so that the site dies when the stars do.
 ///
 /// Where that gives a death at T, the site is the epoch position x moved by the epoch velocity v
 /// ([`epoch_velocity`]) over T, by straight line: x + v T (Design note 22), which for a remnant
@@ -297,11 +338,13 @@ pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<Explosio
         draws: LazyCell::new(|| primary_draws(galaxy, record)),
         helium_free: true,
     };
+    let rules = galaxy.rules().stellar;
     let death = decide(
         record.primary_initial_mass(),
         record.age_at_epoch(),
         &marks,
-        lifetime,
+        rules,
+        |m, composition, draws| lifetime_under(m, composition, draws, rules),
     )?;
     let elapsed = Seconds::new(death.since_epoch().as_seconds_f64());
     let position = record
@@ -378,18 +421,21 @@ pub(crate) const fn keeps_a_recent_type_ia(_stars: &SystemStars) -> bool {
 }
 
 /// The predicate's core: [`death_in_interval`] of a primary of initial mass `m0` and age at the
-/// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, with the exact
-/// tier's death age given by `exact_death_age` of the track mass, the composition and the draws.
+/// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, under the
+/// stellar stage's `rules`, with the exact tier's death age given by `exact_death_age` of the
+/// track mass, the composition and the draws, the lifetime under the same rules.
 ///
-/// Every side of the shared test decides through this one function: [`death_in_interval`] with
-/// the marks given and `stellar::lifetime`, [`explosion_site`] with a grid record's marks made
+/// Every side of the shared test decides through this one function: [`death_in_interval_under`]
+/// with the marks given and `lifetime_under`, [`explosion_site`] with a grid record's marks made
 /// lazily, the soundness test with its own death age; and P08.T12.c will pass the lifetime it has
-/// already computed for a layer-E record (Design note 19) rather than compute it again.
+/// already computed for a layer-E record (Design note 19) rather than compute it again. The fate
+/// table's tier is asked only under the Humphreys–Davidson arm it was fitted for.
 #[must_use]
 fn decide<C, E, D>(
     m0: SolarMasses,
     age_at_epoch: Years,
     marks: &Marks<C, E, D>,
+    rules: StellarRules,
     exact_death_age: impl FnOnce(SolarMasses, &Composition, &StarDraws) -> Years,
 ) -> Option<UniverseTime>
 where
@@ -410,10 +456,12 @@ where
         count(Verdict::Bracket);
         return None;
     }
-    // 2. The fate table, which holds unstripped stars.
+    // 2. The fate table, which holds unstripped stars on the version's tracks: under another
+    //    Humphreys–Davidson arm the exact tier decides.
     let eta = *LazyCell::force(&marks.eta);
-    if let Some(fate) =
-        FittedFates::generator().fate_fitted(m0, LazyCell::force(&marks.composition), eta)
+    if rules.hd_limit.fitted_tables_hold()
+        && let Some(fate) =
+            FittedFates::generator().fate_fitted(m0, LazyCell::force(&marks.composition), eta)
     {
         let (lo, hi) = STRIPPED_WINDOW;
         let stripped = (lo..=hi).contains(&m0.value())
@@ -680,6 +728,8 @@ mod tests {
     use crate::math;
     use crate::rng::{ObjectKey, Stream, tags};
     use crate::stellar::draws::StarDrawsParts;
+    use crate::stellar::lifetime;
+    use crate::stellar::sse::wind::HdLimitRules;
     use crate::stellar::system::{ClockDeath, SystemStars};
     use crate::units::{Dex, HeliumExcess, LightYears};
 
@@ -868,6 +918,7 @@ mod tests {
                     p.m0,
                     age,
                     &given_marks(&p.composition, eta, || p.draws.clone()),
+                    StellarRules::of_version(GENERATOR_VERSION),
                     |_, _, _| death_age,
                 );
                 if expected.is_some() && got.is_none() {
@@ -937,6 +988,51 @@ mod tests {
         assert_eq!(
             (verdicts.bracket, verdicts.table, verdicts.exact()),
             (0, 0, 2)
+        );
+    }
+
+    /// The fate table is the version's tracks', so its tier decides only under the
+    /// Humphreys–Davidson arm it was fitted for.
+    ///
+    /// At an age that puts a 20 M☉ star's death a year past +H at the table's least death age,
+    /// the table decides `None` under the version's rules; under the enforced limit the exact tier
+    /// decides, here on a death age that puts the death at the epoch.
+    #[test]
+    fn the_fate_table_decides_only_under_the_arm_it_was_fitted_for() {
+        let (m0, solar, draws) = (
+            SolarMasses::new(20.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+        );
+        let eta = draws.eta();
+        let fate = FittedFates::generator()
+            .fate_fitted(m0, &solar, eta)
+            .expect("the table answers at 20 M☉");
+        let (least, _) = table_bracket(&fate);
+        let (widest, _) = LifetimeBracket::shared().bracket(m0).expect("in its range");
+        assert!(widest.value() < least.value() - 1e3, "{widest:?} {least:?}");
+        let age = Years::new(least.value() - CLOCK_WINDOW_H.as_julian_years_f64() - 1.0);
+        let version = StellarRules::of_version(GENERATOR_VERSION);
+        let enforced = StellarRules {
+            hd_limit: HdLimitRules::Enforced,
+            ..version
+        };
+        let ask = |rules| {
+            decide(
+                m0,
+                age,
+                &given_marks(&solar, eta, || draws.clone()),
+                rules,
+                |_, _, _| age,
+            )
+        };
+        take_verdicts();
+        assert_eq!(ask(version), None);
+        assert_eq!(ask(enforced), Some(UniverseTime::EPOCH));
+        let verdicts = take_verdicts();
+        assert_eq!(
+            (verdicts.bracket, verdicts.table, verdicts.exact_inside),
+            (0, 1, 1)
         );
     }
 

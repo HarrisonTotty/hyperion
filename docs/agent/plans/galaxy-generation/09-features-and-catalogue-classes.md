@@ -5383,3 +5383,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   moves).** `Galaxy::type_ia_delays` (crate-private) keeps `DelayTimeDistribution::of_field` in a
   lazy cell, counted in `heap_bytes`, and `TypeIaProcess` holds it as an `Arc`. `from_galaxy`
   (the carve-out's `layer_d_kept`, `ancient_share`) still builds its own.
+- **P09.T35 with P06.T42.b (lane `fix-26-hold-tests`, 2026-10-31; no output on the record moved,
+  and under every 26 hold the sites of primaries past the limit move).** The interval
+  predicate reads the galaxy's stellar rules, as its stars do: `explosion_site`, the core-collapse
+  class's candidates and claims and the LBVs' `core_collapse_claims` call the new
+  `displaced::death_in_interval_under` and `sse::lifetime_under` (`death_in_interval` keeps the
+  version's). Its fate-table tier is refused under another Humphreys–Davidson arm, as the
+  brief's is.

@@ -9,7 +9,8 @@
 //! - **D2.** Under the enforced limit these readers show a mover: a track's builders (the track, its
 //!   fate and remnant without segments), a star's model, the engine's pinned death, the range
 //!   brief (whose table route closes and whose gate certifies no pair, its primaries built
-//!   exactly), and the eruptions' thinning (with `events::lbv`'s
+//!   exactly), the explosion sites' deaths (`displaced::site`, the carve-out's and the catalogue
+//!   classes' interval predicate), and the eruptions' thinning (with `events::lbv`'s
 //!   `the_thinned_eruptions_are_the_windows_candidates_at_lbv_states`, which holds the thinned
 //!   listing to the bins' candidates). A star that never passes the limit moves under none.
 //! - **D4.** The same seed twice under the enforced limit gives the same output.
@@ -36,11 +37,14 @@
 //!   freeze holds; the class table's kick bins and lifetimes keep them too. The brief reads a
 //!   fitted fate per star and the pair-light and reach tables per pair, and refuses both under
 //!   another arm ([`HdLimitRules::fitted_tables_hold`]);
+//! - the interval predicate's mass bracket (`displaced::marks::LifetimeBracket`), built from the
+//!   version's lifetimes and widened by a tenth; its exact tier and the core-collapse class's
+//!   lifetimes read the galaxy's rules, and its fate-table tier is refused under the limit, as
+//!   the brief's is. Under every 26 hold the carve-out puts the site on the record, where its
+//!   death must be its stars';
 //! - readers that are no single star's track and that nothing on the record reaches under a hold:
-//!   the displaced classes' explosion sites and deaths in an interval (`displaced::site`), which
-//!   read the fate table and the version's lifetimes, the core-collapse catalogue's ages from the
-//!   version's lifetimes, and the stripping seam's table for stars with no helium excess. Each
-//!   takes the enforced tracks with the bump's refits.
+//!   the stripping seam's table for stars with no helium excess, which takes the enforced tracks
+//!   with the bump's refits.
 
 use std::fmt::Write as _;
 use std::sync::OnceLock;
@@ -49,6 +53,7 @@ use super::*;
 use crate::GENERATOR_VERSION;
 use crate::events::RateModel;
 use crate::galaxy::Galaxy;
+use crate::galaxy::displaced::explosion_site;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
@@ -61,10 +66,11 @@ use crate::stellar::brief::{BriefModel, BriefRoute};
 use crate::stellar::classify::is_luminous_blue_variable;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::events::lbv::{EJECTED_MASS_SOLAR_MASSES, ERUPTIONS_PER_YEAR, LbvModel};
+use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::remnant::collapse::PULSATIONAL_PAIR_INSTABILITY_BLACK_HOLE;
 use crate::stellar::sse::wind::HdLimitRules;
 use crate::stellar::sse::{PhasePredicate, Track, TrackOptions, fate_of, remnant_of};
-use crate::stellar::system::{StarModel, SystemStars};
+use crate::stellar::system::{ClockDeath, StarModel, SystemStars};
 use crate::stellar::{Composition, Phase};
 use crate::time::{Span, UniverseTime};
 use crate::units::{
@@ -141,7 +147,8 @@ fn the_hd_limit_is_held_only_until_the_26_bump() {
          evolved star past the limit moves, and the eruptions are thinned): delete \
          `HD_LIMIT_VERSION`, `HdLimitRules` with its `Belczynski` arm, `StellarRules::hd_limit`, \
          the `match` in `wind::rate` (keep `modern` for P06.T42.a's tests), the eruptions' match, \
-         `HdLimitRules::fitted_tables_hold` and the brief's use of it, this module and \
+         `HdLimitRules::fitted_tables_hold` and the brief's and `displaced::site::decide`'s uses \
+         of it, this module and \
          `stellar::testing`'s enforced census; move \
          `the_thinned_eruptions_are_the_windows_candidates_at_lbv_states` (`events::lbv`) to the \
          version's rules; rewrite against `modern` \
@@ -424,6 +431,50 @@ fn the_brief_builds_its_primaries_under_the_galaxy_s_rules() {
         }
     }
     assert!(refused > 0, "the gate refused no pair under the limit");
+}
+
+/// D2, the explosion site (`displaced::site`): a grid record's site, which the carve-out passes to
+/// the core-collapse claim with the record's stars, dies when those stars die under the galaxy's
+/// rules, and the limit moves the death.
+///
+/// The records are the four primaries past the limit, each re-aged to have died about a million
+/// years before the epoch.
+#[test]
+fn the_explosion_site_dies_with_the_galaxy_s_stars() {
+    let (held, enforced) = (held_galaxy(), enforced_galaxy());
+    let death = |galaxy: &Galaxy, record: &SystemRecord| {
+        let stars = SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle);
+        let ClockDeath::At(death, _) = stars.death_time() else {
+            panic!(
+                "a primary past the limit dies on the clock: {:?}",
+                record.id()
+            );
+        };
+        death
+    };
+    let systems = records(held);
+    let mut moved = 0;
+    for record in &systems[systems.len() - 4..] {
+        let lifetime = death(enforced, record).since_epoch().as_julian_years_f64()
+            + record.age_at_epoch().value();
+        let dying = SystemRecord::from_parts(
+            record.id(),
+            *record.epoch_position(),
+            record.origin(),
+            record.population(),
+            record.primary_initial_mass(),
+            Years::new(lifetime + 1.0e6),
+        );
+        let site = |galaxy| {
+            explosion_site(galaxy, &dying)
+                .expect("a death a million years ago is in the interval")
+                .death()
+        };
+        assert_eq!(site(enforced), death(enforced, &dying), "{:?}", dying.id());
+        assert_eq!(site(held), death(held, &dying), "{:?}", dying.id());
+        moved += usize::from(site(enforced) != site(held));
+    }
+    assert!(moved > 0, "the limit moves no site's death");
 }
 
 /// D2, the eruptions: under the enforced limit a candidate is kept only where the star is a
