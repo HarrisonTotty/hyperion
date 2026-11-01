@@ -41,8 +41,10 @@ import {
 } from "../view/atmosphere/discTable";
 import { tableRadiusM } from "../view/atmosphere/hillaire";
 import type { SurfaceTemperatureField } from "../view/atmosphere/thermal";
+import { gravityOfSpheroid } from "../test/atmosphereFixtures";
 import { groundFieldOf, magmaOceanSurface } from "../test/thermalSurfaces";
-import { gravityRatio } from "../view/atmosphere/oblate";
+import type { AtmosphereMedium } from "../view/atmosphere/medium";
+import { type BodyGravity, gravityRatio, type LevelSpheroid } from "../view/atmosphere/oblate";
 import {
   SATURN_OBLATE_GRAVITY,
   SATURN_OBLATE_REFERENCE,
@@ -497,6 +499,50 @@ function saturnBodyTable(engine: RenderEngine): TextureHandle {
   return texture;
 }
 
+/**
+ * The hand Jupiter's figure as its disc table stands on it (R08.T16.b.2): its envelope floor's
+ * level surface, 71,310.9 by 66,697.1 km (`view/scenes/atmosphereScene.ts`' `TEST JUPITER`), its
+ * gravity a level spheroid's of Jupiter's GM, 1.266865 × 10¹⁷ m³ s⁻² (Jacobson 2013, JUP310), and
+ * System III's spin, 870.536° d⁻¹ (Archinal et al. 2018, Table 2; `test/giantFixtures.ts`).
+ */
+const JUPITER_FLOOR: LevelSpheroid = {
+  equatorialRadiusM: 71_310_949.177_708_8,
+  polarRadiusM: 66_697_132.634_374_596,
+  gmM3S2: 1.266_865e17,
+  angularVelocityRadS: (870.536 * Math.PI) / 180 / 86_400,
+};
+
+/** The hand Jupiter's air above its floor as its body table takes it: its height alone, m. */
+const JUPITER_AIR: AtmosphereMedium = {
+  name: "the hand Jupiter above its floor",
+  topHeightM: 423_543.4,
+  groundAlbedo: [0, 0, 0],
+  terms: [],
+};
+
+/** A level spheroid's body table as the kernels read it, uploaded (`packOblateBody`). */
+function bodyTableOf(
+  engine: RenderEngine,
+  spheroid: LevelSpheroid,
+  gravity: BodyGravity,
+  medium: AtmosphereMedium,
+  name: string,
+): TextureHandle {
+  const plan = tablesPlanOf({ figure: spheroid, gravity }, tableRadiusM(spheroid));
+  const texels = packOblateBody(spheroid, gravity, plan, tableRadiusM(spheroid), medium, 1);
+  const texture = engine.createTexture({
+    name,
+    size: { width: OBLATE_BODY_TEXELS, height: 1 },
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(texture, [0, 0, 0], [OBLATE_BODY_TEXELS, 1, 1], texels);
+  return texture;
+}
+
 /** A sphere of radius `radiusM`, its pole up the image. */
 function sphere(radiusM: number): BodyFigure {
   return { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: vec3(0, 1, 0) };
@@ -580,6 +626,45 @@ function casesOf(saturnLighting: SurfaceLightingTables): ReadonlyArray<AirCase> 
   ];
 }
 
+/**
+ * The hand Jupiter's case's distance, m: just past where the frame takes a body to its table from
+ * the full passes, 10⁹ m and its `REGIME_HYSTERESIS` (`bodies/regime.ts`), 1.1 × 10⁹ m.
+ */
+const JUPITER_CASE_M = 1.15e9;
+
+/**
+ * The hand Jupiter's case (R08.T16.b.2): its figure's three bands' table read at each pixel's
+ * latitude, 160 px across from just past the switch, at 30°.
+ */
+function jupiterCaseOf(lighting: SurfaceLightingTables, gravity: BodyGravity): AirCase {
+  const plan = tablesPlanOf({ figure: JUPITER_FLOOR, gravity }, tableRadiusM(JUPITER_FLOOR));
+  const narrow: ProjectionCamera = {
+    orientation: IDENTITY_QUATERNION,
+    fovXRad: 2 * Math.atan((80 * JUPITER_FLOOR.equatorialRadiusM) / (96 * JUPITER_CASE_M)),
+  };
+  return {
+    name: "a 160 px hand Jupiter's air of three bands at 30° from 1.15 × 10⁹ m, read at each pixel's latitude",
+    viewport: { widthPx: 192, heightPx: 192 },
+    camera: narrow,
+    figure: {
+      equatorialRadiusM: JUPITER_FLOOR.equatorialRadiusM,
+      polarRadiusM: JUPITER_FLOOR.polarRadiusM,
+      pole: vec3(0, 1, 0),
+    },
+    distanceM: JUPITER_CASE_M,
+    phaseDeg: 30,
+    air: {
+      table: patternedTable(plan.bands.length),
+      texture: { kind: "texture", name: "pending" },
+      lnBands: plan.bands.map((band) => log(band.gravityRatio)),
+      gravity,
+    },
+    lighting,
+    reader: DATUM_SHADOW,
+    mesh: false,
+  };
+}
+
 /** The `disc cells` kernel's forms the cases are drawn by. */
 interface CellKernels {
   readonly plain: ComputeHandle;
@@ -614,11 +699,50 @@ function uploaded(engine: RenderEngine, air: DiscAir): DiscAir {
  * output to the kernel arm's 10⁻³ and the image to the disc's texel bound (the module's remarks).
  */
 export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promise<void> {
-  const kept = keepingSums(engine);
-  const renderer = new LitBodyRenderer(kept.engine, WIREFRAME_MATERIALS.starSprite);
   const airless = createAirlessTables(engine, "smoke disc air: no air");
   const bodyTable = saturnBodyTable(engine);
-  const made: TextureHandle[] = [airless.body, bodyTable];
+  await checkAirCases(
+    engine,
+    checks,
+    casesOf({ ...airless, body: bodyTable }),
+    [airless.body, bodyTable],
+    "R08.T16.b",
+  );
+}
+
+/**
+ * Checks the hand Jupiter's figure's disc air as {@link checkDiscAir} checks its cases (R08.T16.b.2):
+ * a table of its three bands on its envelope floor's level surface, read at each pixel's latitude.
+ */
+export async function checkJupiterDiscAir(engine: RenderEngine, checks: Checks): Promise<void> {
+  const airless = createAirlessTables(engine, "smoke disc air: the hand Jupiter, no air");
+  const gravity = gravityOfSpheroid(JUPITER_FLOOR);
+  const bodyTable = bodyTableOf(
+    engine,
+    JUPITER_FLOOR,
+    gravity,
+    JUPITER_AIR,
+    "smoke disc air: the hand Jupiter's body table",
+  );
+  await checkAirCases(
+    engine,
+    checks,
+    [jupiterCaseOf({ ...airless, body: bodyTable }, gravity)],
+    [airless.body, bodyTable],
+    "R08.T16.b.2",
+  );
+}
+
+/** Draws each case and holds it to its twin, releasing `made` and each case's table after. */
+async function checkAirCases(
+  engine: RenderEngine,
+  checks: Checks,
+  cases: ReadonlyArray<AirCase>,
+  made: TextureHandle[],
+  task: string,
+): Promise<void> {
+  const kept = keepingSums(engine);
+  const renderer = new LitBodyRenderer(kept.engine, WIREFRAME_MATERIALS.starSprite);
   try {
     const [plain, emissive, air, emissiveAir] = await Promise.all([
       engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
@@ -629,7 +753,7 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
       renderer.prepareEmissive(),
       renderer.prepareEmissiveAir(),
     ]);
-    for (const given of casesOf({ ...airless, body: bodyTable })) {
+    for (const given of cases) {
       const item = { ...given, air: uploaded(engine, given.air) };
       made.push(item.air.texture);
       const plan = planOf(item);
@@ -641,7 +765,7 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
         (item.thermal !== undefined) !== (record.emission !== undefined)
       ) {
         checks.check(
-          `${item.thermal === undefined ? "R08.T16.b" : "R08.T18.b"} ${item.name}`,
+          `${item.thermal === undefined ? task : "R08.T18.b"} ${item.name}`,
           false,
           "the body was not drawn by its table, or not with its ground's emission",
         );
@@ -671,7 +795,7 @@ export async function checkDiscAir(engine: RenderEngine, checks: Checks): Promis
         image.worst <= 1 &&
         image.classes;
       checks.check(
-        `${item.thermal === undefined ? "R08.T16.b" : "R08.T18.b"} ${item.name}`,
+        `${item.thermal === undefined ? task : "R08.T18.b"} ${item.name}`,
         ok,
         `${String(regime)}, s ${s(0).toFixed(4)} to ${s(Math.PI / 2).toFixed(4)}; the air disc cells' sums of its ${String(sums?.whole.pixels ?? 0)} wholly covered pixels within ${(sums?.whole.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of 10⁻³ of the twin's (worst at ${sums?.whole.where ?? "none"}), of its ${String(sums?.limb.pixels ?? 0)} on the limb within ${(sums?.limb.worst ?? Number.POSITIVE_INFINITY).toFixed(3)} of the image's tolerance; its ${String(image.pixels)} pixels within ${image.worst.toFixed(3)} of the image's tolerance, its classes ${String(image.classes)}`,
       );

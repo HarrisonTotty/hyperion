@@ -107,7 +107,7 @@ import {
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
 import { checkCellPassEveryRecord } from "./cellPass";
-import { checkDiscAir } from "./discAir";
+import { checkDiscAir, checkJupiterDiscAir } from "./discAir";
 import { checkThermalDiscs } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
 import { timeAtmosphereFrame } from "./frameTiming";
@@ -564,6 +564,9 @@ async function run(
   );
   await group(9, "R08.T16.b the disc's air beyond 10⁹ m against its twin", () =>
     checkDiscAir(engine, checks),
+  );
+  await group(9, "R08.T16.b.2 the hand Jupiter's disc air beyond 10⁹ m against its twin", () =>
+    checkJupiterDiscAir(engine, checks),
   );
   // R08.T18.b's forms with emission and air together, compiled after the air forms.
   await group(9, "T9.b catalogue: the emissive forms with air", () =>

@@ -6148,7 +6148,8 @@ Acceptance: `pnpm test`.
     - **T16.b.2 (after T16.a):** the Jupiter fixture at 10⁹ m, and a Jupiter fixture crossing
       10⁹ m by hand.
 
-  _T16.b.1 built 2026-10-30_ (Risks, "Deviations in T16.b.1, as built").
+  _T16.b.1 built 2026-10-30_ (Risks, "Deviations in T16.b.1, as built"). _T16.b.2 built 2026-11-01,
+  its read path shut while the giant's route is closed_ (Risks, "Deviations in T16.b.2, as built").
 
 Acceptance: `pnpm test` and `just test-render`.
 
@@ -24310,3 +24311,30 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - Titan's re-trace is done (2026-11-01): `titan-class.reference.json` at its pilot's counts, the
     case rewritten with them; it refuses 241 of 768 values (the four capped aggregates' fluxes, and
     twilight mostly in the blue), and the importance test reads 0.79–2.21 over it.
+- **Deviations in T16.b.2, as built** (2026-11-01; lane `r08-t16a2`, chained; what the gate's opening
+  and the march's resolution consume; measurements in the lane's outbox).
+  - _The table over a deck_ (`thick/discBake.ts`): `DiscBakeInput.deck` (`DiscDeck`: the packed deck
+    table and ln s_b). Each view ray reads the deck at the datum (`deckGroundInto`), the bare
+    ground's place, through its transmittance; the node's alpha is 0.
+  - Over a deck the bake takes `DISC_DECK_VIEW_STEPS` (768): at 48 steps the hand Jupiter's blue
+    read 84% over. A table on a ground keeps 48, its bits as before.
+  - _The route_ (`AtmosphereCache.ts`): a routed deck's body asks its table once its deck bake
+    lands. `DiscBakeAir.deck` carries the packed table, `bake` its J above the deck
+    (`discLandedOf`). A closed envelope asks none: the read path stays on the full passes until its
+    gate opens (`DECK_ROUTE_RANGE`). A disc over a deck never solves its own J (`#discJ` throws).
+  - _The hand Jupiter_ (`thick/discBakeJupiter.test.ts`, by hand): its table is 3 × 53,248 B, the
+    same half floats from a second bake. Against the routed march at 8× the high setting's samples
+    it reads within 3.6% from 10⁹ m at 0° and 90°.
+  - _The step a routed giant would show at the switch_ (a finding): against the march at the high
+    setting's 36 samples the table reads up to +42.5% red (90°). That march's red is 15–27% dark
+    on the decks above the floor, so the march's resolution is to fix before the gate opens.
+  - _The harness_ (`test/discAirCases.ts`): a `deck` case, its routed march reading the deck with
+    nothing drawn on the datum, and `IntegrationCounts`.
+  - _Smoke_: part 9's group "R08.T16.b.2 the hand Jupiter's disc air beyond 10⁹ m against its
+    twin", a patterned three-band table on the hand Jupiter's floor from 1.15 × 10⁹ m, past the
+    hysteresis (lean: the table against the march is the twins', not the smoke's).
+  - _Open_ (a question to main): a body's drawn disc on its deck's datum ends the full passes'
+    march there, so they draw no deck light. `TEST JUPITER`'s black disc on its floor would hide its
+    deck once routed, while the table holds it.
+  - _Pending, the owner's RTX run_: the frame at 10⁹ m against R08.T11's 15.67 ms. The crossing
+    by hand waits for the gate: no product path draws the table while it is closed.
