@@ -28,6 +28,15 @@ struct VertexOut {
   @location(1) @interpolate(flat) slot : u32,
 }
 
+// The older bake's own and morph heights at the place `at` of its slot's grid for a rebake's fade
+// (`terrainPatch.wgsl`'s `rebakeOf`): the datum's 0 for a rise from the reference surface.
+fn olderHeightsAt(slot : u32, at : vec2f) -> vec2f {
+  if (slot == DATUM_SLOT) {
+    return vec2f(0.0);
+  }
+  return surfaceHeightsAt(slot, at);
+}
+
 @vertex
 fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> VertexOut {
   let v = patchVertexOf(grid, instance);

@@ -121,6 +121,23 @@ fn survey_kept_at(slot : u32, patch_uv : vec2f, kind : u32) -> bool {
   }
 }
 
+// The older bake's own and morph heights at the place `at` of its slot's grid for a rebake's fade
+// (`terrainPatch.wgsl`'s `rebakeOf`; R10.T16.i): the datum's 0 for a rise from the reference
+// surface, and where the older bake's survey mask held the place unsurveyed, so that newly
+// surveyed ground rises out of the reference surface that stood there.
+fn olderHeightsAt(slot : u32, at : vec2f) -> vec2f {
+  if (slot == DATUM_SLOT || !survey_surveyed(slot, at)) {
+    return vec2f(0.0);
+  }
+  return surfaceHeightsAt(slot, at);
+}
+
+// Whether the older bake of a rebake's fade drew the place `patch_uv` ((x, y) ÷ 64) of its slot:
+// not the datum, and surveyed there.
+fn older_drawn_at(slot : u32, patch_uv : vec2f) -> bool {
+  return slot != DATUM_SLOT && survey_surveyed(slot, patch_uv * 64.0);
+}
+
 // Where a vertex of the lit mesh stands (R10.T10.c): its grid vertex's (`patchVertexOf`), moved
 // along the datum's normal to the height its part stands at, a skirt's foot at
 // min(h − skirt depth, 0), its head at max(h, 0), a fin's datum end at 0 on a cell's edge and at h,

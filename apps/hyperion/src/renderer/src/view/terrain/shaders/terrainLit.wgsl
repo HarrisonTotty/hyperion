@@ -250,6 +250,10 @@ struct LitVertexOut {
   // The depth below its edge to which a skirt's foot strip shades as the grid, metres
   // (`skirt_lip_m`).
   @location(11) @interpolate(flat) lipM : f32,
+  // The rebake its instance fades from (R10.T16.i; `rebakeOf`): the older bake's slot, and the fade
+  // of the normals and maturity towards it, 0 with none.
+  @location(12) @interpolate(flat) rebakeSlot : u32,
+  @location(13) @interpolate(flat) rebakeFade : f32,
 }
 
 // The depth below its edge to which a skirt's foot strip of the patch of slot record `rec` stands
@@ -300,6 +304,8 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.kind = placed.kind;
   out.gridHeightM = v.heightM;
   out.lipM = skirt_lip_m(rec);
+  out.rebakeSlot = v.rebakeSlot;
+  out.rebakeFade = v.rebakeFade;
   return out;
 }
 
@@ -494,20 +500,25 @@ fn terrain_class_albedo(slot : u32, k : u32, maturity : TexelMaturity, morph : f
 fn terrain_albedos(in : LitVertexOut, shares : array<f32, TERRAIN_LAWS>) -> array<vec3f, TERRAIN_LAWS> {
   var albedos : array<vec3f, TERRAIN_LAWS>;
   albedos[0] = terrain_row(1u).xyz;
-  var maturity : TexelMaturity;
-  var gathered = false;
-  for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
-    if (!(shares[k + 1u] > 0.0)) {
-      continue;
-    }
-    if (class_drawn_from_nodes(in.slot, k)) {
-      if (!gathered) {
-        maturity = texel_maturity(in.slot, in.patchUv, in.morph);
-        gathered = true;
+  // A rebake's fade mixes in its older bake's maturity (R10.T16.i): a second pass over its slot's
+  // classes drawn from their nodes, one call of each function in the source all the same.
+  let bakes = select(1u, 2u, in.rebakeFade > 0.0 && older_drawn_at(in.rebakeSlot, in.patchUv));
+  for (var bake = 0u; bake < bakes; bake = bake + 1u) {
+    let slot = select(in.slot, in.rebakeSlot, bake == 1u);
+    var maturity : TexelMaturity;
+    var gathered = false;
+    for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
+      if (!(shares[k + 1u] > 0.0)) { continue; }
+      if (class_drawn_from_nodes(slot, k)) {
+        if (!gathered) {
+          maturity = texel_maturity(slot, in.patchUv, in.morph);
+          gathered = true;
+        }
+        let albedo = terrain_class_albedo(slot, k, maturity, in.morph);
+        albedos[k + 1u] = select(albedo, mix(albedos[k + 1u], albedo, in.rebakeFade), bake == 1u);
+      } else if (bake == 0u) {
+        albedos[k + 1u] = class_law(in.slot, k).law.a;
       }
-      albedos[k + 1u] = terrain_class_albedo(in.slot, k, maturity, in.morph);
-    } else {
-      albedos[k + 1u] = class_law(in.slot, k).law.a;
     }
   }
   return albedos;

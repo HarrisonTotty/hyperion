@@ -133,9 +133,9 @@ import {
   type TerrainFault,
 } from "./annunciation";
 import { distanceToBoxM, relativeBounds } from "./bounds";
-import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
+import { type CacheInsert, type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
-import { frustumOf, horizonCone } from "./cull";
+import { frustumOf, horizonCone, inFrustum } from "./cull";
 import { vertexSpacing } from "./cube";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
@@ -2828,7 +2828,18 @@ export class TerrainPass {
       return;
     }
     const keyString = patchKeyString(bake.key);
-    const stored = device.cache.insert(bake);
+    // A rebake of a drawn patch takes a spare slot, where one is, so that the older bake fades out
+    // from its own (R10.T16.i).
+    const rebake = device.residents.has(keyString);
+    let retired: number | null = null;
+    let stored: CacheInsert;
+    if (rebake) {
+      const replaced = device.cache.replace(bake);
+      retired = replaced.kind === "stored" ? replaced.retired : null;
+      stored = replaced;
+    } else {
+      stored = device.cache.insert(bake);
+    }
     if (stored.kind !== "stored") {
       const observers = this.#observers;
       for (let n = 0; n < observers.length; n += 1) {
@@ -2838,6 +2849,10 @@ export class TerrainPass {
     }
     if (stored.evicted !== null) {
       this.#forget(device, stored.evicted);
+    }
+    if (rebake) {
+      device.morph.rebake(keyString, retired);
+      this.#releaseRetired(device);
     }
     let upload: ReturnType<TerrainResources["upload"]>;
     try {
@@ -3439,7 +3454,7 @@ export class TerrainPass {
    * through each coarsen, with the cache's pins and the coarse–fine holds made from it.
    */
   #present(device: Device, selection: Selection, resolved: DrawSet): DrawSet {
-    const drawSet = device.morph.present(resolved, device.cache);
+    const drawSet = device.morph.present(resolved, device.cache, this.#seenAtLastStep(selection));
     device.cache.retain(selection, drawSet);
     // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
     // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
@@ -3457,13 +3472,55 @@ export class TerrainPass {
     return drawSet;
   }
 
+  /**
+   * Whether a view saw an area at the last step (R10.T16.i): the bounds `selection` gives it, in
+   * a view's frustum from its camera then. A patch drawn where nothing was rises out of the
+   * reference surface over such ground, newly surveyed, and appears at once on ground newly in
+   * view, which nothing showed.
+   */
+  #seenAtLastStep(selection: Selection): (area: PatchKey) => boolean {
+    const views = this.#selected?.views ?? [];
+    const frustums = views.flatMap((view) => {
+      const camera = this.#stepped.get(view.id);
+      return camera === undefined
+        ? []
+        : [
+            {
+              positionM: camera.positionM,
+              frustum: frustumOf({
+                orientation: camera.orientation,
+                fovXRad: view.fovXRad,
+                viewport: view.viewport,
+              }),
+            },
+          ];
+    });
+    return (area) => {
+      const bounds = selection.patches.get(patchKeyString(area))?.bounds;
+      return (
+        bounds !== undefined &&
+        frustums.some(({ positionM, frustum }) =>
+          inFrustum(relativeBounds(bounds, positionM), frustum),
+        )
+      );
+    };
+  }
+
   /** The drawn instances' fades at the draw time `nowMs`, made once a time ({@link Device.fades}). */
   #fadesAt(device: Device, nowMs: number): TransitionFades {
     if (device.fadesAtMs !== nowMs) {
       device.fades.update(device.drawnKeys, device.morph.footprintsAt(nowMs));
       device.fadesAtMs = nowMs;
+      this.#releaseRetired(device);
     }
     return device.fades;
+  }
+
+  /** Frees the slots of the older bakes whose fades have ended (R10.T16.i). */
+  #releaseRetired(device: Device): void {
+    for (const slot of device.morph.takeReleased()) {
+      device.cache.releaseRetired(slot);
+    }
   }
 
   /**
@@ -3592,7 +3649,7 @@ export class TerrainPass {
           within === null ? 0 : subPatchOf(patch.key, within),
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
-          fades.own[n] ?? 0,
+          ((fades.own[n] ?? 0) | (device.morph.heightWords[n] ?? 0)) >>> 0,
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;

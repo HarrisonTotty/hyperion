@@ -336,6 +336,49 @@ describe("the patch cache", () => {
     expect(cache.heldBytes).toBe(300);
   });
 
+  it("stores a rebake in a spare slot, keeping the older bake's slot retired until it is released", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, B]);
+    const was = cache.get(patchKeyString(A))?.slot;
+    const replaced = cache.replace(resident(A, 2));
+    const now = cache.get(patchKeyString(A));
+    expect([replaced.kind === "stored" ? replaced.retired : "refused", now?.generation]).toEqual([
+      was,
+      2,
+    ]);
+    expect([now?.slot !== was, cache.usedSlots]).toEqual([true, 3]);
+    expect([
+      cache.releaseRetired(was ?? -1),
+      cache.releaseRetired(was ?? -1),
+      cache.usedSlots,
+    ]).toEqual([true, false, 2]);
+  });
+
+  it("stores a rebake in its own slot, retiring none, where no slot is spare", () => {
+    const cache = cacheOf(6);
+    const forced = [A, B, C, D, AA, AB];
+    insertAll(cache, forced);
+    frame(cache, selectionOf(forced, forced));
+    const was = cache.get(patchKeyString(A))?.slot;
+    expect(cache.replace(resident(A, 2))).toEqual({
+      kind: "stored",
+      slot: was,
+      evicted: null,
+      retired: null,
+    });
+  });
+
+  it("evicts no patch of the selection's chain for a rebake's spare slot", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [ROOT, A, AA, AB, AC, AD]);
+    frame(cache, selectionOf([AA, AB, AC, AD]));
+    const replaced = cache.replace(resident(AA, 2));
+    expect(replaced.kind === "stored" ? [replaced.retired, replaced.evicted] : "refused").toEqual([
+      null,
+      null,
+    ]);
+  });
+
   it("never evicts a root", () => {
     const cache = cacheOf(6);
     insertAll(cache, FACES.map(rootKey));

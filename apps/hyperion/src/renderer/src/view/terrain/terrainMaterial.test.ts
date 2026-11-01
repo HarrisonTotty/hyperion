@@ -1203,7 +1203,8 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
     const albedos = wgslFunction(terrainLitWgsl, "terrain_albedos");
     const skip = albedos.indexOf("if (!(shares[k + 1u] > 0.0)) { continue; }");
     expect(skip).toBeGreaterThan(0);
-    expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(in.slot, k)"));
+    // The slot is the instance's, and on a rebake's second pass its older bake's (R10.T16.i).
+    expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(slot, k)"));
     expect(albedos).toContain("albedos[0] = terrain_row(1u).xyz;");
     expect(albedos).toContain("albedos[k + 1u] = class_law(in.slot, k).law.a;");
     // One call each in the source, so that a compiler inlining every call takes one copy.

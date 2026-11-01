@@ -58,6 +58,23 @@ export type CacheInsert =
    */
   | { readonly kind: "refused" };
 
+/** What {@link PatchCache.replace} did. */
+export type CacheReplace =
+  /**
+   * The patch holds `slot`, having evicted the patch keyed `evicted` if it is not `null`; a newer
+   * bake of a resident patch, in a slot of its own, its older bake kept in `retired`, which no
+   * patch takes until {@link PatchCache.releaseRetired} gives it back, or `null` where no slot was
+   * spare and the newer bake took the older's.
+   */
+  | {
+      readonly kind: "stored";
+      readonly slot: number;
+      readonly evicted: string | null;
+      readonly retired: number | null;
+    }
+  /** As {@link CacheInsert}'s. */
+  | { readonly kind: "refused" };
+
 /** The pins against the slots, which the metrics and the annunciation read. */
 export interface CachePressure {
   /** Patches of the last retained selection in the forced region, resident or not. */
@@ -121,6 +138,8 @@ export class PatchCache implements HeightRangeLookup {
   /** The last retain found the pins beyond the slots, or a refusal before it. */
   private exceededAtRetain = false;
   private refusalCount = 0;
+  /** The slots holding a rebaked patch's older bake while it fades ({@link PatchCache.replace}). */
+  private readonly retired = new Set<number>();
 
   constructor(layout: SlotLayout) {
     this.layout = layout;
@@ -135,9 +154,9 @@ export class PatchCache implements HeightRangeLookup {
     return this.layout.slotCount;
   }
 
-  /** The number of slots holding a patch. */
+  /** The number of slots holding a patch, or a rebaked patch's older bake. */
   get usedSlots(): number {
-    return this.entries.size;
+    return this.entries.size + this.retired.size;
   }
 
   /**
@@ -145,7 +164,7 @@ export class PatchCache implements HeightRangeLookup {
    * themselves are allocated whole, `slotCount × bytesPerSlot`, by the terrain pass.
    */
   get heldBytes(): number {
-    return this.entries.size * this.layout.bytesPerSlot;
+    return this.usedSlots * this.layout.bytesPerSlot;
   }
 
   /**
@@ -246,6 +265,48 @@ export class PatchCache implements HeightRangeLookup {
     this.entries.set(keyString, entry);
     this.byKey.set(patch.key, entry);
     return { kind: "stored", slot, evicted };
+  }
+
+  /**
+   * Stores a baked patch as {@link PatchCache.insert} does, but a newer bake of a resident patch in
+   * a slot of its own where one is spare (free, or an unpinned patch's to evict), its older bake
+   * kept in its slot, retired, for the terrain pass's fade between the two (plan R10, R10.T16.i).
+   *
+   * @throws RangeError for a key deeper than {@link MAX_LEVEL}, before anything is changed.
+   */
+  replace(patch: ResidentPatch): CacheReplace {
+    const keyString = patchKeyString(patch.key);
+    const present = this.entries.get(keyString);
+    if (present === undefined) {
+      const stored = this.insert(patch);
+      return stored.kind === "stored" ? { ...stored, retired: null } : stored;
+    }
+    let slot = this.freeSlots.pop();
+    let evicted: string | null = null;
+    if (slot === undefined) {
+      evicted = this.victim(false);
+      const victim = evicted === null ? undefined : this.entries.get(evicted);
+      if (evicted === null || victim === undefined) {
+        const stored = this.insert(patch);
+        return stored.kind === "stored" ? { ...stored, retired: null } : stored;
+      }
+      slot = victim.patch.slot;
+      this.forget(evicted, victim);
+    }
+    const retired = present.patch.slot;
+    this.retired.add(retired);
+    present.patch = cachedPatch(patch, slot, keyString);
+    present.lastUsed = this.tick;
+    return { kind: "stored", slot, evicted, retired };
+  }
+
+  /** Frees a slot {@link PatchCache.replace} retired, returning whether it was retired. */
+  releaseRetired(slot: number): boolean {
+    if (!this.retired.delete(slot)) {
+      return false;
+    }
+    this.freeSlots.push(slot);
+    return true;
   }
 
   /** Drops a resident patch and frees its slot, returning whether it was resident. */

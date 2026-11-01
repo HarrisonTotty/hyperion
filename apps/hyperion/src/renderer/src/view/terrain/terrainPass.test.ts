@@ -1187,6 +1187,34 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     expect(fades.every((word) => word === 0)).toBe(true);
   });
 
+  it("mixes a rebake's heights from its older bake's, kept in its slot, until the fade ends", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    const [drawn] = pass.lastStep?.drawSet.patches ?? [];
+    if (drawn === undefined) {
+      throw new Error("nothing is drawn");
+    }
+    const older = drawn.patch.slot;
+    pool().deliver(pass, drawn.patch.key);
+    const first = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const rebaking = drawnBy(first.drawSet, drawn.patch.key).map((n) => words[n]?.[11] ?? 0);
+    pass.frame(inputAt(view, 6_000 + MORPH_IN_MS / 2));
+    const halfway = recordWords(engine);
+    const midway = drawnBy(pass.lastStep?.drawSet ?? first.drawSet, drawn.patch.key).map(
+      (n) => ((halfway[n]?.[11] ?? 0) >>> 8) & 0xff,
+    );
+    const done = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS));
+    const after = recordWords(engine);
+    const ended = drawnBy(done.drawSet, drawn.patch.key).map((n) => (after[n]?.[11] ?? 0) >>> 8);
+    expect(rebaking.length).toBeGreaterThan(0);
+    expect([
+      rebaking.every((word) => word >>> 16 === older && ((word >>> 8) & 0xff) === FADE_STEPS),
+      pass.resident(drawn.keyString)?.slot !== older,
+      midway.every((byte) => byte === fadeByte(0.5)),
+      ended.every((word) => word === 0),
+    ]).toEqual([true, true, true, true]);
+  });
+
   it("holds the finer patches through a coarsen until their fade reaches 1, then draws the coarser", async () => {
     const { pass, pool, engine } = await passOn("high");
     const near = northPole(2_000_000);
@@ -1754,7 +1782,10 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
       ["terrain lit interior patch", terrainLitInteriorMaterialSpec(path).name],
       ["terrain lit patch", terrainLitMaterialSpec(path).name],
     ]);
-    const edgeSlots = new Set(edges.map((patch) => patch.slot));
+    // Each rebake in the slot it took, a spare one (R10.T16.i).
+    const edgeSlots = new Set(
+      edges.map((patch) => pass.resident(patchKeyString(patch.key))?.slot ?? -1),
+    );
     const slots = Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count));
     expect([
       writtenSlots(engine, "terrain interior instances"),

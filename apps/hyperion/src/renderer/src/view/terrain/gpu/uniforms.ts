@@ -96,6 +96,13 @@ export function subPatchWord(levels: number, i: number, j: number): number {
 export const MAX_FADE_SLOT = 0xffff;
 
 /**
+ * The slot a rise from the reference surface names as its older bake ({@link fadeWord}; plan R10,
+ * R10.T16.i): no slot, the datum, height 0 everywhere, its normal the spheroid's
+ * (`shaders/terrainPatch.wgsl`'s `DATUM_SLOT`).
+ */
+export const DATUM_SLOT = MAX_FADE_SLOT;
+
+/**
  * The instance record's word of its own fade and its rebake's (plan R10, R10.T16.i): bits 0 to 7
  * its own fade's byte (`coarseFineHolds.ts`' `fadeByte`), 8 to 15 the fade of its rebake, from the
  * bake in slot `oldSlot` (bits 16 to 31) to the slot's own, 0 with none. A fading rebake's instance

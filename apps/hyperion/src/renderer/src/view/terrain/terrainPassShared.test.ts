@@ -563,12 +563,14 @@ describe("the shared pass's rebakes (R10.T16.b; R10 Design note 16)", () => {
         })
         .toSorted(byKey),
     );
-    // Drawn until their new bakes replace them, in their own slots.
+    // Drawn until their new bakes replace them, each in a spare slot, its older bake kept in its own
+    // while it fades (R10.T16.i).
     const slot = made.pass.resident(patchKeyString(named))?.slot;
     expect(settled).toBe(0);
     made.lane().layersOf.set(patchKeyString(named), layers());
     made.lane().deliver(made.pass, named);
-    expect([made.pass.resident(patchKeyString(named))?.slot, settled]).toEqual([slot, 0]);
+    const now = made.pass.resident(patchKeyString(named))?.slot;
+    expect([now !== undefined && now !== slot, settled]).toEqual([true, 0]);
     made.lane().layersOf.set(patchKeyString(incomplete), layers());
     made.lane().deliver(made.pass, incomplete);
     expect([settled, made.pass.settled]).toEqual([1, true]);

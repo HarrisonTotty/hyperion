@@ -62,6 +62,15 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   var cascade_lit = 1.0;
   if (!reference) {
     normal = shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph);
+    if (in.rebakeFade > 0.0) {
+      // A rebake's normal fades from the older bake's tile (R10.T16.i), or from the datum's where
+      // the reference surface stood.
+      var older = datum;
+      if (older_drawn_at(in.rebakeSlot, in.patchUv)) {
+        older = shadingNormalAt(in.rebakeSlot, in.parent, in.patchUv, in.morph);
+      }
+      normal = normalize(mix(normal, older, in.rebakeFade));
+    }
     var place = in.fromCameraBf;
     var receiver_normal = geometric;
     if (in.kind != LIT_GRID) {

@@ -181,6 +181,41 @@ fn surfacePointAt(slot : u32, rec : SlotRecord, at : vec2f) -> SurfacePoint {
   return p;
 }
 
+// The slot's own and morph heights at the place `at` of its grid, as `surfacePointAt` mixes them.
+fn surfaceHeightsAt(slot : u32, at : vec2f) -> vec2f {
+  let q = min(vec2u(floor(at)), vec2u(VERTICES_PER_SIDE - 2u));
+  let f = at - vec2f(q);
+  let mid = select(q + vec2u(0u, 1u), q + vec2u(1u, 0u), f.x >= f.y);
+  let far = q + vec2u(1u);
+  let w0 = 1.0 - max(f.x, f.y);
+  let w1 = abs(f.x - f.y);
+  let w2 = min(f.x, f.y);
+  return vec2f(
+    w0 * heightAt(slot, q.x, q.y, 0u) + w1 * heightAt(slot, mid.x, mid.y, 0u) + w2 * heightAt(slot, far.x, far.y, 0u),
+    w0 * heightAt(slot, q.x, q.y, 1u) + w1 * heightAt(slot, mid.x, mid.y, 1u) + w2 * heightAt(slot, far.x, far.y, 1u),
+  );
+}
+
+// The slot a rise from the reference surface names (uniforms.ts' `DATUM_SLOT`): the datum, height
+// 0 everywhere (R10.T16.i).
+const DATUM_SLOT : u32 = 0xffffu;
+
+// The rebake an instance fades from (plan R10, R10.T16.i; uniforms.ts' `fadeWord`): the slot of
+// the older bake (bits 16 to 31 of `sub.w`), or `DATUM_SLOT` for ground rising out of the reference
+// surface, and the fade of its heights, normals and maturity towards it (bits 8 to 15), 0 with
+// none. A material's own source gives `olderHeightsAt`, the older bake's own and morph heights.
+struct Rebake {
+  slot : u32,
+  fade : f32,
+}
+
+fn rebakeOf(inst : Instance) -> Rebake {
+  var r : Rebake;
+  r.slot = inst.sub.w >> 16u;
+  r.fade = fadeOf(inst.sub.w, 1u);
+  return r;
+}
+
 // One vertex of a drawn patch.
 struct PatchVertex {
   // The vertex less the camera, in the frame the instance origins are in, metres.
@@ -199,6 +234,9 @@ struct PatchVertex {
   // Its morph factor k, CDLOD's with the coarse–fine and grounded holds (`morphFactor`), which
   // mixes its heights.
   morph : f32,
+  // The rebake it fades from (`rebakeOf`), whose slot's normals and maturity its fragments mix in.
+  rebakeSlot : u32,
+  rebakeFade : f32,
 }
 
 // The vertex at `grid` (x, y and 1 for a skirt's) of instance `instance`. A skirt's vertex, and a
@@ -234,6 +272,18 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
     morphHeightM = p.morphHeightM;
     nu = rec.nu0 + normalDifference(rec, directionDifferenceAt(rec, at));
   }
+  // A rebake's fade mixes its heights from the older bake's: a vertex's offset is linear in its
+  // height, along ν, on either vertex path.
+  let rebake = rebakeOf(inst);
+  if (rebake.fade > 0.0) {
+    let older = olderHeightsAt(rebake.slot, at);
+    let dOwn = rebake.fade * (older.x - ownHeightM);
+    let dMorph = rebake.fade * (older.y - morphHeightM);
+    own = own + dOwn * nu;
+    morph = morph + dMorph * nu;
+    ownHeightM = ownHeightM + dOwn;
+    morphHeightM = morphHeightM + dMorph;
+  }
   let k = morphFactor(inst, origin + rotation * own, x, y);
   var q = mix(own, morph, k);
   if (grid.z > 0.5) {
@@ -248,6 +298,8 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   v.patchUv = at / 64.0;
   v.slot = inst.slot;
   v.morph = k;
+  v.rebakeSlot = rebake.slot;
+  v.rebakeFade = rebake.fade;
   return v;
 }
 
