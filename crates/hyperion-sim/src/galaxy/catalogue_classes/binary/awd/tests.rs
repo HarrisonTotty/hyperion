@@ -495,7 +495,7 @@ fn accreting_white_dwarf_golden() {
                 let id = format!("{label} {:016x}", SystemId::from(entry.id()).raw());
                 w.line(&format!(
                     "{id} component {} donor {:?}",
-                    scan.component().index(),
+                    scan.component().unwrap().index(),
                     binary.donor_kind()
                 ));
                 let p = scan.position();

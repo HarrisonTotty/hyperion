@@ -13,17 +13,28 @@
 //! model conditioned on not being in a class, and the catalogue (P11.T8) holds those that are; the
 //! classes' observed shares leave the field through the share matrix
 //! ([`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES)). The primary is never redrawn: its
-//! draws, track, death and kick stay plan 06's and plan 08's.
+//! draws, track, death and kick stay plan 06's and plan 08's. From generator version 27 a feature's
+//! binary members are redrawn the same way, since their feature's list holds its carved binaries
+//! (P11.T8.f).
 
+use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::stellar::multiplicity::MultiplicityContext;
 
-/// Whether the system of `record` under `ctx` is redrawn when one of its pairs is carved: a grid
-/// record under its own multiplicity. A feature member's binaries are plan 09's classes' and
-/// P11.T8.f's, and a forced context's are its caller's.
+/// Whether the system of `record` under `ctx` in `galaxy` is redrawn when one of its pairs is
+/// carved: a grid record under its own multiplicity, and from generator version 27 a feature's
+/// binary member, whose carved binaries its feature's list holds (P11.T8.f). Every other forced
+/// context's binaries are its caller's.
 #[must_use]
-pub(crate) fn grid_redraws(record: &SystemRecord, ctx: MultiplicityContext) -> bool {
-    matches!(record.origin(), SystemOrigin::Grid(_)) && matches!(ctx, MultiplicityContext::Free)
+pub(crate) fn redraws(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> bool {
+    match (record.origin(), ctx) {
+        (SystemOrigin::Grid(_), MultiplicityContext::Free) => true,
+        (SystemOrigin::FeatureMember { .. }, MultiplicityContext::ForcedMultiple { .. }) => {
+            galaxy.rules().feature_binaries == FeatureBinariesRules::Listed
+        }
+        _ => false,
+    }
 }
 
 /// The carve's test record, shared with the census's hierarchy bound (P11.T16).
@@ -134,14 +145,14 @@ mod tests {
         let galaxy = galaxy();
         let (index, mass, age) = CARVED;
         let r = record(&galaxy, index, mass, age);
-        assert!(grid_redraws(&r, MultiplicityContext::Free));
+        assert!(redraws(&galaxy, &r, MultiplicityContext::Free));
         for ctx in [
             MultiplicityContext::ForcedSingle,
             MultiplicityContext::ForcedMultiple {
                 max_separation: None,
             },
         ] {
-            assert!(!grid_redraws(&r, ctx));
+            assert!(!redraws(&galaxy, &r, ctx));
             assert_eq!(
                 SystemStars::generate_in(&galaxy, &r, ctx).attempt(),
                 RedrawAttempt::FIRST

@@ -524,7 +524,7 @@ fn dwarf_nova_source(seed: Seed, entry: &AwdEntry) -> Option<Source> {
 /// Never: the scan's masses, recurrences and rates are in the curves' ranges.
 #[must_use]
 fn xray_source(seed: Seed, scan: &XrbScanMarks) -> Option<Source> {
-    let system = SystemId::from(scan.id());
+    let system = scan.id();
     let mass = scan.accretor_mass();
     match scan.kind() {
         XrbHostKind::NeutronStarTransient | XrbHostKind::BlackHoleTransient => {
@@ -598,7 +598,7 @@ fn red_nova_source(seed: Seed, scan: &MergerScanMarks) -> Source {
     one_shot_source(
         seed,
         BinaryEventKind::LuminousRedNova,
-        SystemId::from(scan.id()),
+        scan.id(),
         scan.merger_time(),
         curve.into(),
     )
@@ -619,7 +619,7 @@ fn kilonova_source(seed: Seed, scan: &NsmScanMarks) -> Option<Source> {
         one_shot_source(
             seed,
             BinaryEventKind::Kilonova,
-            SystemId::from(scan.id()),
+            scan.id(),
             scan.merger_time(),
             curve.into(),
         )

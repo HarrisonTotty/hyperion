@@ -211,13 +211,13 @@ fn entries_resolve_to_themselves() {
     let process = NeutronStarMergers::new(galaxy);
     assert!(all_entries().count() >= 3);
     for (_, value) in all_entries() {
-        let id = value.scan().id();
+        let id = value.scan().host().catalogue_id().unwrap();
         let member = resolve_entry(galaxy, &process, id).unwrap();
         assert_eq!(member.entry().value(), value);
         let system = system_of(galaxy, id).unwrap();
         assert_eq!(system.record(), value.record());
         assert_eq!(
-            placement::resolve(galaxy, SystemId::from(id)),
+            placement::resolve(galaxy, crate::id::SystemId::from(id)),
             Ok(*value.record())
         );
     }
@@ -320,7 +320,7 @@ fn one_id_is_the_pair_before_t_and_the_remnant_after() {
         if before < SourceHorizon::START || after >= SourceHorizon::END {
             continue;
         }
-        let system = system_of(galaxy, value.scan().id()).unwrap();
+        let system = system_of(galaxy, value.scan().host().catalogue_id().unwrap()).unwrap();
         let stars = system
             .stars(galaxy)
             .expect("a merger's stars are its class's");
@@ -383,7 +383,7 @@ fn cells_do_not_depend_on_order() {
     assert_order_independent(&cells, |key| {
         let stray =
             CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
-        let _ = placement::resolve(galaxy, SystemId::from(stray));
+        let _ = placement::resolve(galaxy, crate::id::SystemId::from(stray));
         cell_entries(*key)
     });
 }
@@ -399,7 +399,7 @@ fn an_entry_s_stars_are_its_own() {
         let stars = value.stars(galaxy);
         assert_eq!(stars.star_count(), 2);
         assert_eq!(stars.record(), value.record());
-        let system = system_of(galaxy, value.scan().id()).unwrap();
+        let system = system_of(galaxy, value.scan().host().catalogue_id().unwrap()).unwrap();
         assert_eq!(system.star_model(), None);
         assert_eq!(system.stars(galaxy), Some(stars));
         assert_eq!(value.record().layer(), Layer::E);
@@ -433,14 +433,10 @@ fn neutron_star_merger_golden() {
     w.line(&format!("entries {}", all_entries().count()));
     for (key, value) in all_entries() {
         let scan = value.scan();
-        let id = format!(
-            "cell {:?} {:016x}",
-            key.cell(),
-            SystemId::from(scan.id()).raw()
-        );
+        let id = format!("cell {:?} {:016x}", key.cell(), scan.id().raw());
         w.line(&format!(
             "{id} component {} kind {:?}",
-            scan.component().index(),
+            scan.component().unwrap().index(),
             scan.kind()
         ));
         let p = scan.position();
@@ -622,7 +618,7 @@ fn under_every_26_hold_the_cells_do_not_depend_on_order() {
     assert_order_independent(&cells, |key| {
         let stray =
             CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
-        let _ = placement::resolve(galaxy, SystemId::from(stray));
+        let _ = placement::resolve(galaxy, crate::id::SystemId::from(stray));
         CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
     });
 }

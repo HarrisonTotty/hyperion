@@ -15,9 +15,10 @@
 //! The intensity at x is `Σ_c w_c n_c(x)`: component c's density of systems, times its hosts per
 //! system, `w_c` = the row's hosts per solar mass formed in its population × the mass formed per
 //! system × its born fraction, so that the hosts over the whole component are the row's rate × its
-//! born systems' formed mass, as the share matrix counts them. A cell's bound is
-//! `Σ_c w_c × bound_c`, each component's density bound over the cell's closed box. A candidate, on
-//! its own streams (plan 09's design note 23):
+//! born systems' formed mass, as the share matrix counts them; from generator version 27 times the
+//! share the catalogue keeps, all but the features' (P11.T8.f, `feature::catalogue_share`), which
+//! the features' lists hold. A cell's bound is `Σ_c w_c × bound_c`, each component's density bound
+//! over the cell's closed box. A candidate, on its own streams (plan 09's design note 23):
 //!
 //! 1. draws its scan marks first (`stellar::binary::scan`): its site uniformly in the cell,
 //!    thinned on the intensity there ÷ the bound, the same mark picking its component
@@ -33,6 +34,10 @@
 //!    [`LIFETIME_MARGIN`] × the primary's lifetime (plan 06's), so that its white dwarf has formed;
 //! 4. draws its \[Fe/H\] from its component's law at the site and the drawn age
 //!    (`class.awd.metallicity`).
+//!
+//! A feature's list entry (P11.T8.f) draws the same marks after its site, keyed by its own ID, but
+//! takes its feature's velocity and composition and an age drawn in its members' ages, and is
+//! thinned where its white dwarf's progenitor cannot have died by then.
 //!
 //! Every draw after the scan marks always succeeds, so the scan keeps exactly the class's
 //! entries.
@@ -56,15 +61,15 @@
 //! system's age, and the pair's timeline, which gives both stars' states
 //! ([`AwdEntry::stars`]).
 
-use super::super::core_collapse::class_site_velocity;
 use super::super::grid::{CatalogueMember, ClassProcess};
 use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
-use crate::coords::{GalacticPosition, GalacticVelocity};
+use super::feature::catalogue_share;
+use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
@@ -86,8 +91,8 @@ use crate::tables::binary::{AwdDonorKind, AwdMark, AwdPick};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::{SOLAR_EFFECTIVE_TEMPERATURE_K, SOLAR_RADIUS_M};
 use crate::units::{
-    Dex, GravitationalParameter, HeliumExcess, PerCubicLightYear, Radians, Seconds,
-    SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+    GravitationalParameter, PerCubicLightYear, Radians, Seconds, SolarLuminosities, SolarMasses,
+    SolarMassesPerYear, SolarRadii, Years,
 };
 
 /// The least a host's age is over its primary's main-sequence-and-giant lifetime (plan 06's
@@ -196,7 +201,8 @@ impl AwdProcess {
                 let component = fields.component(id);
                 let hosts = row.hosts_per_formed_mass(component.population())
                     * formed
-                    * component.ages().born_fraction();
+                    * component.ages().born_fraction()
+                    * catalogue_share(galaxy, row, component);
                 (hosts > 0.0).then_some(AwdComponent {
                     id,
                     hosts_per_system: hosts,
@@ -316,19 +322,6 @@ impl AwdProcess {
         Some((site, self.components[picked].id))
     }
 
-    /// A candidate's one velocity at its site, galactic: plan 08's draw of `component`'s law at
-    /// `site` on `class.awd.velocity` keyed by `key`, or zero in a galaxy built without its
-    /// kinematic tables.
-    #[must_use]
-    pub(crate) fn velocity(
-        galaxy: &Galaxy,
-        component: ComponentId,
-        site: &GalacticPosition,
-        key: ObjectKey,
-    ) -> GalacticVelocity {
-        class_site_velocity(galaxy, component, site, tags::CLASS_AWD_VELOCITY, key)
-    }
-
     /// The intensity's terms at `point` into `out`, in the components' order, hosts per cubic
     /// light-year.
     fn weights(&self, galaxy: &Galaxy, point: &PointLy, out: &mut [f64; MAX_COMPONENTS]) -> usize {
@@ -348,9 +341,22 @@ impl AwdProcess {
         bound: PerCubicLightYear,
     ) -> Option<AwdCandidate> {
         let scan = scan_marks(galaxy, self, cell, id, bound)?;
+        self.candidate_of(galaxy, &scan)
+    }
+
+    /// The candidate whose scan marks are `scan`, a catalogue candidate's or a feature's list
+    /// entry's (P11.T8.f): its binary, history and composition after them. A list entry's age is
+    /// drawn in its members' ages and its composition is theirs, and the candidate is `None` if
+    /// its white dwarf's progenitor cannot have died by then.
+    #[must_use]
+    pub(crate) fn candidate_of(
+        &self,
+        galaxy: &Galaxy,
+        scan: &AwdScanMarks,
+    ) -> Option<AwdCandidate> {
         let seed = galaxy.seed();
-        let system = SystemId::from(id);
-        let key = ObjectKey::from(system);
+        let system = scan.id();
+        let key = scan.host().key();
         let sampler = self.sampler;
         // 2. The binary now.
         let mut stream = Stream::open(seed, tags::CLASS_AWD_BINARY, key);
@@ -387,26 +393,35 @@ impl AwdProcess {
         let m2_0 = math::exp10(log_m2_0)
             .max(donor_mass.max(DONOR_INITIAL_MIN.value()))
             .min(m0);
-        // 4. The composition, at the site and the drawn age.
-        let laws = galaxy.fields().component(scan.component());
-        let point = PointLy::from(scan.position());
-        let feh = laws.metallicity(&point, Years::new(math::exp10(log_age)));
-        let mut stream = Stream::open(seed, tags::CLASS_AWD_METALLICITY, key);
-        let composition = Composition::from_fe_h(
-            Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
-            HeliumExcess::ZERO,
-        );
+        // 4. The composition, at the site and the drawn age; a list entry's members' age and
+        // composition.
+        let host = scan.host();
+        let (composition, drawn_age) = match host.listed_host() {
+            None => {
+                let drawn = Years::new(math::exp10(log_age));
+                let composition = host.composition_at(galaxy, drawn, tags::CLASS_AWD_METALLICITY);
+                (composition, drawn.value())
+            }
+            Some(listed) => (
+                *listed.composition(),
+                listed.age_at(stream.uniform()).value(),
+            ),
+        };
         // The stars' own draws, and an age at which the white dwarf has formed.
         let draws = [0, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
         let life = lifetime(track_mass_of(SolarMasses::new(m0)), &composition, &draws[0]).value();
-        let age = math::exp10(log_age).max(LIFETIME_MARGIN * life);
+        let age = match host.listed_host() {
+            None => drawn_age.max(LIFETIME_MARGIN * life),
+            Some(_) if drawn_age < LIFETIME_MARGIN * life => return None,
+            Some(_) => drawn_age,
+        };
         let history = AwdHistory {
             primary_initial_mass: SolarMasses::new(m0),
             donor_initial_mass: SolarMasses::new(m2_0),
             age_at_epoch: Years::new(age),
         };
         let binary = AwdBinary::marked(
-            &scan,
+            scan,
             donor_kind,
             SolarMasses::new(donor_mass),
             log_period_hours,
@@ -416,8 +431,8 @@ impl AwdProcess {
         );
         let marks = binary.marks(composition, draws, history.age_at_epoch);
         Some(AwdCandidate {
-            scan,
-            population: laws.population(),
+            scan: *scan,
+            population: host.population(galaxy),
             composition,
             binary,
             history,
@@ -427,7 +442,7 @@ impl AwdProcess {
 
     /// The class's test on `candidate`: its timeline from its marks, kept if [`carved_class`]
     /// gives its class.
-    fn test(&self, candidate: AwdCandidate) -> Option<AwdEntry> {
+    pub(crate) fn test(&self, candidate: AwdCandidate) -> Option<AwdEntry> {
         let AwdCandidate {
             scan,
             population,
@@ -441,9 +456,9 @@ impl AwdProcess {
             return None;
         }
         let record = SystemRecord::from_parts(
-            SystemId::from(scan.id()),
+            scan.id(),
             *scan.position(),
-            SystemOrigin::CatalogueSystem(self.class()),
+            scan.host().origin(self.class()),
             population,
             history.primary_initial_mass,
             history.age_at_epoch,

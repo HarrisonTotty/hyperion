@@ -1888,7 +1888,7 @@ impl SystemStars {
         primary: StarModel,
         ctx: MultiplicityContext,
     ) -> Self {
-        let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
+        let carves = crate::stellar::binary::carve::redraws(galaxy, record, ctx);
         let mut attempt = GRID_ATTEMPT;
         loop {
             let drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);

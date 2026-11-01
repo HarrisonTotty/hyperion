@@ -19,6 +19,10 @@
 //! [`BE_DONOR_ATTEMPTS`](crate::galaxy::catalogue_classes::binary::BE_DONOR_ATTEMPTS) draws make
 //! it plan 06's Be star, a chance under 10⁻⁴⁹ (the class's documentation).
 //!
+//! A catalogue candidate and a feature's list entry (P11.T8.f) draw the same marks after their site,
+//! each keyed by its own system ([`BinaryHost`]): [`AwdScanMarks::id`] and the other classes' are a
+//! catalogue entry's member 0 or a list entry's member.
+//!
 //! # The recurrence
 //!
 //! The recurrence period `P_rec` is the nova ignition mass over the transfer rate (P11.T5's
@@ -51,7 +55,9 @@ mod merger;
 mod nsm;
 
 pub(crate) use merger::donor_product;
+pub(crate) use merger::merger_marks_at;
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
+pub(crate) use nsm::nsm_marks_at;
 #[cfg(test)]
 pub(crate) use nsm::remnant_mass_under;
 pub use nsm::{NsbhOutflow, NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
@@ -62,12 +68,14 @@ use crate::events::{
 };
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
-use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries, XrbSide};
+use crate::galaxy::catalogue_classes::binary::{
+    AwdProcess, AwdSide, BinaryHost, XrayBinaries, XrbSide,
+};
 use crate::galaxy::fields::ComponentId;
 use crate::id::{BodyId, CatalogueSystemId, SystemId, event_tags};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
-use crate::rng::{ObjectKey, Seed, Stream, tags};
+use crate::rng::{Seed, Stream, tags};
 use crate::stellar::draws::isotropic;
 use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
@@ -143,10 +151,8 @@ pub const MAX_NOVA_TRANSFER_RATE: SolarMassesPerYear = SolarMassesPerYear::new(1
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AwdScanMarks {
-    id: CatalogueSystemId,
+    host: BinaryHost,
     side: AwdSide,
-    component: ComponentId,
-    position: GalacticPosition,
     velocity: GalacticVelocity,
     white_dwarf_mass: SolarMasses,
     transfer_rate: SolarMassesPerYear,
@@ -159,10 +165,16 @@ pub struct AwdScanMarks {
 }
 
 impl AwdScanMarks {
-    /// The host's ID: member 0 of its catalogue entry.
+    /// The host's ID: member 0 of its catalogue entry, or its feature's list entry (P11.T8.f).
     #[must_use]
-    pub const fn id(&self) -> CatalogueSystemId {
-        self.id
+    pub const fn id(&self) -> SystemId {
+        self.host.system()
+    }
+
+    /// Where the host sits and what it shares with its surroundings.
+    #[must_use]
+    pub const fn host(&self) -> &BinaryHost {
+        &self.host
     }
 
     /// Which of the two classes the host is in.
@@ -171,16 +183,16 @@ impl AwdScanMarks {
         self.side
     }
 
-    /// The density component the host was drawn from.
+    /// The density component the host was drawn from, for a catalogue entry.
     #[must_use]
-    pub const fn component(&self) -> ComponentId {
-        self.component
+    pub const fn component(&self) -> Option<ComponentId> {
+        self.host.component()
     }
 
-    /// Where the host is at the epoch: its site in its cell.
+    /// Where the host is at the epoch: its site in its cell, or its list entry's position.
     #[must_use]
     pub const fn position(&self) -> &GalacticPosition {
-        &self.position
+        self.host.position()
     }
 
     /// The host's velocity, galactic, the one its entry moves at (plan 09's rule 6).
@@ -196,7 +208,7 @@ impl AwdScanMarks {
     /// As plan 09's `CatalogueMotion::position_at`, beyond any time the clock reaches.
     #[must_use]
     pub fn position_at(&self, t: UniverseTime) -> GalacticPosition {
-        crate::galaxy::catalogue_classes::CatalogueMotion::straight(self.position, self.velocity)
+        crate::galaxy::catalogue_classes::CatalogueMotion::straight(*self.position(), self.velocity)
             .position_at(t)
     }
 
@@ -288,10 +300,8 @@ impl AwdScanMarks {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct XrbScanMarks {
-    id: CatalogueSystemId,
+    host: BinaryHost,
     kind: XrbHostKind,
-    component: ComponentId,
-    site: GalacticPosition,
     position: GalacticPosition,
     velocity: GalacticVelocity,
     recoil: Option<XrbRecoil>,
@@ -302,10 +312,16 @@ pub struct XrbScanMarks {
 }
 
 impl XrbScanMarks {
-    /// The host's ID: member 0 of its catalogue entry.
+    /// The host's ID: member 0 of its catalogue entry, or its feature's list entry (P11.T8.f).
     #[must_use]
-    pub const fn id(&self) -> CatalogueSystemId {
-        self.id
+    pub const fn id(&self) -> SystemId {
+        self.host.system()
+    }
+
+    /// Where the host sits and what it shares with its surroundings.
+    #[must_use]
+    pub const fn host(&self) -> &BinaryHost {
+        &self.host
     }
 
     /// The host's kind.
@@ -314,21 +330,23 @@ impl XrbScanMarks {
         self.kind
     }
 
-    /// The density component the host was drawn from: the young disc's for a high-mass host.
+    /// The density component the host was drawn from, for a catalogue entry: the young disc's for
+    /// a high-mass host.
     #[must_use]
-    pub const fn component(&self) -> ComponentId {
-        self.component
+    pub const fn component(&self) -> Option<ComponentId> {
+        self.host.component()
     }
 
-    /// Where the host was placed in its cell: for a high-mass host, where its supernova was,
-    /// relative to its component's field; for a low-mass one, its position at the epoch.
+    /// Where the host was placed: in its cell, for a catalogue high-mass host where its supernova
+    /// was, relative to its component's field, and for a low-mass one its position at the epoch;
+    /// a list entry's position (P11.T8.f).
     #[must_use]
     pub const fn site(&self) -> &GalacticPosition {
-        &self.site
+        self.host.position()
     }
 
-    /// Where the host is at the epoch: its site, moved by a high-mass host's recoil over the years
-    /// since its supernova.
+    /// Where the host is at the epoch: its site, moved by a catalogue high-mass host's recoil over
+    /// the years since its supernova.
     #[must_use]
     pub const fn position(&self) -> &GalacticPosition {
         &self.position
@@ -352,7 +370,8 @@ impl XrbScanMarks {
             .position_at(t)
     }
 
-    /// A high-mass host's recoil from its supernova; `None` for a low-mass host.
+    /// A catalogue high-mass host's recoil from its supernova; `None` for a low-mass host and a
+    /// list entry, which moves with its feature (P11.T8.f).
     #[must_use]
     pub const fn recoil(&self) -> Option<&XrbRecoil> {
         self.recoil.as_ref()
@@ -601,8 +620,28 @@ fn xrb_scan_marks(
     bound: PerCubicLightYear,
 ) -> Option<XrbScanMarks> {
     let (site, component, host_side) = process.site(galaxy, cell, id, bound)?;
+    Some(xrb_marks_at(
+        galaxy,
+        process,
+        BinaryHost::field(id, site, component),
+        host_side,
+    ))
+}
+
+/// The scan marks of an X-ray binary on `host_side` at `host`, after its site: its kind and a
+/// transient's recurrence, its compact star's mass and its binary's shape, a catalogue high-mass
+/// host's recoil, and its place and velocity at the epoch. A catalogue candidate's
+/// ([`scan_marks`]) and a feature's list entry's (P11.T8.f), on the same draws keyed by each one's
+/// system; a list entry takes no recoil and moves with its feature.
+#[must_use]
+pub(crate) fn xrb_marks_at(
+    galaxy: &Galaxy,
+    process: &XrayBinaries,
+    host: BinaryHost,
+    host_side: XrbSide,
+) -> XrbScanMarks {
     let seed = galaxy.seed();
-    let key = ObjectKey::from(SystemId::from(id));
+    let key = host.key();
     let sampler = process.sampler();
     let mut stream = Stream::open(seed, tags::CLASS_XRB_KIND, key);
     let kind = match host_side {
@@ -638,6 +677,7 @@ fn xrb_scan_marks(
         | XrbHostKind::BlackHolePersistent
         | XrbHostKind::BlackHoleTransient => None,
     };
+    let recoil_marks = recoil_marks.filter(|_| host.listed_host().is_none());
     let recoil = recoil_marks.map(|(speed_mark, since_mark)| {
         let mut stream = Stream::open(seed, tags::CLASS_XRB_RECOIL, key);
         let metres_per_second = sampler.draw(speed_mark, 0.0, &mut stream) * 1.0e3;
@@ -648,7 +688,8 @@ fn xrb_scan_marks(
             since_supernova: Years::new(since),
         }
     });
-    let drawn = XrayBinaries::velocity(galaxy, component, &site, key);
+    let site = *host.position();
+    let drawn = host.velocity(galaxy, tags::CLASS_XRB_VELOCITY);
     let (position, velocity) = match &recoil {
         Some(recoil) => (
             site.translated(recoil.displacement()).expect(
@@ -659,11 +700,9 @@ fn xrb_scan_marks(
         ),
         None => (site, drawn),
     };
-    Some(XrbScanMarks {
-        id,
+    XrbScanMarks {
+        host,
         kind,
-        component,
-        site,
         position,
         velocity,
         recoil,
@@ -671,7 +710,7 @@ fn xrb_scan_marks(
         accretor_mass,
         transfer_rate: shape.transfer_rate(kind.accretor(), accretor_mass),
         shape,
-    })
+    }
 }
 
 /// A binary catalogue class as a galaxy-wide scan walks it (P11.T8): its bound over a cell and
@@ -771,9 +810,23 @@ fn awd_scan_marks(
     bound: PerCubicLightYear,
 ) -> Option<AwdScanMarks> {
     let (position, component) = process.site(galaxy, cell, id, bound)?;
+    awd_marks_at(galaxy, process, BinaryHost::field(id, position, component))
+}
+
+/// The scan marks of an accreting white dwarf of `process`'s class at `host`, after its site:
+/// its recurrence on the class's side of L, the white dwarf's mass and the rate, its velocity, its
+/// nova series and clock, and a slow host's eruptions in the source horizon; `None` if the
+/// recurrence lands on the other side. A catalogue candidate's ([`scan_marks`]) and a feature's
+/// list entry's (P11.T8.f), on the same draws keyed by each one's system.
+#[must_use]
+pub(crate) fn awd_marks_at(
+    galaxy: &Galaxy,
+    process: &AwdProcess,
+    host: BinaryHost,
+) -> Option<AwdScanMarks> {
     let seed = galaxy.seed();
-    let system = SystemId::from(id);
-    let key = ObjectKey::from(system);
+    let system = host.system();
+    let key = host.key();
     let sampler = process.sampler();
     let mut stream = Stream::open(seed, tags::CLASS_AWD_RECURRENCE, key);
     let drawn = sampler.draw_in_ranks(
@@ -790,7 +843,7 @@ fn awd_scan_marks(
         return None;
     }
     let clock = nova_clock(recurrence, stream.uniform());
-    let velocity = AwdProcess::velocity(galaxy, component, &position, key);
+    let velocity = host.velocity(galaxy, tags::CLASS_AWD_VELOCITY);
     let series = nova_series(seed, system);
     let phase = nova_phase(&clock);
     let (eruptions, eruption_count) = match process.side() {
@@ -798,10 +851,8 @@ fn awd_scan_marks(
         AwdSide::Fast => ([UniverseTime::EPOCH; 2], 0),
     };
     Some(AwdScanMarks {
-        id,
+        host,
         side: process.side(),
-        component,
-        position,
         velocity,
         white_dwarf_mass,
         transfer_rate,

@@ -544,8 +544,8 @@ impl BinaryHost {
 
     fn id(&self) -> SystemId {
         match self {
-            Self::Awd(marks) => SystemId::from(marks.id()),
-            Self::Xrb(marks) => SystemId::from(marks.id()),
+            Self::Awd(marks) => marks.id(),
+            Self::Xrb(marks) => marks.id(),
         }
     }
 

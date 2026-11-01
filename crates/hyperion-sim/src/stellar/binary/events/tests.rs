@@ -529,7 +529,7 @@ fn a_merger_s_one_shot_is_bin_0_number_0_at_its_merger() {
         (
             BinarySystem::stellar_merger(seed, m),
             BinaryEventKind::LuminousRedNova,
-            SystemId::from(m.id()),
+            m.id(),
             m.merger_time(),
             BinaryLightCurve::from(curve),
         )
@@ -538,7 +538,7 @@ fn a_merger_s_one_shot_is_bin_0_number_0_at_its_merger() {
     let kilonova = (
         BinarySystem::neutron_star_merger(seed, nsm),
         BinaryEventKind::Kilonova,
-        SystemId::from(nsm.id()),
+        nsm.id(),
         nsm.merger_time(),
         BinaryLightCurve::from(KilonovaCurve::of(GW170817_EJECTA_MASS).unwrap()),
     );

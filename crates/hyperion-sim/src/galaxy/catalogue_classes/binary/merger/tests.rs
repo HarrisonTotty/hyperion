@@ -157,7 +157,7 @@ fn entries_resolve_to_themselves() {
         let system = system_of(galaxy, entry.id()).unwrap();
         assert_eq!(system.record(), entry.value().record());
         assert_eq!(
-            placement::resolve(galaxy, SystemId::from(entry.id())),
+            placement::resolve(galaxy, crate::id::SystemId::from(entry.id())),
             Ok(*entry.value().record())
         );
     }
@@ -339,7 +339,7 @@ fn cells_do_not_depend_on_order() {
     assert_order_independent(&cells, |key| {
         let stray =
             CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
-        let _ = placement::resolve(galaxy, SystemId::from(stray));
+        let _ = placement::resolve(galaxy, crate::id::SystemId::from(stray));
         cell_entries(*key)
     });
 }
@@ -432,10 +432,13 @@ fn stellar_merger_golden() {
         for entry in entries.iter().take(GOLDEN_ENTRIES) {
             let value = entry.value();
             let scan = value.scan();
-            let id = format!("{label} {:016x}", SystemId::from(entry.id()).raw());
+            let id = format!(
+                "{label} {:016x}",
+                crate::id::SystemId::from(entry.id()).raw()
+            );
             w.line(&format!(
                 "{id} component {} layer {:?}",
-                scan.component().index(),
+                scan.component().unwrap().index(),
                 value.record().layer()
             ));
             let p = scan.position();

@@ -67,7 +67,7 @@ use crate::id::{BodyId, SystemIdKind};
 use crate::math;
 use crate::rng::Mark;
 use crate::stellar::Composition;
-use crate::stellar::binary::carve::grid_redraws;
+use crate::stellar::binary::carve::redraws;
 use crate::stellar::binary::pair_keeps_own_models;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
@@ -758,7 +758,7 @@ fn gate(
     let age_at_epoch = record.age_at_epoch();
     let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
-    let redrawn = grid_redraws(record, ctx);
+    let redrawn = redraws(galaxy, record, ctx);
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
     let tables_hold =

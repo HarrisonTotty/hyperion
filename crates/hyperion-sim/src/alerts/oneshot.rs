@@ -328,13 +328,7 @@ impl OneShotClass for StellarMergers {
             .filter_map(|scan| {
                 let motion = CatalogueMotion::straight(*scan.position(), scan.velocity());
                 let system = BinarySystem::stellar_merger(galaxy.seed(), scan);
-                merger_event(
-                    &system,
-                    scan.merger_time(),
-                    SystemId::from(scan.id()),
-                    motion,
-                    &mut listed,
-                )
+                merger_event(&system, scan.merger_time(), scan.id(), motion, &mut listed)
             })
             .collect()
     }
@@ -379,13 +373,7 @@ impl OneShotClass for NeutronStarMergers {
             .filter_map(|scan| {
                 let motion = CatalogueMotion::straight(*scan.position(), scan.velocity());
                 let system = BinarySystem::neutron_star_merger(galaxy.seed(), scan);
-                merger_event(
-                    &system,
-                    scan.merger_time(),
-                    SystemId::from(scan.id()),
-                    motion,
-                    &mut listed,
-                )
+                merger_event(&system, scan.merger_time(), scan.id(), motion, &mut listed)
             })
             .collect()
     }

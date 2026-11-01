@@ -26,7 +26,6 @@ use crate::events::{PhaseClock, TimeWindow};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::{AwdProcess, AwdSide, XrayBinaries};
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueMotion, ClassId};
-use crate::id::SystemId;
 use crate::stellar::binary::events::{BinarySystem, events_in};
 use crate::stellar::binary::scan::{self, AwdScanMarks};
 use crate::tables::binary::XrbHostKind;
@@ -85,7 +84,7 @@ pub(crate) fn nova_scan_cell(
         events.clear();
         events.extend(listed.iter().map(LitEvent::of_binary));
         let host = LitHost {
-            host: SystemId::from(marks.id()),
+            host: marks.id(),
             class,
             motion,
         };
@@ -168,7 +167,7 @@ pub(crate) fn xray_binary_scan_cell(
         events.clear();
         events.extend(listed.iter().map(LitEvent::of_binary));
         let host = LitHost {
-            host: SystemId::from(marks.id()),
+            host: marks.id(),
             class,
             motion,
         };

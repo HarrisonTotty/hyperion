@@ -47,8 +47,8 @@ use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::hosts::ClassHosts;
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
-use crate::id::{BodyId, CatalogueSystemId, SystemId};
+use crate::galaxy::placement::SystemRecord;
+use crate::id::{BodyId, CatalogueSystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, peters_separation_for};
 use crate::rng::{ObjectKey, Stream, tags};
@@ -125,8 +125,15 @@ impl NeutronStarMergers {
         bound: PerCubicLightYear,
     ) -> Option<NsmCandidate> {
         let scan = nsm_scan_marks(galaxy, self, cell, id, bound)?;
+        Some(Self::candidate_of(galaxy, &scan))
+    }
+
+    /// The candidate whose scan marks are `scan`, a catalogue candidate's or a feature's list
+    /// entry's (P11.T8.f): its orbit, its pair before T and the star it leaves.
+    #[must_use]
+    pub(crate) fn candidate_of(galaxy: &Galaxy, scan: &NsmScanMarks) -> NsmCandidate {
         let seed = galaxy.seed();
-        let system = SystemId::from(id);
+        let system = scan.id();
         let mut stream = Stream::open(seed, tags::CLASS_NSM_BINARY, ObjectKey::from(system));
         let orientation = Orientation::new(
             Radians::new(math::acos(2.0 * stream.uniform() - 1.0)),
@@ -135,7 +142,7 @@ impl NeutronStarMergers {
         )
         .expect("an inclination in [0, π] and angles in [0, 2π) are an orientation");
         let mean_anomaly = Radians::new(std::f64::consts::TAU * stream.uniform());
-        let pair = Inspiral::marked(&scan, (orientation, mean_anomaly));
+        let pair = Inspiral::marked(scan, (orientation, mean_anomaly));
         let product = compact_state(
             scan.remnant_phase(),
             scan.remnant_mass(),
@@ -157,17 +164,17 @@ impl NeutronStarMergers {
             },
         )
         .expect("a merger age past the progenitors' deaths is a marked merger");
-        Some(NsmCandidate {
-            scan,
+        NsmCandidate {
+            scan: *scan,
             pair,
             product,
             marks,
-        })
+        }
     }
 
     /// The class's test on `candidate`: its timeline from its marks, kept if [`carved_class`]
     /// gives the class.
-    fn test(candidate: NsmCandidate) -> Option<NsmEntry> {
+    pub(crate) fn test(candidate: NsmCandidate) -> Option<NsmEntry> {
         let NsmCandidate {
             scan,
             pair,
@@ -179,9 +186,9 @@ impl NeutronStarMergers {
             return None;
         }
         let record = SystemRecord::from_parts(
-            SystemId::from(scan.id()),
+            scan.id(),
             *scan.position(),
-            SystemOrigin::CatalogueSystem(ClassId::NEUTRON_STAR_MERGER),
+            scan.host().origin(ClassId::NEUTRON_STAR_MERGER),
             scan.population(),
             scan.progenitor_masses()[0],
             scan.age_at_epoch(),

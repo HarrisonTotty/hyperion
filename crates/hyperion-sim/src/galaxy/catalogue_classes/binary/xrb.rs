@@ -15,12 +15,14 @@
 //! populations' and the high-mass kinds (Be/X and supergiant) the young disc's. The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
-//! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over
-//! the young thin disc's components, and the low-mass side the rest over every other component,
-//! each side's components in proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every
-//! population would give the young disc, a few tenths of a per cent of the mass formed, about 25
-//! high-mass hosts, fewer than are catalogued; so the budget closes over the galaxy and not
-//! population by population (a finding, the row not retuned). The intensity at x is `Σ_c w_c n_c(x)`, `w_c` the hosts per
+//! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over the young thin disc's components,
+//! and the low-mass side the rest over every other component, each side's components in
+//! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
+//! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
+//! than are catalogued; so the budget closes over the galaxy and not population by population (a
+//! finding, the row not retuned). From generator version 27 each component keeps all but its
+//! features' share (P11.T8.f, `feature::catalogue_share`), which the features' lists hold at the
+//! same hosts per solar mass formed ([`XrayBinaries::hosts_per_formed_mass`]). The intensity at x is `Σ_c w_c n_c(x)`, `w_c` the hosts per
 //! system its side's share gives component c, and a cell's bound `Σ_c w_c × bound_c`.
 //!
 //! # A candidate
@@ -44,6 +46,11 @@
 //!    high-mass host's age is the progenitor's lifetime and the years since its supernova;
 //! 4. draws its \[Fe/H\] from its component's law at its site and that age, before the lifetime
 //!    raises it (`class.xrb.metallicity`).
+//!
+//! A feature's list entry (P11.T8.f) draws the same marks after its site, keyed by its own ID, on
+//! the side its members' population gives, but takes no recoil, its feature's velocity and
+//! composition and an age drawn in its members' ages, and is thinned where its compact star's
+//! progenitor cannot have died by then.
 //!
 //! # The recoil (lean, 2026-10-31)
 //!
@@ -78,16 +85,17 @@
 //! stars are the pair: each star's own model at its initial mass and the system's age, and the
 //! pair's timeline, which gives both stars' states ([`XrbEntry::stars`]).
 
-use super::super::core_collapse::class_site_velocity;
 use super::super::grid::{CatalogueMember, ClassProcess};
 use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
+use super::BinaryTableRules;
 use super::awd::LIFETIME_MARGIN;
-use crate::coords::{GalacticPosition, GalacticVelocity};
+use super::feature::{HostPlace, catalogue_share};
+use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
@@ -114,8 +122,8 @@ use crate::tables::binary::{ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
-    Dex, GravitationalParameter, HeliumExcess, PerCubicLightYear, Radians, SolarLuminosities,
-    SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+    GravitationalParameter, PerCubicLightYear, Radians, SolarLuminosities, SolarMasses,
+    SolarMassesPerYear, SolarRadii, Years,
 };
 use crate::{GENERATOR_VERSION, Seed};
 
@@ -253,6 +261,11 @@ pub struct XrayBinaries {
     components: Vec<XrbComponent>,
     sampler: ClassSampler<XrbMark, XrbPick>,
     rate_split: f64,
+    /// Each side's hosts per solar mass formed over the row's: the low-mass side's, then the
+    /// high-mass side's.
+    side_scales: (f64, f64),
+    /// The tables it reads (`GalaxyRules::binary_tables`).
+    tables: BinaryTableRules,
 }
 
 impl XrayBinaries {
@@ -308,7 +321,8 @@ impl XrayBinaries {
                     * match side {
                         XrbSide::LowMass => low_scale,
                         XrbSide::HighMass => high_scale,
-                    },
+                    }
+                    * catalogue_share(galaxy, row, fields.component(id)),
             })
             .filter(|c| c.hosts_per_system > 0.0)
             .collect();
@@ -317,7 +331,26 @@ impl XrayBinaries {
             components,
             sampler,
             rate_split,
+            side_scales: (low_scale, high_scale),
+            tables,
         }
+    }
+
+    /// The class's hosts per solar mass formed among systems of `population`, before its test: its
+    /// row's, times the share of its side's (module documentation). Over every component it gives
+    /// the row's total; the young disc's high-mass hosts are about 65 times the row's at Milky Way
+    /// parameters (P11.T8.b's record), which is what a young feature's list counts (P11.T8.f).
+    #[must_use]
+    pub fn hosts_per_formed_mass(&self, population: Population) -> f64 {
+        let scale = match XrbSide::of(population) {
+            XrbSide::LowMass => self.side_scales.0,
+            XrbSide::HighMass => self.side_scales.1,
+        };
+        self.tables
+            .class_shares()
+            .row(CarvedClass::XrayBinary)
+            .hosts_per_formed_mass(population)
+            * scale
     }
 
     /// The components it thins on, in component order.
@@ -452,19 +485,6 @@ impl XrayBinaries {
         Some((site, component.id, component.side))
     }
 
-    /// A candidate's velocity at its site, galactic, before a recoil: plan 08's draw of
-    /// `component`'s law at `site` on `class.xrb.velocity` keyed by `key`, or zero in a galaxy
-    /// built without its kinematic tables.
-    #[must_use]
-    pub(crate) fn velocity(
-        galaxy: &Galaxy,
-        component: ComponentId,
-        site: &GalacticPosition,
-        key: ObjectKey,
-    ) -> GalacticVelocity {
-        class_site_velocity(galaxy, component, site, tags::CLASS_XRB_VELOCITY, key)
-    }
-
     /// The intensity's terms at `point` into `out`, in the components' order, hosts per cubic
     /// light-year.
     fn weights(&self, galaxy: &Galaxy, point: &PointLy, out: &mut [f64; MAX_COMPONENTS]) -> usize {
@@ -485,9 +505,22 @@ impl XrayBinaries {
         bound: PerCubicLightYear,
     ) -> Option<XrbCandidate> {
         let scan = scan_marks(galaxy, self, cell, id, bound)?;
+        self.candidate_of(galaxy, &scan)
+    }
+
+    /// The candidate whose scan marks are `scan`, a catalogue candidate's or a feature's list
+    /// entry's (P11.T8.f): its orbit, history and composition after them. A list entry's age is
+    /// drawn in its members' ages and its composition is theirs, and the candidate is `None` if
+    /// its compact star's progenitor cannot have died by then.
+    #[must_use]
+    pub(crate) fn candidate_of(
+        &self,
+        galaxy: &Galaxy,
+        scan: &XrbScanMarks,
+    ) -> Option<XrbCandidate> {
         let seed = galaxy.seed();
-        let system = SystemId::from(id);
-        let key = ObjectKey::from(system);
+        let system = scan.id();
+        let key = scan.host().key();
         let sampler = self.sampler;
         let kind = scan.kind();
         // 2. The binary now: its scan marks hold its masses, period and rate, so its orbit's
@@ -507,36 +540,43 @@ impl XrayBinaries {
             XrayAccretor::BlackHole => XrbMark::BlackHoleProgenitor,
         };
         let m0 = SolarMasses::new(math::exp10(sampler.draw(progenitor_mark, 0.0, &mut stream)));
-        let laws = galaxy.fields().component(scan.component());
-        let (initial_excess, drawn_age) = if let Some(recoil) = scan.recoil() {
-            (None, recoil.since_supernova().value())
-        } else {
-            let excess = sampler.draw(XrbMark::DonorInitialExcess, 0.0, &mut stream);
-            let ages = laws.ages();
-            let unborn = 1.0 - ages.born_fraction();
-            let age = ages.quantile(unborn + (1.0 - unborn) * stream.uniform());
-            (Some(excess), age.value())
+        let host = scan.host();
+        let (initial_excess, drawn_age) = match (scan.recoil(), host.place()) {
+            (Some(recoil), _) => (None, recoil.since_supernova().value()),
+            (None, HostPlace::Field(component)) => {
+                let excess = sampler.draw(XrbMark::DonorInitialExcess, 0.0, &mut stream);
+                let ages = galaxy.fields().component(*component).ages();
+                let unborn = 1.0 - ages.born_fraction();
+                let age = ages.quantile(unborn + (1.0 - unborn) * stream.uniform());
+                (Some(excess), age.value())
+            }
+            (None, HostPlace::Listed(listed)) => {
+                let excess = (!kind.is_high_mass())
+                    .then(|| sampler.draw(XrbMark::DonorInitialExcess, 0.0, &mut stream));
+                (excess, listed.age_at(stream.uniform()).value())
+            }
         };
-        // 4. The composition, at the site and the drawn age.
-        let feh = laws.metallicity(&PointLy::from(scan.site()), Years::new(drawn_age));
-        let mut stream = Stream::open(seed, tags::CLASS_XRB_METALLICITY, key);
-        let composition = Composition::from_fe_h(
-            Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
-            HeliumExcess::ZERO,
-        );
+        // 4. The composition, at the site and the drawn age; a list entry's members'.
+        let composition =
+            host.composition_at(galaxy, Years::new(drawn_age), tags::CLASS_XRB_METALLICITY);
         // The age at which the compact star has formed, and the years since it did.
         let primary = StarDraws::for_star(seed, BodyId::new(system, 0));
         let life = lifetime(track_mass_of(m0), &composition, &primary).value();
-        let (age, since_formation) = if let Some(recoil) = scan.recoil() {
-            let since = recoil.since_supernova().value();
-            (life + since, since)
-        } else {
-            let age = drawn_age.max(LIFETIME_MARGIN * life);
-            (age, age - life)
+        let (age, since_formation) = match (scan.recoil(), host.listed_host()) {
+            (Some(recoil), _) => {
+                let since = recoil.since_supernova().value();
+                (life + since, since)
+            }
+            (None, None) => {
+                let age = drawn_age.max(LIFETIME_MARGIN * life);
+                (age, age - life)
+            }
+            (None, Some(_)) if drawn_age < LIFETIME_MARGIN * life => return None,
+            (None, Some(_)) => (drawn_age, drawn_age - life),
         };
         let age = Years::new(age);
         let binary = XrbBinary::marked(
-            &scan,
+            scan,
             (orientation, mean_anomaly),
             &composition,
             (system, galaxy.seed()),
@@ -557,8 +597,8 @@ impl XrayBinaries {
         };
         let marks = binary.marks(composition, galaxy.seed(), system, age);
         Some(XrbCandidate {
-            scan,
-            population: laws.population(),
+            scan: *scan,
+            population: host.population(galaxy),
             composition,
             binary,
             history,
@@ -569,7 +609,7 @@ impl XrayBinaries {
     /// The class's test on `candidate`: its timeline from its marks, kept if [`carved_class`]
     /// gives the class and the pair is its kind at the epoch.
     #[must_use]
-    fn test_candidate(candidate: XrbCandidate) -> Option<XrbEntry> {
+    pub(crate) fn test_candidate(candidate: XrbCandidate) -> Option<XrbEntry> {
         let XrbCandidate {
             scan,
             population,
@@ -586,9 +626,9 @@ impl XrayBinaries {
             return None;
         }
         let record = SystemRecord::from_parts(
-            SystemId::from(scan.id()),
+            scan.id(),
             *scan.position(),
-            SystemOrigin::CatalogueSystem(ClassId::XRAY_BINARY),
+            scan.host().origin(ClassId::XRAY_BINARY),
             population,
             history.primary_initial_mass,
             history.age_at_epoch,

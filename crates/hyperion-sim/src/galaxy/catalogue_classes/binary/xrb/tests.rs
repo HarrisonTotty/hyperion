@@ -28,6 +28,7 @@ use crate::stellar::sse::lifetime as sse_lifetime;
 use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, XRB_SAMPLER};
 use crate::time::{SourceHorizon, UniverseTime};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
+use crate::units::{Dex, HeliumExcess};
 
 /// The seed of the Milky Way fixture the tests share.
 const SEED: u64 = 0x0b17_08b0_0000_0001;
@@ -227,7 +228,10 @@ fn the_sides_follow_their_populations() {
         let value = entry.value();
         let scan = value.scan();
         let kind = scan.kind();
-        let population = galaxy.fields().component(scan.component()).population();
+        let population = galaxy
+            .fields()
+            .component(scan.component().unwrap())
+            .population();
         assert_eq!(
             XrbSide::of(population).eq(&XrbSide::HighMass),
             kind.is_high_mass()
@@ -630,7 +634,7 @@ fn pin_entry(w: &mut GoldenWriter, galaxy: &Galaxy, label: &str, entry: &Catalog
     let id = format!("{label} {:016x}", SystemId::from(entry.id()).raw());
     w.line(&format!(
         "{id} component {} kind {:?} donor attempt {}",
-        scan.component().index(),
+        scan.component().unwrap().index(),
         scan.kind(),
         binary.donor_attempt()
     ));

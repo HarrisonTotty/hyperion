@@ -4,13 +4,14 @@
 //! The intensity at x is `Σ_c w_c n_c(x)`: component c's density of systems, times its hosts per
 //! system, `w_c` = the row's hosts per solar mass formed in its population × the mass formed per
 //! system × its born fraction, so that the hosts over the whole component are the row's rate × its
-//! born systems' formed mass, as the share matrix counts them. For the two merger classes a host
-//! is a merger inside the source horizon. A cell's bound is `Σ_c w_c × bound_c`, each component's
+//! born systems' formed mass, as the share matrix counts them, and from generator version 27 times
+//! the share the catalogue keeps, all but the features' (P11.T8.f). For the two merger classes a
+//! host is a merger inside the source horizon. A cell's bound is `Σ_c w_c × bound_c`, each component's
 //! density bound over the cell's closed box, and a candidate's site is thinned on the intensity
 //! there ÷ the bound, the same mark picking its component.
 
-use super::super::core_collapse::class_site_velocity;
-use crate::coords::{GalacticPosition, GalacticVelocity};
+use super::feature::catalogue_share;
+use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, ClassId};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
@@ -64,7 +65,8 @@ impl ClassHosts {
                 let component = fields.component(id);
                 let hosts = row.hosts_per_formed_mass(component.population())
                     * formed
-                    * component.ages().born_fraction();
+                    * component.ages().born_fraction()
+                    * catalogue_share(galaxy, row, component);
                 (hosts > 0.0).then_some(HostComponent {
                     id,
                     hosts_per_system: hosts,
@@ -154,19 +156,6 @@ impl ClassHosts {
         let n = self.weights(galaxy, &PointLy::from(&site), &mut weights);
         let picked = stream.mark().pick_weighted(&weights[..n], bound.value())?;
         Some((site, self.components[picked].id))
-    }
-
-    /// A candidate's one velocity at its site, galactic: plan 08's draw of `component`'s law at
-    /// `site` on `tag` keyed by `key`, or zero in a galaxy built without its kinematic tables.
-    #[must_use]
-    pub(crate) fn velocity(
-        galaxy: &Galaxy,
-        component: ComponentId,
-        site: &GalacticPosition,
-        tag: DomainTag,
-        key: ObjectKey,
-    ) -> GalacticVelocity {
-        class_site_velocity(galaxy, component, site, tag, key)
     }
 
     /// The intensity's terms at `point` into `out`, in the components' order, hosts per cubic

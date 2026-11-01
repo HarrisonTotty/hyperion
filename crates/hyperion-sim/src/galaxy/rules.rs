@@ -59,6 +59,11 @@
 //!   P09.T37.a): the range query takes the catalogue classes' hosts beside the grid. It is read
 //!   where a caller asks for the query's sources (`CatalogueClassSource::registered_in`), and
 //!   reaches none of the galaxy's memos.
+//! - [`feature_binaries`](GalaxyRules::feature_binaries), at [`FEATURE_BINARIES_VERSION`] (plan
+//!   11, P11.T8.f): catalogue features and the galactic centre list plan 11's binary classes, the
+//!   catalogue's classes give up the features' share of their hosts, and a feature's binary members
+//!   are drawn inside its hard–soft boundary. It is read where a list, a class's process or a
+//!   member is built, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -68,6 +73,9 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
+use crate::galaxy::catalogue_classes::binary::feature::{
+    FEATURE_BINARIES_VERSION, FeatureBinariesRules,
+};
 use crate::galaxy::catalogue_classes::binary::{
     BINARY_TABLES_VERSION, BinaryTableRules, MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION,
     MergerChannelRules, MergerClassRules,
@@ -116,6 +124,8 @@ pub(crate) struct GalaxyRules {
     pub(crate) binary_tables: BinaryTableRules,
     /// Whether the range query registers the catalogue classes beside the grid (P09.T37.a).
     pub(crate) class_source: ClassSourceRules,
+    /// Whether features hold plan 11's binary classes (P11.T8.f).
+    pub(crate) feature_binaries: FeatureBinariesRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -186,6 +196,11 @@ impl GalaxyRules {
             } else {
                 ClassSourceRules::Unregistered
             },
+            feature_binaries: if version.get() >= FEATURE_BINARIES_VERSION.get() {
+                FeatureBinariesRules::Listed
+            } else {
+                FeatureBinariesRules::Unlisted
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -208,11 +223,11 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
     /// hold ([`GalaxyRules::every_26_hold`]), the galaxy's at 27 (`orphan_streams`, P15.T11.b,
-    /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, and
-    /// `class_source`, P09.T37.a) and the stellar rules' `ia_explosion` (P11.T6;
-    /// [`StellarRules::every_27_hold`]). The planetary stage's holds at 27 are switched on the
-    /// thread instead (`planetary::testing::with_every_27_hold`), around a galaxy built under
-    /// these.
+    /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
+    /// P09.T37.a, and `feature_binaries`, P11.T8.f) and the stellar rules' `ia_explosion`
+    /// (P11.T6; [`StellarRules::every_27_hold`]). The planetary stage's holds at 27 are switched
+    /// on the thread instead (`planetary::testing::with_every_27_hold`), around a galaxy built
+    /// under these; a galaxy hold has no switch and joins here.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.
@@ -435,6 +450,27 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold().class_source,
             ClassSourceRules::Registered
+        );
+        let binaries = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).feature_binaries;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(binaries(v), FeatureBinariesRules::Unlisted, "{v}");
+        }
+        assert_eq!(binaries(27), FeatureBinariesRules::Listed);
+        assert_eq!(
+            GalaxyRules::every_26_hold().feature_binaries,
+            FeatureBinariesRules::Unlisted
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold(),
+            GalaxyRules {
+                orphan_streams: OrphanStreamsRules::Fitted,
+                merger_channels: MergerChannelRules::WithDynamical,
+                binary_tables: BinaryTableRules::Fitted,
+                class_source: ClassSourceRules::Registered,
+                feature_binaries: FeatureBinariesRules::Listed,
+                stellar: StellarRules::of_version(GeneratorVersion::new(27)),
+                ..GalaxyRules::every_26_hold()
+            }
         );
     }
 }

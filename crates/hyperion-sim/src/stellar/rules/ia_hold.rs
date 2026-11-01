@@ -207,7 +207,7 @@ mod slow {
     use crate::galaxy::fields::Component;
     use crate::galaxy::imf::{BandShares, MASS_BAND_EDGES, MassBand, MassFunctionKind};
     use crate::galaxy::placement::SystemOrigin;
-    use crate::stellar::binary::carve::grid_redraws;
+    use crate::stellar::binary::carve::redraws;
     use crate::stellar::binary::ia::{IaExplosionMark, marked_explosion};
     use crate::stellar::testing::reference_position;
     use crate::tables::binary::IA_YIELD;
@@ -340,7 +340,7 @@ mod slow {
             let mut tally = Self::default();
             for record in records {
                 let ctx = grid_multiplicity(record);
-                if !grid_redraws(record, ctx) {
+                if !redraws(galaxy, record, ctx) {
                     continue;
                 }
                 tally.grid += 1;

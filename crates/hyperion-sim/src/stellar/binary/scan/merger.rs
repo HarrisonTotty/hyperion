@@ -45,17 +45,17 @@
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
+use crate::galaxy::Population;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
 use crate::galaxy::catalogue_classes::binary::{
-    ClassHosts, MergerChannelRules, MergerClassRules, StellarMergers,
+    BinaryHost, MergerChannelRules, MergerClassRules, StellarMergers,
 };
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
-use crate::galaxy::{PointLy, Population};
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
-use crate::rng::{ObjectKey, Stream, tags};
+use crate::rng::{Stream, tags};
 use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{
     donor_onset_merger, donor_onset_merges, unstable_companion_ratio,
@@ -71,8 +71,7 @@ use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerMark, MergerPic
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
-    Dex, GravitationalParameter, HeliumExcess, Metres, PerCubicLightYear, Radians, SolarMasses,
-    Years,
+    GravitationalParameter, Metres, PerCubicLightYear, Radians, SolarMasses, Years,
 };
 
 use super::super::sampler::ClassSampler;
@@ -107,10 +106,8 @@ use super::super::sampler::ClassSampler;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MergerScanMarks {
-    id: CatalogueSystemId,
-    component: ComponentId,
+    host: BinaryHost,
     population: Population,
-    position: GalacticPosition,
     velocity: GalacticVelocity,
     merger_time: UniverseTime,
     age_at_epoch: Years,
@@ -121,28 +118,34 @@ pub struct MergerScanMarks {
 }
 
 impl MergerScanMarks {
-    /// The merger's ID: member 0 of its catalogue entry.
+    /// The merger's ID: member 0 of its catalogue entry, or its feature's list entry (P11.T8.f).
     #[must_use]
-    pub const fn id(&self) -> CatalogueSystemId {
-        self.id
+    pub const fn id(&self) -> SystemId {
+        self.host.system()
     }
 
-    /// The density component the merger was drawn from.
+    /// Where the system sits and what it shares with its surroundings.
     #[must_use]
-    pub const fn component(&self) -> ComponentId {
-        self.component
+    pub const fn host(&self) -> &BinaryHost {
+        &self.host
     }
 
-    /// The component's population.
+    /// The density component the merger was drawn from, for a catalogue entry.
+    #[must_use]
+    pub const fn component(&self) -> Option<ComponentId> {
+        self.host.component()
+    }
+
+    /// The population the system is counted in: its component's, or its feature's members'.
     #[must_use]
     pub const fn population(&self) -> Population {
         self.population
     }
 
-    /// Where the system is at the epoch: its site in its cell.
+    /// Where the system is at the epoch: its site in its cell, or its list entry's position.
     #[must_use]
     pub const fn position(&self) -> &GalacticPosition {
-        &self.position
+        self.host.position()
     }
 
     /// The system's velocity, galactic, the one its entry moves at (plan 09's rule 6).
@@ -159,7 +162,7 @@ impl MergerScanMarks {
     /// As plan 09's `CatalogueMotion::position_at`, beyond any time the clock reaches.
     #[must_use]
     pub fn position_at(&self, t: UniverseTime) -> GalacticPosition {
-        crate::galaxy::catalogue_classes::CatalogueMotion::straight(self.position, self.velocity)
+        crate::galaxy::catalogue_classes::CatalogueMotion::straight(*self.position(), self.velocity)
             .position_at(t)
     }
 
@@ -310,27 +313,29 @@ pub fn merger_scan_marks(
         process
             .hosts()
             .site(galaxy, cell, id, bound, tags::CLASS_MERGER_SITE)?;
+    merger_marks_at(galaxy, BinaryHost::field(id, position, component))
+}
+
+/// The scan marks of a stellar merger at `host`, after its site, or `None` if its stars are not
+/// both on their main sequences at T: T and its age, its composition, its pair and its velocity. A
+/// catalogue candidate's ([`merger_scan_marks`]) and a feature's list entry's (P11.T8.f), on the
+/// same draws keyed by each one's system; a list entry's age is drawn in its members' ages by the
+/// same rank, and its composition is theirs.
+#[must_use]
+pub(crate) fn merger_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<MergerScanMarks> {
     let seed = galaxy.seed();
-    let system = SystemId::from(id);
-    let key = ObjectKey::from(system);
+    let system = host.system();
+    let key = host.key();
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
-    let laws = galaxy.fields().component(component);
     // 2. T and the age.
     let mut stream = Stream::open(seed, tags::CLASS_MERGER_TIME, key);
     let merger_time = horizon_time(stream.uniform());
-    let ages = laws.ages();
-    let unborn = ages.cdf(Years::ZERO);
     let rank = sampler.draw(MergerMark::AgeRank, 0.0, &mut stream);
-    let age_at_epoch = ages.quantile(unborn + (1.0 - unborn) * rank);
+    let age_at_epoch = host.age_at_rank(galaxy, rank);
     let merger_age =
         Years::new(age_at_epoch.value() + merger_time.since_epoch().as_julian_years_f64());
     // 3. The composition, at the site and the age.
-    let feh = laws.metallicity(&PointLy::from(&position), age_at_epoch);
-    let mut stream = Stream::open(seed, tags::CLASS_MERGER_METALLICITY, key);
-    let composition = Composition::from_fe_h(
-        Dex::new(stream.normal(feh.mean().value(), feh.sigma().value())),
-        HeliumExcess::ZERO,
-    );
+    let composition = host.composition_at(galaxy, age_at_epoch, tags::CLASS_MERGER_METALLICITY);
     // 4–5. The pair and both stars at T: under the version's arm a contact pair, from 26 the
     // channel first (`MergerClassRules`), one of three from 27 (`MergerChannelRules`).
     let mut stream = Stream::open(seed, tags::CLASS_MERGER_MASS, key);
@@ -372,18 +377,10 @@ pub fn merger_scan_marks(
         }
     };
     // 6. The velocity.
-    let velocity = ClassHosts::velocity(
-        galaxy,
-        component,
-        &position,
-        tags::CLASS_MERGER_VELOCITY,
-        key,
-    );
+    let velocity = host.velocity(galaxy, tags::CLASS_MERGER_VELOCITY);
     Some(MergerScanMarks {
-        id,
-        component,
-        population: laws.population(),
-        position,
+        host,
+        population: host.population(galaxy),
         velocity,
         merger_time,
         age_at_epoch,

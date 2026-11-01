@@ -23,7 +23,7 @@ use super::substellar;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::SystemRecord;
 use crate::stellar::Composition;
-use crate::stellar::binary::carve::grid_redraws;
+use crate::stellar::binary::carve::redraws;
 #[cfg(doc)]
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::grid_multiplicity;
@@ -110,7 +110,7 @@ fn bound_in(
     composition: &Composition,
     ctx: MultiplicityContext,
 ) -> HierarchyBound {
-    let redrawn = grid_redraws(record, ctx);
+    let redrawn = redraws(galaxy, record, ctx);
     let mut draw = RecordDraw::new(
         galaxy,
         record,
@@ -503,7 +503,7 @@ mod tests {
         assert_cover(
             &bound,
             record,
-            grid_redraws(record, grid_multiplicity(record)),
+            redraws(galaxy, record, grid_multiplicity(record)),
         );
         let kept = SystemStars::generate(galaxy, record);
         let id = record.id();

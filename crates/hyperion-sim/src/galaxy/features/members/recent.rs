@@ -210,7 +210,7 @@ impl FeatureStars {
     /// The stars of `feature`, or `None` for a cloud, a dissolved feature, a feature with no
     /// population or a galaxy without its kinematic tables.
     #[must_use]
-    fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+    pub(crate) fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         feature.kind_at(Years::ZERO)?;
         let velocity = bulk_velocity(galaxy, feature)?;
         let component = feature.component()?;
@@ -291,9 +291,52 @@ impl FeatureStars {
         Some(stars)
     }
 
+    /// The feature.
+    #[must_use]
+    pub(crate) const fn feature(&self) -> &FeatureRecord {
+        &self.feature
+    }
+
+    /// The members' population: the budget they are drawn from.
+    #[must_use]
+    pub(crate) const fn population(&self) -> Population {
+        self.population
+    }
+
+    /// The stellar mass the members formed with, less what disruption has taken.
+    #[must_use]
+    pub(crate) const fn formed(&self) -> SolarMasses {
+        self.formed
+    }
+
+    /// The members' ages at the epoch, from the youngest to the oldest.
+    #[must_use]
+    pub(crate) const fn ages(&self) -> (Years, Years) {
+        self.ages
+    }
+
+    /// The members' composition.
+    #[must_use]
+    pub(crate) const fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    /// The feature's bulk velocity, galactic.
+    #[must_use]
+    pub(crate) const fn velocity(&self) -> GalacticVelocity {
+        self.velocity
+    }
+
+    /// The members' profile about the feature's centre: a Plummer sphere of its half-mass radius,
+    /// cut at its reach.
+    #[must_use]
+    pub(crate) const fn profile(&self) -> &ClassProfile {
+        &self.profile
+    }
+
     /// Whether it is a globular, which lists Type Ia hosts alone, with no window.
     #[must_use]
-    fn is_globular(&self) -> bool {
+    pub(crate) fn is_globular(&self) -> bool {
         matches!(self.feature.marks(), FeatureMarks::Globular(_))
     }
 
@@ -439,7 +482,7 @@ impl FeatureStars {
     /// The system ID of the list's entry `index`, or `None` for an index past its 13 bits, which
     /// names no entry.
     #[must_use]
-    fn member_system(&self, index: u16) -> Option<SystemId> {
+    pub(crate) fn member_system(&self, index: u16) -> Option<SystemId> {
         // `IndexTooLarge` is the one error, and an index past any list's is no entry.
         FeatureMemberId::new(
             self.feature.id().feature_ref(),
@@ -465,6 +508,7 @@ impl FeatureStars {
             composition: self.composition,
             abundances: MemberAbundances::NONE,
             velocity: self.velocity,
+            listed: None,
         }
     }
 
@@ -873,6 +917,7 @@ impl RecentEntry {
 /// The classes `feature` registers on its list, in list order, with their expected candidates
 /// and profile: none under the hold's held arm, a feature without stars or a galaxy without its
 /// kinematic tables (module documentation).
+#[cfg(test)]
 #[must_use]
 pub(crate) fn recent_classes(galaxy: &Galaxy, feature: &FeatureRecord) -> Vec<ListClass> {
     FeatureStars::listing(galaxy, feature).map_or_else(Vec::new, |stars| stars.list_classes(galaxy))

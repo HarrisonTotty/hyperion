@@ -45,16 +45,20 @@ use std::num::NonZeroU16;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::feature::{
+    FeatureBinaries, ListedBinary, is_listed_binary,
+};
 use crate::galaxy::catalogue_classes::{ClassId, FEATURE_LEVEL_LIST_ORDER};
-use crate::id::{CentreMemberId, MemberSlot};
+use crate::id::{CentreMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
+use crate::stellar::system::SystemStars;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
-use super::super::catalogue::FeatureRecord;
+use super::super::catalogue::{FeatureCatalogue, FeatureRecord};
 use super::super::interior::ClassProfile;
 use super::MemberRecord;
-use super::recent::{FeatureStars, RecentClass, RecentEntry, recent_classes};
+use super::recent::{FeatureStars, RecentClass, RecentEntry};
 
 /// The words each class owns on the list's streams: 2³², far beyond any count's draws.
 const CLASS_WORDS: u64 = 1 << 32;
@@ -207,11 +211,19 @@ pub enum MemberZero {
 
 /// The classes registered on `feature`'s list, in list order, with their counts and profiles:
 /// from generator version 26 its recently dead and its luminous blue variables (P09.T36, P09.T43;
-/// `members::recent`), none before (the tidal disruptions' victims, P09.T30.b, are on the
-/// galactic centre's list alone, which the centre lists itself).
+/// `members::recent`), and from version 27 plan 11's binary classes after them (P11.T8.f;
+/// `catalogue_classes::binary::feature`), none before (the tidal disruptions' victims, P09.T30.b,
+/// are on the galactic centre's list alone, which the centre lists itself).
 #[must_use]
 pub fn registered_classes(galaxy: &Galaxy, feature: &FeatureRecord) -> Vec<ListClass> {
-    recent_classes(galaxy, feature)
+    let stars = FeatureStars::listing(galaxy, feature);
+    let mut classes = stars
+        .as_ref()
+        .map_or_else(Vec::new, |stars| stars.list_classes(galaxy));
+    if let Some(binaries) = FeatureBinaries::of_feature(galaxy, feature, stars.as_ref()) {
+        classes.extend(binaries.list_classes());
+    }
+    classes
 }
 
 /// A feature's feature-level list (module documentation).
@@ -228,6 +240,9 @@ pub struct FeatureLevelList {
     first: u32,
     /// The feature's stars, which draw its recent classes' entries, where it registers any.
     stars: Option<Box<FeatureStars>>,
+    /// The feature's hosts of plan 11's binary classes, which draw their entries, where it
+    /// registers any (P11.T8.f).
+    binaries: Option<Box<FeatureBinaries>>,
 }
 
 impl FeatureLevelList {
@@ -236,11 +251,18 @@ impl FeatureLevelList {
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Self {
         let stars = FeatureStars::listing(galaxy, feature);
-        let classes = stars
+        let mut classes = stars
             .as_ref()
             .map_or_else(Vec::new, |stars| stars.list_classes(galaxy));
+        let recent = !classes.is_empty();
+        let binaries = FeatureBinaries::of_feature(galaxy, feature, stars.as_ref())
+            .filter(|binaries| !binaries.is_empty());
+        if let Some(binaries) = &binaries {
+            classes.extend(binaries.list_classes());
+        }
         Self {
-            stars: stars.filter(|_| !classes.is_empty()).map(Box::new),
+            stars: stars.filter(|_| recent).map(Box::new),
+            binaries: binaries.map(Box::new),
             ..Self::with_classes(
                 galaxy,
                 feature.id().object_word(),
@@ -341,6 +363,7 @@ impl FeatureLevelList {
             counts,
             first,
             stars: None,
+            binaries: None,
         }
     }
 
@@ -435,12 +458,46 @@ impl FeatureLevelList {
     }
 
     /// The member at `index`, or `None`: no member zero is generated for a catalogue feature, and
-    /// an entry of a recent class is its member where the class's test keeps it
-    /// ([`recent_entry`](Self::recent_entry)).
+    /// an entry of a recent class or of one of plan 11's binary classes is its member where the
+    /// class's test keeps it ([`recent_entry`](Self::recent_entry),
+    /// [`binary_entry`](Self::binary_entry)).
     #[must_use]
     pub fn member(&self, galaxy: &Galaxy, index: u16) -> Option<MemberRecord> {
-        self.recent_entry(galaxy, index)
-            .map(|entry| *entry.member())
+        if let Some(entry) = self.recent_entry(galaxy, index) {
+            return Some(*entry.member());
+        }
+        let binaries = self.binaries.as_ref()?;
+        let entry = self.binary_entry(galaxy, index)?;
+        Some(MemberRecord::of_listed_binary(
+            *entry.record(),
+            entry.member_class(),
+            *entry.composition(),
+            binaries.host().velocity(),
+            entry.class(),
+        ))
+    }
+
+    /// The entry at `index` of one of plan 11's binary classes (P11.T8.f), its class's entry drawn
+    /// at its list host, or `None` for an index of no such class, past the list, or a candidate
+    /// its class's draws or test refuse.
+    #[must_use]
+    pub fn binary_entry(&self, galaxy: &Galaxy, index: u16) -> Option<ListedBinary> {
+        let binaries = self.binaries.as_ref()?;
+        let entry = self.entry(index)?;
+        if !is_listed_binary(entry.class()) {
+            return None;
+        }
+        binaries.entry(galaxy, entry.class(), index, entry.position())
+    }
+
+    /// Every entry of plan 11's binary classes that their draws and tests keep, in index order.
+    pub fn binary_entries<'a>(
+        &'a self,
+        galaxy: &'a Galaxy,
+    ) -> impl Iterator<Item = ListedBinary> + 'a {
+        self.entries()
+            .filter(|entry| is_listed_binary(entry.class()))
+            .filter_map(move |entry| self.binary_entry(galaxy, entry.index()))
     }
 
     /// The entry at `index` of a recent class (P09.T36), its member, site and shell, or `None` for
@@ -463,10 +520,26 @@ impl FeatureLevelList {
     }
 }
 
+/// The stars of the listed binary member `system` (P11.T8.f): its feature's list's entry's, its
+/// class's marked pair, or `None` if `system` names no entry of plan 11's binary classes on a
+/// catalogue feature's list.
+#[must_use]
+pub(crate) fn listed_binary_stars(galaxy: &Galaxy, system: SystemId) -> Option<SystemStars> {
+    let SystemIdKind::FeatureMember(member) = system.kind() else {
+        return None;
+    };
+    let MemberSlot::FeatureLevel { index } = member.slot() else {
+        return None;
+    };
+    let feature = FeatureCatalogue::resolve(galaxy, member.feature().into())?;
+    FeatureLevelList::of(galaxy, &feature)
+        .binary_entry(galaxy, index)
+        .map(|entry| entry.stars(galaxy))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::galaxy::features::catalogue::FeatureCatalogue;
     use crate::galaxy::features::interior::ProfileShape;
     use crate::galaxy::features::members::resolve_member;
     use crate::galaxy::params::GalaxyParams;

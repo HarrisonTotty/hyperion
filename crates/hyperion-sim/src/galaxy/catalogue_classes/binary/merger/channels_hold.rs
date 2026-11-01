@@ -318,7 +318,7 @@ fn the_channels_cells_do_not_depend_on_order() {
             CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
         // Whether the stray ID names a system is beside the point: only asking it could disturb
         // what follows.
-        let _ = crate::galaxy::placement::resolve(galaxy, SystemId::from(stray));
+        let _ = crate::galaxy::placement::resolve(galaxy, crate::id::SystemId::from(stray));
         CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
     });
 }

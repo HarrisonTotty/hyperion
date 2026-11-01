@@ -26,6 +26,8 @@ pub mod registry;
 pub mod source;
 pub mod supernova;
 pub mod system;
+#[cfg(test)]
+pub(crate) mod testing;
 pub mod type_ia;
 
 pub use self::grid::{

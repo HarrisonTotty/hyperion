@@ -77,8 +77,8 @@ use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::hosts::ClassHosts;
 use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
-use crate::id::{BodyId, CatalogueSystemId, SystemId};
+use crate::galaxy::placement::SystemRecord;
+use crate::id::{BodyId, CatalogueSystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{ObjectKey, Stream, tags};
@@ -220,8 +220,15 @@ impl StellarMergers {
         bound: PerCubicLightYear,
     ) -> Option<MergerCandidate> {
         let scan = merger_scan_marks(galaxy, self, cell, id, bound)?;
+        Some(Self::candidate_of(galaxy, &scan))
+    }
+
+    /// The candidate whose scan marks are `scan`, a catalogue candidate's or a feature's list
+    /// entry's (P11.T8.f): its orbit, its pair before T and the star it leaves.
+    #[must_use]
+    pub(crate) fn candidate_of(galaxy: &Galaxy, scan: &MergerScanMarks) -> MergerCandidate {
         let seed = galaxy.seed();
-        let system = SystemId::from(id);
+        let system = scan.id();
         let mut stream = Stream::open(seed, tags::CLASS_MERGER_BINARY, ObjectKey::from(system));
         let orientation = Orientation::new(
             Radians::new(math::acos(2.0 * stream.uniform() - 1.0)),
@@ -240,7 +247,7 @@ impl StellarMergers {
             ),
             Some(separation) => (
                 MergerPair::at_lobe(scan.stars(), separation, angles),
-                donor_product(&scan, &draws, rules).expect(
+                donor_product(scan, &draws, rules).expect(
                     "the scan kept this pair because the engine's onset merges this same input",
                 ),
             ),
@@ -259,17 +266,17 @@ impl StellarMergers {
             },
         )
         .expect("a merger age past the stars' arrival is a marked merger");
-        Some(MergerCandidate {
-            scan,
+        MergerCandidate {
+            scan: *scan,
             pair,
             product,
             marks,
-        })
+        }
     }
 
     /// The class's test on `candidate`: its timeline from its marks, kept if [`carved_class`]
     /// gives the class.
-    fn test(candidate: MergerCandidate) -> Option<MergerEntry> {
+    pub(crate) fn test(candidate: MergerCandidate) -> Option<MergerEntry> {
         let MergerCandidate {
             scan,
             pair,
@@ -281,9 +288,9 @@ impl StellarMergers {
             return None;
         }
         let record = SystemRecord::from_parts(
-            SystemId::from(scan.id()),
+            scan.id(),
             *scan.position(),
-            SystemOrigin::CatalogueSystem(ClassId::STELLAR_MERGER),
+            scan.host().origin(ClassId::STELLAR_MERGER),
             scan.population(),
             scan.primary_mass(),
             scan.age_at_epoch(),

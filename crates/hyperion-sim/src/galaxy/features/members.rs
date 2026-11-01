@@ -32,6 +32,7 @@
 //!   radius's σ, uncut.
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
+use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, FeatureMemberId, SystemId};
@@ -96,6 +97,9 @@ pub struct MemberRecord {
     composition: Composition,
     abundances: MemberAbundances,
     velocity: GalacticVelocity,
+    /// For an entry of one of plan 11's binary classes on its feature's list (P11.T8.f), its
+    /// class, whose entry holds its stars.
+    listed: Option<ClassId>,
 }
 
 impl MemberRecord {
@@ -129,6 +133,33 @@ impl MemberRecord {
         self.velocity
     }
 
+    /// The member that an entry of plan 11's binary class `listed` on its feature's list is
+    /// (P11.T8.f): its record, its class, its stars' composition and its velocity, the feature's.
+    #[must_use]
+    pub(crate) const fn of_listed_binary(
+        record: SystemRecord,
+        class: MemberClass,
+        composition: Composition,
+        velocity: GalacticVelocity,
+        listed: ClassId,
+    ) -> Self {
+        Self {
+            record,
+            class,
+            composition,
+            abundances: MemberAbundances::NONE,
+            velocity,
+            listed: Some(listed),
+        }
+    }
+
+    /// The binary class of an entry of its feature's list that holds plan 11's carved binaries
+    /// (P11.T8.f), whose stars are its class's marked pair; `None` for every other member.
+    #[must_use]
+    pub const fn listed_class(&self) -> Option<ClassId> {
+        self.listed
+    }
+
     /// The attempt its primary's draws are read at.
     #[must_use]
     pub fn attempt(&self) -> u32 {
@@ -153,9 +184,19 @@ impl MemberRecord {
     }
 
     /// Its stars: [`SystemStars::generate_with`] at its composition, under its
-    /// [`multiplicity_context`](Self::multiplicity_context).
+    /// [`multiplicity_context`](Self::multiplicity_context); for an entry of one of plan 11's
+    /// binary classes on its feature's list, its class's marked pair (P11.T8.f).
+    ///
+    /// # Panics
+    ///
+    /// For a listed binary member that its feature's list does not hold in `galaxy`: a member
+    /// resolved in another galaxy.
     #[must_use]
     pub fn stars(&self, galaxy: &Galaxy) -> SystemStars {
+        if self.listed.is_some() {
+            return level_list::listed_binary_stars(galaxy, self.record.id())
+                .expect("a listed binary member's entry is on its feature's list in its galaxy");
+        }
         SystemStars::generate_with(
             galaxy,
             &self.record,
@@ -283,6 +324,7 @@ pub fn draw_member(
         composition,
         abundances,
         velocity,
+        listed: None,
     })
 }
 
