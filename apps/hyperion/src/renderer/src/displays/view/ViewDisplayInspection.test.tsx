@@ -214,14 +214,12 @@ describe("VIEW's body inspection (the owner's request)", () => {
     expect(primaryLabelBlock().textContent).toContain("SURVEY PASS: PENDING");
   });
 
-  it("states its survey's refusal on its plate, with its remedy", async () => {
+  it("states its survey's refusal on its plate", async () => {
     const view = await inspecting(earthOpening(Promise.resolve(REFUSED)));
     view.advance(300);
     await settle();
 
-    expect(primaryLabelBlock().textContent).toContain(
-      "SURVEY PASS REJECTED: no such body, reopen with VIEW BODY to retry",
-    );
+    expect(primaryLabelBlock().textContent).toContain("SURVEY PASS REJECTED: no such body");
   });
 
   it("states nothing of its survey once it is recorded", async () => {

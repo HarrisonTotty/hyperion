@@ -466,18 +466,20 @@ export function primaryCanvas(document: Document): HTMLCanvasElement | null {
 }
 
 /**
- * The state of a request's status among the statements (`labels.ts`'s `atmosphereRejected`): set
- * as a status line, as the faults are, and in `--status-caution` for the server's own failure, but
- * a statement of the plate, never one of its faults.
+ * The states of requests' statuses among the statements (`labels.ts`'s `atmosphereRejected`, and
+ * the body inspection's `SURVEY PASS REJECTED`, `surveyPassStatement.ts`): set as status lines, as
+ * the faults are, and in `--status-caution` for the server's own failure, but statements of the
+ * plate, never among its faults.
  */
-const REJECTED_STATE = "ATMOSPHERE REJECTED:";
+const REJECTED_STATES: ReadonlyArray<string> = ["ATMOSPHERE REJECTED:", "SURVEY PASS REJECTED:"];
 
 /**
  * The primary's label block as it stands, found by its canvas's description (its `-label` part),
  * or `null` while it is not shown.
  *
  * @remarks
- * Its statements are its notes and its requests' statuses (`ATMOSPHERE REJECTED`), in order; its
+ * Its statements are its notes and its requests' statuses (`ATMOSPHERE REJECTED`, `SURVEY PASS
+ * REJECTED`), in order; its
  * fault lines every other status line, the graphics', the terrain's and the atmosphere's.
  */
 export function primaryPlate(document: Document): PrimaryPlate | null {
@@ -491,7 +493,10 @@ export function primaryPlate(document: Document): PrimaryPlate | null {
   const faults: string[] = [];
   for (const each of block.querySelectorAll(".view-label__statement, .request-status__text")) {
     const text = each.textContent.trim();
-    if (each.classList.contains("view-label__statement") || text.startsWith(REJECTED_STATE)) {
+    if (
+      each.classList.contains("view-label__statement") ||
+      REJECTED_STATES.some((state) => text.startsWith(state))
+    ) {
       statements.push(text);
     } else {
       faults.push(text);

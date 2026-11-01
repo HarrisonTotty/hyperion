@@ -10,6 +10,7 @@ import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   FIXTURE_EARTH,
+  FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
   FIXTURE_UNIVERSE,
   sliceBodies,
@@ -122,6 +123,17 @@ describe("the body inspection's survey (the owner's request)", () => {
       reason: "disk full",
       standing: "fault",
     });
+  });
+
+  it("asks nothing of a body with no solid surface, a giant", async () => {
+    const { client, socket } = linked();
+    const inspection = { ...earthInspection(sliceBodies()), body: FIXTURE_JUPITER };
+
+    expect(await surveyInspected(client, inspection)).toEqual({
+      kind: "surfaceless",
+      body: FIXTURE_JUPITER,
+    });
+    expect(socket.requestsOfKind("survey_pass")).toEqual([]);
   });
 
   it("asks nothing of a body whose record holds no figure to give its level", async () => {

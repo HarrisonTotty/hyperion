@@ -17,6 +17,7 @@ import type { BodyIdHex, RequestClient } from "@hyperion/protocol";
 
 import { isRefusal } from "../../lib/refusal";
 import { figureLevel, type SurveyAsked, wholeBodySurveyPass } from "../../lib/wholeBodySurvey";
+import { surfaceless } from "../scene/fromServer";
 import type { BodyInspection } from "./inspectionScene";
 
 /** How the inspection surveys its body: orbital at 50 m, as the served descent spike does. */
@@ -32,6 +33,8 @@ export type InspectionSurvey =
       /** The body's coverage revision with the pass folded in. */
       readonly revision: number;
     }
+  /** No pass sent: the body has no solid surface to survey, a giant's (`surfaceless`). */
+  | { readonly kind: "surfaceless"; readonly body: BodyIdHex }
   | {
       readonly kind: "refused";
       readonly body: BodyIdHex;
@@ -43,14 +46,19 @@ export type InspectionSurvey =
 
 /**
  * Surveys the inspected body whole ({@link INSPECTION_SURVEY}) through `requests`, and gives the
- * pass's revision, or why none was recorded; never rejects.
+ * pass's revision, or why none was recorded; never rejects. A body with no solid surface, a
+ * giant's, is not surveyed: the server refuses its pass.
  */
 export async function surveyInspected(
   requests: Pick<RequestClient, "request">,
   inspection: BodyInspection,
 ): Promise<InspectionSurvey> {
   const { universe, body, time } = inspection;
-  const figure = inspection.bodies.bodies.find((each) => each.id === body)?.figure;
+  const record = inspection.bodies.bodies.find((each) => each.id === body);
+  if (record !== undefined && surfaceless(record)) {
+    return { kind: "surfaceless", body };
+  }
+  const figure = record?.figure;
   if (figure?.state !== "ok") {
     return {
       kind: "refused",
