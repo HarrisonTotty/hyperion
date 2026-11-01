@@ -1,9 +1,7 @@
 //! P14.T53.i's census over the record: the 100 Pa line read once by the steps and the record,
 //! under every 26 hold against every 26 hold with the line's switch held, over P14.T53.c's
 //! thin-air census (the 400 sample systems, the golden systems and LOOK72's systems), and count
-//! (vii)'s two records by name. P14.T49.l's pore gas is set back in each walk
-//! ([`with_every_26_hold_but_the_pore_gas`]): its outer-system ice freezes count (vii)'s N₂ out
-//! (`pore_gas_tests`' flips), which its own census lists.
+//! (vii)'s two records by name.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -18,7 +16,6 @@ use crate::planetary::derive::photometry::area_mix::{
     IcyRegolithRules, with_icy_regolith, with_scattering_held,
 };
 use crate::planetary::testing::with_every_26_hold;
-use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 use crate::units::Kelvin;
 use hyperion_testkit::float::assert_same_bits;
 
@@ -26,7 +23,7 @@ use hyperion_testkit::float::assert_same_bits;
 /// airless climate after a last step on the bulk one, and read once at its N₂'s saturation
 /// pressure over its ice: item 33's world ([`ITEM_33_WORLD`](super::tests::ITEM_33_WORLD)), at
 /// 1.68 Pa, ×49 (the census, 2026-10-31: the brief's two and this one, its lean), to 0.034 Pa; and
-/// count (vii)'s two (decision-p14-t53c-collapse §2.2), at 100.000 Pa, ×1,132 and ×741, to about
+/// count (vii)'s two (decision-p14-t53c-collapse §2.2), at 100.000 Pa, ×1,137 and ×741, to about
 /// 0.09 and 0.13 Pa.
 const MOVERS: [&str; 3] = [
     "02000b2ca0000001.1100",
@@ -36,13 +33,14 @@ const MOVERS: [&str; 3] = [
 
 /// Count (vii)'s two, the brief's movers: their record's N₂ over its ice with the switch held, and
 /// read once their record's N₂ and their derivation's total, Pa, pinned natively (x86-64) so that
-/// the WebAssembly suite checks the re-hold bit for bit; e101's re-pinned at generator version 25,
-/// whose rules move its coldest zone in the last bits.
+/// the WebAssembly suite checks the re-hold bit for bit; e101's under P14.T49.l's pore gas
+/// (2026-11-01), its lid's ground reading its air, re-pinned at generator version 25, whose rules
+/// move its coldest zone in the last bits.
 const COUNT_VII: [(&str, f64, (f64, f64)); 2] = [
     (
         "01ffeb2d20000000.e101",
-        1_132.0,
-        (0.085_466_836_810_647_39, 0.103_091_058_779_141_8),
+        1_137.0,
+        (0.085_142_374_195_206_07, 0.102_698_785_631_132_33),
     ),
     (
         "02002b2d1ffe0000.e103",
@@ -65,12 +63,6 @@ struct Census {
     switched: (Vec<ThinAirBody>, Vec<settled_log::Settled>),
 }
 
-/// `run`'s result under every 26 hold with P14.T49.l's pore gas set back to the vacuum, so that
-/// the line's census reads the line's switch alone.
-fn with_every_26_hold_but_the_pore_gas<R>(run: impl FnOnce() -> R) -> R {
-    with_every_26_hold(|| with_regolith_inertia(RegolithInertiaRules::Vacuum, run))
-}
-
 /// The census under every 26 hold, the line's switch held and in force, walked once a process,
 /// with the solves each walk published ([`settled_log`]).
 fn census() -> &'static Census {
@@ -84,7 +76,7 @@ fn census() -> &'static Census {
         // crossing; 26's bump restates this census.
         let frost = IcyRegolithRules::Frost;
         let held = settled_log::capture(|| {
-            with_every_26_hold_but_the_pore_gas(|| {
+            with_every_26_hold(|| {
                 with_icy_regolith(frost, || {
                     with_scattering_held(|| {
                         with_line_switch(LineSwitchRules::Held, || thin_air_census(&sets))
@@ -95,7 +87,7 @@ fn census() -> &'static Census {
         let walk_held = start.elapsed();
         let start = Instant::now();
         let switched = settled_log::capture(|| {
-            with_every_26_hold_but_the_pore_gas(|| {
+            with_every_26_hold(|| {
                 with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets)))
             })
         });
@@ -222,7 +214,7 @@ fn under_every_26_hold_the_line_is_read_once_by_the_steps_and_the_record() {
 }
 
 /// The census body `id` of the sample, its system generated afresh under every 26 hold with the
-/// line's rules `rules`, the pore gas set back, and the solve that published it ([`settled_log`]).
+/// line's rules `rules`, and the solve that published it ([`settled_log`]).
 /// The icy regolith (P14.T49.m) is set back to the frost: its lag moves both off the line, to a
 /// `Snowball` under either rule
 /// (`under_every_26_hold_the_icy_regolith_moves_count_vii_s_two_off_the_line`); and P14.T24.h.b's
@@ -244,7 +236,7 @@ fn named_under(
         .unwrap_or_else(|| panic!("{id}'s system is in the sample"));
     let sets = [("sample", SEED, ctx.clone())];
     let (bodies, solves) = settled_log::capture(|| {
-        with_every_26_hold_but_the_pore_gas(|| {
+        with_every_26_hold(|| {
             with_icy_regolith(icy, || {
                 with_scattering_held(|| with_line_switch(rules, || thin_air_census(&sets)))
             })
@@ -259,7 +251,7 @@ fn named_under(
 }
 
 /// P14.T53.i's records by name, count (vii)'s two ([`COUNT_VII`]): with the switch held each is
-/// `Tenuous` at 100.000 Pa, its last step on the bulk climate, its record's N₂ ×1,132 and ×741
+/// `Tenuous` at 100.000 Pa, its last step on the bulk climate, its record's N₂ ×1,137 and ×741
 /// over its ice at its coldest zone (P14.T53.c's seam, as today). Read once, each is `Tenuous` or
 /// `Airless`, its record's dominant N₂ within 10⁻⁹ of its saturation pressure at its record's
 /// coldest zone, about 0.09 and 0.13 Pa, and a second hold over the airless span repeats its

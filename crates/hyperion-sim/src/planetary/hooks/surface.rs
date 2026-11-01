@@ -140,6 +140,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::chem::condense::COLLISION_CONSTANTS;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
+use crate::planetary::chem::tenuous::holds_tenuous_air;
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Atmosphere, Crust, EARTH_REFERENCE_AGE, Gas, GreenhouseCeiling,
@@ -154,7 +155,7 @@ use crate::planetary::hooks::figures::GlobalFigures;
 #[cfg(doc)]
 use crate::substance::PhaseDiagram;
 use crate::substance::thermal::{
-    BuildPoreGasError, EvaluateRegolithInertiaError, PoreGas, Pores, RegolithInertiaRules,
+    BuildPoreGasError, EvaluateRegolithInertiaError, LidAir, PoreGas, Pores, RegolithInertiaRules,
     reference_regolith_thermal_inertia_under,
 };
 use crate::substance::{
@@ -624,7 +625,7 @@ impl GroundInertia {
     ) -> Self {
         let t = equilibrium.value();
         if t.is_finite() && t > 0.0 {
-            ground_inertia(lid, material, equilibrium, &Pores::Vacuum)
+            ground_inertia(lid, material, equilibrium, LidAir::Airless, &Pores::Vacuum)
         } else {
             Self {
                 gamma: material_inertia_j_per_m2_k_sqrt_s(material),
@@ -636,15 +637,21 @@ impl GroundInertia {
     }
 
     /// The ground read at `equilibrium` ([`at_equilibrium`](Self::at_equilibrium)'s, the
-    /// caller's) under a column whose pores hold what `pores` gives ([`pores_of`]; P14.T49.l):
-    /// below the hold, or for a ground read at no lid or under no light, itself to the bit, `pores`
-    /// never called; under [`RegolithInertiaRules::PoreGas`], the law at its lid at `equilibrium`
-    /// read once more with the gas in its pores ([`ground_inertia`]), at every step that calls it.
+    /// caller's) on a lid under `air` ([`lid_air`]) whose pores hold what `pores` gives
+    /// ([`pores_of`]; P14.T49.l): below the hold, or for a ground read at no lid or under no light,
+    /// itself to the bit, `pores` never called; under [`RegolithInertiaRules::PoreGas`], the law at
+    /// its lid at `equilibrium` read once more at the form for its air with the gas in its pores
+    /// ([`ground_inertia`]), at every step that calls it.
     #[must_use]
-    pub(crate) fn under(self, equilibrium: Kelvin, pores: impl FnOnce() -> Pores) -> Self {
+    pub(crate) fn under(
+        self,
+        equilibrium: Kelvin,
+        air: LidAir,
+        pores: impl FnOnce() -> Pores,
+    ) -> Self {
         match (RegolithInertiaRules::in_force(), self.lid) {
             (RegolithInertiaRules::PoreGas, Some(lid)) => {
-                ground_inertia(Some(lid), self.material, equilibrium, &pores())
+                ground_inertia(Some(lid), self.material, equilibrium, air, &pores())
             }
             (RegolithInertiaRules::Vacuum, _) | (RegolithInertiaRules::PoreGas, None) => self,
         }
@@ -675,10 +682,10 @@ const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
 }
 
 /// The thermal inertia of the ground of a body whose crust's lid is `lid` and whose bulk is of
-/// `material`, at `temperature`, its pores holding `pores` (P14.T54.a; decision-pre-23-review item
-/// 7; decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row at the rules in force
-/// ([`reference_regolith_thermal_inertia_under`]; below P14.T49.l's hold, a dry regolith in vacuum
-/// of its family's reference form), and otherwise P14.T24.a's constants,
+/// `material`, at `temperature`, on a lid under `air`, its pores holding `pores` (P14.T54.a;
+/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row
+/// at the rules in force ([`reference_regolith_thermal_inertia_under`]; below P14.T49.l's hold, a
+/// dry regolith in vacuum of its family's reference form), and otherwise P14.T24.a's constants,
 /// [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`] and
 /// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], as its fallback ([`InertiaSource`]):
 ///
@@ -694,8 +701,8 @@ const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
 /// neither re-read) lies against its `basalt_fe` lid's about 47 here at its `T_eq` (46.91 at the
 /// reference Mars's 206.9 K), and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728;
 /// not re-read) against its ice's 57. Under the hold the gas in the pores adds its conduction
-/// (P14.T49.l): the reference Mars reads 147.4, and Titan's ice, at the outer system's form, about
-/// 54 at its 94 K surface.
+/// (P14.T49.l): the reference Mars reads 147.4, and Titan's ice, under its air at P14.T49.j's form,
+/// about 130 at its 94 K surface; an airless water-ice lid takes the outer system's ice.
 ///
 /// The lid is a [`CrustLithology`], T51.c's closed set, every row of which has condensed columns
 /// and takes its own family's form: so the law's refusal of a row with none, or of a form of
@@ -717,6 +724,7 @@ fn ground_inertia(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
     temperature: Kelvin,
+    air: LidAir,
     pores: &Pores,
 ) -> GroundInertia {
     let Some(lid) = lid else {
@@ -726,6 +734,7 @@ fn ground_inertia(
         lid.substance(),
         temperature,
         RegolithInertiaRules::in_force(),
+        air,
         pores,
     ) {
         Ok(inertia) => {
@@ -776,6 +785,55 @@ fn ground_inertia(
         source,
         lid: Some(lid),
         material,
+    }
+}
+
+/// Whether the lid of a body of surface gravity `gravity` whose airborne inventory, none of it
+/// condensed, is the column `inventory` lies under an air (P14.T49.l, [`LidAir`]): under one where
+/// that column's gases other than water, all airborne, would reach the tenuous floor
+/// ([`holds_tenuous_air`]), the line between a `Tenuous` air and none.
+///
+/// The passes' steps and the record's conditions take it from the pass's inventory, the column the
+/// first step of T13.c's passes reads, and R09's hand-built inputs from their own air
+/// ([`lid_air_of_air`]): once a pass, and never from a step's partition, so that the form a lid
+/// takes cannot freeze out the air that chose it. A body whose air condenses to a tenuous one or to
+/// none keeps its inventory's form. Water is left out: a water-ice lid's own vapour is no air over
+/// it, and an icy body's inventory holds its whole hydrosphere, which would put every airless icy
+/// moon under an air (lean, 2026-11-01).
+#[must_use]
+pub(crate) fn lid_air(inventory: &PartialPressures, gravity: MetresPerSecondSquared) -> LidAir {
+    let air = Gas::ALL
+        .into_iter()
+        .filter(|&gas| gas != Gas::Water)
+        .fold(0.0, |sum, gas| sum + inventory.of(gas).value());
+    lid_air_at(Pascals::new(air), gravity)
+}
+
+/// Whether a hand-built world's lid lies under its air, the gases `gases` (mole fractions) at the
+/// surface pressure `pressure` under the surface gravity `gravity` ([`lid_air`]'s rule, over its
+/// air's gases other than water).
+#[must_use]
+pub(crate) fn lid_air_of_air(
+    pressure: Pascals,
+    gases: &[(SubstanceId, f64)],
+    gravity: MetresPerSecondSquared,
+) -> LidAir {
+    let water = Gas::Water.substance();
+    let share = gases
+        .iter()
+        .filter(|&&(id, _)| id != water)
+        .fold(0.0, |sum, &(_, x)| sum + x);
+    lid_air_at(Pascals::new(pressure.value() * share), gravity)
+}
+
+/// [`lid_air`]'s line: under an air where the gases other than water weigh `air` under `gravity`,
+/// a column at or above the tenuous floor.
+#[must_use]
+fn lid_air_at(air: Pascals, gravity: MetresPerSecondSquared) -> LidAir {
+    if holds_tenuous_air(air, gravity) {
+        LidAir::UnderAir
+    } else {
+        LidAir::Airless
     }
 }
 
@@ -1294,13 +1352,21 @@ impl SurfaceConditions {
         );
         let floor = night_floor(inputs.heat_flow);
         // The ground's inertia, once: at its lid's row at the column's equilibrium temperature, its
-        // pores holding the column's air under P14.T49.l's hold, as the published pass's step.
+        // pores holding the column's air under P14.T49.l's hold at the form of the inventory's
+        // air, as the published pass's step.
         let ground = GroundInertia::at_equilibrium(
             inputs.lid,
             inputs.material,
             inputs.equilibrium_temperature,
         )
-        .under(inputs.equilibrium_temperature, || pores_of(&column, &gases));
+        .under(
+            inputs.equilibrium_temperature,
+            lid_air(
+                inputs.atmosphere.inventory_weights(),
+                inputs.surface_gravity,
+            ),
+            || pores_of(&column, &gases),
+        );
         // A world locked 1:1 with open water takes its substellar deck in its column (P14.T24.j).
         let deck::Decked {
             column,
@@ -2331,10 +2397,13 @@ pub(crate) fn step_climate(
         // A partial pressure that is not finite has no climate the contrasts can give.
         return ClimateSpan::isothermal(surface_temperature);
     };
-    // The pass's ground, its pores holding this step's air under P14.T49.l's hold.
-    let ground = body.ground.under(body.equilibrium_temperature, || {
-        pores_of(&column, fractions.as_slice())
-    });
+    // The pass's ground, its pores holding this step's air under P14.T49.l's hold, at the form
+    // of the pass's inventory's air, the first step's column.
+    let ground = body.ground.under(
+        body.equilibrium_temperature,
+        lid_air(&body.inventory, body.surface_gravity),
+        || pores_of(&column, fractions.as_slice()),
+    );
     let cap = carbon_dioxide_cap(
         &CapBody {
             spin: body.spin,

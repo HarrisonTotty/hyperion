@@ -15,7 +15,8 @@
 //! - `[built form]`: the same for a few layers built at a caller's porosity and grain size;
 //! - `[pore gas]` (P14.T49.l, held at 26): the outer system's ice form, a few airs in a regolith's
 //!   pores (their conductivity, viscosity and jump length), and the law at P14.T49.l's rules with
-//!   those airs in the pores, the gas term among its parts, at their temperatures.
+//!   those airs in the pores, the gas term among its parts, at their temperatures, at the airless
+//!   lid's form and at the form of a lid under the air.
 //!
 //! Nothing on the record reads the module until P14.T54.a, which wires the inertia at P14.T51.c's
 //! lid into P14.T24.a, so until then a change re-blesses this golden at the version in force
@@ -27,7 +28,7 @@
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::planetary::chem::condense::COLLISION_CONSTANTS;
 use hyperion_sim::substance::thermal::{
-    self, GrainConductivity, PoreGas, Pores, Provenance, RegolithForm, RegolithInertia,
+    self, GrainConductivity, LidAir, PoreGas, Pores, Provenance, RegolithForm, RegolithInertia,
     RegolithInertiaRules, SurfaceEnergy, ThermalColumn, ThermalForm,
     reference_regolith_thermal_inertia, reference_regolith_thermal_inertia_under,
     regolith_thermal_inertia,
@@ -283,12 +284,16 @@ fn pure_gas(key: &str, pressure_pa: f64, t: f64) -> PoreGas {
 
 /// The golden's pore gas (P14.T49.l): the outer system's ice form; a few airs, each at the
 /// temperature of its regolith; and the law under P14.T49.l's rules at each, the gas term among its
-/// parts, with the airless ice form at the pinned temperatures.
+/// parts, at the airless lid's form (the outer system's ice for `H2O`) and at the form of a lid
+/// under that air (P14.T49.j's), with the airless ice form at the pinned temperatures.
 fn pore_gas_section(w: &mut GoldenWriter) {
     w.line("[pore gas]");
-    let outer =
-        RegolithForm::reference_under(MechanicsFamily::WaterIce, RegolithInertiaRules::PoreGas)
-            .expect("water ice has a form");
+    let outer = RegolithForm::reference_under(
+        MechanicsFamily::WaterIce,
+        RegolithInertiaRules::PoreGas,
+        LidAir::Airless,
+    )
+    .expect("water ice has a form");
     let bases: Vec<String> = outer
         .sources()
         .iter()
@@ -328,21 +333,26 @@ fn pore_gas_section(w: &mut GoldenWriter) {
             gas.jump_length(kelvin).value(),
         );
         let id = substance::by_key(row_key).expect("the row is a registry row");
-        let under = format!("{at}: {row_key}");
-        match reference_regolith_thermal_inertia_under(
-            id,
-            kelvin,
-            RegolithInertiaRules::PoreGas,
-            &Pores::Gas(gas),
-        ) {
-            Ok(inertia) => {
-                inertia_lines(w, &under, &inertia);
-                w.f64(
-                    &format!("{under}: gas_conductivity_w_per_m_k"),
-                    inertia.gas_conductivity_w_per_m_k(),
-                );
+        for (air, under) in [
+            (LidAir::Airless, format!("{at}: {row_key}")),
+            (LidAir::UnderAir, format!("{at}: {row_key} under the air")),
+        ] {
+            match reference_regolith_thermal_inertia_under(
+                id,
+                kelvin,
+                RegolithInertiaRules::PoreGas,
+                air,
+                &Pores::Gas(gas),
+            ) {
+                Ok(inertia) => {
+                    inertia_lines(w, &under, &inertia);
+                    w.f64(
+                        &format!("{under}: gas_conductivity_w_per_m_k"),
+                        inertia.gas_conductivity_w_per_m_k(),
+                    );
+                }
+                Err(e) => w.line(&format!("{under}: {e}")),
             }
-            Err(e) => w.line(&format!("{under}: {e}")),
         }
     }
     let ice = substance::by_key("H2O").expect("the registry holds water");
@@ -352,6 +362,7 @@ fn pore_gas_section(w: &mut GoldenWriter) {
             ice,
             Kelvin::new(t),
             RegolithInertiaRules::PoreGas,
+            LidAir::Airless,
             &Pores::Vacuum,
         ) {
             Ok(inertia) => inertia_lines(w, &at, &inertia),

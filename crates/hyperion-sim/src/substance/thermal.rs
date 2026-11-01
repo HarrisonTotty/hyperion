@@ -93,11 +93,13 @@
 //! ([`condense`](crate::planetary::chem::condense)).
 //!
 //! Behind the same hold, `PORE_GAS_VERSION` ([`RegolithInertiaRules`]), the water-ice reference
-//! form is the outer system's fluffy amorphous ice ([`RegolithForm::reference_under`]): 67P's
-//! porosity, its pebbles' size and amorphous ice's conductivity in place of the crystal's, so that
-//! its radiative term carries the temperature from the trans-Neptunian objects' inertia of a few
-//! SI units to Ganymede's tens. The porosity and grain size are an adopted, effective
-//! parameterisation of the radiative path, not a packing of real grains: 67P's 0.80 is its total
+//! form of an airless lid is the outer system's fluffy amorphous ice
+//! ([`RegolithForm::reference_under`], [`LidAir`]): 67P's porosity, its pebbles' size and amorphous
+//! ice's conductivity in place of the crystal's, so that its radiative term carries the
+//! temperature from the trans-Neptunian objects' inertia of a few SI units to Ganymede's tens. A
+//! lid under an air keeps P14.T49.j's crystalline form, the gas in its pores. The porosity and
+//! grain size are an adopted, effective parameterisation of the radiative path, not a packing of
+//! real grains: 67P's 0.80 is its total
 //! porosity, within its pebbles and between them, where dense grains of 2 mm pack at about 0.4,
 //! whose void ratio would make the radiative term six times smaller and Ganymede's Γ about 10
 //! (lean, 2026-10-31; Gundlach and Blum 2012's two levels, the pebbles' packing for the path and
@@ -778,9 +780,10 @@ const ICE_CONTACT_SOURCES: [Source; 2] = [
 
 /// The outer system's icy regolith's porosity (P14.T49.l): 0.80, the middle of comet 67P's
 /// "75–85%" from CONSERT's permittivity of its nucleus (Kofman et al. 2015, Science 349, aab0639,
-/// read by P14.T49.j), as fluffy ice: under the hold, the porosity of every water-ice reference
-/// form, airless or under air (Titan's lid among them); Europa's crystalline regolith's 0.64
-/// ([`ICY_REGOLITH_POROSITY`]) stays below it.
+/// read by P14.T49.j), as fluffy ice: under the hold, the porosity of an airless lid's water-ice
+/// reference form ([`LidAir::Airless`]); Europa's crystalline regolith's 0.64
+/// ([`ICY_REGOLITH_POROSITY`]) stays below it, and a lid under an air, Titan's among them, keeps
+/// it.
 pub(crate) const OUTER_ICE_POROSITY: f64 = 0.80;
 
 /// The outer system's icy regolith's grain diameter, m (P14.T49.l): 2 mm, the smallest of the
@@ -814,8 +817,8 @@ const OUTER_ICE_MATERIAL: FamilyMaterial = FamilyMaterial {
         source(
             "porosity",
             "0.80, the middle of comet 67P's 75–85 per cent from CONSERT (Kofman et al. 2015, \
-             Science 349, aab0639), as the outer system's fluffy ice on every water-ice lid, \
-             airless or under air: the trans-Neptunian objects' mean inertia, 2.5 ± 0.5 \
+             Science 349, aab0639), as the outer system's fluffy ice on every airless water-ice \
+             lid: the trans-Neptunian objects' mean inertia, 2.5 ± 0.5 \
              (Santos-Sanz et al. 2017, A&A 604, A95; not re-read), calls for a far looser \
              regolith than Europa's 0.64",
             Basis::Adopted,
@@ -875,13 +878,35 @@ const WATER_ICE_MATERIAL: FamilyMaterial = FamilyMaterial {
     ],
 };
 
-/// The grain material and reference layer of `family`'s form under `rules`, `None` for a family
-/// with none: under [`RegolithInertiaRules::PoreGas`] the water-ice form is the outer system's
-/// ([`OUTER_ICE_MATERIAL`]), and every other family's is the one below the hold.
+/// Whether a regolith's lid lies under an air (P14.T49.l), which picks its water-ice reference form
+/// under [`RegolithInertiaRules::PoreGas`] ([`RegolithForm::reference_under`]).
+///
+/// The outer system's fluffy ice is the airless lid's: the trans-Neptunian objects' mean inertia of
+/// 2.5 ± 0.5 that it is fitted to is the airless ones' (Santos-Sanz et al. 2017, A&A 604, A95; not
+/// re-read). A lid under an air keeps P14.T49.j's crystalline form, the gas in its pores: the one
+/// measured N₂-aired world of the outer system, Pluto, has a diurnal inertia of 20–30 (Lellouch et
+/// al. 2011, Icarus 214, 701; not re-read), and an air in vapour equilibrium with its ice holds its
+/// frost by latent heat, as [`tenuous`](crate::planetary::chem::tenuous) takes it, so a fluffy dry
+/// lid's cold night is no cold trap for its air. A ground takes it once a pass from the column of
+/// its whole airborne inventory, none of it condensed, so that it cannot feed back on the air it
+/// leaves (lean, 2026-11-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LidAir {
+    /// No air over the lid: under the pore gas's rules, the outer system's ice.
+    Airless,
+    /// An air over the lid, at or above the airless line: P14.T49.j's form at every rule.
+    UnderAir,
+}
+
+/// The grain material and reference layer of `family`'s form under `rules` on a lid under `air`,
+/// `None` for a family with none: under [`RegolithInertiaRules::PoreGas`] an airless lid's
+/// water-ice form is the outer system's ([`OUTER_ICE_MATERIAL`]), and every other is the one below
+/// the hold.
 #[must_use]
 const fn family_form(
     family: MechanicsFamily,
     rules: RegolithInertiaRules,
+    air: LidAir,
 ) -> Option<(FamilyMaterial, ReferenceLayer)> {
     match family {
         MechanicsFamily::Silicate => Some((
@@ -891,15 +916,16 @@ const fn family_form(
                 grain_diameter: LUNAR_SOIL_GRAIN_DIAMETER,
             },
         )),
-        MechanicsFamily::WaterIce => match rules {
-            RegolithInertiaRules::Vacuum => Some((
+        MechanicsFamily::WaterIce => match (rules, air) {
+            (RegolithInertiaRules::Vacuum, _)
+            | (RegolithInertiaRules::PoreGas, LidAir::UnderAir) => Some((
                 WATER_ICE_MATERIAL,
                 ReferenceLayer::Fixed {
                     porosity: ICY_REGOLITH_POROSITY,
                     grain_diameter: ICY_REGOLITH_GRAIN_DIAMETER,
                 },
             )),
-            RegolithInertiaRules::PoreGas => Some((
+            (RegolithInertiaRules::PoreGas, LidAir::Airless) => Some((
                 OUTER_ICE_MATERIAL,
                 ReferenceLayer::Fixed {
                     porosity: OUTER_ICE_POROSITY,
@@ -1002,14 +1028,15 @@ impl RegolithForm {
     /// ```
     #[must_use]
     pub fn reference(family: MechanicsFamily) -> Option<Self> {
-        Self::reference_under(family, RegolithInertiaRules::Vacuum)
+        Self::reference_under(family, RegolithInertiaRules::Vacuum, LidAir::Airless)
     }
 
-    /// The reference form of `family`'s regolith under `rules`, `None` for a family with none
-    /// ([`reference`](Self::reference)'s): under [`RegolithInertiaRules::Vacuum`] the forms of
-    /// P14.T49.j; under [`RegolithInertiaRules::PoreGas`], P14.T49.l's, whose water-ice form is the
-    /// outer system's fluffy amorphous ice (the [module documentation](self)), every other family's
-    /// being P14.T49.j's.
+    /// The reference form of `family`'s regolith under `rules` on a lid under `air`, `None` for a
+    /// family with none ([`reference`](Self::reference)'s): under [`RegolithInertiaRules::Vacuum`]
+    /// the forms of P14.T49.j; under [`RegolithInertiaRules::PoreGas`], P14.T49.l's, whose
+    /// water-ice form on an airless lid is the outer system's fluffy amorphous ice (the [module
+    /// documentation](self)), every other form, a water-ice lid's under an air among them, being
+    /// P14.T49.j's ([`LidAir`]).
     ///
     /// # Panics
     ///
@@ -1017,29 +1044,37 @@ impl RegolithForm {
     ///
     /// # Examples
     ///
-    /// The outer system's ice is looser than Europa's, and conducts as amorphous ice:
+    /// The outer system's airless ice is looser than Europa's, and conducts as amorphous ice; a lid
+    /// under an air keeps Europa's:
     ///
     /// ```
     /// use hyperion_sim::substance::RegolithForm;
-    /// use hyperion_sim::substance::thermal::{GrainConductivity, RegolithInertiaRules};
+    /// use hyperion_sim::substance::thermal::{GrainConductivity, LidAir, RegolithInertiaRules};
     /// use hyperion_surface::field::MechanicsFamily;
     ///
     /// # fn main() {
     /// #     assert!(example().is_some(), "every value the example reads is there");
     /// # }
     /// # fn example() -> Option<()> {
-    /// let europa = RegolithForm::reference(MechanicsFamily::WaterIce)?;
-    /// let outer =
-    ///     RegolithForm::reference_under(MechanicsFamily::WaterIce, RegolithInertiaRules::PoreGas)?;
+    /// let ice = MechanicsFamily::WaterIce;
+    /// let europa = RegolithForm::reference(ice)?;
+    /// let rules = RegolithInertiaRules::PoreGas;
+    /// let outer = RegolithForm::reference_under(ice, rules, LidAir::Airless)?;
+    /// let aired = RegolithForm::reference_under(ice, rules, LidAir::UnderAir)?;
     /// assert!(outer.porosity() > europa.porosity());
     /// assert_eq!(europa.grain_conductivity(), GrainConductivity::Row);
     /// assert_ne!(outer.grain_conductivity(), GrainConductivity::Row);
+    /// assert_eq!(aired, europa);
     /// # Some(())
     /// # }
     /// ```
     #[must_use]
-    pub fn reference_under(family: MechanicsFamily, rules: RegolithInertiaRules) -> Option<Self> {
-        let (material, layer) = family_form(family, rules)?;
+    pub fn reference_under(
+        family: MechanicsFamily,
+        rules: RegolithInertiaRules,
+        air: LidAir,
+    ) -> Option<Self> {
+        let (material, layer) = family_form(family, rules, air)?;
         let (porosity, grain_diameter) = match layer {
             ReferenceLayer::FormRow {
                 depth,
@@ -1478,14 +1513,15 @@ pub fn reference_regolith_thermal_inertia(
     regolith_thermal_inertia(id, &form, temperature)
 }
 
-/// The thermal inertia of the substance `id` at its family's reference form under `rules`
-/// ([`RegolithForm::reference_under`]), its pores holding `pores`, at `temperature`: the law at a
-/// crust's lid, the one choke point of P14.T49.l's hold, which a ground's inertia reads at the
-/// rules in force.
+/// The thermal inertia of the substance `id` at its family's reference form under `rules` on a lid
+/// under `air` ([`RegolithForm::reference_under`]), its pores holding `pores`, at `temperature`:
+/// the law at a crust's lid, the one choke point of P14.T49.l's hold, which a ground's inertia
+/// reads at the rules in force.
 ///
 /// Under [`RegolithInertiaRules::Vacuum`] it is [`reference_regolith_thermal_inertia`] to the bit,
 /// its pores taken as empty whatever `pores` holds, as P14.T49.j's law has none; under
-/// [`RegolithInertiaRules::PoreGas`], [`regolith_thermal_inertia_with_pores`] at P14.T49.l's form.
+/// [`RegolithInertiaRules::PoreGas`], [`regolith_thermal_inertia_with_pores`] at P14.T49.l's form
+/// for the lid's air.
 ///
 /// # Errors
 ///
@@ -1500,7 +1536,7 @@ pub fn reference_regolith_thermal_inertia(
 /// use hyperion_sim::planetary::chem::condense::COLLISION_CONSTANTS;
 /// use hyperion_sim::substance::by_key;
 /// use hyperion_sim::substance::thermal::{
-///     PoreGas, Pores, RegolithInertiaRules, reference_regolith_thermal_inertia,
+///     LidAir, PoreGas, Pores, RegolithInertiaRules, reference_regolith_thermal_inertia,
 ///     reference_regolith_thermal_inertia_under,
 /// };
 /// use hyperion_sim::units::{Kelvin, Pascals};
@@ -1510,7 +1546,7 @@ pub fn reference_regolith_thermal_inertia(
 /// let mars = Pores::Gas(PoreGas::new(Pascals::new(610.0), 44.0, 735.0, *co2)?);
 /// let t = Kelvin::new(214.0);
 /// let gamma = |rules| {
-///     reference_regolith_thermal_inertia_under(basalt, t, rules, &mars)
+///     reference_regolith_thermal_inertia_under(basalt, t, rules, LidAir::UnderAir, &mars)
 ///         .map(|inertia| inertia.inertia_j_per_m2_k_sqrt_s())
 /// };
 /// let vacuum = reference_regolith_thermal_inertia(basalt, t)?.inertia_j_per_m2_k_sqrt_s();
@@ -1522,6 +1558,7 @@ pub fn reference_regolith_thermal_inertia_under(
     id: SubstanceId,
     temperature: Kelvin,
     rules: RegolithInertiaRules,
+    air: LidAir,
     pores: &Pores,
 ) -> Result<RegolithInertia, EvaluateRegolithInertiaError> {
     let family = id
@@ -1532,7 +1569,7 @@ pub fn reference_regolith_thermal_inertia_under(
     match rules {
         RegolithInertiaRules::Vacuum => reference_regolith_thermal_inertia(id, temperature),
         RegolithInertiaRules::PoreGas => {
-            let form = RegolithForm::reference_under(family, rules)
+            let form = RegolithForm::reference_under(family, rules, air)
                 .ok_or(EvaluateRegolithInertiaError::NoRegolithForm { family })?;
             regolith_thermal_inertia_with_pores(id, &form, temperature, pores)
         }
@@ -1556,7 +1593,8 @@ pub enum RegolithInertiaRules {
     /// water-ice form Europa's crystalline regolith.
     Vacuum,
     /// Version 26's: the gas in the pores at the air's pressure ([`Pores`]), and the outer system's
-    /// fluffy amorphous ice as the water-ice form ([`RegolithForm::reference_under`]).
+    /// fluffy amorphous ice as an airless lid's water-ice form ([`RegolithForm::reference_under`],
+    /// [`LidAir`]).
     PoreGas,
 }
 

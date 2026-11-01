@@ -3816,7 +3816,13 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
 #[test]
 fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
     let at = |lid: CrustLithology, material: SurfaceMaterial, t: f64| {
-        ground_inertia(Some(lid), material, Kelvin::new(t), &Pores::Vacuum)
+        ground_inertia(
+            Some(lid),
+            material,
+            Kelvin::new(t),
+            LidAir::Airless,
+            &Pores::Vacuum,
+        )
     };
     let law = |lid: CrustLithology, t: f64| {
         reference_regolith_thermal_inertia(lid.substance(), Kelvin::new(t))
@@ -3864,7 +3870,13 @@ fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
         );
     }
     for (material, gamma) in [(SurfaceMaterial::Rock, rock), (SurfaceMaterial::Ice, ice)] {
-        let none = ground_inertia(None, material, Kelvin::new(214.0), &Pores::Vacuum);
+        let none = ground_inertia(
+            None,
+            material,
+            Kelvin::new(214.0),
+            LidAir::Airless,
+            &Pores::Vacuum,
+        );
         assert_ground(none, InertiaSource::NoLid, gamma);
         assert_eq!(none, GroundInertia::of_material(material));
     }
@@ -3891,10 +3903,11 @@ fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
 
 /// Under P14.T49.l's pore gas (`with_regolith_inertia`), a ground reads its column's air
 /// ([`pores_of`]): the table's Mars's `basalt_fe` lid under its own CO₂, and Titan's water-ice lid
-/// under its nitrogen at the outer system's form, each at its equilibrium temperature, the law
-/// labelled; below the hold the pores change nothing, to the bit; and the record's conditions,
-/// given the lid, read the ground under their own column's pores (the passes' step reads the same,
-/// `under_the_pore_gas_the_passes_climate_is_the_record_s_range`). The table's Mars holds a
+/// under its nitrogen at P14.T49.j's form, its lid being under an air ([`lid_air`]), above the
+/// outer system's airless ice's, each at its equilibrium temperature, the law labelled; below the
+/// hold the pores change nothing, to the bit; and the record's conditions, given the lid, read the
+/// ground under their own column's pores at their inventory's air (the passes' step reads the
+/// same, `under_the_pore_gas_the_passes_climate_is_the_record_s_range`). The table's Mars holds a
 /// thicker air than today's (its figures are printed); P14.T49.l's windows are asserted at today's
 /// airs in `substance::thermal`'s tests and at R09's reference Mars.
 #[test]
@@ -3914,22 +3927,36 @@ fn under_the_pore_gas_a_ground_reads_its_column_s_air() {
         let surface = Surface::of(&inputs).unwrap();
         let pores = pores_of(&surface.column, &surface.gases);
         assert!(matches!(pores, Pores::Gas(_)), "{name}'s column holds air");
+        let air = lid_air(
+            inputs.atmosphere.inventory_weights(),
+            inputs.surface_gravity,
+        );
+        assert_eq!(air, LidAir::UnderAir, "{name}'s lid lies under its air");
         let t = inputs.equilibrium_temperature;
         let held = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
-        assert_eq!(held.under(t, || pores), held, "{name}");
+        assert_eq!(held.under(t, air, || pores), held, "{name}");
         assert_eq!(
-            ground_inertia(Some(lid), inputs.material, t, &pores),
+            ground_inertia(Some(lid), inputs.material, t, air, &pores),
             held,
             "{name}"
         );
-        let (aired, conditions) = with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
-            (
-                GroundInertia::at_equilibrium(Some(lid), inputs.material, t).under(t, || pores),
-                SurfaceConditions::derive(&inputs).unwrap(),
-            )
-        });
+        let (aired, airless, conditions) =
+            with_regolith_inertia(RegolithInertiaRules::PoreGas, || {
+                let ground = GroundInertia::at_equilibrium(Some(lid), inputs.material, t);
+                (
+                    ground.under(t, air, || pores),
+                    ground.under(t, LidAir::Airless, || pores),
+                    SurfaceConditions::derive(&inputs).unwrap(),
+                )
+            });
         assert_eq!(aired.source(), InertiaSource::Law, "{name}");
         assert_eq!(conditions.ground(), aired, "{name}");
+        if lid == CrustLithology::Water {
+            assert!(
+                aired.inertia_j_per_m2_k_sqrt_s() > 2.0 * airless.inertia_j_per_m2_k_sqrt_s(),
+                "{name}: {aired:?} against the airless form's {airless:?}"
+            );
+        }
         let gamma = aired.inertia_j_per_m2_k_sqrt_s();
         eprintln!(
             "{name} under its air at its T_eq {:.2} K, {:.1} Pa: Γ {gamma:.2}, against {:.2} held",
@@ -4007,6 +4034,40 @@ fn under_the_pore_gas_the_passes_climate_is_the_record_s_range() {
     }
 }
 
+/// A lid lies under an air where its inventory's gases other than water would reach the tenuous
+/// floor ([`lid_air`], P14.T49.l): a hydrosphere alone, however heavy, is no air, a column of N₂
+/// at the floor is one and one just under it is not, an empty or non-finite column is none, and a
+/// hand-built world's air takes the same rule ([`lid_air_of_air`]).
+#[test]
+fn a_lid_lies_under_an_air_where_its_dry_inventory_reaches_the_tenuous_floor() {
+    use crate::planetary::chem::tenuous::TENUOUS_FLOOR_COLUMN;
+
+    let g = MetresPerSecondSquared::new(0.62);
+    let floor = TENUOUS_FLOOR_COLUMN.value() * g.value();
+    let column = |water: f64, nitrogen: f64| {
+        PartialPressures::from_fn(|gas| match gas {
+            Gas::Water => Pascals::new(water),
+            Gas::Nitrogen => Pascals::new(nitrogen),
+            _ => Pascals::ZERO,
+        })
+    };
+    assert_eq!(lid_air(&column(1e9, 0.0), g), LidAir::Airless);
+    assert_eq!(lid_air(&column(1e9, floor), g), LidAir::UnderAir);
+    assert_eq!(lid_air(&column(0.0, 0.999 * floor), g), LidAir::Airless);
+    assert_eq!(lid_air(&column(0.0, 0.0), g), LidAir::Airless);
+    assert_eq!(lid_air(&column(0.0, f64::NAN), g), LidAir::Airless);
+    let (water, nitrogen) = (Gas::Water.substance(), Gas::Nitrogen.substance());
+    let air = [(water, 0.5), (nitrogen, 0.5)];
+    assert_eq!(
+        lid_air_of_air(Pascals::new(2.0 * floor), &air, g),
+        LidAir::UnderAir
+    );
+    assert_eq!(
+        lid_air_of_air(Pascals::new(1.9 * floor), &air, g),
+        LidAir::Airless
+    );
+}
+
 /// Every lid T51.c can name takes the law or a named fallback at any positive temperature, never
 /// the unreachable one: each row has condensed columns, which `ground_inertia`'s type rests on
 /// (P14.T54.a; the C1 review's RC1-b and RC1-c).
@@ -4019,7 +4080,13 @@ fn every_lid_takes_the_law_or_a_named_fallback() {
         );
         for t in [20.0, 40.0, 100.0, 214.0, 300.0, 1_000.0, 3_000.0] {
             for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
-                let ground = ground_inertia(Some(lid), material, Kelvin::new(t), &Pores::Vacuum);
+                let ground = ground_inertia(
+                    Some(lid),
+                    material,
+                    Kelvin::new(t),
+                    LidAir::Airless,
+                    &Pores::Vacuum,
+                );
                 assert_ne!(
                     ground.source(),
                     InertiaSource::Unreachable,
@@ -4062,6 +4129,7 @@ fn an_unlit_ground_takes_its_material_s_constant() {
             Some(CrustLithology::Basalt),
             SurfaceMaterial::Rock,
             Kelvin::new(214.0),
+            LidAir::Airless,
             &Pores::Vacuum,
         )
     );
@@ -4078,6 +4146,7 @@ fn an_unreachable_inertia_fails_its_debug_assertion() {
         Some(CrustLithology::Basalt),
         SurfaceMaterial::Rock,
         Kelvin::new(f64::NAN),
+        LidAir::Airless,
         &Pores::Vacuum,
     );
     assert_eq!(ground.source(), InertiaSource::Unreachable);

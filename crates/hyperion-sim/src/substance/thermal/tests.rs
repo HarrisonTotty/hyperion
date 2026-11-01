@@ -1018,12 +1018,14 @@ const MARS_T_K: f64 = 214.0;
 /// (Fulchignoni et al. 2005, Nature 438, 785, abstract; not re-read).
 const TITAN: (f64, f64) = (1.467e5, 93.65);
 
-/// The inertia of `key` at its family's form under P14.T49.l's rules, its pores holding `pores`.
-fn under_pore_gas(key: &str, t: f64, pores: &Pores) -> RegolithInertia {
+/// The inertia of `key` at its family's form under P14.T49.l's rules on a lid under `air`, its
+/// pores holding `pores`.
+fn under_pore_gas(key: &str, t: f64, air: LidAir, pores: &Pores) -> RegolithInertia {
     reference_regolith_thermal_inertia_under(
         row(key),
         Kelvin::new(t),
         RegolithInertiaRules::PoreGas,
+        air,
         pores,
     )
     .unwrap_or_else(|e| panic!("{key} at {t} K: {e}"))
@@ -1039,8 +1041,9 @@ fn the_pore_gas_is_held_only_until_the_26_bump() {
          `PORE_GAS_VERSION`, `RegolithInertiaRules` with its `Vacuum` arm and the rules of \
          `reference_regolith_thermal_inertia_under` (its pores then always read), \
          `GroundInertia::under`'s guard, the tests' `with_regolith_inertia`, its switch in \
-         `with_every_26_hold` (and the helper, if no other 26 hold is left), and this test; make \
-         `RegolithForm::reference`'s water-ice form the outer system's"
+         `with_every_26_hold` (and the helper, if no other 26 hold is left), and this test; give \
+         `RegolithForm::reference` the lid's air (`LidAir`), its airless water-ice form the outer \
+         system's"
     );
     assert_eq!(
         RegolithInertiaRules::in_force(),
@@ -1091,7 +1094,8 @@ fn assert_same_parts(a: &RegolithInertia, b: &RegolithInertia) {
 
 /// Empty pores, a gas at zero pressure, and the vacuum's rules whatever the pores hold, each give
 /// P14.T49.j's law to the bit, for every row with a form at every pinned temperature; the gas term
-/// reads zero.
+/// reads zero. Under the pore gas's rules each form's empty pores are its vacuum's, to the bit: the
+/// airless lid's and, a lid under an air, P14.T49.j's law itself.
 #[test]
 fn substance_thermal_empty_pores_are_the_vacuum_s_to_the_bit() {
     let mars = Pores::Gas(pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K));
@@ -1116,10 +1120,30 @@ fn substance_thermal_empty_pores_are_the_vacuum_s_to_the_bit() {
                 id,
                 t,
                 RegolithInertiaRules::Vacuum,
+                LidAir::UnderAir,
                 &mars,
             )
             .unwrap();
             assert_same_parts(&held, &reference_regolith_thermal_inertia(id, t).unwrap());
+            for air in [LidAir::Airless, LidAir::UnderAir] {
+                let own = RegolithForm::reference_under(family, RegolithInertiaRules::PoreGas, air)
+                    .unwrap();
+                let own_vacuum = regolith_thermal_inertia(id, &own, t).unwrap();
+                for pores in [&Pores::Vacuum, &none] {
+                    let empty = reference_regolith_thermal_inertia_under(
+                        id,
+                        t,
+                        RegolithInertiaRules::PoreGas,
+                        air,
+                        pores,
+                    )
+                    .unwrap();
+                    assert_same_parts(&empty, &own_vacuum);
+                }
+                if air == LidAir::UnderAir {
+                    assert_same_parts(&own_vacuum, &vacuum);
+                }
+            }
             compared += 1;
         }
     }
@@ -1318,9 +1342,9 @@ fn substance_thermal_at_titan_s_pressure_the_gas_ignores_the_grain_size() {
 ///   mode's 180–250 (Mellon et al. 2000, Icarus 148, 437; Putzig et al. 2005, Icarus 173, 325;
 ///   neither re-read), pinned at 145–153, the lunar form's 70 µm grains being finer than Mars's
 ///   sand;
-/// - Titan's `H2O` at the outer system's form under Huygens's air: against MacKenzie et al. 2019's
-///   about 236 for its sand (JGR Planets 124, 1728; its tables not reachable from the lane, so not
-///   re-read), pinned at 50–58, Titan's sand being organic and the form fluffy ice;
+/// - Titan's `H2O` under Huygens's air, a lid under an air keeping P14.T49.j's form: against
+///   MacKenzie et al. 2019's about 236 for its sand (JGR Planets 124, 1728; its tables not
+///   reachable from the lane, so not re-read), pinned at 129–138, Titan's sand being organic;
 /// - the airless `H2O` form at Ganymede's 110 K, its equilibrium temperature at a Bond albedo of
 ///   0.35: inside Ganymede's 20–40 (Bockelée-Morvan et al. 2024, A&A 681, A27; not re-read);
 /// - the airless `H2O` form at 40 K, a trans-Neptunian object's at 40–45 AU: against the
@@ -1330,10 +1354,10 @@ fn substance_thermal_at_titan_s_pressure_the_gas_ignores_the_grain_size() {
 fn substance_thermal_pore_gas_s_binding_figures() {
     let mars_air = Pores::Gas(pure_gas("CO2", MARS_PRESSURE_PA, MARS_T_K));
     let titan_air = Pores::Gas(pure_gas("N2", TITAN.0, TITAN.1));
-    let mars = under_pore_gas("basalt_fe", MARS_T_K, &mars_air);
-    let titan = under_pore_gas("H2O", TITAN.1, &titan_air);
-    let ganymede = under_pore_gas("H2O", 110.0, &Pores::Vacuum);
-    let tno = under_pore_gas("H2O", 40.0, &Pores::Vacuum);
+    let mars = under_pore_gas("basalt_fe", MARS_T_K, LidAir::UnderAir, &mars_air);
+    let titan = under_pore_gas("H2O", TITAN.1, LidAir::UnderAir, &titan_air);
+    let ganymede = under_pore_gas("H2O", 110.0, LidAir::Airless, &Pores::Vacuum);
+    let tno = under_pore_gas("H2O", 40.0, LidAir::Airless, &Pores::Vacuum);
     let gamma = RegolithInertia::inertia_j_per_m2_k_sqrt_s;
     eprintln!(
         "P14.T49.l: Mars {:.2} (k {:.4}: gas {:.4}), Titan {:.2} (k {:.4}: gas {:.4}), Ganymede \
@@ -1348,7 +1372,7 @@ fn substance_thermal_pore_gas_s_binding_figures() {
         gamma(&tno)
     );
     assert!((145.0..=153.0).contains(&gamma(&mars)), "Mars {mars:?}");
-    assert!((50.0..=58.0).contains(&gamma(&titan)), "Titan {titan:?}");
+    assert!((129.0..=138.0).contains(&gamma(&titan)), "Titan {titan:?}");
     assert!(
         (20.0..=40.0).contains(&gamma(&ganymede)),
         "Ganymede {ganymede:?}"
@@ -1356,21 +1380,41 @@ fn substance_thermal_pore_gas_s_binding_figures() {
     assert!((3.3..=3.6).contains(&gamma(&tno)), "a TNO {tno:?}");
 }
 
-/// Under P14.T49.l's rules the water-ice form is the outer system's, its own conductivity
-/// amorphous ice's, every other family's form P14.T49.j's; it names a source for each of its
-/// figures, its conductivity among them, and its radiative term carries Ganymede's inertia.
+/// Under P14.T49.l's rules an airless lid's water-ice form is the outer system's, its own
+/// conductivity amorphous ice's, every other form, a water-ice lid's under an air among them,
+/// P14.T49.j's; it names a source for each of its figures, its conductivity among them, and its
+/// radiative term carries Ganymede's inertia.
 #[test]
 fn substance_thermal_outer_system_ice_is_fluffy_amorphous_ice() {
     for &family in MechanicsFamily::ALL {
-        let under = RegolithForm::reference_under(family, RegolithInertiaRules::PoreGas);
+        let reference = RegolithForm::reference(family);
+        for air in [LidAir::Airless, LidAir::UnderAir] {
+            assert_eq!(
+                RegolithForm::reference_under(family, RegolithInertiaRules::Vacuum, air),
+                reference,
+                "{family:?}"
+            );
+        }
+        assert_eq!(
+            RegolithForm::reference_under(family, RegolithInertiaRules::PoreGas, LidAir::UnderAir),
+            reference,
+            "{family:?}"
+        );
         if family == MechanicsFamily::WaterIce {
             continue;
         }
-        assert_eq!(under, RegolithForm::reference(family), "{family:?}");
+        assert_eq!(
+            RegolithForm::reference_under(family, RegolithInertiaRules::PoreGas, LidAir::Airless),
+            reference,
+            "{family:?}"
+        );
     }
-    let outer =
-        RegolithForm::reference_under(MechanicsFamily::WaterIce, RegolithInertiaRules::PoreGas)
-            .unwrap();
+    let outer = RegolithForm::reference_under(
+        MechanicsFamily::WaterIce,
+        RegolithInertiaRules::PoreGas,
+        LidAir::Airless,
+    )
+    .unwrap();
     assert_same_bits(outer.porosity(), OUTER_ICE_POROSITY);
     assert_same_bits(outer.grain_diameter().value(), 2e-3);
     let GrainConductivity::Form(own) = outer.grain_conductivity() else {
@@ -1392,7 +1436,7 @@ fn substance_thermal_outer_system_ice_is_fluffy_amorphous_ice() {
             "the outer system's ice's {value} names a source"
         );
     }
-    let ganymede = under_pore_gas("H2O", 110.0, &Pores::Vacuum);
+    let ganymede = under_pore_gas("H2O", 110.0, LidAir::Airless, &Pores::Vacuum);
     assert!(
         ganymede.radiative_conductivity_w_per_m_k()
             > 10.0 * ganymede.contact_conductivity_w_per_m_k()

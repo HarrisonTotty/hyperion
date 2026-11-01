@@ -482,7 +482,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   solids' share, on its own stream.
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
-///   outer system's fluffy amorphous ice as the water-ice form.
+///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
 /// - the zonal search's Z₀, `Z0_BRANCH_VERSION` (R09.T13.i), at `Z0BranchRules::Kept` through
 ///   `with_z0_branch`: Z₀'s drift stop, and the held run in its place where it drifted.
 /// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`

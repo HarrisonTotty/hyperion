@@ -13,26 +13,16 @@ use super::*;
 use crate::planetary::testing::with_every_26_hold;
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
-/// The records whose state the pore gas flips over the census (the census at the tip, 2026-10-31),
-/// by ID in the census's order, each `Tenuous` or `Snowball` → `Airless`: N₂ airs at or under the
-/// 100 Pa line on outer-system icy worlds at 35–52 K, whose water-ice lid's inertia the outer
-/// system's ice takes from about 56 to 3–5 J m⁻² K⁻¹ s^−½, its coldest zone 5–23 K colder, under
-/// its N₂'s cold trap. 01ffeb2d20000000.e101 is P14.T53.i's count (vii) world.
-const FLIPS: [&str; 9] = [
-    "01fffb2bdfff0001.0600",
-    "01ffdb2c1fff0000.e103",
-    "01ffdb2c1fff0000.e104",
-    "01ffeb2d20000000.e101",
-    "02002b2d1ffe0000.e104",
-    "41ffecb1ffc00007.0d01",
-    "01fffb2da0010000.e103",
-    "01ffcb2ba0010000.e101",
-    "01ffcb2ba0010000.e102",
-];
+/// The records whose state the pore gas flips over the census, by ID in the census's order: none
+/// (the census at the tip, 2026-11-01). With the outer system's ice on every water-ice lid, nine
+/// N₂ airs at or under the 100 Pa line on icy worlds at 35–52 K went `Airless`, their lids' Γ
+/// taken from about 56 to 3–5 J m⁻² K⁻¹ s^−½ and their coldest zones 5–23 K colder under their
+/// N₂'s cold trap; a lid under an air (`hooks::surface::lid_air`) now keeps P14.T49.j's form.
+const FLIPS: [&str; 0] = [];
 
-/// How many of the census's 6,664 bodies the pore gas moves (2026-10-31): 2,118, 1,833 of them
-/// airless and 180 tenuous.
-const MOVED: usize = 2_118;
+/// How many of the census's 6,664 bodies the pore gas moves (2026-11-01): 1,730, 1,626 of them
+/// airless and 1 tenuous.
+const MOVED: usize = 1_730;
 
 /// The census's two walks, one body each in the same order: the pore gas held, and in force.
 struct Census {

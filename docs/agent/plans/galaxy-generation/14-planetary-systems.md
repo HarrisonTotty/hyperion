@@ -33698,3 +33698,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     frozen at 24) and the refits of `GREENHOUSE_NITROGEN` on Titan with the haze.
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
+  - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's
+    ice is an airless lid's alone; a lid under an air keeps T49.j's form, the pore gas in parallel.
+    `substance::thermal::LidAir::{Airless, UnderAir}` is a new argument of
+    `RegolithForm::reference_under`, `reference_regolith_thermal_inertia_under`,
+    `GroundInertia::under`, `ground_inertia` and R09's `regolith_inertia_j_per_m2_k_sqrt_s`.
+  - _Under an air_ (`hooks::surface::lid_air`, lean, 2026-11-01): the pass's inventory, the first
+    step's column, its gases but water, reaches the tenuous floor (`holds_tenuous_air`); read once a
+    pass in `step_climate`, from `inventory_weights` by the record, and from R09's own air
+    (`lid_air_of_air`). Water counted, an icy body's hydrosphere put almost every airless lid under
+    an air (airless movers 1,824 → 102); the 100 Pa line in the floor's place left
+    01fffb2da0010000.e103 flipping.
+  - _Re-pinned:_ Titan's `H2O` 54.3 → 133.7 (window 129–138); Ganymede 23.66, the TNO 3.418 and
+    R09's `mars_like` and `europa_like` unchanged. The census: no flips (`FLIPS` empty), 1,730
+    movers, 1,626 of them airless. `line_switch_tests` walk every 26 hold
+    (`with_every_26_hold_but_the_pore_gas` deleted). `substance/thermal`'s `[pore gas]` gains each
+    air's `… under the air` lines.
