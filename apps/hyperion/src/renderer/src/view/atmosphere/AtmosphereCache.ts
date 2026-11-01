@@ -45,8 +45,8 @@
  * raises nothing, and the tables are made again at a later frame, after the restore. A body with a
  * problem draws no atmosphere and carries no atmosphere label.
  *
- * **`ATMOSPHERE: PENDING`** stands for a server body asked, or building, with nothing of it drawn;
- * none while a re-request's previous state is drawn. Each view holds it with its own
+ * **`ATMOSPHERE: PENDING`** stands for a server body asked, or building, or a kept scene's record
+ * building, with nothing of it drawn; none while a re-request's previous state is drawn. Each view holds it with its own
  * {@link PendingLineHold} (item 9).
  *
  * **`ATMOSPHERE: APPROXIMATE`'s reasons** (R08.T10.c; `decision-r08-approximate-plate.md`, item 1b)
@@ -197,7 +197,7 @@ import type {
 import type { DiscReflectanceTable } from "./discTable";
 import type { BakeSpectrum } from "./spectralColour";
 import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "./thermal";
-import type { MediumTemperature } from "./thermalSource";
+import { type MediumTemperature, mediumTemperatureK } from "./thermalSource";
 import {
   type AbsorberCurveSlots,
   type AtmosphereBody,
@@ -1145,16 +1145,19 @@ function discBakeAskOf(
 }
 
 /**
- * What a routed deck's tables are made of (the module's remarks, "The cloud deck"; R08.T15.a.2): the
- * upper medium of `built` over the split at `splitM` (`thick/deckRead.ts`'s `upperMediumOf`), on the
- * deck's datum (`deckDatumOf`), its R_ref raised with the datum's radii, (2a + c) ÷ 3; a body of one
- * slice and one band on its sphere raised by the split.
+ * What a routed deck's tables are made of (the module's remarks, "The cloud deck"; R08.T15.a.2), and
+ * a closed envelope's (R08.T16.a.2): the upper medium of `built` over the split at `splitM`
+ * (`thick/deckRead.ts`'s `upperMediumOf`), its temperature's levels from the split
+ * ({@link temperatureAbove}), on the deck's datum (`deckDatumOf`), its R_ref raised with the datum's
+ * radii, (2a + c) ÷ 3; a body of one slice and one band on its sphere raised by the split.
  */
 function deckBuiltOf(built: BuiltAtmosphere, splitM: number): BuiltAtmosphere {
   const medium = upperMediumOf(built.medium, splitM);
-  const { body } = built;
+  const { body, temperature } = built;
+  const above =
+    temperature === undefined ? {} : { temperature: temperatureAbove(temperature, splitM) };
   if (body === null) {
-    return { ...built, medium, bottomRadiusM: built.bottomRadiusM + splitM };
+    return { ...built, medium, ...above, bottomRadiusM: built.bottomRadiusM + splitM };
   }
   const figure = deckDatumOf(body.figure, body.gravity, splitM);
   const raisedM =
@@ -1164,9 +1167,45 @@ function deckBuiltOf(built: BuiltAtmosphere, splitM: number): BuiltAtmosphere {
   return {
     ...built,
     medium,
+    ...above,
     body: { ...body, figure },
     bottomRadiusM: built.bottomRadiusM + raisedM,
   };
+}
+
+/**
+ * A column's temperature above `splitM`, its levels' heights from the split (R08.T16.a.2): the
+ * split's own, interpolated as `thermalSource.ts`'s `mediumTemperatureK` reads it, at 0, then each
+ * level above it, so that the upper medium's thermal source reads the heights its own terms take.
+ */
+function temperatureAbove(temperature: MediumTemperature, splitM: number): MediumTemperature {
+  const heightsM: number[] = [0];
+  const temperaturesK: number[] = [mediumTemperatureK(temperature, splitM)];
+  for (const [i, heightM] of temperature.heightsM.entries()) {
+    if (heightM > splitM) {
+      heightsM.push(heightM - splitM);
+      temperaturesK.push(temperature.temperaturesK[i] ?? Number.NaN);
+    }
+  }
+  return { heightsM: Float64Array.from(heightsM), temperaturesK: Float64Array.from(temperaturesK) };
+}
+
+/**
+ * A gas envelope's floor, m above its medium's ground, where its tables stand on the medium above it
+ * though its route is closed (`AtmosphereCache`'s `#tablesBuilt`; R08.T16.a.2): its `cloudDeck`
+ * regime's split inside the medium; `null` for any other entry, which draws its whole medium.
+ */
+function closedEnvelopeFloorM(
+  entry: Pick<ToDraw, "regime" | "envelope">,
+  medium: AtmosphereMedium,
+): number | null {
+  const { regime } = entry;
+  return entry.envelope &&
+    regime?.kind === "cloudDeck" &&
+    regime.deckAltitudeM > 0 &&
+    regime.deckAltitudeM < medium.topHeightM
+    ? regime.deckAltitudeM
+    : null;
 }
 
 /**
@@ -1846,13 +1885,22 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     return { altitudeM: regime.deckAltitudeM, floor: entry.envelope ? "envelope" : "ground" };
   }
 
-  /** What an entry's tables are made of: its own, or over a routed deck its upper medium's. */
+  /**
+   * What an entry's tables are made of: its own; over a routed deck its upper medium's; and for a gas
+   * envelope whose route is closed its medium above its floor too, over the floor's black ground
+   * with no deck bake (R08.T16.a.2; lean, 2026-11-01): nothing below an envelope's floor is drawn
+   * (Design note 9), and Hillaire's multiple-scattering series diverges over its whole column (the
+   * hand Jupiter's Ψ_ms reaches 4 × 10⁵⁰ there, past `rgba16float`'s range, and 0.77 above its
+   * floor).
+   */
   #tablesBuilt(
     entry: Pick<ToDraw, "regime" | "envelope">,
     built: BuiltAtmosphere,
   ): BuiltAtmosphere {
-    const deck = this.#deckSplitOf(entry, built.medium);
-    return deck === null ? built : deckBuiltOf(built, deck.altitudeM);
+    const splitM =
+      this.#deckSplitOf(entry, built.medium)?.altitudeM ??
+      closedEnvelopeFloorM(entry, built.medium);
+    return splitM === null ? built : deckBuiltOf(built, splitM);
   }
 
   /**

@@ -43,9 +43,8 @@
  *   load's bodies are drawn as it lands. Each air body is drawn on its medium's own figure, the one
  *   its tables take (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or
  *   Saturn's spheroid; before its load lands, on the same figures restated here, which the test
- *   holds to the cases'. `TEST JUPITER` is drawn on its medium's datum, the 1-bar figure lowered
- *   to its column's base (`envelope.ts`'s `loweredFigure`), restated as its figure, black, its
- *   envelope's floor. Its disc is a grey Lambert sphere of its medium's ground albedo,
+ *   holds to the cases'. `TEST JUPITER` is drawn on its envelope's floor, the level surface its
+ *   tables stand on (R08.T16.a.2), restated as its figure, black. Its disc is a grey Lambert sphere of its medium's ground albedo,
  *   provisional (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march
  *   draws at the limb is the disc's (`decision-r08-t10b-depth.md`, text B).
  * - **The moonlit night.** The own ship, `TEST HULL`, stands body-fixed {@link ATMOSPHERE_SHIP_HEIGHT_M}
@@ -199,7 +198,7 @@ export interface AtmosphereFixtureFigure {
 export interface AtmosphereFixture {
   readonly id: BodyIdHex;
   readonly designation: string;
-  /** The reference case whose medium it carries. */
+  /** The reference case whose medium it carries, or the record it gives (`TEST JUPITER`'s). */
   readonly caseName: AtmosphereFixtureCase;
   /** Its centre, m from the barycentre along the galactic axes. */
   readonly centreM: Vec3;
@@ -300,17 +299,19 @@ const TITAN_GROUND_ALBEDO = 0.3;
 const GIANT_GROUND_ALBEDO = 0;
 
 /**
- * The hand Jupiter's medium's datum, the figure its tables take (R08.T16.a.1's `loweredFigure`):
- * Jupiter's 1-bar figure (Archinal et al. 2018's 71,492 and 66,854 km) lowered by the 1-bar
- * level's h\* above its column's base, m, restated from its assembly (the test holds the two
- * equal).
+ * The hand Jupiter's floor, the figure its tables take (R08.T16.a.2): the level surface where τ(550)
+ * from its top reaches 10 (`thick/deckRead.ts`'s `deckDatumOf` over its medium's datum, Jupiter's
+ * 1-bar figure lowered to its column's base, R08.T16.a.1), on which its medium above the floor
+ * stands while its route is closed and its deck's once it opens, m, restated from its assembly
+ * (the test holds the two equal): some 181 km under Jupiter's 1-bar 71,492 km (Archinal et al.
+ * 2018).
  */
-const JUPITER_DATUM: AtmosphereFixtureFigure = {
-  equatorialRadiusM: 70_183_624.506_832_39,
-  polarRadiusM: 65_720_387.822_647_646,
+const JUPITER_FLOOR: AtmosphereFixtureFigure = {
+  equatorialRadiusM: 71_310_949.177_708_8,
+  polarRadiusM: 66_697_132.634_374_596,
 };
 
-/** An envelope's floor, the hand Jupiter's ground: black, below τ(550) 1,100 of its gas. */
+/** An envelope's floor, the hand Jupiter's ground: black, as its tables take it. */
 const ENVELOPE_GROUND_ALBEDO = 0;
 
 /** A sphere of `radiusM`. */
@@ -397,7 +398,7 @@ export const ATMOSPHERE_FIXTURES: ReadonlyArray<AtmosphereFixture> = [
     designation: "TEST JUPITER",
     caseName: "hand-jupiter",
     centreM: legsOn(7),
-    figure: JUPITER_DATUM,
+    figure: JUPITER_FLOOR,
     surfaceless: true,
     groundAlbedo: ENVELOPE_GROUND_ALBEDO,
   },

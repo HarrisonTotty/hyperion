@@ -1793,18 +1793,59 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
     ]);
   });
 
-  it("draws an envelope by the analytic term under the product's closed route, APPROXIMATE with its reason, asking no bake", async () => {
+  it("draws an envelope by the analytic term above its floor under the product's closed route, APPROXIMATE with its reason, asking no bake", async () => {
     const h = harness(undefined, "product", "product");
     const report = await drawn(h, [lit(A)], envelopeAssembly());
     expect([
       h.cache.entryOf(A)?.envelope,
-      madeAt(h, 0).built.medium,
+      madeAt(h, 0).built.medium.topHeightM,
       h.builder.decks.length,
       h.builder.bakes.length,
       h.builder.corrections.length,
       report.labels,
       report.reasons.get(A),
-    ]).toEqual([true, R05_EARTH_REFERENCE, 0, 0, 0, ["atmosphereApproximate"], [THICK_REASON]]);
+    ]).toEqual([
+      true,
+      R05_EARTH_REFERENCE.topHeightM - 5_000,
+      0,
+      0,
+      0,
+      ["atmosphereApproximate"],
+      [THICK_REASON],
+    ]);
+  });
+
+  it("draws an unrouted surface's air split at its deck on its whole medium, as before", async () => {
+    const h = harness();
+    await drawn(h, [lit(A)], envelopeAssembly(false));
+    expect(madeAt(h, 0).built.medium).toBe(R05_EARTH_REFERENCE);
+  });
+
+  it("gives a closed envelope's self-luminous tables its temperature from its floor up", async () => {
+    const h = harness();
+    const assembled = envelopeAssembly();
+    if (assembled.medium === undefined) {
+      throw new Error("the envelope's assembly draws a medium");
+    }
+    await drawn(h, [lit(A)], {
+      ...assembled,
+      drawn: {
+        ...assembled.drawn,
+        temperature: {
+          heightsM: Float64Array.of(0, 4_000, 6_000, 10_000),
+          temperaturesK: Float64Array.of(300, 280, 260, 240),
+        },
+      },
+      regime: { kind: "cloudDeck", deckAltitudeM: 5_000, selfLuminous: true },
+    });
+    const temperature = madeAt(h, 0).built.temperature;
+    expect([
+      Array.from(temperature?.heightsM ?? []),
+      Array.from(temperature?.temperaturesK ?? []),
+    ]).toEqual([
+      [0, 1_000, 5_000],
+      [270, 260, 240],
+    ]);
   });
 
   it("asks an envelope no disc table, which R08.T16.b.2 checks at 10⁹ m, and a surface's split air one", async () => {

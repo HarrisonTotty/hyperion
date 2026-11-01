@@ -8,6 +8,7 @@ import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import { standInThickCases } from "../../test/thickFixtureStandIns";
 import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import { assembleMedium } from "../atmosphere/assemble";
+import { deckDatumOf } from "../atmosphere/thick/deckRead";
 import { tableRadiusM } from "../atmosphere/hillaire";
 import * as cases from "../atmosphere/reference/cases";
 import giantDeckCase from "../atmosphere/reference/giant-deck.case.json" with { type: "json" };
@@ -398,19 +399,19 @@ describe("ATMOSPHERE TEST's media", () => {
     ]);
   });
 
-  it("restates TEST JUPITER's datum and its black floor as the hand Jupiter's assembly takes them", () => {
+  it("restates TEST JUPITER's floor and its black ground as the hand Jupiter's tables take them", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,
     });
-    if (assembled.medium === undefined) {
-      throw new Error("the hand Jupiter draws a medium");
+    if (assembled.medium === undefined || assembled.regime.kind !== "cloudDeck") {
+      throw new Error("the hand Jupiter draws a medium split at its floor");
     }
+    const { body } = assembled.drawn;
     const [fixture] = fixturesOf("giant");
-    expect([
-      fixture?.figure,
-      fixture?.groundAlbedo,
-      assembled.drawn.envelope === undefined,
-    ]).toEqual([assembled.drawn.body.figure, assembled.medium.groundAlbedo[1], false]);
+    expect([fixture?.figure, fixture?.groundAlbedo]).toEqual([
+      deckDatumOf(body.figure, body.gravity, assembled.regime.deckAltitudeM),
+      assembled.medium.groundAlbedo[1],
+    ]);
   }, 120_000);
 
   it("are each its case's medium, with its curves where it has absorbers", async () => {
