@@ -1092,6 +1092,13 @@ impl DerivedMoon {
         self.body.element_inventory()
     }
 
+    /// The side of the snow line the moon's volatiles formed on, from P14.T16's [`derive_body`]
+    /// ([`DerivedBody::formed`]), which P14.T26's resource abundances read.
+    #[must_use]
+    pub(crate) const fn formed(&self) -> crate::planetary::derive::SnowLineSide {
+        self.body.formed()
+    }
+
     /// The flux the moon receives from its planet and the stars, from P14.T16's
     /// [`derive_body`].
     #[must_use]

@@ -159,10 +159,27 @@ impl RadiogenicIsotope {
     #[must_use]
     pub const fn bulk_silicate_earth_mass_fraction(self) -> f64 {
         match self {
-            Self::Uranium238 => BULK_SILICATE_EARTH_URANIUM_MASS_FRACTION * 0.9928,
-            Self::Uranium235 => BULK_SILICATE_EARTH_URANIUM_MASS_FRACTION * 0.0071,
+            Self::Uranium238 | Self::Uranium235 => {
+                BULK_SILICATE_EARTH_URANIUM_MASS_FRACTION * self.share_of_element()
+            }
             Self::Thorium232 => BULK_SILICATE_EARTH_THORIUM_MASS_FRACTION,
-            Self::Potassium40 => BULK_SILICATE_EARTH_POTASSIUM_MASS_FRACTION * 1.19e-4,
+            Self::Potassium40 => {
+                BULK_SILICATE_EARTH_POTASSIUM_MASS_FRACTION * self.share_of_element()
+            }
+        }
+    }
+
+    /// Its mass share of its element today, the shares
+    /// [`bulk_silicate_earth_mass_fraction`](Self::bulk_silicate_earth_mass_fraction) reads:
+    /// 0.9928 for ²³⁸U and 0.0071 for ²³⁵U of uranium, 1 for ²³²Th of thorium and 1.19 × 10⁻⁴
+    /// for ⁴⁰K of potassium, which P14.T26's resource abundances read too.
+    #[must_use]
+    pub const fn share_of_element(self) -> f64 {
+        match self {
+            Self::Uranium238 => 0.9928,
+            Self::Uranium235 => 0.0071,
+            Self::Thorium232 => 1.0,
+            Self::Potassium40 => 1.19e-4,
         }
     }
 

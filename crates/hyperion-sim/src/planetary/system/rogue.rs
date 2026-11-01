@@ -373,8 +373,9 @@ impl PlanetarySystem {
 
     /// [`hooks_at`](Self::hooks_at) in a rogue planet's system: the body's surface seed, its bulk
     /// composition `NotModelled` (it reads a derivation's element inventory, which the derivation
-    /// with no star does not take), its record's surface's state, and its habitability
-    /// `NotModelled` where it is present (P14.T25); `None` for a ring.
+    /// with no star does not take), its record's surface's state, its habitability `NotModelled`
+    /// where it is present (P14.T25), and its resource abundances in its bulk's state, since they
+    /// read it (P14.T26); `None` for a ring.
     pub(super) fn rogue_hooks(
         &self,
         ctx: &SystemContext,
@@ -406,8 +407,14 @@ impl PlanetarySystem {
                 Section::NotApplicable
             }
         };
+        let resources = match &bulk {
+            Section::NotApplicable => Section::NotApplicable,
+            Section::Ok(_) | Section::NotResolved | Section::NotModelled => Section::NotModelled,
+        };
         Ok(Some(
-            BodyHooks::new(seed, bulk, surface, figures).with_habitability(habitability),
+            BodyHooks::new(seed, bulk, surface, figures)
+                .with_habitability(habitability)
+                .with_resources(resources),
         ))
     }
 

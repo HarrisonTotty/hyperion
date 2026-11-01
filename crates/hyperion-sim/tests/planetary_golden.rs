@@ -1471,6 +1471,40 @@ fn golden_systems_habitability_is_pinned() {
     golden!("planetary/habitability", w.as_str());
 }
 
+/// P14.T26: every golden system's bodies' resource abundances at the epoch, each fraction by its
+/// bits, from `hooks_at`, over the crust's lid or the envelope's gas; a body whose abundances are
+/// not `Ok` by its section's state.
+#[test]
+fn the_golden_systems_resource_abundances_are_pinned() {
+    let galaxy = fixture();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let mut pinned_bodies = 0_u32;
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at(&context, body.index(), UniverseTime::EPOCH)
+                .unwrap()
+            else {
+                continue;
+            };
+            let name = format!("{} {:04x}", golden.name, body.index().get());
+            match hooks.resources() {
+                Section::Ok(abundances) => {
+                    for (resource, x) in abundances.iter() {
+                        w.f64(&format!("{name} {}", resource.key()), x);
+                    }
+                    pinned_bodies += 1;
+                }
+                other => w.line(&format!("{name} = {:?}", other.state())),
+            }
+        }
+    }
+    assert!(pinned_bodies > 20, "{pinned_bodies}");
+    golden!("planetary/resources", w.as_str());
+}
+
 /// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
 /// exactly when its class has a solid surface, and then never in the gas-envelope state, or, from
 /// generator version 24, its class has a solid surface under a supercritical envelope (P14.T53.b

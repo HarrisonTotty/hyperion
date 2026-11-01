@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T25, T48.a–d, T48.f, T52.d, T53.d; the
+//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T25, T26, T48.a–d, T48.f, T52.d, T53.d; the
 //! rendering plans' R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
@@ -63,12 +63,17 @@
 //!   ([`Cover`](biosphere::Cover)). It is pure, and no rule makes life: the record's surface
 //!   section holds the biosphere as a member not modelled until a life plan exists, so it needs no
 //!   field here.
+//! - [`resources`]: the body's [`ResourceAbundances`] (P14.T26), a mass fraction of its
+//!   accessible outer layers for each [`Resource`] of the plan's closed list, from its bulk
+//!   composition, its crust's lid or its envelope's gas, the side of the snow line it formed on,
+//!   its host's \[Fe/H\] and \[α/Fe\] and its age, times one log-normal multiple per resource
+//!   drawn on `body.resources`. Server-only, with the hooks, and on no record.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
 //! bump. [`BodyHooks`] holds them with the seed and the composition, from
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at), and with the
-//! habitability assessment (T25). The resource abundances (T26) join it with their task.
+//! habitability assessment (T25) and the resource abundances (T26).
 //!
 //! # The surface seed stays on the server
 //!
@@ -88,6 +93,7 @@ pub mod figures;
 pub mod habitability;
 pub mod modifiers;
 pub(crate) mod ocean;
+pub mod resources;
 pub mod seed;
 pub mod small_bodies;
 pub mod structure;
@@ -109,6 +115,7 @@ pub use habitability::{
     HabitabilityAssessment, HabitabilityClass, HabitabilityLimit, HabitabilityLimits,
 };
 pub use modifiers::{DeriveModifiersError, ModifierInputs, SurfaceModifiers};
+pub use resources::{Resource, ResourceAbundances};
 pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 pub use small_bodies::TaxonomicClass;
 pub use structure::envelope::{EnvelopeProfile, GreyProfile};
@@ -187,9 +194,9 @@ impl BulkComposition {
     }
 }
 
-/// What the layers above read of a body at a time (P14.T23, T24.a, T24.b, T25): its surface seed,
-/// its bulk composition, its surface conditions, its global figures and its habitability
-/// assessment. Server-only (see the [module](self) documentation).
+/// What the layers above read of a body at a time (P14.T23, T24.a, T24.b, T25, T26): its surface
+/// seed, its bulk composition, its surface conditions, its global figures, its habitability
+/// assessment and its resource abundances. Server-only (see the [module](self) documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BodyHooks {
     surface_seed: SurfaceSeed,
@@ -197,12 +204,14 @@ pub struct BodyHooks {
     surface: Section<SurfaceConditions>,
     figures: Section<GlobalFigures>,
     habitability: Section<HabitabilityAssessment>,
+    resources: Section<ResourceAbundances>,
 }
 
 impl BodyHooks {
     /// The hooks of a body of surface seed `surface_seed`, bulk composition `bulk`, surface
-    /// conditions `surface` and global figures `figures`, its habitability not modelled until
-    /// [`with_habitability`](Self::with_habitability).
+    /// conditions `surface` and global figures `figures`, its habitability and its resource
+    /// abundances not modelled until [`with_habitability`](Self::with_habitability) and
+    /// [`with_resources`](Self::with_resources).
     #[must_use]
     pub const fn new(
         surface_seed: SurfaceSeed,
@@ -216,6 +225,7 @@ impl BodyHooks {
             surface,
             figures,
             habitability: Section::NotModelled,
+            resources: Section::NotModelled,
         }
     }
 
@@ -226,6 +236,12 @@ impl BodyHooks {
             habitability,
             ..self
         }
+    }
+
+    /// The same hooks with the resource abundances `resources` (P14.T26).
+    #[must_use]
+    pub fn with_resources(self, resources: Section<ResourceAbundances>) -> Self {
+        Self { resources, ..self }
     }
 
     /// The surface seed, which a body keeps whatever happens to it.
@@ -265,5 +281,15 @@ impl BodyHooks {
     #[must_use]
     pub const fn habitability(&self) -> &Section<HabitabilityAssessment> {
         &self.habitability
+    }
+
+    /// The resource abundances (P14.T26, [`resources`]): [`Section::Ok`] for a present body whose
+    /// bulk composition is known and whose accessible outer layers are, its crust's lid or its
+    /// envelope's gas; otherwise the state of the section that withholds them, [`Section::NotApplicable`]
+    /// for a body not present and [`Section::NotModelled`] where this version computes no bulk,
+    /// crust or envelope.
+    #[must_use]
+    pub const fn resources(&self) -> &Section<ResourceAbundances> {
+        &self.resources
     }
 }

@@ -1258,6 +1258,15 @@ domain_tags! {
     /// of its carbon, nitrogen and oxygen, word 1, one open uniform each; words 2–7 are reserved
     /// (`planetary::chem::envelope_abundances::EnvelopeDraws`).
     BODY_ENVELOPE_FORMATION: Body = "body.envelope_formation";
+
+    // Plan 14, phase E (P14.T26): a body's resource abundances, under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after P14.T50.d's `body.envelope_formation`,
+    // because the macro's order fixes `ALL`.
+
+    /// A body's resource abundances (P14.T26), keyed by the body: the rank of each resource's
+    /// log-normal multiple, one open uniform per resource in `Resource::ALL`'s order, words 0–10;
+    /// words 11–15 are reserved (`planetary::hooks::resources::ResourceDraws`).
+    BODY_RESOURCES: Body = "body.resources";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1522,6 +1531,18 @@ mod tests {
         assert_eq!(BODY_ENVELOPE_FORMATION.scope(), crate::rng::TagScope::Body);
         let at = |tag| ALL.iter().position(|t| *t == tag);
         assert!(at(BODY_ENVELOPE_FORMATION) > at(CLASS_NSM_BINARY));
+    }
+
+    /// P14.T26's one new tag, keyed by the body, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_resources_tag_with_body_scope() {
+        assert_eq!(BODY_RESOURCES.name(), "body.resources");
+        assert_eq!(BODY_RESOURCES.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert_eq!(
+            at(BODY_RESOURCES),
+            at(BODY_ENVELOPE_FORMATION).map(|i| i + 1)
+        );
     }
 
     /// P14.T31.a's three event tags, in the order the "Plan 14" heading lists them, the last three

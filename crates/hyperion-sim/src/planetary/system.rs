@@ -171,11 +171,13 @@ use crate::planetary::hooks::figures::{
     WindowEntryInputs, pass_figures, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::ocean::{OceanInputs, OceanSolutes, subsurface_ocean};
+use crate::planetary::hooks::resources::{OuterLayer, ResourceDraws, ResourceInputs};
 use crate::planetary::hooks::surface::{
     ClimateInputs, Forcing, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
 };
 use crate::planetary::hooks::{
-    self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
+    self, BodyHooks, BulkComposition, GlobalFigures, ResourceAbundances, Subsurface,
+    SurfaceConditions, SurfaceSeed,
 };
 use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
 use crate::planetary::hosts::substellar::brown_dwarf_class_weights;
@@ -2504,13 +2506,14 @@ impl PlanetarySystem {
         })
     }
 
-    /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b, T25): its surface seed, its bulk
-    /// composition, the mass fractions its record gives with the volatile inventory of its
+    /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b, T25, T26): its surface seed, its
+    /// bulk composition, the mass fractions its record gives with the volatile inventory of its
     /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], its surface conditions and
     /// global figures, its record's surface section's ([`record::Surface`](crate::planetary::record::Surface),
-    /// P14.T48.e, in the same state), and its habitability assessment (`system::habitability`);
-    /// `None` for a ring, a belt or the halo. Server-only, and not part of the body's record (the
-    /// [`hooks`] module documentation).
+    /// P14.T48.e, in the same state), its habitability assessment (`system::habitability`), and
+    /// its resource abundances over its record's crust's lid or envelope's gas
+    /// ([`hooks::resources`]); `None` for a ring, a belt or the halo. Server-only, and not part of
+    /// the body's record (the [`hooks`] module documentation).
     ///
     /// # Errors
     ///
@@ -2549,7 +2552,7 @@ impl PlanetarySystem {
         // The seasonal orbit the habitability reads (P14.T25): a planet's or a member's own, and a
         // moon's planet's.
         let seasonal = primary_record.orbit().ok().copied();
-        let (bulk, record, unseen, whose) = match &body.part {
+        let (bulk, formed, record, unseen, whose) = match &body.part {
             Part::Planet(_) | Part::Member(_) => {
                 let bulk = match now.derived {
                     Some(d) => {
@@ -2563,7 +2566,8 @@ impl PlanetarySystem {
                     state: d.atmosphere().published_state(),
                     xuv_flux: d.xuv_flux(),
                 });
-                (bulk, primary_record, unseen, SeasonsFrom::Own)
+                let formed = now.derived.map(|d| d.formed());
+                (bulk, formed, primary_record, unseen, SeasonsFrom::Own)
             }
             Part::Moon(moon) => {
                 let label = label::label(self, index).expect("every body of a system has a label");
@@ -2592,16 +2596,25 @@ impl PlanetarySystem {
                     None if present => Section::NotModelled,
                     None => Section::NotApplicable,
                 };
+                let formed = derived.as_ref().map(DerivedMoon::formed);
                 let unseen = derived.map(|d| Unseen {
                     state: d.atmosphere().published_state(),
                     xuv_flux: d.xuv_flux(),
                 });
-                (bulk, record, unseen, SeasonsFrom::Planet)
+                (bulk, formed, record, unseen, SeasonsFrom::Planet)
             }
             Part::Ring(_) => unreachable!("a ring has no surface seed"),
         };
         let habitability =
             self.habitability_section(&epoch, (primary, seasonal.as_ref(), whose), &record, unseen);
+        let resources = resource_section(
+            self.seed,
+            index.body_id(self.system),
+            &bulk,
+            formed,
+            &record,
+            ctx.age_at(t),
+        );
         let (surface, figures) = match record.into_surface() {
             Section::Ok(surface) => {
                 let (conditions, figures) = surface.into_parts();
@@ -2612,7 +2625,9 @@ impl PlanetarySystem {
             Section::NotApplicable => (Section::NotApplicable, Section::NotApplicable),
         };
         Ok(Some(
-            BodyHooks::new(seed, bulk, surface, figures).with_habitability(habitability),
+            BodyHooks::new(seed, bulk, surface, figures)
+                .with_habitability(habitability)
+                .with_resources(resources),
         ))
     }
 
@@ -5565,6 +5580,57 @@ fn bulk_composition(
         elements,
         ctx.fe_h(),
         ctx.alpha_fe(),
+    ))
+}
+
+/// The resource abundances of body `body` at the age `age` in the universe of `seed` (P14.T26,
+/// [`hooks::resources`]): its bulk composition `bulk`'s, formed on `formed`'s side of the snow
+/// line, over the accessible outer layers its record `record` gives, its envelope's gas where that
+/// section is `Ok` and otherwise its surface's crust's lid, at its ranks on `body.resources`.
+///
+/// Where the bulk is not `Ok` the abundances take its state. Where neither layer is known they
+/// take the state of the section that withholds them, not resolved before not modelled before not
+/// applicable, and not modelled where the surface is `Ok` but its crust is not modelled.
+#[must_use]
+fn resource_section(
+    seed: Seed,
+    body: BodyId,
+    bulk: &Section<BulkComposition>,
+    formed: Option<SnowLineSide>,
+    record: &BodyRecord,
+    age: Years,
+) -> Section<ResourceAbundances> {
+    let (bulk, formed) = match (bulk, formed) {
+        (Section::Ok(bulk), Some(formed)) => (bulk, formed),
+        (Section::Ok(_), None) | (Section::NotModelled, _) => return Section::NotModelled,
+        (Section::NotResolved, _) => return Section::NotResolved,
+        (Section::NotApplicable, _) => return Section::NotApplicable,
+    };
+    let layer = match (record.envelope(), record.surface()) {
+        (Section::Ok(envelope), _) => OuterLayer::Gas(envelope.atmosphere().composition()),
+        (_, Section::Ok(surface)) => match surface.crust() {
+            Modelled::Ok(crust) => {
+                let key = crust.lid_lithology().substance().key();
+                OuterLayer::of_lid(
+                    CrustLithology::of_key(key.as_str())
+                        .expect("a crust's lid is a lithology of its closed set"),
+                )
+            }
+            Modelled::NotModelled => return Section::NotModelled,
+        },
+        (Section::NotResolved, _) | (_, Section::NotResolved) => return Section::NotResolved,
+        (Section::NotModelled, _) | (_, Section::NotModelled) => return Section::NotModelled,
+        (Section::NotApplicable, Section::NotApplicable) => return Section::NotApplicable,
+    };
+    let inputs = ResourceInputs {
+        bulk,
+        formed,
+        layer,
+        age,
+    };
+    Section::Ok(ResourceAbundances::derive(
+        &inputs,
+        &ResourceDraws::for_body(seed, body),
     ))
 }
 

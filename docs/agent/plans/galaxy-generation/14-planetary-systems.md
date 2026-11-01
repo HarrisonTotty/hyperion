@@ -3191,6 +3191,7 @@ one log-normal draw per resource of 0.3 dex for what the model leaves out.
   at fixed composition; radioactives halve over 4.5 Gyr for the U-238 share; a metal-poor halo
   planet is poorer in every metal than its disc twin.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::resources`.
+- _Built_ 2026-11-01, server-only, on no record: Risks, "Deviations in P14.T26, as built".
 
 ### Phase F: special hosts
 
@@ -33804,3 +33805,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     sections). `crust.golden`, the other systems, the surface and photometry goldens, and the
     server's do not move. Measure them again under every 27 hold before the re-bless: 25's and
     26's holds move the bodies near the edge.
+- **Deviations in P14.T26, as built (lane p14-t26, 2026-11-01).** Server-only:
+  `BodyHooks::with_resources` and `resources()`, a `Section<ResourceAbundances>` from `hooks_at`
+  (T25's pattern; `new` keeps four arguments), on no record or wire.
+  Only the new `planetary/resources` golden and `rng/tags`'s `body.resources` line are added.
+  - _For the record's `Full` level:_ `Resource::ALL`, 11 in the plan's order with `Resource::key`;
+    `ResourceAbundances::{fraction, iter, radioactive}`; `body.resources` words 0–10 read, 11–15
+    reserved (open question 17's base metals).
+  - _The layer_ (lean, 2026-11-01): `OuterLayer::of_lid` on the record's crust lid (bulk, silicate
+    crust, ice shell) or the envelope's 1-bar gas; its depth stays open (open question 18). No crust
+    or envelope modelled gives `NotModelled`. Solid layers carry their water's deuterium too (at
+    VSMOW), and an absent [α/Fe] is read as 0.
+  - _The draws_ (lean, 2026-11-01): each multiple scales its resource's odds, m w ÷ (1 + m (w − 1)),
+    all divided by their sum above 1: the plan's 0.3 dex on trace groups, less on major parts.
+  - _[Fe/H] on the majors_ (lean, 2026-11-01): the light lithophiles take 10^[α/H] on their odds,
+    not their share; the iron group and trace groups on their share (the plan's test), the metals
+    capped at the layer's solids.
