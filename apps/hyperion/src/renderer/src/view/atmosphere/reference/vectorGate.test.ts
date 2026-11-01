@@ -1052,6 +1052,9 @@ const VENUS_CASES = ["venus-92bar", "venus-58bar"] as const;
 
 type VenusCaseName = (typeof VENUS_CASES)[number];
 
+/** `f32`'s least normal, 2⁻¹²⁶ (IEEE 754-2008's binary32), exactly. */
+const F32_LEAST_NORMAL = 1.1754943508222875e-38;
+
 /** Their committed references. */
 const VENUS_REFERENCES: Readonly<Record<VenusCaseName, ReferenceFile>> = {
   "venus-92bar": venus92Reference,
@@ -1290,7 +1293,10 @@ function venusGateBaked(caseName: VenusCaseName): {
   const below = packBelowDeckTable(kept.tables, kernelMedium(referenceCase.medium));
   const words = new Float32Array(below.texels.buffer);
   // The table below's f32 values under f32's least normal, 2⁻¹²⁶, and above 0.
-  const subnormal = words.reduce((n, x) => (x !== 0 && Math.abs(x) < 2 ** -126 ? n + 1 : n), 0);
+  const subnormal = words.reduce(
+    (n, x) => (x !== 0 && Math.abs(x) < F32_LEAST_NORMAL ? n + 1 : n),
+    0,
+  );
   return {
     values,
     figures: {
