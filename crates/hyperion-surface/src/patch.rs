@@ -158,7 +158,7 @@ pub enum NormalsLayer {
     Baked,
     /// At [`BakeOptions::normals`]' resolution as a draft that asks no height for them: each
     /// vertex's [`Baked`](Self::Baked)'s bit for bit, and at [`NormalScale::Double`] each sample
-    /// between the vertices the mean of theirs about it ([`normals::draft_normals`]), the shading
+    /// between the vertices the mean of theirs about it, the shading
     /// of the mesh's resolution, R05 Design note 25's fallback. The high setting draws it first,
     /// and R10's [`refine_normals`](crate::bake::refine_normals) makes the samples between later,
     /// which [`normals::merge_between`] puts in its place: the [`Baked`](Self::Baked) bake's

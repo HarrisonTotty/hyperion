@@ -278,7 +278,8 @@ pub(crate) fn normals_between<S: HeightSource>(
 }
 
 /// `normals`, a bake's at `scale` row by row, with each sample between the vertices replaced, in
-/// order, by `between`'s ([`normals_between`]): a draft's made the bake's whole.
+/// order, by `between`'s ([`refine_normals`](crate::bake::refine_normals)'): a draft's made the
+/// bake's whole.
 ///
 /// # Panics
 ///

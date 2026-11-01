@@ -902,7 +902,7 @@ const fn normal_map_band(field_level: u8) -> u8 {
 /// # Why band max(L − 6, 0), at the cells' centres
 ///
 /// A patch of level P spans 64 quads a side, the cells of level P + 6, and its doubled normals
-/// ([`NormalScale::Double`](crate::patch::NormalScale::Double), 129 samples a side, 128 intervals)
+/// ([`NormalScale::Double`], 129 samples a side, 128 intervals)
 /// put a sample at each such cell's centre, its odd–odd samples, at band level P. So at L of 6 or more each pair is,
 /// bit for bit, what the patches of level L − 6 bake at that cell's centre on the high setting (the
 /// root's at L = 6): the cell-scale slope the coarsest terrain shades the cell with, the terrain's
