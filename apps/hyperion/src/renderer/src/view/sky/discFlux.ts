@@ -69,3 +69,23 @@ export function discLuminanceAboveRgb(host: HostDiscDto, levelCdM2: number): Rgb
   }
   return excess;
 }
+
+/**
+ * {@link discLuminanceAboveRgb} of the disc as the air between dims it, `transmittance` per channel:
+ * T ∫ max(0, I(μ) − level ÷ T), the light of the dimmed disc above `levelCdM2` (fix-view-light);
+ * none in a channel the air takes whole.
+ */
+export function discLuminanceAboveThroughRgb(
+  host: HostDiscDto,
+  levelCdM2: number,
+  transmittance: Rgb,
+): Rgb {
+  const [tr, tg, tb] = transmittance;
+  if (tr === tg && tg === tb) {
+    const [er, eg, eb] = tr > 0 ? discLuminanceAboveRgb(host, levelCdM2 / tr) : [0, 0, 0];
+    return [tr * er, tr * eg, tr * eb];
+  }
+  const channel = (t: number, c: 0 | 1 | 2): number =>
+    t > 0 ? t * discLuminanceAboveRgb(host, levelCdM2 / t)[c] : 0;
+  return [channel(tr, 0), channel(tg, 1), channel(tb, 2)];
+}

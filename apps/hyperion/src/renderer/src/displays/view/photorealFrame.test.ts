@@ -8,7 +8,7 @@ import { PLANETSHINE_SOURCES_HIGH } from "../../view/lighting/planetshine";
 import { lightingFramesOf } from "../../view/lighting/retarded";
 import { DEFAULT_EXPOSURE, controlEv100, exposureScale } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, PHASE_STAR, phaseScene } from "../../view/scenes/phaseScene";
-import { HostDiscLayer } from "../../view/sky/disc";
+import { HostDiscLayer, NO_AIR } from "../../view/sky/disc";
 import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
 import { vec3 } from "../../geometry/vec3";
 import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
@@ -26,13 +26,28 @@ import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
 import type { PhotometricLaw } from "../../view/appearance/law";
 import { lawFor } from "../../view/appearance/phase";
 import type { Viewport } from "../../view/camera/projection";
+import { type AbsorberCurve, absorberCurve } from "../../view/atmosphere/absorbers";
+import { EARTH_OZONE, EARTH_REFERENCE, EARTH_REFERENCE_CURVES } from "../../view/atmosphere/earth";
+import { BAKE_BIN_COUNT } from "../../view/atmosphere/medium";
+import { bakeSpectrumOf } from "../../view/atmosphere/spectralColour";
+import { AtmosphereTables } from "../../view/atmosphere/tables";
+import type { FrameAtmosphere } from "../../view/photoreal/renderer";
+import type { Rgb } from "../../view/photometry/toneCurve";
+import { glareAirTransmittance } from "../../view/post/glareAir";
+import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
-import { litBodiesOf, litLabelsOf, photorealFrame, type PhotorealInputs } from "./photorealFrame";
+import {
+  frameGlareAir,
+  litBodiesOf,
+  litLabelsOf,
+  photorealFrame,
+  type PhotorealInputs,
+} from "./photorealFrame";
 import { runPose, startRun, startServerRun } from "./viewRun";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -406,5 +421,100 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
 
   it("state the label for a kept scene's bodies, which carry no appearance", () => {
     expect(litLabelsOf(phaseScene().sceneAt(0))).toEqual(["BODY PHOTOMETRY: NOT YET MODELLED"]);
+  });
+});
+
+describe("the air between the camera and a star (fix-view-light)", () => {
+  /** Earth's mean radius, m. */
+  const EARTH_RADIUS_M = 6_371_008.8;
+  const AU_M = 149_597_870_700;
+  const SUN_RADIUS_RAD = 0.00465;
+  /** The reference Sun's curves, and ozone's under an equal-energy light, a second slot's. */
+  const SUN_CURVES = EARTH_REFERENCE_CURVES[0] ?? [];
+  const FLAT_CURVES = [
+    absorberCurve(EARTH_OZONE, bakeSpectrumOf(Array.from({ length: BAKE_BIN_COUNT }, () => 1))),
+  ];
+  /** The direction 1° above the horizon of a camera 2 m up on the body's +x, towards +y. */
+  const LOW_SUN = vec3(Math.sin(Math.PI / 180), Math.cos(Math.PI / 180), 0);
+
+  /** A body 2 m below the camera, its body-fixed axes the galactic ones, under `tables`. */
+  function earthUnder(
+    id: string,
+    tables: AtmosphereTables,
+  ): { readonly body: LitBodyInput; readonly air: FrameAtmosphere } {
+    const lit = aLitBody();
+    const centreM = vec3(-(EARTH_RADIUS_M + 2), 0, 0);
+    return {
+      body: { id, centreM, figure: lit.figure, photometry: lit.photometry, lighting: undefined },
+      air: {
+        id,
+        tables,
+        camera: {
+          positionM: vec3(EARTH_RADIUS_M + 2, 0, 0),
+          orientation: IDENTITY_QUATERNION,
+          fovXRad: Math.PI / 3,
+          viewport: { widthPx: 1920, heightPx: 1080 },
+        },
+        toBodyFixed: IDENTITY_QUATERNION,
+      },
+    };
+  }
+
+  /** The glare's air of one body's medium alone, its tables' figure a sphere. */
+  function alone(curves: ReadonlyArray<AbsorberCurve>): Rgb {
+    return glareAirTransmittance(
+      {
+        medium: EARTH_REFERENCE,
+        equatorialRadiusM: EARTH_RADIUS_M,
+        polarRadiusM: EARTH_RADIUS_M,
+        cameraM: vec3(EARTH_RADIUS_M + 2, 0, 0),
+        toBodyFixed: IDENTITY_QUATERNION,
+      },
+      curves,
+      LOW_SUN,
+      SUN_RADIUS_RAD,
+    );
+  }
+
+  /** Star 3 at 1 au and star 7, fainter, at 1.2 au: slots 0 and 1 of the body's lights. */
+  const LIGHTS = [
+    { disc: aHostDisc({ star: 7 }), centreM: vec3(0, 1.2 * AU_M, 0) },
+    { disc: aHostDisc({ star: 3 }), centreM: vec3(0, AU_M, 0) },
+  ];
+
+  it("takes no air where the frame draws none", () => {
+    expect(frameGlareAir([], [], LIGHTS)).toBe(NO_AIR);
+  });
+
+  it("reads each star's line through its own light slot's curves, brightest first", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_RADIUS_M, [
+      SUN_CURVES,
+      FLAT_CURVES,
+    ]);
+    const { body, air } = earthUnder("earth", tables);
+    const of = frameGlareAir([air], [body], LIGHTS);
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD)).toEqual(alone(SUN_CURVES));
+    expect(of(7, LOW_SUN, SUN_RADIUS_RAD)).toEqual(alone(FLAT_CURVES));
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD)).not.toEqual(of(7, LOW_SUN, SUN_RADIUS_RAD));
+  });
+
+  it("multiplies the transmittances of every body's air the line crosses", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_RADIUS_M, [
+      SUN_CURVES,
+      FLAT_CURVES,
+    ]);
+    const one = earthUnder("one", tables);
+    const two = earthUnder("two", tables);
+    const both = frameGlareAir([one.air, two.air], [one.body, two.body], LIGHTS)(
+      3,
+      LOW_SUN,
+      SUN_RADIUS_RAD,
+    );
+    const single = alone(SUN_CURVES);
+    for (const c of [0, 1, 2] as const) {
+      expect(both[c] / single[c] ** 2).toBeCloseTo(1, 12);
+    }
   });
 });

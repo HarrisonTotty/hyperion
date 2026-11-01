@@ -10,7 +10,8 @@ import { viewRay } from "../bodies/discShading";
 import { limbDepthAt, limbDepths } from "../bodies/smoothMesh";
 import { NEAR_PLANE_M, pixelSolidAngle, type Viewport } from "../camera/projection";
 import { quaternionFromAxisAngle, rotate } from "../camera/quaternion";
-import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
 import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
@@ -25,6 +26,7 @@ import {
 import {
   angularRadiusRad,
   discLuminanceAboveRgb,
+  discLuminanceAboveThroughRgb,
   discIlluminanceRgbLx,
   discLuminanceRgb,
 } from "./discFlux";
@@ -237,6 +239,45 @@ describe("the host discs", () => {
     };
     const cast = layer.glareSources(LOOK, VIEWPORT, "eye", [planet], 4);
     expect(cast.length).toBe(sources);
+  });
+
+  it("dim a disc's glare by the air between: its whole light by the transmittance, its excess the dimmed disc's (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
+    const host = sunHost();
+    const exposureScale = 1e-8;
+    layer.frame(
+      [{ host, direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      exposureScale,
+    );
+    const [clear] = layer.glareSources(LOOK, VIEWPORT, "eye");
+    const air: Rgb = [0.5, 0.25, 0.125];
+    const [dimmed] = layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => air);
+    for (const c of [0, 1, 2] as const) {
+      expect((dimmed?.luminance[c] ?? 0) / (clear?.luminance[c] ?? 1)).toBeCloseTo(air[c], 12);
+    }
+    expect(dimmed?.excessLuminance).toEqual(
+      discLuminanceAboveThroughRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale, air),
+    );
+    expect(
+      layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [0, 0, 0]),
+    ).toEqual([]);
+  });
+
+  it("hold the dimmed disc's light above a level: T ∫ max(0, I − level ÷ T), less than T times the clear disc's", () => {
+    const host = sunHost();
+    const level = 0.5 * host.central_luminance_cd_m2[1];
+    expect(discLuminanceAboveThroughRgb(host, level, [1, 1, 1])).toEqual(
+      discLuminanceAboveRgb(host, level),
+    );
+    const [, half] = discLuminanceAboveThroughRgb(host, level, [0.5, 0.5, 0.5]);
+    const [, clearAt2] = discLuminanceAboveRgb(host, 2 * level);
+    const [, clearAt1] = discLuminanceAboveRgb(host, level);
+    expect(half).toBeCloseTo(0.5 * clearAt2, 6);
+    expect(half).toBeLessThan(0.5 * clearAt1);
+    expect(discLuminanceAboveThroughRgb(host, level, [0.5, 0, 0.25])[1]).toBe(0);
   });
 
   it("cast no glare source from a host drawn as a sprite", async () => {

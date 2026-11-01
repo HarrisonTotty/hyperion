@@ -50,7 +50,7 @@ import {
 } from "../wireframe/submit";
 import {
   angularRadiusRad,
-  discLuminanceAboveRgb,
+  discLuminanceAboveThroughRgb,
   discIlluminanceRgbLx,
   rgbOfBvr,
 } from "./discFlux";
@@ -80,6 +80,16 @@ export const DISC_MATERIAL: WgslMaterialSpec = {
 
 /** The diameter, px, below which a disc is drawn as a point sprite: three pixels. */
 export const DISC_MIN_DIAMETER_PX = 3;
+
+/**
+ * The transmittance per channel of the air between the camera and a host star along its line of
+ * sight, by the star's index (`HostDiscDto.star`), its unit direction in the scene's
+ * camera-relative axes and its angular radius, rad.
+ */
+export type GlareAirOf = (star: number, direction: Vec3, angularRadiusRad: number) => Rgb;
+
+/** No air between the camera and any star. */
+export const NO_AIR: GlareAirOf = () => [1, 1, 1];
 
 /** How far outside an eye view's frame a disc still casts glare into it, rad: 45°. */
 export const EYE_GLARE_REACH_RAD = Math.PI / 4;
@@ -391,8 +401,11 @@ export class HostDiscLayer {
    * An eye view's share of a disc beyond its frame fades out over the reach's last
    * {@link EYE_GLARE_FADE_RAD} ({@link eyeGlareShare}), its light and its excess alike; and every
    * view takes only the share of the disc's light that `occluders`, the frame's bodies, leave the
-   * camera (`eclipseVisible`, by `annuli` annuli), so that a disc behind a limb casts no glare.
-   * Air between them is not taken: a setting star's glare is not dimmed by it.
+   * camera (`eclipseVisible`, by `annuli` annuli), so that a disc behind a limb casts no glare;
+   * and its light is the disc's as `air` dims it, the transmittance of the air between the camera
+   * and the star along its line of sight (`glareAir.ts`), its excess the dimmed disc's above the
+   * threshold ({@link discLuminanceAboveThroughRgb}), so that a setting star's glare is dimmed and
+   * reddened as its disc is.
    * A host drawn as a sprite casts none: its light is in the sprite, which the target holds, and
    * the bloom chain spreads it.
    *
@@ -405,6 +418,7 @@ export class HostDiscLayer {
     role: ViewRole,
     occluders: ReadonlyArray<Occluder> = [],
     annuli: number = DISC_ANNULI_HIGH,
+    air: GlareAirOf = NO_AIR,
   ): GlareSource[] {
     const reach = role === "eye" ? EYE_GLARE_REACH_RAD : 0;
     const sources: GlareSource[] = [];
@@ -431,20 +445,29 @@ export class HostDiscLayer {
                 annuli,
               );
       });
-      const seen: Rgb = [sr ?? share, sg ?? share, sb ?? share];
+      const visible: Rgb = [sr ?? share, sg ?? share, sb ?? share];
+      // And dimmed by the air between, as R08's composite dims the disc (fix-view-light).
+      const transmitted = air(host.star, axis, rho);
+      const seen: Rgb = [
+        visible[0] * transmitted[0],
+        visible[1] * transmitted[1],
+        visible[2] * transmitted[2],
+      ];
       if (seen[0] + seen[1] + seen[2] === 0) {
         continue;
       }
-      // Its light above the display's range: its texels are kept out of the bloom chain.
-      const [er, eg, eb] = discLuminanceAboveRgb(
+      // The dimmed disc's light above the display's range: its texels are kept out of the bloom
+      // chain.
+      const [er, eg, eb] = discLuminanceAboveThroughRgb(
         host,
         BLOOM_THRESHOLD_EXPOSED / this.#exposureScale,
+        transmitted,
       );
       const [lr, lg, lb] = rgbOfBvr(host.mean_luminance_cd_m2);
       sources.push({
         direction: axis,
         angularRadiusRad: rho,
-        excessLuminance: [seen[0] * er, seen[1] * eg, seen[2] * eb],
+        excessLuminance: [visible[0] * er, visible[1] * eg, visible[2] * eb],
         luminance: [seen[0] * lr, seen[1] * lg, seen[2] * lb],
       });
     }

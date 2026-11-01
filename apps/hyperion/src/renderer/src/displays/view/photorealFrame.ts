@@ -17,6 +17,7 @@
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../../view/atmosphere/bodyCamera";
+import { tablesFigureOf } from "../../view/atmosphere/hillaire";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
 import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 
@@ -33,7 +34,14 @@ import type { LitRegime } from "../../view/bodies/regime";
 import { type ProjectionCamera, project, type Viewport } from "../../view/camera/projection";
 import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem } from "../../view/engine/types";
-import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
+import {
+  hostLights,
+  lightsAt,
+  MAX_BODY_LIGHTS,
+  type PlacedLight,
+  placeLights,
+  sceneHostDiscs,
+} from "../../view/lighting/hostLights";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
 import type {
   FrameAtmosphere,
@@ -47,7 +55,8 @@ import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
-import { type HostDiscLayer, hostPlacements } from "../../view/sky/disc";
+import { type GlareAirOf, type HostDiscLayer, hostPlacements, NO_AIR } from "../../view/sky/disc";
+import { type GlareAir, glareAirTransmittance } from "../../view/post/glareAir";
 import {
   exposedSpriteRecord,
   type SpriteRecord,
@@ -162,6 +171,52 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
     .filter(isLitBody)
     .flatMap((body) => body.appearance?.labels ?? PROVISIONAL_LABELS);
   return [...new Set(labels)];
+}
+
+/**
+ * The air between the camera and each host star along its line of sight, through every body's
+ * atmosphere the frame draws (fix-view-light, the setting Sun's halo): the product of each one's
+ * transmittance (`glareAirTransmittance`) on its tables' figure, read through the star's light slot,
+ * its place in that body's brightest-first order of its lights (`lightsAt`, as `skySources` slots
+ * them); none where the frame draws no air.
+ */
+export function frameGlareAir(
+  atmospheres: ReadonlyArray<FrameAtmosphere>,
+  bodies: ReadonlyArray<LitBodyInput>,
+  lights: ReadonlyArray<PlacedLight>,
+): GlareAirOf {
+  const airs = atmospheres.flatMap((each) => {
+    const body = bodies.find((lit) => lit.id === each.id);
+    if (body === undefined) {
+      return [];
+    }
+    const figure = tablesFigureOf(each.tables);
+    const order = lightsAt(body.centreM, lights, MAX_BODY_LIGHTS).map(
+      (light) => light.host.disc.star,
+    );
+    const air: GlareAir = {
+      medium: each.tables.medium,
+      equatorialRadiusM: figure.equatorialRadiusM,
+      polarRadiusM: figure.polarRadiusM,
+      cameraM: each.camera.positionM,
+      toBodyFixed: each.toBodyFixed,
+    };
+    return [{ air, curves: each.tables.curves, order }];
+  });
+  if (airs.length === 0) {
+    return NO_AIR;
+  }
+  return (star, direction, angularRadiusRad) => {
+    const transmitted: [number, number, number] = [1, 1, 1];
+    for (const { air, curves, order } of airs) {
+      const slot = Math.max(0, order.indexOf(star));
+      const [r, g, b] = glareAirTransmittance(air, curves[slot] ?? [], direction, angularRadiusRad);
+      transmitted[0] *= r;
+      transmitted[1] *= g;
+      transmitted[2] *= b;
+    }
+    return transmitted;
+  };
 }
 
 /**
@@ -338,6 +393,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       run.camera.role,
       occluders,
       SETTINGS[inputs.setting].photoreal.discAnnuli,
+      frameGlareAir(atmospheres, litBodies, lights),
     ),
     lights,
     bodies: litBodies,

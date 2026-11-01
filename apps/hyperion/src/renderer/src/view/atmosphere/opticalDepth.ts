@@ -284,7 +284,7 @@ export function curvesOpticalDepth(
  * A term absorber's amount along a path over which its relative density integrates to
  * `densityPathM`, m: its density at relative density 1 times that, in its kind's unit.
  */
-function amountAlong(absorber: TermAbsorber, densityPathM: number): AbsorberAmount {
+export function amountAlong(absorber: TermAbsorber, densityPathM: number): AbsorberAmount {
   let amount: AbsorberAmount;
   switch (absorber.kind) {
     case "column":
