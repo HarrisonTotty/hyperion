@@ -99,6 +99,7 @@ import {
   MARS_CASE,
   referenceCaseBakeLights,
 } from "./reference/cases";
+import { titanClassReferenceCase } from "./reference/thickCases";
 import { type AtmosphereBody, kernelMedium, perPlanetRowOf, tablesPlanOf } from "./tables";
 import { DISC_LAYER_VALUES, type DiscReflectanceTable } from "./discTable";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
@@ -2958,7 +2959,7 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
   }
 
-  it("posts the bake as a haze route's, its channels at their own wavelengths and its streams' curved paths, never the horizon's terms, where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
+  it("posts the bake as a haze route's, its channels at their own wavelengths and its streams' curved paths, never the horizon's terms, where the route says so, and in the product not for a medium the kept cases' range holds (R08.T14.d.4)", async () => {
     const asked = async (
       bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
     ): Promise<unknown> => {
@@ -3199,6 +3200,46 @@ describe("the product's route (R08.T14.d.4)", () => {
       [[[], []], undefined, undefined, [TWILIGHT_REASON], undefined],
     ]);
   });
+
+  it("bakes a Titan-class world as a haze and corrects it, COMPUTING until both land, then nothing but its low sun", async () => {
+    const titan = titanClassReferenceCase();
+    const TITAN: KeptBodyAtmosphere = {
+      kind: "medium",
+      built: builtOfCase(titan, "titan-class"),
+      labels: [],
+    };
+    const h = harness(undefined, "product", "product");
+    const asked = keptFrame(h, [[A, TITAN, undefined]]);
+    const { ask } = latestBake(h);
+    const levers = [ask.ownWavelengths, ask.curvedStreams, ask.horizonTerms];
+    const plan = madeAt(h, 0).plan.bands;
+    latestBake(h).settle({
+      kind: "baked",
+      tables: patternedThickBake(plan, kernelMedium(titan.medium), 1),
+    });
+    latestCorrection(h).settle({
+      kind: "baked",
+      tables: patternedCorrection(plan, titan.medium, 1),
+    });
+    await microtasks();
+    const landed = keptFrame(h, [[A, TITAN, undefined]]);
+    const lowSun = keptFrame(h, [[A, TITAN, { heightM: 2, lightElevationSine: 0.17 }]]);
+    expect([
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      levers,
+      asked.labels,
+      [landed.labels, [...landed.reasons]],
+      [lowSun.labels, [...lowSun.reasons]],
+    ]).toEqual([
+      1,
+      1,
+      [true, true, undefined],
+      ["atmosphereComputing"],
+      [[], []],
+      [["atmosphereApproximate"], [[A, [LOW_SUN_REASON]]]],
+    ]);
+  }, 180_000);
 
   it("shows COMPUTING in twilight while the bake runs, and nothing of twilight", () => {
     const h = harness(undefined, "product", "product");

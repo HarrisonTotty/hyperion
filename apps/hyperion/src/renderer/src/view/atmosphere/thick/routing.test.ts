@@ -1,7 +1,7 @@
 /**
  * The thick bake's router (plan R08, R08.T14.c, R08.T14.d.4 and R08.T15.b.2; Design note 9's
  * routing): a `thickScattering` world routed within the range its passing gates cover, a Titan-class
- * haze's opened by `titan-class`'s gate alone once its recorded verdict passes, a `cloudDeck`
+ * haze's opened by `titan-class`'s gate alone, its verdict passing with its named exceptions, a `cloudDeck`
  * world by its floor's range, none yet, a gas envelope's opened by `giant-deck`'s envelope variant
  * alone once its recorded verdict passes (R08.T16.a.2), and the polarisation correction asked of
  * every world with air once routed.
@@ -29,7 +29,6 @@ import {
 } from "./regime";
 import {
   bakedAsHaze,
-  BELOW_THE_HORIZON_IMAGES,
   CORRECTION_ROUTED,
   correctionRouted,
   DECK_ROUTE_RANGE,
@@ -40,8 +39,12 @@ import {
   ENVELOPE_GATE_TALLIES,
   ENVELOPE_ROUTE_RANGE,
   type GateImageTally,
+  type GateMiss,
+  HAZE_GATE_EXCEPTIONS,
+  HAZE_GATE_MISSES,
   HAZE_GATE_TALLIES,
   HAZE_ROUTE_RANGE,
+  HAZE_UNJUDGED_IMAGES,
   hazeGatePasses,
   LOW_SUN_SINE,
   THICK_ROUTE_RANGE,
@@ -149,7 +152,7 @@ describe("thickBakeRouted (R08.T14.d.4)", () => {
     ).toEqual([true, true, true]);
   });
 
-  it("leaves a deeper column out of the range, as the Venus- and Titan-class cases' gates pass no depth", () => {
+  it("leaves a deeper column out of the kept cases' range, which no Venus- or Titan-class depth reaches", () => {
     const earth = cases.EARTH_CASE.medium;
     const deeper = {
       ...earth,
@@ -352,48 +355,132 @@ function titan(): { readonly medium: AtmosphereMedium; readonly regime: Atmosphe
 
 describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
   /**
-   * Every image of the gate above the horizon passing, one value of each refused, and those below
-   * it refused throughout: a fixture verdict.
+   * Every image the gate judges passing, one value of each refused, and those it does not judge
+   * refused throughout: a fixture verdict, with no miss.
    */
   const passing: ReadonlyArray<GateImageTally> = HAZE_GATE_TALLIES.map((image) =>
-    BELOW_THE_HORIZON_IMAGES.includes(image.image)
+    HAZE_UNJUDGED_IMAGES.includes(image.image)
       ? tallied(image, 0, 0, image.comparisons)
       : tallied(image, image.comparisons - 1, 0, 1),
   );
 
+  /**
+   * `passing` with `misses` added to their images' tallies, each in a pass's place, or a refusal's
+   * on an image the gate does not judge.
+   */
+  const missing = (misses: ReadonlyArray<GateMiss>): ReadonlyArray<GateImageTally> =>
+    passing.map((image) => {
+      const here = misses.filter((miss) => miss.image === image.image).length;
+      if (here === 0) {
+        return image;
+      }
+      return HAZE_UNJUDGED_IMAGES.includes(image.image)
+        ? tallied(image, image.passes, here, image.refusals - here)
+        : tallied(image, image.passes - here, here, image.refusals);
+    });
+
+  /** The committed record's titan-class section. */
+  const titanClass = committedGate.titanClass;
+
   it("holds the recorded verdict to vectorGate.json's titanClass, image by image", () => {
     expect(HAZE_GATE_TALLIES).toEqual(
-      committedGate.titanClass.routed.images.map(
-        ([image, comparisons, passes, misses, refusals]) => ({
-          image,
-          comparisons,
-          passes,
-          misses,
-          refusals,
-        }),
-      ),
+      titanClass.routed.images.map(([image, comparisons, passes, misses, refusals]) => ({
+        image,
+        comparisons,
+        passes,
+        misses,
+        refusals,
+      })),
     );
   });
 
-  it("keeps the haze's route closed on the recorded verdict: titan-class misses at the horizon, the limb and in daylight", () => {
-    expect([hazeGatePasses(HAZE_GATE_TALLIES), THICK_ROUTE_RANGES]).toEqual([
-      false,
-      [THICK_ROUTE_RANGE],
+  it("holds the misses on the judged images to vectorGate.json's titanClass, value by value", () => {
+    const channels = ["r", "g", "b"];
+    const recordedMisses = titanClass.geometries.flatMap((row) =>
+      HAZE_UNJUDGED_IMAGES.includes(String(row[1]))
+        ? []
+        : channels.flatMap((channel, c) =>
+            row[19 + c] === "miss"
+              ? [{ image: row[1], value: `${String(row[0])}/${channel}`, ratio: row[22 + c] }]
+              : [],
+          ),
+    );
+    expect(HAZE_GATE_MISSES).toEqual(recordedMisses);
+  });
+
+  it("bounds each exception at its recorded value, rounded outward at its third figure, for a value its route draws better than the analytic path, image by image", () => {
+    const worst = new Map(titanClass.worstByGeometry.map((row) => [String(row[0]), row]));
+    expect(
+      HAZE_GATE_EXCEPTIONS.map((exception) => {
+        const miss = HAZE_GATE_MISSES.find((each) => each.value === exception.value);
+        const [geometry] = exception.value.split("/");
+        const row = worst.get(geometry ?? "");
+        return [
+          exception.value,
+          miss === undefined ? null : outwardSteps(exception.bound, [miss.ratio], "most")[0],
+          Number(row?.[3]) > Number(row?.[1]),
+          exception.cause.length > 0,
+        ];
+      }),
+    ).toEqual(
+      HAZE_GATE_EXCEPTIONS.map((exception) => [
+        exception.value,
+        expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
+        true,
+        true,
+      ]),
+    );
+  });
+
+  it("opens the haze's route on the recorded verdict: titan-class misses only its named exceptions on the images it judges", () => {
+    expect([
+      hazeGatePasses(HAZE_GATE_TALLIES, HAZE_GATE_MISSES),
+      THICK_ROUTE_RANGES,
+      HAZE_GATE_EXCEPTIONS.map((exception) => exception.value),
+    ]).toEqual([
+      true,
+      [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE],
+      ["ground-s30-v30-a45/r", "ground-s30-v30-a180/r", "disc-p60/r"],
     ]);
   });
 
-  it("routes titan-class if and only if its gate passes", () => {
+  it("routes titan-class if and only if its gate passes with the listed exceptions", () => {
     const { medium, regime } = titan();
+    const unlisted: GateMiss = { image: "limb", value: "limb-3H/g", ratio: 1.01 };
+    const closed = thickRouteRangesOf(missing([...HAZE_GATE_MISSES, unlisted]), [
+      ...HAZE_GATE_MISSES,
+      unlisted,
+    ]);
     expect([
       regime.kind,
       thickBakeRouted(regime, medium),
-      thickBakeRouted(regime, medium, thickRouteRangesOf(HAZE_GATE_TALLIES)),
-      thickRouteRangesOf(passing),
-      thickBakeRouted(regime, medium, thickRouteRangesOf(passing)),
-    ]).toEqual(["thickScattering", false, false, [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE], true]);
+      thickBakeRouted(regime, medium, thickRouteRangesOf(HAZE_GATE_TALLIES, HAZE_GATE_MISSES)),
+      thickBakeRouted(regime, medium, thickRouteRangesOf(passing, [])),
+      closed,
+      thickBakeRouted(regime, medium, closed),
+    ]).toEqual(["thickScattering", true, true, true, [THICK_ROUTE_RANGE], false]);
   }, 180_000);
 
-  it("never routes a Mars- or Venus-class medium, and routes the Earth- and Saturn-class cases as before, on either verdict", () => {
+  it("closes on an unlisted miss, a listed one past its bound, or a miss its list leaves out", () => {
+    const listed = HAZE_GATE_MISSES;
+    const unlisted: GateMiss = { image: "ground-s60", value: "ground-s60-v0-a0/b", ratio: 1.001 };
+    const past = listed.map((miss) =>
+      miss.value === "ground-s30-v30-a45/r" ? { ...miss, ratio: 1.041 } : miss,
+    );
+    const atBound = listed.map((miss) =>
+      miss.value === "ground-s30-v30-a45/r" ? { ...miss, ratio: 1.04 } : miss,
+    );
+    expect([
+      hazeGatePasses(missing(listed), listed),
+      hazeGatePasses(missing(atBound), atBound),
+      hazeGatePasses(missing([...listed, unlisted]), [...listed, unlisted]),
+      hazeGatePasses(missing(past), past),
+      hazeGatePasses(missing([...listed, unlisted]), listed),
+      hazeGatePasses(missing(listed), listed, []),
+    ]).toEqual([true, true, false, false, false, false]);
+  });
+
+  it("never routes a Mars- or Venus-class medium, and routes the Earth- and Saturn-class cases as before, open or closed", () => {
     const venus = venusClassMedium().medium;
     const routedOn = (ranges: ReadonlyArray<ThickRouteRange>): ReadonlyArray<unknown> => [
       ...[...PASSING, cases.MARS_CASE].map((each) =>
@@ -405,7 +492,7 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
     expect([
       classifyRegime(venus, CLEAR_COVER).kind,
       routedOn(THICK_ROUTE_RANGES),
-      routedOn(thickRouteRangesOf(passing)),
+      routedOn([THICK_ROUTE_RANGE]),
     ]).toEqual([
       "thickScattering",
       [true, true, true, false, false, false],
@@ -415,35 +502,33 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
 
   it("bakes a haze-routed world as a haze route's bake is, and no world the kept cases' range routes", () => {
     const { medium, regime } = titan();
-    const opened = thickRouteRangesOf(passing);
     const earth = cases.EARTH_CASE.medium;
     const earthRegime = classifyRegime(earth, CLEAR_COVER);
     expect([
       bakedAsHaze(regime, medium),
-      bakedAsHaze(regime, medium, opened),
-      bakedAsHaze(earthRegime, earth, opened),
-      bakedAsHaze({ kind: "thin" }, medium, opened),
-    ]).toEqual([false, true, false, false]);
+      bakedAsHaze(regime, medium, [THICK_ROUTE_RANGE]),
+      bakedAsHaze(earthRegime, earth),
+      bakedAsHaze({ kind: "thin" }, medium),
+    ]).toEqual([true, false, false, false]);
   }, 180_000);
 
-  it("judges no image whose sun stands below the horizon, and closes on a miss at the horizon or an image refused throughout", () => {
-    const twilit = passing.map((image) =>
-      image.image === "ground-s95" ? tallied(image, 0, 3, 60) : image,
-    );
-    const horizon = passing.map((image) =>
-      image.image === "ground-s90" ? tallied(image, 62, 1, 0) : image,
-    );
+  it("judges no image whose sun stands at most 0.35 over the horizon, and closes on an image refused throughout", () => {
+    const lowSun: ReadonlyArray<GateMiss> = [
+      { image: "ground-s80", value: "ground-s80-v60-a0/r", ratio: 1.1 },
+      { image: "ground-s90", value: "ground-s90-v0-a0/r", ratio: 3.4 },
+      { image: "ground-s95", value: "ground-s95-v0-a0/r", ratio: 5 },
+    ];
     const refused = passing.map((image) =>
       image.image === "limb" ? tallied(image, 0, 0, 15) : image,
     );
     expect([
-      BELOW_THE_HORIZON_IMAGES,
-      hazeGatePasses(passing),
-      hazeGatePasses(twilit),
-      hazeGatePasses(horizon),
-      hazeGatePasses(refused),
-      hazeGatePasses([]),
-    ]).toEqual([["ground-s95"], true, true, false, false, false]);
+      HAZE_UNJUDGED_IMAGES,
+      hazeGatePasses(passing, []),
+      hazeGatePasses(missing(lowSun), lowSun),
+      hazeGatePasses(missing(lowSun), []),
+      hazeGatePasses(refused, []),
+      hazeGatePasses([], []),
+    ]).toEqual([["ground-s80", "ground-s90", "ground-s95"], true, true, true, false, false]);
   });
 
   it.each(BOUNDS)(

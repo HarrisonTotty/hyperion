@@ -537,7 +537,7 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   /**
    * Whether a routed body in `regime` from `medium` is baked as a haze route's bake is (R08.T14.d.4;
    * `thick/bake.ts`'s remarks, "Own wavelengths" and "Curved streams"): `thick/routing.ts`'s
-   * `bakedAsHaze` if absent, none yet; a test's choice otherwise.
+   * `bakedAsHaze` if absent, a Titan-class haze's; a test's choice otherwise.
    */
   readonly bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   /**

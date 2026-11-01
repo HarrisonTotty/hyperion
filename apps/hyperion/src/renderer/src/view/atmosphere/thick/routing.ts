@@ -5,8 +5,9 @@
  * `thickScattering` world only within the range its passing gates cover ({@link THICK_ROUTE_RANGE};
  * main's rule on routing by the depth range the passing cases cover,
  * `decision-r08-t13c2-classes.md` §6). Elsewhere a thick world is drawn by the analytic term under
- * `ATMOSPHERE: APPROXIMATE`. A Titan-class haze's range opens on `titan-class`'s gate alone, once
- * its recorded verdict passes ({@link HAZE_GATE_TALLIES}, R08.T14.d.4), which it does not yet. A
+ * `ATMOSPHERE: APPROXIMATE`. A Titan-class haze's range opens on `titan-class`'s gate alone, its
+ * recorded verdict passing with its named exceptions ({@link HAZE_GATE_TALLIES},
+ * {@link HAZE_GATE_EXCEPTIONS}, R08.T14.d.4), which it does. A
  * `cloudDeck` world routes to its deck's bake only within the range its
  * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2), which none does yet: a gas
  * envelope's opens on `giant-deck`'s envelope variant alone, once its recorded verdict passes
@@ -59,7 +60,7 @@ export interface ThickRouteRange {
  * of it stand a Mars-class dust's forward peak (ḡ 0.71–0.76, τ ḡ 0.36–0.38), which stays
  * `ATMOSPHERE: APPROXIMATE` (precondition 2, main's ruling with the split), and the Venus- and
  * Titan-class columns (τ 7–77): Venus's is a deck's (R08.T15.b.2), and Titan's has a range of its
- * own, {@link HAZE_ROUTE_RANGE}, closed while its gate misses. Neither the absorbers' depth, which
+ * own, {@link HAZE_ROUTE_RANGE}, open on its gate with its named exceptions. Neither the absorbers' depth, which
  * the channels leave out (only `earth`'s ozone is gated), nor the radius over the scale height, on
  * which the pseudo-spherical beam's low sun depends, is bounded.
  */
@@ -196,24 +197,116 @@ export const HAZE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
 ];
 
 /**
- * The gate's images whose sun stands below the horizon, s95 (`reference/cases.ts`'s sphere set): a
- * routed body's view there reads `ATMOSPHERE: APPROXIMATE` with {@link TWILIGHT_REASON}, past the
- * pseudo-spherical model's limit (main's ruling with T14.d.2's step 3), so no haze gate is judged
- * on them.
+ * One value a gate's recorded verdict misses (R08.T14.d.4): its image, the value as
+ * `geometry/channel`, and its |twin − ref| ÷ (T + 4σ), in units of the gate's edge.
  */
-export const BELOW_THE_HORIZON_IMAGES: ReadonlyArray<string> = ["ground-s95"];
-
-/**
- * Whether a haze gate's recorded tallies pass (R08.T14.d.4; lean, 2026-11-01): the deck's rule
- * ({@link deckGatePasses}), every image passing somewhere and none missing, over the images whose
- * sun stands at or above the horizon ({@link BELOW_THE_HORIZON_IMAGES}).
- */
-export function hazeGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean {
-  return deckGatePasses(tallies.filter((image) => !BELOW_THE_HORIZON_IMAGES.includes(image.image)));
+export interface GateMiss {
+  readonly image: string;
+  readonly value: string;
+  readonly ratio: number;
 }
 
 /**
- * The range a Titan-class haze routes over once `titan-class`'s gate passes (R08.T14.d.4; lean,
+ * `titan-class`'s misses through its route on the images its gate judges (R08.T14.d.4):
+ * `vectorGate.json`'s `titanClass.geometries`, every channel that misses outside
+ * {@link HAZE_UNJUDGED_IMAGES}, held to the file by the test.
+ */
+export const HAZE_GATE_MISSES: ReadonlyArray<GateMiss> = [
+  { image: "ground-s30", value: "ground-s30-v30-a45/r", ratio: 1.039095 },
+  { image: "ground-s30", value: "ground-s30-v30-a180/r", ratio: 1.637087 },
+  { image: "disc-p60", value: "disc-p60/r", ratio: 1.041367 },
+];
+
+/**
+ * A miss a gate passes with, named and bounded (R08.T14.d.4): the value, as {@link GateMiss}'s;
+ * its bound, its recorded |twin − ref| ÷ (T + 4σ) rounded outward at its third figure; and its
+ * measured cause.
+ */
+export interface GateException {
+  readonly value: string;
+  readonly bound: number;
+  readonly cause: string;
+}
+
+/**
+ * The haze gate's named exceptions (R08.T14.d.4; main's ruling (1) of 2026-11-01): `titan-class`'s
+ * three misses on the images it judges, each held to its bound, as Earth's route passed with its
+ * named misses (research-leans-4 §3). Each reads no closer to the reference through the analytic
+ * path, the one an unrouted world is drawn by, than through the route, judged per image in the
+ * gate's edge units (main's reading of ruling (1), research-leans-28 §4: a pixel takes its three
+ * channels from one path), as `vectorGate.json`'s `titanClass.worstByGeometry` records and the
+ * test holds. A new miss, or one of these past its bound, closes the route
+ * ({@link hazeGatePasses}).
+ */
+export const HAZE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [
+  {
+    value: "ground-s30-v30-a45/r",
+    bound: 1.04,
+    cause:
+      "the table's azimuthal modes, m <= 2: within the gate at m < 8, the read's modes widened by hand (r08-titan-route); the analytic path's worst channel there 9.86 of the edge",
+  },
+  {
+    value: "ground-s30-v30-a180/r",
+    bound: 1.64,
+    cause:
+      "the table's azimuthal modes, m <= 2, as a45's; the analytic path's worst channel there 11.2 of the edge",
+  },
+  {
+    value: "disc-p60/r",
+    bound: 1.05,
+    cause:
+      "mode-free and red alone: the bins' red conversion, its methane's channel curve at the floor (T14.d.1's record); the image's worst channel through the analytic path, its blue at 2.29 of the edge, is larger than through the route, its red at 1.04",
+  },
+];
+
+/**
+ * The haze gate's images it does not judge (R08.T14.d.4; main's ruling of 2026-11-01): those whose
+ * sun stands at most {@link LOW_SUN_SINE} over the horizon, s80 and s90, where a body baked as a
+ * haze reads `ATMOSPHERE: APPROXIMATE` with {@link LOW_SUN_REASON}, and s95 below it
+ * ({@link TWILIGHT_REASON}), past the pseudo-spherical model's limit (`reference/cases.ts`'s
+ * sphere set).
+ */
+export const HAZE_UNJUDGED_IMAGES: ReadonlyArray<string> = [
+  "ground-s80",
+  "ground-s90",
+  "ground-s95",
+];
+
+/**
+ * Whether a haze gate's recorded verdict passes (R08.T14.d.4; main's ruling of 2026-11-01): the
+ * deck's rule ({@link deckGatePasses}) over the images it judges (all but
+ * {@link HAZE_UNJUDGED_IMAGES}), every image passing somewhere, and every miss there one of
+ * `exceptions` within its bound. `misses` must account for every judged image's tally of misses,
+ * so that a miss the list leaves out closes the route.
+ *
+ * @param misses - The verdict's misses ({@link HAZE_GATE_MISSES}); those on the images it does not
+ *   judge are passed over.
+ * @param exceptions - The named exceptions: {@link HAZE_GATE_EXCEPTIONS}, or a test's.
+ */
+export function hazeGatePasses(
+  tallies: ReadonlyArray<GateImageTally>,
+  misses: ReadonlyArray<GateMiss>,
+  exceptions: ReadonlyArray<GateException> = HAZE_GATE_EXCEPTIONS,
+): boolean {
+  const judged = tallies.filter((image) => !HAZE_UNJUDGED_IMAGES.includes(image.image));
+  const judgedMisses = misses.filter((miss) => !HAZE_UNJUDGED_IMAGES.includes(miss.image));
+  return (
+    judged.length > 0 &&
+    judged.every(
+      (image) =>
+        image.passes > 0 &&
+        judgedMisses.filter((miss) => miss.image === image.image).length === image.misses,
+    ) &&
+    judgedMisses.every((miss) =>
+      exceptions.some(
+        (exception) => exception.value === miss.value && miss.ratio <= exception.bound,
+      ),
+    )
+  );
+}
+
+/**
+ * The range a Titan-class haze routes over, `titan-class`'s gate passing (R08.T14.d.4; lean,
  * 2026-11-01): the case's channels over `regimeChannels`, the range its gate covers, as
  * {@link THICK_ROUTE_RANGE} is the kept cases'.
  *
@@ -233,26 +326,30 @@ export const HAZE_ROUTE_RANGE: ThickRouteRange = {
 };
 
 /**
- * The ranges a `thickScattering` world routes over, given `tallies`, the haze gate's recorded
- * verdict (R08.T14.d.4): {@link THICK_ROUTE_RANGE}, and `haze` beside it where the gate passes
- * ({@link hazeGatePasses}).
+ * The ranges a `thickScattering` world routes over, given `tallies` and `misses`, the haze gate's
+ * recorded verdict (R08.T14.d.4): {@link THICK_ROUTE_RANGE}, and `haze` beside it where the gate
+ * passes ({@link hazeGatePasses}).
  */
 export function thickRouteRangesOf(
   tallies: ReadonlyArray<GateImageTally>,
+  misses: ReadonlyArray<GateMiss>,
   haze: ThickRouteRange = HAZE_ROUTE_RANGE,
 ): ReadonlyArray<ThickRouteRange> {
-  return hazeGatePasses(tallies) ? [THICK_ROUTE_RANGE, haze] : [THICK_ROUTE_RANGE];
+  return hazeGatePasses(tallies, misses) ? [THICK_ROUTE_RANGE, haze] : [THICK_ROUTE_RANGE];
 }
 
 /**
- * The ranges a `thickScattering` world routes over (R08.T14.d.4): {@link THICK_ROUTE_RANGE} alone,
- * since `titan-class`'s gate misses ({@link HAZE_GATE_TALLIES}). A Titan-class world stays drawn by
- * the analytic term under `ATMOSPHERE: APPROXIMATE` with `THICK_REASON`, its bake unasked. Its
- * opening also waits on the owner's RTX run of a routed Titan's frame against
- * `decision-r08-t11-frame.md`'s 16.67 ms.
+ * The ranges a `thickScattering` world routes over (R08.T14.d.4): {@link THICK_ROUTE_RANGE} and
+ * {@link HAZE_ROUTE_RANGE}, since `titan-class`'s gate passes with its named exceptions
+ * ({@link HAZE_GATE_TALLIES}, {@link HAZE_GATE_EXCEPTIONS}). A Titan-class world is baked as a haze
+ * ({@link bakedAsHaze}) and reads `ATMOSPHERE: COMPUTING`, then nothing, but for its low sun
+ * ({@link LOW_SUN_REASON}). Its routed frame against `decision-r08-t11-frame.md`'s 16.67 ms is
+ * pending, the owner's RTX run, as Earth's was when it routed.
  */
-export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> =
-  thickRouteRangesOf(HAZE_GATE_TALLIES);
+export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> = thickRouteRangesOf(
+  HAZE_GATE_TALLIES,
+  HAZE_GATE_MISSES,
+);
 
 /**
  * Whether a body routed `regime` is baked as a haze route's bake is (R08.T14.d.4): the channels its

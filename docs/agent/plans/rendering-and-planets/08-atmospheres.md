@@ -5996,7 +5996,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       Titan-class gated 2026-11-01 on its re-traced reference: it misses, and is not routed (Risks,
       "R08.T14.d.4's Titan-class gate"); with the horizon's terms, 3 misses are left (Risks,
       "R08.T14.d.4's horizon terms"); the estimator check keeps the route closed (Risks,
-      "R08.T14.d.4's estimator check").
+      "R08.T14.d.4's estimator check"). Titan-class routed 2026-11-01, its low sun labelled and its
+      three misses named (Risks, "R08.T14.d.4's haze route, opened").
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -24485,6 +24486,31 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     (1.003 against 1.072), so ruling (1)'s condition fails there as well.
   - Left undone, past the brief's stop: `HAZE_GATE_EXCEPTIONS`, the route, the pool's arrival
     bench, and TEST TITAN's captures.
+- **R08.T14.d.4's haze route, opened** (2026-11-01; lane `fix-titan-route-open-2`, main's ruling on
+  research-leans-28 §3–§4; figures in the lane's outbox).
+  - _The bake_: `bakedAsHaze` gives own wavelengths and curved streams, never the horizon's terms
+    (`HORIZON_TERMS` stays, opt-in). `vectorGate.json` format 11: `titanClass` reads format 9's
+    160 / 25 / 175 and adds `diagnostic`, `diagnosticRatios`, `worstByGeometry` and
+    `diagnosticValues`, the analytic path with the correction.
+  - _The label_: `thick/routing.ts`'s `LOW_SUN_SINE` (`HORIZON_SUN_COSINE`, held by test) and
+    `LOW_SUN_REASON`. The cache's `inDeepTwilight` is now `twilightReasonOf`: a haze-baked body at
+    a sine 0–0.35 reads `LOW_SUN_REASON`, below 0 `TWILIGHT_REASON` (lean, 2026-11-01).
+  - _The gate_: `HAZE_UNJUDGED_IMAGES` (s80, s90, s95) replaces `BELOW_THE_HORIZON_IMAGES`.
+    `hazeGatePasses(tallies, misses, exceptions)` and `thickRouteRangesOf(tallies, misses, haze)`
+    take `HAZE_GATE_MISSES` (`GateMiss`). `THICK_ROUTE_RANGES` holds `HAZE_ROUTE_RANGE`.
+  - _The named exceptions_ (`HAZE_GATE_EXCEPTIONS`, `GateException`), beside Earth's named misses
+    ("R08.T14.d.4, as built"): ground-s30-v30-a45/r ≤ 1.04 and -a180/r ≤ 1.64 (the table's m ≤ 2),
+    disc-p60/r ≤ 1.05 (the bins' red conversion). Ruling (1)'s "at those values" is read per image
+    (main): at each, the analytic path's worst channel is the larger, 9.86, 11.2 and 2.29 of the
+    edge, against the route's 1.04, 1.64 and 1.04.
+  - _For the owner's UX list_: `ATMOSPHERE: APPROXIMATE`'s example drops "Titan-" ("such as a Mars-
+    or Venus-class world's"), and gains: "It also stands for a Titan-class world, the camera inside
+    its air and its brightest star at most 20.5° above the local horizontal (its reason line set in
+    code: Multiple scattering: computed beyond its checked range, the brightest star low over the
+    local horizontal)." The routed views it clears though their gate misses gain titan-class's
+    three exceptions.
+  - _Pending, the owner's runs_: a routed Titan's RTX frame (part 1 with
+    `--smoke-gpu-timing=1 --smoke-thick-read=1`) and the UHD 620 host's arrival.
 - **The composite over the air's area, as built** (2026-11-01; lane `r08-t16a2`, chained; main's
   next lever after the early return; measurements in the lane's outbox).
   - _The engine_ (`engine/types.ts`, `webgpu/drawing.ts`, `webgpu/target.ts`): a target's frame may
