@@ -1207,6 +1207,7 @@ the research's figures.
     and the timed passes' count (Design note 18).
   - _Acceptance:_ captures byte-identical; caster triangles reported per cascade, in the terrain
     run's results and test-render's `R10.T16 the frame` log.
+  - _Built_ (66d7c32): records at the end of Risks.
 - **R14.T1.c Casters culled by the depths their receivers sample.** Exact under `castsInto`'s own
   relief premise; size M.
   - _Today:_ a near patch is drawn into all four cascades: 1.3–4.0 caster patches a drawn patch.
@@ -1218,6 +1219,7 @@ the research's figures.
   - _Acceptance:_ captures byte-identical (the layers may differ only where no receiver samples);
     caster triangles 0.48–0.79 of T1.b's above 1 km on the research's counts, which left out the
     fall-through, so accepted against the rebuilt harness's.
+  - _Built_ (4190c9d): records at the end of Risks.
 - **R14.T1.d Casters at their cascade's texel.** A lean; size S.
   - The coarsest stride s ≤ 8 with s × the level's largest spacing ≤ the cascade's texel, 2 r ÷
     2,048. All of a patch's clusters take one stride a cascade, so no crack opens inside a patch,
@@ -1233,6 +1235,7 @@ the research's figures.
     T1.c's (the hand-over check's unit), the rest listed with their largest difference; before and
     after captures in the outbox; caster triangles a further 0.65–1.00 above 1 km and 0.56–0.91
     below on the research's counts, accepted against the rebuilt harness's.
+  - _Built_ (b91da73): records at the end of Risks.
 - **R14.T1.e The overlay's terrain depth at what it resolves.** Choose by what is simpler to keep
   exact, and record the choice; size S–M.
   - _Today:_ `LiveFrameTerrain.symbologyDepth` redraws each of a view's terrain draws (since T1.a,
@@ -1258,6 +1261,7 @@ the research's figures.
     check's captures, the hull, orbit and graticule marks at a limb among them; overlay triangles
     counted, with no ratio target (the research's overlay at 4 px was 0.80–0.92 of the base's on
     high at 1–10 km and 1.0 on low, so 0.7 was never in reach).
+  - _Built_ (aac8ec0, c5171c5; `cluster`, not the lean): records at the end of Risks.
 - **R14.T1.f What T1's lane lands without.** Conditional; size S–M, after T1.e. Whatever of this
   plan's T1 the lane's commits leave out, if any: `GeometrySettings` with each lever's field, the
   `geometry-clusters` category and the catalogue entries; the way back made runnable (Design note
@@ -1800,3 +1804,64 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   with and without a lever; `litInteriorMeshData`, `isInteriorBake`, `withoutSurveyDiscard` and the
   interior lit materials, catalogued and in `materialSet.ts`. Every terrain vertex stage's position
   is `@invariant`, its six sources re-pinned.
+- **R14.T1.b** (66d7c32): `view/clusters/` as built: `record.ts` (32 B `ClusterRecord`, a sphere;
+  flags shape, DAG and may-discard bits; strided errors (0, +∞)), `templates.ts` (one mesh of 8
+  templates: blocks 128 / 32 / 8 / 2, strips 16 / 8 / 4 / 2), `terrain.ts` (96 clusters a page,
+  records written at each slot's upload from the L + 3 descendant's `patchBounds`, the grid place
+  decoded from the cluster index in WGSL and its twin `terrainClusterGrid`), `cullPass.ts`
+  (`CullPass` 128 B, `CullParams` 144 B), `clusterCull.wgsl` and `cull.ts` (the twin `cullTwin`),
+  `buckets.ts` (`ClusterBuckets`, 20 B arguments a bucket, the list base as the `clusterBase` `u32`
+  uniform), `stats.ts`. `GeometrySettings` and `GEOMETRY_BEFORE_R14` in `qualitySetting.ts` are the
+  levers' source (`TerrainLevers` and `setLevers` became `geometry` / `setGeometry`); the
+  `geometry-clusters` category; catalogue entries. The sphere was kept (no 48 B box); the cull tests
+  it against `castsInto`'s box conservatively, the near side left to the patch's own test.
+  Stand-ins (seamless-1's sub-patches among them) take the edge path in every pass. Caster
+  triangles 0.471 of the way back's on the smoke's cascades frame.
+- **R14.T1.c** (4190c9d): the receivers' rule in `clusters/receivers.ts` (`cascadeCullReceivers`,
+  `cascadeCullPasses`) and `cull.ts`' `receiversRefuse`, the kernel's `receivers_refuse`; also on the
+  CPU per patch for the edge patches' lit-mesh casters (not for a stand-in). Margins: depth
+  2 o_k + 3 t_k, across 3 t_k + o_k + o₍ₖ₋₁₎, the covered square r₍ₖ₋₁₎ − 2 t₍ₖ₋₁₎. `CullReceivers`
+  is `depthM`, `reachM` (nearer, farther) and `coveredBelow` {centre, half-side, reach}, not the
+  plan's `receiverDepthM` / `Float32Array`. 0.701 of T1.b's caster triangles on the smoke frame.
+- **R14.T1.d** (b91da73): the stride per instance a pass, `casterStrideCap` 8 on both settings;
+  `scripts/compareCaptures.mjs`; the smoke's in-run comparison and `--captures` frames with masks
+  (`smoke/leverCaptures.ts`). No cluster strides in any pod scene: the smoke fixture's selected
+  patches stay spaced above twice every cascade's texel.
+- **R14.T1.e** (aac8ec0, c5171c5): `overlayDepth` `redraw` / `cluster` / `scene-depth`; both
+  settings take `cluster`, not the lean. A camera pass (kind 2, up to 6 planes) in the cull, a fifth
+  bucket pass a view, every lit pass clustered (low too), the overlay's pass culled alone without
+  cascades; `terrainClusterDepth.wgsl`; `photoreal/overlayDepth.ts` for `scene-depth`, kept
+  selectable. `TerrainViewFrame.overlayDepth`, `FrameTerrain.sceneDepth()`,
+  `FrameTerrainPass.geometry`. `counts()` gives `overlayTriangles`. T3.c can keep `cluster` (main's
+  note): it is already the setting.
+- **R14.T1.f** (02fea32): the counters through a `bit-exact` reduction (6 words a pass: clusters,
+  triangles, by stride); `ClusterPassStats.byStride` replaces `byTemplate`. Not built (left for
+  main): the `--geometry` override on `views-check`, `descent-spike` and the smoke page; the
+  `--fixture=broken-wgsl` fallback test; the counting harness (`clusterCounts.ts`); the descent
+  spike's counters (`RESULTS_VERSION` 7); the brainstorm's twin cases, the wasm bounds test, a
+  restore test and the timed passes' count pin.
+- **From building T1** (`geometry-clusters-1`'s notes for the plan):
+  - T1.e's lean fails its acceptance: the scene's depth carries the reference surface's tessellated
+    depth, which hides a body's own datum lines beyond its survey (in-run, settled frame: redraw =
+    cluster, scene depth differs). Make `cluster` the setting and drop the lean, or say how the
+    reference surface stays out of the overlay's test.
+  - T1.d's yield depends on the selection's error, not only on the cascade's texel: a cascade's texel
+    is about a pixel's footprint at its slice's far end, so only casters well inside it stride, and
+    the smoke fixture's smooth fine levels leave its patches spaced above every texel. Accept T1.d on
+    real worlds (the owner's run or the harness), not on the pod's smoke.
+  - Timed passes: the cull is one timed pass a lit view-frame (`terrain cluster cull`), the counters'
+    reduction one more while measuring. The engine's timer makes its query set (1,024 B, `other`) at
+    its first timed pass; R10.T16.b's release check now counts it apart.
+  - Buckets hold 5 passes a view (4 cascades and the overlay), and every lit pass is clustered on
+    both settings: about 1.25 × the plan's caster-only bucket bytes.
+  - The receivers' rule (T1.c) needs only `CascadeSet` fields that exist (`fadeStartM`, `farM`,
+    `normalOffsetM`, `texelM`, `centreFromCameraLightM`, `radiusM`, `casterReachM`, `basis`).
+  - `createComputeAsync` can throw at the call on a lost device rather than reject; a
+    `Promise.allSettled` over it needs the call wrapped.
+  - The forced flag (bit 18 of `parentQuadrant`) is not written in T1: no T1 pass strides where it
+    applies (casters may stride; the overlay stays at stride 1).
+  - The research harness was not rebuilt: T1's ratios are the smoke scenes' alone, and the
+    15.4–20.3 M a frame figure was not checked.
+  - From the interim: strips 16 / 8 / 4 / 2; `TerrainViewFrame.draws`; interior by the survey mask;
+    `@invariant` first; no tie pixel in any compared frame; in-run A/B over cross-build compares; the
+    list base as a `u32` uniform below 2²⁴; 7 storage bindings in the cluster vertex stage.
