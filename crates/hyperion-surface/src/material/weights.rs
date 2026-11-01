@@ -456,7 +456,13 @@ fn steepness_cases(
     let scale = num::assert_finite(rho / (rho + sample.height_m));
     let tail = |slope: f64| exceedance(size, slope2, math::tan(slope) / scale);
     let cliff = tail(CLIFF_SLOPE.value());
-    let shed = num::min(tail(SNOW_SHED_SLOPE.value()), cliff);
+    // A tail is never below +0, so where the cliff's is +0 the shed's min with it is +0 whatever
+    // its own: its quadrature, half of the steepness's, is skipped there, bit for bit.
+    let shed = if cliff <= 0.0 {
+        cliff
+    } else {
+        num::min(tail(SNOW_SHED_SLOPE.value()), cliff)
+    };
     vec![
         (Steepness::Loose, 1.0 - cliff),
         (Steepness::Cliff, cliff - shed),

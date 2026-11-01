@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use hyperion_testkit::float::bits;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -433,6 +434,36 @@ fn material_weights_the_steepness_cases_sum_to_one_and_tend_to_the_level_s_own()
             }
         }
     }
+}
+
+#[test]
+fn material_weights_a_zero_cliff_tail_leaves_the_shed_tail_zero_bit_for_bit() {
+    // `steepness_cases` skips the snow shed's tail where the cliff's is +0: a tail is never below
+    // +0, nor −0, so the shed's min with the cliff's is the cliff's +0 whatever its own.
+    let mut rng = Lcg::new(0x0073_6865_6430);
+    let mut zeros = 0;
+    for _ in 0..per_target(4_000, 400) {
+        let mean = 0.6 * rng.next_f64();
+        let variance = math::powf(10.0, -7.0 * rng.next_f64());
+        let scale = 0.9 + 0.2 * rng.next_f64();
+        let cliff = exceedance(mean, variance, math::tan(CLIFF_SLOPE.value()) / scale);
+        let shed = exceedance(mean, variance, math::tan(SNOW_SHED_SLOPE.value()) / scale);
+        for tail in [cliff, shed] {
+            assert!(
+                tail >= 0.0 && bits(tail) != bits(-0.0),
+                "a tail of {tail:e}"
+            );
+        }
+        if cliff <= 0.0 {
+            zeros += 1;
+            assert_eq!(
+                bits(num::min(shed, cliff)),
+                bits(0.0),
+                "{mean} {variance} {scale}"
+            );
+        }
+    }
+    assert!(zeros > 0, "no cliff tail was zero");
 }
 
 /// The face and the (s, t) of the unit direction `dir`.
