@@ -11,6 +11,7 @@ import { limbDepthAt, limbDepths } from "../bodies/smoothMesh";
 import { NEAR_PLANE_M, pixelSolidAngle, type Viewport } from "../camera/projection";
 import { quaternionFromAxisAngle, rotate } from "../camera/quaternion";
 import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
+import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
   DISC_MIN_DIAMETER_PX,
@@ -23,6 +24,7 @@ import {
 import {
   angularRadiusRad,
   discExcessLuminanceRgb,
+  discLuminanceAboveRgb,
   discIlluminanceRgbLx,
   discLuminanceRgb,
 } from "./discFlux";
@@ -149,6 +151,24 @@ describe("the host discs", () => {
       discIlluminanceRgbLx(host, angularRadiusRad(SUN_RADIUS_M, 50 * AU_M)),
     );
     expect(DISC_MIN_DIAMETER_PX).toBe(3);
+  });
+
+  it("hand R07 the light above the bloom threshold, none below it (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
+    const host = sunHost();
+    const exposureScale = 1e-8;
+    layer.frame(
+      [{ host, direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      exposureScale,
+    );
+    const [source] = layer.glareSources(LOOK, VIEWPORT, "eye");
+    expect(source?.excessLuminance).toEqual(
+      discLuminanceAboveRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale),
+    );
+    expect(discLuminanceAboveRgb(host, 1e12)).toEqual([0, 0, 0]);
   });
 
   it("hand R07 the light above a half's 65,504, and none while the disc fits", () => {

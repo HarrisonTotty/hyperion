@@ -1,7 +1,8 @@
 /**
  * R07.T14.b's smoke checks: the bloom chain on the device against its CPU twin, energy kept across
  * the clamp (stored and bloomed on the device, injected in closed form), and the glare sources'
- * veil in WGSL against its TypeScript twin at pinned pixels.
+ * veil in WGSL against its TypeScript twin at pinned pixels; and a host disc's texels, meter class
+ * 0, kept out of the chain, its light above the threshold the closed form's (fix-view-light).
  *
  * @remarks
  * The HDR input is the check's own texture (decision 2026-10-02, item 1). The composite here is
@@ -38,6 +39,7 @@ import {
   type GlareSource,
 } from "../view/post/glare";
 import GLARE_WGSL from "../view/post/glare.wgsl?raw";
+import { METER_CLASS } from "../view/post/meter";
 import { SETTINGS } from "../view/quality/qualitySetting";
 import { type Checks, halfBits, halfTexels, halfToNumber, show } from "./harness";
 
@@ -84,9 +86,10 @@ struct Draw {
 }
 
 @fragment fn fragmentMain(@builtin(position) fragment : vec4f) -> @location(0) vec4f {
-  let hdr = textureLoad(hdrColour, vec2i(fragment.xy), 0).rgb;
+  let texel = textureLoad(hdrColour, vec2i(fragment.xy), 0);
+  let hdr = texel.rgb;
   var light = min(hdr, vec3f(draw.threshold));
-  light += draw.levelZeroWeight * bloom_excess(hdr, draw.threshold);
+  light += draw.levelZeroWeight * bloom_excess_of(texel, draw.threshold);
   light += draw.levelOneWeight * bloom_tent(bloomUp, fragment.xy, frame.viewport.xy);
   let terms = GlareTerms(
     draw.glarePoisson0, draw.glarePoisson1, draw.glarePoisson2, draw.glareBroad, draw.glareMisc,
@@ -150,8 +153,11 @@ function pixelDirection(x: number, y: number): readonly [number, number, number]
   return [v[0] / n, v[1] / n, v[2] / n];
 }
 
-/** The synthetic HDR frame, red channel only: the clamped disc at the centre over a dark sky. */
-function hdrFrame(): {
+/**
+ * The synthetic HDR frame, red channel only: the clamped disc at the centre over a dark sky, its
+ * texels of meter class `discClass`.
+ */
+function hdrFrame(discClass: number = METER_CLASS.other): {
   readonly bits: Uint16Array;
   readonly red: Float64Array;
   readonly discPixels: number;
@@ -168,7 +174,8 @@ function hdrFrame(): {
       const inDisc = Math.hypot(x - centre, y - centre) <= DISC_PX;
       discPixels += inDisc ? 1 : 0;
       const value = inDisc ? disc : sky;
-      bits.set([value, 0, 0, halfBits(1)], 4 * (y * SIZE.widthPx + x));
+      const meterClass = halfBits(inDisc ? discClass : METER_CLASS.other);
+      bits.set([value, 0, 0, meterClass], 4 * (y * SIZE.widthPx + x));
       red[y * SIZE.widthPx + x] = halfToNumber(value);
     }
   }
@@ -222,7 +229,11 @@ export async function checkBloom(
     category: "other",
   });
   engine.writeBuffer(sources, 0, packGlareSources([source], 1, terms));
-  const composite = async (sourceCount: number): Promise<Float32Array> => {
+  const composite = async (
+    sourceCount: number,
+    input: TextureHandle = hdr,
+    gathered: BloomChain = chain,
+  ): Promise<Float32Array> => {
     const target = engine.createRenderTarget({
       name: `smoke composite ${sourceCount}`,
       size: SIZE,
@@ -243,11 +254,11 @@ export async function checkBloom(
           uniforms: {
             threshold: new Float32Array([threshold]),
             levelZeroWeight: new Float32Array([levelWeight(kernel, 0)]),
-            levelOneWeight: new Float32Array([chain.levelOneWeight]),
+            levelOneWeight: new Float32Array([gathered.levelOneWeight]),
             sourceCount: new Float32Array([sourceCount]),
             ...packGlareTerms(terms),
           },
-          textures: { hdrColour: hdr, bloomUp: chain.levelOne },
+          textures: { hdrColour: input, bloomUp: gathered.levelOne },
           storageBuffers: { glareSources: sources },
         },
       ],
@@ -330,6 +341,76 @@ export async function checkBloom(
     "R07.T14.b the veil in WGSL equals its twin to 1% beyond the limb",
     misses.length === 0,
     misses.length === 0 ? `5 pixels, first ${show(veiled.subarray(0, 4))}` : misses.join("; "),
+  );
+  await checkDiscOutOfChain(engine, checks, { kernel, threshold, composite });
+  chain.dispose();
+}
+
+/**
+ * fix-view-light: a host disc's texels, meter class 0, stay out of the chain, and its glare
+ * source's closed form carries its light above the threshold, the stored disc and the closed form
+ * holding the unclamped energy together.
+ */
+async function checkDiscOutOfChain(
+  engine: RenderEngine,
+  checks: Checks,
+  inputs: {
+    readonly kernel: ReturnType<typeof bloomKernel>;
+    readonly threshold: number;
+    readonly composite: (
+      sourceCount: number,
+      input: TextureHandle,
+      gathered: BloomChain,
+    ) => Promise<Float32Array>;
+  },
+): Promise<void> {
+  const { kernel, threshold, composite } = inputs;
+  const frame = hdrFrame(METER_CLASS.hostDisc);
+  const hdr = engine.createTexture({
+    name: "smoke bloom disc input",
+    size: [SIZE.widthPx, SIZE.heightPx],
+    dimension: "2d",
+    format: "rgba16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    hdr,
+    { x: 0, y: 0 },
+    { width: SIZE.widthPx, height: SIZE.heightPx },
+    frame.bits,
+  );
+  const chain = await BloomChain.create(engine, "smoke disc", SIZE, kernel);
+  chain.run(hdr, threshold);
+  const plain = await composite(0, hdr, chain);
+  let gpu = 0;
+  let shown = 0;
+  frame.red.forEach((value, i) => {
+    gpu += plain[4 * i] ?? 0;
+    shown += Math.min(value, threshold);
+  });
+  const centre = SIZE.widthPx / 2;
+  const [x, y, z] = pixelDirection(centre, centre);
+  const source: GlareSource = {
+    direction: { x, y, z },
+    angularRadiusRad: Math.sqrt(frame.discPixels / Math.PI) * RAD_PER_PX,
+    excessLuminance: [DISC_LUMINANCE - threshold, 0, 0],
+    luminance: [DISC_LUMINANCE, 0, 0],
+  };
+  const injected = (source.excessLuminance[0] * glareSourceSolidAngleSr(source)) / RAD_PER_PX ** 2;
+  const unclamped =
+    frame.discPixels * DISC_LUMINANCE +
+    (SIZE.widthPx * SIZE.heightPx - frame.discPixels) * (frame.red[0] ?? 0);
+  checks.check(
+    "fix-view-light a host disc's texels stay out of the bloom chain: the device shows its stored disc alone",
+    Math.abs(gpu / shown - 1) < 0.005,
+    `device ${gpu.toPrecision(7)}, shown ${shown.toPrecision(7)}`,
+  );
+  checks.check(
+    "fix-view-light the shown disc and its closed form above the threshold hold the unclamped energy to 1.5%",
+    Math.abs((gpu + injected) / unclamped - 1) < 0.015,
+    `shown ${gpu.toPrecision(6)} + closed form ${injected.toPrecision(6)} against ${unclamped.toPrecision(6)}`,
   );
   chain.dispose();
 }

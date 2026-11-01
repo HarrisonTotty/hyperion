@@ -12,8 +12,9 @@ import type { ViewRole } from "../camera/state";
 import type { Rgb } from "../photometry/toneCurve";
 
 /**
- * A light source too bright for the HDR target: its glare is evaluated in closed form in the
- * tone-mapping pass, in `f32`, rather than through the bloom chain (Design note 12).
+ * A light source too bright for the display: its glare is evaluated in closed form in the
+ * tone-mapping pass, in `f32`, rather than through the bloom chain (Design note 12), whose first
+ * pass leaves its texels (meter class 0) out (fix-view-light).
  *
  * @remarks
  * R06's `HostDiscLayer.glareSources` returns one per host disc (in an eye view also for discs up to
@@ -28,15 +29,16 @@ export interface GlareSource {
   /** The source's angular radius, rad; zero for a point. */
   readonly angularRadiusRad: number;
   /**
-   * The luminance the target could not store, per channel, cd/m²: the source's mean luminance less
-   * what its clamped texels hold, 65,504 ÷ the pre-exposure scale (Provides: "cd/m² above 65,504").
+   * The luminance above the display's range, per channel, cd/m²: the source's mean luminance less
+   * what its texels show, the bloom threshold in cd/m² (fix-view-light, 2026-11-02; was the
+   * luminance above 65,504 ÷ the pre-exposure scale, the Provides' "cd/m² above 65,504", with the
+   * part between them bloomed).
    */
   readonly excessLuminance: Rgb;
   /**
    * The source's whole mean luminance, per channel, cd/m²: what the meter spreads through the view's
-   * spread function (`histogram.wgsl`), whatever the pre-exposure. The image spreads only
-   * {@link GlareSource.excessLuminance} in closed form, and the part its texels hold through the
-   * bloom chain, which the meter cannot read.
+   * spread function (`histogram.wgsl`), whatever the pre-exposure. The image spreads
+   * {@link GlareSource.excessLuminance} in closed form, the part above the display's range.
    */
   readonly luminance: Rgb;
 }

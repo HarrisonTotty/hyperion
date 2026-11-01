@@ -301,10 +301,11 @@ const GLARE_SOURCE_FLOATS = GLARE_SOURCE_BYTES / 4;
 
 /**
  * The glare sources as the tone-mapping pass's storage buffer holds them (`GlareSourceGpu` in
- * `glare.wgsl`): direction and angular radius, then the excess in the target's units (cd/m² × the
- * pre-exposure) and the solid angle, then each narrow term's level inside the disc, −1 where the
- * source is a point for that term, and the source's whole luminance through the meter's weights in
- * the target's units, which the exposure histogram spreads (`histogram.wgsl`).
+ * `glare.wgsl`): direction and angular radius, then the excess above the bloom threshold in the
+ * target's units (cd/m² × the pre-exposure) and the solid angle, then each narrow term's level
+ * inside the disc, −1 where the source is a point for that term, and the source's whole luminance
+ * through the meter's weights in the target's units, which the exposure histogram spreads
+ * (`histogram.wgsl`).
  *
  * @param preExposure - The target's pre-exposure scale, 1 ÷ (cd/m²).
  * @param terms - The view's spread function, whose narrow terms set the levels inside each disc.

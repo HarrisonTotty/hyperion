@@ -57,9 +57,10 @@ fn tpdf(u : f32) -> f32 {
 @fragment fn fragmentMain(@builtin(position) fragment : vec4f) -> @location(0) vec4f {
   let outputSize = frame.viewport.xy;
   let uv = fragment.xy * frame.viewport.zw;
-  let hdr = textureSampleLevel(hdrColour, hdrSampler, uv, 0.0).rgb;
+  let texel = textureSampleLevel(hdrColour, hdrSampler, uv, 0.0);
+  let hdr = texel.rgb;
   var light = min(hdr, vec3f(draw.threshold));
-  light += draw.levelZeroWeight * bloom_excess(hdr, draw.threshold);
+  light += draw.levelZeroWeight * bloom_excess_of(texel, draw.threshold);
   light += draw.levelOneWeight * bloom_tent(bloomUp, fragment.xy, outputSize);
   let terms = GlareTerms(
     draw.glarePoisson0,

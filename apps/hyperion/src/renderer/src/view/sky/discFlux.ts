@@ -52,23 +52,31 @@ const EXCESS_RINGS = 256;
 
 /**
  * The luminance a target holding at most 65,504 after pre-exposure cannot store, per channel,
- * cd/m², averaged over the disc: R07's `GlareSource.excessLuminance`.
+ * cd/m², averaged over the disc ({@link discLuminanceAboveRgb} above 65,504 ÷ the scale).
  *
  * @param exposureScale - The frame's pre-exposure scale (R02's `exposureScale`).
- * @remarks
- * ∫ max(0, I(μ) − 65,504 ÷ scale) over the disc's projected area, by the midpoint rule over equal
- * rings in r, the projected radius, with μ = √(1 − r²); 256 rings hold it to well under 1%.
  */
 export function discExcessLuminanceRgb(host: HostDiscDto, exposureScale: number): Rgb {
-  const held = HALF_MAX / exposureScale;
+  return discLuminanceAboveRgb(host, HALF_MAX / exposureScale);
+}
+
+/**
+ * The disc's luminance above `levelCdM2`, per channel, cd/m², averaged over the disc: R07's
+ * `GlareSource.excessLuminance` above the bloom threshold (fix-view-light).
+ *
+ * @remarks
+ * ∫ max(0, I(μ) − level) over the disc's projected area, by the midpoint rule over equal rings in
+ * r, the projected radius, with μ = √(1 − r²); 256 rings hold it to well under 1%.
+ */
+export function discLuminanceAboveRgb(host: HostDiscDto, levelCdM2: number): Rgb {
   const excess: [number, number, number] = [0, 0, 0];
   for (let ring = 0; ring < EXCESS_RINGS; ring += 1) {
     const r = (ring + 0.5) / EXCESS_RINGS;
     const weight = (2 * r) / EXCESS_RINGS;
     const [lr, lg, lb] = discLuminanceRgb(host, Math.sqrt(1 - r * r));
-    excess[0] += Math.max(0, lr - held) * weight;
-    excess[1] += Math.max(0, lg - held) * weight;
-    excess[2] += Math.max(0, lb - held) * weight;
+    excess[0] += Math.max(0, lr - levelCdM2) * weight;
+    excess[1] += Math.max(0, lg - levelCdM2) * weight;
+    excess[2] += Math.max(0, lb - levelCdM2) * weight;
   }
   return excess;
 }

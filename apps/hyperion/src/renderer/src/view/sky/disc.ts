@@ -36,6 +36,7 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
+import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import type { GlareSource } from "../post/glare";
 import { sceneOrigins, type ViewScene } from "../scene/model";
 import frameWgsl from "../shaders/frame.wgsl?raw";
@@ -48,7 +49,7 @@ import {
 } from "../wireframe/submit";
 import {
   angularRadiusRad,
-  discExcessLuminanceRgb,
+  discLuminanceAboveRgb,
   discIlluminanceRgbLx,
   rgbOfBvr,
 } from "./discFlux";
@@ -369,8 +370,10 @@ export class HostDiscLayer {
    * the frame for a camera, and one up to 45° outside it for the eye (R07's asks).
    *
    * @remarks
+   * Each carries the disc's light above the bloom threshold: the disc's texels, meter class 0, are
+   * kept out of R07's bloom chain, so that its glare is the closed form's alone (fix-view-light).
    * A host drawn as a sprite casts none: its light is in the sprite, which the target holds, and
-   * R07's bloom chain spreads it.
+   * the bloom chain spreads it.
    */
   glareSources(camera: ProjectionCamera, viewport: Viewport, role: ViewRole): GlareSource[] {
     const reach = role === "eye" ? EYE_GLARE_REACH_RAD : 0;
@@ -384,7 +387,8 @@ export class HostDiscLayer {
       sources.push({
         direction: axis,
         angularRadiusRad: rho,
-        excessLuminance: discExcessLuminanceRgb(host, this.#exposureScale),
+        // Its light above the display's range: its texels are kept out of the bloom chain.
+        excessLuminance: discLuminanceAboveRgb(host, BLOOM_THRESHOLD_EXPOSED / this.#exposureScale),
         luminance: rgbOfBvr(host.mean_luminance_cd_m2),
       });
     }

@@ -4,7 +4,10 @@
  *
  * @remarks
  * Only the light the display cannot show, L_high = L − min(L, T) with T at AgX's top of range, is
- * bloomed; the player's eye supplies the glare of what the display reproduces. The chain is
+ * bloomed; the player's eye supplies the glare of what the display reproduces. A host disc's texels
+ * (meter class 0) are not: their glare source spreads the disc's light above T in closed form,
+ * the view's spread function whole, where the chain's coarsest level would crowd its far tail
+ * (fix-view-light). The chain is
  * Jimenez 2014's 13-tap downsample and 3 × 3 tent upsample ("Next Generation Post Processing in
  * Call of Duty: Advanced Warfare", SIGGRAPH 2014) without the Karis average, which does not
  * conserve energy. Each mip level is weighted once on the way up, U_m = w_m D_m + up(U_{m+1}),
@@ -37,6 +40,17 @@ export function bloomThreshold(exposureScale: number, preExposureScale: number):
 /** The part of a pre-exposed value above the threshold, which alone is bloomed: L − min(L, T). */
 export function bloomExcess(value: number, threshold: number): number {
   return value - Math.min(value, threshold);
+}
+
+/**
+ * The part of a texel above the threshold that the chain spreads (`bloom_excess_of` in
+ * `glare.wgsl`): {@link bloomExcess}, but none of a host disc's texel, meter class 0 in its alpha,
+ * whose light above the threshold its glare source spreads in closed form (fix-view-light).
+ *
+ * @param alpha - The texel's alpha, its meter class; a filtered texel at a disc's edge by its share.
+ */
+export function bloomExcessOf(value: number, alpha: number, threshold: number): number {
+  return Math.min(Math.max(alpha, 0), 1) * bloomExcess(value, threshold);
 }
 
 /** Which mip levels a bloom chain weights. */

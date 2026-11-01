@@ -51,8 +51,7 @@ export const FULL_WINDOW: PercentileWindow = { low: 0, high: 1 };
  * counts inside `window`, with Lᵢ = 2^(bin centre) ÷ the pre-exposure and bin 0 at luminance 0
  * (Design note 11). The glare sources' veil is in it, of each source's whole light, as the optic
  * delivers it (`histogram.wgsl`); the host disc's own pixels are not, and nor is the bloom chain's
- * light, which moves the weighed texels' light and spreads the disc's stored light, which that veil
- * already holds.
+ * light, which only moves the weighed texels' light and leaves the disc's out.
  *
  * @returns 0 when the window holds no counts.
  */
