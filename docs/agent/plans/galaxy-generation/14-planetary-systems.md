@@ -3030,8 +3030,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
       `planetary/derive/atmosphere/tests.rs`.
     - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
     - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits; the envelope's
-      own albedo and the cold giants' clouds built 2026-11-01, held at 27: Risks, "Deviations in
-      P14.T24.h.b, as built".
+      own albedo, the cold giants' clouds and the ice giants' methane layer built 2026-11-01, held
+      at 27: Risks, "Deviations in P14.T24.h.b, as built".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -33744,6 +33744,14 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _At the bump:_ `THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG` takes 2.92 × 10⁻³ and its `_OWN_ALBEDO`
       twin goes, as do the κ₁ and Galileo tests' 26 forms: their 27 twin stays
       (`under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo`).
+  - _Part 7, the ice giants' methane layer, behind part 5's hold:_ a CH₄ deck's modes become
+    `envelope_atmosphere::methane_layer_mode`'s, Irwin et al. 2022's Aerosol-2 (recalled): haze
+    cores of `ice_giant_haze` at `photochem::METHANE_LAYER_PARTICLES` (0.5 µm), naming the deck,
+    at the loop's τ, on the record and in the closed form.
+    - _The material_ is a lean (2026-11-01): Aerosol-3's index stands in for Aerosol-2's own.
+    - _The internal temperature_ is unchanged (lean, 2026-11-01). The cooling law gives Neptune
+      its measured 52.6 K. The warm 1-bar profiles are the grey opacity's
+      (decision-p14-t24d-profile §1.5), and a cold-opacity law would move Saturn.
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
   - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's
