@@ -235,7 +235,7 @@ pub(crate) enum RunawayDeathsRules {
 /// field's age density is some tenth of its largest (`RECENT_DEATH_AGES`), so a candidate drawn
 /// by these odds, its mass in its interval by the mass function, pays a lifetime only where it is
 /// likely kept.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct MassRates {
     rates: [f64; INTERVALS],
     odds: [f64; INTERVALS],
@@ -322,7 +322,7 @@ impl MassIntervals {
 /// band-E displaced class `class`, of a young component's source, whose density is its form, and
 /// the deaths of that component's stars ejected into it as `kind`: every runaway, a feature's
 /// with the field's, and the field's walkaways (module documentation).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EjectedTerm {
     /// The displaced class whose form the term's deaths follow.
     class: DisplacedClassId,
@@ -415,7 +415,7 @@ impl Ejection {
 }
 
 /// One of the young field's components, as the class thins on it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct YoungComponent {
     id: ComponentId,
     share: f64,

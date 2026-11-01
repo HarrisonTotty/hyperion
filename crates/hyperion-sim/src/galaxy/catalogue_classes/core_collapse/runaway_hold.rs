@@ -645,8 +645,11 @@ fn the_field_s_death_rate_is_bounded_where_band_e_dies() {
     let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
     for young in process.components() {
         let ages = galaxy.field_ages(young.id());
-        let by_mass = young.by_mass.expect("from 27 a component's rates by mass");
-        assert_eq!(by_mass, intervals.rates(ages, interval, &[1.0; INTERVALS]));
+        let by_mass = young
+            .by_mass
+            .as_ref()
+            .expect("from 27 a component's rates by mass");
+        assert_eq!(*by_mass, intervals.rates(ages, interval, &[1.0; INTERVALS]));
         assert_same_bits(young.deaths_per_system(), by_mass.total());
         let densest =
             ages.max_pdf_between(floor, RECENT_DEATH_AGES) * (1.0 + RATE_MARGIN) * interval;
