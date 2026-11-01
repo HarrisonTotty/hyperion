@@ -906,8 +906,8 @@ const COVERAGE_MASK_TEXTURE: TextureBindingSpec = {
 
 /**
  * The disc draws' textures: {@link DISC_TEXTURES} with the body's coverage mask at binding 13
- * (plan R10, R10.T10.c), which a mesh body's limb discards by over its surveyed terrain, and which
- * is the mask of no surveyed cell for every other draw.
+ * (plan R10, R10.T10.c), which a handed-over mesh body's limb reads to discard its pixels over its
+ * surveyed terrain; the mask of no surveyed cell for every other draw.
  */
 const DISC_DRAW_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   ...DISC_TEXTURES,

@@ -789,12 +789,12 @@ function levelClassLaws(): PhotometricLaw[] {
 /**
  * A neighbour seen as Jupiter is from Io, 5.9 of its radii away (Jupiter's equatorial radius
  * 71,492 km, Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22, Table 4; Io's semi-major
- * axis 421,700 km, JPL's mean elements of the Galilean satellites), to the camera's right: R10.T10.g
+ * axis 421.8 × 10³ km, NASA GSFC's Jovian Satellite Fact Sheet), to the camera's right: the R10.T10.g
  * record's case of planetshine on a slope, whose source's disc is about 9.8° in radius.
  */
 const NEIGHBOUR_AS_FROM_IO = {
   radiusM: 7.1492e7,
-  distanceM: 4.217e8,
+  distanceM: 4.218e8,
   direction: vec3(1, 0, 0),
 } as const;
 

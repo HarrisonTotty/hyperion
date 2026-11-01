@@ -214,12 +214,15 @@ async function bakeAcrossTheEdge(
   }
 }
 
-/** The block's bakes on the low setting from a fresh worker, and the field's blocks it took. */
-async function bakeTheBlock(): Promise<{
+/** The block baked: its setting, its bakes and the field's blocks the worker took. */
+interface BakedBlock {
   readonly settings: TerrainSettings;
-  readonly bakes: BakedPatch[];
-  readonly blocks: FieldBlockAnswer[];
-}> {
+  readonly bakes: ReadonlyArray<BakedPatch>;
+  readonly blocks: ReadonlyArray<FieldBlockAnswer>;
+}
+
+/** The block's bakes on the low setting from a fresh worker, and the field's blocks it took. */
+async function bakeTheBlock(): Promise<BakedBlock> {
   const field = moonLikeFixture("first");
   const settings = { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES };
   const { bakes, blocks } = await bakeAcrossTheEdge(
@@ -348,21 +351,24 @@ export function poseAtTheLimb(): Pose {
   };
 }
 
-/**
- * A pixel's ray from `pose`, body-fixed, in the spheroid's scaled space (the pole stretched by
- * a ÷ c, a sphere of radius a), with the body's centre from the camera there.
- */
-function scaledRay(
-  pose: Pose,
-  xPx: number,
-  yPx: number,
-): { readonly ray: Vec3; readonly centre: Vec3; readonly radiusM: number } {
+/** A pixel's ray in the spheroid's scaled space, body-fixed, the pole stretched by a ÷ c. */
+interface ScaledRay {
+  /** The ray's unit direction from the camera there. */
+  readonly ray: Vec3;
+  /** The body's centre from the camera there, m. */
+  readonly centreM: Vec3;
+  /** The sphere's radius there, a, m. */
+  readonly radiusM: number;
+}
+
+/** The ray through (`xPx`, `yPx`) from `pose`, in the spheroid's scaled space. */
+function scaledRay(pose: Pose, xPx: number, yPx: number): ScaledRay {
   const stretch = MOON_LIKE.equatorialRadiusM / MOON_LIKE.polarRadiusM;
   const scaled = (v: Vec3): Vec3 => vec3(v.x, v.y, v.z * stretch);
   const ray = rotate(pose.camera.orientation, viewRay(xPx, yPx, pose.camera, VIEWPORT));
   return {
     ray: normalise(scaled(ray)),
-    centre: scaled(scale(pose.cameraM, -1)),
+    centreM: scaled(scale(pose.cameraM, -1)),
     radiusM: MOON_LIKE.equatorialRadiusM,
   };
 }
@@ -372,8 +378,10 @@ function scaledRay(
  * outside: `bodyDisc.wgsl`'s `limb_angle` in `f64`.
  */
 function limbAngleAt(pose: Pose, xPx: number, yPx: number): number {
-  const { ray, centre, radiusM } = scaledRay(pose, xPx, yPx);
-  return Math.atan2(norm(cross(ray, centre)), dot(ray, centre)) - Math.asin(radiusM / norm(centre));
+  const { ray, centreM, radiusM } = scaledRay(pose, xPx, yPx);
+  return (
+    Math.atan2(norm(cross(ray, centreM)), dot(ray, centreM)) - Math.asin(radiusM / norm(centreM))
+  );
 }
 
 /**
@@ -382,8 +390,8 @@ function limbAngleAt(pose: Pose, xPx: number, yPx: number): number {
  * where it passes outside, the spheroid's point nearest it.
  */
 function limbCellAt(pose: Pose, xPx: number, yPx: number, level: number): string {
-  const { ray, centre, radiusM } = scaledRay(pose, xPx, yPx);
-  const offset = sub(scale(ray, dot(ray, centre)), centre);
+  const { ray, centreM, radiusM } = scaledRay(pose, xPx, yPx);
+  const offset = sub(scale(ray, dot(ray, centreM)), centreM);
   const h2 = radiusM * radiusM - dot(offset, offset);
   const ground = h2 >= 0 ? sub(offset, scale(ray, Math.sqrt(h2))) : offset;
   const { face, i, j } = classMapTexelOf([ground.x, ground.y, ground.z], 2 ** level);

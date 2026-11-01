@@ -1197,6 +1197,12 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
     expect(shade).toContain("mean_a = mean_a + shares[m] * albedos[m];");
     expect(shade).not.toContain("terrain_law(in.slot, m).a");
   });
+
+  it("cuts each planetshine source's disc at the datum's tangent plane, as the disc does (R10.T10.g)", () => {
+    expect(wgslFunction(terrainLitWgsl, "shade_terrain")).toMatch(
+      /let cut = max\(angle_between\(nu, towards\) - angle_between\(normal, towards\), 0\.0\);\s+let irradiance = planetshine_irradiance\(to_source, source\.w, place\.w, normal, cut\);/u,
+    );
+  });
 });
 
 /** decision-r10-limb's particulate rule L_p(x) (`material/properties.rs`' `limb_parameter`). */
