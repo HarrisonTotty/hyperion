@@ -999,6 +999,52 @@ differences of face coordinates or from offsets the worker computes in `f64` and
 patch, whichever measures cheaper. And the height texture holds height above the spheroid, not
 radius, so its `f32` step at ±20 km is about 2 mm.
 
+### Virtualized geometry
+
+Added 2026-11-01 at the owner's request: faster terrain viewing and streaming, by Nanite's
+techniques where they fit, as one system for every kind of 3D model, terrain first, Apple Silicon
+first. The terrain as built turned out triangle-bound rather than CPU- or draw-bound: on the high
+setting every pose above 1 km draws its whole patch budget at quads of 1.5–2.6 px, the four
+cascades re-rasterise 1.3–2.9 times that, and the overlay redraws it once more, 21–32 M triangles
+a frame (research of 2026-11-01, counted on R05's descent; none of it the target's measurement).
+The table above stands: no mesh shaders, no compute rasteriser, and the terrain keeps its known
+structure. What is taken from Nanite is what survives WebGPU through the hardware rasteriser.
+
+- **One cluster path for every consumer.** Geometry is cut into clusters of at most 128 triangles
+  with bounds and an error. A compute pass culls each cluster against every pass of the frame (the
+  camera, each cascade, the overlay's depth), chooses its level of detail by its error projected
+  against that pass's own tolerance (τ for the camera, the texel for a cascade), and appends it to a
+  list that one indirect draw a template draws. The terrain's patches are its first consumer, then
+  the smooth figure, the hulls' occluders, and authored, procedural and instanced meshes.
+- **Two ways to coarsen.** A regular grid is its own hierarchy: a terrain patch is drawn at a stride
+  of 1, 2, 4 or 8 of its vertices where the error measured from its own bake allows, morphed across
+  the change. Authored and procedural meshes carry a precomputed hierarchy of simplified cluster
+  groups with monotone errors, and a cluster is drawn where its own error is within the tolerance
+  and its parent's is not.
+- **A visibility buffer.** The lit pass rasterises only a position and an ID, and shades each pixel
+  once, which removes the overshading of 1–3 px² triangles and the varyings a tile-based GPU bins.
+  Apple's GPUs reject hidden fragments before shading only where no shader may discard, so ground
+  the survey covers wholly draws without a discard, and first.
+- **What does not move.** Selection stays a pure function on the CPU; heights stay the workers'
+  bakes, bit for bit; under every grounded body the finest level is drawn at stride 1 with its morph
+  held at zero within the stated radius, so [collision still agrees with what is drawn](#level-of-detail-consistency-and-why-collision-agrees);
+  every cull refuses only what cannot reach a pixel. Strides, culls and shading order are
+  presentation, and no generated value depends on them.
+- **Streaming** is one pool of fixed slots with least-recently-used eviction that never evicts what
+  is drawn or forced, and never draws a hole: a missing piece is drawn by its resident coarser
+  ancestor.
+- **The ladder** gains a geometry row: the cluster path on both settings; the visibility buffer on
+  the high setting, and on the low one once the UHD 620 is measured; measured strides within τ on
+  both. The memory table gains a mesh-page pool beside the height-texture cache (**lean:** 128 MiB
+  on the discrete target, 32 MiB on the UHD 620) and about 15–20 MB a lit view of lists,
+  identifiers and a depth pyramid.
+
+**Lean:** build it in the order its gains are certain: the exact cuts first (no fins or discard on
+wholly surveyed patches, casters culled by the depths their receivers sample), then the visibility
+buffer, then measured-error strides and occlusion, each accepted on its counts and on a frame
+measured on the owner's Mac and on the recommended specification.
+[Plan R14](../plans/rendering-and-planets/14-virtualized-geometry.md) builds it.
+
 ### Where the height comes from: the central tension
 
 This is the hardest problem in the document, and it deserves to be stated plainly before any solution
