@@ -42,6 +42,7 @@ use crate::requests::{bodies_of, openable_universe, request_error};
 use crate::subscriptions::{
     PendingPush, Pusher, ScenePush, SubscriptionCommand, not_of_this_topic,
 };
+use crate::surface::SystemPrefetch;
 use crate::universe::UniverseId;
 
 /// Where a scene's computations run and what they read: the universe, its galaxy, and the
@@ -169,6 +170,7 @@ pub(crate) async fn open(
         told,
         commands,
         pusher: pusher.clone(),
+        prefetch: None,
     };
     spawn(topic, &pusher);
     Ok(SubscriptionState::Scene(scene))
@@ -270,6 +272,9 @@ struct Topic {
     told: RaisedRevisions,
     commands: Option<mpsc::Receiver<SubscriptionCommand>>,
     pusher: Pusher,
+    /// The prefetch of the coarse fields of the system the scene is in, with the system: given up
+    /// as the scene leaves it, or as the task ends (rendering plan R09, R09.T17).
+    prefetch: Option<(SystemId, SystemPrefetch)>,
 }
 
 /// What woke a scene's task.
@@ -286,6 +291,7 @@ enum Wake {
 impl Topic {
     /// Keeps the subscription until it ends.
     async fn run(mut self) {
+        self.follow_system();
         let mut heartbeat = interval_at(Instant::now() + SCENE_HEARTBEAT, SCENE_HEARTBEAT);
         heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut craft = interval(CRAFT_PUSH_INTERVAL);
@@ -465,7 +471,34 @@ impl Topic {
         ];
         self.source.keep_only(&keep);
         self.core = Some(core);
+        self.follow_system();
         Ok((reading, delta))
+    }
+
+    /// Prefetches the coarse fields of the system the scene is in, nearest the ship first, from
+    /// when the scene enters it (its own test, plan 03's `frame_at` with the Schmitt band) until it
+    /// leaves; the last system's prefetch is given up as it drops (rendering plan R09, R09.T17).
+    ///
+    /// The ship's own system alone: no system listed or browsed is prefetched, which would start
+    /// passes for systems the ship never visits (lean, 2026-11-01). A scene that arrives again in
+    /// its system, as a withdrawal makes it, keeps the prefetch it has.
+    fn follow_system(&mut self) {
+        let now = self.core().system_id();
+        if self.prefetch.as_ref().map(|(system, _)| *system) == now {
+            return;
+        }
+        self.prefetch = None;
+        let started = now
+            .zip(self.core().entered())
+            .map(|(id, (system, time, ship))| {
+                let prefetch =
+                    self.source
+                        .state
+                        .surface
+                        .prefetch_system(self.source.key, system, ship, time);
+                (id, prefetch)
+            });
+        self.prefetch = started;
     }
 
     /// The core, home between jobs.
@@ -513,10 +546,17 @@ mod tests {
     };
     use hyperion_sim::id::BodyId;
 
+    use crate::compute::BulkGate;
     use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture};
     use crate::scene::{CraftSource, CraftState, SceneKnowledge};
+    use crate::surface::{InputsSource, RECORD_TIME};
     use crate::testing::{Client, Harness, NEVER, Scripted, WAIT};
     use crate::ws::ConnectionLimits;
+    use hyperion_sim::planetary::record::{BodyRecord, Section};
+    use hyperion_sim::planetary::surface::{
+        CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, reference,
+    };
+    use hyperion_sim::planetary::{BodyIndex, SystemContext};
 
     /// The stand-in 1 au from `system`'s barycentre at rest, the clock at `start` at `rate`.
     fn in_system(
@@ -606,6 +646,7 @@ mod tests {
             told: RaisedRevisions::default(),
             commands: pusher.take_commands(),
             pusher: pusher.clone(),
+            prefetch: None,
         };
         spawn(topic, &pusher);
 
@@ -1030,6 +1071,273 @@ mod tests {
             }
             other => panic!("expected the unknown subscription refused, got {other:?}"),
         }
+        drop(client);
+        harness.stop().await;
+    }
+
+    /// The reference Ceres's inputs for every body with a solid surface, a giant refused as its
+    /// record's own reading refuses it, recording each body asked for, in order.
+    #[derive(Debug, Clone, Default)]
+    struct Grounded(Arc<std::sync::Mutex<Vec<BodyIndex>>>);
+
+    impl Grounded {
+        fn asked(&self) -> Vec<BodyIndex> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    impl InputsSource for Grounded {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            self.0.lock().unwrap().push(record.index());
+            match record.surface() {
+                Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface.into()),
+                Section::Ok(_) | Section::NotModelled | Section::NotResolved => {
+                    Ok(reference::ceres_like())
+                }
+            }
+        }
+    }
+
+    /// Yields until `ready` holds.
+    async fn until(what: &str, ready: impl Fn() -> bool) {
+        timeout(WAIT, async {
+            while !ready() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
+    }
+
+    /// A system of the cell with a giant and a body with a solid surface: its bodies with a surface
+    /// seed present at `start`, by index, with their places and whether their ground is solid; a
+    /// place beside its giant, nearer the giant than any other body; and the body with a solid
+    /// surface nearest it.
+    struct BesideAGiant {
+        system: SystemId,
+        present: Vec<(BodyIndex, SystemPosition, bool)>,
+        ship: SystemPosition,
+        solid: BodyIndex,
+    }
+
+    impl BesideAGiant {
+        async fn find(
+            state: &Arc<AppState>,
+            universe: &crate::universe::Universe,
+            cell: &[hyperion_sim::galaxy::placement::SystemRecord],
+            start: UniverseTime,
+        ) -> Self {
+            let galaxy = state.galaxies.get(universe.key()).await.unwrap();
+            for record in cell {
+                let generated = bodies_of(state, universe.key(), &galaxy, record.id())
+                    .await
+                    .unwrap();
+                let (ctx, planets) = generated.as_ref();
+                let present: Vec<(BodyIndex, SystemPosition, bool)> = planets
+                    .indices()
+                    .into_iter()
+                    .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+                    .filter_map(|index| {
+                        let at = planets.position_at(ctx, index, start).ok()??;
+                        let record = planets.body_at(ctx, index, RECORD_TIME).ok()?;
+                        Some((
+                            index,
+                            at,
+                            !matches!(record.surface(), Section::NotApplicable),
+                        ))
+                    })
+                    .collect();
+                let Some(giant) = present.iter().find(|body| !body.2) else {
+                    continue;
+                };
+                let ship = giant
+                    .1
+                    .translated(hyperion_sim::coords::SystemVector::new([1.0e8, 0.0, 0.0]));
+                let distance = |at: &SystemPosition| ship.displacement_to(at).length().value();
+                let nearest = |solid_only: bool| {
+                    present
+                        .iter()
+                        .filter(|body| body.2 || !solid_only)
+                        .min_by(|a, b| distance(&a.1).total_cmp(&distance(&b.1)))
+                        .map(|body| body.0)
+                };
+                let Some(solid) = nearest(true) else {
+                    continue;
+                };
+                assert_eq!(
+                    nearest(false),
+                    Some(giant.0),
+                    "the giant is the nearest body"
+                );
+                return Self {
+                    system: record.id(),
+                    present,
+                    ship,
+                    solid,
+                };
+            }
+            panic!("a system of the cell has a giant and solid ground");
+        }
+
+        /// The scene's setting with the ship at rest beside the giant, the clock paused at `start`.
+        fn setting(&self, start: UniverseTime) -> SceneSetting {
+            SceneSetting {
+                clock: SceneClock::new(start, Instant::now(), TimeRate::PAUSED).unwrap(),
+                ship: ShipStandIn::new(
+                    ShipPosition::System {
+                        system: self.system,
+                        offset: self.ship,
+                    },
+                    [0.0; 3],
+                    start,
+                    KinematicsDto {
+                        position: FramePositionDto::Galactic {
+                            position: hyperion_protocol::GalacticPosition::default(),
+                        },
+                        velocity_m_s: [0.0; 3],
+                        time: hyperion_protocol::UniverseTime {
+                            seconds: start.seconds(),
+                            nanos: start.subsec_nanos(),
+                        },
+                    },
+                ),
+            }
+        }
+    }
+
+    /// Subscribes `client` to `universe`'s scene as request 1, and returns the subscription.
+    async fn subscribe_to_scene(client: &mut Client, universe: &crate::universe::Universe) -> u32 {
+        let subscribe = RequestBody::Subscribe(SubscribeRequest {
+            universe: universe.id().into(),
+            topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                detail: DetailLevelDto::Contact,
+                cameras: Vec::new(),
+            }),
+        });
+        client.request(1, subscribe).await;
+        match client.next_message().await {
+            ServerMessage::Response {
+                body: ResponseBody::Subscribe(subscribed),
+                ..
+            } => subscribed.subscription,
+            other => panic!("expected `subscribed`, got {other:?}"),
+        }
+    }
+
+    /// Waits until the scene's queued pass, held at `gate`, is given up, then lets it through and
+    /// waits until the pool skips it, `cancelled` the pool's cancellations before.
+    async fn given_up_and_skipped(state: &AppState, gate: &BulkGate, cancelled: u64) {
+        until("the queued pass is given up", || {
+            state.surface.computing() == 0
+        })
+        .await;
+        gate.open();
+        until("the queued pass is skipped", || {
+            let pool = state.pool.counters();
+            pool.cancelled() == cancelled + 1 && pool.running() == 0
+        })
+        .await;
+    }
+
+    /// A scene whose ship is in a system, beside its giant, prefetches the coarse field of the
+    /// system's nearest body with a solid surface, past the giant, which its plan reads and no pass
+    /// computes. Leaving the system gives up the pass queued next, as ending the scene gives up the
+    /// one queued after the scene enters again, and neither leaves a field (rendering plan R09,
+    /// R09.T17).
+    #[tokio::test]
+    async fn a_scene_prefetches_its_system_s_nearest_solid_body_until_it_leaves_or_ends() {
+        let gate = BulkGate::default();
+        gate.close();
+        let source = Grounded::default();
+        let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
+            config
+                .workers(std::num::NonZeroUsize::new(3).unwrap())
+                .surface_passes(std::num::NonZeroUsize::new(2).unwrap())
+                .surface_inputs(source.clone())
+                .bulk_gate(gate.clone())
+        })
+        .await;
+        let state = Arc::clone(harness.state());
+        let (universe, cell) = universe_and_cell(&state).await;
+        let start = UniverseTime::new(3_600, 0).unwrap();
+        let beside = BesideAGiant::find(&state, &universe, &cell, start).await;
+        let present = beside.present.len();
+        state.scene.set(universe.id(), beside.setting(start));
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let subscription = subscribe_to_scene(&mut client, &universe).await;
+        until("the plan reaches the gate", || gate.held() == 1).await;
+        gate.admit();
+        until("the first pass reaches the gate", || {
+            gate.held() == 1 && source.asked().len() == present
+        })
+        .await;
+        let mut planned = source.asked();
+        planned.sort_unstable();
+        assert_eq!(
+            planned,
+            beside.present.iter().map(|body| body.0).collect::<Vec<_>>(),
+            "the plan reads each body with a surface seed once"
+        );
+        gate.admit();
+        until(
+            "the first pass is computed and the next reaches the gate",
+            || state.surface.counters().computed() == 1 && gate.held() == 1,
+        )
+        .await;
+        assert_eq!(
+            source.asked()[present],
+            beside.solid,
+            "the first pass is the nearest body with a solid surface"
+        );
+
+        // The ship leaves for the galactic frame.
+        let cancelled = state.pool.counters().cancelled();
+        state
+            .scene
+            .set(universe.id(), SceneSetting::unset(Instant::now()));
+        given_up_and_skipped(&state, &gate, cancelled).await;
+        let counters = state.surface.counters();
+        assert_eq!(
+            (counters.computed(), counters.cache().entries()),
+            (1, 1),
+            "{counters:?}"
+        );
+
+        // The ship enters again, and the scene ends.
+        gate.close();
+        let asked = source.asked().len();
+        state.scene.set(universe.id(), beside.setting(start));
+        until("the plan reaches the gate", || gate.held() == 1).await;
+        gate.admit();
+        until(
+            "the plan is read and the next pass reaches the gate",
+            || source.asked().len() == asked + present && gate.held() == 1,
+        )
+        .await;
+        let cancelled = state.pool.counters().cancelled();
+        client
+            .request(
+                2,
+                RequestBody::Unsubscribe(hyperion_protocol::UnsubscribeRequest { subscription }),
+            )
+            .await;
+        given_up_and_skipped(&state, &gate, cancelled).await;
+        let counters = state.surface.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                counters.cache().hits()
+            ),
+            (1, 1, 1),
+            "the field had before is found held, and no other is kept: {counters:?}"
+        );
         drop(client);
         harness.stop().await;
     }

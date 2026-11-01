@@ -5,12 +5,18 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::num::NonZeroUsize;
+use std::panic::AssertUnwindSafe;
+use std::pin::pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
+use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use hyperion_protocol::SeedHex;
 use hyperion_sim::Seed;
+use hyperion_sim::coords::SystemPosition;
 use hyperion_sim::planetary::derive::figure::BodyFigure;
 use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
 use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
@@ -19,6 +25,7 @@ use hyperion_sim::planetary::surface::{
     CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
 };
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
+use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
 use hyperion_surface::material::{
@@ -26,15 +33,15 @@ use hyperion_surface::material::{
     exposed_albedo_scale, haloed_albedo_scale, maturity_mix,
 };
 use hyperion_surface::synth::{SynthCache, Synthesiser};
-use tokio::sync::{Semaphore, watch};
-use tokio::task::JoinSet;
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
+use tokio::task::{AbortHandle, JoinSet};
 
 use super::{FieldCache, FieldKey, InputsSource};
 use crate::cache::LruCounters;
 use crate::compute::sky::bulk;
 use crate::compute::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GeneratedSystem, JobError, Priority,
-    SingleFlight, SubmitJobError,
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, GeneratedSystem, JobError,
+    Priority, SingleFlight, SubmitJobError, panic_message,
 };
 use crate::knowledge::LoadKnowledgeError;
 use crate::knowledge::surveys::{RaisedRevisions, SurveyLog};
@@ -151,23 +158,36 @@ impl FieldLevel {
     }
 }
 
-/// Every body's coarse field, computed once on the CPU pool and kept in one byte budget (the
-/// [module](super) documentation).
-pub struct SurfaceService {
+/// What makes and keeps the fields: shared by the service and the tasks its prefetches run.
+#[derive(Debug, Clone)]
+struct Fields {
     pool: Arc<CpuPool>,
     /// Where every field's inputs come from.
     source: Arc<dyn InputsSource>,
     held: Arc<FieldCache>,
-    flights: SingleFlight<FieldKey, CoarseField, SurfaceJobError>,
+    flights: Arc<SingleFlight<FieldKey, CoarseField, SurfaceJobError>>,
     /// The coarse passes allowed to run at once, a permit each (rendering plan R09, R09.T17.a): a
-    /// pass takes its permit in its flight, before its bulk job is queued, and the job holds it
-    /// until it ends, however it ends. Never closed.
+    /// pass takes its permit in its flight, before its bulk job is queued, or a system's prefetch
+    /// takes it before the flight ([`prefetch_permit`]), and the job holds it until it ends,
+    /// however it ends. Never closed.
     passes: Arc<Semaphore>,
+    /// The permits `passes` was made with.
+    bound: usize,
+    /// Woken whenever a pass's permit is freed ([`PassPermit`]), for the prefetches waiting to
+    /// take one.
+    released: Arc<Notify>,
     computed: Arc<AtomicU64>,
+}
+
+/// Every body's coarse field, computed once on the CPU pool and kept in one byte budget (the
+/// [module](super) documentation).
+pub struct SurfaceService {
+    fields: Fields,
     /// The passes started by [`prefetch`](Self::prefetch), each waited on by a task of its own so
-    /// that its flight lives with no request waiting; aborted by
+    /// that its flight lives with no request waiting, and the systems' prefetches
+    /// ([`prefetch_system`](Self::prefetch_system)); aborted by
     /// [`stop_prefetching`](Self::stop_prefetching), at the server's shutdown, or when the service
-    /// is dropped.
+    /// is dropped, and a system's when its [`SystemPrefetch`] is dropped.
     prefetching: Mutex<JoinSet<()>>,
     /// Each universe's survey log, opened once ([`survey_log`](Self::survey_log)).
     surveys: Arc<Mutex<HashMap<UniverseId, SurveyLog>>>,
@@ -201,14 +221,19 @@ impl SurfaceService {
         budget_bytes: usize,
         passes: NonZeroUsize,
     ) -> Self {
+        // `Semaphore::new` panics above its count's limit, and a bound past it bounds nothing.
+        let bound = passes.get().min(Semaphore::MAX_PERMITS);
         Self {
-            pool,
-            source,
-            held: Arc::new(FieldCache::new(budget_bytes)),
-            flights: SingleFlight::new(),
-            // `Semaphore::new` panics above its count's limit, and a bound past it bounds nothing.
-            passes: Arc::new(Semaphore::new(passes.get().min(Semaphore::MAX_PERMITS))),
-            computed: Arc::new(AtomicU64::new(0)),
+            fields: Fields {
+                pool,
+                source,
+                held: Arc::new(FieldCache::new(budget_bytes)),
+                flights: Arc::new(SingleFlight::new()),
+                passes: Arc::new(Semaphore::new(bound)),
+                bound,
+                released: Arc::new(Notify::new()),
+                computed: Arc::new(AtomicU64::new(0)),
+            },
             prefetching: Mutex::new(JoinSet::new()),
             surveys: Arc::new(Mutex::new(HashMap::new())),
             opening: SingleFlight::new(),
@@ -258,10 +283,10 @@ impl SurfaceService {
         system: &Arc<GeneratedSystem>,
     ) -> Result<Arc<CoarseField>, SurfaceJobError> {
         check_system(key, system);
-        if let Some(field) = self.held.get(&key) {
+        if let Some(field) = self.fields.held.get(&key) {
             return Ok(field);
         }
-        self.flight(key, system).await
+        self.fields.clone().flight(key, system, Turn::Asked).await
     }
 
     /// Starts the field of the body `key` names, whose planetary system is `system`, unless it is
@@ -270,13 +295,13 @@ impl SurfaceService {
     /// The pass runs on the pool at bulk priority through the service's single flight, waited on
     /// by a task the service owns, and a request made meanwhile joins it. It waits for a permit of
     /// the service's bound of passes as a requested pass does ([`field`](Self::field)), so a
-    /// prefetch never runs a pass past the bound. Session code will call it as the ship approaches
-    /// a body (Design note 19), and is why it is public; `survey_pass` calls it for a body whose
-    /// inputs are modelled (R09.T19.a). It looks for the field as a request does, so it counts a
-    /// hit when the field is held; otherwise a miss, and one more inside the flight where it starts
-    /// the pass, but none there where it joins a pass already in flight. A pass that fails is
-    /// logged (a refused body at `debug`, a job that did not run at `warn`), and the next request
-    /// asks again.
+    /// prefetch never runs a pass past the bound: it is an asked pass, which `survey_pass` calls
+    /// for a body whose inputs are modelled (R09.T19.a). A scene's ship entering a system starts
+    /// [`prefetch_system`](Self::prefetch_system) instead, which yields to asked passes. It looks
+    /// for the field as a request does, so it counts a hit when the field is held; otherwise a
+    /// miss, and one more inside the flight where it starts the pass, but none there where it
+    /// joins a pass already in flight. A pass that fails is logged (a refused body at `debug`, a
+    /// job that did not run at `warn`), and the next request asks again.
     ///
     /// # Panics
     ///
@@ -284,17 +309,81 @@ impl SurfaceService {
     /// runtime, where the task that waits on the pass cannot be spawned.
     pub fn prefetch(&self, key: FieldKey, system: &Arc<GeneratedSystem>) -> bool {
         check_system(key, system);
-        if self.held.get(&key).is_some() {
+        if self.fields.held.get(&key).is_some() {
             return false;
         }
-        let flight = self.flight(key, system);
-        let mut tasks = self
-            .prefetching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        // The finished tasks are reaped as new ones start, so the set holds only waiters on passes
-        // still running. A body prefetched again during its pass adds one more task awaiting the
-        // same flight: the field is still computed once.
+        let flight = self.fields.clone().flight(key, system, Turn::Asked);
+        // A body prefetched again during its pass adds one more task awaiting the same flight:
+        // the field is still computed once.
+        self.spawn_prefetch(async move {
+            if let Err(error) = flight.await {
+                log_prefetch_failure(key, error);
+            }
+        });
+        true
+    }
+
+    /// Starts the coarse fields of the bodies of `system`, in the universe of `galaxy`, whose
+    /// inputs the service's source gives, nearest `near` at `t` first, and returns at once the
+    /// prefetch, which is given up when it is dropped (rendering plan R09, R09.T17).
+    ///
+    /// A scene calls it as it enters a system, `near` the ship's place in the system's frame, and
+    /// drops it as the ship leaves or the scene ends (the scene's topic). One bulk job reads the
+    /// plan, as `field_level` reads each body: every body with a surface seed present at `t` (so
+    /// no ring, belt or halo) whose level is `FieldLevel::Modelled` (so no giant, and nothing below
+    /// the serve gate's version with [`RecordInputs`](super::RecordInputs)), by its distance from
+    /// `near`. Each body's field is then had in turn, through the service's single flight, so that
+    /// a request for a body joins its prefetched pass and the prefetch joins an asked one:
+    ///
+    /// - **Its permit.** A prefetched pass takes a permit of the service's bound only while two or
+    ///   more are free (`prefetch_permit`): so it never takes the last one an asked pass could
+    ///   use, or one an asked pass is waiting for, and at most the bound less one run at once.
+    ///   With a bound of one, nothing is prefetched.
+    /// - **Its bytes.** It starts a pass only while the fields it has had, and its passes running
+    ///   at the most bytes a cell it has seen, fit the field cache's budget, the first pass alone
+    ///   until a field's size is known (`PrefetchBudget`), so that its fields never evict one
+    ///   another; it stops at the first that would not fit.
+    /// - **Given up.** Dropped, it gives up its passes: one still waiting for a permit or queued
+    ///   never runs, and none it alone waits on is kept, as a request given up keeps nothing.
+    ///
+    /// A field held already counts a hit and becomes the most recently used. A pass that fails is
+    /// logged as [`prefetch`](Self::prefetch) logs it.
+    ///
+    /// # Panics
+    ///
+    /// As [`field`](Self::field), if `system` is not a system of the universe of `galaxy` or the
+    /// version is not one this build generates; and outside a Tokio runtime.
+    pub fn prefetch_system(
+        &self,
+        galaxy: GalaxyKey,
+        system: &Arc<GeneratedSystem>,
+        near: SystemPosition,
+        t: UniverseTime,
+    ) -> SystemPrefetch {
+        let planets = &system.1;
+        let surfaced = planets
+            .indices()
+            .into_iter()
+            .find(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+            .unwrap_or(BodyIndex::PRIMARY);
+        check_system(
+            FieldKey::new(galaxy, surfaced.body_id(planets.system())),
+            system,
+        );
+        let task = self.spawn_prefetch(prefetch_nearest(
+            self.fields.clone(),
+            galaxy,
+            Arc::clone(system),
+            near,
+            t,
+        ));
+        SystemPrefetch { task }
+    }
+
+    /// Spawns `prefetch` in the service's set of prefetches, reaping those finished first, so that
+    /// the set holds only the prefetches still running.
+    fn spawn_prefetch(&self, prefetch: impl Future<Output = ()> + Send + 'static) -> AbortHandle {
+        let mut tasks = lock(&self.prefetching);
         while let Some(finished) = tasks.try_join_next() {
             if let Err(error) = finished
                 && error.is_panic()
@@ -302,44 +391,7 @@ impl SurfaceService {
                 tracing::error!(%error, "a coarse pass started by a prefetch panicked");
             }
         }
-        tasks.spawn(async move {
-            match flight.await {
-                Ok(_) => {}
-                Err(
-                    error @ (SurfaceJobError::Body(_)
-                    | SurfaceJobError::Inputs(ReadCoarseInputsError::Section(_))),
-                ) => {
-                    tracing::debug!(
-                        body = %key.body(),
-                        ?error,
-                        "a prefetched body has no coarse field"
-                    );
-                }
-                Err(
-                    error @ SurfaceJobError::Inputs(
-                        ReadCoarseInputsError::PlanetMissing(_)
-                        | ReadCoarseInputsError::NotItsPlanet { .. }
-                        | ReadCoarseInputsError::NotAtRecordTime
-                        | ReadCoarseInputsError::SeasonalOrbit(_)
-                        | ReadCoarseInputsError::Build(_),
-                    ),
-                ) => {
-                    tracing::error!(
-                        body = %key.body(),
-                        ?error,
-                        "a prefetched body's coarse-pass inputs could not be read from its records"
-                    );
-                }
-                Err(error @ SurfaceJobError::Compute(_)) => {
-                    tracing::warn!(
-                        body = %key.body(),
-                        ?error,
-                        "a prefetched body's coarse field was not computed"
-                    );
-                }
-            }
-        });
-        true
+        tasks.spawn(prefetch)
     }
 
     /// The level of the coarse field of the body `key` names, whose planetary system is `system`,
@@ -373,8 +425,9 @@ impl SurfaceService {
         token: CancelToken,
     ) -> Result<FieldLevel, SurfaceJobError> {
         check_system(key, system);
-        let (source, system) = (Arc::clone(&self.source), Arc::clone(system));
+        let (source, system) = (Arc::clone(&self.fields.source), Arc::clone(system));
         let receiver = self
+            .fields
             .pool
             .try_submit(Priority::Interactive, token, move |_: &CancelToken| {
                 level_of(source.as_ref(), key, &system)
@@ -437,44 +490,56 @@ impl SurfaceService {
         raised_sender(&self.raised, universe).subscribe()
     }
 
-    /// Stops waiting on the passes [`prefetch`](Self::prefetch) started.
+    /// Stops waiting on the passes [`prefetch`](Self::prefetch) and the systems' prefetches
+    /// ([`prefetch_system`](Self::prefetch_system)) started.
     ///
     /// Each is given up unless a request waits on it too, and its job, if still queued, is
     /// skipped. For the server's shutdown, before its pool stops. It does not wait for the waiters
     /// to end: each is aborted at its next poll.
     pub(crate) fn stop_prefetching(&self) {
-        self.prefetching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .abort_all();
+        lock(&self.prefetching).abort_all();
     }
 
     /// The fields held, the bytes they are charged, their use, and the passes computed so far.
     #[must_use]
     pub fn counters(&self) -> SurfaceCounters {
         SurfaceCounters {
-            cache: self.held.counters(),
-            computed: self.computed.load(Ordering::Relaxed),
+            cache: self.fields.held.counters(),
+            computed: self.fields.computed.load(Ordering::Relaxed),
         }
     }
 
+    /// The fields whose passes someone still waits on, for the tests of the service's callers.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn computing(&self) -> usize {
+        self.fields.flights.len()
+    }
+}
+
+impl Fields {
     /// The pass of `key`'s field, joined if one is in progress: it looks for the field once more
-    /// inside the flight, waits for a permit of the bound of passes, then computes the field as
-    /// one bulk job, which holds the permit, and keeps it.
+    /// inside the flight, has a permit of the bound of passes as `turn` says, then computes the
+    /// field as one bulk job, which holds the permit, and keeps it. A flight joined, or one that
+    /// finds the field held, drops a permit `turn` brings, which frees it.
     fn flight(
-        &self,
+        self,
         key: FieldKey,
         system: &Arc<GeneratedSystem>,
+        turn: Turn,
     ) -> Flight<CoarseField, SurfaceJobError> {
-        let (pool, source, held, computed, passes, system) = (
-            Arc::clone(&self.pool),
-            Arc::clone(&self.source),
-            Arc::clone(&self.held),
-            Arc::clone(&self.computed),
-            Arc::clone(&self.passes),
-            Arc::clone(system),
-        );
-        self.flights.run(key, move || async move {
+        let Self {
+            pool,
+            source,
+            held,
+            flights,
+            passes,
+            bound: _,
+            released,
+            computed,
+        } = self;
+        let system = Arc::clone(system);
+        flights.run(key, move || async move {
             // As in `SkyTablesService::flight`: a caller can arrive just after another flight has
             // finished and left the registry, and the field it computed is worth more than a
             // second pass. The look is counted, since `SharedByteLru` has no uncounted lookup.
@@ -489,10 +554,16 @@ impl SurfaceService {
             // the bulk queue (R09.T17.a), and counted in `waited_ms`. Tokio's acquire is
             // cancel-safe: a flight whose every waiter goes while it waits drops the wait, and its
             // pass never runs, as a queued job is skipped.
-            let permit = passes
-                .acquire_owned()
-                .await
-                .expect("the service never closes its passes' semaphore");
+            let permit = match turn {
+                Turn::Asked => PassPermit::new(
+                    passes
+                        .acquire_owned()
+                        .await
+                        .expect("the service never closes its passes' semaphore"),
+                    released,
+                ),
+                Turn::Prefetched(permit) => permit,
+            };
             let (field, pass) = bulk(&pool, &token, move |_: &CancelToken| {
                 // The job holds the permit, not the flight, so that it is freed when the job ends
                 // however it ends: run to its end, or panicked (dropped as the pool's
@@ -527,19 +598,377 @@ impl SurfaceService {
 
 impl fmt::Debug for SurfaceService {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let prefetching = self
-            .prefetching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .len();
+        let prefetching = lock(&self.prefetching).len();
         f.debug_struct("SurfaceService")
-            .field("source", &self.source)
+            .field("source", &self.fields.source)
             .field("counters", &self.counters())
-            .field("computing", &self.flights.len())
-            .field("passes_free", &self.passes.available_permits())
+            .field("computing", &self.fields.flights.len())
+            .field("passes_free", &self.fields.passes.available_permits())
             .field("prefetching", &prefetching)
             .field("survey_logs", &lock(&self.surveys).len())
             .finish_non_exhaustive()
+    }
+}
+
+/// A system's prefetch of its bodies' coarse fields ([`SurfaceService::prefetch_system`]): given
+/// up when dropped.
+#[derive(Debug)]
+#[must_use = "a system's prefetch is given up when it is dropped"]
+pub struct SystemPrefetch {
+    task: AbortHandle,
+}
+
+impl Drop for SystemPrefetch {
+    /// Aborts the prefetch's task at its next poll, which drops its waits: a pass still waiting
+    /// for a permit or queued is then skipped, unless a request waits on it too.
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// How a flight's pass has its permit of the service's bound.
+enum Turn {
+    /// Asked for (a request's [`SurfaceService::field`], or `survey_pass`'s
+    /// [`SurfaceService::prefetch`]): the flight waits for its permit in the semaphore's queue.
+    Asked,
+    /// Started by a system's prefetch with the permit it took ([`prefetch_permit`]).
+    Prefetched(PassPermit),
+}
+
+/// A coarse pass's permit of the service's bound, which wakes the prefetches waiting to take one
+/// when it is freed.
+struct PassPermit {
+    permit: Option<OwnedSemaphorePermit>,
+    released: Arc<Notify>,
+}
+
+impl PassPermit {
+    #[must_use]
+    fn new(permit: OwnedSemaphorePermit, released: Arc<Notify>) -> Self {
+        Self {
+            permit: Some(permit),
+            released,
+        }
+    }
+}
+
+impl Drop for PassPermit {
+    fn drop(&mut self) {
+        // Freed before the prefetches are woken, so that the one that looks finds it free.
+        drop(self.permit.take());
+        self.released.notify_waiters();
+    }
+}
+
+/// A permit of `passes` for a prefetched pass, taken only while two or more are free (rendering
+/// plan R09, R09.T17).
+///
+/// So a prefetch never takes the last permit an asked pass could use, nor one an asked pass waits
+/// for: Tokio's semaphore is fair, and gives each permit freed to the passes waiting in its queue
+/// before any is free. At most the bound less one prefetched passes then hold permits at once, and
+/// none under a bound of one. Cancel-safe: dropped while it waits, it holds nothing.
+async fn prefetch_permit(passes: &Arc<Semaphore>, released: &Arc<Notify>) -> PassPermit {
+    loop {
+        let freed = released.notified();
+        let mut freed = pin!(freed);
+        // Waiting before the look, so that a permit freed after it wakes this prefetch.
+        freed.as_mut().enable();
+        if let Ok(mut two) = Arc::clone(passes).try_acquire_many_owned(2) {
+            // The second was taken only to know that it was free, and goes back at once.
+            let spare = two.split(1).expect("two permits split into one and one");
+            drop(PassPermit::new(spare, Arc::clone(released)));
+            return PassPermit::new(two, Arc::clone(released));
+        }
+        freed.await;
+    }
+}
+
+/// What a system's prefetch may still start: the field cache's budget, less the fields it has had
+/// and an estimate of each pass it has running, so that its own fields never evict one another
+/// (rendering plan R09, R09.T17).
+///
+/// A field's size is known only once it is computed, so a pass is estimated at the most bytes a
+/// cell of any field the prefetch has had so far, over its level's cells; until it has had one,
+/// its first pass runs alone.
+#[derive(Debug)]
+struct PrefetchBudget {
+    budget: usize,
+    /// The bytes the fields it has had are charged in the cache.
+    had: usize,
+    /// The estimates of its passes running.
+    reserved: usize,
+    running: usize,
+    /// The field with the most bytes charged a cell so far: its charge and its cells.
+    densest: Option<(usize, u32)>,
+}
+
+/// Whether a system's prefetch starts its next body's pass ([`PrefetchBudget::admits`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admission {
+    /// Now, its field estimated at this many bytes.
+    Start(usize),
+    /// Once a pass running ends: its size, or the bytes it frees from the estimates, decide.
+    AfterRunning,
+    /// Never: it would not fit with nothing running.
+    Stop,
+}
+
+impl PrefetchBudget {
+    #[must_use]
+    fn new(budget: usize) -> Self {
+        Self {
+            budget,
+            had: 0,
+            reserved: 0,
+            running: 0,
+            densest: None,
+        }
+    }
+
+    /// Whether the pass of a field at `level` may start.
+    #[must_use]
+    fn admits(&self, level: CoarseLevel) -> Admission {
+        let Some((charge, cells)) = self.densest else {
+            return if self.running == 0 {
+                Admission::Start(0)
+            } else {
+                Admission::AfterRunning
+            };
+        };
+        let estimate = charge
+            .saturating_mul(usize::try_from(level.cell_count()).unwrap_or(usize::MAX))
+            .div_ceil(usize::try_from(cells).unwrap_or(usize::MAX).max(1));
+        if self
+            .had
+            .saturating_add(self.reserved)
+            .saturating_add(estimate)
+            <= self.budget
+        {
+            Admission::Start(estimate)
+        } else if self.running > 0 {
+            Admission::AfterRunning
+        } else {
+            Admission::Stop
+        }
+    }
+
+    /// A pass estimated at `estimate` bytes has started, or a flight in progress been joined.
+    fn started(&mut self, estimate: usize) {
+        self.running += 1;
+        self.reserved = self.reserved.saturating_add(estimate);
+    }
+
+    /// A pass estimated at `estimate` has ended, with `field` if it gave one.
+    fn ended(&mut self, estimate: usize, field: Option<&CoarseField>) {
+        self.running -= 1;
+        self.reserved = self.reserved.saturating_sub(estimate);
+        if let Some(field) = field {
+            self.had_field(field);
+        }
+    }
+
+    /// The prefetch has had `field`, computed or held: kept unless it is larger than the whole
+    /// budget, which the cache refuses.
+    fn had_field(&mut self, field: &CoarseField) {
+        let charge = FieldCache::charge(field);
+        if charge <= self.budget {
+            self.had = self.had.saturating_add(charge);
+        }
+        let cells = field.header().level().cell_count();
+        let denser = self.densest.is_none_or(|(most, of)| {
+            charge.saturating_mul(usize::try_from(of).unwrap_or(usize::MAX))
+                > most.saturating_mul(usize::try_from(cells).unwrap_or(usize::MAX))
+        });
+        if denser {
+            self.densest = Some((charge, cells));
+        }
+    }
+}
+
+/// A system's prefetch ([`SurfaceService::prefetch_system`]): its plan, on one bulk job, then each
+/// body's field in the plan's order, as its budget and its permits allow.
+async fn prefetch_nearest(
+    fields: Fields,
+    galaxy: GalaxyKey,
+    system: Arc<GeneratedSystem>,
+    near: SystemPosition,
+    t: UniverseTime,
+) {
+    if fields.bound < 2 {
+        // No permit would ever be left over for a prefetched pass.
+        return;
+    }
+    let token = CancelToken::new();
+    // Cancels the plan's job, if still queued, once the prefetch is given up.
+    let _cancel_on_drop = CancelOnDrop::new(token.clone());
+    let (source, planned) = (Arc::clone(&fields.source), Arc::clone(&system));
+    let plan = match bulk(&fields.pool, &token, move |token: &CancelToken| {
+        nearest_modelled(source.as_ref(), galaxy, &planned, near, t, token)
+    })
+    .await
+    {
+        Ok(plan) => plan,
+        Err(error) => {
+            tracing::warn!(
+                system = %system.1.system(),
+                ?error,
+                "a system's coarse fields were not prefetched"
+            );
+            return;
+        }
+    };
+    let mut budget = PrefetchBudget::new(fields.held.counters().budget());
+    let mut running = FuturesUnordered::<BoxFuture<'static, Awaited>>::new();
+    let mut next = plan.iter().copied().peekable();
+    while let Some(&(key, level)) = next.peek() {
+        if let Some(field) = fields.held.get(&key) {
+            budget.had_field(&field);
+            next.next();
+            continue;
+        }
+        let estimate = match budget.admits(level) {
+            Admission::Start(estimate) => estimate,
+            Admission::AfterRunning => {
+                let Some((estimate, field)) = running.next().await else {
+                    break;
+                };
+                budget.ended(estimate, field.as_deref());
+                continue;
+            }
+            Admission::Stop => break,
+        };
+        // A pass in flight, asked for or another scene's, is joined without a permit.
+        let flight = if let Some(flight) = fields.flights.join(&key) {
+            flight
+        } else {
+            let permit = tokio::select! {
+                permit = prefetch_permit(&fields.passes, &fields.released) => permit,
+                Some((estimate, field)) = running.next(), if !running.is_empty() => {
+                    budget.ended(estimate, field.as_deref());
+                    continue;
+                }
+            };
+            fields
+                .clone()
+                .flight(key, &system, Turn::Prefetched(permit))
+        };
+        budget.started(estimate);
+        running.push(awaited(key, estimate, flight).boxed());
+        next.next();
+    }
+    while let Some((estimate, field)) = running.next().await {
+        budget.ended(estimate, field.as_deref());
+    }
+    tracing::debug!(
+        system = %system.1.system(),
+        planned = plan.len(),
+        had_mib = budget.had / (1 << 20),
+        "prefetched a system's coarse fields"
+    );
+}
+
+/// What a system's prefetch had of one body's pass: its estimate, with its field, or `None` with
+/// the failure logged.
+type Awaited = (usize, Option<Arc<CoarseField>>);
+
+/// The wait of a system's prefetch on one body's pass.
+async fn awaited(
+    key: FieldKey,
+    estimate: usize,
+    flight: Flight<CoarseField, SurfaceJobError>,
+) -> Awaited {
+    // A flight's waiters panic with its computation, a bug, which should not end the system's
+    // prefetch with it.
+    let field = match AssertUnwindSafe(flight).catch_unwind().await {
+        Ok(Ok(field)) => Some(field),
+        Ok(Err(error)) => {
+            log_prefetch_failure(key, error);
+            None
+        }
+        Err(payload) => {
+            tracing::error!(
+                body = %key.body(),
+                panic = %panic_message(payload.as_ref()),
+                "a coarse pass started by a prefetch panicked"
+            );
+            None
+        }
+    };
+    (estimate, field)
+}
+
+/// The bodies of `system`, in the universe of `galaxy`, whose fields its prefetch has, with their
+/// levels, nearest `near` at `t` first (by index where two are as near): each body with a surface
+/// seed present at `t` whose level [`level_of`] reads from `source` as [`FieldLevel::Modelled`],
+/// a body it refuses logged. It reads no further once `token` is cancelled.
+#[must_use]
+fn nearest_modelled(
+    source: &dyn InputsSource,
+    galaxy: GalaxyKey,
+    system: &GeneratedSystem,
+    near: SystemPosition,
+    t: UniverseTime,
+    token: &CancelToken,
+) -> Vec<(FieldKey, CoarseLevel)> {
+    let (ctx, planets) = system;
+    let mut by_distance: Vec<(f64, BodyIndex)> = planets
+        .indices()
+        .into_iter()
+        .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+        .filter_map(|index| {
+            let position = planets.position_at(ctx, index, t).ok().flatten()?;
+            Some((near.displacement_to(&position).length().value(), index))
+        })
+        .collect();
+    by_distance.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    by_distance
+        .into_iter()
+        .take_while(|_| !token.is_cancelled())
+        .filter_map(|(_, index)| {
+            let key = FieldKey::new(galaxy, index.body_id(planets.system()));
+            match level_of(source, key, system) {
+                Ok(FieldLevel::Modelled(level)) => Some((key, level)),
+                Ok(FieldLevel::NotModelled { .. }) => None,
+                Err(error) => {
+                    log_prefetch_failure(key, error);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Logs a prefetch's body that has no field: refused for its own state at `debug`, a fault of the
+/// server's reading of its records at `error`, and a job that did not run at `warn`.
+fn log_prefetch_failure(key: FieldKey, error: SurfaceJobError) {
+    match error {
+        SurfaceJobError::Body(_) | SurfaceJobError::Inputs(ReadCoarseInputsError::Section(_)) => {
+            tracing::debug!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body has no coarse field"
+            );
+        }
+        SurfaceJobError::Inputs(
+            ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_),
+        ) => {
+            tracing::error!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body's coarse-pass inputs could not be read from its records"
+            );
+        }
+        SurfaceJobError::Compute(_) => {
+            tracing::warn!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body's coarse field was not computed"
+            );
+        }
     }
 }
 
@@ -886,7 +1315,7 @@ mod tests {
     };
     use hyperion_surface::material::{Material, MaterialClass, albedo_scale, exposed_properties};
     use hyperion_surface::substance_key::SubstanceKey;
-    use hyperion_surface::testing::FieldBuilder;
+    use hyperion_surface::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
     use hyperion_surface::wire::encode_payload;
     use tokio::time::timeout;
 
@@ -1285,7 +1714,7 @@ mod tests {
             (0, 0),
             "{counters:?}"
         );
-        assert!(service.flights.is_empty());
+        assert!(service.fields.flights.is_empty());
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
@@ -1363,7 +1792,7 @@ mod tests {
         )
         .await;
         service.stop_prefetching();
-        until("the pass is given up", || service.flights.is_empty()).await;
+        until("the pass is given up", || service.fields.flights.is_empty()).await;
         release.send(()).unwrap();
         timeout(WAIT, held).await.unwrap().unwrap().unwrap();
         drain(&pool).await;
@@ -1400,6 +1829,9 @@ mod tests {
     struct Turnstile {
         gates: Mutex<Gates>,
         opened: Condvar,
+        /// Whether each body's first entry goes through at once: a system prefetch's plan reads
+        /// every body's level before its passes.
+        plans_free: bool,
     }
 
     /// What a [`Turnstile`] knows of each body, by its index.
@@ -1445,7 +1877,11 @@ mod tests {
         ) -> Result<CoarseInputs, ReadCoarseInputsError> {
             let index = record.index();
             let mut gates = lock(&self.gates);
-            *gates.entered.entry(index).or_default() += 1;
+            let entered = gates.entered.entry(index).or_default();
+            *entered += 1;
+            if self.plans_free && *entered == 1 {
+                return Ok(reference::ceres_like());
+            }
             if gates.panics.contains(&index) {
                 drop(gates);
                 panic!("the test makes this body's pass panic");
@@ -1514,7 +1950,7 @@ mod tests {
                 source.entered(second),
                 counters.running(),
                 counters.queued_bulk(),
-                service.passes.available_permits()
+                service.fields.passes.available_permits()
             ),
             (0, 1, 0, 0),
             "the second pass holds no place in the queue and no worker: {counters:?}"
@@ -1535,7 +1971,7 @@ mod tests {
                 source.entered(first),
                 source.entered(second),
                 service.counters().computed(),
-                service.passes.available_permits()
+                service.fields.passes.available_permits()
             ),
             (1, 1, 2, 1)
         );
@@ -1561,10 +1997,14 @@ mod tests {
         );
         assert!(service.prefetch(given_up, &system().0));
         drop(asking);
-        assert_eq!(service.flights.len(), 2, "the prefetch keeps the pass");
+        assert_eq!(
+            service.fields.flights.len(),
+            2,
+            "the prefetch keeps the pass"
+        );
         service.stop_prefetching();
         until("the waiting pass is given up", || {
-            service.flights.len() == 1
+            service.fields.flights.len() == 1
         })
         .await;
         source.open(given_up);
@@ -1642,7 +2082,7 @@ mod tests {
             SurfaceJobError::Compute(ComputeError::Job(JobError::Panicked))
         );
         assert_eq!(
-            service.passes.available_permits(),
+            service.fields.passes.available_permits(),
             1,
             "the permit is freed before the job's answer is sent"
         );
@@ -1671,8 +2111,334 @@ mod tests {
             0,
             NonZeroUsize::MAX,
         );
-        assert_eq!(service.passes.available_permits(), Semaphore::MAX_PERMITS);
+        assert_eq!(
+            service.fields.passes.available_permits(),
+            Semaphore::MAX_PERMITS
+        );
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pool of `n` workers.
+    fn workers(n: usize) -> Arc<CpuPool> {
+        Arc::new(
+            CpuPool::new(
+                NonZeroUsize::new(n).unwrap(),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// A bound of `n` passes.
+    fn passes(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).unwrap()
+    }
+
+    /// The first system of the layer-C cell at the solar circle with six bodies or more that have
+    /// a surface seed and are present at the epoch, with those bodies' fields nearest the
+    /// barycentre first: the order a system's prefetch from the barycentre at the epoch has them
+    /// in where every one is modelled.
+    fn crowded() -> &'static (Arc<GeneratedSystem>, Vec<FieldKey>) {
+        static CROWDED: OnceLock<(Arc<GeneratedSystem>, Vec<FieldKey>)> = OnceLock::new();
+        CROWDED.get_or_init(|| {
+            let mut cell = Vec::new();
+            generate_cell(
+                galaxy(),
+                CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+                &mut cell,
+            );
+            cell.iter()
+                .find_map(|record| {
+                    let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                    let planets = generate(Seed::new(SEED), &ctx);
+                    let mut near: Vec<(f64, BodyIndex)> = planets
+                        .indices()
+                        .into_iter()
+                        .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+                        .filter_map(|index| {
+                            let at = planets
+                                .position_at(&ctx, index, UniverseTime::EPOCH)
+                                .ok()??;
+                            Some((at.distance_from_origin().value(), index))
+                        })
+                        .collect();
+                    near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                    let order: Vec<FieldKey> = near
+                        .iter()
+                        .map(|&(_, index)| key(index.body_id(planets.system())))
+                        .collect();
+                    (order.len() >= 6).then(|| (Arc::new((ctx, planets)), order))
+                })
+                .expect("a system of the cell has six bodies with a surface seed")
+        })
+    }
+
+    /// Runs a job on a free worker and waits for it, so that the tasks woken meanwhile have run.
+    async fn settle(pool: &CpuPool) {
+        let token = CancelToken::new();
+        timeout(WAIT, bulk(pool, &token, |_: &CancelToken| ()))
+            .await
+            .expect("timed out running a job on a free worker")
+            .unwrap();
+    }
+
+    /// A system's prefetch reads its plan, then runs its nearest body's pass alone until a field's
+    /// size is known, then at most the bound less one at once, leaving the last permit to asked
+    /// passes: with three permits on four workers, two prefetched passes run and the third waits;
+    /// an asked pass of another body takes the permit left at once, and one asked once every
+    /// permit is held is served before the prefetch's next as a pass ends. Each body is read once
+    /// for the plan and computed once, the asked ones joined or found held (rendering plan R09,
+    /// R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_runs_at_most_the_bound_less_one_and_yields_to_asked_passes() {
+        let pool = workers(4);
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        assert!(
+            order.iter().all(|&key| source.entered(key) >= 1),
+            "the plan"
+        );
+        settle(&pool).await;
+        assert!(
+            order[1..].iter().all(|&key| source.entered(key) == 1),
+            "the first pass runs alone"
+        );
+        source.open(order[0]);
+        until("two prefetched passes run", || {
+            source.entered(order[1]) == 2 && source.entered(order[2]) == 2
+        })
+        .await;
+        settle(&pool).await;
+        assert_eq!(
+            (
+                source.entered(order[3]),
+                service.fields.passes.available_permits()
+            ),
+            (1, 1),
+            "the third waits, and one permit is left"
+        );
+        let ask = |key: FieldKey| {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(key, &crowded().0).await })
+        };
+        let first_asked = ask(order[4]);
+        until("the asked pass runs", || source.entered(order[4]) == 2).await;
+        let second_asked = ask(order[5]);
+        settle(&pool).await;
+        assert_eq!(
+            (source.entered(order[5]), pool.counters().running()),
+            (1, 3),
+            "every permit held, the second asked pass waits"
+        );
+        source.open(order[1]);
+        until("the second asked pass runs", || {
+            source.entered(order[5]) == 2
+        })
+        .await;
+        settle(&pool).await;
+        assert_eq!(
+            source.entered(order[3]),
+            1,
+            "the prefetch's next still waits"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        for asked in [first_asked, second_asked] {
+            timeout(WAIT, asked).await.unwrap().unwrap().unwrap();
+        }
+        until("every field is held", || {
+            service.counters().cache().entries() == order.len()
+        })
+        .await;
+        assert_eq!(
+            service.counters().computed(),
+            u64::try_from(order.len()).unwrap()
+        );
+        assert!(
+            order.iter().all(|&key| source.entered(key) == 2),
+            "each body read once for the plan and once for its pass"
+        );
+        drop(prefetch);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A system's prefetch dropped gives up its passes: one queued is skipped and one running is
+    /// not kept, so that only the field it had before stays, and the next body is never read past
+    /// the plan (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_dropped_gives_up_its_passes_and_keeps_nothing_of_them() {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        );
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "one pass runs and one is queued behind the held worker",
+            || source.entered(order[1]) == 2 && pool.counters().queued_bulk() == 1,
+        )
+        .await;
+        drop(prefetch);
+        until("the passes are given up", || {
+            service.fields.flights.is_empty()
+        })
+        .await;
+        source.open(order[1]);
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the running pass ends and frees its permit", || {
+            pool.counters().running() == 0 && service.fields.passes.available_permits() == 3
+        })
+        .await;
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                pool.counters().cancelled(),
+                source.entered(order[2])
+            ),
+            (1, 1, 1, 1),
+            "{counters:?}"
+        );
+        assert!(service.fields.held.get(&order[0]).is_some());
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A system's prefetch stops at the field cache's budget: with room for two of its fields and
+    /// a half, it computes two and stops, evicting none, the third body read only for the plan
+    /// (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_stops_at_the_field_cache_s_budget() {
+        let pool = workers(3);
+        let (system, order) = crowded();
+        let (measuring, _) = service(&pool, 64 << 20);
+        let charge = FieldCache::charge(&field(&measuring, order[0]).await.unwrap());
+        let source = Arc::new(Counted::default());
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            charge * 5 / 2,
+            passes(2),
+        );
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let _prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the prefetch ends", || {
+            lock(&service.prefetching)
+                .try_join_next()
+                .is_some_and(|ended| ended.is_ok())
+        })
+        .await;
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                counters.cache().evictions(),
+                source.calls()
+            ),
+            (2, 2, 0, order.len() + 2),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// Under a bound of one pass no permit is ever left over for a prefetched pass, so a system's
+    /// prefetch ends at once, reading nothing and queueing no job.
+    #[tokio::test]
+    async fn a_system_prefetch_under_a_bound_of_one_does_nothing() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let _prefetch = service.prefetch_system(
+            galaxy,
+            &crowded().0,
+            SystemPosition::ORIGIN,
+            UniverseTime::EPOCH,
+        );
+        until("the prefetch ends", || {
+            lock(&service.prefetching)
+                .try_join_next()
+                .is_some_and(|ended| ended.is_ok())
+        })
+        .await;
+        assert_eq!(
+            (
+                source.calls(),
+                service.counters().computed(),
+                pool.counters().completed()
+            ),
+            (0, 0, 0)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A prefetch's budget starts its first pass alone, then estimates each at the densest field
+    /// it has had over the level's cells, and stops at the first that does not fit with nothing
+    /// running.
+    #[test]
+    fn a_prefetch_budget_estimates_at_its_densest_field() {
+        let field = synthetic_field(SyntheticWorld::CeresLike);
+        let (charge, level) = (FieldCache::charge(&field), field.header().level());
+        let mut budget = PrefetchBudget::new(charge * 3);
+        assert_eq!(budget.admits(level), Admission::Start(0));
+        budget.started(0);
+        assert_eq!(budget.admits(level), Admission::AfterRunning);
+        budget.ended(0, Some(&field));
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.started(charge);
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.started(charge);
+        assert_eq!(budget.admits(level), Admission::AfterRunning);
+        budget.ended(charge, None);
+        budget.ended(charge, Some(&field));
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.had_field(&field);
+        assert_eq!(budget.admits(level), Admission::Stop);
+        let finer = CoarseLevel::new(level.get() + 1).unwrap();
+        let cells = |level: CoarseLevel| usize::try_from(level.cell_count()).unwrap();
+        assert_eq!(
+            PrefetchBudget {
+                densest: Some((charge, level.cell_count())),
+                ..PrefetchBudget::new(usize::MAX)
+            }
+            .admits(finer),
+            Admission::Start((charge * cells(finer)).div_ceil(cells(level)))
+        );
     }
 
     /// Passes for its worker's start, then flushes: the probe after the first job fails.

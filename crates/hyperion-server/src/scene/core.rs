@@ -225,6 +225,8 @@ struct InSystem {
     all: Vec<BodyIndex>,
     /// The bodies sent, by index.
     sent: BTreeMap<BodyIndex, Sent>,
+    /// The scene time the scene entered the system at, and the ship's place in its frame then.
+    entered: (UniverseTime, SystemPosition),
 }
 
 /// The system a scene is to be in, worked out before anything changes.
@@ -328,6 +330,16 @@ impl SceneCore {
     #[must_use]
     pub(crate) fn system_id(&self) -> Option<SystemId> {
         self.system.as_ref().map(|system| system.record.id())
+    }
+
+    /// The planetary system the scene is in, with the scene time it entered at and the ship's
+    /// place in its frame then, the barycentre where the ship could not observe: what the surface
+    /// prefetch orders the system's bodies by (rendering plan R09, R09.T17).
+    #[must_use]
+    pub(crate) fn entered(&self) -> Option<(&Arc<GeneratedSystem>, UniverseTime, SystemPosition)> {
+        let system = self.system.as_ref()?;
+        let (time, ship) = system.entered;
+        Some((&system.generated, time, ship))
     }
 
     /// The next scene time at which [`SceneCore::advance`] must be called for a body's
@@ -477,6 +489,12 @@ impl SceneCore {
             record,
             generated: Arc::clone(generated),
             all: planets.indices(),
+            entered: (
+                t,
+                observer
+                    .as_ref()
+                    .map_or(SystemPosition::ORIGIN, |observer| *observer.position()),
+            ),
             sent: listed
                 .into_iter()
                 .map(|listed| {

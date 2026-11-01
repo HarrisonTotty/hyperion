@@ -3,17 +3,18 @@
 //! R10.T10.a's albedo scale in its header, and with the production source, the serve gate open
 //! from generator version 25 (P14.T54.a), a generated moon is served the sim's pass of its record's
 //! inputs, bit for bit, read with its planet's record (R09.T10.f), and a giant answers that it has
-//! no solid surface.
+//! no solid surface. A system's prefetch computes its bodies with a solid surface, nearest first,
+//! to the same bits.
 
 mod common;
 
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use common::patience;
 use common::surface::{
     ReferenceWorld, SEED, moon_system, reference_inputs, served_field, surface_system,
 };
+use common::{patience, patiently};
 use hyperion_server::compute::{CpuPool, GalaxyKey};
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use hyperion_server::surface::{
@@ -21,12 +22,12 @@ use hyperion_server::surface::{
     field_albedo_scale,
 };
 use hyperion_sim::id::BodyId;
-use hyperion_sim::planetary::BodyIndex;
 use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
-use hyperion_sim::planetary::record::Section;
+use hyperion_sim::planetary::record::{BodyRecord, Section};
 use hyperion_sim::planetary::surface::{
     CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
 };
+use hyperion_sim::planetary::{BodyIndex, SystemContext};
 use hyperion_sim::units::Metres;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_surface::field::{CoarseField, Cover, CoverRange, FieldView, ResolutionCode};
@@ -204,6 +205,139 @@ async fn a_generated_surface_is_served_the_sim_s_pass_of_its_record() {
         (counters.computed(), counters.cache().entries()),
         (1, 1),
         "the moon's pass alone, kept: {counters:?}"
+    );
+    timeout(patience(), pool.shutdown()).await.unwrap().unwrap();
+}
+
+/// The reference Ceres's inputs for every body with a solid surface, a giant refused, recording
+/// each body asked for, in order.
+#[derive(Debug)]
+struct Recording {
+    asked: Arc<Mutex<Vec<BodyIndex>>>,
+}
+
+impl InputsSource for Recording {
+    fn inputs(
+        &self,
+        record: &BodyRecord,
+        planet: Option<&BodyRecord>,
+        ctx: &SystemContext,
+    ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+        self.asked
+            .lock()
+            .expect("no test thread panics holding it")
+            .push(record.index());
+        reference_inputs(ReferenceWorld::Ceres).inputs(record, planet, ctx)
+    }
+}
+
+/// A system's prefetch from beside its solid body reads every body with a surface seed for its
+/// plan, nearest first, then computes the solid body's field first and each body with a solid
+/// surface after it, nearest first, and none for a giant, a ring or a belt. The prefetched field
+/// is the coarse pass on the same inputs bit for bit, and asked for once the prefetch has had it,
+/// it costs one cache read (rendering plan R09, R09.T17).
+#[tokio::test]
+async fn a_surface_prefetch_of_a_system_computes_its_nearest_solid_bodies_bit_for_bit() {
+    let pool = Arc::new(
+        CpuPool::new(
+            NonZeroUsize::new(3).expect("three workers"),
+            INTERACTIVE_QUEUE_CAPACITY,
+            BULK_QUEUE_CAPACITY,
+        )
+        .expect("the pool starts"),
+    );
+    let system = surface_system();
+    let (ctx, planets) = system.system.as_ref();
+    let solid = BodyIndex::try_from(system.solid.body_index()).expect("a body's index");
+    let near = planets
+        .position_at(ctx, solid, RECORD_TIME)
+        .expect("the solid body resolves")
+        .expect("the solid body is present at the record's time");
+    let mut by_distance: Vec<(f64, BodyIndex)> = planets
+        .indices()
+        .into_iter()
+        .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+        .filter_map(|index| {
+            let at = planets.position_at(ctx, index, RECORD_TIME).ok()??;
+            Some((near.displacement_to(&at).length().value(), index))
+        })
+        .collect();
+    by_distance.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let planned: Vec<BodyIndex> = by_distance.iter().map(|&(_, index)| index).collect();
+    let grounded: Vec<BodyIndex> = planned
+        .iter()
+        .copied()
+        .filter(|&index| {
+            let record = planets
+                .body_at(ctx, index, RECORD_TIME)
+                .expect("a planned body resolves");
+            !matches!(record.surface(), Section::NotApplicable)
+        })
+        .collect();
+    let gaseous = BodyIndex::try_from(system.gaseous.body_index()).expect("a body's index");
+    assert!(planned.contains(&gaseous) && !grounded.contains(&gaseous));
+    assert_eq!(grounded.first(), Some(&solid));
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    // A bound of two: the prefetch runs one pass at a time, in its order.
+    let service = SurfaceService::new(
+        Arc::clone(&pool),
+        Arc::new(Recording {
+            asked: Arc::clone(&asked),
+        }),
+        64 << 20,
+        NonZeroUsize::new(2).expect("two passes"),
+    );
+    let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+    let _prefetch = service.prefetch_system(galaxy, &system.system, near, RECORD_TIME);
+    let all = u64::try_from(grounded.len()).expect("a count of bodies");
+    patiently("prefetching the system's fields", async {
+        while service.counters().computed() < all {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let asked = asked
+        .lock()
+        .expect("no test thread panics holding it")
+        .clone();
+    assert_eq!(
+        asked[..planned.len()],
+        planned[..],
+        "the plan reads each body with a surface seed once, nearest first"
+    );
+    assert_eq!(
+        asked[planned.len()..],
+        grounded[..],
+        "then a pass for each body with a solid surface, nearest first"
+    );
+
+    let before = service.counters();
+    let prefetched = patiently(
+        "asking for a prefetched field",
+        service.field(key(system.solid), &system.system),
+    )
+    .await
+    .expect("a reference world has a field");
+    let after = service.counters();
+    assert_eq!(
+        (
+            after.cache().hits() - before.cache().hits(),
+            after.cache().misses() - before.cache().misses(),
+            after.computed()
+        ),
+        (1, 0, all),
+        "one cache read"
+    );
+    let (served, own) = (
+        payload(&prefetched),
+        payload(&served_field(ReferenceWorld::Ceres, system.solid)),
+    );
+    assert_eq!(served.len(), own.len(), "the payloads' lengths");
+    assert_eq!(
+        served.iter().zip(&own).position(|(a, b)| a != b),
+        None,
+        "the payloads' first differing byte"
     );
     timeout(patience(), pool.shutdown()).await.unwrap().unwrap();
 }

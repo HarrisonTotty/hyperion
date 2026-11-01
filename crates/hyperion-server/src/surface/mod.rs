@@ -63,11 +63,15 @@
 //!
 //! # What starts a field
 //!
-//! The first `surface_field` or `survey_pass` for the body (R09.T19, which wires them), and
-//! [`SurfaceService::prefetch`], which session code will call as the ship approaches a body. A
-//! `survey_pass` first reads the field's level on an interactive job
-//! (`SurfaceService::field_level`) and starts the field only where the body's inputs are
-//! modelled.
+//! The first `surface_field` or `survey_pass` for the body (R09.T19, which wires them), and a
+//! scene's ship entering the body's system. A `survey_pass` first reads the field's level on an
+//! interactive job (`SurfaceService::field_level`) and starts the field
+//! ([`SurfaceService::prefetch`]) only where the body's inputs are modelled. A scene entering a
+//! system starts [`SurfaceService::prefetch_system`] and holds its [`SystemPrefetch`] until it
+//! leaves or ends (R09.T17): the system's bodies whose inputs are modelled, nearest the ship
+//! first, each pass taking a permit only while two are free, so that at most the bound less one
+//! run at once and an asked pass never waits behind one, and no more than the cache's budget
+//! holds.
 //!
 //! # The survey logs
 //!
@@ -91,5 +95,6 @@ pub use cache::{FieldCache, FieldKey};
 pub use inputs::{InputsSource, RecordInputs};
 pub(crate) use service::FieldLevel;
 pub use service::{
-    RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService, field_albedo_scale,
+    RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService, SystemPrefetch,
+    field_albedo_scale,
 };

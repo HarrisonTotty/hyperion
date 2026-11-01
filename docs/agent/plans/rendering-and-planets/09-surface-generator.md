@@ -4011,7 +4011,8 @@ cancelled job leaves nothing cached; the server's field, from `reference_inputs`
 `crates/hyperion-server/src/surface/inputs.rs`; updated 2026-10-15). Acceptance:
 `cargo test -p hyperion-server surface`.
 
-_Built 2026-10-13_ (`9ebb725d`).
+_Built 2026-10-13_ (`9ebb725d`). The scene's prefetch of the ship's system, built 2026-11-01 (lane
+surface-prefetch; the record file).
 
 - **R09.T17.a The passes in flight** (a T17 follow-up, after R09.T16; decision-r09-pass-cost §C).
   R09.T17's deferred _Concurrent passes_, which R09.T16 measured at 408 MB a level-8 pass.

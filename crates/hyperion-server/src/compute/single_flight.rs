@@ -136,6 +136,18 @@ where
         drop(flights);
         Flight { shared: candidate }
     }
+
+    /// Joins the computation of `key` in progress, if there is one, and starts nothing.
+    ///
+    /// A caller that may start a computation only under a condition of its own (the surface
+    /// prefetch's permit, rendering plan R09, R09.T17) joins one already running without meeting
+    /// it.
+    pub fn join(&self, key: &K) -> Option<Flight<V, E>> {
+        let existing = lock(&self.flights)
+            .get(key)
+            .and_then(|(_, weak)| weak.upgrade());
+        existing.map(|shared| Flight { shared })
+    }
 }
 
 impl<K, V, E> Default for SingleFlight<K, V, E> {
@@ -295,6 +307,28 @@ mod tests {
         assert_eq!(outcome(two).await, Ok(2));
         assert_eq!(outcome(one).await, Ok(1));
         assert_eq!(runs.load(Ordering::SeqCst), 2);
+    }
+
+    /// A join shares the computation in progress and starts none: nothing to join before the
+    /// first call, or once its flight has finished.
+    #[tokio::test]
+    async fn a_join_shares_the_computation_in_progress_and_starts_none() {
+        let flights = Flights::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        assert!(flights.join(&1).is_none(), "nothing in progress");
+        let (make, send) = computation(&runs);
+        let first = flights.run(1, make);
+        let joined = flights
+            .join(&1)
+            .expect("the first call's flight is in progress");
+        assert!(flights.join(&2).is_none(), "another key has none");
+        assert_eq!(flights.len(), 1);
+        send.send(Ok(5)).unwrap();
+        let (first, joined) = tokio::join!(outcome(first), outcome(joined));
+        assert_eq!((first, joined), (Ok(5), Ok(5)));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(flights.join(&1).is_none(), "the flight has finished");
+        assert!(flights.is_empty());
     }
 
     #[tokio::test]
