@@ -187,7 +187,58 @@ pub(crate) fn heights<F: FieldView>(
     cache: &mut SynthCache,
     key: PatchKey,
 ) -> Result<PatchHeights, QueryHeightError> {
-    PatchHeights::from_queries(key, |q| synth.height_at(cache, q.dir, band(q.level)))
+    let mut paired = PairedQueries::new(key);
+    PatchHeights::from_queries(key, |q| paired.answer(synth, cache, q))
+}
+
+/// The answers to a patch's [`VertexQuery`]s, each [`Synthesiser::height_at`] at its query, bit
+/// for bit, its error included: each even vertex's own level and its parent's are made together
+/// ([`Synthesiser::height_pair_at`]) when its own is asked, and the parent's answer is kept for
+/// its turn, so that the two share their base elevation, styles, octaves and channels.
+///
+/// Measured on `bake/patch_65`'s patches (natively, one thread, pod, 16 vCPU, 2026-11-01): R09's
+/// bake of the heights 18.7 ms against 21.7 ms before on the Earth-like world at L + 4, 27.0 ms
+/// against 31.7 ms at 19 and 15.5 ms against 16.7 ms on the Moon-like world's rim at L + 4, its
+/// 1,089 parent-level queries sharing their vertices' work.
+pub(crate) struct PairedQueries {
+    key: PatchKey,
+    /// Each even vertex's parent-level answer, row by row, until it is asked.
+    parents: Vec<Option<Result<HeightSample, QueryHeightError>>>,
+}
+
+impl PairedQueries {
+    /// None answered yet, for the queries of `key`.
+    #[must_use]
+    pub(crate) fn new(key: PatchKey) -> Self {
+        let parents = if key.level() == 0 {
+            Vec::new()
+        } else {
+            vec![None; PARENT_VERTICES * PARENT_VERTICES]
+        };
+        Self { key, parents }
+    }
+
+    /// The answer to `q`, one of the patch's queries, asked at most once each.
+    pub(crate) fn answer<F: FieldView>(
+        &mut self,
+        synth: &Synthesiser<'_, F>,
+        cache: &mut SynthCache,
+        q: VertexQuery,
+    ) -> Result<HeightSample, QueryHeightError> {
+        let even = q.x.is_multiple_of(2) && q.y.is_multiple_of(2);
+        let at = || vertex_index(q.x / 2, q.y / 2, PARENT_VERTICES);
+        match self.key.level().checked_sub(1) {
+            Some(parent) if even && q.level == self.key.level() => {
+                let (own, up) = synth.height_pair_at(cache, q.dir, band(q.level), band(parent));
+                self.parents[at()] = Some(up);
+                own
+            }
+            Some(parent) if q.level == parent => self.parents[at()]
+                .take()
+                .unwrap_or_else(|| synth.height_at(cache, q.dir, band(q.level))),
+            Some(_) | None => synth.height_at(cache, q.dir, band(q.level)),
+        }
+    }
 }
 
 /// R05's `u8` level of a patch or its parent as a band level.

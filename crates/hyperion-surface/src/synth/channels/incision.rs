@@ -2014,20 +2014,47 @@ impl Channels {
     ) -> Result<HeightSample, ReadCellError> {
         self.check_field(field);
         let levels = self.incision(field, cache).levels(dir, through)?;
-        let mut height = 0.0;
-        let mut of_point = [0.0; 3];
-        let mut of_direction = [0.0; 3];
-        for level in levels.as_slice() {
-            height += level.value;
-            for k in 0..3 {
-                of_point[k] += level.of_point[k];
-                of_direction[k] += level.of_direction[k];
-            }
-        }
-        Ok(HeightSample {
-            height_m: num::assert_finite(height),
-            gradient: combine(field.header(), dir, of_point, of_direction),
-        })
+        Ok(summed(field.header(), dir, levels.as_slice()))
+    }
+
+    /// [`incision_at`](Self::incision_at) through `through` and through `parent_through`, no
+    /// finer, from one evaluation of the levels: each level's raw incision reads only coarser
+    /// levels' and its correction none, and the sum takes them coarsest first, so the coarser sum
+    /// is the finer's first levels', bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// As [`incision_at`](Self::incision_at) through `through`.
+    ///
+    /// # Panics
+    ///
+    /// As [`incision_at`](Self::incision_at); and, in debug builds, if `parent_through` is above
+    /// `through`.
+    pub(crate) fn incision_pair_at<F: FieldView>(
+        &self,
+        field: &F,
+        dir: [f64; 3],
+        through: u8,
+        parent_through: u8,
+        cache: &mut SynthCache,
+    ) -> Result<(HeightSample, HeightSample), ReadCellError> {
+        debug_assert!(
+            parent_through <= through,
+            "a parent's levels through {parent_through} are not a prefix of those through {through}"
+        );
+        self.check_field(field);
+        let levels = self.incision(field, cache).levels(dir, through)?;
+        let levels = levels.as_slice();
+        // The parent's levels: the first to `parent_through`, none below the first, of those
+        // `levels` holds, which stop at the deepest the cut evaluates about the point.
+        let parent_count = parent_through
+            .checked_sub(self.level)
+            .map_or(0, |n| (usize::from(n) + 1).min(levels.len()));
+        let header = field.header();
+        Ok((
+            summed(header, dir, levels),
+            summed(header, dir, &levels[..parent_count]),
+        ))
     }
 
     /// Whether the unit direction `dir` lies on a channel's bed: within half its bankfull width of
@@ -2109,6 +2136,26 @@ impl Channels {
             field,
             cache,
         }
+    }
+}
+
+/// The incision at the unit direction `dir` of a body of header `header` from its `levels`, summed
+/// in level order, each its incision less its correction ([`Channels::incision_at`]).
+#[must_use]
+fn summed(header: &FieldHeader, dir: [f64; 3], levels: &[LevelSample]) -> HeightSample {
+    let mut height = 0.0;
+    let mut of_point = [0.0; 3];
+    let mut of_direction = [0.0; 3];
+    for level in levels {
+        height += level.value;
+        for k in 0..3 {
+            of_point[k] += level.of_point[k];
+            of_direction[k] += level.of_direction[k];
+        }
+    }
+    HeightSample {
+        height_m: num::assert_finite(height),
+        gradient: combine(header, dir, of_point, of_direction),
     }
 }
 

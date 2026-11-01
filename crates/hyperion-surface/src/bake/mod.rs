@@ -68,6 +68,7 @@ use crate::patch::{BakeOptions, HeightSource, PATCH_VERTICES, PatchBake, bake_wi
 use crate::reading::SurveyView;
 use crate::scatter::ExtraLayer;
 use crate::spheroid::Spheroid;
+use crate::synth::bake::PairedQueries;
 use crate::synth::{BandLevel, PatchHeights, QueryHeightError, SynthCache, Synthesiser};
 
 /// What R11 adds to a patch's bake: its layers, made in the same bake and kept in the same cache
@@ -421,9 +422,10 @@ impl<F: SurveyView> HeightSource for SurveyedGround<'_, '_, F> {
         cache: &mut SynthCache,
         key: PatchKey,
     ) -> Result<PatchHeights, QueryHeightError> {
+        let mut paired = PairedQueries::new(key);
         PatchHeights::from_queries(key, |q| {
             let n = usize::from(q.y) * PATCH_VERTICES + usize::from(q.x);
-            let answer = self.synth.height_at(cache, q.dir, band(q.level));
+            let answer = paired.answer(self.synth, cache, q);
             let refused = answer.is_err();
             let sample = self.or_reference(answer, self.mask[n] == SURVEYED)?;
             if refused && q.level == key.level() {

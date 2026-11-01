@@ -216,6 +216,74 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         level: BandLevel,
     ) -> Result<HeightSample, QueryHeightError> {
         let parts = self.contributions(cache, dir, level)?;
+        self.finish(cache, dir, &parts)
+    }
+
+    /// [`height_at`](Self::height_at) at `level` and at `parent`, a coarser level, from one pass
+    /// where the two share it: each the point query's answer at its level, bit for bit, its error
+    /// included.
+    ///
+    /// The base elevation and the relief's styles are the same at every level, and the structural
+    /// octaves and the channels' levels are summed coarsest first, each term reading only coarser
+    /// ones, so `parent`'s are a prefix of `level`'s and are kept as the sum passes them; the small
+    /// craters and the coarse craters' rims are band-limited at the level asked, and are made for
+    /// each. Where a read is refused, or the two levels' sets do not nest, each is asked on its
+    /// own. A bake asks it at each even vertex, whose morph target is its parent level's height
+    /// (R10.T6.a's lever, measured at `bake/patch_65`).
+    ///
+    /// # Panics
+    ///
+    /// As [`height_at`](Self::height_at).
+    pub(crate) fn height_pair_at(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        parent: BandLevel,
+    ) -> (
+        Result<HeightSample, QueryHeightError>,
+        Result<HeightSample, QueryHeightError>,
+    ) {
+        match self.shared_pair(cache, dir, level, parent) {
+            Some((own, up)) => (Ok(own), Ok(up)),
+            None => (
+                self.height_at(cache, dir, level),
+                self.height_at(cache, dir, parent),
+            ),
+        }
+    }
+
+    /// [`height_pair_at`](Self::height_pair_at)'s one pass, or `None` where a read is refused or
+    /// the levels' sets do not nest.
+    fn shared_pair(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        parent: BandLevel,
+    ) -> Option<(HeightSample, HeightSample)> {
+        // A refusal is dropped here, safely: each level is then asked on its own, whose answer
+        // carries its own error, the first its reads meet, as the point query orders them.
+        let (own, up) = self.contributions_pair(cache, dir, level, parent).ok()??;
+        Some((
+            self.finish(cache, dir, &own).ok()?,
+            self.finish(cache, dir, &up).ok()?,
+        ))
+    }
+
+    /// The height and gradient of `parts`, summed in their order with the channels' floor at
+    /// `dir` ([`height_at`](Self::height_at)).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell the floor reads that the view does
+    /// not hold.
+    fn finish(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        parts: &Contributions,
+    ) -> Result<HeightSample, QueryHeightError> {
         let mut sample = parts.base;
         for part in [parts.relief, parts.channels, parts.craters, parts.rims] {
             sample.height_m += part.height_m;
@@ -306,6 +374,98 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             craters,
             rims,
         })
+    }
+
+    /// [`contributions`](Self::contributions) at `level` and at `parent` in one pass
+    /// ([`height_pair_at`](Self::height_pair_at)), or `None` where the levels' sets do not nest:
+    /// `parent`'s octaves or channels evaluated where `level`'s are not, or through a finer octave
+    /// or level than `level`'s.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming a cell read that the view does not hold.
+    fn contributions_pair(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        parent: BandLevel,
+    ) -> Result<Option<(Contributions, Contributions)>, QueryHeightError> {
+        let field = self.field;
+        let (set, up) = (self.bounds.set(level), self.bounds.set(parent));
+        let evaluated = |through: Option<u8>| through.filter(|&t| self.relief.evaluates(t));
+        let ((base, relief), (up_base, up_relief)) = match (
+            evaluated(set.relief_through()),
+            evaluated(up.relief_through()),
+        ) {
+            (Some(through), up_through) => {
+                let header = field.header();
+                let (base, style) = match cache.controls.memo_for(self.channels.id()) {
+                    Some(memo) => relief::base_and_style(field, dir, memo)?,
+                    None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
+                };
+                let lattice = cache.lattice_mut();
+                match up_through {
+                    Some(up_through) if up_through <= through => {
+                        let (relief, up_relief) = self
+                            .relief
+                            .at_in_style_pair(header, dir, through, up_through, &style, lattice);
+                        ((base, relief), (base, up_relief))
+                    }
+                    Some(_) => return Ok(None),
+                    None => {
+                        let relief = self
+                            .relief
+                            .at_in_style(header, dir, through, &style, lattice);
+                        // The parent's base as the point query takes it there, alone.
+                        (
+                            (base, relief),
+                            (interp::base_elevation(field, dir)?, NOTHING),
+                        )
+                    }
+                }
+            }
+            (None, Some(_)) => return Ok(None),
+            (None, None) => {
+                let base = interp::base_elevation(field, dir)?;
+                ((base, NOTHING), (base, NOTHING))
+            }
+        };
+        let (channels, up_channels) = match (set.channels_through(), up.channels_through()) {
+            (Some(through), Some(up_through)) if up_through <= through => self
+                .channels
+                .incision_pair_at(field, dir, through, up_through, cache)?,
+            (Some(through), None) => (
+                self.channels.incision_at(field, dir, through, cache)?,
+                NOTHING,
+            ),
+            (None, None) => (NOTHING, NOTHING),
+            (Some(_) | None, Some(_)) => return Ok(None),
+        };
+        let mut craters_at = |level: BandLevel, through: Option<u8>| match through {
+            Some(through) => self.craters.at(dir, level, through, &mut cache.craters),
+            None => NOTHING,
+        };
+        let craters = craters_at(level, set.craters_through());
+        let up_craters = craters_at(parent, up.craters_through());
+        let rims = self.rims.at(field, dir, level)?;
+        let up_rims = self.rims.at(field, dir, parent)?;
+        Ok(Some((
+            Contributions {
+                base,
+                relief,
+                channels,
+                craters,
+                rims,
+            },
+            Contributions {
+                base: up_base,
+                relief: up_relief,
+                channels: up_channels,
+                craters: up_craters,
+                rims: up_rims,
+            },
+        )))
     }
 
     /// The heights, parent-band heights and gradients of `patch`'s 65 × 65 vertices, in R05's bake

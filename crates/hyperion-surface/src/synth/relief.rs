@@ -1645,6 +1645,60 @@ impl Relief {
         }
     }
 
+    /// [`at_in_style`](Self::at_in_style) through `through` and through `parent_through`, no finer,
+    /// from one walk of the octaves: each octave's term reads only coarser ones' and the sum takes
+    /// them coarsest first, so the coarser sum is the finer's as it passes its last octave, bit for
+    /// bit.
+    ///
+    /// # Panics
+    ///
+    /// As [`at_in_style`](Self::at_in_style); and, in debug builds, if `parent_through` is above
+    /// `through` or evaluates no octave.
+    pub(crate) fn at_in_style_pair(
+        &self,
+        header: &FieldHeader,
+        dir: [f64; 3],
+        through: u8,
+        parent_through: u8,
+        style: &StyleSample,
+        lattice: &mut LatticeCache,
+    ) -> (HeightSample, HeightSample) {
+        debug_assert!(
+            parent_through <= through && self.evaluates(parent_through),
+            "a parent's octaves through {parent_through} are not a prefix of those through {through}"
+        );
+        let key = NoiseKey::Relief(self.seed);
+        let seed = self.seed;
+        let table = lattice.take_octaves(key, || octave_table(seed));
+        let last = through.min(self.variance.finest);
+        let parent_last = parent_through.min(self.variance.finest);
+        let mut height = 0.0;
+        let mut gradient = [0.0; 3];
+        let mut parent = (0.0, [0.0; 3]);
+        self.octave_terms(
+            &table,
+            header.figure().point(dir),
+            style,
+            last,
+            lattice,
+            |term| {
+                height += term.height.value;
+                for (g, d) in gradient.iter_mut().zip(term.height.gradient) {
+                    *g += d;
+                }
+                if term.octave == parent_last {
+                    parent = (height, gradient);
+                }
+            },
+        );
+        lattice.restore_octaves(key, table);
+        let sample = |(height, gradient): (f64, [f64; 3])| HeightSample {
+            height_m: num::assert_finite(height),
+            gradient: as_function_of_direction(header, dir, gradient).map(num::assert_finite),
+        };
+        (sample((height, gradient)), sample(parent))
+    }
+
     /// Each octave's term at `dir`, octaves [`first_octave`] to `through` (never past the finest)
     /// of `table`, handed to `emit` in octave order, the styles interpolated from `field` first;
     /// nothing is read when no octave is asked for.
