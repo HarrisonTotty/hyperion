@@ -225,6 +225,7 @@ import {
   viewLayout,
 } from "./viewLayout";
 import {
+  commandCutsImage,
   commandRun,
   EASED_MOVES_STATEMENT,
   framedRun,
@@ -1536,12 +1537,7 @@ function ViewStage({
       }
       runRef.current = result.run;
       setPublished((previous) => ({ ...previous, run: result.run }));
-      // A preset's or a target's change that is not eased cuts the image, and its exposure snaps
-      // to it (fix-view-light).
-      if (
-        (action.kind === "preset" || action.kind === "target") &&
-        result.run.camera.move === null
-      ) {
+      if (commandCutsImage(action, result.run)) {
         cutRef.current = true;
       }
       if (action.kind === "target") {

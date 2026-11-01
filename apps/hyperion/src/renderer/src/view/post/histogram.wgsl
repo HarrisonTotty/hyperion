@@ -8,7 +8,8 @@
 // from `glare.wgsl`, with the frame's view rotation and projection as the tone-mapping pass reads
 // them). The host disc's own pixels still weigh nothing, so the exposure does not step as the star
 // enters the frame: its veil rises smoothly as it nears. The bloom chain's gathered light is left
-// out: the chain only moves light the histogram has already weighed, conserving it.
+// out: the chain moves the weighed texels' light, conserving it, and spreads the disc's stored
+// light, which the veil of the whole light already holds.
 //
 // Concatenated after `glare.wgsl`. Its CPU twin is `cpuHistogram` in `histogram.ts`, which the smoke
 // harness compares bin for bin.

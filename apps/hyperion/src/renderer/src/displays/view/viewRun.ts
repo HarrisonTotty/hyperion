@@ -434,6 +434,14 @@ export function commandRun(
   return result;
 }
 
+/**
+ * Whether a camera command's outcome cuts the view's image, so that its exposure snaps to it
+ * (fix-view-light, `AutoExposure.cut`): a preset's or a target's change that is not an eased move.
+ */
+export function commandCutsImage(action: ViewKeyAction, after: ViewRun): boolean {
+  return (action.kind === "preset" || action.kind === "target") && after.camera.move === null;
+}
+
 /** The pose the run draws from: the camera's, blended through an eased move. */
 export function runPose(run: ViewRun): CameraPose {
   return displayPose(run.camera, sceneOrigins(run.scene));

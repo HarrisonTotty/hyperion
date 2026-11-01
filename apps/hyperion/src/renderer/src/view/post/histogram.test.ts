@@ -135,7 +135,7 @@ function sunAt(direction: {
   };
 }
 
-/** 60° across at 480 × 270 px: the Sun at 1 au 2.1 px in radius. */
+/** 60° across at 480 × 270 px: the Sun at 1 au 1.93 px in radius at the centre. */
 const FRAME = { widthPx: 480, heightPx: 270 };
 
 function frameGlare(
@@ -243,10 +243,10 @@ describe("the meter with the glare sources' veil (fix-view-light)", () => {
     }
   });
 
-  // The research's figures (research-leans-19, advice §0) are 15.0 and 15.4 for the camera, 17.8
-  // and 17.9 for the eye, from the spread function at the point form; the eye's resolved form here
-  // holds more of the core's light just beyond the limb (`glareSourceVeilOf`), a finding of
-  // +0.55 EV pinned as it stands.
+  // The research's figures are 15.0 and 15.4 for the camera, 17.8 and 17.9 for the eye, from the
+  // spread function at the point form; an exact convolution over the disc gives the eye 18.22,
+  // and the closed form's own +7% to +13% near the limb (`glareSourceVeilOf`) the rest of a
+  // +0.55 EV finding, pinned as it stands.
   it.each([
     { role: "camera", alone: 14.8, withPlanet: 15.22 },
     { role: "eye", alone: 18.35, withPlanet: 18.39 },

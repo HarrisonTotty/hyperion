@@ -264,6 +264,7 @@ export async function checkHistogram(engine: RenderEngine, checks: Checks): Prom
   const litHdr = inputTexture(engine, "smoke histogram glare input", lit.bits);
   for (const mode of ["average", "lit"] as const) {
     for (const stride of [1, 2] as const) {
+      // Each case reads back before the next dispatches, as the harness's checks do.
       // oxlint-disable-next-line no-await-in-loop
       const gpu = await gpuHistogram(engine, kernel, litHdr, mode, stride, bound(1));
       const cpu = cpuHistogram(lit.values, SIZE, mode, stride, glare);

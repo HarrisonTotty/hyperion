@@ -48,6 +48,7 @@ import {
 import { rotate } from "../../view/camera/quaternion";
 import {
   cameraReading,
+  commandCutsImage,
   commandRun,
   contourIntervalLine,
   followRun,
@@ -192,6 +193,37 @@ describe("a view's run", () => {
       ),
     );
     expect([eased.camera.move === null, reduced.camera.move === null]).toEqual([false, true]);
+  });
+
+  it.each([
+    {
+      name: "a preset's cut",
+      action: { kind: "preset", preset: "chase" },
+      options: CUT,
+      cuts: true,
+    },
+    { name: "a target's cut", action: { kind: "target", step: 1 }, options: CUT, cuts: true },
+    {
+      name: "an eased preset",
+      action: { kind: "preset", preset: "chase" },
+      options: { easedMoves: true, reducedMotion: false },
+      cuts: false,
+    },
+    {
+      name: "a field of view's step",
+      action: { kind: "fov", step: -1 },
+      options: CUT,
+      cuts: false,
+    },
+    {
+      name: "a style's change",
+      action: { kind: "style", style: "toggle" },
+      options: CUT,
+      cuts: false,
+    },
+  ] as const)("says whether $name cuts the image for its exposure", ({ action, options, cuts }) => {
+    const run = startRun(precisionScene());
+    expect(commandCutsImage(action, done(commandRun(run, action, options)))).toBe(cuts);
   });
 
   it("steps the field of view", () => {

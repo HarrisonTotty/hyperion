@@ -113,6 +113,7 @@ async function nextHistogram(renderer: PhotorealRenderer): Promise<Histogram | u
     if (histogram !== undefined) {
       return histogram;
     }
+    // The read settles on the device's timeline: each look waits for the one before.
     // oxlint-disable-next-line no-await-in-loop
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 10);
@@ -173,6 +174,7 @@ async function settle(
     // oxlint-disable-next-line no-await-in-loop
     const bytes = await view.readBack();
     srgb = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+    // The next frame's exposure is metered from this frame's histogram, as the view's loop does.
     // oxlint-disable-next-line no-await-in-loop
     histogram = await nextHistogram(renderer);
     if (Math.abs(ev100 - last) < SETTLED_EV) {

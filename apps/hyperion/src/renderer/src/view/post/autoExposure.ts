@@ -51,7 +51,8 @@ export const FULL_WINDOW: PercentileWindow = { low: 0, high: 1 };
  * counts inside `window`, with Lᵢ = 2^(bin centre) ÷ the pre-exposure and bin 0 at luminance 0
  * (Design note 11). The glare sources' veil is in it, of each source's whole light, as the optic
  * delivers it (`histogram.wgsl`); the host disc's own pixels are not, and nor is the bloom chain's
- * light, which only moves light already counted.
+ * light, which moves the weighed texels' light and spreads the disc's stored light, which that veil
+ * already holds.
  *
  * @returns 0 when the window holds no counts.
  */
@@ -129,7 +130,8 @@ export function meteredAverage(
 
 /**
  * The smoothing speed, EV/s, the same toward a brighter scene and a darker one: a camera's
- * automatic exposure, which settles in 0.1 to 0.5 s (fix-view-light, 2026-11-01), linear while the
+ * automatic exposure, which settles in 0.1 to 0.5 s (fix-view-light's design value, 2026-11-01,
+ * after a still camera's AE on a step of a few EV; no measurement read), linear while the
  * metered value is more than {@link SMOOTHING_BAND_EV} away and exponential inside the band at
  * speed ÷ band, 16 s⁻¹, with a continuous first derivative (Unreal's form, UE 4.27, "Auto
  * Exposure", `r.EyeAdaptation.ExponentialTransitionDistance`). A 10 EV step comes within 0.1 EV in
@@ -140,9 +142,10 @@ export function meteredAverage(
  * 4.26 Python API), which left a sunlit body some 8 s overexposed after a starfield and took some
  * 23 s back. Every view is a camera, `VIEW_CAMERA`'s triple at every level, and the operator's own
  * eyes adapt to the display. The eye is not modelled: its dark adaptation takes minutes, the cones'
- * plateau near 10 min and the rods' at 30 to 40 min (Hecht, Haig and Chase 1937, J. Gen. Physiol.
- * 20, 831; recalled, not read here), which would blind the console for minutes after a star left
- * the frame.
+ * plateau near 10 min and the rods' at 30 to 40 min (Hecht, Haig and Chase 1937, "The influence of
+ * light adaptation on subsequent dark adaptation of the eye", J. Gen. Physiol. 20, 831–850,
+ * doi:10.1085/jgp.20.6.831; recalled, not read here), which would blind the console for minutes
+ * after a star left the frame.
  */
 export const SMOOTHING_SPEED_EV_PER_S = 24;
 
@@ -151,8 +154,10 @@ export const SMOOTHING_BAND_EV = 1.5;
 
 /**
  * The fraction of a reading's weighed counts in the histogram's top bin above which the reading is
- * clipped: 0.5%. Those texels hold at least 2¹⁶ after pre-exposure, at or above `rgba16float`'s
- * clamp, so the mean is only a lower bound on the light.
+ * clipped: 0.5%. Those texels hold at least 60,404 after pre-exposure (2^15.88, the top bin's
+ * floor), up to `rgba16float`'s clamp at 65,504 and the veil's light beyond it, all metered at the
+ * bin's centre, so the mean is only a lower bound on the light. At `AUTO` the top bin lies
+ * 19.2 EV above the metered mean.
  */
 export const CLIPPED_TOP_FRACTION = 0.005;
 
@@ -322,8 +327,9 @@ export interface AutoExposureOptions {
  * camera's does: the next histogram that weighs a pixel while the control follows the meter sets
  * the applied value with no smoothing, and while the readings are clipped
  * ({@link readingRange}) each sets it to its bound, never back past an earlier one, until one lies
- * inside the range. `MAN`'s 56 EV against the histogram's 30 needs at most three such readings. The
- * frames drawn before the first draw at the exposure as it stood.
+ * inside the range. A reading above the range moves the exposure at least 19.2 EV, so `MAN`'s
+ * 56 EV needs at most three toward a brighter scene; one below it moves 10.74 EV, so toward a
+ * darker one up to six. The frames drawn before the first draw at the exposure as it stood.
  *
  * Each frame the owner calls {@link AutoExposure.step} with the histogram that arrived, then draws
  * at the reading's control, then tells the controller whether that frame drew the photorealistic

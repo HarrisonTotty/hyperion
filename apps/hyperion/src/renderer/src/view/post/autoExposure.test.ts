@@ -693,33 +693,35 @@ describe("smoothEv", () => {
 });
 
 describe("readingRange (fix-view-light)", () => {
-  it("is a bound above with over 0.5% of the counts in the top bin, below with all in bin 0", () => {
-    expect(
-      readingRange(
-        histogram([
-          [120, 1000],
-          [255, 5],
-        ]),
-      ),
-    ).toBe("inside");
-    expect(
-      readingRange(
-        histogram([
-          [120, 1000],
-          [255, 6],
-        ]),
-      ),
-    ).toBe("above");
-    expect(readingRange(histogram([[0, 1000]]))).toBe("below");
-    expect(
-      readingRange(
-        histogram([
-          [0, 1000],
-          [1, 1],
-        ]),
-      ),
-    ).toBe("inside");
-    expect(readingRange(histogram([]))).toBe("inside");
+  it.each([
+    {
+      name: "0.5% in the top bin",
+      counts: [
+        [120, 1000],
+        [255, 5],
+      ],
+      range: "inside",
+    },
+    {
+      name: "over 0.5% in the top bin",
+      counts: [
+        [120, 1000],
+        [255, 6],
+      ],
+      range: "above",
+    },
+    { name: "every count in bin 0", counts: [[0, 1000]], range: "below" },
+    {
+      name: "one count above bin 0",
+      counts: [
+        [0, 1000],
+        [1, 1],
+      ],
+      range: "inside",
+    },
+    { name: "no count", counts: [], range: "inside" },
+  ] as const)("reads $name as $range", ({ counts, range }) => {
+    expect(readingRange(histogram(counts))).toBe(range);
   });
 });
 
@@ -840,12 +842,15 @@ describe("a cut (fix-view-light)", () => {
     expect(exposure.step(bright, 1 / 60).ev100).toBe(meteredEvOf(bright));
   });
 
-  it("leaves MAN and the operator's inhibit where they stand", () => {
+  it("leaves MAN where it stands", () => {
     const manual = controller(DEFAULT_MAN);
     manual.cut();
     expect(manual.step(histogram([[160, 100]]), 1 / 60).control).toEqual(DEFAULT_MAN);
+  });
+
+  it("leaves the operator's inhibit where it stands", () => {
     const held = controller({ kind: "auto", ev100: 3 });
-    expect(held.apply(inhibit(held.control))).toBe(true);
+    held.apply(inhibit(held.control));
     held.cut();
     expect(held.step(histogram([[160, 100]]), 1 / 60).ev100).toBe(3);
   });

@@ -16,7 +16,7 @@ import {
   venusClassMedium,
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { countingRenderEngine, type RecordedDispatch } from "../../test/countingRenderEngine";
 import { microtasks } from "../../test/opticsFakes";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
@@ -1300,7 +1300,11 @@ describe("the photorealistic renderer's histogram", () => {
     renderer.dispose();
   });
 
-  it("binds this frame's glare sources, written before it, with their count (fix-view-light)", async () => {
+  /** One frame drawn with two Sun-like glare sources, and its histogram's dispatch. */
+  async function withSources(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly histogram: RecordedDispatch | undefined;
+  }> {
     const { engine, renderer } = await ready();
     const sun = {
       direction: vec3(0, 0, -1),
@@ -1309,18 +1313,23 @@ describe("the photorealistic renderer's histogram", () => {
       luminance: [2e9, 2e9, 2e9],
     } as const;
     renderer.render(new RecordingView(), { ...frameWith([]), glareSources: [sun, sun] });
+    renderer.dispose();
     const histogram = engine.dispatched.find((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
-    const sourcesWrite = engine.writes.findIndex((w) => w.buffer === "test view glare sources");
+    return { engine, histogram };
+  }
+
+  it("binds the tone-mapping pass's glare sources with their count (fix-view-light)", async () => {
+    const { histogram } = await withSources();
     expect([
       Array.from(histogram?.bindings.uniforms["params"] ?? []),
       histogram?.bindings.buffers["glareSources"]?.name,
-      sourcesWrite >= 0 && sourcesWrite < (histogram?.writesBefore ?? -1),
-    ]).toEqual([
-      Array.from(histogramParams(VIEWPORT, "average", 1, 2)),
-      "test view glare sources",
-      true,
-    ]);
-    renderer.dispose();
+    ]).toEqual([Array.from(histogramParams(VIEWPORT, "average", 1, 2)), "test view glare sources"]);
+  });
+
+  it("writes the frame's glare sources before it is dispatched (fix-view-light)", async () => {
+    const { engine, histogram } = await withSources();
+    const written = engine.writes.findIndex((w) => w.buffer === "test view glare sources");
+    expect(written >= 0 && written < (histogram?.writesBefore ?? -1)).toBe(true);
   });
 
   it("is not taken on a frame that meters nothing, as an instrument's (R07.T19.c)", async () => {
