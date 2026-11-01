@@ -2270,3 +2270,19 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - Under every 26 hold, the grid's warm plan goes from 1.04 to 0.71 ms at 1 ly and from 2.10 to
     1.42 ms at 50 ly, against 0.08 and 0.16 ms before P08.T12. The cold remainder is the layer-E
     records' exact fates, about 31 a cell at 0.39 ms each, which the marks' design needs.
+- **P08.T15.b perf, the edge-on remnants map (lane `perf-remnants-map`, 2026-11-01; bit for
+  bit).** `galaxy::map::class_columns` integrates an edge-on band's displaced classes column by
+  column, sharing radii, arm points and radial parts, and each line between nodes of one `|z|` or
+  `|y|`. `displaced_pixel` stays as the tests' reference.
+  - New: `map::render_row_ranges`, several row ranges rendered as one band;
+    `FlaredLayer::density_from`; and `BallisticLayer`'s `radial_exponent`, `height_exponent` and
+    `envelope_from`. The server bands every edge-on density map in mirrored half-bands
+    (`Banding::Mirrored`), each job 8 rows and their mirrors.
+  - Lean dropped: no resolution cap. 1,024 px edge-on is 50 s on 16 workers (pod, release), so
+    the server serves every resolution and the client is unchanged.
+  - Tests: `the_bands_class_columns_are_the_direct_quadratures_bit_for_bit` and
+    `every_class_is_even_in_z_and_its_split_density_is_its_own`; in the server,
+    `under_every_26_hold_the_remnants_maps_are_the_pinned_ones` and
+    `the_other_maps_are_the_pinned_ones_at_24_25_and_26`, which pin BASE's digests, and the sim's
+    `the_remnants_maps_are_pinned_under_every_26_hold`. The 26 bump re-pins or drops the 24 and 25
+    rows, which build those versions' galaxies (`galaxy_at`).
