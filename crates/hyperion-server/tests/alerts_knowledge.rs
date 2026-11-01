@@ -148,11 +148,11 @@ async fn alerts_knowledge_tell_every_subscription_of_the_universe_of_a_clear() {
     server.stop().await;
 }
 
-/// The census per class rides a notification: subscribed to the core collapses and the luminous
-/// blue variables at a host limit of one, through a V sensor that reaches 700 ly, both open
+/// The census per class rides a notification: subscribed to the core collapses and the tidal
+/// disruption victims at a host limit of one, through a V sensor that reaches 700 ly, both open
 /// `pending`; once the first scan has run, a notification carries each class's census in class
-/// order, the core collapses `over_limit` with their hosts counted, and the luminous blue
-/// variables, whose walk is not built, `unwalked` with none.
+/// order, the core collapses `over_limit` with their hosts counted, and the victims, whose centre
+/// the server walks without a global list, `unwalked` with none.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alerts_knowledge_carry_the_census_per_class_over_the_limit_included() {
     let galaxy = Galaxy::new(Seed::new(SEED));
@@ -168,7 +168,7 @@ async fn alerts_knowledge_carry_the_census_per_class_over_the_limit_included() {
     let universe = client.create_universe("Alerts: the census", SEED).await.id;
     let classes = [
         CatalogueClassWire::CoreCollapse,
-        CatalogueClassWire::LuminousBlueVariable,
+        CatalogueClassWire::TidalDisruptionVictim,
     ];
     let request = subscribe_to(
         &universe,
@@ -195,7 +195,7 @@ async fn alerts_knowledge_carry_the_census_per_class_over_the_limit_included() {
             break notification.census;
         }
     };
-    let [core_collapses, eruptions] = census[..] else {
+    let [core_collapses, victims] = census[..] else {
         panic!("each class's census: {census:?}");
     };
     assert_eq!(
@@ -215,9 +215,9 @@ async fn alerts_knowledge_carry_the_census_per_class_over_the_limit_included() {
             .is_some_and(|hosts| hosts > 1.0)
     );
     assert_eq!(
-        (eruptions.class, eruptions.status, eruptions.expected_hosts),
+        (victims.class, victims.status, victims.expected_hosts),
         (
-            CatalogueClassWire::LuminousBlueVariable,
+            CatalogueClassWire::TidalDisruptionVictim,
             ClassCensusStatusDto::Unwalked,
             None
         )
