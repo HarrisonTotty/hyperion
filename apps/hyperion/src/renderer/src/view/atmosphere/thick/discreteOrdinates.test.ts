@@ -14,6 +14,7 @@ import {
   type GroundReflectance,
   homogeneousSolution,
   intensityAtAzimuth,
+  layerKeep,
   layerStackRightHandSide,
   layerStackRightHandSideInto,
   modeParticulars,
@@ -1394,5 +1395,86 @@ describe("a solve's bits (R08.T14.b)", () => {
     expect(await bitsOf(solution)).toBe(
       "d9da446ba8e60802a6053a0b589a755e0ae84505d5b07ffe352e4e28557ade58",
     );
+  });
+});
+
+describe("a solve's kept layers (R08.T16.b.2's lever)", () => {
+  // An upper air of 12 layers from 72 to 12 km, and a cloud of 6 under it to the ground.
+  const radiusM = 6_371_000;
+  const upperHeights = Float64Array.from({ length: 13 }, (_, k) => 60_000 * (1 - k / 12) + 12_000);
+  const wholeHeights = Float64Array.from({ length: 19 }, (_, k) =>
+    k <= 12 ? entry(upperHeights, k) : 12_000 * (1 - (k - 12) / 6),
+  );
+  const upper = Array.from({ length: 12 }, (_, p): OrdinateLayer => ({
+    opticalDepth: 0.02 + 0.01 * p,
+    singleScatteringAlbedo: 0.9 + 0.005 * p,
+    moments: henyeyGreenstein(0.2 + 0.02 * p),
+  }));
+  const cloud = slab(4, 0.999, henyeyGreenstein(0.7), 6);
+  const users = [0.3, 0.7, 1];
+  const keptBy = (layers: ReadonlyArray<OrdinateLayer>): ReturnType<typeof layerKeep> => {
+    const keep = layerKeep();
+    const cosines = [0.9, 0.5, 0.2, -0.05];
+    const depths = Float64Array.from(layers, (layer) => layer.opticalDepth);
+    solveDiscreteOrdinates({
+      layers,
+      groundAlbedo: 0.3,
+      beamCosines: cosines,
+      userCosines: users,
+      maxMode: 2,
+      beamPaths: cosines.map((mu0) => sphericalBeamPath(radiusM, upperHeights, depths, mu0)),
+      keepLayers: keep,
+    });
+    return keep;
+  };
+  const columnProblem = (
+    layers: ReadonlyArray<OrdinateLayer>,
+    userCosines: ReadonlyArray<number>,
+  ): DiscreteOrdinatesProblem => {
+    // The upper solve's daylit beams, in another order.
+    const cosines = [0.2, 0.9, 0.5];
+    const depths = Float64Array.from(layers, (layer) => layer.opticalDepth);
+    return {
+      layers,
+      groundAlbedo: 0.1,
+      beamCosines: cosines,
+      userCosines,
+      maxMode: 2,
+      beamPaths: cosines.map((mu0) => sphericalBeamPath(radiusM, wholeHeights, depths, mu0)),
+      fieldInterfaces: [12, 15, 18],
+    };
+  };
+
+  it("gives the whole column's solve the bits of its own, taking the upper solve's layers", async () => {
+    const problem = columnProblem([...upper, ...cloud], users);
+    const own = await bitsOf(solveDiscreteOrdinates(problem));
+    const kept = solveDiscreteOrdinates({ ...problem, keptLayers: keptBy(upper) });
+    expect(await bitsOf(kept)).toBe(own);
+  });
+
+  it("takes the kept particular solutions where they are the solve's: spoilt, they spoil it", async () => {
+    const problem = columnProblem([...upper, ...cloud], users);
+    const own = await bitsOf(solveDiscreteOrdinates(problem));
+    const keep = keptBy(upper);
+    keep.kept?.modes.get(0)?.beams.get(0.5)?.particulars.top.fill(Number.NaN);
+    expect(await bitsOf(solveDiscreteOrdinates({ ...problem, keptLayers: keep }))).not.toBe(own);
+  });
+
+  it("takes only the leading layers that are its own", async () => {
+    // The fifth layer's albedo another: the four above it alone are the keeper's.
+    const altered = upper.map((layer, p) =>
+      p === 4 ? { ...layer, singleScatteringAlbedo: 0.91 } : layer,
+    );
+    const problem = columnProblem([...altered, ...cloud], users);
+    const own = await bitsOf(solveDiscreteOrdinates(problem));
+    const kept = solveDiscreteOrdinates({ ...problem, keptLayers: keptBy(upper) });
+    expect(await bitsOf(kept)).toBe(own);
+  });
+
+  it("takes none at other user cosines", async () => {
+    const problem = columnProblem([...upper, ...cloud], [0.3, 0.75, 1]);
+    const own = await bitsOf(solveDiscreteOrdinates(problem));
+    const kept = solveDiscreteOrdinates({ ...problem, keptLayers: keptBy(upper) });
+    expect(await bitsOf(kept)).toBe(own);
   });
 });

@@ -445,6 +445,118 @@ export interface DiscreteOrdinatesProblem {
   readonly fieldInterfaces?: ArrayLike<number>;
   /** Whether the downward user intensities are made (NaN where not); true when absent. */
   readonly userDown?: boolean;
+  /** Where the solve keeps its layers for a later solve ({@link LayerKeep}); none kept when absent. */
+  readonly keepLayers?: LayerKeep;
+  /** An earlier solve's kept layers ({@link LayerKeep}), taken where they are this solve's. */
+  readonly keptLayers?: LayerKeep;
+}
+
+/**
+ * A solve's layers kept for a later solve over the same leading layers (plan R08, R08.T16.b.2's
+ * lever: the table below a deck solves the whole column, whose upper layers are the upper medium's
+ * solve's): per mode, each layer's homogeneous solution, faces and user transfers, and each beam's
+ * particular solutions at its own slant factors, by its μ₀.
+ *
+ * @remarks
+ * A solve that reads it takes them for its leading layers whose optics are the keeper's to the bit,
+ * at the same streams, user cosines and downward user field, and a beam's particular solutions in
+ * those layers where its μ₀, its transmission at the layer's top and the slant factor it is solved
+ * at are the keeper's beam's; it makes the rest. Each layer's are a function of those alone, so the
+ * solve's fields are the bits of its own solve without them.
+ */
+export interface LayerKeep {
+  /** The keeping solve's layers, set by it; a reader may let them go once it has solved. */
+  kept: KeptSolve | undefined;
+}
+
+/** A fresh {@link LayerKeep}, which a solve given it as `keepLayers` fills. */
+export function layerKeep(): LayerKeep {
+  return { kept: undefined };
+}
+
+/** What a {@link LayerKeep} holds of its solve. */
+export interface KeptSolve {
+  readonly streams: number;
+  readonly userCosines: Float64Array;
+  readonly userDown: boolean;
+  readonly layers: ReadonlyArray<PreparedLayer>;
+  /** Each mode's, by m. */
+  readonly modes: Map<number, KeptMode>;
+}
+
+/** One mode's kept layers ({@link LayerKeep}). */
+interface KeptMode {
+  readonly layerModes: ReadonlyArray<LayerMode>;
+  readonly faces: ReadonlyArray<LayerFaces>;
+  readonly transfers: ReadonlyArray<UserTransfer>;
+  /** Each beam's first solve at its own slant factors, by μ₀. */
+  readonly beams: Map<number, KeptBeam>;
+}
+
+/** A beam's particular solutions in every layer of its keeper, with what they rest on. */
+interface KeptBeam {
+  readonly cosine: number;
+  readonly topTransmission: Float64Array;
+  readonly slantFactor: Float64Array;
+  readonly particulars: ModeParticulars;
+}
+
+/** The kept layers a solve takes: the keeper's mode by m, and how many leading layers are its own. */
+interface KeptLead {
+  readonly solve: KeptSolve;
+  readonly count: number;
+}
+
+/**
+ * The leading layers of `layers` that are `keep`'s solve's to the bit, at the same streams, user
+ * cosines and downward field; `undefined` for none.
+ */
+function keptLeadOf(
+  keep: LayerKeep | undefined,
+  layers: ReadonlyArray<PreparedLayer>,
+  userCosines: Float64Array,
+  streams: number,
+  userDown: boolean,
+): KeptLead | undefined {
+  const solve = keep?.kept;
+  if (
+    solve === undefined ||
+    solve.streams !== streams ||
+    solve.userDown !== userDown ||
+    !sameValues(solve.userCosines, userCosines)
+  ) {
+    return undefined;
+  }
+  let count = 0;
+  while (count < Math.min(layers.length, solve.layers.length)) {
+    const mine = layers[count];
+    const theirs = solve.layers[count];
+    if (
+      mine === undefined ||
+      theirs === undefined ||
+      !Object.is(mine.opticalDepth, theirs.opticalDepth) ||
+      !Object.is(mine.omega, theirs.omega) ||
+      mine.conservative !== theirs.conservative ||
+      !sameValues(mine.moments, theirs.moments)
+    ) {
+      break;
+    }
+    count += 1;
+  }
+  return count > 0 ? { solve, count } : undefined;
+}
+
+/** Whether two arrays hold the same values to the bit, of the same length. */
+function sameValues(a: Float64Array, b: Float64Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (!Object.is(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Which fields of a solve are made ({@link DiscreteOrdinatesProblem.fieldInterfaces}). */
@@ -1455,6 +1567,14 @@ interface ModeContext {
   readonly ground: GroundModeTerms | undefined;
   /** The fields the solve makes. */
   readonly fields: SolveFields;
+  /** A kept solve's mode and how many leading layers are this solve's ({@link LayerKeep}), or none. */
+  readonly kept: KeptModeLead | undefined;
+}
+
+/** A kept solve's mode, with how many of its leading layers are a solve's own. */
+interface KeptModeLead {
+  readonly mode: KeptMode;
+  readonly count: number;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
@@ -1596,6 +1716,14 @@ function solvedModes(
   const planck =
     problem.thermal === undefined ? undefined : checkedThermal(problem.thermal, layers);
   const fields = solveFieldsOf(problem, layerCount);
+  const lead = keptLeadOf(problem.keptLayers, layers, userCosines, streams, fields.userDown);
+  const keeping: KeptSolve | undefined =
+    problem.keepLayers === undefined
+      ? undefined
+      : { streams, userCosines, userDown: fields.userDown, layers, modes: new Map() };
+  if (problem.keepLayers !== undefined) {
+    problem.keepLayers.kept = keeping;
+  }
   const perBeam: ModeIntensities[][] = beams.map(() => []);
   const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   let thermal: ThermalSolution | undefined;
@@ -1604,6 +1732,7 @@ function solvedModes(
       groundReflectance === undefined
         ? undefined
         : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
+    const keptMode = lead?.solve.modes.get(m);
     const context = modeContext(
       m,
       quadrature,
@@ -1612,9 +1741,24 @@ function solvedModes(
       problem.groundAlbedo,
       ground,
       fields,
+      keptMode === undefined || lead === undefined
+        ? undefined
+        : { mode: keptMode, count: lead.count },
     );
     contexts?.push(context);
-    solveBeamModes(context, beams, exponentials).forEach((mode, b) => {
+    const keptHere: KeptMode | undefined =
+      keeping === undefined
+        ? undefined
+        : {
+            layerModes: context.layerModes,
+            faces: context.faces,
+            transfers: context.transfers,
+            beams: new Map(),
+          };
+    if (keeping !== undefined && keptHere !== undefined) {
+      keeping.modes.set(m, keptHere);
+    }
+    solveBeamModes(context, beams, exponentials, keptHere).forEach((mode, b) => {
       perBeam[b]?.push(mode);
     });
     if (m === 0 && planck !== undefined) {
@@ -1683,17 +1827,28 @@ function modeContext(
   groundAlbedo: number,
   ground: GroundModeTerms | undefined,
   fields: SolveFields,
+  kept: KeptModeLead | undefined,
 ): ModeContext {
   const lmax = quadrature.streams - 1;
   const n = quadrature.nodes.length;
   const nodeLegendre = legendreTable(m, lmax, quadrature.nodes);
   const userLegendre = legendreTable(m, lmax, userCosines);
   const weightedNodeLegendre = weightedLegendreTable(nodeLegendre, quadrature);
-  const layerModes = layers.map((layer) =>
-    layerMode(layer, m, quadrature, nodeLegendre, weightedNodeLegendre),
+  // A kept solve's leading layers are these layers' own to the bit ({@link LayerKeep}).
+  const lead = kept?.count ?? 0;
+  const layerModes = layers.map(
+    (layer, p) =>
+      (p < lead ? kept?.mode.layerModes[p] : undefined) ??
+      layerMode(layer, m, quadrature, nodeLegendre, weightedNodeLegendre),
   );
-  const faces = layerModes.map(scalarFaces);
-  const transfers = layerModes.map((lm) => userTransfer(lm, userLegendre, userCosines));
+  const faces = layerModes.map(
+    (lm, p) => (p < lead ? kept?.mode.faces[p] : undefined) ?? scalarFaces(lm),
+  );
+  const transfers = layerModes.map(
+    (lm, p) =>
+      (p < lead ? kept?.mode.transfers[p] : undefined) ??
+      userTransfer(lm, userLegendre, userCosines),
+  );
   let reflection: Float64Array | undefined;
   if (m === 0 && groundAlbedo > 0) {
     const r = new Float64Array(n * n);
@@ -1721,6 +1876,7 @@ function modeContext(
     groundAlbedo,
     ground,
     fields,
+    kept,
   };
 }
 
@@ -1740,6 +1896,7 @@ function solveBeamModes(
   context: ModeContext,
   beams: ReadonlyArray<PreparedBeam>,
   exponentials: ReadonlyArray<BeamExponentials>,
+  keeping: KeptMode | undefined,
 ): ModeIntensities[] {
   const { m, quadrature, layerModes, userCosines, stack } = context;
   const n = quadrature.nodes.length;
@@ -1785,7 +1942,29 @@ function solveBeamModes(
     if (own === undefined) {
       throw new Error(`beam ${solve.beam.index} has no exponentials`);
     }
-    beamParticularsInto(context, solve.beam, solve.slantFactor, beamLegendre, own, scratch, parts);
+    beamParticularsInto(
+      context,
+      solve.beam,
+      solve.slantFactor,
+      beamLegendre,
+      own,
+      scratch,
+      keptParticularsOf(context.kept, solve),
+      parts,
+    );
+    // A beam's first solve at its own slant factors is the one a later solve can take.
+    if (
+      keeping !== undefined &&
+      solve.slantFactor === solve.beam.slantFactor &&
+      !keeping.beams.has(solve.beam.cosine)
+    ) {
+      keeping.beams.set(solve.beam.cosine, {
+        cosine: solve.beam.cosine,
+        topTransmission: solve.beam.topTransmission,
+        slantFactor: solve.beam.slantFactor,
+        particulars: parts,
+      });
+    }
     layerStackRightHandSideInto(
       stack,
       parts,
@@ -1832,6 +2011,36 @@ function solveBeamModes(
   });
 }
 
+/** A kept beam's particular solutions, and how many leading layers a solve takes of them. */
+interface KeptParticulars {
+  readonly particulars: ModeParticulars;
+  readonly count: number;
+}
+
+/**
+ * The kept particular solutions a solve takes ({@link LayerKeep}): its beam's keeper's at the same
+ * μ₀, in the leading kept layers where its transmission and the slant factor it is solved at are
+ * the keeper's beam's to the bit; `undefined` for none.
+ */
+function keptParticularsOf(
+  kept: KeptModeLead | undefined,
+  solve: BeamSolve,
+): KeptParticulars | undefined {
+  const beam = kept?.mode.beams.get(solve.beam.cosine);
+  if (kept === undefined || beam === undefined || !Object.is(beam.cosine, solve.beam.cosine)) {
+    return undefined;
+  }
+  let count = 0;
+  while (
+    count < kept.count &&
+    Object.is(at(solve.beam.topTransmission, count), at(beam.topTransmission, count)) &&
+    Object.is(at(solve.slantFactor, count), at(beam.slantFactor, count))
+  ) {
+    count += 1;
+  }
+  return count > 0 ? { particulars: beam.particulars, count } : undefined;
+}
+
 /**
  * A beam's exponentials through each layer, the same at every mode: e^{−λ_p Δ_p}, and per user
  * cosine φ(λ_p + 1 ÷ μ_u, Δ_p) and ψ(λ_p, 1 ÷ μ_u, Δ_p) at `p × U + u`, made at the beam's first
@@ -1868,6 +2077,7 @@ function beamParticularsInto(
   beamLegendre: Float64Array,
   exponentials: BeamExponentials,
   scratch: ParticularScratch,
+  kept: KeptParticulars | undefined,
   out: ModeParticulars,
 ): void {
   const { m, quadrature, layerModes, userLegendre, userCosines } = context;
@@ -1877,7 +2087,19 @@ function beamParticularsInto(
   const users = userCosines.length;
   const { sourceUp, sourceDown } = scratch;
   const { made, through: throughs, along, against } = exponentials;
+  const lead = kept?.count ?? 0;
+  if (kept !== undefined) {
+    // The kept layers' particular solutions are this beam's there to the bit ({@link LayerKeep}).
+    const from = kept.particulars;
+    out.top.set(from.top.subarray(0, lead * span));
+    out.bottom.set(from.bottom.subarray(0, lead * span));
+    out.userUp.set(from.userUp.subarray(0, lead * users));
+    out.userDown.set(from.userDown.subarray(0, lead * users));
+  }
   layerModes.forEach((lm, p) => {
+    if (p < lead) {
+      return;
+    }
     const transmission = at(beam.topTransmission, p);
     const lambda = at(slantFactor, p);
     const { omega, opticalDepth: depth } = lm.layer;

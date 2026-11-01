@@ -194,6 +194,8 @@ import {
   type GroundCosines,
   groundCosinesOf,
   type GroundReflectance,
+  layerKeep,
+  type LayerKeep,
   type ModeIntensities,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
@@ -210,7 +212,13 @@ import {
   type ExpSumOptions,
   fitExpSum,
 } from "./expSum";
-import { type SphericalBeam, sphericalBeamPath, sphericalSlantDepths } from "./sphericalBeam";
+import {
+  type BeamChords,
+  type SphericalBeam,
+  sphericalBeamChords,
+  sphericalBeamPath,
+  sphericalSlantDepths,
+} from "./sphericalBeam";
 import { EMISSION_CHANNEL_WEIGHTS, planckRadiance } from "../thermal";
 import {
   mediumTemperatureK,
@@ -1584,6 +1592,8 @@ export interface BinSolve {
    * radiance unit per metre, weight 1; absent for a column without a temperature.
    */
   readonly thermalSource?: Float64Array;
+  /** The solve's layers kept for a later solve (`discreteOrdinates.ts`'s `LayerKeep`), where asked. */
+  readonly keptLayers: LayerKeep | undefined;
 }
 
 /**
@@ -1626,6 +1636,12 @@ export interface BakeBandOptions {
    * none by default.
    */
   readonly horizonTerms?: HorizonTerms;
+  /**
+   * Whether each solve keeps its layers for a later solve over the same upper layers, which
+   * {@link BakeBandOptions.onSolve} reads in {@link BinSolve.keptLayers} (R08.T16.b.2's lever: the
+   * table below a deck); none kept by default.
+   */
+  readonly keepLayers?: boolean;
 }
 
 /**
@@ -2009,6 +2025,8 @@ export function bakeBinSolve(
     "every",
     false,
     undefined,
+    undefined,
+    false,
   );
 }
 
@@ -2047,6 +2065,8 @@ function solveOf(
   interfaces: SolveInterfaces,
   curved: boolean,
   horizon: HorizonTerms | undefined,
+  chords: ReadonlyArray<BeamChords> | undefined,
+  keepLayers: boolean,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -2059,11 +2079,11 @@ function solveOf(
   } = deltaMLayersOf(base, factor, term.absorptionDepth, 0);
   const radius = band.bottomRadiusM;
   const planck = prepared.interfacePlanck?.[bin];
-  const scaledBeams = Array.from(grid.sunCosines, (mu0) =>
-    sphericalBeamPath(radius, interfaceHeightsM, scaledDepths, mu0),
+  const scaledBeams = Array.from(grid.sunCosines, (mu0, s) =>
+    sphericalBeamPath(radius, interfaceHeightsM, scaledDepths, mu0, chords?.[s]),
   );
-  const kernelBeams = Array.from(grid.sunCosines, (mu0) =>
-    sphericalBeamPath(radius, interfaceHeightsM, kernelDepths, mu0),
+  const kernelBeams = Array.from(grid.sunCosines, (mu0, s) =>
+    sphericalBeamPath(radius, interfaceHeightsM, kernelDepths, mu0, chords?.[s]),
   );
   const groundReflectance = ground?.(
     bin,
@@ -2071,6 +2091,7 @@ function solveOf(
     groundCosinesOf(THICK_BAKE_STREAMS, grid.upwardCosines, grid.sunCosines),
     solveModes - 1,
   );
+  const keptLayers = keepLayers ? layerKeep() : undefined;
   const problem: DiscreteOrdinatesProblem = {
     layers: scaled,
     groundAlbedo: groundReflectance === undefined ? (prepared.groundAlbedo[bin] ?? Number.NaN) : 0,
@@ -2084,6 +2105,7 @@ function solveOf(
       ? {}
       : { thermal: { interfacePlanck: planck, groundPlanck: planck[layers] ?? Number.NaN } }),
     ...(interfaces === "table" ? { fieldInterfaces: tableInterfaces(prepared) } : {}),
+    ...(keptLayers === undefined ? {} : { keepLayers: keptLayers }),
   };
   // The rows that take the horizon's terms (the module's remarks), their fields I + B by row.
   const rows =
@@ -2263,6 +2285,7 @@ function solveOf(
     light,
     groundReflectance,
     ...(thermalSource === undefined ? {} : { thermalSource }),
+    keptLayers,
   };
 }
 
@@ -2436,6 +2459,11 @@ export function bakeBins(
   const views = 2 * grid.upwardCosines.length;
   const points = altitudes * suns * views * THICK_BAKE_MODES;
   const thermal = prepared.interfacePlanck !== undefined;
+  // Each sun's beam's chords through the band's column, which every bin and term traces anew at its
+  // own depths (R08.T16.b.2's lever).
+  const chords = Array.from(grid.sunCosines, (mu0) =>
+    sphericalBeamChords(geometry.bottomRadiusM, prepared.interfaceHeightsM, mu0),
+  );
   const parts = prepared.bins.map((b): MsBinPart => {
     const base = bandBinOf(prepared, b, geometry.coefficientFactor);
     // E_th, A × V, over the first light's terms (the module's remarks, "Thermal emission").
@@ -2469,6 +2497,8 @@ export function bakeBins(
             "table",
             options?.curvedStreams === true,
             options?.horizonTerms,
+            chords,
+            options?.keepLayers ?? false,
           );
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);

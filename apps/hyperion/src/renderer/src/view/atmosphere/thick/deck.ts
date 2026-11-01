@@ -163,6 +163,7 @@ import {
   type DiscreteOrdinatesSolution,
   type GroundCosines,
   type GroundReflectance,
+  type LayerKeep,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
   solveDiscreteOrdinateModes,
@@ -180,7 +181,12 @@ import {
   type PreparedPolarisation,
 } from "./polarisation";
 import { ENVELOPE_FLOOR_CHANNEL } from "./regime";
-import { type SphericalBeam, sphericalBeamPath } from "./sphericalBeam";
+import {
+  type BeamChords,
+  type SphericalBeam,
+  sphericalBeamChords,
+  sphericalBeamPath,
+} from "./sphericalBeam";
 import { type SpectralColumn, spectralOptics, type SpectralPhase } from "./spectralColumn";
 import { cos, exp } from "../../../lib/pinnedMath";
 
@@ -586,12 +592,22 @@ export function deckSingleScattering(
     { length: maxMode + 1 },
     () => new Float64Array(outgoingCosines.length * columns),
   );
+  // Λ_l^m at each cosine and mode, once (R08.T16.b.2's lever: each pair of cosines read them anew).
+  const outgoing = Array.from(outgoingCosines, (mu) =>
+    Array.from({ length: maxMode + 1 }, (_, m) => normalizedAssociatedLegendre(m, lmax, mu)),
+  );
+  const incoming = Array.from(incidentCosines, (mu0) =>
+    Array.from({ length: maxMode + 1 }, (_, m) => normalizedAssociatedLegendre(m, lmax, -mu0)),
+  );
   for (const [i, mu] of outgoingCosines.entries()) {
     for (const [j, mu0] of incidentCosines.entries()) {
       const escapes = layerEscapes(layers, mu, mu0);
       for (let m = 0; m <= maxMode; m += 1) {
-        const out = normalizedAssociatedLegendre(m, lmax, mu);
-        const into = normalizedAssociatedLegendre(m, lmax, -mu0);
+        const out = outgoing[i]?.[m];
+        const into = incoming[j]?.[m];
+        if (out === undefined || into === undefined) {
+          throw new Error(`no Legendre functions of mode ${m} at cosines ${i} and ${j}`);
+        }
         let sum = 0;
         for (const [p, layer] of layers.entries()) {
           const omega = layer.singleScatteringAlbedo;
@@ -1129,6 +1145,18 @@ export function bakeDeckBins(
     }
     return { ...out, phaseWeights, nadirWeight };
   };
+  // Under a deck over a surface, the whole column's solve of each bin and term follows the upper
+  // medium's, whose layers it takes (R08.T16.b.2's lever), and the keep goes with it.
+  let below: BelowDeckRecorder | null;
+  switch (prepared.split.floor) {
+    case "ground":
+      below = belowDeckRecorder(prepared, geometry);
+      break;
+    case "envelope":
+      below = null;
+      break;
+  }
+  const belowRecords = new Map<number, Map<BinTerm, BelowRecord>>();
   const above = bakeBins(upper, body, band, {
     ground,
     onSolve: (bin, term, solve) => {
@@ -1138,8 +1166,20 @@ export function bakeDeckBins(
         records.set(bin, byTerm);
       }
       byTerm.set(term, recordOf(bin, term, solve));
+      if (below !== null) {
+        let belowByTerm = belowRecords.get(bin);
+        if (belowByTerm === undefined) {
+          belowByTerm = new Map();
+          belowRecords.set(bin, belowByTerm);
+        }
+        belowByTerm.set(term, below(bin, term, solve.keptLayers));
+      }
+      if (solve.keptLayers !== undefined) {
+        solve.keptLayers.kept = undefined;
+      }
     },
     solveModes: diffuseModes,
+    keepLayers: below !== null,
   });
   const deckLayerCount = prepared.deck.interfaceHeightsM.length - 1;
   const none = new Float64Array(prepared.whole.interfaceHeightsM.length - 1);
@@ -1152,15 +1192,7 @@ export function bakeDeckBins(
     singleBeamGeometry: points,
   } as const;
   const entries = DECK_PHASE_U.length;
-  let belowParts: ReturnType<typeof belowDeckBins> | null;
-  switch (prepared.split.floor) {
-    case "ground":
-      belowParts = belowDeckBins(prepared, geometry);
-      break;
-    case "envelope":
-      belowParts = null;
-      break;
-  }
+  const belowParts = below === null ? null : belowDeckBins(prepared, below, belowRecords);
   const parts = upper.bins.map((b): DeckBinPart => {
     const lights = upper.lights.map((light, slot): DeckBinLight => {
       const bin = light.bins[b];
@@ -1375,6 +1407,11 @@ export interface DeckColumnSolve {
  *
  * @param fields - The fields the solve makes (`discreteOrdinates.ts`'s `fieldInterfaces` and
  *   `userDown`): every one when absent; the table below asks its altitudes' alone.
+ * @param chords - Each daylit μ₀'s beam's chords through the whole column (`sphericalBeam.ts`'s
+ *   `sphericalBeamChords`), kept by a caller that solves its every bin and term; found anew by
+ *   default.
+ * @param kept - The upper medium's solve's layers in this bin and term (`discreteOrdinates.ts`'s
+ *   `LayerKeep`), which the whole column's leading layers take; none by default.
  * @throws RangeError as the solver refuses a layer.
  */
 export function deckColumnSolve(
@@ -1383,6 +1420,8 @@ export function deckColumnSolve(
   bin: number,
   term: BinTerm,
   fields: Pick<DiscreteOrdinatesProblem, "fieldInterfaces" | "userDown"> = {},
+  chords?: ReadonlyArray<BeamChords>,
+  kept?: LayerKeep,
 ): DeckColumnSolve {
   const { upper, deck, whole, floorAlbedo } = prepared;
   const { grid } = upper;
@@ -1412,11 +1451,11 @@ export function deckColumnSolve(
   const radius = band.bottomRadiusM;
   const heights = whole.interfaceHeightsM;
   const suns = daylitCosines(grid);
-  const scaledBeams = Array.from(suns, (mu0) =>
-    sphericalBeamPath(radius, heights, scaledDepths, mu0),
+  const scaledBeams = Array.from(suns, (mu0, s) =>
+    sphericalBeamPath(radius, heights, scaledDepths, mu0, chords?.[s]),
   );
-  const kernelBeams = Array.from(suns, (mu0) =>
-    sphericalBeamPath(radius, heights, kernelDepths, mu0),
+  const kernelBeams = Array.from(suns, (mu0, s) =>
+    sphericalBeamPath(radius, heights, kernelDepths, mu0, chords?.[s]),
   );
   const solution = solveDiscreteOrdinates({
     layers,
@@ -1427,6 +1466,7 @@ export function deckColumnSolve(
     streams: THICK_BAKE_STREAMS,
     beamPaths: scaledBeams,
     ...fields,
+    ...(kept === undefined ? {} : { keptLayers: kept }),
   });
   return { solution, scaledBeams, kernelBeams };
 }
@@ -1496,15 +1536,14 @@ interface BelowRecord {
   readonly direct: Float64Array;
 }
 
+/** The table below the deck's record of one bin and term, the upper medium's kept layers taken. */
+type BelowDeckRecorder = (bin: number, term: BinTerm, kept: LayerKeep | undefined) => BelowRecord;
+
 /**
- * The table below the deck of one band in the bins `prepared` holds (the module's remarks): the
- * whole column solved once a bin and term, its fields read at the deck's altitudes and summed by
- * the terms' weights, before the channels ({@link belowDeckOf}).
+ * A band's {@link BelowDeckRecorder}: the whole column solved in a bin and term, its fields read at
+ * the deck's altitudes.
  */
-function belowDeckBins(
-  prepared: PreparedDeck,
-  band: ThickBakeBand,
-): { readonly grid: BelowDeckGrid; readonly parts: Map<number, ReadonlyArray<BelowBinLight>> } {
+function belowDeckRecorder(prepared: PreparedDeck, band: ThickBakeBand): BelowDeckRecorder {
   const { upper, deck } = prepared;
   const { grid } = upper;
   const deckLayers = deck.interfaceHeightsM.length - 1;
@@ -1516,12 +1555,17 @@ function belowDeckBins(
   const v2 = 2 * views;
   const modes = THICK_BAKE_MODES;
   const size = altitudes * suns * v2 * modes;
-  // The node fields at the table's altitudes alone, all `recordOf` reads of them.
+  // The node fields at the table's altitudes alone, all the record reads of them.
   const fieldInterfaces = Array.from(
     { length: altitudes },
     (_, a) => ground - a * grid.altitudeStride,
   );
-  const recordOf = (solve: DeckColumnSolve): BelowRecord => {
+  // Each sun's beam's chords through the whole column, which every bin and term traces anew.
+  const chords = Array.from(sunCosines, (mu0) =>
+    sphericalBeamChords(band.bottomRadiusM, prepared.whole.interfaceHeightsM, mu0),
+  );
+  return (bin, term, kept) => {
+    const solve = deckColumnSolve(prepared, band, bin, term, { fieldInterfaces }, chords, kept);
     const out = {
       radiance: new Float64Array(size),
       irradiance: new Float64Array(altitudes * suns),
@@ -1551,7 +1595,29 @@ function belowDeckBins(
     }
     return out;
   };
-  const records = new Map<number, Map<BinTerm, BelowRecord>>();
+}
+
+/**
+ * The table below the deck of one band in the bins `prepared` holds (the module's remarks): the
+ * whole column solved once a bin and term, its fields read at the deck's altitudes and summed by
+ * the terms' weights, before the channels ({@link belowDeckOf}).
+ *
+ * @param records - Each bin and term's record already made, by bin; those missing `recordOf` makes.
+ */
+function belowDeckBins(
+  prepared: PreparedDeck,
+  recordOf: BelowDeckRecorder,
+  records: Map<number, Map<BinTerm, BelowRecord>>,
+): { readonly grid: BelowDeckGrid; readonly parts: Map<number, ReadonlyArray<BelowBinLight>> } {
+  const { upper, deck } = prepared;
+  const { grid } = upper;
+  const altitudes = deck.altitudesM.length;
+  const sunCosines = daylitCosines(grid);
+  const suns = sunCosines.length;
+  const views = grid.upwardCosines.length;
+  const v2 = 2 * views;
+  const modes = THICK_BAKE_MODES;
+  const size = altitudes * suns * v2 * modes;
   const sums = upper.lights.map((light, slot) =>
     upper.bins.map((b): BelowBinLight => {
       const bin = light.bins[b];
@@ -1571,7 +1637,7 @@ function belowDeckBins(
       for (const term of bin.terms) {
         let record = byTerm.get(term);
         if (record === undefined) {
-          record = recordOf(deckColumnSolve(prepared, band, b, term, { fieldInterfaces }));
+          record = recordOf(b, term, undefined);
           byTerm.set(term, record);
         }
         const w = term.weight;

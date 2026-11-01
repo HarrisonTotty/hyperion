@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { bitsOf } from "../../../test/bits";
 import { planeParallelBeam } from "./discreteOrdinates";
-import { SLANT_FACTOR_FLOOR, sphericalBeamPath, sphericalSlantDepths } from "./sphericalBeam";
+import {
+  SLANT_FACTOR_FLOOR,
+  type SphericalBeam,
+  sphericalBeamChords,
+  sphericalBeamPath,
+  sphericalSlantDepths,
+} from "./sphericalBeam";
 
 /** A column of `count` layers, its interfaces from the top down, evenly over `topM`. */
 function interfaces(topM: number, count: number): Float64Array {
@@ -403,5 +410,49 @@ describe("the slant depths alone (R08.T14.d.4's curved streams)", () => {
       return asked.every((k, i) => Object.is(alone[i], whole[k]));
     });
     expect(same).toBe(true);
+  });
+});
+
+describe("the pseudo-spherical beam's kept chords (R08.T16.b.2's lever)", () => {
+  const radiusM = 6_371_000;
+  const heights = interfaces(100_000, 64);
+  // Every fifth layer clear, so that its geometric slant enters, and the shadow's edge cutting clear
+  // layers and others; no unpinned maths.
+  const depths = Float64Array.from({ length: 64 }, (_, p) =>
+    p % 5 === 3 ? 0 : (0.002 * (p + 1)) / (1 + p / 16),
+  );
+  const cosines = [1, 0.5, 0.05, 1 / 64, 0, -1 / 64, -0.03, -0.05, -0.1, -0.15, -0.17];
+  const beams = (kept: boolean): SphericalBeam[] =>
+    cosines.map((mu0) =>
+      sphericalBeamPath(
+        radiusM,
+        heights,
+        depths,
+        mu0,
+        kept ? sphericalBeamChords(radiusM, heights, mu0) : undefined,
+      ),
+    );
+
+  it("traces the bits it traced before the chords were kept, kept or found anew", async () => {
+    // BASE's digest of the same beams.
+    const before = "7b2d98983bb6e27e710a619722ebc18a915c218e63d3e451fd4df32868aba757";
+    expect(await bitsOf(beams(false))).toBe(before);
+    expect(await bitsOf(beams(true))).toBe(before);
+  });
+
+  it("traces one set of chords at other depths to the bits found anew there", async () => {
+    const chords = sphericalBeamChords(radiusM, heights, -0.05);
+    const deeper = depths.map((tau) => 3 * tau);
+    const kept = await bitsOf(sphericalBeamPath(radiusM, heights, deeper, -0.05, chords));
+    expect(kept).toBe(await bitsOf(sphericalBeamPath(radiusM, heights, deeper, -0.05)));
+  });
+
+  it("refuses chords of another column or cosine", () => {
+    const chords = sphericalBeamChords(radiusM, heights, 0.5);
+    expect(() => sphericalBeamPath(radiusM, heights, depths, 0.4, chords)).toThrow(RangeError);
+    expect(() => sphericalBeamPath(radiusM + 1, heights, depths, 0.5, chords)).toThrow(RangeError);
+    expect(() => sphericalBeamPath(radiusM, heights.slice(), depths, 0.5, chords)).toThrow(
+      RangeError,
+    );
   });
 });
