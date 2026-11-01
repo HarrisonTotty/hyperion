@@ -739,19 +739,20 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass
 /// under every 27 hold and under the 26 arm, as measured (2026-11-01, re-measured once every 27
 /// hold took P15.T11.b's orphan streams, whose galaxy draws this reference; at an effective 73 the
-/// 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins), all over P15.T10.b's 3.1: a finding,
-/// for P15.T10.b's fit. The dynamical channel takes the mass ratio's from 166 to 62; the masses'
-/// stay high, the engine holding 13% of its primaries in layers D and E against the class's 1.3%
-/// and its giant-branch donors heavier (median 1.69 M☉) than the class's at the turn-off.
+/// 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins; at generator version 25, measured
+/// again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit. The dynamical channel takes
+/// the mass ratio's from 171 to 66 (166 to 62 at 24); the masses' stay high, the engine holding 13%
+/// of its primaries in layers D and E against the class's 1.3% and (at 24) its giant-branch donors
+/// heavier (median 1.69 M☉) than the class's at the turn-off.
 const PINNED_CHI_SQUARE: [[f64; 3]; 2] = [
     [
-        213.826_907_176_875_4,
-        62.288_584_415_560_166,
-        305.282_917_827_972_14,
+        209.685_829_507_384_54,
+        66.018_167_378_926_39,
+        309.844_914_298_476_2,
     ],
     [
-        182.057_675_866_719_88,
-        166.149_729_763_708_96,
-        286.244_102_393_490_04,
+        180.726_441_199_643_7,
+        171.029_693_612_656_76,
+        287.849_998_170_355_3,
     ],
 ];
