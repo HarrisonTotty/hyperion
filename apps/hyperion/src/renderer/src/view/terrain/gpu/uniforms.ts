@@ -56,7 +56,9 @@ export const SLOT_RECORD_BYTES = 112;
  *                           // bits 2 to 17 its morph holds at its coarse–fine edges and corners
  *                           // (`coarseFineHolds.ts`; R10.T8.c)
  *   sub : vec4u,            // x the sub-patch it draws of its slot's patch, or 0 for the whole
- *                           // patch ({@link subPatchWord}); y, z and w 0
+ *                           // patch ({@link subPatchWord}); y its edges' fades and z its corners',
+ *                           // a byte each; w its own fade, its rebake's and the slot it fades
+ *                           // from ({@link fadeWord}; R10.T16.i)
  * }
  * ```
  */
@@ -88,6 +90,30 @@ export function subPatchWord(levels: number, i: number, j: number): number {
     throw new RangeError(`sub-patch (${i}, ${j}) is not one of ${side} × ${side}`);
   }
   return (levels | (i << 5) | (j << 18)) >>> 0;
+}
+
+/** The most slots a rebake's fade can name its old bake's in ({@link fadeWord}): 16 bits. */
+export const MAX_FADE_SLOT = 0xffff;
+
+/**
+ * The instance record's word of its own fade and its rebake's (plan R10, R10.T16.i): bits 0 to 7
+ * its own fade's byte (`coarseFineHolds.ts`' `fadeByte`), 8 to 15 the fade of its rebake, from the
+ * bake in slot `oldSlot` (bits 16 to 31) to the slot's own, 0 with none. A fading rebake's instance
+ * carries both slots: the new in its `slot`, the old here.
+ *
+ * @throws RangeError for a byte that is not a whole number of 0 to 255, or a slot past
+ *   {@link MAX_FADE_SLOT}.
+ */
+export function fadeWord(own: number, rebake: number, oldSlot: number): number {
+  for (const byte of [own, rebake]) {
+    if (!Number.isInteger(byte) || byte < 0 || byte > 0xff) {
+      throw new RangeError(`a fade byte ${byte} is not 0 to 255`);
+    }
+  }
+  if (!Number.isInteger(oldSlot) || oldSlot < 0 || oldSlot > MAX_FADE_SLOT) {
+    throw new RangeError(`a rebake's old slot ${oldSlot} is not 0 to ${MAX_FADE_SLOT}`);
+  }
+  return (own | (rebake << 8) | (oldSlot << 16)) >>> 0;
 }
 
 /**
@@ -366,8 +392,11 @@ export class InstanceRecords {
    * (`CoarseFineHolds`; R10.T8.c), 0 to {@link MAX_MORPH_HOLDS}, packed above the quadrant.
    * @param sub - The sub-patch of the slot's patch it draws ({@link subPatchWord}), or 0 for the
    * whole patch.
-   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds or
-   * sub-patch word that is not a whole number in its range.
+   * @param edgeFades - Its edges' fades, a byte each in `EDGES`' order (R10.T16.i), 0 for none.
+   * @param cornerFades - Its corners' fades, a byte each in `cornerNeighbours`' order, 0 for none.
+   * @param fades - Its own fade and its rebake's ({@link fadeWord}), 0 for none.
+   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
+   * sub-patch word or fades word that is not a whole number in its range.
    */
   push(
     slot: number,
@@ -378,6 +407,9 @@ export class InstanceRecords {
     quadrant = 0,
     holds = 0,
     sub = 0,
+    edgeFades = 0,
+    cornerFades = 0,
+    fades = 0,
   ): void {
     this.pushXyz(
       slot,
@@ -390,6 +422,9 @@ export class InstanceRecords {
       quadrant,
       holds,
       sub,
+      edgeFades,
+      cornerFades,
+      fades,
     );
   }
 
@@ -405,6 +440,9 @@ export class InstanceRecords {
     quadrant = 0,
     holds = 0,
     sub = 0,
+    edgeFades = 0,
+    cornerFades = 0,
+    fades = 0,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -424,6 +462,11 @@ export class InstanceRecords {
     if (!Number.isInteger(sub) || sub < 0 || sub > 0x7fff_ffff) {
       throw new RangeError(`sub-patch word ${sub} is not 31 bits`);
     }
+    for (const word of [edgeFades, cornerFades, fades]) {
+      if (!Number.isInteger(word) || word < 0 || word > 0xffff_ffff) {
+        throw new RangeError(`fades word ${word} is not a u32`);
+      }
+    }
     const base = this.#count * F32_WORDS_PER_INSTANCE;
     this.#f32[base] = xM;
     this.#f32[base + 1] = yM;
@@ -434,9 +477,9 @@ export class InstanceRecords {
     this.#u32[base + 6] = parentSlot;
     this.#u32[base + 7] = quadrant | (holds << QUADRANT_BITS);
     this.#u32[base + 8] = sub;
-    this.#u32[base + 9] = 0;
-    this.#u32[base + 10] = 0;
-    this.#u32[base + 11] = 0;
+    this.#u32[base + 9] = edgeFades;
+    this.#u32[base + 10] = cornerFades;
+    this.#u32[base + 11] = fades;
     this.#count += 1;
   }
 

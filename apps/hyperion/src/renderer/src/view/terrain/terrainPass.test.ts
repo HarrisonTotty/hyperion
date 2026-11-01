@@ -25,6 +25,7 @@ import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
 import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT, subPatchOf } from "./gpu/uniforms";
+import { FADE_STEPS, fadeByte, fadedMorph } from "./coarseFineHolds";
 import {
   LOOKAHEAD_SAMPLES,
   LOOKAHEAD_SLOW_EVERY,
@@ -39,6 +40,7 @@ import {
   type PatchKey,
   patchKeyString,
 } from "./patchKey";
+import { MORPH_IN_MS } from "./timeMorph";
 import { planetGeometry, surfacePoint } from "./planet";
 import {
   type PatchRequest,
@@ -68,9 +70,11 @@ import { microtasks } from "../../test/opticsFakes";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
+  BAND_SLEW_PER_STEP,
   effectiveTauPx,
   morphRangeM,
   SELECT_MEASURE,
+  slewedTauPx,
   type TerrainFrame,
   type TerrainFrameInput,
   type TerrainPassOptions,
@@ -881,9 +885,15 @@ function streamedUnderBudget(): Promise<BudgetStream> {
     const sizes: number[] = [];
     let frame = pass.frame(inputAt(BUDGET_VIEW));
     sizes.push(frame.selection.patches.size);
-    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+    let n = 1;
+    for (; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
       frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
       sizes.push(frame.selection.patches.size);
+    }
+    // The bands reach the last selection's τ′ at 2% a frame (R10.T16.i): 2.6 × 10² frames for a
+    // τ′ 200 times the setting's.
+    for (const stop = n + 400; n < stop; n += 1) {
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
     }
     return {
       maxPatches: pass.maxPatches,
@@ -1040,6 +1050,190 @@ describe("the morph bands under the patch budget", () => {
     }
     expect(edges).toBeGreaterThan(0);
     expect(unmorphed).toEqual([]);
+  });
+});
+
+describe("the morph bands' slew (R10.T16.i)", () => {
+  it("steps the bands' tolerance at most 2% towards the selection's, either way, and to it within a step", () => {
+    const step = 1 + BAND_SLEW_PER_STEP;
+    expect([
+      slewedTauPx(null, 10),
+      slewedTauPx(1, 50),
+      slewedTauPx(50, 1),
+      slewedTauPx(1.01, 1),
+      slewedTauPx(1, 1),
+    ]).toEqual([10, step, 50 / step, 1, 1]);
+  });
+
+  it("moves each level's band at most 2% a frame while the budget's τ′ steps", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    let frame = pass.frame(inputAt(BUDGET_VIEW));
+    const ends: Array<Map<number, number>> = [];
+    for (let n = 1; n < 120; n += 1) {
+      pool().bakeDemand(pass);
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      const bands = writtenBands(engine, frame.drawSet);
+      ends.push(
+        new Map(
+          frame.drawSet.patches.map((p) => [p.patch.key.level, bands.get(p.keyString)?.[1] ?? 0]),
+        ),
+      );
+    }
+    const steps = ends.slice(1).flatMap((now, n) =>
+      [...now].flatMap(([level, end]) => {
+        const was = ends[n]?.get(level);
+        return was === undefined || !(end > 0) ? [] : [Math.max(end / was, was / end)];
+      }),
+    );
+    // The ends are f32: a step's ratio within 1 + 2% and an f32 rounding of each.
+    expect(Math.max(...steps)).toBeLessThanOrEqual(step32(1 + BAND_SLEW_PER_STEP));
+    expect(frame.selection.limitExcess).toBeGreaterThan(1);
+  });
+});
+
+/** `ratio` widened by two `f32` roundings. */
+function step32(ratio: number): number {
+  return ratio * (1 + 2 ** -22);
+}
+
+/** Each record's words, as the last frame wrote them to the spike's one view. */
+function recordWords(engine: CountingRenderEngine): Uint32Array[] {
+  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+  const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+  return Array.from({ length: u.length / WORDS }, (_, n) => u.slice(n * WORDS, (n + 1) * WORDS));
+}
+
+/** The areas `drawn` draws, a sub-patch's its missing patch's. */
+function areaKeysOf(drawn: DrawSet): PatchKey[] {
+  return drawn.patches.map((p) => p.within ?? p.patch.key);
+}
+
+/** {@link areaKeysOf} as `patchKeyString`s. */
+function areasOf(drawn: DrawSet): Set<string> {
+  return new Set(areaKeysOf(drawn).map(patchKeyString));
+}
+
+/** The indices in `drawSet` of the instances that draw `key`'s patch, whole or in part. */
+function drawnBy(drawSet: DrawSet, key: PatchKey): number[] {
+  const keyString = patchKeyString(key);
+  return drawSet.patches.flatMap((p, n) => (p.keyString === keyString ? [n] : []));
+}
+
+describe("the drawn ground's changes over time (R10.T16.i)", () => {
+  const CHILD: PatchKey = { face: 2, level: 1, i: 0, j: 0 };
+
+  /** A pass over the north pole with the roots and the face's other children baked, and `CHILD` not. */
+  async function standingIn(): Promise<{
+    readonly pass: TerrainPass;
+    readonly pool: () => FakePool;
+    readonly engine: CountingRenderEngine;
+    readonly view: TerrainView;
+  }> {
+    const made = await passOn("high");
+    const view = northPole(2_000_000);
+    made.pass.frame(inputAt(view, 0));
+    made.pool().bakeDemand(made.pass);
+    made.pass.frame(inputAt(view, 1_000));
+    for (const request of made.pool().demand) {
+      if (patchKeyString(request.key) !== patchKeyString(CHILD)) {
+        made.pool().deliver(made.pass, request.key);
+      }
+    }
+    // Long past every fade those bakes started.
+    made.pass.frame(inputAt(view, 2_000));
+    made.pass.frame(inputAt(view, 5_000));
+    return { ...made, view };
+  }
+
+  it("draws a refine's first frame on the stand-in's surface, its patch at k = 1", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pool().deliver(pass, CHILD);
+    // The child's parts now stand for its own children, which selection takes at once.
+    const frame = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const drawn = drawnBy(frame.drawSet, CHILD).map((n) => {
+      const own = (words[n]?.[11] ?? 0) & 0xff;
+      return [own, fadedMorph((words[n]?.[7] ?? 0) >>> 2, 0, 0, own, 32, 32, 0)];
+    });
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn).toEqual(drawn.map(() => [FADE_STEPS, 1]));
+  });
+
+  it("draws the distance's k once the change has morphed in", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pool().deliver(pass, CHILD);
+    pass.frame(inputAt(view, 6_000));
+    const halfway = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS / 2));
+    const [first] = drawnBy(halfway.drawSet, CHILD);
+    const fadeHalfway = (recordWords(engine)[first ?? -1]?.[11] ?? 0) & 0xff;
+    const done = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS));
+    const words = recordWords(engine);
+    const left = drawnBy(done.drawSet, CHILD).flatMap((n) => [
+      words[n]?.[9],
+      words[n]?.[10],
+      words[n]?.[11],
+    ]);
+    expect([fadeHalfway, left.length > 0, left.every((word) => word === 0)]).toEqual([
+      fadeByte(0.5),
+      true,
+      true,
+    ]);
+  });
+
+  it("writes no fade once nothing changes, the records as without one", async () => {
+    const { engine } = await standingIn();
+    const fades = recordWords(engine).flatMap((words) => [words[9], words[10], words[11]]);
+    expect(fades.length).toBeGreaterThan(0);
+    expect(fades.every((word) => word === 0)).toBe(true);
+  });
+
+  it("holds the finer patches through a coarsen until their fade reaches 1, then draws the coarser", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const near = northPole(2_000_000);
+    // Streamed near, then far enough that the selection coarsens.
+    let frame = pass.frame(inputAt(near, 0));
+    for (let n = 1; n < 30 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(near, 1_000 * n));
+    }
+    frame = pass.frame(inputAt(near, 60_000));
+    const fineKeys = areaKeysOf(frame.drawSet);
+    // The finer areas drawn near inside `key`'s area.
+    const finerOver = (key: PatchKey): string[] =>
+      fineKeys
+        .filter(
+          (a) =>
+            a.face === key.face &&
+            a.level > key.level &&
+            a.i >> (a.level - key.level) === key.i &&
+            a.j >> (a.level - key.level) === key.j,
+        )
+        .map(patchKeyString);
+    const far = northPole(5_000_000);
+    const held = pass.frame(inputAt(far, 61_000));
+    // The patches selected far over finer ones drawn near: each a coarsen, held over the finer
+    // patches' areas, the rest of it newly in view.
+    const coarsened = [...held.selection.patches.values()]
+      .map((p) => p.key)
+      .filter((key) => finerOver(key).length > 0);
+    const during = areasOf(held.drawSet);
+    const rising = recordWords(engine).map((words) => (words[11] ?? 0) & 0xff);
+    const late = areasOf(pass.frame(inputAt(far, 61_000 + MORPH_IN_MS - 16)).drawSet);
+    pass.frame(inputAt(far, 61_000 + MORPH_IN_MS));
+    const after = areasOf(pass.frame(inputAt(far, 61_000 + MORPH_IN_MS + 16)).drawSet);
+    const heldIn = (areas: Set<string>): boolean[] =>
+      coarsened.map(
+        (key) => !areas.has(patchKeyString(key)) && finerOver(key).every((a) => areas.has(a)),
+      );
+    expect(coarsened.length).toBeGreaterThan(0);
+    // Their first frame at the fade's start, 0: the finer patches as they were.
+    expect([heldIn(during), heldIn(late), rising.every((byte) => byte === 0)]).toEqual([
+      coarsened.map(() => true),
+      coarsened.map(() => true),
+      true,
+    ]);
+    expect(coarsened.map((key) => after.has(patchKeyString(key)))).toEqual(
+      coarsened.map(() => true),
+    );
   });
 });
 

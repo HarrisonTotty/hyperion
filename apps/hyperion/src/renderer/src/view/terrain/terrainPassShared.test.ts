@@ -1075,7 +1075,9 @@ describe("the live path's records are the single view's (R10.T16; T8.b's sunset 
     for (let n = 0; n < 5; n += 1) {
       single.pass.frame({ ...frameOf(view, n, LIGHTING), grounded: [] });
       single.lane().bakeDemand(single.pass);
+      // Drawn at the spike's frames' times, so that its transitions start as the spike's do.
       live.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
+      live.pass.drawFor(PRIMARY, frameOf(view, n, LIGHTING));
       live.lane().bakeDemand(live.pass);
     }
     single.pass.frame({ ...frameOf(view, 99, LIGHTING), grounded: [] });

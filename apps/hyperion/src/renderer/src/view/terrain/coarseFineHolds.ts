@@ -137,6 +137,68 @@ export function coarseFineMorph(holds: number, x: number, y: number, k: number):
   return (holds & at) !== 0 ? 0 : k;
 }
 
+/**
+ * The steps of a fade (plan R10, R10.T16.i; the seamless lane's time morph): a fade is a byte, 0 to
+ * {@link FADE_STEPS}, for 0 to 1.
+ */
+export const FADE_STEPS = 255;
+
+/**
+ * A fade of 0 to 1 as its byte ({@link FADE_STEPS}): rounded to the nearest step, so that every
+ * instance given the same fade at the same time writes the same byte.
+ */
+export function fadeByte(fade: number): number {
+  return Math.round(Math.min(1, Math.max(0, fade)) * FADE_STEPS);
+}
+
+/**
+ * The fade floor at vertex (`x`, `y`) of an instance (plan R10, R10.T16.i): the largest of its own
+ * fade and the fades of the edges and the corner the vertex lies on, from the bytes of
+ * `edgeFades` (`EDGES`' order, byte n edge n), `cornerFades` (`cornerNeighbours`' order) and
+ * `ownFade`'s low byte, each 0 to 1. The shader's `fadeFloor`.
+ */
+export function fadeFloor(
+  edgeFades: number,
+  cornerFades: number,
+  ownFade: number,
+  x: number,
+  y: number,
+): number {
+  const at = vertexHoldBits(x, y);
+  let floor = ownFade & 0xff;
+  for (let n = 0; n < 4; n += 1) {
+    if ((at & (1 << n)) !== 0) {
+      floor = Math.max(floor, (edgeFades >>> (8 * n)) & 0xff);
+    }
+    if ((at & (16 << n)) !== 0) {
+      floor = Math.max(floor, (cornerFades >>> (8 * n)) & 0xff);
+    }
+  }
+  return floor / FADE_STEPS;
+}
+
+/**
+ * The morph factor at vertex (`x`, `y`) of an instance with holds `holds` and fades (plan R10,
+ * R10.T16.i): {@link coarseFineMorph}'s, raised to its {@link fadeFloor} but where a hold at k = 0
+ * alone covers the vertex, so that a coarse side touching a finer patch stays on its own mesh
+ * whatever fades (R05 Design note 6). The shader's `morphFactor` before the grounded contacts'
+ * hold; with no fade, {@link coarseFineMorph}'s, bit for bit.
+ */
+export function fadedMorph(
+  holds: number,
+  edgeFades: number,
+  cornerFades: number,
+  ownFade: number,
+  x: number,
+  y: number,
+  k: number,
+): number {
+  const held = coarseFineMorph(holds, x, y, k);
+  const at = vertexHoldBits(x, y);
+  const toOwnAlone = (holds & at) !== 0 && ((holds >>> TO_PARENT_SHIFT) & at) === 0;
+  return toOwnAlone ? held : Math.max(held, fadeFloor(edgeFades, cornerFades, ownFade, x, y));
+}
+
 /** A patch key whose fields are rewritten in place. */
 interface ScratchKey {
   face: Face;
@@ -294,6 +356,124 @@ export class CoarseFineHolds {
       }
     }
     return -1;
+  }
+}
+
+/**
+ * A transition of the drawn ground in progress over an area at a frame (plan R10, R10.T16.i): the
+ * area, its footprint, and its fade there, 0 to 1.
+ */
+export interface FadeFootprint {
+  readonly area: PatchKey;
+  readonly fade: number;
+}
+
+/**
+ * The fades of a draw set's instances from the transitions in progress (plan R10, R10.T16.i), made
+ * once a frame, with nothing allocated after warm-up.
+ *
+ * @remarks
+ * An instance whose area lies in a footprint takes its fade as its own; one outside it, of the
+ * footprint's level or finer, takes it on each edge and corner whose cell beside, of the instance's
+ * level, lies in the footprint. So every vertex on a footprint's boundary takes its fade from every
+ * side of that level or finer, and two instances that share a vertex compute one morph factor
+ * there (R05 Design note 6's crack rule). An instance coarser than a footprint touching it is the
+ * coarse side of a coarse–fine edge there, held at k = 0, which a fade does not raise
+ * ({@link fadedMorph}). The bytes are {@link fadeByte}'s, laid out as the instance record carries
+ * them: {@link TransitionFades.edges} byte n for edge n in `EDGES`' order,
+ * {@link TransitionFades.corners} byte n for corner n in `cornerNeighbours`' order, and
+ * {@link TransitionFades.own}.
+ */
+export class TransitionFades {
+  readonly edges: Uint32Array;
+  readonly corners: Uint32Array;
+  readonly own: Uint8Array;
+  /** The footprints being applied, to their fades' bytes; empty between calls. */
+  readonly #footprints = new PatchKeyTable<number>();
+  readonly #cell: CellOut = { face: 0, i: 0, j: 0 };
+  /** The footprints' levels, each once, coarsest first. */
+  readonly #levels: number[] = [];
+
+  /** @param capacity - The most instances a draw set holds: the cache's slot count. */
+  constructor(capacity: number) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new RangeError(`transition fades need a whole, positive capacity, not ${capacity}`);
+    }
+    this.edges = new Uint32Array(capacity);
+    this.corners = new Uint32Array(capacity);
+    this.own = new Uint8Array(capacity);
+  }
+
+  /**
+   * Fills the first `areas.length` entries for the drawn instances' areas `areas`, which do not
+   * overlap, from `footprints`, which do not overlap either.
+   *
+   * @throws RangeError for more instances than the capacity.
+   */
+  update(areas: ReadonlyArray<PatchKey>, footprints: ReadonlyArray<FadeFootprint>): void {
+    if (areas.length > this.own.length) {
+      throw new RangeError(`${areas.length} instances exceed ${this.own.length} fades`);
+    }
+    const table = this.#footprints;
+    const levels = this.#levels;
+    levels.length = 0;
+    for (const { area, fade } of footprints) {
+      const byte = fadeByte(fade);
+      if (byte > 0) {
+        table.set(area, Math.max(byte, table.get(area) ?? 0));
+        if (!levels.includes(area.level)) {
+          levels.push(area.level);
+        }
+      }
+    }
+    levels.sort((a, b) => a - b);
+    const cell = this.#cell;
+    for (let n = 0; n < areas.length; n += 1) {
+      const area = areas[n];
+      let own = 0;
+      let edges = 0;
+      let corners = 0;
+      if (area !== undefined && levels.length > 0) {
+        own = this.#fadeOver(area.face, area.level, area.i, area.j);
+        for (let p = 0; p < PROBES.length; p += 1) {
+          const probe = PROBES[p];
+          if (probe === undefined || !stepCellInto(cell, area, probe.di, probe.dj)) {
+            continue;
+          }
+          const byte = this.#fadeOver(cell.face, area.level, cell.i, cell.j);
+          if (p < 4) {
+            edges |= byte << (8 * p);
+          } else {
+            corners |= byte << (8 * (p - 4));
+          }
+        }
+      }
+      this.own[n] = own;
+      this.edges[n] = edges >>> 0;
+      this.corners[n] = corners >>> 0;
+    }
+    for (const { area } of footprints) {
+      table.delete(area);
+    }
+  }
+
+  /** The largest fade's byte of the footprints holding cell (`i`, `j`) of `level` on `face`. */
+  #fadeOver(face: Face, level: number, i: number, j: number): number {
+    let byte = 0;
+    for (const footprint of this.#levels) {
+      if (footprint > level) {
+        break;
+      }
+      const cells = 2 ** (level - footprint);
+      const found = this.#footprints.getAt(
+        face,
+        footprint,
+        Math.floor(i / cells),
+        Math.floor(j / cells),
+      );
+      byte = Math.max(byte, found ?? 0);
+    }
+    return byte;
   }
 }
 

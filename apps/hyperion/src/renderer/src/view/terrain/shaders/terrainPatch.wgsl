@@ -25,7 +25,9 @@ const HALF_FLOAT_MAX : f32 = 65504.0;
 // bits 2 to 17 of `parentQuadrant` are the patch's morph holds at its coarse–fine edges and
 // corners (`coarseFineMorph`; coarseFineHolds.ts), so every reader of the quadrant masks it.
 // `sub.x` is the part of the slot's patch the instance draws, 0 for the whole (`sourceGridOf`;
-// uniforms.ts' `subPatchWord`); everything else the instance carries is the slot's patch's.
+// uniforms.ts' `subPatchWord`); everything else the instance carries is the slot's patch's. `sub.y`
+// to `sub.w` are its fades (R10.T16.i): its edges' and its corners' bytes, then its own fade's
+// byte, its rebake's fade's and the slot of the bake it fades from (`fadeFloor`, `rebakeOf`).
 struct Instance {
   originM : vec3f,
   slot : u32,
@@ -93,15 +95,43 @@ fn coarseFineMorph(word : u32, x : u32, y : u32, k : f32) -> f32 {
   return select(select(k, 0.0, toOwn), 1.0, toParent);
 }
 
+// Byte `n` (0 to 3) of a fades word, as a fade of 0 to 1 (coarseFineHolds.ts' `FADE_STEPS`).
+fn fadeOf(word : u32, n : u32) -> f32 {
+  return f32((word >> (8u * n)) & 0xffu) / 255.0;
+}
+
+// The fade floor (plan R10, R10.T16.i) at the vertex whose hold bits are `at` (`holdBitsAt`): the
+// largest of the instance's own fade (`sub.w`'s low byte) and the fades of the edges (`sub.y`, byte
+// n edge n) and the corner (`sub.z`) it lies on; the TypeScript twin is coarseFineHolds.ts'
+// `fadeFloor`.
+fn fadeFloor(inst : Instance, at : u32) -> f32 {
+  var floor = fadeOf(inst.sub.w, 0u);
+  for (var n = 0u; n < 4u; n += 1u) {
+    if ((at & (1u << n)) != 0u) {
+      floor = max(floor, fadeOf(inst.sub.y, n));
+    }
+    if ((at & (16u << n)) != 0u) {
+      floor = max(floor, fadeOf(inst.sub.z, n));
+    }
+  }
+  return floor;
+}
+
 // CDLOD's morph factor at vertex (x, y) from the unmorphed vertex's distance (Design note 6), held
-// at the instance's coarse–fine edges and corners (`coarseFineMorph`), then held at zero near every
-// grounded contact and rising to 1 across its ramp: a contact's hold wins, so the ground under a
-// craft is its own level's (the forced region's edge, past every ramp, is where its patches meet
-// coarser ones).
+// at the instance's coarse–fine edges and corners (`coarseFineMorph`), raised to its fades' floor
+// (`fadeFloor`; R10.T16.i) but where a hold at k = 0 alone covers the vertex, then held at zero near
+// every grounded contact and rising to 1 across its ramp: a contact's hold wins, so the ground under
+// a craft is its own level's (the forced region's edge, past every ramp, is where its patches meet
+// coarser ones). The TypeScript twin of all but the contacts is coarseFineHolds.ts' `fadedMorph`.
 fn morphFactor(inst : Instance, fromCameraM : vec3f, x : u32, y : u32) -> f32 {
   let span = inst.morphEndM - inst.morphStartM;
   let cdlod = select(0.0, clamp((length(fromCameraM) - inst.morphStartM) / span, 0.0, 1.0), span > 0.0);
   var k = coarseFineMorph(inst.parentQuadrant, x, y, cdlod);
+  let at = holdBitsAt(x, y);
+  let toOwnAlone = ((inst.parentQuadrant >> 2u) & 0xffu & at) != 0u && ((inst.parentQuadrant >> 10u) & 0xffu & at) == 0u;
+  if (!toOwnAlone) {
+    k = max(k, fadeFloor(inst, at));
+  }
   for (var i = 0u; i < contacts.count; i += 1u) {
     let c = contacts.items[i];
     let beyond = length(fromCameraM - c.centreM) - c.heldRadiusM;

@@ -134,7 +134,7 @@ import {
 } from "./annunciation";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
-import { CoarseFineHolds } from "./coarseFineHolds";
+import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
 import { frustumOf, horizonCone } from "./cull";
 import { vertexSpacing } from "./cube";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
@@ -164,6 +164,7 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
+import { TimeMorph } from "./timeMorph";
 import {
   finestPatchSizeM,
   type GroundContact,
@@ -803,6 +804,14 @@ interface Device {
    */
   readonly holds: CoarseFineHolds;
   /**
+   * The drawn ground's transitions (R10.T16.i), which present each resolved draw set with its
+   * coarsens' finer patches held, and the instances' fades they give a frame.
+   */
+  readonly morph: TimeMorph;
+  readonly fades: TransitionFades;
+  /** The draw time {@link Device.fades} were last made at, ms; `null` before any. */
+  fadesAtMs: number | null;
+  /**
    * The drawn patches' areas the holds are made from, a sub-patch's its missing patch's, and the
    * levels they are drawn at, a sub-patch's its patch's, reused from selection to selection.
    */
@@ -893,8 +902,19 @@ interface ViewState {
   readonly debounce: TerrainAnnunciationDebounce;
   readonly instances: InstanceRecords;
   readonly contacts: ContactRecords;
-  /** Each level's morph band, start then end, at the view's tolerance ({@link effectiveTauPx}). */
+  /**
+   * Each level's morph band, start then end, at the view's slewed tolerance
+   * ({@link ViewState.bandTauPx}).
+   */
   readonly morph: Float64Array;
+  /**
+   * The tolerance the bands are at, pixels: the last selection's {@link effectiveTauPx}, reached at
+   * most {@link BAND_SLEW_PER_STEP} a step ({@link slewedTauPx}; plan R10, R10.T16.i); `null` before
+   * the view's first selection.
+   */
+  bandTauPx: number | null;
+  /** The last selection's {@link effectiveTauPx} for the view, pixels, which the bands follow. */
+  targetTauPx: number | null;
   readonly uniforms: {
     readonly bodyRotation: Float32Array;
     readonly sunDirection: Float32Array;
@@ -1239,7 +1259,10 @@ interface Selected {
    * (`priority.ts`' `joinDemand`), the cache's demand pins with it.
    */
   readonly demand: ReadonlyArray<PatchRequest>;
+  /** The draw set as the time morph presents it (R10.T16.i), which every draw reads. */
   readonly drawSet: DrawSet;
+  /** The resolver's draw set for the selection, which a coarsen's end presents again. */
+  readonly resolved: DrawSet;
   /** The contacts that reach a drawn patch, body-fixed. */
   readonly nearContacts: ReadonlyArray<GroundContact>;
   /** The views, in the selection's order: view k is bit k of the masks. */
@@ -1335,6 +1358,27 @@ export function morphRangeM(
  */
 export function effectiveTauPx(tauPx: number, limitExcess: number, weight: number): number {
   return tauPx * Math.max(1, limitExcess / weight);
+}
+
+/**
+ * The most a view's morph bands' tolerance moves a step, as a fraction (plan R10, R10.T16.i; a
+ * hand value): the budget's τ′ steps by up to 50 to 63 times between selections (TERRAIN TEST,
+ * research-terrain-seamless), and a vertex in its band moves by about 6 Δτ′ ÷ τ′ in k, so that the
+ * whole screen re-morphed at once.
+ */
+export const BAND_SLEW_PER_STEP = 0.02;
+
+/**
+ * The bands' tolerance a step on from `currentPx` towards `targetPx`, pixels: at most a factor of
+ * 1 + {@link BAND_SLEW_PER_STEP} up or down; `targetPx` itself with no current one. Selection's τ
+ * and `limitExcess` are not slewed: only {@link morphRangeM}'s input is.
+ */
+export function slewedTauPx(currentPx: number | null, targetPx: number): number {
+  if (currentPx === null) {
+    return targetPx;
+  }
+  const step = 1 + BAND_SLEW_PER_STEP;
+  return Math.min(currentPx * step, Math.max(currentPx / step, targetPx));
 }
 
 /** A view's camera as a step took it, body-fixed: where it stood and how it looked. */
@@ -2205,6 +2249,14 @@ export class TerrainPass {
     }
     for (const view of views) {
       this.#stepped.set(view.id, view.camera);
+      const state = this.#views.get(view.id);
+      if (state !== undefined && state.targetTauPx !== null) {
+        const tauPx = slewedTauPx(state.bandTauPx, state.targetTauPx);
+        if (tauPx !== state.bandTauPx || reselected) {
+          state.bandTauPx = tauPx;
+          this.#bandsOf(state, view);
+        }
+      }
     }
     if (clock !== null) {
       this.#steppedAtMs = nowMs;
@@ -2213,6 +2265,15 @@ export class TerrainPass {
     const selected = this.#selected;
     if (selected === null) {
       throw new Error("selection did not run");
+    }
+    if (!reselected && device.morph.swapDue) {
+      // A coarsen's fade has reached 1: its patch takes its finer ones' place (R10.T16.i).
+      const { selection, demand, resolved } = selected;
+      this.#present(
+        device,
+        demand === selection.demand ? selection : { ...selection, demand },
+        resolved,
+      );
     }
     const { selection, drawSet } = selected;
     if (reselected || this.#demandDirty) {
@@ -2662,6 +2723,9 @@ export class TerrainPass {
       cache,
       resolver: new DrawSetResolver(cache),
       holds: new CoarseFineHolds(layout.slots.slotCount),
+      morph: new TimeMorph(layout.slots.slotCount),
+      fades: new TransitionFades(layout.slots.slotCount),
+      fadesAtMs: null,
       drawnKeys: [],
       drawnLevels: [],
       pool,
@@ -2974,6 +3038,8 @@ export class TerrainPass {
       instances: new InstanceRecords(slotCount),
       contacts: new ContactRecords(),
       morph: new Float64Array(2 * (MAX_LEVEL + 1)),
+      bandTauPx: null,
+      targetTauPx: null,
       uniforms: {
         bodyRotation,
         sunDirection: new Float32Array(4),
@@ -3017,6 +3083,16 @@ export class TerrainPass {
       drawnTable: null,
       drawnAtmosphere: null,
     };
+  }
+
+  /** Rewrites `state`'s morph bands for `view` at its slewed tolerance. */
+  #bandsOf(state: ViewState, view: PassSelectionView): void {
+    const morphView = { ...view, tauPx: state.bandTauPx ?? view.bandTauPx };
+    for (let level = 0; level <= MAX_LEVEL; level += 1) {
+      const [start, end] = morphRangeM(this.#planet, level, morphView);
+      state.morph[2 * level] = start;
+      state.morph[2 * level + 1] = end;
+    }
   }
 
   /** A view as selection takes it: body-fixed, at τ_sel ({@link selectionTolerancePx}). */
@@ -3214,17 +3290,14 @@ export class TerrainPass {
       if (Number.isFinite(nearestM)) {
         this.#nearestGround.set(view.id, Math.max(nearestM, patchM));
       }
-      // At the view's τ, not the τ ÷ (1 + m) selection uses, raised where the budget binds.
+      // At the view's τ, not the τ ÷ (1 + m) selection uses, raised where the budget binds, and
+      // reached a step at a time ({@link slewedTauPx}).
       const state = this.#views.get(view.id);
       if (state !== undefined) {
-        const morphView = {
-          ...view,
-          tauPx: effectiveTauPx(view.bandTauPx, selection.limitExcess, view.weight),
-        };
-        for (let level = 0; level <= MAX_LEVEL; level += 1) {
-          const [start, end] = morphRangeM(planet, level, morphView);
-          state.morph[2 * level] = start;
-          state.morph[2 * level + 1] = end;
+        state.targetTauPx = effectiveTauPx(view.bandTauPx, selection.limitExcess, view.weight);
+        if (state.bandTauPx === null) {
+          state.bandTauPx = state.targetTauPx;
+          this.#bandsOf(state, view);
         }
       }
       return {
@@ -3243,23 +3316,12 @@ export class TerrainPass {
     // The same object every selection, rewritten in place; unseen forced patches are pinned by
     // `retain` but not drawn. The lookahead's patches are pinned as demanded alone: as they land,
     // until the next retain finds them neither selected nor beneath the selection.
-    const drawSet = device.resolver.resolve(selection);
-    device.cache.retain(
+    const resolved = device.resolver.resolve(selection);
+    const drawSet = this.#present(
+      device,
       demand === selection.demand ? selection : { ...selection, demand },
-      drawSet,
+      resolved,
     );
-    // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
-    // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
-    // fine side at 1 (decision-r10-t16-leans §9).
-    const keys = device.drawnKeys;
-    const levels = device.drawnLevels;
-    keys.length = 0;
-    levels.length = 0;
-    for (const { patch, within } of drawSet.patches) {
-      keys.push(within ?? patch.key);
-      levels.push(patch.key.level);
-    }
-    device.holds.update(keys, levels);
     const grounded = input.grounded.map((c) => ({
       positionM: { ...c.positionM },
       radiusM: c.radiusM,
@@ -3274,6 +3336,7 @@ export class TerrainPass {
       selection,
       demand,
       drawSet,
+      resolved,
       nearContacts,
       views: selectedViews,
       grounded,
@@ -3372,6 +3435,38 @@ export class TerrainPass {
   }
 
   /**
+   * The draw set of `resolved` as the time morph presents it (R10.T16.i), its finer patches held
+   * through each coarsen, with the cache's pins and the coarse–fine holds made from it.
+   */
+  #present(device: Device, selection: Selection, resolved: DrawSet): DrawSet {
+    const drawSet = device.morph.present(resolved, device.cache);
+    device.cache.retain(selection, drawSet);
+    // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
+    // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
+    // fine side at 1 (decision-r10-t16-leans §9).
+    const keys = device.drawnKeys;
+    const levels = device.drawnLevels;
+    keys.length = 0;
+    levels.length = 0;
+    for (const { patch, within } of drawSet.patches) {
+      keys.push(within ?? patch.key);
+      levels.push(patch.key.level);
+    }
+    device.holds.update(keys, levels);
+    device.fadesAtMs = null;
+    return drawSet;
+  }
+
+  /** The drawn instances' fades at the draw time `nowMs`, made once a time ({@link Device.fades}). */
+  #fadesAt(device: Device, nowMs: number): TransitionFades {
+    if (device.fadesAtMs !== nowMs) {
+      device.fades.update(device.drawnKeys, device.morph.footprintsAt(nowMs));
+      device.fadesAtMs = nowMs;
+    }
+    return device.fades;
+  }
+
+  /**
    * The records written on the current device, or no draw while the device is lost (`refused`): a
    * view's frame buffers are made at its first frame, and nothing can be made then
    * (`EngineUnavailable`).
@@ -3462,6 +3557,7 @@ export class TerrainPass {
     const forms = lit ? this.#litForms(device, input) : NO_FORMS;
     const wireSplit = this.#wireSplits(device, state);
     const split = (this.#geometry.clusterPath && forms.interior !== null) || wireSplit;
+    const fades = this.#fadesAt(device, input.nowMs);
     instances.clear();
     interior.clear();
     phases?.clear();
@@ -3494,6 +3590,9 @@ export class TerrainPass {
           parentQuadrant(patch.key),
           holds[n] ?? 0,
           within === null ? 0 : subPatchOf(patch.key, within),
+          fades.edges[n] ?? 0,
+          fades.corners[n] ?? 0,
+          fades.own[n] ?? 0,
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
