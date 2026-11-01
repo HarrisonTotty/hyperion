@@ -248,12 +248,24 @@ export function bandIndex(matrix: BandMatrix, row: number, column: number): numb
   return row * matrix.width + offset;
 }
 
-/** A band matrix factorised in place by {@link factorBand}: P A = L U, with its row interchanges. */
+/**
+ * A band matrix factorised in place by {@link factorBand}: P A = L U, with its row interchanges and
+ * where its factors are not 0.
+ */
 export interface BandLu {
   /** The factors: U on and above the diagonal, the multipliers of L below it. */
   readonly factors: BandMatrix;
   /** The row each step k swapped with row k. */
   readonly pivots: Int32Array;
+  /**
+   * Step k's rows below the diagonal with a multiplier not 0, ascending, at
+   * `lowerRows[lowerStart[k]]` up to `lowerStart[k + 1]`.
+   */
+  readonly lowerRows: Int32Array;
+  readonly lowerStart: Int32Array;
+  /** Row k's columns past the diagonal where U is not 0, ascending, as `lowerRows` holds L's. */
+  readonly upperColumns: Int32Array;
+  readonly upperStart: Int32Array;
 }
 
 /**
@@ -265,12 +277,24 @@ export interface BandLu {
  * rows where they were made, so that {@link solveBand} applies the interchanges and the eliminations
  * in turn, as they were made.
  *
- * @returns The factors, sharing `matrix`'s storage, and the pivots.
+ * Only the entries not 0 are eliminated with, the rest of the band left as it stands (plan R08,
+ * R08.T14.b's lever, the block-bidiagonal elimination): a layer stack's problem couples each layer
+ * only to its neighbours, so about a third of L and two thirds of U within the band are 0 at 16
+ * streams. A product of an exact 0 changes no entry it is subtracted from but for the sign of a
+ * zero, so the factors and the pivots are a dense band elimination's to the bit, but for that sign.
+ *
+ * @returns The factors, sharing `matrix`'s storage, the pivots and where the factors are not 0.
  * @throws Error if a pivot column is all zero: the matrix is singular.
  */
 export function factorBand(matrix: BandMatrix): BandLu {
   const { order: n, lower: ml, upper: mu, width: w, entries: a } = matrix;
   const pivots = new Int32Array(n);
+  const lowerRows = new Int32Array(n * ml);
+  const lowerStart = new Int32Array(n + 1);
+  const upperColumns = new Int32Array(n * (ml + mu));
+  const upperStart = new Int32Array(n + 1);
+  let lowerCount = 0;
+  let upperCount = 0;
   for (let k = 0; k < n; k += 1) {
     const last = Math.min(n - 1, k + ml);
     let pivotRow = k;
@@ -296,81 +320,73 @@ export function factorBand(matrix: BandMatrix): BandLu {
         a[ip] = held;
       }
     }
+    // Row k of U is final once its interchange is made: later steps touch the rows below it.
+    const firstUpper = upperCount;
+    for (let c = k + 1; c <= columnEnd; c += 1) {
+      if (at(a, k * w + (c - k + ml)) !== 0) {
+        upperColumns[upperCount] = c;
+        upperCount += 1;
+      }
+    }
+    upperStart[k + 1] = upperCount;
     const pivot = at(a, k * w + ml);
     for (let r = k + 1; r <= last; r += 1) {
       const ir = r * w + (k - r + ml);
       const multiplier = at(a, ir) / pivot;
       a[ir] = multiplier;
       if (multiplier !== 0) {
-        for (let c = k + 1; c <= columnEnd; c += 1) {
+        lowerRows[lowerCount] = r;
+        lowerCount += 1;
+        for (let e = firstUpper; e < upperCount; e += 1) {
+          const c = upperColumns[e] ?? k;
           const target = r * w + (c - r + ml);
           a[target] = at(a, target) - multiplier * at(a, k * w + (c - k + ml));
         }
       }
     }
+    lowerStart[k + 1] = lowerCount;
   }
-  return { factors: matrix, pivots };
+  return { factors: matrix, pivots, lowerRows, lowerStart, upperColumns, upperStart };
 }
 
 /**
  * Solves A x = b in place from {@link factorBand}'s factors: the interchanges and eliminations in
- * the order they were made, then back substitution with U.
+ * the order they were made, then back substitution with U, over the factors' entries not 0.
  *
  * @throws RangeError if `b`'s length is not the matrix's order.
  */
 export function solveBand(lu: BandLu, b: Float64Array): void {
-  const { order: n, lower: ml, upper: mu, width: w, entries: a } = lu.factors;
+  const { order: n } = lu.factors;
   if (b.length !== n) {
     throw new RangeError(`a right-hand side of ${b.length} entries for an order-${n} matrix`);
   }
-  for (let k = 0; k < n; k += 1) {
-    const p = lu.pivots[k] ?? k;
-    if (p !== k) {
-      const held = at(b, k);
-      b[k] = at(b, p);
-      b[p] = held;
-    }
-    const bk = at(b, k);
-    if (bk !== 0) {
-      const last = Math.min(n - 1, k + ml);
-      for (let r = k + 1; r <= last; r += 1) {
-        b[r] = at(b, r) - at(a, r * w + (k - r + ml)) * bk;
-      }
-    }
-  }
-  for (let k = n - 1; k >= 0; k -= 1) {
-    const columnEnd = Math.min(n - 1, k + ml + mu);
-    let sum = at(b, k);
-    for (let c = k + 1; c <= columnEnd; c += 1) {
-      sum -= at(a, k * w + (c - k + ml)) * at(b, c);
-    }
-    b[k] = sum / at(a, k * w + ml);
-  }
+  solveBandColumns(lu, b, 1);
 }
 
 /**
  * Solves A X = B in place for `columns` right-hand sides at once from {@link factorBand}'s factors,
- * B row-major with entry (r, j) at `r * columns + j`: each column takes {@link solveBand}'s
- * arithmetic on it alone, in the same order, so that it is that solve's to the bit, while the
- * factors are read once for all of them (plan R08, R08.T14.b's lever: a mode's beams solved
- * together).
+ * B row-major with entry (r, j) at `r * columns + j`: each column takes the arithmetic of a solve of
+ * it alone, in the same order, so that it is that solve's to the bit, while the factors are read
+ * once for all of them (plan R08, R08.T14.b's lever: a mode's beams solved together).
  *
  * @remarks
- * A column whose entry k is 0 at elimination step k is left as {@link solveBand} leaves it, so that
- * a signed zero below it keeps its sign.
+ * As {@link factorBand} eliminates, only the factors' entries not 0 are taken: for finite right-hand
+ * sides a dense band solve's to the bit but for the sign of a zero. A column whose entry k is 0 at
+ * elimination step k is left as it stands.
  *
  * @throws RangeError if `columns` is not a whole number of at least 1, or `b` does not hold the
  *   matrix's order times `columns` entries.
  */
 export function solveBandColumns(lu: BandLu, b: Float64Array, columns: number): void {
-  const { order: n, lower: ml, upper: mu, width: w, entries: a } = lu.factors;
+  const { order: n, lower: ml, width: w, entries: a } = lu.factors;
+  const { pivots, lowerRows, lowerStart, upperColumns, upperStart } = lu;
   if (!Number.isInteger(columns) || columns < 1 || b.length !== n * columns) {
     throw new RangeError(
       `${b.length} entries for ${columns} right-hand sides of an order-${n} matrix`,
     );
   }
   for (let k = 0; k < n; k += 1) {
-    const p = lu.pivots[k] ?? k;
+    const p = pivots[k] ?? k;
     const kRow = k * columns;
     if (p !== k) {
       const pRow = p * columns;
@@ -380,8 +396,9 @@ export function solveBandColumns(lu: BandLu, b: Float64Array, columns: number): 
         b[pRow + j] = held;
       }
     }
-    const last = Math.min(n - 1, k + ml);
-    for (let r = k + 1; r <= last; r += 1) {
+    const end = lowerStart[k + 1] ?? 0;
+    for (let e = lowerStart[k] ?? 0; e < end; e += 1) {
+      const r = lowerRows[e] ?? k;
       const multiplier = at(a, r * w + (k - r + ml));
       const rRow = r * columns;
       for (let j = 0; j < columns; j += 1) {
@@ -394,12 +411,13 @@ export function solveBandColumns(lu: BandLu, b: Float64Array, columns: number): 
   }
   const sums = new Float64Array(columns);
   for (let k = n - 1; k >= 0; k -= 1) {
-    const columnEnd = Math.min(n - 1, k + ml + mu);
     const kRow = k * columns;
     for (let j = 0; j < columns; j += 1) {
       sums[j] = at(b, kRow + j);
     }
-    for (let c = k + 1; c <= columnEnd; c += 1) {
+    const end = upperStart[k + 1] ?? 0;
+    for (let e = upperStart[k] ?? 0; e < end; e += 1) {
+      const c = upperColumns[e] ?? k;
       const u = at(a, k * w + (c - k + ml));
       const cRow = c * columns;
       for (let j = 0; j < columns; j += 1) {

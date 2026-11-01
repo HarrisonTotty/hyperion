@@ -164,6 +164,91 @@ function needsPivots(n: number, lower: number, upper: number): BandMatrix {
   return m;
 }
 
+/** `m` with about half its band's entries set to 0 by a fixed pattern, its diagonal kept. */
+function withZeros(m: BandMatrix): BandMatrix {
+  for (let r = 0; r < m.order; r += 1) {
+    for (let c = Math.max(0, r - m.lower); c <= Math.min(m.order - 1, r + m.upper); c += 1) {
+      if (r !== c && (7 * r + 3 * c) % 5 < 3) {
+        m.entries[bandIndex(m, r, c)] = 0;
+      }
+    }
+  }
+  return m;
+}
+
+/**
+ * The banded elimination with partial pivoting as R08.T14.a built it, every product taken, kept as
+ * the oracle of `factorBand` and `solveBand`, which skip the factors' zeros (R08.T14.b).
+ */
+function denseBandElimination(matrix: BandMatrix): {
+  readonly entries: Float64Array;
+  readonly pivots: Int32Array;
+  readonly solve: (b: Float64Array) => Float64Array;
+} {
+  const { order: n, lower: ml, upper: mu, width: w, entries: a } = matrix;
+  const pivots = new Int32Array(n);
+  for (let k = 0; k < n; k += 1) {
+    const last = Math.min(n - 1, k + ml);
+    let pivotRow = k;
+    let largest = Math.abs(entry(a, k * w + ml));
+    for (let r = k + 1; r <= last; r += 1) {
+      const candidate = Math.abs(entry(a, r * w + (k - r + ml)));
+      if (candidate > largest) {
+        largest = candidate;
+        pivotRow = r;
+      }
+    }
+    pivots[k] = pivotRow;
+    const columnEnd = Math.min(n - 1, k + ml + mu);
+    if (pivotRow !== k) {
+      for (let c = k; c <= columnEnd; c += 1) {
+        const ik = k * w + (c - k + ml);
+        const ip = pivotRow * w + (c - pivotRow + ml);
+        const held = entry(a, ik);
+        a[ik] = entry(a, ip);
+        a[ip] = held;
+      }
+    }
+    const pivot = entry(a, k * w + ml);
+    for (let r = k + 1; r <= last; r += 1) {
+      const ir = r * w + (k - r + ml);
+      const multiplier = entry(a, ir) / pivot;
+      a[ir] = multiplier;
+      if (multiplier !== 0) {
+        for (let c = k + 1; c <= columnEnd; c += 1) {
+          const target = r * w + (c - r + ml);
+          a[target] = entry(a, target) - multiplier * entry(a, k * w + (c - k + ml));
+        }
+      }
+    }
+  }
+  const solve = (b: Float64Array): Float64Array => {
+    for (let k = 0; k < n; k += 1) {
+      const p = pivots[k] ?? k;
+      if (p !== k) {
+        const held = entry(b, k);
+        b[k] = entry(b, p);
+        b[p] = held;
+      }
+      const bk = entry(b, k);
+      if (bk !== 0) {
+        for (let r = k + 1; r <= Math.min(n - 1, k + ml); r += 1) {
+          b[r] = entry(b, r) - entry(a, r * w + (k - r + ml)) * bk;
+        }
+      }
+    }
+    for (let k = n - 1; k >= 0; k -= 1) {
+      let sum = entry(b, k);
+      for (let c = k + 1; c <= Math.min(n - 1, k + ml + mu); c += 1) {
+        sum -= entry(a, k * w + (c - k + ml)) * entry(b, c);
+      }
+      b[k] = sum / entry(a, k * w + ml);
+    }
+    return b;
+  };
+  return { entries: a, pivots, solve };
+}
+
 function multiplyBand(m: BandMatrix, x: Float64Array): Float64Array {
   const out = new Float64Array(m.order);
   for (let r = 0; r < m.order; r += 1) {
@@ -212,6 +297,27 @@ describe("banded elimination with partial pivoting", () => {
     expect(() => {
       solveBandColumns(lu, new Float64Array(n * columns), columns + 1);
     }).toThrow(RangeError);
+  });
+
+  it("eliminates over its entries not 0 alone, as the dense elimination does to the bit but for a zero's sign (R08.T14.b)", () => {
+    const n = 48;
+    const sparse = withZeros(needsPivots(n, 7, 9));
+    const dense = denseBandElimination({ ...sparse, entries: Float64Array.from(sparse.entries) });
+    const lu = factorBand(sparse);
+    expect(Array.from(lu.pivots)).toEqual(Array.from(dense.pivots));
+    lu.factors.entries.forEach((value, i) => {
+      // `===` holds 0 and −0 equal and every other value to its bits.
+      expect(value === entry(dense.entries, i)).toBe(true);
+    });
+    // The zeros were skipped: U and L hold fewer entries than their bands.
+    expect(lu.upperStart[n]).toBeLessThan(n * (7 + 9));
+    expect(lu.lowerStart[n]).toBeLessThan(n * 7);
+    const b = Float64Array.from({ length: n }, (_, i) => Math.cos(0.41 * i) + 0.3);
+    const expected = dense.solve(Float64Array.from(b));
+    solveBand(lu, b);
+    b.forEach((value, i) => {
+      expect(value === entry(expected, i)).toBe(true);
+    });
   });
 
   it("refuses a singular matrix", () => {
