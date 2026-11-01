@@ -39,7 +39,10 @@ function figures(startMs: number, endMs: number): WindowFigures {
 }
 
 /** A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`. */
-function profiler(drawMs: number): {
+function profiler(
+  drawMs: number,
+  untimedUntilMs = Number.NEGATIVE_INFINITY,
+): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
   readonly marked: ViewsCheckWindow[];
@@ -66,7 +69,11 @@ function profiler(drawMs: number): {
       // A draw every `drawMs` since the window's start.
       drawTimes: (_view, fromMs) =>
         Array.from({ length: Math.floor((nowMs - fromMs) / drawMs) }, (_, i) => fromMs + i),
-      window: figures,
+      // Its frames untimed until `untimedUntilMs`, as a slow renderer's resolves land late.
+      window: (startMs, endMs) => ({
+        ...figures(startMs, endMs),
+        untimedFrames: nowMs < untimedUntilMs ? 1 : 0,
+      }),
       passTimes: () => [
         { label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] },
       ],
@@ -103,9 +110,9 @@ describe("the inspection run's frame profile (the owner's report)", () => {
   it("ends a window at its draws, marks it, and waits for the last pass times before ending it", async () => {
     const { profile, calls, marked } = profiler(100);
     await profile.measure("orbit", PLATE);
-    // 30 draws at 100 ms take 3 s; the trace ends a settle later.
+    // 30 draws at 100 ms take 3 s; the trace ends once their times are in, a poll later.
     expect(marked).toEqual([{ startMs: 1_000, endMs: 4_000 }]);
-    expect(calls).toEqual(["start orbit at 1000", "end orbit 1000–4000 at 5000"]);
+    expect(calls).toEqual(["start orbit at 1000", "end orbit 1000–4000 at 4100"]);
     expect(profile.windows[0]).toMatchObject({
       name: "orbit",
       canvas: { widthPx: 1140, heightPx: 640 },
@@ -117,6 +124,17 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       marchSamples: 36,
       position: "28.9 Mm 268° +49°",
     });
+  });
+
+  it("waits for its frames' late pass times, and no longer than its settle", async () => {
+    const late = profiler(100, 6_000);
+    await late.profile.measure("orbit", PLATE);
+    expect(late.calls.at(-1)).toBe("end orbit 1000–4000 at 6000");
+    const never = profiler(100, Number.POSITIVE_INFINITY);
+    await never.profile.measure("orbit", PLATE);
+    expect(never.calls.at(-1)).toBe(
+      `end orbit 1000–4000 at ${String(4_000 + INSPECTION_PROFILE_TIMING.settleMs)}`,
+    );
   });
 
   it("ends a window of slow frames at its longest wait, with the draws it has", async () => {

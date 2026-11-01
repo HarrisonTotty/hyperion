@@ -31,17 +31,21 @@ export interface InspectionProfileTiming {
   readonly draws: number;
   /** The longest a window waits for them, ms: past it, it ends with the draws it has. */
   readonly maxMs: number;
-  /** How long the window's last frames' pass times are waited for once it ends, ms. */
+  /**
+   * The longest the window's frames' pass times are waited for once it ends, ms: until every frame
+   * drawn in it is timed, or this passes, since a slow renderer's resolve lands a frame of seconds
+   * late.
+   */
   readonly settleMs: number;
   /** How often the window looks again at the draws, ms. */
   readonly pollMs: number;
 }
 
-/** The profile's timing: 30 draws, or as many as 30 s gives, the last frames' times a second. */
+/** The profile's timing: 30 draws, or as many as 30 s gives, their times waited for 10 s at most. */
 export const INSPECTION_PROFILE_TIMING: InspectionProfileTiming = {
   draws: 30,
   maxMs: 30_000,
-  settleMs: 1_000,
+  settleMs: 10_000,
   pollMs: 100,
 };
 
@@ -114,7 +118,17 @@ export class InspectionProfiler {
       this.#deps.markWindow({ startMs, endMs });
       said = plate();
       // The last frames' pass times resolve a frame or more late.
-      await this.#deps.sleep(timing.settleMs);
+      const settleFromMs = this.#deps.nowMs();
+      const timed = (): boolean =>
+        views.window(startMs, endMs, [{ name: PRIMARY_VIEW_NAME, style: "photorealistic" }])
+          .untimedFrames === 0 || this.#deps.nowMs() - settleFromMs >= timing.settleMs;
+      const settled = async (): Promise<void> => {
+        await this.#deps.sleep(timing.pollMs);
+        if (!timed()) {
+          await settled();
+        }
+      };
+      await settled();
       ending = true;
       await api.endProfile(name, { startMs, endMs });
     } catch (error: unknown) {
