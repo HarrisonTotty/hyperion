@@ -2286,3 +2286,21 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     `the_other_maps_are_the_pinned_ones_at_24_25_and_26`, which pin BASE's digests, and the sim's
     `the_remnants_maps_are_pinned_under_every_26_hold`. The 26 bump re-pins or drops the 24 and 25
     rows, which build those versions' galaxies (`galaxy_at`).
+- **P08.T12, layer E's exact fates, bit for bit (lane `perf-layer-e-fates`, 2026-11-01, at
+  `GENERATOR_VERSION` 24; no output moved).**
+  - _Profile (pod, release, one thread)._ The Sun-like 50 ly grid query, cold, under every 26
+    hold, takes 101.6 ms. Of that, 237 fate or lifetime builds take 95.5 ms, 0.40 ms each.
+    `ZCoeffs::new` takes 1 µs a build and allocation is nil. No phase is built past the death,
+    which needs them all. A build is about 150 model evaluations of transcendental fits, spread
+    over the phases: the main sequence 83 µs, the Hertzsprung gap 63, the giant branch 77, core
+    helium burning 90 and the early AGB 118.
+  - _Lever._ `hyperion_base::math::PositivePowers` shares one logarithm among a base's powers,
+    which is `powf_positive` bit for bit. It is used in the main sequence's fits and in
+    `LesserPowerLaw::at`; the giant branches' radius laws already shared theirs. A fate now takes
+    0.387 ms, against the 0.04 ms target.
+  - _Test._ `stellar::sse::track::lifetime_sweep` (slow): 2,000 masses over the track's 0.1–150 M☉
+    (not 0.08, where no track exists), five compositions and two draws, under the stellar rules of
+    24 to 27, pinned by digest from before the change.
+  - _The 27-held redesign (research-leans-19 §3), estimated._ The fitted fate table answers 187 of
+    the query's 229 fates, in 0.5 µs each. With exact calls only where it doesn't, about 50 builds
+    remain, about 20 ms, so the grid's cold query would fall from about 101 ms to about 30 ms.
