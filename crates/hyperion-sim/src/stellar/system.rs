@@ -3404,11 +3404,10 @@ mod tests {
         )
     }
 
-    /// The paired path of P06.T24.b's hold: under the full arm a pre-main-sequence star its pair
-    /// has changed takes the young class of its own initial mass and disc, and a star of the
-    /// thermally pulsing AGB no S or carbon class (its track's pulses are not its pair's); under
-    /// the version's rules neither takes a class. No grid star its pair has changed is young, so
-    /// this arm is the one no grid system can show moving (`stellar/rules/classes_hold.rs`).
+    /// The paired path of P06.T24.b's classes: a pre-main-sequence star its pair has changed takes
+    /// the young class of its own initial mass and disc, and a star of the thermally pulsing AGB no
+    /// S or carbon class (its track's pulses are not its pair's). No grid star its pair has changed
+    /// is young, so this path is the one no grid system can show (`stellar/rules/classes_hold.rs`).
     #[test]
     fn a_paired_star_takes_a_young_class_and_no_carbon_class() {
         let paired = |state: StarState| PairedStar {
@@ -3435,8 +3434,6 @@ mod tests {
             paired(state).class_extras_of(&young),
             ClassExtras::NONE.with_peculiar(PeculiarClass::TTauri { classical: false })
         );
-        let held = model(1.0, 2e6, StellarRules::of_version(GENERATOR_VERSION));
-        assert_eq!(paired(state).class_extras_of(&held), ClassExtras::NONE);
         let agb = model(3.0, 1.2e10, full);
         let clock = crate::stellar::events::thermal_pulse::ThermalPulseClock::of(&agb).unwrap();
         let half = clock

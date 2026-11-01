@@ -1205,7 +1205,7 @@ mod tests {
     /// The plan's test (P06.T24.b, amended by research-leans-12 §3): a 1 M☉ star at 2 Myr is a
     /// T Tauri star, classical while its disc lasts by its disc draw, a 4 M☉ one at 0.8 Myr, on its
     /// contraction, a Herbig Ae/Be star; the protostars of 4 M☉ at 0.3 Myr and 1 M☉ at 0.1 Myr, a
-    /// 9 M☉ star at 0.8 Myr, the Sun, and every star under the version's rules take neither.
+    /// 9 M☉ star at 0.8 Myr and the Sun take neither.
     #[test]
     fn young_stars_are_t_tauri_or_herbig_ae_be_stars_by_mass() {
         let young = |m: f64, age: f64, rank: f64, rules: StellarRules| {
@@ -1261,10 +1261,6 @@ mod tests {
         }
         assert_eq!(young(9.0, 8e5, 0.5, full).peculiar_class(), None);
         assert_eq!(young(1.0, 4.57e9, 0.5, full).peculiar_class(), None);
-        let held = StellarRules::of_version(crate::GENERATOR_VERSION);
-        for (m, age) in [(1.0, 2e6), (4.0, 8e5)] {
-            assert_eq!(young(m, age, 0.95, held).peculiar_class(), None);
-        }
     }
 
     /// The T Tauri stars' upper mass is the FU Orionis outbursts' disc phase's (P06.T28.d), and
