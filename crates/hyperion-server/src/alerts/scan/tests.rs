@@ -1,11 +1,13 @@
-//! The scans' walks (plan 12, P12.T8.b): how far a first scan walks back, what keys a walk, and a
-//! background walk split into chunks, which gives the interactive walk's pushes, each once.
+//! The scans' walks (plan 12, P12.T8.b and P12.T8.b.2): how far a first scan walks back, what keys
+//! a walk, a background walk in jobs of x-slabs, which gives the interactive walk's pushes, each
+//! once, and a whole galaxy's plan, which lists no cell.
 
 use std::collections::BTreeSet;
 
 use hyperion_sim::alerts::{ClassSet, LocalEventsCache, LongestRise, SensorHorizon, TransientKind};
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::catalogue_classes::ClassId;
+use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use hyperion_sim::galaxy::catalogue_classes::{ClassId, cells_in_sphere, occupied_cells};
 use hyperion_sim::id::EventId;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::time::{Span, UniverseTime};
@@ -132,12 +134,12 @@ fn pushes_of(
         .collect()
 }
 
-/// A background walk of the core collapses split into chunks gives the whole's pushes, each once,
-/// in chunks of one cell, of five and of all, and they are the interactive walk's: 0.2 ly from the
-/// pinned supernova, through a V sensor that reaches some 700 ly, a few dozen of the class's cells,
-/// over the first scan's year and its walk back.
+/// A background walk of the core collapses in jobs gives the whole's pushes, each once, in jobs of
+/// one slab, of three and of all, and they are the interactive walk's: 0.2 ly from the pinned
+/// supernova, through a V sensor that reaches some 700 ly, over the first scan's year and its walk
+/// back. The jobs draw every candidate of the sphere's cells.
 #[tokio::test]
-async fn a_background_walk_in_chunks_gives_the_interactive_walks_pushes_each_once() {
+async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_once() {
     let (server, _data_dir) = server(|config| config).await;
     let state = server.state();
     let supernova = pinned();
@@ -146,19 +148,38 @@ async fn a_background_walk_in_chunks_gives_the_interactive_walks_pushes_each_onc
     let (subscription, first) = core_collapses(far, start, reaching(700.0));
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let class = ClassId::CORE_COLLAPSE;
-    let cells = background_cells(galaxy(), &spec, class, MAX_BACKGROUND_CELLS).unwrap();
-    assert!(cells.len() > 10, "a few dozen cells: {}", cells.len());
     let token = CancelToken::new();
-    let walk = |cells: &[BackgroundCell]| {
-        walk_cells(state, galaxy(), &spec, class, cells, &token).expect("not cancelled")
+    let walk = |per_job| {
+        let plan = background_plan(galaxy(), &spec, class, per_job).unwrap();
+        let jobs = plan.jobs().to_vec();
+        let walked = jobs.into_iter().map(|slabs| {
+            walk_slabs(state, galaxy(), &spec, &plan, slabs, &token).expect("not cancelled")
+        });
+        (
+            plan.jobs().len(),
+            ScanResult::of_jobs(walked.collect::<Vec<_>>()),
+        )
     };
-    let whole = walk(&cells);
-    for per_job in [1, 5, cells.len()] {
-        let chunked: Vec<_> = chunks(&cells, per_job)
-            .iter()
-            .flat_map(|chunk| walk(chunk))
-            .collect();
-        assert_eq!(chunked, whole, "in chunks of {per_job}");
+    let (slabs, whole) = walk(usize::MAX);
+    assert_eq!(slabs, 1, "one job of every slab");
+    let plan = background_plan(galaxy(), &spec, class, 1).unwrap();
+    assert!(
+        plan.jobs().len() > 10,
+        "a few dozen slabs: {:?}",
+        plan.jobs()
+    );
+    let drawn: u32 = occupied_cells(
+        galaxy(),
+        &CoreCollapseProcess::new(galaxy()),
+        cells_in_sphere(class, &plan.sphere),
+    )
+    .iter()
+    .map(|&(_, count)| count)
+    .sum();
+    assert_eq!(whole.drawn(), Some(drawn));
+    for per_job in [1, 3] {
+        let (_, jobs) = walk(per_job);
+        assert_eq!(jobs, whole, "in jobs of {per_job} slabs");
     }
     let interactive = walk_interactive(state, galaxy(), &spec, &mut LocalEventsCache::default());
     assert_eq!(
@@ -174,7 +195,7 @@ async fn a_background_walk_in_chunks_gives_the_interactive_walks_pushes_each_onc
         .cloned()
         .collect();
 
-    let pushes = pushes_of(&subscription, &first, whole);
+    let pushes = pushes_of(&subscription, &first, whole.tracks().to_vec());
     assert_eq!(pushes, pushes_of(&subscription, &first, interactive));
     let once: BTreeSet<_> = pushes.iter().collect();
     assert_eq!(once.len(), pushes.len(), "each push once: {pushes:?}");
@@ -187,22 +208,27 @@ async fn a_background_walk_in_chunks_gives_the_interactive_walks_pushes_each_onc
     server.shutdown().await.unwrap();
 }
 
-/// A class whose cells within its reach are more than a walk may read is not planned; with room,
-/// it is.
+/// A sensor that sees across the galaxy, V 10⁻¹² W m⁻², plans its core collapses as the root
+/// cube's 256 x-slabs of 512 ly cells, in order and without a gap: 64 jobs of 4 slabs, or at most
+/// 256 jobs however few slabs a job is asked to take. The plan holds the slabs, never a list of the
+/// cube's 2²⁴ cell keys. A class no background walk reads in cells has no plan.
 #[test]
-fn a_class_whose_cells_are_too_many_is_not_planned() {
-    let supernova = pinned();
-    let far = beside(&supernova, 0.2);
-    let (subscription, first) = core_collapses(far, UniverseTime::EPOCH, reaching(700.0));
+fn a_whole_galaxy_plan_is_the_cubes_slabs_and_no_list_of_its_keys() {
+    let (subscription, first) = core_collapses(sun(), UniverseTime::EPOCH, v_sensor(1e-12, 1e-10));
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let class = ClassId::CORE_COLLAPSE;
-    let planned = background_cells(galaxy(), &spec, class, MAX_BACKGROUND_CELLS).unwrap();
-    assert_eq!(
-        background_cells(galaxy(), &spec, class, planned.len() / 2),
-        None
-    );
-    assert_eq!(
-        background_cells(galaxy(), &spec, class, planned.len()),
-        Some(planned)
-    );
+    for (per_job, jobs) in [(SLABS_PER_JOB, 64), (1, 256), (0, 256)] {
+        let plan = background_plan(galaxy(), &spec, class, per_job).unwrap();
+        assert_eq!(plan.jobs().len(), jobs, "{per_job} slabs a job");
+        assert_eq!(plan.jobs().first().map(|slabs| slabs.start), Some(-128));
+        assert_eq!(plan.jobs().last().map(|slabs| slabs.end), Some(128));
+        assert!(
+            plan.jobs()
+                .windows(2)
+                .all(|pair| pair[0].end == pair[1].start),
+            "{:?}",
+            plan.jobs()
+        );
+    }
+    assert!(background_plan(galaxy(), &spec, ClassId::LUMINOUS_BLUE_VARIABLE, 1).is_none());
 }

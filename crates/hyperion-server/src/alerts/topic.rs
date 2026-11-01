@@ -290,8 +290,10 @@ impl Topic {
         self.after(advance, census_changed).await;
     }
 
-    /// Merges a class's background walk late, and makes what fell due: the class's census is
-    /// complete if the walk is the latest scan's, and stays `pending` if the walk failed.
+    /// Merges a class's background walk late, and makes what fell due: if the walk is the latest
+    /// scan's, the class's census is settled with the candidates the walk drew as its hosts,
+    /// complete or, past the host limit, over it, and stays `pending` if the walk failed (Design
+    /// note 7). A class over its limit, or one no walk reads, yields nothing.
     async fn on_background(&mut self, walked: BackgroundWalked) {
         let BackgroundWalked {
             spec,
@@ -306,25 +308,29 @@ impl Topic {
                 return;
             }
         };
-        let merged = self
-            .subscription
-            .merge_late(spec.request(), found.tracks().iter().cloned());
-        if !merged_in_order(merged) {
-            return;
+        let settled = match found.drawn() {
+            None => ClassCensusStatusDto::Unwalked,
+            Some(drawn) if drawn > self.subscription.host_limit().get() => {
+                ClassCensusStatusDto::OverLimit
+            }
+            Some(_) => ClassCensusStatusDto::Complete,
+        };
+        if settled == ClassCensusStatusDto::Complete {
+            let merged = self
+                .subscription
+                .merge_late(spec.request(), found.tracks().iter().cloned());
+            if !merged_in_order(merged) {
+                return;
+            }
         }
         let mut census_changed = false;
         if self.background.get(&class) == Some(&number) {
             self.background.remove(&class);
             if let Some(dto) = self.census.get_mut(&class) {
-                // A class whose cells are too many to walk yields nothing, as one over the host
-                // limit does (lean, 2026-11-01).
-                let settled = if found.is_oversized() {
-                    ClassCensusStatusDto::OverLimit
-                } else {
-                    ClassCensusStatusDto::Complete
-                };
-                census_changed = dto.status != settled;
+                let hosts = found.drawn().map(f64::from);
+                census_changed = (dto.status, dto.expected_hosts) != (settled, hosts);
                 dto.status = settled;
+                dto.expected_hosts = hosts;
             }
         }
         let advance = self.subscription.advance(*self.subscription.observer());

@@ -1,7 +1,8 @@
 //! The alert service's scans over a socket (plan 12, P12.T8.b and P12.T9.b): a subscription near a
 //! pinned supernova is told of it at `bearing` as its light rises past the sensor's detection
-//! limit, and then, moved close, of the same contact `resolved` with its host; and a class walked
-//! in the background whose walk is given up stays `pending` and delivers nothing.
+//! limit, and then, moved close, of the same contact `resolved` with its host; a class walked in
+//! the background whose walk is given up stays `pending` and delivers nothing; and one walked across
+//! the whole galaxy reads `complete` with the candidates it drew (P12.T8.b.2).
 //!
 //! P12.T9.b's test is to watch a pinned recurrent nova. Plan 11's novae are not walked yet, so a
 //! supernova stands in, as the brief allows (`common::alerts`).
@@ -14,7 +15,8 @@ use common::alerts::{
     move_to, opened, peak, pinned, subscribe, v_sensor,
 };
 use hyperion_protocol::{
-    ClassCensusStatusDto, ContactDto, RequestBody, ResponseBody, UnsubscribeRequest,
+    ClassCensusStatusDto, ContactDto, NotificationBody, RequestBody, ResponseBody,
+    UnsubscribeRequest,
 };
 use hyperion_server::compute::BulkGate;
 use hyperion_server::knowledge::PersistedKnowledge;
@@ -168,4 +170,47 @@ async fn alerts_scans_give_up_a_background_walk_and_deliver_nothing() {
         .await
         .unwrap();
     assert_eq!(knowledge.read(|store| store.contacts().count()), 0);
+}
+
+/// A sensor that sees across the galaxy, a V limit of 10⁻¹² W m⁻², at the Sun-like point: its core
+/// collapses, too many cells to count interactively, open `pending` with no count of hosts, are
+/// walked in the background over every slab of the root cube, and read `complete` with the
+/// candidates the walk drew, hundreds of thousands (P12.T8.b.2; research's 5.0 × 10⁵ for the Milky
+/// Way fixture).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alerts_scans_walk_a_galaxy_wide_class_to_complete() {
+    let sun =
+        hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).unwrap();
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Alerts: the galaxy", SEED).await.id;
+    let start = hyperion_sim::time::UniverseTime::EPOCH;
+    let (_, census) = opened(
+        &mut client,
+        subscribe(&universe, &sun, start, (1e-12, 1e-10)),
+    )
+    .await;
+    assert_eq!(
+        (census.status, census.expected_hosts),
+        (ClassCensusStatusDto::Pending, None)
+    );
+    let settled = loop {
+        let (_, NotificationBody::Alerts(notification)) = client.next_notification().await else {
+            panic!("an alerts notification");
+        };
+        if let [line] = notification.census[..]
+            && line.status != ClassCensusStatusDto::Pending
+        {
+            break line;
+        }
+    };
+    assert_eq!(
+        settled.status,
+        ClassCensusStatusDto::Complete,
+        "{settled:?}"
+    );
+    let hosts = settled.expected_hosts.unwrap_or_default();
+    assert!((1e5..1e7).contains(&hosts), "{settled:?}");
+    client.close().await;
+    server.stop().await;
 }

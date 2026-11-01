@@ -5,10 +5,12 @@
 //! keyed by [`ScanKey`], under a [`SingleFlight`], so two subscriptions at one place with one
 //! sensor, classes and window share one walk. A scan's interactive classes and local events are
 //! one `Priority::Interactive` job. A class its census sends to the background is planned in one
-//! `Priority::Bulk` job and walked in bulk jobs of [`BACKGROUND_CELLS_PER_JOB`] cells, all under
-//! one [`CancelToken`], and is complete only when every one has finished: one cancelled or failed
-//! fails the class's walk, which yields nothing (Design note 7). A walk whose last waiter gives up
-//! is cancelled, its jobs still queued skipped and its running ones stopped at their next cell.
+//! `Priority::Bulk` job, which builds its process once, and walked in at most
+//! [`MAX_BACKGROUND_JOBS`] bulk jobs of [`SLABS_PER_JOB`] x-slabs each, all under one
+//! [`CancelToken`] and sharing the process (P12.T8.b.2). It is complete only when every job has
+//! finished: one cancelled or failed fails the class's walk, which yields nothing (Design note 7).
+//! A walk whose last waiter gives up is cancelled, its jobs still queued skipped and its running
+//! ones stopped at their next cell.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,9 +22,10 @@ use hyperion_sim::alerts::LocalEventsCache;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 
+#[cfg(doc)]
+use super::scan::MAX_BACKGROUND_JOBS;
 use super::scan::{
-    BACKGROUND_CELLS_PER_JOB, MAX_BACKGROUND_CELLS, ScanKey, ScanResult, ScanSpec,
-    background_cells, chunks, walk_cells, walk_interactive,
+    SLABS_PER_JOB, ScanKey, ScanResult, ScanSpec, background_plan, walk_interactive, walk_slabs,
 };
 use crate::AppState;
 use crate::cache::{LruCounters, SharedByteLru};
@@ -46,31 +49,27 @@ pub(crate) type Walked = Result<Arc<ScanResult>, ComputeError>;
 pub(crate) struct AlertScans {
     walks: Arc<SharedByteLru<WalkKey, ScanResult>>,
     flights: SingleFlight<WalkKey, ScanResult, ComputeError>,
-    /// The cells of each background job.
-    cells_per_job: usize,
-    /// The most cells a background walk reads.
-    most_cells: usize,
+    /// The x-slabs each background job sweeps, at the least.
+    slabs_per_job: usize,
     /// The walks run so far, interactive and background, each counted once its first job starts.
     walked: Arc<AtomicU64>,
 }
 
 impl AlertScans {
-    /// A service keeping at most `budget_bytes` of walks, whose background walks read at most
-    /// [`MAX_BACKGROUND_CELLS`] cells, in jobs of [`BACKGROUND_CELLS_PER_JOB`] cells each.
+    /// A service keeping at most `budget_bytes` of walks, whose background jobs sweep
+    /// [`SLABS_PER_JOB`] x-slabs each.
     #[must_use]
     pub(crate) fn new(budget_bytes: usize) -> Self {
-        Self::with_cells(budget_bytes, BACKGROUND_CELLS_PER_JOB, MAX_BACKGROUND_CELLS)
+        Self::with_slabs_per_job(budget_bytes, SLABS_PER_JOB)
     }
 
-    /// [`new`](Self::new), with `cells_per_job` cells in each background job, at least one, and at
-    /// most `most_cells` in a walk.
+    /// [`new`](Self::new), with `slabs_per_job` x-slabs in each background job, at least one.
     #[must_use]
-    pub(crate) fn with_cells(budget_bytes: usize, cells_per_job: usize, most_cells: usize) -> Self {
+    pub(crate) fn with_slabs_per_job(budget_bytes: usize, slabs_per_job: usize) -> Self {
         Self {
             walks: Arc::new(SharedByteLru::new(budget_bytes)),
             flights: SingleFlight::new(),
-            cells_per_job: cells_per_job.max(1),
-            most_cells,
+            slabs_per_job: slabs_per_job.max(1),
             walked: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -140,12 +139,12 @@ impl AlertScans {
     }
 
     /// The background walk of `class` for `spec` in `galaxy`, through `state`'s caches: held,
-    /// joined, or planned in one bulk job and walked in bulk jobs of the service's cells each
+    /// joined, or planned in one bulk job and walked in bulk jobs of the service's slabs each
     /// (module documentation).
     ///
     /// The future fails as [`interactive`](Self::interactive)'s does, for any of the jobs: the
-    /// class's walk is whole or not at all. A class whose cells are too many is not walked
-    /// ([`ScanResult::is_oversized`]).
+    /// class's walk is whole or not at all. A class no background walk reads in cells is not
+    /// walked ([`ScanResult::unwalked`]).
     pub(crate) fn background(
         &self,
         state: &Arc<AppState>,
@@ -159,7 +158,7 @@ impl AlertScans {
         }
         let (state, galaxy, spec) = (Arc::clone(state), Arc::clone(galaxy), spec.clone());
         let (walks, walked) = (Arc::clone(&self.walks), Arc::clone(&self.walked));
-        let (per_job, most) = (self.cells_per_job, self.most_cells);
+        let per_job = self.slabs_per_job;
         self.flights
             .run(key.clone(), move || async move {
                 if let Some(held) = walks.get(&key) {
@@ -174,25 +173,33 @@ impl AlertScans {
                     let (galaxy, spec) = (Arc::clone(&galaxy), spec.clone());
                     pool.submit(Priority::Bulk, token.clone(), move |_: &CancelToken| {
                         walked.fetch_add(1, Ordering::Relaxed);
-                        background_cells(&galaxy, &spec, class, most)
+                        background_plan(&galaxy, &spec, class, per_job)
                     })
                     .await?
                 };
                 let planned = plan
                     .await
                     .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
-                let Some(cells) = planned else {
-                    let refused = Arc::new(ScanResult::oversized());
-                    drop(walks.insert(key, Arc::clone(&refused)));
-                    return Ok(refused);
+                let Some(plan) = planned.map(Arc::new) else {
+                    tracing::error!(
+                        ?class,
+                        "a background walk of a class no walk reads in cells"
+                    );
+                    let unwalked = Arc::new(ScanResult::unwalked());
+                    drop(walks.insert(key, Arc::clone(&unwalked)));
+                    return Ok(unwalked);
                 };
-                let mut jobs = Vec::new();
-                for chunk in chunks(&cells, per_job) {
-                    let (state, galaxy, spec) =
-                        (Arc::clone(&state), Arc::clone(&galaxy), spec.clone());
+                let mut jobs = Vec::with_capacity(plan.jobs().len());
+                for slabs in plan.jobs().iter().cloned() {
+                    let (state, galaxy, spec, plan) = (
+                        Arc::clone(&state),
+                        Arc::clone(&galaxy),
+                        spec.clone(),
+                        Arc::clone(&plan),
+                    );
                     jobs.push(
                         pool.submit(Priority::Bulk, token.clone(), move |token: &CancelToken| {
-                            walk_cells(&state, &galaxy, &spec, class, &chunk, token)
+                            walk_slabs(&state, &galaxy, &spec, &plan, slabs, token)
                         })
                         .await?,
                     );
@@ -205,7 +212,7 @@ impl AlertScans {
                             .ok_or(JobError::Cancelled)?,
                     );
                 }
-                let result = Arc::new(ScanResult::of_chunks(parts));
+                let result = Arc::new(ScanResult::of_jobs(parts));
                 drop(walks.insert(key, Arc::clone(&result)));
                 Ok(result)
             })
@@ -232,8 +239,7 @@ impl fmt::Debug for AlertScans {
         f.debug_struct("AlertScans")
             .field("counters", &self.counters())
             .field("walking", &self.flights.len())
-            .field("cells_per_job", &self.cells_per_job)
-            .field("most_cells", &self.most_cells)
+            .field("slabs_per_job", &self.slabs_per_job)
             .finish_non_exhaustive()
     }
 }

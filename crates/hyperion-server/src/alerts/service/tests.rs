@@ -98,7 +98,7 @@ async fn two_subscriptions_with_one_key_share_one_walk() {
 /// three of six, and is never passed.
 #[tokio::test]
 async fn the_walks_are_kept_within_their_budget() {
-    let empty = ByteLru::<WalkKey, ScanResult>::charge(&ScanResult::of_chunks([]));
+    let empty = ByteLru::<WalkKey, ScanResult>::charge(&ScanResult::of_jobs([]));
     let budget = 3 * empty;
     let (server, _data_dir) = server(|config| config.alert_cache_bytes(budget)).await;
     let state = server.state();
@@ -119,16 +119,16 @@ async fn the_walks_are_kept_within_their_budget() {
 }
 
 /// A background walk whose waiter gives up while its plan is held at the gate stores nothing and
-/// runs nothing: let through, the plan is skipped as cancelled, and none of its chunks' jobs is
+/// runs nothing: let through, the plan is skipped as cancelled, and none of its slabs' jobs is
 /// queued. Asked again, the walk runs whole and finds the pinned supernova, through a sensor that
-/// reaches some 700 ly, in jobs of four cells.
+/// reaches some 700 ly, in jobs of one slab.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_background_walk_given_up_keeps_nothing_and_runs_nothing() {
     let gate = BulkGate::default();
     gate.close();
     let (server, _data_dir) = server(|config| config.bulk_gate(gate.clone())).await;
     let state = server.state();
-    let scans = AlertScans::with_cells(1 << 20, 4, 1 << 20);
+    let scans = AlertScans::with_slabs_per_job(1 << 20, 1);
     let supernova = pinned();
     let far = beside(&supernova, 0.2);
     let (subscription, first) =
@@ -157,7 +157,11 @@ async fn a_background_walk_given_up_keeps_nothing_and_runs_nothing() {
         .await
         .unwrap();
     assert_eq!(scans.walked(), 1);
-    assert!(!walked.is_oversized());
+    assert!(
+        walked.drawn().is_some_and(|drawn| drawn > 0),
+        "{:?}",
+        walked.drawn()
+    );
     assert!(
         walked
             .tracks()
@@ -168,8 +172,55 @@ async fn a_background_walk_given_up_keeps_nothing_and_runs_nothing() {
     );
     assert!(
         pool().completed() > skipped.completed() + 2,
-        "a plan and its chunks: {:?}",
+        "a plan and its slabs' jobs: {:?}",
         pool()
     );
+    server.shutdown().await.unwrap();
+}
+
+/// A background walk whose waiter gives up once its plan has run, its slabs' jobs queued and two
+/// of them held at the gate by the pool's two workers, stores nothing and walks no slab: let
+/// through, every one of its jobs is skipped as cancelled, and only the plan has run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_background_walk_given_up_among_its_jobs_walks_no_slab() {
+    let gate = BulkGate::default();
+    gate.close();
+    let (server, _data_dir) = server(|config| config.bulk_gate(gate.clone())).await;
+    let state = server.state();
+    let scans = AlertScans::with_slabs_per_job(1 << 20, 1);
+    let supernova = pinned();
+    let far = beside(&supernova, 0.2);
+    let (subscription, first) =
+        core_collapses(far, after(arrival(&supernova, &far), -DAY), reaching(700.0));
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let pool = || state.pool.counters();
+    let start = pool();
+    let given_up = tokio::spawn(scans.background(state, galaxy(), &spec, ClassId::CORE_COLLAPSE));
+    until("the plan to reach the gate", || gate.held() == 1).await;
+    gate.admit();
+    until("two slabs' jobs to be held and more queued", || {
+        gate.held() == 2 && pool().queued_bulk() > 0 && pool().completed() == start.completed() + 1
+    })
+    .await;
+    given_up.abort();
+    assert!(given_up.await.unwrap_err().is_cancelled());
+    gate.open();
+    until("the slabs' jobs to be skipped", || {
+        pool().running() == 0 && pool().queued_bulk() == 0
+    })
+    .await;
+    let after_all = pool();
+    assert_eq!(
+        after_all.completed(),
+        start.completed() + 1,
+        "the plan alone ran: {after_all:?}"
+    );
+    // The two held and every one queued behind them: the walk may queue a few more before its
+    // waiter's departure cancels it.
+    assert!(
+        after_all.cancelled() > start.cancelled() + 2,
+        "every slab's job was skipped: {after_all:?}"
+    );
+    assert_eq!(scans.counters().entries(), 0);
     server.shutdown().await.unwrap();
 }

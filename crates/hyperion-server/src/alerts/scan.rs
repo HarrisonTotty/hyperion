@@ -5,8 +5,10 @@
 //! and the local events of the systems an observed range query finds within
 //! [`LOCAL_EVENTS_RADIUS`] of the observer (P12.T5.d, P12.T5.e). [`walk_interactive`] walks what
 //! the census lets it walk at once, one interactive job. A class the census sends to the background
-//! is walked by [`walk_cells`] over the cells [`background_cells`] plans, in bulk jobs of
-//! [`BACKGROUND_CELLS_PER_JOB`] cells each (the service's).
+//! is planned by [`background_plan`] and walked by [`walk_slabs`] in bulk jobs of a few x-slabs of
+//! its sphere each (the service's): each job sweeps its slabs' occupied cells and builds only the
+//! candidates whose event time, read first, can light the window (P12.T8.b.2), so that a sensor
+//! that sees across the galaxy is walked in seconds, its class `complete` or over its host limit.
 //!
 //! The first scan after a schedule starts or restarts walks each class back from its window's start
 //! by the class's longest rise to peak ([`class_longest_rise`]; research's lean of 2026-10-30), and
@@ -20,18 +22,24 @@
 //! universe's global list, so its census says so (`Unwalked::NoGlobalList`; lean, 2026-11-01).
 
 use std::mem::size_of;
+use std::ops::Range;
+use std::sync::Arc;
 
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BuildAlertQueryError, ClassCensus, ClassSet, ClassStatus,
     Detection, LocalEventsCache, LongestRise, ProductionAlertClasses, Route, TransientKind,
-    TransientRow, alerts_in_with, class_longest_rise, class_reach, magnetar_scan_cell,
-    magnetar_scan_plan, one_shot_scan_cell, one_shot_scan_plan,
+    TransientRow, alerts_in_with, class_longest_rise, class_reach, kind_reach, magnetar_scan_cell,
+    one_shot_scan_cell,
 };
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use hyperion_sim::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
-use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, ClassId, cells_in_sphere};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, ClassId, cells_in_slab, class_slabs, occupied_cells,
+};
 use hyperion_sim::galaxy::features::catalogue::FeatureCellCache;
 use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
 use hyperion_sim::galaxy::gas::modifiers::{GasModifierSource, NoModifiers};
@@ -50,16 +58,14 @@ use crate::{AppState, FeatureMembers};
 /// out reaches few sensors' limits, and a wider query reads every one of its stars at each scan.
 pub(crate) const LOCAL_EVENTS_RADIUS: LightYears = LightYears::new(10.0);
 
-/// Catalogue cells per background job: 256, the few hundred Design note 7 has, some 0.6 s of
-/// core-collapse cells at their 2.3 ms each by the solar circle (P12.T5.b's record).
-pub(crate) const BACKGROUND_CELLS_PER_JOB: usize = 256;
+/// The x-slabs of a background class's sphere each job sweeps: 4, so 64 jobs over the root cube's
+/// 256 slabs of 512 ly cells, each some 0.1 s of bounds and counts at 24 ms a slab
+/// (research-alerts-galaxy-scan, pod, 16 vCPU), long beside a job's round trip.
+pub(crate) const SLABS_PER_JOB: usize = 4;
 
-/// The most cells a class's background walk reads: 2²⁰, ten times the census's interactive bound
-/// (`BACKGROUND_THRESHOLD_CELLS`), a 512 ly class's cells within some 32,000 ly, some 40 minutes of
-/// a worker's time at 2.3 ms a cell (lean, 2026-11-01). The sim's plans list every cell of the
-/// reach's sphere, a sensor that reaches across the root cube some 1.3 × 10⁸ of them, 2 GB of keys
-/// and days of walking, so a class whose sphere holds more is not walked and is over the limit.
-pub(crate) const MAX_BACKGROUND_CELLS: usize = 1 << 20;
+/// The most jobs a background walk is split into: 256 (the brief for P12.T8.b.2), more slabs to a
+/// job past it.
+pub(crate) const MAX_BACKGROUND_JOBS: usize = 256;
 
 /// The stars a subscription's local events cache keeps: every star of a 10 ly query's few dozen,
 /// many times over, at a few dozen bytes each.
@@ -208,42 +214,50 @@ pub(crate) struct ScanKey {
     first: bool,
 }
 
-/// What a walk found: the tracks of what bears on its scan's window, and for an interactive walk
-/// each class's census, in class order.
+/// What a walk found: the tracks of what bears on its scan's window, for an interactive walk each
+/// class's census, in class order, and for a background walk the candidates its cells drew.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScanResult {
     tracks: Vec<Tracked>,
     census: Vec<ClassCensus>,
-    /// Whether a background walk was refused for its cells, more than [`MAX_BACKGROUND_CELLS`].
-    oversized: bool,
+    /// The candidates a background walk's cells drew, or `None` for an interactive walk or a
+    /// class no background walk reads.
+    drawn: Option<u32>,
 }
 
 impl ScanResult {
-    /// A background walk's, of every chunk's tracks in the plan's order: no census.
+    /// A background walk's, of every job's in the plan's order: no census.
     #[must_use]
-    pub(crate) fn of_chunks(chunks: impl IntoIterator<Item = Vec<Tracked>>) -> Self {
+    pub(crate) fn of_jobs(jobs: impl IntoIterator<Item = SlabsWalked>) -> Self {
+        let mut tracks = Vec::new();
+        let mut drawn: u32 = 0;
+        for job in jobs {
+            tracks.extend(job.tracks);
+            drawn = drawn.saturating_add(job.drawn);
+        }
         Self {
-            tracks: chunks.into_iter().flatten().collect(),
+            tracks,
             census: Vec::new(),
-            oversized: false,
+            drawn: Some(drawn),
         }
     }
 
-    /// A background walk refused for its cells: nothing.
+    /// The background walk of a class that no background walk reads in cells: nothing.
     #[must_use]
-    pub(crate) const fn oversized() -> Self {
+    pub(crate) const fn unwalked() -> Self {
         Self {
             tracks: Vec::new(),
             census: Vec::new(),
-            oversized: true,
+            drawn: None,
         }
     }
 
-    /// Whether the walk was a background one refused for its cells, more than
-    /// [`MAX_BACKGROUND_CELLS`].
+    /// The candidates a background walk's cells drew within its class's reach, its census's
+    /// count of hosts (lean, 2026-11-01): `None` for an interactive walk, or a class no
+    /// background walk reads.
     #[must_use]
-    pub(crate) const fn is_oversized(&self) -> bool {
-        self.oversized
+    pub(crate) const fn drawn(&self) -> Option<u32> {
+        self.drawn
     }
 
     /// The tracks: an interactive walk's each class's in class order and then the local events',
@@ -385,116 +399,198 @@ pub(crate) fn walk_interactive(
     ScanResult {
         tracks: spec.tracked(detections),
         census,
-        oversized: false,
+        drawn: None,
     }
 }
 
-/// One catalogue cell of a background walk, and the walk that reads it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BackgroundCell {
-    /// A cell of the class's one-shot events, its supernovae (`one_shot_scan_cell`).
-    OneShot(CatalogueCellKey),
-    /// A cell of the class's magnetars (`magnetar_scan_cell`).
-    Magnetars(CatalogueCellKey),
+/// A class's process as a background walk builds it once and lends it to every job (P12.T8.b.2):
+/// the classes `ProductionAlertClasses` walks in cells, the core collapses with their magnetars.
+#[derive(Debug)]
+pub(crate) enum BackgroundProcess {
+    CoreCollapse(CoreCollapseProcess),
+    TypeIa(TypeIaProcess),
+    StellarMergers(StellarMergers),
+    NeutronStarMergers(NeutronStarMergers),
 }
 
-/// The cells of `class` that a background walk of `spec` reads, in the plan's order: the class's
-/// supernovae's cells, then its magnetars'; `None` if the class's cells within its reach are more
-/// than `most`, which are not planned. The core collapses and the Type Ia are the classes walked
-/// in cells (P12.T5.d's `ProductionAlertClasses`); the others have none.
+impl BackgroundProcess {
+    /// `class`'s process in `galaxy`, or `None` for a class no background walk reads in cells.
+    #[must_use]
+    fn of(galaxy: &Galaxy, class: ClassId) -> Option<Self> {
+        match class {
+            ClassId::CORE_COLLAPSE => Some(Self::CoreCollapse(CoreCollapseProcess::new(galaxy))),
+            // Its process costs some 37 ms (P12.T5.d), built once a walk, not once a job.
+            ClassId::TYPE_IA => Some(Self::TypeIa(TypeIaProcess::new(galaxy))),
+            ClassId::STELLAR_MERGER => Some(Self::StellarMergers(StellarMergers::new(galaxy))),
+            ClassId::NEUTRON_STAR_MERGER => {
+                Some(Self::NeutronStarMergers(NeutronStarMergers::new(galaxy)))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// A background walk of one class, planned: its process, the sphere of its reach about the
+/// observer, and its x-slabs in the jobs that sweep them (P12.T8.b.2). It holds no cell keys: each
+/// job lists its slabs' cells as it sweeps them ([`walk_slabs`]).
+#[derive(Debug, Clone)]
+pub(crate) struct BackgroundPlan {
+    process: Arc<BackgroundProcess>,
+    sphere: QuerySphere,
+    jobs: Vec<Range<i32>>,
+}
+
+impl BackgroundPlan {
+    /// The slabs of each job, in x order.
+    #[must_use]
+    pub(crate) fn jobs(&self) -> &[Range<i32>] {
+        &self.jobs
+    }
+}
+
+/// The plan of `class`'s background walk for `spec` in `galaxy`, its slabs `slabs_per_job` to a
+/// job, more where they would make over [`MAX_BACKGROUND_JOBS`] jobs; `None` for a class no
+/// background walk reads in cells. A class the sensor cannot see has no slabs.
 ///
-/// Each plan's sphere is one of the class's kinds' reach, within the class's: so each holds at
-/// most the class sphere's cells, which are counted first, up to `most` and one.
+/// The sphere is the class's reach ([`class_reach`]), within which every kind of the class has its
+/// own; the plan sweeps it slab by slab, so no list of its cells is held, 2²⁴ of them over the cube.
 #[must_use]
-pub(crate) fn background_cells(
+pub(crate) fn background_plan(
     galaxy: &Galaxy,
     spec: &ScanSpec,
     class: ClassId,
-    most: usize,
-) -> Option<Vec<BackgroundCell>> {
+    slabs_per_job: usize,
+) -> Option<BackgroundPlan> {
+    let process = Arc::new(BackgroundProcess::of(galaxy, class)?);
     let query = spec.class_query(class);
-    let reach = class_reach(class, query.sensor());
-    if reach > LightYears::ZERO {
-        let sphere = QuerySphere::new(
-            *query.observer_position(),
-            reach,
-            query.window().start(),
-            LightYears::ZERO,
-        )
-        .expect("a reach is a positive length within the cube's diagonal");
-        if cells_in_sphere(class, &sphere).take(most + 1).count() > most {
-            return None;
-        }
-    }
-    let one_shot = match class {
-        ClassId::CORE_COLLAPSE => one_shot_scan_plan(&CoreCollapseProcess::new(galaxy), &query),
-        ClassId::TYPE_IA => one_shot_scan_plan(&TypeIaProcess::new(galaxy), &query),
-        _ => Vec::new(),
-    };
-    let magnetars = if class == ClassId::CORE_COLLAPSE {
-        magnetar_scan_plan(class, &query)
-    } else {
-        Vec::new()
-    };
-    Some(
-        one_shot
-            .into_iter()
-            .map(BackgroundCell::OneShot)
-            .chain(magnetars.into_iter().map(BackgroundCell::Magnetars))
-            .collect(),
+    let sphere = QuerySphere::new(
+        *query.observer_position(),
+        class_reach(class, query.sensor()),
+        query.window().start(),
+        LightYears::ZERO,
     )
+    .expect("a reach is a length within the cube's diagonal");
+    let slabs = class_slabs(class, &sphere);
+    let count = usize::try_from(slabs.end - slabs.start).unwrap_or(0);
+    // No more slabs a job than the sphere has, which are some hundreds.
+    let per_job = slabs_per_job
+        .max(count.div_ceil(MAX_BACKGROUND_JOBS))
+        .clamp(1, count.max(1));
+    let step = i32::try_from(per_job).expect("a sphere's slabs in the root cube fit in i32");
+    let jobs = slabs
+        .clone()
+        .step_by(per_job)
+        .map(|first| first..first.saturating_add(step).min(slabs.end))
+        .collect();
+    Some(BackgroundPlan {
+        process,
+        sphere,
+        jobs,
+    })
 }
 
-/// Walks `cells` of `class` for `spec` in `galaxy`, on a pool worker: the tracks of what bears on
-/// the window, in the cells' order, or `None` if `token` was cancelled before the last cell.
-///
-/// Over every cell of [`background_cells`], in chunks of any size, the tracks are the class's own
-/// in [`walk_interactive`], each to the bit: each cell's walk is a pure function of the cell
-/// (P12.T5.d), and each event is one cell's.
+/// What a background job found: the tracks of what bears on the window, and the candidates its
+/// slabs' cells drew.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct SlabsWalked {
+    tracks: Vec<Tracked>,
+    drawn: u32,
+}
+
+/// Whether `kind`'s events of `key`'s cell can reach `query`'s sensor: its box within the kind's
+/// reach and [`LIFETIME_REACH`] of the observer, and a light-year more for the rounding. A cell
+/// beyond adds nothing to its kind's walk, so walking a few more changes no detection.
 #[must_use]
-pub(crate) fn walk_cells(
+fn reaches(query: &AlertQuery, kind: TransientKind, key: &CatalogueCellKey) -> bool {
+    let reach = kind_reach(kind, query.sensor());
+    if reach <= LightYears::ZERO {
+        return false;
+    }
+    let centre = query.observer_position().to_light_years_f64();
+    let edge = f64::from(key.edge_ly());
+    let origin = key.origin_ly();
+    let gap_squared = (0..3).fold(0.0, |sum, axis| {
+        let low = f64::from(origin[axis]);
+        let gap = (low - centre[axis]).max(centre[axis] - low - edge).max(0.0);
+        sum + gap * gap
+    });
+    let padded = reach.value() + LIFETIME_REACH.value() + 1.0;
+    gap_squared <= padded * padded
+}
+
+/// Walks the slabs `slabs` of `plan` for `spec` in `galaxy`, on a pool worker: every occupied cell
+/// of each slab ([`occupied_cells`]), its one-shot events and, for the core collapses, its
+/// magnetars, each kind where it can reach the sensor, cut to the candidates whose time read first
+/// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`). `None` if `token` was
+/// cancelled before the last cell.
+///
+/// Over every job of the plan, in any order, the tracks are the class's own in
+/// [`walk_interactive`], each to the bit: each cell's walk is a pure function of the cell.
+#[must_use]
+pub(crate) fn walk_slabs(
     state: &AppState,
     galaxy: &Galaxy,
     spec: &ScanSpec,
-    class: ClassId,
-    cells: &[BackgroundCell],
+    plan: &BackgroundPlan,
+    slabs: Range<i32>,
     token: &CancelToken,
-) -> Option<Vec<Tracked>> {
+) -> Option<SlabsWalked> {
     let feature_cells = state.feature_cells.handle(spec.galaxy);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
     let mut ctx = AlertContext::new(&mut noise, gas.source());
-    let query = spec.class_query(class);
-    let core_collapses =
-        (class == ClassId::CORE_COLLAPSE).then(|| CoreCollapseProcess::new(galaxy));
-    let type_ia = (class == ClassId::TYPE_IA).then(|| TypeIaProcess::new(galaxy));
     let mut detections = Vec::new();
-    for &cell in cells {
+    let mut drawn: u32 = 0;
+    let process = plan.process.as_ref();
+    let class = match process {
+        BackgroundProcess::CoreCollapse(_) => ClassId::CORE_COLLAPSE,
+        BackgroundProcess::TypeIa(_) => ClassId::TYPE_IA,
+        BackgroundProcess::StellarMergers(_) => ClassId::STELLAR_MERGER,
+        BackgroundProcess::NeutronStarMergers(_) => ClassId::NEUTRON_STAR_MERGER,
+    };
+    let query = spec.class_query(class);
+    for x in slabs {
         if token.is_cancelled() {
             return None;
         }
-        match (cell, &core_collapses, &type_ia) {
-            (BackgroundCell::OneShot(cell), Some(process), _) => {
-                one_shot_scan_cell(galaxy, &mut ctx, &query, process, cell, &mut detections);
+        let cells = cells_in_slab(class, &plan.sphere, x);
+        let occupied = match process {
+            BackgroundProcess::CoreCollapse(p) => occupied_cells(galaxy, p, cells),
+            BackgroundProcess::TypeIa(p) => occupied_cells(galaxy, p, cells),
+            BackgroundProcess::StellarMergers(p) => occupied_cells(galaxy, p, cells),
+            BackgroundProcess::NeutronStarMergers(p) => occupied_cells(galaxy, p, cells),
+        };
+        for (cell, count) in occupied {
+            if token.is_cancelled() {
+                return None;
             }
-            (BackgroundCell::OneShot(cell), None, Some(process)) => {
-                one_shot_scan_cell(galaxy, &mut ctx, &query, process, cell, &mut detections);
+            drawn = drawn.saturating_add(count);
+            let out = &mut detections;
+            match process {
+                BackgroundProcess::CoreCollapse(p) => {
+                    if reaches(&query, TransientKind::CoreCollapse, &cell) {
+                        one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                    }
+                    if reaches(&query, TransientKind::MagnetarBurst, &cell) {
+                        magnetar_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                    }
+                }
+                BackgroundProcess::TypeIa(p) => {
+                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
+                BackgroundProcess::StellarMergers(p) => {
+                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
+                BackgroundProcess::NeutronStarMergers(p) => {
+                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
             }
-            (BackgroundCell::Magnetars(cell), Some(process), _) => {
-                magnetar_scan_cell(galaxy, &mut ctx, &query, process, cell, &mut detections);
-            }
-            // A cell no plan of the class holds: `background_cells` gives none.
-            (BackgroundCell::OneShot(_), None, None) | (BackgroundCell::Magnetars(_), None, _) => {}
         }
     }
-    Some(spec.tracked(detections))
-}
-
-/// Splits `cells` into the chunks of a background walk's jobs, `per_job` cells each and at least
-/// one, the last the rest.
-#[must_use]
-pub(crate) fn chunks(cells: &[BackgroundCell], per_job: usize) -> Vec<Vec<BackgroundCell>> {
-    cells.chunks(per_job.max(1)).map(<[_]>::to_vec).collect()
+    Some(SlabsWalked {
+        tracks: spec.tracked(detections),
+        drawn,
+    })
 }
 
 #[cfg(test)]

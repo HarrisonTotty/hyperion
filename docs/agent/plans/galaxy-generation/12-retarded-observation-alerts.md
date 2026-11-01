@@ -628,6 +628,8 @@ Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acc
   merged only when all have finished (Design note 7); look-ahead renewal; the `ByteLru` of schedules
   under `SingleFlight`. Tests: a cancelled scan leaves the class `Pending` and delivers nothing; two
   subscriptions with one key share one scan; the cache is bounded.
+- **P12.T8.b.2 A background scan of the whole galaxy** (2026-11-01, after research's
+  research-alerts-galaxy-scan; the ID is a lean). Built: see its record under Risks.
 - **P12.T8.c Into Knowledge.** Each due detection becomes a sighting; the notification carries the
   views of the contacts that changed, and the census per class (`complete`, `over_limit`,
   `pending`). A resolved contact appears first as a bearing if its flux crossed `detect` before
@@ -2967,8 +2969,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Leans (2026-11-01)._ The cache holds walks, not schedules, keyed by galaxy, not universe.
     Feature gas at the epoch, so a light is the same in every scan. Local events from grid rows
     within 10 ly. The centre is `unwalked`: no global list in the server.
-  - _Lean (2026-11-01)._ A background class whose sphere holds over 2²⁰ cells is not walked and
-    reads `over_limit`.
+  - _Lean (2026-11-01; overturned by P12.T8.b.2)._ A background class whose sphere holds over
+    2²⁰ cells is not walked and reads `over_limit`.
   - _T9.b on a supernova (lean, 2026-11-01)._ The novae are not walked (P11.T9), so the test pins
     seed 9's IIP at +874 yr in core-collapse cell [-3, 48, 0]. Not built: the `awd_scan_cold`
     bench (no accreting white dwarfs).
@@ -3044,3 +3046,15 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _For T8.b._ No cell cache is lent for the new classes: white dwarf and X-ray binary cells are
     rescanned from their marks (`binary/awd_scan_marks`), and an LBV cell is generated whole each
     call; a server that rescans should keep LBV cells as it keeps the magnetars'.
+- **P12.T8.b.2 as built (lane `p12-t8a`, 2026-11-01; no output moves).** Built.
+  - _Names._ `ClassProcess::event_time` (rule 10; the core collapses' and the Type Ia's),
+    `entries_when`, `class_slabs`, `cells_in_slab`, `occupied_cells` and
+    `OneShotClass::cell_events_when`. `one_shot_scan_cell` and `magnetar_scan_cell` build only the
+    candidates whose time can light the window (`alerts/cut.rs`). The server's `background_plan`
+    builds the process once and splits the slabs into at most 256 bulk jobs (`walk_slabs`,
+    `SLABS_PER_JOB` = 4).
+  - _The census._ T8.b's 2²⁰-cell refusal is gone: a whole-galaxy class reads `complete`, its
+    `expected_hosts` the candidates its walk drew (lean). Past the host limit it reads `over_limit`
+    and merges nothing.
+  - _Leans (2026-11-01)._ No cache of occupied cells: a rescan sweeps the slabs again. Each kind is
+    walked only on cells within its reach, so a V-only sensor walks no magnetar.

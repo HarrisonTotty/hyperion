@@ -53,6 +53,10 @@ name = "global_list_pool"
 harness = false
 
 [[bench]]
+name = "oneshot_scan_galaxy"
+harness = false
+
+[[bench]]
 name = "range_query"
 harness = false
 
