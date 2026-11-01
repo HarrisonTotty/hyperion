@@ -41,7 +41,7 @@ use crate::units::{KilometresPerSecond, LightYears};
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
 use super::super::cluster::{ClusterModel, ClusterParameters};
 use super::super::interior::counts::TailReach;
-use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
+use super::super::interior::{BoundMemo, CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
 use super::recent::{FeatureStars, claimed_by};
@@ -233,8 +233,20 @@ impl FeatureInterior {
     /// How `band`'s candidates are proposed in `cell`, and the cell's box.
     #[must_use]
     fn proposal(&self, band: MassBand, cell: NestedCell) -> (CellProposal, LocalCell) {
+        self.proposal_with(band, cell, None)
+    }
+
+    /// [`proposal`](Self::proposal), bit for bit, its bound read from and kept in `memo`, which
+    /// serves this interior's cells alone.
+    #[must_use]
+    fn proposal_with(
+        &self,
+        band: MassBand,
+        cell: NestedCell,
+        memo: Option<&mut BoundMemo>,
+    ) -> (CellProposal, LocalCell) {
         let local = self.grid.local_cell(cell);
-        (self.table.proposal(band, &local), local)
+        (self.table.proposal_with(band, &local, memo), local)
     }
 
     /// The expected candidates of `band` in `cell`: its bound times its volume, or its cusp
@@ -242,6 +254,19 @@ impl FeatureInterior {
     #[must_use]
     pub fn expected_candidates(&self, band: MassBand, cell: NestedCell) -> f64 {
         let (proposal, local) = self.proposal(band, cell);
+        proposal.expected(&local)
+    }
+
+    /// [`expected_candidates`](Self::expected_candidates), bit for bit, its bound read from and
+    /// kept in `memo` ([`BoundMemo`]), which serves this interior's cells alone.
+    #[must_use]
+    pub(crate) fn expected_candidates_with(
+        &self,
+        band: MassBand,
+        cell: NestedCell,
+        memo: &mut BoundMemo,
+    ) -> f64 {
+        let (proposal, local) = self.proposal_with(band, cell, Some(memo));
         proposal.expected(&local)
     }
 
@@ -391,11 +416,11 @@ impl FeatureInterior {
         cell: NestedCell,
         near: &PointLy,
         within: LightYears,
-        out: &mut Vec<(MemberRecord, PointLy)>,
+        (out, memo): (&mut Vec<(MemberRecord, PointLy)>, &mut BoundMemo),
     ) {
         let within = within.value();
         out.clear();
-        let (proposal, local) = self.proposal(band, cell);
+        let (proposal, local) = self.proposal_with(band, cell, Some(memo));
         let n = count_from_mean(
             galaxy,
             self.member_id(band, cell, 0),
@@ -549,8 +574,12 @@ mod tests {
     /// shows a failing test's output.
     #[test]
     fn the_fixture_s_clusters_place_resolve_and_pin_their_members() {
-        let properties: [(&str, fn()); 10] = [
+        let properties: [(&str, fn()); 11] = [
             ("members_golden", members_golden),
+            (
+                "a_memo_s_expected_candidates_and_members_are_its_cells_own",
+                a_memo_s_expected_candidates_and_members_are_its_cells_own,
+            ),
             (
                 "every_member_s_id_round_trips_and_resolves_to_it",
                 every_member_s_id_round_trips_and_resolves_to_it,
@@ -591,6 +620,62 @@ mod tests {
         for (name, property) in properties {
             println!("property: {name}");
             property();
+        }
+    }
+
+    /// A census through a [`BoundMemo`] is each cell's own, bit for bit: over the cells a 50 ly
+    /// sphere about a globular's centre and one 20 ly off it touch, every band's expected
+    /// candidates and members found sharing one memo are those found without it, and the memo
+    /// holds far fewer bounds than the cells it served, since the grid's mirrors repeat them.
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
+    fn a_memo_s_expected_candidates_and_members_are_its_cells_own() {
+        use hyperion_testkit::float::assert_same_bits;
+
+        let galaxy = galaxy();
+        for interior in [globular(false), open_cluster()] {
+            for near in [PointLy::new(0.0, 0.0, 0.0), PointLy::new(20.0, -3.0, 7.5)] {
+                let radius = LightYears::new(50.0);
+                let cells: Vec<NestedCell> =
+                    interior.grid().cells_touching(&near, radius).collect();
+                let mut memo = BoundMemo::default();
+                let (mut with, mut without) = (Vec::new(), Vec::new());
+                for band in MassBand::ALL {
+                    for &cell in &cells {
+                        assert_same_bits(
+                            interior.expected_candidates_with(band, cell, &mut memo),
+                            interior.expected_candidates(band, cell),
+                        );
+                    }
+                }
+                let served = MassBand::ALL.len() * cells.len();
+                assert!(
+                    memo.len() * 4 < served,
+                    "{} bounds kept for {served} cells' bands",
+                    memo.len()
+                );
+                for band in MassBand::ALL {
+                    for &cell in cells.iter().step_by(37) {
+                        interior.members_in_cell_near(
+                            galaxy,
+                            band,
+                            cell,
+                            &near,
+                            radius,
+                            (&mut with, &mut memo),
+                        );
+                        interior.members_in_cell_near(
+                            galaxy,
+                            band,
+                            cell,
+                            &near,
+                            radius,
+                            (&mut without, &mut BoundMemo::default()),
+                        );
+                        assert_eq!(with, without, "{band:?} {cell:?}");
+                    }
+                }
+            }
         }
     }
 

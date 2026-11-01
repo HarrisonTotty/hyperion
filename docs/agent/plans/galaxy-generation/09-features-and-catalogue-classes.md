@@ -5454,3 +5454,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `RulesCell`, which replaces `RemnantTableCell`): the lightest mass from which every corner's exact
   CO core reaches the low mode's ramp top (3 M☉). A slow pair's stripped attempt at or above it is
   refused. The fixture's floors are 13.10 and 12.64 M☉.
+- **P09.T10 perf, the census's cell bounds (lane `galaxy-centre-core`, 2026-11-01; bit for bit).**
+  `interior::BoundMemo`: a sphere's profiled bounds by band and corner radius (keyed by value),
+  read through `MemberClassTable::proposal_with`, `FeatureInterior::expected_candidates_with` and
+  `members_in_cell_near`, which now takes `(out, memo)`. `FeatureMemberSource` keeps one memo per
+  interior per call.

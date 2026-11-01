@@ -19,6 +19,8 @@
 //! count, the tube's to the reach along the axis, errs high by the Gaussian's share outside the
 //! sphere, which the census allows.
 
+use std::collections::BTreeMap;
+
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
 use crate::galaxy::imf::MassBand;
@@ -79,6 +81,49 @@ impl LocalCell {
             PointLy::new(self.min[0] + h, self.min[1] + h, self.min[2] + h),
             h * 3.0_f64.sqrt(),
         )
+    }
+}
+
+/// The bounds of a band's profiled classes already found at a cell's corner radius
+/// ([`MemberClassTable::bound`], a pure function of the band and the radius), for the cells of one
+/// sphere of one table: the census and the walk of a range query read one per band and cell, and
+/// the nested grid's cells, whose corners lie at exact multiples of a power-of-two edge, repeat
+/// their corner radii across the grid's mirrors and permutations, so a 50 ly query in a globular's
+/// core finds most of its 60,000 census bounds here (P09.T10; a pod of 16 vCPU). A radius is
+/// looked up by its value, so a bound is reused only for the very radius it was found at.
+#[derive(Debug, Default)]
+pub(crate) struct BoundMemo(BTreeMap<(usize, Radius), f64>);
+
+#[cfg(test)]
+impl BoundMemo {
+    /// The bounds it holds.
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// A corner radius as [`BoundMemo`]'s key, ly: ordered and equal by `total_cmp`, so that equal
+/// keys are the same value.
+#[derive(Debug, Clone, Copy)]
+struct Radius(f64);
+
+impl PartialEq for Radius {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0).is_eq()
+    }
+}
+
+impl Eq for Radius {}
+
+impl PartialOrd for Radius {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Radius {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
 
@@ -405,10 +450,28 @@ impl MemberClassTable {
     /// over its bounding sphere, with a margin of 10⁻¹² over the rounding.
     #[must_use]
     pub fn cell_bound(&self, band: MassBand, cell: &LocalCell) -> f64 {
+        self.cell_bound_with(band, cell, None)
+    }
+
+    /// [`cell_bound`](Self::cell_bound), bit for bit, its profiled classes' bound read from
+    /// `memo` where it holds the band's at the cell's corner radius, and kept there otherwise.
+    #[must_use]
+    fn cell_bound_with(
+        &self,
+        band: MassBand,
+        cell: &LocalCell,
+        memo: Option<&mut BoundMemo>,
+    ) -> f64 {
         let (centre, radius) = cell.bounding_sphere();
-        (self.bound(band, cell.nearest_radius())
-            + self.tail(band).map_or(0.0, |t| t.bound(&centre, radius)))
-            * (1.0 + 1e-12)
+        let nearest = cell.nearest_radius();
+        let profiled = match memo {
+            Some(memo) => *memo
+                .0
+                .entry((band.index(), Radius(nearest)))
+                .or_insert_with(|| self.bound(band, nearest)),
+            None => self.bound(band, nearest),
+        };
+        (profiled + self.tail(band).map_or(0.0, |t| t.bound(&centre, radius))) * (1.0 + 1e-12)
     }
 
     /// The density of `band`'s members at local `p` by class, into `out` (cleared first), in the
@@ -550,6 +613,18 @@ impl MemberClassTable {
     /// uniformly under [`cell_bound`](Self::cell_bound) everywhere else.
     #[must_use]
     pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CellProposal {
+        self.proposal_with(band, cell, None)
+    }
+
+    /// [`proposal`](Self::proposal), bit for bit, a uniform cell's profiled bound read from and
+    /// kept in `memo` ([`BoundMemo`]).
+    #[must_use]
+    pub(crate) fn proposal_with(
+        &self,
+        band: MassBand,
+        cell: &LocalCell,
+        memo: Option<&mut BoundMemo>,
+    ) -> CellProposal {
         match self.cusp_slope(band) {
             Some(slope) if cell.nearest_radius() <= 0.0 => {
                 debug_assert!(
@@ -583,7 +658,7 @@ impl MemberClassTable {
                 }
             }
             Some(_) | None => CellProposal::Uniform {
-                bound: self.cell_bound(band, cell),
+                bound: self.cell_bound_with(band, cell, memo),
             },
         }
     }
