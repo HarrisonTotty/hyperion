@@ -126,10 +126,10 @@ task = "cluster_bh"
 revision = 1
 inputs_sha256 = "757274b19f5d79b654bad73f7ef259f976999b1aea2dad6100f31ac3823b6f49"
 body_sha256 = "964586543142493ab4b88be0dd39b88e609d69f935c3e231310b7227bbdc8b20"
-fingerprint = [0.5859340259539524, 0.048716933237337584, 7.98070989792187]
+fingerprint = [0.5859340259539524, 0.04871940500120706, 7.98070989792187]
 since_generator_version = 15
 provisional = false
-acceptance = "adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae 144 (20–400; passes), ω Centauri 8376 (3,000–20,000; passes), 12699 over the catalogue (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes). Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716 dex in log₁₀(1 + N) over those at the adopted constants and 0.476 at the best fit (under 0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ = 1.90e19 and β ψ₁ = 0.1012 (β and c enter only as β ÷ c)"
+acceptance = "adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae 144 (20–400; passes), ω Centauri 8377 (3,000–20,000; passes), 12700 over the catalogue (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes). Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716 dex in log₁₀(1 + N) over those at the adopted constants and 0.478 at the best fit (under 0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ = 1.17e20 and β ψ₁ = 0.1011 (β and c enter only as β ÷ c)"
 
 [[table]]
 name = "cluster_retention"
