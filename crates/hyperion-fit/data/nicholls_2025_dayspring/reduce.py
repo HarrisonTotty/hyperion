@@ -415,7 +415,7 @@ if __name__ == "__main__":
     W = lambda f, s: f.write(s + "\n")
     with open(OUT, "w") as f:
         W(f, "//! The envelope albedo's opacities on the optics' twelve bins (P14.T24.h.b part 5), reduced by")
-        W(f, "//! `crates/hyperion-fit/data/envelope_opacity/reduce.py` from these inputs (SHA-256):")
+        W(f, "//! `crates/hyperion-fit/data/nicholls_2025_dayspring/reduce.py` from these inputs (SHA-256):")
         W(f, "//!")
         for k, v in inputs:
             W(f, f"//! - `{k}` `{v}`")

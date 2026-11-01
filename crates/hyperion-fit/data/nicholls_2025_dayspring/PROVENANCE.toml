@@ -22,17 +22,17 @@ release = "Dayspring.sf and Dayspring.sf_k of each record as Zenodo served them 
 licence = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), each Zenodo record's; reduced values with their citation, the raw files not committed"
 
 [[files]]
-name = "48/Dayspring.sf"
-sha256 = "fd799365252718a7daafb601567e8e64fc8f1b647dca8e1f2c227c4487a4410b"
-
-[[files]]
-name = "48/Dayspring.sf_k"
-sha256 = "32cb857b6bfa31b66ceb1c55485c61970687be9bd8b00f56631a75d1ff3310a5"
-
-[[files]]
 name = "256/Dayspring.sf"
 sha256 = "ce9fdb94c776ddc664c83e5c21ede9dae9009a2fc630176edbbce20adcce2b58"
 
 [[files]]
 name = "256/Dayspring.sf_k"
 sha256 = "3a3fd2df34649b4a844663c64c89d37461962dfa76732086a4d376670d907787"
+
+[[files]]
+name = "48/Dayspring.sf"
+sha256 = "fd799365252718a7daafb601567e8e64fc8f1b647dca8e1f2c227c4487a4410b"
+
+[[files]]
+name = "48/Dayspring.sf_k"
+sha256 = "32cb857b6bfa31b66ceb1c55485c61970687be9bd8b00f56631a75d1ff3310a5"

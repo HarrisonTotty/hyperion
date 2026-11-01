@@ -1,5 +1,5 @@
 //! The envelope albedo's opacities on the optics' twelve bins (P14.T24.h.b part 5), reduced by
-//! `crates/hyperion-fit/data/envelope_opacity/reduce.py` from these inputs (SHA-256):
+//! `crates/hyperion-fit/data/nicholls_2025_dayspring/reduce.py` from these inputs (SHA-256):
 //!
 //! - `apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json` `ad096ab3dc5cf2f0e256a04760eb60a588d4898b8d51671ddd6b6b8e10510e54`
 //! - `apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json` `e024e6724fc7f0fde57186a87451ff07dc69ad5db062c4c85fdbe34edc9ed622`
