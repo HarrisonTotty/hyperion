@@ -5471,3 +5471,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   that less the loss (the early AGB reads the main sequence's end mass,
   `sse::main_sequence_end_mass`), and decides where the mode's and the remnant's marks agree over
   the bracket.
+- **P09.T10 perf, the white dwarfs between the ceilings (lane `galaxy-centre-core`, 2026-11-01;
+  bit for bit).** `ClusterModel::white_dwarf_main_sequence_loss(rules)`
+  (`remnants::white_dwarf_main_sequence_loss`, lazy in its own `RulesCell`) is the largest
+  main-sequence loss at the unstripped refusal's top. `main_sequence_loss` and it share
+  `largest_main_sequence_loss`. Between the ceilings and the refusals, a white dwarf is kept below
+  the start of its window at its own composition and refused where its track mass less the loss is
+  past it. Elsewhere the track decides.

@@ -20,7 +20,10 @@
 //!   its track reads it, says which capture window it can open: an unstripped star is kept below
 //!   a ceiling [`UNSTRIPPED_CEILING_MARGIN`] under that edge, and any star is refused
 //!   [`WHITE_DWARF_TOP_MARGIN`] above the start of its window, `m_cc` less the window's width,
-//!   where no corner's exact fate is a white dwarf.
+//!   where no corner's exact fate is a white dwarf. Between, its track tests the window at its own
+//!   composition in the mass its main sequence ends with, between its track mass and that less
+//!   the cluster's white dwarfs' main-sequence loss ([`white_dwarf_main_sequence_loss`]): it is
+//!   kept below the window's start and refused where even the lighter mass is past it.
 //! - **A neutron star** is refused when the ordinary mode's slowest kick, the rank clamp's floor
 //!   (about 33 km/s), is at or above the escape speed, in a cluster old enough that its star has
 //!   surely died, and a low-mode kick, judged on its pair's systemic speed, either is too fast or
@@ -365,7 +368,24 @@ pub(crate) fn tabulated_fit(
             };
             let top =
                 table.highest_iron_core_mass.value() - window.value() + WHITE_DWARF_TOP_MARGIN;
-            (mass >= top).then_some(false)
+            if mass >= top {
+                return Some(false);
+            }
+            // Between, the track tests its window in the mass its main sequence ends with, at most
+            // the cluster's white dwarfs' main-sequence loss below its track mass: a white dwarf
+            // below the window's start at its own composition, and none from it
+            // (`a_white_dwarf_s_main_sequence_ends_below_its_window_s_start`).
+            let start = ElectronCaptureWindows::new(&ZCoeffs::new(composition.z_fit()))
+                .window(window)
+                .lower()
+                .value();
+            if m0.value() - model.white_dwarf_main_sequence_loss(rules).value() >= start {
+                return Some(false);
+            }
+            if m0.value() < start {
+                return kept();
+            }
+            None
         }
         ClassKind::NeutronStar => {
             let law = StandardKickLaw::under(rules);
@@ -518,16 +538,39 @@ const LOSS_MARGIN: (f64, f64) = (1.25, 0.005);
 /// The most mass, M☉, a member of `model` of a slow pair's stripped neutron-star attempt loses on
 /// its main sequence under the stellar `rules`, with a margin ([`LOSS_MARGIN`]): the largest loss
 /// at the cluster's carbon–oxygen core floor ([`co_core_floor`], held to [`CO_CORE_SEARCH_TOP`]),
-/// the heaviest such member, at the corners of its members' compositions and at Reimers η 0, 0.5
-/// and 0.92, since the main sequence's wind grows with the mass
-/// (`the_main_sequence_loses_most_at_the_floor`). It costs nine main sequences at most, some
-/// 0.8 ms.
+/// the heaviest such member ([`largest_main_sequence_loss`];
+/// `the_main_sequence_loses_most_at_the_floor`).
 #[must_use]
 pub(crate) fn main_sequence_loss(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
+    let top = model.co_core_floor(rules).value().min(CO_CORE_SEARCH_TOP);
+    largest_main_sequence_loss(model, rules, track_mass_of(SolarMasses::new(top)))
+}
+
+/// The most mass, M☉, a white-dwarf member of `model` between its ceilings and its refusals
+/// loses on its main sequence under the stellar `rules`, with a margin ([`LOSS_MARGIN`]): the
+/// largest loss at the unstripped refusal's top, [`WHITE_DWARF_TOP_MARGIN`] above the cluster's
+/// highest `m_cc`, the heaviest such member ([`largest_main_sequence_loss`];
+/// `a_white_dwarf_s_main_sequence_ends_below_its_window_s_start`).
+#[must_use]
+pub(crate) fn white_dwarf_main_sequence_loss(
+    model: &ClusterModel,
+    rules: StellarRules,
+) -> SolarMasses {
+    let top = model.remnant_table(rules).highest_iron_core_mass.value() + WHITE_DWARF_TOP_MARGIN;
+    largest_main_sequence_loss(model, rules, track_mass_of(SolarMasses::new(top)))
+}
+
+/// The largest mass, M☉, the main sequence of a member of `model` of track mass `top` loses under
+/// the stellar `rules`, times and plus [`LOSS_MARGIN`]: at the corners of its members'
+/// compositions and at Reimers η 0, 0.5 and 0.92. A lighter member loses less, since the main
+/// sequence's wind grows with the mass. It costs nine main sequences at most, some 0.8 ms.
+#[must_use]
+fn largest_main_sequence_loss(
+    model: &ClusterModel,
+    rules: StellarRules,
+    top: SolarMasses,
+) -> SolarMasses {
     let options = TrackOptions::default().with_rules(rules);
-    let top = track_mass_of(SolarMasses::new(
-        model.co_core_floor(rules).value().min(CO_CORE_SEARCH_TOP),
-    ));
     let mut loss = 0.0_f64;
     for comp in corners(model) {
         for eta in [-8.0, 0.0, 6.0] {
@@ -919,6 +962,71 @@ mod tests {
         }
     }
 
+    /// Between each fixture globular's white-dwarf ceiling and its refusals, a star's exact fate is
+    /// a white dwarf exactly where the mass its main sequence ends with lies below the start of
+    /// its capture window at its composition, and its main sequence loses no more than the
+    /// cluster's [`white_dwarf_main_sequence_loss`]: unstripped and companion-stripped, at the
+    /// corners of its members' compositions and at Reimers η 0, 0.5 and 0.92, every 0.05 M☉,
+    /// under 26's rules.
+    #[test]
+    fn a_white_dwarf_s_main_sequence_ends_below_its_window_s_start() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
+        let (mut dwarfs, mut others) = (0_u32, 0_u32);
+        for (_, model, _) in clusters(galaxy) {
+            let table = model.remnant_table(rules);
+            let loss = model.white_dwarf_main_sequence_loss(rules).value();
+            assert!(0.0 < loss && loss < 0.3, "{loss} M☉");
+            for comp in corners(&model) {
+                let windows = ElectronCaptureWindows::new(&ZCoeffs::new(comp.z_fit()));
+                for (mark, window) in [
+                    (NEVER_STRIPPED, SINGLE_STAR_WINDOW),
+                    (crate::rng::Mark::from_word(0), COMPANION_STRIPPED_WINDOW),
+                ] {
+                    let top = table.highest_iron_core_mass.value() - window.value()
+                        + WHITE_DWARF_TOP_MARGIN;
+                    let start = windows.window(window).lower().value();
+                    for eta in [-8.0, 0.0, 6.0] {
+                        let draws = StarDraws::from_parts(StarDrawsParts {
+                            eta: StandardNormal::new(eta).unwrap(),
+                            stripped: mark,
+                            ..StarDrawsParts::MEDIAN
+                        });
+                        let mut mass = table.white_dwarf_ceiling.value();
+                        while mass < top {
+                            let m0 = track_mass_of(SolarMasses::new(mass));
+                            assert_eq!(
+                                sse::is_companion_stripped_under(m0, &comp, &draws, rules),
+                                window == COMPANION_STRIPPED_WINDOW
+                            );
+                            let end = sse::main_sequence_end_mass(m0, &comp, &draws, options);
+                            assert!(
+                                end <= m0 && m0.value() - end.value() <= loss,
+                                "{mass} M☉, {comp:?}, η normal {eta}: {end:?} of {m0:?}"
+                            );
+                            let fate = sse::fate_of(m0, &comp, &draws, options);
+                            let dwarf = fate.remnant.kind() == RemnantKind::WhiteDwarf;
+                            assert_eq!(
+                                dwarf,
+                                end.value() < start,
+                                "{mass} M☉, {comp:?}, mark {mark:?}, η normal {eta}: {end:?} \
+                                 against the window's start {start}"
+                            );
+                            dwarfs += u32::from(dwarf);
+                            others += u32::from(!dwarf);
+                            mass += 0.05;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            dwarfs > 50 && others > 50,
+            "{dwarfs} white dwarfs, {others} not"
+        );
+    }
+
     /// Between each fixture globular's capture window's top and its carbon–oxygen core floor, a
     /// star's iron core collapses with the cores of its early AGB at the mass its main sequence
     /// ends with, bit for bit, and its main sequence loses no more than the cluster's
@@ -1128,10 +1236,7 @@ mod tests {
                 .all(|(&n, &of)| 100 * n <= of),
             "{refused_kept:?} of {refused:?} refusals are kept by the track"
         );
-        assert_eq!(
-            refused_kept[1], 0,
-            "{refused_kept:?} refusals kept by the track"
-        );
+        assert_eq!(refused_kept, [0, 0], "refusals kept by the track");
     }
 
     /// A slow pair's companion-stripped neutron star below the slowest fixture globular's

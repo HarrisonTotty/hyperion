@@ -352,6 +352,8 @@ pub struct ClusterModel {
     co_core_floor: RulesCell<SolarMasses>,
     /// [`ClusterModel::main_sequence_loss`], found when first asked.
     main_sequence_loss: RulesCell<SolarMasses>,
+    /// [`ClusterModel::white_dwarf_main_sequence_loss`], found when first asked.
+    white_dwarf_main_sequence_loss: RulesCell<SolarMasses>,
 }
 
 impl ClusterModel {
@@ -418,6 +420,7 @@ impl ClusterModel {
             remnant_table: RulesCell::default(),
             co_core_floor: RulesCell::default(),
             main_sequence_loss: RulesCell::default(),
+            white_dwarf_main_sequence_loss: RulesCell::default(),
         }
     }
 
@@ -727,6 +730,17 @@ impl ClusterModel {
     pub(crate) fn main_sequence_loss(&self, rules: StellarRules) -> SolarMasses {
         self.main_sequence_loss
             .get(rules, || remnants::main_sequence_loss(self, rules))
+    }
+
+    /// The most mass a white-dwarf member between the ceilings and the refusals loses on its main
+    /// sequence, with a margin, under the stellar `rules`
+    /// ([`remnants::white_dwarf_main_sequence_loss`]), M☉, found the first time it is asked, about a
+    /// millisecond, and kept with the model.
+    #[must_use]
+    pub(crate) fn white_dwarf_main_sequence_loss(&self, rules: StellarRules) -> SolarMasses {
+        self.white_dwarf_main_sequence_loss.get(rules, || {
+            remnants::white_dwarf_main_sequence_loss(self, rules)
+        })
     }
 }
 
