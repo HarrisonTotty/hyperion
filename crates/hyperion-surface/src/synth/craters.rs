@@ -2412,6 +2412,116 @@ impl SmallCraters {
     }
 }
 
+impl SmallCraters {
+    /// [`at`](Self::at) at `L` unit directions at once, each lane's sample bit for bit
+    /// [`at`](Self::at)'s at its direction.
+    ///
+    /// The lanes whose query lies in the same cell of an octave's level share the octave's search
+    /// about it, each searched cell's draw and each crater's profile, which are functions of the
+    /// cell, the crater and the level alone; each lane takes its own gaps, chords and profile
+    /// heights, and sums its craters in [`at`](Self::at)'s order, octave by octave, cell by cell in
+    /// the search's order, and crater by crater in the cell's draw order.
+    ///
+    /// # Panics
+    ///
+    /// As [`at`](Self::at), at any lane.
+    pub(crate) fn at_lanes<const L: usize>(
+        &self,
+        dirs: &[[f64; 3]; L],
+        level: BandLevel,
+        through: u8,
+        cache: &mut CraterCache,
+    ) -> [HeightSample; L] {
+        let figure = self.octaves.inputs.figure;
+        let band = band_half_width(&figure, level);
+        let mut heights = [0.0; L];
+        let mut gradients = [[0.0; 3]; L];
+        self.own(cache);
+        let last = num_octaves_through(self.octaves.octaves.len(), through);
+        if last > 0 {
+            let points = dirs.map(|dir| figure.point(dir));
+            let ats = dirs.map(xyz_to_face_uv);
+            let lengths = dirs.map(|d| (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt());
+            let sts = ats.map(|at| (uv_to_st(at.u), uv_to_st(at.v)));
+            let roots = ats.map(gap_root);
+            let radius_m = smallest_radius_m(&figure);
+            for octave in 0..last {
+                let octave_band = &self.octaves.octaves[usize::from(octave)];
+                let widest = octave_band.diameters.lower().value() * (1.0 + MAX_EXTERIOR_WIDTH);
+                let homes: [PatchKey; L] =
+                    std::array::from_fn(|l| cell_at_st(ats[l].face, sts[l], octave_band.level));
+                let mut searched = [false; L];
+                for lead in 0..L {
+                    if searched[lead] {
+                        continue;
+                    }
+                    let group: [bool; L] =
+                        std::array::from_fn(|l| !searched[l] && homes[l] == homes[lead]);
+                    let search = *Search::of(&mut cache.searches, octave, homes[lead]);
+                    for &cell in search.cells() {
+                        // The lanes some crater of the octave in the cell may reach.
+                        let near: [bool; L] = std::array::from_fn(|l| {
+                            group[l] && {
+                                let gap = search.edges.gap_m(ats[l], roots[l], cell, radius_m)
+                                    * lengths[l];
+                                gap * (1.0 - GAP_MARGIN) - GAP_SLACK_M < widest
+                            }
+                        });
+                        if !near.contains(&true) {
+                            continue;
+                        }
+                        let drawn = self.cell_draw(octave, cell, &mut cache.cells);
+                        let key = cell_key(octave, cell);
+                        for (index, draw) in (0_u32..).zip(&mut drawn.draws) {
+                            let id = CraterId { cell: key, index };
+                            let mut profile: Option<CraterProfile> = None;
+                            for l in (0..L).filter(|&l| near[l]) {
+                                let delta = [0, 1, 2].map(|k| points[l][k] - draw.point_m[k]);
+                                let d2 =
+                                    delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+                                if d2 >= widest * widest {
+                                    continue;
+                                }
+                                let Some(crater) = self
+                                    .made_within(octave, draw, d2, &mut cache.counts)
+                                    .copied()
+                                else {
+                                    continue;
+                                };
+                                let reach = crater.shape.reach().value();
+                                if d2 < reach * reach {
+                                    let profile = *profile.get_or_insert_with(|| {
+                                        *cache.profiles.get_or_make(id, level, || {
+                                            CraterProfile::new(crater.shape, band, crater.wear)
+                                        })
+                                    });
+                                    let distance = d2.sqrt();
+                                    let rim_m = 0.5 * crater.shape.diameter().value();
+                                    let (h, slope) = profile.height_and_slope(distance / rim_m);
+                                    heights[l] += h;
+                                    if distance > 0.0 {
+                                        let along = slope / (rim_m * distance);
+                                        for (g, d) in gradients[l].iter_mut().zip(delta) {
+                                            *g += along * d;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (done, &in_group) in searched.iter_mut().zip(&group) {
+                        *done |= in_group;
+                    }
+                }
+            }
+        }
+        std::array::from_fn(|l| HeightSample {
+            height_m: num::assert_finite(heights[l]),
+            gradient: direction_gradient(&figure, dirs[l], gradients[l]).map(num::assert_finite),
+        })
+    }
+}
+
 /// The relative margin a cell's [`CellEdges::gap_m`] is taken short by before it puts a cell
 /// beyond an octave's reach: 10⁻⁹, far beyond the rounding of the gap and of the craters' and the
 /// point's spheroid points, a few times 2.2 × 10⁻¹⁶ of them.

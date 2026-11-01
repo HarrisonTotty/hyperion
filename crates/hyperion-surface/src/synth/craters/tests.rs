@@ -2637,3 +2637,56 @@ mod native_only {
         }
     }
 }
+
+/// `N` lanes about random places, close enough that lanes share their cells at most octaves and
+/// far enough apart that some do not at the finest, at random band levels and octaves, through
+/// one cache kept across rounds: each lane's sample [`SmallCraters::at`]'s from a fresh cache, bit
+/// for bit.
+fn assert_crater_lanes_are_each_point_s<const N: usize>(seed: u64, rounds: usize) -> usize {
+    let mut rng = Lcg::new(seed);
+    let mut cratered = 0;
+    for kind in WORLDS {
+        let craters = small(kind);
+        let finest = finest_level(world(kind).header().radius().value());
+        let mut kept = CraterCache::new();
+        for round in 0..rounds {
+            let centre = random_dirs(rng.next_u64(), 1)[0];
+            let spread = math::powf(10.0, -2.0 - 5.0 * rng.next_f64());
+            let dirs: [[f64; 3]; N] = std::array::from_fn(|_| {
+                towards(centre, spread * rng.next_f64(), 6.3 * rng.next_f64())
+            });
+            let level = BandLevel::new(
+                u8::try_from(rng.next_below(u64::from(finest) + 1)).expect("a level"),
+            )
+            .expect("a band level");
+            let through = if round % 3 == 0 {
+                ALL
+            } else {
+                u8::try_from(rng.next_below(20)).expect("an octave")
+            };
+            let lanes = craters.at_lanes(&dirs, level, through, &mut kept);
+            for (dir, got) in dirs.iter().zip(lanes) {
+                let alone = craters.at(*dir, level, through, &mut CraterCache::new());
+                let context = format!("{kind:?}, round {round}, {level:?}, through {through}");
+                assert_eq!(bits(got.height_m), bits(alone.height_m), "{context}");
+                assert_eq!(
+                    got.gradient.map(bits),
+                    alone.gradient.map(bits),
+                    "{context}"
+                );
+                if alone.height_m.abs() > 0.0 {
+                    cratered += 1;
+                }
+            }
+        }
+    }
+    cratered
+}
+
+#[test]
+fn crater_lanes_are_each_point_s_bits() {
+    let cratered = assert_crater_lanes_are_each_point_s::<1>(0x6372_6c61_0001, per_target(24, 4))
+        + assert_crater_lanes_are_each_point_s::<4>(0x6372_6c61_0004, per_target(64, 8))
+        + assert_crater_lanes_are_each_point_s::<8>(0x6372_6c61_0008, per_target(24, 4));
+    assert!(cratered > 100, "only {cratered} lanes met a crater");
+}

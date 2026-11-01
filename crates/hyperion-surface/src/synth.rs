@@ -501,6 +501,53 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         base: HeightSample,
         relief: HeightSample,
     ) -> Result<Contributions, QueryHeightError> {
+        let craters = self.craters_at(cache, dir, level);
+        self.after_craters(cache, dir, level, (base, relief, craters))
+    }
+
+    /// The small craters at `dir` at `level`, nothing where the level evaluates none.
+    fn craters_at(&self, cache: &mut SynthCache, dir: [f64; 3], level: BandLevel) -> HeightSample {
+        match self.parts.bounds.set(level).craters_through() {
+            Some(through) => self
+                .parts
+                .craters
+                .at(dir, level, through, &mut cache.craters),
+            None => NOTHING,
+        }
+    }
+
+    /// [`craters_at`](Self::craters_at) at each of `dirs`, each lane's bit for bit, the lanes'
+    /// searches shared ([`SmallCraters::at_lanes`]).
+    fn craters_lanes<const N: usize>(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]; N],
+        level: BandLevel,
+    ) -> [HeightSample; N] {
+        match self.parts.bounds.set(level).craters_through() {
+            Some(through) => self
+                .parts
+                .craters
+                .at_lanes(dirs, level, through, &mut cache.craters),
+            None => [NOTHING; N],
+        }
+    }
+
+    /// [`after_relief`](Self::after_relief) with its small craters made: the channels and the
+    /// coarse rims at `dir`, after the base elevation, the structural octaves and the small
+    /// craters. The craters read no cell and refuse nothing, so that making them first moves no
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// As [`after_relief`](Self::after_relief).
+    fn after_craters(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        (base, relief, craters): (HeightSample, HeightSample, HeightSample),
+    ) -> Result<Contributions, QueryHeightError> {
         let field = self.field;
         let set = self.parts.bounds.set(level);
         let channels = match set.channels_through() {
@@ -508,13 +555,6 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 .parts
                 .channels
                 .incision_at(field, dir, through, cache)?,
-            None => NOTHING,
-        };
-        let craters = match set.craters_through() {
-            Some(through) => self
-                .parts
-                .craters
-                .at(dir, level, through, &mut cache.craters),
             None => NOTHING,
         };
         let rims = self.parts.rims.at(field, dir, level)?;
@@ -571,7 +611,11 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             }
             PairBeforeRelief::Neither { base } => ((base, NOTHING), (base, NOTHING)),
         };
-        self.pair_after_relief(cache, dir, level, parent, own, up)
+        let craters = (
+            self.craters_at(cache, dir, level),
+            self.craters_at(cache, dir, parent),
+        );
+        self.pair_after_relief(cache, dir, (level, parent), own, up, craters)
     }
 
     /// [`contributions_pair`](Self::contributions_pair)'s first stage: the base elevations and the
@@ -628,9 +672,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         }
     }
 
-    /// [`contributions_pair`](Self::contributions_pair)'s last stage: the channels, the small
-    /// craters and the coarse rims at both levels, after each level's base elevation and
-    /// structural octaves, `own` and `up`; `None` where the levels' channels do not nest.
+    /// [`contributions_pair`](Self::contributions_pair)'s last stage: the channels and the coarse
+    /// rims at both levels, after each level's base elevation and structural octaves, `own` and
+    /// `up`, and its small craters, `craters`, which refuse nothing, so that making them first
+    /// moves no error; `None` where the levels' channels do not nest.
     ///
     /// # Errors
     ///
@@ -640,10 +685,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         &self,
         cache: &mut SynthCache,
         dir: [f64; 3],
-        level: BandLevel,
-        parent: BandLevel,
+        (level, parent): (BandLevel, BandLevel),
         (base, relief): (HeightSample, HeightSample),
         (up_base, up_relief): (HeightSample, HeightSample),
+        (craters, up_craters): (HeightSample, HeightSample),
     ) -> Result<Option<(Contributions, Contributions)>, QueryHeightError> {
         let field = self.field;
         let (set, up) = (self.parts.bounds.set(level), self.parts.bounds.set(parent));
@@ -661,15 +706,6 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             (None, None) => (NOTHING, NOTHING),
             (Some(_) | None, Some(_)) => return Ok(None),
         };
-        let mut craters_at = |level: BandLevel, through: Option<u8>| match through {
-            Some(through) => self
-                .parts
-                .craters
-                .at(dir, level, through, &mut cache.craters),
-            None => NOTHING,
-        };
-        let craters = craters_at(level, set.craters_through());
-        let up_craters = craters_at(parent, up.craters_through());
         let rims = self.parts.rims.at(field, dir, level)?;
         let up_rims = self.parts.rims.at(field, dir, parent)?;
         Ok(Some((
@@ -733,10 +769,13 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 .and_then(|b| b.relief.map(|(through, style)| (through, None, style)))
         });
         let reliefs = self.relief_lanes(cache, dirs, &asks);
-        for ((dir, before), relief) in dirs.iter().zip(before).zip(reliefs) {
+        let craters = self.craters_lanes(cache, dirs, level);
+        for (((dir, before), relief), craters) in dirs.iter().zip(before).zip(reliefs).zip(craters)
+        {
             out.push(before.and_then(|before| {
                 let relief = relief.map_or(NOTHING, |(own, _)| own);
-                let parts = self.after_relief(cache, *dir, level, before.base, relief)?;
+                let parts =
+                    self.after_craters(cache, *dir, level, (before.base, relief, craters))?;
                 self.finish(cache, *dir, &parts)
             }));
         }
@@ -807,7 +846,15 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             Some(PairBeforeRelief::Neither { .. }) | None => None,
         });
         let reliefs = self.relief_lanes(cache, dirs, &asks);
-        for ((dir, before), relief) in dirs.iter().zip(before).zip(reliefs) {
+        let craters = self.craters_lanes(cache, dirs, level);
+        let up_craters = self.craters_lanes(cache, dirs, parent);
+        for ((((dir, before), relief), craters), up_craters) in dirs
+            .iter()
+            .zip(before)
+            .zip(reliefs)
+            .zip(craters)
+            .zip(up_craters)
+        {
             let shared = before.and_then(|before| {
                 let (own, up) = match (before, relief) {
                     (PairBeforeRelief::Shared { base, .. }, Some((own, Some(up)))) => {
@@ -822,7 +869,7 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                     _ => unreachable!("a lane's octaves are walked as its first stage asked"),
                 };
                 let (own, up) = self
-                    .pair_after_relief(cache, *dir, level, parent, own, up)
+                    .pair_after_relief(cache, *dir, (level, parent), own, up, (craters, up_craters))
                     .ok()??;
                 Some((
                     self.finish(cache, *dir, &own).ok()?,
