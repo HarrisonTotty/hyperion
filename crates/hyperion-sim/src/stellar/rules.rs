@@ -90,6 +90,12 @@
 //!   grid redraws a binary whose candidate the mark explodes at or before +H, in one test,
 //!   [`SystemStars::exploded_pair`], which the system stage's redraw and P09.T35's hook read
 //!   (`stellar/rules/ia_hold.rs`).
+//! - [`ns_accretion`](StellarRules::ns_accretion), at [`NS_ACCRETION_VERSION`] (plan 11, P11.T4's
+//!   fix): what a neutron star keeps of a companion's stable Roche-lobe overflow, all of it up to
+//!   the Eddington rate below it, a share from it, read at one choke point, `Engine::accretion`,
+//!   through the engine's input's rules. The pair-light and reach tables keep the version's rules
+//!   until the bump refits them, as for the merger mass (`stellar/rules/ns_accretion_hold.rs`
+//!   lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -105,6 +111,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
+use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
 use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
 use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
 use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
@@ -149,6 +156,9 @@ pub(crate) struct StellarRules {
     /// Whether the system stage reads the Type Ia explosion mark and redraws a binary it explodes
     /// by +H, the hold of [`IA_EXPLOSION_VERSION`].
     pub(crate) ia_explosion: IaExplosionRules,
+    /// What a neutron star keeps of a companion's stable Roche-lobe overflow in the binary engine,
+    /// the hold of [`NS_ACCRETION_VERSION`].
+    pub(crate) ns_accretion: NsAccretionRules,
 }
 
 impl StellarRules {
@@ -204,6 +214,11 @@ impl StellarRules {
             } else {
                 IaExplosionRules::Pooled
             },
+            ns_accretion: if version.get() >= NS_ACCRETION_VERSION.get() {
+                NsAccretionRules::Efficiency
+            } else {
+                NsAccretionRules::Eddington
+            },
         }
     }
 
@@ -218,7 +233,7 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`).
+    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion` and P11.T4's `ns_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -253,6 +268,8 @@ mod helium_hold;
 mod ia_hold;
 #[cfg(test)]
 mod merger_mass_hold;
+#[cfg(test)]
+mod ns_accretion_hold;
 #[cfg(test)]
 mod stripping_hold;
 #[cfg(test)]

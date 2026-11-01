@@ -591,7 +591,7 @@ fn accreting_marks(
 
 /// An X-ray binary's marks where [`carved_class`] reads them, the pair's stars of initial masses
 /// `initial` in the engine's order, or `None` for a pair that no age of the horizon makes one.
-fn xray_marks(
+pub(super) fn xray_marks(
     timeline: &BinaryTimeline,
     age_at_epoch: Years,
     initial: [SolarMasses; 2],

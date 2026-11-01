@@ -7,8 +7,12 @@
 //! The census bounds' helpers serve this crate's own tests alone, so they are built for tests
 //! only; the splitmix64 stream serves both.
 
+#[cfg(test)]
+pub(crate) mod census;
 mod members;
 mod mergers;
+#[cfg(test)]
+pub(crate) mod remnant_pair;
 
 pub use mergers::{MergerMember, brute_force_merger_members_in};
 

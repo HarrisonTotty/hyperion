@@ -774,8 +774,9 @@ fn gate(
     let redrawn = redraws(galaxy, record, ctx);
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
-    let tables_hold =
-        stellar.hd_limit.fitted_tables_hold() && stellar.merger_mass.fitted_tables_hold();
+    let tables_hold = stellar.hd_limit.fitted_tables_hold()
+        && stellar.merger_mass.fitted_tables_hold()
+        && stellar.ns_accretion.fitted_tables_hold();
     let certified = attempt
         .pairs()
         .iter()

@@ -31,11 +31,12 @@
 //!   fed by any other donor takes the thermally limited share (BSE `evolv2.f` 1476–1479);
 //!   degenerate accretors take what the Eddington limit allows (equations 67 and 68, X the accreted
 //!   matter's hydrogen fraction), which is on by default (ruling 132.1, where BSE's table 3 has it
-//!   off). What is not accreted leaves with the donor's specific orbital angular momentum,
-//!   a (M₁ + M₂) = constant for it (section 2.6), or with the accretor's for novae and
-//!   super-Eddington loss, as the published code has it. The donor's transferred spin returns to
-//!   the orbit and the accretor's spin grows by the specific angular momentum of the inner disc
-//!   (equations 54 and 55), up to break-up.
+//!   off); from generator version 27 a neutron star keeps only a share of it
+//!   ([`ns_accretion`](super::ns_accretion), P11.T4's fix). What is not accreted leaves with the
+//!   donor's specific orbital angular momentum, a (M₁ + M₂) = constant for it (section 2.6), or
+//!   with the accretor's for novae and super-Eddington loss, as the published code has it. The
+//!   donor's transferred spin returns to the orbit and the accretor's spin grows by the specific
+//!   angular momentum of the inner disc (equations 54 and 55), up to break-up.
 //! - **The swell** (sections 2.6.4, "effectively a reverse of the process which formed the
 //!   degenerate remnant star in the first place", and 2.6.6; BSE `evolv2.f` 1480–1490 and
 //!   1513–1547, `gntage.f` 99–160; ruling p11-c2-swell of 2026-10-06, P11.T4.m). A fed helium star
@@ -970,12 +971,20 @@ impl Engine {
             Kind::HeliumWhiteDwarf
             | Kind::CarbonOxygenWhiteDwarf
             | Kind::OxygenNeonWhiteDwarf
-            | Kind::NeutronStar
             | Kind::BlackHole => {
                 let (share, limited) = eddington(1.0);
                 Accretion {
                     share,
                     from_accretor: limited,
+                    swells: false,
+                }
+            }
+            // What a neutron star keeps is P11.T4's hold's (`ns_accretion`).
+            Kind::NeutronStar => {
+                let (share, from_accretor) = self.ctx.rules().ns_accretion.accreted(eddington);
+                Accretion {
+                    share,
+                    from_accretor,
                     swells: false,
                 }
             }

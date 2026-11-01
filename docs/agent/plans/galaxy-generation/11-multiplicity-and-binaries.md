@@ -7222,3 +7222,11 @@ galaxy_sweeps`.
   - _For P15.T10.b._ Listed candidates are thinned by their members' ages: the nurseries keep none,
     the young open clusters about half. The lists read the galaxy's share table and samplers
     (`GalaxyRules::binary_tables`), independently of `feature_binaries`.
+- **P11.T4's neutron-star accretion, held at 27** (lane `fix-p11-t4-ns-accretion`, 2026-11-01;
+  at version 24 no golden moves). From `NS_ACCRETION_VERSION` = 27 (`stellar/binary/ns_accretion.rs`,
+  `StellarRules::ns_accretion`; `StellarRules::every_27_hold` is new) a neutron star fed by stable
+  transfer keeps `NS_ACCRETION_EFFICIENCY` = 0.1 of it, up to the Eddington rate (lean,
+  2026-11-01); the brief's gate refuses the pair-light and reach tables under it. Test helpers:
+  `testing::census::slab_census` (10⁷ slab records in 64 parts) and
+  `testing::remnant_pair::donor_onto_remnant`. Left: `Accretion::from_accretor` is set but
+  `transfer_trial` never reads it, so every loss leaves with the donor's angular momentum.

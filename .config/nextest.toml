@@ -292,6 +292,13 @@ threads-required = "num-cpus"
 filter = "package(hyperion-sim) & test(=galaxy::placement::carve_out_hold::census_of_the_carve_out)"
 threads-required = 16
 
+# P11.T4's neutron-star accretion census runs two slab censuses of the binary engine's pairs in
+# sixteen shares of its own (`in_shares`, `stellar::binary::testing::census::THREADS`), so it
+# reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::ns_accretion_hold::census_of_the_neutron_star_accretion)"
+threads-required = 16
+
 # P09.T36.a's census walks every catalogue feature's list and two classes' cells in sixteen shares of
 # its own (`in_shares`), so it reserves sixteen slots too.
 [[profile.slow.overrides]]
