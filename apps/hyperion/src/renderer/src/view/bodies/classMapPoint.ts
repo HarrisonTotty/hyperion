@@ -1382,8 +1382,10 @@ function lightGeometryOf(
  * Where the point would be drawn by a surface whose elements are made (the map's own, or its
  * stand-in's), a refresh is queued at this geometry ({@link stepClassMapPoints} finds it), unless
  * that surface holds a ratio of this light within the cache's angle of it, or a refresh of this
- * light within the stand-in's angle of it is queued; its ratio is then held as a refresh's is
- * (`holdRefreshed`), so that each light keeps its one entry. Nothing is evaluated here, and where
+ * light is queued for it already, at any geometry: one a light, however fast its geometry moves
+ * (both angles narrow to nothing at conjunction). Its ratio is held as a refresh's is
+ * (`holdRefreshed`), so that each light keeps its one entry, and the next frame past δ of it
+ * queues the next. Nothing is evaluated here, and where
  * no made surface stands, nothing is queued: the map's build is stepped as its body is near.
  *
  * @param lightKey - The light's identity among the body's lights, as `pointFlux` names it.
@@ -1410,10 +1412,12 @@ export function warmClassMapPoint(
   if ((HELD.get(drawn.surface) ?? []).some((entry) => nearAs(entry, at, cacheAngle))) {
     return;
   }
-  const staleAngle = classMapPointStaleAngleRad(alpha);
   if (
     REFRESHES.some(
-      (refresh) => refresh.surface === drawn.surface && nearAs(refresh, at, staleAngle),
+      (refresh) =>
+        refresh.surface === drawn.surface &&
+        refresh.lightKey === at.lightKey &&
+        refresh.cOverA === at.cOverA,
     )
   ) {
     return;

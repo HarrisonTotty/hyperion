@@ -1,7 +1,7 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc } from "../../test/litFixtures";
 import { memoised } from "../../test/memo";
 import {
@@ -70,7 +70,7 @@ import {
   discSurfaceLaws,
   packClassMap,
 } from "./discSurface";
-import { type LitBodyInput, planLitBodies, pointFlux } from "./draw";
+import { bodyLightSources, type LitBodyInput, planLitBodies, pointFlux } from "./draw";
 import { bodyReflection } from "./oblate";
 import { type LitRegime, POINT_BELOW_PX } from "./regime";
 
@@ -1680,6 +1680,20 @@ function drainNear(): void {
 /** The leading side's star's key, as `pointFlux` names `aHostDisc`'s. */
 const LEADING_STAR = `star ${String(aHostDisc().star)}`;
 
+/** The frame's evaluations `draw` makes. */
+function evaluationsOf(draw: () => void): number {
+  const before = classMapPointWork().frameEvaluations;
+  draw();
+  return classMapPointWork().frameEvaluations - before;
+}
+
+/** The refreshes `act` queues. */
+function refreshesOf(act: () => void): number {
+  const before = classMapPointWork().refreshes;
+  act();
+  return classMapPointWork().refreshes - before;
+}
+
 describe("the class-mapped point near the switch only (R10.T14.f's deferred levers)", () => {
   afterEach(() => {
     // Each test cancels or drains what it queues, so that none steps another's.
@@ -1754,6 +1768,53 @@ describe("the class-mapped point near the switch only (R10.T14.f's deferred leve
     ]);
   });
 
+  /**
+   * The Iapetus `px` across under `surface` and a neighbour of ten times its radius 10⁸ m from it,
+   * opposite its star, which lights it by planetshine at full phase.
+   */
+  function withNeighbourAt(
+    surface: ClassMapDiscSurface,
+    px: number,
+  ): { readonly bodies: LitBodyInput[]; readonly hosts: PlacedLight[] } {
+    const { body, hosts } = iapetusAt(surface, APEX, vec3(1, 0, 0), 60 * RAD, px);
+    const star = hosts[0];
+    if (star === undefined) {
+      throw new Error("the Iapetus has its star");
+    }
+    const towardsStar = normalise(sub(star.centreM, body.centreM));
+    const neighbour: LitBodyInput = {
+      id: "0200080020000000.0302",
+      centreM: add(body.centreM, scale(towardsStar, -1e8)),
+      figure: { equatorialRadiusM: 10 * RADIUS_M, polarRadiusM: 10 * RADIUS_M, pole: null },
+      photometry: PHOTOMETRY,
+      lighting: undefined,
+    };
+    return { bodies: [body, neighbour], hosts };
+  }
+
+  it("evaluates no light, its planetshine's among them, on the frame an approach makes the body a point", () => {
+    const surface = surfaceOf(iapetusMap());
+    const { bodies: first, hosts: firstHosts } = withNeighbourAt(surface, BAND_PX);
+    const [iapetus] = first;
+    if (
+      iapetus === undefined ||
+      bodyLightSources(iapetus, first, firstHosts, OPTIONS).planetshine.length === 0
+    ) {
+      throw new Error("the neighbour lights the Iapetus by planetshine");
+    }
+    let previous: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+    const before = classMapPointWork().frameEvaluations;
+    for (let px = BAND_PX - 1; px > 2; px -= 0.25) {
+      const { bodies, hosts } = withNeighbourAt(surface, px);
+      previous = planLitBodies(bodies, hosts, OPTIONS, previous).regimes;
+      drainNear();
+    }
+    expect([previous.get(iapetus.id), classMapPointWork().frameEvaluations - before]).toEqual([
+      "point",
+      0,
+    ]);
+  });
+
   it("draws the first point frame within T10.f's cache bound of a fresh evaluation there, inside R07's 1%", () => {
     const surface = surfaceOf(iapetusMap());
     let previous: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
@@ -1775,12 +1836,11 @@ describe("the class-mapped point near the switch only (R10.T14.f's deferred leve
     expect(worstRatio(first.drawn, fresh)).toBeLessThan(1.7e-3);
   });
 
-  it("draws a light warmed at its geometry by the ratio the slices found, bit for bit the synchronous path's", () => {
-    const surface = surfaceOf(halfIapetus());
+  /** A light warmed on the leading side's geometry and its slices drained: its point's draw. */
+  function warmedLeadingPoint(surface: ClassMapDiscSurface): Rgb {
     warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
     drainNear();
-    const before = classMapPointWork().frameEvaluations;
-    const drawn = classMapPointReflection(
+    return classMapPointReflection(
       SPHERE,
       surface,
       IDENTITY_ROTATION,
@@ -1788,39 +1848,113 @@ describe("the class-mapped point near the switch only (R10.T14.f's deferred leve
       APEX,
       LEADING_STAR,
     );
-    const evaluated = classMapPointWork().frameEvaluations - before;
+  }
+
+  /** Warms the leading side's light under `surface`, at `light` if given. */
+  function warmLeading(surface: ClassMapDiscSurface, light: Vec3 = LEADING_LIGHT): void {
+    warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, light, APEX, LEADING_STAR);
+  }
+
+  it("draws a light warmed at its geometry by the ratio the slices found, bit for bit the synchronous path's", () => {
+    const drawn = warmedLeadingPoint(surfaceOf(halfIapetus()));
     const expected = leadingWith(
       classMapReflectionRatio(SPHERE, surfaceOf(halfIapetus()), LEADING_LIGHT, APEX),
     );
-    expect([drawn.map((value, c) => Object.is(value, expected[c])), evaluated]).toEqual([
-      [true, true, true],
-      0,
-    ]);
+    expect(drawn.map((value, c) => Object.is(value, expected[c]))).toEqual([true, true, true]);
   });
 
-  it("queues one refresh a light to warm it, and none while its own ratio is held within δ", () => {
+  it("evaluates no light on the frame that draws a warmed light's point", () => {
     const surface = surfaceOf(halfIapetus());
-    const warm = (): number => {
-      const before = classMapPointWork().refreshes;
-      warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
-      return classMapPointWork().refreshes - before;
-    };
-    const queued = [warm(), warm()];
+    warmLeading(surface);
     drainNear();
-    queued.push(warm());
+    expect(evaluationsOf(() => leadingPointOf(surface))).toBe(0);
+  });
+
+  it("queues one refresh to warm a light", () => {
+    const surface = surfaceOf(halfIapetus());
+    const queued = refreshesOf(() => warmLeading(surface));
+    drainNear();
+    expect(queued).toBe(1);
+  });
+
+  it("queues no refresh to warm a light while its own ratio is held within δ", () => {
+    const surface = surfaceOf(halfIapetus());
+    warmLeading(surface);
+    drainNear();
+    expect(refreshesOf(() => warmLeading(surface))).toBe(0);
+  });
+
+  it("queues at most one refresh a light, however its geometry moves, as near conjunction", () => {
+    const surface = surfaceOf(halfIapetus());
+    const queued = [175, 175.5, 176].map((phaseDeg) =>
+      refreshesOf(() => warmLeading(surface, lightAt(APEX, vec3(1, 0, 0), phaseDeg * RAD))),
+    );
+    drainNear();
     expect(queued).toEqual([1, 0, 0]);
   });
 
-  it("warms nothing while no made surface stands for the map, and notes its body near so that its build is stepped", () => {
+  it("warms nothing while no made surface stands for the map", () => {
     const surface = unmadeOf(() => iapetusMap());
     queueClassMapPoint(surface.texels, null, null);
-    const before = classMapPointWork().refreshes;
-    warmClassMapPoint(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX, LEADING_STAR);
-    const queued = classMapPointWork().refreshes - before;
+    const queued = refreshesOf(() => warmLeading(surface));
+    cancelClassMapPoint(surface.texels);
+    expect(queued).toBe(0);
+  });
+
+  it("notes a warmed disc's body near the switch, so that its build is stepped", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(surface.texels, null, null);
+    warmLeading(surface);
     const clock = tickingClock();
     stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, "near");
     cancelClassMapPoint(surface.texels);
-    expect([queued, clock.readings() > 1]).toEqual([0, true]);
+    expect(clock.readings() > 1).toBe(true);
+  });
+
+  it("steps a near map's build before an older one whose body no frame draws near the switch", () => {
+    const far = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(far.texels, null, null);
+    const near = unmadeOf(halfIapetus);
+    queueClassMapPoint(near.texels, null, null);
+    leadingPointOf(near);
+    drainNear();
+    const states = [classMapPointState(far), classMapPointState(near)];
+    cancelClassMapPoint(far.texels);
+    cancelClassMapPoint(near.texels);
+    expect(states).toEqual(["queued", "made"]);
+  });
+
+  /** A replaced map's surface, its predecessor made and drawn, and its own build queued. */
+  function replacedMap(): ClassMapDiscSurface {
+    const first = surfaceOf(iapetusMap());
+    leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    return second;
+  }
+
+  /** The light at 100° of phase on the leading side, past the stand-in's angle of the 60° one. */
+  const WIDE_LIGHT = lightAt(APEX, vec3(1, 0, 0), 100 * RAD);
+
+  it("warms a replaced map's stand-in while the map's own elements are unmade", () => {
+    const second = replacedMap();
+    const queued = refreshesOf(() => warmLeading(second, WIDE_LIGHT));
+    cancelClassMapPoint(second.texels);
+    expect(queued).toBe(1);
+  });
+
+  it("evaluates no light at a replaced map's first point frame after its disc's frames warmed it", () => {
+    const second = replacedMap();
+    for (let frame = 0; frame < 3; frame += 1) {
+      warmLeading(second, WIDE_LIGHT);
+      drainNear();
+    }
+    const evaluated = evaluationsOf(() =>
+      classMapPointReflection(SPHERE, second, IDENTITY_ROTATION, WIDE_LIGHT, APEX, LEADING_STAR),
+    );
+    drainNear();
+    cancelClassMapPoint(second.texels);
+    expect(evaluated).toBe(0);
   });
 
   /**

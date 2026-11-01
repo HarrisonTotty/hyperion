@@ -732,6 +732,13 @@ function pointSpriteOf(
  * drawn before the sequence, with depth. The order is the drawing's, by the drawn centres; each
  * body is lit by its own lighting frame where it has one (T10.a).
  *
+ * Under a class map the plan has two side effects on the point's module-wide work (plan R10,
+ * R10.T14.f's levers; `classMapPoint.ts`): a point it draws queues its map's build or a refresh
+ * where they are missing, and a disc it draws within `CLASS_MAP_POINT_BAND` × 3 px of the frame's
+ * own pixels queues its lights' refreshes (`warmClassMapPoint`); either notes its map near the
+ * switch, so that the terrain session's slices step them. A caller with no session (the smoke
+ * page) steps none of that work.
+ *
  * @param hosts - The host stars where they are drawn, which keep their place in the order and
  *   light each body that has no lighting frame of its own (`LitBodyInput.lighting`).
  * @param previous - Each body's regime on the previous frame, for the hysteresis.
