@@ -25,9 +25,9 @@ use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 /// N₂'s cold trap; a lid under an air (`hooks::surface::lid_air`) now keeps P14.T49.j's form.
 const FLIPS: [&str; 0] = [];
 
-/// How many of the census's 6,664 bodies the pore gas moves (2026-11-01): 1,730, 1,626 of them
-/// airless and 1 tenuous.
-const MOVED: usize = 1_730;
+/// How many of the census's 6,664 bodies the pore gas moves (2026-11-01): 1,729 at generator
+/// version 25 (1,730 at 24), 1,626 of them airless and 1 tenuous.
+const MOVED: usize = 1_729;
 
 /// The census's two walks, one body each in the same order: the pore gas held, and in force.
 struct Census {
