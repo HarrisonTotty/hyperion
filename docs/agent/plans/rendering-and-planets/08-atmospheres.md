@@ -24435,3 +24435,18 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     25 miss, 175 refused, every limb view within the gate (10H 1.04, 3H 1.05). Left: the horizon's 21,
     s30's two red views (within the gate at m < 8, measured with the read's modes widened by hand),
     s80's forward red (0.92) and the disc's at p60 (1.07).
+  - _Lever 2, the horizon: not found._ Its 21 views (every channel 0.76–0.88) are unmoved by the
+    modes (m < 16), the correction, the curved streams, a last-flight lateral term (each stream's μ₀
+    at its origin, x̄ ÷ R sunward, through ∂I_m/∂μ₀: v0 0.821 to 0.822), a linear read across the
+    horizon's rows (+1%) and the beam's slant floor (it never acts). A smoothing of J over μ₀ reaches
+    it only by a tuned width. J near the ground is near-linear in μ₀ about 0, so no symmetric lateral
+    mixing adds the 20–30% the reference holds. Next: the field at the horizon's rows evaluated
+    spherically (the plane-parallel source integrated along curved rays at each point's own μ₀, a
+    combined differential-integral step), or a check of the reference's s90.
+  - _Lever 4, the aureole: not built._ The lobes' in-lobe excess on the table's side (T14.d.3's
+    option (b), the orders less their wide tail at the table's share) brightens near-sun views at a
+    high sun (s0 1.17, s30 1.23) and leaves s80's forward red at 0.92. That view and the disc's red
+    at p60 (1.07) are red alone and mode-free: the bins' red, its methane's curve at the floor.
+  - _The modes after both levers:_ m < 8 clears s30's two red views (23 misses); m = 3 alone trades
+    them for s30's a135 (24). Not built: a second texel and its read for two views while the horizon
+    holds 21.
