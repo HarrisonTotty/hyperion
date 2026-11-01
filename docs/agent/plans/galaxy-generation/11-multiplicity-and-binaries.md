@@ -7135,3 +7135,47 @@ galaxy_sweeps`.
     its time in each phase. For P15.T10.b's fit; not chased.
   - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`; slow,
     `engine_channels_hold`'s measurement (with `--ignored`).
+- **Deviations in P11.T6, as built** (lane `p11-t6`, 2026-11-01; held at 27, so nothing generated
+  moves at 24–26). The tags golden gains `binary.ia_mark`, and a new golden,
+  `stellar/ia_marks`, pins eight pairs' marks at every attempt.
+  - _The hold replaces the bump._ `StellarRules::ia_explosion` (`IaExplosionRules::Pooled` to 26,
+    `Marked` from `IA_EXPLOSION_VERSION` = 27), `StellarRules::every_27_hold` and
+    `GalaxyRules::every_27_hold` (added here; no galaxy-side hold turns on at 27 yet). The tripwire
+    and the tests are in `stellar/rules/ia_hold.rs`.
+  - _The table (P15.T9.b's shape)._ In `tables::binary`: `IaYieldTable`, `IA_YIELD`,
+    `IA_DELAY_BINS` and `ia_delay_bin`. `IaYieldTable::new([[f64; 2]; IA_DELAY_BINS])` is const,
+    each share in [0, 1], with `eta_in(bin, channel)` and `eta(delay, channel)`, the merger
+    first. A delay outside `DELAY_EDGES` falls in the end bin on its side. `IaPoolChannel` stays
+    the engine's type in `stellar::binary` and is re-exported from `tables::binary`. There is no
+    `tables::MANIFEST` row, as Provides § Tables says (the manifest lists only what hyperion-fit
+    writes); the header says provisional.
+  - _The mark and the carve._ `IaExplosionMark::of(seed, pair_key, attempt)` is word 64n of the
+    pair's `binary.ia_mark` stream (`SystemHierarchy::pair_key`); `marked_explosion` is
+    `pub(crate)`. `SystemStars::exploded_pair` sits beside `carved_pair`, and the redraw loop keeps
+    the first attempt with neither.
+    - P09.T35's `keeps_a_recent_type_ia` is `exploded_pair().is_some()`, not `carved_class`.
+      `carved_class(timeline, age)` is also the catalogue's test (P11.T8), and the mark needs the
+      seed, the key and the attempt, which it does not take.
+    - The hierarchy bound's cover holds, since only an engine-run pair pools a candidate.
+    - A feature member is not redrawn and may keep a marked candidate (P11.T8.f's and plan 09's).
+  - _Plan 09's entry._ `orbit::peters_separation_for` was public already. `type_ia.rs` keeps its
+    private `peters_separation`, the separation after the envelope: the two differ in the last bit
+    or two for 324,702 of 10⁶ inputs, and sharing would move the entry's pinned separations.
+    The test runs the `Engine` on the entry's two white dwarfs from the second dwarf's birth, not
+    `evolve`, which starts from zero-age stars. Over 60 entries the merger falls at the drawn delay
+    within 1%, and the inspiral within 0.43% of the entry's.
+  - _Measured_ (slow; a drawn Kroupa galaxy, every 27 hold, the scratch η):
+    - The galaxy's layer D: 333 of 10⁵ redrawn, 0.333%. The band 0.3–4.5% is asserted on this
+      sample: records built from parts, each component by its share of the galaxy's systems, at its
+      population's reference position. The task's figure is a galaxy-wide rate.
+    - Near the Sun (placed records): 280 of 99,904, 0.280%, below the band; printed only.
+    - Exploded ÷ pooled: 344 of 1,940, against a sixth.
+    - The pool to date is 0.25 times the delay-time distribution's Type Ia for the mergers, and
+      0.66 for every candidate, against the observed five to seven (findings). No η of at most 1
+      reaches the observed rate, so P15.T9.b's acceptance cannot pass against this pool. P11.T15's
+      2–4% needs η near 1 (layer D pools 1.9%).
+  - _At the bump._ No golden moves. `sky_binary_light_c`'s fingerprint probe moves, so the bump
+    refits `sky_binary_light_c`, `_d` and `_e`. "Generator version" should name P11.T6's redraw of
+    about 0.3% of layer D beside T7's.
+  - _Acceptance:_ `cargo test -p hyperion-sim binary::ia`, `stellar::rules::ia_hold` and
+    `tables::binary`; slow, the two `ia_hold::slow` tests (`just test-slow`).

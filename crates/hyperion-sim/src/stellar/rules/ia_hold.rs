@@ -447,7 +447,7 @@ mod slow {
     /// records of layer D, every record of cells drawn at random near the Sun-like point: no system
     /// the grid keeps has an exploded binary at any t ≤ +H, and exploded ÷ pooled is η to Poisson
     /// accuracy. The share whose first attempt explodes is printed: the solar neighbourhood's
-    /// redraw rate, 271 of 99,890, 0.271%, on 2026-11-01 (the galaxy's, which the plan's band
+    /// redraw rate, 280 of 99,904, 0.280%, on 2026-11-01 (the galaxy's, which the plan's band
     /// bounds, is the next test's).
     #[test]
     #[ignore = "slow: 10⁵ layer-D systems near the Sun under every 27 hold, their pairs run"]
