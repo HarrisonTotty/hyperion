@@ -232,9 +232,10 @@ domain_tags! {
     /// An accepted system's signed age at the epoch.
     SYSTEM_AGE: System = "system.age";
 
-    /// A system's velocity at the epoch: the escape cut's attempts at words 4k (P08.T5), and for
-    /// a member of a displaced class in a first-excursion bin its outbound marks at words 64 + k
-    /// (P08.T12.d).
+    /// A system's velocity at the epoch: the escape cut's attempts at words 4k (P08.T5), for a
+    /// member of a displaced class in a first-excursion bin its outbound marks at words 64 + k
+    /// (P08.T12.d), and for a hypervelocity survivor its launch's tries at words 4k to 4k + 3
+    /// (P09.T34.b).
     SYSTEM_VELOCITY: System = "system.velocity";
 
     // Plan 06: the stars. Every `star.*` draw tag has scope `Body`, is opened with

@@ -5642,13 +5642,17 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _The draws_, on plan 08's tags, none new (lean, 2026-11-01): population by the counts on
     `displaced.origin_bin`, speed ∝ path ÷ v − S on `runaway.speed`, time since launch uniform on
     [S, path ÷ v] on `runaway.ejection`, birth component by Type Ia rate.
-    `placement::survivor_flight` reads the flight back. The velocity is radial from the centre.
+    `placement::survivor_flight` reads the flight back.
   - _The donor_ (fix, 2026-11-01): its mass is its speed's inverse at Roche-lobe contact beside
     a 1.0 M☉ accretor (`survivors::donor_mass`; Eggleton 1983, Nauenberg 1972), held to
     0.15–1.0 M☉. Up to 0.30 M☉ (`HEAVIEST_HELIUM_WHITE_DWARF`) it is a helium white dwarf, the
     record's primary of its own mass and age since launch (`placement::is_helium_donor`), built by
     `StarModel::helium_white_dwarf_under` and taken exactly by the brief model. A C/O donor's
     progenitor is Kalirai's inverse in layer D.
+  - _The launch_ (fix, 2026-11-01): the direction is drawn from launch sites on the sphere of
+    radius vτ by `Survivors::launches_per_year_per_cubic_ly`, on `system.velocity` words
+    4k–4k + 3 (`Survivors::launch_direction`, `LaunchSampler`: a uniform, lobe and plane-band
+    proposal, bound at its probes).
   - _The pad._ Raising `pad_speed(D)` outright moved `sky/census_near_sun`'s and `sky/eye_cut`'s
     cell tallies at 24, so `query::pad_speed_in(galaxy, layer)` and `escape_cut_holds_in` (new)
     give layer D `UNBOUND_PAD_SPEED` from 27; the walks, `epoch_velocity`, lensing and the exempt

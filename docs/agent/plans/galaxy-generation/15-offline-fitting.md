@@ -3293,3 +3293,7 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     as a finding while the engine's αλ stands (as built: about 0.5–0.9).
   - Dropped: "the mark averages about one in six (0.1–0.25)", "bins at the cap hold under a tenth
     of the yield" and "the pool's merger rate is 4.5–7 times the Ia rate".
+- **For P15.T6's production `HYPERVELOCITY` (plan 09's P09.T34.b fix, 2026-11-01).** Fit only
+  the class's own launches: S ≤ τ ≤ path ÷ v from the sim's
+  `Survivors::launches_per_year_per_cubic_ly` (a kernel hollow inside vS), each population at its
+  share and speed density, normalised to `Survivors::count`.

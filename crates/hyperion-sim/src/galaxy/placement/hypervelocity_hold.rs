@@ -8,8 +8,9 @@
 //! - every exempt class padded with the class's weight (P08.T12.d's check), the survivors alone in
 //!   layer D;
 //! - each survivor launched before the Type Ia class's interval, its donor a helium white dwarf
-//!   of its speed's mass or a C/O one already when it was, moving straight out at its speed below
-//!   layer D's pad, as P08.T17's debug assertion holds, and the same twice;
+//!   of its speed's mass or a C/O one already when it was, flying at its speed from a launch site
+//!   below layer D's pad, as P08.T17's debug assertion holds, and the same twice;
+//! - near the Sun's circle, its mean cosine to the radial direction and the radial fallbacks;
 //! - layer D's cells visited at |t| = H rising by under a third with its raised pad;
 //! - and, slow, at t = ±H a 50 ly query about each of 100 centres, each with a survivor within
 //!   15 ly outside it at the epoch, equal to the brute-force enumeration.
@@ -34,7 +35,9 @@ use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::displaced::class_table::{ClassKey, hypervelocity_class};
 use crate::galaxy::displaced::hold::displaced;
-use crate::galaxy::displaced::survivors::{DonorKind, SurvivorBand, SurvivorFlight};
+use crate::galaxy::displaced::survivors::{
+    DonorKind, LaunchDirection, LaunchSampler, SurvivorBand, SurvivorFlight,
+};
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw;
@@ -48,6 +51,8 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::ShellEnvironment;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
+use crate::math;
+use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Phase;
 use crate::stellar::brief::BriefModel;
 use crate::stellar::multiplicity::MultiplicityContext;
@@ -283,18 +288,18 @@ enum Marked {
     Generated,
 }
 
-/// Checks the survivor `record` (whose marks are `marked`) and gives its flight and its star's
-/// phase at the epoch: launched no later than the Type Ia class's interval's
+/// Checks the survivor `record` (whose marks are `marked`) and gives its flight, its launch and its
+/// star's phase at the epoch: launched no later than the Type Ia class's interval's
 /// start, where the entries take over, nor before its path across the cube allows, born in a
 /// component with Type Ia; its donor of its speed's mass, a helium white dwarf of that mass and
 /// age, or a C/O or O/Ne one whose layer-D progenitor died before the launch, as the stellar stage
-/// builds the star; and its velocity its speed straight out from the centre, under layer D's pad,
+/// builds the star; and its velocity its speed along its launch's direction, under layer D's pad,
 /// as `epoch_velocity` (whose debug assertion, P08.T17's, holds it below the pad) gives it.
 fn check_survivor(
     galaxy: &Galaxy,
     record: &SystemRecord,
     marked: Marked,
-) -> (SurvivorFlight, Phase) {
+) -> (SurvivorFlight, LaunchDirection, Phase) {
     let survivors = galaxy
         .fields()
         .displaced()
@@ -354,18 +359,39 @@ fn check_survivor(
         }
         other => panic!("a survivor of the {other:?}: {flight:?}"),
     }
+    let mut stream = Stream::open(
+        galaxy.seed(),
+        tags::SYSTEM_VELOCITY,
+        ObjectKey::from(record.id()),
+    );
+    let at = PointLy::from(record.epoch_position());
+    let launch = survivors.launch_direction(galaxy, &at, &flight, &mut stream);
     let velocity = draw(galaxy, record);
     let speed = velocity.velocity().speed().value() / 1_000.0;
     assert!((speed - v).abs() <= 1e-9 * v, "{speed} {v}");
     assert!(speed < pad_speed_in(galaxy, Layer::D).value());
     assert!((velocity.cut().value() - UNBOUND_PAD_SPEED.value()).abs() < 1e-9);
-    let p = PointLy::from(record.epoch_position());
-    let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
     let w = velocity.velocity().metres_per_second();
-    let outward = (w[0] * p.x + w[1] * p.y + w[2] * p.z) / (r * speed * 1_000.0);
-    assert!(outward > 1.0 - 1e-12, "{outward}");
+    for (c, n) in w.iter().zip(launch.direction()) {
+        assert!(
+            (c / (speed * 1_000.0) - n).abs() < 1e-12,
+            "{w:?} {launch:?}"
+        );
+    }
+    if !launch.is_radial() {
+        let d = flight.flown_ly();
+        let site = PointLy {
+            x: at.x - d * launch.direction()[0],
+            y: at.y - d * launch.direction()[1],
+            z: at.z - d * launch.direction()[2],
+        };
+        assert!(
+            survivors.launches_per_year_per_cubic_ly(galaxy, &site) > 0.0,
+            "{site:?}"
+        );
+    }
     assert_eq!(epoch_velocity(galaxy, record), velocity.velocity());
-    (flight, state.phase())
+    (flight, launch, state.phase())
 }
 
 /// At the Sun-like point, above the bulge and in the halo, each survivor's marks, star and line
@@ -386,7 +412,7 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
         at([0.0, 0.0, 30_000.0]),
     ] {
         for (record, lifetime) in survivors_at(galaxy, &place, 400) {
-            let (flight, _) = check_survivor(galaxy, &record, Marked::Lifetime(lifetime));
+            let (flight, _, _) = check_survivor(galaxy, &record, Marked::Lifetime(lifetime));
             seen += 1;
             fast += u32::from(flight.band() == SurvivorBand::Fast);
         }
@@ -399,6 +425,52 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
         2.0 * normal_cdf(-z.abs()),
         ALPHA,
     );
+}
+
+/// In the plane at R = 7.5–9 kpc, about the Sun's circle, survivors fly from their launch sites in
+/// the old stars, not straight out from the centre: their mean cosine to the radial direction,
+/// recorded against the science review's about 0.5 from a disc and bulge's convolution; and under
+/// one in a hundred takes the radial direction for want of an accepted try.
+#[test]
+fn near_the_suns_circle_survivors_fly_from_their_launch_sites() {
+    let galaxy = weighted();
+    let survivors = galaxy
+        .fields()
+        .displaced()
+        .and_then(|fields| fields.class_table().survivors())
+        .expect("weighted under every 27 hold");
+    let (mut cosines, mut radial, mut tries) = (Vec::new(), 0_u32, 0_u64);
+    for k in 0..24_u32 {
+        let azimuth = core::f64::consts::TAU * f64::from(k) / 24.0;
+        let r = 24_500.0 + 4_800.0 * f64::from(k % 6) / 5.0;
+        let (sin, cos) = math::sin_cos(azimuth);
+        let place =
+            GalacticPosition::from_light_years([r * cos, r * sin, 20.0]).expect("in the cube");
+        for (record, _) in survivors_at(galaxy, &place, 25) {
+            let flight = survivor_flight(galaxy, &record).expect("a survivor has its flight");
+            let mut stream = Stream::open(
+                galaxy.seed(),
+                tags::SYSTEM_VELOCITY,
+                ObjectKey::from(record.id()),
+            );
+            let at = PointLy::from(record.epoch_position());
+            let launch = survivors.launch_direction(galaxy, &at, &flight, &mut stream);
+            let norm = (at.x * at.x + at.y * at.y + at.z * at.z).sqrt();
+            let n = launch.direction();
+            cosines.push((n[0] * at.x + n[1] * at.y + n[2] * at.z) / norm);
+            radial += u32::from(launch.is_radial());
+            tries += u64::from(launch.tries());
+        }
+    }
+    #[expect(clippy::cast_precision_loss, reason = "counts far below 2⁵³")]
+    let (n, mean_tries) = (cosines.len() as f64, tries as f64 / cosines.len() as f64);
+    let mean = cosines.iter().sum::<f64>() / n;
+    eprintln!(
+        "{n} survivors at R 7.5–9 kpc: mean cosine to radial {mean:.3} (the science review's \
+         about 0.5), {radial} radial, {mean_tries:.1} tries each"
+    );
+    assert!(mean < 0.99 && mean > 0.0, "{mean}");
+    assert!(f64::from(radial) < 0.01 * n, "{radial} of {n}");
 }
 
 /// A survivor's brief is its system's: the brief model takes a helium donor's white dwarf exactly,
@@ -415,6 +487,49 @@ fn a_survivors_brief_is_its_white_dwarfs() {
         kinds[usize::from(is_helium_donor(&record))] += 1;
     }
     assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
+}
+
+/// The launch's bound holds the launch density over its proposal on a lattice of 20,000
+/// directions on each sphere, for survivors at the Sun-like point, above the bulge and in the
+/// halo: the rejection is exact where the bound is, which its probes only sample.
+#[test]
+fn the_launchs_bound_holds_its_ratio_over_the_sphere() {
+    let galaxy = weighted();
+    let survivors = galaxy
+        .fields()
+        .displaced()
+        .and_then(|fields| fields.class_table().survivors())
+        .expect("weighted under every 27 hold");
+    let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).expect("in the cube");
+    let mut largest: f64 = 0.0;
+    for place in [
+        at([0.0, 26_000.0, 20.0]),
+        at([0.0, 2_000.0, 6_000.0]),
+        at([0.0, 0.0, 30_000.0]),
+    ] {
+        for (record, _) in survivors_at(galaxy, &place, 6) {
+            let flight = survivor_flight(galaxy, &record).expect("a survivor has its flight");
+            let sampler = LaunchSampler::new(
+                survivors,
+                galaxy,
+                &PointLy::from(record.epoch_position()),
+                &flight,
+            );
+            let bound = sampler.bound();
+            assert!(bound > 0.0 && bound.is_finite(), "{bound}");
+            let n = 20_000_u32;
+            for i in 0..n {
+                let z = 1.0 - (2.0 * f64::from(i) + 1.0) / f64::from(n);
+                let across = (1.0 - z * z).sqrt();
+                let (sin, cos) = math::sin_cos(f64::from(i) * 2.399_963_229_728_653);
+                let direction = [across * cos, across * sin, z];
+                let ratio = sampler.density(direction) / sampler.proposal(direction);
+                largest = largest.max(ratio / bound);
+                assert!(ratio <= bound, "{ratio} over {bound} at {direction:?}");
+            }
+        }
+    }
+    eprintln!("the ratio reaches {largest:.3} of the bound");
 }
 
 /// The same seed gives the same survivors twice: two galaxies built apart draw each survivor's
@@ -647,16 +762,23 @@ fn at_the_window_ends_a_query_beside_a_survivor_is_the_brute_force_enumeration()
         expected,
         ALPHA,
     );
-    let (mut helium, mut carbon_oxygen) = (0_u32, 0_u32);
+    let (mut helium, mut carbon_oxygen, mut radial) = (0_u32, 0_u32, 0_u32);
     for record in &found {
-        let (flight, _) = check_survivor(galaxy, record, Marked::Generated);
+        let (flight, launch, _) = check_survivor(galaxy, record, Marked::Generated);
         assert!(flight.since_launch() >= survivors.youngest(), "{flight:?}");
         match flight.donor_kind() {
             DonorKind::Helium => helium += 1,
             DonorKind::CarbonOxygen => carbon_oxygen += 1,
         }
+        radial += u32::from(launch.is_radial());
     }
-    eprintln!("{helium} helium and {carbon_oxygen} C/O or O/Ne white dwarfs");
+    eprintln!(
+        "{helium} helium and {carbon_oxygen} C/O or O/Ne white dwarfs, {radial} launched radially"
+    );
+    assert!(
+        f64::from(radial) < 0.01 * f64::from(helium + carbon_oxygen),
+        "{radial}"
+    );
     assert!(found.len() >= 100, "{} survivors", found.len());
     let [minus_h, plus_h] = window_ends();
     let h_years = CLOCK_WINDOW_H.as_julian_years_f64();

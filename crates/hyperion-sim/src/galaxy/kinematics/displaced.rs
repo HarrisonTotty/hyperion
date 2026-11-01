@@ -16,8 +16,9 @@
 //!   (0.3–8 `R_d ÷ v_c`) the vertical component takes the sign of z with the class's `outbound`
 //!   share, so a fast pulsar high above the disc is also moving away from it.
 //! - **The hypervelocity survivors** (from generator version 27, plan 09's P09.T34.b): their
-//!   launch speed ([`Survivors::flight`]) straight away from the galactic centre, on the straight
-//!   line `HYPERVELOCITY`'s form is the density of, and nothing drawn on `system.velocity`.
+//!   launch speed ([`Survivors::flight`]) along the straight line from their launch site, which
+//!   the galaxy's Type Ia rate density weighs ([`Survivors::launch_direction`], on
+//!   `system.velocity` from word 0).
 //!
 //! The escape cut of Design note 7 holds every class but the fastest of each age bin, which hold
 //! the unbound (Design note 23), and the survivors: those are cut at their record's layer's
@@ -26,6 +27,7 @@
 //! a survivor's, which no draw makes, is scaled.
 //!
 //! [`Survivors::flight`]: crate::galaxy::displaced::survivors::Survivors::flight
+//! [`Survivors::launch_direction`]: crate::galaxy::displaced::survivors::Survivors::launch_direction
 
 use super::EllipsoidAxes;
 use super::draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, WORDS_PER_ATTEMPT, basis, norm, scaled_to};
@@ -92,7 +94,7 @@ pub(super) fn draw_displaced(
     );
     let key = displaced.class(class).key();
     if key == ClassKey::Hypervelocity {
-        return outward(galaxy, record, &PointLy::from(record.epoch_position()));
+        return launched(galaxy, displaced, record, stream);
     }
     let source = key
         .source()
@@ -117,25 +119,30 @@ pub(super) fn draw_displaced(
     )
 }
 
-/// A hypervelocity survivor's velocity at `p`, its epoch position: its launch speed straight away
-/// from the galactic centre (lean, 2026-11-01; along +z at the centre itself), held below its
+/// A hypervelocity survivor's velocity: its launch speed along the direction from its launch site
+/// ([`Survivors::launch_direction`], on `stream`, its `system.velocity` stream), held below its
 /// layer's pad speed, which its 2,500 km/s at most is under.
 ///
-/// That is the far field of `HYPERVELOCITY`'s convolution, whose sites are the old stars'. Near
-/// the disc a survivor's own line, from its launch site, can lie well off the radial; drawing that
-/// site is the exact law.
+/// # Panics
+///
+/// If the record is not a survivor of a weighted class, which no other record of the class is.
 #[must_use]
-fn outward(galaxy: &Galaxy, record: &SystemRecord, p: &PointLy) -> VelocityDraw {
-    let speed = survivor_flight(galaxy, record)
-        .expect("a member of the hypervelocity class has its flight")
-        .speed()
-        .value();
-    let r = norm([p.x, p.y, p.z]);
-    let direction = if r > 0.0 {
-        [p.x / r, p.y / r, p.z / r]
-    } else {
-        [0.0, 0.0, 1.0]
-    };
+fn launched(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    record: &SystemRecord,
+    stream: &mut Stream,
+) -> VelocityDraw {
+    let survivors = displaced
+        .class_table()
+        .survivors()
+        .expect("a survivor is placed only where its class has weight");
+    let flight = survivor_flight(galaxy, record).expect("a member of the class has its flight");
+    let at = PointLy::from(record.epoch_position());
+    let direction = survivors
+        .launch_direction(galaxy, &at, &flight, stream)
+        .direction();
+    let speed = flight.speed().value();
     scaled_to(
         direction.map(|c| c * speed),
         pad_speed_in(galaxy, record.layer()).value(),
