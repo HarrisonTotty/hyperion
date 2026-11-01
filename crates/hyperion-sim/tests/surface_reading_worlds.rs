@@ -111,8 +111,9 @@ const GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.25;
 
 /// The sample-world cases, each a world's name and a survey's index in [`SURVEYS_M`], whose
 /// z-scores' variance is held to [`STYLE_GAP_Z`] rather than the plan's 15%: the reference Earth at
-/// both surveys and the locked Earth at 100 m. With R09.T6.g at generator version 24 (2026-10-30)
-/// they measure 1.1755, 1.1705 and 1.1650, each with its RMS ratio within 1% of 1 (0.9940, 1.0052
+/// both surveys and the locked Earth at 100 m. At generator version 25 they measure 1.1757, 1.1913
+/// and 1.1648, each with its RMS ratio within 1% of 1 (0.9948, 1.0058 and 0.9947; R10.T15.b.2);
+/// with R09.T6.g at generator version 24 (2026-10-30) 1.1755, 1.1705 and 1.1650, each with its RMS ratio within 1% of 1 (0.9940, 1.0052
 /// and 0.9949) and held at the plan's 10%; with R09.T6.g at 23, 1.1757, 1.1732 and 1.1650; before
 /// it at 24 (P14.T54.b.l, T53.a's water term moving the Earths' coarse fields), the reference
 /// Earth's 1.1739 and 1.3718; with R09.T6.f at 23, 1.1751, 1.3568 and 1.1635; before it, 1.1772,
@@ -128,12 +129,12 @@ const GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.25;
 /// R10's "Deferred findings (2026-10-13 rule) (R10.T5's `sample_worlds()` follow-up)").
 const STYLE_GAP: [(&str, usize); 3] = [(EARTH, 0), (EARTH, 1), (LOCKED_EARTH, 0)];
 
-/// The style gap's bounds on the z-scores' variance, \[0.85, 1.18\]: the plan's tolerance from
-/// below, so that a σ quoted too high still fails, and from above the largest measured, 1.1755
-/// (the reference Earth at 100 m with R09.T6.g at generator version 24), rounded up to the next
-/// 0.01 (decision-r10-t2-weights §2.4's rule for a pin; 1.38 at the 24 bump, P14.T54.b.l, and
-/// 1.36 at 23 since R09.T6.f, 1.18 before it).
-const STYLE_GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.18;
+/// The style gap's bounds on the z-scores' variance, \[0.85, 1.20\]: the plan's tolerance from
+/// below, so that a σ quoted too high still fails, and from above the largest measured, 1.1913
+/// (the reference Earth at 1000 m at generator version 25), rounded up to the next 0.01
+/// (decision-r10-t2-weights §2.4's rule for a pin; 1.18 with R09.T6.g at 24, 1.38 at the 24 bump,
+/// P14.T54.b.l, and 1.36 at 23 since R09.T6.f, 1.18 before it).
+const STYLE_GAP_Z: RangeInclusive<f64> = 1.0 - Z_TOLERANCE..=1.20;
 
 /// `count` distinct cells of `level` at random.
 fn random_cells(level: u8, count: usize, rng: &mut Lcg) -> Vec<PatchKey> {
