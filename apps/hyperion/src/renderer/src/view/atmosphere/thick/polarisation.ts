@@ -166,7 +166,12 @@ import {
   type StreamDirection,
 } from "./discreteOrdinates";
 import { EXP_SUM_OPTIONS, type ExpSumOptions } from "./expSum";
-import { type SphericalBeam, sphericalBeamPath } from "./sphericalBeam";
+import {
+  type BeamChords,
+  type SphericalBeam,
+  sphericalBeamChords,
+  sphericalBeamPath,
+} from "./sphericalBeam";
 import {
   forwardDeltaShare,
   phaseMoments,
@@ -2851,7 +2856,8 @@ function solvePoint(
   term: BinTerm,
   streams: number,
   maxMode: number,
-  ground?: PolarisationGround,
+  ground: PolarisationGround | undefined,
+  chords: ReadonlyArray<BeamChords>,
 ): PointSolve {
   const { grid, layering } = prepared;
   const layers = grid.layers;
@@ -2888,11 +2894,11 @@ function solvePoint(
   }
   const radius = geometry.bottomRadiusM;
   const heights = layering.interfaceHeightsM;
-  const scaledBeams = Array.from(grid.sunCosines, (mu0) =>
-    sphericalBeamPath(radius, heights, scaledDepths, mu0),
+  const scaledBeams = Array.from(grid.sunCosines, (mu0, s) =>
+    sphericalBeamPath(radius, heights, scaledDepths, mu0, chords[s]),
   );
-  const kernelBeams = Array.from(grid.sunCosines, (mu0) =>
-    sphericalBeamPath(radius, heights, kernelDepths, mu0),
+  const kernelBeams = Array.from(grid.sunCosines, (mu0, s) =>
+    sphericalBeamPath(radius, heights, kernelDepths, mu0, chords[s]),
   );
   const groundReflectance = ground?.(
     point,
@@ -3187,6 +3193,11 @@ export function polarisationSources(
     }
     return sum;
   });
+  // Each sun's beam's chords through the band's column, which every term traces at its own depths
+  // (R08.T16.b.2's lever).
+  const chords = Array.from(grid.sunCosines, (mu0) =>
+    sphericalBeamChords(geometry.bottomRadiusM, prepared.layering.interfaceHeightsM, mu0),
+  );
   const solved = new Map<BinTerm, PointSolve>();
   return prepared.lights.map((lightBins): PolarisationSources => {
     const bin = lightBins[point];
@@ -3211,7 +3222,7 @@ export function polarisationSources(
     for (const term of bin.terms) {
       let solve = solved.get(term);
       if (solve === undefined) {
-        solve = solvePoint(prepared, geometry, at0, term, streams, maxMode, options.ground);
+        solve = solvePoint(prepared, geometry, at0, term, streams, maxMode, options.ground, chords);
         solved.set(term, solve);
       }
       for (const record of solve.vector.eigen) {
