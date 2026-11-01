@@ -8,8 +8,11 @@ use hyperion_testkit::lcg::Lcg;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
-use crate::field::{CoarseField, FieldView};
-use crate::synth::test_support::{SEED, random_cells, random_points_in, rim_cells, world};
+use crate::cube::{Face, PatchKey};
+use crate::field::{CoarseField, FieldView, cell_at_index};
+use crate::synth::test_support::{
+    SEED, point_in, random_cells, random_points_in, rim_cells, world,
+};
 use crate::synth::{SynthCache, Synthesiser};
 use crate::test_sizes::per_target;
 use crate::testing::SyntheticWorld;
@@ -158,6 +161,46 @@ fn the_level_bound_is_zero_from_the_complete_level_and_never_rises_with_the_leve
     }
 }
 
+/// The base elevation's range over every cell of `field`, metres, widened for rounding as the
+/// client's worker widens the cells it holds, and what all its cells certify of the channels:
+/// the view of a field holding every cell (R09.T8.d (b2)).
+fn held_over(field: &CoarseField) -> ((f64, f64), HeldChannels) {
+    let level = field.header().level();
+    let records: Vec<&SynthesisCell> = (0..level.cell_count())
+        .map(|n| field.cell(cell_at_index(level.get(), n).unwrap()).unwrap())
+        .collect();
+    let (lo, hi) = records.iter().fold((i32::MAX, i32::MIN), |(lo, hi), r| {
+        (lo.min(r.elevation_mm), hi.max(r.elevation_mm))
+    });
+    let (lo, hi) = (f64::from(lo) / 1000.0, f64::from(hi) / 1000.0);
+    let slack = |x: f64| 1e-6 + 1e-12 * x.abs();
+    let held = HeldChannels::of(records, ChannelBody::of(field.header()));
+    ((lo - slack(lo), hi + slack(hi)), held)
+}
+
+/// Points on the cube's seams at coarse level `level`: on each face, its four corners, the cube's,
+/// and a point on each of its four edges, each exactly on the seam.
+fn seam_points(level: u8) -> Vec<[f64; 3]> {
+    let last = (1_u32 << level) - 1;
+    let mid = last / 2;
+    let cell = |face, i, j| PatchKey::new(face, level, i, j).unwrap();
+    Face::ALL
+        .iter()
+        .flat_map(|&face| {
+            [
+                point_in(cell(face, 0, 0), 0.0, 0.0),
+                point_in(cell(face, last, 0), 1.0, 0.0),
+                point_in(cell(face, last, last), 1.0, 1.0),
+                point_in(cell(face, 0, last), 0.0, 1.0),
+                point_in(cell(face, mid, 0), 0.37, 0.0),
+                point_in(cell(face, last, mid), 1.0, 0.29),
+                point_in(cell(face, mid, last), 0.83, 1.0),
+                point_in(cell(face, 0, mid), 0.0, 0.61),
+            ]
+        })
+        .collect()
+}
+
 /// What [`sample_levels`] finds: by level n below the band limit's, the largest
 /// |h(n) − h(m)| ÷ `level_bound_m(n)` over the finer levels m, and by level to the band limit's,
 /// the [`Extremes`] of the contributions.
@@ -167,25 +210,33 @@ struct Sampled {
 }
 
 /// Samples `field` at `points` points in each of `cells` random cells of its coarse level, and in a
-/// tenth as many cells on coarse rims, at every level to the band limit's. It asserts that no
-/// difference between two levels exceeds the coarser one's bound, that the band limit's level and
-/// every finer one give the same height to the bit, and that every contribution stays within its
-/// own term of the level's reach and their sum within [`LevelBounds::contribution_range_m`] (R09.T8.d):
-/// the octaves and the channels hard, the small craters, the rims and both together within their
-/// quantiles.
+/// tenth as many cells on coarse rims, and at the cube's corners and on its face edges
+/// ([`seam_points`]), at every level to the band limit's. It asserts that no difference between
+/// two levels exceeds the coarser one's bound, that the band limit's level and every finer one give
+/// the same height to the bit, that every contribution stays within its own term of the level's
+/// reach and their sum within [`LevelBounds::contribution_range_m`] (R09.T8.d): the octaves and the
+/// channels hard, the small craters, the rims and both together within their quantiles; and that
+/// the height as delivered stays within the range the whole field's cells certify
+/// ([`LevelBounds::held_height_range_m`], R09.T8.d (b2)), itself within the header's.
 fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) -> Sampled {
     let synth = Synthesiser::new(field, SEED);
     let bounds = synth.bounds();
     let shares = term_shares(field.header());
+    let (base, held) = held_over(field);
     let complete = band_limit_level(bounds);
     let mut rng = Lcg::new(seed);
     let mut worst = vec![0.0_f64; usize::from(complete)];
     let mut extremes = vec![[(f64::INFINITY, f64::NEG_INFINITY); 5]; usize::from(complete) + 1];
     let mut sampled = random_cells(field.header().level().get(), cells, &mut rng);
     sampled.extend(rim_cells(field, cells / 10));
-    for cell in sampled {
+    let mut groups: Vec<Vec<[f64; 3]>> = sampled
+        .into_iter()
+        .map(|cell| random_points_in(cell, points, &mut rng))
+        .collect();
+    groups.push(seam_points(field.header().level().get()));
+    for group in groups {
         let mut cache = SynthCache::new();
-        for dir in random_points_in(cell, points, &mut rng) {
+        for dir in group {
             let mut heights = Vec::with_capacity(usize::from(complete) + 1);
             for n in 0..=complete {
                 let level = BandLevel::new(n).unwrap();
@@ -234,6 +285,12 @@ fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) ->
                     low <= floored && floored <= high,
                     "{dir:?} {n}: {floored} m outside [{low}, {high}] m"
                 );
+                let (held_low, held_high) = bounds.held_height_range_m(level, base, &held);
+                assert!(
+                    held_low <= height && height <= held_high,
+                    "{dir:?} {n}: {height} m outside the held [{held_low}, {held_high}] m"
+                );
+                assert!(base.0 + low <= held_low && held_high <= base.1 + high);
                 heights.push(height);
             }
             for n in 0..complete {
@@ -414,6 +471,66 @@ fn an_airless_body_s_channels_reach_nothing_and_omit_nothing() {
 }
 
 #[test]
+fn the_held_range_is_the_header_s_with_its_caps_whole_and_never_wider() {
+    // A certificate that holds nothing back: an epoch's valleys, tributaries and trunks as deep as
+    // any cap.
+    let whole = HeldChannels {
+        epoch: true,
+        tributaries: true,
+        trunk_m: f64::INFINITY,
+    };
+    for &kind in SyntheticWorld::ALL {
+        let field = world(kind);
+        let header = field.header();
+        let bounds = LevelBounds::new(header);
+        let (base, held) = held_over(field);
+        let coarse_cap = groove_cap_m(header.radius().value(), header.level().get());
+        // What each world's cells certify (R09.T8.d (b2)).
+        match kind {
+            SyntheticWorld::EarthLike => {
+                assert!(!held.epoch && held.tributaries, "{held:?}");
+                assert!(0.0 < held.trunk_m && held.trunk_m < coarse_cap, "{held:?}");
+            }
+            SyntheticWorld::MarsLike => {
+                assert!(held.epoch && !held.tributaries, "{held:?}");
+                assert!(0.0 < held.trunk_m && held.trunk_m < coarse_cap, "{held:?}");
+            }
+            SyntheticWorld::MoonLike
+            | SyntheticWorld::CeresLike
+            | SyntheticWorld::Flat
+            | SyntheticWorld::OneCrater => {
+                assert_eq!(held, HeldChannels::default(), "{kind:?}");
+            }
+        }
+        let mut tightened = false;
+        for level in every_level() {
+            let n = usize::from(level.get());
+            let (low, high) = bounds.contribution_range_m(level);
+            let (whole_low, whole_high) = bounds.held_height_range_m(level, base, &whole);
+            assert_same_bits(whole_low, base.0 + low);
+            assert_same_bits(whole_high, base.1 + high);
+            let (held_low, held_high) = bounds.held_height_range_m(level, base, &held);
+            assert!(
+                whole_low <= held_low && held_high <= whole_high,
+                "{kind:?} {n}: [{held_low}, {held_high}] outside [{whole_low}, {whole_high}]"
+            );
+            tightened |= whole_low < held_low || held_high < whole_high;
+            if header.is_airless() {
+                assert_same_bits(held_low, whole_low);
+                assert_same_bits(held_high, whole_high);
+            }
+            // On a world wet now the channels add nothing to the lowest height: the sea floor
+            // holds, and the sea lies above the base's lowest.
+            if kind == SyntheticWorld::EarthLike {
+                let others = bounds.relief_reach_m[n] + bounds.craters_reach_m[n];
+                assert_same_bits(held_low, base.0 + -others);
+            }
+        }
+        assert_eq!(tightened, !header.is_airless(), "{kind:?}");
+    }
+}
+
+#[test]
 fn a_level_at_or_beyond_the_coarse_band_reaches_no_rim() {
     for &kind in SyntheticWorld::ALL {
         let header = world(kind).header();
@@ -498,6 +615,20 @@ fn measure_the_reach_s_terms() {
             let (l, h) = bounds.contribution_range_m(band(n));
             (num::min(lo, l), num::max(hi, h))
         });
+        // The range the whole field's cells certify, over the base's (R09.T8.d (b2)).
+        let (base, held) = held_over(field);
+        let (held_lowest, held_highest) =
+            (0..BAND_LEVELS).fold((0.0_f64, 0.0_f64), |(lo, hi), n| {
+                let (l, h) = bounds.held_height_range_m(band(n), base, &held);
+                (num::min(lo, l - base.0), num::max(hi, h - base.1))
+            });
+        eprintln!(
+            "{kind:?}: held {held:?}, base [{:.1}, {:.1}] m, sea {:.1} m; held reach lowest \
+             {held_lowest:.1} m, highest {held_highest:.1} m",
+            base.0,
+            base.1,
+            header.sea_level().value(),
+        );
         eprintln!(
             "{kind:?}: R {:.0} m, L {}, D_b {:.0} m, coarse band {:.0} m, realised relief {:.1} m, \
              σ_h {:.1} m; reach lowest {lowest:.1} m, highest {highest:.1} m",

@@ -128,7 +128,9 @@ use crate::patch::normals::{encode_octahedral_f32, surface_normal};
 use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
 };
+use crate::synth::channels::ChannelBody;
 use crate::synth::craters::CraterOctaves;
+use crate::synth::levels::HeldChannels;
 use crate::synth::{
     BandLevel, LevelBounds, QueryHeightError, SynthCache, SynthesisParts, Synthesiser,
     omitted_variance_in,
@@ -159,6 +161,9 @@ struct BodyField {
     bounds: LevelBounds,
     /// The lowest and highest elevation of the cells held, millimetres, `None` before any.
     elevation_mm: Option<(i32, i32)>,
+    /// What the cells held certify of the channels' incision, which holds the level table's
+    /// channel terms (R09.T8.d (b2)).
+    channels: HeldChannels,
     /// The body's σ by level over the cells held as surveyed (R10.T4.b), or `None` where the field
     /// was started with [`SigmaSurvey::Skipped`] (R10.T4.c).
     sigma: Option<LevelSigma>,
@@ -264,14 +269,17 @@ fn drawn_at(
 }
 
 impl BodyField {
-    /// Widens the elevations held by `block`'s cells.
-    fn hold_elevations(&mut self, block: &DecodedBlock) {
+    /// Widens the elevations held, and what the cells held certify of the channels, by `block`'s
+    /// cells.
+    fn hold_cells(&mut self, block: &DecodedBlock) {
+        let body = ChannelBody::of(self.field.header());
         for cell in block.cells() {
             let e = cell.elevation_mm;
             self.elevation_mm = Some(
                 self.elevation_mm
                     .map_or((e, e), |(lo, hi)| (lo.min(e), hi.max(e))),
             );
+            self.channels.hold(cell, body);
         }
     }
 
@@ -1490,11 +1498,12 @@ impl WorkerFields {
             bounds,
             field,
             elevation_mm: None,
+            channels: HeldChannels::default(),
             cache: SynthCache::new(),
             nodes: NodeCache::default(),
             parts: None,
         };
-        held.hold_elevations(&block);
+        held.hold_cells(&block);
         held.survey_sigma(&change);
         self.bodies.insert(body, held);
         Ok(change)
@@ -1524,7 +1533,7 @@ impl WorkerFields {
         }
         let change = survey_change(&held.field, &block);
         held.field.insert(&block).map_err(TakeBlockError::Insert)?;
-        held.hold_elevations(&block);
+        held.hold_cells(&block);
         held.survey_sigma(&change);
         Ok(change)
     }
@@ -1542,9 +1551,12 @@ impl WorkerFields {
     /// - the lowest and highest height a patch of the level can bake, metres above the datum: the
     ///   elevations of the cells held, which R09's approximating spline never leaves, widened by a
     ///   micrometre and a part in 10¹² as R09's patch range is, plus the most the level's and its
-    ///   parent's contributions can add ([`LevelBounds::contribution_range_m`]), and stretched to
-    ///   the datum, 0, which a vertex outside the survey takes where the field cannot make it
-    ///   (R10.T6.a); exactly 0 and 0 while no cell is held;
+    ///   parent's contributions can add ([`LevelBounds::contribution_range_m`]), the channels'
+    ///   share held by what the cells held certify: the deepest trunk groove among them, no finer
+    ///   level where none carries tributaries, and the channels' floor at the sea where none
+    ///   carries a wet epoch's incision (R09.T8.d (b2)); and stretched to the datum, 0, which a
+    ///   vertex outside the survey takes where the field cannot make it (R10.T6.a); exactly 0 and
+    ///   0 while no cell is held;
     /// - the largest vertex spacing of the level on the body's equatorial radius, metres
     ///   ([`vertex_spacing`]).
     ///
@@ -1564,17 +1576,16 @@ impl WorkerFields {
         let mut table = Vec::with_capacity(LEVEL_TABLE_ROWS * LEVEL_TABLE_STRIDE);
         for level in 0..=MAX_LEVEL {
             let n = band(level);
-            let (low, high) = base.map_or((0.0, 0.0), |(base_low, base_high)| {
-                let (mut low, mut high) = held.bounds.contribution_range_m(n);
+            let (low, high) = base.map_or((0.0, 0.0), |base| {
+                let (mut low, mut high) = held.bounds.held_height_range_m(n, base, &held.channels);
                 if let Some(parent) = level.checked_sub(1) {
-                    let (l, h) = held.bounds.contribution_range_m(band(parent));
+                    let (l, h) =
+                        held.bounds
+                            .held_height_range_m(band(parent), base, &held.channels);
                     low = num::min(low, l);
                     high = num::max(high, h);
                 }
-                (
-                    num::min(base_low + low, 0.0),
-                    num::max(base_high + high, 0.0),
-                )
+                (num::min(low, 0.0), num::max(high, 0.0))
             });
             table.extend([
                 held.bounds.bound_m(n),

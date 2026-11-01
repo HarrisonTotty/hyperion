@@ -78,6 +78,22 @@
 //! changes their profiles, and nothing at a level whose band is at or beyond the coarse band, which
 //! sharpens no rim (R09.T8.d).
 //!
+//! # What the cells held certify
+//!
+//! The terms above read the header alone. Over the cells a view holds, which are all its heights
+//! read, the channels' share of the range is held further (R09.T8.d (b2);
+//! [`LevelBounds::held_height_range_m`], from [`HeldChannels`]), and no height moves:
+//!
+//! - **the coarse level's cap**: every groove of the coarse level is a trunk's, so it cuts no
+//!   deeper than the deepest trunk groove of a cell held, where that is under `G_L`;
+//! - **the finer levels**: where no cell held carries tributaries, no point evaluates a level finer
+//!   than the coarse one, so their caps add nothing;
+//! - **the sea floor** (R09.T6.f): where no cell held carries a wet epoch's incision, the channels
+//!   take no point of a dry cell below min(h₀, sea), h₀ the height without them, and cut nothing
+//!   in a cell under water, so no height lies below the lesser of the sea level and the base
+//!   elevation's lowest less the other contributions' reach. On a world wet now, or never wet, the
+//!   channels then add nothing to the lowest height at all.
+//!
 //! [`octave_spacing`]: super::relief::octave_spacing
 //! [`band_half_width`]: super::craters::band_half_width
 //! [`octave_bound`]: super::relief::octave_bound
@@ -86,7 +102,8 @@ use hyperion_base::math;
 use hyperion_base::units::Metres;
 
 use super::channels::incision::{
-    BUBBLE_MEAN_FLOOR, deepest_possible_level, groove_cap_m, mean_cell_width,
+    BUBBLE_MEAN_FLOOR, ChannelBody, carries_tributaries, deepest_possible_level, groove_cap_m,
+    mean_cell_width, trunk_groove_m,
 };
 use super::craters::bound::{
     OctaveMarks, RimMarks, chord_area_allowance, coarse_marks, octave_marks, poisson_tail_bound,
@@ -96,7 +113,7 @@ use super::craters::{CraterOctaves, band_half_width};
 use super::relief::{finest_octave, first_octave, nyquist_degree, octave_bound, octave_spacing};
 use super::{BAND_LEVELS, BandLevel};
 use crate::cube::MAX_LEVEL;
-use crate::field::FieldHeader;
+use crate::field::{FieldHeader, SynthesisCell};
 use crate::geometry::{BAND_LIMIT_M, vertex_spacing};
 use crate::num;
 use crate::spheroid::Spheroid;
@@ -265,6 +282,14 @@ pub struct LevelBounds {
     bound_m: [f64; BAND_LEVELS],
     low_m: [f64; BAND_LEVELS],
     high_m: [f64; BAND_LEVELS],
+    /// Each level's structural octaves' reach, |height| at most, metres.
+    relief_reach_m: [f64; BAND_LEVELS],
+    /// Each level's craters' reach, the small craters' and the coarse rims' together at
+    /// [`CRATER_BOUND_TAIL`], metres.
+    craters_reach_m: [f64; BAND_LEVELS],
+    channels: ChannelCaps,
+    /// The header's sea level, metres above the datum, at which the channels' floor stands.
+    sea_level_m: f64,
 }
 
 impl LevelBounds {
@@ -288,6 +313,8 @@ impl LevelBounds {
         let mut bound_m = [0.0; BAND_LEVELS];
         let mut low_m = [0.0; BAND_LEVELS];
         let mut high_m = [0.0; BAND_LEVELS];
+        let mut relief_reach_m = [0.0; BAND_LEVELS];
+        let mut craters_reach_m = [0.0; BAND_LEVELS];
         let mut craters = CraterTerms::with_capacity(terms.marks.len() + terms.rims.len());
         for n in 0..BAND_LEVELS {
             let set = &terms.sets[n];
@@ -304,12 +331,18 @@ impl LevelBounds {
             let craters_reach = poisson_tail_bound(&craters.heights, ln_tail);
             low_m[n] = num::assert_finite(-(relief_reach + channels_low + craters_reach));
             high_m[n] = num::assert_finite(relief_reach + channels_high + craters_reach);
+            relief_reach_m[n] = relief_reach;
+            craters_reach_m[n] = craters_reach;
         }
         Self {
             sets: terms.sets,
             bound_m,
             low_m,
             high_m,
+            relief_reach_m,
+            craters_reach_m,
+            channels: terms.channels,
+            sea_level_m: header.sea_level().value(),
         }
     }
 
@@ -332,6 +365,84 @@ impl LevelBounds {
     pub fn contribution_range_m(&self, level: BandLevel) -> (f64, f64) {
         let n = usize::from(level.get());
         (self.low_m[n], self.high_m[n])
+    }
+
+    /// The lowest and highest height above the datum a point of `level` can have over a view of
+    /// the field, metres: the base elevation's range over the cells the view holds, `base_m`
+    /// (lowest, highest, each a bound on the elevations held, rounding's widening included),
+    /// widened by the level's contributions as [`contribution_range_m`](Self::contribution_range_m)
+    /// widens it, with the channels' share held by what the cells held certify, `held` (the
+    /// [module documentation](self), "What the cells held certify"; R09.T8.d (b2)).
+    ///
+    /// It bounds every height a point query of the level answers over the view, the channels'
+    /// floor at the sea included ([`Synthesiser::height_at`](super::Synthesiser::height_at)),
+    /// since every cell a query reads is held. With the header's caps alone it is the base's range
+    /// plus [`contribution_range_m`](Self::contribution_range_m), bit for bit, and it is never
+    /// wider. The craters' share is the same 1 − 10⁻⁹ quantile.
+    #[must_use]
+    pub(crate) fn held_height_range_m(
+        &self,
+        level: BandLevel,
+        base_m: (f64, f64),
+        held: &HeldChannels,
+    ) -> (f64, f64) {
+        let n = usize::from(level.get());
+        let (relief, craters) = (self.relief_reach_m[n], self.craters_reach_m[n]);
+        let (channels_low, channels_high) = self.channels.held_reach_m(self.sets[n].channels, held);
+        let (base_low, base_high) = base_m;
+        let mut low = base_low + -(relief + channels_low + craters);
+        // A dry cell's channels take no point below min(h₀, sea), and a wet cell's cut nothing,
+        // wherever no cell carries an epoch's valleys (R09.T6.f; `Synthesiser::height_at`).
+        if !held.epoch {
+            low = num::max(
+                low,
+                num::min(base_low + -(relief + craters), self.sea_level_m),
+            );
+        }
+        let high = base_high + (relief + channels_high + craters);
+        (num::assert_finite(low), num::assert_finite(high))
+    }
+}
+
+/// What the cells a view holds certify of the channels' incision (R09.T8.d (b2); the
+/// [module documentation](self), "What the cells held certify"): whether any of them carries a
+/// wet epoch's incision, whether any carries tributaries, and the deepest groove any one's trunk
+/// can cut. It only grows as cells are held, so the range it holds
+/// ([`LevelBounds::held_height_range_m`]) only widens. Holding no cell, it certifies nothing a
+/// height can need: a view that holds no cell answers no query.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct HeldChannels {
+    /// Whether a cell held carries a wet epoch's incision, where the channels cut below the sea.
+    epoch: bool,
+    /// Whether a cell held carries tributaries, which evaluate levels finer than the coarse one.
+    tributaries: bool,
+    /// The deepest groove a held cell's trunk can cut, metres.
+    trunk_m: f64,
+}
+
+impl HeldChannels {
+    /// Holds `cell`, a coarse cell of the field of `body`.
+    ///
+    /// # Panics
+    ///
+    /// If `body` is not a body.
+    pub(crate) fn hold(&mut self, cell: &SynthesisCell, body: ChannelBody) {
+        self.epoch |= cell.epoch_incision.is_epoch();
+        self.tributaries |= carries_tributaries(cell);
+        self.trunk_m = num::max(self.trunk_m, trunk_groove_m(cell, body));
+    }
+
+    /// What `cells`, coarse cells of the field of `body`, certify together.
+    #[cfg(test)]
+    pub(crate) fn of<'a>(
+        cells: impl IntoIterator<Item = &'a SynthesisCell>,
+        body: ChannelBody,
+    ) -> Self {
+        let mut held = Self::default();
+        for cell in cells {
+            held.hold(cell, body);
+        }
+        held
     }
 }
 
@@ -510,6 +621,7 @@ impl Octaves {
 
 /// The channels' bounds on a body: each level's groove cap `G_k` from the coarse level to the
 /// deepest any of its cells can evaluate, or none on an airless body, whose network cuts nothing.
+#[derive(Debug, Clone, PartialEq)]
 struct ChannelCaps {
     first: u8,
     deepest: u8,
@@ -571,6 +683,38 @@ impl ChannelCaps {
             .sum();
         (
             self.cap_m[usize::from(self.first)] + caps / BUBBLE_MEAN_FLOOR,
+            Self::correction_factor() * caps,
+        )
+    }
+
+    /// [`reach_m`](Self::reach_m) over a view whose cells `held` certifies: the coarse level's cap
+    /// held to the deepest groove a held cell's trunk can cut, every groove of that level being a
+    /// trunk's, and no finer level where no held cell carries tributaries, since a query evaluates
+    /// no level past the deepest of the cells within two king moves of its own. The raw incision
+    /// of the levels evaluated is at most the deepest of their caps deep. With the header's caps
+    /// whole it is [`reach_m`](Self::reach_m), bit for bit.
+    #[must_use]
+    fn held_reach_m(&self, through: Option<u8>, held: &HeldChannels) -> (f64, f64) {
+        let Some(t) = through else {
+            return (0.0, 0.0);
+        };
+        let last = if held.tributaries {
+            t.min(self.deepest)
+        } else {
+            self.first
+        };
+        let cap_of = |k: u8| {
+            let cap = self.cap_m[usize::from(k)];
+            if k == self.first {
+                num::min(cap, held.trunk_m)
+            } else {
+                cap
+            }
+        };
+        let caps: f64 = (self.first..=last).map(cap_of).sum();
+        let deepest = (self.first..=last).map(cap_of).fold(0.0, num::max);
+        (
+            deepest + caps / BUBBLE_MEAN_FLOOR,
             Self::correction_factor() * caps,
         )
     }

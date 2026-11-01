@@ -758,6 +758,67 @@ fn worker_level_table_bounds_every_patch_of_its_level() {
     }
 }
 
+/// R09.T8.d (b2): on a world wet now the table's rows read what the cells held certify of the
+/// channels. They hold every height a patch of the level over the survey bakes, its parent level's
+/// included, at the cube corner the fixture's cell touches and inside it, and lie within R09's
+/// patch range from the header's caps, whose low they raise wherever the level evaluates channels:
+/// the sea floor holds, and the channels add nothing to the lowest height.
+#[test]
+fn worker_level_table_holds_every_baked_height_and_tightens_the_channels_on_a_wet_world() {
+    let f = earth_fixture();
+    let fields = earth_worker(&f);
+    let table = fields.level_table(f.body).unwrap();
+    let field = fields.field(f.body).unwrap();
+    let synth = Synthesiser::new(field, SEED);
+    let coarse = field.header().level().get();
+    let complete = (0..=MAX_LEVEL)
+        .find(|&n| bits(synth.level_bound_m(band(n))) == bits(0.0))
+        .unwrap();
+    let mut raised = 0;
+    for level in 0..=MAX_LEVEL {
+        let row = &table[usize::from(level) * LEVEL_TABLE_STRIDE..][..LEVEL_TABLE_STRIDE];
+        // The patch over the cell's centre, whose margin is every cell the field holds, as the
+        // header's caps bound it, stretched to the datum as the row is.
+        let (low, high) = synth.height_range_m(patch_over(earth_cell(), level));
+        let (low, high) = (num::min(low, 0.0), num::max(high, 0.0));
+        assert!(
+            low <= row[1] && row[2] <= high,
+            "{level}: {row:?} outside [{low}, {high}]"
+        );
+        let evaluates_channels = synth.level_set(band(level)).channels_through().is_some();
+        if evaluates_channels {
+            assert!(low < row[1], "{level}: {low} against {}", row[1]);
+            raised += 1;
+        }
+    }
+    assert!(raised > 10, "{raised} rows raised");
+    // Every height a patch of the level bakes, at the coarse level, some finer ones and the band
+    // limit's, over the cube corner and the cell's centre.
+    let mut cache = SynthCache::new();
+    for level in [coarse, coarse + 2, coarse + 4, complete] {
+        let row = &table[usize::from(level) * LEVEL_TABLE_STRIDE..][..LEVEL_TABLE_STRIDE];
+        for key in [
+            PatchKey::new(Face::PosX, level, 0, 0).unwrap(),
+            patch_over(earth_cell(), level),
+        ] {
+            let baked = synth.bake_patch(&mut cache, key).unwrap();
+            let heights = baked
+                .samples()
+                .iter()
+                .map(|s| s.height_m)
+                .chain(baked.parent_heights_m().iter().copied());
+            for h in heights {
+                assert!(
+                    row[1] <= h && h <= row[2],
+                    "{key:?}: {h} m outside [{}, {}]",
+                    row[1],
+                    row[2]
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn worker_level_table_is_the_datum_before_any_cell() {
     let f = fixture();

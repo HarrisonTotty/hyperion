@@ -370,6 +370,51 @@ fn trunk_depth_m(valley_m: f64, bankfull_m: f64, cap_m: f64) -> f64 {
     num::min(num::max(valley_m, bankfull_m), cap_m)
 }
 
+/// The deepest the groove of the coarse cell `cell`'s trunk can be on `body`, metres: the depth
+/// [`Groove`] gives the trunk the network builds for the cell, but for the base level's hold
+/// ([`trunk_valley_m`]), which only makes a steady-state valley shallower; zero where the cell
+/// heads no trunk, its flow terminal or its catchment shedding no runoff. A cell under water heads
+/// a trunk that cuts nothing (R09.T6.f), and is counted all the same.
+///
+/// Every groove of the coarse level is a trunk's, so the largest of this over the cells a view
+/// holds bounds the coarse level's raw incision there, as [`groove_cap_m`] bounds it on any body
+/// (the level bounds' held range, R09.T8.d).
+///
+/// # Panics
+///
+/// If `body` is not a body.
+#[must_use]
+pub(crate) fn trunk_groove_m(cell: &SynthesisCell, body: ChannelBody) -> f64 {
+    body.check();
+    if cell.flow.edge().is_none() || cell.catchment_runoff == crate::field::LogRunoff::NONE {
+        return 0.0;
+    }
+    // A world dry now's trunk cuts its epoch's valley as it is.
+    if cell.epoch_incision.is_epoch() {
+        return epoch_valley(cell, body).map_or(0.0, |valley| valley.depth().value());
+    }
+    let (_, _, bankfull_m) = channel_size(
+        cell.catchment_runoff.metres_per_year(),
+        cell.drainage.area(),
+        body.gravity,
+    );
+    let valley_m = tributary_steepness_of(cell)
+        .map_or(0.0, |k| valley_depth(k, body.radius, body.level).value());
+    trunk_depth_m(
+        valley_m,
+        bankfull_m,
+        groove_cap_m(body.radius.value(), body.level),
+    )
+}
+
+/// Whether the coarse cell `cell` carries tributaries: where it does not, its network evaluates
+/// no level finer than the coarse one ([`deepest_level`] is its coarse level), so none of its
+/// segments is a tributary.
+#[must_use]
+pub(crate) fn carries_tributaries(cell: &SynthesisCell) -> bool {
+    tributary_steepness_of(cell).is_some() && !cell.epoch_incision.is_epoch()
+}
+
 /// A trunk's valley on a world dry now: the valley of a short wet epoch, whose cross-section the
 /// synthesis cuts and whose void the coarse pass's width closure takes from the cell (R09.T6.c;
 /// decision-r09-t14-choices F2; decision-r09-t14-mars-ceiling §2.2 and §5).

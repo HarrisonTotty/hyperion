@@ -759,6 +759,62 @@ fn a_trunk_s_valley_is_the_relief_from_its_channel_heads() {
 }
 
 #[test]
+fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_heads_none() {
+    // The level bounds' held range reads both (R09.T8.d (b2)): every groove of the coarse level is
+    // a trunk's, no deeper than `trunk_groove_m` of its cell, and a cell that carries no
+    // tributaries heads no segment finer than its trunk and evaluates no finer level.
+    for (field, dry_now) in [(earth(), false), (mars(), false), (mars_epoch(), true)] {
+        let header = field.header();
+        let level = header.level();
+        let first = level.get();
+        let body = ChannelBody::of(header);
+        let radius_m = header.radius().value();
+        let channels = Channels::new(header, SEED);
+        let mut network = channels.network(field);
+        let cells = usize::try_from(level.cell_count()).unwrap();
+        let step = (cells / crate::test_sizes::per_target(4_000, 400)).max(1);
+        let (mut trunks, mut exact, mut without) = (0, 0, 0);
+        for n in (0..level.cell_count()).step_by(step) {
+            let c = cell_at_index(first, n).unwrap();
+            let record = field.cell(c).unwrap();
+            let bound = trunk_groove_m(record, body);
+            match network.segment(c).unwrap() {
+                None => assert_eq!(bits(bound), bits(0.0), "{c:?}: no trunk, bound {bound} m"),
+                Some(trunk) => {
+                    if let Some(groove) = Groove::of(&trunk, radius_m) {
+                        let Depth::Constant(depth) = groove.depth else {
+                            panic!("{c:?}: a trunk's groove has one depth all along it");
+                        };
+                        assert!(depth <= bound, "{c:?}: {depth} m over {bound} m");
+                        trunks += 1;
+                        // Where the base level does not hold its valley, the bound is the groove's
+                        // depth to the bit.
+                        exact += usize::from(bits(depth) == bits(bound));
+                    }
+                }
+            }
+            if !carries_tributaries(record) {
+                assert_eq!(deepest_level(record, body), first, "{c:?}");
+                for cell in below(c, first + 1) {
+                    assert_eq!(network.segment(cell).unwrap(), None, "{cell:?}");
+                }
+                without += 1;
+            }
+        }
+        assert!(trunks > 100, "{trunks} trunks");
+        assert!(
+            exact * 2 > trunks,
+            "{exact} of {trunks} trunks at their bound"
+        );
+        assert!(without > 0, "{without} cells without tributaries");
+        // A world dry now's trunks cut their epoch's valleys as they are.
+        if dry_now {
+            assert_eq!(exact, trunks);
+        }
+    }
+}
+
+#[test]
 fn the_incision_is_continuous_across_cell_edges() {
     for field in [earth(), mars(), mars_epoch()] {
         let header = field.header();
