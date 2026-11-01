@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { add, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { WGS84_FIGURE } from "../../test/terrainFixtures";
+import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "./cube";
 import {
   aheadPositionM,
@@ -12,12 +12,14 @@ import {
   lookaheadSeconds,
   movesFast,
   slowSelection,
+  timeToNeedS,
 } from "./lookahead";
 import type { PatchKey } from "./patchKey";
-import { surfacePoint } from "./planet";
+import { planetGeometry, surfacePoint } from "./planet";
 import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 
-// A site on face 0, about 0.6 km wide.
+const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+// About 0.6 km wide, so that its neighbours along its row are reached within 2 s at 1 km/s.
 const SITE: PatchKey = { face: 0, level: 14, i: 4_000, j: 8_000 };
 
 function above(altitudeM: number, key: PatchKey = SITE): Vec3 {
@@ -100,6 +102,34 @@ describe("the lookahead's pose", () => {
     const eastM = step.x * east.x + step.y * east.y + step.z * east.z;
     expect(radialM).toBeCloseTo(-LOOKAHEAD_MAX_CLOSING_FRACTION * 2_000, 6);
     expect(eastM).toBeCloseTo(1_000, 6);
+  });
+});
+
+describe("the time to need", () => {
+  const p = above(2_000);
+  /** SITE's neighbour `n` patches along its row; the camera moves towards `n` > 0. */
+  const along = (n: number): PatchKey => ({ ...SITE, i: SITE.i + n });
+  const forward = normalise(sub(above(0, along(1)), above(0)));
+  const camera = { positionM: p, velocityMps: scale(forward, 1_000) };
+
+  it("is sooner for a patch nearer along the motion, 0 at or behind the camera", () => {
+    const near = timeToNeedS(PLANET, along(1), [camera], 2);
+    const far = timeToNeedS(PLANET, along(3), [camera], 2);
+    expect(near).toBeGreaterThan(0);
+    expect(far).toBeGreaterThan(near);
+    expect(timeToNeedS(PLANET, along(-3), [camera], 2)).toBe(0);
+  });
+
+  it("is L for a patch beyond the lookahead, and 0 with no moving view", () => {
+    expect(timeToNeedS(PLANET, along(3), [camera], 0.01)).toBe(0.01);
+    expect(timeToNeedS(PLANET, along(3), [], 2)).toBe(0);
+  });
+
+  it("is the least over the moving views: the first to reach the patch", () => {
+    const faster = { positionM: p, velocityMps: scale(forward, 4_000) };
+    const both = timeToNeedS(PLANET, along(3), [camera, faster], 2);
+    expect(both).toBe(timeToNeedS(PLANET, along(3), [faster], 2));
+    expect(both).toBeLessThan(timeToNeedS(PLANET, along(3), [camera], 2));
   });
 });
 

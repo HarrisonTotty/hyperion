@@ -8,6 +8,7 @@ import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
 import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
+import { seededRandom } from "../../test/seededRandom";
 import {
   compareRequests,
   fillsHole,
@@ -99,6 +100,42 @@ describe("the request order", () => {
   });
 });
 
+/** A request's place before its time to need: forced or not, then its priority. */
+function rankOf(r: PatchRequest): string {
+  return `${r.forced ? 0 : 1}/${r.priority}`;
+}
+
+describe("the time to need's tie-break (R10.T14.b)", () => {
+  it("puts the sooner needed first among equal priorities, before the key, absent as 0", () => {
+    const later = { key: KEY(0), priority: 1, forced: false, needS: 0.8 };
+    const sooner = { key: KEY(1), priority: 1, forced: false, needS: 0.2 };
+    const now = { key: KEY(2), priority: 1, forced: false };
+    expect([later, sooner, now].toSorted(compareRequests)).toEqual([now, sooner, later]);
+  });
+
+  it("leaves the order among different priorities, forced first, as it is without it", () => {
+    const random = seededRandom(24);
+    const requests: PatchRequest[] = Array.from({ length: 400 }, (_, n) => ({
+      key: KEY(n),
+      // Few priorities, so that most requests tie with others.
+      priority: Math.floor(random() * 6),
+      forced: random() < 0.1,
+      needS: Math.floor(random() * 4) / 2,
+    }));
+    const withNeed = requests.toSorted(compareRequests);
+    const without = requests
+      .map(({ key, priority, forced }) => ({ key, priority, forced }))
+      .toSorted(compareRequests);
+    expect(withNeed.map(rankOf)).toEqual(without.map(rankOf));
+    // Within each rank, the sooner needed first.
+    const later = withNeed.filter((r, n) => {
+      const next = withNeed[n + 1];
+      return next !== undefined && rankOf(next) === rankOf(r) && (next.needS ?? 0) < (r.needS ?? 0);
+    });
+    expect(later).toEqual([]);
+  });
+});
+
 describe("the lookahead's demand, joined (R10.T14.b)", () => {
   it("asks each patch once, at the larger priority, forced from either, by the request order", () => {
     const own = [
@@ -110,10 +147,10 @@ describe("the lookahead's demand, joined (R10.T14.b)", () => {
       { key: KEY(2), priority: 2, forced: true },
       { key: KEY(0), priority: 2, forced: false },
     ];
-    expect(joinDemand(own, ahead)).toEqual([
-      { key: KEY(2), priority: 2, forced: true },
-      { key: KEY(0), priority: 4, forced: false },
-      { key: KEY(1), priority: 3, forced: false },
+    expect(joinDemand(own, ahead, (key) => key.i / 10)).toEqual([
+      { key: KEY(2), priority: 2, forced: true, needS: 0.2 },
+      { key: KEY(0), priority: 4, forced: false, needS: 0 },
+      { key: KEY(1), priority: 3, forced: false, needS: 0.1 },
     ]);
   });
 
@@ -121,7 +158,9 @@ describe("the lookahead's demand, joined (R10.T14.b)", () => {
     const own = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT)]);
     const ahead = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT * LOOKAHEAD_DEMAND_WEIGHT)]);
     expect(LOOKAHEAD_DEMAND_WEIGHT).toBe(0.5);
-    expect(joinDemand(own, ahead)).toEqual(own);
+    expect(joinDemand(own, ahead, () => 0)).toEqual(
+      own.map(({ key, priority, forced }) => ({ key, priority, forced, needS: 0 })),
+    );
   });
 });
 

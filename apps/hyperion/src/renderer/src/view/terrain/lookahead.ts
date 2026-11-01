@@ -14,10 +14,14 @@
  * {@link LOOKAHEAD_DEMAND_WEIGHT} of each view's weight (`priority.ts`' `joinDemand`), its patches
  * pinned only as demanded, so that the cache gives them up before the selection's own. A view
  * closing on the ground selects ahead at the lower altitude, so that the next level's patches
- * beneath it are asked a round trip early.
+ * beneath it are asked a round trip early. Ties of priority go to the request the views reach first
+ * ({@link timeToNeedS}).
  */
 
-import { add, dot, scale, type Vec3 } from "../../geometry/vec3";
+import { add, dot, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { vertexDir } from "./cube";
+import type { PatchKey } from "./patchKey";
+import { type PlanetGeometry, surfacePoint } from "./planet";
 import { LOOKAHEAD_DEMAND_WEIGHT } from "./priority";
 import type { SelectionInput, ViewSelectionInput } from "./select";
 import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
@@ -161,4 +165,43 @@ export function lookaheadInput(
     });
   }
   return views.length === 0 ? null : { ...input, views };
+}
+
+/** A moving view's camera, as {@link timeToNeedS} reads it. */
+export interface MovingCamera {
+  /** Its position, body-fixed metres. */
+  readonly positionM: Vec3;
+  /** Its velocity, body-fixed metres a second. */
+  readonly velocityMps: Vec3;
+}
+
+/**
+ * When the moving views reach patch `key`, s: the least over `cameras` of the time at which the
+ * camera, along its straight line, passes nearest the patch's centre on the datum, within
+ * [0, `aheadS`]: 0 for a patch at or behind it, `aheadS` for one beyond its lookahead.
+ *
+ * @remarks
+ * It breaks ties of priority alone (`priority.ts`' `compareRequests`): among requests of equal
+ * weighted excess, siblings under one stand-in among them, the one the views reach first is baked
+ * first. With no camera it is 0.
+ */
+export function timeToNeedS(
+  planet: PlanetGeometry,
+  key: PatchKey,
+  cameras: ReadonlyArray<MovingCamera>,
+  aheadS: number,
+): number {
+  if (cameras.length === 0) {
+    return 0;
+  }
+  const [x, y, z] = surfacePoint(planet.figure, vertexDir(key, 32, 32), 0);
+  const centre = vec3(x, y, z);
+  let least = aheadS;
+  for (const camera of cameras) {
+    const v = camera.velocityMps;
+    const speed2 = dot(v, v);
+    const t = speed2 > 0 ? dot(sub(centre, camera.positionM), v) / speed2 : 0;
+    least = Math.min(least, Math.max(0, t));
+  }
+  return least;
 }

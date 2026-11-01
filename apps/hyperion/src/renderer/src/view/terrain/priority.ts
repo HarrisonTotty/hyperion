@@ -10,7 +10,8 @@
  *
  * A pass's lookahead (`lookahead.ts`; R10.T14.b, the seamless-lookahead lane) selects again ahead of
  * each fast view's motion, its views at {@link LOOKAHEAD_DEMAND_WEIGHT} of their weights, and its
- * demand joins the pass's ({@link joinDemand}).
+ * demand joins the pass's ({@link joinDemand}); ties of priority then go to the request the views
+ * reach first ({@link compareRequests}).
  *
  * Each terrain pass bakes through its own lane of one pool, which shares its workers by the passes'
  * holes (plan R10, R10.T14.b; lean, 2026-11-01): a pass with a hole in its drawn set, a request
@@ -19,7 +20,7 @@
  * first's demand outweighs its own, as the first's does on a generated world.
  */
 
-import { patchKeyString } from "./patchKey";
+import { type PatchKey, patchKeyString } from "./patchKey";
 import type { PatchRequest } from "./select";
 
 /** The streaming weight of a view: 1 for the primary view (Design note 24). */
@@ -36,8 +37,9 @@ export const SECONDARY_VIEW_WEIGHT = 0.25;
 export const LOOKAHEAD_DEMAND_WEIGHT = 0.5;
 
 /**
- * Orders requests for the pool: forced first, then the higher priority, then by `patchKeyString`,
- * so that equal priorities keep one order however the views were given.
+ * Orders requests for the pool: forced first, then the higher priority, then the sooner needed
+ * (`PatchRequest.needS`, 0 where absent), then by `patchKeyString`, so that equal priorities keep
+ * one order however the views were given.
  */
 export function compareRequests(a: PatchRequest, b: PatchRequest): number {
   if (a.forced !== b.forced) {
@@ -45,6 +47,11 @@ export function compareRequests(a: PatchRequest, b: PatchRequest): number {
   }
   if (a.priority !== b.priority) {
     return b.priority - a.priority;
+  }
+  const na = a.needS ?? 0;
+  const nb = b.needS ?? 0;
+  if (na !== nb) {
+    return na - nb;
   }
   const ka = patchKeyString(a.key);
   const kb = patchKeyString(b.key);
@@ -70,16 +77,20 @@ export function fillsHole(request: PatchRequest): boolean {
 
 /**
  * A selection's demand joined by its lookahead's (`lookahead.ts`): each patch once, at the larger
- * of its priorities, forced where either asks it forced, ordered by {@link compareRequests}.
+ * of its priorities, forced where either asks it forced, with `needS` its time to need, ordered by
+ * {@link compareRequests}.
  *
  * @remarks
  * The lookahead's views carry {@link LOOKAHEAD_DEMAND_WEIGHT} of their weights, so its priorities
  * are already at that weight: the join is the largest over the views, as one selection over every
  * view gives it (Design note 24).
+ *
+ * @param needS - The time until the views need a patch, s, at least 0 (`lookahead.ts`' `timeToNeedS`).
  */
 export function joinDemand(
   own: ReadonlyArray<PatchRequest>,
   ahead: ReadonlyArray<PatchRequest>,
+  needS: (key: PatchKey) => number,
 ): PatchRequest[] {
   const joined = new Map<string, PatchRequest>();
   for (const request of [...own, ...ahead]) {
@@ -96,5 +107,7 @@ export function joinDemand(
           },
     );
   }
-  return [...joined.values()].toSorted(compareRequests);
+  return [...joined.values()]
+    .map(({ key, priority, forced }) => ({ key, priority, forced, needS: needS(key) }))
+    .toSorted(compareRequests);
 }

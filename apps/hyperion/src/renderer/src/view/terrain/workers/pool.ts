@@ -20,8 +20,8 @@
  * terrain passes takes its own ({@link HeightWorkerPool.lane}), with its own bake settings (its
  * height source, vertex path and normals), demand, generation and listeners, over the pool's one
  * queue, workers and fields. The queue takes forced requests first, then the larger weighted excess
- * w × ρ ÷ τ whatever the lane (Design note 24's priority, comparable across lanes), then the older
- * lane's, then by key; but where that is one lane's refinement, a lane with a hole in its drawn
+ * w × ρ ÷ τ whatever the lane (Design note 24's priority, comparable across lanes), then the sooner
+ * needed (a pass's lookahead's time to need, R10.T14.b), then the older lane's, then by key; but where that is one lane's refinement, a lane with a hole in its drawn
  * set, a root still to bake (`priority.ts`' `fillsHole`), takes the worker first, its best hole
  * first (the per-pass share, plan R10, R10.T14.b; lean, 2026-11-01). One lane alone is baked in
  * Design note 24's order, request for request. A pool made with bake settings (the descent spike's)
@@ -281,8 +281,9 @@ interface Candidate {
 }
 
 /**
- * Orders requests: forced first, then higher priority whatever the lane, then the older lane's,
- * then by key string. With one lane it is R05's order.
+ * Orders requests: forced first, then higher priority whatever the lane, then the sooner needed
+ * (`PatchRequest.needS`, a pass's lookahead's, 0 where absent; R10.T14.b), then the older lane's,
+ * then by key string. With one lane and no lookahead it is R05's order.
  */
 function before(a: Candidate, b: Candidate): boolean {
   const ra = a.queued.request;
@@ -292,6 +293,11 @@ function before(a: Candidate, b: Candidate): boolean {
   }
   if (ra.priority !== rb.priority) {
     return ra.priority > rb.priority;
+  }
+  const na = ra.needS ?? 0;
+  const nb = rb.needS ?? 0;
+  if (na !== nb) {
+    return na < nb;
   }
   if (a.lane.index !== b.lane.index) {
     return a.lane.index < b.lane.index;

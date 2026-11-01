@@ -151,7 +151,10 @@ import {
   LOOKAHEAD_SLOW_EVERY,
   lookaheadInput,
   lookaheadSeconds,
+  type MovingCamera,
+  movesFast,
   slowSelection,
+  timeToNeedS,
   type ViewMotion,
 } from "./lookahead";
 import { joinDemand } from "./priority";
@@ -2526,7 +2529,19 @@ export class TerrainPass {
       this.#stepCostMs += performance.now() - startMs;
       this.#sinceAhead = 0;
     }
-    return joinDemand(selection.demand, this.#aheadDemand);
+    // The views it looked ahead for: a still one would make every patch needed now.
+    const cameras: MovingCamera[] = [];
+    for (let n = 0; n < views.length; n += 1) {
+      const view = views[n];
+      const motion = motions[n] ?? null;
+      if (view !== undefined && motion !== null && movesFast(motion)) {
+        cameras.push({ positionM: view.cameraBodyFixedM, velocityMps: motion.velocityMps });
+      }
+    }
+    const planet = this.#planet;
+    return joinDemand(selection.demand, this.#aheadDemand, (key) =>
+      timeToNeedS(planet, key, cameras, aheadS),
+    );
   }
 
   /**

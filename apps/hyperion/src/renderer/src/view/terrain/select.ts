@@ -106,6 +106,12 @@ export interface PatchRequest {
   readonly priority: number;
   /** Whether it lies in a grounded body's forced region, which outranks everything. */
   readonly forced: boolean;
+  /**
+   * The time until the views need it, s, at least 0, which breaks ties of priority alone: a
+   * terrain pass's lookahead's estimate (`lookahead.ts`' `timeToNeedS`; R10.T14.b). Selection's
+   * own demand gives none, which orders as 0.
+   */
+  readonly needS?: number;
 }
 
 /** What selection returns: the patches to draw, by `patchKeyString`, and the demand to bake. */

@@ -1730,10 +1730,11 @@ describe("the terrain pass's lookahead (R10.T14.b)", () => {
       expected.map(([, priority]) => priority),
     );
     expect(lookahead.filter((r) => !owned.has(patchKeyString(r.key))).length).toBeGreaterThan(0);
-    // The selection's own demand is asked too.
+    // The selection's own demand is asked too, with every request's time to need.
     for (const keyString of owned.keys()) {
       expect(asked.has(keyString)).toBe(true);
     }
+    expect(pool().demand.every((r) => r.needS !== undefined && r.needS >= 0)).toBe(true);
   });
 
   it("never draws the lookahead's patches, and pins them as demanded alone", async () => {

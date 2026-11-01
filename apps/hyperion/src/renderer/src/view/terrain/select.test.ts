@@ -931,7 +931,9 @@ describe("the lookahead's selection (R10.T14.b)", () => {
       throw new Error("a fast camera selects ahead");
     }
     const demand = selectPatches(own).demand;
-    expect(joinDemand(demand, selectPatches(here).demand)).toEqual(demand);
+    expect(joinDemand(demand, selectPatches(here).demand, () => 0)).toEqual(
+      demand.map(({ key, priority, forced }) => ({ key, priority, forced, needS: 0 })),
+    );
   });
 });
 

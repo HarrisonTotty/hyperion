@@ -172,6 +172,21 @@ describe("the height-worker pool", () => {
     expect(bakedKeys(workerAt(created, 0))[2]).toBe(patchKeyString(keyAt(4)));
   });
 
+  it("breaks a tie of priority by the time to need, sooner first, before the key (R10.T14.b)", () => {
+    const { pool, created } = poolOf(1);
+    pool.reprioritise([
+      { ...req(1, 5), needS: 0.5 },
+      { ...req(2, 5), needS: 0.1 },
+      { ...req(3, 6), needS: 2 },
+      req(4, 5),
+    ]);
+    const w = workerAt(created, 0);
+    w.bakeOldest();
+    w.bakeOldest();
+    // 3 outranks the rest whatever its time; then 4, needed now, then 2 and 1 by their times.
+    expect(bakedKeys(w)).toEqual([3, 4, 2, 1].map((i) => patchKeyString(keyAt(i))));
+  });
+
   it("never gives a worker more than two requests at once", () => {
     const { pool, created } = poolOf(2);
     pool.reprioritise(Array.from({ length: 10 }, (_, i) => req(i, i)));
