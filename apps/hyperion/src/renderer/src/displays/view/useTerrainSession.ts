@@ -138,8 +138,8 @@ export interface TerrainSessionInput {
   /** The workers' count; the default where absent (`TerrainSessionOptions.workers`). */
   readonly workers?: number | undefined;
   /**
-   * The machine's performance cores' threads, which the default count reads
-   * (`TerrainSessionOptions.performanceThreads`); `null` where absent.
+   * The machine's performance cores' threads with a third of its efficiency cores', which the
+   * default count reads (`TerrainSessionOptions.performanceThreads`); `null` where absent.
    */
   readonly performanceThreads?: number | null | undefined;
   /**

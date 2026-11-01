@@ -8288,3 +8288,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
 - **An Apple chip's efficiency cores counted at a third (lean, 2026-11-01; lane
   perf-terrain-bakes-2).** clamp(P − 2 + ⌊E ÷ 3⌋, 1, 8), E from `hw.perflevel1.logicalcpu`: 4 on
   the M5, 3 on an M1, unchanged where E ≤ 2. The owner's `workerSweep.mjs` on the Mac decides it.
+- **R05.T18's first draws after the batched bake (2026-11-01; lane perf-terrain-bakes-2).** About
+  97 high drafts a second at eight workers on the pod's stream, against 94 before and 129.9 asked:
+  the batching cut the double normals (the refinements) by a fifth, but a cold draft is mostly the
+  class weights' steepness quadrature (libm's `exp`, a quarter of it in wasm) and the horizon's far
+  field, neither batched. Figures in the lane's outbox.

@@ -1,6 +1,6 @@
 /**
- * How the main process hands the machine's performance threads (`src/main/performanceThreads.ts`)
- * to the preload.
+ * How the main process hands the machine's performance threads, with a third of its efficiency
+ * cores' (`src/main/performanceThreads.ts`), to the preload.
  *
  * @remarks
  * As `qualityLaunch.ts` does for the quality setting: the count rides in the renderer's own `argv`

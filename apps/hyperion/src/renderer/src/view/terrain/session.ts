@@ -226,8 +226,9 @@ export interface TerrainSessionOptions {
    */
   readonly workers?: number;
   /**
-   * The machine's performance cores' threads, `HyperionApi.performanceThreads`, which the default
-   * count reads where {@link TerrainSessionOptions.workers} is absent; `null` where absent.
+   * The machine's performance cores' threads with a third of its efficiency cores',
+   * `HyperionApi.performanceThreads`, which the default count reads where
+   * {@link TerrainSessionOptions.workers} is absent; `null` where absent.
    */
   readonly performanceThreads?: number | null;
   /**

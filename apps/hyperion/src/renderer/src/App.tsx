@@ -58,7 +58,10 @@ interface DisplayInputs {
   readonly setting: QualitySetting;
   /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
   readonly platform: string;
-  /** The machine's performance cores' threads, which `VIEW`'s height workers' count reads. */
+  /**
+   * The machine's performance cores' threads with a third of its efficiency cores', which `VIEW`'s
+   * height workers' count reads.
+   */
   readonly performanceThreads: number | null;
 }
 

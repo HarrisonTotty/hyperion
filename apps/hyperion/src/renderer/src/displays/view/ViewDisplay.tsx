@@ -368,8 +368,9 @@ interface ViewDisplayProps {
    */
   readonly platform?: string | undefined;
   /**
-   * The machine's performance cores' threads, `window.hyperion.performanceThreads`, which the
-   * terrain session's default worker count reads (plan R10, R10.T6.a); none by default.
+   * The machine's performance cores' threads with a third of its efficiency cores',
+   * `window.hyperion.performanceThreads`, which the terrain session's default worker count reads
+   * (plan R10, R10.T6.a); none by default.
    */
   readonly performanceThreads?: number | null | undefined;
   /**

@@ -245,8 +245,8 @@ impl<F: FieldView> HeightSource for Synthesiser<'_, F> {
     }
 
     /// [`Synthesiser::height_at`] at each of `dirs` at band level `level`, the structural octaves
-    /// walked several points at a time ([`Synthesiser::heights_at`]): the same answers, bit for
-    /// bit.
+    /// and the small craters made several points at a time (the crate's
+    /// `Synthesiser::heights_at`): the same answers, bit for bit.
     ///
     /// # Panics
     ///

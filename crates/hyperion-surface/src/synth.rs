@@ -727,9 +727,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     }
 
     /// [`height_at`](Self::height_at) at each of `dirs` at `level`, in their order, each the point
-    /// query's answer bit for bit, its error included: the structural octaves walked [`LANES`]
-    /// points at a time ([`Relief::at_in_style_lanes`]), every other stage the point query's own,
-    /// point by point.
+    /// query's answer bit for bit, its error included: the structural octaves and the small
+    /// craters made [`LANES`] points at a time ([`Relief::at_in_style_lanes`],
+    /// [`SmallCraters::at_lanes`]), every other stage the point query's own, point by point.
     ///
     /// Every answer is made, an error's followers too: a caller that stops at the first error
     /// reads the point queries' first.
@@ -783,8 +783,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
     /// [`height_pair_at`](Self::height_pair_at) at each of `dirs` at `level` and `parent`, in
     /// their order, each pair the point query's bit for bit, as
-    /// [`heights_at`](Self::heights_at) answers the point queries: the structural octaves of both
-    /// levels walked [`LANES`] points at a time, every other stage the pair's own, point by point.
+    /// [`heights_at`](Self::heights_at) answers the point queries: the structural octaves and the
+    /// small craters of both levels made [`LANES`] points at a time, every other stage the pair's
+    /// own, point by point.
     ///
     /// # Panics
     ///
