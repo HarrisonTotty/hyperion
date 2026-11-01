@@ -64,7 +64,7 @@ fn state_of(
     resource_section(
         Seed::new(26),
         body,
-        bulk,
+        (bulk, &HostAbundances::protosolar()),
         formed,
         record,
         Years::new(4.57e9),

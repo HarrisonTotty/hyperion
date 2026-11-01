@@ -585,6 +585,8 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
+/// - a body's resources by their ratios to its rock's α elements, `RESOURCE_RATIOS_VERSION`
+///   (P14.T26's ratios), at `ResourceRatiosRules::Ratios` through `with_resource_ratios`.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -599,8 +601,10 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
+    use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_carriers(CarriersRules::Carried, run);
+    let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 

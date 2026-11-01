@@ -859,7 +859,7 @@ pub const BULK_IRON_CORE_PIVOT: f64 = 0.1955;
 
 /// `FeO`'s mass over its iron's, 1.2865: (`M_Fe` + `M_O`) ÷ `M_Fe` from the standard atomic weights.
 #[must_use]
-fn iron_oxide_per_iron() -> f64 {
+pub(crate) fn iron_oxide_per_iron() -> f64 {
     let w = Element::standard_atomic_weight_g_per_mol;
     (w(Element::Fe) + w(Element::O)) / w(Element::Fe)
 }
@@ -912,7 +912,7 @@ pub fn mantle_iron_oxide_mass_fraction(
 
 /// The core's share of a body's solids, iron ÷ (iron + rock); 0 for a body with neither.
 #[must_use]
-fn core_share(fractions: &MassFractions) -> f64 {
+pub(crate) fn core_share(fractions: &MassFractions) -> f64 {
     let solids = fractions.iron() + fractions.rock();
     if solids > 0.0 {
         fractions.iron() / solids

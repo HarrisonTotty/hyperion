@@ -2610,7 +2610,7 @@ impl PlanetarySystem {
         let resources = resource_section(
             self.seed,
             index.body_id(self.system),
-            &bulk,
+            (&bulk, &self.host_abundances(ctx)),
             formed,
             &record,
             ctx.age_at(t),
@@ -2719,10 +2719,7 @@ impl PlanetarySystem {
             formation: self.formation_zone(body),
             fe_h: ctx.fe_h(),
             alpha_fe: ctx.alpha_fe(),
-            host: HostAbundances::of(
-                ctx.fe_h(),
-                &AbundanceDraws::for_system(self.seed, self.system),
-            ),
+            host: self.host_abundances(ctx),
             primordial_helium_per_hydrogen: derived.envelope_helium().map_or_else(
                 || host_helium_per_hydrogen(ctx.composition()),
                 EnvelopeHelium::helium_to_hydrogen,
@@ -3616,18 +3613,25 @@ impl PlanetarySystem {
         }
     }
 
+    /// The C/O and Mg/Si of the host of the system of `ctx` (P14.T50.a's [`HostAbundances`]), at
+    /// its system's `system.abundances` words 0–1 and its \[Fe/H\], which its bodies' envelopes,
+    /// crusts and resources read.
+    #[must_use]
+    fn host_abundances(&self, ctx: &SystemContext) -> HostAbundances {
+        HostAbundances::of(
+            ctx.fe_h(),
+            &AbundanceDraws::for_system(self.seed, self.system),
+        )
+    }
+
     /// What the host of the system of `ctx` gives every body's crust's basis (P14.T51.c): its
     /// Mg/Si by number, its system's `system.abundances` words 0–1 at its \[Fe/H\] (P14.T50.a's
     /// [`HostAbundances`], first read on the record from 23, P14.T54.a), its \[α/Fe\] (0 for none)
     /// and its \[Fe/H\].
     #[must_use]
     fn crust_host(&self, ctx: &SystemContext) -> CrustHost {
-        let abundances = HostAbundances::of(
-            ctx.fe_h(),
-            &AbundanceDraws::for_system(self.seed, self.system),
-        );
         CrustHost {
-            host_magnesium_to_silicon: abundances.magnesium_to_silicon(),
+            host_magnesium_to_silicon: self.host_abundances(ctx).magnesium_to_silicon(),
             alpha_fe: ctx.alpha_fe().unwrap_or(Dex::ZERO),
             fe_h: ctx.fe_h(),
         }
@@ -5584,9 +5588,11 @@ fn bulk_composition(
 }
 
 /// The resource abundances of body `body` at the age `age` in the universe of `seed` (P14.T26,
-/// [`hooks::resources`]): its bulk composition `bulk`'s, formed on `formed`'s side of the snow
-/// line, over the accessible outer layers its record `record` gives, its envelope's gas where that
-/// section is `Ok` and otherwise its surface's crust's lid, at its ranks on `body.resources`.
+/// [`hooks::resources`]): its bulk composition `bulk`'s, about a host of abundances `host` (its
+/// system's [`HostAbundances`] at its `system.abundances` draws, as its crust's basis reads them),
+/// formed on `formed`'s side of the snow line, over the accessible outer layers its record
+/// `record` gives, its envelope's gas where that section is `Ok` and otherwise its surface's
+/// crust's lid, at its ranks on `body.resources`.
 ///
 /// Where the bulk is not `Ok` the abundances take its state. Where neither layer is known they
 /// take the state of the section that withholds them, not resolved before not modelled before not
@@ -5595,7 +5601,7 @@ fn bulk_composition(
 fn resource_section(
     seed: Seed,
     body: BodyId,
-    bulk: &Section<BulkComposition>,
+    (bulk, host): (&Section<BulkComposition>, &HostAbundances),
     formed: Option<SnowLineSide>,
     record: &BodyRecord,
     age: Years,
@@ -5627,6 +5633,8 @@ fn resource_section(
         formed,
         layer,
         age,
+        host_magnesium_to_silicon: host.magnesium_to_silicon(),
+        host_carbon_to_oxygen: host.carbon_to_oxygen(),
     };
     Section::Ok(ResourceAbundances::derive(
         &inputs,

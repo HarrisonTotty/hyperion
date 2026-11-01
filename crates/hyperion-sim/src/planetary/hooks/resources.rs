@@ -34,23 +34,39 @@
 //! - a differentiated body's silicate, the bulk silicate Earth (`BULK_SILICATE`), its rare
 //!   earths CI's in proportion to its aluminium, as refractory lithophiles are.
 //!
-//! Each metal group is its reservoirs' shares times their concentrations, times 10^\[Fe/H\], and
-//! for the α elements among the light lithophiles (Mg, Ca, Ti) 10^(\[Fe/H\] + \[α/Fe\]), as the
-//! plan writes it; the radioactives' isotopes are each decayed from the present Solar System's age
-//! to the body's, by its own half-life ([`RadiogenicIsotope`]). The light lithophiles, a rock's
-//! major metals, take the scale on their odds against the rest of the rock rather than on their
-//! share: ℓ = `ℓ_S` ÷ (1 + `ℓ_S` − ℓ₀), `ℓ_S` the scaled share and ℓ₀ the solar one, which a
-//! trace group would not tell apart and which keeps a super-solar crust's below 1 (28% of the bulk
-//! silicate Earth's rock becomes 44%, not 56%, at \[Fe/H\] +0.3). Silicates are the rock's rest, its
-//! silicon, oxygen and the elements the list omits, so that a metal-poor host's rock is poorer in
-//! metals and richer in silicates and the layer's parts sum to it. Where a metal-rich host's metals
-//! would exceed the layer's solids, they are scaled down together to fill them.
+//! Each metal group is its reservoirs' shares times their concentrations, scaled by its host's
+//! abundances by the rules its hold gives ([`RESOURCE_RATIOS_VERSION`]):
+//!
+//! - **Below generator version 27**, as the plan writes it: times 10^\[Fe/H\], and for the α
+//!   elements among the light lithophiles (Mg, Ca, Ti) 10^(\[Fe/H\] + \[α/Fe\]).
+//! - **From 27**, by each element's ratio to the rock's α elements: a host's \[Fe/H\] sets how much
+//!   rock forms, not what a kilogram of it holds, so no 10^\[Fe/H\] is applied, as the crust's own
+//!   bulk iron has it ([`bulk_iron_mass_fraction`](crate::planetary::hooks::crust::bulk_iron_mass_fraction)).
+//!   With s = 10^(−\[α/Fe\]): a bulk's iron and platinum groups are its own metal's; the α
+//!   lithophiles, uranium and thorium keep the column's ratio to the rock, the actinides being
+//!   r-process elements, which run with the α elements in the disc as europium does (Frank, Meyer
+//!   and Mojzsis 2014, Icarus 243, 274, Eu as their proxy; not read); the other light lithophiles,
+//!   the rare earths (with Al) and ⁴⁰K (with K) take s. A crust's iron is its own mantle's `FeO`
+//!   ([`mantle_iron_oxide_mass_fraction`]), and its V, Cr, Mn, Co, Ni and platinum group, the
+//!   bulk silicate Earth's, take s.
+//!
+//! The radioactives' isotopes are each decayed from the present Solar System's age to the body's,
+//! by its own half-life ([`RadiogenicIsotope`]). The light lithophiles, a rock's major metals, take
+//! the scale on their odds against the rest of the rock rather than on their share: ℓ = `ℓ_S` ÷
+//! (1 + `ℓ_S` − ℓ₀), `ℓ_S` the scaled share and ℓ₀ the solar one, which a trace group would not
+//! tell apart and which keeps a super-solar crust's below 1 below 27 (28% of the bulk silicate
+//! Earth's rock becomes 44%, not 56%, at \[Fe/H\] +0.3); from 27 only their non-α tenth is scaled,
+//! and the odds move the group by under 2%. Silicates are the rock's rest, its silicon, oxygen and
+//! the elements the list omits, so that a metal-poor host's rock is poorer in metals and richer in
+//! silicates and the layer's parts sum to it. Where a metal-rich host's metals would exceed the
+//! layer's solids, they are scaled down together to fill them, which below 27 a bulk reaches above
+//! \[Fe/H\] +0.3 and from 27 no host does.
 //!
 //! The ices are the bulk's water, with, for a body formed beyond the snow line, its carbon dioxide
 //! and its nitrogen as ammonia in the proportion its element inventory holds them to its water.
 //! Deuterium is the water's at Vienna Standard Mean Ocean Water's D/H, counted apart from the
 //! water ice. Hydrocarbons are only an undifferentiated body's formed beyond the snow line: CI's
-//! carbon per unit of its rock.
+//! carbon per unit of its rock, from 27 times its host's C/O over the Sun's.
 //!
 //! A gas layer is its species by mass: the iron-group and light lithophile elements of its species
 //! by element, its water, its methane, ammonia and carbon dioxide, and its hydrocarbons of two or
@@ -96,16 +112,18 @@
 #[cfg(test)]
 mod tests;
 
-use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
+use crate::planetary::chem::solar_carbon_to_oxygen;
 use crate::planetary::derive::SnowLineSide;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::BulkComposition;
-use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::crust::history::{
     CI_ALUMINIUM_MASS_FRACTION, CI_POTASSIUM_MASS_FRACTION, CI_THORIUM_MASS_FRACTION,
     CI_URANIUM_MASS_FRACTION,
+};
+use crate::planetary::hooks::crust::{
+    CrustLithology, core_share, iron_oxide_per_iron, mantle_iron_oxide_mass_fraction,
 };
 use crate::planetary::hooks::figures::interior::{
     BULK_SILICATE_EARTH_POTASSIUM_MASS_FRACTION, BULK_SILICATE_EARTH_THORIUM_MASS_FRACTION,
@@ -115,6 +133,70 @@ use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::substance::{Element, Substance, SubstanceId};
 use crate::units::{Dex, Years};
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
+
+/// The generator version from which a body's resources follow each element's ratio to its rock's
+/// α elements, not its host's \[Fe/H\] (P14.T26's ratios; the [module](self)'s "The mean"): 27.
+///
+/// It is the ratios' one hold. Below it [`ResourceRatiosRules::in_force`] is
+/// [`ResourceRatiosRules::Held`]: each kilogram of a solid layer's rock and metal is scaled by
+/// 10^\[Fe/H\], and every fraction is version 24's, 25's and 26's bit for bit. 27's bump deletes
+/// this hold, [`ResourceRatiosRules`] with its `Held` arm, the tests' switch and its tripwire
+/// (`the_resource_ratios_are_held_only_until_the_27_bump`).
+pub(crate) const RESOURCE_RATIOS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// How a solid layer's metals follow their host's abundances (its hold,
+/// [`RESOURCE_RATIOS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ResourceRatiosRules {
+    /// Version 26's and before: the metals take 10^\[Fe/H\], the α lithophiles
+    /// 10^(\[Fe/H\] + \[α/Fe\]), and a crust's iron is the bulk silicate Earth's.
+    Held,
+    /// Version 27's: each element keeps its ratio to the rock's α elements, the others taking
+    /// 10^(−\[α/Fe\]), a bulk's metal is its own and a crust's iron its own mantle's `FeO`.
+    Ratios,
+}
+
+impl ResourceRatiosRules {
+    /// The rules this generator version gives: the ratios from [`RESOURCE_RATIOS_VERSION`], the
+    /// metallicity's scale below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_resource_ratios`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = RESOURCE_RATIOS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= RESOURCE_RATIOS_VERSION {
+            Self::Ratios
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The resource ratios' rules a test sets on its thread, `None` for the version's.
+    static RESOURCE_RATIOS_RULES: core::cell::Cell<Option<ResourceRatiosRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the resource ratios' rules `rules` on this thread, for the tests to reach
+/// them ahead of the bump; the version's rules are set back after, a panic in `run` included. 27's
+/// bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_resource_ratios<R>(rules: ResourceRatiosRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<ResourceRatiosRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RESOURCE_RATIOS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(RESOURCE_RATIOS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The log-normal scatter of each resource's multiple about its mean, dex: 0.3, plan 14's
 /// (P14.T26), for what the model leaves out.
@@ -169,6 +251,14 @@ pub const CI_RARE_EARTHS: [f64; 16] = [
 /// the lane's memory of their Table 5, not re-read.
 pub const BULK_SILICATE_EARTH_IRON_GROUP: [f64; 6] =
     [82e-6, 2_625e-6, 1_045e-6, 62_600e-6, 105e-6, 1_960e-6];
+
+/// The bulk silicate Earth's iron group less its iron, kg per kg: its V, Cr, Mn, Co and Ni
+/// ([`BULK_SILICATE_EARTH_IRON_GROUP`]), 5,817 ppm, which from generator version 27
+/// ([`RESOURCE_RATIOS_VERSION`]) a silicate crust holds beside its own mantle's iron.
+const BULK_SILICATE_EARTH_IRON_TRACES: f64 = {
+    let [v, cr, mn, _, co, ni] = BULK_SILICATE_EARTH_IRON_GROUP;
+    v + cr + mn + co + ni
+};
 
 /// The bulk silicate Earth's platinum group, kg per kg: Ru 5.0, Rh 0.9, Pd 3.9, Os 3.4, Ir 3.2 and
 /// Pt 7.1 ppb (McDonough and Sun 1995, Table 5; the lane's memory, not re-read), about 1/140 of
@@ -366,6 +456,15 @@ pub struct ResourceInputs<'a> {
     pub layer: OuterLayer<'a>,
     /// Its age at the time, to which its radioactives are decayed.
     pub age: Years,
+    /// Its host's Mg/Si by number (P14.T50.a's
+    /// [`HostAbundances::magnesium_to_silicon`](crate::planetary::chem::HostAbundances::magnesium_to_silicon),
+    /// as its crust reads it), positive, from which from generator version 27
+    /// ([`RESOURCE_RATIOS_VERSION`]) a silicate crust's iron, its mantle's `FeO`, follows.
+    pub host_magnesium_to_silicon: f64,
+    /// Its host's C/O by number
+    /// ([`HostAbundances::carbon_to_oxygen`](crate::planetary::chem::HostAbundances::carbon_to_oxygen)),
+    /// positive, over the Sun's of which from generator version 27 a bulk's hydrocarbons scale.
+    pub host_carbon_to_oxygen: f64,
 }
 
 /// The ranks of a body's resource multiples, as drawn from [`tags::BODY_RESOURCES`] by
@@ -449,6 +548,7 @@ impl ResourceAbundances {
     ///
     /// ```
     /// use hyperion_sim::planetary::chem::inventory::{InventoryInputs, element_inventory};
+    /// use hyperion_sim::planetary::chem::{solar_carbon_to_oxygen, solar_magnesium_to_silicon};
     /// use hyperion_sim::planetary::derive::atmosphere::VolatileDraws;
     /// use hyperion_sim::planetary::derive::{SnowLineSide, composition};
     /// use hyperion_sim::planetary::hooks::BulkComposition;
@@ -473,7 +573,14 @@ impl ResourceAbundances {
     /// });
     /// let bulk = BulkComposition::new(fractions, elements, Dex::ZERO, Some(Dex::ZERO));
     /// let of = |layer| {
-    ///     let inputs = ResourceInputs { bulk: &bulk, formed: side, layer, age: Years::new(4.57e9) };
+    ///     let inputs = ResourceInputs {
+    ///         bulk: &bulk,
+    ///         formed: side,
+    ///         layer,
+    ///         age: Years::new(4.57e9),
+    ///         host_magnesium_to_silicon: solar_magnesium_to_silicon(),
+    ///         host_carbon_to_oxygen: solar_carbon_to_oxygen(),
+    ///     };
     ///     ResourceAbundances::derive(&inputs, &ResourceDraws::MEDIAN)
     /// };
     /// let crust = of(OuterLayer::SilicateCrust).fraction(Resource::PlatinumGroup);
@@ -737,29 +844,24 @@ fn solid_mean(inputs: &ResourceInputs<'_>, layer: Solid) -> Mean {
         Solid::SilicateCrust => (0.0, 1.0 - ices, &BULK_SILICATE, ices),
         Solid::IceShell => (0.0, 0.0, &BULK_SILICATE, 1.0),
     };
-    let fe_h = bulk.fe_h().value();
-    let iron_scale = math::exp10(fe_h);
-    let alpha_scale = math::exp10(fe_h + bulk.alpha_fe().map_or(0.0, Dex::value));
-    let since = RADIOGENIC_REFERENCE_AGE.value() - inputs.age.value();
-
-    let mut iron_group = (metal * METAL.iron_group + rock * column.iron_group) * iron_scale;
-    let mut platinum_group =
-        (metal * METAL.platinum_group + rock * column.platinum_group) * iron_scale;
-    // The light lithophiles are a rock's major metals, 28% of the bulk silicate Earth: the host's
-    // scale multiplies their odds against the rest of the rock, not their share, which at a
-    // super-solar [Fe/H] would pass any rock's. The difference is written so that at the solar
-    // scale the denominator is 1 exactly.
-    let solar = column.alpha_lithophiles + column.other_lithophiles;
-    let scaled = column.alpha_lithophiles * alpha_scale + column.other_lithophiles * iron_scale;
-    let mut lithophiles = rock * scaled / (1.0 + (scaled - solar));
-    let mut rare_earths = rock * column.rare_earths * iron_scale;
-    let mut radioactive = RadiogenicIsotope::ALL.map(|isotope| {
-        rock * column.isotope(isotope) * math::exp(since / isotope.mean_life().value()) * iron_scale
-    });
-    let hydrocarbons = if beyond && layer == Solid::Bulk {
-        rock * column.carbon
-    } else {
-        0.0
+    let reservoirs = Reservoirs {
+        layer,
+        metal,
+        rock,
+        column,
+        since: RADIOGENIC_REFERENCE_AGE.value() - inputs.age.value(),
+        organic: beyond && layer == Solid::Bulk,
+    };
+    let Metals {
+        mut iron_group,
+        mut platinum_group,
+        mut lithophiles,
+        mut rare_earths,
+        mut radioactive,
+        hydrocarbons,
+    } = match ResourceRatiosRules::in_force() {
+        ResourceRatiosRules::Held => held_metals(bulk, &reservoirs),
+        ResourceRatiosRules::Ratios => ratio_metals(inputs, &reservoirs),
     };
 
     // The solids the metals and the silicates share; a metal-rich host's metals fill them at most.
@@ -797,6 +899,125 @@ fn solid_mean(inputs: &ResourceInputs<'_>, layer: Solid) -> Mean {
     mean.fractions[Resource::Deuterium.index()] = deuterium;
     mean.radioactive = radioactive;
     mean
+}
+
+/// A solid layer's reservoirs, as [`solid_mean`] reads them.
+#[derive(Debug, Clone, Copy)]
+struct Reservoirs<'c> {
+    /// The layer.
+    layer: Solid,
+    /// Its metal, kg per kg of the layer: an undifferentiated body's iron.
+    metal: f64,
+    /// Its rock, kg per kg of the layer.
+    rock: f64,
+    /// The rock's concentrations.
+    column: &'c Column,
+    /// The years from the body's age to the present Solar System's, over which the radioactives
+    /// are grown back.
+    since: f64,
+    /// Whether its rock holds organic matter: an undifferentiated body's formed beyond the snow
+    /// line.
+    organic: bool,
+}
+
+/// A solid layer's metal groups and hydrocarbons before the fill cap, kg per kg of the layer.
+#[derive(Debug, Clone, Copy)]
+struct Metals {
+    iron_group: f64,
+    platinum_group: f64,
+    lithophiles: f64,
+    rare_earths: f64,
+    radioactive: [f64; 4],
+    hydrocarbons: f64,
+}
+
+/// The metals of `of` below generator version 27 ([`ResourceRatiosRules::Held`]), as the plan
+/// writes them: every metal's share times 10^\[Fe/H\] of the host of `bulk`, the α lithophiles'
+/// 10^(\[Fe/H\] + \[α/Fe\]).
+#[must_use]
+fn held_metals(bulk: &BulkComposition, of: &Reservoirs<'_>) -> Metals {
+    let (metal, rock, column) = (of.metal, of.rock, of.column);
+    let fe_h = bulk.fe_h().value();
+    let iron_scale = math::exp10(fe_h);
+    let alpha_scale = math::exp10(fe_h + bulk.alpha_fe().map_or(0.0, Dex::value));
+    // The light lithophiles are a rock's major metals, 28% of the bulk silicate Earth: the host's
+    // scale multiplies their odds against the rest of the rock, not their share, which at a
+    // super-solar [Fe/H] would pass any rock's. The difference is written so that at the solar
+    // scale the denominator is 1 exactly.
+    let solar = column.alpha_lithophiles + column.other_lithophiles;
+    let scaled = column.alpha_lithophiles * alpha_scale + column.other_lithophiles * iron_scale;
+    Metals {
+        iron_group: (metal * METAL.iron_group + rock * column.iron_group) * iron_scale,
+        platinum_group: (metal * METAL.platinum_group + rock * column.platinum_group) * iron_scale,
+        lithophiles: rock * scaled / (1.0 + (scaled - solar)),
+        rare_earths: rock * column.rare_earths * iron_scale,
+        radioactive: RadiogenicIsotope::ALL.map(|isotope| {
+            rock * column.isotope(isotope)
+                * math::exp(of.since / isotope.mean_life().value())
+                * iron_scale
+        }),
+        hydrocarbons: if of.organic {
+            rock * column.carbon
+        } else {
+            0.0
+        },
+    }
+}
+
+/// The metals of `of` from generator version 27 ([`ResourceRatiosRules::Ratios`]), each element
+/// at its ratio to the rock's α elements (the [module](self)'s "The mean"), with s =
+/// 10^(−\[α/Fe\]) of the host of `inputs` on those not made with them; \[Fe/H\] is not read.
+#[must_use]
+fn ratio_metals(inputs: &ResourceInputs<'_>, of: &Reservoirs<'_>) -> Metals {
+    let bulk = inputs.bulk;
+    let (metal, rock, column) = (of.metal, of.rock, of.column);
+    let alpha_fe = bulk.alpha_fe().unwrap_or(Dex::ZERO);
+    let s = math::exp10(-alpha_fe.value());
+    let (iron_group, platinum_group) = match of.layer {
+        // Its metal is its own, as its radius gives it.
+        Solid::Bulk => (metal * METAL.iron_group, metal * METAL.platinum_group),
+        // Its iron is the `FeO` its core left in its mantle; the bulk silicate Earth's other
+        // iron-peak metals and its late veneer's platinum group follow the host's iron.
+        Solid::SilicateCrust => {
+            let feo = mantle_iron_oxide_mass_fraction(
+                core_share(&bulk.fractions()),
+                inputs.host_magnesium_to_silicon,
+                alpha_fe,
+            );
+            let iron = feo / iron_oxide_per_iron();
+            (
+                rock * (iron + BULK_SILICATE_EARTH_IRON_TRACES * s),
+                rock * column.platinum_group * s,
+            )
+        }
+        Solid::IceShell => (0.0, 0.0),
+    };
+    // The odds form of `held_metals`, on the light lithophiles' non-α share alone.
+    let solar = column.alpha_lithophiles + column.other_lithophiles;
+    let scaled = column.alpha_lithophiles + column.other_lithophiles * s;
+    Metals {
+        iron_group,
+        platinum_group,
+        lithophiles: rock * scaled / (1.0 + (scaled - solar)),
+        rare_earths: rock * column.rare_earths * s,
+        radioactive: RadiogenicIsotope::ALL.map(|isotope| {
+            // ⁴⁰K follows its potassium; uranium and thorium keep their ratio to the rock.
+            let scale = match isotope {
+                RadiogenicIsotope::Potassium40 => s,
+                RadiogenicIsotope::Uranium238
+                | RadiogenicIsotope::Uranium235
+                | RadiogenicIsotope::Thorium232 => 1.0,
+            };
+            rock * column.isotope(isotope)
+                * math::exp(of.since / isotope.mean_life().value())
+                * scale
+        }),
+        hydrocarbons: if of.organic {
+            rock * column.carbon * (inputs.host_carbon_to_oxygen / solar_carbon_to_oxygen())
+        } else {
+            0.0
+        },
+    }
 }
 
 /// The mass of a body's other ices per unit mass of its water: its element inventory's carbon
