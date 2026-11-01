@@ -22,7 +22,7 @@ use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
 use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
 use hyperion_sim::planetary::surface::{
-    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
+    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass_spread,
 };
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
@@ -36,6 +36,7 @@ use hyperion_surface::synth::{SynthCache, Synthesiser};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
 use tokio::task::{AbortHandle, JoinSet};
 
+use super::spread::PoolSpread;
 use super::{FieldCache, FieldKey, InputsSource};
 use crate::cache::LruCounters;
 use crate::compute::sky::{promotable, queued};
@@ -591,6 +592,7 @@ impl Fields {
                 ),
                 Turn::Prefetched(permit) => (permit, Priority::Background),
             };
+            let helpers = Arc::clone(&pool);
             let job = move |_: &CancelToken| {
                 // The job holds the permit, not the flight, so that it is freed when the job ends
                 // however it ends: run to its end, or panicked (dropped as the pool's
@@ -599,7 +601,8 @@ impl Fields {
                 // counted.
                 let _permit = permit;
                 let started = Instant::now();
-                compute(source.as_ref(), key, &system).map(|field| (field, started.elapsed()))
+                compute(source.as_ref(), key, &system, (&helpers, priority))
+                    .map(|field| (field, started.elapsed()))
             };
             let done = match &registered {
                 Some(registered) => {
@@ -1082,23 +1085,32 @@ fn check_system(key: FieldKey, system: &GeneratedSystem) {
 
 /// The coarse field of `key`'s body in `system`, on the pool: the body's surface seed and its
 /// record at [`RECORD_TIME`] with a moon's planet's, the inputs `source` reads from them, the
-/// pass, and the albedo scale on its classes ([`field_albedo_scale`], R10.T10.a), from the
-/// record's photometry and the body's detail seed.
+/// pass, its independent tasks spread over `pool`'s free workers at `priority` ([`PoolSpread`]),
+/// and the albedo scale on its classes ([`field_albedo_scale`], R10.T10.a), from the record's
+/// photometry and the body's detail seed.
 ///
 /// # Errors
 ///
-/// [`SurfaceJobError::Body`] and [`SurfaceJobError::Inputs`], as
-/// [`SurfaceService::field`] gives them.
+/// [`SurfaceJobError::Body`] and [`SurfaceJobError::Inputs`], as [`SurfaceService::field`] gives
+/// them; and [`SurfaceJobError::Compute`] with [`JobError::FloatingPointMode`] where a worker that
+/// ran one of the pass's tasks flushes subnormals, which is logged.
 fn compute(
     source: &dyn InputsSource,
     key: FieldKey,
     system: &GeneratedSystem,
+    (pool, priority): (&Arc<CpuPool>, Priority),
 ) -> Result<CoarseField, SurfaceJobError> {
     let (seed, record, planet) = surface_record(key, system)?;
     let inputs = source
         .inputs(&record, planet.as_ref(), &system.0)
         .map_err(SurfaceJobError::Inputs)?;
-    let field = coarse_pass(seed, &inputs);
+    let spread = PoolSpread::new(Arc::clone(pool), priority);
+    let field = coarse_pass_spread(seed, &inputs, &spread);
+    if spread.flushed() {
+        let error = ComputeError::Job(JobError::FloatingPointMode);
+        log_refusal(key, error);
+        return Err(SurfaceJobError::Compute(error));
+    }
     // The seed the client synthesises the ground with, from the record's hooks section, which
     // carries it to the client (R09.T1.b); a body with a surface has one, and where it is not given
     // it is the same derivation.
@@ -1377,7 +1389,7 @@ mod tests {
     use hyperion_sim::planetary::derive::photometry::{PhaseTemplate, PhotometryInputs};
     use hyperion_sim::planetary::placement::OrbitHost;
     use hyperion_sim::planetary::record::{BodyKind, BodyRecord};
-    use hyperion_sim::planetary::surface::{CoarseInputs, reference};
+    use hyperion_sim::planetary::surface::{CoarseInputs, coarse_pass, reference};
     use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::units::{
