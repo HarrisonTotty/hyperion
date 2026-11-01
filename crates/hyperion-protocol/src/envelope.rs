@@ -490,7 +490,7 @@ mod tests {
     };
     use crate::sky::BandSpecDto;
     use crate::stellar::SystemExistenceDto;
-    use crate::surface::{CellRangeDto, RecordSectionDto, SurveySourceDto};
+    use crate::surface::{CellRangeDto, RecordSectionDto, SurveyScopeDto, SurveySourceDto};
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
 
@@ -573,6 +573,7 @@ mod tests {
             universe: universe(),
             body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
             have_revision: None,
+            scope: SurveyScopeDto::Live,
         }
     }
 
@@ -589,6 +590,7 @@ mod tests {
             source: SurveySourceDto::Orbital,
             resolution_m: 100.0,
             cells: vec![CellRangeDto { start: 0, end: 96 }],
+            scope: SurveyScopeDto::Live,
         }
     }
 
@@ -1467,6 +1469,7 @@ mod tests {
                 universe: universe(),
                 body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
                 have_revision: Some(2),
+                scope: SurveyScopeDto::Live,
             }),
             json!({
                 "kind": "surface_field",
@@ -1490,6 +1493,7 @@ mod tests {
                 source: SurveySourceDto::Landed,
                 resolution_m: 0.004,
                 cells: vec![CellRangeDto { start: 5, end: 8 }],
+                scope: SurveyScopeDto::Live,
             }),
             json!({
                 "kind": "survey_pass",

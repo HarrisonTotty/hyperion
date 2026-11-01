@@ -71,8 +71,8 @@ use hyperion_protocol::{
     CoverRangeDto, CreateUniverseRequest, DetailLevelDto, FramePositionDto, KinematicsDto,
     NotificationBody, RequestBody, ResponseBody, SceneShipRequest, SceneSubscribeRequest,
     SectionDto, SeedHex, ServerMessage, SubscribeRequest, SubscriptionTopic, SurfaceFieldRequest,
-    SurveyPassDto, SurveyPassRequest, SurveySourceDto, SystemBodiesRequest, SystemIdHex,
-    UniverseIdHex, UniverseTime,
+    SurveyPassDto, SurveyPassRequest, SurveyScopeDto, SurveySourceDto, SystemBodiesRequest,
+    SystemIdHex, UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::id::BodyId;
@@ -288,6 +288,7 @@ fn pass(
         source,
         resolution_m,
         cells: runs,
+        scope: SurveyScopeDto::Live,
     }
 }
 
@@ -1023,6 +1024,7 @@ impl Session {
             universe: self.universe.clone(),
             body: hex(self.body),
             have_revision,
+            scope: SurveyScopeDto::Live,
         };
         let answer = field_via_wire(&mut self.client, request).await;
         self.secret.check_text(&answer.text);

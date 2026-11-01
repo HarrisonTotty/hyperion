@@ -45,7 +45,7 @@ use crate::compute::{
     Priority, Promotion, SingleFlight, SubmitJobError, panic_message,
 };
 use crate::knowledge::LoadKnowledgeError;
-use crate::knowledge::surveys::{RaisedRevisions, SurveyLog};
+use crate::knowledge::surveys::{RaisedRevisions, ScratchSurveyLog, SurveyLog};
 use crate::universe::{UniverseId, UniverseStore};
 
 /// The time at which the service reads a body's record for its inputs: the sim's, at which
@@ -202,6 +202,9 @@ pub struct SurfaceService {
     /// opening, whichever comes first, and given to the log when it opens
     /// ([`watch_surveys`](Self::watch_surveys)).
     raised: Arc<Mutex<HashMap<UniverseId, watch::Sender<RaisedRevisions>>>>,
+    /// Each universe's scratch survey log, the passes of training, made on its first use
+    /// ([`scratch_surveys`](Self::scratch_surveys)).
+    scratch: Mutex<HashMap<UniverseId, ScratchSurveyLog>>,
 }
 
 impl SurfaceService {
@@ -244,6 +247,7 @@ impl SurfaceService {
             surveys: Arc::new(Mutex::new(HashMap::new())),
             opening: SingleFlight::new(),
             raised: Arc::new(Mutex::new(HashMap::new())),
+            scratch: Mutex::new(HashMap::new()),
         }
     }
 
@@ -491,6 +495,14 @@ impl SurfaceService {
         Ok(SurveyLog::clone(&opened))
     }
 
+    /// Universe `universe`'s scratch survey log, the passes of training (`VIEW`'s body
+    /// inspection's; the owner's delegated call, 2026-11-01): made empty on its first use and kept
+    /// while the server runs, never written, and never read for a live request.
+    #[must_use]
+    pub(crate) fn scratch_surveys(&self, universe: UniverseId) -> ScratchSurveyLog {
+        lock(&self.scratch).entry(universe).or_default().clone()
+    }
+
     /// A receiver of universe `universe`'s [`RaisedRevisions`]: woken whenever a survey pass of one
     /// of its bodies is recorded, the body's revision raised in it (R09.T19.b).
     ///
@@ -683,6 +695,7 @@ impl fmt::Debug for SurfaceService {
             .field("passes_free", &self.fields.passes.available_permits())
             .field("prefetching", &prefetching)
             .field("survey_logs", &lock(&self.surveys).len())
+            .field("scratch_survey_logs", &lock(&self.scratch).len())
             .finish_non_exhaustive()
     }
 }

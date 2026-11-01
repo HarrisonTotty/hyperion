@@ -218,6 +218,7 @@ import type { SurfaceHeaderDto } from "./generated/SurfaceHeaderDto";
 import type { SurfaceRevisionDto } from "./generated/SurfaceRevisionDto";
 import type { SurveyPassDto } from "./generated/SurveyPassDto";
 import type { SurveyPassRequest } from "./generated/SurveyPassRequest";
+import type { SurveyScopeDto } from "./generated/SurveyScopeDto";
 import type { SurveySourceDto } from "./generated/SurveySourceDto";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
@@ -566,6 +567,7 @@ export type {
   SurfaceRevisionDto,
   SurveyPassDto,
   SurveyPassRequest,
+  SurveyScopeDto,
   SurveySourceDto,
   SeedHex,
   ServerMessage,

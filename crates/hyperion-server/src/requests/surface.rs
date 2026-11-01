@@ -11,7 +11,9 @@
 //! raises the body's revision on the universe's scene topic, whose subscriptions name it in their
 //! next notification's `surface_revisions`. A pass of a body whose inputs are modelled also starts
 //! the body's field, so that the `surface_field` that follows finds it computed or computing
-//! (Design note 19).
+//! (Design note 19). A pass marked for training (`scope` `training`, `VIEW`'s body inspection's;
+//! the owner's delegated call, 2026-11-01) goes to the universe's scratch log instead
+//! ([`ScratchSurveyLog`]): never to its file, and raising nothing on its scene topic.
 //!
 //! A `surface_field` resolves its body in the same order, answers a body whose inputs are not
 //! modelled `not_modelled` from the same interactive job, with no bulk slot taken, and reads the
@@ -20,16 +22,19 @@
 //! on a bulk job, gated by the coverage ([`gate`]): the surveyed cells with their codes and their
 //! margin, the climate over them and every crater that reaches them, and with `have_revision`
 //! only what the client's revision did not hold (Design notes 15 to 17). Its bytes are R03's bulk
-//! payload, sent as binary frames before the answer ([`Answer`]).
+//! payload, sent as binary frames before the answer ([`Answer`]). A request marked for training
+//! reads the scratch log alone, and an unmarked one never reads it, so the live scene's field is
+//! gated by the universe's passes whatever training has surveyed.
 //!
 //! [`SurfaceService::field_level`]: crate::surface::SurfaceService::field_level
+//! [`ScratchSurveyLog`]: crate::knowledge::surveys::ScratchSurveyLog
 
 use std::sync::Arc;
 
 use axum::body::Bytes;
 use hyperion_protocol::{
     BodyIdHex, ErrorCode, RequestError, ResponseBody, SurfaceFieldDto, SurfaceFieldRequest,
-    SurveyPassDto, SurveyPassRequest,
+    SurveyPassDto, SurveyPassRequest, SurveyScopeDto,
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::ResolveBodyError;
@@ -59,7 +64,8 @@ use crate::surface::{FieldKey, FieldLevel, SurfaceJobError};
 /// same, at the level of its record's figure ([`FieldLevel::NotModelled`]; ruled 2026-10-13), and
 /// starts no field; one whose inputs are modelled starts its field, which the answer does not wait
 /// for. A pass that has reached the log stays there if the client cancels the request meanwhile, as
-/// a universe created after its requester gave up stays created.
+/// a universe created after its requester gave up stays created. A pass marked for training is
+/// recorded in the universe's scratch log, and the universe's survey log is not opened for it.
 ///
 /// # Errors
 ///
@@ -73,7 +79,8 @@ use crate::surface::{FieldKey, FieldLevel, SurfaceJobError};
 /// cell; `queue_full`, `internal` or `cancelled` from the pool's jobs; `internal` if the server
 /// fails to read the body's records into its inputs (a moon's planet's record missing among them;
 /// R09.T10.f), which only a server fault makes; `unsupported_save_format` or `internal` if the
-/// universe's survey log cannot be opened; and `storage_failed` if the pass cannot be saved.
+/// universe's survey log cannot be opened; and `storage_failed` if the pass cannot be saved. A
+/// pass marked for training is never opened or saved.
 pub(crate) async fn survey_pass(
     state: Arc<AppState>,
     request: SurveyPassRequest,
@@ -90,15 +97,18 @@ pub(crate) async fn survey_pass(
         .await
         .map_err(|error| surface_refusal(&request.body, error))?;
     let pass = wanted.into_pass(level.level())?;
-    let log = state
-        .surface
-        .survey_log(state.registry.store(), universe.id())
-        .await
-        .map_err(|error| open_surveys_refusal(&error))?;
-    let revision = log
-        .record(pass)
-        .await
-        .map_err(|error| record_survey_refusal(&error))?;
+    let recorded = match request.scope {
+        SurveyScopeDto::Live => {
+            let log = state
+                .surface
+                .survey_log(state.registry.store(), universe.id())
+                .await
+                .map_err(|error| open_surveys_refusal(&error))?;
+            log.record(pass).await
+        }
+        SurveyScopeDto::Training => state.surface.scratch_surveys(universe.id()).record(pass),
+    };
+    let revision = recorded.map_err(|error| record_survey_refusal(&error))?;
     let field_started = match level {
         FieldLevel::Modelled(_) => state.surface.prefetch(field, &system),
         FieldLevel::NotModelled { .. } => false,
@@ -106,6 +116,7 @@ pub(crate) async fn survey_pass(
     tracing::debug!(
         body = request.body.as_str(),
         %revision,
+        scope = ?request.scope,
         field_started,
         "recorded a survey pass"
     );
@@ -123,7 +134,9 @@ pub(crate) async fn survey_pass(
 /// the delta since that revision: the cells of the body's cover and margin that the client's did
 /// not hold, or held with another code, and the answer's `coverage` names them alone. The field is
 /// computed on the first request for it, or found computing or kept, and the payload encoded on a
-/// bulk job; the same request at the same revision gives the same bytes.
+/// bulk job; the same request at the same revision gives the same bytes. A request marked for
+/// training is gated, and its revisions counted, by the universe's scratch log alone, and the
+/// universe's survey log is not opened for it.
 ///
 /// # Errors
 ///
@@ -165,12 +178,18 @@ pub(crate) async fn field(
         }
         Err(error) => return Err(surface_refusal(&request.body, error)),
     }
-    let log = state
-        .surface
-        .survey_log(state.registry.store(), universe.id())
-        .await
-        .map_err(|error| open_surveys_refusal(&error))?;
-    let history = log.history(asked.body());
+    let history = match request.scope {
+        SurveyScopeDto::Live => state
+            .surface
+            .survey_log(state.registry.store(), universe.id())
+            .await
+            .map_err(|error| open_surveys_refusal(&error))?
+            .history(asked.body()),
+        SurveyScopeDto::Training => state
+            .surface
+            .scratch_surveys(universe.id())
+            .history(asked.body()),
+    };
     let latest = history.as_ref().map(|history| history.latest().revision());
     let since = asked.since(latest)?;
     let revision = latest.map_or(0, CoverageRevision::get);
@@ -193,6 +212,7 @@ pub(crate) async fn field(
     tracing::debug!(
         body = request.body.as_str(),
         revision,
+        scope = ?request.scope,
         since = since.map(CoverageRevision::get),
         bytes = payload.manifest().bytes,
         "answered a body's coarse field"
@@ -539,6 +559,7 @@ mod tests {
                 .iter()
                 .map(|&(start, end)| CellRangeDto { start, end })
                 .collect(),
+            scope: SurveyScopeDto::Live,
         }
     }
 
@@ -645,6 +666,117 @@ mod tests {
             harness.state().surface.counters().computed() == 2
         })
         .await;
+        harness.stop().await;
+    }
+
+    /// `request` marked for training.
+    fn training(mut request: SurveyPassRequest) -> SurveyPassRequest {
+        request.scope = SurveyScopeDto::Training;
+        request
+    }
+
+    /// The universe's survey file, `None` before its first pass made it.
+    fn survey_file(harness: &Harness, universe: &UniverseIdHex) -> Option<Vec<u8>> {
+        let path = harness
+            .state()
+            .registry
+            .store()
+            .knowledge_dir(UniverseId::from(universe))
+            .join("surveys.v1.jsonl");
+        match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => panic!("reading {}: {error}", path.display()),
+        }
+    }
+
+    /// A pass marked for training leaves the universe's survey log byte for byte as it was, whether
+    /// or not the universe has a file yet, counts its own revisions in the scratch log, and raises
+    /// nothing on the scene topic.
+    #[tokio::test]
+    async fn a_training_pass_leaves_the_universe_s_log_unchanged() {
+        let (harness, universe) = started(Ceres).await;
+        let solid = bodies().solid;
+        let id = UniverseId::from(&universe);
+        let raised = harness.state().surface.watch_surveys(id);
+        let whole = ceres_level().cell_count();
+        assert_eq!(
+            revision(survey(&harness, training(pass(&universe, solid, &[(0, whole)]))).await),
+            1
+        );
+        assert_eq!(survey_file(&harness, &universe), None, "no file is made");
+        assert_eq!(raised.borrow().get(solid), None);
+
+        assert_eq!(
+            revision(survey(&harness, pass(&universe, solid, &[(0, 8)])).await),
+            1,
+            "the universe's log counts its own passes"
+        );
+        let before = survey_file(&harness, &universe).expect("the live pass made the file");
+        let raised_before = raised.borrow().clone();
+        assert_eq!(
+            revision(survey(&harness, training(pass(&universe, solid, &[(8, 16)]))).await),
+            2
+        );
+        assert_eq!(survey_file(&harness, &universe), Some(before));
+        assert_eq!(*raised.borrow(), raised_before, "no revision raised");
+        assert_eq!(
+            log(&harness, &universe)
+                .await
+                .coverage(solid)
+                .map(|coverage| (coverage.revision().get(), coverage.surveyed())),
+            Some((1, 8))
+        );
+        harness.stop().await;
+    }
+
+    /// A body surveyed whole in training reads surveyed to a field request marked for training
+    /// alone: a live request for it still reads it unsurveyed, at revision 0, and a body the
+    /// universe's log covers is gated for training by the scratch log alone.
+    #[tokio::test]
+    async fn a_body_surveyed_in_training_is_surveyed_for_training_alone() {
+        let (harness, universe) = started(Ceres).await;
+        let Bodies {
+            solid, other_solid, ..
+        } = *bodies();
+        let level = ceres_level();
+        let whole = level.cell_count();
+        revision(survey(&harness, training(pass(&universe, solid, &[(0, whole)]))).await);
+        let marked = |body, have| SurfaceFieldRequest {
+            scope: SurveyScopeDto::Training,
+            ..field_request(&universe, body, have)
+        };
+
+        let live = served(ask(&harness, field_request(&universe, solid, None)).await);
+        assert_eq!(
+            (live.revision, live.coverage.ranges.len()),
+            (0, 0),
+            "the live scene reads it unsurveyed"
+        );
+        let inspected = served(ask(&harness, marked(solid, None)).await);
+        let code = ResolutionCode::from_resolution(Metres::new(120.0)).unwrap();
+        assert_eq!(inspected.revision, 1);
+        assert_eq!(
+            inspected.coverage,
+            cover_dto(&cover_of(&[(0, whole)], code).with_margin(level, SYNTHESIS_MARGIN_CELLS)),
+            "training reads every cell surveyed"
+        );
+        let ahead = ask(&harness, field_request(&universe, solid, Some(1)))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (ahead.code, ahead.field),
+            bad("have_revision"),
+            "the scratch revision is no revision of the universe's log"
+        );
+
+        revision(survey(&harness, pass(&universe, other_solid, &[(0, 8)])).await);
+        let unsurveyed = served(ask(&harness, marked(other_solid, None)).await);
+        assert_eq!(
+            (unsurveyed.revision, unsurveyed.coverage.ranges.len()),
+            (0, 0),
+            "the universe's passes do not gate a training request"
+        );
         harness.stop().await;
     }
 
@@ -821,6 +953,7 @@ mod tests {
                     };
                     MAX_SURVEY_RANGES
                 ],
+                scope: SurveyScopeDto::Training,
             }),
         };
         let text = serde_json::to_string(&widest).unwrap();
@@ -912,6 +1045,7 @@ mod tests {
             universe: universe.clone(),
             body: hex(body),
             have_revision,
+            scope: SurveyScopeDto::Live,
         }
     }
 

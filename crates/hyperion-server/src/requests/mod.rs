@@ -1283,8 +1283,9 @@ mod tests {
         MassLayer, OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
         SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
         StreamTrackRequest, SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest,
-        SurveyPassRequest, SurveySourceDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
-        SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        SurveyPassRequest, SurveyScopeDto, SurveySourceDto, SystemBodiesRequest, SystemIdHex,
+        SystemSummaryRequest, SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime,
+        UnsubscribeRequest,
     };
 
     use tokio::time::timeout;
@@ -1385,6 +1386,7 @@ mod tests {
                 universe: UniverseIdHex::from_u64(42),
                 body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
                 have_revision: None,
+                scope: SurveyScopeDto::Live,
             }),
             RequestBody::SurveyPass(SurveyPassRequest {
                 universe: UniverseIdHex::from_u64(42),
@@ -1394,6 +1396,7 @@ mod tests {
                 source: SurveySourceDto::Orbital,
                 resolution_m: 100.0,
                 cells: Vec::new(),
+                scope: SurveyScopeDto::Live,
             }),
             RequestBody::ExtinctionMap(ExtinctionMapRequest {
                 universe: UniverseIdHex::from_u64(42),

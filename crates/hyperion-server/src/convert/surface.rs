@@ -535,7 +535,7 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use hyperion_protocol::UniverseIdHex;
+    use hyperion_protocol::{SurveyScopeDto, UniverseIdHex};
     use hyperion_sim::Seed;
     use hyperion_sim::orbit::BuildOrbitError;
     use hyperion_sim::planetary::DecodeBodyIndexError;
@@ -667,6 +667,7 @@ mod tests {
                 universe: UniverseIdHex::from_u64(42),
                 body: body(),
                 have_revision,
+                scope: SurveyScopeDto::Live,
             })
             .unwrap()
         };
@@ -696,6 +697,7 @@ mod tests {
             universe: UniverseIdHex::from_u64(42),
             body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0xd000),
             have_revision: None,
+            scope: SurveyScopeDto::Live,
         })
         .unwrap_err();
         assert_eq!(

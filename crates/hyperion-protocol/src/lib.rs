@@ -140,7 +140,7 @@ pub use surface::{
     CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, LiquidBasisDto, LiquidDto,
     PaletteEntryDto, PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto, SURFACE_LIQUID_BINS,
     SurfaceFieldDto, SurfaceFieldRequest, SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassDto,
-    SurveyPassRequest, SurveySourceDto,
+    SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,

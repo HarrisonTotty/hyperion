@@ -77,7 +77,9 @@
 //!
 //! Nothing holds a universe's Knowledge yet (P12.T8 will), so the service opens each universe's
 //! [`SurveyLog`](crate::knowledge::surveys::SurveyLog) on its first use and keeps it
-//! (`SurfaceService::survey_log`): a universe's survey file has one writer (R09.T18).
+//! (`SurfaceService::survey_log`): a universe's survey file has one writer (R09.T18). Beside it,
+//! each universe's `ScratchSurveyLog` keeps the passes of training in memory alone
+//! (`SurfaceService::scratch_surveys`).
 //!
 //! # The floating-point mode
 //!

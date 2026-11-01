@@ -46,6 +46,14 @@
 //! client grant its ship coverage, as the server grants detail levels today. A pass carries at
 //! most the server's `MAX_SURVEY_RANGES` (256) ranges, which keeps its frame under plan 04's
 //! 16 KiB inbound limit; a longer pass is sent as several requests sharing its time span.
+//!
+//! # Training
+//!
+//! A pass and a field request may be marked for training ([`SurveyScopeDto::Training`]), as
+//! `VIEW`'s body inspection marks its own (the owner's delegated call, 2026-11-01): the server keeps
+//! a marked pass in a scratch log of its own, never in the universe's, and gates a marked request's
+//! field by the scratch log alone, so that a training scene never changes what the live game has
+//! surveyed. A marked pass raises no revision on the scene topic.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -80,6 +88,12 @@ pub struct SurfaceFieldRequest {
     /// then carries only the cells surveyed since. `null` (or 0) for the whole surveyed field. A
     /// revision above the body's own is `bad_request` naming `have_revision`.
     pub have_revision: Option<u32>,
+    /// Whose passes gate the field: the universe's survey log when absent; when `training`, the
+    /// scratch log of the passes marked for training alone, whose revisions are its own. Written
+    /// only when `training`, so that a request of R09's form is unchanged.
+    #[serde(default, skip_serializing_if = "SurveyScopeDto::is_live")]
+    #[ts(as = "Option<SurveyScopeDto>", optional)]
+    pub scope: SurveyScopeDto,
 }
 
 /// A body's coarse field, the answer to `surface_field`, tagged by `state`.
@@ -457,6 +471,32 @@ pub enum SurveySourceDto {
     Landed,
 }
 
+/// Where a survey pass is kept, and whose passes gate a field: the universe's survey log, or the
+/// scratch log of training that the server keeps apart from it and never writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SurveyScopeDto {
+    /// The universe's survey log, which the live game reads.
+    #[default]
+    Live,
+    /// The training scratch log, which only a request marked `training` reads.
+    Training,
+}
+
+impl SurveyScopeDto {
+    /// Whether this is [`Live`](Self::Live), which the wire leaves out so that a request of R09's
+    /// form is written as it was.
+    #[must_use]
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `skip_serializing_if` passes the field by reference"
+    )]
+    pub(crate) const fn is_live(&self) -> bool {
+        matches!(self, Self::Live)
+    }
+}
+
 /// Records one survey pass of a body (`survey_pass`), answered with a [`SurveyPassDto`].
 ///
 /// The body is resolved and refused as for a [`SurfaceFieldRequest`]. A field outside its range is
@@ -483,6 +523,12 @@ pub struct SurveyPassRequest {
     /// The cells it covered at the level of the body's field: at least one run, at most 256, in
     /// order and not overlapping (runs may meet).
     pub cells: Vec<CellRangeDto>,
+    /// Where the pass is kept: the universe's survey log when absent; when `training`, the scratch
+    /// log of training alone, never the universe's. Written only when `training`, so that a
+    /// request of R09's form is unchanged.
+    #[serde(default, skip_serializing_if = "SurveyScopeDto::is_live")]
+    #[ts(as = "Option<SurveyScopeDto>", optional)]
+    pub scope: SurveyScopeDto,
 }
 
 /// A survey pass recorded: the body's new coverage revision.
@@ -764,6 +810,7 @@ mod tests {
                 universe: universe(),
                 body: body(),
                 have_revision: Some(3),
+                scope: SurveyScopeDto::Live,
             },
             json!({
                 "universe": "000000000000002a",
@@ -776,11 +823,26 @@ mod tests {
                 universe: universe(),
                 body: body(),
                 have_revision: None,
+                scope: SurveyScopeDto::Live,
             },
             json!({
                 "universe": "000000000000002a",
                 "body": "0200080020000000.0103",
                 "have_revision": null,
+            }),
+        );
+        assert_wire_form(
+            &SurfaceFieldRequest {
+                universe: universe(),
+                body: body(),
+                have_revision: Some(1),
+                scope: SurveyScopeDto::Training,
+            },
+            json!({
+                "universe": "000000000000002a",
+                "body": "0200080020000000.0103",
+                "have_revision": 1,
+                "scope": "training",
             }),
         );
     }
@@ -876,6 +938,7 @@ mod tests {
                         end: 1_001,
                     },
                 ],
+                scope: SurveyScopeDto::Live,
             },
             json!({
                 "universe": "000000000000002a",
@@ -890,6 +953,37 @@ mod tests {
                 ],
             }),
         );
+    }
+
+    /// A pass marked for training carries `scope`; one of R09's form, with none, reads as live.
+    #[test]
+    fn survey_pass_request_training_wire_form() {
+        let pass = |scope| SurveyPassRequest {
+            universe: universe(),
+            body: body(),
+            from: UniverseTime::default(),
+            to: UniverseTime::default(),
+            source: SurveySourceDto::Orbital,
+            resolution_m: 50.0,
+            cells: vec![CellRangeDto {
+                start: 0,
+                end: 6_144,
+            }],
+            scope,
+        };
+        let wire = json!({
+            "universe": "000000000000002a",
+            "body": "0200080020000000.0103",
+            "from": { "seconds": 0, "nanos": 0 },
+            "to": { "seconds": 0, "nanos": 0 },
+            "source": "orbital",
+            "resolution_m": 50.0,
+            "cells": [{ "start": 0, "end": 6_144 }],
+        });
+        assert_wire_form(&pass(SurveyScopeDto::Live), wire.clone());
+        let mut training = wire;
+        training["scope"] = json!("training");
+        assert_wire_form(&pass(SurveyScopeDto::Training), training);
     }
 
     #[test]
@@ -914,6 +1008,10 @@ mod tests {
             (SurveySourceDto::Orbital, "orbital"),
             (SurveySourceDto::CloseRange, "close_range"),
             (SurveySourceDto::Landed, "landed"),
+        ]);
+        assert_wire_strings(&[
+            (SurveyScopeDto::Live, "live"),
+            (SurveyScopeDto::Training, "training"),
         ]);
         assert_wire_strings(&[
             (ClimateModelDto::EnergyBalance, "energy_balance"),

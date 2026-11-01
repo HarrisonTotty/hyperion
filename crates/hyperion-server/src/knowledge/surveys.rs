@@ -34,6 +34,12 @@
 //! to tell its subscribers which bodies' coverage grew (`SurveyLog::open_announcing`, which the
 //! surface service opens each universe's log with).
 //!
+//! # Training
+//!
+//! The passes of training, `VIEW`'s body inspection's, are kept apart in a `ScratchSurveyLog`
+//! (the owner's delegated call, 2026-11-01): folded as the log's are, in memory alone, so that a
+//! training scene never changes the universe's file or what the live scene reads.
+//!
 //! [`cell_index`]: hyperion_surface::field::cell_index
 //! [`coarse_level`]: hyperion_surface::field::coarse_level
 
@@ -600,6 +606,21 @@ struct BodySurveys {
 }
 
 impl Surveys {
+    /// Body `body`'s coverage as it stands, shared, or `None` if no pass has covered it.
+    fn coverage(&self, body: BodyId) -> Option<Arc<Coverage>> {
+        self.bodies
+            .get(&body)
+            .map(|body| Arc::clone(&body.coverage))
+    }
+
+    /// Body `body`'s coverage with its passes, shared, or `None` if no pass has covered it.
+    fn history(&self, body: BodyId) -> Option<CoverageHistory> {
+        self.bodies.get(&body).map(|body| CoverageHistory {
+            latest: Arc::clone(&body.coverage),
+            passes: body.passes.clone(),
+        })
+    }
+
     /// The revision `pass` would fold in at: refused if it does not fit its body's coverage.
     fn next_revision(&self, pass: &SurveyPass) -> Result<CoverageRevision, FitPassError> {
         self.bodies
@@ -735,10 +756,7 @@ impl SurveyLog {
     /// its codes and its revision always agree.
     #[must_use]
     pub fn coverage(&self, body: BodyId) -> Option<Arc<Coverage>> {
-        lock(&self.shared.surveys)
-            .bodies
-            .get(&body)
-            .map(|body| Arc::clone(&body.coverage))
+        lock(&self.shared.surveys).coverage(body)
     }
 
     /// Body `body`'s coverage with its passes, or `None` if no pass has covered it: one snapshot,
@@ -748,13 +766,40 @@ impl SurveyLog {
     /// Taking it shares the passes rather than copying them.
     #[must_use]
     pub fn history(&self, body: BodyId) -> Option<CoverageHistory> {
-        lock(&self.shared.surveys)
-            .bodies
-            .get(&body)
-            .map(|body| CoverageHistory {
-                latest: Arc::clone(&body.coverage),
-                passes: body.passes.clone(),
-            })
+        lock(&self.shared.surveys).history(body)
+    }
+}
+
+/// A universe's scratch survey log: the passes of training, kept apart from its [`SurveyLog`] (the
+/// module's "Training").
+///
+/// A pass folds as the log's do, and each body's revisions count its scratch passes alone. It is
+/// kept in memory and never written, and raises no revision on the scene topic, which tells the
+/// live scene alone; the server's run is its session until sessions exist. What it holds grows
+/// only with the operator's inspections: a body's coverage, 384 KiB at level 8, and one pass an
+/// opening. Cloning shares it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ScratchSurveyLog {
+    surveys: Arc<Mutex<Surveys>>,
+}
+
+impl ScratchSurveyLog {
+    /// Records `pass` and returns its body's new revision in the scratch log:
+    /// [`CoverageRevision::FIRST`] for the body's first scratch pass, and one more for each after.
+    ///
+    /// # Errors
+    ///
+    /// [`RecordSurveyError::Level`] if the body's earlier scratch passes index another level, and
+    /// [`RecordSurveyError::Revisions`] if it has 2³² − 1 of them already; nothing is recorded.
+    pub(crate) fn record(&self, pass: SurveyPass) -> Result<CoverageRevision, RecordSurveyError> {
+        Ok(lock(&self.surveys).apply(pass)?)
+    }
+
+    /// Body `body`'s scratch coverage with its passes, or `None` if no scratch pass has covered it
+    /// ([`SurveyLog::history`]).
+    #[must_use]
+    pub(crate) fn history(&self, body: BodyId) -> Option<CoverageHistory> {
+        lock(&self.surveys).history(body)
     }
 }
 
@@ -1142,6 +1187,34 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    /// The scratch log folds the passes as the universe's log does, revisions, codes and history
+    /// alike, and holds them apart from it: the log's coverage stays its own.
+    #[tokio::test]
+    async fn scratch_passes_fold_as_the_log_s_do_and_stay_apart_from_it() {
+        let (_dir, store) = universe();
+        let log = SurveyLog::open(&store, UNIVERSE).await.unwrap();
+        let passes = passes();
+        assert_eq!(record_all(&log, &passes[..1]).await, [1]);
+        let scratch = ScratchSurveyLog::default();
+        let revisions: Vec<u32> = passes
+            .iter()
+            .map(|pass| scratch.record(pass.clone()).unwrap().get())
+            .collect();
+        assert_eq!(revisions, [1, 2, 3, 4, 1]);
+        let (_folded_dir, folded_store) = universe();
+        let folded = SurveyLog::open(&folded_store, UNIVERSE).await.unwrap();
+        record_all(&folded, &passes).await;
+        for body in [earth(), moon()] {
+            assert_eq!(scratch.history(body), folded.history(body), "{body}");
+        }
+        assert_eq!(
+            log.coverage(earth()).unwrap().revision().get(),
+            1,
+            "the universe's log holds its own pass alone"
+        );
+        assert_eq!(log.coverage(moon()), None);
     }
 
     /// R09.T18: what is written is what is read back, every pass to the bit, under a header of
