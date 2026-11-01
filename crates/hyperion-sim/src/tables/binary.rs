@@ -887,7 +887,7 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///
 /// Version 27's (P11.T8.c's missing channel; research-leans-16 §1.1) add a choice and five marks,
 /// scratch, shaped on the engine's own mergers under every 26 hold (48,000 members, an effective
-/// 1,259; `merger/engine_channels_hold.rs`'s slow test prints them) and not fitted:
+/// 1,259 when measured; `merger/engine_channels_hold.rs`'s slow test prints them) and not fitted:
 ///
 /// - **The channel** among three: 0.15 contact, as at 26, the light curves' evidence; 0.50 evolved
 ///   donor and 0.35 dynamical main sequence, the rest split about as the engine's evolved donors

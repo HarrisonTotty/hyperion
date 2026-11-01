@@ -15,7 +15,7 @@
 //! - Every entry is its class at every age, under one candidate in ten fails, the scan keeps
 //!   exactly the cells' entries without stepping the engine, and the cells do not depend on the
 //!   order they are generated in.
-//! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,259 (17
+//! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,233 (17
 //!   times P11.T8.c's 73), by chi-square per degree of freedom by mark under every 27 hold and
 //!   under the 26 arm, pinned as measured, with the engine's channel split and its donors' mass
 //!   ratios by kind printed.
@@ -491,7 +491,7 @@ fn the_27_cells_do_not_depend_on_order() {
     });
 }
 
-/// The engine members the slow test measures the class against: 48,000, an effective 1,259 under
+/// The engine members the slow test measures the class against: 48,000, an effective 1,233 under
 /// these weights, 17 times P11.T8.c's 3,000 (an effective 73).
 const REFERENCE_MEMBERS: usize = 48_000;
 
@@ -680,7 +680,7 @@ fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
 
 /// The class against the engine under every 27 hold and under the 26 arm (P11.T8.c's missing
 /// channel): the pair's total mass, mass ratio and primary's initial mass of the engine's own
-/// mergers, 48,000 members weighted as mergers in the horizon (an effective 1,259), in the
+/// mergers, 48,000 members weighted as mergers in the horizon (an effective 1,233), in the
 /// deciles of 10,000 of the class's entries in the same place ([`catalogue`]), by chi-square per
 /// degree of freedom, pinned as measured (a miss of P15.T10.b's 3.1 is a finding); with the same
 /// against the engine's mergers the class's channels cover, the engine's shares of the class's
@@ -737,20 +737,21 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 }
 
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass
-/// under every 27 hold and under the 26 arm, as measured (2026-11-01; at an effective 73 the 26
-/// arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins), all over P15.T10.b's 3.1: a finding,
-/// for P15.T10.b's fit. The dynamical channel takes the mass ratio's from 172 to 63; the masses'
+/// under every 27 hold and under the 26 arm, as measured (2026-11-01, re-measured once every 27
+/// hold took P15.T11.b's orphan streams, whose galaxy draws this reference; at an effective 73 the
+/// 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins), all over P15.T10.b's 3.1: a finding,
+/// for P15.T10.b's fit. The dynamical channel takes the mass ratio's from 166 to 62; the masses'
 /// stay high, the engine holding 13% of its primaries in layers D and E against the class's 1.3%
 /// and its giant-branch donors heavier (median 1.69 M☉) than the class's at the turn-off.
 const PINNED_CHI_SQUARE: [[f64; 3]; 2] = [
     [
-        215.481_505_446_486_72,
-        63.170_840_393_519_21,
-        309.495_424_617_351_4,
+        213.826_907_176_875_4,
+        62.288_584_415_560_166,
+        305.282_917_827_972_14,
     ],
     [
-        183.199_901_405_426_4,
-        172.202_530_443_945_4,
-        290.700_083_190_533_5,
+        182.057_675_866_719_88,
+        166.149_729_763_708_96,
+        286.244_102_393_490_04,
     ],
 ];

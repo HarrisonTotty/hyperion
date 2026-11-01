@@ -7130,6 +7130,8 @@ galaxy_sweeps`.
   - _Measured_ (48,000 engine members, an effective 1,259, 17 times P11.T8.c's 73; 10,000 entries
     a side in the reference's own cells), χ²/dof of log total mass, mass ratio, log primary mass:
     27, 215, 63, 310; the 26 arm, 183, 172, 291 (at an effective 73 it read 14.2, 12.1, 16.0).
+    Re-pinned once every 27 hold took P15.T11.b's orphan streams, whose galaxy draws the reference
+    (an effective 1,233): 27, 214, 62, 305; the 26 arm, 182, 166, 286.
     The engine holds 13% of its primaries in layers D–E against the class's 1.3%, its giant-branch
     donors are heavier (median 1.69 M☉) than the class's at the turn-off, and its evolved donors
     are 8% gap, 78% giant branch, 14% AGB and no helium burning against the class's 31%, 47%, 0%
