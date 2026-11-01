@@ -72,6 +72,10 @@
 //! - [`hypervelocity`](GalaxyRules::hypervelocity), at [`HYPERVELOCITY_VERSION`] (plan 09,
 //!   P09.T34.b): the hypervelocity survivors' class has its weight in layer D. It is read where the
 //!   class table is built, with the galaxy, so `Galaxy::with_rules` refuses to change it.
+//! - [`orphan_spray`](GalaxyRules::orphan_spray), at [`ORPHAN_SPRAY_VERSION`] (plan 10, P10.T10.b's
+//!   warm-up, at 27): an orphan's tube is sprayed from 500 tracers an arm at ruling 146.3's `τ_p ÷
+//!   32`. It is read where a stream's spray is set (`SprayParams::of_stream`), and reaches none of
+//!   the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -97,6 +101,7 @@ use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRu
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
+use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
 use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
 use crate::stellar::rules::StellarRules;
 
@@ -142,6 +147,9 @@ pub(crate) struct GalaxyRules {
     /// Whether the hypervelocity survivors' class has its weight in layer D (P09.T34.b), which the
     /// class table reads where the galaxy is built.
     pub(crate) hypervelocity: HypervelocityRules,
+    /// How an orphan's tube is sprayed: as every stream's, or from fewer tracers at a longer step
+    /// (P10.T10.b's warm-up).
+    pub(crate) orphan_spray: OrphanSprayRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -227,6 +235,11 @@ impl GalaxyRules {
             } else {
                 HypervelocityRules::Unweighted
             },
+            orphan_spray: if version.get() >= ORPHAN_SPRAY_VERSION.get() {
+                OrphanSprayRules::Coarse
+            } else {
+                OrphanSprayRules::Exact
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -250,9 +263,9 @@ impl GalaxyRules {
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
     /// hold ([`GalaxyRules::every_26_hold`]), the galaxy's at 27 (`orphan_streams`, P15.T11.b,
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
-    /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, and `hypervelocity`,
-    /// P09.T34.b) and the stellar rules' `ia_explosion`, P11.T6, `ns_accretion`, P11.T4, and
-    /// `binary_kicks`, P11.T10 ([`StellarRules::every_27_hold`]).
+    /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
+    /// P09.T34.b, and `orphan_spray`, P10.T10.b's warm-up) and the stellar rules' `ia_explosion`,
+    /// P11.T6, `ns_accretion`, P11.T4, and `binary_kicks`, P11.T10 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -510,6 +523,15 @@ mod tests {
             GalaxyRules::every_27_hold().hypervelocity,
             HypervelocityRules::Weighted
         );
+        let spray = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).orphan_spray;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(spray(v), OrphanSprayRules::Exact, "{v}");
+        }
+        assert_eq!(spray(27), OrphanSprayRules::Coarse);
+        assert_eq!(
+            GalaxyRules::every_26_hold().orphan_spray,
+            OrphanSprayRules::Exact
+        );
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
@@ -520,6 +542,7 @@ mod tests {
                 feature_binaries: FeatureBinariesRules::Listed,
                 runaway_deaths: RunawayDeathsRules::Ejected,
                 hypervelocity: HypervelocityRules::Weighted,
+                orphan_spray: OrphanSprayRules::Coarse,
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
                 ..GalaxyRules::every_26_hold()
             }

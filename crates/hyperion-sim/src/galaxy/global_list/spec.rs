@@ -38,6 +38,8 @@
 //! to the last major merger, whichever is shorter"). `T_s` also stops at a cluster's age, since no
 //! cluster lost stars before it formed (P10.T3, as built).
 
+use std::num::NonZeroU32;
+
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::potential::PotentialTables;
@@ -392,6 +394,25 @@ impl SphericalOrbit {
             Metres::from(self.pericentre()),
             MetresPerSecond::from(self.pericentre_speed()),
             span,
+        )
+    }
+
+    /// [`fixed_step`](Self::fixed_step) at `steps` steps per pericentre crossing
+    /// ([`FixedStep::with_steps_per_crossing`]): `fixed_step`'s, bit for bit, at 64.
+    ///
+    /// # Errors
+    ///
+    /// As [`fixed_step`](Self::fixed_step).
+    pub fn fixed_step_at(
+        &self,
+        span: Seconds,
+        steps: NonZeroU32,
+    ) -> Result<FixedStep, BuildLeapfrogError> {
+        FixedStep::with_steps_per_crossing(
+            Metres::from(self.pericentre()),
+            MetresPerSecond::from(self.pericentre_speed()),
+            span,
+            steps,
         )
     }
 }

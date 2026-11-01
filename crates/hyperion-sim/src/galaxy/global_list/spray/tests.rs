@@ -270,6 +270,25 @@ fn a_spray_and_its_table_are_shared_between_threads() {
     shared::<SprayForce>();
 }
 
+/// The tripwire of the hold: below 27 every galaxy sprays every stream at the step rule's 64 and
+/// 1,000 tracers an arm.
+#[test]
+fn the_orphan_spray_is_held_only_until_the_27_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < ORPHAN_SPRAY_VERSION,
+        "the 26 → 27 bump sprays every orphan's tube from 500 tracers an arm at ruling 146.3's \
+         τ_p ÷ 32 (P10.T10.b's warm-up): every orphan's tube table, its members and the range \
+         query's answers in it move. Delete `ORPHAN_SPRAY_VERSION`, `OrphanSprayRules` with its \
+         `Exact` arm, `GalaxyRules::orphan_spray` and this test in the bump's own commit, and \
+         re-pin by name what plan 10's records list for it (\"P10.T10.b's orphan spray, held \
+         at 27\"): the server's warm-up digest and range answers, and P10.T12's figures"
+    );
+    assert_eq!(
+        crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_spray,
+        OrphanSprayRules::Exact
+    );
+}
+
 /// The Milky Way fixture's full tables and their spray table, built once for the checks below.
 mod milky_way {
     use std::sync::OnceLock;
@@ -343,6 +362,77 @@ mod milky_way {
         a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s();
         the_drawn_offsets_keep_their_dispersions_within_the_cut();
         the_energy_at_release_names_each_tracer_s_arm();
+    }
+
+    /// P10.T10.b's orphan spray, held at 27: through 26 every test stream is sprayed at the
+    /// generator's default; under 27's rules `gd1_like`, an orphan, from 500 tracers an arm at
+    /// `τ_p ÷ 32`, its step count halved, and `pal5_like` and `sagittarius_like` as before. At `τ_p
+    /// ÷ 32` each tracer's energy at the epoch is its energy at release within ruling 146.3's 5 ×
+    /// 10⁻⁴ (the leapfrog's error, the potential being static; 5.3 × 10⁻⁵ at worst over 200
+    /// tracers, x86-64), and a spray of the coarse step is pinned by its bits.
+    #[test]
+    fn under_27_an_orphan_is_sprayed_from_half_its_tracers_at_half_its_steps() {
+        let f = fixture();
+        let streams = test_streams();
+        for (name, spec) in &streams {
+            assert_eq!(
+                OrphanSprayRules::Exact.params(spec),
+                SprayParams::default(),
+                "{name}"
+            );
+        }
+        let coarse = OrphanSprayRules::Coarse;
+        assert_eq!(coarse.params(&streams[0].1), SprayParams::default());
+        assert_eq!(coarse.params(&streams[2].1), SprayParams::default());
+        let (name, gd1) = &streams[1];
+        assert!(
+            matches!(gd1.mass_loss(), MassLoss::Dissolved { .. }),
+            "{name}"
+        );
+        let params = coarse.params(gd1);
+        assert_eq!(
+            (params.tracers_per_arm(), params.steps_per_crossing()),
+            (ORPHAN_TRACERS_PER_ARM, ORPHAN_STEPS_PER_CROSSING)
+        );
+        let exact = SprayParams::default()
+            .fixed_step(gd1)
+            .expect("a finite span");
+        let half = params.fixed_step(gd1).expect("a finite span");
+        assert!(
+            (2 * half.count()).abs_diff(exact.count()) <= 2,
+            "{} steps against {}",
+            half.count(),
+            exact.count()
+        );
+        let few = SprayParams::new(NonZeroU32::new(100).expect("not zero"))
+            .with_steps_per_crossing(NonZeroU32::new(ORPHAN_STEPS_PER_CROSSING).expect("32"));
+        let sprayed = Spray::new(SEED, &f.force, &f.tables, gd1, &few).expect("a finite span");
+        assert_eq!(sprayed.schedule().step(), half);
+        let tracers = sprayed.tracers();
+        let energy = |x: [f64; 3], v: [f64; 3]| {
+            0.5 * dot(v, v) + f.force.potential_j_kg(&GalacticDisplacement::new(x))
+        };
+        let mut worst = 0.0_f64;
+        for t in &tracers {
+            let (x, v) = sprayed
+                .progenitor(t.release_step())
+                .expect("released on the track");
+            let released = energy(x.metres(), v.metres_per_second()) + t.energy_offset_j_kg();
+            let now = energy(t.position().metres(), t.velocity().metres_per_second());
+            worst = worst.max((now / released - 1.0).abs());
+        }
+        assert!(worst < 5e-4, "{name}: energy drifted by {worst:e}");
+        let mut bits = Vec::new();
+        for t in &tracers {
+            bits.extend(t.position().metres());
+            bits.extend(t.velocity().metres_per_second());
+            bits.extend([t.psi().value(), t.energy_offset_j_kg()]);
+        }
+        assert_eq!(
+            (tracers.len(), format!("{:016x}", f64_digest(&bits))),
+            (200, "c46e58ef7f92d4f0".to_owned()),
+            "{name} at τ_p ÷ 32, energy drift {worst:e}"
+        );
     }
 
     /// The bits of each test stream's specification and of a spray of four tracers an arm, and of

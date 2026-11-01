@@ -146,6 +146,7 @@
 use std::borrow::Cow;
 use std::num::NonZeroU32;
 
+use crate::GeneratorVersion;
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::{Galaxy, PointLy};
@@ -155,7 +156,7 @@ use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{LightYears, Radians, Seconds, SolarMasses, Years};
 
 use super::MassLoss;
-use super::orbit::{BuildLeapfrogError, FixedStep, cross, dot};
+use super::orbit::{BuildLeapfrogError, FixedStep, STEPS_PER_PERICENTRE_CROSSING, cross, dot};
 use super::spec::StreamSpec;
 
 mod force;
@@ -210,32 +211,93 @@ pub const OFFSET_WORDS: u64 = 4;
 /// that a stream has the brainstorm's "about 2,000" ("Streams and accreted structure").
 pub const TRACERS_PER_ARM: u32 = 1_000;
 
-/// The spray's settings: how many tracers each arm releases (module documentation).
+/// Tracers released from each Lagrange point of an orphan's spray from generator version 27, a
+/// parameter of the generator version: 500, so that, with [`ORPHAN_STEPS_PER_CROSSING`], an
+/// orphan's tube costs a quarter of its spray at 26 (P10.T10.b's warm-up, held at 27).
+pub const ORPHAN_TRACERS_PER_ARM: u32 = 500;
+
+/// Steps per pericentre crossing of an orphan's spray from generator version 27, a parameter of
+/// the generator version: ruling 146.3's fallback for the spray's budget, `τ_p ÷ 32`, half the
+/// step rule's [`STEPS_PER_PERICENTRE_CROSSING`].
+pub const ORPHAN_STEPS_PER_CROSSING: u32 = 32;
+
+/// The generator version from which an orphan's spray releases [`ORPHAN_TRACERS_PER_ARM`] tracers
+/// an arm at [`ORPHAN_STEPS_PER_CROSSING`] steps a pericentre crossing (the hold of
+/// [`OrphanSprayRules`], P10.T10.b's warm-up).
 ///
-/// [`SprayParams::default`] is the generator's, [`TRACERS_PER_ARM`]; a smaller count serves
-/// tests and benchmarks that need the shape of a spray and not its numbers.
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`OrphanSprayRules::Exact`], every stream's spray at [`TRACERS_PER_ARM`] and the step rule's
+/// 64, so every generated value keeps its bits; the tests reach the new arm through a galaxy built
+/// under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold, [`OrphanSprayRules`]
+/// with its `Exact` arm, the galaxy's `orphan_spray` field and its tripwire
+/// (`the_orphan_spray_is_held_only_until_the_27_bump`).
+pub(crate) const ORPHAN_SPRAY_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// How a galaxy's streams are sprayed (the hold of [`ORPHAN_SPRAY_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OrphanSprayRules {
+    /// Version 26's and before: every stream at [`TRACERS_PER_ARM`] and the step rule's 64 steps a
+    /// pericentre crossing, [`SprayParams::default`].
+    Exact,
+    /// Version 27's: an orphan's at [`ORPHAN_TRACERS_PER_ARM`] and [`ORPHAN_STEPS_PER_CROSSING`];
+    /// a living globular's and a dwarf's as before.
+    Coarse,
+}
+
+impl OrphanSprayRules {
+    /// The spray of `spec`'s stream under these rules.
+    #[must_use]
+    pub(crate) fn params(self, spec: &StreamSpec) -> SprayParams {
+        match (self, spec.mass_loss()) {
+            (Self::Coarse, MassLoss::Dissolved { .. }) => {
+                SprayParams::new(NonZeroU32::new(ORPHAN_TRACERS_PER_ARM).expect("500 is not zero"))
+                    .with_steps_per_crossing(
+                        NonZeroU32::new(ORPHAN_STEPS_PER_CROSSING).expect("32 is not zero"),
+                    )
+            }
+            (Self::Exact, _) | (Self::Coarse, MassLoss::Steady(_) | MassLoss::Pulsed { .. }) => {
+                SprayParams::default()
+            }
+        }
+    }
+}
+
+/// The spray's settings: how many tracers each arm releases, and the steps a pericentre crossing
+/// they and the progenitor take (module documentation).
+///
+/// [`SprayParams::default`] is the generator's for every stream through version 26,
+/// [`TRACERS_PER_ARM`] at the step rule's [`STEPS_PER_PERICENTRE_CROSSING`];
+/// [`SprayParams::of_stream`] is the generator's for a stream of a galaxy, under the galaxy's
+/// rules. A smaller count serves tests and benchmarks that need the shape of a spray and not its
+/// numbers.
 ///
 /// # Examples
 ///
 /// ```
 /// use std::num::NonZeroU32;
 ///
+/// use hyperion_sim::galaxy::global_list::orbit::STEPS_PER_PERICENTRE_CROSSING;
 /// use hyperion_sim::galaxy::global_list::spray::{SprayParams, TRACERS_PER_ARM};
 ///
 /// assert_eq!(SprayParams::default().tracers_per_arm(), TRACERS_PER_ARM);
 /// let few = SprayParams::new(NonZeroU32::new(50).expect("not zero"));
 /// assert_eq!(few.tracers(), 100);
+/// assert_eq!(few.steps_per_crossing(), STEPS_PER_PERICENTRE_CROSSING);
+/// let coarse = few.with_steps_per_crossing(NonZeroU32::new(32).expect("not zero"));
+/// assert_eq!(coarse.steps_per_crossing(), 32);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SprayParams {
     tracers_per_arm: NonZeroU32,
+    steps_per_crossing: NonZeroU32,
 }
 
 impl SprayParams {
     /// The most tracers an arm may release, 2³¹ − 1, so that both arms' count is a `u32`.
     pub const MAX_TRACERS_PER_ARM: u32 = u32::MAX / 2;
 
-    /// A spray of `tracers_per_arm` releases, each freeing one tracer from each Lagrange point.
+    /// A spray of `tracers_per_arm` releases, each freeing one tracer from each Lagrange point, at
+    /// the step rule's [`STEPS_PER_PERICENTRE_CROSSING`].
     ///
     /// # Panics
     ///
@@ -247,7 +309,32 @@ impl SprayParams {
             tracers_per_arm.get() <= Self::MAX_TRACERS_PER_ARM,
             "a spray releases at most 2^31 - 1 tracers an arm"
         );
-        Self { tracers_per_arm }
+        Self {
+            tracers_per_arm,
+            steps_per_crossing: NonZeroU32::new(STEPS_PER_PERICENTRE_CROSSING)
+                .expect("64 is not zero"),
+        }
+    }
+
+    /// This spray at `steps` steps a pericentre crossing, its progenitor's and its tracers'
+    /// ([`SphericalOrbit::fixed_step_at`](super::SphericalOrbit::fixed_step_at)).
+    #[must_use]
+    pub const fn with_steps_per_crossing(self, steps: NonZeroU32) -> Self {
+        Self {
+            steps_per_crossing: steps,
+            ..self
+        }
+    }
+
+    /// The generator's spray of `spec`'s stream in `galaxy`, under the galaxy's rules: through
+    /// version 26 [`SprayParams::default`] for every stream, and from 27 an orphan's at
+    /// [`ORPHAN_TRACERS_PER_ARM`] and [`ORPHAN_STEPS_PER_CROSSING`] (P10.T10.b's warm-up, held at
+    /// 27).
+    /// What [`spray`] and [`TubeTable::build`](super::TubeTable::build) spray, and a caller's pool
+    /// with them.
+    #[must_use]
+    pub fn of_stream(galaxy: &Galaxy, spec: &StreamSpec) -> Self {
+        galaxy.rules().orphan_spray.params(spec)
     }
 
     /// The tracers each arm releases.
@@ -262,10 +349,25 @@ impl SprayParams {
         // At most 2 × (2³¹ − 1), by `new`.
         2 * self.tracers_per_arm.get()
     }
+
+    /// The steps a pericentre crossing the progenitor and the tracers take.
+    #[must_use]
+    pub const fn steps_per_crossing(&self) -> u32 {
+        self.steps_per_crossing.get()
+    }
+
+    /// The step over `spec`'s stripping time at these steps a crossing.
+    fn fixed_step(self, spec: &StreamSpec) -> Result<FixedStep, BuildLeapfrogError> {
+        spec.orbit().fixed_step_at(
+            Seconds::from(spec.stripping_time()),
+            self.steps_per_crossing,
+        )
+    }
 }
 
 impl Default for SprayParams {
-    /// The generator's spray: [`TRACERS_PER_ARM`] from each Lagrange point.
+    /// The generator's spray of every stream through version 26: [`TRACERS_PER_ARM`] from each
+    /// Lagrange point, at the step rule's [`STEPS_PER_PERICENTRE_CROSSING`].
     fn default() -> Self {
         Self::new(NonZeroU32::new(TRACERS_PER_ARM).expect("the generator's count is not zero"))
     }
@@ -356,9 +458,7 @@ impl ReleaseSchedule {
         params: &SprayParams,
         pericentres: &[u32],
     ) -> Result<Self, BuildLeapfrogError> {
-        let step = spec
-            .orbit()
-            .fixed_step(Seconds::from(spec.stripping_time()))?;
+        let step = params.fixed_step(spec)?;
         let history = History::new(spec, step, pericentres);
         let (progenitor_mass, tube_mass) = (spec.progenitor_mass(), spec.mass());
         let n = params.tracers_per_arm();
@@ -794,9 +894,7 @@ impl SprayPlan {
         spec: &StreamSpec,
         params: &SprayParams,
     ) -> Result<Self, BuildLeapfrogError> {
-        let fixed = spec
-            .orbit()
-            .fixed_step(Seconds::from(spec.stripping_time()))?;
+        let fixed = params.fixed_step(spec)?;
         let (h, steps) = (fixed.step().value(), fixed.count());
         let field = |x: [f64; 3]| force.acceleration_m_s2(&GalacticDisplacement::new(x));
         // Backwards from the epoch to the start of the stripping time, then forwards again.
@@ -1259,8 +1357,8 @@ impl<'a> Spray<'a> {
     }
 }
 
-/// The spray of `spec`'s stream in `galaxy`, at the generator's [`SprayParams`]: its tracers in
-/// index order (module documentation). It builds the galaxy's [`SprayForce`] each time; a caller
+/// The spray of `spec`'s stream in `galaxy`, at the generator's [`SprayParams`] under the galaxy's
+/// rules ([`SprayParams::of_stream`]): its tracers in index order (module documentation). It builds the galaxy's [`SprayForce`] each time; a caller
 /// spraying several streams keeps one and calls [`Spray::new`].
 ///
 /// # Errors
@@ -1270,7 +1368,8 @@ impl<'a> Spray<'a> {
 pub fn spray(galaxy: &Galaxy, spec: &StreamSpec) -> Result<Vec<Tracer>, BuildLeapfrogError> {
     let tables = galaxy.potential();
     let force = SprayForce::new(tables)?;
-    let spray = Spray::new(galaxy.seed(), &force, tables, spec, &SprayParams::default())?;
+    let params = SprayParams::of_stream(galaxy, spec);
+    let spray = Spray::new(galaxy.seed(), &force, tables, spec, &params)?;
     Ok(spray.tracers())
 }
 

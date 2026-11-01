@@ -65,6 +65,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::num::NonZeroU32;
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::{GRID_EDGE_LY, PotentialTables};
@@ -168,6 +169,26 @@ impl FixedStep {
         pericentre_speed: MetresPerSecond,
         span: Seconds,
     ) -> Result<Self, BuildLeapfrogError> {
+        /// The step rule's steps a crossing, as `with_steps_per_crossing` takes them.
+        const STEPS: NonZeroU32 =
+            NonZeroU32::new(STEPS_PER_PERICENTRE_CROSSING).expect("64 is not zero");
+        Self::with_steps_per_crossing(pericentre, pericentre_speed, span, STEPS)
+    }
+
+    /// [`new`](Self::new)'s step at `steps` steps per pericentre crossing in place of
+    /// [`STEPS_PER_PERICENTRE_CROSSING`]: the longest step `min(τ_p ÷ steps, 2 Myr)`, the same bits
+    /// as `new`'s at 64. A spray may take ruling 146.3's fallback, `τ_p ÷ 32` (P10.T10.b's orphans
+    /// from 27, [`SprayParams`](super::spray::SprayParams)).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub fn with_steps_per_crossing(
+        pericentre: Metres,
+        pericentre_speed: MetresPerSecond,
+        span: Seconds,
+        steps: NonZeroU32,
+    ) -> Result<Self, BuildLeapfrogError> {
         let crossing = pericentre.value() / pericentre_speed.value();
         if !(crossing.is_finite() && crossing > 0.0) {
             return Err(BuildLeapfrogError::InvalidStep(Seconds::new(crossing)));
@@ -175,7 +196,7 @@ impl FixedStep {
         if !span.value().is_finite() {
             return Err(BuildLeapfrogError::InvalidStep(span));
         }
-        let longest = (crossing / f64::from(STEPS_PER_PERICENTRE_CROSSING)).min(MAX_STEP.value());
+        let longest = (crossing / f64::from(steps.get())).min(MAX_STEP.value());
         let steps = (span.value().abs() / longest).ceil();
         // Also refuses a NaN, from a subnormal crossing time that makes `longest` zero.
         if steps.is_nan() || steps > f64::from(u32::MAX) {

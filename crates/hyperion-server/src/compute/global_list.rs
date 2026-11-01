@@ -443,7 +443,7 @@ pub async fn tube_table_on(
         pool,
         forces,
         (galaxy, key),
-        (spec, SprayParams::default()),
+        (spec, SprayParams::of_stream(galaxy, spec)),
         (priority, shares),
         token,
     )
@@ -919,7 +919,13 @@ impl Lists {
             held: 0,
             streams: streams.len(),
         };
-        let room = tables_in_flight(self.pool.workers());
+        // The fewest tracers a table of the galaxy sprays, whose shares fill the fewest workers.
+        let fewest = streams
+            .iter()
+            .map(|spec| SprayParams::of_stream(&galaxy, spec).tracers())
+            .min()
+            .unwrap_or_else(|| SprayParams::default().tracers());
+        let room = tables_in_flight(self.pool.workers(), fewest);
         let galaxy = &galaxy;
         let mut next = streams.iter();
         let mut full = false;
@@ -973,18 +979,17 @@ impl Lists {
     }
 }
 
-/// How many tables a warm-up builds at once on a pool of `workers`: enough that every worker
-/// holds a share of one with the shares of [`TRACERS_PER_SHARE`] tracers, and one more, whose
-/// plan and shares wait in the queue for the workers the others free: two on eight workers,
-/// three on fifteen. A table has eight shares, so one at a time left seven of fifteen workers
-/// idle: the Milky Way fixture's 261 tables took 63.7 s on fifteen, against 32.8 s three at a
-/// time, and 60.0 s and 59.2 s on eight (P10.T10.b, the slow-test profile, pod, 16 vCPU,
-/// 2026-11-01).
+/// How many tables a warm-up builds at once on a pool of `workers` when its tables spray
+/// `tracers` tracers or more: enough that every worker holds a share of one with the shares of
+/// [`TRACERS_PER_SHARE`] tracers, and one more, whose plan and shares wait in the queue for the
+/// workers the others free. A table of 2,000 tracers has eight shares, so two on eight workers and
+/// three on fifteen; one at a time left seven of fifteen workers idle: the Milky Way fixture's 261
+/// tables took 63.7 s on fifteen, against 32.8 s three at a time, and 60.0 s and 59.2 s on eight
+/// (P10.T10.b, the slow-test profile, pod, 16 vCPU, 2026-11-01). An orphan's of 1,000 from 27 has
+/// four.
 #[must_use]
-fn tables_in_flight(workers: NonZeroUsize) -> usize {
-    let shares = SprayParams::default()
-        .tracers()
-        .div_ceil(TRACERS_PER_SHARE.get());
+fn tables_in_flight(workers: NonZeroUsize, tracers: u32) -> usize {
+    let shares = tracers.div_ceil(TRACERS_PER_SHARE.get());
     let shares = usize::try_from(shares)
         .unwrap_or(usize::MAX)
         .clamp(1, workers.get());
@@ -1146,11 +1151,21 @@ mod tests {
         n: usize,
         tubes: &Arc<TubeTableCache>,
     ) -> (GlobalListService, Arc<CpuPool>) {
+        milky_way_service_at(n, tubes, GENERATOR_VERSION)
+    }
+
+    /// As [`milky_way_service`], its galaxies under generator version `version`'s rules.
+    fn milky_way_service_at(
+        n: usize,
+        tubes: &Arc<TubeTableCache>,
+        version: hyperion_sim::GeneratorVersion,
+    ) -> (GlobalListService, Arc<CpuPool>) {
         let pool = Arc::new(pool(n));
-        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), |seed| {
-            Galaxy::from_params(
+        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), move |seed| {
+            Galaxy::from_params_at_version(
                 seed,
                 hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
             )
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
@@ -1321,12 +1336,16 @@ mod tests {
         pool.shutdown().await.unwrap();
     }
 
-    /// P10.T10.b: two tables at once on four workers, three on fifteen or sixteen: enough that
-    /// every worker holds a share of a table, and one more.
+    /// P10.T10.b: of tables of 2,000 tracers, two at once on four workers, three on fifteen or
+    /// sixteen: enough that every worker holds a share of a table, and one more; of 1,000, an
+    /// orphan's from 27, three on eight and five on fifteen.
     #[test]
     fn a_warm_up_builds_enough_tables_at_once_to_fill_the_pool() {
-        let at = |n| tables_in_flight(workers(n));
+        let at = |n| tables_in_flight(workers(n), 2_000);
         assert_eq!([1, 4, 8, 9, 15, 16, 64].map(at), [2, 2, 2, 3, 3, 3, 9]);
+        let orphans = |n| tables_in_flight(workers(n), 1_000);
+        assert_eq!([1, 4, 8, 15, 16].map(orphans), [2, 2, 3, 5, 5]);
+        assert_eq!(tables_in_flight(workers(8), 1), 9);
     }
 
     /// P10.T10.b: a warm-up with tables in flight builds the tables one at a time builds, bit for
@@ -1337,7 +1356,7 @@ mod tests {
         let charge = a_table_s_charge().await;
         let three = Arc::new(TubeTableCache::new(3 * charge + charge / 2));
         let (service, pool) = service_on(4, &three);
-        assert_eq!(tables_in_flight(pool.workers()), 2);
+        assert_eq!(tables_in_flight(pool.workers(), 2_000), 2);
         let warmed = within(service.lists.warm(key()))
             .await
             .expect("the warm-up's jobs run");
@@ -1519,6 +1538,65 @@ mod tests {
     /// FNV-1a 64's offset basis.
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 
+    /// The digest of the bits of `streams`' tables, which `tubes` holds, in their order.
+    fn tables_digest(tubes: &TubeTableCache, streams: &[StreamSpec]) -> u64 {
+        streams.iter().fold(FNV_OFFSET, |hash, spec| {
+            let table = tubes
+                .get(&(key(), spec.number()))
+                .expect("every table is held");
+            fnv1a(
+                hash,
+                &fnv1a(FNV_OFFSET, bits(&table).as_bytes()).to_le_bytes(),
+            )
+        })
+    }
+
+    /// P10.T10.b's orphan spray, held at 27: under every 27 hold the warm-up builds and keeps every
+    /// stream's table of the Milky Way fixture, the orphans' from 500 tracers an arm at `τ_p ÷ 32`,
+    /// and prints what it cost; the digest of the tables' bits pins the 27 arm. A 27 hold that
+    /// moves the fixture's list, or the bump, re-pins it by name.
+    #[tokio::test]
+    #[ignore = "slow: warms every tube table of a Milky Way galaxy under 27's rules, some 3 \
+                CPU-minutes"]
+    async fn under_every_27_hold_the_warm_up_readies_every_track_of_the_coarse_orphans() {
+        let tubes = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
+        // Eight workers, as the slow profile reserves for it (`.config/nextest.toml`).
+        let n = 8;
+        let (service, pool) =
+            milky_way_service_at(n, &tubes, hyperion_sim::GeneratorVersion::new(27));
+        let (galaxy, list) = listed(&service).await;
+        let streams = list.list().debris().streams();
+        let orphans = streams
+            .iter()
+            .filter(|spec| SprayParams::of_stream(&galaxy, spec) != SprayParams::default())
+            .count();
+        let started = std::time::Instant::now();
+        let warmed = within(service.lists.warm(key()))
+            .await
+            .expect("the warm-up's jobs run");
+        let counters = service.tube_counters();
+        println!(
+            "warm-up at 27 on {n} workers: {} of {} tables built, {orphans} sprayed coarse, in \
+             {:.1} s, {} held, {} bytes",
+            warmed.built(),
+            warmed.streams(),
+            started.elapsed().as_secs_f64(),
+            counters.entries(),
+            counters.bytes()
+        );
+        assert_eq!(
+            (warmed.built(), warmed.held()),
+            (warmed.streams(), warmed.streams())
+        );
+        let tables = tables_digest(&tubes, streams);
+        assert_eq!(
+            (streams.len(), orphans, format!("{tables:016x}")),
+            (360, 355, "3a0c68456a60d280".to_owned()),
+            "the tables' bits at 27"
+        );
+        pool.shutdown().await.unwrap();
+    }
+
     /// P10.T10.b's warm-up at Milky Way values and its range test, until the registration lands.
     ///
     /// The warm-up builds every stream's table of a galaxy at the Milky Way fixture's values and
@@ -1562,15 +1640,7 @@ mod tests {
                 .iter()
                 .all(|spec| service.is_ready(key(), spec.number()))
         );
-        let tables = streams.iter().fold(FNV_OFFSET, |hash, spec| {
-            let table = tubes
-                .get(&(key(), spec.number()))
-                .expect("every table is held");
-            fnv1a(
-                hash,
-                &fnv1a(FNV_OFFSET, bits(&table).as_bytes()).to_le_bytes(),
-            )
-        });
+        let tables = tables_digest(&tubes, streams);
         assert_eq!(
             (streams.len(), format!("{tables:016x}")),
             (261, "7e4cf90f5b9aca5d".to_owned()),
