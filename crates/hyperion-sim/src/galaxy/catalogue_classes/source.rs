@@ -47,7 +47,10 @@
 //! and the other classes' members ([`ClassCellSystems`]), is epoch state, so a caller may keep it
 //! between queries ([`CatalogueClassCellCache`]; [`CatalogueClassSource::with_cells`]). A warm
 //! query then draws only the candidates whose place its sphere can reach. Without a cache
-//! ([`NoClassCellCache`]) every cell's systems are made for the query and dropped.
+//! ([`NoClassCellCache`]) every cell's systems are made for the query and dropped. Each cell is a
+//! pure function of the galaxy and its key, so a server may make a query's cells
+//! ([`CatalogueClassSource::cells_read`]) on several threads before it asks for the hits
+//! ([`CachedClassSource::read_ahead`]; P09.T37's bench).
 //!
 //! The range query registers the source from generator version 27, the hold's
 //! (`CLASS_SOURCE_VERSION`; [`CatalogueClassSource::registered_in`]); below it a query takes the
@@ -69,7 +72,8 @@ use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::query::{
-    LayerCounts, LayerSet, PAD_SPEED, QuerySphere, SystemHit, SystemSource, pad_for,
+    LayerCounts, LayerSet, PAD_SPEED, QuerySphere, RangeQuery, SystemHit, SystemSource, pad_for,
+    widest_sphere,
 };
 use crate::id::{CatalogueSystemId, Layer, SystemIdKind};
 use crate::time::UniverseTime;
@@ -203,6 +207,62 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
             let _ = self.lookup.visit_class(galaxy, class, visit);
         }
     }
+
+    /// The class cells the source's hits read for `query` in `layers`: class by class in
+    /// [`ALL_CLASSES`] order, and each class's in the order its hits read them (module
+    /// documentation, "Hits"), about the sphere the range query asks its sources about.
+    ///
+    /// They are what a server makes ahead of the query on several threads
+    /// ([`CachedClassSource::read_ahead`]; P09.T37's bench). A census that admits fewer layers reads
+    /// only some of them, so the layers of a plan made without the sources, which hold the plan's
+    /// with them (`RangePlan::with_sources`), give every cell the query reads.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
+    /// use hyperion_sim::galaxy::query::{RangePlan, RangeQuery};
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9)).with_full_potential();
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// let layers = RangePlan::new(&galaxy, &[], &query).census().layers();
+    /// let classes = CatalogueClassSource::new();
+    /// let cells = classes.cells_read(&galaxy, &query, layers);
+    /// // Each share of the cells may be made on a thread of its own, into a cache that keeps them.
+    /// for share in cells.chunks(256) {
+    ///     classes.with_cells(&NoClassCellCache).read_ahead(&galaxy, share);
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn cells_read(
+        &self,
+        galaxy: &Galaxy,
+        query: &RangeQuery,
+        layers: LayerSet,
+    ) -> Vec<CatalogueCellKey> {
+        let mut cells = Vec::new();
+        if layers.is_empty() {
+            return cells;
+        }
+        let sphere = widest_sphere(galaxy, query);
+        for class in ALL_CLASSES {
+            let visit = CellsRead {
+                galaxy,
+                sphere: &sphere,
+                layers,
+                out: &mut cells,
+            };
+            // A class without a process reads no cell.
+            let _ = self.lookup.visit_class(galaxy, class, visit);
+        }
+        cells
+    }
 }
 
 /// A [`CatalogueClassSource`] whose hits read each class cell's systems through a
@@ -211,6 +271,28 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
 pub struct CachedClassSource<'a, L = ProductionClasses> {
     source: CatalogueClassSource<L>,
     cells: &'a dyn CatalogueClassCellCache,
+}
+
+impl<L: ClassLookup> CachedClassSource<'_, L> {
+    /// Makes the systems of each of `cells` through the source's cache, as its hits make them, one
+    /// class's process for each run of cells of one class: what a server does on several threads
+    /// for a query's [`cells_read`](CatalogueClassSource::cells_read) before the query asks for its
+    /// hits, so that its lookups find the cells held. Each is a pure function of the galaxy and its
+    /// key, so it changes no answer, and it is lost if the cache keeps nothing.
+    pub fn read_ahead(&self, galaxy: &Galaxy, cells: &[CatalogueCellKey]) {
+        for run in cells.chunk_by(|a, b| a.class() == b.class()) {
+            let visit = ReadAhead {
+                galaxy,
+                keys: run,
+                cells: self.cells,
+            };
+            // A class without a process has no cell to make.
+            let _ = self
+                .source
+                .lookup
+                .visit_class(galaxy, run[0].class(), visit);
+        }
+    }
 }
 
 impl<L: std::fmt::Debug> std::fmt::Debug for CachedClassSource<'_, L> {
@@ -602,26 +684,11 @@ impl ClassVisitor for Hits<'_> {
             out,
         } = self;
         let class = process.class();
-        let asked = |set: &LayerSet| layers.iter().any(|layer| set.contains(layer));
-        let tables = galaxy.rules().binary_tables;
-        if member_layers(class, tables).is_some_and(|members| !members.iter().any(asked)) {
-            // No member of the class can be in a layer asked for.
+        if !may_be_asked(galaxy, class, layers) {
             return;
         }
         let reach = place_reach(sphere);
-        // A placed class's places lie in their cells, so only the cells its padded sphere meets can
-        // hold one it reaches (the grid's rule 11); any other class's entries may lie anywhere in
-        // their reach.
-        let keys: Vec<_> = if process.reads_place_first() {
-            cells_about(
-                class,
-                sphere.centre(),
-                reach + LightYears::new(CUBE_MARGIN_LY),
-            )
-        } else {
-            cells_in_sphere(class, sphere).collect()
-        };
-        for key in keys {
+        for key in hit_cells(process, sphere) {
             let systems = cells.systems(galaxy, key, &mut || {
                 ClassCellSystems::of(galaxy, process, key)
             });
@@ -644,6 +711,77 @@ impl ClassVisitor for Hits<'_> {
             for system in systems.members() {
                 push_hit(system, sphere, layers, out);
             }
+        }
+    }
+}
+
+/// Whether a member of `class`'s entries can be in a layer of `layers` under `galaxy`'s binary
+/// tables: not where every member's layers miss them all.
+#[must_use]
+fn may_be_asked(galaxy: &Galaxy, class: ClassId, layers: LayerSet) -> bool {
+    let asked = |set: &LayerSet| layers.iter().any(|layer| set.contains(layer));
+    member_layers(class, galaxy.rules().binary_tables)
+        .is_none_or(|members| members.iter().any(asked))
+}
+
+/// The cells of `process`'s class whose systems its hits about `sphere` read, in the order they
+/// read them. A placed class's places lie in their cells, so only the cells its padded sphere meets
+/// can hold one it reaches (the grid's rule 11); any other class's entries may lie anywhere in
+/// their reach.
+#[must_use]
+fn hit_cells<P: ClassProcess>(process: &P, sphere: &QuerySphere) -> Vec<CatalogueCellKey> {
+    let class = process.class();
+    if process.reads_place_first() {
+        cells_about(
+            class,
+            sphere.centre(),
+            place_reach(sphere) + LightYears::new(CUBE_MARGIN_LY),
+        )
+    } else {
+        cells_in_sphere(class, sphere).collect()
+    }
+}
+
+/// [`CatalogueClassSource::cells_read`]'s visit of one class: the cells its hits in `layers` about
+/// the sphere read, appended to `out`.
+struct CellsRead<'a> {
+    galaxy: &'a Galaxy,
+    sphere: &'a QuerySphere,
+    layers: LayerSet,
+    out: &'a mut Vec<CatalogueCellKey>,
+}
+
+impl ClassVisitor for CellsRead<'_> {
+    type Output = ();
+
+    fn visit<P: ClassProcess>(self, process: &P) {
+        if may_be_asked(self.galaxy, process.class(), self.layers) {
+            self.out.extend(hit_cells(process, self.sphere));
+        }
+    }
+}
+
+/// [`CachedClassSource::read_ahead`]'s visit of one class: the systems of each of `keys`, its
+/// cells, made through `cells` and dropped.
+struct ReadAhead<'a> {
+    galaxy: &'a Galaxy,
+    keys: &'a [CatalogueCellKey],
+    cells: &'a dyn CatalogueClassCellCache,
+}
+
+impl ClassVisitor for ReadAhead<'_> {
+    type Output = ();
+
+    fn visit<P: ClassProcess>(self, process: &P) {
+        let Self {
+            galaxy,
+            keys,
+            cells,
+        } = self;
+        for &key in keys {
+            drop(cells.systems(galaxy, key, &mut || {
+                ClassCellSystems::of(galaxy, process, key)
+            }));
         }
     }
 }

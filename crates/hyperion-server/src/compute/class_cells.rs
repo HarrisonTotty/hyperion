@@ -5,18 +5,25 @@
 //! some 2,900 512 ly cells a class about a 50 ly sphere. What a hit is made from in each cell is
 //! the sim's [`ClassCellSystems`], epoch state, a pure function of the galaxy and the cell. So
 //! [`SharedClassCellCache`] keeps it, a [`SharedByteLru`] over `(GalaxyKey, CatalogueCellKey)`
-//! charged each cell's heap bytes, and a query near another reads its cells warm. A cell is made by
-//! the job whose query first reads it; a cell evicted is made again, and changes no answer.
+//! charged each cell's heap bytes, and a query near another reads its cells warm. A cold query's
+//! cells are made ahead of its hits by its jobs, several at once
+//! ([`served_range_query`](super::served_range_query)); a cell is otherwise made by the job whose
+//! query first reads it. A cell evicted is made again, and changes no answer.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{
-    CatalogueCellKey, CatalogueClassCellCache, ClassCellSystems,
+    CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
 };
 
 use super::GalaxyKey;
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
+
+/// The class cells a job makes ahead of a query before it stores them under one hold of the
+/// cache's lock, as the grid's cell jobs store theirs (`cells.rs`).
+const MADE_CHUNK_CELLS: usize = 128;
 
 impl HeapBytes for ClassCellSystems {
     /// The sim's own count of what the cell's systems own on the heap
@@ -57,6 +64,75 @@ impl SharedClassCellCache {
     #[must_use]
     pub fn counters(&self) -> LruCounters {
         self.cells.counters()
+    }
+
+    /// The cells of `cells` of the galaxy `galaxy` names that the cache does not hold, in order,
+    /// asked under one hold of its lock and without counting a lookup or marking a use: what a
+    /// served query asks before it makes its class cells ahead of its hits
+    /// ([`served_range_query`](super::served_range_query)).
+    #[must_use]
+    pub fn lacking(
+        &self,
+        galaxy: GalaxyKey,
+        cells: impl IntoIterator<Item = CatalogueCellKey>,
+    ) -> Vec<CatalogueCellKey> {
+        self.cells
+            .absent(cells.into_iter().map(|cell| (galaxy, cell)))
+            .into_iter()
+            .map(|(_, cell)| cell)
+            .collect()
+    }
+
+    /// Makes the systems of each of `cells` of `galaxy`, the galaxy `key` names, as a query's hits
+    /// make them ([`CachedClassSource::read_ahead`](hyperion_sim::galaxy::catalogue_classes::CachedClassSource::read_ahead)),
+    /// and stores them [`MADE_CHUNK_CELLS`] at a time, each chunk under one hold of the cache's
+    /// lock: how a served query's jobs make its class cells ahead of its hits, several at once
+    /// ([`served_range_query`](super::served_range_query)). A cell held already is made again and
+    /// replaced by its equal; one larger than the whole budget is dropped.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of `key`, as a handle's lookup.
+    pub(crate) fn read_ahead(&self, key: GalaxyKey, galaxy: &Galaxy, cells: &[CatalogueCellKey]) {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a class cell cache stores the cells of one galaxy under its key, and this is another's"
+        );
+        let making = Making {
+            made: RefCell::new(Vec::with_capacity(MADE_CHUNK_CELLS)),
+        };
+        let source = CatalogueClassSource::new().with_cells(&making);
+        for chunk in cells.chunks(MADE_CHUNK_CELLS) {
+            source.read_ahead(galaxy, chunk);
+            let mut made = making.made.borrow_mut();
+            // A refused cell is the hits' to make again, as a handle's would be.
+            drop(
+                self.cells
+                    .insert_all(made.drain(..).map(|(cell, systems)| ((key, cell), systems))),
+            );
+        }
+    }
+}
+
+/// One job's view of the class cell cache for cells nobody holds: the sim's
+/// [`CatalogueClassCellCache`], which makes each cell it is asked for, lends it, and keeps it for
+/// [`SharedClassCellCache::read_ahead`] to store with the others a chunk at a time.
+struct Making {
+    /// The cells made and not yet stored.
+    made: RefCell<Vec<(CatalogueCellKey, Arc<ClassCellSystems>)>>,
+}
+
+impl CatalogueClassCellCache for Making {
+    fn systems(
+        &self,
+        _galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        let systems = Arc::new(make());
+        self.made.borrow_mut().push((key, Arc::clone(&systems)));
+        systems
     }
 }
 

@@ -871,3 +871,81 @@ fn the_x_ray_binaries_layers_follow_the_binary_tables_hold() {
             .collect::<Vec<_>>()
     );
 }
+
+/// A class-cell cache that keeps every cell it makes, as [`KeepClassCells`], and counts what it
+/// makes and what it is asked for.
+#[derive(Debug, Default)]
+struct CountClassCells {
+    kept: KeepClassCells,
+    made: std::cell::Cell<usize>,
+    asked: RefCell<Vec<CatalogueCellKey>>,
+}
+
+impl CatalogueClassCellCache for CountClassCells {
+    fn systems(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        self.asked.borrow_mut().push(key);
+        self.kept.systems(galaxy, key, &mut || {
+            self.made.set(self.made.get() + 1);
+            make()
+        })
+    }
+}
+
+/// The cells a query reads, made ahead in shares in any order (P09.T37's bench), are every cell
+/// its hits read, so its lookups make none, and the answer is the one through no cache, bit for
+/// bit: queries in the outer disc and about a placed host and a core collapse, at three times,
+/// each class's cells read in the layers of the plan without the sources, which hold the plan's
+/// with them. With no layer asked, none is read.
+#[test]
+fn the_cells_read_ahead_are_every_cell_the_hits_read() {
+    let galaxy = at_27();
+    let ly = |p: [f64; 3]| GalacticPosition::from_light_years(p).expect("in the cube");
+    let core = first_hosts(galaxy, ClassId::CORE_COLLAPSE, 1)[0].system;
+    let placed = first_hosts(galaxy, ClassId::ACCRETING_WHITE_DWARF, 1)[0].system;
+    let queries = [
+        (ly([0.0, 48_000.0, 0.0]), 50.0, 0),
+        (ly([1_500.0, 47_000.0, 80.0]), 20.0, -900),
+        (core.position_at(at(300)), 2.0, 300),
+        (placed.position_at(UniverseTime::EPOCH), 1.0, 0),
+    ]
+    .map(|(centre, radius, years)| {
+        RangeQuery::builder(centre, LightYears::new(radius))
+            .time(at(years))
+            .build()
+            .expect("a query")
+    });
+    let classes = CatalogueClassSource::new();
+    let mut hits = 0;
+    for query in &queries {
+        let layers = RangePlan::new(galaxy, &[], query).census().layers();
+        let cells = classes.cells_read(galaxy, query, layers);
+        assert_eq!(classes.cells_read(galaxy, query, LayerSet::EMPTY), []);
+        let counted = CountClassCells::default();
+        let shares: Vec<_> = cells.chunks(cells.len().div_ceil(7)).collect();
+        for share in shares.iter().rev() {
+            classes.with_cells(&counted).read_ahead(galaxy, share);
+        }
+        let ahead = counted.made.get();
+        assert_eq!(ahead, cells.len(), "each cell made once, ahead");
+        counted.asked.borrow_mut().clear();
+        let cached = classes.with_cells(&counted);
+        let found = range_query(galaxy, &mut NoCache::new(), &[&cached], query);
+        assert_eq!(counted.made.get(), ahead, "the hits make no cell");
+        let read: std::collections::BTreeSet<_> = counted.asked.borrow().iter().copied().collect();
+        let held: std::collections::BTreeSet<_> = cells.iter().copied().collect();
+        assert!(read.is_subset(&held));
+        let uncached = range_query(galaxy, &mut NoCache::new(), &[&classes], query);
+        assert_eq!(found, uncached);
+        hits += found
+            .systems()
+            .iter()
+            .filter(|hit| matches!(hit.id().kind(), SystemIdKind::Catalogue(_)))
+            .count();
+    }
+    assert!(hits >= 2, "{hits} class hosts among the answers");
+}

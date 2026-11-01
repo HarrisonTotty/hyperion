@@ -3,23 +3,27 @@
 //!
 //! A cold 50 ly query at the Sun-like point reads some 1,750 cells nobody has generated: twenty
 //! feature cells, 5.8 ms of the query's 14.8, and 1,732 grid cells, 7.6 ms (lane measurements of
-//! 2026-10-30, pod, 16 vCPU). Each is a pure function of the galaxy and its key, so they may be
+//! 2026-10-30, pod, 16 vCPU). From generator version 27 it reads some 8,700 catalogue-class cells
+//! besides, 105 ms of the 190 under every 27 hold, in which the grid takes 72 (measured
+//! 2026-11-01, pod, 16 vCPU). Each is a pure function of the galaxy and its key, so they may be
 //! generated in any order on any thread, and each grid cell's walk with them
 //! ([`RangePlan::walk_cells`]). [`served_range_query`] does so, in three steps of pool jobs:
 //!
 //! 1. One job asks what the query will read that the caches lack: the feature cells the members'
 //!    source looks up ([`FeatureMemberSource::feature_cells`]), each with the last process it
-//!    reads it through, and then the grid cells of the query's plan ([`RangePlan::cells`]). With
-//!    its feature cells held, that is the plan with the sources, as a warm query plans once;
-//!    otherwise it is the plan without them, which holds every cell the plan with them walks
-//!    ([`RangePlan::with_sources`]), since the sources' counts need the cells being generated. If
-//!    none is worth generating ahead, it walks there and then.
-//! 2. Otherwise the cells it found lacking, both kinds at once, are shared out among jobs, about
-//!    three for each worker: the feature cells' jobs read them into the shared caches, and the
-//!    grid's generate theirs into the cell cache and walk each as it is made. Once the feature
-//!    cells' jobs end, one more job plans the query with its sources, over the warm feature cells,
-//!    if it was planned without them, and asks the sources for their hits
-//!    ([`RangePlan::source_hits`]), while the last of the grid's jobs run.
+//!    reads it through, then the grid cells of the query's plan ([`RangePlan::cells`]), and the
+//!    class cells the classes' hits read in its layers ([`CatalogueClassSource::cells_read`]).
+//!    With its feature cells held, that is the plan with the sources, as a warm query plans once;
+//!    otherwise it is the plan without them, which holds every cell and layer the plan with them
+//!    walks ([`RangePlan::with_sources`]), since the sources' counts need the cells being
+//!    generated. If none is worth generating ahead, it walks there and then.
+//! 2. Otherwise the cells it found lacking, every kind at once, are shared out among jobs, about
+//!    three for each worker: the sources' jobs read the feature cells and make the class cells
+//!    into the shared caches, and the grid's generate theirs into the cell cache and walk each as
+//!    it is made. Once the sources' cell jobs end, one more job plans the query with its sources,
+//!    over the warm feature cells, if it was planned without them, and asks the sources for their
+//!    hits over the warm class cells ([`RangePlan::source_hits`]), while the last of the grid's
+//!    jobs run.
 //! 3. The last job merges the grid's walked parts and the sources' hits into the answer
 //!    ([`RangePlan::finish`]).
 //!
@@ -28,7 +32,7 @@
 //! worker, and with every worker so held the cells would never run, so the pool would stall. So
 //! every job here is queued by the request's own task, on the runtime, which awaits their replies
 //! without holding a worker; a job only ever generates, asks, plans or walks. The sources' job is
-//! queued only once the feature cells' jobs have ended, or beside the grid's if there are none, so
+//! queued only once the sources' cell jobs have ended, or beside the grid's if there are none, so
 //! a query never holds more than three of the queue's places for each worker, as its cells' jobs
 //! did before it.
 //!
@@ -43,7 +47,9 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassCellCache, CatalogueClassSource};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource,
+};
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::centre::CentreOrbitCache;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
@@ -70,6 +76,12 @@ const AHEAD_FEATURE_CELLS: usize = 2;
 /// a grid cell near the Sun takes (1,732 in 7.6 ms, lane measurements of 2026-10-30), where a
 /// round of jobs costs some tens of microseconds; fewer would cost more than they save.
 const AHEAD_GRID_CELLS: usize = 64;
+
+/// The fewest class cells worth making ahead of a query: 16, some 0.2 ms at the 12 µs a class cell
+/// about the Sun-like point takes on average under every 27 hold (8,720 in 105 ms, measured
+/// 2026-11-01, pod, 16 vCPU), several rounds of jobs. A core collapse's cell with candidates in the
+/// disc can take a millisecond.
+const AHEAD_CLASS_CELLS: usize = 16;
 
 /// The grid's cell jobs for each worker: two, smaller than a feature cell's, to fill the workers
 /// the feature cells leave idle. Two to six took the Sun-like 50 ly query the same time cold, 4.6
@@ -258,7 +270,7 @@ where
         )
         .map_err(ComputeError::Submit)?;
     let Lacking {
-        features,
+        sources,
         grid,
         plan,
         planned,
@@ -272,7 +284,7 @@ where
         caches,
         served,
         (Arc::new(plan), planned),
-        (features, grid),
+        (sources, grid),
         token,
     )
     .await;
@@ -317,11 +329,19 @@ enum Asked<T, F> {
 /// One job's feature cells, each with the last process the query reads it through.
 type FeatureShare = Vec<(FeatureCell, FeatureProcess)>;
 
+/// One job's share of the cells the query's sources read: its feature cells and its class cells.
+#[derive(Debug, Default)]
+struct SourceCells {
+    features: FeatureShare,
+    classes: Vec<CatalogueCellKey>,
+}
+
 /// The cells the caches lack for a query, dealt out among the jobs that generate them, and what
 /// the query is then walked and answered with.
 struct Lacking<F> {
-    /// The feature cells, one share for each job, the fullest dealt first.
-    features: Vec<FeatureShare>,
+    /// The sources' cells, one share for each job: the feature cells, the fullest dealt first,
+    /// and the class cells, in the order they are read, dealt out in turn.
+    sources: Vec<SourceCells>,
     /// The grid cells of the plan, in walk order, dealt out in turn, one share for each job.
     grid: Vec<Vec<CellKey>>,
     /// The query's plan.
@@ -498,10 +518,12 @@ where
             Planned::WithoutSources => RangePlan::new(galaxy, &[], query),
         };
         let grid = lacking_grid_cells(&caches.cells, key, &plan);
+        let classes = lacking_class_cells(caches, served, &plan);
         // Nothing worth generating ahead is lacking only where the plan was made with the
         // sources, and so is the walk's.
         if let Planned::WithSources = planned
             && grid.len() < AHEAD_GRID_CELLS
+            && classes.len() < AHEAD_CLASS_CELLS
         {
             let result = plan.run(galaxy, &mut caches.cells.handle(key), sources);
             return Asked::Answered(answer(galaxy, result, reads));
@@ -510,8 +532,18 @@ where
         // 0.65 ms against 0.1 ms through the clusters alone, so they are dealt out from the
         // fullest.
         features.sort_by_key(|&(cell, last)| (Reverse(last.index()), cell));
+        let mut features = shares(workers.get(), &features).into_iter();
+        let mut classes = shares(workers.get(), &classes).into_iter();
+        let source_cells = std::iter::from_fn(|| match (features.next(), classes.next()) {
+            (None, None) => None,
+            (features, classes) => Some(SourceCells {
+                features: features.unwrap_or_default(),
+                classes: classes.unwrap_or_default(),
+            }),
+        })
+        .collect();
         Asked::Lacking(Box::new(Lacking {
-            features: shares(workers.get(), &features),
+            sources: source_cells,
             grid: shares(GRID_JOBS_PER_WORKER * workers.get(), &grid),
             plan,
             planned,
@@ -542,23 +574,51 @@ where
     })
 }
 
-/// The grid cells `plan` walks that `cells` lacks, in walk order.
+/// The grid cells `plan` walks that `cells` lacks, in walk order, sampled ([`sampled_lacking`]):
+/// one taken as held that the cache lacks is the finish's to walk, as every cell was before
+/// P09.T40.a.
+fn lacking_grid_cells(cells: &SharedCellCache, key: GalaxyKey, plan: &RangePlan) -> Vec<CellKey> {
+    sampled_lacking(plan.cells().collect(), |asked| cells.lacking(key, asked))
+}
+
+/// The class cells `served`'s sources' hits read in `plan`'s layers
+/// ([`CatalogueClassSource::cells_read`]) that the class cell cache lacks, in the order they are
+/// read, sampled ([`sampled_lacking`]); none where the query takes no class. One taken as held that
+/// the cache lacks is made by the hits, as every class cell was before.
+fn lacking_class_cells(
+    caches: &RangeCaches,
+    served: &ServedQuery,
+    plan: &RangePlan,
+) -> Vec<CatalogueCellKey> {
+    let classes = match served.members {
+        FeatureMembers::Held => None,
+        FeatureMembers::Served => CatalogueClassSource::registered_in(&served.galaxy),
+    };
+    classes.map_or_else(Vec::new, |classes| {
+        let read = classes.cells_read(&served.galaxy, &served.query, plan.census().layers());
+        sampled_lacking(read, |asked| caches.classes.lacking(served.key, asked))
+    })
+}
+
+/// The cells of `read` that a cache lacks, in order, as `lacking` asks it for the cells it is
+/// given.
 ///
 /// The cache is first asked for every [`LACKING_SAMPLE_STRIDE`]th cell. If it holds them all, the
-/// grid is taken as warm and none is lacking; if it lacks them all, the grid is taken as cold and
+/// cells are taken as warm and none is lacking; if it lacks them all, they are taken as cold and
 /// every cell is; only between the two is it asked for the rest. A cell taken as lacking that the
-/// cache holds is generated again, and one taken as held that it lacks is the finish's to walk, as
-/// every cell was before P09.T40.a: either costs time, never an answer.
-fn lacking_grid_cells(cells: &SharedCellCache, key: GalaxyKey, plan: &RangePlan) -> Vec<CellKey> {
-    let sample = cells.lacking(key, plan.cells().step_by(LACKING_SAMPLE_STRIDE));
+/// cache holds is generated again, and one taken as held that it lacks is generated where it is
+/// read: either costs time, never an answer.
+fn sampled_lacking<T: Copy>(
+    read: Vec<T>,
+    lacking: impl Fn(&mut dyn Iterator<Item = T>) -> Vec<T>,
+) -> Vec<T> {
+    let sample = lacking(&mut read.iter().copied().step_by(LACKING_SAMPLE_STRIDE));
     if sample.is_empty() {
-        return Vec::new();
-    }
-    let walked: Vec<_> = plan.cells().collect();
-    if sample.len() == walked.len().div_ceil(LACKING_SAMPLE_STRIDE) {
-        walked
+        Vec::new()
+    } else if sample.len() == read.len().div_ceil(LACKING_SAMPLE_STRIDE) {
+        read
     } else {
-        cells.lacking(key, walked)
+        lacking(&mut read.into_iter())
     }
 }
 
@@ -591,23 +651,24 @@ async fn queue<R: Send + 'static>(
 }
 
 /// The jobs ahead of a query's finish, on `pool`'s workers (module documentation): each share of
-/// `features` read through its processes, with the grid reach bounds and the interiors of their
-/// features that the query reads ([`FeatureMemberSource::read_ahead`]); each share of `grid`
-/// generated into the cell cache and walked with `plan` ([`SharedCellCache::walk_generated`]);
-/// and, once the feature cells' jobs end, the plan with the sources and their hits. It waits for
-/// every job it queued.
+/// `source_cells`, its feature cells read through their processes, with the grid reach bounds and the
+/// interiors of their features that the query reads ([`FeatureMemberSource::read_ahead`]), and its
+/// class cells made into the class cell cache ([`SharedClassCellCache::read_ahead`]); each share
+/// of `grid` generated into the cell cache and walked with `plan`
+/// ([`SharedCellCache::walk_generated`]); and, once the sources' cell jobs end, the plan with the
+/// sources and their hits. It waits for every job it queued.
 ///
-/// The feature cells' jobs, one for each worker, are queued first; the grid's, some microseconds
-/// a cell, follow in twice as many jobs, which fill the workers the feature cells leave idle; and
-/// the sources' job, queued once the feature cells' have left the queue, runs beside the last of
-/// the grid's. A query without feature cells to wait for queues it ahead of the grid's jobs. A job
-/// cancelled or failed is passed over: what it did not do is the finish's.
+/// The sources' cell jobs, one for each worker, are queued first; the grid's, some microseconds a
+/// cell, follow in twice as many jobs, which fill the workers the sources' cells leave idle; and
+/// the sources' job, queued once the sources' cell jobs have left the queue, runs beside the last
+/// of the grid's. A query without sources' cells to wait for queues it ahead of the grid's jobs. A
+/// job cancelled or failed is passed over: what it did not do is the finish's, or its hits'.
 async fn ahead(
     pool: &CpuPool,
     caches: &RangeCaches,
     served: &ServedQuery,
     (plan, planned): (Arc<RangePlan>, Planned),
-    (features, grid): (Vec<FeatureShare>, Vec<Vec<CellKey>>),
+    (source_cells, grid): (Vec<SourceCells>, Vec<Vec<CellKey>>),
     token: &CancelToken,
 ) -> Ahead {
     let key = served.key;
@@ -623,20 +684,23 @@ async fn ahead(
     };
     // Held, the sources are none, and the finish asks them at no cost.
     let asks_sources = matches!(served.members, FeatureMembers::Served);
-    let mut feature_jobs = Vec::new();
-    for share in features {
+    let mut cell_jobs = Vec::new();
+    for share in source_cells {
         let (caches, served) = (caches.clone(), served.clone());
         let job = move |_: &CancelToken| {
             let (cells, interiors) = (caches.features.handle(key), caches.interiors.handle(key));
             let source = FeatureMemberSource::new(&cells, &interiors);
-            for cell in share {
+            for cell in share.features {
                 source.read_ahead(&served.galaxy, &served.query, cell);
             }
+            caches
+                .classes
+                .read_ahead(key, &served.galaxy, &share.classes);
         };
-        feature_jobs.extend(queue(pool, token, job).await);
+        cell_jobs.extend(queue(pool, token, job).await);
     }
     let mut asking = None;
-    if asks_sources && feature_jobs.is_empty() {
+    if asks_sources && cell_jobs.is_empty() {
         asking = queue(pool, token, sources_job()).await;
     }
     let mut grid_jobs = Vec::new();
@@ -651,8 +715,8 @@ async fn ahead(
         };
         grid_jobs.extend(queue(pool, token, job).await);
     }
-    if !feature_jobs.is_empty() {
-        for receiver in feature_jobs {
+    if !cell_jobs.is_empty() {
+        for receiver in cell_jobs {
             // Its cells are held now, or left to the jobs after it, as the documentation says.
             let _ = receiver.await;
         }
@@ -1031,6 +1095,57 @@ mod tests {
         assert_eq!(listed(at_27, FeatureMembers::Held).0, 0);
         let (n, read, _) = listed(galaxy_at(26), FeatureMembers::Served);
         assert_eq!((n, read), (1, false));
+    }
+
+    /// The server tests' galaxy under every 27 hold, shared with the pools' jobs.
+    fn shared_galaxy_27() -> Arc<Galaxy> {
+        static GALAXY: OnceLock<Arc<Galaxy>> = OnceLock::new();
+        Arc::clone(GALAXY.get_or_init(|| Arc::new(galaxy_at(27))))
+    }
+
+    /// From 27 a cold query's class cells are made on the pool's workers ahead of its hits
+    /// (P09.T37's bench): every cell the hits read, each once, so the hits make none, and the
+    /// answer is the sim's bit for bit, cold and warm, on one worker and on eight.
+    #[tokio::test]
+    async fn from_27_the_class_cells_are_made_ahead_of_the_hits() {
+        use hyperion_sim::GeneratorVersion;
+        let galaxy = shared_galaxy_27();
+        let key = GalaxyKey::new(SEED, GeneratorVersion::new(27));
+        let query = sun_like(0);
+        let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
+        let expected = beside_the_grid(
+            &galaxy,
+            FeatureMembers::Served,
+            (&source, &NoClassCellCache),
+            None,
+            |sources, _| {
+                assert_eq!(sources.len(), 2, "the members and the classes");
+                range_query(&galaxy, &mut NoCache::new(), sources, &query)
+            },
+        );
+        let layers = RangePlan::new(&galaxy, &[], &query).census().layers();
+        let read = CatalogueClassSource::new()
+            .cells_read(&galaxy, &query, layers)
+            .len();
+        assert!(read > 1_000, "{read}");
+        let served = ServedQuery::new(
+            Arc::clone(&galaxy),
+            key,
+            query.clone(),
+            FeatureMembers::Served,
+        );
+        for workers in [1, 8] {
+            let pool = pool(workers, INTERACTIVE_QUEUE_CAPACITY);
+            let caches = caches(64 << 20);
+            assert_eq!(served_on(&pool, &caches, &served).await, expected, "cold");
+            let cold = caches.classes.counters();
+            assert_eq!(cold.entries(), read, "every class cell made ahead, once");
+            assert_eq!(cold.misses(), 0, "the hits make no class cell");
+            assert!(cold.hits() > 0);
+            assert_eq!(served_on(&pool, &caches, &served).await, expected, "warm");
+            assert_eq!(caches.classes.counters().misses(), 0);
+            pool.shutdown().await.unwrap();
+        }
     }
 
     /// The seed the tests' universes are of.

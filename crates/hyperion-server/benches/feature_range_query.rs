@@ -22,6 +22,11 @@
 //! (P09.T40); and at 50 ly each class's source alone, its census and its hits through no cache, for
 //! each class's share.
 //!
+//! `served_at_27` is the Sun-like query of 50 ly under 27's rules as `systems_in_range` serves it
+//! (`served_range_query`), with the members and the classes, on pools of 1, 4 and 8 workers, cold
+//! and warm: a cold query's class cells made across the workers ahead of its hits (P09.T37's
+//! bench).
+//!
 //! `list_at_27` is the Sun-like query of 50 ly and of 1 ly, and the query of 50 ly at the black
 //! hole, where nothing fits, at the epoch under 27's rules with every source, the global list's
 //! among them (P10.T10.b's registration and P09.T37.b), cold and warm: the list's tube tables
@@ -330,6 +335,72 @@ fn served_on_the_pool(c: &mut Criterion) {
     group.finish();
 }
 
+/// The galaxy of the server's seed under generator version 27's rules, with its full potential.
+fn galaxy_at_27() -> Galaxy {
+    let seed = Seed::new(SEED);
+    let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+    Galaxy::from_params_at_version(seed, params, GeneratorVersion::new(27))
+        .expect("a drawn galaxy builds")
+        .with_full_potential()
+}
+
+/// The Sun-like 50 ly query under generator version 27's rules served on pools of 1, 4 and 8
+/// workers, cold and warm (module documentation).
+fn served_at_27(c: &mut Criterion) {
+    let version = GeneratorVersion::new(27);
+    let galaxy = Arc::new(galaxy_at_27());
+    let key = GalaxyKey::new(SEED, version);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let served = ServedQuery::new(
+        Arc::clone(&galaxy),
+        key,
+        query_at(sun_like(), 50.0),
+        FeatureMembers::Served,
+    );
+    let mut group = c.benchmark_group("served_at_27");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(20));
+    for workers in [1, 4, 8] {
+        let pool = CpuPool::new(
+            NonZeroUsize::new(workers).expect("at least one worker"),
+            INTERACTIVE_QUEUE_CAPACITY,
+            BULK_QUEUE_CAPACITY,
+        )
+        .expect("the pool starts");
+        let token = CancelToken::new();
+        let serve = |caches: &RangeCaches| {
+            runtime
+                .block_on(served_range_query(
+                    &pool,
+                    caches,
+                    &served,
+                    &token,
+                    |_, result, _| result,
+                ))
+                .expect("the query's jobs run")
+        };
+        group.bench_function(format!("Sun-like 50 ly, {workers} workers (cold)"), |b| {
+            b.iter_batched_ref(
+                range_caches,
+                |caches| serve(caches),
+                BatchSize::PerIteration,
+            );
+        });
+        let warm = range_caches();
+        drop(serve(&warm));
+        group.bench_function(format!("Sun-like 50 ly, {workers} workers (warm)"), |b| {
+            b.iter(|| serve(&warm));
+        });
+        runtime
+            .block_on(pool.shutdown())
+            .expect("the pool shuts down");
+    }
+    group.finish();
+}
+
 /// One class of the production lookup, for its share of the classes' source.
 #[derive(Debug, Clone, Copy)]
 struct Only(ClassId);
@@ -530,6 +601,7 @@ criterion_group!(
     served,
     served_on_the_pool,
     classes_at_27,
+    served_at_27,
     list_at_27
 );
 criterion_main!(benches);
