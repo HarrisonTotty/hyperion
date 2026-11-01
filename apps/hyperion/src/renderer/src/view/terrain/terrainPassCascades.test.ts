@@ -405,19 +405,23 @@ function PASS_ENTRIES(made: Made): number {
 }
 
 /** A streamed pass at {@link NEAR} whose every bake is wholly surveyed: its patches interior. */
-async function clusteredPass(): Promise<Made> {
-  const made = await litPass();
+async function clusteredPass(setting: "high" | "low" = "high"): Promise<Made> {
+  const made = await litPass(setting);
   made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
   // Until nothing more is asked for, so that no patch is drawn by a stand-in.
   stream(made, [passView(PRIMARY, NEAR)], 24);
   return made;
 }
 
-/** The high setting's geometry without T1.c's receivers' cull, at stride 1: T1.b's path alone. */
+/**
+ * The high setting's geometry without T1.c's receivers' cull, at stride 1, the overlay redrawn:
+ * T1.b's path alone.
+ */
 const CLUSTERS_ALONE: GeometrySettings = {
   ...SETTINGS.high.geometry,
   casterDepthCull: false,
   casterStrideCap: 1,
+  overlayDepth: "redraw",
 };
 
 /** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
@@ -859,6 +863,94 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     ]);
   });
 
+  it("gives the overlay its depth on the cluster path: the edge draws, and the interior patches' clusters at stride 1 culled to the camera's frustum (R14.T1.e)", async () => {
+    const made = await clusteredPass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const words = dispatch?.bindings.uniforms["passes"] ?? new Uint32Array();
+    const passes = new DataView(words.buffer, words.byteOffset, words.byteLength);
+    const params = dispatch?.bindings.uniforms["params"] ?? new Uint32Array();
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const overlay = frame.overlayDepth ?? fail();
+    const at = 4 * CULL_PASS_BYTES;
+    expect([
+      [
+        passes.getUint32(at, true),
+        passes.getUint32(at + 4, true),
+        passes.getFloat32(at + 20, true),
+      ],
+      new DataView(params.buffer, params.byteOffset).getUint32(60, true),
+      interior.length > 0 && interior.every((_, n) => ((inputs[2 * n] ?? 0) & 0b1_0000) !== 0),
+      overlay.edge.length === frame.draws.length - 1 &&
+        overlay.edge.every((draw) => frame.draws.includes(draw)),
+      overlay.clusters.map((draw) => [
+        draw.material.name,
+        draw.indirect?.offsetBytes,
+        draw.storageBuffers?.["instances"]?.name,
+      ]),
+    ]).toEqual([
+      [2, 0, 5],
+      5,
+      true,
+      true,
+      [
+        [
+          `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
+          (4 * 8 + 0) * 20,
+          `terrain interior instances (${PRIMARY})`,
+        ],
+        [
+          `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
+          (4 * 8 + 4) * 20,
+          `terrain interior instances (${PRIMARY})`,
+        ],
+      ],
+    ]);
+  });
+
+  it("culls the overlay's pass alone where no cascades are drawn, as on the low setting (R14.T1.e)", async () => {
+    const made = await clusteredPass("low");
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const words = dispatch?.bindings.uniforms["passes"] ?? new Uint32Array();
+    const passes = new DataView(words.buffer, words.byteOffset, words.byteLength);
+    expect([
+      frame.cascades,
+      [0, 1, 2, 3, 4].map((k) => passes.getUint32(k * CULL_PASS_BYTES, true)),
+      frame.overlayDepth?.clusters.length,
+    ]).toEqual([null, [0, 0, 0, 0, 2], 2]);
+  });
+
+  it("redraws the overlay's depth by the way back and where its lever is redraw, culling no overlay pass (R14.T1.e)", async () => {
+    const made = await clusteredPass("low");
+    const culls = (): number =>
+      made.engine.dispatched.filter((d) => d.kernel === "cluster cull").length;
+    made.pass.setGeometry({ ...SETTINGS.low.geometry, overlayDepth: "redraw" });
+    const before = culls();
+    const redrawn = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    made.pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const back = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    expect([redrawn.overlayDepth, back.overlayDepth, culls() - before]).toEqual([null, null, 0]);
+  });
+
+  it("counts the overlay's triangles: its redraw's, or its edge draws' and its counted clusters' (R14.T1.e)", async () => {
+    const made = await clusteredPass("low");
+    made.pass.setGeometry({ ...SETTINGS.low.geometry, overlayDepth: "redraw" });
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    const redrawn = made.pass.counts(PRIMARY) ?? fail();
+    made.pass.setGeometry(SETTINGS.low.geometry);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    expect([
+      redrawn.overlayTriangles === redrawn.drawnTriangles,
+      made.pass.counts(PRIMARY)?.overlayTriangles,
+    ]).toEqual([
+      true,
+      // No counters' sample back unmeasured.
+      null,
+    ]);
+  });
+
   it("casts by the lit mesh alone by the way back, and where no patch is interior (R14.T1.b)", async () => {
     const made = await clusteredPass();
     made.pass.setGeometry(GEOMETRY_BEFORE_R14);
@@ -951,8 +1043,9 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       const byCascade = [1, 2, 3, 4].map((n) =>
         recordsIn(made.engine, `terrain casters (${PRIMARY}) ${String(n)}`),
       );
+      // The cascades' bits alone: the fifth is the overlay's (plan R14, R14.T1.e).
       return [
-        ...interior.map((_, n) => inputs[2 * n] ?? 0),
+        ...interior.map((_, n) => (inputs[2 * n] ?? 0) & 0b1111),
         ...edge.map((record) =>
           byCascade.reduce((m, records, k) => (records.includes(record) ? m | (1 << k) : m), 0),
         ),

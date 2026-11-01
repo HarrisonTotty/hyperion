@@ -55,7 +55,12 @@ import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { overlaySubmission } from "../view/photoreal/overlay";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { type PhotorealOverlay, PhotorealRenderer } from "../view/photoreal/renderer";
-import { GEOMETRY_BEFORE_R14, SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
+  SETTINGS,
+  TERRAIN_SETTINGS,
+} from "../view/quality/qualitySetting";
 import type { CapturedImage } from "./atmosphere";
 import { captureOf, captureScale, maskOf } from "./leverCaptures";
 import { AU_M } from "../view/scenes/kept";
@@ -661,6 +666,7 @@ export async function checkTerrainFrame(
             surveyCoverage: (body: string) => frame.terrain.surveyCoverage(body),
             draws: (...args: Parameters<LiveFrameTerrain["draws"]>) => frame.terrain.draws(...args),
             symbologyDepth: () => [],
+            sceneDepth: () => false,
           };
       // The datums the renderer packs the overlay with, from its plan.
       let datums = 0;
@@ -704,8 +710,40 @@ export async function checkTerrainFrame(
         digest: bytesDigest(read),
       };
     };
+    // R14.T1.e: a frame's symbology under each of the overlay's terrain depths, from the same
+    // selection and residents: its canvas's fingerprint by the redraw, the cluster path and the
+    // scene's depth, then by the redraw again, so that a frame still streaming between them, whose
+    // two redraws differ, is told apart.
+    const modes: ReadonlyArray<GeometrySettings["overlayDepth"]> = [
+      "redraw",
+      "cluster",
+      "scene-depth",
+      "redraw",
+    ];
+    const overlays: Array<readonly [string, ReadonlyArray<string>]> = [];
+    const underEachOverlay = async (
+      name: string,
+      pass: TerrainPass,
+      draw: () => ReturnType<typeof drawFrame>,
+    ): Promise<void> => {
+      const prints: string[] = [];
+      try {
+        for (const overlayDepth of modes) {
+          pass.setGeometry({ ...SETTINGS.low.geometry, overlayDepth });
+          // Each mode's frame is read back before the next is drawn.
+          // oxlint-disable-next-line no-await-in-loop
+          prints.push((await draw()).digest);
+        }
+      } finally {
+        pass.setGeometry(SETTINGS.low.geometry);
+      }
+      overlays.push([name, prints]);
+    };
     const marksAt = [midpoint(under), midpoint(over)];
     const withDepth = await drawFrame(list, { withDepth: true, giveWay: true }, marksAt);
+    await underEachOverlay("the marks under and over the ground", relief, () =>
+      drawFrame(list, { withDepth: true, giveWay: true }, marksAt),
+    );
     const without = await drawFrame(list, { withDepth: false, giveWay: true }, marksAt);
     const [underShown, overShown] = withDepth.shown;
     const [underBare, overBare] = without.shown;
@@ -750,6 +788,9 @@ export async function checkTerrainFrame(
     };
     const linesAt = [midpoint(surveyedLine), midpoint(beyondLine)];
     const givingWay = await drawFrame(datumList, { withDepth: true, giveWay: true }, linesAt);
+    await underEachOverlay("the datum's lines", relief, () =>
+      drawFrame(datumList, { withDepth: true, giveWay: true }, linesAt),
+    );
     const whole = await drawFrame(datumList, { withDepth: true, giveWay: false }, linesAt);
     const [surveyedShown, beyondShown] = givingWay.shown;
     const [surveyedWhole, beyondWhole] = whole.shown;
@@ -807,6 +848,9 @@ export async function checkTerrainFrame(
       { withDepth: false, giveWay: true, pass: flat, view: graze },
       [],
     );
+    await underEachOverlay("the mark behind grazing ground", flat, () =>
+      drawFrame(behindList, { withDepth: true, giveWay: true, pass: flat, view: graze }, []),
+    );
     const markRow = (marked: ReadonlyArray<number>): number => marked[GRAZE_ROW] ?? 0;
     checks.check(
       "R10.T16.c over grazing ground the terrain's depth hides a mark 1 km behind it, seen from 10 km up at 2°",
@@ -859,6 +903,9 @@ export async function checkTerrainFrame(
           [],
         );
       const grounded = await frameOf(onGround, true);
+      await underEachOverlay(`the line on the ground at ${String(deg)}°`, flat, () =>
+        frameOf(onGround, true),
+      );
       const bare = await frameOf(onGround, false);
       const offGround = await frameOf(line, true);
       return {
@@ -881,6 +928,19 @@ export async function checkTerrainFrame(
       "R10.T16.c a line on the ground, as the survey edge is drawn, draws whole over grazing ground at 2°, 10° and 60°, where one off it loses its nearer half",
       looks.every(({ ok }) => ok),
       looks.map(({ read }) => read).join("; "),
+    );
+    // The cluster path is the setting's (plan R14, R14.T1.e's choice); the scene's depth is recorded
+    // where it differs, its reference surfaces' depth hiding marks on their datum.
+    const steady = overlays.filter(([, [first, , , again]]) => first === again);
+    const sceneDiffers = steady.filter(([, [first, , scene]]) => scene !== first);
+    checks.check(
+      "R14.T1.e every mark over the image is kept or hidden as the redraw keeps or hides it: on the cluster path the symbology draws the redraw's canvas, byte for byte, wherever the frame held still",
+      overlays.length === 6 &&
+        steady.length >= 2 &&
+        steady.every(([, [first, cluster]]) => cluster === first),
+      `${String(steady.length)} of ${String(overlays.length)} frames held still; the scene's depth differs at ${sceneDiffers.map(([name]) => name).join(", ") || "none"}; ${overlays
+        .map(([name, prints]) => `${name}: ${prints.join(", ")}`)
+        .join("; ")} (redraw, cluster, scene depth, redraw)`,
     );
   } finally {
     canvas.dispose();

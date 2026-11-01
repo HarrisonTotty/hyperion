@@ -106,6 +106,7 @@ import { between, seededRandom } from "../../test/seededRandom";
 import { patternedDeckTables, patternedThickBake } from "../../test/thickTables";
 import {
   type FrameAtmosphere,
+  type FrameTerrain,
   type PhotorealFrame,
   lostDevice,
   type PhotorealOverlay,
@@ -257,6 +258,7 @@ describe("the photorealistic renderer", () => {
         return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
       },
       symbologyDepth: () => [],
+      sceneDepth: () => false,
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
       engine.targetFrames
@@ -599,6 +601,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
         return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
       },
       symbologyDepth: () => [],
+      sceneDepth: () => false,
     };
     const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
     const first = renderer.render(view, air);
@@ -1230,6 +1233,7 @@ describe("the photorealistic renderer's overlay", () => {
       surveyCoverage: () => null,
       draws: () => [],
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => false,
     };
     renderer.render(view, { ...frameWith([]), overlay, terrain });
     expect(
@@ -1237,6 +1241,47 @@ describe("the photorealistic renderer's overlay", () => {
         .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
         ?.draws.map((draw) => draw.material.name),
     ).toEqual(["terrain-depth-baked-offsets", "occluderSphere", "lines"]);
+    renderer.dispose();
+  });
+
+  it("draws the scene's depth in the terrain's place where the terrain asks it and the scene's size is the canvas's, else the terrain's (R14.T1.e)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const overlay = (): FrameSubmission => ({ ...SYMBOLOGY, draws: [drawOf("lines")] });
+    const terrain = (asks: boolean): FrameTerrain => ({
+      surveyCoverage: () => null,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => asks,
+    });
+    const symbology = (frame: PhotorealFrame): ReadonlyArray<string> | undefined => {
+      view.frames.length = 0;
+      renderer.render(view, frame);
+      return view.frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name);
+    };
+    const larger = { widthPx: 2 * VIEWPORT.widthPx, heightPx: 2 * VIEWPORT.heightPx };
+    expect([
+      symbology({ ...frameWith([]), overlay, terrain: terrain(true) }),
+      symbology({ ...frameWith([]), overlay, terrain: terrain(false) }),
+      symbology({ ...frameWith([]), presentedPx: larger, overlay, terrain: terrain(true) }),
+    ]).toEqual([
+      ["overlay scene depth", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+    ]);
+    const sceneDraw = (() => {
+      view.frames.length = 0;
+      renderer.render(view, { ...frameWith([]), overlay, terrain: terrain(true) });
+      return view.frames.find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)?.draws[0];
+    })();
+    expect(Object.keys(sceneDraw?.textures ?? {})).toEqual(["sceneDepth"]);
     renderer.dispose();
   });
 

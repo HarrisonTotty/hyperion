@@ -41,7 +41,7 @@ import {
   fittedTerrainLayout,
   GRID_INDICES,
   GRID_VERTICES,
-  CLUSTER_CASTER_PASSES,
+  CLUSTER_PASSES,
   CLUSTER_RECORDS_SLOT_BYTES,
   CULL_INPUT_BYTES,
   INDIRECT_ARGS_BYTES,
@@ -1335,7 +1335,7 @@ describe("the terrain's resources", () => {
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 
-  it("make a clustered lit layout's records, cluster mesh and each view's buckets under geometry-clusters (R14.T1.b)", async () => {
+  it("make a clustered lit layout's records, cluster mesh and each view's buckets, the cascades' and the overlay's, under geometry-clusters (R14.T1.b, T1.e)", async () => {
     const engine = await countingRenderEngine();
     const created: Array<readonly [string, string]> = [];
     engine.onAllocation((event) => {
@@ -1356,7 +1356,7 @@ describe("the terrain's resources", () => {
       "terrain clusters",
       slots * CLUSTER_RECORDS_SLOT_BYTES,
       slots * CULL_INPUT_BYTES,
-      CLUSTER_CASTER_PASSES,
+      CLUSTER_PASSES,
       [
         "terrain cluster records",
         "terrain clusters (view) lists",

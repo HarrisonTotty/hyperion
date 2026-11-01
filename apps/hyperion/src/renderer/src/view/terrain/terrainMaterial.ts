@@ -96,6 +96,7 @@ import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
 import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
+import terrainClusterDepthWgsl from "./shaders/terrainClusterDepth.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
@@ -557,6 +558,52 @@ export function terrainClusterShadowMaterialSpec(
   };
 }
 
+/** The console names of the two paths' cluster depths (plan R14, R14.T1.e). */
+const CLUSTER_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER DEPTH OFFSETS",
+  "face-differences": "TERRAIN CLUSTER DEPTH",
+};
+
+/**
+ * The interior patches' depth for the symbology's pass on the cluster path, for a vertex path (plan
+ * R14, R14.T1.e; `terrainClusterDepth.wgsl`): the depth material's states and push, its uniforms
+ * with `clusterBase` after them, drawn with the terrain cluster mesh from a bucket's list
+ * ({@link withClusterVertex}) into the canvas, and no survey discard, which an interior patch never
+ * takes.
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone, as the cluster caster's: R05's (four on
+ * `face-differences`), the survey mask and the lists, seven at most against WebGPU's eight.
+ */
+export function terrainClusterDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const source = withClusterVertex(
+    LIT_TERRAIN_SOURCE + terrainClusterDepthWgsl + PATH_SOURCES[path],
+  );
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-cluster-depth-${path}`,
+    displayName: CLUSTER_DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      ...LIT_DRAW_UNIFORMS,
+      { name: "occluderSlopePx", type: "f32" },
+      { name: "clusterBase", type: "u32" },
+    ],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
@@ -585,6 +632,12 @@ export const TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterial
 export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainDepthMaterialSpec("baked-offsets"),
   terrainDepthMaterialSpec("face-differences"),
+];
+
+/** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */
+export const TERRAIN_CLUSTER_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterDepthMaterialSpec("baked-offsets"),
+  terrainClusterDepthMaterialSpec("face-differences"),
 ];
 
 /**

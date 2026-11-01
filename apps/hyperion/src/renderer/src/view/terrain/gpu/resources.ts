@@ -172,8 +172,14 @@ export const LIT_INTERIOR_INDICES = GRID_INDICES + 4 * QUADS * 6;
 /** Terrain's cluster mesh and its eight templates (plan R14, R14.T1.b), made once. */
 export const TERRAIN_CLUSTER_MESH = terrainClusterMesh();
 
-/** The passes a view's cluster buckets hold (plan R14, R14.T1.b): one a shadow cascade. */
+/** The shadow cascades' passes of a view's cluster buckets (plan R14, R14.T1.b), the first four. */
 export const CLUSTER_CASTER_PASSES = 4;
+
+/** The overlay's terrain depth's pass of a view's cluster buckets (plan R14, R14.T1.e), the fifth. */
+export const CLUSTER_OVERLAY_PASS = CLUSTER_CASTER_PASSES;
+
+/** The passes a view's cluster buckets hold: the cascades' and the overlay's. */
+export const CLUSTER_PASSES = CLUSTER_CASTER_PASSES + 1;
 
 /** Bytes of a slot's cluster records: its patch's 96 clusters (plan R14, R14.T1.b). */
 export const CLUSTER_RECORDS_SLOT_BYTES = TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES;
@@ -1051,7 +1057,7 @@ export class TerrainResources {
 
   /**
    * `view`'s cluster path buffers (plan R14, R14.T1.b), made at its first call on the current
-   * device: its buckets for {@link CLUSTER_CASTER_PASSES} passes of terrain's templates, each with
+   * device: its buckets for {@link CLUSTER_PASSES} passes of terrain's templates, each with
    * room for every cluster of its shape of every slot, named `terrain clusters (view)`, and its
    * cull inputs; released with its other buffers. `null` on a layout made without clusters.
    *
@@ -1075,7 +1081,7 @@ export class TerrainResources {
         buckets: new ClusterBuckets(
           this.#engine,
           named,
-          CLUSTER_CASTER_PASSES,
+          CLUSTER_PASSES,
           templates,
           templates.map(
             (t) =>

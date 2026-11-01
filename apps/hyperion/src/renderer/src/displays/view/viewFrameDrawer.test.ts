@@ -711,6 +711,7 @@ describe("what a view's frame gives its label block and list (the batch review's
         standingIn: false,
         maskReady: false,
         cascades: null,
+        overlayDepth: null,
       }),
       coverageMask: () => null,
       wirePass: () => null,
@@ -831,6 +832,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             ? {
                 maskReadyFor: () => true,
                 symbologyDepthMaterial: null,
+                geometry: { overlayDepth: "redraw" },
                 heights,
                 viewIds: new Set([VIEW]),
                 faulted: false,
@@ -851,6 +853,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             standingIn: false,
             maskReady: true,
             cascades: null,
+            overlayDepth: null,
           };
         },
         // Never faulted here: the drawer's guards are R10.T16.e's own tests'.
@@ -920,6 +923,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
     const pass: FrameTerrainPass = {
       maskReadyFor: () => true,
       symbologyDepthMaterial: null,
+      geometry: { overlayDepth: "redraw" },
       heights: DATUM,
       viewIds: new Set([VIEW]),
       faulted: false,
@@ -1041,6 +1045,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             ? {
                 maskReadyFor: () => true,
                 symbologyDepthMaterial: null,
+                geometry: { overlayDepth: "redraw" },
                 heights,
                 viewIds: new Set([VIEW, OTHER]),
                 faulted: false,

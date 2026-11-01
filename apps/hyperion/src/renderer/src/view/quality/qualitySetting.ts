@@ -83,9 +83,15 @@ export interface GeometrySettings {
   /** R14.T1.d: the coarsest stride a caster may take at its cascade's texel; 1 keeps stride 1. */
   readonly casterStrideCap: Stride;
   /**
-   * R14.T1.e: the overlay's terrain depth: redrawn by the lit mesh (`redraw`, as before), read from
-   * the photorealistic pass's depth (`scene-depth`), or drawn through the cluster path
-   * (`cluster`).
+   * R14.T1.e: where the symbology's pass over the photorealistic image takes the terrain's depth
+   * for its marks' test. `redraw`, as before: each of the terrain's draws again with the depth
+   * material. `cluster`, both settings': the overlay's own depth, the edge patches' draws and the
+   * interior patches' clusters at stride 1, culled to the camera's frustum, which keeps every
+   * mark's visibility and is the one to keep once plan R14's T3.c strides the camera pass.
+   * `scene-depth`, the plan's lean: the scene target's depth where its size is the canvas's, and
+   * elsewhere as `cluster`; it carries the reference surfaces' tessellated depth, which hides marks
+   * on their datum that the redraw leaves in sight (R14.T1.e's smoke), so no setting takes it.
+   * Unread by the way back, which redraws.
    */
   readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
 }
@@ -234,7 +240,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       clusterPath: true,
       casterDepthCull: true,
       casterStrideCap: 8,
-      overlayDepth: "redraw",
+      overlayDepth: "cluster",
     },
   },
   low: {
@@ -260,7 +266,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       clusterPath: true,
       casterDepthCull: true,
       casterStrideCap: 8,
-      overlayDepth: "redraw",
+      overlayDepth: "cluster",
     },
   },
 };

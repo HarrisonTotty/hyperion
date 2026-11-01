@@ -401,6 +401,8 @@ function fakeSource(
     readonly annunciation?: TerrainAnnunciation | null;
     readonly hasPass?: boolean;
     readonly draws?: ReadonlyArray<DrawItem>;
+    readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
+    readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
   } = {},
 ): {
   readonly source: ViewTerrainSource;
@@ -415,6 +417,7 @@ function fakeSource(
       return options.ready ?? true;
     },
     symbologyDepthMaterial: options.depth === undefined ? DEPTH : options.depth,
+    geometry: { overlayDepth: options.overlayMode ?? "redraw" },
     heights: new ResidentHeights(),
     viewIds: new Set([VIEW]),
     faulted: false,
@@ -429,6 +432,7 @@ function fakeSource(
     standingIn: false,
     maskReady: true,
     cascades: null,
+    overlayDepth: options.overlayDepth ?? null,
   };
   return {
     drawn,
@@ -657,6 +661,45 @@ describe("a view's frame terrain (R10.T16.c)", () => {
   });
 });
 
+describe("a view's frame terrain and the overlay's depth on the cluster path (plan R14, R14.T1.e)", () => {
+  const CLUSTERS: DrawItem = {
+    ...DRAW,
+    mesh: { kind: "mesh", name: "terrain clusters" },
+    material: { kind: "material", name: "terrain-cluster-depth-baked-offsets" },
+  };
+
+  it("gives the edge draws with the depth material and the clusters with their own, each with the overlay's slope term", () => {
+    const { plan, body } = handed();
+    const terrain = frameTerrain(
+      fakeSource({ overlayDepth: { edge: [DRAW], clusters: [CLUSTERS] }, overlayMode: "cluster" })
+        .source,
+    );
+    terrain.draws(plan, [body]);
+    const slope = new Float32Array([3]);
+    expect(terrain.symbologyDepth()).toEqual([
+      { ...DRAW, material: DEPTH, uniforms: { ...DRAW.uniforms, occluderSlopePx: slope } },
+      { ...CLUSTERS, uniforms: { ...CLUSTERS.uniforms, occluderSlopePx: slope } },
+    ]);
+  });
+
+  it("asks the scene's depth where every body drawn takes it so, and not where its redraw or its cluster depth is asked", () => {
+    const asked = (mode: FrameTerrainPass["geometry"]["overlayDepth"]): boolean => {
+      const { plan, body } = handed();
+      const terrain = frameTerrain(fakeSource({ overlayMode: mode }).source);
+      terrain.draws(plan, [body]);
+      return terrain.sceneDepth();
+    };
+    const none = frameTerrain(fakeSource({ overlayMode: "scene-depth", depth: null }).source);
+    none.draws(handed().plan, [handed().body]);
+    expect([asked("scene-depth"), asked("cluster"), asked("redraw"), none.sceneDepth()]).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
 describe("a view's frame terrain and the datum over the image (R10.T16.f)", () => {
   /** The plan of the body handed over with the mask `terrain` gives, in its rotation, if any. */
   function handedWith(terrain: LiveFrameTerrain): ReturnType<typeof handed> {
@@ -790,6 +833,7 @@ function edgeSource(
         ? {
             maskReadyFor: () => true,
             symbologyDepthMaterial: null,
+            geometry: { overlayDepth: "redraw" },
             heights,
             viewIds: new Set([VIEW]),
             faulted: false,
@@ -961,6 +1005,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
           ? {
               maskReadyFor: () => true,
               symbologyDepthMaterial: null,
+              geometry: { overlayDepth: "redraw" },
               heights: wire,
               viewIds: wireViews,
               faulted: false,
@@ -1058,6 +1103,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
           : {
               maskReadyFor: () => true,
               symbologyDepthMaterial: null,
+              geometry: { overlayDepth: "redraw" },
               heights: each.heights ?? new ResidentHeights(),
               viewIds: each.viewIds ?? new Set([VIEW]),
               faulted: false,
@@ -1078,6 +1124,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
               standingIn: false,
               maskReady: true,
               cascades: null,
+              overlayDepth: null,
               ...each.frame,
             };
       },

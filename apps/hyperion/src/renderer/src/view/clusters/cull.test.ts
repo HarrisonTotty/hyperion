@@ -10,6 +10,7 @@ import type { Vec3 } from "../../geometry/vec3";
 import { declaredStructLayout } from "../engine/webgpu/uniforms";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
 import {
+  cameraKeeps,
   cascadeKeeps,
   CULL_ROUNDING_M,
   cullTwin,
@@ -18,6 +19,7 @@ import {
   strideLevel,
 } from "./cull";
 import {
+  type CameraCullPass,
   type CascadeCullPass,
   type CullReceivers,
   CULL_PARAMS_BYTES,
@@ -207,6 +209,39 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
     }).toThrow(RangeError);
   });
 
+  it("packs a camera pass's planes after its scalars, kind 2, and a pass left out as none (R14.T1.e)", () => {
+    const out = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
+    packCullPasses(
+      [null, CAMERA],
+      [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 64 },
+      ],
+      out,
+    );
+    const view = new DataView(out);
+    const at = CULL_PASS_BYTES;
+    const f = (o: number): number => view.getFloat32(at + o, true);
+    expect([
+      new Uint8Array(out, 0, CULL_PASS_BYTES).every((byte) => byte === 0),
+      [0, 4, 8, 12].map((o) => view.getUint32(at + o, true)),
+      f(20),
+      [32, 36, 40, 44, 96, 100, 104, 108].map(f),
+    ]).toEqual([
+      true,
+      [2, 0, 8, 64],
+      5,
+      [Math.fround(-Math.SQRT1_2), 0, Math.fround(-Math.SQRT1_2), 0, 0, 0, -1, -0.5],
+    ]);
+    expect(() => {
+      packCullPasses(
+        [{ ...CAMERA, planes: Array.from({ length: 7 }, () => ({ normal: X, offsetM: 0 })) }],
+        [{ bucketBase: 0, listBase: 0 }],
+        out,
+      );
+    }).toThrow(RangeError);
+  });
+
   it("packs a pass's receivers after its centre, its switch in its scalars, and −1 for no cover", () => {
     const out = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
     const covered = cascade({ receivers: RECEIVERS });
@@ -260,6 +295,20 @@ function strideOf(bucket: number): number {
   return 2 ** (bucket % 4);
 }
 
+/** A camera at the origin looking down −z, its frustum's sides at 45°, its near plane 0.5 m out. */
+const CAMERA: CameraCullPass = {
+  kind: "camera",
+  planes: [
+    { normal: { x: -Math.SQRT1_2, y: 0, z: -Math.SQRT1_2 }, offsetM: 0 },
+    { normal: { x: Math.SQRT1_2, y: 0, z: -Math.SQRT1_2 }, offsetM: 0 },
+    { normal: { x: 0, y: -Math.SQRT1_2, z: -Math.SQRT1_2 }, offsetM: 0 },
+    { normal: { x: 0, y: Math.SQRT1_2, z: -Math.SQRT1_2 }, offsetM: 0 },
+    { normal: { x: 0, y: 0, z: -1 }, offsetM: -0.5 },
+  ],
+  toleranceM: 0,
+  strideCap: 1,
+};
+
 /** Receivers between 40 m and 200 m, reaching 3 m nearer and 5 m farther, a cover below. */
 const RECEIVERS: CullReceivers = {
   depthM: [40, 200],
@@ -300,6 +349,22 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       at(2, 0.02),
       at(1, 0.02),
     ]).toEqual([8, 4, 2, 2, 1, 2, 1]);
+  });
+
+  it("keeps a sphere not wholly outside any of a camera's planes, or about the camera, and refuses one wholly outside one (R14.T1.e)", () => {
+    const keeps = (c: Vec3, r = 1): boolean => cameraKeeps(CAMERA, c, r, 0);
+    expect([
+      keeps({ x: 0, y: 0, z: -100 }),
+      // Across a side by under its radius, and by more: 1.4 ÷ √2 and 2 ÷ √2 beyond its plane.
+      keeps({ x: 101.4, y: 0, z: -100 }),
+      keeps({ x: 102, y: 0, z: -100 }),
+      // Behind the camera, and about it.
+      keeps({ x: 0, y: 0, z: 2 }),
+      keeps({ x: 0, y: 0, z: 0.5 }),
+      keeps({ x: 0, y: 0, z: 30 }, 40),
+    ]).toEqual([true, true, false, false, true, true]);
+    // The kernel's allowance widens each plane by a metre and some ulps of the distance.
+    expect(cameraKeeps(CAMERA, { x: 102, y: 0, z: -100 }, 1)).toBe(true);
   });
 
   it("refuses a sphere whose receivers all lie beyond the far end, or below the near end inside the cover, and keeps the rest (R14.T1.c)", () => {

@@ -80,6 +80,8 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import type { BucketDrawBase, ClusterBuckets } from "../clusters/buckets";
 import { CLUSTER_CULL_KERNEL, receiversRefuse } from "../clusters/cull";
 import {
+  type CameraCullPass,
+  type CullPass,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
   MAX_CULL_PASSES,
@@ -124,10 +126,11 @@ import {
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { CoarseFineHolds } from "./coarseFineHolds";
+import { frustumOf } from "./cull";
 import { vertexSpacing } from "./cube";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
-  CLUSTER_CASTER_PASSES,
+  CLUSTER_OVERLAY_PASS,
   DEFAULT_TERRAIN_VIEW,
   isInteriorBake,
   LIT_INTERIOR_INDICES,
@@ -474,6 +477,13 @@ export interface TerrainGeometryCounts {
    * frame drew no cascades, or cast through the cluster path with no sample back yet.
    */
   readonly casterTriangles: readonly [number, number, number, number] | null;
+  /**
+   * The overlay's terrain depth's triangles (plan R14, R14.T1.e): by the way back its draws', the
+   * drawn triangles; on the cluster path the edge patches' and the counted clusters', from the last
+   * sample back, `null` before one; none of them where the overlay takes the scene's depth, which
+   * the photorealistic renderer decides.
+   */
+  readonly overlayTriangles: number | null;
 }
 
 /** One view that hands the pass's body over, as a step takes it (R10.T16.b). */
@@ -555,6 +565,24 @@ export interface TerrainViewFrame {
    * high setting under a star; `null` otherwise, when its lit draw takes w = 0.
    */
   readonly cascades: TerrainCascadeFrame | null;
+  /**
+   * The overlay's terrain depth on the cluster path (plan R14, R14.T1.e;
+   * `GeometrySettings.overlayDepth`), where the pass takes it there; `null` where the overlay
+   * redraws each of {@link TerrainViewFrame.draws} with the depth material.
+   */
+  readonly overlayDepth: TerrainOverlayDepth | null;
+}
+
+/**
+ * A view-frame's terrain depth for the symbology's pass on the cluster path (plan R14, R14.T1.e):
+ * the edge patches' draws, which take the depth material as every draw does by the way back, and
+ * the interior patches' bucket draws at stride 1, culled to the camera's frustum, each with the
+ * cluster depth (`terrainClusterDepthMaterialSpec`), which pushes its depth as the depth material
+ * does; both but the overlay's `occluderSlopePx`, which its frame gives.
+ */
+export interface TerrainOverlayDepth {
+  readonly edge: ReadonlyArray<DrawItem>;
+  readonly clusters: ReadonlyArray<DrawItem>;
 }
 
 /** The survey a pass's selection reads, with a count of its changes (R10.T16.b). */
@@ -762,6 +790,8 @@ interface Device {
    * when the interior patches cast by the lit mesh.
    */
   clusterShadowMaterial: MaterialHandle | null;
+  /** The interior patches' depth for the overlay on the cluster path (plan R14, R14.T1.e). */
+  clusterDepthMaterial: MaterialHandle | null;
   cullKernel: ComputeHandle | null;
   /**
    * A lit terrain's interior patches' material (plan R14, R14.T1.a), the lit material without its
@@ -834,6 +864,10 @@ interface ViewState {
   /** Its last frame's patches and casters, for its counts (plan R14; {@link TerrainPass.counts}). */
   lastPatches: TerrainDrawnPatches;
   lastCasters: CasterFrame | null;
+  /** Whether its last frame's overlay took its depth from the cluster path (plan R14, R14.T1.e). */
+  lastOverlay: boolean;
+  /** Its cluster path's state (plan R14), made at its first frame on it. */
+  clusters: ViewClusters | null;
   /**
    * The interior patches' records this frame (plan R14, R14.T1.a), apart from {@link
    * ViewState.instances}, which then hold the other patches', and the draw set's index of each.
@@ -879,17 +913,21 @@ interface ViewCasters {
   /** The device and material the draws were made for, to make them again when either changes. */
   device: Device | null;
   material: MaterialHandle | null;
-  /**
-   * The cluster path's (plan R14, R14.T1.b): each interior record's cull input (its cascades' mask
-   * and its error unit's `f32` bits), the passes and the parameters as the cull reads them, the
-   * bucket draws' shared parts on {@link ViewCasters.clusterDevice}, and the counters, made when
-   * the view's measurement is on.
-   */
-  readonly cullInputs: Uint32Array;
-  readonly cullPasses: ArrayBuffer;
-  readonly cullParams: ArrayBuffer;
-  clusterBase: BucketDrawBase | null;
-  clusterDevice: Device | null;
+}
+
+/**
+ * A lit view's cluster path (plan R14, R14.T1.b and T1.e): each interior record's cull input (its
+ * passes' mask and its error unit's `f32` bits), the passes and the parameters as the cull reads
+ * them, the bucket draws' shared parts of the casters and of the overlay's depth on
+ * {@link ViewClusters.device}, and the counters, made when the view's measurement is on.
+ */
+interface ViewClusters {
+  readonly inputs: Uint32Array;
+  readonly passes: ArrayBuffer;
+  readonly params: ArrayBuffer;
+  casterBase: BucketDrawBase | null;
+  overlayBase: BucketDrawBase | null;
+  device: Device | null;
   stats: ClusterStats | null;
 }
 
@@ -900,16 +938,33 @@ const NO_PASSES: ReadonlyArray<DepthLayerPass> = [];
 const NO_DRAWS: ReadonlyArray<DrawItem> = [];
 
 /**
- * A view-frame's cluster path (plan R14, R14.T1.b): its buckets and cull inputs, the cluster mesh,
- * the bucket draws' shared parts and the cull's kernel.
+ * A view-frame's cluster path (plan R14, R14.T1.b and T1.e): its buckets, its cull inputs' buffer
+ * and their staging, the cluster mesh, the bucket draws' shared parts of the casters (`null` before
+ * the cluster caster is made) and of the overlay's depth (`null` where the overlay does not take
+ * it from the cluster path), whether it does, and the cull's kernel.
  */
 interface ClusterPath {
   readonly buckets: ClusterBuckets;
   readonly cullInputs: BufferHandle;
+  readonly inputs: Uint32Array;
   readonly mesh: MeshHandle;
-  readonly base: BucketDrawBase;
+  readonly casterBase: BucketDrawBase | null;
+  readonly overlayBase: BucketDrawBase | null;
+  readonly overlay: boolean;
   readonly kernel: ComputeHandle;
 }
+
+/** The overlay's pass of the cull (plan R14, R14.T1.e), after the four cascades', and its bit. */
+const OVERLAY_PASS_BIT = 1 << CLUSTER_OVERLAY_PASS;
+
+/** The cull's passes' names for the counters: the cascades', then the overlay's depth. */
+const CLUSTER_PASS_NAMES: ReadonlyArray<string> = [...CASCADE_PASS_NAMES, "overlay depth"];
+
+/**
+ * How far each side of the overlay's frustum is opened for its cull, rad: past the `f32` rounding
+ * of the planes and the scene's and the canvas's aspects, so that no cluster that draws is refused.
+ */
+const OVERLAY_CULL_MARGIN_RAD = 0.01;
 
 /** A frame's caster passes and their counts, as {@link TerrainPass}'s `#drawCasters` drew them. */
 type CasterFrame = Pick<TerrainCascadeFrame, "passes" | "litMeshCasters" | "clustered">;
@@ -1370,7 +1425,7 @@ export class TerrainPass {
    * order); `null` before any, and while {@link TerrainPass.measureClusters} is off.
    */
   clusterStats(id: TerrainViewId): ReadonlyArray<ClusterPassStats> | null {
-    return this.#measuring ? (this.#views.get(id)?.casters?.stats?.latest() ?? null) : null;
+    return this.#measuring ? (this.#views.get(id)?.clusters?.stats?.latest() ?? null) : null;
   }
 
   /**
@@ -1396,11 +1451,14 @@ export class TerrainPass {
       );
       casterTriangles = [a ?? 0, b ?? 0, c ?? 0, d ?? 0];
     }
-    return {
-      patches: state.lastPatches,
-      drawnTriangles: (interior * LIT_INTERIOR_INDICES + edge * edgeIndices) / 3,
-      casterTriangles,
-    };
+    const drawnTriangles = (interior * LIT_INTERIOR_INDICES + edge * edgeIndices) / 3;
+    const overlayStats = stats?.[CLUSTER_OVERLAY_PASS] ?? null;
+    let overlayTriangles: number | null = drawnTriangles;
+    if (state.lastOverlay) {
+      overlayTriangles =
+        overlayStats === null ? null : (edge * edgeIndices) / 3 + overlayStats.triangles;
+    }
+    return { patches: state.lastPatches, drawnTriangles, casterTriangles, overlayTriangles };
   }
 
   /** The current device's layout. */
@@ -1535,7 +1593,8 @@ export class TerrainPass {
       lit ? this.#readyDepth(device, path) : Promise.resolve(),
       cascades ? this.#readyShadow(device, path) : Promise.resolve(),
       lit ? this.#readyInterior(device, "lit-interior", path) : Promise.resolve(),
-      cascades ? this.#readyClusters(device, path) : Promise.resolve(),
+      lit ? this.#readyClusters(device, path) : Promise.resolve(),
+      cascades ? this.#readyClusterCasters(device, path) : Promise.resolve(),
     ]);
     let material: MaterialHandle;
     try {
@@ -1569,6 +1628,7 @@ export class TerrainPass {
     kind:
       | TerrainShading
       | "depth"
+      | "depth-cluster"
       | "shadow"
       | "shadow-cluster"
       | "lit-emissive"
@@ -1650,27 +1710,60 @@ export class TerrainPass {
   }
 
   /**
-   * Compiles, or takes, `device`'s cluster path (plan R14, R14.T1.b): the interior patches' caster
-   * and the cull's kernel; never rejects. Either that cannot be made is reported, and the interior
-   * patches cast by the lit mesh.
+   * Compiles, or takes, `device`'s cluster path (plan R14, R14.T1.b and T1.e): the cull's kernel
+   * and the interior patches' depth for the overlay; never rejects. Either that cannot be made is
+   * reported, and the interior patches cast by the lit mesh and the overlay redraws its draws.
    */
   async #readyClusters(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
-    try {
-      const [caster, kernel] = await Promise.all([
-        this.#materialOf("shadow-cluster", device, path),
-        this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL),
-      ]);
+    // A refusal thrown at the call, as a lost device's, settles as one rejected.
+    const [kernel, depth] = await Promise.allSettled([
+      (async () => this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL))(),
+      (async () => this.#materialOf("depth-cluster", device, path))(),
+    ]);
+    const taken =
+      kernel.status === "fulfilled" &&
+      depth.status === "fulfilled" &&
+      device === this.#device &&
+      !this.#disposed &&
+      device.cullKernel === null &&
+      device.clusterDepthMaterial === null;
+    if (taken) {
+      device.cullKernel = kernel.value;
+      device.clusterDepthMaterial = depth.value;
+      return;
+    }
+    // Neither is kept where either was refused: the one made is released.
+    if (kernel.status === "fulfilled") {
+      this.#engine.releaseCompute(kernel.value);
+    }
+    if (depth.status === "fulfilled") {
+      this.#releaseOwn(depth.value);
+    }
+    for (const outcome of [kernel, depth]) {
       if (
-        device === this.#device &&
-        !this.#disposed &&
-        device.clusterShadowMaterial === null &&
-        device.cullKernel === null
+        outcome.status === "rejected" &&
+        !this.#superseded(device) &&
+        !(outcome.reason instanceof EngineUnavailable)
       ) {
+        console.error(
+          "the terrain's cluster path failed: its interior patches cast by the lit mesh",
+          outcome.reason,
+        );
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s interior patches' caster on the cluster path (plan R14,
+   * R14.T1.b); never rejects. One that cannot be made is reported, and they cast by the lit mesh.
+   */
+  async #readyClusterCasters(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const caster = await this.#materialOf("shadow-cluster", device, path);
+      if (device === this.#device && !this.#disposed && device.clusterShadowMaterial === null) {
         device.clusterShadowMaterial = caster;
-        device.cullKernel = kernel;
       } else {
         this.#releaseOwn(caster);
-        this.#engine.releaseCompute(kernel);
       }
     } catch (error: unknown) {
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
@@ -1900,6 +1993,7 @@ export class TerrainPass {
         standingIn: false,
         maskReady: false,
         cascades: null,
+        overlayDepth: null,
       };
     }
     const { selection, drawSet } = selected;
@@ -1908,7 +2002,7 @@ export class TerrainPass {
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
     const set = this.#cascadesFor(state, input);
-    const { draws, patches, count, refused, cast } = this.#writeOrNone(
+    const { draws, patches, count, refused, cast, overlayDepth } = this.#writeOrNone(
       state,
       mask,
       selected.nearContacts,
@@ -1929,6 +2023,7 @@ export class TerrainPass {
     const annunciation = state.debounce.update(conditions, input.nowMs);
     state.lastPatches = patches;
     state.lastCasters = set === null ? null : cast;
+    state.lastOverlay = overlayDepth !== null;
     return {
       draws,
       patches,
@@ -1941,6 +2036,7 @@ export class TerrainPass {
       maskReady:
         !missing && !refused && (draws.length > 0 || count === 0) && !this.#seesCodeZeroOpen(mask),
       cascades: set === null ? null : { set, ...cast },
+      overlayDepth,
     };
   }
 
@@ -2141,7 +2237,7 @@ export class TerrainPass {
   #forgetView(id: TerrainViewId): void {
     this.#stepped.delete(id);
     this.#nearestGround.delete(id);
-    this.#views.get(id)?.casters?.stats?.dispose();
+    this.#views.get(id)?.clusters?.stats?.dispose();
     if (this.#views.delete(id)) {
       this.#device.resources.releaseView(id);
     }
@@ -2169,7 +2265,7 @@ export class TerrainPass {
       device.offFailed();
       device.pool.terminate();
       for (const state of this.#views.values()) {
-        state.casters?.stats?.dispose();
+        state.clusters?.stats?.dispose();
       }
       this.#views.clear();
       this.#stepped.clear();
@@ -2219,6 +2315,10 @@ export class TerrainPass {
       this.#releaseOwn(device.clusterShadowMaterial);
       device.clusterShadowMaterial = null;
     }
+    if (device.clusterDepthMaterial !== null) {
+      this.#releaseOwn(device.clusterDepthMaterial);
+      device.clusterDepthMaterial = null;
+    }
     if (device.cullKernel !== null) {
       this.#engine.releaseCompute(device.cullKernel);
       device.cullKernel = null;
@@ -2236,7 +2336,8 @@ export class TerrainPass {
         this.#terrain,
         this.#planet.figure,
         this.#shading,
-        this.#shading === "lit" && this.#shadows?.cascades === true,
+        // A lit pass's interior patches cast and give the overlay its depth on the cluster path.
+        this.#shading === "lit",
       );
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
@@ -2275,6 +2376,7 @@ export class TerrainPass {
       interiorMaterial: null,
       emissiveInteriorMaterial: null,
       clusterShadowMaterial: null,
+      clusterDepthMaterial: null,
       cullKernel: null,
       residents: new Map(),
       rebakes: new Map(),
@@ -2303,7 +2405,7 @@ export class TerrainPass {
     // centres dropped, since the pass is remade (decision-r10-t9-split, ruling 7 amended).
     for (const [id, state] of this.#views) {
       // The lost device's counters went with it; the view's next measured frame makes its own.
-      state.casters?.stats?.dispose();
+      state.clusters?.stats?.dispose();
       this.#views.set(id, { ...this.#viewState(id), debounce: state.debounce });
     }
     this.#rangesVersion += 1;
@@ -2567,6 +2669,8 @@ export class TerrainPass {
       drawn: [],
       lastPatches: NO_PATCHES,
       lastCasters: null,
+      lastOverlay: false,
+      clusters: null,
       interior: new InstanceRecords(slotCount),
       interiorDrawn: [],
       interiorDraw: null,
@@ -2961,6 +3065,7 @@ export class TerrainPass {
     readonly count: number;
     readonly refused: boolean;
     readonly cast: CasterFrame;
+    readonly overlayDepth: TerrainOverlayDepth | null;
   } {
     try {
       return {
@@ -2975,6 +3080,7 @@ export class TerrainPass {
           count: 0,
           refused: true,
           cast: NO_CASTERS,
+          overlayDepth: null,
         };
       }
       throw error;
@@ -3007,6 +3113,7 @@ export class TerrainPass {
     readonly patches: TerrainDrawnPatches;
     readonly count: number;
     readonly cast: CasterFrame;
+    readonly overlayDepth: TerrainOverlayDepth | null;
   } {
     const { resources, residents } = device;
     const { instances, morph, phases, drawn: drawnIndices, interior } = state;
@@ -3078,7 +3185,7 @@ export class TerrainPass {
     }
     const count = instances.count + interior.count;
     if (device.material === null || count === 0) {
-      return { draws: NO_DRAWS, patches: NO_PATCHES, count, cast: NO_CASTERS };
+      return { draws: NO_DRAWS, patches: NO_PATCHES, count, cast: NO_CASTERS, overlayDepth: null };
     }
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
     let draws: ReadonlyArray<DrawItem>;
@@ -3099,13 +3206,32 @@ export class TerrainPass {
         draws = [this.#writeSpike(device, state, device.material, input)];
         break;
     }
+    const clusters = draws.length > 0 && lit ? this.#clusterPath(device, state) : null;
     const cast =
       draws.length > 0 && live !== null
-        ? this.#drawCasters(device, state, input, live)
+        ? this.#drawCasters(device, state, input, live, clusters)
         : NO_CASTERS;
+    // Without casters the overlay's pass is culled alone (the low setting's, and w = 0's).
+    const culled = cast !== NO_CASTERS && clusters !== null && (cast.clustered || clusters.overlay);
+    if (clusters !== null && clusters.overlay && !culled) {
+      this.#cullClusters(device, state, clusters, input, null);
+    }
+    const overlayBase = clusters?.overlayBase ?? null;
+    const overlayDepth =
+      clusters !== null && overlayBase !== null
+        ? {
+            edge: draws.filter((draw) => draw.mesh !== resources.interiorMesh),
+            clusters: clusters.buckets.drawItems(
+              CLUSTER_OVERLAY_PASS,
+              clusters.mesh,
+              overlayBase,
+              1,
+            ),
+          }
+        : null;
     const patches =
       draws.length > 0 ? { interior: interior.count, edge: instances.count } : NO_PATCHES;
-    return { draws, patches, count, cast };
+    return { draws, patches, count, cast, overlayDepth };
   }
 
   /**
@@ -3323,6 +3449,7 @@ export class TerrainPass {
     state: ViewState,
     input: TerrainViewFrameInput,
     set: CascadeSet,
+    clusters: ClusterPath | null,
   ): CasterFrame {
     const shadows = this.#shadows;
     const target = shadows?.target ?? null;
@@ -3343,21 +3470,14 @@ export class TerrainPass {
       items: null,
       device: null,
       material: null,
-      cullInputs: new Uint32Array(2 * slots),
-      cullPasses: new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES),
-      cullParams: new ArrayBuffer(CULL_PARAMS_BYTES),
-      clusterBase: null,
-      clusterDevice: null,
-      stats: null,
     });
     for (const records of casters.records) {
       records.clear();
     }
-    const clusters = this.#clusterPath(device, state);
-    const clustered = clusters !== null;
+    // The interior patches cast through the cluster path where its caster is made.
+    const clustered = clusters !== null && clusters.casterBase !== null;
     // Each patch's centre less the camera, body-fixed, in `f64`, as the fit placed the cascades.
     const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
-    const radiusM = this.#planet.figure.equatorialRadiusM;
     // T1.c's receivers' cull of each patch, in the same body-fixed frame: a stand-in's sub-patch is
     // left to `castsInto` alone, as its draw is left to the edge path.
     const viewAxis = rotateToBodyFixed(input.view.rotation, viewAxisOf(input.view.orientation));
@@ -3389,10 +3509,7 @@ export class TerrainPass {
           }
         }
         if (interior && clustered) {
-          casters.cullInputs[2 * record] = mask;
-          casters.cullInputs[2 * record + 1] = f32Bits(
-            patch === undefined ? 0 : vertexSpacing(radiusM, patch.key.level).maxM,
-          );
+          clusters.inputs[2 * record] = (clusters.inputs[2 * record] ?? 0) | mask;
           continue;
         }
         // The interior patches' records cast as the others' do: a layer's depth is its casters'
@@ -3409,10 +3526,11 @@ export class TerrainPass {
       casters.device = device;
       casters.material = material;
     }
-    if (clusters !== null) {
-      this.#cullClusters(device, state, casters, clusters, input, set);
+    if (clusters !== null && (clustered || clusters.overlay)) {
+      this.#cullClusters(device, state, clusters, input, clustered ? set : null);
     }
     const items = casters.items;
+    const casterBase = clustered ? clusters.casterBase : null;
     const passes = CASCADES.map((index): DepthLayerPass => {
       const records = casters.records[index];
       resources.writeCasters(state.id, index, records);
@@ -3420,12 +3538,12 @@ export class TerrainPass {
       const others = shadows.casters.draws(set, index, state.id);
       const count = records.count;
       const terrain: DrawItem[] = count > 0 ? [{ ...items[index], instanceCount: count }] : [];
-      if (clusters !== null) {
+      if (clusters !== null && casterBase !== null) {
         terrain.push(
           ...clusters.buckets.drawItems(
             index,
             clusters.mesh,
-            clusters.base,
+            casterBase,
             this.#geometry.casterStrideCap,
           ),
         );
@@ -3444,25 +3562,25 @@ export class TerrainPass {
   }
 
   /**
-   * View `state`'s cluster path this frame (plan R14, R14.T1.b): its buckets, the cluster mesh and
-   * the bucket draws' shared parts, where its lever is on, the device's cluster caster and cull are
-   * made, the layout holds the clusters and the frame has interior records; `null` otherwise, when
-   * the interior patches cast by the lit mesh.
+   * View `state`'s cluster path this frame (plan R14, R14.T1.b and T1.e): its buckets, cull inputs
+   * and their staging, the cluster mesh, the bucket draws' shared parts of the casters, where the
+   * cluster caster is made, and of the overlay's depth, where the cluster depth is made and the
+   * overlay takes its depth from the cluster path, and the cull's kernel; `null` where the lever is
+   * off, the kernel not made, the layout holds no clusters or the frame has no interior records,
+   * when the interior patches cast by the lit mesh and the overlay redraws every draw. Each
+   * interior record's cull input is its level's largest vertex spacing, its passes none until the
+   * casters' or the overlay's mark them.
    */
   #clusterPath(device: Device, state: ViewState): ClusterPath | null {
     const { resources } = device;
-    const material = device.clusterShadowMaterial;
     const kernel = device.cullKernel;
     const mesh = resources.clusterMesh;
     const interior = resources.viewBuffers(state.id).interior;
-    const casters = state.casters;
     if (
       !this.#geometry.clusterPath ||
-      material === null ||
       kernel === null ||
       mesh === null ||
       interior === null ||
-      casters === null ||
       state.interior.count === 0
     ) {
       return null;
@@ -3473,55 +3591,100 @@ export class TerrainPass {
     if (buffers === null || heights === null || surveyMask === null) {
       return null;
     }
-    if (
-      casters.clusterBase === null ||
-      casters.clusterDevice !== device ||
-      casters.clusterBase.material !== material
-    ) {
-      const offsets = resources.field("offsets");
-      casters.clusterBase = {
-        material,
-        offsetFromCameraM: ZERO_OFFSET,
-        uniforms: state.casterUniforms,
-        textures: {},
-        storageBuffers: {
-          heights,
-          slots: resources.slotRecords,
-          instances: interior.instances,
-          contacts: resources.viewBuffers(state.id).contacts,
-          surveyMask,
-          clusterLists: buffers.buckets.lists,
-          ...(offsets === null ? {} : { offsets }),
-        },
-      };
-      casters.clusterDevice = device;
+    const slots = resources.layout.slots.slotCount;
+    const clusters = (state.clusters ??= {
+      inputs: new Uint32Array(2 * slots),
+      passes: new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES),
+      params: new ArrayBuffer(CULL_PARAMS_BYTES),
+      casterBase: null,
+      overlayBase: null,
+      device: null,
+      stats: null,
+    });
+    if (clusters.device !== device) {
+      clusters.casterBase = null;
+      clusters.overlayBase = null;
+      clusters.device = device;
+    }
+    const offsets = resources.field("offsets");
+    const storageBuffers: Readonly<Record<string, BufferHandle>> = {
+      heights,
+      slots: resources.slotRecords,
+      instances: interior.instances,
+      contacts: resources.viewBuffers(state.id).contacts,
+      surveyMask,
+      clusterLists: buffers.buckets.lists,
+      ...(offsets === null ? {} : { offsets }),
+    };
+    const baseOf = (
+      material: MaterialHandle | null,
+      held: BucketDrawBase | null,
+    ): BucketDrawBase | null =>
+      material === null
+        ? null
+        : held?.material === material
+          ? held
+          : {
+              material,
+              offsetFromCameraM: ZERO_OFFSET,
+              uniforms: state.casterUniforms,
+              textures: {},
+              storageBuffers,
+            };
+    clusters.casterBase = baseOf(device.clusterShadowMaterial, clusters.casterBase);
+    clusters.overlayBase = baseOf(device.clusterDepthMaterial, clusters.overlayBase);
+    const overlay =
+      this.#geometry.overlayDepth !== "redraw" &&
+      clusters.overlayBase !== null &&
+      device.depthMaterial !== null;
+    const radiusM = this.#planet.figure.equatorialRadiusM;
+    const drawSet = this.#selected?.drawSet;
+    for (let record = 0; record < state.interiorDrawn.length; record += 1) {
+      const drawnIndex = state.interiorDrawn[record];
+      const patch = drawnIndex === undefined ? undefined : drawSet?.patches[drawnIndex]?.patch;
+      // A record whose patch the draw set no longer holds enters no pass.
+      clusters.inputs[2 * record] = overlay && patch !== undefined ? OVERLAY_PASS_BIT : 0;
+      clusters.inputs[2 * record + 1] = f32Bits(
+        patch === undefined ? 0 : vertexSpacing(radiusM, patch.key.level).maxM,
+      );
     }
     return {
       buckets: buffers.buckets,
       cullInputs: buffers.cullInputs,
+      inputs: clusters.inputs,
       mesh,
-      base: casters.clusterBase,
+      casterBase: clusters.casterBase,
+      overlayBase: overlay ? clusters.overlayBase : null,
+      overlay,
       kernel,
     };
   }
 
   /**
-   * Culls view `state`'s interior patches' clusters into `set`'s cascades' buckets (plan R14,
-   * R14.T1.b–d): writes each record's cull input, the cascades as the cull's passes, up to
-   * `casterStrideCap` and with their receivers' cull where `casterDepthCull` is on, and the
-   * dispatch's parameters, clears the buckets and dispatches the cull, a workgroup a record, its
-   * submission before the caster passes'; and, behind the measurement switch, samples the
-   * buckets' counts.
+   * Culls view `state`'s interior patches' clusters into its buckets (plan R14, R14.T1.b–e): writes
+   * each record's cull input, as the casters and the overlay marked them, `set`'s cascades as the
+   * cull's first four passes, up to `casterStrideCap` and with their receivers' cull where
+   * `casterDepthCull` is on, and where the overlay takes its depth from the cluster path its camera's
+   * frustum as the fifth, at stride 1, and the dispatch's parameters; clears the buckets and
+   * dispatches the cull, a workgroup a record, its submission before the caster passes' and the
+   * overlay's; and, behind the measurement switch, samples the buckets' counts.
+   *
+   * @param set - The cascades the frame casts into on the cluster path, or `null` for none.
    */
   #cullClusters(
     device: Device,
     state: ViewState,
-    casters: ViewCasters,
     clusters: ClusterPath,
     input: TerrainViewFrameInput,
-    set: CascadeSet,
+    set: CascadeSet | null,
   ): void {
     const { resources } = device;
+    const held = state.clusters;
+    const interior = resources.viewBuffers(state.id).interior;
+    const records = resources.clusterRecords;
+    if (held === null || interior === null || records === null) {
+      return;
+    }
     const engine = this.#engine;
     const count = state.interior.count;
     const [r0, r1, r2] = input.view.rotation.rows;
@@ -3531,15 +3694,26 @@ export class TerrainPass {
       y: r1.x * v.x + r1.y * v.y + r1.z * v.z,
       z: r2.x * v.x + r2.y * v.y + r2.z * v.z,
     });
-    const axes = [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)] as const;
     const viewAxis = viewAxisOf(input.view.orientation);
     const { casterStrideCap, casterDepthCull } = this.#geometry;
-    const passes = cascadeCullPasses(set, axes, viewAxis, casterStrideCap, casterDepthCull);
+    const cascades: ReadonlyArray<CullPass | null> =
+      set === null
+        ? [null, null, null, null]
+        : cascadeCullPasses(
+            set,
+            [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)],
+            viewAxis,
+            casterStrideCap,
+            casterDepthCull,
+          );
+    const passes: ReadonlyArray<CullPass | null> = clusters.overlay
+      ? [...cascades, this.#overlayCullPass(input)]
+      : cascades;
     const { buckets } = clusters;
     packCullPasses(
       passes,
-      CASCADES.map((index) => buckets.place(index)),
-      casters.cullPasses,
+      passes.map((_, index) => buckets.place(index)),
+      held.passes,
     );
     packCullParams(
       {
@@ -3551,26 +3725,21 @@ export class TerrainPass {
         instances: count,
         instanceWords: INSTANCE_RECORD_BYTES / 4,
         clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
-        passes: CLUSTER_CASTER_PASSES,
+        passes: passes.length,
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
         viewAxis,
       },
-      casters.cullParams,
+      held.params,
     );
-    engine.writeBuffer(clusters.cullInputs, 0, casters.cullInputs.subarray(0, 2 * count));
+    engine.writeBuffer(clusters.cullInputs, 0, clusters.inputs.subarray(0, 2 * count));
     buckets.clear();
-    const interior = resources.viewBuffers(state.id).interior;
-    const records = resources.clusterRecords;
-    if (interior === null || records === null) {
-      return;
-    }
     engine.dispatch(
       clusters.kernel,
       {
         uniforms: {
-          params: new Uint32Array(casters.cullParams),
-          passes: new Uint32Array(casters.cullPasses),
+          params: new Uint32Array(held.params),
+          passes: new Uint32Array(held.passes),
         },
         buffers: {
           instance_words: interior.instances,
@@ -3586,9 +3755,23 @@ export class TerrainPass {
       TERRAIN_CLUSTER_CULL_LABEL,
     );
     if (this.#measuring) {
-      casters.stats ??= new ClusterStats(engine, `terrain clusters (${state.id})`);
-      casters.stats.sample(buckets, TERRAIN_CLUSTER_MESH.templates, CASCADE_PASS_NAMES);
+      held.stats ??= new ClusterStats(engine, `terrain clusters (${state.id})`);
+      held.stats.sample(buckets, TERRAIN_CLUSTER_MESH.templates, CLUSTER_PASS_NAMES);
     }
+  }
+
+  /**
+   * The overlay's camera as a pass of the cull (plan R14, R14.T1.e): R05's frustum of the view's
+   * camera in the instances' frame, each side opened by {@link OVERLAY_CULL_MARGIN_RAD}, at stride
+   * 1.
+   */
+  #overlayCullPass(input: TerrainViewFrameInput): CameraCullPass {
+    const { view } = input;
+    const frustum = frustumOf(
+      { orientation: view.orientation, fovXRad: view.fovXRad, viewport: view.viewport },
+      OVERLAY_CULL_MARGIN_RAD,
+    );
+    return { kind: "camera", planes: frustum.planes, toleranceM: 0, strideCap: 1 };
   }
 
   /**

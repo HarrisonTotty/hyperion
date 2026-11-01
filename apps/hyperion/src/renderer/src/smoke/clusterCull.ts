@@ -9,16 +9,18 @@
  * bucket must be the doubly widened twin's: so no cluster the `f64` test keeps is refused, and none
  * is kept that the test with the kernel's allowance would not keep. The strides take the pass's cap
  * of 8 at random tolerances, so that every template's bucket is filled; a bucket's count is its
- * entries'. The first pass culls by its box alone, the others by their receivers' depths too
- * (R14.T1.c), the second with no cover below. The buckets' order varies with the appends', so each
- * is compared as a set.
+ * entries'. The first pass culls by its box alone, the next three by their receivers' depths too
+ * (R14.T1.c), the second with no cover below, and the fifth is a camera's frustum (R14.T1.e). The
+ * buckets' order varies with the appends', so each is compared as a set.
  */
 
 import type { Vec3 } from "../geometry/vec3";
 import { ClusterBuckets } from "../view/clusters/buckets";
 import { CLUSTER_CULL_KERNEL, cullTwin, type CullTwinInput } from "../view/clusters/cull";
 import {
+  type CameraCullPass,
   type CascadeCullPass,
+  type CullPass,
   type CullReceivers,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
@@ -32,15 +34,17 @@ import {
   packClusterRecord,
 } from "../view/clusters/record";
 import { terrainClusterMesh } from "../view/clusters/templates";
+import { quaternionFromRows } from "../view/camera/quaternion";
+import { frustumOf } from "../view/terrain/cull";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, RenderEngine } from "../view/engine/types";
 import type { Checks } from "./harness";
 
-/** The check's instances, pages, clusters a page and passes. */
+/** The check's instances, pages, clusters a page and passes: four cascades and a camera. */
 const INSTANCES = 48;
 const PAGES = 12;
 const CLUSTERS = 96;
-const PASSES = 4;
+const PASSES = 5;
 
 /** A seeded uniform generator in [0, 1) (mulberry32). */
 function random(seed: number): () => number {
@@ -148,11 +152,11 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       z: Math.fround(30_000 * (next() - 0.5)),
     },
     page: n % PAGES,
-    passMask: Math.floor(next() * 16),
+    passMask: Math.floor(next() * 32),
     unitM: 0.01 + next(),
   }));
   const axes = frame(next);
-  const passes: CascadeCullPass[] = Array.from({ length: PASSES }, (_, k) => ({
+  const cascades: CascadeCullPass[] = Array.from({ length: PASSES - 1 }, (_, k) => ({
     kind: "cascade",
     axes,
     centreFromCameraLightM: {
@@ -166,6 +170,23 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     strideCap: 8,
     receivers: k === 0 ? null : receiversOf(next, k),
   }));
+  // A camera at the instances' origin, 60° across at 16:9, looking along a random axis (R14.T1.e).
+  const [right, up, back] = frame(next);
+  const camera: CameraCullPass = {
+    kind: "camera",
+    planes: frustumOf({
+      orientation: quaternionFromRows([
+        { x: right.x, y: up.x, z: back.x },
+        { x: right.y, y: up.y, z: back.y },
+        { x: right.z, y: up.z, z: back.z },
+      ]),
+      fovXRad: Math.PI / 3,
+      viewport: { widthPx: 1920, heightPx: 1080 },
+    }).planes,
+    toleranceM: 0,
+    strideCap: 1,
+  };
+  const passes: CullPass[] = [...cascades, camera];
   const viewAxis = unit(next);
   const buckets = new ClusterBuckets(
     engine,
@@ -272,9 +293,9 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     };
     const exact = cullTwin(input, 0);
     const widened = cullTwin(input, 2);
-    const boxes: CascadeCullPass[] = [];
+    const boxes: CullPass[] = [];
     for (const pass of passes) {
-      boxes.push({ ...pass, receivers: null });
+      boxes.push(pass.kind === "cascade" ? { ...pass, receivers: null } : pass);
     }
     const byReceivers = entriesOf(cullTwin({ ...input, passes: boxes }, 0)) - entriesOf(exact);
     let missing = 0;
@@ -295,7 +316,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       }
     }
     checks.check(
-      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses, its receivers' cull (R14.T1.c) on three of its passes",
+      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses, its receivers' cull (R14.T1.c) on three of its passes and a camera's frustum (R14.T1.e) its fifth",
       missing === 0 &&
         extra === 0 &&
         kept > 0 &&

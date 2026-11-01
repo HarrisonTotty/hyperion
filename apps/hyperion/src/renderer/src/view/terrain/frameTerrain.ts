@@ -61,6 +61,7 @@ import { relativeToCamera } from "../coords/relative";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type { DrawItem, MaterialHandle, TextureHandle, ViewSize } from "../engine/types";
 import type { FrameTerrain } from "../photoreal/renderer";
+import type { GeometrySettings } from "../quality/qualitySetting";
 import { sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
 import { angularDiameterPx, bodyRegime, graticuleStepDeg } from "../wireframe/bodies";
 import { sphereInFrustum } from "../wireframe/cull";
@@ -232,6 +233,11 @@ export interface FrameTerrainPass {
   maskReadyFor(view: string): boolean;
   /** The terrain as depth alone, for the symbology's pass (`TerrainPass.symbologyDepthMaterial`). */
   readonly symbologyDepthMaterial: MaterialHandle | null;
+  /**
+   * Where the symbology's pass takes the terrain's depth (`TerrainPass.geometry`'s `overlayDepth`;
+   * plan R14, R14.T1.e).
+   */
+  readonly geometry: Pick<GeometrySettings, "overlayDepth">;
   /** The resident bakes' heights (`TerrainPass.heights`). */
   readonly heights: ResidentHeightsView;
   /** The views its last step took (`TerrainPass.viewIds`). */
@@ -335,6 +341,7 @@ export class LiveFrameTerrain implements FrameTerrain {
   readonly #input: LiveFrameTerrainInput;
   #annunciation: TerrainAnnunciation | null = null;
   #depth: DrawItem[] = [];
+  #sceneDepth = false;
 
   constructor(source: FrameTerrainSource, input: LiveFrameTerrainInput) {
     this.#source = source;
@@ -382,6 +389,8 @@ export class LiveFrameTerrain implements FrameTerrain {
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
     const depth: DrawItem[] = [];
+    // Whether every body drawn lets the symbology take the scene's depth (plan R14, R14.T1.e).
+    let sceneDepth = true;
     let annunciation: TerrainAnnunciation | null = null;
     const handed: Array<{
       readonly record: DiscRecord;
@@ -422,22 +431,30 @@ export class LiveFrameTerrain implements FrameTerrain {
         continue;
       }
       draws.push(...frame.draws);
-      const material = this.#source.pass(record.body)?.symbologyDepthMaterial ?? null;
+      const pass = this.#source.pass(record.body);
+      sceneDepth &&= pass?.geometry.overlayDepth === "scene-depth";
+      const material = pass?.symbologyDepthMaterial ?? null;
       if (material !== null) {
         const slope = new Float32Array([occluderSlopePx]);
+        const sloped = (draw: DrawItem): DrawItem => ({
+          ...draw,
+          uniforms: { ...draw.uniforms, occluderSlopePx: slope },
+        });
         // Each of the body's draws, its interior patches' among them (plan R14, R14.T1.a), with its
-        // own mesh and records.
-        for (const draw of frame.draws) {
-          depth.push({
-            ...draw,
-            material,
-            uniforms: { ...draw.uniforms, occluderSlopePx: slope },
-          });
+        // own mesh and records; on the cluster path the edge patches' so, and the interior
+        // patches' clusters with their own depth (plan R14, R14.T1.e).
+        const overlay = frame.overlayDepth;
+        for (const draw of overlay === null ? frame.draws : overlay.edge) {
+          depth.push({ ...sloped(draw), material });
+        }
+        if (overlay !== null) {
+          depth.push(...overlay.clusters.map(sloped));
         }
       }
     }
     this.#annunciation = annunciation;
     this.#depth = depth;
+    this.#sceneDepth = sceneDepth && depth.length > 0;
     return draws;
   }
 
@@ -448,6 +465,16 @@ export class LiveFrameTerrain implements FrameTerrain {
    */
   symbologyDepth(): ReadonlyArray<DrawItem> {
     return this.#depth;
+  }
+
+  /**
+   * Whether the symbology's pass may take the scene's depth for the terrain's where their sizes
+   * agree (plan R14, R14.T1.e): every body the last {@link LiveFrameTerrain.draws} drew takes its
+   * overlay's depth so (`GeometrySettings.overlayDepth` `scene-depth`), and it drew any; otherwise,
+   * and where the sizes differ, the pass draws {@link LiveFrameTerrain.symbologyDepth}.
+   */
+  sceneDepth(): boolean {
+    return this.#sceneDepth;
   }
 }
 

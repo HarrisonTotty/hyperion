@@ -902,6 +902,15 @@ describe("the shared pass's fault (R10.T16.b; decision-r10-t16-contracts §7)", 
   });
 });
 
+/** Lets the pass's compiles' promise chains settle. */
+async function settle(): Promise<void> {
+  for (let hop = 0; hop < 10; hop += 1) {
+    // Each hop waits on the last.
+    // oxlint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+}
+
 /** Live bytes by category, from a tally made before the pass. */
 const CATEGORIES: ReadonlyArray<MemoryCategory> = ["height-cache", "other", "coarse-field-gpu"];
 
@@ -934,6 +943,8 @@ describe("the shared pass's releases (R10.T16.b; decision-r10-t16-contracts §1)
       stream(made, views, 2);
       made.pass.drawFor(PRIMARY, frameOf(primary, 16, LIGHTING));
       made.pass.dispose();
+      // A compile the rebuild started is released as it lands, after the teardown.
+      await settle();
       expect(engine.live).toEqual(before);
       expect(CATEGORIES.map((c) => tally.liveBytes(c))).toEqual(bytes);
     },
@@ -1496,8 +1507,9 @@ describe("the shared pass through a loss and its materials (the batch review's S
     engine.restore();
     await ready;
     await Promise.resolve();
-    // The lit material, its interior patches' form (plan R14, R14.T1.a) and its depth material.
-    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([3, true]);
+    // The lit material, its interior patches' form (plan R14, R14.T1.a), its depth material and its
+    // interior patches' cluster depth (plan R14, R14.T1.e).
+    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([4, true]);
     pass.dispose();
   });
 

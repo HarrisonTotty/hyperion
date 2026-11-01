@@ -63,7 +63,12 @@ const TOKENS = {
 } as const;
 
 /** A view's terrain that draws nothing and gives no mask. */
-const NO_TERRAIN = { surveyCoverage: () => null, draws: () => [], symbologyDepth: () => [] };
+const NO_TERRAIN = {
+  surveyCoverage: () => null,
+  draws: () => [],
+  symbologyDepth: () => [],
+  sceneDepth: () => false,
+};
 
 /** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
 function drawnOnly(body: LitBodyInput): LitBodyInput {
@@ -199,13 +204,19 @@ describe("a photorealistic frame of the phase scene", () => {
         },
         draws: () => [],
         symbologyDepth: () => [],
+        sceneDepth: () => false,
       },
     });
     expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
   });
 
   it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
-    const terrain = { surveyCoverage: () => null, draws: () => [], symbologyDepth: () => [] };
+    const terrain = {
+      surveyCoverage: () => null,
+      draws: () => [],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+    };
     expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
   });
 

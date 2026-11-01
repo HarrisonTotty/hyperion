@@ -15,7 +15,7 @@
 import type { Vec3 } from "../../geometry/vec3";
 import type { KernelPair } from "../engine/kernels";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
-import type { CascadeCullPass, CullPassPlace } from "./cullPass";
+import type { CameraCullPass, CascadeCullPass, CullPass, CullPassPlace } from "./cullPass";
 import type { ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { STRIDES } from "./templates";
@@ -59,7 +59,8 @@ export interface CullTwinInput {
   readonly clustersPerPage: number;
   /** The page's axes into the instances' frame, by column. */
   readonly rotationColumns: readonly [Vec3, Vec3, Vec3];
-  readonly passes: ReadonlyArray<CascadeCullPass>;
+  /** The passes, `null` for one not culled for this dispatch. */
+  readonly passes: ReadonlyArray<CullPass | null>;
   readonly places: ReadonlyArray<CullPassPlace>;
   /** The templates a pass has. */
   readonly templates: number;
@@ -153,11 +154,58 @@ export function receiversRefuse(
 }
 
 /**
+ * Whether a sphere at `centreM`, camera-relative, of radius `radiusM`, may show in camera pass
+ * `pass`'s frustum, widened by `slackScale` times the kernel's rounding allowance
+ * (`clusterCull.wgsl`'s `camera_keeps`): not wholly outside any plane, or about the camera.
+ */
+export function cameraKeeps(
+  pass: CameraCullPass,
+  centreM: Vec3,
+  radiusM: number,
+  slackScale = 1,
+): boolean {
+  const distanceM = Math.hypot(centreM.x, centreM.y, centreM.z);
+  const reach = radiusM + slackScale * (CULL_ROUNDING_FRACTION * distanceM + CULL_ROUNDING_M);
+  if (distanceM <= reach) {
+    return true;
+  }
+  return pass.planes.every(
+    ({ normal: n, offsetM }) =>
+      n.x * centreM.x + n.y * centreM.y + n.z * centreM.z + offsetM >= -reach,
+  );
+}
+
+/**
+ * Whether a sphere may draw into `pass` where anything reads it, by the pass's kind, at
+ * `slackScale` times the kernel's allowance (`pass_keeps`).
+ */
+export function passKeeps(
+  pass: CullPass,
+  viewAxis: Vec3,
+  centreM: Vec3,
+  radiusM: number,
+  slackScale = 1,
+): boolean {
+  let keeps: boolean;
+  switch (pass.kind) {
+    case "cascade":
+      keeps =
+        cascadeKeeps(pass, centreM, radiusM, slackScale) &&
+        !receiversRefuse(pass, viewAxis, centreM, radiusM, slackScale);
+      break;
+    case "camera":
+      keeps = cameraKeeps(pass, centreM, radiusM, slackScale);
+      break;
+  }
+  return keeps;
+}
+
+/**
  * The coarsest stride's level, up to `pass`'s cap, whose 2^l × `unitM` is within its tolerance,
  * both narrowed to `f32` as the kernel holds them (`stride_level`); 0 where none is.
  */
 export function strideLevel(
-  pass: Pick<CascadeCullPass, "strideCap" | "toleranceM">,
+  pass: Pick<CullPass, "strideCap" | "toleranceM">,
   unitM: number,
 ): number {
   const unit = Math.fround(unitM);
@@ -189,9 +237,9 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
       };
       input.passes.forEach((pass, p) => {
         if (
+          pass === null ||
           (instance.passMask & (1 << p)) === 0 ||
-          !cascadeKeeps(pass, centre, record.radiusM, slackScale) ||
-          receiversRefuse(pass, input.viewAxis, centre, record.radiusM, slackScale)
+          !passKeeps(pass, input.viewAxis, centre, record.radiusM, slackScale)
         ) {
           return;
         }

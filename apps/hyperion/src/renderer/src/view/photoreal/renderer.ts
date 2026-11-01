@@ -101,6 +101,7 @@ import { type GlareSource, glareSpreadTerms } from "../post/glare";
 import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histogram";
 import type { MeterMode } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
+import { OVERLAY_SCENE_DEPTH_MATERIAL, overlaySceneDepthDraw, sizesAgree } from "./overlayDepth";
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
@@ -154,6 +155,12 @@ export interface FrameTerrain {
    * hides it in the image (plan R10, R10.T16.c).
    */
   symbologyDepth(): ReadonlyArray<DrawItem>;
+  /**
+   * Whether the symbology's pass may take the scene's depth in place of
+   * {@link FrameTerrain.symbologyDepth} where the scene target's size is the canvas's (plan R14,
+   * R14.T1.e; `GeometrySettings.overlayDepth` `scene-depth`).
+   */
+  sceneDepth(): boolean;
 }
 
 /**
@@ -342,6 +349,8 @@ interface Resources {
   readonly sprite: MaterialHandle;
   readonly quad: MeshHandle;
   readonly tonemap: MaterialHandle;
+  /** The scene's depth into the symbology's pass (plan R14, R14.T1.e; `overlayDepth.ts`). */
+  readonly overlayDepth: MaterialHandle;
   readonly triangle: MeshHandle;
   readonly blueNoise: TextureHandle;
   /** The scene target's exposure histogram, read back one to three frames late (R07.T12). */
@@ -576,13 +585,15 @@ export class PhotorealRenderer {
       bloomKernel(SETTINGS[setting].photoreal.bloom, role, radPx, DEFAULT_EYE_OBSERVER),
     );
     let tonemap: MaterialHandle;
+    let overlayDepth: MaterialHandle;
     let sprite: MaterialHandle;
     let kernel: ComputeHandle;
     let discCells: ComputeHandle;
     let atmosphere: AtmosphereFrameKernels;
     try {
-      [tonemap, sprite, kernel, discCells, atmosphere] = await Promise.all([
+      [tonemap, overlayDepth, sprite, kernel, discCells, atmosphere] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
+        engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
         engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
         engine.createComputeAsync(HISTOGRAM_KERNEL),
         engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
@@ -627,6 +638,7 @@ export class PhotorealRenderer {
       sprite,
       quad,
       tonemap,
+      overlayDepth,
       triangle,
       blueNoise,
       histograms: new HistogramReader(engine, kernel, this.#name, (histogram) => {
@@ -902,9 +914,20 @@ export class PhotorealRenderer {
     if (frame.overlay !== null) {
       // Each handed-over body's datum gives way where its reference surface did (R10.T16.f), and
       // the terrain's depth goes first, so that nearer ground hides the marks drawn after it
-      // (R10.T16.c).
+      // (R10.T16.c): the scene's, where its size is the canvas's and the terrain asks it (plan
+      // R14, R14.T1.e), else the terrain's own.
       const overlay = frame.overlay(surveyedDatumsOf(plan, frame.bodies));
-      const depth = frame.terrain?.symbologyDepth() ?? [];
+      const terrain = frame.terrain;
+      const sceneDepth = resources.target.depth;
+      let depth: ReadonlyArray<DrawItem> = [];
+      if (terrain !== undefined) {
+        depth =
+          terrain.sceneDepth() &&
+          sceneDepth !== null &&
+          sizesAgree(frame.viewport, frame.presentedPx)
+            ? [overlaySceneDepthDraw(resources.triangle, resources.overlayDepth, sceneDepth)]
+            : terrain.symbologyDepth();
+      }
       view.render({
         ...overlay,
         draws: depth.length === 0 ? overlay.draws : [...depth, ...overlay.draws],
@@ -1219,6 +1242,7 @@ export class PhotorealRenderer {
       // The atmospheres' composite and its triangle, made with the view's pipelines; their
       // kernels have no release.
       this.#engine.releaseMaterial(resources.atmosphere.composite);
+      this.#engine.releaseMaterial(resources.overlayDepth);
       this.#engine.releaseMesh(resources.atmosphere.triangle);
       resources.bloom.dispose();
       this.#engine.releaseBuffer(resources.glare);

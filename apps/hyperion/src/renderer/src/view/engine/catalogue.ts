@@ -68,6 +68,7 @@ import {
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
+import { OVERLAY_SCENE_DEPTH_MATERIAL } from "../photoreal/overlayDepth";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
 import { BAND_MATERIAL } from "../sky/band";
@@ -79,6 +80,7 @@ import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
+  TERRAIN_CLUSTER_DEPTH_MATERIALS,
   TERRAIN_CLUSTER_SHADOW_MATERIALS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
@@ -154,6 +156,8 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BLOOM_DOWN_MATERIAL },
   { kind: "material", spec: BLOOM_UP_MATERIAL },
   { kind: "material", spec: TONEMAP_MATERIAL },
+  // The scene's depth into the symbology's pass (plan R14, R14.T1.e).
+  { kind: "material", spec: OVERLAY_SCENE_DEPTH_MATERIAL, targets: ["canvas"] },
 ];
 
 /**
@@ -243,9 +247,10 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, and its interior patches' form without the
  * survey discard (plan R14, R14.T1.a), R10.T16.c's lit terrain as depth alone for the symbology's
- * pass, one per vertex path, R10.T11's wireframe terrain, one per vertex path, and R10.T9.b's
- * shadow casters, one per vertex path, and plan R14's cluster casters (R14.T1.b), for the cascades'
- * `depth-only` layers, and the cluster path's cull and counters.
+ * pass, one per vertex path, and its interior patches' on the cluster path (plan R14, R14.T1.e),
+ * R10.T11's wireframe terrain, one per vertex path, and R10.T9.b's shadow casters, one per vertex
+ * path, and plan R14's cluster casters (R14.T1.b), for the cascades' `depth-only` layers, and the
+ * cluster path's cull and counters.
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -254,6 +259,7 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     ...TERRAIN_LIT_MATERIALS,
     ...TERRAIN_LIT_INTERIOR_MATERIALS,
     ...TERRAIN_DEPTH_MATERIALS,
+    ...TERRAIN_CLUSTER_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
   ...[...TERRAIN_SHADOW_MATERIALS, ...TERRAIN_CLUSTER_SHADOW_MATERIALS].map(

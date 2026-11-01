@@ -30,6 +30,9 @@
 //   reach across. The cluster is refused where all of them lie beyond the far end, or all at or
 //   below the near end and inside the next nearer cascade's covered square, each test narrowed by
 //   the same allowance, so that it writes no texel any receiver reads.
+// - _A camera's frustum_ (kind 2, T1.e): the cluster's sphere against each of the pass's planes,
+//   refused where it lies wholly outside one by more than the allowance, and kept where the camera
+//   is inside it, as R05's `inFrustum` keeps a patch's sphere.
 // - _The stride_: the coarsest s = 2^l, l up to the pass's cap, with s × the unit within the pass's
 //   tolerance, in `f32` as the twin forms it; s = 1 where none is.
 // - _The bucket_: the record's shape (its flags' bits 0–3) × STRIDE_LEVELS + l, from the pass's
@@ -72,6 +75,7 @@ struct CullParams {
 // `cullPass.ts`' MAX_CULL_PASSES, a pass's kinds and the strides' levels.
 const MAX_CULL_PASSES : u32 = 8u;
 const PASS_CASCADE : u32 = 1u;
+const PASS_CAMERA : u32 = 2u;
 const STRIDE_LEVELS : u32 = 4u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
@@ -125,6 +129,62 @@ fn receivers_refuse(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool 
   return abs(across.x) + reach <= below.z && abs(across.y) + reach <= below.z;
 }
 
+// A camera pass's plane `i`, its inward normal and its offset.
+fn camera_plane(cull_pass : CullPass, i : u32) -> vec4f {
+  switch i {
+    case 0u: {
+      return cull_pass.axisX;
+    }
+    case 1u: {
+      return cull_pass.axisY;
+    }
+    case 2u: {
+      return cull_pass.axisZ;
+    }
+    case 3u: {
+      return cull_pass.centre;
+    }
+    case 4u: {
+      return cull_pass.receivers;
+    }
+    default: {
+      return cull_pass.covered;
+    }
+  }
+}
+
+// Whether the sphere at `centre`, camera-relative, of radius `radius` may show in camera pass
+// `pass`'s frustum (see the module's head).
+fn camera_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
+  let slack = ROUNDING_FRACTION * length(centre) + ROUNDING_M;
+  if (dot(centre, centre) <= (radius + slack) * (radius + slack)) {
+    return true;
+  }
+  let planes = min(u32(cull_pass.scalars.y), 6u);
+  for (var i = 0u; i < planes; i = i + 1u) {
+    let plane = camera_plane(cull_pass, i);
+    if (dot(plane.xyz, centre) + plane.w < -(radius + slack)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Whether the sphere may draw into pass `pass` where anything reads it, by the pass's kind.
+fn pass_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
+  switch cull_pass.header.x {
+    case PASS_CASCADE: {
+      return cascade_keeps(cull_pass, centre, radius) && !receivers_refuse(cull_pass, centre, radius);
+    }
+    case PASS_CAMERA: {
+      return camera_keeps(cull_pass, centre, radius);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
 // The coarsest stride's level, up to the pass's cap, whose 2^l × `unit` is within its tolerance.
 fn stride_level(cull_pass : CullPass, unit : f32) -> u32 {
   var level = 0u;
@@ -176,11 +236,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         continue;
       }
       let cull_pass = passes[p];
-      if (
-        cull_pass.header.x != PASS_CASCADE ||
-        !cascade_keeps(cull_pass, centre, record.radius) ||
-        receivers_refuse(cull_pass, centre, record.radius)
-      ) {
+      if (!pass_keeps(cull_pass, centre, record.radius)) {
         continue;
       }
       let t = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);

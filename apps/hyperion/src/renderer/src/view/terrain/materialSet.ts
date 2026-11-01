@@ -48,6 +48,7 @@ import {
 import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/resources";
 import type { TerrainShading } from "./slotLayout";
 import {
+  terrainClusterDepthMaterialSpec,
   terrainClusterShadowMaterialSpec,
   terrainDepthMaterialSpec,
   terrainLitEmissiveInteriorMaterialSpec,
@@ -64,8 +65,9 @@ import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire
  * without the survey discard for the interior patches (`lit-interior` and `lit-emissive-interior`,
  * plan R14, R14.T1.a), its depth material for the symbology's pass (`depth`, R10.T16.c), the
  * wireframe's (`wire`, R10.T11), the lit terrain as a caster into the high setting's shadow
- * cascades (`shadow`, R10.T9.b), and its interior patches as casters on the cluster path
- * (`shadow-cluster`, plan R14, R14.T1.b).
+ * cascades (`shadow`, R10.T9.b), its interior patches as casters on the cluster path
+ * (`shadow-cluster`, plan R14, R14.T1.b), and their depth for the symbology's pass on it
+ * (`depth-cluster`, plan R14, R14.T1.e).
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -73,6 +75,7 @@ export type TerrainMaterialKind =
   | "lit-interior"
   | "lit-emissive-interior"
   | "depth"
+  | "depth-cluster"
   | "wire"
   | "shadow"
   | "shadow-cluster";
@@ -138,6 +141,9 @@ export function terrainMaterialOf(
     case "depth":
       made = { spec: terrainDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
       break;
+    case "depth-cluster":
+      made = { spec: terrainClusterDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
+      break;
     case "wire":
       made = { spec: terrainWireMaterialSpec(path), targets: ["canvas"], shading: "wire" };
       break;
@@ -161,8 +167,8 @@ export function terrainMaterialOf(
 
 /**
  * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
- * material, its interior patches' form (plan R14, R14.T1.a) and its depth material on the lit
- * layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
+ * material, its interior patches' form (plan R14, R14.T1.a), its depth material and its interior
+ * patches' cluster depth (plan R14, R14.T1.e) on the lit layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
  * cluster caster on that path too (R10.T9.b; plan R14, R14.T1.b; the low setting has no
  * cascades), and the wireframe's on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
  * device cannot hold (`fittedTerrainLayout`), of which no pass can be made either.
@@ -178,6 +184,7 @@ export function sessionMaterials(
       { kind: "lit", path: lit.vertexPath },
       { kind: "lit-interior", path: lit.vertexPath },
       { kind: "depth", path: lit.vertexPath },
+      { kind: "depth-cluster", path: lit.vertexPath },
     );
     if (setting === "high") {
       keys.push(

@@ -1586,13 +1586,15 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   ];
 
   /**
-   * The high setting's six, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
-   * (plan R14, R14.T1.a) and their cluster caster (R14.T1.b) among them.
+   * The high setting's seven, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
+   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b) and their cluster depth (R14.T1.e) among
+   * them.
    */
   const HIGH = [
     "terrain-lit-baked-offsets",
     "terrain-lit-interior-baked-offsets",
     "terrain-depth-baked-offsets",
+    "terrain-cluster-depth-baked-offsets",
     "terrain-shadow-baked-offsets",
     "terrain-cluster-shadow-baked-offsets",
     "terrain-wire-baked-offsets",
@@ -1607,7 +1609,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
 
   it("compiles its setting's lit, depth, caster and wireframe materials as it is made", async () => {
     const h = await harness();
-    expect([await h.session.compiled, compiled(h)]).toEqual([6, HIGH]);
+    expect([await h.session.compiled, compiled(h)]).toEqual([HIGH.length, HIGH]);
   });
 
   it("compiles the low setting's on face differences", async () => {
@@ -1617,6 +1619,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       "terrain-lit-face-differences",
       "terrain-lit-interior-face-differences",
       "terrain-depth-face-differences",
+      "terrain-cluster-depth-face-differences",
       "terrain-wire-face-differences",
     ]);
   });
@@ -1626,7 +1629,11 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 6), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH_DRAWN, 6]);
+    expect([compiled(h, HIGH.length), drawnWith(h), h.engine.live.materials]).toEqual([
+      [],
+      HIGH_DRAWN,
+      HIGH.length,
+    ]);
   });
 
   it("compiles nothing at a hand-over on the low setting either", async () => {
@@ -1637,14 +1644,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, 5), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
         "terrain-lit-face-differences",
         "terrain-depth-face-differences",
         "terrain-wire-face-differences",
       ],
-      4,
+      5,
     ]);
   });
 
@@ -1657,7 +1664,11 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.engine.restore();
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 6), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH_DRAWN, 6]);
+    expect([compiled(h, HIGH.length), drawnWith(h), h.engine.live.materials]).toEqual([
+      HIGH,
+      HIGH_DRAWN,
+      HIGH.length,
+    ]);
   });
 
   it("releases its materials only at its teardown, not with a pass", async () => {
@@ -1669,7 +1680,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.session.step();
     const kept = [h.session.passBodies.size, h.engine.live.materials];
     h.session.dispose();
-    expect([kept, h.engine.live.materials]).toEqual([[0, 6], 0]);
+    expect([kept, h.engine.live.materials]).toEqual([[0, HIGH.length], 0]);
   });
 });
 
