@@ -837,7 +837,8 @@ function ViewStage({
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
   const viewSky = useViewSky({
     universe,
-    place: server?.place ?? null,
+    // A kept scene of served bodies is lit by its sky, as the server's is (the owner's request).
+    place: server?.place ?? shown.run.scene.served?.place ?? null,
     run: shown.run,
     exposure,
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
@@ -1265,11 +1266,12 @@ function ViewStage({
         grantsFor = sceneSystem;
         grants = grantLevelsOf(sceneSystem);
       }
-      // The server's scene as the atmosphere cache's requests take it; none for a kept scene.
+      // The server's scene as the atmosphere cache's requests take it, or a kept scene's served
+      // bodies' (the body inspection's); none for any other kept scene.
+      const served = current === null ? run.scene.served : undefined;
       const airScene: AtmosphereScene | null =
-        current === null || inputs.universe === null
-          ? null
-          : {
+        current !== null && inputs.universe !== null
+          ? {
               universe: inputs.universe,
               system: current.place.system,
               designation: current.place.designation,
@@ -1277,7 +1279,18 @@ function ViewStage({
               arrival,
               grants,
               linkUp: inputs.linkUp,
-            };
+            }
+          : served === undefined
+            ? null
+            : {
+                universe: served.universe,
+                system: run.scene.system,
+                designation: served.place.designation,
+                time: run.scene.time,
+                arrival,
+                grants: served.grants,
+                linkUp: inputs.linkUp,
+              };
       let frameInputs: ViewFrameInputs | null = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
@@ -2283,7 +2296,7 @@ function ViewPanels({
   if (host === null) {
     throw new Error("the VIEW display is rendered outside a ViewSceneProvider");
   }
-  const { scene, sceneName, keptName, knownSystem, choose } = host;
+  const { scene, sceneName, keptName, knownSystem, choose, inspection, closeInspection } = host;
   const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   const [meter, setMeter] = useState<MeterMode>("average");
@@ -2313,7 +2326,9 @@ function ViewPanels({
           removeCamera: scene.removeCamera,
         }
       : null;
-  const option = sceneOptions.find((each) => each.name === (serverChosen ? keptName : sceneName));
+  // The body inspection is offered after the kept scenes while it is open (the owner's request).
+  const offered = inspection === null ? sceneOptions : [...sceneOptions, inspection.option];
+  const option = offered.find((each) => each.name === (serverChosen ? keptName : sceneName));
   if (option === undefined) {
     throw new Error(`no kept scene named ${serverChosen ? keptName : sceneName}`);
   }
@@ -2322,6 +2337,9 @@ function ViewPanels({
   // from here, above the stage that a new scene remounts, so that a scene in the same system asks
   // nothing again (Design note 19).
   const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
+  // A kept scene of served bodies, the body inspection's, is the server's to its terrain session
+  // and its atmosphere cache, which ask its bodies' records of the server.
+  const served = server === null ? (keptStart.served ?? null) : null;
   // What the chosen scene loads for itself, started here and not as it is made, in render
   // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
   // chooses the scene, so leaving the scene stops nothing.
@@ -2347,11 +2365,11 @@ function ViewPanels({
   const terrain = useTerrainSession({
     engineState,
     source: terrainSessionSource(
-      server === null
+      server === null && served === null
         ? { kind: "kept", option }
         : {
             kind: "server",
-            universe,
+            universe: served?.universe ?? universe,
             link,
             onSurface: scene.onSurface,
             requests: share.terrain,
@@ -2364,7 +2382,7 @@ function ViewPanels({
   // records through the share; a kept scene's bodies bring their own settings.
   const atmosphere = useAtmosphereCache({
     engineState,
-    requests: server === null ? null : share.atmosphere,
+    requests: server === null && served === null ? null : share.atmosphere,
     createWorker: opticsWorkers,
   });
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
@@ -2383,7 +2401,7 @@ function ViewPanels({
       <div className="view-display__bar">
         <fieldset className="preset-buttons" aria-label="Scene">
           <span className="field__label">SCENE</span>
-          {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
+          {[SERVER_SCENE_NAME, ...offered.map((each) => each.name)].map((name) => (
             <button
               key={name}
               type="button"
@@ -2399,6 +2417,16 @@ function ViewPanels({
               {name}
             </button>
           ))}
+          {inspection === null ? null : (
+            <button
+              type="button"
+              className="control preset-buttons__button"
+              aria-label={`CLOSE ${inspection.option.name}`}
+              onClick={closeInspection}
+            >
+              CLOSE
+            </button>
+          )}
         </fieldset>
         {lines.length === 0 ? null : (
           <div className="view-display__status" id={statusId}>
@@ -2414,7 +2442,14 @@ function ViewPanels({
         )}
       </div>
       <ViewStage
-        key={server === null ? option.name : SERVER_SCENE_NAME}
+        // Each opening of the body inspection is a new scene, its camera framed afresh.
+        key={
+          server !== null
+            ? SERVER_SCENE_NAME
+            : option === inspection?.option
+              ? `${option.name} ${String(inspection.sequence)}`
+              : option.name
+        }
         source={server === null ? { kind: "kept", option } : { kind: "server", server }}
         engineState={engineState}
         exposure={exposure}
@@ -2448,7 +2483,10 @@ function ViewPanels({
  * @remarks
  * It draws the scene chosen under `SCENE`: `SERVER`, the server's scene of the open universe from
  * R03's subscription (`useScene`), by default, or a kept test scene, `PRECISION TEST` or
- * `FRAME CHANGE TEST`; the subscription and the choice are held above the console frame by
+ * `FRAME CHANGE TEST`, or the body inspection `SYSTEM`'s `VIEW BODY` opens, offered with its
+ * `CLOSE` after the kept scenes until it is closed (the owner's request, 2026-11-01): a kept scene
+ * of the body's served records, whose terrain session and atmosphere cache are the server scene's,
+ * and whose sky is asked as the server scene's is; the subscription and the choice are held above the console frame by
  * `ViewSceneProvider`, which it must be rendered in, so that `App`'s header strip shows `TRAINING`
  * over a kept scene only. While the server's scene cannot be drawn (no universe open, the
  * subscription pending, refused or unanswered, the link down before a scene arrived, or the ship in

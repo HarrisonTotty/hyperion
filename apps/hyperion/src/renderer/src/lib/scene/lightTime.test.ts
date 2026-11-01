@@ -6,6 +6,7 @@ import {
   SPEED_OF_LIGHT_M_PER_S,
   spanDistance,
   spanSeconds,
+  timeAfter,
   timeBefore,
 } from "./lightTime";
 
@@ -61,5 +62,22 @@ describe("span arithmetic", () => {
 
   it("gives a span as a float of seconds as the simulation does", () => {
     expect(spanSeconds({ seconds: 4, nanos: 999_999_999 })).toBe(4 + 999_999_999 * 1e-9);
+  });
+});
+
+describe("the time after an instant", () => {
+  it("carries the nanoseconds into the seconds", () => {
+    expect(timeAfter({ seconds: 10, nanos: 900_000_000 }, 1.25)).toEqual({
+      seconds: 12,
+      nanos: 150_000_000,
+    });
+    expect(timeAfter({ seconds: 10, nanos: 0 }, 0)).toEqual({ seconds: 10, nanos: 0 });
+  });
+
+  it("goes back before the instant for a negative span", () => {
+    expect(timeAfter({ seconds: 10, nanos: 100_000_000 }, -0.5)).toEqual({
+      seconds: 9,
+      nanos: 600_000_000,
+    });
   });
 });

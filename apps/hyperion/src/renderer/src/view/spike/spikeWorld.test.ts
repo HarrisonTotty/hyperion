@@ -13,6 +13,7 @@ import {
   terrainTestGolden,
 } from "../scenes/terrainScene";
 import { norm } from "../../geometry/vec3";
+import { timeAfter } from "../../lib/scene/lightTime";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { sceneModelOf, stateNearEarth } from "../../test/sceneFixture";
 import { type ServedBody, servedBodyOf } from "../scene/servedBody";
@@ -23,7 +24,6 @@ import {
   spikeWorldNamed,
   TEST_PLANET_WORLD,
   terrainTestWorld,
-  timeAfter,
 } from "./spikeWorld";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
@@ -130,23 +130,6 @@ describe("a served world (R10.T15.b)", () => {
 
   it("counts its scene's time from the scene's when it was read", () => {
     expect(world.epoch).toEqual(served.epoch);
-  });
-});
-
-describe("the time after an instant", () => {
-  it("carries the nanoseconds into the seconds", () => {
-    expect(timeAfter({ seconds: 10, nanos: 900_000_000 }, 1.25)).toEqual({
-      seconds: 12,
-      nanos: 150_000_000,
-    });
-    expect(timeAfter({ seconds: 10, nanos: 0 }, 0)).toEqual({ seconds: 10, nanos: 0 });
-  });
-
-  it("goes back before the instant for a negative span", () => {
-    expect(timeAfter({ seconds: 10, nanos: 100_000_000 }, -0.5)).toEqual({
-      seconds: 9,
-      nanos: 600_000_000,
-    });
   });
 });
 

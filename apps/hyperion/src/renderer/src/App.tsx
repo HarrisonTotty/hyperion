@@ -1,4 +1,4 @@
-import { galacticPositionFromLy } from "@hyperion/protocol";
+import { galacticPositionFromLy, type RequestClient } from "@hyperion/protocol";
 import { Activity, type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
@@ -7,7 +7,7 @@ import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
-import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
+import { type InspectionOpening, ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
 import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
@@ -23,6 +23,7 @@ import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
 import type { ViewEngineSource } from "./displays/view/useViewEngine";
 import type { SceneOption } from "./displays/view/viewRun";
+import type { BodyInspection } from "./view/scenes/inspectionScene";
 import type { TerrainSession } from "./view/terrain/session";
 import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
@@ -43,6 +44,8 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
+  /** Opens a body in `VIEW`'s body inspection, from `SYSTEM`'s `VIEW BODY` (the owner's request). */
+  readonly viewBody: (inspection: BodyInspection) => void;
   /** `VIEW`'s engine on a `--views-check` launch (R07.T20), and its terrain run's seam, else `null`. */
   readonly checkedView: CheckedView | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
@@ -75,7 +78,8 @@ interface CheckedView {
  * The probes of a `--views-check` launch: the views probe, and its run's own (`CheckedRun`): the
  * terrain run's probe on a `--terrain` one, and on a `--handover` one also the hand-over check's
  * looks (R10.T10.g), offered among the terrain probe's kept scenes on that launch alone; none of its
- * own on an `--atmosphere` one (R08.T10.b).
+ * own on an `--atmosphere` one (R08.T10.b); on an `--inspection` one, the link's request client,
+ * through which its run asks what it opens (the owner's request).
  */
 interface CheckProbes {
   readonly views: ViewsProbe;
@@ -94,7 +98,11 @@ function servedHandoverOf(launch: ViewsCheckLaunch): ServedWorldNames | null {
  * A `--views-check` launch's probes, by its options; a `--handover` launch's looks on `served`,
  * the served world read from the server, where it names one, else on `TERRAIN TEST`'s.
  */
-function checkProbesOf(launch: ViewsCheckLaunch, served: HandoverWorld | null = null): CheckProbes {
+function checkProbesOf(
+  launch: ViewsCheckLaunch,
+  requests: RequestClient,
+  served: HandoverWorld | null = null,
+): CheckProbes {
   const views = new ViewsProbe();
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
@@ -110,6 +118,9 @@ function checkProbesOf(launch: ViewsCheckLaunch, served: HandoverWorld | null = 
       break;
     case "atmosphere":
       run = { kind: "atmosphere" };
+      break;
+    case "inspection":
+      run = { kind: "inspection", requests };
       break;
     case "terrain":
       run = { kind: "terrain", terrain: terrainProbe([]) };
@@ -134,8 +145,9 @@ function checkProbesOf(launch: ViewsCheckLaunch, served: HandoverWorld | null = 
 /** The view a check launch hands `VIEW`, from its probes. */
 function checkedViewOf(probes: CheckProbes): CheckedView {
   const { run } = probes;
-  // T20's run and the atmosphere run (R08.T10.b) draw through the views probe alone.
-  if (run.kind === "several-views" || run.kind === "atmosphere") {
+  // T20's run, the atmosphere run (R08.T10.b) and the inspection run draw through the views probe
+  // alone.
+  if (run.kind === "several-views" || run.kind === "atmosphere" || run.kind === "inspection") {
     return { engineSource: probes.views.source, terrain: null };
   }
   const { terrain } = run;
@@ -168,7 +180,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = <GalaxyDisplay onOpenSystem={inputs.openSystem} />;
       break;
     case "system":
-      content = <SystemDisplay opening={inputs.systemOpening} />;
+      content = <SystemDisplay opening={inputs.systemOpening} onViewBody={inputs.viewBody} />;
       break;
     case "view":
       content = (
@@ -210,6 +222,10 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
  * display is not rendered again for it.
  *
+ * `VIEW BODY` on the `SYSTEM` display's orbit map opens its body in `VIEW`'s body inspection (the
+ * owner's request, 2026-11-01): `App` keeps the latest opening, counted as a system's opening is,
+ * hands it to `ViewSceneProvider`, which chooses it, and switches to `VIEW`; the callback is stable.
+ *
  * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
  * R07.T17), which holds for the run.
  *
@@ -234,7 +250,7 @@ export function App() {
   const [probes, setProbes] = useState((): CheckProbes | null =>
     viewsCheck === undefined || servedHandoverOf(viewsCheck.launch) !== null
       ? null
-      : checkProbesOf(viewsCheck.launch),
+      : checkProbesOf(viewsCheck.launch, connection.requests),
   );
   const awaitingServed =
     probes === null && viewsCheck !== undefined && servedHandoverOf(viewsCheck.launch) !== null;
@@ -263,7 +279,7 @@ export function App() {
         }
         switch (read.kind) {
           case "read":
-            setProbes(checkProbesOf(viewsCheck.launch, read.world));
+            setProbes(checkProbesOf(viewsCheck.launch, requests, read.world));
             break;
           case "not served":
             fail(
@@ -296,6 +312,11 @@ export function App() {
     setSystemOpening((previous) => ({ target, sequence: (previous?.sequence ?? 0) + 1 }));
     setActiveDisplay("system");
   }, []);
+  const [inspection, setInspection] = useState<InspectionOpening | null>(null);
+  const viewBody = useCallback((body: BodyInspection): void => {
+    setInspection((previous) => ({ inspection: body, sequence: (previous?.sequence ?? 0) + 1 }));
+    setActiveDisplay("view");
+  }, []);
   const target = systemOpening?.target ?? null;
   const knownSystem = useMemo(
     (): SystemPlace | null =>
@@ -318,6 +339,7 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
+    viewBody,
     checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
     platform: window.hyperion.platform,
@@ -330,11 +352,16 @@ export function App() {
           probe={probes.views}
           run={probes.run}
           launchMode={window.hyperion.graphics.launchMode}
+          openSystem={openSystem}
         />
       )}
       <ServerLinkContext value={link}>
         <UniverseProvider>
-          <ViewSceneProvider active={activeDisplay === "view"} knownSystem={knownSystem}>
+          <ViewSceneProvider
+            active={activeDisplay === "view"}
+            knownSystem={knownSystem}
+            inspection={inspection}
+          >
             {(sceneProvenance) => (
               <ConsoleFrame
                 displays={DISPLAYS}

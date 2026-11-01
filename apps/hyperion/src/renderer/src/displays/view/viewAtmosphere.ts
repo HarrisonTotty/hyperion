@@ -34,7 +34,12 @@ import type { LitRegime } from "../../view/bodies/regime";
 import type { CameraPose } from "../../view/camera/pose";
 import { relativeToCamera } from "../../view/coords/relative";
 import { isLitBody } from "../../view/lighting/retarded";
-import { sceneOrigins, type ViewBody, type ViewScene } from "../../view/scene/model";
+import {
+  bringsOwnSettings,
+  sceneOrigins,
+  type ViewBody,
+  type ViewScene,
+} from "../../view/scene/model";
 import type { BodyFigure } from "../../view/terrain/planet";
 
 /** A view's atmospheres for its drawer's frame (`ViewFrameInputs.atmosphere`). */
@@ -187,7 +192,9 @@ export function atmosphereFrameOf(
   drawsAtmosphere: boolean,
   observerOf?: (body: ViewBody, lights: ReadonlyArray<BodyLight>) => AtmosphereObserver | undefined,
 ): AtmosphereFrame {
-  const kept = scene.provenance.kind === "kept";
+  // A kept scene of served bodies has their records asked, as a server scene's (the owner's body
+  // inspection, 2026-11-01).
+  const kept = bringsOwnSettings(scene);
   const bodies: AtmosphereFrameBody[] = drawsAtmosphere
     ? scene.bodies.filter(isLitBody).map((body): AtmosphereFrameBody => {
         const regime = regimes.get(body.id) ?? "point";

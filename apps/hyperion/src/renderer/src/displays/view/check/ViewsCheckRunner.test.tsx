@@ -48,6 +48,7 @@ describe("ViewsCheckRunner", () => {
         probe={new ViewsProbe()}
         run={{ kind: "several-views" }}
         launchMode="vulkan"
+        openSystem={() => undefined}
       />,
     );
     expect(window.requestAnimationFrame).not.toBe(own);
@@ -66,6 +67,7 @@ describe("ViewsCheckRunner", () => {
         probe={new ViewsProbe()}
         run={{ kind: "several-views" }}
         launchMode="vulkan"
+        openSystem={() => undefined}
       />,
     );
 
@@ -94,6 +96,7 @@ describe("ViewsCheckRunner", () => {
         probe={views}
         run={{ kind: "handover", terrain, scenes }}
         launchMode="vulkan"
+        openSystem={() => undefined}
       />,
     );
 
@@ -113,6 +116,7 @@ describe("ViewsCheckRunner", () => {
         probe={new ViewsProbe()}
         run={{ kind: "atmosphere" }}
         launchMode="vulkan"
+        openSystem={() => undefined}
       />,
     );
 
@@ -135,6 +139,7 @@ describe("ViewsCheckRunner", () => {
         probe={new ViewsProbe()}
         run={{ kind: "atmosphere" }}
         launchMode="software"
+        openSystem={() => undefined}
       />,
     );
 

@@ -980,8 +980,8 @@ export interface ViewsCheckLaunch {
   /**
    * The hand-over check's served world (`--universe`, `--body`; plan R10, R10.T15.b): present only
    * on a `--terrain --handover` launch that names one, whose looks are then made on the body the
-   * server serves in `TERRAIN TEST`'s place (its `fixture` `terrain-test`, unread), and absent on
-   * every other launch.
+   * server serves in `TERRAIN TEST`'s place (its `fixture` `terrain-test`, unread), and on every
+   * `--inspection` launch, whose body it names; absent on every other launch.
    */
   readonly served?: ServedWorldNames;
 }
@@ -1002,9 +1002,12 @@ export type ViewsCheckTerrainFixture = "terrain-test" | "terrain-test-weathered"
  * (`handover`, `--terrain --handover`, plan R10, R10.T10.g; decision-r10-t16-leans §1), the three
  * hand-over looks on `TERRAIN TEST`'s world ({@link HandoverCheckRecord}); or the atmosphere's
  * scripted hand flight on `ATMOSPHERE TEST` (`atmosphere`, `--atmosphere`, plan R08, R08.T10.b;
- * {@link AtmosphereCheckRecord}).
+ * {@link AtmosphereCheckRecord}); or a served body opened from `SYSTEM` through `VIEW BODY` and its
+ * photorealistic body inspection captured (`inspection`, `--inspection`, the owner's request,
+ * 2026-11-01), which writes its capture alone.
  */
-export type ViewsCheckRunKind = "several-views" | "terrain" | "handover" | "atmosphere";
+export type ViewsCheckRunKind =
+  "several-views" | "terrain" | "handover" | "atmosphere" | "inspection";
 
 /**
  * The check's phases, each a configuration of `VIEW` held while it is measured (R07.T20): the

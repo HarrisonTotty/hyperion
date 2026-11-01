@@ -7,6 +7,7 @@ import {
 
 import { AU_M } from "../../lib/system/constants";
 import type { CameraPose } from "../camera/pose";
+import type { RenderStyle } from "../camera/state";
 import type { ViewScene } from "../scene/model";
 
 /**
@@ -22,6 +23,12 @@ export interface KeptScene {
   sceneAt(tS: number): ViewScene;
   /** The scripted camera's pose at `tS` seconds into the script. */
   cameraAt(tS: number): CameraPose;
+  /**
+   * The style a view of it starts in: `photorealistic` for `VIEW`'s body inspection (the owner's
+   * request, 2026-11-01), drawn so once the view may draw it; the wireframe where absent, as every
+   * other kept scene starts.
+   */
+  readonly startStyle?: RenderStyle;
 }
 
 /** The kept scenes' system: a made-up ID, labelled as a test wherever it is shown. */

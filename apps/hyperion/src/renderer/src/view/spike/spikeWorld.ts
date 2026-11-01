@@ -37,7 +37,7 @@ import type { SpikeWorldName as LaunchWorldName } from "../../../../preload/api"
 import type { TerrainSessionSource } from "../../displays/view/useTerrainSession";
 import type { ConnectionStatus } from "../../lib/connection";
 import { norm } from "../../geometry/vec3";
-import { spanFromSeconds, timeBefore } from "../../lib/scene/lightTime";
+import { timeAfter } from "../../lib/scene/lightTime";
 import type { WireAppearance } from "../appearance/fromWire";
 import type { Rotation3 } from "../coords/rotation";
 import type { ServedBody } from "../scene/servedBody";
@@ -173,23 +173,6 @@ export function terrainTestWorld(): SpikeWorld {
     hostDiscs: TERRAIN_HOST_DISCS,
   };
 }
-
-/** The instant `seconds` after `time`, before it where negative, to the nanosecond. */
-export function timeAfter(time: UniverseTime, seconds: number): UniverseTime {
-  if (seconds < 0) {
-    return timeBefore(time, spanFromSeconds(-seconds));
-  }
-  const span = spanFromSeconds(seconds);
-  const nanos = time.nanos + span.nanos;
-  const carry = nanos >= NANOS_PER_SECOND ? 1 : 0;
-  return {
-    seconds: time.seconds + span.seconds + carry,
-    nanos: nanos - carry * NANOS_PER_SECOND,
-  };
-}
-
-/** Nanoseconds in a second. */
-const NANOS_PER_SECOND = 1_000_000_000;
 
 /**
  * A served world from `served`, a body as the server's scene drew it, lit by `hostDiscs`, its

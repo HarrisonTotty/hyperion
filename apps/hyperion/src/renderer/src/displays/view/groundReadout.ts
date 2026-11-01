@@ -51,7 +51,7 @@ import type { BodyIdHex, UniverseTime } from "@hyperion/protocol";
 import { spanFromSeconds, timeBefore } from "../../lib/scene/lightTime";
 import type { ViewId } from "../../view/camera/state";
 import { isLitBody } from "../../view/lighting/retarded";
-import type { ViewBody } from "../../view/scene/model";
+import { bringsOwnSettings, type ViewBody } from "../../view/scene/model";
 import type { TerrainFault } from "../../view/terrain/annunciation";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import { lineOfSightOf, type SightGap, sightGapOf } from "../../view/terrain/readouts";
@@ -116,10 +116,11 @@ export function groundBodyOf(run: ViewRun): ViewBody | null {
 
 /**
  * Whether a kept scene leaves `body`'s surface unset (decision-r10-t12-commit3 §5): it gives the
- * body no detail seed, so that no survey of it can arrive.
+ * body no detail seed, so that no survey of it can arrive. A kept scene of served bodies leaves none
+ * unset, their seeds asked of the server as a server scene's are (`VIEW`'s body inspection).
  */
 export function surfaceUnsetOf(run: ViewRun, body: ViewBody): boolean {
-  return run.scene.provenance.kind === "kept" && body.detailSeed === undefined;
+  return bringsOwnSettings(run.scene) && body.detailSeed === undefined;
 }
 
 /**

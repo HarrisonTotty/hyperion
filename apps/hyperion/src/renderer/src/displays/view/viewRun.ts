@@ -160,14 +160,18 @@ export interface ViewRun {
   readonly camera: CameraState;
 }
 
-/** A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship). */
+/**
+ * A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship), in the
+ * scene's start style (`KeptScene.startStyle`; the wireframe unless it gives one).
+ */
 export function startRun(kept: KeptScene): ViewRun {
   const scene = kept.sceneAt(0);
+  const camera = newCameraState(cameraSceneOf(scene), "eye");
   return {
     source: { kind: "kept", kept },
     tS: 0,
     scene,
-    camera: newCameraState(cameraSceneOf(scene), "eye"),
+    camera: kept.startStyle === undefined ? camera : { ...camera, style: kept.startStyle },
   };
 }
 

@@ -66,7 +66,12 @@
  * photorealistic, its atmosphere media awaited, the moonlit night captured from the seat, then a
  * scripted free-camera flight to a few radii of each air fixture, each captured. `--atmosphere` is
  * refused without `--views-check`, and with `--terrain`, a separate run (`--handover` and
- * `--weathered` beside it are refused first, as options of a `--terrain` that was not given).
+ * `--weathered` beside it are refused first, as options of a `--terrain` that was not given). With
+ * `--inspection` (the owner's request, 2026-11-01) it runs the inspection run: the universe
+ * `--universe` names opened on `GALAXY`, the system of the body `--body` names opened on `SYSTEM`,
+ * the body opened in `VIEW` through the orbit map's `VIEW BODY` and its photorealistic inspection
+ * captured; it needs both, and is refused without `--views-check` and beside `--terrain` or
+ * `--atmosphere`.
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -280,6 +285,12 @@ export function buildCommand(version: string): Command {
         "the check's atmosphere run on ATMOSPHERE TEST (plan R08): the moonlit night, then a hand flight past each air fixture",
       ),
     )
+    .addOption(
+      new Option(
+        "--inspection",
+        "the check's inspection run (the owner's request): --body opened from SYSTEM through VIEW BODY, captured",
+      ),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -379,6 +390,15 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["atmosphere"] === true && options["viewsCheck"] !== true) {
     command.error("error: --atmosphere is an option of --views-check, which was not given");
+  }
+  if (
+    options["inspection"] === true &&
+    (options["terrain"] === true || options["atmosphere"] === true)
+  ) {
+    command.error("error: --inspection is a run of its own; give it alone");
+  }
+  if (options["inspection"] === true && options["viewsCheck"] !== true) {
+    command.error("error: --inspection is an option of --views-check, which was not given");
   }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
@@ -483,11 +503,14 @@ function viewsCheckServedRefusal(
 ): string | null {
   const universe = options["universe"] !== undefined;
   const body = options["body"] !== undefined;
+  if (launch.run === "inspection") {
+    return universe && body ? null : "the inspection run needs --universe and --body";
+  }
   if (!universe && !body) {
     return null;
   }
   if (launch.run !== "handover") {
-    return "--universe and --body are options of --terrain --handover: the hand-over check's served world";
+    return "--universe and --body are options of --terrain --handover or --inspection: the served world";
   }
   if (launch.fixture !== "terrain-test") {
     return "--weathered does not fit a served world: the body is the server's, not a fixture";
@@ -510,13 +533,15 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     // `--handover` and `--weathered` are refused without `--terrain` before this is reached, and
     // `--atmosphere` with it, so an atmosphere launch names `TERRAIN TEST`'s field, the default.
     run:
-      options["atmosphere"] === true
-        ? "atmosphere"
-        : options["terrain"] !== true
-          ? "several-views"
-          : options["handover"] === true
-            ? "handover"
-            : "terrain",
+      options["inspection"] === true
+        ? "inspection"
+        : options["atmosphere"] === true
+          ? "atmosphere"
+          : options["terrain"] !== true
+            ? "several-views"
+            : options["handover"] === true
+              ? "handover"
+              : "terrain",
     fixture: options["weathered"] === true ? "terrain-test-weathered" : "terrain-test",
     // Both or neither, which `viewsCheckServedRefusal` holds the launch to.
     ...servedOf(options),

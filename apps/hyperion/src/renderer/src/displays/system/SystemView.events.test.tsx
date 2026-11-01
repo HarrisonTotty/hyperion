@@ -81,7 +81,7 @@ function renderView(frames = false) {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(HEIGHT_PX);
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget({ time: EPOCH })} />
+      <SystemView target={aSystemTarget({ time: EPOCH })} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();

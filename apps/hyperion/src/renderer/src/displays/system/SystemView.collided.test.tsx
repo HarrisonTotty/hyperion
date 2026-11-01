@@ -37,7 +37,7 @@ async function renderCollided() {
   );
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget()} />
+      <SystemView target={aSystemTarget()} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();

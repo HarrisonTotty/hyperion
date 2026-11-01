@@ -130,6 +130,7 @@ describe("the client's command line", () => {
       ENV_SERVER_PORT,
       "--weathered",
       "--atmosphere",
+      "--inspection",
     ]) {
       expect(text).toContain(mention);
     }
@@ -579,6 +580,42 @@ describe("the several-views check's options", () => {
       1,
       `error: ${option} is an option of --terrain, which was not given`,
     ]);
+  });
+
+  it("takes --inspection, the inspection run (the owner's request), with its body", () => {
+    expect(
+      parse(["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY]).viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "inspection",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+    });
+  });
+
+  it.each([
+    [["--views-check", "--inspection"], "error: the inspection run needs --universe and --body"],
+    [
+      ["--views-check", "--inspection", "--universe", UNIVERSE],
+      "error: the inspection run needs --universe and --body",
+    ],
+    [
+      ["--inspection", "--universe", UNIVERSE, "--body", BODY],
+      "error: --inspection is an option of --views-check, which was not given",
+    ],
+    [
+      ["--views-check", "--inspection", "--atmosphere"],
+      "error: --inspection is a run of its own; give it alone",
+    ],
+    [
+      ["--views-check", "--inspection", "--terrain", "--universe", UNIVERSE, "--body", BODY],
+      "error: --inspection is a run of its own; give it alone",
+    ],
+  ] as const)("refuses the inspection run %j", (args, message) => {
+    const error = refusal([...args]);
+    expect([error.exitCode, error.message]).toEqual([1, message]);
   });
 
   it("refuses --atmosphere with the descent spike as separate runs", () => {

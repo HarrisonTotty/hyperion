@@ -34,6 +34,7 @@ import type {
   SceneCraft,
   SceneKinematics,
   SceneModel,
+  SceneParts,
   ScenePosition,
   SystemPlace,
 } from "../../lib/scene/model";
@@ -100,7 +101,7 @@ export function serverSceneGap(model: SceneModel): ServerSceneGap | null {
  * first frame for a view starting on the server's scene, before its drawing loop reads
  * `useScene`'s `frameAt`; `null` while the scene cannot be drawn.
  */
-export function serverSceneAtPush(model: SceneModel, place: SystemPlace): ViewScene | null {
+export function serverSceneAtPush(model: SceneParts, place: SystemPlace): ViewScene | null {
   const time = model.clock.time;
   const observer = shipObserver(model, time);
   const frame = observer === null ? null : sceneAt(model, observer, time, null);
@@ -393,7 +394,7 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * nose does not swing as its frame changes.
  */
 export function viewSceneFromServer(
-  model: SceneModel,
+  model: SceneParts,
   frame: SceneFrame,
   place: SystemPlace,
 ): ViewScene | null {

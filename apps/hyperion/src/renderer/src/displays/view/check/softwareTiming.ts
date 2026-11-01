@@ -13,6 +13,7 @@
 import type { GraphicsLaunchMode } from "../../../../../preload/api";
 import type { AtmosphereCheckTiming } from "./atmosphereCheckRun";
 import type { HandoverCheckTiming } from "./handoverCheckRun";
+import type { InspectionCheckTiming } from "./inspectionCheckRun";
 import type { TerrainCheckTiming } from "./terrainCheckRun";
 import type { ViewsCheckTiming } from "./viewsCheckRun";
 
@@ -84,6 +85,25 @@ export function handoverCheckTimingOf(
         waitMs: stretched(timing.waitMs),
         surveyWaitMs: stretched(timing.surveyWaitMs),
         overrunMs: stretched(timing.overrunMs),
+      }
+    : timing;
+}
+
+/**
+ * The inspection run's timing for a launch (the owner's request, 2026-11-01): its waits for a
+ * control and for the first photorealistic frames, and `AUTO`'s settle limit, stretched in the
+ * software mode.
+ */
+export function inspectionCheckTimingOf(
+  timing: InspectionCheckTiming,
+  launchMode: GraphicsLaunchMode,
+): InspectionCheckTiming {
+  return launchMode === "software"
+    ? {
+        ...timing,
+        waitMs: stretched(timing.waitMs),
+        drawWaitMs: stretched(timing.drawWaitMs),
+        settleMaxMs: stretched(timing.settleMaxMs),
       }
     : timing;
 }

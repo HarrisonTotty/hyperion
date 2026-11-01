@@ -1,4 +1,9 @@
-import type { DetailLevelDto, RequestKind, UniverseTime } from "@hyperion/protocol";
+import {
+  type DetailLevelDto,
+  galacticPositionFromLy,
+  type RequestKind,
+  type UniverseTime,
+} from "@hyperion/protocol";
 import { useCallback, useMemo, useState } from "react";
 
 import { stateAt } from "../../lib/orbit";
@@ -16,6 +21,7 @@ import type { RequestState } from "../../lib/useServerRequest";
 import type { SpatialScene } from "../../spatial/marks";
 import { localFrameAt } from "../../geometry/frame";
 import { dot, norm } from "../../geometry/vec3";
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import {
   bodyFitAu,
   bodyFrameName,
@@ -24,6 +30,8 @@ import {
   equatorNormal,
   focusHeldReason,
   focusTarget,
+  inspectionHeldReason,
+  inspectionTarget,
 } from "./bodyFrame";
 import {
   ALL_ZONE_LAYERS,
@@ -152,6 +160,17 @@ export interface SystemViewState {
    * `ORBIT NOT RESOLVED`), or `null` when there is a planet to focus.
    */
   readonly focusHeld: string | null;
+  /**
+   * What `VIEW BODY` opens in `VIEW` (the owner's request, 2026-11-01): the focused planet, or a
+   * selected moon of it, with the system's records at the display time; `null` while it is held
+   * back.
+   */
+  readonly inspection: BodyInspection | null;
+  /**
+   * Why `VIEW BODY` is held back (`NO BODY FOCUSED`, `MOON DESTROYED`, `BULK NOT RESOLVED`), or
+   * `null` when it opens a body.
+   */
+  readonly inspectionHeld: string | null;
   /** The map's frame, as its `FRAME` reads: `SYSTEM BARYCENTRIC`, or `BODY <designation>`. */
   readonly frameName: string;
   /** The zoom preset whose radius the view fits, and the grid covers. */
@@ -380,6 +399,28 @@ export function useSystemView(target: SystemTarget): SystemViewState {
   }
   const focusable = focusTarget(chosenBody ?? null, bodyList);
   const focusHeld = focusHeldReason(chosenBody ?? null, bodyList);
+  const inspected = inspectionTarget(focusedBody, chosenBody ?? null);
+  const inspectionHeld = inspectionHeldReason(focusedBody, chosenBody ?? null);
+  const inspection: BodyInspection | null =
+    inspectionHeld === null && inspected !== null && formed !== null && bodies !== null
+      ? {
+          universe: target.universe,
+          place: {
+            kind: "charted",
+            system: target.system,
+            designation: target.designation,
+            barycentre: galacticPositionFromLy([
+              target.positionLy.x,
+              target.positionLy.y,
+              target.positionLy.z,
+            ]),
+          },
+          model: formed,
+          bodies,
+          body: inspected.id,
+          time: displayTime.time,
+        }
+      : null;
   const focusPlane = useMemo(
     () => (focusedBody === null ? null : bodyPlane(focusedBody, localFrameAt(target.positionLy))),
     [focusedBody, target.positionLy],
@@ -580,6 +621,8 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     focused: focusedBody,
     focusable,
     focusHeld,
+    inspection,
+    inspectionHeld,
     frameName: focusedBody === null ? "SYSTEM BARYCENTRIC" : bodyFrameName(focusedBody),
     zoom,
     zoomHeld,

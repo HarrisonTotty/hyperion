@@ -7,7 +7,8 @@
 # summary. No server is needed.
 #
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
-#                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered] | --atmosphere]
+#                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered] | --atmosphere
+#                  | --inspection --universe <ID> --body <ID>]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -60,6 +61,13 @@
 # process exited over the run (plan R08, R08.T10.g), or when no capture was taken. --atmosphere
 # with --terrain is refused by the client.
 #
+# --inspection --universe <ID> --body <ID> runs the inspection run instead (the owner's request,
+# 2026-11-01): on a running server, the universe opened on GALAXY, the body's system on SYSTEM, the
+# body selected, FOCUS BODY and VIEW BODY pressed, and VIEW's photorealistic body inspection of it
+# captured once AUTO has settled, as between-inspection-<system>-<index>.png under
+# target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
+# when a step does not take effect, VIEW BODY is held back, or a fault line stands on the capture.
+#
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and
 # implying --hidden. It is the check-only software mode, a test-tool exception to R01 Design note 8
@@ -96,6 +104,7 @@ smoke=0
 terrain=0
 served=0
 atmosphere=0
+inspection=0
 setting=""
 check_args=()
 while [[ $# -gt 0 ]]; do
@@ -106,6 +115,7 @@ while [[ $# -gt 0 ]]; do
         --terrain) terrain=1; check_args+=("$1"); shift ;;
         --handover) check_args+=("$1"); shift ;;
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
+        --inspection) inspection=1; check_args+=("$1"); shift ;;
         --universe) served=1; check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
@@ -178,11 +188,14 @@ if [[ $hidden -eq 1 ]]; then
 fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
-# 15). Given both, the client refuses the launch at once, so the terrain run's limit stands.
+# 15); the inspection run's 10 and 12, above its (8 and 10). Given two, the client refuses the
+# launch at once, so the first run's limit here stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
 elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : 1200 ))
+elif [[ $inspection -eq 1 ]]; then
+    limit=$(( smoke == 1 ? 600 : 720 ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

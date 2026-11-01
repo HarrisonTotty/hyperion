@@ -15,7 +15,7 @@ import type { ViewEngineSource } from "../displays/view/useViewEngine";
 import { ViewDisplay } from "../displays/view/ViewDisplay";
 import { type MarkLabelSide, PLATE_SIDE_PADDING_REM } from "../displays/view/ViewMarkLabels";
 import type { OffsetPx } from "../spatial/symbols";
-import { ViewSceneProvider } from "../displays/view/ViewSceneProvider";
+import { type InspectionOpening, ViewSceneProvider } from "../displays/view/ViewSceneProvider";
 import { UniversePanel } from "../displays/galaxy/UniversePanel";
 import { requestAdapterOutcome } from "../view/engine/platform";
 import {
@@ -459,6 +459,8 @@ export function renderViewDisplay(options: {
   readonly sceneOptions?: ReadonlyArray<SceneOption>;
   /** The views check's watch of the terrain session (R10.T16.d): none by default. */
   readonly watchTerrain?: (session: TerrainSession) => () => void;
+  /** The body inspection opened as `VIEW` mounts (the owner's request, 2026-11-01): none by default. */
+  readonly inspection?: InspectionOpening;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -486,7 +488,7 @@ export function renderViewDisplay(options: {
       <UniverseProvider>
         <GraphicsStatusContext value={options.store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <ViewSceneProvider active knownSystem={null}>
+          <ViewSceneProvider active knownSystem={null} inspection={options.inspection ?? null}>
             {() => (
               <Activity mode="visible">
                 {/* In the console frame's work area, as `ConsoleFrame` lays VIEW out. */}

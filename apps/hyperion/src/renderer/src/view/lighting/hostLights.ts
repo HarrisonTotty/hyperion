@@ -14,7 +14,7 @@ import { type BodyIdHex, formatBodyId, type HostDiscDto } from "@hyperion/protoc
 
 import { norm, sub, type Vec3 } from "../../geometry/vec3";
 import type { Rgb } from "../photometry/toneCurve";
-import type { ViewScene } from "../scene/model";
+import { bringsOwnSettings, type ViewScene } from "../scene/model";
 import { annulusEdges, type AnnulusSet } from "./annuli";
 import { photopicIlluminance, shiningStars, starIlluminance } from "./illuminance";
 
@@ -43,7 +43,8 @@ export function hostLights(scene: ViewScene, discs: ReadonlyArray<HostDiscDto>):
 }
 
 /**
- * The discs a view lights its scene with: a kept scene's own, a server scene's held sky's.
+ * The discs a view lights its scene with: a kept scene's own, a server scene's held sky's, as a kept
+ * scene of served bodies' are (`VIEW`'s body inspection, the owner's request, 2026-11-01).
  *
  * @param skyHosts - The view's sky's `response.hosts`, or `null` where it has none.
  */
@@ -51,7 +52,7 @@ export function sceneHostDiscs(
   scene: ViewScene,
   skyHosts: ReadonlyArray<HostDiscDto> | null,
 ): ReadonlyArray<HostDiscDto> {
-  return scene.provenance.kind === "kept" ? (scene.hostDiscs ?? []) : (skyHosts ?? []);
+  return bringsOwnSettings(scene) ? (scene.hostDiscs ?? []) : (skyHosts ?? []);
 }
 
 /**

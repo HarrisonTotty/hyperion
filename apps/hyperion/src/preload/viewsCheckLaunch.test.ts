@@ -74,6 +74,17 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...served, ...change })).toBeNull();
   });
 
+  it("carries the inspection run's body, which it always names (the owner's request)", () => {
+    const launch: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    expect(readViewsCheckLaunch({ ...LAUNCH, run: "inspection" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...launch, fixture: "terrain-test-weathered" })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });

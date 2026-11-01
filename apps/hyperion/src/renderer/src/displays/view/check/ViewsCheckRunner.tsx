@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import type { RequestClient } from "@hyperion/protocol";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import type { GraphicsLaunchMode, ViewsCheckApi } from "../../../../../preload/api";
+import type { SystemTarget } from "../../system/systemTarget";
 import { pageAtmosphereFixtures } from "../../../view/scenes/atmosphereScene";
 import {
   ATMOSPHERE_CHECK_TIMING,
@@ -10,8 +12,14 @@ import {
 import { handoverCheckTimingFor, recordHandoverCheck, runHandoverCheck } from "./handoverCheckRun";
 import type { HandoverScenes } from "./handoverScenes";
 import {
+  INSPECTION_CHECK_TIMING,
+  recordInspectionCheck,
+  runInspectionCheck,
+} from "./inspectionCheckRun";
+import {
   atmosphereCheckTimingOf,
   handoverCheckTimingOf,
+  inspectionCheckTimingOf,
   terrainCheckTimingOf,
   viewsCheckTimingOf,
 } from "./softwareTiming";
@@ -25,11 +33,13 @@ import type { ViewsProbe } from "./viewsProbe";
  * probe alone; the terrain run (plan R10, R10.T16.d) its terrain probe, whose engine source,
  * workers and kept scenes `VIEW` takes; the hand-over check (plan R10, R10.T10.g) that probe and
  * its looks, which `VIEW` offers through the terrain probe's kept scenes; the atmosphere run (plan
- * R08, R08.T10.b) the views probe alone, as T20's.
+ * R08, R08.T10.b) the views probe alone, as T20's; the inspection run (the owner's request,
+ * 2026-11-01) the views probe and the link's request client, through which it asks what it opens.
  */
 export type CheckedRun =
   | { readonly kind: "several-views" }
   | { readonly kind: "atmosphere" }
+  | { readonly kind: "inspection"; readonly requests: RequestClient }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
       readonly kind: "handover";
@@ -50,6 +60,11 @@ export interface ViewsCheckRunnerProps {
    * mode's waits are five times as long (plan R01, R01.T16).
    */
   readonly launchMode: GraphicsLaunchMode;
+  /**
+   * Opens the `SYSTEM` display on a system, `App`'s, as `OPEN SYSTEM` calls it: the inspection run
+   * opens its body's system through it (the owner's request).
+   */
+  readonly openSystem: (target: SystemTarget) => void;
 }
 
 /** The name of each phase's measured window in the trace's user timing. */
@@ -72,8 +87,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Runs the launch's run once the app mounts: the several-views check (plan R07, T20), the terrain
- * run (plan R10, R10.T16.d), the hand-over check (plan R10, R10.T10.g) or the atmosphere run (plan
- * R08, R08.T10.b), and ends the app with it: the probe times the page's animation frames, the script drives `VIEW`, and the main process
+ * run (plan R10, R10.T16.d), the hand-over check (plan R10, R10.T10.g), the atmosphere run (plan
+ * R08, R08.T10.b) or the inspection run (the owner's request), and ends the app with it: the probe times the page's animation frames, the script drives `VIEW`, and the main process
  * writes the record and exits with 0, or with 1 and the reason when the script could not finish
  * (or a terrain check, the hand-over's verdict or an atmosphere capture failed).
  *
@@ -81,7 +96,18 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * Renders nothing. Mounted only on a `--views-check` launch, beside the consoles. In the check-only
  * software mode each run's waits are stretched (`softwareTiming.ts`), its measured windows not.
  */
-export function ViewsCheckRunner({ api, probe, run, launchMode }: ViewsCheckRunnerProps) {
+export function ViewsCheckRunner({
+  api,
+  probe,
+  run,
+  launchMode,
+  openSystem,
+}: ViewsCheckRunnerProps) {
+  // The run reads the latest opener through a ref, so that a new one does not start it again.
+  const openSystemRef = useRef(openSystem);
+  useLayoutEffect(() => {
+    openSystemRef.current = openSystem;
+  }, [openSystem]);
   useEffect(() => {
     const controller = new AbortController();
     const restoreFrames = probe.installFrameClock(window);
@@ -136,6 +162,29 @@ export function ViewsCheckRunner({ api, probe, run, launchMode }: ViewsCheckRunn
           controller.signal,
         );
         break;
+      case "inspection": {
+        const { served } = api.launch;
+        if (served === undefined) {
+          throw new Error("an inspection launch names its universe and body");
+        }
+        ended = recordInspectionCheck(
+          api,
+          () =>
+            runInspectionCheck({
+              ...shared,
+              api,
+              views: probe,
+              requests: run.requests,
+              served,
+              openSystem: (target) => {
+                openSystemRef.current(target);
+              },
+              timing: inspectionCheckTimingOf(INSPECTION_CHECK_TIMING, launchMode),
+            }),
+          controller.signal,
+        );
+        break;
+      }
       case "terrain": {
         const { terrain } = run;
         stopWatching = terrain.start();

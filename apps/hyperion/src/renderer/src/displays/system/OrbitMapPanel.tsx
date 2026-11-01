@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useMemo } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusLine } from "../../components/StatusLine";
@@ -15,6 +15,7 @@ import { SpatialView } from "../../spatial/SpatialView";
 import { bodySymbol } from "../../lib/system/bodySymbols";
 import { bodyKindLabel } from "../../lib/system/bodyWords";
 import type { SpatialScene } from "../../spatial/marks";
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import type { ZoneLayers } from "./bodyMap";
 import { DISPLAY_TIME_LABEL, DISPLAY_TIME_WIDTH_CH } from "./displayTime";
 import { type BodyLegendEntry, OrbitLegend } from "./OrbitLegend";
@@ -38,6 +39,9 @@ const CENTRE_DECIMALS = 1;
 
 /** The key of `FOCUS BODY`, which focuses the selected planet and returns the map from it. */
 export const FOCUS_KEY = "C";
+
+/** The key of `VIEW BODY`, which opens the focused body in `VIEW` (the owner's request). */
+export const VIEW_BODY_KEY = "V";
 
 /** The zones' annuli the map can switch, in the order offered, with their labels. */
 const ZONE_TOGGLES: ReadonlyArray<{ readonly layer: keyof ZoneLayers; readonly label: string }> = [
@@ -76,6 +80,8 @@ function bodyLegendEntries(
 /** Props of {@link OrbitMapPanel}. */
 export interface OrbitMapPanelProps {
   readonly view: SystemViewState;
+  /** Opens a body in `VIEW` (`App`'s), as `VIEW BODY` asks (the owner's request, 2026-11-01). */
+  readonly onViewBody: (inspection: BodyInspection) => void;
 }
 
 /**
@@ -92,7 +98,11 @@ export interface OrbitMapPanelProps {
  * press. `FOCUS BODY`, key `C`, draws the selected planet, or a selected moon's or ring's, in its own
  * frame, `BODY <designation>`, with its moons and rings about it, its equatorial plane for
  * reference and the scale bar in `Mm` and `km`; pressed again, or on a zoom preset, the map returns
- * to `SYSTEM BARYCENTRIC` (P14.T42.b). The zones' switches stand only in the system frame. Until there is an answer the panel
+ * to `SYSTEM BARYCENTRIC` (P14.T42.b). `VIEW BODY`, key `V`, opens the focused planet, or a
+ * selected moon of it, in `VIEW`'s body inspection, photorealistic (the owner's request,
+ * 2026-11-01); it is held back with its reason, `NO BODY FOCUSED` before a body is focused, whose
+ * line is hidden while `FOCUS BODY`'s stands, so that the head holds one line of reasons. The zones'
+ * switches stand only in the system frame. Until there is an answer the panel
  * reads the request's state in words and draws nothing; a system not yet formed reads
  * `NOT YET FORMED`; a system with nothing to draw reads `NO BODIES`; an answer the display cannot
  * use reads `SYSTEM DATA INVALID` with `RETRY`. A newer request's state stands in the panel's head,
@@ -114,9 +124,10 @@ export interface OrbitMapPanelProps {
  * and one naming what the granted detail level withholds, so that the space round the stars is not
  * read as empty (ruling 113.2).
  */
-export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
+export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
   const titleId = useId();
   const focusHeldId = useId();
+  const viewHeldId = useId();
   const { target, status, model, fault, stale, plane, fitRadiusAu, zoom, displayTime } = view;
   const { chooseZoom, toggleFocus, hasBelts, sceneAt } = view;
   // While the display time runs, the map alone follows it frame by frame (P14.T44.b).
@@ -128,7 +139,13 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
   const drawn = scene !== null && scene.points.length > 0;
   const focused = view.focused !== null;
   const focusHeld = !focused && view.focusable === null ? view.focusHeld : null;
+  const { inspection, inspectionHeld } = view;
   const presets = ZOOM_PRESETS.filter((control) => control.name !== "belts" || hasBelts);
+  const viewBody = useCallback((): void => {
+    if (inspection !== null) {
+      onViewBody(inspection);
+    }
+  }, [inspection, onViewBody]);
 
   // The zoom keys act from anywhere on the display but a text field, as the view's own keys do.
   useEffect(() => {
@@ -148,6 +165,11 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
         toggleFocus();
         return;
       }
+      if (key === VIEW_BODY_KEY) {
+        event.preventDefault();
+        viewBody();
+        return;
+      }
       const preset = ZOOM_PRESETS.find((control) => control.key === key);
       if (preset === undefined || (preset.name === "belts" && !hasBelts)) {
         return;
@@ -159,7 +181,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [drawn, chooseZoom, toggleFocus, hasBelts]);
+  }, [drawn, chooseZoom, toggleFocus, viewBody, hasBelts]);
 
   const centre = cylindrical(target.positionLy);
   const onAxis = !(centre.radiusLy > AXIS_TOLERANCE_LY);
@@ -273,11 +295,28 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
             >
               <span className="control__key">{FOCUS_KEY}</span> FOCUS BODY
             </button>
+            <button
+              type="button"
+              className="control orbit-map__zoom-button"
+              aria-keyshortcuts={VIEW_BODY_KEY}
+              aria-disabled={inspectionHeld === null ? undefined : "true"}
+              aria-describedby={inspectionHeld === null ? undefined : viewHeldId}
+              onClick={viewBody}
+            >
+              <span className="control__key">{VIEW_BODY_KEY}</span> VIEW BODY
+            </button>
           </fieldset>
         ) : null}
         {drawn && focusHeld !== null ? (
           <p className="panel__inhibit" id={focusHeldId}>
             {focusHeld}
+          </p>
+        ) : null}
+        {drawn && inspectionHeld !== null ? (
+          // While FOCUS BODY's reason stands, it says why there is nothing to view too, so that the
+          // head holds one line of reasons.
+          <p className="panel__inhibit" id={viewHeldId} hidden={focusHeld !== null}>
+            {inspectionHeld}
           </p>
         ) : null}
         {drawn && !focused && (view.bodies?.zones.length ?? 0) > 0 ? (

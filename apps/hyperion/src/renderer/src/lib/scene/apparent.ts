@@ -283,7 +283,10 @@ function composedVelocity(placements: SystemPlacements, id: string, time: Univer
  * `null` when the scene has no system, when the ship's frame is the galactic one or another
  * system's, or when it is a body's that is not placed, none of which a scene the server built has.
  */
-export function shipObserver(model: SceneModel, time: UniverseTime): SceneObserver | null {
+export function shipObserver(
+  model: Pick<SceneModel, "system" | "ship">,
+  time: UniverseTime,
+): SceneObserver | null {
   const system = model.system;
   if (system === null) {
     return null;
@@ -457,7 +460,7 @@ function framesBody(body: SystemBody): boolean {
  * @returns The frame, or `null` when the scene has no system.
  */
 export function sceneAt(
-  model: SceneModel,
+  model: Pick<SceneModel, "system">,
   observer: SceneObserver,
   time: UniverseTime,
   previous: SceneFrame | null,

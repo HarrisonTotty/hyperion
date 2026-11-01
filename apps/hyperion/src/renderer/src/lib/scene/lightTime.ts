@@ -106,6 +106,20 @@ export function timeBefore(time: UniverseTime, span: Span): UniverseTime {
   return subtract(time, span);
 }
 
+/** The instant `seconds` after `time`, before it where negative, to the nanosecond. */
+export function timeAfter(time: UniverseTime, seconds: number): UniverseTime {
+  if (seconds < 0) {
+    return timeBefore(time, spanFromSeconds(-seconds));
+  }
+  const span = spanFromSeconds(seconds);
+  const nanos = time.nanos + span.nanos;
+  const carry = nanos >= NANOS_PER_SECOND ? 1 : 0;
+  return {
+    seconds: time.seconds + span.seconds + carry,
+    nanos: nanos - carry * NANOS_PER_SECOND,
+  };
+}
+
 /** |`a` − `b`|, as the simulation's `checked_sub` then `checked_abs`. */
 export function spanDistance(a: Span, b: Span): Span {
   const difference = subtract(a, b);

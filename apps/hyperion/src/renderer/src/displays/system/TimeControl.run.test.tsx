@@ -73,7 +73,7 @@ async function renderAnswered(time: UniverseTime = A_CENTURY): Promise<Rendered>
   const tree = (activity: "visible" | "hidden"): ReactNode => (
     <ServerLinkHarness>
       <Activity mode={activity}>
-        <SystemView target={target} />
+        <SystemView target={target} onViewBody={() => undefined} />
       </Activity>
     </ServerLinkHarness>
   );

@@ -68,7 +68,7 @@ async function renderAnswered(
   );
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget({ time })} />
+      <SystemView target={aSystemTarget({ time })} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();

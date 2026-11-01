@@ -1,3 +1,4 @@
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import { BodiesPanel } from "./BodiesPanel";
 import { EventsPanel } from "./EventsPanel";
 import { OrbitMapPanel } from "./OrbitMapPanel";
@@ -8,6 +9,8 @@ import { useSystemView } from "./useSystemView";
 /** Props of {@link SystemView}. */
 export interface SystemViewProps {
   readonly target: SystemTarget;
+  /** Opens a body in `VIEW`, as the orbit map's `VIEW BODY` asks (the owner's request). */
+  readonly onViewBody: (inspection: BodyInspection) => void;
 }
 
 /**
@@ -21,12 +24,12 @@ export interface SystemViewProps {
  * display time, so they stand under it. The list and the readout are paired with the map, as the
  * chart's are, and stand beside it.
  */
-export function SystemView({ target }: SystemViewProps) {
+export function SystemView({ target, onViewBody }: SystemViewProps) {
   const view = useSystemView(target);
   return (
     <div className="system">
       <div className="system__column system__column--map">
-        <OrbitMapPanel view={view} />
+        <OrbitMapPanel view={view} onViewBody={onViewBody} />
         <TimeControl time={view.displayTime} />
         <EventsPanel view={view} />
       </div>

@@ -32,6 +32,7 @@ const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = [
   "terrain",
   "handover",
   "atmosphere",
+  "inspection",
 ];
 
 /** The fields a terrain run may be served. */
@@ -45,7 +46,8 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
  * and the weathered fixture on a terrain run or its hand-over check alone (T20's run and the
  * atmosphere run, plan R08, R08.T10.b, serve no field, so their launches name `TERRAIN TEST`'s, the
  * default); a served world (plan R10, R10.T15.b), its universe's and body's IDs, only on a
- * hand-over check of `TERRAIN TEST`'s own fixture.
+ * hand-over check of `TERRAIN TEST`'s own fixture, and always on the inspection run (the owner's
+ * request, 2026-11-01), which serves no field either.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
@@ -60,15 +62,20 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
     !(out === null || (typeof out === "string" && out.length > 0)) ||
     run === null ||
     fixture === null ||
-    ((run === "several-views" || run === "atmosphere") && fixture !== "terrain-test")
+    ((run === "several-views" || run === "atmosphere" || run === "inspection") &&
+      fixture !== "terrain-test")
   ) {
     return null;
   }
   if (served === undefined) {
-    return { setting, smoke, out, run, fixture };
+    return run === "inspection" ? null : { setting, smoke, out, run, fixture };
   }
   const names = readServedWorldNames(served);
-  if (names === null || run !== "handover" || fixture !== "terrain-test") {
+  if (
+    names === null ||
+    (run !== "handover" && run !== "inspection") ||
+    fixture !== "terrain-test"
+  ) {
     return null;
   }
   return { setting, smoke, out, run, fixture, served: names };

@@ -1,14 +1,17 @@
 import type {
   BodyIdHex,
+  DetailLevelDto,
   DetailSeedHex,
   GalacticPosition,
   HostDiscDto,
   SystemIdHex,
+  UniverseIdHex,
   UniverseTime,
 } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
+import type { SystemPlace } from "../../lib/scene/model";
 import type { WireAppearance } from "../appearance/fromWire";
 import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import {
@@ -275,6 +278,21 @@ export interface ViewStar {
 }
 
 /**
+ * Where a kept scene's bodies are a served universe's, as `VIEW`'s body inspection draws them (the
+ * owner's request, 2026-11-01): the universe, the system's place and each body's granted detail
+ * level. Its bodies are the server's records drawn by the server scene's own path, so they are
+ * served bodies wherever the view reads one: their atmospheres and detail seeds are asked of the
+ * server, and the view is lit by its sky's host discs, never by settings of the scene's own.
+ */
+export interface ServedSceneSource {
+  readonly universe: UniverseIdHex;
+  /** The system's designation of record and its barycentre, from which its sky is asked. */
+  readonly place: SystemPlace;
+  /** Each body's granted detail level, by which its record is asked. */
+  readonly grants: ReadonlyMap<BodyIdHex, DetailLevelDto>;
+}
+
+/**
  * Where a scene came from: a kept test scene, with its name (`PRECISION TEST`,
  * `FRAME CHANGE TEST`), or the server's scene (R02.T17).
  */
@@ -324,6 +342,20 @@ export interface ViewScene {
    * scene leaves it unset and is lit by its held sky's `hosts`.
    */
   readonly hostDiscs?: ReadonlyArray<HostDiscDto>;
+  /**
+   * A kept scene's served bodies (`VIEW`'s body inspection; {@link ServedSceneSource}), which the
+   * view reads as a server scene's; absent for every other kept scene and for the server's.
+   */
+  readonly served?: ServedSceneSource;
+}
+
+/**
+ * Whether a scene's bodies bring settings of the scene's own, its host discs, atmospheres and detail
+ * seeds, as a kept test scene's do, where every other scene's are the server's: a server scene's,
+ * and a kept scene of served bodies ({@link ViewScene.served}, `VIEW`'s body inspection).
+ */
+export function bringsOwnSettings(scene: ViewScene): boolean {
+  return scene.provenance.kind === "kept" && scene.served === undefined;
 }
 
 /**

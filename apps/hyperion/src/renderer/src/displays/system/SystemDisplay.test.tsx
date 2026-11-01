@@ -1,7 +1,7 @@
 /**
  * Opening the `SYSTEM` display from the `GALAXY` chart, through `App` (plan 14, P14.T41.a).
  */
-import { universeTimeFromYears } from "@hyperion/protocol";
+import { type SystemIdHex, universeTimeFromYears } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import {
   aUniverse,
   aUniverseList,
 } from "../../test/galaxyFixtures";
+import { FIXTURE_SYSTEM, populatedBodies } from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { aSummaryResponse, aSystemSummary } from "../../test/systemFixtures";
 import { statusLine } from "../../test/statusLine";
@@ -55,8 +56,9 @@ function nextFrame(): void {
  * @param clock - `fake` runs the test on {@link fakeFramesAndTimeouts}'s clock, with `user-event`'s
  *   own delays on it too, so that the test gives each animation frame itself with
  *   {@link nextFrame}.
+ * @param system - The charted system's ID, the fixture's own where absent.
  */
-async function renderCharted(clock: "real" | "fake" = "real") {
+async function renderCharted(clock: "real" | "fake" = "real", system?: SystemIdHex) {
   const user = userEvent.setup(clock === "fake" ? { advanceTimers: fakeFramesAndTimeouts() } : {});
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -78,14 +80,19 @@ async function renderCharted(clock: "real" | "fake" = "real") {
   await user.clear(screen.getByRole("textbox", { name: "X" }));
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
+  const charted = aSystemsInRange({
+    centreLy: [26_000, 0, 0],
+    timeYr: CHART_TIME_YR,
+    systems: [{ relLy: [0, 0, 10], layer: "c" }],
+  });
+  // A system of another ID, for a test whose bodies' answer names its own.
+  const [first, ...rest] = charted.systems;
+  const systems =
+    first === undefined || system === undefined
+      ? charted.systems
+      : [{ ...first, id: system }, ...rest];
   await server(() => {
-    socket.serverAnswers("systems_in_range", () =>
-      aSystemsInRange({
-        centreLy: [26_000, 0, 0],
-        timeYr: CHART_TIME_YR,
-        systems: [{ relLy: [0, 0, 10], layer: "c" }],
-      }),
-    );
+    socket.serverAnswers("systems_in_range", () => ({ ...charted, systems }));
   });
   return { user, socket };
 }
@@ -208,6 +215,38 @@ describe("the SYSTEM display", () => {
         statusLine("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
       ),
     ).toBeInTheDocument();
+  });
+
+  it("opens the focused planet in VIEW's body inspection with VIEW BODY (the owner's request)", async () => {
+    const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+    await answerSummaries(socket);
+    await server(() => {
+      socket.serverAnswers("system_bodies", () => populatedBodies());
+    });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+    await user.keyboard("c");
+    await user.keyboard("v");
+
+    expect(within(navigation()).getByRole("button", { name: "F4 View" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const scenes = screen.getByRole("group", { name: "Scene" });
+    expect(within(scenes).getByRole("button", { name: "BODY INSPECTION" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // The 800 × 500 layout is VIEW's compact one, its STYLE panel folded until opened.
+    await user.click(screen.getByRole("button", { name: "STYLE", expanded: false }));
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    expect(within(style).getByRole("button", { name: "PHOTOREALISTIC" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
   });
 
   it("asks nothing again for its answer when the display is left and shown again", async () => {

@@ -27,6 +27,10 @@
  * fixtures and the night, and its record through a writer of its own
  * (`atmosphereCheckResults.ts`), every other run's refused; it ends with 1 unless that record was
  * written and its captures pass.
+ *
+ * An `--inspection` launch (the owner's request, 2026-11-01) opens a served body from `SYSTEM` in
+ * `VIEW`'s body inspection and captures it: no phases and no record, every writer refused; it ends
+ * with 1 unless its capture was saved.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
@@ -130,7 +134,8 @@ export const VIEWS_CHECK_TRACE_BUFFER_KB = 512 * 1024;
  * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
  * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
  * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
- * `docs/measurements/atmosphere-flight/`; the captures under the smoke's directory either way.
+ * `docs/measurements/atmosphere-flight/`, and the inspection run's captures, its only output, under
+ * `target/views-check/inspection/`; the captures under the smoke's directory either way.
  *
  * @remarks
  * A run in the check-only software mode (plan R01, R01.T16) writes under the smoke's directory, a
@@ -160,6 +165,9 @@ export function viewsCheckDirs(
         full: "docs/measurements/atmosphere-flight",
       };
       break;
+    case "inspection":
+      dirs = { smoke: "target/views-check/inspection", full: "target/views-check/inspection" };
+      break;
   }
   const kept = launch.smoke || launchMode === "software";
   return { out: kept ? dirs.smoke : dirs.full, captures: dirs.smoke };
@@ -173,7 +181,8 @@ export function viewsCheckDirs(
  * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
  * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
  * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
- * awaited and a flight to eight air fixtures and the seat's night, 8 and 15. Each is
+ * awaited and a flight to eight air fixtures and the seat's night, 8 and 15; the inspection run's,
+ * one body opened and its first photorealistic frames and atmosphere awaited, 8 and 10. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -193,6 +202,9 @@ export function viewsCheckWatchdogMs(
       break;
     case "atmosphere":
       ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
+      break;
+    case "inspection":
+      ms = launch.smoke ? 8 * 60_000 : 10 * 60_000;
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
@@ -766,6 +778,9 @@ export class ViewsCheckSession {
                 : `the atmosphere run's checks failed: ${atmosphereFailures(results)}`;
           break;
         }
+        case "inspection":
+          failure = this.#captured ? null : "the inspection run ended with no capture saved";
+          break;
       }
     }
     if (failure === null) {
@@ -824,7 +839,10 @@ const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
   "wireframe-alone",
 ];
 
-/** The phases of each run: the hand-over check (R10.T10.g) and the atmosphere run (R08.T10.b) have none. */
+/**
+ * The phases of each run: the hand-over check (R10.T10.g), the atmosphere run (R08.T10.b) and the
+ * inspection run have none.
+ */
 function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
   let phases: ReadonlyArray<CheckPhaseName>;
   switch (run) {
@@ -836,6 +854,7 @@ function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
       break;
     case "handover":
     case "atmosphere":
+    case "inspection":
       phases = [];
       break;
   }
@@ -857,6 +876,9 @@ function runWords(run: ViewsCheckRunKind): string {
       break;
     case "atmosphere":
       words = "the atmosphere run";
+      break;
+    case "inspection":
+      words = "the inspection run";
       break;
   }
   return words;

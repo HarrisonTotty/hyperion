@@ -125,6 +125,61 @@ export function focusHeldReason(
 }
 
 /**
+ * The body `VIEW BODY` opens in `VIEW` (the owner's request, 2026-11-01): a moon of the focused
+ * planet where one is selected, else the focused planet itself; `null` with no planet focused.
+ */
+export function inspectionTarget(
+  focused: SystemBody | null,
+  selected: SystemBody | null,
+): SystemBody | null {
+  if (focused === null) {
+    return null;
+  }
+  const parent = selected?.parent;
+  const moonOfFocus =
+    selected?.kind.kind === "moon" && parent?.kind === "body" && parent.id === focused.id;
+  return moonOfFocus ? selected : focused;
+}
+
+/** A section named `name` in its state's words where it is withheld or not computed, else `null`. */
+function withheld(name: string, state: SystemBody["orbit"]["state"]): string | null {
+  return state === "not_resolved" || state === "not_modelled"
+    ? `${name} ${sectionStateLabel(state)}`
+    : null;
+}
+
+/**
+ * Why `VIEW BODY` is held back, in words, or `null` when it opens its body ({@link inspectionTarget}):
+ * `NO BODY FOCUSED` before `FOCUS BODY` has focused one; the body by its kind and state where it is
+ * not present (`MOON DESTROYED`); or the section that `VIEW` would draw it from as its state stands,
+ * withheld at the granted level or not computed: its orbit's, where it could not be placed
+ * (`ORBIT NOT RESOLVED`), its bulk's, where it would have no radius (`BULK NOT YET MODELLED`), and
+ * its mass's, where the view's camera could not hold its frame (`MASS NOT RESOLVED`).
+ */
+export function inspectionHeldReason(
+  focused: SystemBody | null,
+  selected: SystemBody | null,
+): string | null {
+  const target = inspectionTarget(focused, selected);
+  if (target === null) {
+    return "NO BODY FOCUSED";
+  }
+  if (target.state.kind !== "present") {
+    return `${bodyKindLabel(target.kind)} ${bodyStateLabel(target.state)}`;
+  }
+  if (target.orbit.state !== "ok") {
+    return withheld("ORBIT", target.orbit.state) ?? "NO ORBIT";
+  }
+  if (target.figure.state !== "ok" && target.bulk.state !== "ok") {
+    return withheld("BULK", target.bulk.state) ?? "NO RADIUS";
+  }
+  if (target.massMearth.state !== "ok") {
+    return withheld("MASS", target.massMearth.state) ?? "NO MASS";
+  }
+  return null;
+}
+
+/**
  * The normal of a body's equatorial plane, a unit vector along the galactic axes: its rotation
  * section's pole; or, where the server does not model its rotation, its orbit's normal, which
  * stands for its pole (plan R02, Design note 14); `null` where its rotation is withheld or does

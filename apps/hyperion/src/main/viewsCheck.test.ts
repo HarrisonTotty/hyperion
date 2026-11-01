@@ -526,6 +526,59 @@ describe("a views check's directories and watchdog", () => {
   });
 });
 
+describe("the inspection run (the owner's request)", () => {
+  const LAUNCH: ViewsCheckLaunch = {
+    setting: "high",
+    smoke: false,
+    out: null,
+    run: "inspection",
+    fixture: "terrain-test",
+    served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+  };
+
+  /** An inspection launch's session. */
+  function inspectionSession(
+    overrides: Partial<ViewsCheckSessionDeps> = {},
+  ): ReturnType<typeof session> {
+    return session({ launch: LAUNCH, ...overrides });
+  }
+
+  it("keeps its captures under target/, whatever the mode", () => {
+    for (const mode of ["default", "vulkan", "safe", "software"] as const) {
+      expect(viewsCheckDirs(LAUNCH, mode)).toEqual({
+        out: "target/views-check/inspection",
+        captures: "target/views-check/inspection",
+      });
+    }
+  });
+
+  it("is given 10 minutes, a smoke 8, five times as long in software", () => {
+    expect([
+      viewsCheckWatchdogMs(LAUNCH, "vulkan"),
+      viewsCheckWatchdogMs({ ...LAUNCH, smoke: true }, "vulkan"),
+      viewsCheckWatchdogMs(LAUNCH, "software"),
+    ]).toEqual([10 * 60_000, 8 * 60_000, 50 * 60_000]);
+  });
+
+  it("names its capture between phases and passes once it is saved", async () => {
+    const { session: run, deps } = inspectionSession();
+    await run.capture("inspection-61ffd967fe000023-0100");
+    run.end(0, null);
+    expect(deps.capture).toHaveBeenCalledWith(
+      "/captures/between-inspection-61ffd967fe000023-0100.png",
+    );
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("fails a run that ends with no capture saved", () => {
+    const lines: string[] = [];
+    const { session: run, deps } = inspectionSession({ log: (line) => lines.push(line) });
+    run.end(0, null);
+    expect(lines.at(-1)).toBe("views check: FAIL the inspection run ended with no capture saved");
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
 describe("the views check's session on a terrain launch (R10.T16.d)", () => {
   it("takes no trace of a phase, and captures the page at its end", async () => {
     const { session: run, deps } = terrainSession();

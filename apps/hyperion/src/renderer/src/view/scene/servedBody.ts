@@ -165,8 +165,13 @@ function servedKind(body: ViewBody): ServedBodyKind | null {
  * The host star in `scene` of the body whose record is `record`, up its record's parents: the star
  * it orbits; for a pair (`OrbitHostDto`'s `pair`, keyed by its outer member's first star), the
  * lowest-indexed star under that pair node; else the scene's first star, which is the system's.
+ * `VIEW`'s body inspection frames its body against it (the owner's request, 2026-11-01).
  */
-function hostStar(scene: ViewScene, system: SceneSystem, record: SystemBody): ViewBody | null {
+export function hostStar(
+  scene: ViewScene,
+  system: SceneSystem,
+  record: SystemBody,
+): ViewBody | null {
   const records = new Map(system.bodies.bodies.map((each) => [each.id, each]));
   const firstStar = scene.bodies.find((each) => each.kind === "star") ?? null;
   // A star the scene does not draw falls back to the first star, as a broken chain does.

@@ -157,3 +157,11 @@ export interface SceneModel {
   /** The scene as the wire states it, which every notification is merged into. */
   readonly wire: SceneStateDto;
 }
+
+/**
+ * The parts of a scene its frames are drawn from: its clock, its ship stand-in, its system and its
+ * craft, without the wire state they were merged from, so that a scene the client composes from a
+ * system's records (`VIEW`'s body inspection, the owner's request, 2026-11-01) is drawn by the server
+ * scene's own path (`serverSceneAtPush`).
+ */
+export type SceneParts = Pick<SceneModel, "clock" | "ship" | "system" | "craft">;

@@ -2,6 +2,7 @@ import { memo, useId } from "react";
 
 import { StatusText } from "../../components/StatusText";
 import { useUniverse } from "../../lib/universe";
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import type { SystemOpening } from "./systemTarget";
 import { SystemView } from "./SystemView";
 
@@ -9,9 +10,14 @@ import { SystemView } from "./SystemView";
 interface SystemDisplayProps {
   /** The latest opening, from `OPEN SYSTEM` on the `GALAXY` display; `null` before the first. */
   readonly opening: SystemOpening | null;
+  /**
+   * Opens a body in `VIEW`, as the orbit map's `VIEW BODY` asks (`App`'s, stable in identity; the
+   * owner's request, 2026-11-01).
+   */
+  readonly onViewBody: (inspection: BodyInspection) => void;
 }
 
-function SystemPanels({ opening }: SystemDisplayProps) {
+function SystemPanels({ opening, onViewBody }: SystemDisplayProps) {
   const titleId = useId();
   const { open } = useUniverse();
   // A system of a universe no longer open is not the display's to show.
@@ -31,7 +37,7 @@ function SystemPanels({ opening }: SystemDisplayProps) {
       </div>
     );
   }
-  return <SystemView key={target.sequence} target={target.target} />;
+  return <SystemView key={target.sequence} target={target.target} onViewBody={onViewBody} />;
 }
 
 /**
@@ -42,7 +48,8 @@ function SystemPanels({ opening }: SystemDisplayProps) {
  * It shows the system `OPEN SYSTEM` last opened on the `GALAXY` display, at the chart's time; each
  * opening is keyed apart, so that opening a system again starts it afresh, held at the chart's time.
  * With none opened, or once another universe is open, it reads `NO SYSTEM SELECTED` and says how to
- * choose one. Memoised: its prop is the opening, which `App` keeps in state, and it reads the server
- * link and the universe from context, so a latency update does not re-render it.
+ * choose one. Memoised: its props are the opening, which `App` keeps in state, and `App`'s stable
+ * `VIEW BODY` callback, and it reads the server link and the universe from context, so a latency
+ * update does not re-render it.
  */
 export const SystemDisplay = memo(SystemPanels);

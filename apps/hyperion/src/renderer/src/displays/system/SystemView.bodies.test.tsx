@@ -57,6 +57,7 @@ import {
 } from "../../test/systemFixtures";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import { dot, type Vec3 } from "../../geometry/vec3";
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import { SystemView } from "./SystemView";
 
 const WIDTH_PX = 1214;
@@ -70,7 +71,7 @@ async function server(play: () => void): Promise<void> {
   });
 }
 
-function renderView() {
+function renderView(onViewBody: (inspection: BodyInspection) => void = () => undefined) {
   const user = userEvent.setup();
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -79,7 +80,7 @@ function renderView() {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(HEIGHT_PX);
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget()} />
+      <SystemView target={aSystemTarget()} onViewBody={onViewBody} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();
@@ -2208,6 +2209,73 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  describe("VIEW BODY, which opens the focused body in VIEW (the owner's request)", () => {
+    /** The orbit map's `VIEW BODY`. */
+    function viewBody(): HTMLElement {
+      return within(mapPanel()).getByRole("button", { name: "V VIEW BODY" });
+    }
+
+    it("is held back with NO BODY FOCUSED, shown once FOCUS BODY's reason is not", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(opened);
+      await answer(socket, populatedBodies());
+
+      expect(viewBody()).toHaveAttribute("aria-disabled", "true");
+      expect(viewBody()).toHaveAccessibleDescription("NO BODY FOCUSED");
+      // The star is selected: FOCUS BODY's reason stands, and says why for both.
+      expect(within(mapPanel()).getByText("NO PLANET SELECTED")).toBeVisible();
+      expect(within(mapPanel()).getByText("NO BODY FOCUSED")).not.toBeVisible();
+
+      await selectRow(user, /\/256,/);
+
+      expect(within(mapPanel()).getByText("NO BODY FOCUSED")).toBeVisible();
+      await user.keyboard("v");
+      await user.click(viewBody());
+      expect(opened).not.toHaveBeenCalled();
+    });
+
+    it("opens the focused planet with V, with the system's records at the display time", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(opened);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/256,/);
+      await user.keyboard("c");
+
+      expect(viewBody()).not.toHaveAttribute("aria-disabled");
+      expect(within(mapPanel()).queryByText("NO BODY FOCUSED")).not.toBeInTheDocument();
+      await user.keyboard("v");
+
+      expect(opened).toHaveBeenCalledTimes(1);
+      const inspection = opened.mock.calls[0]?.[0];
+      const target = aSystemTarget();
+      expect(inspection?.body).toBe(PLANET_ID);
+      expect(inspection?.universe).toBe(target.universe);
+      expect(inspection?.place).toMatchObject({
+        kind: "charted",
+        system: target.system,
+        designation: target.designation,
+      });
+      expect(inspection?.time).toEqual(target.time);
+      expect(inspection?.bodies.bodies.map((body) => body.id)).toContain(PLANET_ID);
+    });
+
+    it("opens a selected moon of the focused planet, and the planet for its ring", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(opened);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/257,/);
+      await user.keyboard("c");
+      await user.click(viewBody());
+      await selectRow(user, /\/384,/);
+      await user.click(viewBody());
+
+      expect(opened.mock.calls.map(([inspection]) => inspection.body)).toEqual([
+        `${FIXTURE_SYSTEM}.0101`,
+        PLANET_ID,
+      ]);
+    });
   });
 
   it("reads a moon's origin and its inclination to its planet's equator", async () => {

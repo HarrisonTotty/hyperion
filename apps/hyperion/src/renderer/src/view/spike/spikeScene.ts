@@ -56,7 +56,8 @@ import {
 import { type BodyFigure, planetGeometry, spheroidNormal } from "../terrain/planet";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import type { DescentPose, DescentProfile } from "./descentProfile";
-import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD, timeAfter } from "./spikeWorld";
+import { timeAfter } from "../../lib/scene/lightTime";
+import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD } from "./spikeWorld";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
 export const SPIKE_SCENE_NAME = "DESCENT SPIKE";

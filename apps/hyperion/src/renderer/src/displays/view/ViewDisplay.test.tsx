@@ -127,7 +127,7 @@ function setup(
       <UniverseProvider>
         <GraphicsStatusContext value={store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <ViewSceneProvider active={mode === "visible"} knownSystem={null}>
+          <ViewSceneProvider active={mode === "visible"} knownSystem={null} inspection={null}>
             {() => (
               <Activity mode={mode}>
                 <ViewDisplay
