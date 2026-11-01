@@ -7349,3 +7349,34 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _Sources:_ the blue-straggler, hot-subdwarf and recycled-field windows are recalled. The pod
     reads no web, so they go unchecked against their papers, and a miss of any of them is a
     finding, not a failure.
+- **P11.T5's and P11.T8.b's X-ray binaries, held at 27** (lane `fix-p11-t5-awd-helium`'s pod,
+  brief `fix-p11-t8b-xrb-carving`, 2026-11-01; research-p15-t10b-rates; at 24–26 nothing moves).
+  - _The hold._ `XRB_CLASS_VERSION` = 27 (`stellar/binary/xrb_class.rs`),
+    `StellarRules::xrb_class` (`XrbClassRules::{Held, Carved}`, one `match` in `carves`), read
+    through each timeline's rules by `classify`'s three rules and through the galaxy's by the X-ray
+    binaries' scan.
+  - _From 27_ (each recalled, provisional): Roche-lobe overflow onto a compact star is an X-ray
+    binary only at `XRB_MIN_TRANSFER_RATE` = 10⁻¹³ M☉ yr⁻¹ or more (about 10³³ erg s⁻¹; King and
+    Wijnands 2006); a main-sequence B star without a fossil field that gained
+    `SPUN_UP_GAINED_SHARE` = 0.1 of its mass in stable transfer is a Be star (Packet 1981); a
+    wind-fed black hole beside a massive star needs it to fill `WIND_DISC_ROCHE_FILLING` = 0.9 of
+    its lobe (Hirai and Mandel 2021). Wind-fed neutron stars keep no disc rule (deviation: their
+    field takes a wind). The scan refuses a candidate fed under the floor, so it keeps exactly the
+    entries at the bump.
+  - _Kinds._ The census's `XrbMemberKind` (the catalogue's six, `Ultracompact`, `Symbiotic`,
+    `BlackHoleHighMass`) gives every member one (`XrayMarks::member_kind`); the catalogue draws
+    only its six (lean: the other three's builds, marks and events are P11.T8.b work for main).
+  - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
+    the engine's timeline alone; `classify`'s marks round trip skips such pairs.
+  - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
+    accretion and heavy donors): slab members 565 → 565, the 456 ultracompacts all fed just above
+    the floor (1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min: a finding); young disc 252 → 606,
+    Be/X 19 → 373, supergiant neutron stars 12 → 5, black holes 56 → 64. Before P11.T4's fixes
+    the slab's ultracompacts were 145 → 14.
+  - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
+    `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
+    `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the
+    hold's own version-arm tests. Under every 27 hold `engine_channels_hold`'s pins are re-measured
+    (the grid redraws other systems).
+  - _Acceptance:_ `cargo test -p hyperion-sim xrb_class_hold` and `every_x_ray_binary_member`;
+    slow, `no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind`.

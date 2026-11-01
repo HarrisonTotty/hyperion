@@ -166,6 +166,71 @@ impl XrayMarks {
     }
 }
 
+/// What kind of X-ray binary a census member is (P11.T8.b's fix): one of the catalogue's six
+/// ([`XrbHostKind`]) or of the three it does not draw, so that every member has one, what the
+/// fit's kind shares sum over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum XrbMemberKind {
+    /// One of the catalogue's kinds.
+    Host(XrbHostKind),
+    /// A neutron star or a black hole fed through its inner Lagrangian point by a white dwarf or a
+    /// helium star: an ultracompact X-ray binary.
+    Ultracompact,
+    /// A neutron star or a black hole fed by a low-mass giant's wind: a symbiotic X-ray binary.
+    Symbiotic,
+    /// A black hole beside a star of 8 M☉ or more, fed by its wind or through its inner Lagrangian
+    /// point, or beside a Be star.
+    BlackHoleHighMass,
+}
+
+impl XrbMemberKind {
+    /// Every kind: the catalogue's in [`XrbHostKind::ALL`]' order, then the three it does not draw.
+    pub const ALL: [Self; 9] = [
+        Self::Host(XrbHostKind::NeutronStarPersistent),
+        Self::Host(XrbHostKind::NeutronStarTransient),
+        Self::Host(XrbHostKind::BlackHolePersistent),
+        Self::Host(XrbHostKind::BlackHoleTransient),
+        Self::Host(XrbHostKind::BeX),
+        Self::Host(XrbHostKind::Supergiant),
+        Self::Ultracompact,
+        Self::Symbiotic,
+        Self::BlackHoleHighMass,
+    ];
+}
+
+impl XrayMarks {
+    /// The member's kind ([`XrbMemberKind`]): its catalogue kind ([`host_kind`](Self::host_kind)),
+    /// or else an ultracompact, a symbiotic or a black hole beside a massive star; `None` only for
+    /// marks whose class is not an X-ray binary's, which no member's is.
+    #[must_use]
+    pub const fn member_kind(&self) -> Option<XrbMemberKind> {
+        if let Some(kind) = self.host_kind() {
+            return Some(XrbMemberKind::Host(kind));
+        }
+        match self.class {
+            BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic) => Some(XrbMemberKind::Symbiotic),
+            BinaryClass::LowMassXrayBinary(XrbKind::Persistent | XrbKind::Transient) => {
+                Some(XrbMemberKind::Ultracompact)
+            }
+            BinaryClass::HighMassXrayBinary(HmxbKind::BeX | HmxbKind::Supergiant) => {
+                Some(XrbMemberKind::BlackHoleHighMass)
+            }
+            BinaryClass::None
+            | BinaryClass::Algol
+            | BinaryClass::Contact
+            | BinaryClass::BlueStraggler
+            | BinaryClass::HotSubdwarf
+            | BinaryClass::RCoronaeBorealis
+            | BinaryClass::Symbiotic
+            | BinaryClass::CataclysmicVariable(_)
+            | BinaryClass::MillisecondPulsar
+            | BinaryClass::DoubleNeutronStar
+            | BinaryClass::DoubleWhiteDwarf
+            | BinaryClass::TypeIaProgenitor => None,
+        }
+    }
+}
+
 /// One prior member of a carved class: the grid record it came from, its class, its pair's
 /// timeline and, for an accreting white dwarf or an X-ray binary, its marks.
 #[derive(Debug, Clone, PartialEq)]
@@ -640,6 +705,124 @@ pub(super) fn xray_marks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An X-ray binary member of `class` whose compact star and donor are of `accretor` and
+    /// `donor`, the rest of its marks fixed.
+    fn xray(class: BinaryClass, accretor: Phase, donor: Phase) -> XrayMarks {
+        XrayMarks {
+            age: Years::new(1.0e9),
+            class,
+            accretor_phase: accretor,
+            accretor_mass: SolarMasses::new(1.4),
+            donor_mass: SolarMasses::new(0.5),
+            donor_phase: donor,
+            period: None,
+            eccentricity: None,
+            transfer_rate: None,
+            recoil_speed: None,
+            since_supernova: None,
+            accretor_initial_mass: SolarMasses::new(15.0),
+            donor_initial_mass: SolarMasses::new(1.0),
+            rate_excess_dex: None,
+        }
+    }
+
+    /// Every X-ray binary member has a kind: the catalogue's where its kinds hold it, else an
+    /// ultracompact (a white dwarf's or a helium star's matter), a symbiotic one, or a black hole
+    /// beside a massive star; marks of another class have none.
+    #[test]
+    fn every_x_ray_binary_member_has_a_kind() {
+        use XrbMemberKind::{BlackHoleHighMass, Host, Symbiotic, Ultracompact};
+        let (ns, bh) = (Phase::NeutronStar, Phase::BlackHole);
+        let lmxb = |kind| BinaryClass::LowMassXrayBinary(kind);
+        let hmxb = |kind| BinaryClass::HighMassXrayBinary(kind);
+        let cases = [
+            (
+                lmxb(XrbKind::Persistent),
+                ns,
+                Phase::MainSequence,
+                Host(XrbHostKind::NeutronStarPersistent),
+            ),
+            (
+                lmxb(XrbKind::Transient),
+                bh,
+                Phase::FirstGiantBranch,
+                Host(XrbHostKind::BlackHoleTransient),
+            ),
+            (
+                lmxb(XrbKind::Transient),
+                ns,
+                Phase::HeliumWhiteDwarf,
+                Ultracompact,
+            ),
+            (
+                lmxb(XrbKind::Persistent),
+                bh,
+                Phase::CarbonOxygenWhiteDwarf,
+                Ultracompact,
+            ),
+            (
+                lmxb(XrbKind::Persistent),
+                ns,
+                Phase::HeliumMainSequence,
+                Ultracompact,
+            ),
+            (
+                lmxb(XrbKind::Symbiotic),
+                ns,
+                Phase::FirstGiantBranch,
+                Symbiotic,
+            ),
+            (lmxb(XrbKind::Symbiotic), bh, Phase::EarlyAgb, Symbiotic),
+            (
+                hmxb(HmxbKind::BeX),
+                ns,
+                Phase::MainSequence,
+                Host(XrbHostKind::BeX),
+            ),
+            (
+                hmxb(HmxbKind::Supergiant),
+                ns,
+                Phase::CoreHeliumBurning,
+                Host(XrbHostKind::Supergiant),
+            ),
+            (
+                hmxb(HmxbKind::BeX),
+                bh,
+                Phase::MainSequence,
+                BlackHoleHighMass,
+            ),
+            (
+                hmxb(HmxbKind::Supergiant),
+                bh,
+                Phase::HeliumMainSequence,
+                BlackHoleHighMass,
+            ),
+        ];
+        for (class, accretor, donor, kind) in cases {
+            let marks = xray(class, accretor, donor);
+            assert_eq!(
+                marks.member_kind(),
+                Some(kind),
+                "{class:?} {accretor:?} {donor:?}"
+            );
+            if let Host(host) = kind {
+                assert_eq!(marks.host_kind(), Some(host));
+            } else {
+                assert_eq!(marks.host_kind(), None);
+            }
+            assert!(XrbMemberKind::ALL.contains(&kind));
+        }
+        assert_eq!(
+            xray(
+                BinaryClass::CataclysmicVariable(crate::stellar::binary::CvKind::DwarfNova),
+                ns,
+                Phase::MainSequence
+            )
+            .member_kind(),
+            None
+        );
+    }
 
     /// The stride is prime to the cells' count, so that a census's walk meets every cell once in
     /// as many steps, and the parts of one count share no cell and together hold them all.

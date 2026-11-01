@@ -280,6 +280,12 @@ threads-required = 4
 filter = "package(hyperion-sim) & test(=stellar::rules::awd_donors_hold::the_helium_fed_hosts_leave_the_fast_class_in_a_census)"
 threads-required = 16
 
+# P11.T5's and P11.T8.b's X-ray binary hold runs its four censuses of 10⁶ records on sixteen
+# threads of their own (`xrb_class_hold::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::xrb_class_hold::no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind)"
+threads-required = 16
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"
