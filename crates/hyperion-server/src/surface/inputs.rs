@@ -40,6 +40,14 @@ pub trait InputsSource: fmt::Debug + Send + Sync {
         planet: Option<&BodyRecord>,
         ctx: &SystemContext,
     ) -> Result<CoarseInputs, ReadCoarseInputsError>;
+
+    /// Whether the source may give any body's inputs: `false` only for one that answers every body
+    /// not modelled, so that a system's prefetch reads no record for nothing (rendering plan R09,
+    /// R09.T17). [`RecordInputs`] models them, the serve gate open from generator version 25
+    /// (P14.T54.a).
+    fn models_any_body(&self) -> bool {
+        true
+    }
 }
 
 /// The production source: the body's record, with a moon's planet's, read by

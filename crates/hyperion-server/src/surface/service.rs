@@ -345,6 +345,9 @@ impl SurfaceService {
     ///   another; it stops at the first that would not fit.
     /// - **Given up.** Dropped, it gives up its passes: one still waiting for a permit or queued
     ///   never runs, and none it alone waits on is kept, as a request given up keeps nothing.
+    /// - **Nothing to do.** Under a bound of one, or from a source that models no body
+    ///   ([`InputsSource::models_any_body`], [`RecordInputs`](super::RecordInputs) below the serve
+    ///   gate), it starts nothing and reads no record.
     ///
     /// A field held already counts a hit and becomes the most recently used. A pass that fails is
     /// logged as [`prefetch`](Self::prefetch) logs it.
@@ -370,6 +373,11 @@ impl SurfaceService {
             FieldKey::new(galaxy, surfaced.body_id(planets.system())),
             system,
         );
+        // No permit would ever be left over for a prefetched pass under a bound of one, and no
+        // body's inputs come from a source that models none.
+        if self.fields.bound < 2 || !self.fields.source.models_any_body() {
+            return SystemPrefetch { task: None };
+        }
         let task = self.spawn_prefetch(prefetch_nearest(
             self.fields.clone(),
             galaxy,
@@ -377,7 +385,7 @@ impl SurfaceService {
             near,
             t,
         ));
-        SystemPrefetch { task }
+        SystemPrefetch { task: Some(task) }
     }
 
     /// Spawns `prefetch` in the service's set of prefetches, reaping those finished first, so that
@@ -619,14 +627,17 @@ impl fmt::Debug for SurfaceService {
 #[derive(Debug)]
 #[must_use = "a system's prefetch is given up when it is dropped"]
 pub struct SystemPrefetch {
-    task: AbortHandle,
+    /// The prefetch's task, or `None` where it has nothing to do.
+    task: Option<AbortHandle>,
 }
 
 impl Drop for SystemPrefetch {
     /// Aborts the prefetch's task at its next poll, which drops its waits: a pass still waiting
     /// for a permit or queued is then skipped, unless a request waits on it too.
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
@@ -799,10 +810,6 @@ async fn prefetch_nearest(
     near: SystemPosition,
     t: UniverseTime,
 ) {
-    if fields.bound < 2 {
-        // No permit would ever be left over for a prefetched pass.
-        return;
-    }
     let token = CancelToken::new();
     // Cancels the plan's job, if still queued, once the prefetch is given up.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
@@ -2450,32 +2457,67 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
-    /// Under a bound of one pass no permit is ever left over for a prefetched pass, so a system's
-    /// prefetch ends at once, reading nothing and queueing no job.
+    /// A source that models no body, as the records below the serve gate, counting its calls.
+    #[derive(Debug, Default)]
+    struct ModelsNone(Counted);
+
+    impl InputsSource for ModelsNone {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            planet: Option<&BodyRecord>,
+            ctx: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            self.0.inputs(record, planet, ctx)
+        }
+
+        fn models_any_body(&self) -> bool {
+            false
+        }
+    }
+
+    /// A system's prefetch with nothing to do starts no task, reads no record and queues no job:
+    /// under a bound of one pass, where no permit is ever left over for a prefetched pass, and from
+    /// a source that models no body, as the records below the serve gate (rendering plan R09,
+    /// R09.T17).
     #[tokio::test]
-    async fn a_system_prefetch_under_a_bound_of_one_does_nothing() {
-        let pool = one_worker();
-        let (service, source) = service(&pool, 64 << 20);
+    async fn a_system_prefetch_with_nothing_to_do_reads_nothing() {
+        let pool = workers(3);
         let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
-        let _prefetch = service.prefetch_system(
-            galaxy,
-            &crowded().0,
-            SystemPosition::ORIGIN,
-            UniverseTime::EPOCH,
-        );
-        until("the prefetch ends", || {
-            lock(&service.prefetching)
-                .try_join_next()
-                .is_some_and(|ended| ended.is_ok())
-        })
-        .await;
-        assert_eq!(
+        let bounded = Arc::new(Counted::default());
+        let unmodelled = Arc::new(ModelsNone::default());
+        for (source, calls, bound) in [
             (
-                source.calls(),
-                service.counters().computed(),
-                pool.counters().completed()
+                Arc::clone(&bounded) as Arc<dyn InputsSource>,
+                Box::new(|| bounded.calls()) as Box<dyn Fn() -> usize>,
+                1,
             ),
-            (0, 0, 0)
+            (
+                Arc::clone(&unmodelled) as Arc<dyn InputsSource>,
+                Box::new(|| unmodelled.0.calls()),
+                3,
+            ),
+        ] {
+            let service = SurfaceService::new(Arc::clone(&pool), source, 64 << 20, passes(bound));
+            let prefetch = service.prefetch_system(
+                galaxy,
+                &crowded().0,
+                SystemPosition::ORIGIN,
+                UniverseTime::EPOCH,
+            );
+            settle(&pool).await;
+            assert!(lock(&service.prefetching).is_empty(), "bound {bound}");
+            assert_eq!(
+                (calls(), service.counters().computed()),
+                (0, 0),
+                "bound {bound}"
+            );
+            drop(prefetch);
+        }
+        assert_eq!(
+            pool.counters().completed(),
+            2,
+            "the two settling jobs alone"
         );
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
