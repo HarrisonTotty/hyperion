@@ -523,8 +523,8 @@ pub fn white_dwarf_absolute_magnitude_v(state: &StarState) -> Option<Magnitudes>
 }
 
 /// Whether the sky treats `state` as dark in V under the version's rules: a protostar (A3's
-/// interim), a white dwarf (A4's interim, to version 25), a neutron star, a black hole, nothing
-/// left, or any state plan 06's photometry gives no V magnitude (an object cooler than its table's
+/// interim), a neutron star, a black hole, nothing left, or any state plan 06's photometry gives no
+/// V magnitude (an object cooler than its table's
 /// 1,710 K, or one of no luminosity).
 #[must_use]
 pub fn is_dark_in_v(state: &StarState) -> bool {
@@ -670,10 +670,11 @@ mod tests {
         assert_eq!(bolometric_correction_v(Kelvin::ZERO), None);
         assert_eq!(bolometric_correction_v(Kelvin::new(f64::NAN)), None);
         assert_eq!(colour_b_v(Kelvin::new(-5.0)), None);
-        // A white dwarf of 10,000 K and a black hole, which has no luminosity at all.
+        // A black hole, which has no luminosity at all; a white dwarf of 10,000 K has the Montreal
+        // grid's V (P06.T43.b).
         let wd = state(Phase::CarbonOxygenWhiteDwarf, 3e-3, 0.0126);
         assert!(wd.effective_temperature().value() > 9_000.0);
-        assert_eq!(absolute_magnitude_v(&wd), None);
+        assert!(absolute_magnitude_v(&wd).is_some_and(|m| m.value().is_finite()));
         assert_eq!(
             absolute_magnitude_v(&state(Phase::BlackHole, 0.0, 1e-5)),
             None
@@ -983,8 +984,10 @@ mod tests {
         assert!((shift - 1.339).abs() < 1e-3, "{shift}");
     }
 
+    /// A protostar is dark in V; a main-sequence star and, from 26 (P06.T43.b), a white dwarf are
+    /// not.
     #[test]
-    fn protostars_and_white_dwarfs_are_dark_and_main_sequence_stars_are_not() {
+    fn protostars_are_dark_and_main_sequence_stars_and_white_dwarfs_are_not() {
         let sun = Track::full(
             SolarMasses::new(1.0),
             &Composition::SOLAR,
@@ -1000,7 +1003,7 @@ mod tests {
         assert!(!is_dark_in_v(&main_sequence));
         let white_dwarf = sun.state_at(Years::new(1.5e10));
         assert_eq!(white_dwarf.phase(), Phase::CarbonOxygenWhiteDwarf);
-        assert!(is_dark_in_v(&white_dwarf));
+        assert!(!is_dark_in_v(&white_dwarf));
     }
 
     /// The determinism audit's pin for P06.T43.b (P06.T43.a's record): once the swap puts the two
