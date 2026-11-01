@@ -7,7 +7,7 @@
  * rest of the client never reads a wire field name. The census's layers and the features' census
  * lines are the wire types passed through, since they are already tables, the layers with only
  * their layer and status read into the model's own; so are the closed enums that name a feature's
- * kind, a density map's population or an emission class.
+ * kind, a density map's population, an emission class or a grid system's placement.
  *
  * A mass layer, a population and a layer's status are of enums plan 04 names as growing, which a
  * newer server may send a new string of without a protocol bump. Each therefore has an `unknown`
@@ -30,6 +30,7 @@ import type {
   MassLayer,
   MultiplicityWire,
   ObjectKindDto,
+  PlacementKind,
   Population,
   ShellPhaseWire,
   SystemIdHex,
@@ -199,6 +200,12 @@ export interface ChartSystem {
   /** What it is, from its layer. */
   readonly kind: ChartKind;
   readonly population: ChartPopulation;
+  /**
+   * How its layer's grid placed it beside its population (plan 08, P08.T15.a); `null` for a row
+   * without one: a feature's or the centre's member's, a catalogue system's, or any row from a
+   * server built before P08.T15.a.
+   */
+  readonly placement: PlacementKind | null;
   /** Initial mass of the primary star, or a free-floating object's mass, in M☉. */
   readonly initialMassMsun: number;
   /** Its age at the chart's time; zero or less for one not yet formed. */

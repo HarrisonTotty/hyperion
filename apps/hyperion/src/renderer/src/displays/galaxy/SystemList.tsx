@@ -14,6 +14,7 @@ import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleSlot } from "../../components/StaleSlot";
 import { formatListPosition, formatSubstellarMass } from "../../lib/format";
 import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
+import { placedOriginWords } from "../../lib/galaxy/wire";
 import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
@@ -112,7 +113,10 @@ interface SystemListProps {
  * of what a star is (plan 06, design note 17); a system not yet formed at the chart's time has no
  * class, an em dash, and is named `NOT YET FORMED`. The `STARS` column counts the system's stars,
  * the primary included, one digit right-aligned, and the em dash where the row has no brief; the
- * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5).
+ * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5). A grid
+ * system's name repeats its readout's `ORIGIN`, its population and placement
+ * (`OLD THIN DISC · DISPLACED REMNANT`), where its row carries a placement (plan 08, P08.T15.a): no
+ * column has room for it at 1280 × 720.
  *
  * A free-floating brown dwarf is a row like a star's, its class its own (`T4`), one star, and its
  * mass in M☉ to three decimals (`0.052`). A free-floating planet has no class and no star: its
@@ -317,6 +321,8 @@ export function SystemList({
                 aria-label={[
                   system.designation,
                   starName(system),
+                  // Its `ORIGIN` as the readout reads it, where its row says how it was placed.
+                  placedOriginWords(system),
                   starCountName(system),
                   `${distance} ${distanceUnit.symbol}`,
                   mass === null ? null : `${mass.value} ${massName}`,

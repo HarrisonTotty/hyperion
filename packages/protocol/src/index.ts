@@ -133,6 +133,7 @@ import type { ParameterGroup } from "./generated/ParameterGroup";
 import type { ParameterOrigin } from "./generated/ParameterOrigin";
 import type { ParameterValue } from "./generated/ParameterValue";
 import type { PhaseDto } from "./generated/PhaseDto";
+import type { PlacementKind } from "./generated/PlacementKind";
 import type { PlanetClassDto } from "./generated/PlanetClassDto";
 import type { PlanetaryNebulaDto } from "./generated/PlanetaryNebulaDto";
 import type { Population } from "./generated/Population";
@@ -485,6 +486,7 @@ export type {
   ParameterOrigin,
   ParameterValue,
   PhaseDto,
+  PlacementKind,
   PlanetClassDto,
   PlanetaryNebulaDto,
   Population,

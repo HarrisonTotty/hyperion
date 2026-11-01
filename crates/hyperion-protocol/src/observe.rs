@@ -282,6 +282,7 @@ pub(crate) mod tests {
                     initial_mass_msun: 11.25,
                     age_myr: 7_250.5,
                     population: Population::OldThinDisc,
+                    placement: None,
                     velocity_km_s: [-12.5, 231.25, 7.0],
                     stellar: None,
                     fe_h_dex: None,

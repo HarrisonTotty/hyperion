@@ -444,6 +444,45 @@ describe("SystemList's free-floating objects (plan 13, P13.T8.d)", () => {
   });
 });
 
+describe("SystemList's placements (plan 08, P08.T15.a)", () => {
+  it.each([
+    ["field", "FIELD"],
+    ["retained", "RETAINED"],
+    ["displaced_remnant", "DISPLACED REMNANT"],
+    ["runaway", "RUNAWAY"],
+    ["walkaway", "WALKAWAY"],
+    ["hypervelocity_survivor", "HYPERVELOCITY SURVIVOR"],
+  ] as const)(
+    "names a row placed %s with its ORIGIN, as the readout reads it",
+    (placement, words) => {
+      stubViewport();
+      const response = aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [{ relLy: [1, 0, 0], layer: "e" }],
+      });
+      const { systems } = toChartResult(withRowFields(response, { placement }));
+
+      renderList(systems);
+
+      expect(
+        screen.getByRole("option", {
+          name: `H7K 4C0RFZ E-1, DWARF B0V, OLD THIN DISC · ${words}, 2 stars, 1.00 ly, 79.0 solar masses, IN RANGE`,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("leaves the origin out of the name of a row that does not say how it was placed", () => {
+    stubViewport();
+
+    renderList(manySystems(1));
+
+    expect(
+      screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, DWARF M3V, 1 star, / }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("SystemList's layers this build does not know (plan 04's reserved list)", () => {
   it("lists an object of one with its mass Missing, and leaves the mass out of its name", () => {
     stubViewport();

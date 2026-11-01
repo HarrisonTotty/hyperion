@@ -208,6 +208,7 @@ fn systems_in_range(records: usize) -> SystemsInRange {
                 initial_mass_msun: 0.1 + along * 8.0,
                 age_myr: 100.0 + along * 12_000.0,
                 population: Population::OldThinDisc,
+                placement: None,
                 velocity_km_s: [
                     -30.0 + along * 60.0,
                     180.0 + along * 70.0,

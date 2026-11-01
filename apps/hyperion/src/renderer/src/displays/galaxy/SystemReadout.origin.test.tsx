@@ -6,6 +6,7 @@
 import type {
   CatalogueClassWire,
   MemberClassWire,
+  PlacementKind,
   SupernovaStateWire,
   SystemOriginWire,
   SystemRecord,
@@ -47,7 +48,9 @@ function anUnknownClass(): CatalogueClassWire {
 
 /** One system 1 ly out, its row carrying what `row` adds, through the chart's adapter. */
 function aSystem(
-  row: Partial<Pick<SystemRecord, "origin" | "member_class" | "supernova" | "population">>,
+  row: Partial<
+    Pick<SystemRecord, "origin" | "member_class" | "supernova" | "population" | "placement">
+  >,
 ) {
   const response = aSystemsInRange({
     centreLy: CENTRE,
@@ -222,6 +225,54 @@ describe("SystemReadout's origin (plan 09, P09.T41.c)", () => {
     expect(valueOf(readout, "SUPERNOVA")).toBe("PROGENITOR");
     expect(valueOf(readout, "EXPLODES IN")).toBe("0.812 kyr");
     expect(valueOf(readout, "PAIR PERIOD")).toBe("1.11E-3 d");
+  });
+});
+
+/** Each placement, and its words in a grid system's `ORIGIN` (the guide's nomenclature). */
+const PLACEMENTS: ReadonlyArray<readonly [PlacementKind, string]> = [
+  ["field", "FIELD"],
+  ["retained", "RETAINED"],
+  ["displaced_remnant", "DISPLACED REMNANT"],
+  ["runaway", "RUNAWAY"],
+  ["walkaway", "WALKAWAY"],
+  ["hypervelocity_survivor", "HYPERVELOCITY SURVIVOR"],
+];
+
+describe("SystemReadout's placement (plan 08, P08.T15.a)", () => {
+  it.each(PLACEMENTS)(
+    "reads a grid system placed %s as its population and placement",
+    (placement, words) => {
+      const readout = renderReadout(aSystem({ origin: { type: "grid" }, placement }));
+
+      expect(valueOf(readout, "ORIGIN")).toBe(`OLD THIN DISC · ${words}`);
+    },
+  );
+
+  it("reads a row with its placement but no origin as a grid system's, not as not modelled", () => {
+    // P09.T40.a's gate holds the origins back, and only a grid row carries a placement.
+    const readout = renderReadout(aSystem({ placement: "displaced_remnant" }));
+
+    expect(valueOf(readout, "ORIGIN")).toBe("OLD THIN DISC · DISPLACED REMNANT");
+    expect(valueOf(readout, "MEMBER CLASS")).toBeUndefined();
+  });
+
+  it("keeps the placement of a row whose population it does not know, the population Missing", () => {
+    const readout = renderReadout(
+      aSystem({ population: anUnknownPopulation(), placement: "runaway" }),
+    );
+
+    expect(valueOf(readout, "ORIGIN")).toBe("— · RUNAWAY");
+  });
+
+  it("reads a feature's member by its feature whatever its row says of placement", () => {
+    const readout = renderReadout(
+      aSystem({
+        origin: { type: "feature_member", feature: OPEN_CLUSTER.id },
+        placement: "field",
+      }),
+    );
+
+    expect(valueOf(readout, "ORIGIN")).toBe("OC GPF F207");
   });
 });
 

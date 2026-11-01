@@ -1016,7 +1016,7 @@ export function aSystemsInRange({
  */
 export function withRowFields(
   response: ResponseFor<"systems_in_range">,
-  fields: Partial<Pick<SystemRecord, "layer" | "population">>,
+  fields: Partial<Pick<SystemRecord, "layer" | "population" | "placement">>,
   count = response.systems.length,
 ): ResponseFor<"systems_in_range"> {
   const systems: SystemRecord[] = [];

@@ -20,6 +20,7 @@ mod features;
 mod global_answers;
 mod motion;
 mod observe;
+mod placement;
 mod planetary;
 mod scene;
 #[cfg(test)]
@@ -85,6 +86,7 @@ pub(crate) use self::motion::system_motion;
 pub(crate) use self::observe::{
     ResolveRequest, observed_dto, resolved_system, untraced, untraced_system,
 };
+use self::placement::grid_placement;
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, ListedBody, body_detail, body_refusal, detail_level,
     hosts_request, scene_body, scene_system, system_bodies,
@@ -664,6 +666,7 @@ fn system_record_moving(
         initial_mass_msun: record.primary_initial_mass().value(),
         age_myr: Megayears::from(record.age_at(time)).value(),
         population: wire_population(record.population()),
+        placement: grid_placement(galaxy, record),
         velocity_km_s: velocity.map(|v| KilometresPerSecond::from(MetresPerSecond::new(v)).value()),
         stellar: brief,
         fe_h_dex,

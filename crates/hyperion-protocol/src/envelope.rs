@@ -942,6 +942,7 @@ mod tests {
                         initial_mass_msun: 11.25,
                         age_myr: 7_250.5,
                         population: Population::OldThinDisc,
+                        placement: None,
                         velocity_km_s: [0.0; 3],
                         stellar: None,
                         fe_h_dex: None,

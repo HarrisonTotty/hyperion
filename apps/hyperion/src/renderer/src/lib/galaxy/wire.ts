@@ -15,6 +15,7 @@ import {
   type LayerStatus,
   type MassLayer,
   type ObservedDto,
+  type PlacementKind,
   type Population,
   type QueryModeDto,
   type RequestOf,
@@ -143,6 +144,8 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     layer,
     kind: chartKindOf(layer),
     population: toChartPopulation(record.population),
+    // Only a grid system's row from a server built since P08.T15.a carries it.
+    placement: record.placement ?? null,
     initialMassMsun: record.initial_mass_msun,
     ageMyr: record.age_myr,
     // Every chart query asks for the briefs, so a row without one is a system not yet formed, or
@@ -321,6 +324,46 @@ export function populationLabel(population: Population): string {
       break;
   }
   return label;
+}
+
+/** The upper-case name of a grid system's placement, as its `ORIGIN` reads it (plan 08, P08.T15.a). */
+export function placementLabel(placement: PlacementKind): string {
+  let label: string;
+  switch (placement) {
+    case "field":
+      label = "FIELD";
+      break;
+    case "retained":
+      label = "RETAINED";
+      break;
+    case "displaced_remnant":
+      label = "DISPLACED REMNANT";
+      break;
+    case "runaway":
+      label = "RUNAWAY";
+      break;
+    case "walkaway":
+      label = "WALKAWAY";
+      break;
+    case "hypervelocity_survivor":
+      label = "HYPERVELOCITY SURVIVOR";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A grid system's `ORIGIN` in words, its birth population and how its grid placed it, as the readout
+ * and the list's row both write it (plan 08, P08.T15.a): `OLD THIN DISC · DISPLACED REMNANT`, the
+ * population the em dash where this build does not know it, as the guide composes a reading with a
+ * part Missing; `null` for a row without a placement.
+ */
+export function placedOriginWords(system: ChartSystem): string | null {
+  if (system.placement === null) {
+    return null;
+  }
+  const population = system.population === "unknown" ? "—" : populationLabel(system.population);
+  return `${population} · ${placementLabel(system.placement)}`;
 }
 
 /**

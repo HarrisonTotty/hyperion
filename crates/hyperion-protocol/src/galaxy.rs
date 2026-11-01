@@ -556,6 +556,18 @@ pub struct SystemRecord {
     pub age_myr: f64,
     /// The population it was placed from.
     pub population: Population,
+    /// How its layer's grid placed it beside its population (plan 08, P08.T15.a): in the field,
+    /// a remnant retained there, or a displaced remnant, runaway, walkaway or hypervelocity
+    /// survivor.
+    ///
+    /// A server built since P08.T15.a sends it on every grid system's row of a galaxy that holds
+    /// plan 08's displaced classes, from generator version 26. It is absent from a feature's or
+    /// the centre's member's and a catalogue system's row, which no population's grid placed; from
+    /// every row of a galaxy below 26, whose grid places every system in the field; and from every
+    /// row of a server built before P08.T15.a. Such a row is exactly plan 04's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub placement: Option<PlacementKind>,
     /// Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
     /// +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
     /// position at the query's time is its epoch position plus this times the time since the
@@ -614,6 +626,34 @@ pub struct SystemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(as = "Option<SupernovaStateWire>", optional)]
     pub supernova: Option<Box<SupernovaStateWire>>,
+}
+
+/// How a grid system was placed beside its birth population (plan 08, P08.T15.a): the sim's
+/// placement class, without the displaced class's index.
+///
+/// Every value of the sim's classes has a string from the first build that sends one, the
+/// hypervelocity survivors among them, which no galaxy places before plan 09's P09.T34.b gives
+/// their class weight, so the enum is closed: a value added later bumps the protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlacementKind {
+    /// Where its population places it: any system outside layers D and E, a living star, or a
+    /// white dwarf of layer D, which the sim does not tell from its living stars there (plan 08,
+    /// Design note 17).
+    Field,
+    /// A remnant of layer E that stayed with its population after its natal kick.
+    Retained,
+    /// A remnant whose natal kick carried it out of its population's volume.
+    DisplacedRemnant,
+    /// A living star ejected at 30 km/s or more, by a supernova in its binary or an encounter: the
+    /// line Renzo et al. (2019) draw between runaways and walkaways, as the brainstorm's
+    /// "Displaced objects: kicks and runaways" does.
+    Runaway,
+    /// A living star ejected more slowly, under 30 km/s.
+    Walkaway,
+    /// The surviving companion of a Type Ia supernova, a hypervelocity star.
+    HypervelocitySurvivor,
 }
 
 #[cfg(test)]
@@ -1034,6 +1074,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                placement: None,
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: None,
                 fe_h_dex: None,
@@ -1053,6 +1094,7 @@ mod tests {
                 initial_mass_msun: 0.625,
                 age_myr: 45.0,
                 population: Population::YoungThinDisc,
+                placement: None,
                 velocity_km_s: [3.5, -228.0, -0.75],
                 stellar: None,
                 fe_h_dex: None,
@@ -1350,6 +1392,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                placement: None,
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: Some(StellarBriefDto {
                     kind: ObjectKindDto::NeutronStar,
@@ -1386,6 +1429,47 @@ mod tests {
                 },
             }),
         );
+    }
+
+    #[test]
+    fn placement_kind_strings() {
+        assert_wire_strings(&[
+            (PlacementKind::Field, "field"),
+            (PlacementKind::Retained, "retained"),
+            (PlacementKind::DisplacedRemnant, "displaced_remnant"),
+            (PlacementKind::Runaway, "runaway"),
+            (PlacementKind::Walkaway, "walkaway"),
+            (
+                PlacementKind::HypervelocitySurvivor,
+                "hypervelocity_survivor",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn system_record_wire_form_with_its_placement() {
+        let mut row = two_rows().remove(0);
+        row.placement = Some(PlacementKind::DisplacedRemnant);
+        let wire = json!({
+            "id": "0200080020000000",
+            "designation": "Vorth AB-C e4-17",
+            "position": { "cell_ly": [26_012, -3, -2], "offset_m": [1.5e15, 0.0, 9.0e15] },
+            "layer": "e",
+            "initial_mass_msun": 11.25,
+            "age_myr": 7_250.5,
+            "population": "old_thin_disc",
+            "placement": "displaced_remnant",
+            "velocity_km_s": [-12.5, 231.25, 7.0],
+        });
+        assert_wire_form(&row, wire.clone());
+        // A row without it, as a server built before P08.T15.a sends, parses as one that does not
+        // say.
+        let mut bare = wire;
+        bare.as_object_mut()
+            .expect("a row is an object")
+            .remove("placement");
+        let record: SystemRecord = serde_json::from_value(bare).unwrap();
+        assert_eq!(record.placement, None);
     }
 
     #[test]
@@ -1486,6 +1570,7 @@ mod tests {
             initial_mass_msun: 0.052,
             age_myr: 4_600.0,
             population: Population::OldThinDisc,
+            placement: None,
             velocity_km_s: [10.0, 225.5, -3.25],
             stellar: Some(StellarBriefDto {
                 kind: ObjectKindDto::Substellar,
@@ -1512,6 +1597,7 @@ mod tests {
             initial_mass_msun: 3.0e-6,
             age_myr: 8_125.0,
             population: Population::ThickDisc,
+            placement: None,
             velocity_km_s: [-40.0, 190.0, 22.5],
             stellar: None,
             fe_h_dex: Some(-0.375),

@@ -1395,6 +1395,9 @@ constants of Design notes 9, 10 and 24, with the figure.
 
 ### P08.T15 Protocol and display: placement class
 
+**P08.T15.a built** (2026-11-01, at `GENERATOR_VERSION` 24 and `PROTOCOL_VERSION` 3; no output
+moves): see "P08.T15, as built" under [Risks](#risks-and-open-points).
+
 - **P08.T15.a Placement in the record.** `SystemRecord.placement: PlacementKind`, `snake_case` on
   the wire, with a pinned wire-form test and `just gen-protocol`; the readout's `ORIGIN` line
   (`OLD THIN DISC · DISPLACED REMNANT`); the list's text repeats it; the UX guide's nomenclature table
@@ -2205,3 +2208,19 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     `no_record_reaches_its_layers_pad_speed` are slow, run by name. On the provisional table the
     slowest class rotates at 1.063 v_c against the youngest's 1.005: a finding, pinned by name
     (`SLOWEST_ROTATION`, `YOUNGEST_ROTATION`) for P15.T6.c–f's lane to re-pin.
+- **P08.T15, as built (2026-11-01, at 24 and protocol 3; no output moves).**
+  - `PlacementKind` has six values: `field`, `retained`, `displaced_remnant`, `runaway`,
+    `walkaway` and `hypervelocity_survivor` (deviation: the sixth, so that the match over the sim's
+    `DisplacedKind` is exhaustive). It is closed.
+  - Deviation: `SystemRecord.placement` is optional (`Option<PlacementKind>`), so it does not bump
+    the protocol (plan 04's Design note 15). It is absent from a member's row and a catalogue
+    system's row. The server's `convert/placement.rs` maps `placement_class()`.
+  - Lean (2026-11-01): a row carries `placement` only from a galaxy that holds the displaced
+    classes (`Fields::displaced()`, 26's rules). Below 26 every system is in the field, so the
+    rows stay plan 04's and the server's two range goldens do not move, as P09.T40.a's gate keeps
+    the origins. The 26 bump re-blesses them with `placement` on every grid row.
+  - Client: `ChartSystem.placement`, `placementLabel` and `placedOriginWords`
+    (`lib/galaxy/wire.ts`). A row with a placement reads
+    `ORIGIN OLD THIN DISC · DISPLACED REMNANT`, its origin sent or not (only a grid row carries
+    one), and the list's row name repeats it. The UX guide gains `HYPERVELOCITY SURVIVOR`; it
+    already had the other five terms.

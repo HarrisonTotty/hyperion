@@ -14,7 +14,7 @@ import type {
   ShellState,
   SupernovaState,
 } from "../../lib/galaxy/model";
-import { populationLabel } from "../../lib/galaxy/wire";
+import { placedOriginWords, populationLabel } from "../../lib/galaxy/wire";
 import { formatHex64 } from "../../lib/seed";
 import { SystemReading as Reading } from "./SystemReading";
 
@@ -28,24 +28,44 @@ type OriginShown =
   | { readonly kind: "missing" };
 
 /**
- * A system's `ORIGIN`: its birth population for one its layer's grid placed, its feature's kind and
- * designation for a feature's member (`OC GPF F207`, or `FEATURE` and its feature's ID where the chart
- * holds no such feature), `CENTRE` for the centre's, its class in words for a catalogue system; Missing for
- * an origin, a population or a class this build does not know; and `NOT YET MODELLED`, a status, for
- * a row from a server that does not say.
+ * A grid system's `ORIGIN`: its birth population and placement (`OLD THIN DISC · DISPLACED
+ * REMNANT`), or, from a server that sends no placement, its population alone, Missing where this
+ * build does not know it.
+ */
+function gridShown(system: ChartSystem): OriginShown {
+  const placed = placedOriginWords(system);
+  if (placed !== null) {
+    return { kind: "value", text: placed };
+  }
+  return system.population === "unknown"
+    ? { kind: "missing" }
+    : { kind: "value", text: populationLabel(system.population) };
+}
+
+/**
+ * A system's `ORIGIN`: its birth population and placement for one its layer's grid placed (plan 08,
+ * P08.T15.a), its feature's kind and designation for a feature's member (`OC GPF F207`, or `FEATURE`
+ * and its feature's ID where the chart holds no such feature), `CENTRE` for the centre's, its class in
+ * words for a catalogue system; Missing for an origin, a population or a class this build does not
+ * know; and `NOT YET MODELLED`, a status, for a row from a server that does not say.
+ *
+ * @remarks
+ * A row whose origin is not sent but whose placement is, as a server built since P08.T15.a sends
+ * while P09.T40.a's gate holds the features' members back, is a grid system's: only a grid row
+ * carries a placement.
  */
 function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>): OriginShown {
   const { origin } = system;
   let shown: OriginShown;
   switch (origin.kind) {
     case "not_sent":
-      shown = { kind: "status", text: "NOT YET MODELLED" };
+      shown =
+        system.placement === null
+          ? { kind: "status", text: "NOT YET MODELLED" }
+          : gridShown(system);
       break;
     case "grid":
-      shown =
-        system.population === "unknown"
-          ? { kind: "missing" }
-          : { kind: "value", text: populationLabel(system.population) };
+      shown = gridShown(system);
       break;
     case "feature_member": {
       const feature = features.find((each) => each.id === origin.feature);
@@ -258,7 +278,8 @@ export interface OriginReadingsProps {
 
 /**
  * The system readout's readings of what placed the selected system (plan 09, P09.T41.c): its
- * `ORIGIN`, a member's `MEMBER CLASS`, and a supernova catalogue entry's state.
+ * `ORIGIN`, a grid system's with its placement (plan 08, P08.T15.a), a member's `MEMBER CLASS`, and
+ * a supernova catalogue entry's state.
  *
  * @remarks
  * Readings of the row, a `dt` and its `dd` each, for the readout's own list. `ORIGIN` always

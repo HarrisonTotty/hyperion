@@ -312,7 +312,8 @@ function ageReading(system: ChartSystem | null): AgeShown {
  * after a newer request failed.
  *
  * After `POPULATION`, what placed the system (plan 09, P09.T41.c; {@link OriginReadings}): its
- * `ORIGIN`, `NOT YET MODELLED` from a server that does not say, a member's `MEMBER CLASS`, and a
+ * `ORIGIN`, a grid system's population and placement (`OLD THIN DISC · DISPLACED REMNANT`, plan
+ * 08, P08.T15.a), `NOT YET MODELLED` from a server that does not say, a member's `MEMBER CLASS`, and a
  * supernova catalogue entry's state; an origin, a catalogue class or a member class this build does
  * not know reads Missing, and every other reading as before.
  *

@@ -82,7 +82,7 @@ pub use galaxy::{
     Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
     ExtinctionResult, ExtinctionTarget, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
-    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
+    ParameterValue, PlacementKind, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
     TargetExtinction, Unit,
 };
 pub use global_list::{
@@ -208,6 +208,12 @@ pub use universe::{
 /// Giving the alerts' census its `unwalked` status and an optional `expected_hosts` (galaxy plan
 /// 12, P12.T8.b) leaves it at 3: P12.T9.a's build answered every census empty, so no build sent a
 /// `ClassCensusDto`, and the first that sends one sets its shape, as the surface section's did.
+///
+/// Giving a range row its `placement` (galaxy plan 08, P08.T15.a) leaves it at 3 as well: it is an
+/// optional field, absent from every row of a server built before it and of a galaxy below
+/// generator version 26, which a client reads as a row that does not say, and an older client
+/// ignores it. [`PlacementKind`] is closed, and carries
+/// every one of the sim's placement classes from the first build that sends a value of it.
 pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]
