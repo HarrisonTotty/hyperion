@@ -124,10 +124,10 @@ describe("the inspection run's reading of the ground and the camera's range", ()
     ).toEqual([6.69e6, 1e6, 87_000, null, null]);
   });
 
-  it("closes in by holds whose one camera step flies at most a third of what is left", () => {
+  it("closes in by holds whose one camera step flies at most half of what is left", () => {
     const steps = [3e3, 1e5, 1.55e7].map((remainingM) => {
       const flownM = freeRateMPerS(closeRateStep(remainingM)) * MAX_FREE_STEP_S;
-      return flownM <= remainingM / 3 && flownM > remainingM / 3 / Math.sqrt(10);
+      return flownM <= remainingM / 2 && flownM > remainingM / 2 / Math.sqrt(10);
     });
     expect(steps).toEqual([true, true, true]);
   });

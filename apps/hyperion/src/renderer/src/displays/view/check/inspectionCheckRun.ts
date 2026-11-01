@@ -23,8 +23,9 @@
  *    2026-11-01), and with it off again; then with the `STYLE` panel's `GRID` at `OFF`, the image
  *    bare, as `inspection-<system>-<index>-grid-off`.
  * 5. Over surveyed ground the camera then closes in along its line of sight, the flight key `W`
- *    held on the primary's canvas in short holds at a rate step (`PageUp`, `PageDown`) that flies a
- *    third of what is left, each read back from the `POSITION` line once its coast has run out,
+ *    held on the primary's canvas in short holds at a rate step (`PageUp`, `PageDown`) whose one
+ *    step flies at most half of what is left, each read back from the `POSITION` line once its coast
+ *    has all but run out,
  *    until it stands {@link CLOSE_ALTITUDE_SHARE} of the body's radius above it (at least
  *    {@link CLOSE_ALTITUDE_MIN_M}); once the terrain has streamed, its ground is read, `AUTO` has
  *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`.
@@ -93,7 +94,11 @@ export interface InspectionCheckTiming {
   readonly groundWaitMs: number;
   /** The most holds the camera closes in by before the run fails. */
   readonly closeHolds: number;
-  /** The primary's draws waited for after each hold, for the camera's coast to run out. */
+  /**
+   * The primary's draws waited for after each hold, each a step's most of the camera's time, for
+   * its coast to all but run out: it damps with that time constant, so two leave under a fifth of
+   * it to come, short of the goal still.
+   */
   readonly coastFrames: number;
 }
 
@@ -108,7 +113,7 @@ export const INSPECTION_CHECK_TIMING: InspectionCheckTiming = {
   framesBeforeCapture: 5,
   groundWaitMs: 300_000,
   closeHolds: 40,
-  coastFrames: 8,
+  coastFrames: 2,
 };
 
 /** How far above the body the camera closes in to, as a share of its equatorial radius: 5%. */
@@ -198,11 +203,11 @@ export function positionRangeM(positionLine: string | null): number | null {
 
 /**
  * The free camera's rate step for a hold that closes `remainingM`: the fastest whose one camera
- * step, at most {@link MAX_FREE_STEP_S} of its rate, flies no more than a third of it, so that a
- * hold of a draw or two leaves the camera short of its goal; between 0 and 31.
+ * step, at most {@link MAX_FREE_STEP_S} of its rate, flies no more than half of it, so that a hold
+ * of a draw or two leaves the camera short of its goal; between 0 and 31.
  */
 export function closeRateStep(remainingM: number): number {
-  const step = Math.floor(2 * Math.log10(remainingM / 3 / MAX_FREE_STEP_S));
+  const step = Math.floor(2 * Math.log10(remainingM / 2 / MAX_FREE_STEP_S));
   return Math.min(Math.max(step, 0), 31);
 }
 
@@ -409,13 +414,14 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     await settled(read());
   };
   await settle();
-  /** Waits for `count` of the primary's draws from now. */
-  const framesDrawn = async (count = timing.framesBeforeCapture): Promise<void> => {
+  /** Waits for `count` of the primary's draws from now, and for at least `leastMs` to pass. */
+  const framesDrawn = async (count = timing.framesBeforeCapture, leastMs = 0): Promise<void> => {
     const fromMs = deps.nowMs();
     await until(
       `the primary did not draw ${String(count)} frames`,
       () =>
-        deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >= count,
+        deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >= count &&
+        deps.nowMs() - fromMs >= leastMs,
     );
   };
   await framesDrawn();
@@ -531,11 +537,12 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     stopped();
     target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
     try {
-      await framesDrawn(1);
+      // A step's most of the camera's time, a draw or more, on a slow renderer or a fast one.
+      await framesDrawn(1, 1000 * MAX_FREE_STEP_S);
     } finally {
       target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
     }
-    await framesDrawn(timing.coastFrames);
+    await framesDrawn(timing.coastFrames, 1000 * timing.coastFrames * MAX_FREE_STEP_S);
     await closeIn(left - 1);
   };
   await closeIn(timing.closeHolds);
