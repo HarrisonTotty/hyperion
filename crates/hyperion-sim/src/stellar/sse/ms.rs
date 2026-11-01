@@ -12,7 +12,7 @@
 //! exceeds the tolerances P06.T12.b validates the backbone to. The doc comment of each function
 //! concerned names the case.
 
-use crate::math;
+use crate::math::{self, PositivePowers};
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
@@ -55,9 +55,9 @@ fn t_bgb_myr(m: f64, c: &ZCoeffs) -> f64 {
 /// The fraction µ of `t_bgb` at which the hook ends (HPT equation 7):
 /// max(0.5, 1.0 − 0.01 max(a6 ÷ M^a7, a8 + a9 ÷ M^a10)).
 #[must_use]
-fn hook_fraction(m: f64, c: &ZCoeffs) -> f64 {
-    let first = c.a(6) / math::powf_positive(m, c.a(7));
-    let second = c.a(8) + c.a(9) / math::powf_positive(m, c.a(10));
+fn hook_fraction(m: PositivePowers, c: &ZCoeffs) -> f64 {
+    let first = c.a(6) / m.pow(c.a(7));
+    let second = c.a(8) + c.a(9) / m.pow(c.a(10));
     0.5_f64.max(1.0 - 0.01 * first.max(second))
 }
 
@@ -83,9 +83,9 @@ fn ms_fraction(c: &ZCoeffs) -> f64 {
 /// `t_hook` and `t_MS` in Myr for a mass `m` in M☉ (HPT equations 5–7): µ `t_bgb`, and
 /// max(`t_hook`, x `t_bgb`).
 #[must_use]
-fn timescales_myr(m: f64, c: &ZCoeffs) -> (f64, f64) {
+fn timescales_myr(m: f64, powers: PositivePowers, c: &ZCoeffs) -> (f64, f64) {
     let t_bgb = t_bgb_myr(m, c);
-    let t_hook = hook_fraction(m, c) * t_bgb;
+    let t_hook = hook_fraction(powers, c) * t_bgb;
     (t_hook, t_hook.max(ms_fraction(c) * t_bgb))
 }
 
@@ -93,24 +93,29 @@ fn timescales_myr(m: f64, c: &ZCoeffs) -> (f64, f64) {
 #[cfg(test)]
 #[must_use]
 pub(crate) fn t_hook(m: SolarMasses, c: &ZCoeffs) -> Megayears {
-    Megayears::new(timescales_myr(m.value(), c).0)
+    Megayears::new(timescales_myr(m.value(), PositivePowers::of(m.value()), c).0)
 }
 
 /// The main-sequence lifetime, max(`t_hook`, x `t_bgb`) (HPT equation 5), Myr.
 #[must_use]
 pub(crate) fn t_ms(m: SolarMasses, c: &ZCoeffs) -> Megayears {
-    Megayears::new(timescales_myr(m.value(), c).1)
+    Megayears::new(timescales_myr(m.value(), PositivePowers::of(m.value()), c).1)
 }
 
 /// The luminosity at the end of the main sequence (HPT equation 8):
 /// (a11 M³ + a12 M⁴ + a13 M^(a16 + 1.8)) ÷ (a14 + a15 M⁵ + M^a16).
 #[must_use]
 pub(crate) fn l_tms(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
-    let m = m.value();
+    l_tms_powers(m.value(), PositivePowers::of(m.value()), c)
+}
+
+/// [`l_tms`] with the mass's `powers` given.
+#[must_use]
+fn l_tms_powers(m: f64, powers: PositivePowers, c: &ZCoeffs) -> SolarLuminosities {
     let m3 = m * m * m;
-    let m_a16 = math::powf_positive(m, c.a(16));
+    let m_a16 = powers.pow(c.a(16));
     SolarLuminosities::new(
-        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * math::powf_positive(m, 1.8))
+        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * powers.pow(1.8))
             / (c.a(14) + c.a(15) * m3 * m * m + m_a16),
     )
 }
@@ -172,37 +177,35 @@ pub(crate) fn l_bgb(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
 
 /// The luminosity hook's amplitude ΔL at mass `m` in M☉ (HPT equation 16).
 #[must_use]
-fn delta_l(m: f64, c: &ZCoeffs) -> f64 {
+fn delta_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let a33 = c.a(33);
-    let high = |m: f64| c.hook_luminosity_scale().at(m);
     if m <= m_hook {
         0.0
     } else if m < a33 {
-        high(a33) * math::powf_positive((m - m_hook) / (a33 - m_hook), 0.4)
+        c.hook_luminosity_scale().at(a33) * math::powf_positive((m - m_hook) / (a33 - m_hook), 0.4)
     } else {
-        high(m)
+        c.hook_luminosity_scale().at_powers(m, powers)
     }
 }
 
 /// The radius hook's amplitude ΔR at mass `m` in M☉ (HPT equation 17).
 #[must_use]
-fn delta_r(m: f64, c: &ZCoeffs) -> f64 {
+fn delta_r(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let (a42, a43) = (c.a(42), c.a(43));
-    let high = |m: f64| {
-        (c.a(38) + c.a(39) * m * m * m * m.sqrt())
-            / (c.a(40) * m * m * m + math::powf_positive(m, c.a(41)))
-            - 1.0
+    let high = |m: f64, m_a41: f64| {
+        (c.a(38) + c.a(39) * m * m * m * m.sqrt()) / (c.a(40) * m * m * m + m_a41) - 1.0
     };
     if m <= m_hook {
         0.0
     } else if m <= a42 {
         a43 * ((m - m_hook) / (a42 - m_hook)).sqrt()
     } else if m < 2.0 {
-        a43 + (high(2.0) - a43) * math::powf_positive((m - a42) / (2.0 - a42), c.a(44))
+        let at_2 = high(2.0, math::powf_positive(2.0, c.a(41)));
+        a43 + (at_2 - a43) * math::powf_positive((m - a42) / (2.0 - a42), c.a(44))
     } else {
-        high(m)
+        high(m, powers.pow(c.a(41)))
     }
 }
 
@@ -221,14 +224,13 @@ fn eta(m: f64, c: &ZCoeffs) -> f64 {
 
 /// The luminosity α coefficient at mass `m` in M☉ (HPT equations 19a and 19b).
 #[must_use]
-fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
-    let high = |m: f64| {
-        (c.a(45) + c.a(46) * math::powf_positive(m, c.a(48)))
-            / (math::powf_positive(m, 0.4) + c.a(47) * math::powf_positive(m, 1.9))
+fn alpha_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let high = |powers: PositivePowers| {
+        (c.a(45) + c.a(46) * powers.pow(c.a(48))) / (powers.pow(0.4) + c.a(47) * powers.pow(1.9))
     };
     let (a49, a50, a51, a52, a53) = (c.a(49), c.a(50), c.a(51), c.a(52), c.a(53));
     if m >= 2.0 {
-        high(m)
+        high(powers)
     } else if m < 0.5 {
         a49
     } else if m < 0.7 {
@@ -238,19 +240,19 @@ fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
     } else if m < a53 {
         a50 + (a51 - a50) * (m - a52) / (a53 - a52)
     } else {
-        a51 + (high(2.0) - a51) * (m - a53) / (2.0 - a53)
+        a51 + (high(PositivePowers::of(2.0)) - a51) * (m - a53) / (2.0 - a53)
     }
 }
 
 /// The luminosity β coefficient at mass `m` in M☉ (HPT equation 20): max(0, a54 − a55 M^a56), and
 /// above a57, while positive, falling linearly to zero over 0.1 M☉ from its value at a57.
 #[must_use]
-fn beta_l(m: f64, c: &ZCoeffs) -> f64 {
-    let base = |m: f64| 0.0_f64.max(c.a(54) - c.a(55) * math::powf_positive(m, c.a(56)));
-    let beta = base(m);
+fn beta_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let base = |m_a56: f64| 0.0_f64.max(c.a(54) - c.a(55) * m_a56);
+    let beta = base(powers.pow(c.a(56)));
     let a57 = c.a(57);
     if m > a57 && beta > 0.0 {
-        let b = base(a57);
+        let b = base(math::powf_positive(a57, c.a(56)));
         0.0_f64.max(b - 10.0 * (m - a57) * b)
     } else {
         beta
@@ -283,20 +285,20 @@ fn alpha_r(m: f64, c: &ZCoeffs) -> f64 {
 /// the denominator as a74 − 1.06 (in the journal and the preprint), which would not reach a72 at
 /// a74; the published SSE code has a74 − 1.0, a misprint settled.
 #[must_use]
-fn beta_r(m: f64, c: &ZCoeffs) -> f64 {
-    let power_law =
-        |m: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + math::powf_positive(m, c.a(71)));
+fn beta_r(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let power_law = |m: f64, m_a71: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + m_a71);
+    let at = |m: f64| power_law(m, math::powf_positive(m, c.a(71)));
     let (a72, a74) = (c.a(72), c.a(74));
     let beta_prime = if m <= 1.0 {
         1.06
     } else if m < a74 {
         1.06 + (a72 - 1.06) * (m - 1.0) / (a74 - 1.0)
     } else if m < 2.0 {
-        a72 + (power_law(2.0) - a72) * (m - a74) / (2.0 - a74)
+        a72 + (at(2.0) - a72) * (m - a74) / (2.0 - a74)
     } else if m <= 16.0 {
-        power_law(m)
+        power_law(m, powers.pow(c.a(71)))
     } else {
-        power_law(16.0) + c.a(73) * (m - 16.0)
+        at(16.0) + c.a(73) * (m - 16.0)
     };
     beta_prime - 1.0
 }
@@ -363,7 +365,11 @@ impl MainSequence {
         let l_zams = zams::luminosity(m, c).value();
         let r_zams = zams::radius(m, c).value();
         let mass = m.value();
-        let (t_hook, t_ms) = timescales_myr(mass, c);
+        // Every power of the mass below shares one logarithm of it (`PositivePowers`), the same
+        // bits as a `powf_positive` each: the lifetime-only build evaluates this some 120 times a
+        // star (P08.T12's layer-E fates).
+        let powers = PositivePowers::of(mass);
+        let (t_hook, t_ms) = timescales_myr(mass, powers, c);
         // HPT equation 24: low-mass stars are partly degenerate (Tout et al. 1997), so the radius
         // is held above 0.0258 (1 + X)^(5/3) M^(−1/3). The floor binds only near 0.1 M☉ and is
         // applied at every mass, which changes nothing above.
@@ -373,16 +379,16 @@ impl MainSequence {
             t_hook,
             l_zams,
             r_zams,
-            log_l_tms: math::log10(l_tms(m, c).value() / l_zams),
+            log_l_tms: math::log10(l_tms_powers(mass, powers, c).value() / l_zams),
             log_r_tms: math::log10(r_tms(m, c).value() / r_zams),
-            alpha_l: alpha_l(mass, c),
-            beta_l: beta_l(mass, c),
+            alpha_l: alpha_l(mass, powers, c),
+            beta_l: beta_l(mass, powers, c),
             eta: eta(mass, c),
-            delta_l: delta_l(mass, c),
+            delta_l: delta_l(mass, powers, c),
             alpha_r: alpha_r(mass, c),
-            beta_r: beta_r(mass, c),
+            beta_r: beta_r(mass, powers, c),
             gamma: gamma(mass, c),
-            delta_r: delta_r(mass, c),
+            delta_r: delta_r(mass, powers, c),
             r_degenerate,
         }
     }
@@ -558,14 +564,14 @@ mod tests {
     #[test]
     fn every_coefficient_of_the_evolution_is_continuous_in_mass() {
         let coefficients: [(&str, Coefficient); 8] = [
-            ("αL", alpha_l),
-            ("βL", beta_l),
+            ("αL", |m, c| alpha_l(m, PositivePowers::of(m), c)),
+            ("βL", |m, c| beta_l(m, PositivePowers::of(m), c)),
             ("η", eta),
-            ("ΔL", delta_l),
+            ("ΔL", |m, c| delta_l(m, PositivePowers::of(m), c)),
             ("αR", alpha_r),
-            ("βR", beta_r),
+            ("βR", |m, c| beta_r(m, PositivePowers::of(m), c)),
             ("γ", gamma),
-            ("ΔR", delta_r),
+            ("ΔR", |m, c| delta_r(m, PositivePowers::of(m), c)),
         ];
         let masses: Vec<f64> = log_mass_sweep(2_000).into_iter().map(math::exp10).collect();
         for z in REFERENCE_Z {

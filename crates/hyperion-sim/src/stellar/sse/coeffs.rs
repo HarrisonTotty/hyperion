@@ -338,9 +338,16 @@ impl LesserPowerLaw {
     /// min(k₁ x^−e₁, k₂ x^−e₂) at `x`.
     #[must_use]
     pub(crate) fn at(&self, x: f64) -> f64 {
+        self.at_powers(x, math::PositivePowers::of(x))
+    }
+
+    /// [`at`](Self::at) with `x`'s `powers` given, for a caller that raises `x` to other powers
+    /// too: the same bits ([`math::PositivePowers`]).
+    #[must_use]
+    pub(crate) fn at_powers(&self, x: f64, powers: math::PositivePowers) -> f64 {
         let law = |[k, e]: [f64; 2]| match self.form {
-            PowerForm::Product => k * math::powf_positive(x, -e),
-            PowerForm::Quotient => k / math::powf_positive(x, e),
+            PowerForm::Product => k * powers.pow(-e),
+            PowerForm::Quotient => k / powers.pow(e),
         };
         let first = || law(self.first);
         let second = || law(self.second);

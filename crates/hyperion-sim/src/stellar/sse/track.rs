@@ -2134,6 +2134,8 @@ impl Segment {
 }
 
 #[cfg(test)]
+mod lifetime_sweep;
+#[cfg(test)]
 mod stages_tests;
 #[cfg(test)]
 mod tests;

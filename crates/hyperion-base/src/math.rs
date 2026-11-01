@@ -254,6 +254,58 @@ pub fn powf_positive(x: f64, y: f64) -> f64 {
     libm::exp(y * libm::log(x))
 }
 
+/// The powers of one finite positive base, `x^y` for as many `y` as a formula raises it to: each
+/// [`powf_positive`]`(x, y)` bit for bit, with `ln x` taken once rather than once a power.
+///
+/// [`powf_positive`] is `exp(y ln x)`, so a formula that raises one star's mass to a dozen powers
+/// takes a dozen logarithms of it. These take one, and each power is the same `exp` of the same
+/// product, so every value keeps its bits (plan 08, P08.T12's layer-E fates).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_base::math::{PositivePowers, powf_positive};
+///
+/// // A 13 M☉ star's mass, raised to the powers a main-sequence fit takes.
+/// let m = PositivePowers::of(13.0);
+/// for y in [0.4, 1.8, 3.6, -2.2] {
+///     assert_eq!(m.pow(y).to_bits(), powf_positive(13.0, y).to_bits());
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositivePowers {
+    ln_x: f64,
+}
+
+impl PositivePowers {
+    /// The powers of `x`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `x` is not finite and positive, as [`powf_positive`].
+    #[inline]
+    #[must_use]
+    pub fn of(x: f64) -> Self {
+        debug_assert!(
+            x > 0.0 && x.is_finite(),
+            "powers need a finite positive base, not {x}"
+        );
+        Self { ln_x: libm::log(x) }
+    }
+
+    /// `x^y`: [`powf_positive`]`(x, y)`, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `y` is not finite, as [`powf_positive`].
+    #[inline]
+    #[must_use]
+    pub fn pow(self, y: f64) -> f64 {
+        debug_assert!(y.is_finite(), "a power must be finite, not {y}");
+        libm::exp(y * self.ln_x)
+    }
+}
+
 /// The cube root of `x`.
 #[inline]
 #[must_use]
@@ -891,6 +943,21 @@ mod tests {
         assert_same_bits(powf_positive(1.0, -7.5), 1.0);
         assert_same_bits(powf_positive(1e10, 40.0), f64::INFINITY);
         assert_same_bits(powf_positive(1e-10, 40.0), 0.0);
+    }
+
+    /// A base's powers taken once are `powf_positive`'s, bit for bit, over the same ranges.
+    #[test]
+    fn positive_powers_are_powf_positive_bit_for_bit() {
+        let mut g = hyperion_testkit::lcg::Lcg::new(0x9f10);
+        for _ in 0..20_000 {
+            let x = exp10(-5.0 + 13.0 * g.next_f64());
+            let powers = PositivePowers::of(x);
+            for _ in 0..10 {
+                let y = -11.0 + 22.0 * g.next_f64();
+                assert_same_bits(powers.pow(y), powf_positive(x, y));
+            }
+        }
+        assert_same_bits(PositivePowers::of(7.0).pow(0.0), 1.0);
     }
 
     /// For bases whose small powers are exact the two orders of multiplication cannot differ.
