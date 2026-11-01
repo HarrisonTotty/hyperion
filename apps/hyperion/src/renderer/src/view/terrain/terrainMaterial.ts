@@ -17,7 +17,9 @@
  *   factor R07's disc gives each of its laws, its class-map classes' included (`oblateAlbedoScale`
  *   of the class's L(0), 1 for a sphere; R10.T10.e), so that the disc and the terrain draw one
  *   law a class on an oblate body too; L(0) the law's at c A_N, and the law's template and
- *   exponent s ({@link CLASS_LAW_TEMPLATES}). Its row of R07's
+ *   exponent s ({@link CLASS_LAW_TEMPLATES}), a Regolith class's the body's on a regolith
+ *   template, with its L(α) curve and L(0) no higher than the body's ({@link classRowLaw},
+ *   R10.T10.e). Its row of R07's
  *   phase table holds its f against its L(α), L(0) times McEwen's profile for the particulate laws
  *   and 0 for Lambert's, in alpha ({@link TerrainPhaseRows}): one row per (law, L(0)), so the
  *   materials of L(0) = 1, every one up to A_N 0.60, share one row of their law, and a bright
@@ -454,7 +456,8 @@ export const AIRLESS_ICE_EXPONENT = 0.8215365032066868;
  * Each law's template and exponent s, grey (R10.T1.a's `PhaseLaw::template`; decision-r10-limb):
  * Regolith's the Moon's curve at s = 1 (q 0.626), Ice's `airless-ice` at {@link
  * AIRLESS_ICE_EXPONENT}, and Lambert's `lambert` at s = 1, f ≡ 1 (q 3/2; provisional, labelled
- * there).
+ * there). On a body of a {@link REGOLITH_TEMPLATES} template the Regolith row is the body's curve
+ * instead ({@link classRowLaw}).
  */
 export const CLASS_LAW_TEMPLATES: Readonly<
   Record<PhaseLawCode, { readonly template: PhaseTemplateId; readonly phaseExponent: number }>
@@ -464,15 +467,60 @@ export const CLASS_LAW_TEMPLATES: Readonly<
   [PHASE_LAW.lambert]: { template: "lambert", phaseExponent: 1 },
 };
 
+/**
+ * The templates of a body whose ground is a regolith family's, on which a Regolith class draws its
+ * body's curve (plan R10, R10.T10.e; {@link classRowLaw}): plan 14's airless rock's Mercury, a
+ * thin-aired magma ocean's `magma` (Mercury's curve), a thin-aired world's Mars (P14.T47.b's
+ * template choice, `photometry.rs`' `choose`), and the Moon's, which `TEST MOON` takes.
+ *
+ * @remarks
+ * Every other template is a whole planet's under cloud or a thick air (Venus, Earth, the giants),
+ * an ice's (`airless-ice`, `snowball`) or the provisional Lambert sphere: none is a curve of its
+ * rock, so a Regolith class keeps the Moon's curve at s = 1 there, as before.
+ */
+export const REGOLITH_TEMPLATES: ReadonlySet<PhaseTemplateId> = new Set<PhaseTemplateId>([
+  "moon",
+  "mercury",
+  "magma",
+  "mars",
+]);
+
 function isPhaseLawCode(code: number): code is PhaseLawCode {
   return code === PHASE_LAW.regolith || code === PHASE_LAW.ice || code === PHASE_LAW.lambert;
 }
 
 /**
  * The law whose row holds f and L(α) for code `code` at L(0) `l0`: A of 1 (a row holds no A), the
- * law's template and grey s, and the template's L(α) curve (`withTemplateCurve`).
+ * law's template and grey s, and the template's L(α) curve (`withTemplateCurve`); on a body whose
+ * uniform law `body` is on a {@link REGOLITH_TEMPLATES} template, a Regolith class's is the body's
+ * curve (plan R10, R10.T10.e).
+ *
+ * @remarks
+ * There the row takes the body's template, its exponent s per channel and its L(α) curve, and its
+ * L(0) no higher than the body's (the law's `lommelSeeligerCeiling`, set where the body's is the
+ * lesser: Mars's 0.5 under the particulate rule's 1). The class keeps its A and L(0), and so its p
+ * (R10.T10.a's), its figure's factor and its maturity nodes: f is tabulated against the share
+ * drawn, so a class of the body's p draws the body's own law at every phase and geometry, and the
+ * classes' q is the body's within their L(0) where it is below the body's. Before, every body drew
+ * the Moon's curve at s = 1 on its Regolith classes, q 0.626 against Mercury's 0.480 and Mars's
+ * 1.085 (R10.T10.e's finding). The Ice and Lambert rows, and a Regolith class on any other
+ * template, are the law's own.
+ *
+ * @param body - The body's uniform law, `elsewhere`; absent, the law's own row.
  */
-export function classRowLaw(code: PhaseLawCode, l0: number): PhotometricLaw {
+export function classRowLaw(code: PhaseLawCode, l0: number, body?: PhotometricLaw): PhotometricLaw {
+  if (code === PHASE_LAW.regolith && body !== undefined && REGOLITH_TEMPLATES.has(body.template)) {
+    const curve = body.lommelSeeligerCurve;
+    const ceiling = body.lommelSeeligerShare;
+    return {
+      a: [1, 1, 1],
+      lommelSeeligerShare: l0,
+      ...(curve === undefined ? {} : { lommelSeeligerCurve: curve }),
+      ...(ceiling < l0 ? { lommelSeeligerCeiling: ceiling } : {}),
+      template: body.template,
+      phaseExponent: body.phaseExponent,
+    };
+  }
   const { template, phaseExponent: s } = CLASS_LAW_TEMPLATES[code];
   return withTemplateCurve({
     a: [1, 1, 1],
@@ -510,8 +558,8 @@ export function classPhotometryOf(photometry: Float32Array, slot: number): Class
 }
 
 /**
- * Whether two laws give the same phase table row: the same A, L(0), template and exponents, and the
- * same L(α) profile object (the templates' own, shared), or each none.
+ * Whether two laws give the same phase table row: the same A, L(0), ceiling, template and
+ * exponents, and the same L(α) profile object (the templates' own, shared), or each none.
  */
 function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
   return (
@@ -521,6 +569,7 @@ function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
       a.a[2] === b.a[2] &&
       a.lommelSeeligerShare === b.lommelSeeligerShare &&
       a.lommelSeeligerCurve === b.lommelSeeligerCurve &&
+      a.lommelSeeligerCeiling === b.lommelSeeligerCeiling &&
       a.template === b.template &&
       a.phaseExponent[0] === b.phaseExponent[0] &&
       a.phaseExponent[1] === b.phaseExponent[1] &&
@@ -530,16 +579,21 @@ function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
 
 /**
  * The rows of a terrain's phase table (`phase_factor_table`): row 0 the body's uniform law, then
- * one row per (law, L(0)) as the patches' class laws ask for them, kept in the order asked.
+ * one row per (law, L(0)) as the patches' class laws ask for them, kept in the order asked, each
+ * the row of its law on the body ({@link classRowLaw} with row 0's law).
  *
  * @remarks
  * Rows are only added: a body's palette has at most fifteen entries, and every material up to A_N
- * 0.60 shares its law's row at L(0) = 1, so a body takes a handful. {@link version} rises with each
- * change, so that the holder re-uploads the table.
+ * 0.60 shares its law's row at L(0) = 1, so a body takes a handful. A Regolith row follows row 0's
+ * law, and is made again in its place when row 0 changes (R10.T10.e), so that the slots' packed
+ * rows hold and no slot is written again. {@link version} rises with each change, so that the
+ * holder re-uploads the table.
  */
 export class TerrainPhaseRows {
   readonly #laws: PhotometricLaw[];
   readonly #rows = new Map<string, number>();
+  /** The Regolith rows' L(0), by row: those made again when row 0 changes. */
+  readonly #regolith = new Map<number, number>();
   #version = 0;
 
   constructor(elsewhere: PhotometricLaw) {
@@ -557,9 +611,9 @@ export class TerrainPhaseRows {
   }
 
   /**
-   * Puts `law` in row 0; whether it changed. A law equal to row 0's by value changes nothing, so
-   * that the views of one body, each lit by its own frame's law object, upload the table once
-   * (plan R10, R10.T16.b).
+   * Puts `law` in row 0, and makes the Regolith rows again on it; whether it changed. A law equal
+   * to row 0's by value changes nothing, so that the views of one body, each lit by its own frame's
+   * law object, upload the table once (plan R10, R10.T16.b).
    */
   setElsewhere(law: PhotometricLaw): boolean {
     const held = this.#laws[0];
@@ -567,11 +621,14 @@ export class TerrainPhaseRows {
       return false;
     }
     this.#laws[0] = law;
+    for (const [row, l0] of this.#regolith) {
+      this.#laws[row] = classRowLaw(PHASE_LAW.regolith, l0, law);
+    }
     this.#version += 1;
     return true;
   }
 
-  /** The row of law `code` at L(0) `l0`, added if it is new. */
+  /** The row of law `code` at L(0) `l0` on row 0's body, added if it is new. */
   rowOf(code: PhaseLawCode, l0: number): number {
     const key = `${String(code)}:${String(l0)}`;
     const known = this.#rows.get(key);
@@ -579,8 +636,11 @@ export class TerrainPhaseRows {
       return known;
     }
     const row = this.#laws.length;
-    this.#laws.push(classRowLaw(code, l0));
+    this.#laws.push(classRowLaw(code, l0, this.#laws[0]));
     this.#rows.set(key, row);
+    if (code === PHASE_LAW.regolith) {
+      this.#regolith.set(row, l0);
+    }
     this.#version += 1;
     return row;
   }
@@ -1006,14 +1066,19 @@ export function texelLawOf(law: PhotometricLaw): TexelLaw {
 
 /**
  * A class's law as a texel draws it: its A scaled for the figure ({@link figureScaledA}), and the
- * table of its row's law, f against its L(α) ({@link classRowLaw}).
+ * table of its row's law on the body, f against its L(α) ({@link classRowLaw}).
  *
  * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param body - The body's uniform law, `elsewhere`, which a Regolith row may follow.
  */
-export function classTexelLaw(photometry: ClassPhotometry, polarOverEquatorial: number): TexelLaw {
+export function classTexelLaw(
+  photometry: ClassPhotometry,
+  polarOverEquatorial: number,
+  body: PhotometricLaw,
+): TexelLaw {
   return {
     a: figureScaledA(photometry, polarOverEquatorial),
-    table: phaseFactorTableOf(classRowLaw(photometry.code, photometry.l0)),
+    table: phaseFactorTableOf(classRowLaw(photometry.code, photometry.l0, body)),
   };
 }
 
@@ -1063,7 +1128,7 @@ export function terrainTexelLaws(
       if (law === null) {
         return null;
       }
-      const texel = classTexelLaw(law, polarOverEquatorial);
+      const texel = classTexelLaw(law, polarOverEquatorial, elsewhere);
       return at === undefined || nodes === null
         ? texel
         : {

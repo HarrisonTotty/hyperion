@@ -1695,7 +1695,7 @@ describe("the height worker's fields on the real module", () => {
             ...classRowLaw(PHASE_LAW.regolith, 1),
             a: [darker * crust[2], darker * crust[1], darker * crust[0]],
           };
-          const laws = classMapLawsOf(map).map((law) => law ?? elsewhere);
+          const laws = classMapLawsOf(map, elsewhere).map((law) => law ?? elsewhere);
           const surface = classMapSurface(UNREAD_TEXTURES, "weathered", texels, laws, elsewhere);
           const allLaws = discSurfaceLaws(surface);
           return [0, 30, 60].map((phaseDeg) => {

@@ -33,7 +33,8 @@
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * R08.T14.c's thick read in part 13, its kernels' catalogue first, then its kernels against their
  * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
- * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.c's
+ * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.e's
+ * classes' curve in the lit-body kernel, R10.T10.c's
  * survey edge, R10.T16.c's frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
@@ -116,7 +117,7 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
-import { checkLitBody } from "./litBody";
+import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
 import { captureSurveyLimb, checkSurveyEdge } from "./surveyEdge";
 import { captureOccultation, checkMeshBodies } from "./meshBodies";
@@ -565,6 +566,9 @@ async function run(
     checkCatalogue(engine, status, DISC_EMISSIVE_AIR_ENTRIES, checks),
   );
   await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
+  await group(7, "R10.T10.e the classes' curve in the kernel", () =>
+    checkClassCurveSeam(engine, checks),
+  );
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
   await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
   await group(7, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));

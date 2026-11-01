@@ -13,6 +13,8 @@ import {
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import type { PhotometricLaw } from "../appearance/law";
+import { geometricAlbedo, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
+import { shapeGeometricAlbedo } from "../appearance/shapes";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import {
@@ -1472,4 +1474,182 @@ describe("the point under a class map's maturity (R10.T1.c, test 11)", () => {
       expect([wrong, slices > 1]).toEqual([[], true]);
     }, 60_000);
   }
+});
+
+/** A texel's place hashed to [0, 1). */
+function hashed(face: number, i: number, j: number): number {
+  let h = Math.imul(face * 4096 + j * 64 + i + 1, 0x9e3779b1);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h >>> 0) / 2 ** 32;
+}
+
+/** A glacier's law at A: Lambert's row, the consolidated forms' (R10.T1.a). */
+function glacier(a: number): PhotometricLaw {
+  return { ...classRowLaw(PHASE_LAW.lambert, 0), a: [a, a, a] };
+}
+
+describe("the point's phase integral on a Mars-like world (R10.T10.e)", () => {
+  /**
+   * The Mars-like world's photometry: plan 14's Mars row, its template at L 0.5 and s = 1, at its
+   * p_V of 0.17 (R10.T10.a's table), grey.
+   */
+  const MARS_P = 0.17;
+  const MARS: PhotometricLaw = withTemplateCurve({
+    a: [
+      MARS_P / shapeGeometricAlbedo(0.5),
+      MARS_P / shapeGeometricAlbedo(0.5),
+      MARS_P / shapeGeometricAlbedo(0.5),
+    ],
+    lommelSeeligerShare: 0.5,
+    template: "mars",
+    phaseExponent: [1, 1, 1],
+  });
+
+  /**
+   * The world's classes by area, the surface crate's `albedo/worlds.golden` (MarsLike at level 7):
+   * dust 98.31%, two glaciers (H₂O and CO₂) 0.770% each and sediment 0.146%; scattered over the
+   * texels by a hash of their place, so that a few orientations average them as all do.
+   */
+  const SHARES = { glacierH2o: 0.0077, glacierCo2: 0.0077, sediment: 0.00146 } as const;
+
+  /** The class map: dust, sediment, the H₂O glacier and the CO₂ glacier, in that order. */
+  function marsLikeMap(glaciers: boolean): ClassMapTexels {
+    return packClassMap(64, 4, ({ face, i, j }) => {
+      const h = hashed(face, i, j);
+      const { glacierH2o, glacierCo2, sediment } = SHARES;
+      if (glaciers && h < glacierH2o) {
+        return [0, 0, 1, 0];
+      }
+      if (glaciers && h < glacierH2o + glacierCo2) {
+        return [0, 0, 0, 1];
+      }
+      return h < glacierH2o + glacierCo2 + sediment ? [0, 1, 0, 0] : [1, 0, 0, 0];
+    });
+  }
+
+  /**
+   * The classes' laws on the world: the glaciers under Lambert's law at their spans' low ends, as
+   * R10.T10.a's clamp draws them (`GLACIER_ICE_V` 0.69, and `VOLATILE_GLACIER_V` 0.80 taking CO₂ as
+   * a volatile ice: p 0.460 and 0.533; R10.T10.f's record), and the dust and sediment, the
+   * particulate rule's L(0) of 1, on the Regolith row on the world (or, `before`, the Moon's), their
+   * A the rest of p_V by the map's own area shares.
+   */
+  function marsLikeLaws(map: ClassMapTexels, rule: "now" | "before"): PhotometricLaw[] {
+    const area = [0, 0, 0, 0];
+    for (const shares of latticeShares(map)) {
+      shares.forEach((share, m) => {
+        if (m > 0) {
+          area[m - 1] = (area[m - 1] ?? 0) + share / (LATTICE.length / 3);
+        }
+      });
+    }
+    const [dust = 0, sediment = 0, h2o = 0, co2 = 0] = area;
+    const glaciers = [glacier(0.69), glacier(0.8)];
+    const glacierP =
+      h2o * geometricAlbedo(glaciers[0] ?? MARS)[1] + co2 * geometricAlbedo(glaciers[1] ?? MARS)[1];
+    const a = (MARS_P - glacierP) / (dust + sediment);
+    const row =
+      rule === "now"
+        ? classRowLaw(PHASE_LAW.regolith, 1, MARS)
+        : classRowLaw(PHASE_LAW.regolith, 1);
+    return [{ ...row, a: [a, a, a] }, { ...row, a: [a, a, a] }, ...glaciers];
+  }
+
+  /** Observers on a Fibonacci lattice and two azimuths of the light about each. */
+  const OBSERVERS = fibonacci(16);
+  const AZIMUTHS = [0.3, 0.3 + Math.PI];
+
+  /** Simpson's intervals over [0, π]: 10°. */
+  const INTERVALS = 18;
+
+  /**
+   * q = 2 ∫ Φ̄(α) sin α dα of the point's light averaged over the orientations, Φ̄ = F̄(α) ÷ F̄(0),
+   * F the point's reflection (its ratio times the uniform point's), by Simpson's rule; its V.
+   */
+  function orientationQ(surface: ClassMapDiscSurface | null): number {
+    const h = Math.PI / INTERVALS;
+    const mean: number[] = [];
+    for (let n = 0; n < INTERVALS; n += 1) {
+      const alpha = n * h;
+      let sum = 0;
+      for (let o = 0; o < OBSERVERS.length / 3; o += 1) {
+        const observer = vec3(
+          OBSERVERS[3 * o] ?? 0,
+          OBSERVERS[3 * o + 1] ?? 0,
+          OBSERVERS[3 * o + 2] ?? 1,
+        );
+        const seed = Math.abs(observer.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+        const u = normalise(cross(seed, observer));
+        const w = cross(observer, u);
+        for (const psi of AZIMUTHS) {
+          const across = add(scale(u, Math.cos(psi)), scale(w, Math.sin(psi)));
+          const light = lightAt(observer, across, alpha);
+          const uniform = bodyReflection(
+            { ...SPHERE, pole: vec3(0, 0, 1) },
+            MARS,
+            light,
+            observer,
+          )[1];
+          const ratio =
+            surface === null ? 1 : classMapReflectionRatio(SPHERE, surface, light, observer)[1];
+          sum += uniform * ratio;
+        }
+      }
+      mean.push(sum);
+    }
+    // Φ̄(π) is 0, its weight sin π besides.
+    const f0 = mean[0] ?? Number.NaN;
+    let q = 0;
+    for (let n = 1; n < INTERVALS; n += 1) {
+      q += (n % 2 === 1 ? 4 : 2) * ((mean[n] ?? Number.NaN) / f0) * Math.sin(n * h);
+    }
+    return (2 * h * q) / 3;
+  }
+
+  /** The surface of `laws` over `map`, its point's elements made at once. */
+  function marsLikeSurface(
+    map: ClassMapTexels,
+    laws: ReadonlyArray<PhotometricLaw>,
+  ): ClassMapDiscSurface {
+    return made(classMapSurface(UNREAD_TEXTURES, "mars-like", map, laws, MARS));
+  }
+
+  it("equals the body's q to 1% on its regolith ground, the dust and sediment on the world's curve", () => {
+    const map = marsLikeMap(false);
+    const q = orientationQ(marsLikeSurface(map, marsLikeLaws(map, "now")));
+    // The quadrature's own q of the uniform point against plan 14's, then the classes' against it.
+    const uniform = orientationQ(null);
+    expect(Math.abs(uniform / lawPhaseIntegral(MARS)[1] - 1)).toBeLessThan(2e-3);
+    expect(Math.abs(q / uniform - 1)).toBeLessThan(0.01);
+  }, 60_000);
+
+  it("stands 1.7% over it with its glaciers' Lambert law, as the closed form gives, and 39% under it before", () => {
+    const map = marsLikeMap(true);
+    const laws = marsLikeLaws(map, "now");
+    const q = orientationQ(marsLikeSurface(map, laws)) / orientationQ(null);
+    // T10.e's closed form, Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ, over the body's q: each law's q its own.
+    const area = latticeShares(map).reduce<number[]>(
+      (sum, shares) => shares.map((share, m) => (sum[m] ?? 0) + share),
+      [],
+    );
+    let pq = 0;
+    let pSum = 0;
+    laws.forEach((law, k) => {
+      const ap = (area[k + 1] ?? 0) * geometricAlbedo(law)[1];
+      pq += ap * lawPhaseIntegral(law)[1];
+      pSum += ap;
+    });
+    const closed = pq / pSum / lawPhaseIntegral(MARS)[1];
+    expect(closed - 1).toBeCloseTo(0.017, 3);
+    expect(Math.abs(q / closed - 1)).toBeLessThan(5e-3);
+    // Before, the Moon's row on the dust: the closed form's q_V 0.665 of R10.T10.f's record.
+    const before = marsLikeLaws(map, "before");
+    let pqBefore = 0;
+    before.forEach((law, k) => {
+      pqBefore += (area[k + 1] ?? 0) * geometricAlbedo(law)[1] * lawPhaseIntegral(law)[1];
+    });
+    expect(pqBefore / pSum).toBeCloseTo(0.665, 2);
+  }, 60_000);
 });

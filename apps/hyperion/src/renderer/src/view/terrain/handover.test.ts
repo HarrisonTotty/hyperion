@@ -13,13 +13,19 @@ import {
   unreadNormalMap,
 } from "../../test/normalMapFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import type { PhaseTemplateId, PhotometricLaw } from "../appearance/law";
-import { lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
+import { type PhaseTemplateId, phaseFactorTableOf, type PhotometricLaw } from "../appearance/law";
+import { geometricAlbedo, lawFor, withTemplateCurve } from "../appearance/phase";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
+import { shapeGeometricAlbedo } from "../appearance/shapes";
 import { AIRLESS_LIGHTING } from "../atmosphere/surfaceLighting";
 import { normalMapNormalAt } from "../bodies/discNormals";
 import { discReflectance, shadeDiscPoint } from "../bodies/discShading";
-import { type ClassMapTexels, classMapSurface, packClassMap } from "../bodies/discSurface";
+import {
+  type ClassMapTexels,
+  classMapSharesAt,
+  classMapSurface,
+  packClassMap,
+} from "../bodies/discSurface";
 import { type LitBodyInput, planLitBodies } from "../bodies/draw";
 import { type LitRegime, REGIME_HYSTERESIS } from "../bodies/regime";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -50,6 +56,7 @@ import {
   PHASE_LAW,
   type PhaseLawCode,
   TERRAIN_CLASSES,
+  type TexelLaw,
   TerrainPhaseRows,
   terrainReflectance,
   terrainTexelLaws,
@@ -327,7 +334,7 @@ describe("the disc and the terrain draw one law a class (R10.T10.e)", () => {
   ])(
     "agree to 10⁻⁶ at 30° and 90° of phase on %s, per class law and law 0, each law's one row read by both",
     (_, cOverA) => {
-      const discLaws = [ELSEWHERE, ...classMapLawsOf(answerOf(CLASSES))];
+      const discLaws = [ELSEWHERE, ...classMapLawsOf(answerOf(CLASSES), ELSEWHERE)];
       const terrainLaws = terrainTexelLaws(bakePhotometryOf(CLASSES), ELSEWHERE, cOverA);
       const rows = new TerrainPhaseRows(ELSEWHERE);
       const names = ["law 0", "Regolith", "Ice", "Lambert"];
@@ -428,7 +435,7 @@ describe("the disc under the field's normal map and the terrain at the same cell
     const pointM = vec3(0, 0, -RANGE_M);
     const centreM = sub(pointM, scale(rotateToBody(rotation, spheroidPoint), RADIUS_M));
     const normals = constantNormalMap(6, normal, CENTRE, NEAR_RAD);
-    const discLaws = classMapLawsOf(answerOf(CLASSES)).map((law) => law ?? ELSEWHERE);
+    const discLaws = classMapLawsOf(answerOf(CLASSES), ELSEWHERE).map((law) => law ?? ELSEWHERE);
     const surface = classMapSurface(
       UNREAD_TEXTURES,
       "test",
@@ -549,34 +556,150 @@ describe("the disc under the field's normal map and the terrain at the same cell
   );
 });
 
-/** A template's own q in V at s = 1 and L `share`, under McEwen's L(α) where it takes one. */
-function templateQ(template: PhaseTemplateId, share: number): number {
-  return lawPhaseIntegral(
-    withTemplateCurve({
-      a: [0.1, 0.1, 0.1],
-      lommelSeeligerShare: share,
-      template,
-      phaseExponent: [1, 1, 1],
-    }),
-  )[1];
+/** A served body's law at p per display channel: its template at its own L, s = 1 (plan 14). */
+function served(template: PhaseTemplateId, share: number, p: Rgb): PhotometricLaw {
+  const k = shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [p[0] / k, p[1] / k, p[2] / k],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
 }
 
-describe("the classes' q against plan 14's (R10.T10.a's residual, Design note 8)", () => {
-  // The orientation-averaged phase integral of a patterned sphere is Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ, as its
-  // p is the area average (R10.T10.a's module documentation): on a world whose ground takes one
-  // class law, the classes' q is that law's, whatever their albedos.
-  const regolithQ = lawPhaseIntegral(classRowLaw(PHASE_LAW.regolith, 1))[1];
+/**
+ * The worker's regolith of the body's p, [B, V, R, code, L(0)] in `f32`: under the particulate
+ * rule its L(0) is 1, so its A is p (R10.T10.a's p = A (2 + L(0)) ÷ 3).
+ */
+function regolithOf(body: PhotometricLaw): readonly [number, number, number, number, number] {
+  const [r, v, b] = geometricAlbedo(body);
+  return [Math.fround(b), Math.fround(v), Math.fround(r), PHASE_LAW.regolith, 1];
+}
 
-  it("states the Regolith row's q and its residual against Mercury's and Mars's templates", () => {
-    // Plan 14's `templates.golden` at each template's own L: Mercury's 0.47980, Mars's 1.08465.
-    const mercury = templateQ("mercury", 1);
-    const mars = templateQ("mars", 0.5);
-    expect(regolithQ).toBeCloseTo(0.626, 3);
-    expect(mercury).toBeCloseTo(0.4798, 4);
-    expect(mars).toBeCloseTo(1.0846, 3);
-    // The airless rocks' (the Moon- and Ceres-like worlds, the reference Moon and Ceres) and the
-    // reference Mars's dust: +30.5% and −42.3%.
-    expect(regolithQ / mercury - 1).toBeCloseTo(0.305, 3);
-    expect(regolithQ / mars - 1).toBeCloseTo(-0.423, 3);
+/** The worst step in stops, |log₂(surveyed ÷ unsurveyed)| over the channels. */
+function stops(surveyed: Rgb, unsurveyed: Rgb): number {
+  return Math.max(...surveyed.map((x, c) => Math.abs(Math.log2(x / (unsurveyed[c] ?? 0)))));
+}
+
+/** Mars's polar over its equatorial radius, 3,376.2 ÷ 3,396.2 km (NASA's Mars fact sheet). */
+const MARS_C_OVER_A = 3376.2 / 3396.2;
+
+describe("the survey's edge on a regolith body (R10.T10.e)", () => {
+  // The Moon-like world's p on Mercury's template, as `ELSEWHERE`, and plan 14's Mars row's p on
+  // Mars's (R10.T10.a's table): the airless rocks' and the thin-aired worlds' templates.
+  const BODIES = [
+    ["a Mercury-like", served("mercury", 1, [0.172, 0.142, 0.105])],
+    ["a Mars-like", served("mars", 0.5, [0.288, 0.17, 0.088])],
+  ] as const;
+
+  /** Half the body surveyed at the class map's level: the regolith where a texel's x > 0. */
+  const N = 2 ** CLASS_MAP_LEVEL;
+  const HALF = packClassMap(N, 1, ({ face, i, j }) =>
+    directionAt(face, (i + 0.5) / N, (j + 0.5) / N).x > 0 ? [1] : null,
+  );
+  /** A surveyed point and an unsurveyed one, a quarter of a radius either side of the edge. */
+  const INSIDE = [0.25, 0.6, Math.sqrt(1 - 0.25 ** 2 - 0.6 ** 2)] as const;
+  const OUTSIDE = [-0.25, 0.6, Math.sqrt(1 - 0.25 ** 2 - 0.6 ** 2)] as const;
+
+  /** In-plane geometries at phase α, deg, as (μ₀, μ): i and e either side of the normal and on one. */
+  function geometriesAt(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+    return [
+      [alphaDeg / 2, alphaDeg / 2],
+      [0, alphaDeg],
+      [alphaDeg, 0],
+      [alphaDeg + 20, 20],
+      [20, alphaDeg + 20],
+      [alphaDeg / 2 + 30, alphaDeg / 2 - 30],
+    ]
+      .filter(([i = 0, e = 0]) => Math.abs(i) < 85 && Math.abs(e) < 85)
+      .map(([i = 0, e = 0]) => [Math.cos(i * RAD), Math.cos(e * RAD)] as const);
+  }
+
+  /** The regolith's laws as the terrain's twin and the disc draw them, law 0 the body's. */
+  interface EdgeLaws {
+    readonly terrain: ReadonlyArray<TexelLaw | null>;
+    readonly disc: ReadonlyArray<PhotometricLaw>;
+  }
+
+  /**
+   * The regolith's laws on its body's curve, from the readers themselves, or as they were before,
+   * on the Moon's row at s = 1 (R10.T10.e's finding), its A the same.
+   */
+  function edgeLaws(body: PhotometricLaw, cOverA: number, rule: "now" | "before"): EdgeLaws {
+    const photometry = regolithOf(body);
+    const terrain = terrainTexelLaws(bakePhotometryOf([photometry]), body, cOverA);
+    const [disc] = classMapLawsOf(answerOf([photometry]), body);
+    const slot = terrain[1];
+    if (disc === undefined || disc === null || slot === undefined || slot === null) {
+      throw new Error("the regolith has a law");
+    }
+    if (rule === "now") {
+      return { terrain, disc: [body, disc] };
+    }
+    const moonRow: PhotometricLaw = { ...classRowLaw(PHASE_LAW.regolith, 1), a: disc.a };
+    return {
+      terrain: [terrain[0] ?? null, { a: slot.a, table: phaseFactorTableOf(moonRow) }],
+      disc: [body, moonRow],
+    };
+  }
+
+  /** The worst step across the edge at phase α on the terrain's twin and on the disc, stops. */
+  function stepsAt(
+    laws: EdgeLaws,
+    cOverA: number,
+    alphaDeg: number,
+  ): { readonly terrain: number; readonly disc: number } {
+    const inside = classMapSharesAt(HALF, INSIDE);
+    const outside = classMapSharesAt(HALF, OUTSIDE);
+    expect([inside, outside]).toEqual([
+      [0, 1],
+      [1, 0],
+    ]);
+    const alpha = alphaDeg * RAD;
+    let terrain = 0;
+    let disc = 0;
+    for (const [mu0, mu] of geometriesAt(alphaDeg)) {
+      terrain = Math.max(
+        terrain,
+        stops(
+          terrainReflectance(laws.terrain, [0, 1], mu0, mu, alpha),
+          terrainReflectance(laws.terrain, [1, 0], mu0, mu, alpha),
+        ),
+      );
+      disc = Math.max(
+        disc,
+        stops(
+          discReflectance(laws.disc, cOverA, inside, mu0, mu, alpha),
+          discReflectance(laws.disc, cOverA, outside, mu0, mu, alpha),
+        ),
+      );
+    }
+    return { terrain, disc };
+  }
+
+  const PHASES_DEG = [0, 30, 60, 90] as const;
+
+  it.each(BODIES)(
+    "draws no step across it on %s body at 0°, 30°, 60° and 90° of phase, on the terrain's twin and on the disc, to 0.02 stop",
+    (_, body) => {
+      for (const cOverA of [1, MARS_C_OVER_A]) {
+        const laws = edgeLaws(body, cOverA, "now");
+        for (const alphaDeg of PHASES_DEG) {
+          const steps = stepsAt(laws, cOverA, alphaDeg);
+          expect(steps.terrain).toBeLessThan(0.02);
+          expect(steps.disc).toBeLessThan(0.02);
+        }
+      }
+    },
+  );
+
+  it("stood 0.36 stop at 30° to 90° on the Mercury-like body and over 1.3 at 90° on the Mars-like, on the Moon's row (before)", () => {
+    const [[, mercury], [, mars]] = BODIES;
+    for (const alphaDeg of [30, 60, 90]) {
+      expect(stepsAt(edgeLaws(mercury, 1, "before"), 1, alphaDeg).disc).toBeGreaterThan(0.35);
+    }
+    const marsAt90 = stepsAt(edgeLaws(mars, 1, "before"), 1, 90);
+    expect(marsAt90.disc).toBeGreaterThan(1.3);
+    expect(marsAt90.terrain).toBeCloseTo(marsAt90.disc, 12);
   });
 });

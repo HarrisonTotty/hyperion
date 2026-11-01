@@ -14,10 +14,13 @@
  *   is `null`, no weight ({@link classMapTexelsOf}, through R07's `packClassMap`).
  * - **The laws** are one per class, the body's (form, entry) pairs, at most 16: the class's
  *   photometry as the worker resolves it (R10.T10.a's c A_N, its law's L(0)) on its law's row law
- *   (`classRowLaw`), a full `PhotometricLaw` of its own; a class whose palette names no substance
- *   shades with `elsewhere`, as the lit terrain's law 0 takes such a slot ({@link classMapLawsOf}).
- *   `elsewhere` is R07's uniform `lawFor(p, q, template)`, the body's photometry's law. R07's disc
- *   scales every law's A for its figure (`oblateAlbedoScale`), the classes' included, as it did.
+ *   on the body (`classRowLaw` with `elsewhere`: a Regolith class's the body's curve on a regolith
+ *   template, R10.T10.e), a full `PhotometricLaw` of its own; a class whose palette names no
+ *   substance shades with `elsewhere`, as the lit terrain's law 0 takes such a slot
+ *   ({@link classMapLawsOf}). `elsewhere` is R07's uniform `lawFor(p, q, template)`, the body's
+ *   photometry's law, which the frame gives, so the store holds each class's photometry and makes
+ *   its laws on each `elsewhere` it is asked with. R07's disc scales every law's A for its figure
+ *   (`oblateAlbedoScale`), the classes' included, as it did.
  * - **The maturity** (R10.T1.c's client half; decision-r10-t1c-client-scope §2.3) comes in the same
  *   answer where the body's header carries one: each texel's band-0 code and each class's band-0
  *   albedo nodes. The texels carry both ({@link classMapTexelsOf}), so that the disc draws each
@@ -60,7 +63,13 @@ import type { RenderEngine, TextureHandle } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import { fieldCellAt } from "./coverage";
 import { MATURITY_NODES } from "./maturityNodes";
-import { classPhotometryOf, classRowLaw, MELT_CLASS_CODE, PHASE_LAW } from "./terrainMaterial";
+import {
+  type ClassPhotometry,
+  classPhotometryOf,
+  classRowLaw,
+  MELT_CLASS_CODE,
+  PHASE_LAW,
+} from "./terrainMaterial";
 import type { ClassMapAnswer, ClassMapMaturityAnswer } from "./workers/messages";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
 import type { FieldChange, HeightWorkerPool } from "./workers/pool";
@@ -85,17 +94,20 @@ function classCount(answer: ClassMapAnswer): number {
   return answer.classes.length / 2;
 }
 
+/** A class's law before its body's: its photometry, and the A it draws (R10.T10.e). */
+interface ClassLawSource {
+  readonly photometry: ClassPhotometry;
+  readonly a: Rgb;
+}
+
 /**
- * The laws of an answered map's classes, one per class in its order: each class's photometry on its
- * law's row law, a distinct object, or `null` for a class whose palette names no substance (law
- * code 0), which shades with `elsewhere`. Where the map carries its maturity (R10.T1.c's client
- * half), a class's A is its node K − 1, T₀(m_body), the albedo at the body's background maturity
- * from which its texels' nodes draw it; its row and L(0) are its photometry's either way.
+ * An answered map's classes' photometries and A, one per class in its order, `null` for a class
+ * whose palette names no substance (law code 0); with a maturity, a class's A is its node K − 1.
  *
  * @throws Error for photometry that is not five values a class, nodes that are not K × 3 a class,
  *   or a law code no law has.
  */
-export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<PhotometricLaw | null> {
+function classLawSourcesOf(answer: ClassMapAnswer): ReadonlyArray<ClassLawSource | null> {
   const classes = classCount(answer);
   if (answer.photometry.length !== classes * PHOTOMETRY_STRIDE) {
     throw new Error(
@@ -103,7 +115,7 @@ export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<Photometri
     );
   }
   const nodes = answer.maturity === undefined ? null : displayNodesOf(answer.maturity, classes);
-  return Array.from({ length: classes }, (_, k): PhotometricLaw | null => {
+  return Array.from({ length: classes }, (_, k): ClassLawSource | null => {
     const photometry = classPhotometryOf(answer.photometry, k);
     if (photometry === null) {
       return null;
@@ -115,8 +127,41 @@ export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<Photometri
       nodes === null
         ? photometry.a
         : [nodes[at] ?? Number.NaN, nodes[at + 1] ?? Number.NaN, nodes[at + 2] ?? Number.NaN];
-    return { ...classRowLaw(photometry.code, photometry.l0), a };
+    return { photometry, a };
   });
+}
+
+/** The classes' laws on a body of uniform law `elsewhere`, each a distinct object. */
+function lawsOnBody(
+  sources: ReadonlyArray<ClassLawSource | null>,
+  elsewhere: PhotometricLaw,
+): ReadonlyArray<PhotometricLaw | null> {
+  return sources.map((source) =>
+    source === null
+      ? null
+      : {
+          ...classRowLaw(source.photometry.code, source.photometry.l0, elsewhere),
+          a: source.a,
+        },
+  );
+}
+
+/**
+ * The laws of an answered map's classes on a body of uniform law `elsewhere`, one per class in its
+ * order: each class's photometry on its law's row law on the body (`classRowLaw`; R10.T10.e), a
+ * distinct object, or `null` for a class whose palette names no substance (law code 0), which
+ * shades with `elsewhere`. Where the map carries its maturity (R10.T1.c's client half), a class's A
+ * is its node K − 1, T₀(m_body), the albedo at the body's background maturity from which its
+ * texels' nodes draw it; its row and L(0) are its photometry's either way.
+ *
+ * @throws Error for photometry that is not five values a class, nodes that are not K × 3 a class,
+ *   or a law code no law has.
+ */
+export function classMapLawsOf(
+  answer: ClassMapAnswer,
+  elsewhere: PhotometricLaw,
+): ReadonlyArray<PhotometricLaw | null> {
+  return lawsOnBody(classLawSourcesOf(answer), elsewhere);
 }
 
 /** Whether each class of an answered map has the `Melt` form ({@link MELT_CLASS_CODE}), in its order. */
@@ -251,7 +296,8 @@ export type ClassMapPool = Pick<HeightWorkerPool, "classMap" | "onFieldChange">;
 /** A body's map as the store holds it. */
 interface HeldMap {
   readonly texels: ClassMapTexels;
-  readonly laws: ReadonlyArray<PhotometricLaw | null>;
+  /** Each class's photometry and A, whose laws each `elsewhere` makes (R10.T10.e). */
+  readonly sources: ReadonlyArray<ClassLawSource | null>;
   /** Whether each class's form is `Melt` (R08.T18.a). */
   readonly meltClasses: ReadonlyArray<boolean>;
   /** The normal map's texels, `null` for none (no surveyed cell answered). */
@@ -383,7 +429,7 @@ export class ClassMapStore implements ClassMapSource {
         kind: "class-map",
         weights: map.texture,
         texels: map.texels,
-        laws: map.laws.map((law) => law ?? elsewhere),
+        laws: lawsOnBody(map.sources, elsewhere).map((law) => law ?? elsewhere),
         elsewhere,
         normals:
           map.normals === null || map.normalTexture === null
@@ -480,7 +526,7 @@ export class ClassMapStore implements ClassMapSource {
     }
     const map: HeldMap = {
       texels,
-      laws: classMapLawsOf(answer),
+      sources: classLawSourcesOf(answer),
       meltClasses: classMapMeltOf(answer),
       normals,
       complete: answer.complete && answer.normalsComplete,
@@ -500,7 +546,7 @@ export class ClassMapStore implements ClassMapSource {
   #upload(body: BodyIdHex, map: HeldMap): void {
     try {
       // R07's construction; the laws it is given stand in, `classMapOf` giving each frame's.
-      const placeholder = map.laws.map((law) => law ?? STAND_IN_LAW);
+      const placeholder = lawsOnBody(map.sources, STAND_IN_LAW).map((law) => law ?? STAND_IN_LAW);
       const weights = classMapSurface(
         this.#engine,
         `${this.#name} ${body}`,

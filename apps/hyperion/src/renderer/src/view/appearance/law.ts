@@ -6,14 +6,16 @@
  * I/F = A · f(α) · [L(α) · 2μ₀ ÷ (μ₀ + μ) + (1 − L(α)) μ₀] per display channel, f(0) = 1. L(α) is
  * the Lommel–Seeliger share at phase α: L(0), the law's {@link PhotometricLaw.lommelSeeligerShare},
  * at every phase for a law without a curve, else L(0) times its curve's profile
- * ({@link limbShareAt}; decision-r07-t8b). The phase factor reproduces a measured V curve Φ_t
- * raised to a per-channel exponent s: f(α) = Φ_t(α)^s ÷ Φ_shape(α; L), Φ_shape taken with L(α), so
- * that the disc-integrated phase function is Φ_t^s wherever f is not clamped, whatever L(α) does,
- * and the curve moves only the limb profile. It is clamped at {@link PHASE_F_CLAMP} (a Lambert
- * crescent vanishes faster than a cloudy one: Venus's f would reach 61 at 170°) and held at its
- * value at the template's last valid phase beyond it. The table samples f every 0.5° from 0° to
- * 180° in `f32`, with L(α) beside it (the row's alpha), and both the TypeScript reference and the
- * shader interpolate them linearly, so the two read one f and one L.
+ * ({@link limbShareAt}; decision-r07-t8b), L(0) capped there by a class law's ceiling (plan R10,
+ * R10.T10.e; {@link PhotometricLaw.lommelSeeligerCeiling}). The phase factor reproduces a measured
+ * V curve Φ_t raised to a per-channel exponent s: f(α) = Φ_t(α)^s ÷ Φ_shape(α; L), Φ_shape taken
+ * with L(α), so that the disc-integrated phase function is Φ_t^s wherever f is not clamped,
+ * whatever L(α) does, and the curve moves only the limb profile. It is clamped at
+ * {@link PHASE_F_CLAMP} (a Lambert crescent vanishes faster than a cloudy one: Venus's f would
+ * reach 61 at 170°) and held at its value at the template's last valid phase beyond it. The table
+ * samples f every 0.5° from 0° to 180° in `f32`, with L(α) beside it (the row's alpha), and both
+ * the TypeScript reference and the shader interpolate them linearly, so the two read one f and one
+ * L.
  */
 import type { Rgb } from "../photometry/toneCurve";
 import { shapePhase } from "./shapes";
@@ -54,7 +56,8 @@ export interface PhotometricLaw {
   readonly a: Rgb;
   /**
    * L(0), the Lommel–Seeliger share at opposition, 0 (Lambert) to 1; the share at every phase where
-   * the law has no {@link PhotometricLaw.lommelSeeligerCurve}.
+   * the law has no {@link PhotometricLaw.lommelSeeligerCurve}; the share drawn is no higher than
+   * its {@link PhotometricLaw.lommelSeeligerCeiling}.
    */
   readonly lommelSeeligerShare: number;
   /**
@@ -62,6 +65,15 @@ export interface PhotometricLaw {
    * {@link PhotometricLaw.lommelSeeligerShare} (decision-r07-t8b).
    */
   readonly lommelSeeligerCurve?: LommelSeeligerCurve;
+  /**
+   * A ceiling on the share drawn (plan R10, R10.T10.e): L(α) takes min(L(0), the ceiling) in L(0)'s
+   * place, so that a class law drawn on its body's law takes the body's L(0) where the body's is the
+   * lesser (`terrainMaterial.ts`' `classRowLaw`). Absent, none. L(0) still sets p = A [L(0) +
+   * ⅔(1 − L(0))]: f is tabulated against the share drawn, its shape normalised at L(0), so that
+   * f(0) = [L(0) + ⅔(1 − L(0))] ÷ [L′ + ⅔(1 − L′)], L′ the share drawn at opposition, and the
+   * disc-integrated phase function is still Φ_t^s wherever f is not clamped.
+   */
+  readonly lommelSeeligerCeiling?: number;
   /** Whose V curve f is fitted to. */
   readonly template: PhaseTemplateId;
   /** s per display channel (r, g, b) in Φ_t(α)^s; 1 reproduces the template's V curve. */
@@ -115,18 +127,23 @@ const PROFILES: Readonly<Record<LommelSeeligerCurve, (alphaRad: number) => numbe
 
 /**
  * L(α), a law's Lommel–Seeliger share at phase α: L(0) times its curve's profile, or L(0) at every
- * phase for a law without a curve.
+ * phase for a law without a curve; L(0) taken no higher than the law's ceiling where it has one
+ * ({@link PhotometricLaw.lommelSeeligerCeiling}).
  *
  * @param alphaRad - Phase angle, rad, 0 to π.
  */
 export function limbShareAt(
-  law: Pick<PhotometricLaw, "lommelSeeligerShare" | "lommelSeeligerCurve">,
+  law: Pick<
+    PhotometricLaw,
+    "lommelSeeligerShare" | "lommelSeeligerCurve" | "lommelSeeligerCeiling"
+  >,
   alphaRad: number,
 ): number {
+  const ceiling = law.lommelSeeligerCeiling;
+  const share =
+    ceiling === undefined ? law.lommelSeeligerShare : Math.min(law.lommelSeeligerShare, ceiling);
   const curve = law.lommelSeeligerCurve;
-  return curve === undefined
-    ? law.lommelSeeligerShare
-    : law.lommelSeeligerShare * PROFILES[curve](alphaRad);
+  return curve === undefined ? share : share * PROFILES[curve](alphaRad);
 }
 
 /**

@@ -28,10 +28,17 @@ import {
   surfaceLightingKernelTextures,
   type SurfaceLightingTables,
 } from "../view/atmosphere/surfaceLighting";
-import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../view/appearance/law";
-import { lawFor } from "../view/appearance/phase";
+import {
+  PHASE_TABLE_SAMPLES,
+  type PhaseTemplateId,
+  type PhotometricLaw,
+} from "../view/appearance/law";
+import { geometricAlbedo, lawFor, withTemplateCurve } from "../view/appearance/phase";
+import { shapeGeometricAlbedo } from "../view/appearance/shapes";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { RenderEngine } from "../view/engine/types";
+import { PHASE_LAW, TerrainPhaseRows } from "../view/terrain/terrainMaterial";
+import type { Rgb } from "../view/photometry/toneCurve";
 import type { Checks } from "./harness";
 
 /** The agreement T4.c asks of the twins, relative. */
@@ -408,4 +415,196 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, worst ${worst.toExponential(2)}`,
     );
   });
+}
+
+/**
+ * R10.T10.e's seam's tolerance, stops: surveyed ground against unsurveyed of the same albedo.
+ */
+const SEAM_TOLERANCE_STOPS = 0.02;
+
+/** A served body's law: its template at its own L and s = 1, as plan 14 states it, at p. */
+function servedLaw(template: PhaseTemplateId, share: number, p: Rgb): PhotometricLaw {
+  const k = shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [p[0] / k, p[1] / k, p[2] / k],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
+}
+
+/**
+ * The seam's bodies: the Moon-like world's p on Mercury's template and plan 14's Mars row's on
+ * Mars's (R10.T10.a's table).
+ */
+const SEAM_BODIES: ReadonlyArray<readonly [string, PhotometricLaw]> = [
+  ["a Mercury-like", servedLaw("mercury", 1, [0.172, 0.142, 0.105])],
+  ["a Mars-like", servedLaw("mars", 0.5, [0.288, 0.17, 0.088])],
+];
+
+/** The seam's phases, deg, each at i = e and at up to two geometries off it in the phase plane. */
+const SEAM_PHASES_DEG = [0, 30, 60, 90] as const;
+
+/** The seam's cases at phase α: (i, e) in the phase plane, deg, those lit and seen. */
+function seamGeometries(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+  const pairs: ReadonlyArray<readonly [number, number]> = [
+    [alphaDeg / 2, alphaDeg / 2],
+    [alphaDeg / 2 + 20, alphaDeg / 2 - 20],
+    [alphaDeg + 20, 20],
+  ];
+  return pairs.filter(([i, e]) => Math.abs(i) < 85 && Math.abs(e) < 85);
+}
+
+/** One body's case pair: its unsurveyed ground's and its surveyed regolith's at one geometry. */
+interface SeamPair {
+  readonly name: string;
+  readonly unsurveyed: BrdfProbeCase;
+  readonly surveyed: BrdfProbeCase;
+}
+
+/**
+ * R10.T10.e: `body_brdf` on the rows the terrain's `TerrainPhaseRows` makes, which the disc's
+ * class laws equal, for a Regolith class on its body's curve on a Mercury-like and a Mars-like
+ * body: each result equals `brdf` to 10⁻⁵, and the class at the body's p (A = p at the particulate
+ * rule's L(0) of 1) draws as the body's own law, surveyed ground against unsurveyed, to 0.02 stop
+ * at 0°, 30°, 60° and 90° of phase.
+ */
+export async function checkClassCurveSeam(engine: RenderEngine, checks: Checks): Promise<void> {
+  const laws: PhotometricLaw[] = [];
+  const pairs: SeamPair[] = [];
+  for (const [name, body] of SEAM_BODIES) {
+    const rows = new TerrainPhaseRows(body);
+    const regolith = rows.rowOf(PHASE_LAW.regolith, 1);
+    const first = laws.length;
+    laws.push(...rows.laws);
+    const row = rows.laws[regolith];
+    if (row === undefined) {
+      throw new Error(`${name} body's rows hold no Regolith row`);
+    }
+    const p = geometricAlbedo(body);
+    const surveyedLaw: PhotometricLaw = { ...row, a: [p[0], p[1], p[2]] };
+    for (const alphaDeg of SEAM_PHASES_DEG) {
+      for (const [i, e] of seamGeometries(alphaDeg)) {
+        const at = {
+          mu0: Math.cos(i * RAD_PER_DEG),
+          mu: Math.cos(e * RAD_PER_DEG),
+          phaseRad: alphaDeg * RAD_PER_DEG,
+          perTexel: null,
+        };
+        pairs.push({
+          name: `${name} body at ${String(alphaDeg)}°, i ${String(i)}°, e ${String(e)}°`,
+          unsurveyed: { law: body, row: first, ...at },
+          surveyed: { law: surveyedLaw, row: first + regolith, ...at },
+        });
+      }
+    }
+  }
+  const cases = pairs.flatMap((pair) => [pair.unsurveyed, pair.surveyed]);
+  const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
+  const bytes = packBrdfProbeCases(cases);
+  const input = engine.createBuffer({
+    name: "class curve probe cases",
+    bytes: bytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(input, 0, new Uint8Array(bytes));
+  const results = engine.createBuffer({
+    name: "class curve probe results",
+    bytes: cases.length * 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const table = engine.createTexture({
+    name: "class curve probe phase table",
+    size: { width: PHASE_TABLE_SAMPLES, height: laws.length },
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    table,
+    { x: 0, y: 0 },
+    { width: PHASE_TABLE_SAMPLES, height: laws.length },
+    packPhaseFactorRows(laws),
+  );
+  // One lighting case, the hooks': the kernel's other half, which this run does not read.
+  const lightingBytes = packLightingProbeCases([{ kind: "hooks" }]);
+  const lightingInput = engine.createBuffer({
+    name: "class curve probe lighting case",
+    bytes: lightingBytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(lightingInput, 0, new Uint8Array(lightingBytes));
+  const lightingResults = engine.createBuffer({
+    name: "class curve probe lighting result",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const airless = createAirlessTables(engine, "class curve probe: no atmosphere");
+  try {
+    engine.dispatch(
+      kernel,
+      {
+        uniforms: {},
+        buffers: {
+          cases: input,
+          results,
+          lighting_cases: lightingInput,
+          lighting_results: lightingResults,
+        },
+        sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(airless) },
+        storage: {},
+      },
+      [Math.ceil(cases.length / 8), 1, 1],
+      LIT_BODY_PROBE.name,
+    );
+    const gpu = new Float32Array(await engine.readBuffer(results));
+    const expected = expectedBrdf(cases);
+    const read = (index: number): Rgb => [
+      gpu[4 * index] ?? Number.NaN,
+      gpu[4 * index + 1] ?? Number.NaN,
+      gpu[4 * index + 2] ?? Number.NaN,
+    ];
+    let worstTwin = 0;
+    const seams = pairs.map((pair, n) => {
+      for (const index of [2 * n, 2 * n + 1]) {
+        const reference = expected[index] ?? [Number.NaN, Number.NaN, Number.NaN];
+        const value = read(index);
+        worstTwin = Math.max(
+          worstTwin,
+          ...reference.map((r, c) => Math.abs((value[c] ?? Number.NaN) - r) / Math.abs(r)),
+        );
+      }
+      const unsurveyed = read(2 * n);
+      const stops = Math.max(
+        ...read(2 * n + 1).map((x, c) => Math.abs(Math.log2(x / (unsurveyed[c] ?? Number.NaN)))),
+      );
+      return { name: pair.name, stops };
+    });
+    // A NaN step fails the check: it is never within the tolerance, and it heads the list.
+    const worst = seams.toSorted((a, b) =>
+      Number.isNaN(a.stops) ? -1 : Number.isNaN(b.stops) ? 1 : b.stops - a.stops,
+    )[0];
+    checks.check(
+      "R10.T10.e body_brdf equals brdf to 10⁻⁵ on the Regolith rows on their bodies' curves",
+      worstTwin <= BRDF_TOLERANCE,
+      `${String(cases.length)} cases, worst ${worstTwin.toExponential(2)}`,
+    );
+    checks.check(
+      "R10.T10.e surveyed regolith of the body's p draws as its unsurveyed ground in the kernel, on a Mercury-like and a Mars-like body at 0°, 30°, 60° and 90°, to 0.02 stop",
+      seams.every((seam) => seam.stops <= SEAM_TOLERANCE_STOPS),
+      `${String(pairs.length)} pairs, worst ${worst?.stops.toExponential(2) ?? "none"} stop (${worst?.name ?? "no pair"})`,
+    );
+  } finally {
+    for (const buffer of [input, results, lightingInput, lightingResults]) {
+      engine.releaseBuffer(buffer);
+    }
+    engine.releaseTexture(table);
+    engine.releaseTexture(airless.body);
+  }
 }

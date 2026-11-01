@@ -221,9 +221,9 @@ async function settle(): Promise<void> {
   await Promise.resolve();
 }
 
-/** A class's law as the map should take it: its photometry on its law's row law. */
+/** A class's law as the map should take it: its photometry on its law's row law on the body. */
 function lawOf(code: 1 | 2 | 3, l0: number, a: readonly [number, number, number]): PhotometricLaw {
-  return { ...classRowLaw(code, l0), a };
+  return { ...classRowLaw(code, l0, ELSEWHERE), a };
 }
 
 afterEach(() => {
@@ -327,7 +327,7 @@ describe("a class map from a worker's answer", () => {
   });
 
   it("takes a law a class: its photometry on its law's row law, a distinct object, none for an unnamed substance", () => {
-    const laws = classMapLawsOf(answerOf(TEXELS));
+    const laws = classMapLawsOf(answerOf(TEXELS), ELSEWHERE);
     expect(laws).toHaveLength(3);
     const [regolith, frost, unnamed] = laws;
     // A in display order: R, V, B as r, g, b.
@@ -344,9 +344,62 @@ describe("a class map from a worker's answer", () => {
     expect(regolith?.lommelSeeligerCurve).toBe("mcewen-1996");
     expect(unnamed).toBeNull();
     expect(regolith).not.toBe(frost);
-    expect(() => classMapLawsOf({ ...answerOf(TEXELS), photometry: new Float32Array(14) })).toThrow(
-      /3 classes has 14 photometry values/u,
+    expect(() =>
+      classMapLawsOf({ ...answerOf(TEXELS), photometry: new Float32Array(14) }, ELSEWHERE),
+    ).toThrow(/3 classes has 14 photometry values/u);
+  });
+});
+
+describe("the class map's laws on their body (R10.T10.e)", () => {
+  const MARS = lawFor([0.288, 0.17, 0.088], [1.08, 1.08, 1.08], "mars");
+
+  it("draws a Regolith class on its body's curve on a regolith template, the Ice row as it is", () => {
+    const [regolith, frost] = classMapLawsOf(answerOf(TEXELS), MARS);
+    expect(regolith).toEqual({
+      ...classRowLaw(PHASE_LAW.regolith, 1, MARS),
+      a: [Math.fround(0.12), Math.fround(0.11), Math.fround(0.1)],
+    });
+    expect([regolith?.template, regolith?.phaseExponent, regolith?.lommelSeeligerCeiling]).toEqual([
+      "mars",
+      MARS.phaseExponent,
+      0.5,
+    ]);
+    expect(frost).toEqual(
+      lawOf(PHASE_LAW.ice, Math.fround(0.6), [
+        Math.fround(0.9),
+        Math.fround(0.85),
+        Math.fround(0.8),
+      ]),
     );
+  });
+
+  it("keeps the Moon's row at s = 1 on a template that is not a rock's", () => {
+    const earth = lawFor([0.21, 0.215, 0.263], [1.3, 1.3, 1.3], "earth");
+    const [regolith] = classMapLawsOf(answerOf(TEXELS), earth);
+    expect(regolith).toEqual({
+      ...classRowLaw(PHASE_LAW.regolith, 1),
+      a: [Math.fround(0.12), Math.fround(0.11), Math.fround(0.1)],
+    });
+  });
+
+  it("hands out each frame's surface with its laws on the `elsewhere` it is asked with", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    try {
+      store.want(MOON, SEED);
+      pool.asked[0]?.resolve(answerOf(TEXELS));
+      await settle();
+      const onMars = store.classMapOf(MOON, MARS);
+      expect(onMars?.laws.slice(0, 2)).toEqual(classMapLawsOf(answerOf(TEXELS), MARS).slice(0, 2));
+      expect(onMars?.laws[2]).toBe(MARS);
+      expect(store.classMapOf(MOON, MARS)).toBe(onMars);
+      const onMoon = store.classMapOf(MOON, ELSEWHERE);
+      expect(onMoon?.laws[0]?.template).toBe("moon");
+      expect(onMoon?.texels).toBe(onMars?.texels);
+    } finally {
+      store.dispose();
+    }
   });
 });
 
@@ -391,7 +444,9 @@ describe("the class-map store", () => {
     expect(surface?.texels).toEqual(classMapTexelsOf(answerOf(TEXELS)));
     // The unnamed substance's class shades with `elsewhere`, the others with their own laws.
     expect(surface?.laws[2]).toBe(ELSEWHERE);
-    expect(surface?.laws.slice(0, 2)).toEqual(classMapLawsOf(answerOf(TEXELS)).slice(0, 2));
+    expect(surface?.laws.slice(0, 2)).toEqual(
+      classMapLawsOf(answerOf(TEXELS), ELSEWHERE).slice(0, 2),
+    );
     // The same surface, its laws the same objects, frame after frame; another for another law.
     expect(store.classMapOf(MOON, ELSEWHERE)).toBe(surface);
     const other = lawFor([0.3, 0.3, 0.3], [1, 1, 1], "moon");
@@ -937,18 +992,21 @@ describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
   it("takes no law of nodes that are not K × 3 a class", () => {
     const answer = maturedAnswer(answerOf(TEXELS));
     expect(() =>
-      classMapLawsOf({
-        ...answer,
-        maturity: {
-          codes: answer.maturity?.codes ?? new Uint16Array(),
-          nodes: new Float32Array(3 * MATURITY_NODES * 2),
+      classMapLawsOf(
+        {
+          ...answer,
+          maturity: {
+            codes: answer.maturity?.codes ?? new Uint16Array(),
+            nodes: new Float32Array(3 * MATURITY_NODES * 2),
+          },
         },
-      }),
+        ELSEWHERE,
+      ),
     ).toThrow(/3 classes has 144 node values, not 96/u);
   });
 
   it("takes a named class's A as its node K − 1, in the display channels, its row and L(0) its photometry's", () => {
-    const [regolith, frost, unnamed] = classMapLawsOf(maturedAnswer(answerOf(TEXELS)));
+    const [regolith, frost, unnamed] = classMapLawsOf(maturedAnswer(answerOf(TEXELS)), ELSEWHERE);
     expect(regolith).toEqual(
       lawOf(PHASE_LAW.regolith, 1, [background(0, 2), background(0, 1), background(0, 0)]),
     );
@@ -980,7 +1038,7 @@ describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
       const surface = store.classMapOf(MOON, ELSEWHERE);
       expect(sameValues(surface?.texels.data, classMapTexelsOf(answer)?.data ?? [])).toBe(true);
       expect(surface?.texels.maturity?.drawn).toEqual([true, true, false]);
-      expect(surface?.laws.slice(0, 2)).toEqual(classMapLawsOf(answer).slice(0, 2));
+      expect(surface?.laws.slice(0, 2)).toEqual(classMapLawsOf(answer, ELSEWHERE).slice(0, 2));
       // Its point's elements queued as any map's (R10.T14.f), and cancelled with the store.
       expect(surface === null ? null : classMapPointState(surface)).toBe("queued");
     } finally {

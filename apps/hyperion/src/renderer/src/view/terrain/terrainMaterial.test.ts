@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { brdf, brdfFromTable } from "../appearance/brdf";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import {
   mcewenLunarProfile,
   PHASE_TABLE_SAMPLES,
   PHASE_TABLE_STEP_RAD,
   type PhaseFactorTable,
   phaseFactorTableOf,
+  type PhaseTemplateId,
   type PhotometricLaw,
 } from "../appearance/law";
-import { lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
+import { packPhaseFactorRows } from "../appearance/litBodyProbe";
+import { geometricAlbedo, lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
+import { shapeGeometricAlbedo } from "../appearance/shapes";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { WgslMaterialSpec } from "../engine/types";
@@ -74,6 +78,7 @@ import {
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
   PHASE_LAW,
+  REGOLITH_TEMPLATES,
   type TerrainLighting,
   TerrainPhaseRows,
   terrainDepthMaterialSpec,
@@ -795,7 +800,13 @@ describe("a texel's blend (R10.T10.b; Design note 8)", () => {
     });
     for (const [mu0, mu, deg] of geometries) {
       expect(
-        terrainReflectance([null, classTexelLaw(photometry, 1)], [0, 1], mu0, mu, deg * RAD),
+        terrainReflectance(
+          [null, classTexelLaw(photometry, 1, PROVISIONAL_PHOTOMETRY.law)],
+          [0, 1],
+          mu0,
+          mu,
+          deg * RAD,
+        ),
       ).toEqual(brdf(perBody, mu0, mu, deg * RAD));
     }
   });
@@ -1080,7 +1091,7 @@ describe("a class's albedo drawn from its maturity nodes (R10.T1.c's client half
     }
     // Without a layer each slot's A is its law's, scaled for the figure.
     const law = classPhotometryOf(MATURITY_PHOTOMETRY, 2);
-    expect(plain[3]?.a).toEqual(law === null ? null : classTexelLaw(law, cOverA).a);
+    expect(plain[3]?.a).toEqual(law === null ? null : classTexelLaw(law, cOverA, elsewhere).a);
   });
 });
 
@@ -1408,5 +1419,172 @@ describe("the lit terrain's emissive form (R08.T18.a)", () => {
     expect([flagged[6], flagged[8 + 6]]).toEqual([0, 1]);
     expect(plain[8 + 6]).toBe(0);
     expect([...flagged].filter((value, i) => value !== plain[i])).toEqual([1]);
+  });
+});
+
+/** A served body's law: its template at its own L and s = 1, as plan 14 states it, at p. */
+function served(template: PhaseTemplateId, share: number, p: number): PhotometricLaw {
+  const a = p / shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [a, a, a],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
+}
+
+describe("a Regolith class on its body's curve (R10.T10.e)", () => {
+  // The airless rocks' Mercury at the Moon-like world's p_V and Mars at its own (T10.a's table).
+  const MERCURY = served("mercury", 1, 0.142);
+  const MARS = served("mars", 0.5, 0.17);
+  const MAGMA = served("magma", 1, 0.142);
+  // `TEST MOON`'s: the Regolith row at L(0) = 1 (`terrainScene.ts`' `terrainMoonPhotometry`).
+  const TEST_MOON: PhotometricLaw = { ...classRowLaw(PHASE_LAW.regolith, 1), a: [0.2, 0.2, 0.2] };
+
+  /** In-plane geometries at phase α, deg: i and e either side of the normal and on one side. */
+  function geometriesAt(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+    const pairs = [
+      [alphaDeg / 2, alphaDeg / 2],
+      [0, alphaDeg],
+      [alphaDeg, 0],
+      [alphaDeg + 20, 20],
+      [20, alphaDeg + 20],
+    ];
+    return pairs
+      .filter(([i = 0, e = 0]) => i < 85 && e < 85)
+      .map(([i = 0, e = 0]) => [Math.cos(i * RAD), Math.cos(e * RAD)] as const);
+  }
+
+  it("takes the body's template, s and L(α) curve on a regolith template, its L(0) no higher than the body's", () => {
+    for (const body of [TEST_MOON, MERCURY, MAGMA, MARS]) {
+      expect(REGOLITH_TEMPLATES.has(body.template)).toBe(true);
+      for (const l0 of [1, 0.6]) {
+        const row = classRowLaw(PHASE_LAW.regolith, l0, body);
+        expect(row.template).toBe(body.template);
+        expect(row.phaseExponent).toBe(body.phaseExponent);
+        expect(row.lommelSeeligerCurve).toBe(body.lommelSeeligerCurve);
+        expect(row.lommelSeeligerShare).toBe(l0);
+        // Mars's 0.5 caps both; the airless templates' 1 caps neither.
+        expect(row.lommelSeeligerCeiling).toBe(body === MARS ? 0.5 : undefined);
+      }
+    }
+    // The share drawn: Mars's constant 0.5; Mercury's L(0) on McEwen's profile.
+    const mars = phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MARS));
+    expect([...mars.alpha].every((share) => share === 0.5)).toBe(true);
+    const mercury = phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MERCURY));
+    expect(mercury.alpha[120]).toBe(Math.fround(mcewenLunarProfile(120 * PHASE_TABLE_STEP_RAD)));
+  });
+
+  it("keeps the Moon's curve at s = 1 on every other template, and the Ice and Lambert rows on every body", () => {
+    const others: ReadonlyArray<PhaseTemplateId> = [
+      "venus",
+      "earth",
+      "jupiter",
+      "saturn",
+      "uranus",
+      "neptune",
+      "airless-ice",
+      "snowball",
+      "lambert",
+    ];
+    for (const template of others) {
+      expect(REGOLITH_TEMPLATES.has(template)).toBe(false);
+      const body = lawFor([0.3, 0.3, 0.3], [0.9, 0.9, 0.9], template);
+      for (const l0 of [1, 0.6]) {
+        expect(classRowLaw(PHASE_LAW.regolith, l0, body)).toEqual(
+          classRowLaw(PHASE_LAW.regolith, l0),
+        );
+      }
+    }
+    for (const body of [TEST_MOON, MERCURY, MARS]) {
+      expect(classRowLaw(PHASE_LAW.ice, 0.8, body)).toEqual(classRowLaw(PHASE_LAW.ice, 0.8));
+      expect(classRowLaw(PHASE_LAW.lambert, 0, body)).toEqual(classRowLaw(PHASE_LAW.lambert, 0));
+    }
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["Mars's", MARS],
+  ])(
+    "draws ground of the body's p as the body's own law on %s template, at every phase and geometry",
+    (_, body) => {
+      // The worker's regolith at the body's p: L(0) 1 under the particulate rule, so A = p.
+      const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+      const p = geometricAlbedo(body)[1];
+      let worst = 0;
+      let checked = 0;
+      for (let alphaDeg = 0; alphaDeg <= 150; alphaDeg += 10) {
+        for (const [mu0, mu] of geometriesAt(alphaDeg)) {
+          const surveyed = brdfFromTable(
+            { a: [p, p, p] },
+            phaseFactorTableOf(row),
+            mu0,
+            mu,
+            alphaDeg * RAD,
+          );
+          const unsurveyed = brdf(body, mu0, mu, alphaDeg * RAD);
+          for (const c of [0, 1, 2] as const) {
+            expect(unsurveyed[c]).toBeGreaterThan(0);
+            worst = Math.max(worst, Math.abs(surveyed[c] / unsurveyed[c] - 1));
+            checked += 1;
+          }
+        }
+      }
+      expect(checked).toBe(144);
+      // The two rows' f in `f32`, one of them 1.2 times the other on Mars.
+      expect(worst).toBeLessThan(1e-6);
+    },
+  );
+
+  it("gives the classes the body's q, and keeps each class's p", () => {
+    // Plan 14's `templates.golden` at each template's own L: Mercury's 0.47980, Mars's 1.08465.
+    expect(lawPhaseIntegral(MERCURY)[1]).toBeCloseTo(0.4798, 4);
+    expect(lawPhaseIntegral(MARS)[1]).toBeCloseTo(1.0846, 3);
+    for (const body of [MERCURY, MAGMA, MARS]) {
+      const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+      expect(lawPhaseIntegral(row)[1] / lawPhaseIntegral(body)[1]).toBeCloseTo(1, 12);
+      expect(geometricAlbedo({ ...row, a: [0.2, 0.2, 0.2] })).toEqual([0.2, 0.2, 0.2]);
+    }
+    // Before, the Moon's curve at s = 1 on every body: +30.5% on Mercury's, −42.3% on Mars's.
+    const moonRow = lawPhaseIntegral(classRowLaw(PHASE_LAW.regolith, 1))[1];
+    expect(moonRow / lawPhaseIntegral(MERCURY)[1] - 1).toBeCloseTo(0.305, 3);
+    expect(moonRow / lawPhaseIntegral(MARS)[1] - 1).toBeCloseTo(-0.423, 3);
+  });
+
+  it("leaves TEST MOON's rows as they were, bit for bit, on its Moon's template at s = 1 (T10.g's hand-back)", () => {
+    for (const l0 of [1, 0.84, 0.3]) {
+      expect(packPhaseFactorRows([classRowLaw(PHASE_LAW.regolith, l0, TEST_MOON)])).toEqual(
+        packPhaseFactorRows([classRowLaw(PHASE_LAW.regolith, l0)]),
+      );
+    }
+  });
+
+  it("makes the Regolith rows again in their places when row 0's law changes, the other rows kept", () => {
+    // The resources' stand-in until the first frame's lights: Lambert's row.
+    const rows = new TerrainPhaseRows(classRowLaw(PHASE_LAW.lambert, 0));
+    const regolith = rows.rowOf(PHASE_LAW.regolith, 1);
+    const ice = rows.rowOf(PHASE_LAW.ice, 1);
+    const iceLaw = rows.laws[ice];
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1));
+    const before = rows.version;
+    expect(rows.setElsewhere(MARS)).toBe(true);
+    expect(rows.version).toBe(before + 1);
+    expect(rows.laws[0]).toBe(MARS);
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1, MARS));
+    expect(rows.laws[ice]).toBe(iceLaw);
+    expect(rows.rowOf(PHASE_LAW.regolith, 1)).toBe(regolith);
+    // A row asked for afterwards is made on row 0's law at once.
+    const bright = rows.rowOf(PHASE_LAW.regolith, 0.8);
+    expect(rows.laws[bright]).toEqual(classRowLaw(PHASE_LAW.regolith, 0.8, MARS));
+    expect(rows.setElsewhere(MERCURY)).toBe(true);
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1, MERCURY));
+    expect(rows.laws[bright]).toEqual(classRowLaw(PHASE_LAW.regolith, 0.8, MERCURY));
+  });
+
+  it("draws the twin's class on its body's row", () => {
+    const photometry = { a: [0.17, 0.17, 0.17] as const, l0: 1, code: PHASE_LAW.regolith };
+    expect(classTexelLaw(photometry, 1, MARS).table).toEqual(
+      phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MARS)),
+    );
   });
 });

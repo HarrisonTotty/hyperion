@@ -129,20 +129,23 @@ const TEXTURE: TextureHandle = { kind: "texture", name: "class map" };
 function oneClassMap(): ClassMapDiscSurface {
   const photometry = new Float32Array(PHOTOMETRY_STRIDE);
   photometry.set(REGOLITH);
-  const [law] = classMapLawsOf({
-    level: CLASS_MAP_LEVEL,
-    fieldLevel: 6,
-    classes: new Uint8Array(2),
-    photometry,
-    texels: new Uint32Array(0),
-    fractions: new Float32Array(0),
-    weights: new Uint8Array(0),
-    complete: true,
-    normalLevel: 6,
-    normalCells: new Uint32Array(0),
-    normalPairs: new Float16Array(0),
-    normalsComplete: true,
-  });
+  const [law] = classMapLawsOf(
+    {
+      level: CLASS_MAP_LEVEL,
+      fieldLevel: 6,
+      classes: new Uint8Array(2),
+      photometry,
+      texels: new Uint32Array(0),
+      fractions: new Float32Array(0),
+      weights: new Uint8Array(0),
+      complete: true,
+      normalLevel: 6,
+      normalCells: new Uint32Array(0),
+      normalPairs: new Float16Array(0),
+      normalsComplete: true,
+    },
+    ELSEWHERE,
+  );
   if (law === null || law === undefined) {
     throw new Error("the class has a law");
   }

@@ -30,6 +30,7 @@ import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline
 import { moonLikeFixture } from "../../test/moonLikeFixture";
 import { testPatienceMs } from "../../test/patience";
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
 import { discReflectance } from "../bodies/discShading";
@@ -262,17 +263,18 @@ describe("the hand-over's brightness on the Moon-like world (R10.T10.e, scripted
   function compare(override: Override | null): Comparison {
     const photometry = overridden(map.photometry, map.classes, override);
     const texels = classMapTexelsOf(map);
-    const laws = classMapLawsOf({ ...map, photometry });
     if (texels === null) {
       throw new Error("the map has classes");
     }
     // `elsewhere` at the survey's own p, as R10.T10.a's scale makes the classes' p the body's (the
     // fixture's header holds no scale, so c is 1), on Mercury's template, as the photometry draws
-    // an airless rock.
+    // an airless rock. A class's A and L(0) are its own on any body (R10.T10.e), so its p is read
+    // from its laws on the provisional photometry's before `elsewhere` is made.
     const classes = map.classes.length / 2;
     const p: [number, number, number] = [0, 0, 0];
+    const ownLaws = classMapLawsOf({ ...map, photometry }, PROVISIONAL_PHOTOMETRY.law);
     map.texels.forEach((_, t) => {
-      laws.forEach((law, k) => {
+      ownLaws.forEach((law, k) => {
         const w = (map.weights[t * classes + k] ?? 0) / 255 / map.texels.length;
         const l = law?.lommelSeeligerShare ?? 0;
         for (const c of [0, 1, 2] as const) {
@@ -281,6 +283,7 @@ describe("the hand-over's brightness on the Moon-like world (R10.T10.e, scripted
       });
     });
     const elsewhere: PhotometricLaw = lawFor(p, [0.4798, 0.4798, 0.4798], "mercury");
+    const laws = classMapLawsOf({ ...map, photometry }, elsewhere);
     const discLaws = [elsewhere, ...laws.map((law) => law ?? elsewhere)];
     const n = CLASS_MAP_FACE_TEXELS;
     const centres = [...map.texels].map((index) => {
@@ -375,7 +378,7 @@ describe("the hand-over's brightness on the Moon-like world (R10.T10.e, scripted
 
   it("holds the map's eight surveyed texels, one law over them all", () => {
     expect(map.texels).toHaveLength(8);
-    const named = classMapLawsOf(map).filter((law) => law !== null);
+    const named = classMapLawsOf(map, PROVISIONAL_PHOTOMETRY.law).filter((law) => law !== null);
     expect(named.map((law) => [law.a, law.lommelSeeligerShare])).toEqual([
       [[Math.fround(0.2), Math.fround(0.2), Math.fround(0.2)], 1],
     ]);
