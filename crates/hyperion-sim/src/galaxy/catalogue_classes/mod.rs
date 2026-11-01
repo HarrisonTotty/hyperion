@@ -14,7 +14,8 @@
 //! accreting white dwarfs, fast and slow (P11.T8.a, [`binary`]), its X-ray binaries (P11.T8.b) and
 //! its stellar and neutron-star mergers (P11.T8.c–d), they are the production lookup's
 //! ([`ProductionClasses`]) arms, whose members are catalogue systems ([`system`]) that plan 03's
-//! resolve returns. The other processes and the carve-out follow in P09.T35.
+//! resolve returns. The other processes and the carve-out follow in P09.T35, and the classes'
+//! source of the range query in P09.T37.a ([`source`], [`CatalogueClassSource`]).
 
 pub mod binary;
 pub mod core_collapse;
@@ -22,6 +23,7 @@ pub mod grid;
 pub mod ids;
 pub mod lbv;
 pub mod registry;
+pub mod source;
 pub mod supernova;
 pub mod system;
 pub mod type_ia;
@@ -33,4 +35,5 @@ pub use self::grid::{
 };
 pub use self::ids::{BuildCatalogueCellKeyError, CatalogueCellKey};
 pub use self::registry::{ALL_CLASSES, ClassId, FEATURE_LEVEL_LIST_ORDER};
+pub use self::source::CatalogueClassSource;
 pub use self::system::{CatalogueMotion, CatalogueSystem, system_of, system_of_record};
