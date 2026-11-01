@@ -45,31 +45,31 @@ use crate::limits::{
 };
 
 /// The pool's workers, as the slow profile reserves for the test (`.config/nextest.toml`).
-const WORKERS: usize = 8;
+pub(super) const WORKERS: usize = 8;
 
 /// `future` within twenty minutes, which a stalled pool would never meet.
-async fn within<T>(future: impl Future<Output = T>) -> T {
+pub(super) async fn within<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_mins(20), future)
         .await
         .expect("the pool does not stall")
 }
 
 /// The key the server tests' galaxy is cached under.
-fn key() -> GalaxyKey {
+pub(super) fn key() -> GalaxyKey {
     GalaxyKey::new(SEED, GENERATOR_VERSION)
 }
 
 /// What the test serves its queries with: a pool, a galaxy cache that builds under every 27 hold,
 /// the global list's service over it with its tube tables, and the range query's caches.
-struct Served {
-    pool: Arc<CpuPool>,
-    galaxies: Arc<GalaxyCache>,
-    lists: GlobalListService,
-    tubes: Arc<TubeTableCache>,
+pub(super) struct Served {
+    pub(super) pool: Arc<CpuPool>,
+    pub(super) galaxies: Arc<GalaxyCache>,
+    pub(super) lists: GlobalListService,
+    pub(super) tubes: Arc<TubeTableCache>,
 }
 
 impl Served {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let pool = Arc::new(
             CpuPool::new(
                 NonZeroUsize::new(WORKERS).expect("at least one worker"),
@@ -106,7 +106,7 @@ impl Served {
     }
 
     /// Fresh range query caches of 256 MiB each, the centre's orbits' of `centre_bytes`.
-    fn caches(centre_bytes: usize) -> RangeCaches {
+    pub(super) fn caches(centre_bytes: usize) -> RangeCaches {
         let bytes = 256 << 20;
         RangeCaches::new(
             Arc::new(SharedCellCache::new(bytes)),
@@ -121,7 +121,7 @@ impl Served {
 
     /// `request` answered as the handler answers it, through `caches`: the sim's result and the
     /// wire's rows. It prints how long it took.
-    async fn answer(
+    pub(super) async fn answer(
         &self,
         caches: &RangeCaches,
         galaxy: &Arc<Galaxy>,
@@ -178,7 +178,11 @@ impl Served {
 }
 
 /// A request of every stellar layer within `radius_ly` of `centre` at `years` from the epoch.
-fn request(centre: &GalacticPosition, radius_ly: f64, years: i64) -> SystemsInRangeRequest {
+pub(super) fn request(
+    centre: &GalacticPosition,
+    radius_ly: f64,
+    years: i64,
+) -> SystemsInRangeRequest {
     SystemsInRangeRequest {
         universe: hyperion_protocol::UniverseIdHex::from_u64(0x0123_4567_89ab_cdef),
         centre: hyperion_protocol::GalacticPosition {
@@ -208,7 +212,7 @@ fn unique(result: &RangeResult) -> bool {
 
 /// A member of a stream of `galaxy`'s list, in band A inside its shell, and its stream: the first
 /// stream with one about its leading arm's last knot, its table built on the pool.
-async fn a_stream_member(
+pub(super) async fn a_stream_member(
     served: &Served,
     galaxy: &Arc<Galaxy>,
 ) -> (StreamNumber, GalacticPosition) {

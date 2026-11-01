@@ -60,6 +60,10 @@ pub enum TraceMotionError {
     /// its class's motion ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion))
     /// has no tracer yet.
     CatalogueMotionNotTraced(SystemId),
+    /// The system is a tidal disruption's victim (plan 09, P09.T30.b) asked about after its
+    /// disruption, when it is no system: its path
+    /// ([`CentrePath`](crate::galaxy::features::centre::CentrePath)) ends there.
+    Disrupted(SystemId),
 }
 
 impl fmt::Display for TraceMotionError {
@@ -79,6 +83,11 @@ impl fmt::Display for TraceMotionError {
                 f,
                 "the catalogue system {} moves on a line broken at its explosion, which is not \
                  traced yet",
+                id.raw()
+            ),
+            Self::Disrupted(id) => write!(
+                f,
+                "the centre member {} was disrupted by the central black hole before then",
                 id.raw()
             ),
         }

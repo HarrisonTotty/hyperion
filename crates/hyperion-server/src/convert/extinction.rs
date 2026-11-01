@@ -85,8 +85,9 @@ pub(crate) fn extinction_map(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum LineEnd {
     /// A system ID, decoded but not yet resolved. One that resolves to nothing, or to a system the
-    /// server cannot place yet (a member of the galactic centre, or a catalogue system, at every
-    /// time, by [`system_motion`](super::system_motion)), is answered `no_such_system`.
+    /// server does not place then ([`system_motion`](super::system_motion): below generator version
+    /// 27 a member of the galactic centre or the global list, or a catalogue system, at every time;
+    /// a tidal disruption's victim after its disruption), is answered `no_such_system`.
     System(SystemId),
     /// A system ID whose bits are no system ID at all: answered `no_such_system`, as one that
     /// resolves to nothing is.

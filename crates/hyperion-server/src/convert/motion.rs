@@ -7,33 +7,329 @@
 //! members"), so every request that places a system from a client's ID places it here:
 //! `resolve_system`, `extinction`'s system targets, `scene_ship`'s frame, and the scene's core
 //! after it.
+//!
+//! From generator version 27 a range query returns three more kinds of system beside the grid's
+//! and the features' (plan 10, P10.T10.b's registration member; plan 09, P09.T37), and each is
+//! placed here as its row places it, bit for bit: a member of the galactic centre on its path
+//! ([`CentrePath`]), a stream's or a dwarf core's member drifting at its own velocity
+//! ([`GlobalMemberRecord::position_at`]), and a catalogue class's host on its class's broken line
+//! ([`CatalogueSystem::position_at`]). Below 27 no query returns them, and each is refused at every
+//! time, as before: a centre member and a list member under the list source's hold
+//! ([`GlobalListSource::is_registered_in`]), a host under the class source's
+//! ([`CatalogueClassSource::registered_in`]).
 
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueClassSource, CatalogueSystem, system_of_record,
+};
+use hyperion_sim::galaxy::features::centre::{CentreOrbitCache, CentrePath, NoCentreOrbitCache};
+use hyperion_sim::galaxy::features::members::NoInteriorCache;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
-use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
-use hyperion_sim::galaxy::query::{epoch_velocity, position_at};
-use hyperion_sim::observe::{Drift, TraceMotionError, Trajectory};
+use hyperion_sim::galaxy::global_list::GlobalListSource;
+use hyperion_sim::galaxy::global_list::members::GlobalMemberRecord;
+use hyperion_sim::galaxy::motion::StateAt;
+use hyperion_sim::galaxy::placement::{
+    ResolveSystemError, SystemOrigin, SystemRecord, resolve_list_member_with,
+};
+use hyperion_sim::galaxy::query::{SystemHit, epoch_velocity, position_at};
+use hyperion_sim::id::{SystemId, SystemIdKind};
+use hyperion_sim::observe::{
+    Drift, ObservedSystem, Observer, Retardation, TraceMotionError, Trajectory, observe_hit_on,
+    summary_observed_on,
+};
+use hyperion_sim::stellar::system::{SystemStars, SystemSummary};
 use hyperion_sim::time::UniverseTime;
 
-/// Where the system `record` is at `t`, its barycentre in the galactic frame, and its velocity
-/// there, m/s along the galactic axes, by the record's origin.
+use crate::compute::{ListedTubes, Listing};
+
+/// Where a stream's or a dwarf core's member is resolved from (plan 10, P10.T10.b): a served
+/// query's list source, which holds its tables, band shares and cores' models, or a request's view
+/// of its galaxy's list ([`ListedTubes`]), through plan 10's `resolve_list_member_with`. Either
+/// gives the same member.
+pub(crate) trait ListMembers {
+    /// The member `id` names in `galaxy`.
+    ///
+    /// # Errors
+    ///
+    /// The [`ResolveSystemError`] of an ID that names no member of the galaxy's list.
+    fn list_member(
+        &self,
+        galaxy: &Galaxy,
+        id: SystemId,
+    ) -> Result<GlobalMemberRecord, ResolveSystemError>;
+}
+
+impl ListMembers for GlobalListSource<'_> {
+    fn list_member(
+        &self,
+        galaxy: &Galaxy,
+        id: SystemId,
+    ) -> Result<GlobalMemberRecord, ResolveSystemError> {
+        self.member(galaxy, id)
+    }
+}
+
+impl ListMembers for ListedTubes {
+    fn list_member(
+        &self,
+        galaxy: &Galaxy,
+        id: SystemId,
+    ) -> Result<GlobalMemberRecord, ResolveSystemError> {
+        resolve_list_member_with(galaxy, id, self)
+    }
+}
+
+/// What [`system_motion`] reads a system's path through: the server's caches, each the same
+/// whatever it holds (plan 12, P12.T6; plan 10, P10.T10.b): a catalogue feature's interiors, the
+/// galactic centre's cells of members and their orbits, and the galaxy's global list, if the
+/// caller has it.
+#[derive(Clone, Copy)]
+pub(crate) struct MotionReads<'a> {
+    interiors: &'a dyn FeatureInteriorCache,
+    orbits: &'a dyn CentreOrbitCache,
+    list: Option<&'a dyn ListMembers>,
+}
+
+impl<'a> MotionReads<'a> {
+    /// The reads of a caller that holds the features' interiors in `interiors` and the centre's
+    /// orbits in `orbits`, and no list: a list member is then refused.
+    #[must_use]
+    pub(crate) fn new(
+        interiors: &'a dyn FeatureInteriorCache,
+        orbits: &'a dyn CentreOrbitCache,
+    ) -> Self {
+        Self {
+            interiors,
+            orbits,
+            list: None,
+        }
+    }
+
+    /// The reads of a caller that holds nothing: every path is built afresh.
+    #[must_use]
+    pub(crate) fn uncached() -> MotionReads<'static> {
+        MotionReads::new(&NoInteriorCache, &NoCentreOrbitCache)
+    }
+
+    /// The same reads, a list member resolved through `list`.
+    #[must_use]
+    pub(crate) fn with_list(self, list: &'a dyn ListMembers) -> Self {
+        Self {
+            list: Some(list),
+            ..self
+        }
+    }
+
+    /// The same reads, a list member resolved through `listing` if it is the galaxy's list
+    /// ([`Listing::Listed`]).
+    #[must_use]
+    pub(crate) fn with_listing(self, listing: &'a Listing) -> Self {
+        match listing {
+            Listing::Unlisted => self,
+            Listing::Listed(tubes) => self.with_list(tubes),
+        }
+    }
+
+    /// The galaxy's list, if the caller has it.
+    #[must_use]
+    pub(crate) fn list(&self) -> Option<&'a dyn ListMembers> {
+        self.list
+    }
+}
+
+/// How a system a client names moves: its path, found once by its record's origin, which
+/// [`system_motion`] reads at a time and observed mode reads the light on.
 ///
-/// - A grid record is where a range query finds it, bit for bit: [`position_at`], with plan 08's
-///   [`epoch_velocity`] beside it, as a range row carries it.
-/// - A feature member moves on its own line, its cluster's motion and its own, which plan 08's draw
-///   is not: [`Drift::of_record`] (plan 09, P09.T10; plan 12, P12.T6), its feature's interior
-///   from `interiors`, the server's own cache where the caller holds it, the same whatever it holds
-///   ([`Drift::of_record_in`]).
-/// - A member of the galactic centre (the black hole, a member of the centre's grid or a tidal
-///   disruption's victim) is refused at every time, the epoch included, until plan 09's P09.T37 and
-///   P09.T40 place them: they turn this arm on for every request together. Refused at the epoch
-///   too, no answer depends on the time, which the scene's core relies on; and a victim is no
-///   system at all after its disruption, which can precede the epoch (seed 0x4d2's nine were
-///   disrupted 43,000–227,000 years before it), so its epoch position may be only formal.
-/// - An origin the sim adds later is placed on the sim's own line for it, or refused by its error:
-///   [`SystemOrigin`] is `#[non_exhaustive]`, so this `match` cannot name it, but
-///   [`Drift::of_record`]'s own `match` does, and it never reaches a grid record's draw.
+/// It needs no cache once found, so a caller that places one system at many times, as the scene's
+/// core places the ship's frame, keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum SystemLine {
+    /// A grid system: where a range query finds it, bit for bit, [`position_at`], with plan 08's
+    /// [`epoch_velocity`] beside it, as a range row carries it.
+    Grid(SystemRecord),
+    /// A system on the line [`Drift::of_record`] gives it: a catalogue feature's member, its
+    /// cluster's motion and its own, which plan 08's draw is not (plan 09, P09.T10; plan 12,
+    /// P12.T6), and an origin the sim adds later, on the sim's own line for it.
+    Line(SystemRecord, Drift),
+    /// A stream's or a dwarf core's member, drifting at its own velocity, as the list's source
+    /// places it ([`GlobalMemberRecord::position_at`]).
+    Listed(GlobalMemberRecord),
+    /// A member of the galactic centre, on its path ([`CentrePath`]).
+    Centre(CentrePath),
+    /// A catalogue class's host, on its class's line broken at its explosion
+    /// ([`CatalogueSystem::position_at`]), with its velocity there.
+    Catalogue(CatalogueSystem),
+}
+
+impl SystemLine {
+    /// The path of the system `record`, read through `reads` (the module's documentation).
+    ///
+    /// # Errors
+    ///
+    /// Below generator version 27, at every time: [`TraceMotionError::CentreOrbitNotBuilt`] for a
+    /// member of the galactic centre, [`TraceMotionError::GlobalListMember`] for a stream's or a
+    /// dwarf core's member, and [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue
+    /// system. From 27, [`TraceMotionError::GlobalListMember`] for a list member if `reads` holds no
+    /// list.
+    ///
+    /// # Panics
+    ///
+    /// If `record` is a member, of a feature, the centre or the list, or a catalogue system that
+    /// does not resolve in `galaxy`, which only a record of another galaxy can be, or if a cache of
+    /// `reads` is of another galaxy, which the server's handles assert.
+    pub(crate) fn of(
+        galaxy: &Galaxy,
+        reads: MotionReads<'_>,
+        record: &SystemRecord,
+    ) -> Result<Self, TraceMotionError> {
+        let served = GlobalListSource::is_registered_in(galaxy);
+        match record.origin() {
+            SystemOrigin::Grid(_) => Ok(Self::Grid(*record)),
+            #[expect(
+                clippy::match_same_arms,
+                reason = "`SystemOrigin` is `#[non_exhaustive]`, so the wildcard below cannot go; \
+                          the feature member is named so that its line is this function's choice, \
+                          not the fallback's"
+            )]
+            SystemOrigin::FeatureMember { .. } => Ok(Self::Line(
+                *record,
+                Drift::of_record_in(galaxy, reads.interiors, record)?,
+            )),
+            SystemOrigin::CentreMember { .. } => {
+                if !served {
+                    return Err(TraceMotionError::CentreOrbitNotBuilt(record.id()));
+                }
+                let SystemIdKind::Centre(id) = record.id().kind() else {
+                    unreachable!("a centre member's record is built with a centre ID")
+                };
+                Ok(Self::Centre(
+                    CentrePath::of(galaxy, reads.orbits, id)
+                        .expect("a centre member's record resolves in the galaxy that placed it"),
+                ))
+            }
+            SystemOrigin::GlobalListMember { .. } => {
+                let list = reads
+                    .list
+                    .filter(|_| served)
+                    .ok_or(TraceMotionError::GlobalListMember(record.id()))?;
+                Ok(Self::Listed(list.list_member(galaxy, record.id()).expect(
+                    "a list member's record resolves through the list of the galaxy that placed it",
+                )))
+            }
+            SystemOrigin::CatalogueSystem(_) => {
+                if CatalogueClassSource::registered_in(galaxy).is_none() {
+                    return Err(TraceMotionError::CatalogueMotionNotTraced(record.id()));
+                }
+                Ok(Self::Catalogue(system_of_record(galaxy, record)))
+            }
+            _ => Ok(Self::Line(
+                *record,
+                Drift::of_record_in(galaxy, reads.interiors, record)?,
+            )),
+        }
+    }
+
+    /// The system's record.
+    #[must_use]
+    pub(crate) fn record(&self) -> &SystemRecord {
+        match self {
+            Self::Grid(record) | Self::Line(record, _) => record,
+            Self::Listed(member) => member.record(),
+            Self::Centre(path) => path.record(),
+            Self::Catalogue(system) => system.record(),
+        }
+    }
+
+    /// Where the system is at `t`, its barycentre in the galactic frame, and its velocity there,
+    /// m/s along the galactic axes: its range row's at `t`, bit for bit, but for a catalogue
+    /// feature's member, on its own line, whose row plan 03 rounds differently by up to a few
+    /// metres.
+    ///
+    /// # Errors
+    ///
+    /// [`TraceMotionError::Disrupted`] for a tidal disruption's victim after its disruption, when
+    /// it is no system.
+    pub(crate) fn at(
+        &self,
+        galaxy: &Galaxy,
+        t: UniverseTime,
+    ) -> Result<(GalacticPosition, GalacticVelocity), TraceMotionError> {
+        match self {
+            Self::Grid(record) => Ok((
+                position_at(galaxy, record, t),
+                epoch_velocity(galaxy, record),
+            )),
+            Self::Line(_, line) => Ok((line.position_at(t), line.velocity())),
+            Self::Listed(member) => Ok((member.position_at(t), member.velocity())),
+            Self::Centre(path) => match path.state_at(t) {
+                StateAt::Exists(state) => Ok((*state.position(), state.velocity())),
+                StateAt::NoSuchSystem => Err(TraceMotionError::Disrupted(path.record().id())),
+            },
+            Self::Catalogue(system) => Ok((system.position_at(t), system.motion().velocity_at(t))),
+        }
+    }
+
+    /// What `observer` receives from the system `hit`, this path's, whose stars are `stars`, if
+    /// the caller gives them: [`observe_hit_on`] on the path.
+    #[must_use]
+    pub(crate) fn observe(
+        &self,
+        galaxy: &Galaxy,
+        hit: &SystemHit,
+        stars: Option<&SystemStars>,
+        observer: &Observer,
+    ) -> ObservedSystem {
+        match self {
+            Self::Grid(record) => {
+                observe_hit_on(galaxy, hit, &grid_line(galaxy, record), stars, observer)
+            }
+            Self::Line(_, line) => observe_hit_on(galaxy, hit, line, stars, observer),
+            Self::Listed(member) => observe_hit_on(
+                galaxy,
+                hit,
+                &Drift::of_global_member(member),
+                stars,
+                observer,
+            ),
+            Self::Centre(path) => observe_hit_on(galaxy, hit, path, stars, observer),
+            Self::Catalogue(system) => {
+                observe_hit_on(galaxy, hit, system.motion(), stars, observer)
+            }
+        }
+    }
+
+    /// The summary of the system's stars `stars` as `observer` sees it, with the retardation:
+    /// [`summary_observed_on`] on the path.
+    #[must_use]
+    pub(crate) fn summary_observed(
+        &self,
+        galaxy: &Galaxy,
+        stars: &SystemStars,
+        observer: &Observer,
+    ) -> (SystemSummary, Retardation) {
+        match self {
+            Self::Grid(record) => summary_observed_on(stars, &grid_line(galaxy, record), observer),
+            Self::Line(_, line) => summary_observed_on(stars, line, observer),
+            Self::Listed(member) => {
+                summary_observed_on(stars, &Drift::of_global_member(member), observer)
+            }
+            Self::Centre(path) => summary_observed_on(stars, path, observer),
+            Self::Catalogue(system) => summary_observed_on(stars, system.motion(), observer),
+        }
+    }
+}
+
+/// A grid system's line: plan 08's velocity from its epoch position.
+fn grid_line(galaxy: &Galaxy, record: &SystemRecord) -> Drift {
+    Drift::of_record(galaxy, record).expect("a grid system moves on plan 08's line")
+}
+
+/// Where the system `record` is at `t`, its barycentre in the galactic frame, and its velocity
+/// there, m/s along the galactic axes, by the record's origin ([`SystemLine::of`], then
+/// [`SystemLine::at`]): its range row's position and velocity at `t`, bit for bit, for every
+/// system a range query returns but a catalogue feature's member, which moves on its own line
+/// ([`Drift::of_record_in`]).
 ///
 /// This is the one place the server places a system from a client's ID; [`system_place`] and the
 /// range rows read grid records alone. Version 25's wiring of the Kepler regime changes the grid
@@ -43,54 +339,20 @@ use hyperion_sim::time::UniverseTime;
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, and
-/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system (plan 09, P09.T33.a), each
-/// at every time.
+/// As [`SystemLine::of`], at every time, and [`SystemLine::at`].
 ///
 /// # Panics
 ///
-/// If `record` is a feature member that does not resolve in `galaxy`, which only a record of
-/// another galaxy can be ([`Drift::of_record`]), or if `interiors` is a cache of another galaxy's
-/// interiors, which the server's handle asserts.
+/// As [`SystemLine::of`].
 pub(crate) fn system_motion(
     galaxy: &Galaxy,
-    interiors: &dyn FeatureInteriorCache,
+    reads: MotionReads<'_>,
     record: &SystemRecord,
     t: UniverseTime,
 ) -> Result<(GalacticPosition, GalacticVelocity), TraceMotionError> {
-    match record.origin() {
-        SystemOrigin::Grid(_) => Ok((
-            position_at(galaxy, record, t),
-            epoch_velocity(galaxy, record),
-        )),
-        #[expect(
-            clippy::match_same_arms,
-            reason = "`SystemOrigin` is `#[non_exhaustive]`, so the wildcard below cannot go; the \
-                      feature member is named so that its line is this function's choice, not the \
-                      fallback's"
-        )]
-        SystemOrigin::FeatureMember { .. } => on_its_line(galaxy, interiors, record, t),
-        SystemOrigin::CentreMember { .. } => {
-            Err(TraceMotionError::CentreOrbitNotBuilt(record.id()))
-        }
-        _ => on_its_line(galaxy, interiors, record, t),
-    }
+    SystemLine::of(galaxy, reads, record)?.at(galaxy, t)
 }
 
-/// `record` on the line [`Drift::of_record`] gives it, at `t`, a feature member's interior from
-/// `interiors` ([`Drift::of_record_in`]).
-fn on_its_line(
-    galaxy: &Galaxy,
-    interiors: &dyn FeatureInteriorCache,
-    record: &SystemRecord,
-    t: UniverseTime,
-) -> Result<(GalacticPosition, GalacticVelocity), TraceMotionError> {
-    let line = Drift::of_record_in(galaxy, interiors, record)?;
-    Ok((line.position_at(t), line.velocity()))
-}
-
-/// The systems of each origin in the server tests' galaxy, for the tests of what places them: this
-/// module's, and the scene core's, which frames a ship on the feature member.
 #[cfg(test)]
 pub(crate) mod origins {
     use std::sync::OnceLock;
@@ -233,7 +495,8 @@ mod tests {
         let record = a_grid_system();
         assert!(matches!(record.origin(), SystemOrigin::Grid(_)));
         for t in times() {
-            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
+            let (position, velocity) =
+                system_motion(galaxy, MotionReads::uncached(), &record, t).unwrap();
             assert_eq!(
                 bits(&position),
                 bits(&position_at(galaxy, &record, t)),
@@ -279,7 +542,8 @@ mod tests {
         let key = GalaxyKey::new(SEED, GENERATOR_VERSION);
         let placed = |interiors: &dyn FeatureInteriorCache, record: &SystemRecord| {
             times().map(|t| {
-                let (position, velocity) = system_motion(galaxy, interiors, record, t).unwrap();
+                let reads = MotionReads::new(interiors, &NoCentreOrbitCache);
+                let (position, velocity) = system_motion(galaxy, reads, record, t).unwrap();
                 (bits(&position), velocity_bits(velocity))
             })
         };
@@ -323,7 +587,8 @@ mod tests {
         ));
         let line = Drift::of_record(galaxy, &record).unwrap();
         for t in times() {
-            let (position, velocity) = system_motion(galaxy, &NoInteriorCache, &record, t).unwrap();
+            let (position, velocity) =
+                system_motion(galaxy, MotionReads::uncached(), &record, t).unwrap();
             assert_eq!(bits(&position), bits(&line.position_at(t)), "{t}");
             assert_eq!(
                 velocity_bits(velocity),
@@ -344,7 +609,7 @@ mod tests {
             );
             for t in times() {
                 assert_eq!(
-                    system_motion(galaxy, &NoInteriorCache, &record, t),
+                    system_motion(galaxy, MotionReads::uncached(), &record, t),
                     Err(TraceMotionError::CentreOrbitNotBuilt(record.id())),
                     "{:?} at {t}",
                     record.id()
@@ -360,7 +625,7 @@ mod tests {
         assert!(matches!(record.origin(), SystemOrigin::CatalogueSystem(_)));
         for t in times() {
             assert_eq!(
-                system_motion(galaxy, &NoInteriorCache, &record, t),
+                system_motion(galaxy, MotionReads::uncached(), &record, t),
                 Err(TraceMotionError::CatalogueMotionNotTraced(record.id())),
                 "{t}"
             );

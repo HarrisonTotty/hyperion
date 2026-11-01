@@ -485,17 +485,33 @@ pub(crate) fn hit_at(
         Existence::NoSystemYet => return None,
         Existence::Exists => {}
     }
-    let position = if sphere.time() == UniverseTime::EPOCH {
-        *record.epoch_position()
-    } else {
-        record
-            .epoch_position()
-            .translated(velocity.displacement_over(elapsed))
-            .expect("a member moving under 3,000 km/s over the clock window stays addressable")
-    };
+    let position = drifted_at(record, velocity, sphere.time(), elapsed);
     let distance = LightYears::from(sphere.centre().distance_to(&position));
     (distance.value() <= sphere.radius().value())
         .then(|| SystemHit::new(*record, position, distance))
+}
+
+/// Where a member drifting at `velocity` from `record`'s epoch position is at `t`, `elapsed` since
+/// the epoch: the position its hit carries ([`hit_at`]), its epoch position at the epoch.
+///
+/// # Panics
+///
+/// If the drift leaves the addressable range, which nothing below light's speed does from the
+/// root cube within the source horizon.
+#[must_use]
+pub(crate) fn drifted_at(
+    record: &SystemRecord,
+    velocity: GalacticVelocity,
+    t: UniverseTime,
+    elapsed: Seconds,
+) -> GalacticPosition {
+    if t == UniverseTime::EPOCH {
+        return *record.epoch_position();
+    }
+    record
+        .epoch_position()
+        .translated(velocity.displacement_over(elapsed))
+        .expect("a member moving under 3,000 km/s over the clock window stays addressable")
 }
 
 #[cfg(test)]

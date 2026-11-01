@@ -1845,9 +1845,12 @@ fn bright_retarded(
         }
         // No source the census walks holds the global list's members yet (plan 10, P10.T10.b). No
         // catalogue class is a source of the census yet (plan 09's P09.T37 merges them), and a
-        // catalogue system's broken line has no tracer (P09.T33.a).
+        // catalogue system's broken line has no tracer (P09.T33.a). A victim's path, which ends at
+        // its disruption, is a centre member's, which no line from its record alone gives.
         Err(
-            TraceMotionError::GlobalListMember(_) | TraceMotionError::CatalogueMotionNotTraced(_),
+            TraceMotionError::GlobalListMember(_)
+            | TraceMotionError::CatalogueMotionNotTraced(_)
+            | TraceMotionError::Disrupted(_),
         ) => return None,
     };
     let observer = query.observer();

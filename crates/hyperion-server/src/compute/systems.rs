@@ -272,6 +272,41 @@ impl SystemStarsHandle<'_> {
     pub fn galaxy(&self) -> GalaxyKey {
         self.key
     }
+
+    /// Calls `f` with the stars of the system `id` of `galaxy`: the cache's, or those `build`
+    /// makes, then kept; `None` if `build` makes none, which is not kept.
+    ///
+    /// For a system whose stars its caller resolves itself (plan 10, P10.T10.b's registration
+    /// member): a stream's or a dwarf core's member, from its member record, and a catalogue
+    /// class's host, from its class. `build` must make what
+    /// [`SharedSystemCache::get_or_generate`] makes for `id`, under whose key they are kept.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the handle's.
+    pub fn with_stars_of<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        id: SystemId,
+        build: impl FnOnce() -> Option<SystemStars>,
+        f: impl FnOnce(Option<&SystemStars>) -> R,
+    ) -> R {
+        assert_eq!(
+            galaxy.seed().get(),
+            self.key.seed(),
+            "a system cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (self.key, id);
+        if let Some(stars) = self.cache.systems.get(&entry_key) {
+            return f(Some(&stars));
+        }
+        let Some(stars) = build().map(Arc::new) else {
+            return f(None);
+        };
+        // A system larger than the whole budget is handed back and still answered from.
+        let _ = self.cache.systems.insert(entry_key, Arc::clone(&stars));
+        f(Some(&stars))
+    }
 }
 
 impl StarsCache for SystemStarsHandle<'_> {
@@ -378,6 +413,34 @@ impl SharedBriefCache {
         // A model larger than the whole budget is handed back and still answered from.
         let _ = self.briefs.insert(entry_key, Arc::clone(&model));
         Ok(model)
+    }
+
+    /// The brief model of the global list's member `member` of `galaxy`, the galaxy `key` names:
+    /// the cache's, or built from its member record and stored ([`BriefModel::of_global_member`],
+    /// plan 10, P10.T10.b's registration member), under its ID as every system's.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of `key`, as [`SharedBriefCache::get_or_build`].
+    pub fn get_or_build_listed(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        member: &GlobalMemberRecord,
+    ) -> Arc<BriefModel> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a brief cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (key, member.record().id());
+        if let Some(model) = self.briefs.get(&entry_key) {
+            return model;
+        }
+        let model = Arc::new(BriefModel::of_global_member(galaxy, member));
+        // A model larger than the whole budget is handed back and still answered from.
+        let _ = self.briefs.insert(entry_key, Arc::clone(&model));
+        model
     }
 
     /// The models held, the bytes they are charged, and the hits, misses, evictions and refusals

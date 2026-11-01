@@ -29,6 +29,7 @@ pub(crate) use self::core::is_large_notification;
 pub use self::sensing::{CraftSource, CraftState, GrantAsked, NoCraft, SceneKnowledge};
 pub(crate) use self::ship::{ShipPosition, ShipStandIn};
 pub(crate) use self::topic::open;
+use crate::convert::SystemLine;
 use crate::universe::UniverseId;
 
 /// A scene's clock, as the scene's core reads it (Design note 2): the stand-in's [`SceneClock`]
@@ -56,6 +57,14 @@ pub(crate) trait Ship {
 
     /// Its pose as the wire carries it.
     fn kinematics(&self) -> KinematicsDto;
+
+    /// The path of the system its pose's frame is in, a system frame's or a body frame's system's,
+    /// found when the pose was set ([`SystemLine::of`]): what the scene's core places the frame
+    /// by at every time, through no cache; `None` for a pose in the galactic frame, or one set
+    /// without it, whose frame the core resolves again.
+    fn frame_line(&self) -> Option<&SystemLine> {
+        None
+    }
 }
 
 /// One universe's scene setting: its clock and its ship stand-in, as the last `scene_ship` set

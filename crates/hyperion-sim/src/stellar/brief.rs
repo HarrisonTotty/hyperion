@@ -64,6 +64,7 @@
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
+use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord, is_helium_donor};
 use crate::id::{BodyId, SystemIdKind};
 use crate::math;
@@ -358,6 +359,24 @@ impl BriefModel {
             galaxy,
             member.record(),
             (*member.composition(), member.multiplicity_context()),
+            &FittedFates::generator(),
+        )
+    }
+
+    /// The brief model of the global list's member `member` in `galaxy`, a stream's or a dwarf
+    /// core's (plan 10, P10.T10.b's registration member): its
+    /// [`GlobalMemberRecord::stars`]' brief by the module's routes, at its composition, its
+    /// multiplicity its own to draw ([`MultiplicityContext::Free`]), as its stars are.
+    ///
+    /// # Panics
+    ///
+    /// As [`BriefModel::new`], if a committed pair-light table cannot be read.
+    #[must_use]
+    pub fn of_global_member(galaxy: &Galaxy, member: &GlobalMemberRecord) -> Self {
+        Self::build(
+            galaxy,
+            member.record(),
+            (*member.composition(), MultiplicityContext::Free),
             &FittedFates::generator(),
         )
     }

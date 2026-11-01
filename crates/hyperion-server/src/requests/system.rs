@@ -24,7 +24,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::{Layer, SystemId};
-use hyperion_sim::observe::{Drift, Observer, curvature_error, retarded, summary_observed_in};
+use hyperion_sim::observe::{Drift, Observer, curvature_error, retarded};
 use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
 
 use super::global_list::listing_refused;
@@ -34,9 +34,10 @@ use crate::compute::{
     CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Listing, Priority,
 };
 use crate::convert::{
-    BodiesRequest, DetailRequest, EventsRequest, SummaryRequest, body_detail, body_events,
-    body_refusal, hosts_request, starless_summary, starless_summary_observed, system_bodies,
-    system_summary, system_summary_observed, unknown_system, untraced,
+    BodiesRequest, DetailRequest, EventsRequest, MotionReads, SummaryRequest, SystemLine,
+    body_detail, body_events, body_refusal, hosts_request, starless_summary,
+    starless_summary_observed, system_bodies, system_summary, system_summary_observed,
+    unknown_system, untraced,
 };
 
 /// Every star of one system at the request's time, and the orbits that hold them; in observed mode
@@ -49,8 +50,9 @@ use crate::convert::{
 /// from it there, as the range query's job does with the cell cache. The small answer is
 /// serialised on the runtime (design note 22).
 ///
-/// In observed mode the same job reads the cached stars through the sim's
-/// [`summary_observed_in`], a feature member's interior from the server's cache, at
+/// In observed mode the same job reads the cached stars on the system's path ([`SystemLine`],
+/// through the sim's `summary_observed_on`), a feature member's interior and the centre's orbits
+/// from the server's caches, at
 /// the time the light the observer receives at the request's time left the system, and states the
 /// curvature error as a range row does; the emitted time is never held to the clock window, only
 /// the request's time is.
@@ -71,7 +73,8 @@ use crate::convert::{
 /// `unknown_system` naming `system` for an ID that plan 03's `resolve` refuses in this universe's
 /// galaxy, or plan 10's `resolve_with` for a list member, or whose stars are not generated (a
 /// member of the galactic centre), in either mode; in observed mode, `bad_request` naming `mode`
-/// for a list member, whose motion the sim does not trace yet; `internal` if the pool is shutting
+/// below generator version 27 for a list member or a catalogue system, whose motion the server
+/// does not trace then ([`SystemLine::of`]); `internal` if the pool is shutting
 /// down or the job panics; and `cancelled` if the client gave up before it ran. A rogue planet is
 /// answered by [`starless`] (P14.T27.b).
 pub(crate) async fn summary(
@@ -108,13 +111,17 @@ pub(crate) async fn summary(
                     "the request's observer is in the root cube and its time in the clock window",
                 );
                 // Lent so that a feature member's line does not build its interior again.
-                let interiors = shared.cluster_models.handle(key);
-                // A member of the galactic centre has no traced motion yet, and the cache has
-                // refused it above; a member of the global list has none either, and is refused
-                // here (plan 10, P10.T10.b).
-                let (summary, retardation) =
-                    summary_observed_in(&galaxy, &interiors, stars.record(), &stars, &observer)
-                        .map_err(untraced)?;
+                let (interiors, orbits) = (
+                    shared.cluster_models.handle(key),
+                    shared.centre_orbits.handle(key),
+                );
+                let reads = MotionReads::new(&interiors, &orbits).with_listing(&listing);
+                // A member of the galactic centre has no stars generated, and the cache has
+                // refused it above; below generator version 27 a member of the global list and a
+                // catalogue system are refused here, as no range query returns them (plan 10,
+                // P10.T10.b).
+                let line = SystemLine::of(&galaxy, reads, stars.record()).map_err(untraced)?;
+                let (summary, retardation) = line.summary_observed(&galaxy, &stars, &observer);
                 let error = curvature_error(&galaxy, observer.position(), &retardation);
                 system_summary_observed(request, &stars, &summary, &retardation, error)
             }

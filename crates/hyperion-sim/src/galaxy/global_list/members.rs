@@ -66,7 +66,7 @@
 //! ([`Drift::of_global_member`](crate::observe::Drift::of_global_member)), since plan 03's
 //! `query::motion` serves grid records only.
 
-use crate::coords::GalacticVelocity;
+use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
 use crate::galaxy::features::interior::counts::{
@@ -75,6 +75,7 @@ use crate::galaxy::features::interior::counts::{
 use crate::galaxy::features::interior::{
     ClassKind, Generation, MemberClass, Multiplicity, ProfileShape,
 };
+use crate::galaxy::features::members::source::drifted_at;
 use crate::galaxy::features::members::{ATTEMPT_WORDS, MAX_ATTEMPTS, remnant_fits, systemic_speed};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::params::ProgenitorKind;
@@ -87,7 +88,8 @@ use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::turn_off_mass;
 use crate::stellar::system::SystemStars;
-use crate::units::{Dex, HeliumExcess, MetresPerSecond, SolarMasses, Years};
+use crate::time::UniverseTime;
+use crate::units::{Dex, HeliumExcess, MetresPerSecond, Seconds, SolarMasses, Years};
 
 use super::StreamOrigin;
 use super::dwarf_core::{
@@ -154,6 +156,23 @@ impl GlobalMemberRecord {
     #[must_use]
     pub const fn velocity(&self) -> GalacticVelocity {
         self.velocity
+    }
+
+    /// Where it is at `t`: its epoch position drifted at its velocity, as the list's source places
+    /// its hits ([`GlobalListSource`](super::GlobalListSource)), bit for bit (plan 10, P10.T10.b).
+    ///
+    /// It is the range row's position, as plan 03 rounds a drift: the observed line,
+    /// [`Drift::of_global_member`](crate::observe::Drift::of_global_member), keeps the product
+    /// exact and differs from it by up to a few metres within the clock window.
+    ///
+    /// # Panics
+    ///
+    /// If the drift leaves the addressable range, which no member, slower than 3,000 km/s, does
+    /// from the root cube within the source horizon.
+    #[must_use]
+    pub fn position_at(&self, t: UniverseTime) -> GalacticPosition {
+        let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
+        drifted_at(&self.record, self.velocity, t, elapsed)
     }
 
     /// The attempt its primary's draws are read at, which its class's conditional draw chose.

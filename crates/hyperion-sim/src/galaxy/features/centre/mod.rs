@@ -30,6 +30,7 @@ pub mod marks;
 pub mod members;
 #[cfg(test)]
 mod over_time;
+pub mod path;
 pub mod profile;
 pub(crate) mod recent;
 pub mod source;
@@ -40,6 +41,7 @@ pub use classes::{CentreClass, CentreClassKind, CentreClasses, CentreTracer};
 pub use df::{DistributionFunction, EnergyGrid};
 pub use marks::{LossCone, OrbitMarks};
 pub use members::ExceedCentreIndexError;
+pub use path::CentrePath;
 pub use profile::{BuildCentreError, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
 pub use source::{
     CentreCellOrbits, CentreMemberSource, CentreOrbitCache, KeepCentreOrbits, NoCentreOrbitCache,

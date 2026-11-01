@@ -59,7 +59,7 @@ pub use retarded::{
     extrapolate_to_present, light_time, retarded, retarded_exact_linear, retarded_from,
 };
 pub use stars_cache::{NoStarsCache, StarsCache, stars_of};
-pub(crate) use system::observe_on_line;
 pub use system::{
-    ObservedSystem, observe_hit, observe_hit_in, summary_observed, summary_observed_in,
+    ObservedSystem, observe_hit, observe_hit_in, observe_hit_on, summary_observed,
+    summary_observed_in, summary_observed_on,
 };

@@ -135,6 +135,19 @@ impl CatalogueMotion {
     }
 }
 
+/// A catalogue system as a source of light (plan 12): its broken line, read on whichever side of
+/// the break each time falls (plan 10, P10.T10.b's registration member). Its stated curvature
+/// error is a straight line's, the line through the light's emission at its velocity then.
+impl crate::observe::Trajectory for CatalogueMotion {
+    fn position_at(&self, t: UniverseTime) -> GalacticPosition {
+        Self::position_at(self, t)
+    }
+
+    fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
+        Self::velocity_at(self, t)
+    }
+}
+
 /// A member of a catalogue class's entry, as the rest of the sim reads it: its record, its motion,
 /// and how its stars are generated where its class models them by the stellar stage (plan 09,
 /// P09.T33.a).

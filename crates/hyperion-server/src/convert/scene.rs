@@ -184,8 +184,9 @@ pub(crate) fn unknown_frame_system(what: &str, reason: impl std::fmt::Display) -
     }
 }
 
-/// The refusal of a frame whose system the server cannot place yet, a member of the galactic
-/// centre or a catalogue system at any time ([`system_motion`](super::system_motion)):
+/// The refusal of a frame whose system the server does not place at every time of the clock window
+/// ([`SystemLine`](super::SystemLine): below generator version 27 a member of the galactic centre
+/// or the global list, or a catalogue system; a tidal disruption's victim disrupted inside it):
 /// `unknown_system`, naming
 /// `ship.position`, as `resolve_system` refuses it, with a message that says why the system
 /// cannot be placed rather than that it does not exist.

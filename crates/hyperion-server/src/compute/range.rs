@@ -55,11 +55,12 @@ use hyperion_sim::galaxy::query::{
 use hyperion_sim::id::FeatureCell;
 
 use super::{
-    CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, KeptInteriors,
-    ListedTubes, Priority, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
-    SharedClusterModelCache, SharedFeatureCellCache, SubmitJobError,
+    CancelToken, CentreOrbitHandle, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver,
+    KeptInteriors, ListedTubes, Priority, SharedCellCache, SharedCentreOrbitCache,
+    SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache, SubmitJobError,
 };
 use crate::FeatureMembers;
+use crate::convert::MotionReads;
 
 /// The fewest feature cells worth generating ahead of a query: two, since one takes 0.1–0.7 ms,
 /// well above a job's round trip (lane measurements of 2026-10-30).
@@ -163,10 +164,11 @@ impl ServedQuery {
 }
 
 /// What a served query's rows are converted with beyond its hits: the features' interiors, kept
-/// for the whole job, and the global list's source if the query took it, which resolves the
-/// list's members' rows (P10.T10.b).
+/// for the whole job, the galactic centre's cells of members and their orbits, and the global
+/// list's source if the query took it, which resolves the list's members' rows (P10.T10.b).
 pub struct RowReads<'a> {
     interiors: &'a KeptInteriors<'a>,
+    orbits: &'a CentreOrbitHandle<'a>,
     list: Option<&'a GlobalListSource<'a>>,
 }
 
@@ -181,6 +183,17 @@ impl<'a> RowReads<'a> {
     #[must_use]
     pub fn list(&self) -> Option<&'a GlobalListSource<'a>> {
         self.list
+    }
+
+    /// What the rows' systems are placed and observed through: the interiors, the centre's
+    /// orbits and the list's source, the ones the query read.
+    #[must_use]
+    pub(crate) fn motion(&self) -> MotionReads<'a> {
+        let reads = MotionReads::new(self.interiors, self.orbits);
+        match self.list {
+            Some(list) => reads.with_list(list),
+            None => reads,
+        }
     }
 }
 
@@ -365,6 +378,7 @@ fn with_sources<R>(
                 sources,
                 &RowReads {
                     interiors: &interiors,
+                    orbits: &orbits,
                     list,
                 },
             )

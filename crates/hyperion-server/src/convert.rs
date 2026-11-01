@@ -87,7 +87,7 @@ pub(crate) use self::global_answers::{
 };
 #[cfg(test)]
 pub(crate) use self::motion::origins;
-pub(crate) use self::motion::system_motion;
+pub(crate) use self::motion::{ListMembers, MotionReads, SystemLine, system_motion};
 pub(crate) use self::observe::{
     ResolveRequest, observed_dto, resolved_system, untraced, untraced_system,
 };

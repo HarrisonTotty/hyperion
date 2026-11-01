@@ -2,7 +2,7 @@
 //! P12.T2; Design note 4).
 
 use super::error::{CurvatureError, curvature_error};
-use super::retarded::{Drift, Observer, Retardation, TraceMotionError, retarded};
+use super::retarded::{Drift, Observer, Retardation, TraceMotionError, Trajectory, retarded};
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::members::source::{FeatureInteriorCache, NoInteriorCache};
 use crate::galaxy::placement::SystemRecord;
@@ -141,21 +141,28 @@ pub fn observe_hit_in(
     observer: &Observer,
 ) -> Result<ObservedSystem, TraceMotionError> {
     let line = Drift::of_record_in(galaxy, interiors, hit.record())?;
-    Ok(observe_on_line(galaxy, hit, &line, Some(stars), observer))
+    Ok(observe_hit_on(galaxy, hit, &line, Some(stars), observer))
 }
 
-/// [`observe_hit`] for a hit whose line the caller has traced already, as the observed range
-/// query does with its interior cache (P12.T3). `stars` is `None` for a system that has none, a
-/// rogue planet, which then has no brief at the emitted time either.
+/// [`observe_hit`] for a hit whose path the caller has traced already: as the observed range query
+/// does with its interior cache (P12.T3), and as a server does for a system whose path its own
+/// caches give, a member of the galactic centre on its orbit
+/// ([`CentrePath`](crate::galaxy::features::centre::CentrePath)), a stream's or a dwarf core's
+/// member on its line ([`Drift::of_global_member`]) and a catalogue system on its broken line
+/// ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion); plan 10, P10.T10.b's
+/// registration member). `stars` is `None` for a system whose stars are not given, a rogue planet
+/// or a centre member, which then has no brief at the emitted time either.
+///
+/// `path` must be the hit's system's, defined back to the source horizon, as a [`Trajectory`] is.
 ///
 /// # Panics
 ///
 /// In debug builds, if `stars` are not `hit`'s system's.
 #[must_use]
-pub(crate) fn observe_on_line(
+pub fn observe_hit_on(
     galaxy: &Galaxy,
     hit: &SystemHit,
-    line: &Drift,
+    path: &impl Trajectory,
     stars: Option<&SystemStars>,
     observer: &Observer,
 ) -> ObservedSystem {
@@ -163,7 +170,7 @@ pub(crate) fn observe_on_line(
         stars.is_none_or(|stars| stars.record().id() == hit.id()),
         "the stars given are not the hit's system's"
     );
-    let retardation = retarded(observer, line);
+    let retardation = retarded(observer, path);
     let emitted = retardation.emitted();
     ObservedSystem {
         hit: *hit,
@@ -219,8 +226,20 @@ pub fn summary_observed_in(
         record.id(),
         "the stars given are not the record's system's"
     );
-    let retardation = retarded(observer, &line);
-    Ok((stars.summary_at(retardation.emitted()), retardation))
+    Ok(summary_observed_on(stars, &line, observer))
+}
+
+/// [`summary_observed`] for a system whose path the caller has traced already, as
+/// [`observe_hit_on`] takes it: the summary of `stars` at the retarded time on `path`, with the
+/// retardation.
+#[must_use]
+pub fn summary_observed_on(
+    stars: &SystemStars,
+    path: &impl Trajectory,
+    observer: &Observer,
+) -> (SystemSummary, Retardation) {
+    let retardation = retarded(observer, path);
+    (stars.summary_at(retardation.emitted()), retardation)
 }
 
 #[cfg(test)]
