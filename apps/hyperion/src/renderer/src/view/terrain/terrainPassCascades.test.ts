@@ -66,16 +66,21 @@ const INSTRUMENT = instrumentViewId(1);
 
 const RAD = Math.PI / 180;
 
-/** A body's layers, complete and wholly surveyed. */
+/**
+ * A body's layers, complete and surveyed but at one corner vertex, so that its patches are drawn
+ * by the lit mesh, as edge patches (plan R14, R14.T1.a).
+ */
 function layers(): TerrainLayers {
   const palette = new Uint8Array(16).fill(PALETTE_NONE);
   palette.set([1, 0, 2, PALETTE_NONE]);
   const photometry = new Float32Array(40);
   photometry.set([0.1, 0.12, 0.14, 1, 1]);
+  const surveyMask = new Uint8Array(65 * 65).fill(255);
+  surveyMask[0] = 0;
   return {
     palette,
     weights: new Uint8Array(65 * 65 * 8),
-    surveyMask: new Uint8Array(65 * 65).fill(255),
+    surveyMask,
     fieldLevel: 8,
     boundM: 1,
     sigmaM: 0,
@@ -93,6 +98,8 @@ function layers(): TerrainLayers {
 class PlacedLane implements TerrainPool {
   demand: ReadonlyArray<PatchRequest> = [];
   readonly #baked = new Set<(bake: BakedPatch) => void>();
+  /** The layers each bake carries: {@link layers}' unless a test gives others. */
+  layers: TerrainLayers = layers();
 
   constructor(readonly settings: BakeSettings) {}
 
@@ -133,7 +140,7 @@ class PlacedLane implements TerrainPool {
       boundingRadiusM: 64 * vertexSpacing(PLANET.figure.equatorialRadiusM, key.level).maxM,
       originHeightM: 0,
       skirtDepthM: 1,
-      layers: layers(),
+      layers: this.layers,
     };
     for (const listener of this.#baked) {
       listener(bake);
@@ -319,10 +326,11 @@ const ORBIT = viewOver(1e9, 0, 89.5);
 
 /** A frame's draw, which it must have. */
 function drawOf(frame: TerrainViewFrame): DrawItem {
-  if (frame.draw === null) {
+  const draw = frame.draws.at(-1);
+  if (draw === undefined) {
     throw new Error("the pass drew nothing");
   }
-  return frame.draw;
+  return draw;
 }
 
 /** A frame's cascades, which it must have. */
@@ -592,6 +600,22 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     for (const { records, count } of cast) {
       expect([records.length, subsequence(records, own)]).toEqual([count, true]);
     }
+  });
+
+  it("casts the interior patches' records as it casts the others' (R14.T1.a)", async () => {
+    const made = await litPass();
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    stream(made, [passView(PRIMARY, NEAR)]);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const cast = recordsIn(made.engine, `terrain casters (${PRIMARY}) 1`);
+    expect([
+      frame.draws.map((draw) => draw.mesh.name),
+      interior.length > 0,
+      cast.length > 0,
+      subsequence(cast, interior),
+      terrainCaster(cascadesOf(frame).passes[0] ?? fail()).mesh.name,
+    ]).toEqual([["terrain lit interior patch"], true, true, true, "terrain lit patch"]);
   });
 
   it("gives two views of one pass each their own four passes, of their own records", async () => {
@@ -948,7 +972,7 @@ describe("the fit's inputs (R10.T9.b; D6)", () => {
     const after = fit(2);
     expect([
       flat.cascades,
-      flat.draw !== null,
+      flat.draws.length > 0,
       onLattice(cascadesOf(after).set, viewOver(heightOf(2)).cameraM),
     ]).toEqual([null, true, true]);
   });

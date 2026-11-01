@@ -42,8 +42,11 @@ import {
   GRID_INDICES,
   GRID_VERTICES,
   INDIRECT_ARGS_BYTES,
+  isInteriorBake,
+  LIT_INTERIOR_INDICES,
   LIT_PATCH_INDICES,
   LIT_VERTEX_CODE,
+  litInteriorMeshData,
   litPatchMeshData,
   NO_HORIZON_WORD,
   normalsAtlasLayout,
@@ -302,6 +305,61 @@ describe("the lit material's mesh (R10.T10.c)", () => {
   });
 });
 
+/** A mesh's triangles, each its three indices joined. */
+function triangles(indices: Uint32Array): string[] {
+  return Array.from({ length: indices.length / 3 }, (_, t) =>
+    [...indices.subarray(3 * t, 3 * t + 3)].join(),
+  );
+}
+
+describe("the interior patches' mesh (plan R14, R14.T1.a)", () => {
+  const lit = litPatchMeshData();
+  const interior = litInteriorMeshData();
+  const code = (v: number): number => lit.positions[3 * v + 2] ?? Number.NaN;
+
+  it("keeps the lit mesh's vertices, in its numbering", () => {
+    expect(interior.positions).toEqual(lit.positions);
+  });
+
+  it("draws 8,704 of its 10,752 triangles: its grid and its skirts' feet", () => {
+    expect([interior.indices.length, LIT_INTERIOR_INDICES / 3]).toEqual([
+      LIT_INTERIOR_INDICES,
+      8_704,
+    ]);
+    const parts = new Map<number, number>();
+    for (let t = 0; t < interior.indices.length / 3; t += 1) {
+      const first = code(interior.indices[3 * t] ?? -1);
+      parts.set(first, (parts.get(first) ?? 0) + 1);
+    }
+    expect(Object.fromEntries(parts)).toEqual({
+      [LIT_VERTEX_CODE.grid]: 64 * 64 * 2,
+      [LIT_VERTEX_CODE.skirtFoot]: 4 * 64 * 2,
+    });
+  });
+
+  it("draws them in the lit mesh's order and winding, its heads and fins taken out", () => {
+    const kept = triangles(lit.indices).filter((_, t) => {
+      const first = code(lit.indices[3 * t] ?? -1);
+      return first === LIT_VERTEX_CODE.grid || first === LIT_VERTEX_CODE.skirtFoot;
+    });
+    expect(triangles(interior.indices)).toEqual(kept);
+  });
+
+  it("takes a bake whose every vertex is surveyed for an interior patch, and no other", () => {
+    const whole = new Uint8Array(65 * 65).fill(255);
+    const cornerOut = whole.slice();
+    cornerOut[65 * 65 - 1] = 0;
+    const half = whole.slice();
+    half[100] = 128;
+    expect([whole, cornerOut, half].map((surveyMask) => isInteriorBake({ surveyMask }))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(isInteriorBake(null)).toBe(false);
+  });
+});
+
 /** A survey mask of a patch whose vertices are surveyed where `surveyed(x, y)` says. */
 function maskOf(surveyed: (x: number, y: number) => boolean): Uint8Array {
   const mask = new Uint8Array(65 * 65);
@@ -411,10 +469,22 @@ describe("the survey mask (R10.T10.c)", () => {
     const lit = new TerrainResources(engine, LOW, WGS84, "lit");
     lit.viewBuffers(DEFAULT_TERRAIN_VIEW);
     expect([lit.mesh.name, indexCount()]).toEqual(["terrain lit patch", LIT_PATCH_INDICES]);
+    // The interior patches' mesh and its indirect draw's index count beside it (R14.T1.a).
+    const interiorCount = engine.writes.findLast(
+      (w) => w.buffer === "terrain interior indirect" && w.offsetBytes === 0,
+    );
+    expect([
+      lit.interiorMesh?.name,
+      new Uint32Array(interiorCount?.data.slice().buffer ?? new ArrayBuffer(4))[0],
+    ]).toEqual(["terrain lit interior patch", LIT_INTERIOR_INDICES]);
     const spike = new TerrainResources(engine, LOW, WGS84);
     spike.viewBuffers(DEFAULT_TERRAIN_VIEW);
     expect([spike.mesh.name, indexCount()]).toEqual(["terrain patch", PATCH_INDICES]);
     expect(spike.field("survey-mask")).toBeNull();
+    expect([spike.interiorMesh, spike.viewBuffers(DEFAULT_TERRAIN_VIEW).interior]).toEqual([
+      null,
+      null,
+    ]);
     lit.dispose();
     spike.dispose();
   });
@@ -435,6 +505,8 @@ describe("the survey mask (R10.T10.c)", () => {
       "terrain contacts",
       "terrain indirect",
       "terrain lights",
+      "terrain interior instances",
+      "terrain interior indirect",
     ]);
     resources.dispose();
   });
@@ -1219,6 +1291,45 @@ describe("the terrain's resources", () => {
       [...records.bytes()],
     ]);
     resources.dispose();
+  });
+
+  it("write a frame's interior patches' records and their draw's count into the view's interior buffers (R14.T1.a)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const records = new InstanceRecords(2);
+    records.pushXyz(3, 1, 2, 3, 0, 1);
+    records.pushXyz(4, 4, 5, 6, 0, 1);
+    resources.writeInterior(records, "primary");
+    const [instances, count] = engine.writes.slice(-2);
+    expect([
+      [instances?.buffer, instances?.offsetBytes, [...(instances?.data ?? [])]],
+      [count?.buffer, count?.offsetBytes, [...new Uint32Array(count?.data.slice().buffer ?? [])]],
+    ]).toEqual([
+      ["terrain interior instances (primary)", 0, [...records.bytes()]],
+      ["terrain interior indirect (primary)", 4, [2]],
+    ]);
+    resources.dispose();
+  });
+
+  it("release a view's interior buffers with its others, and every handle at dispose (R14.T1.a)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const before = engine.live;
+    resources.viewBuffers("view");
+    const destroyed: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
+    resources.releaseView("view");
+    expect([engine.live, destroyed.filter((name) => name.includes("interior"))]).toEqual([
+      before,
+      ["terrain interior instances (view)", "terrain interior indirect (view)"],
+    ]);
+    resources.viewBuffers("view");
+    resources.dispose();
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 
   it("refuse, writing nothing, more of a cascade's casters than the slots (R10.T9.b)", async () => {

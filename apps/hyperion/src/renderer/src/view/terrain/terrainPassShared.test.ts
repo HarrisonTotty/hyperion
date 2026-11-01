@@ -430,8 +430,10 @@ describe("each view's own draw of the shared pass (R10.T16.b)", () => {
         `terrain instances (${INSTRUMENT})`,
       ].toSorted(),
     );
-    expect(frame.draw?.storageBuffers?.["instances"]?.name).toBe(`terrain instances (${PRIMARY})`);
-    expect(made.pass.drawFor(INSTRUMENT, frameOf(instrument)).draw).toBeNull();
+    expect(frame.draws.at(-1)?.storageBuffers?.["instances"]?.name).toBe(
+      `terrain instances (${PRIMARY})`,
+    );
+    expect(made.pass.drawFor(INSTRUMENT, frameOf(instrument)).draws).toEqual([]);
   });
 
   it("gives a view the last step did not take no draw", async () => {
@@ -439,7 +441,7 @@ describe("each view's own draw of the shared pass (R10.T16.b)", () => {
     const view = northPole(2_000_000);
     stream(made, [passView(PRIMARY, view)], 2);
     const frame = made.pass.drawFor(INSTRUMENT, frameOf(view));
-    expect([frame.draw, frame.fault, frame.maskReady]).toEqual([null, null, false]);
+    expect([frame.draws, frame.fault, frame.maskReady]).toEqual([[], null, false]);
   });
 });
 
@@ -647,8 +649,8 @@ describe("the shared pass over a survey (R10.T16.b; decision-r10-t16-contracts �
     made.pass.drawFor(PRIMARY, frameOf(view, 0));
     const frame = made.pass.drawFor(PRIMARY, frameOf(view, 2_000));
     expect(made.lane().demand).toEqual([]);
-    expect([frame.draw, frame.conditions.streaming, frame.annunciation, frame.maskReady]).toEqual([
-      null,
+    expect([frame.draws, frame.conditions.streaming, frame.annunciation, frame.maskReady]).toEqual([
+      [],
       false,
       null,
       true,
@@ -848,8 +850,8 @@ describe("the shared pass's fault (R10.T16.b; decision-r10-t16-contracts §7)", 
       true,
       1,
     ]);
-    expect([frame.draw, frame.annunciation, frame.fault, frame.maskReady]).toEqual([
-      null,
+    expect([frame.draws, frame.annunciation, frame.fault, frame.maskReady]).toEqual([
+      [],
       null,
       TERRAIN_NOT_AVAILABLE,
       false,
@@ -877,10 +879,10 @@ describe("the shared pass's fault (R10.T16.b; decision-r10-t16-contracts §7)", 
       step.drawSet.count,
       made.pass.faulted,
       made.pass.maskReadyFor(PRIMARY),
-      frame.draw,
+      frame.draws,
       frame.annunciation,
       frame.fault,
-    ]).toEqual([[], 0, true, false, null, null, TERRAIN_COMPUTATION_FAILED]);
+    ]).toEqual([[], 0, true, false, [], null, TERRAIN_COMPUTATION_FAILED]);
   });
 
   it("keeps the first cause: a halt after every worker is lost changes nothing", async () => {
@@ -1041,8 +1043,9 @@ describe("the live path's records are the single view's (R10.T16; T8.b's sunset 
     single.pass.frame({ ...frameOf(view, 99, LIGHTING), grounded: [] });
     live.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
     live.pass.drawFor(PRIMARY, frameOf(view, 99, LIGHTING));
-    const spike = recordBytes(single.engine, "terrain instances");
-    const primary = recordBytes(live.engine, `terrain instances (${PRIMARY})`);
+    // Its bakes wholly surveyed, every record is an interior patch's (plan R14, R14.T1.a).
+    const spike = recordBytes(single.engine, "terrain interior instances");
+    const primary = recordBytes(live.engine, `terrain interior instances (${PRIMARY})`);
     expect([
       [...primary].join(),
       parentSlots(primary).some((slot) => slot !== NO_PARENT_SLOT),
@@ -1365,7 +1368,7 @@ describe("the shared pass through a loss and its materials (the batch review's S
     made.engine.loseDevice();
     made.pass.step({ views: [passView(PRIMARY, view), passView(INSTRUMENT, view)], grounded: [] });
     const frame = made.pass.drawFor(INSTRUMENT, frameOf(view, 0, LIGHTING));
-    expect([frame.draw, frame.maskReady]).toEqual([null, false]);
+    expect([frame.draws, frame.maskReady]).toEqual([[], false]);
   });
 
   it("reports a depth material that fails to compile, and draws on without it", async () => {
@@ -1379,7 +1382,7 @@ describe("the shared pass through a loss and its materials (the batch review's S
     const frame = made.pass.drawFor(PRIMARY, frameOf(view, 0, LIGHTING));
     expect([
       made.pass.symbologyDepthMaterial,
-      frame.draw !== null,
+      frame.draws.length > 0,
       error.mock.calls.length,
     ]).toEqual([null, true, 1]);
   });
@@ -1412,7 +1415,8 @@ describe("the shared pass through a loss and its materials (the batch review's S
     engine.restore();
     await ready;
     await Promise.resolve();
-    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([2, true]);
+    // The lit material, its interior patches' form (plan R14, R14.T1.a) and its depth material.
+    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([3, true]);
     pass.dispose();
   });
 
@@ -1597,7 +1601,7 @@ describe("each view's own annunciation in one pass (the batch review's M2; decis
     });
 
     it("draws nothing", async () => {
-      expect((await stepped()).frame.draw).toBeNull();
+      expect((await stepped()).frame.draws).toEqual([]);
     });
 
     it("leaves its view's annunciation clear", async () => {

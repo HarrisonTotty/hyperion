@@ -68,7 +68,14 @@ import { uvToSt, vertexSpacing, xyzToFaceUv } from "../view/terrain/cube";
 import { type PatchKey, sameKey } from "../view/terrain/patchKey";
 import { planetGeometry } from "../view/terrain/planet";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
-import { TerrainPass, type TerrainPool } from "../view/terrain/terrainPass";
+import {
+  ALL_LEVERS,
+  NO_LEVERS,
+  TerrainPass,
+  type TerrainDrawnPatches,
+  type TerrainPool,
+} from "../view/terrain/terrainPass";
+import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
 import type { BakedPatch } from "../view/terrain/workers/messages";
 import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
 import {
@@ -80,7 +87,7 @@ import {
 import { WireframeRenderer, WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import { addCanvas } from "./frames";
-import { type Checks, pause } from "./harness";
+import { bytesDigest, type Checks, pause } from "./harness";
 import { MOON_LIKE } from "./litTerrain";
 import {
   bodyAt,
@@ -204,10 +211,17 @@ interface LiveFrame {
   readonly terrainDraws: ReturnType<LiveFrameTerrain["draws"]>;
 }
 
+/** The patches the last frame of each pass drew (plan R14, R14.T1.a), by pass. */
+const drawnPatches = new WeakMap<TerrainPass, TerrainDrawnPatches>();
+
 /** The view's frame terrain over `pass` and the body's mask, `VIEW`'s session's seams. */
 function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
   return {
-    drawTerrain: (view, _body, input) => pass.drawFor(view, input),
+    drawTerrain: (view, _body, input) => {
+      const frame = pass.drawFor(view, input);
+      drawnPatches.set(pass, frame.patches);
+      return frame;
+    },
     coverageMask: () => mask.texture,
     pass: () => pass,
   };
@@ -297,7 +311,7 @@ async function settled(
     const done =
       role?.kind === "handed-over" &&
       role.coverage !== null &&
-      frame.terrainDraws.length === 1 &&
+      frame.terrainDraws.length >= 1 &&
       drawSet !== undefined &&
       drawSet.missing === 0 &&
       (near === null ? drawSet.standingIn === 0 : !standsInNear());
@@ -502,7 +516,30 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     checks.check(
       "R10.T16.c a photorealistic frame with the body handed over draws its terrain over the reference surface, finite, every pixel drawn",
       withRelief.done && finite && covered === pixels,
-      `settled ${String(withRelief.done)}; finite ${String(finite)}, ${String(pixels - covered)} pixels undrawn of ${String(pixels)}`,
+      `settled ${String(withRelief.done)}; finite ${String(finite)}, ${String(pixels - covered)} pixels undrawn of ${String(pixels)}; digest ${bytesDigest(both)}`,
+    );
+
+    // The same frame with plan R14's levers off, from the same selection and residents, as the pass
+    // drew it before them, and with them on again, after it: byte for byte (R14.T1.a).
+    const patches = drawnPatches.get(relief) ?? { interior: 0, edge: 0 };
+    const reliefFrame = async (): Promise<Float32Array> => {
+      const frame = liveFrame(relief, mask, pose, performance.now());
+      return drawn(engine, pose, [
+        { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
+      ]);
+    };
+    relief.setLevers(NO_LEVERS);
+    const unlevered = await reliefFrame();
+    relief.setLevers(ALL_LEVERS);
+    const levered = await reliefFrame();
+    const digests = [both, unlevered, levered].map((texels) => bytesDigest(texels));
+    const litTriangles =
+      (patches.interior * LIT_INTERIOR_INDICES + patches.edge * LIT_PATCH_INDICES) / 3;
+    const unleveredTriangles = ((patches.interior + patches.edge) * LIT_PATCH_INDICES) / 3;
+    checks.check(
+      "R14.T1.a the interior patches' draw, without fins, skirt heads or discard, draws the frame the lit mesh draws, byte for byte",
+      withRelief.done && patches.interior > 0 && new Set(digests).size === 1,
+      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} with the levers, ${digests[1] ?? ""} without, ${digests[2] ?? ""} with them again`,
     );
 
     // On the datum: each surface alone, through the same live path.
@@ -531,7 +568,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         terrainPixels >= 0.1 * pixels &&
         referencePixels >= 0.1 * pixels &&
         terrainAlone.every(Number.isFinite),
-      `settled ${String(onDatum.done)}; terrain ${String(terrainPixels)}, reference ${String(referencePixels)}, both ${String(doubles)} of ${String(pixels)}`,
+      `settled ${String(onDatum.done)}; terrain ${String(terrainPixels)}, reference ${String(referencePixels)}, both ${String(doubles)} of ${String(pixels)}; digests ${bytesDigest(terrainAlone)} terrain, ${bytesDigest(referenceAlone)} reference`,
     );
 
     // The whole frame through the renderer, the marks under and over the surveyed ground.
@@ -576,6 +613,8 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       readonly marked: number;
       /** How many of each row's pixels are, top first. */
       readonly markedRows: ReadonlyArray<number>;
+      /** The canvas's fingerprint ({@link bytesDigest}). */
+      readonly digest: string;
     }> => {
       const { withDepth, giveWay } = options;
       const view = options.view ?? pose;
@@ -635,6 +674,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         shown: at.map((point) => markedNear(read, project(point, view.camera, VIEWPORT))),
         marked: rows.reduce((sum, count) => sum + count, 0),
         markedRows: rows,
+        digest: bytesDigest(read),
       };
     };
     const marksAt = [midpoint(under), midpoint(over)];
@@ -645,12 +685,12 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     checks.check(
       "R10.T16.c over the image the terrain's depth hides a mark under the surveyed ground, and one over it stands",
       withDepth.handedOver &&
-        withDepth.depthDraws === 1 &&
+        withDepth.depthDraws >= 1 &&
         underShown === false &&
         overShown === true &&
         underBare === true &&
         overBare === true,
-      `handed over ${String(withDepth.handedOver)}; with the terrain's ${String(withDepth.depthDraws)} depth draw: the mark under the ground shown ${String(underShown)}, the mark over it ${String(overShown)}; with none: under ${String(underBare)}, over ${String(overBare)}`,
+      `handed over ${String(withDepth.handedOver)}; with the terrain's ${String(withDepth.depthDraws)} depth draws: the mark under the ground shown ${String(underShown)}, the mark over it ${String(overShown)}; with none: under ${String(underBare)}, over ${String(overBare)}; digests ${withDepth.digest} with depth, ${without.digest} without`,
     );
 
     // R10.T16.f: two lines of the body's own on the datum, as its graticule is, each along the
@@ -698,7 +738,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         beyondShown === true &&
         surveyedWhole === true &&
         beyondWhole === true,
-      `handed over ${String(givingWay.handedOver)}, ${String(givingWay.datums)} datum giving way: the lines over the surveyed ground and beyond its edge, at ${linesAt.map(pixelOf).join(" and ")} px, shown ${String(surveyedShown)} and ${String(beyondShown)}; with no datum giving way, ${String(surveyedWhole)} and ${String(beyondWhole)}`,
+      `handed over ${String(givingWay.handedOver)}, ${String(givingWay.datums)} datum giving way: the lines over the surveyed ground and beyond its edge, at ${linesAt.map(pixelOf).join(" and ")} px, shown ${String(surveyedShown)} and ${String(beyondShown)}; with no datum giving way, ${String(surveyedWhole)} and ${String(beyondWhole)}; digests ${givingWay.digest} giving way, ${whole.digest} whole`,
     );
 
     // R10.T16.c's grazing fix, over the flat ground of a pass wholly on the datum, from 10 km up
@@ -745,10 +785,10 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       "R10.T16.c over grazing ground the terrain's depth hides a mark 1 km behind it, seen from 10 km up at 2°",
       grazed.done &&
         behindDrawn.handedOver &&
-        behindDrawn.depthDraws === 1 &&
+        behindDrawn.depthDraws >= 1 &&
         markRow(behindDrawn.markedRows) === 0 &&
         markRow(behindBare.markedRows) >= 20,
-      `settled ${String(grazed.done)} (${grazed.state}), handed over ${String(behindDrawn.handedOver)}, ${String(behindDrawn.depthDraws)} depth draw: the mark's pixels on its ground's row ${String(markRow(behindDrawn.markedRows))}; with no terrain depth, ${String(markRow(behindBare.markedRows))}`,
+      `settled ${String(grazed.done)} (${grazed.state}), handed over ${String(behindDrawn.handedOver)}, ${String(behindDrawn.depthDraws)} depth draws: the mark's pixels on its ground's row ${String(markRow(behindDrawn.markedRows))}; with no terrain depth, ${String(markRow(behindBare.markedRows))}; digests ${behindDrawn.digest} with depth, ${behindBare.digest} without`,
     );
 
     // A line on the ground across the view along row 23's pixel centres, as the survey edge is
@@ -797,11 +837,11 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       return {
         ok:
           viewSettled.done &&
-          grounded.depthDraws === 1 &&
+          grounded.depthDraws >= 1 &&
           bare.marked >= 40 &&
           grounded.marked >= 0.98 * bare.marked &&
           offGround.marked <= 0.8 * bare.marked,
-        read: `${String(deg)}°: settled ${String(viewSettled.done)} (${viewSettled.state}), on the ground ${String(grounded.marked)} of ${String(bare.marked)} px, off it ${String(offGround.marked)}`,
+        read: `${String(deg)}°: settled ${String(viewSettled.done)} (${viewSettled.state}), on the ground ${String(grounded.marked)} of ${String(bare.marked)} px, off it ${String(offGround.marked)}; digests ${grounded.digest}, ${bare.digest}, ${offGround.digest}`,
       };
     };
     const looks: { readonly ok: boolean; readonly read: string }[] = [];

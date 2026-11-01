@@ -256,6 +256,23 @@ export function halfTexels(bytes: ArrayBuffer): Float32Array {
   return Float32Array.from(new Uint16Array(bytes), halfToNumber);
 }
 
+/**
+ * The 32-bit FNV-1a of a read-back's bytes, eight lowercase hexadecimal digits: a frame's
+ * fingerprint in a check's details, so that two builds' frames can be compared byte for byte from
+ * their logs alone (plan R14, R14.T1.a).
+ */
+export function bytesDigest(data: ArrayBufferView | ArrayBuffer): string {
+  const bytes =
+    data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
 /** A half's place on the number line, so that neighbouring halves differ by 1 and ±0 is 0. */
 function halfOrdinal(bits: number): number {
   return (bits & 0x8000) === 0 ? bits : -(bits & 0x7fff);

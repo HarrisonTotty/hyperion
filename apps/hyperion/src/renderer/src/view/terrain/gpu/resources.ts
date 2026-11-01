@@ -153,6 +153,13 @@ export const LIT_PATCH_INDICES =
   PATCH_INDICES + 4 * QUADS * 6 + 2 * SURVEY_FIN_LINES.length * QUADS * 12;
 
 /**
+ * Indices of an interior patch's mesh (plan R14, R14.T1.a; {@link litInteriorMeshData}): the lit
+ * mesh's grid and its skirts' foot strips, 8,704 triangles of its 10,752, without the skirt heads
+ * and fins that a patch with no unsurveyed vertex collapses or discards whole.
+ */
+export const LIT_INTERIOR_INDICES = GRID_INDICES + 4 * QUADS * 6;
+
+/**
  * The rows a lit layout's phase table is first made with: row 0 and the three laws at L(0) = 1 and
  * 0, which most bodies' materials share; it doubles as rows are added.
  */
@@ -604,6 +611,55 @@ export function litPatchMeshData(): {
 }
 
 /**
+ * An interior patch's mesh (plan R14, R14.T1.a): {@link litPatchMeshData}'s vertices, in its
+ * numbering, so that `lit_place` places each as the lit mesh's, and of its triangles the grid's and
+ * the skirts' foot strips' alone, in its order and winding, without the heads interleaved with the
+ * feet and without the fins.
+ *
+ * @remarks
+ * A patch whose every vertex is surveyed (`isInteriorBake`) draws through it: its heads and fins
+ * are collapsed or wholly discarded by the survey (`terrainSurvey.wgsl`'s `lit_place` and
+ * `survey_kept_at`), and none of its grid's or feet's fragments is discarded, so it draws what the
+ * lit mesh draws, with neither the triangles nor the discard (`terrainMaterial.ts`'
+ * `withoutSurveyDiscard`).
+ */
+export function litInteriorMeshData(): {
+  readonly positions: Float32Array;
+  readonly indices: Uint32Array;
+} {
+  const lit = litPatchMeshData();
+  const indices = new Uint32Array(LIT_INTERIOR_INDICES);
+  indices.set(lit.indices.subarray(0, GRID_INDICES));
+  // Each edge quad's twelve indices are its foot's six, then its head's.
+  for (let quad = 0; quad < 4 * QUADS; quad += 1) {
+    const from = GRID_INDICES + 12 * quad;
+    indices.set(lit.indices.subarray(from, from + 6), GRID_INDICES + 6 * quad);
+  }
+  return { positions: lit.positions, indices };
+}
+
+/**
+ * Whether a bake draws as an interior patch (plan R14, R14.T1.a): a body's bake whose every vertex
+ * is surveyed, its survey mask 255 throughout (so its `unsurveyedCells` are none), which the survey
+ * discard never cuts and whose skirt heads and fins draw nothing ({@link litInteriorMeshData}).
+ */
+export function isInteriorBake(layers: Pick<TerrainLayers, "surveyMask"> | null): boolean {
+  return layers !== null && layers.surveyMask.every((byte) => byte === 255);
+}
+
+/** The interior patches' mesh's spec (plan R14, R14.T1.a), of the lit mesh's vertex layout. */
+export function terrainInteriorMeshSpec(): MeshSpec {
+  const { positions, indices } = litInteriorMeshData();
+  return {
+    name: "terrain lit interior patch",
+    positions,
+    indices,
+    topology: "triangle-list",
+    attributes: {},
+  };
+}
+
+/**
  * The mesh a pass of `shading` draws every patch with: R05's shared one ({@link patchMeshData})
  * for the spike's shading, and the lit mesh ({@link litPatchMeshData}) for R10's lit material and
  * the wireframe's (R10.T10.c, R10.T11).
@@ -776,6 +832,20 @@ export interface TerrainViewBuffers {
    * at most (R10.T11); `null` on the other layouts.
    */
   readonly phases: BufferHandle | null;
+  /**
+   * A lit layout's interior patches' instance records and `drawIndexedIndirect` arguments for it
+   * (plan R14, R14.T1.a; {@link litInteriorMeshData}), drawn before its other patches; `null` on
+   * the other layouts.
+   */
+  readonly interior: TerrainInteriorBuffers | null;
+}
+
+/** One view's interior patches' frame buffers (plan R14, R14.T1.a). */
+export interface TerrainInteriorBuffers {
+  /** Their instance records ({@link INSTANCE_RECORD_BYTES} each), one per slot at most. */
+  readonly instances: BufferHandle;
+  /** Their draw's `drawIndexedIndirect` arguments, at offset 0. */
+  readonly indirect: BufferHandle;
 }
 
 /**
@@ -798,6 +868,8 @@ interface MadeFields {
   readonly fields: ReadonlyMap<SlotFieldName, BufferHandle>;
   readonly slotRecords: BufferHandle;
   readonly mesh: MeshHandle;
+  /** A lit layout's interior patches' mesh (plan R14, R14.T1.a); `null` on the other layouts. */
+  readonly interiorMesh: MeshHandle | null;
   /** Each view's frame buffers, made at its first frame on the device. */
   readonly views: Map<string, TerrainViewBuffers>;
   /** Each view's caster buffers, made at its first caster frame on the device (R10.T9.b). */
@@ -891,6 +963,14 @@ export class TerrainResources {
    */
   get mesh(): MeshHandle {
     return this.#made.mesh;
+  }
+
+  /**
+   * A lit layout's interior patches' mesh (plan R14, R14.T1.a; {@link litInteriorMeshData}): the lit
+   * mesh's vertices, its grid and its skirts' feet; `null` on the other layouts.
+   */
+  get interiorMesh(): MeshHandle | null {
+    return this.#made.interiorMesh;
   }
 
   /**
@@ -1265,6 +1345,31 @@ export class TerrainResources {
   }
 
   /**
+   * Writes a frame's interior patches' records into `view`'s interior buffers and sets their
+   * indirect draw's instance count (plan R14, R14.T1.a); nothing on a layout without them.
+   *
+   * @throws RangeError if `instances` holds more records than the buffer, whose capacity is the
+   * slot count.
+   */
+  writeInterior(instances: InstanceRecords, view: string = DEFAULT_TERRAIN_VIEW): void {
+    const made = this.#made;
+    if (instances.count > made.layout.slots.slotCount) {
+      throw new RangeError(
+        `${instances.count} interior instances exceed the ${made.layout.slots.slotCount} slots`,
+      );
+    }
+    const interior = this.viewBuffers(view).interior;
+    if (interior === null) {
+      return;
+    }
+    if (instances.count > 0) {
+      this.#engine.writeBuffer(interior.instances, 0, instances.bytes());
+    }
+    this.#instanceCount[0] = instances.count;
+    this.#engine.writeBuffer(interior.indirect, 4, this.#instanceCount);
+  }
+
+  /**
    * Writes a frame's phase records into `view`'s phases buffer, one a drawn patch in its instances'
    * order (R10.T11); nothing on a layout other than the wireframe's, or with none this frame.
    *
@@ -1300,13 +1405,13 @@ export class TerrainResources {
   }
 
   /**
-   * Releases every handle of `made`: the slot buffers, records and atlas, the mesh, the table and
+   * Releases every handle of `made`: the slot buffers, records and atlas, the meshes, the table and
    * the views'. Each release is tried whatever the one before did; one that throws, a bug (a handle
    * released twice), is reported, so that a restore always goes on to make the resources again
    * and a disposal releases the rest (the batch review's S3).
    */
   #release(made: Made): void {
-    const { lit, normals } = made;
+    const { lit, normals, interiorMesh } = made;
     const releases: Array<() => void> = [
       ...[...made.fields.values()].map((buffer) => () => {
         this.#engine.releaseBuffer(buffer);
@@ -1324,6 +1429,13 @@ export class TerrainResources {
       () => {
         this.#engine.releaseMesh(made.mesh);
       },
+      ...(interiorMesh === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseMesh(interiorMesh);
+            },
+          ]),
       ...(lit === null
         ? []
         : [
@@ -1364,6 +1476,10 @@ export class TerrainResources {
     }
     if (buffers.phases !== null) {
       this.#engine.releaseBuffer(buffers.phases);
+    }
+    if (buffers.interior !== null) {
+      this.#engine.releaseBuffer(buffers.interior.instances);
+      this.#engine.releaseBuffer(buffers.interior.indirect);
     }
   }
 
@@ -1534,7 +1650,25 @@ export class TerrainResources {
           category: "other",
         })
       : null;
-    return { instances, contacts, indirect, lights, phases };
+    let interior: TerrainInteriorBuffers | null = null;
+    if (traits.lit) {
+      interior = {
+        instances: engine.createBuffer({
+          name: named("interior instances"),
+          bytes: layout.slots.slotCount * INSTANCE_RECORD_BYTES,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "other",
+        }),
+        indirect: engine.createBuffer({
+          name: named("interior indirect"),
+          bytes: INDIRECT_ARGS_BYTES,
+          usage: BUFFER_USAGE.INDIRECT | BUFFER_USAGE.COPY_DST,
+          category: "other",
+        }),
+      };
+      engine.writeBuffer(interior.indirect, 0, new Uint32Array([LIT_INTERIOR_INDICES, 0, 0, 0, 0]));
+    }
+    return { instances, contacts, indirect, lights, phases, interior };
   }
 
   #scratchFor(layout: TerrainLayout): Uint16Array {
@@ -1569,6 +1703,7 @@ export class TerrainResources {
     const traits = TERRAIN_SHADING_TRAITS[layout.shading];
     const rest = (): MadeFields => {
       const mesh = engine.createMesh(terrainMeshSpec(layout.shading));
+      const interiorMesh = traits.lit ? engine.createMesh(terrainInteriorMeshSpec()) : null;
       // Every view's buffers, the default view's included, are made at its first frame.
       const views = new Map<string, TerrainViewBuffers>();
       const casters = new Map<string, TerrainCasterBuffers>();
@@ -1577,6 +1712,7 @@ export class TerrainResources {
         fields,
         slotRecords,
         mesh,
+        interiorMesh,
         views,
         casters,
       };

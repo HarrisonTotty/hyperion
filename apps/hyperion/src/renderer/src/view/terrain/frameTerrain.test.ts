@@ -400,6 +400,7 @@ function fakeSource(
     readonly depth?: MaterialHandle | null;
     readonly annunciation?: TerrainAnnunciation | null;
     readonly hasPass?: boolean;
+    readonly draws?: ReadonlyArray<DrawItem>;
   } = {},
 ): {
   readonly source: ViewTerrainSource;
@@ -419,7 +420,8 @@ function fakeSource(
     faulted: false,
   };
   const frame: TerrainViewFrame = {
-    draw: DRAW,
+    draws: options.draws ?? [DRAW],
+    patches: { interior: 0, edge: 1 },
     conditions: { streaming: false, detailLimited: false },
     annunciation: options.annunciation ?? null,
     fault: null,
@@ -631,6 +633,27 @@ describe("a view's frame terrain (R10.T16.c)", () => {
       uniforms: { ...DRAW.uniforms, occluderSlopePx: new Float32Array([3]) },
     });
     expect([withDepth.symbologyDepth().length, withoutDepth.symbologyDepth()]).toEqual([1, []]);
+  });
+
+  it("draws each of a body's draws in order, the interior patches' first, and gives each as depth (R14.T1.a)", () => {
+    const { plan, body } = handed();
+    const interior: DrawItem = {
+      ...DRAW,
+      mesh: { kind: "mesh", name: "terrain lit interior patch" },
+      material: { kind: "material", name: "terrain-lit-interior-baked-offsets" },
+    };
+    const terrain = frameTerrain(fakeSource({ draws: [interior, DRAW] }).source);
+    const draws = terrain.draws(plan, [body]);
+    expect([
+      draws,
+      terrain.symbologyDepth().map((depth) => [depth.mesh.name, depth.material]),
+    ]).toEqual([
+      [interior, DRAW],
+      [
+        ["terrain lit interior patch", DEPTH],
+        ["terrain patches", DEPTH],
+      ],
+    ]);
   });
 });
 
@@ -1046,7 +1069,8 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
         return each === undefined
           ? null
           : {
-              draw: WIRE_DRAW,
+              draws: [WIRE_DRAW],
+              patches: { interior: 0, edge: 1 },
               conditions: { streaming: false, detailLimited: false },
               annunciation: null,
               fault: null,
@@ -1194,7 +1218,7 @@ describe("a wireframe view's terrain (R10.T11; Design note 14)", () => {
   });
 
   it("states no interval while it draws nothing, holding the one its pose sets", () => {
-    const { source } = wireSource(theMoon({ frame: { draw: null } }));
+    const { source } = wireSource(theMoon({ frame: { draws: [] } }));
     const frame = wireframeTerrainOf(source, wireInput({ previousIntervalM: 50_000 }));
     expect([frame.draws, frame.intervalM, frame.heldIntervalM]).toEqual([[], null, 20_000]);
   });

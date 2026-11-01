@@ -306,7 +306,7 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
     for (;;) {
       const drawSet = made.lastStep?.drawSet;
       const done =
-        frame.draw !== null &&
+        frame.draws.length > 0 &&
         frame.maskReady &&
         drawSet !== undefined &&
         drawSet.missing === 0 &&
@@ -319,18 +319,19 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       await pause(50);
       frame = frameAt(performance.now());
     }
-    const settled = frame.draw !== null && frame.maskReady;
+    const settled = frame.draws.length > 0 && frame.maskReady;
     checks.check(
       "R10.T11 a wireframe pass streams the surveyed ground to a draw with the body's mask given",
       settled,
-      `draw ${String(frame.draw !== null)}, mask ready ${String(frame.maskReady)}, missing ${String(frame.missing)}`,
+      `draw ${String(frame.draws.length > 0)}, mask ready ${String(frame.maskReady)}, missing ${String(frame.missing)}`,
     );
     const texture = mask.texture;
-    if (frame.draw === null || texture === null) {
+    // The wireframe's one draw (R10.T11): it has no interior patches' draw.
+    const draw = frame.draws[0];
+    if (draw === undefined || texture === null) {
       return;
     }
 
-    const draw = frame.draw;
     const drawWith = async (
       list: WireframeDrawList,
       terrain: WireframeTerrain,

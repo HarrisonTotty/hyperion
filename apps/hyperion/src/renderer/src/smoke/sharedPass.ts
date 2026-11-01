@@ -41,7 +41,9 @@ import { quaternionFromRows } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import type { MemoryCategory } from "../view/engine/memory";
-import type { DrawItem, RenderEngine } from "../view/engine/types";
+import { BUFFER_USAGE } from "../view/engine/gpuFlags";
+import type { KernelPair } from "../view/engine/kernels";
+import type { DepthLayerPass, DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { vertexDir } from "../view/terrain/cube";
@@ -53,6 +55,8 @@ import { TerrainShadows } from "../view/terrain/shadows/terrainShadows";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import type { TerrainLighting } from "../view/terrain/terrainMaterial";
 import {
+  ALL_LEVERS,
+  NO_LEVERS,
   TerrainPass,
   type TerrainPassView,
   type TerrainView,
@@ -60,7 +64,7 @@ import {
 } from "../view/terrain/terrainPass";
 import { HeightWorkerPool } from "../view/terrain/workers/pool";
 import { moonLikeFixture } from "../test/moonLikeFixture";
-import { type Checks, halfTexels, pause, projection } from "./harness";
+import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
 import { MOON_LIKE } from "./litTerrain";
 
 /** Each view's frame, pixels. */
@@ -216,6 +220,8 @@ interface Drawn {
   readonly finite: boolean;
   /** The share of the frame the terrain covers. */
   readonly cover: number;
+  /** Its texels' fingerprint ({@link bytesDigest}). */
+  readonly digest: string;
 }
 
 /** Draws `frame`'s draw from `view` into a frame of its own and reads it back. */
@@ -238,7 +244,7 @@ async function drawView(
       label: name,
       viewRotation: viewRotation4(view.orientation),
       projection: projection(FRAME.widthPx / FRAME.heightPx),
-      draws: frame.draw === null ? [] : [frame.draw],
+      draws: frame.draws,
       postProcesses: [],
     });
     const texels = halfTexels(await engine.readTexture(target.colour));
@@ -253,6 +259,7 @@ async function drawView(
     return {
       finite: texels.every(Number.isFinite),
       cover: terrain / (FRAME.widthPx * FRAME.heightPx),
+      digest: bytesDigest(texels),
     };
   } finally {
     target.dispose();
@@ -283,7 +290,7 @@ async function stream(
         nowMs: now,
       }),
     );
-    const settled = frames.every((f) => !f.missing && !f.standingIn && f.draw !== null);
+    const settled = frames.every((f) => !f.missing && !f.standingIn && f.draws.length > 0);
     if (settled || now - started > timeoutMs) {
       return { settled, frames };
     }
@@ -396,7 +403,7 @@ export async function checkSharedPass(
       `settled ${String(twoViews.settled)}; ${drawn
         .map(
           (d, n) =>
-            `view ${String(n)}: terrain ${(100 * d.cover).toFixed(1)}%, finite ${String(d.finite)}`,
+            `view ${String(n)}: terrain ${(100 * d.cover).toFixed(1)}%, finite ${String(d.finite)}, digest ${d.digest}`,
         )
         .join("; ")}`,
     );
@@ -516,6 +523,75 @@ async function texelsOf(
     return halfTexels(await engine.readTexture(target.colour));
   } finally {
     target.dispose();
+  }
+}
+
+/** Each caster pass's instances drawn, by direct count, joined: the terrain's and the others'. */
+function casterCounts(passes: ReadonlyArray<DepthLayerPass>): string {
+  return passes
+    .map((each) => String(each.draws.reduce((sum, d) => sum + (d.instanceCount ?? 0), 0)))
+    .join(", ");
+}
+
+/**
+ * A smoke kernel that copies one layer of the cascades' depth into a buffer as its bits, row by
+ * row, so that the layers can be fingerprinted (plan R14, R14.T1.b): a caster change that leaves
+ * the frame alone still shows in them.
+ */
+const LAYER_COPY_KERNEL: KernelPair = {
+  name: "smoke cascade layer copy",
+  reference: `
+@group(0) @binding(0) var layers : texture_depth_2d_array;
+@group(0) @binding(1) var<storage, read_write> bits : array<u32>;
+@group(0) @binding(2) var<uniform> params : vec4u;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id : vec3u) {
+  let size = params.y;
+  if (id.x >= size || id.y >= size) {
+    return;
+  }
+  bits[id.y * size + id.x] = bitcast<u32>(textureLoad(layers, vec2u(id.xy), params.x, 0));
+}
+`,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** Each of `depth`'s `layers` layers of `sizePx`² texels, fingerprinted ({@link bytesDigest}). */
+async function layerDigests(
+  engine: RenderEngine,
+  depth: TextureHandle,
+  layers: number,
+  sizePx: number,
+): Promise<string[]> {
+  const kernel = engine.createCompute(LAYER_COPY_KERNEL);
+  const bits = engine.createBuffer({
+    name: "smoke cascade layer bits",
+    bytes: sizePx * sizePx * 4,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  try {
+    const digests: string[] = [];
+    for (let layer = 0; layer < layers; layer += 1) {
+      engine.dispatch(
+        kernel,
+        {
+          uniforms: { params: Uint32Array.of(layer, sizePx, 0, 0) },
+          buffers: { bits },
+          sampled: { layers: depth },
+          storage: {},
+        },
+        [Math.ceil(sizePx / 8), Math.ceil(sizePx / 8), 1],
+      );
+      // One layer read at a time, so that the buffer is reused.
+      // oxlint-disable-next-line no-await-in-loop
+      digests.push(bytesDigest(await engine.readBuffer(bits)));
+    }
+    return digests;
+  } finally {
+    engine.releaseBuffer(bits);
+    engine.releaseCompute(kernel);
   }
 }
 
@@ -639,7 +715,7 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         passView.id,
         frameInput(view, light, false, performance.now()),
       );
-      settled = !streaming.missing && !streaming.standingIn && streaming.draw !== null;
+      settled = !streaming.missing && !streaming.standingIn && streaming.draws.length > 0;
       if (!settled) {
         // The workers bake and the engine answers on the event loop, between the polls.
         // oxlint-disable-next-line no-await-in-loop
@@ -655,7 +731,7 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
     const weight = cascades?.set.weight ?? 0;
     checks.check(
       "R10.T9.b on the high setting near the ground the four caster passes are drawn at w > 0, the nearest with the terrain",
-      frame.draw !== null &&
+      frame.draws.length > 0 &&
         weight > 0 &&
         passes.length === 4 &&
         passes.every((each, n) => each.layer === n) &&
@@ -663,31 +739,53 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         cascades?.set.unclippedDepth === unclipped,
       `${path}; settled ${String(settled)} in ${((performance.now() - started) / 1_000).toFixed(1)} s; w ${weight.toFixed(3)}, shadowed range ${(cascades?.set.rangeM ?? 0).toFixed(0)} m, cascade 1's texel ${((cascades?.set.cascades[0].texelM ?? 0) * 100).toFixed(2)} cm, caster reach ${((cascades?.set.casterReachM ?? 0) / 1_000).toFixed(1)} km; draws per cascade ${draws.join(", ")}`,
     );
-    const draw = frame.draw;
-    if (draw === null) {
+    if (frame.draws.length === 0) {
       throw new Error("the cascades' view drew no terrain");
     }
-    // The receiver's read as drawn, then the same draw at w = 0, before any other draws the set.
-    const shadowed = await texelsOf(engine, "cascades: shadowed", view, [draw]);
-    const axis = draw.uniforms["cascadeViewAxis"] ?? new Float32Array(4);
-    const open = await texelsOf(engine, "cascades: w = 0", view, [
-      {
+    // The receiver's read as drawn, then the same draws at w = 0, before any other draws the set.
+    const shadowed = await texelsOf(engine, "cascades: shadowed", view, frame.draws);
+    const unshadowed: DrawItem[] = [];
+    for (const draw of frame.draws) {
+      const axis = draw.uniforms["cascadeViewAxis"] ?? new Float32Array(4);
+      unshadowed.push({
         ...draw,
         uniforms: {
           ...draw.uniforms,
           cascadeViewAxis: Float32Array.of(axis[0] ?? 0, axis[1] ?? 0, axis[2] ?? 0, 0),
         },
-      },
-    ]);
+      });
+    }
+    const open = await texelsOf(engine, "cascades: w = 0", view, unshadowed);
     const finite = shadowed.every(Number.isFinite) && open.every(Number.isFinite);
     const seen = againstUnshadowed(shadowed, open);
+    const target = shadows.target;
+    const layers =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, target.layers, target.sizePx);
     checks.check(
       "R10.T9.b the frame with cascades is finite at every texel, darker at some and nowhere brighter than at w = 0",
       finite &&
         seen.terrain >= 0.3 * FRAME.widthPx * FRAME.heightPx &&
         seen.darker > 0 &&
         seen.brighter <= NEVER_BRIGHTER,
-      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)})`,
+      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
+    );
+    // The same frame with plan R14's levers off, as the pass drew it before them: its cascades'
+    // layers and its frame, byte for byte, from the same selection and residents (R14.T1).
+    made.setLevers(NO_LEVERS);
+    const unlevered = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const shadowedBefore = await texelsOf(engine, "cascades: before R14", view, unlevered.draws);
+    const layersBefore =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, target.layers, target.sizePx);
+    made.setLevers(ALL_LEVERS);
+    checks.check(
+      "R14.T1 the cascades' layers and the frame they shadow are those the pass drew before plan R14, byte for byte",
+      bytesDigest(shadowedBefore) === bytesDigest(shadowed) &&
+        layersBefore.join() === layers.join(),
+      `${path}; ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches; caster instances by cascade ${casterCounts(passes)}, ${casterCounts(unlevered.cascades?.passes ?? [])} before; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}; before ${layersBefore.join(", ")}`,
     );
     made.dispose();
     pass = null;

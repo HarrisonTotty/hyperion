@@ -741,8 +741,8 @@ describe("the terrain session's fault (R10.T16.b; decision-r10-t16-contracts §7
   it("draws nothing under the fault, giving the fault and no annunciation", async () => {
     const { h } = await faulted();
     const frame = h.session.drawTerrain(PRIMARY, MOON, frameAt(5_000));
-    expect([frame?.draw, frame?.fault, frame?.annunciation]).toEqual([
-      null,
+    expect([frame?.draws, frame?.fault, frame?.annunciation]).toEqual([
+      [],
       TERRAIN_NOT_AVAILABLE,
       null,
     ]);
@@ -1146,11 +1146,11 @@ describe("the terrain session's computation fault (R10.T16.e; decision-r10-t16-l
       draws.length,
       terrain.annunciation,
       terrain.surveyCoverage(MOON),
-      instrument?.draw,
+      instrument?.draws,
       instrument?.fault,
       instrument?.annunciation,
       instrument?.maskReady,
-    ]).toEqual([0, null, null, null, TERRAIN_COMPUTATION_FAILED, null, false]);
+    ]).toEqual([0, null, null, [], TERRAIN_COMPUTATION_FAILED, null, false]);
   });
 
   it("makes no pass once faulted: a body handed over after it keeps its figure, its mask withheld", async () => {
@@ -1318,7 +1318,7 @@ function wireFrameAt(nowMs: number): TerrainViewFrameInput {
 
 /** The material a view's frame of a pass draws with, or `null` where it draws nothing. */
 function material(frame: TerrainViewFrame | null): string | null {
-  return frame?.draw?.material.name ?? null;
+  return frame?.draws.at(-1)?.material.name ?? null;
 }
 
 /** Cells of face +z at the field's level, by their `[i, j]`. */
@@ -1571,9 +1571,13 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary" })],
   ];
 
-  /** The high setting's four, its shadow cascades' caster among them (R10.T9.b). */
+  /**
+   * The high setting's five, its shadow cascades' caster (R10.T9.b) and its interior patches' lit
+   * form (plan R14, R14.T1.a) among them.
+   */
   const HIGH = [
     "terrain-lit-baked-offsets",
+    "terrain-lit-interior-baked-offsets",
     "terrain-depth-baked-offsets",
     "terrain-shadow-baked-offsets",
     "terrain-wire-baked-offsets",
@@ -1588,7 +1592,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
 
   it("compiles its setting's lit, depth, caster and wireframe materials as it is made", async () => {
     const h = await harness();
-    expect([await h.session.compiled, compiled(h)]).toEqual([4, HIGH]);
+    expect([await h.session.compiled, compiled(h)]).toEqual([5, HIGH]);
   });
 
   it("compiles the low setting's on face differences", async () => {
@@ -1596,6 +1600,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     expect(compiled(h)).toEqual([
       "terrain-lit-face-differences",
+      "terrain-lit-interior-face-differences",
       "terrain-depth-face-differences",
       "terrain-wire-face-differences",
     ]);
@@ -1606,7 +1611,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH_DRAWN, 4]);
+    expect([compiled(h, 5), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH_DRAWN, 5]);
   });
 
   it("compiles nothing at a hand-over on the low setting either", async () => {
@@ -1617,14 +1622,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
         "terrain-lit-face-differences",
         "terrain-depth-face-differences",
         "terrain-wire-face-differences",
       ],
-      3,
+      4,
     ]);
   });
 
@@ -1637,7 +1642,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.engine.restore();
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH_DRAWN, 4]);
+    expect([compiled(h, 5), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH_DRAWN, 5]);
   });
 
   it("releases its materials only at its teardown, not with a pass", async () => {
@@ -1649,7 +1654,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.session.step();
     const kept = [h.session.passBodies.size, h.engine.live.materials];
     h.session.dispose();
-    expect([kept, h.engine.live.materials]).toEqual([[0, 4], 0]);
+    expect([kept, h.engine.live.materials]).toEqual([[0, 5], 0]);
   });
 });
 
@@ -1734,7 +1739,7 @@ describe("the terrain session's shadow cascades (R10.T9.b; decision-r10-t9b-desi
     const frame = h.session.drawTerrain(PRIMARY, MOON, nearGround(0));
     expect([
       frame?.cascades ?? null,
-      frame?.draw?.textures["shadowCascades"]?.name,
+      frame?.draws.at(-1)?.textures["shadowCascades"]?.name,
       h.engine.counts.depthLayerTargets,
       h.session.memory().gpuBytes.get("shadows"),
     ]).toEqual([null, SHADOW_PLACEHOLDER_NAME, 0, undefined]);

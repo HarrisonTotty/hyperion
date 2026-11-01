@@ -78,7 +78,9 @@ import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import {
   TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
   TERRAIN_LIT_EMISSIVE_MATERIALS,
+  TERRAIN_LIT_INTERIOR_MATERIALS,
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
@@ -236,7 +238,8 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
- * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
+ * R10.T10.b's lit terrain, one material per vertex path, and its interior patches' form without the
+ * survey discard (plan R14, R14.T1.a), R10.T16.c's lit terrain as depth
  * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
  * vertex path, and R10.T9.b's shadow casters, one per vertex path, for the cascades' `depth-only`
  * layers.
@@ -246,6 +249,7 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     ...TERRAIN_MATERIALS,
     LIT_AGX_MATERIAL,
     ...TERRAIN_LIT_MATERIALS,
+    ...TERRAIN_LIT_INTERIOR_MATERIALS,
     ...TERRAIN_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
@@ -318,8 +322,11 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.limb },
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
-  // R10.T10.b's lit terrain's emissive form, one material per vertex path.
-  ...TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
+  // R10.T10.b's lit terrain's emissive form, one material per vertex path, and its interior
+  // patches' form (plan R14, R14.T1.a).
+  ...[...TERRAIN_LIT_EMISSIVE_MATERIALS, ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS].map(
+    (spec): CatalogueEntry => ({ kind: "material", spec }),
+  ),
 ];
 
 /**

@@ -11,7 +11,7 @@ import type { Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
-import { normalsAtlasOf } from "./gpu/resources";
+import { DEFAULT_TERRAIN_VIEW, LIT_INTERIOR_INDICES, normalsAtlasOf } from "./gpu/resources";
 import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
 import { terrainWireMaterialSpec } from "./terrainWire";
 import { distanceToBoxM, relativeBounds } from "./bounds";
@@ -39,15 +39,19 @@ import {
   packTerrainLighting,
   type TerrainLighting,
   terrainDepthMaterialSpec,
+  terrainLitEmissiveInteriorMaterialSpec,
   terrainLitEmissiveMaterialSpec,
+  terrainLitInteriorMaterialSpec,
   terrainLitMaterialSpec,
 } from "./terrainMaterial";
 import { microtasks } from "../../test/opticsFakes";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
+  ALL_LEVERS,
   effectiveTauPx,
   morphRangeM,
+  NO_LEVERS,
   SELECT_MEASURE,
   type TerrainFrame,
   type TerrainFrameInput,
@@ -232,9 +236,9 @@ async function passOn(
   };
 }
 
-/** The slots of the instance records last written. */
-function writtenSlots(engine: CountingRenderEngine): number[] {
-  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+/** The slots of the instance records last written into `buffer`, the edge patches' by default. */
+function writtenSlots(engine: CountingRenderEngine, buffer = "terrain instances"): number[] {
+  const write = engine.writes.findLast((w) => w.buffer === buffer);
   const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const slots: number[] = [];
   for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
@@ -254,7 +258,7 @@ describe("the terrain pass", () => {
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
-    expect(frame.draw?.indirect?.buffer.name).toBe("terrain indirect");
+    expect(frame.draws.at(-1)?.indirect?.buffer.name).toBe("terrain indirect");
     expect(writtenSlots(engine)).toEqual(
       Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
     );
@@ -387,7 +391,7 @@ describe("the terrain pass", () => {
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
-    expect(frame.draw?.material.name).toBe(terrainMaterialSpec("face-differences").name);
+    expect(frame.draws.at(-1)?.material.name).toBe(terrainMaterialSpec("face-differences").name);
   });
 
   it("keeps its variant through a device restore", async () => {
@@ -497,7 +501,7 @@ describe("the terrain pass", () => {
       ),
     );
     // Column-major: the first column is R's first column, (0, 1, 0).
-    expect(Array.from(frame.draw?.uniforms["bodyRotation"] ?? []).slice(0, 4)).toEqual([
+    expect(Array.from(frame.draws.at(-1)?.uniforms["bodyRotation"] ?? []).slice(0, 4)).toEqual([
       0, 1, 0, 0,
     ]);
   });
@@ -1016,6 +1020,17 @@ function bodyLayers(): TerrainLayers {
 }
 
 /**
+ * {@link bodyLayers} with one vertex, the corner (0, 0), outside the survey: its patches are edge
+ * patches, drawn by the lit mesh and the material with the survey discard (plan R14, R14.T1.a).
+ */
+function edgeLayers(): TerrainLayers {
+  const layers = bodyLayers();
+  const surveyMask = layers.surveyMask.slice();
+  surveyMask[0] = 0;
+  return { ...layers, surveyMask };
+}
+
+/**
  * The parent slots and quadrants of the instance records last written, each quadrant without the
  * morph holds above its two bits (R10.T8.c).
  */
@@ -1061,13 +1076,13 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
 
   it("binds the slots' class weights and laws, the lights, the phase table and a body without air's tables", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
-    pool().layers = bodyLayers();
+    pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     pass.frame({ ...inputAt(view), lighting: LIGHTING });
     pool().bakeDemand(pass);
     const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
-    const draw = frame.draw;
-    if (draw === null) {
+    const draw = frame.draws.at(-1);
+    if (draw === undefined) {
       throw new Error("the lit pass drew nothing");
     }
     expect(draw.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
@@ -1122,16 +1137,16 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
 
   it("draws nothing lit until a frame gives its lights, and binds the frame's atmosphere where given", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
-    pool().layers = bodyLayers();
+    pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const unlit = pass.frame(inputAt(view));
-    expect(unlit.draw).not.toBeNull();
+    expect(unlit.draws.at(-1)).toBeDefined();
     expect(engine.writes.filter((w) => w.buffer === "terrain lights")).toHaveLength(1);
     const air = createAirlessTables(engine, "a body's air");
     const withAir = pass.frame({ ...inputAt(view), lighting: { ...LIGHTING, atmosphere: air } });
-    expect(withAir.draw?.textures["atmosphereBody"]).toBe(air.body);
+    expect(withAir.draws.at(-1)?.textures["atmosphereBody"]).toBe(air.body);
   });
 
   /** A lit pass on low over `bodyLayers`, its patches baked, and its view. */
@@ -1139,7 +1154,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     Awaited<ReturnType<typeof passOn>> & { readonly view: TerrainView }
   > {
     const made = await passOn("low", { source: BODY });
-    made.pool().layers = bodyLayers();
+    made.pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     made.pass.frame({ ...inputAt(view), lighting: LIGHTING });
     made.pool().bakeDemand(made.pass);
@@ -1159,7 +1174,9 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
   it("draws a body whose lighting carries its ground's emission by the plain form until the emissive form is made (R08.T18.a)", async () => {
     const { pass, view } = await bakedLitPass();
     const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
-    expect(plain.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(plain.draws.at(-1)?.material.name).toBe(
+      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+    );
   });
 
   it("draws it by the emissive form once that is made (R08.T18.a)", async () => {
@@ -1167,7 +1184,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     pass.frame({ ...inputAt(view), lighting: EMITTING });
     await microtasks();
     const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
-    expect(emissive.draw?.material.name).toBe(
+    expect(emissive.draws.at(-1)?.material.name).toBe(
       terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name,
     );
   });
@@ -1189,7 +1206,9 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     pass.frame({ ...inputAt(view), lighting: EMITTING });
     await microtasks();
     const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
-    expect(after.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(after.draws.at(-1)?.material.name).toBe(
+      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+    );
   });
 
   it("asks for the emissive form again on the device a restore makes (R08.T18.a)", async () => {
@@ -1203,7 +1222,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     engine.restore();
     await pass.ready();
     // The new device's slots are empty until its pool bakes them again.
-    pool().layers = bodyLayers();
+    pool().layers = edgeLayers();
     pass.frame({ ...inputAt(view), lighting: EMITTING });
     pool().bakeDemand(pass);
     pass.frame({ ...inputAt(view), lighting: EMITTING });
@@ -1218,7 +1237,9 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     pass.frame({ ...inputAt(view), lighting: EMITTING });
     await microtasks();
     const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
-    expect(frame.draw?.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(frame.draws.at(-1)?.material.name).toBe(
+      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+    );
     expect(reported).toHaveBeenCalledWith(
       "the terrain's emissive form failed: its ground is drawn unlit by itself",
       expect.any(Error),
@@ -1227,22 +1248,22 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
 
   it("binds the larger phase table once the slots' laws outgrow it", async () => {
     const { pass, pool } = await passOn("low", { source: BODY });
-    pool().layers = bodyLayers();
+    pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     pass.frame({ ...inputAt(view), lighting: LIGHTING });
     pool().bakeDemand(pass);
-    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draw?.textures[
+    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draws.at(-1)?.textures[
       "phaseFactorTable"
     ];
     // Six bright frosts of six L(0)s: rows past the table's first four.
-    const frosts = bodyLayers();
+    const frosts = edgeLayers();
     const photometry = new Float32Array(40);
     for (let k = 0; k < 6; k += 1) {
       photometry.set([0.9, 0.9, 0.9, 2, 0.9 - 0.05 * k], 5 * k);
     }
     pool().layers = { ...frosts, photometry };
     pool().deliver(pass, { face: 2, level: 3, i: 1, j: 1 });
-    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draw?.textures[
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draws.at(-1)?.textures[
       "phaseFactorTable"
     ];
     expect(before?.name).toBe("terrain phase table");
@@ -1252,7 +1273,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
 
   it("gives each drawn patch its parent's slot where the parent's horizon map is resident, and no parent otherwise", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
-    pool().layers = bodyLayers();
+    pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     pass.frame({ ...inputAt(view), lighting: LIGHTING });
     for (const face of [0, 1, 2, 3, 4, 5] as const) {
@@ -1294,7 +1315,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     );
     // A parent whose slot holds no map is no parent to blend to.
     pool().layers = {
-      ...bodyLayers(),
+      ...edgeLayers(),
       horizonNear: new Uint32Array(),
       horizonFar: new Uint32Array(),
     };
@@ -1324,6 +1345,225 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(pool().bakeDemand(pass)).toBeGreaterThan(0);
     const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(frame.drawSet.count).toBe(0);
+  });
+});
+
+/** Each of a frame's draws' mesh, material, instance buffer and indirect buffer, by name. */
+function named(frame: TerrainFrame): string[][] {
+  return frame.draws.map((draw) => [
+    draw.mesh.name,
+    draw.material.name,
+    draw.storageBuffers?.["instances"]?.name ?? "",
+    draw.indirect?.buffer.name ?? "",
+  ]);
+}
+
+describe("the interior patches (plan R14, R14.T1.a)", () => {
+  const BODY = {
+    kind: "body",
+    body: "0200080020000000.0301",
+    detailSeed: "617373656d626c79",
+    weights: "baked",
+  } as const;
+
+  const LIGHTING = {
+    lights: [],
+    occluders: [],
+    secondaries: [],
+    elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    exposureScale: 1e-4,
+  } satisfies TerrainLighting;
+
+  /** {@link LIGHTING} carrying the lava world's ground's emission about a star over the pole. */
+  const EMITTING: TerrainLighting = {
+    ...LIGHTING,
+    emission: {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: { x: 0, y: 0, z: 1 },
+      meltClasses: [],
+    },
+  };
+
+  /**
+   * A lit pass on low over `bodyLayers`, wholly surveyed, its patches baked, and its view, on an
+   * engine that fails the materials `fails` names.
+   */
+  async function interiorPass(fails: (name: string) => boolean = () => false): Promise<{
+    readonly pass: TerrainPass;
+    readonly pool: FakePool;
+    readonly engine: CountingRenderEngine;
+    readonly view: TerrainView;
+  }> {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    engine.failMaterials(fails);
+    const pools: FakePool[] = [];
+    const pass = new TerrainPass({
+      engine,
+      setting: "low",
+      planet: PLANET,
+      source: BODY,
+      createPool: (bake) => {
+        const made = new FakePool(bake);
+        pools.push(made);
+        return made;
+      },
+    });
+    await pass.ready();
+    const pool = pools.at(-1);
+    if (pool === undefined) {
+      throw new Error("no pool was made");
+    }
+    pool.layers = bodyLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool.bakeDemand(pass);
+    return { pass, pool, engine, view };
+  }
+
+  it("draws a wholly surveyed body's patches by the interior mesh and form alone", async () => {
+    const { pass, engine, view } = await interiorPass();
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const path = pass.layout.vertexPath;
+    expect(named(frame)).toEqual([
+      [
+        "terrain lit interior patch",
+        terrainLitInteriorMaterialSpec(path).name,
+        "terrain interior instances",
+        "terrain interior indirect",
+      ],
+    ]);
+    const slots = Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count));
+    expect(slots.length).toBeGreaterThan(0);
+    expect(writtenSlots(engine, "terrain interior instances")).toEqual(slots);
+    const counts = engine.writes.filter((w) => w.buffer === "terrain interior indirect");
+    expect([
+      [...new Uint32Array(counts[0]?.data.slice().buffer ?? new ArrayBuffer(0))],
+      [...new Uint32Array(counts.at(-1)?.data.slice().buffer ?? new ArrayBuffer(0))],
+    ]).toEqual([[LIT_INTERIOR_INDICES, 0, 0, 0, 0], [slots.length]]);
+    // The interior draw is the lit draw but its mesh, material, records and indirect arguments.
+    const draw = frame.draws[0];
+    expect([draw?.uniforms["bodyRotation"], draw?.textures["phaseFactorTable"]?.name]).toEqual([
+      expect.any(Float32Array),
+      "terrain phase table",
+    ]);
+  });
+
+  it("draws the interior patches first and then the others, each in the draw set's order, and classifies a rebake again", async () => {
+    const { pass, pool, engine, view } = await interiorPass();
+    const first = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const drawn = first.drawSet.patches.map(({ patch }) => patch);
+    expect(drawn.length).toBeGreaterThan(1);
+    // Every other drawn patch baked again with a vertex outside the survey: an edge patch now.
+    const edges = drawn.filter((_, n) => n % 2 === 1);
+    for (const patch of edges) {
+      pool.layersOf.set(patchKeyString(patch.key), edgeLayers());
+      pool.deliver(pass, patch.key);
+    }
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const path = pass.layout.vertexPath;
+    expect(named(frame).map(([mesh, material]) => [mesh, material])).toEqual([
+      ["terrain lit interior patch", terrainLitInteriorMaterialSpec(path).name],
+      ["terrain lit patch", terrainLitMaterialSpec(path).name],
+    ]);
+    const edgeSlots = new Set(edges.map((patch) => patch.slot));
+    const slots = Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count));
+    expect([
+      writtenSlots(engine, "terrain interior instances"),
+      writtenSlots(engine, "terrain instances"),
+    ]).toEqual([
+      slots.filter((slot) => !edgeSlots.has(slot)),
+      slots.filter((slot) => edgeSlots.has(slot)),
+    ]);
+  });
+
+  it("counts the patches each draw draws", async () => {
+    const { pass, pool, view } = await interiorPass();
+    const first = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const edge = first.drawSet.patches[0]?.patch;
+    if (edge === undefined) {
+      throw new Error("the pass drew nothing");
+    }
+    pool.layersOf.set(patchKeyString(edge.key), edgeLayers());
+    pool.deliver(pass, edge.key);
+    const view0 = pass.drawFor(DEFAULT_TERRAIN_VIEW, { ...inputAt(view), lighting: LIGHTING });
+    expect(view0.patches).toEqual({ interior: first.drawSet.count - 1, edge: 1 });
+  });
+
+  it("draws as before the split with the interior lever off, from the same records, and splits again with it on", async () => {
+    const { pass, engine, view } = await interiorPass();
+    const path = pass.layout.vertexPath;
+    const split = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pass.setLevers(NO_LEVERS);
+    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const slots = Array.from(before.drawSet.slots.subarray(0, before.drawSet.count));
+    expect([named(before), writtenSlots(engine), pass.levers]).toEqual([
+      [
+        [
+          "terrain lit patch",
+          terrainLitMaterialSpec(path).name,
+          "terrain instances",
+          "terrain indirect",
+        ],
+      ],
+      slots,
+      NO_LEVERS,
+    ]);
+    pass.setLevers(ALL_LEVERS);
+    const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(named(again)).toEqual(named(split));
+  });
+
+  it("draws every patch by the lit mesh where the interior form cannot be made, and reports it", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pass, engine, view } = await interiorPass((name) =>
+      name.startsWith("terrain-lit-interior"),
+    );
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(named(frame)).toEqual([
+      [
+        "terrain lit patch",
+        terrainLitMaterialSpec(pass.layout.vertexPath).name,
+        "terrain instances",
+        "terrain indirect",
+      ],
+    ]);
+    expect(writtenSlots(engine)).toEqual(
+      Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
+    );
+    expect(reported).toHaveBeenCalledWith(
+      "the terrain's interior form failed: its interior patches are drawn with the others",
+      expect.any(Error),
+    );
+  });
+
+  it("draws the interior patches by the interior emissive form once both emissive forms are made (R08.T18.a)", async () => {
+    const { pass, view } = await interiorPass();
+    const path = pass.layout.vertexPath;
+    const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect([plain, emissive].map((frame) => frame.draws.map((draw) => draw.material.name))).toEqual(
+      [
+        [terrainLitInteriorMaterialSpec(path).name],
+        [terrainLitEmissiveInteriorMaterialSpec(path).name],
+      ],
+    );
+  });
+
+  it("draws them by the lit mesh's emissive form where its interior form cannot be made", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pass, view } = await interiorPass((name) =>
+      name.startsWith("terrain-lit-emissive-interior"),
+    );
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(named(frame).map(([mesh, material]) => [mesh, material])).toEqual([
+      ["terrain lit patch", terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name],
+    ]);
   });
 });
 

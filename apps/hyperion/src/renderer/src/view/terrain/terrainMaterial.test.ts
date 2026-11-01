@@ -75,7 +75,9 @@ import {
   TERRAIN_LIGHT_ROWS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_BINDINGS,
+  TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
   TERRAIN_LIT_EMISSIVE_MATERIALS,
+  TERRAIN_LIT_INTERIOR_MATERIALS,
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
   PHASE_LAW,
@@ -92,6 +94,9 @@ import {
   texelClassAlbedo,
   texelLawOf,
   texelWeights,
+  terrainLitEmissiveInteriorMaterialSpec,
+  terrainLitInteriorMaterialSpec,
+  withoutSurveyDiscard,
   withTerrainEmission,
 } from "./terrainMaterial";
 import { packDiscEmission } from "../atmosphere/discReflectance";
@@ -1323,6 +1328,58 @@ describe("the rows' energy bound, with their f and L(α) (decision-r10-limb §3)
     for (const mu0 of MU0S) {
       expect(Math.abs(eta(table, mu0) - 1)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("the interior patches' lit forms (plan R14, R14.T1.a)", () => {
+  /** `terrainLitShade.wgsl`'s survey discard, which the interior forms take out. */
+  const DISCARD = "  if (!survey_kept(in)) {\n    discard;\n  }\n";
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "makes the %s path's from the plain and emissive forms, the survey discard alone taken out, their bindings and states the same",
+    (path) => {
+      for (const [form, interior] of [
+        [terrainLitMaterialSpec(path), terrainLitInteriorMaterialSpec(path)],
+        [terrainLitEmissiveMaterialSpec(path), terrainLitEmissiveInteriorMaterialSpec(path)],
+      ] as const) {
+        const [head = "", tail = "", ...rest] = form.fragmentWgsl.split(DISCARD);
+        expect(rest).toEqual([]);
+        expect(interior.fragmentWgsl).toBe(head + tail);
+        // No discard statement is left, outside the comments that name it.
+        expect(interior.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "")).not.toMatch(/\bdiscard\b/u);
+        expect(interior.vertexWgsl).toBe(interior.fragmentWgsl);
+        expect({
+          ...interior,
+          name: form.name,
+          displayName: form.displayName,
+          vertexWgsl: form.vertexWgsl,
+          fragmentWgsl: form.fragmentWgsl,
+        }).toEqual(form);
+      }
+      // The `terrain-lit-` prefix the probes and the hand-over check read (R10.T14, R10.T16).
+      expect([
+        terrainLitInteriorMaterialSpec(path).name,
+        terrainLitEmissiveInteriorMaterialSpec(path).name,
+      ]).toEqual([`terrain-lit-interior-${path}`, `terrain-lit-emissive-interior-${path}`]);
+    },
+  );
+
+  it("are registered in the catalogue for both paths", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "material" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(
+        [...TERRAIN_LIT_INTERIOR_MATERIALS, ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS].map(
+          (m) => m.name,
+        ),
+      ),
+    );
+  });
+
+  it("refuses a source without the survey discard, or with two", () => {
+    expect(() => withoutSurveyDiscard("fn main() {}")).toThrow(/once, found 0/u);
+    expect(() => withoutSurveyDiscard(DISCARD + DISCARD)).toThrow(/once, found 2/u);
   });
 });
 

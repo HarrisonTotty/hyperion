@@ -982,7 +982,7 @@ export class SpikeRun {
       this.#views.main,
       viewRotation4(camera.orientation),
       perspectiveReversedInfinite(SPIKE_FOV_X_RAD, render.widthPx / render.heightPx, NEAR_PLANE_M),
-      frame.draw === null ? [] : [frame.draw],
+      frame.draws,
       (scene) =>
         main.atmosphere.drawFrame(
           {

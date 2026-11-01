@@ -702,7 +702,8 @@ describe("what a view's frame gives its label block and list (the batch review's
       survey: (body) =>
         body === SURVEYED ? { coverage: oneCell(), header: moonLikeHeader(SURVEYED) } : null,
       drawTerrain: () => ({
-        draw: null,
+        draws: [],
+        patches: { interior: 0, edge: 0 },
         conditions: { streaming: true, detailLimited: false },
         annunciation: "TERRAIN: STREAMING",
         fault: null,
@@ -841,7 +842,8 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
           }
           asked.push(input);
           return {
-            draw: WIRE_DRAW,
+            draws: [WIRE_DRAW],
+            patches: { interior: 0, edge: 1 },
             conditions: { streaming: true, detailLimited: false },
             annunciation: "TERRAIN: STREAMING",
             fault: null,

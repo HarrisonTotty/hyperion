@@ -112,6 +112,7 @@ import { vertexSpacing } from "./cube";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
   DEFAULT_TERRAIN_VIEW,
+  isInteriorBake,
   normalsAtlasOf,
   surveyCellCode,
   type TerrainLayout,
@@ -181,6 +182,27 @@ export type TerrainViewId = ViewId | typeof DEFAULT_TERRAIN_VIEW;
  * after the step that selected for it, finds its leading edge selected.
  */
 export type TerrainFrustumMargin = "none" | "motion";
+
+/**
+ * The levers of plan R14's first phase (the cluster path, terrain its first consumer), each on by
+ * default: switched off, a pass draws as it drew before the lever, so that one build's frames can
+ * be held byte for byte against the levers' and timed before and after them
+ * ({@link TerrainPass.setLevers}).
+ */
+export interface TerrainLevers {
+  /**
+   * R14.T1.a: a lit pass draws its interior patches, those with no unsurveyed vertex, by a mesh of
+   * their own without the skirt heads and fins, through a form without the survey discard, before
+   * the others.
+   */
+  readonly interior: boolean;
+}
+
+/** Every lever of {@link TerrainLevers} on: how a pass draws unless told otherwise. */
+export const ALL_LEVERS: TerrainLevers = { interior: true };
+
+/** Every lever off: a pass drawing as it drew before plan R14. */
+export const NO_LEVERS: TerrainLevers = { interior: false };
 
 /**
  * The most a view's frustum is opened by under `motion`, rad (about 5.7°): a view that jumps between
@@ -361,8 +383,11 @@ export interface TerrainCascadeFrame {
 
 /** One frame's outcome. */
 export interface TerrainFrame {
-  /** The instanced draw, or `null` before the material is ready or with nothing to draw. */
-  readonly draw: DrawItem | null;
+  /**
+   * Its instanced draws, in order ({@link TerrainViewFrame.draws}); none before the material is
+   * ready or with nothing to draw.
+   */
+  readonly draws: ReadonlyArray<DrawItem>;
   /**
    * The pass's one draw set, rewritten in place when selection next runs: read it before the next
    * {@link TerrainPass.frame} call, or copy it.
@@ -375,6 +400,17 @@ export interface TerrainFrame {
   /** The debounced label line (Design note 23), for `labelStatements`. */
   readonly annunciation: TerrainAnnunciation | null;
 }
+
+/** How many patches a view's draws draw (plan R14, R14.T1.a; {@link TerrainViewFrame.patches}). */
+export interface TerrainDrawnPatches {
+  /** The interior patches, drawn by the lit pass's interior mesh. */
+  readonly interior: number;
+  /** The others, drawn by the shading's own mesh. */
+  readonly edge: number;
+}
+
+/** No patches drawn. */
+const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0 };
 
 /** One view that hands the pass's body over, as a step takes it (R10.T16.b). */
 export interface TerrainPassView {
@@ -419,8 +455,17 @@ export type TerrainViewFrameInput = Omit<TerrainFrameInput, "grounded">;
 
 /** One view's frame of the pass (R10.T16.b). */
 export interface TerrainViewFrame {
-  /** Its instanced draw, or `null`: before the material is ready, with nothing it sees, or faulted. */
-  readonly draw: DrawItem | null;
+  /**
+   * Its instanced draws, drawn in order: on a lit pass the interior patches' (plan R14, R14.T1.a),
+   * where it sees any and their material is made, then the other patches'; one draw on the other
+   * shadings. None before the material is ready, with nothing it sees, or faulted.
+   */
+  readonly draws: ReadonlyArray<DrawItem>;
+  /**
+   * How many patches its draws draw (plan R14, R14.T1.a): the interior patches, by their own mesh,
+   * and the others, by the shading's; none where it draws nothing.
+   */
+  readonly patches: TerrainDrawnPatches;
   /** Its conditions, before the debounce. */
   readonly conditions: TerrainConditions;
   /** Its debounced label line (Design note 23), for `labelStatements`; `null` under the fault. */
@@ -552,6 +597,13 @@ interface Resident {
    * which the wireframe's contour phase is formed (R10.T11; `contourPhase`).
    */
   readonly originHeightM: number;
+  /**
+   * Whether a lit pass draws it as an interior patch (plan R14, R14.T1.a; `isInteriorBake`): its
+   * every vertex surveyed, so that the interior patches' mesh and material, without the skirt
+   * heads, the fins and the survey discard, draw what the lit mesh draws. A rebake classifies it
+   * again.
+   */
+  readonly interior: boolean;
 }
 
 /** A resident patch's place for the graticule at one step (R10.T11), kept until the step changes. */
@@ -602,6 +654,13 @@ interface Device {
   emissiveMaterial: MaterialHandle | null;
   /** Whether the emissive form has been asked for on this device. */
   emissiveAsked: boolean;
+  /**
+   * A lit terrain's interior patches' material (plan R14, R14.T1.a), the lit material without its
+   * survey discard, and its emissive form, asked for with the emissive form; `null` before, and
+   * for the other shadings, when the interior patches are drawn with the others.
+   */
+  interiorMaterial: MaterialHandle | null;
+  emissiveInteriorMaterial: MaterialHandle | null;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -663,6 +722,15 @@ interface ViewState {
   centres: readonly [Vec3, Vec3, Vec3, Vec3] | null;
   /** The draw set's index of each of this frame's instance records, in their order (R10.T9.b). */
   readonly drawn: number[];
+  /**
+   * The interior patches' records this frame (plan R14, R14.T1.a), apart from {@link
+   * ViewState.instances}, which then hold the other patches', and the draw set's index of each.
+   */
+  readonly interior: InstanceRecords;
+  readonly interiorDrawn: number[];
+  /** The interior patches' draw, and the view's draw it was made beside; `null` before. */
+  interiorDraw: DrawItem | null;
+  interiorBeside: DrawItem | null;
   /** The cascades' caster records and draws, made at the view's first caster frame (R10.T9.b). */
   casters: ViewCasters | null;
   /** The shadow texture the lit draw binds: the set's layers or the placeholder (R10.T9.b). */
@@ -703,6 +771,21 @@ interface ViewCasters {
 
 /** No caster passes: a frame that draws no cascades. */
 const NO_PASSES: ReadonlyArray<DepthLayerPass> = [];
+
+/** No draws: a frame that draws no terrain. */
+const NO_DRAWS: ReadonlyArray<DrawItem> = [];
+
+/**
+ * The lit materials a frame draws with (R08.T18.a; plan R14, R14.T1.a): the other patches' form
+ * and the interior patches' form of the same, each `null` where it is not made.
+ */
+interface LitForms {
+  readonly edge: MaterialHandle | null;
+  readonly interior: MaterialHandle | null;
+}
+
+/** No lit forms: the other shadings' frames. */
+const NO_FORMS: LitForms = { edge: null, interior: null };
 
 /** The cascades' indices, nearest first. */
 const CASCADES: readonly [CascadeIndex, CascadeIndex, CascadeIndex, CascadeIndex] = [0, 1, 2, 3];
@@ -993,6 +1076,8 @@ export class TerrainPass {
   readonly #ownShadows: boolean;
   /** The body's realised relief range, m, for the cascades' caster reach (R10.T9.b). */
   readonly #reliefM: () => number | null;
+  /** Which of plan R14's levers the pass draws with ({@link TerrainPass.setLevers}). */
+  #levers: TerrainLevers = ALL_LEVERS;
   /** Each view's own frame state, by its name. */
   readonly #views = new Map<TerrainViewId, ViewState>();
   /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
@@ -1063,6 +1148,20 @@ export class TerrainPass {
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
     });
+  }
+
+  /** Which of plan R14's levers the pass draws with: {@link ALL_LEVERS} unless set. */
+  get levers(): TerrainLevers {
+    return this.#levers;
+  }
+
+  /**
+   * Switches plan R14's levers from the next draw on ({@link TerrainLevers}): with one off, the
+   * pass draws as it drew before it, from the same selection, residents and records, so that a
+   * check draws one frame both ways and holds them byte for byte.
+   */
+  setLevers(levers: TerrainLevers): void {
+    this.#levers = levers;
   }
 
   /** The current device's layout. */
@@ -1176,6 +1275,7 @@ export class TerrainPass {
     const depth = Promise.all([
       lit ? this.#readyDepth(device, path) : Promise.resolve(),
       cascades ? this.#readyShadow(device, path) : Promise.resolve(),
+      lit ? this.#readyInterior(device, "lit-interior", path) : Promise.resolve(),
     ]);
     let material: MaterialHandle;
     try {
@@ -1206,7 +1306,13 @@ export class TerrainPass {
    * the wireframe's into the canvas), and R05's spike shading into the scene target (`rgba16float`).
    */
   #materialOf(
-    kind: TerrainShading | "depth" | "shadow" | "lit-emissive",
+    kind:
+      | TerrainShading
+      | "depth"
+      | "shadow"
+      | "lit-emissive"
+      | "lit-interior"
+      | "lit-emissive-interior",
     device: Device,
     path: TerrainLayout["vertexPath"],
   ): Promise<MaterialHandle> {
@@ -1247,6 +1353,37 @@ export class TerrainPass {
       // symbology has no terrain depth over the image, and the terrain itself still draws.
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
         console.error("the terrain's depth material for the symbology failed:", error);
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s interior patches' lit material or its emissive form (plan R14,
+   * R14.T1.a); never rejects. One that cannot be made is reported, and the interior patches are
+   * drawn with the others, by the lit mesh and the material with the survey discard.
+   */
+  async #readyInterior(
+    device: Device,
+    kind: "lit-interior" | "lit-emissive-interior",
+    path: TerrainLayout["vertexPath"],
+  ): Promise<void> {
+    try {
+      const made = await this.#materialOf(kind, device, path);
+      const held =
+        kind === "lit-interior" ? device.interiorMaterial : device.emissiveInteriorMaterial;
+      if (device !== this.#device || this.#disposed || held !== null) {
+        this.#releaseOwn(made);
+      } else if (kind === "lit-interior") {
+        device.interiorMaterial = made;
+      } else {
+        device.emissiveInteriorMaterial = made;
+      }
+    } catch (error: unknown) {
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        console.error(
+          "the terrain's interior form failed: its interior patches are drawn with the others",
+          error,
+        );
       }
     }
   }
@@ -1450,7 +1587,8 @@ export class TerrainPass {
         state.centres = null;
       }
       return {
-        draw: null,
+        draws: NO_DRAWS,
+        patches: NO_PATCHES,
         conditions: CLEAR,
         annunciation: null,
         fault: this.#faulted ? this.#cause : null,
@@ -1466,7 +1604,7 @@ export class TerrainPass {
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
     const set = this.#cascadesFor(state, input);
-    const { draw, count, refused, passes } = this.#writeOrNone(
+    const { draws, patches, count, refused, passes } = this.#writeOrNone(
       state,
       mask,
       selected.nearContacts,
@@ -1486,7 +1624,8 @@ export class TerrainPass {
     };
     const annunciation = state.debounce.update(conditions, input.nowMs);
     return {
-      draw,
+      draws,
+      patches,
       conditions,
       annunciation,
       fault: null,
@@ -1494,7 +1633,7 @@ export class TerrainPass {
       standingIn,
       // A draw a loss refused at its making withholds the mask, whatever it would have drawn.
       maskReady:
-        !missing && !refused && (draw !== null || count === 0) && !this.#seesCodeZeroOpen(mask),
+        !missing && !refused && (draws.length > 0 || count === 0) && !this.#seesCodeZeroOpen(mask),
       cascades: set === null ? null : { set, passes },
     };
   }
@@ -1684,8 +1823,8 @@ export class TerrainPass {
       [{ id: DEFAULT_TERRAIN_VIEW, view: input.view, tauPx: this.#terrain.tauPx, weight: 1 }],
       input,
     );
-    const { draw, conditions, annunciation } = this.drawFor(DEFAULT_TERRAIN_VIEW, input);
-    return { draw, drawSet, selection, reselected, conditions, annunciation };
+    const { draws, conditions, annunciation } = this.drawFor(DEFAULT_TERRAIN_VIEW, input);
+    return { draws, drawSet, selection, reselected, conditions, annunciation };
   }
 
   /**
@@ -1756,6 +1895,14 @@ export class TerrainPass {
       this.#releaseOwn(device.emissiveMaterial);
       device.emissiveMaterial = null;
     }
+    if (device.interiorMaterial !== null) {
+      this.#releaseOwn(device.interiorMaterial);
+      device.interiorMaterial = null;
+    }
+    if (device.emissiveInteriorMaterial !== null) {
+      this.#releaseOwn(device.emissiveInteriorMaterial);
+      device.emissiveInteriorMaterial = null;
+    }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
     }
@@ -1793,6 +1940,8 @@ export class TerrainPass {
       shadowMaterial: null,
       emissiveMaterial: null,
       emissiveAsked: false,
+      interiorMaterial: null,
+      emissiveInteriorMaterial: null,
       residents: new Map(),
       rebakes: new Map(),
       gates: [],
@@ -1902,6 +2051,7 @@ export class TerrainPass {
         layers.unsurveyedCells.length > 0 &&
         surveyCellCode(bake.key.level, layers.fieldLevel) === 0,
       originHeightM: Math.fround(bake.originHeightM),
+      interior: isInteriorBake(layers),
     });
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
@@ -2002,6 +2152,10 @@ export class TerrainPass {
       casterUniforms: { bodyRotation, cameraBodyFixedM, atlas },
       centres: null,
       drawn: [],
+      interior: new InstanceRecords(slotCount),
+      interiorDrawn: [],
+      interiorDraw: null,
+      interiorBeside: null,
       casters: null,
       drawnShadow: null,
       wireUniforms: {
@@ -2240,7 +2394,8 @@ export class TerrainPass {
     input: TerrainViewFrameInput,
     cascades: CascadeSet | null,
   ): {
-    readonly draw: DrawItem | null;
+    readonly draws: ReadonlyArray<DrawItem>;
+    readonly patches: TerrainDrawnPatches;
     readonly count: number;
     readonly refused: boolean;
     readonly passes: ReadonlyArray<DepthLayerPass>;
@@ -2252,7 +2407,13 @@ export class TerrainPass {
       };
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
-        return { draw: null, count: 0, refused: true, passes: NO_PASSES };
+        return {
+          draws: NO_DRAWS,
+          patches: NO_PATCHES,
+          count: 0,
+          refused: true,
+          passes: NO_PASSES,
+        };
       }
       throw error;
     }
@@ -2260,8 +2421,14 @@ export class TerrainPass {
 
   /**
    * Writes view `state`'s records, the drawn patches in `mask`, relative to its camera, and returns
-   * its draw, or `null`, with how many patches it draws; and, where its lit draw receives
-   * `cascades` (R10.T9.b), draws their caster passes, which it returns.
+   * its draws, with how many patches it draws; and, where its lit draw receives `cascades`
+   * (R10.T9.b), draws their caster passes, which it returns.
+   *
+   * @remarks
+   * On a lit pass whose interior form is made for the frame's lighting, the interior patches'
+   * records (plan R14, R14.T1.a) are written apart from the others', each in the draw set's order,
+   * and drawn first, by the interior patches' mesh; without it every patch is drawn by the lit
+   * mesh, as before the split.
    */
   #write(
     device: Device,
@@ -2271,20 +2438,26 @@ export class TerrainPass {
     input: TerrainViewFrameInput,
     cascades: CascadeSet | null,
   ): {
-    readonly draw: DrawItem | null;
+    readonly draws: ReadonlyArray<DrawItem>;
+    readonly patches: TerrainDrawnPatches;
     readonly count: number;
     readonly passes: ReadonlyArray<DepthLayerPass>;
   } {
-    const { resources } = device;
-    const { instances, morph, phases, drawn: drawnIndices } = state;
+    const { resources, residents } = device;
+    const { instances, morph, phases, drawn: drawnIndices, interior } = state;
     const { cameraM } = input.view;
     const [r0, r1, r2] = input.view.rotation.rows;
     const drawSet = this.#selected?.drawSet;
     const wire = input.wire;
     const { holds } = device.holds;
+    const lit = this.#shading === "lit";
+    const forms = lit ? this.#litForms(device, input) : NO_FORMS;
+    const split = this.#levers.interior && forms.interior !== null;
     instances.clear();
+    interior.clear();
     phases?.clear();
     drawnIndices.length = 0;
+    state.interiorDrawn.length = 0;
     if (drawSet !== undefined) {
       // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`), and `holds` their
       // morph holds in the same order (`#select`).
@@ -2297,7 +2470,8 @@ export class TerrainPass {
         const { patch } = drawn;
         const o = patch.originM;
         const level = patch.key.level;
-        instances.pushXyz(
+        const inner = split && residents.get(drawn.keyString)?.interior === true;
+        (inner ? interior : instances).pushXyz(
           patch.slot,
           r0.x * o.x + r0.y * o.y + r0.z * o.z - cameraM.x,
           r1.x * o.x + r1.y * o.y + r1.z * o.z - cameraM.y,
@@ -2308,7 +2482,7 @@ export class TerrainPass {
           parentQuadrant(patch.key),
           holds[n] ?? 0,
         );
-        drawnIndices.push(n);
+        (inner ? state.interiorDrawn : drawnIndices).push(n);
         if (phases !== null && wire !== undefined) {
           this.#pushPhase(device, phases, drawn.keyString, patch.originM, wire);
         }
@@ -2328,34 +2502,64 @@ export class TerrainPass {
       );
     }
     resources.writeFrame(instances, records, state.id);
+    if (lit) {
+      resources.writeInterior(interior, state.id);
+    }
     if (phases !== null) {
       resources.writePhases(phases, state.id);
     }
-    const count = instances.count;
+    const count = instances.count + interior.count;
     if (device.material === null || count === 0) {
-      return { draw: null, count, passes: NO_PASSES };
+      return { draws: NO_DRAWS, patches: NO_PATCHES, count, passes: NO_PASSES };
     }
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
-    let draw: DrawItem | null;
+    let draws: ReadonlyArray<DrawItem>;
     let live: CascadeSet | null = null;
     switch (this.#shading) {
       case "lit": {
-        const lit = this.#writeLit(device, state, input, cascades);
-        draw = lit.draw;
-        live = lit.live;
+        const made = this.#writeLit(device, state, input, cascades, forms);
+        draws = made.draws;
+        live = made.live;
         break;
       }
       case "wire":
         // A wireframe view's frame with no contours to draw draws nothing (R10.T11).
-        draw = wire === undefined ? null : this.#writeWire(device, state, device.material, wire);
+        draws =
+          wire === undefined ? NO_DRAWS : [this.#writeWire(device, state, device.material, wire)];
         break;
       case "spike":
-        draw = this.#writeSpike(device, state, device.material, input);
+        draws = [this.#writeSpike(device, state, device.material, input)];
         break;
     }
     const passes =
-      draw !== null && live !== null ? this.#drawCasters(device, state, input, live) : NO_PASSES;
-    return { draw, count, passes };
+      draws.length > 0 && live !== null ? this.#drawCasters(device, state, input, live) : NO_PASSES;
+    const patches =
+      draws.length > 0 ? { interior: interior.count, edge: instances.count } : NO_PATCHES;
+    return { draws, patches, count, passes };
+  }
+
+  /**
+   * The lit materials a frame of `input`'s lighting draws with on `device`: the ground's emission's
+   * form where the lighting carries it and it is made, the plain form until then (R08.T18.a), and
+   * beside it the interior patches' form of the same (plan R14, R14.T1.a), or `null` where that is
+   * not made, when the interior patches are drawn with the others. The first frame that carries the
+   * emission asks for both emissive forms.
+   */
+  #litForms(device: Device, input: TerrainViewFrameInput): LitForms {
+    const emission = input.lighting?.emission !== undefined;
+    if (emission && !device.emissiveAsked) {
+      device.emissiveAsked = true;
+      const path = device.resources.layout.vertexPath;
+      void this.#readyEmissive(device, path).catch((error: unknown) => {
+        console.error("the terrain's emissive form could not be taken:", error);
+      });
+      void this.#readyInterior(device, "lit-emissive-interior", path).catch((error: unknown) => {
+        console.error("the terrain's interior emissive form could not be taken:", error);
+      });
+    }
+    return emission && device.emissiveMaterial !== null
+      ? { edge: device.emissiveMaterial, interior: device.emissiveInteriorMaterial }
+      : { edge: device.material, interior: device.interiorMaterial };
   }
 
   /** R05's spike shading's uniforms for this frame, and its draw item, made once a device. */
@@ -2402,21 +2606,25 @@ export class TerrainPass {
   }
 
   /**
-   * A lit frame's uniforms and lights, its shadow cascades' fields (R10.T9.b), and its draw, made
-   * again where its tables or its bound shadow texture changed; with the cascades its draw
-   * receives, `null` where it receives none.
+   * A lit frame's uniforms and lights, its shadow cascades' fields (R10.T9.b), and its draws, made
+   * again where its tables or its bound shadow texture changed: the interior patches' (plan R14,
+   * R14.T1.a), where it has any, then the others', where it has any; with the cascades its draws
+   * receive, `null` where they receive none.
    *
    * @remarks
-   * The draw receives `cascades` where their weight is above 0 and the caster material is made, the
-   * set then made at its first need; it binds the set's layers while the set lives, and the
-   * placeholder before. Otherwise its cascades' fields take w = 0, so that it samples nothing.
+   * The draws receive `cascades` where their weight is above 0 and the caster material is made, the
+   * set then made at its first need; they bind the set's layers while the set lives, and the
+   * placeholder before. Otherwise their cascades' fields take w = 0, so that they sample nothing.
+   * The interior patches' draw is the other draw's but its mesh, its material (`forms`'), its
+   * instance records and its indirect arguments.
    */
   #writeLit(
     device: Device,
     state: ViewState,
     input: TerrainViewFrameInput,
     cascades: CascadeSet | null,
-  ): { readonly draw: DrawItem | null; readonly live: CascadeSet | null } {
+    forms: LitForms,
+  ): { readonly draws: ReadonlyArray<DrawItem>; readonly live: CascadeSet | null } {
     const { resources } = device;
     const shadows = this.#shadows;
     if (shadows === null) {
@@ -2434,18 +2642,7 @@ export class TerrainPass {
     c[3] = 1 / this.#planet.figure.equatorialRadiusM;
     const table = resources.phaseTable;
     const atmosphere = lighting?.atmosphere ?? device.airless;
-    // The ground's emission's form where the lighting carries it and it is made, the plain form
-    // until then (R08.T18.a).
-    if (lighting?.emission !== undefined && !device.emissiveAsked) {
-      device.emissiveAsked = true;
-      void this.#readyEmissive(device, resources.layout.vertexPath).catch((error: unknown) => {
-        console.error("the terrain's emissive form could not be taken:", error);
-      });
-    }
-    const material =
-      lighting?.emission !== undefined && device.emissiveMaterial !== null
-        ? device.emissiveMaterial
-        : device.material;
+    const material = forms.edge;
     const drawable = table !== null && atmosphere !== null && material !== null;
     const live =
       drawable &&
@@ -2457,7 +2654,7 @@ export class TerrainPass {
         : null;
     packCascadeUniforms(live, viewAxisOf(input.view.orientation), state.litUniforms);
     if (table === null || atmosphere === null || material === null) {
-      return { draw: null, live: null };
+      return { draws: NO_DRAWS, live: null };
     }
     const shadow = shadows.bound();
     if (
@@ -2474,7 +2671,44 @@ export class TerrainPass {
       state.drawnAtmosphere = atmosphere;
       state.drawnShadow = shadow;
     }
-    return { draw: state.draw, live };
+    const draw = state.draw;
+    const interior = state.interior.count > 0 ? this.#interiorDrawOf(device, state, forms) : null;
+    const draws =
+      interior === null ? [draw] : state.instances.count > 0 ? [interior, draw] : [interior];
+    return { draws, live };
+  }
+
+  /**
+   * View `state`'s interior patches' draw (plan R14, R14.T1.a): its lit draw with the interior
+   * patches' mesh, their material (`forms`' interior), their instance records and their indirect
+   * arguments, made again where the lit draw or the material changed.
+   *
+   * @throws Error where the frame has interior records but no interior form, or the layout no
+   *   interior buffers: {@link TerrainPass}'s `#write` writes them apart only with both.
+   */
+  #interiorDrawOf(device: Device, state: ViewState, forms: LitForms): DrawItem {
+    const beside = state.draw;
+    const material = forms.interior;
+    const mesh = device.resources.interiorMesh;
+    const buffers = device.resources.viewBuffers(state.id).interior;
+    if (beside === null || material === null || mesh === null || buffers === null) {
+      throw new Error("a lit view's interior patches have no draw: its form, mesh or buffers");
+    }
+    if (
+      state.interiorDraw === null ||
+      state.interiorBeside !== beside ||
+      state.interiorDraw.material !== material
+    ) {
+      state.interiorDraw = {
+        ...beside,
+        mesh,
+        material,
+        storageBuffers: { ...beside.storageBuffers, instances: buffers.instances },
+        indirect: { buffer: buffers.indirect, offsetBytes: 0 },
+      };
+      state.interiorBeside = beside;
+    }
+    return state.interiorDraw;
   }
 
   /**
@@ -2482,17 +2716,17 @@ export class TerrainPass {
    * decision-r10-t9b-design D4), one pass a cascade, and returns the passes.
    *
    * @remarks
-   * Each cascade's casters are the view's own records this frame, in its order, whose patch's
-   * bounding sphere (the resident bake's origin and bounding radius) meets the cascade's
-   * light-space box with the caster reach ({@link castsInto}), each copied as it stands, so that a
-   * caster is drawn with the view's own morph bands, holds and parents and stores the surface the
-   * view draws. They are written into the view's caster buffer for the cascade and drawn with a
-   * direct instance count, through the caster material, the lit mesh and the view's storage and
-   * `Draw` values. Each pass, into the cascade's layer with its light rotation and projection,
-   * draws the terrain's draw, where it has casters, and then the other casters'
-   * ({@link TerrainShadows.casters}); every pass is drawn, clearing its layer, so that no other
-   * view's casts remain in it. The set renders them under the view's name, each a submission of
-   * its own, before this returns.
+   * Each cascade's casters are the view's own records this frame, in their order, the interior
+   * patches' after the others' (plan R14, R14.T1.a), whose patch's bounding sphere (the resident
+   * bake's origin and bounding radius) meets the cascade's light-space box with the caster reach
+   * ({@link castsInto}), each copied as it stands, so that a caster is drawn with the view's own
+   * morph bands, holds and parents and stores the surface the view draws. They are written into the
+   * view's caster buffer for the cascade and drawn with a direct instance count, through the caster
+   * material, the lit mesh and the view's storage and `Draw` values. Each pass, into the cascade's
+   * layer with its light rotation and projection, draws the terrain's draw, where it has casters,
+   * and then the other casters' ({@link TerrainShadows.casters}); every pass is drawn, clearing its
+   * layer, so that no other view's casts remain in it. The set renders them under the view's name,
+   * each a submission of its own, before this returns.
    */
   #drawCasters(
     device: Device,
@@ -2525,19 +2759,25 @@ export class TerrainPass {
     }
     // Each patch's centre less the camera, body-fixed, in `f64`, as the fit placed the cascades.
     const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
-    const drawn = state.drawn;
-    for (let record = 0; record < drawn.length; record += 1) {
-      const drawnIndex = drawn[record];
-      // A record whose patch the draw set no longer holds casts nothing.
-      const patch = drawnIndex === undefined ? undefined : drawSet.patches[drawnIndex]?.patch;
-      if (patch === undefined) {
-        continue;
-      }
-      const o = patch.originM;
-      const fromCamera = { x: o.x - camera.x, y: o.y - camera.y, z: o.z - camera.z };
-      for (const index of CASCADES) {
-        if (castsInto(set, index, fromCamera, patch.boundingRadiusM)) {
-          casters.records[index].pushCopy(state.instances, record);
+    // The interior patches' records cast as the others' do: a layer's depth is its casters' nearest,
+    // whatever their order.
+    for (const [records, drawn] of [
+      [state.instances, state.drawn],
+      [state.interior, state.interiorDrawn],
+    ] as const) {
+      for (let record = 0; record < drawn.length; record += 1) {
+        const drawnIndex = drawn[record];
+        // A record whose patch the draw set no longer holds casts nothing.
+        const patch = drawnIndex === undefined ? undefined : drawSet.patches[drawnIndex]?.patch;
+        if (patch === undefined) {
+          continue;
+        }
+        const o = patch.originM;
+        const fromCamera = { x: o.x - camera.x, y: o.y - camera.y, z: o.z - camera.z };
+        for (const index of CASCADES) {
+          if (castsInto(set, index, fromCamera, patch.boundingRadiusM)) {
+            casters.records[index].pushCopy(records, record);
+          }
         }
       }
     }

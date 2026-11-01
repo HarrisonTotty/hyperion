@@ -40,11 +40,12 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's four, on its own path, the shadow cascades' caster among them (R10.T9.b):
- * what every compile below is held to.
+ * The high setting's five, on its own path, the shadow cascades' caster (R10.T9.b) and the interior
+ * patches' lit form (plan R14, R14.T1.a) among them: what every compile below is held to.
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
+  `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
@@ -93,6 +94,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
     const engine = await countingRenderEngine();
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "baked-offsets" },
+      { kind: "lit-interior", path: "baked-offsets" },
       { kind: "depth", path: "baked-offsets" },
       { kind: "shadow", path: "baked-offsets" },
       { kind: "wire", path: "baked-offsets" },
@@ -103,13 +105,19 @@ describe("sessionMaterials (R10.T14.d)", () => {
     const engine = await countingRenderEngine();
     expect(
       sessionMaterials("low", engine.capabilities).map(({ kind, path }) => `${kind} ${path}`),
-    ).toEqual(["lit face-differences", "depth face-differences", "wire face-differences"]);
+    ).toEqual([
+      "lit face-differences",
+      "lit-interior face-differences",
+      "depth face-differences",
+      "wire face-differences",
+    ]);
   });
 
   it("gives the lit layout's on face differences where the device's binding holds the wireframe's offsets alone", async () => {
     const engine = await countingRenderEngine(NARROW);
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "face-differences" },
+      { kind: "lit-interior", path: "face-differences" },
       { kind: "depth", path: "face-differences" },
       { kind: "shadow", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
@@ -150,6 +158,20 @@ describe("terrainMaterialOf (R10.T14.d)", () => {
     ]);
   });
 
+  it("draws the interior patches' forms into the scene target over the lit mesh's layout (R14.T1.a)", () => {
+    expect(
+      (["lit-interior", "lit-emissive-interior"] as const).map((kind) => {
+        const { spec, targets, shading } = terrainMaterialOf(kind, "baked-offsets", {
+          depthClipControl: false,
+        });
+        return [spec.name, targets, shading];
+      }),
+    ).toEqual([
+      ["terrain-lit-interior-baked-offsets", ["rgba16float"], "lit"],
+      ["terrain-lit-emissive-interior-baked-offsets", ["rgba16float"], "lit"],
+    ]);
+  });
+
   it("makes the caster unclipped exactly where the device offers depth-clip-control (R10.T9.b)", () => {
     expect(
       [true, false].map(
@@ -164,7 +186,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
   it("compiles its setting's materials as it is made", async () => {
     const engine = await countingRenderEngine();
     const set = new TerrainMaterialSet(engine, "high");
-    expect([await set.compiled, compiles(engine)]).toEqual([4, HIGH]);
+    expect([await set.compiled, compiles(engine)]).toEqual([5, HIGH]);
   });
 
   it("compiles each against a mesh of its pass's layout, released once compiled", async () => {
@@ -173,6 +195,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([
       [
+        layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
@@ -188,7 +211,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     const first = await set.material("lit", "baked-offsets");
     const second = await set.material("lit", "baked-offsets");
-    expect([second, compiles(engine).length]).toEqual([first, 4]);
+    expect([second, compiles(engine).length]).toEqual([first, 5]);
   });
 
   it("compiles a material of another path at its first ask, once", async () => {
@@ -197,7 +220,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     await set.material("wire", "face-differences");
     await set.material("wire", "face-differences");
-    expect(compiles(engine, 4)).toEqual([
+    expect(compiles(engine, 5)).toEqual([
       `terrain-wire-face-differences canvas ${COMPILE_MESH_NAME}`,
     ]);
   });
@@ -206,10 +229,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     const engine = await countingRenderEngine();
     engine.failMaterials((name) => name === "terrain-depth-baked-offsets");
     const set = new TerrainMaterialSet(engine, "high");
-    expect(await set.compiled).toBe(3);
+    expect(await set.compiled).toBe(4);
     engine.failMaterials(() => false);
     const depth = await set.material("depth", "baked-offsets");
-    expect([depth.name, compiles(engine).length]).toEqual(["terrain-depth-baked-offsets", 5]);
+    expect([depth.name, compiles(engine).length]).toEqual(["terrain-depth-baked-offsets", 6]);
   });
 
   it("compiles nothing while the device is lost, and its setting once the device is restored", async () => {
@@ -223,7 +246,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     expect([lit.name, compiles(engine), engine.live.materials]).toEqual([
       "terrain-lit-baked-offsets",
       HIGH,
-      4,
+      5,
     ]);
   });
 
@@ -236,10 +259,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await settle();
     const after = await set.material("lit", "baked-offsets");
-    expect([after === before, compiles(engine, 4), engine.live.materials]).toEqual([
+    expect([after === before, compiles(engine, 5), engine.live.materials]).toEqual([
       false,
       HIGH,
-      4,
+      5,
     ]);
   });
 
@@ -256,7 +279,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     const after = await (asked[0] ?? Promise.reject(new Error("never asked")));
-    expect([after === before, engine.live.materials]).toEqual([false, 4]);
+    expect([after === before, engine.live.materials]).toEqual([false, 5]);
     set.dispose();
     expect(engine.live.materials).toBe(0);
   });
@@ -269,8 +292,8 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
     await settle();
-    // The setting's four compiled again on the restored device, and nothing else held.
-    expect(engine.live.materials).toBe(4);
+    // The setting's five compiled again on the restored device, and nothing else held.
+    expect(engine.live.materials).toBe(5);
   });
 
   it("releases every material when let go, and refuses asks after", async () => {
@@ -299,7 +322,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     await settle();
-    expect([compiles(engine, 4), engine.live.materials]).toEqual([HIGH, 4]);
+    expect([compiles(engine, 5), engine.live.materials]).toEqual([HIGH, 5]);
   });
 
   it("releases a compile that ends after it is let go", async () => {
@@ -317,6 +340,6 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     set.dispose();
     engine.restore();
     await settle();
-    expect(compiles(engine).length).toBe(4);
+    expect(compiles(engine).length).toBe(5);
   });
 });

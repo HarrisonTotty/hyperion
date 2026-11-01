@@ -11,15 +11,15 @@
  *   the hand-over's stall of the page was R07's `bodies:smoothMesh`, which `LitBodyRenderer` now
  *   prepares). Compiled when the session is made, the materials are ready before any view hands a
  *   body over, and every pass of the session draws with the same handles.
- * - **What is compiled.** {@link sessionMaterials}: the lit material and its depth material on the
- *   lit layout's path, on the high setting the shadow cascades' caster beside them (R10.T9.b), and
- *   the wireframe's on the wireframe layout's, each as `terrainLayout`
- *   resolves the setting's own path against the device's limits (`baked-offsets` falling back to
- *   `face-differences` where the offsets exceed a binding), into the targets its pass draws into
- *   ({@link terrainMaterialOf}). Each is compiled against a mesh of the patches' own vertex layout
- *   (`terrainMeshSpec`), made for the compile and released after it: the engine keys a material's
- *   pipelines by the mesh's layout, the target's format and its depth, so the pipelines serve every
- *   pass's mesh of that layout.
+ * - **What is compiled.** {@link sessionMaterials}: the lit material, its interior patches' form
+ *   (plan R14, R14.T1.a) and its depth material on the lit layout's path, on the high setting the
+ *   shadow cascades' caster beside them (R10.T9.b), and the wireframe's on the wireframe layout's,
+ *   each as `terrainLayout` resolves the setting's own path against the device's limits
+ *   (`baked-offsets` falling back to `face-differences` where the offsets exceed a binding), into
+ *   the targets its pass draws into ({@link terrainMaterialOf}). Each is compiled against a mesh of
+ *   the patches' own vertex layout (`terrainMeshSpec`), made for the compile and released after it:
+ *   the engine keys a material's pipelines by the mesh's layout, the target's format and its depth,
+ *   so the pipelines serve every pass's mesh of that layout.
  * - **A path not compiled** (a pass on another setting, say) is compiled at its first ask and kept
  *   for the next; a compile that fails is forgotten, so that the next ask tries again.
  * - **A device loss.** The handles die with the device; at the restore the set forgets them and
@@ -49,7 +49,9 @@ import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/
 import type { TerrainShading } from "./slotLayout";
 import {
   terrainDepthMaterialSpec,
+  terrainLitEmissiveInteriorMaterialSpec,
   terrainLitEmissiveMaterialSpec,
+  terrainLitInteriorMaterialSpec,
   terrainLitMaterialSpec,
   terrainShadowMaterialSpec,
 } from "./terrainMaterial";
@@ -57,11 +59,14 @@ import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire
 
 /**
  * A material of the terrain session's passes: R10's lit material (`lit`), its emissive form for a
- * body above R08's visibility cut (`lit-emissive`, R08.T18.a), compiled at its first ask, its depth
- * material for the symbology's pass (`depth`, R10.T16.c), the wireframe's (`wire`, R10.T11), and
- * the lit terrain as a caster into the high setting's shadow cascades (`shadow`, R10.T9.b).
+ * body above R08's visibility cut (`lit-emissive`, R08.T18.a), compiled at its first ask, the two
+ * without the survey discard for the interior patches (`lit-interior` and `lit-emissive-interior`,
+ * plan R14, R14.T1.a), its depth material for the symbology's pass (`depth`, R10.T16.c), the
+ * wireframe's (`wire`, R10.T11), and the lit terrain as a caster into the high setting's shadow
+ * cascades (`shadow`, R10.T9.b).
  */
-export type TerrainMaterialKind = "lit" | "lit-emissive" | "depth" | "wire" | "shadow";
+export type TerrainMaterialKind =
+  "lit" | "lit-emissive" | "lit-interior" | "lit-emissive-interior" | "depth" | "wire" | "shadow";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -107,6 +112,20 @@ export function terrainMaterialOf(
         shading: "lit",
       };
       break;
+    case "lit-interior":
+      made = {
+        spec: terrainLitInteriorMaterialSpec(path),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
+    case "lit-emissive-interior":
+      made = {
+        spec: terrainLitEmissiveInteriorMaterialSpec(path),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
     case "depth":
       made = { spec: terrainDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
       break;
@@ -126,7 +145,8 @@ export function terrainMaterialOf(
 
 /**
  * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
- * material and its depth material on the lit layout's vertex path, on the high setting the shadow
+ * material, its interior patches' form (plan R14, R14.T1.a) and its depth material on the lit
+ * layout's vertex path, on the high setting the shadow
  * cascades' caster on that path too (R10.T9.b; the low setting has no cascades), and the
  * wireframe's on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
  * device cannot hold (`fittedTerrainLayout`), of which no pass can be made either.
@@ -138,7 +158,11 @@ export function sessionMaterials(
   const keys: TerrainMaterialKey[] = [];
   const lit = fittedTerrainLayout(TERRAIN_SETTINGS[setting], limits, "lit");
   if (lit !== null) {
-    keys.push({ kind: "lit", path: lit.vertexPath }, { kind: "depth", path: lit.vertexPath });
+    keys.push(
+      { kind: "lit", path: lit.vertexPath },
+      { kind: "lit-interior", path: lit.vertexPath },
+      { kind: "depth", path: lit.vertexPath },
+    );
     if (setting === "high") {
       keys.push({ kind: "shadow", path: lit.vertexPath });
     }

@@ -418,20 +418,22 @@ export class LiveFrameTerrain implements FrameTerrain {
         continue;
       }
       annunciation = morePressingAnnunciation(annunciation, frame.annunciation);
-      if (frame.draw === null) {
+      if (frame.draws.length === 0) {
         continue;
       }
-      draws.push(frame.draw);
+      draws.push(...frame.draws);
       const material = this.#source.pass(record.body)?.symbologyDepthMaterial ?? null;
       if (material !== null) {
-        depth.push({
-          ...frame.draw,
-          material,
-          uniforms: {
-            ...frame.draw.uniforms,
-            occluderSlopePx: new Float32Array([occluderSlopePx]),
-          },
-        });
+        const slope = new Float32Array([occluderSlopePx]);
+        // Each of the body's draws, its interior patches' among them (plan R14, R14.T1.a), with its
+        // own mesh and records.
+        for (const draw of frame.draws) {
+          depth.push({
+            ...draw,
+            material,
+            uniforms: { ...draw.uniforms, occluderSlopePx: slope },
+          });
+        }
       }
     }
     this.#annunciation = annunciation;
@@ -727,9 +729,7 @@ export function wireframeTerrainOf(
       continue;
     }
     annunciation = morePressingAnnunciation(annunciation, frame.annunciation);
-    if (frame.draw !== null) {
-      draws.push(frame.draw);
-    }
+    draws.push(...frame.draws);
     const mask = frame.maskReady ? source.coverageMask(body.id) : null;
     if (mask !== null) {
       surveyed.set(body.id, {

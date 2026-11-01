@@ -307,6 +307,72 @@ export function terrainLitEmissiveMaterialSpec(path: TerrainVertexPath): WgslMat
   };
 }
 
+/** The console names of the two paths' interior patches' lit materials (plan R14, R14.T1.a). */
+const INTERIOR_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "INTERIOR TERRAIN OFFSETS",
+  "face-differences": "INTERIOR TERRAIN",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T1.a; R08.T18.a). */
+const INTERIOR_EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "INTERIOR EMISSIVE OFFSETS",
+  "face-differences": "INTERIOR EMISSIVE TERRAIN",
+};
+
+/** `terrainLitShade.wgsl`'s survey discard, which an interior patch's fragment never takes. */
+const SURVEY_DISCARD = "  if (!survey_kept(in)) {\n    discard;\n  }\n";
+
+/**
+ * A lit terrain source with its fragment stage's survey discard taken out (plan R14, R14.T1.a), for
+ * the interior patches, whose every vertex is surveyed (`gpu/resources.ts`' `isInteriorBake`):
+ * none of their fragments is discarded, so they draw what the plain form draws, with no discard in
+ * their draw to keep a tile-based GPU from rejecting their occluded fragments before they shade.
+ *
+ * @throws Error unless the discard occurs exactly once in `source`.
+ */
+export function withoutSurveyDiscard(source: string): string {
+  const parts = source.split(SURVEY_DISCARD);
+  if (parts.length !== 2) {
+    throw new Error(
+      `an interior patch's lit form needs terrainLitShade.wgsl's survey discard once, found ${parts.length - 1}`,
+    );
+  }
+  return parts.join("");
+}
+
+/**
+ * The interior patches' lit material of a vertex path (plan R14, R14.T1.a): the plain form's
+ * bindings, uniforms and states, without its survey discard ({@link withoutSurveyDiscard}), drawn
+ * with the interior patches' mesh (`gpu/resources.ts`' `litInteriorMeshData`).
+ */
+export function terrainLitInteriorMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const plain = terrainLitMaterialSpec(path);
+  const source = withoutSurveyDiscard(plain.fragmentWgsl);
+  return {
+    ...plain,
+    name: `terrain-lit-interior-${path}`,
+    displayName: INTERIOR_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
+/**
+ * The interior patches' lit material of a vertex path in its emissive form (plan R14, R14.T1.a;
+ * R08.T18.a): {@link terrainLitEmissiveMaterialSpec}'s, without the survey discard.
+ */
+export function terrainLitEmissiveInteriorMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const emissive = terrainLitEmissiveMaterialSpec(path);
+  const source = withoutSurveyDiscard(emissive.fragmentWgsl);
+  return {
+    ...emissive,
+    name: `terrain-lit-emissive-interior-${path}`,
+    displayName: INTERIOR_EMISSIVE_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
 /** The console names of the two paths' depth materials. */
 const DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": "TERRAIN DEPTH OFFSETS",
@@ -421,6 +487,18 @@ export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
 export const TERRAIN_LIT_EMISSIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitEmissiveMaterialSpec("baked-offsets"),
   terrainLitEmissiveMaterialSpec("face-differences"),
+];
+
+/** Both paths' interior patches' lit materials (plan R14, R14.T1.a), for the catalogue. */
+export const TERRAIN_LIT_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitInteriorMaterialSpec("baked-offsets"),
+  terrainLitInteriorMaterialSpec("face-differences"),
+];
+
+/** Their emissive forms (plan R14, R14.T1.a; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitEmissiveInteriorMaterialSpec("baked-offsets"),
+  terrainLitEmissiveInteriorMaterialSpec("face-differences"),
 ];
 
 /** Both paths' depth materials (R10.T16.c), for the catalogue. */

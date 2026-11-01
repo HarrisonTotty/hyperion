@@ -400,7 +400,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
   it("draws its patches as one indirect draw of the wireframe's material over the lit mesh", async () => {
     const made = await wirePass();
     streamed(made);
-    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draw;
+    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws.at(-1);
     expect([
       draw?.mesh.name,
       draw?.material.name,
@@ -419,7 +419,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
   it("binds R05's vertex storage, the survey masks and the view's phases", async () => {
     const made = await wirePass();
     streamed(made);
-    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draw;
+    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws.at(-1);
     const bound = Object.fromEntries(
       Object.entries(draw?.storageBuffers ?? {}).map(([name, buffer]) => [name, buffer.name]),
     );
@@ -436,7 +436,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
   it("binds the offsets too on the baked-offsets path", async () => {
     const made = await wirePass("high");
     streamed(made);
-    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draw;
+    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws.at(-1);
     expect([made.pass.layout.vertexPath, draw?.storageBuffers?.["offsets"]?.name]).toEqual([
       "baked-offsets",
       "terrain offsets",
@@ -455,7 +455,8 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
         made.pass.layout.atlas,
         made.pass
           .drawFor(PRIMARY, frameOf(VIEW, WIRE))
-          .draw?.material.name.startsWith("terrain-wire-"),
+          .draws.at(-1)
+          ?.material.name.startsWith("terrain-wire-"),
       ]).toEqual(["skipped", null, true]);
     },
   );
@@ -469,7 +470,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
   it("gives its draw the interval, stroke scale, coastline, widths, graticule, colours and slope term", async () => {
     const made = await wirePass();
     streamed(made);
-    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draw;
+    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws.at(-1);
     const uniforms = Object.fromEntries(
       Object.entries(draw?.uniforms ?? {}).map(([name, value]) => [name, [...value]]),
     );
@@ -491,10 +492,9 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
   it("draws no coastline and no graticule where the world has no sea and the view no graticule", async () => {
     const made = await wirePass();
     streamed(made);
-    const draw = made.pass.drawFor(
-      PRIMARY,
-      frameOf(VIEW, { ...WIRE, seaLevelM: null, graticule: null }),
-    ).draw;
+    const draw = made.pass
+      .drawFor(PRIMARY, frameOf(VIEW, { ...WIRE, seaLevelM: null, graticule: null }))
+      .draws.at(-1);
     expect([
       [...(draw?.uniforms["contour"] ?? [])],
       [...(draw?.uniforms["graticule"] ?? [])],
@@ -516,7 +516,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
     );
     const made = await wirePass();
     streamed(made, passView(turned));
-    const draw = made.pass.drawFor(PRIMARY, frameOf(turned, WIRE)).draw;
+    const draw = made.pass.drawFor(PRIMARY, frameOf(turned, WIRE)).draws.at(-1);
     expect([...(draw?.uniforms["bodyRotation"] ?? [])]).toEqual([
       0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
     ]);
@@ -526,14 +526,16 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
     const made = await wirePass();
     streamed(made);
     const frame = made.pass.drawFor(PRIMARY, frameOf(VIEW, undefined));
-    expect([frame.draw, made.pass.seesPatch(PRIMARY)]).toEqual([null, true]);
+    expect([frame.draws, made.pass.seesPatch(PRIMARY)]).toEqual([[], true]);
   });
 
   it("rewrites one draw's uniforms in place from frame to frame", async () => {
     const made = await wirePass();
     streamed(made);
-    const first = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draw;
-    const second = made.pass.drawFor(PRIMARY, frameOf(VIEW, { ...WIRE, intervalM: 500 })).draw;
+    const first = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws.at(-1);
+    const second = made.pass
+      .drawFor(PRIMARY, frameOf(VIEW, { ...WIRE, intervalM: 500 }))
+      .draws.at(-1);
     expect([second === first, second?.uniforms["contour"]?.[0]]).toEqual([true, 500]);
   });
 
@@ -722,7 +724,7 @@ describe("the wireframe's annunciation and mask (R10.T11)", () => {
       made.pass.maskReadyFor(PRIMARY),
       frame.maskReady,
       frame.missing,
-      frame.draw === null,
+      frame.draws.length === 0,
     ]).toEqual([false, false, false, false]);
   });
 

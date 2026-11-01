@@ -549,7 +549,7 @@ async function captureShot(
       // oxlint-disable-next-line no-await-in-loop
       await pause(50);
     }
-    lit.render(output, viewRotation, projectionMatrix, frame.draw === null ? [] : [frame.draw]);
+    lit.render(output, viewRotation, projectionMatrix, frame.draws);
     const texels = halfTexels(await engine.readTexture(output.colour));
     const rgba = new Uint8Array(texels.length);
     for (let i = 0; i < texels.length; i += 4) {
