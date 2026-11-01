@@ -1,0 +1,64 @@
+//! P09.T38's slow tests: the catalogue classes against the grid, the features and the budget,
+//! across every class at once, under every 27 hold and once under the 26 arm for comparison (plan
+//! 09, "P09.T38 Complementarity, budgets and the Milky Way's shells").
+//!
+//! - [`complementarity`]: 10⁵ mark sets about the shared test's interval and across the clock
+//!   window, each held by exactly one of the grid and the catalogue, the predicate's reject path
+//!   forced; and the grid's own cells, claimed or kept, through the production hook.
+//! - [`budgets`]: field, members and catalogue systems against each population's budget in twelve
+//!   test volumes, the centre's left out.
+//! - [`shells`]: the distinct shells of every source at the epoch, over seeds, by phase and size.
+//!
+//! The per-class tests stay where they are (`core_collapse`, `lbv`, `type_ia`, plan 11's binary
+//! classes, the features' and the centre's lists); these are the shared, sampled ones.
+
+mod budgets;
+mod complementarity;
+mod shells;
+
+use crate::Seed;
+use crate::coords::GalacticPosition;
+use crate::galaxy::Galaxy;
+use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::placement::CellKey;
+use crate::galaxy::rules::GalaxyRules;
+use crate::id::Layer;
+use crate::math;
+
+/// The seed of the Milky Way fixture: P09.T35's carve-out's and P09.T36's lists', so that the
+/// figures compare with theirs.
+const SEED: u64 = 0x0935_0000_0000_0001;
+
+/// The fixture under `rules`, with its kinematic tables, as every production galaxy has them: each
+/// grid site is the epoch position moved along the record's velocity to its death.
+fn milky_way(rules: GalaxyRules) -> Galaxy {
+    Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+        .expect("the Milky Way fixture builds")
+        .with_full_potential()
+}
+
+/// `count` layer-E cells along each of `galaxy`'s arm ridges, in the plane, at each radius of
+/// `radii` ly: the young field's richest cells, where the recently dead are.
+fn ridge_cells(galaxy: &Galaxy, radii: &[f64], count: i32) -> Vec<CellKey> {
+    let arms = galaxy.fields().arms();
+    let mut keys = Vec::new();
+    for &r in radii {
+        for arm in 0..4 {
+            let (sin, cos) = math::sin_cos(arms.ridge_azimuth(r, arm));
+            for step in -count / 2..count / 2 {
+                let along = f64::from(step) * f64::from(Layer::E.cell_size_ly());
+                let at = GalacticPosition::from_light_years([
+                    r * cos - along * sin,
+                    r * sin + along * cos,
+                    0.0,
+                ])
+                .expect("in the cube");
+                let key = CellKey::containing(Layer::E, &at).expect("a cell of the cube");
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys
+}

@@ -281,7 +281,7 @@ fn in_the_field(
 /// one, which every layer-E record's of a galaxy holding plan 08's displaced classes did (P08.T12.c):
 /// the site's exact step reads it instead of computing it again (P08.T13 as built, inheritance 3).
 #[must_use]
-pub(super) fn catalogue_claims(
+pub(crate) fn catalogue_claims(
     galaxy: &Galaxy,
     record: &SystemRecord,
     lifetime: Option<Years>,

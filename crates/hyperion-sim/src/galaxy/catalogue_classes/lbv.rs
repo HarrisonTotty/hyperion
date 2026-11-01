@@ -649,17 +649,24 @@ impl Verdict {
     /// The test's verdict on `candidate` (module documentation, "The test").
     #[must_use]
     fn of(galaxy: &Galaxy, candidate: &LbvCandidate) -> Self {
+        Self::of_record(galaxy, candidate, &candidate.record())
+    }
+
+    /// [`Verdict::of`] with the primary's stars and draws read on `drawn`'s: the candidate's own
+    /// record in production; a test passes a grid record whose marks the candidate carries
+    /// (P09.T38). The entry's record is the candidate's either way.
+    #[must_use]
+    fn of_record(galaxy: &Galaxy, candidate: &LbvCandidate, drawn: &SystemRecord) -> Self {
         // The prefilter binds this side as it binds the grid's: a candidate whose age rounded
         // past its node's span is one the grid's claim would not ask either.
         if !may_host(candidate.mass, candidate.age_at_epoch) {
             return Self::Prefiltered;
         }
-        let record = candidate.record();
         // The primary alone, as the grid's claim builds it: the window is its, and the death
         // marks read no companion.
         let stars = SystemStars::generate_with(
             galaxy,
-            &record,
+            drawn,
             &candidate.composition,
             MultiplicityContext::ForcedSingle,
         );
@@ -668,7 +675,7 @@ impl Verdict {
         };
         if core_collapse_claims(
             galaxy,
-            &record,
+            drawn,
             &candidate.composition,
             &stars,
             candidate.velocity,
@@ -676,7 +683,7 @@ impl Verdict {
             return Self::CoreCollapse;
         }
         Self::Host(Box::new(LbvEntry {
-            record,
+            record: candidate.record(),
             component: candidate.component,
             composition: candidate.composition,
             motion: CatalogueMotion::straight(candidate.site, candidate.velocity),
@@ -743,6 +750,44 @@ fn core_collapse_claims(
     let site = ExplosionSite::new(position, death);
     DeathMarks::of(galaxy, stars, &site, velocity)
         .is_some_and(|marks| claims(galaxy, &site, &marks, Surroundings::Field))
+}
+
+/// The class's test on the marks of the grid record `record` (plan 09, P09.T38's
+/// complementarity): a candidate of the record's component at its epoch position carrying its
+/// primary's initial mass, its age at the epoch, its metallicity draw and its epoch velocity,
+/// through the class's test, its stars drawn on the record's own. The entry the class keeps of
+/// those marks, or `None`.
+///
+/// # Panics
+///
+/// As [`lbv_claims`], for a record that is not a grid record of `galaxy`, and as plan 08's
+/// `epoch_velocity`.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn test_on_grid_marks(galaxy: &Galaxy, record: &SystemRecord) -> Option<LbvEntry> {
+    let site = *record.epoch_position();
+    let id = crate::galaxy::catalogue_classes::CatalogueCellKey::containing(
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+        &site,
+    )
+    .expect("a site in the root cube")
+    .candidate_id(0, 0)
+    .expect("the first candidate of a cell");
+    let component = record.component().expect("a grid record has its component");
+    let candidate = LbvCandidate {
+        id,
+        site,
+        component,
+        population: record.population(),
+        mass: record.primary_initial_mass(),
+        age_at_epoch: record.age_at_epoch(),
+        composition: draw_metallicity(galaxy, record),
+        velocity: crate::galaxy::query::epoch_velocity(galaxy, record),
+    };
+    match Verdict::of_record(galaxy, &candidate, record) {
+        Verdict::Host(entry) => Some(*entry),
+        Verdict::Prefiltered | Verdict::NoWindow | Verdict::CoreCollapse => None,
+    }
 }
 
 #[cfg(test)]

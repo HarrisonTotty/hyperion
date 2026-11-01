@@ -234,6 +234,20 @@ impl EjectedTerm {
             * self.largest_share
             * self.deaths_per_system
     }
+
+    /// The displaced class whose form the term's deaths follow.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn class(&self) -> DisplacedClassId {
+        self.class
+    }
+
+    /// The young component the term's stars were born in.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn component(&self) -> ComponentId {
+        self.component
+    }
 }
 
 /// How a runaway's or a walkaway's candidate was ejected (plan 09, P09.T33.b): its class, its kind,
@@ -1430,6 +1444,55 @@ pub(crate) fn recent_death_claims(
     let stars = SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle);
     DeathMarks::of(galaxy, &stars, site, velocity)
         .is_some_and(|marks| claims(galaxy, site, &marks, Surroundings::Field))
+}
+
+/// The class's test on the marks of the grid record `record` (plan 09, P09.T38's
+/// complementarity): a candidate of the record's component carrying its primary's initial mass,
+/// its age at the epoch, its metallicity draw, its primary's draws and its epoch velocity, dying
+/// at `site`, through the two halves [`ClassProcess::test`] takes, its stars drawn on the record's
+/// own, as P09.T33.b's agreement test draws them. `site` is the record's explosion site where plan
+/// 08's predicate puts its death in the interval; elsewhere the predicate refuses the candidate
+/// before it is read. The entry the class keeps of those marks, or `None`.
+///
+/// # Panics
+///
+/// As [`recent_death_claims`], for a record that is not a grid record of `galaxy`.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn test_on_grid_marks(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    site: GalacticPosition,
+) -> Option<CoreCollapseEntry> {
+    let id = CatalogueCellKey::containing(ClassId::CORE_COLLAPSE, &site)
+        .expect("a site in the root cube")
+        .candidate_id(0, 0)
+        .expect("the first candidate of a cell");
+    let mass = record.primary_initial_mass();
+    let composition = crate::stellar::system::draw_metallicity(galaxy, record);
+    let draws = crate::stellar::system::primary_draws(galaxy, record);
+    let lifetime = lifetime_under(
+        track_mass_of(mass),
+        &composition,
+        &draws,
+        galaxy.rules().stellar,
+    );
+    let candidate = CoreCollapseCandidate {
+        id,
+        site,
+        component: record.component().expect("a grid record has its component"),
+        population: record.population(),
+        mass,
+        composition,
+        draws,
+        lifetime,
+        age_at_epoch: record.age_at_epoch(),
+        velocity: epoch_velocity(galaxy, record),
+        ejection: None,
+    };
+    let death = RecentDeath::of_record(galaxy, &candidate, record)?;
+    let window = claimed_window(galaxy, &death.site, &death.marks, Surroundings::Field)?;
+    Some(death.into_entry(&candidate, window))
 }
 
 #[cfg(test)]

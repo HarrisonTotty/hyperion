@@ -213,8 +213,26 @@ fn the_centre_lists_its_variables_exactly_where_its_cells_carve_them() {
 #[test]
 #[ignore = "slow: 10⁴ of the centre's young mark sets under either arm"]
 fn the_centre_s_cells_and_its_list_are_complementary() {
+    complementary_at_the_centre(held(), listed());
+}
+
+/// P09.T38: [`the_centre_s_cells_and_its_list_are_complementary`] under every 27 hold, galaxy and
+/// stellar, against every 27 hold but this one's.
+#[test]
+#[ignore = "slow: 10⁴ of the centre's young mark sets under either arm, every 27 hold"]
+fn the_centre_s_cells_and_its_list_are_complementary_under_every_27_hold() {
+    let on = milky_way(GalaxyRules::every_27_hold());
+    let off = milky_way(GalaxyRules {
+        feature_classes: FeatureClassesRules::Unlisted,
+        ..GalaxyRules::every_27_hold()
+    });
+    complementary_at_the_centre(&off, &on);
+}
+
+/// The centre's complementarity of [`the_centre_s_cells_and_its_list_are_complementary`], in `on`
+/// against `off`, its held arm.
+fn complementary_at_the_centre(off: &Galaxy, on: &Galaxy) {
     const SETS: u16 = 10_000;
-    let (off, on) = (held(), listed());
     let model = on.centre().unwrap();
     let recent = CentreRecent::new(on, model, victim_count(on).unwrap());
     let young: Vec<u8> = (0_u8..)

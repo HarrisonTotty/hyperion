@@ -29,6 +29,8 @@ pub mod system;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod type_ia;
+#[cfg(test)]
+mod verification;
 
 pub use self::grid::{
     CatalogueClassCell, CatalogueEntry, CatalogueMember, CheckClassHeadroomError, ClassLookup,

@@ -496,7 +496,7 @@ where
     // 1. The mass bracket, built without a helium excess.
     if (marks.helium_free || LazyCell::force(&marks.composition).helium_excess().value() <= 0.0)
         && let Some(bracket) = LifetimeBracket::shared().bracket(m0)
-        && outside(start, age_at_epoch, bracket)
+        && outside(start, age_at_epoch, forced(bracket))
     {
         count(Verdict::Bracket);
         return None;
@@ -515,7 +515,7 @@ where
                 LazyCell::force(&marks.composition),
                 with_eta(LazyCell::force(&marks.draws), eta),
             );
-        if !stripped && outside(start, age_at_epoch, table_bracket(&fate)) {
+        if !stripped && outside(start, age_at_epoch, forced(table_bracket(&fate))) {
             count(Verdict::Table);
             return None;
         }
@@ -565,6 +565,48 @@ fn table_bracket(fate: &FittedFate) -> (Years, Years) {
 #[must_use]
 fn table_margin(fate: &FittedFate) -> f64 {
     (STATED_FACTOR * fate.bounds.0).max(DEAD_MARGIN_FLOOR)
+}
+
+/// A cheap tier's bracket on the death age as the predicate reads it: `bracket` itself, but in a
+/// test that forces the reject path ([`with_forced_margin`]), where both ends are moved by the
+/// margin, so that the tier can put outside the interval a death the exact tier puts inside it.
+#[cfg(test)]
+#[must_use]
+fn forced((least, greatest): (Years, Years)) -> (Years, Years) {
+    let margin = FORCED_MARGIN.with(std::cell::Cell::get);
+    (
+        Years::new(least.value() * (1.0 + margin)),
+        Years::new(greatest.value() * (1.0 + margin)),
+    )
+}
+
+/// A cheap tier's bracket on the death age: `bracket` itself outside a test build.
+#[cfg(not(test))]
+#[must_use]
+const fn forced(bracket: (Years, Years)) -> (Years, Years) {
+    bracket
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The relative margin by which a test moves both ends of the cheap tiers' brackets on this
+    /// thread ([`with_forced_margin`]); zero, which moves nothing, otherwise.
+    static FORCED_MARGIN: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+/// `run` with the cheap tiers' brackets moved by the relative `margin` on this thread, both ends
+/// times 1 + `margin`, then restored (plan 09, P09.T38: the predicate's reject path, forced).
+///
+/// A bracket so moved no longer holds the exact death age, so the mass bracket or the fate table
+/// may refuse a death the exact tier keeps: a failed bound, made at will. Every side of the shared
+/// test decides through [`decide`], so every side then refuses it, and the system stays a grid star
+/// without a shell. The exact tier and its death time are not moved.
+#[cfg(test)]
+pub(crate) fn with_forced_margin<T>(margin: f64, run: impl FnOnce() -> T) -> T {
+    let before = FORCED_MARGIN.with(|cell| cell.replace(margin));
+    let out = run();
+    FORCED_MARGIN.with(|cell| cell.set(before));
+    out
 }
 
 /// Whether every death age in `bracket` (least, greatest) puts the death of a star whose age at

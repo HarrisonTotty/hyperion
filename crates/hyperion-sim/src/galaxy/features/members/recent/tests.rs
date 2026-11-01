@@ -473,8 +473,27 @@ fn within(centre: &GalacticPosition, reach: LightYears, lcg: &mut Lcg) -> Galact
 #[test]
 #[ignore = "slow: 10⁴ band-E members of the nurseries' cells under either arm"]
 fn the_cells_and_the_list_are_complementary_over_ten_thousand_members() {
+    complementary_over_ten_thousand_members(held(), listed());
+}
+
+/// P09.T38: [`the_cells_and_the_list_are_complementary_over_ten_thousand_members`] under every 27
+/// hold, galaxy and stellar, against every 27 hold but this one's.
+#[test]
+#[ignore = "slow: 10⁴ band-E members of the nurseries' cells under either arm, every 27 hold"]
+fn the_cells_and_the_list_are_complementary_under_every_27_hold() {
+    let on = milky_way(GalaxyRules::every_27_hold());
+    let off = milky_way(GalaxyRules {
+        feature_classes: FeatureClassesRules::Unlisted,
+        ..GalaxyRules::every_27_hold()
+    });
+    complementary_over_ten_thousand_members(&off, &on);
+}
+
+/// The features' complementarity of
+/// [`the_cells_and_the_list_are_complementary_over_ten_thousand_members`], in `on` against `off`,
+/// its held arm.
+fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
     const MEMBERS: u32 = 10_000;
-    let (off, on) = (held(), listed());
     let mut lcg = Lcg::new(0x0936_0000);
     let (mut members, mut sets) = (0_u32, 0_u32);
     let (mut cells, mut lists, mut claims) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
@@ -492,7 +511,11 @@ fn the_cells_and_the_list_are_complementary_over_ten_thousand_members() {
             checked_claim(on, &stars, record, (composition, velocity))
         };
         for entry in FeatureLevelList::of(on, &feature).entries() {
-            let class = RecentClass::of(entry.class()).unwrap();
+            // From 27 the lists hold plan 11's binary classes too (P11.T8.f), which no recent
+            // class's claim reads.
+            let Some(class) = RecentClass::of(entry.class()) else {
+                continue;
+            };
             if class == RecentClass::TypeIa {
                 continue;
             }

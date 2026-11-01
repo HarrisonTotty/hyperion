@@ -1527,6 +1527,10 @@ recorded against the brainstorm's 2–4 Myr and the 4.3 Myr of the oldest known 
 P08.T13's interval predicate: see "From P08.T13: the interval predicate is part of the one shared
 test", after P09.T35; main's ruling, 2026-10-15.)
 
+_Built under every 27 hold (lane `p09-t38`, 2026-11-01, at `GENERATOR_VERSION` 24; one fault fixed
+behind 27's runaways' hold, no output moved at 24–26): see Risks, "P09.T38, as built". The budgets'
+centre volume waits on p10-list-registration._
+
 ### Phase 8: protocol, server and display
 
 #### P09.T39 Protocol messages
@@ -5679,3 +5683,25 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     stars' progenitors from 3.2 M☉. Its accretors grew past the core-collapse mass, so the layers
     widen with it rather than the fit being bounded. Under the scratch tables the class stays at
     E.
+- **P09.T38, as built (lane `p09-t38`, 2026-11-01, at `GENERATOR_VERSION` 24, under every 27 hold;
+  no output moves at 24–26).**
+  - _Tests_ (slow, fixed seeds, run by name for the 27 bump; `catalogue_classes::verification`):
+    `complementarity::the_grid_and_the_catalogue_are_complementary_under_every_27_hold` and
+    `…_under_every_26_hold`; `budgets::the_field_members_and_catalogue_hold_each_population_s_budget`;
+    `shells::the_shells_at_milky_way_rates_under_every_27_hold` (golden
+    `catalogue_classes/shells_27`, new). Beside them, the features' and the centre's
+    complementarity under every 27 hold: `features::members::recent::tests::the_cells_and_the_list_are_complementary_under_every_27_hold`
+    and `features::centre::recent::tests::the_centre_s_cells_and_its_list_are_complementary_under_every_27_hold`.
+    Fast: `lbv::tests::a_displaced_host_is_the_grid_s_from_27`.
+  - _Seams (test builds only)._ `displaced::site::with_forced_margin` (the reject path, forced);
+    `core_collapse::test_on_grid_marks` and `lbv::test_on_grid_marks` (each class's test on a grid
+    record's marks); `SystemRecord::with_primary_initial_mass`; `placement::catalogue_claims`.
+    `lbv`'s verdict reads its stars through `Verdict::of_record` (bit for bit).
+  - _Fault fixed (P09.T43's class, under 27's runaways' field, `RunawayDeathsRules::Ejected`)._
+    `lbv_claims` claimed displaced systems, which `LbvProcess` never draws (it takes the stay
+    share): lost systems. From 27 `lbv::claims_its_placement` leaves them on the grid; the 27 bump
+    deletes its match with the hold. The 26 arm keeps the gap (held output).
+  - _Budgets._ The centre's volume is NOT RUN: it waits on p10-list-registration (P09.T37.b
+    registers the centre's members). The carve-out's claims are printed, not tested: the grid's
+    displaced classes weigh the whole budget and T33.b's terms its field part (pending the owner's
+    ruling there). Members are tested only where a volume holds 20 features or more.

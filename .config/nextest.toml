@@ -305,6 +305,12 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(=galaxy::features::members::recent::tests::the_features_hold_most_core_collapses_and_some_of_the_shells)"
 threads-required = 16
 
+# P09.T38's slow tests walk their mark sets, cells, volumes and censuses in sixteen shares of their
+# own (`in_shares`), so each reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::verification::/)"
+threads-required = 16
+
 # P11.T6's two censuses of the Type Ia redraw run their records in sixteen shares of their own
 # (`in_shares`), so each reserves sixteen slots.
 [[profile.slow.overrides]]
