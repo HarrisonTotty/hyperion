@@ -310,10 +310,10 @@ const NON_SPINNING_ISCO: f64 = 6.0;
 const DISC_WIND_SHARE: f64 = 0.15;
 
 /// What a black hole leaves outside itself when it merges with a neutron star (P11.T9.b), at the
-/// hole's spin χ = 0 ([`NON_SPINNING_ISCO`]), M☉: the remnant outside the hole
-/// ([`FOUCART_2018_REMNANT`]), its dynamical ejecta ([`KRUGER_FOUCART_2020_DYNAMICAL`], at most the
+/// hole's spin χ = 0 (`NON_SPINNING_ISCO`), M☉: the remnant outside the hole
+/// (`FOUCART_2018_REMNANT`), its dynamical ejecta (`KRUGER_FOUCART_2020_DYNAMICAL`, at most the
 /// remnant), the bound disc they leave, and the kilonova's ejecta, the dynamical ejecta and the
-/// disc's outflows ([`DISC_WIND_SHARE`]).
+/// disc's outflows (`DISC_WIND_SHARE`).
 ///
 /// The neutron star's radius is plan 06's, 12.2 km, at every mass, its compactness C = `GM_NS` ÷
 /// (R c²), and both fits scale with its baryonic mass, `M_NS` (1 + 0.6 C ÷ (1 − 0.5 C)) (Krüger and
@@ -387,7 +387,7 @@ impl NsbhOutflow {
         self.disc
     }
 
-    /// The kilonova's ejecta, the dynamical ejecta and [`DISC_WIND_SHARE`] of the disc, M☉: zero
+    /// The kilonova's ejecta, the dynamical ejecta and `DISC_WIND_SHARE` of the disc, M☉: zero
     /// where nothing is left outside the hole.
     #[must_use]
     pub const fn ejecta(&self) -> SolarMasses {
