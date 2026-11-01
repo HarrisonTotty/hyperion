@@ -10,15 +10,16 @@ export type AccretedProgenitorWire = {
  */
 kind: ProgenitorKindWire, 
 /**
- * Its stellar mass, in solar masses.
+ * Its stellar mass, in solar masses: positive.
  */
 mass_msun: number, 
 /**
- * How long before the epoch it was accreted, in gigayears.
+ * How long before the epoch it was accreted, in gigayears: 6–11 for the last major merger,
+ * 0–6 for a recent progenitor.
  */
 accreted_gyr: number, 
 /**
- * Its orbit's pericentre about the galactic centre, in light-years.
+ * Its orbit's pericentre about the galactic centre, in light-years: below its apocentre.
  */
 pericentre_ly: number, 
 /**

@@ -262,8 +262,9 @@ export function toCatalogueClass(value: CatalogueClassWire): CatalogueClass {
 
 /**
  * What placed a range row's system (plan 09, P09.T39): `not_sent` for a row without the key, from a
- * server that does not say, and `unknown` for an origin this build does not know, so that the
- * readout's switches stay exhaustive and the reading is Missing.
+ * server that does not say, and `unknown` for an origin this build does not know, or for plan 10's
+ * members of streams and dwarf cores until P10.T11 names them, so that the readout's switches stay
+ * exhaustive and the reading is Missing.
  */
 export function toSystemOrigin(origin: SystemOriginWire | undefined): SystemOrigin {
   if (origin === undefined) {

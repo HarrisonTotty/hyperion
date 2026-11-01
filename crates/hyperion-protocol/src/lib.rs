@@ -87,8 +87,8 @@ pub use galaxy::{
 };
 pub use global_list::{
     AccretedProgenitorWire, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest,
-    ProgenitorKindWire, StreamTrackRequest, StreamTrackWire, TrackPointWire, TrackStatusWire,
-    TrackWire,
+    ProgenitorKindWire, ShellWire, StreamTrackRequest, StreamTrackWire, TrackPointWire,
+    TrackStatusWire, TrackWire,
 };
 pub use modelled::Modelled;
 pub use observe::{ObservedDto, QueryModeDto, ResolveSystemRequest, ResolvedSystem};

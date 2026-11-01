@@ -242,7 +242,8 @@ export type CatalogueClass = CatalogueClassWire | "unknown";
  * catalogue class; `not_sent` for a row from a server that does not say, as one before P09.T40
  * does not and P09.T40's does not before its members' gate opens (P09.T2.c, version 26); and
  * `unknown` for an origin this build does not know, which the enum's growing allows (plan 04's
- * reserved list) and which reads Missing.
+ * reserved list), and for plan 10's members of streams and dwarf cores until P10.T11 names them;
+ * either reads Missing.
  */
 export type SystemOrigin =
   | { readonly kind: "not_sent" }

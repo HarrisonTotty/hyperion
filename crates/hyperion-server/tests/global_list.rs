@@ -7,7 +7,7 @@ mod common;
 use common::origins::SEED;
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, FeatureKindWire, GlobalFeatures, GlobalFeaturesRequest, ProgenitorKindWire,
+    ErrorCode, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest, ProgenitorKindWire,
     RequestBody, ResponseBody, StreamTrackRequest, TrackStatusWire, TrackWire, UniverseIdHex,
 };
 
@@ -39,37 +39,39 @@ async fn global_features_list_the_centre_streams_cores_and_progenitors() {
     let answer = global_features(&mut client, &universe).await;
     assert_eq!(answer.universe, universe);
     let entries = &answer.entries;
-    assert_eq!(entries[0].kind, FeatureKindWire::GalacticCentre);
-    assert_eq!(entries[0].number, None);
-    let streams: Vec<_> = entries
-        .iter()
-        .filter(|e| e.kind == FeatureKindWire::Stream)
-        .collect();
-    assert!(streams.len() > 100, "{} streams", streams.len());
-    for (k, stream) in streams.iter().enumerate() {
-        assert_eq!(stream.number, Some(u16::try_from(k).expect("small")));
-        assert_eq!(stream.track, Some(TrackStatusWire::Pending));
-        // A stream wholly beyond the root cube's corner has an empty shell, its inner radius past
-        // its outer.
-        assert!(stream.mass_msun > 0.0, "{stream:?}");
-        assert!(
-            stream.shell_inner_ly >= 0.0 && stream.shell_outer_ly.is_finite(),
-            "{stream:?}"
-        );
+    assert!(matches!(entries[0], GlobalEntryWire::GalacticCentre { .. }));
+    let (mut streams, mut living, mut cores) = (0_u16, 0, 0);
+    for entry in &entries[1..] {
+        match entry {
+            GlobalEntryWire::Stream {
+                number,
+                mass_msun,
+                shell,
+                progenitor,
+                track,
+            } => {
+                assert_eq!(cores, 0, "every stream before every core");
+                assert_eq!(*number, streams);
+                assert_eq!(*track, TrackStatusWire::Pending);
+                // A stream wholly beyond the root cube's corner has an empty shell, its inner
+                // radius past its outer.
+                assert!(*mass_msun > 0.0, "{entry:?}");
+                assert!(
+                    shell.inner_ly >= 0.0 && shell.outer_ly.is_finite(),
+                    "{entry:?}"
+                );
+                streams += 1;
+                living += usize::from(progenitor.is_some());
+            }
+            GlobalEntryWire::DwarfCore { number, .. } => {
+                assert_eq!(*number, cores);
+                cores += 1;
+            }
+            GlobalEntryWire::GalacticCentre { .. } => panic!("a second centre"),
+        }
     }
-    assert!(
-        streams.iter().any(|s| s.progenitor.is_some()),
-        "no living globular's stream"
-    );
-    let kinds: Vec<_> = entries.iter().map(|e| e.kind).collect();
-    let first_core = kinds.iter().position(|&k| k == FeatureKindWire::DwarfCore);
-    if let Some(first) = first_core {
-        assert!(
-            kinds[first..]
-                .iter()
-                .all(|&k| k == FeatureKindWire::DwarfCore)
-        );
-    }
+    assert!(streams > 100, "{streams} streams");
+    assert!(living > 0, "no living globular's stream");
     assert_eq!(
         answer.progenitors[0].kind,
         ProgenitorKindWire::DominantMerger
@@ -81,7 +83,12 @@ async fn global_features_list_the_centre_streams_cores_and_progenitors() {
     );
     let again = global_features(&mut client, &universe).await;
     assert_eq!(again, answer);
-    assert_eq!(server.stats().global_lists().entries(), 1);
+    let held = server.stats().global_lists();
+    assert_eq!(
+        (held.entries(), held.hits()),
+        (1, 1),
+        "the second answered from the list kept"
+    );
     client.close().await;
     server.stop().await;
 }
@@ -110,13 +117,16 @@ async fn stream_track_answers_a_track_and_refuses_a_stream_the_list_lacks() {
             assert!(point.speed_km_s > 0.0 && point.speed_km_s < 3_000.0);
         }
     }
-    let beyond = RequestBody::StreamTrack(StreamTrackRequest {
-        universe,
-        stream: 4_095,
-    });
-    let refused = client.request(beyond).await.expect_err("no such stream");
-    assert_eq!(refused.code, ErrorCode::UnknownFeature);
-    assert_eq!(refused.field.as_deref(), Some("stream"));
+    // Past the list's streams, and past any stream's number.
+    for stream in [4_095, u16::MAX] {
+        let beyond = RequestBody::StreamTrack(StreamTrackRequest {
+            universe: universe.clone(),
+            stream,
+        });
+        let refused = client.request(beyond).await.expect_err("no such stream");
+        assert_eq!(refused.code, ErrorCode::UnknownFeature);
+        assert_eq!(refused.field.as_deref(), Some("stream"));
+    }
     client.close().await;
     server.stop().await;
 }

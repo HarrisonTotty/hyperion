@@ -4,8 +4,8 @@ import type { GlobalEntryWire } from "./GlobalEntryWire";
 import type { UniverseIdHex } from "./UniverseIdHex";
 
 /**
- * A galaxy's global list: its galactic centre, streams and dwarf cores, and the progenitors
- * accreted since its last major merger.
+ * A galaxy's global list: its galactic centre, streams and dwarf cores, and the accreted
+ * progenitors they come from, its last major merger and the recent ones.
  *
  * `universe` echoes the request.
  */

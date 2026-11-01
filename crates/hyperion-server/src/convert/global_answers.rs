@@ -18,28 +18,25 @@
 //! `ready` once warmed.
 
 use hyperion_protocol::{
-    AccretedProgenitorWire, ErrorCode, FeatureKindWire, GlobalEntryWire, GlobalFeatures,
-    GlobalFeaturesRequest, ProgenitorKindWire, RequestError, StreamTrackRequest, StreamTrackWire,
+    AccretedProgenitorWire, ErrorCode, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest,
+    ProgenitorKindWire, RequestError, ShellWire, StreamTrackRequest, StreamTrackWire,
     TrackPointWire, TrackStatusWire, TrackWire,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::global_list::spray::Arm;
 use hyperion_sim::galaxy::global_list::tube::TubeKnot;
 use hyperion_sim::galaxy::global_list::{
-    GlobalEntryKind, GlobalList, StreamNumber, StreamOrigin, TubeTable,
+    BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, StreamOrigin, TubeTable,
 };
 use hyperion_sim::galaxy::params::{Progenitor, ProgenitorKind};
 use hyperion_sim::units::KilometresPerSecond;
 
 use super::features::feature_id_hex;
-use super::galactic_position;
+use super::{galactic_position, gyr};
 
 /// The most points an arm of a stream's track is sent with (plan 10, P10.T10.a): half a tube arm's
 /// 256 knots.
 pub(crate) const TRACK_POINTS: usize = 128;
-
-/// Years in a gigayear, the wire's unit for an accretion time.
-const YEARS_PER_GYR: f64 = 1e9;
 
 /// The galaxy's global list as `global_features` sends it, for `request`.
 #[must_use]
@@ -52,9 +49,9 @@ pub(crate) fn global_features(
         .entries()
         .iter()
         .map(|entry| {
-            let shell = entry.shell();
-            let (kind, number, progenitor, track) = match entry.kind() {
-                GlobalEntryKind::Centre => (FeatureKindWire::GalacticCentre, None, None, None),
+            let (mass_msun, shell) = (entry.mass().value(), shell_wire(entry.shell()));
+            match entry.kind() {
+                GlobalEntryKind::Centre => GlobalEntryWire::GalacticCentre { mass_msun, shell },
                 GlobalEntryKind::Stream(number) => {
                     let spec = list
                         .stream(number)
@@ -63,28 +60,19 @@ pub(crate) fn global_features(
                         StreamOrigin::LivingGlobular(feature) => Some(feature_id_hex(feature)),
                         StreamOrigin::Orphan | StreamOrigin::Dwarf(_) => None,
                     };
-                    (
-                        FeatureKindWire::Stream,
-                        Some(number.get()),
+                    GlobalEntryWire::Stream {
+                        number: number.get(),
+                        mass_msun,
+                        shell,
                         progenitor,
-                        Some(TrackStatusWire::Pending),
-                    )
+                        track: TrackStatusWire::Pending,
+                    }
                 }
-                GlobalEntryKind::DwarfCore(number) => (
-                    FeatureKindWire::DwarfCore,
-                    Some(u16::from(number.get())),
-                    None,
-                    None,
-                ),
-            };
-            GlobalEntryWire {
-                kind,
-                number,
-                mass_msun: entry.mass().value(),
-                shell_inner_ly: shell.inner().value(),
-                shell_outer_ly: shell.outer().value(),
-                progenitor,
-                track,
+                GlobalEntryKind::DwarfCore(number) => GlobalEntryWire::DwarfCore {
+                    number: u16::from(number.get()),
+                    mass_msun,
+                    shell,
+                },
             }
         })
         .collect();
@@ -99,6 +87,15 @@ pub(crate) fn global_features(
         universe: request.universe,
         entries,
         progenitors,
+    }
+}
+
+/// `shell` as the wire carries it: its radii, in light-years.
+#[must_use]
+fn shell_wire(shell: BoundingShell) -> ShellWire {
+    ShellWire {
+        inner_ly: shell.inner().value(),
+        outer_ly: shell.outer().value(),
     }
 }
 
@@ -132,7 +129,7 @@ fn accreted_progenitor(
     Some(AccretedProgenitorWire {
         kind,
         mass_msun: progenitor.mass().value(),
-        accreted_gyr: progenitor.accreted().value() / YEARS_PER_GYR,
+        accreted_gyr: gyr(progenitor.accreted()),
         pericentre_ly: orbit.pericentre().value(),
         apocentre_ly: orbit.apocentre().value(),
         stream,
@@ -149,6 +146,8 @@ pub(crate) fn stream_track_number(
     list: &GlobalList,
     request: &StreamTrackRequest,
 ) -> Result<StreamNumber, RequestError> {
+    // A number of 4,096 or more is no stream's either: it is refused as one the list lacks, not
+    // as malformed, since the request names a stream either way.
     StreamNumber::new(request.stream)
         .ok()
         .filter(|&number| list.stream(number).is_some())
@@ -196,22 +195,21 @@ pub(crate) fn stream_track(
 
 /// The indices, in order, of the knots of an arm of `n` that its track sends: every one for an arm
 /// of at most [`TRACK_POINTS`], else [`TRACK_POINTS`] spaced evenly in index with both ends kept.
-#[must_use]
-fn track_indices(n: usize) -> Vec<usize> {
-    if n <= TRACK_POINTS {
-        (0..n).collect()
-    } else {
-        (0..TRACK_POINTS)
-            .map(|k| k * (n - 1) / (TRACK_POINTS - 1))
-            .collect()
-    }
+fn track_indices(n: usize) -> impl Iterator<Item = usize> {
+    let (points, last) = (n.min(TRACK_POINTS), n.saturating_sub(1));
+    (0..points).map(move |k| {
+        if n <= TRACK_POINTS {
+            k
+        } else {
+            k * last / (TRACK_POINTS - 1)
+        }
+    })
 }
 
 /// An arm's knots, in their order, as a track's points ([`track_indices`]).
 #[must_use]
 fn track_of(knots: &[TubeKnot]) -> Vec<TrackPointWire> {
     track_indices(knots.len())
-        .into_iter()
         .map(|k| {
             let knot = &knots[k];
             let [normal, binormal] = knot.widths();
@@ -268,40 +266,56 @@ mod tests {
         );
         assert_eq!(answer.universe, universe());
         assert_eq!(answer.entries.len(), list.entries().len());
+        let mut living_streams = 0;
         for (wire, entry) in answer.entries.iter().zip(list.entries()) {
-            assert_eq!(wire.mass_msun.to_bits(), entry.mass().value().to_bits());
-            assert_eq!(
-                wire.shell_outer_ly.to_bits(),
-                entry.shell().outer().value().to_bits()
-            );
-            match entry.kind() {
-                GlobalEntryKind::Centre => {
-                    assert_eq!(wire.kind, FeatureKindWire::GalacticCentre);
-                    assert_eq!((wire.number, wire.track), (None, None));
+            let shell = shell_wire(entry.shell());
+            match (entry.kind(), wire) {
+                (
+                    GlobalEntryKind::Centre,
+                    GlobalEntryWire::GalacticCentre {
+                        mass_msun,
+                        shell: s,
+                    },
+                ) => {
+                    assert_eq!(mass_msun.to_bits(), entry.mass().value().to_bits());
+                    assert_eq!(*s, shell);
                 }
-                GlobalEntryKind::Stream(number) => {
-                    assert_eq!(wire.kind, FeatureKindWire::Stream);
-                    assert_eq!(wire.number, Some(number.get()));
-                    assert_eq!(wire.track, Some(TrackStatusWire::Pending));
+                (
+                    GlobalEntryKind::Stream(number),
+                    GlobalEntryWire::Stream {
+                        number: n,
+                        mass_msun,
+                        shell: s,
+                        progenitor,
+                        track,
+                    },
+                ) => {
+                    assert_eq!(*n, number.get());
+                    assert_eq!(mass_msun.to_bits(), entry.mass().value().to_bits());
+                    assert_eq!((*s, *track), (shell, TrackStatusWire::Pending));
                     let living = matches!(
                         list.stream(number).expect("listed").origin(),
                         StreamOrigin::LivingGlobular(_)
                     );
-                    assert_eq!(wire.progenitor.is_some(), living);
+                    assert_eq!(progenitor.is_some(), living);
+                    living_streams += usize::from(living);
                 }
-                GlobalEntryKind::DwarfCore(number) => {
-                    assert_eq!(wire.kind, FeatureKindWire::DwarfCore);
-                    assert_eq!(wire.number, Some(u16::from(number.get())));
-                    assert_eq!(wire.track, None);
+                (
+                    GlobalEntryKind::DwarfCore(number),
+                    GlobalEntryWire::DwarfCore {
+                        number: n,
+                        mass_msun,
+                        shell: s,
+                    },
+                ) => {
+                    assert_eq!(*n, u16::from(number.get()));
+                    assert_eq!(mass_msun.to_bits(), entry.mass().value().to_bits());
+                    assert_eq!(*s, shell);
                 }
+                (kind, wire) => panic!("{kind:?} sent as {wire:?}"),
             }
         }
-        assert!(
-            answer
-                .entries
-                .iter()
-                .any(|e| e.kind == FeatureKindWire::Stream && e.progenitor.is_some())
-        );
+        assert!(living_streams > 0);
         let progenitors = &answer.progenitors;
         assert_eq!(progenitors[0].kind, ProgenitorKindWire::DominantMerger);
         assert_eq!((progenitors[0].stream, progenitors[0].core), (None, None));
@@ -375,21 +389,26 @@ mod tests {
             universe: universe(),
             stream: u16::try_from(list.debris().streams().len()).expect("small"),
         };
-        let refused = stream_track_number(list, &beyond).expect_err("no such stream");
-        assert_eq!(refused.code, ErrorCode::UnknownFeature);
-        assert_eq!(refused.field.as_deref(), Some("stream"));
+        // Past the list's streams, and past any stream's number.
+        for stream in [beyond.stream, u16::MAX] {
+            let request = StreamTrackRequest {
+                universe: universe(),
+                stream,
+            };
+            let refused = stream_track_number(list, &request).expect_err("no such stream");
+            assert_eq!(refused.code, ErrorCode::UnknownFeature);
+            assert_eq!(refused.field.as_deref(), Some("stream"));
+        }
     }
 
     /// P10.T10.a: an arm of up to 128 knots is sent whole, and a longer one thinned evenly with
     /// both ends kept, in order.
     #[test]
     fn an_arm_is_thinned_evenly_with_its_ends_kept() {
-        assert_eq!(track_indices(5), vec![0, 1, 2, 3, 4]);
-        assert_eq!(
-            track_indices(TRACK_POINTS),
-            (0..TRACK_POINTS).collect::<Vec<_>>()
-        );
-        let thinned = track_indices(256);
+        let indices = |n: usize| track_indices(n).collect::<Vec<_>>();
+        assert_eq!(indices(5), vec![0, 1, 2, 3, 4]);
+        assert_eq!(indices(TRACK_POINTS), (0..TRACK_POINTS).collect::<Vec<_>>());
+        let thinned = indices(256);
         assert_eq!(thinned.len(), TRACK_POINTS);
         assert_eq!((thinned[0], thinned[TRACK_POINTS - 1]), (0, 255));
         assert!(thinned.windows(2).all(|pair| pair[0] < pair[1]));

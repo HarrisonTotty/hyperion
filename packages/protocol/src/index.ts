@@ -280,6 +280,7 @@ import type { GlobalEntryWire } from "./generated/GlobalEntryWire";
 import type { GlobalFeatures } from "./generated/GlobalFeatures";
 import type { GlobalFeaturesRequest } from "./generated/GlobalFeaturesRequest";
 import type { ProgenitorKindWire } from "./generated/ProgenitorKindWire";
+import type { ShellWire } from "./generated/ShellWire";
 import type { StreamTrackRequest } from "./generated/StreamTrackRequest";
 import type { StreamTrackWire } from "./generated/StreamTrackWire";
 import type { TrackPointWire } from "./generated/TrackPointWire";
@@ -342,6 +343,7 @@ export type {
   GlobalFeatures,
   GlobalFeaturesRequest,
   ProgenitorKindWire,
+  ShellWire,
   StreamTrackRequest,
   StreamTrackWire,
   TrackPointWire,

@@ -7,7 +7,7 @@
 //! galaxy's at the epoch: its entries do not move in a clock window, so neither request names a
 //! time. A type's shape is fixed by the first build that sends a value of it, this one
 //! (`PROTOCOL_VERSION`'s documentation). Every enum here is closed, carrying all its variants
-//! from this build.
+//! from this build; a later field would be an optional one.
 //!
 //! Plan 10's members of streams and cores are what a range row's
 //! [`SystemOriginWire`](crate::SystemOriginWire) calls `stream` and `dwarf_core`; no row carries
@@ -16,6 +16,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+#[cfg(doc)]
 use crate::features::FeatureKindWire;
 use crate::primitives::{FeatureIdHex, GalacticPosition, UniverseIdHex};
 
@@ -27,8 +28,8 @@ pub struct GlobalFeaturesRequest {
     pub universe: UniverseIdHex,
 }
 
-/// A galaxy's global list: its galactic centre, streams and dwarf cores, and the progenitors
-/// accreted since its last major merger.
+/// A galaxy's global list: its galactic centre, streams and dwarf cores, and the accreted
+/// progenitors they come from, its last major merger and the recent ones.
 ///
 /// `universe` echoes the request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -43,29 +44,58 @@ pub struct GlobalFeatures {
     pub progenitors: Vec<AccretedProgenitorWire>,
 }
 
-/// One entry of the global list: what it is, its mass, and the shell about the galactic centre
-/// that holds every member it places.
+/// One entry of the global list, tagged by `kind` with [`FeatureKindWire`]'s strings: what it is,
+/// its mass, and the shell about the galactic centre that holds every member it places.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
-pub struct GlobalEntryWire {
-    /// What the entry is: `galactic_centre`, `stream` or `dwarf_core`.
-    pub kind: FeatureKindWire,
-    /// The stream's or the core's number on the list, what `stream_track` and a member's origin
-    /// name it by; `null` for the galactic centre.
-    pub number: Option<u16>,
-    /// Its mass, in solar masses: a stream's in its tube, a core's still bound, and the centre's
-    /// within its reach.
-    pub mass_msun: f64,
-    /// The bounding shell's inner radius about the galactic centre, in light-years.
-    pub shell_inner_ly: f64,
-    /// The bounding shell's outer radius, in light-years: at most the root cube's corner.
-    pub shell_outer_ly: f64,
-    /// The living globular cluster a stream is still being stripped from; `null` for an orphan's
-    /// stream, a dwarf's, and every other entry.
-    pub progenitor: Option<FeatureIdHex>,
-    /// Whether `stream_track` can answer the stream's track at once; `null` for every entry but a
-    /// stream.
-    pub track: Option<TrackStatusWire>,
+pub enum GlobalEntryWire {
+    /// The galactic centre, the list's first entry.
+    GalacticCentre {
+        /// Its mass within its reach, in solar masses: positive.
+        mass_msun: f64,
+        /// The shell its members lie in.
+        shell: ShellWire,
+    },
+    /// A stellar stream.
+    Stream {
+        /// Its number on the list, below 4,096: what `stream_track` and a member's origin name
+        /// it by.
+        number: u16,
+        /// Its tube's mass, in solar masses: positive.
+        mass_msun: f64,
+        /// The shell its members lie in.
+        shell: ShellWire,
+        /// The living globular cluster it is still being stripped from; `null` for an orphan's
+        /// stream and a dwarf's.
+        progenitor: Option<FeatureIdHex>,
+        /// Whether `stream_track` can answer its track at once.
+        track: TrackStatusWire,
+    },
+    /// The core of an accreted dwarf galaxy.
+    DwarfCore {
+        /// Its number on the list, below the list's core limit: what a member's origin names it
+        /// by.
+        number: u16,
+        /// Its mass still bound, in solar masses: positive.
+        mass_msun: f64,
+        /// The shell its members lie in.
+        shell: ShellWire,
+    },
+}
+
+/// A bounding shell about the galactic centre, clipped to the root cube.
+///
+/// Its radii are in light-years, the inner at least zero and the outer at most the root cube's
+/// corner, 113,512 ly. A shell whose inner radius passes its outer is empty: its entry lies wholly
+/// beyond the cube's corner and places no member.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ShellWire {
+    /// The inner radius, in light-years.
+    pub inner_ly: f64,
+    /// The outer radius, in light-years.
+    pub outer_ly: f64,
 }
 
 /// Whether the server holds a stream's track.
@@ -86,11 +116,12 @@ pub enum TrackStatusWire {
 pub struct AccretedProgenitorWire {
     /// Which progenitor it is.
     pub kind: ProgenitorKindWire,
-    /// Its stellar mass, in solar masses.
+    /// Its stellar mass, in solar masses: positive.
     pub mass_msun: f64,
-    /// How long before the epoch it was accreted, in gigayears.
+    /// How long before the epoch it was accreted, in gigayears: 6–11 for the last major merger,
+    /// 0–6 for a recent progenitor.
     pub accreted_gyr: f64,
-    /// Its orbit's pericentre about the galactic centre, in light-years.
+    /// Its orbit's pericentre about the galactic centre, in light-years: below its apocentre.
     pub pericentre_ly: f64,
     /// Its orbit's apocentre, in light-years.
     pub apocentre_ly: f64,
@@ -113,8 +144,8 @@ pub enum ProgenitorKindWire {
 
 /// Asks for one stream's track (`stream_track`), answered with [`StreamTrackWire`].
 ///
-/// The server resolves the number first: one the galaxy's list has no stream for is refused as
-/// `unknown_feature`, naming `stream`.
+/// The server resolves the number first: one the galaxy's list has no stream for, 4,096 or more
+/// among them, is refused as `unknown_feature`, naming `stream`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StreamTrackRequest {
@@ -143,7 +174,9 @@ pub struct StreamTrackWire {
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(export)]
 pub enum TrackWire {
-    /// The track: each arm a polyline along its centre line, at the epoch.
+    /// The track: each arm a polyline along its centre line, at the epoch. A stream whose cluster
+    /// hardly drifted, an eccentric orphan near its apocentre, is a cloud rather than a tube, and
+    /// its track is no stream's line (plan 10, "P10.T6.a's arms by energy, as built").
     Ready {
         /// The trailing arm, from its tip to its root at the progenitor: at most 128 points.
         trailing: Vec<TrackPointWire>,
@@ -186,26 +219,33 @@ pub(crate) mod tests {
         UniverseIdHex::from_u64(UNIVERSE)
     }
 
-    /// The list's centre and a living globular's stream.
+    /// The list's centre, a living globular's stream, and a dwarf core.
     pub(crate) fn entries() -> Vec<GlobalEntryWire> {
         vec![
-            GlobalEntryWire {
-                kind: FeatureKindWire::GalacticCentre,
-                number: None,
+            GlobalEntryWire::GalacticCentre {
                 mass_msun: 2.5e7,
-                shell_inner_ly: 0.0,
-                shell_outer_ly: 128.0,
-                progenitor: None,
-                track: None,
+                shell: ShellWire {
+                    inner_ly: 0.0,
+                    outer_ly: 128.0,
+                },
             },
-            GlobalEntryWire {
-                kind: FeatureKindWire::Stream,
-                number: Some(3),
+            GlobalEntryWire::Stream {
+                number: 3,
                 mass_msun: 1.25e4,
-                shell_inner_ly: 28_689.0,
-                shell_outer_ly: 64_267.5,
+                shell: ShellWire {
+                    inner_ly: 28_689.0,
+                    outer_ly: 64_267.5,
+                },
                 progenitor: Some(FeatureIdHex::from_u64(GLOBULAR)),
-                track: Some(TrackStatusWire::Pending),
+                track: TrackStatusWire::Pending,
+            },
+            GlobalEntryWire::DwarfCore {
+                number: 0,
+                mass_msun: 2.0e3,
+                shell: ShellWire {
+                    inner_ly: 31_500.0,
+                    outer_ly: 38_250.0,
+                },
             },
         ]
     }
@@ -214,21 +254,22 @@ pub(crate) mod tests {
         json!([
             {
                 "kind": "galactic_centre",
-                "number": null,
                 "mass_msun": 2.5e7,
-                "shell_inner_ly": 0.0,
-                "shell_outer_ly": 128.0,
-                "progenitor": null,
-                "track": null,
+                "shell": { "inner_ly": 0.0, "outer_ly": 128.0 },
             },
             {
                 "kind": "stream",
                 "number": 3,
                 "mass_msun": 1.25e4,
-                "shell_inner_ly": 28_689.0,
-                "shell_outer_ly": 64_267.5,
+                "shell": { "inner_ly": 28_689.0, "outer_ly": 64_267.5 },
                 "progenitor": "e842000280000000",
                 "track": "pending",
+            },
+            {
+                "kind": "dwarf_core",
+                "number": 0,
+                "mass_msun": 2.0e3,
+                "shell": { "inner_ly": 31_500.0, "outer_ly": 38_250.0 },
             },
         ])
     }

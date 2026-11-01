@@ -2244,21 +2244,29 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
 - **P10.T10.a as built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24).** No
   generated output moved; no `PROTOCOL_VERSION` bump (new kinds and a growing enum's variants).
   - _Wire._ `global_features` answers `GlobalFeatures { universe, entries, progenitors }`:
-    `GlobalEntryWire` (`kind` is `FeatureKindWire`, `number`, `mass_msun`, the shell's radii, a
-    living globular's `progenitor`, `track: TrackStatusWire`) and `AccretedProgenitorWire` (the
-    dominant merger, then the recent ones, with the `stream` and `core` each left). `stream_track`
-    answers `StreamTrackWire { universe, stream, track }`, `TrackWire` tagged `status`: `ready`
-    (`trailing` and `leading`, at most 128 `TrackPointWire`s each, ends kept) or `pending`. A
-    stream the list lacks is `unknown_feature` naming `stream`. `SystemOriginWire` gains
-    `stream { stream }` and `dwarf_core { core }`.
-  - _Server (lean, 2026-10-31)._ `compute::GlobalListService` builds each galaxy's list once in a
-    bulk job (`GLOBAL_LIST_CACHE_BYTES`, 4 MiB). With no tube cache, every stream's `track` is
-    `pending` and `stream_track` builds its tube in the job that asks; T10.b's cache and warm-up
-    make them `ready`. `convert::system_origin` still has no arm for `GlobalListMember`, whose
-    number is in its ID: T10.b's.
+    `GlobalEntryWire`, tagged `kind` (`galactic_centre`, `stream` with `number`, `progenitor` and
+    `track: TrackStatusWire`, `dwarf_core` with `number`), each with `mass_msun` and a `ShellWire`
+    (empty, inner past outer, for an entry wholly beyond the cube's corner); and
+    `AccretedProgenitorWire`s, the dominant merger then the recent ones, with the `stream` and
+    `core` each left. `stream_track` answers `StreamTrackWire { universe, stream, track }`,
+    `TrackWire` tagged `status`: `ready` (`trailing` and `leading`, at most 128 `TrackPointWire`s
+    each, ends kept) or `pending`. A stream the list lacks, 4,096 or more among them, is
+    `unknown_feature` naming `stream`. `SystemOriginWire` gains `stream { stream }` and
+    `dwarf_core { core }`. No dispersion on a track point: a later optional field.
+  - _Server, taken from T10.b (lean, 2026-10-31)._ The two handlers. `compute::GlobalListService`
+    builds each galaxy's list on its first request, not when the universe opens, in a bulk job
+    (`GLOBAL_LIST_CACHE_BYTES`, 4 MiB). With no tube cache, every stream's `track` is `pending`
+    and `stream_track` builds its tube serially in the interactive job that asks, about 2 s a
+    request; T10.b's cache, warm-up and open-time build make them `ready`. A cloud's tube (an
+    eccentric orphan near apocentre) is sent `ready` like any other. `convert::system_origin` has
+    no arm for `GlobalListMember`, whose number is in its ID: T10.b's.
   - _Parameters._ `halo.discrete_share` is sent drawn in the `halo` group; both keys are out of
     `EXCLUDED_PARAMETERS`, and `PARAMETERS_ACCOUNTED_FOR` is 115, since the progenitors now go in
     `global_features`. `galaxy_parameters.golden` re-blessed by name. The applied share's derived
     key waits for T3.d.b.
-  - _For T11._ The client reads `stream` and `dwarf_core` origins as `unknown` (`featureWire.ts`),
-    and `halo.discrete_share` has no label in `parameterLabels.ts` yet.
+  - _For T11._ The client reads `stream` and `dwarf_core` origins as `unknown` (`featureWire.ts`).
+    `halo.discrete_share` needs its label in `parameterLabels.ts` and its row in
+    `galaxyFixtures.ts`'s parameter list.
+  - _Tests._ `hyperion-server`'s `tests/global_list.rs`, and slow:
+    `convert::global_answers::tests::global_features_lists_every_entry_and_the_accreted_progenitors`
+    and `a_stream_s_track_is_its_tube_s_knots_thinned_to_128_an_arm`.

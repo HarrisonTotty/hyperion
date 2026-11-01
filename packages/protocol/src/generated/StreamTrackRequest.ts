@@ -4,8 +4,8 @@ import type { UniverseIdHex } from "./UniverseIdHex";
 /**
  * Asks for one stream's track (`stream_track`), answered with [`StreamTrackWire`].
  *
- * The server resolves the number first: one the galaxy's list has no stream for is refused as
- * `unknown_feature`, naming `stream`.
+ * The server resolves the number first: one the galaxy's list has no stream for, 4,096 or more
+ * among them, is refused as `unknown_feature`, naming `stream`.
  */
 export type StreamTrackRequest = { 
 /**
