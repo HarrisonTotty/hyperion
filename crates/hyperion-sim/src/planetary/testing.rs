@@ -500,6 +500,9 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
+/// - a body's bulk iron with its solids' minor oxides, `MINOR_OXIDES_VERSION` (P14.T51.k), at
+///   `MinorOxidesRules::Chondritic` through `with_minor_oxides`: the mantle `FeO` and the
+///   secondary crust that read it.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -521,6 +524,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
         with_organic_sediment, with_rayleigh_adding,
     };
+    use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -569,6 +573,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
+    let run = move || with_minor_oxides(MinorOxidesRules::Chondritic, run);
     with_locked_climate(LockedClimateRules::Deck, run)
 }
 
