@@ -10,7 +10,10 @@ import {
   DAWN_SAFETY_OFF_DISABLED,
   DAWN_SAFETY_OFF_ENABLED,
   type DawnSafety,
+  FIELD_HOLD_TIMEOUT_MS,
   launchSwitches,
+  MEASURE_TIMEOUT_MS,
+  MEASUREMENT_MARGIN_MS,
   registerSpikeHandlers,
   SPIKE_CHANNELS,
   type SpikeHandlerDeps,
@@ -20,12 +23,18 @@ import {
   SPIKE_TRACE_BUFFER_KB,
   SPIKE_TRACE_CATEGORIES,
   SPIKE_TRACE_FORMAT,
+  SERVED_FIELD_HOLD_TIMEOUT_MS,
+  SOFTWARE_SPIKE_RESULTS_DIR,
+  SPIKE_RESULTS_DIR,
+  spikeResultsDir,
   SpikeTrace,
   type SpikeTracing,
   spikeTraceConfig,
+  spikeWatchdogMs,
   type TraceWindowStop,
   traceSettingsOf,
 } from "./spike";
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
 import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 
@@ -252,6 +261,48 @@ function keep(): {
     },
   };
 }
+
+describe("the spike's watchdog", () => {
+  it("gives a descent 45 minutes and a smoke 3, with each generated world's measurement", () => {
+    const terrainMs = FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+    const servedMs = SERVED_FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(spikeWatchdogMs({ smoke: false, world: "test-planet" }, mode)).toBe(45 * 60_000);
+      expect(spikeWatchdogMs({ smoke: true, world: "test-planet" }, mode)).toBe(180_000);
+      expect(spikeWatchdogMs({ smoke: false, world: "terrain-test" }, mode)).toBe(
+        45 * 60_000 + terrainMs,
+      );
+      expect(spikeWatchdogMs({ smoke: true, world: "served" }, mode)).toBe(180_000 + servedMs);
+    }
+    expect(terrainMs).toBe(13 * 60_000);
+    expect(servedMs).toBe(21 * 60_000);
+  });
+
+  it("is five times as long in the software mode, on every world", () => {
+    for (const smoke of [false, true]) {
+      for (const world of ["test-planet", "terrain-test", "served"] as const) {
+        expect(spikeWatchdogMs({ smoke, world }, "software")).toBe(
+          SOFTWARE_WAIT_FACTOR * spikeWatchdogMs({ smoke, world }, "vulkan"),
+        );
+      }
+    }
+  });
+});
+
+describe("the spike's results directory", () => {
+  it("is the measurements' directory on a GPU launch, and --out where one is given", () => {
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(spikeResultsDir(null, mode)).toBe("docs/measurements/descent-spike");
+      expect(spikeResultsDir("/runs/here", mode)).toBe("/runs/here");
+    }
+    expect(SPIKE_RESULTS_DIR).toBe("docs/measurements/descent-spike");
+  });
+
+  it("is under target/ in the software mode, whose figures are SwiftShader's", () => {
+    expect(spikeResultsDir(null, "software")).toBe("target/descent-spike/results");
+    expect(SOFTWARE_SPIKE_RESULTS_DIR.startsWith("target/")).toBe(true);
+  });
+});
 
 describe("the spike's trace", () => {
   it("records a timed run's five categories, without gpu or the CPU profiler, and only those", () => {

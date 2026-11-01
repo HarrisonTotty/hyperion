@@ -69,7 +69,7 @@ const GPU_TIMING_DAWN_SWITCH: ChromiumSwitch = {
  * @returns The Vulkan set, plus the timing toggle when `gpuTiming` is on, in `vulkan` mode on
  * Linux; nothing in `safe` mode (no Vulkan, no Dawn toggle and no timing, since nothing draws with
  * WebGPU there), nothing in `software` mode, whose SwiftShader switches are the command line's own
- * (`viewsCheck.sh --software`, plan R01, R01.T16), and nothing in `default` mode, or on any other
+ * (`viewsCheck.sh --software` and `descentSpike.sh --software`, plan R01, R01.T16), and nothing in `default` mode, or on any other
  * platform, which needs none.
  */
 export function graphicsSwitches(options: GraphicsLaunchOptions): ReadonlyArray<ChromiumSwitch> {

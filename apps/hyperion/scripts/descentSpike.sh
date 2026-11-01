@@ -3,7 +3,7 @@
 # after a build. It starts a local hyperion-server with its pool capped at two workers, runs the
 # built client with `--descent-spike` and the spike's options, and stops everything it started.
 #
-#   descentSpike.sh [--companion-load <threads>] [--cold-cache] [--hidden]
+#   descentSpike.sh [--companion-load <threads>] [--cold-cache] [--hidden] [--software]
 #                   [--universe <NAME|ID>] [--body <BODY_ID>] [--survey <SOURCE> <RESOLUTION_M>]
 #                   [--distance <AU>] [spike options...]
 #
@@ -45,6 +45,19 @@
 # into the run's profile and kept again after it, so that cold and warm caches are run apart.
 # --hidden never shows the window (offscreen rendering), as --smoke never does.
 #
+# --software runs the spike hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and no display,
+# as a pod has (the check-only software mode, plan R01, R01.T16; main's ruling of 2026-11-01 for the
+# spike, on R10.T15.b.2's runs): Linux only (exit 2 elsewhere), implying --hidden. It is
+# `viewsCheck.sh --software`'s mode: Electron runs in test-render's environment (DISPLAY,
+# WAYLAND_DISPLAY and XDG_SESSION_TYPE unset, the session's D-Bus out of reach) with test-render's
+# adapter and headless switches, --hyperion-graphics-software, --ozone-override-screen-size=1920,1080
+# and --disable-gpu-watchdog, never --ozone-platform=x11; the client then forces no Vulkan switch,
+# draws both styles on the fallback adapter and records the launch mode `software`. Its frame times
+# are SwiftShader's and its figures never a GPU's: the results go under target/descent-spike/results/
+# (the client refuses --out with the switch), and its shader caches are kept in
+# target/descent-spike/gpu-cache-software, apart from a GPU run's. The client's watchdog and this
+# script's limit are five times as long. A GPU launch, without --software, is unchanged.
+#
 # Each run gets a fresh `--user-data-dir` under target/descent-spike/, on disk and never under
 # TMPDIR, removed afterwards: the trace's window files wait there until the run ends, about 1 GB
 # for a timed descent and 2 GB for a profiled one, which a RAM-backed /tmp cannot hold (decision-r05-trace-windows.md). Electron's
@@ -59,14 +72,17 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
-electron="$here/node_modules/.bin/electron"
-runs="$repo/target/descent-spike"
+# The client's Electron; a test of this script gives a stand-in that records its arguments.
+electron="${HYPERION_SPIKE_ELECTRON:-$here/node_modules/.bin/electron}"
+# Where the runs' profiles and kept shader caches go; a test of this script gives its own.
+runs="${HYPERION_SPIKE_RUNS:-$repo/target/descent-spike}"
 cache_keep="$runs/gpu-cache"
 port="${HYPERION_SPIKE_PORT:-7879}"
 
 companion=0
 cold=0
 hidden=0
+software=0
 universe=""
 body=""
 survey_source=orbital
@@ -79,6 +95,7 @@ while [[ $# -gt 0 ]]; do
         --companion-load=*) companion="${1#--companion-load=}"; shift ;;
         --cold-cache) cold=1; shift ;;
         --hidden) hidden=1; shift ;;
+        --software) software=1; hidden=1; shift ;;
         --universe) universe="$2"; shift 2 ;;
         --body) body="$2"; shift 2 ;;
         --survey) survey_source="$2"; survey_resolution="$3"; shift 3 ;;
@@ -86,6 +103,15 @@ while [[ $# -gt 0 ]]; do
         *) spike_args+=("$1"); shift ;;
     esac
 done
+# The software mode's switches are the smoke harness's, which only Linux runs headless.
+if [[ $software -eq 1 && "$(uname -s)" != Linux ]]; then
+    echo "descentSpike.sh: --software runs on Linux only" >&2
+    exit 2
+fi
+if [[ $software -eq 1 ]]; then
+    # SwiftShader's shader caches are kept apart, so that they never warm a GPU run's.
+    cache_keep="$runs/gpu-cache-software"
+fi
 if ! [[ "$companion" =~ ^[0-9]+$ ]]; then
     echo "descentSpike.sh: --companion-load takes a thread count, not $companion" >&2
     exit 2
@@ -131,6 +157,12 @@ trap cleanup EXIT INT TERM
 # each 13 more on the terrain world and 21 more on a served one (`spikeWatchdogMs`), so that this
 # limit stays above it.
 limit=$(( (smoke == 1 ? 300 : 3600) + (terrain == 1 ? 780 : 0) + (served == 1 ? 1260 : 0) ))
+# The software mode's, five times as long, as the client's watchdog is (`SOFTWARE_WAIT_FACTOR`).
+software_factor=5
+if [[ $software -eq 1 ]]; then
+    limit=$(( limit * software_factor ))
+    echo "descent spike: software mode, on SwiftShader; the run's limit $limit s"
+fi
 if [[ $served -eq 1 ]]; then
     # Built first, so that the server is up within seconds of starting and the ship can be placed.
     cargo build --release --quiet --manifest-path "$repo/Cargo.toml" -p hyperion-server
@@ -193,16 +225,30 @@ fi
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -q -x >"$profile/nvidia-baseline.xml" 2>/dev/null; then
     env_run+=("HYPERION_SPIKE_NVIDIA_BASELINE=$profile/nvidia-baseline.xml")
 fi
-# As the `client` recipe does: on Wayland the client would relaunch itself through XWayland, and
-# this script would take the first process's exit for the run's.
-x11=()
-if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-    x11=(--ozone-platform=x11)
+# testRender.sh's adapter and headless switches, word for word (descentSpikeScript.test.ts holds
+# the two lists equal), for --software alone.
+adapter_switches=(--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader)
+headless_switches=(--ozone-platform=headless --use-angle=swiftshader --enable-features=Vulkan
+    --use-vulkan=swiftshader)
+env_unset=()
+switches=()
+if [[ $software -eq 1 ]]; then
+    # testRender.sh's environment, no display and the session's D-Bus out of reach, and no
+    # XDG_SESSION_TYPE either; `env` takes its -u options before the assignments.
+    env_unset=(-u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE)
+    env_run+=(DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent)
+    switches=("${adapter_switches[@]}" "${headless_switches[@]}" --hyperion-graphics-software
+        --ozone-override-screen-size=1920,1080 --disable-gpu-watchdog)
+elif [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    # As the `client` recipe does: on Wayland the client would relaunch itself through XWayland,
+    # and this script would take the first process's exit for the run's.
+    switches=(--ozone-platform=x11)
 fi
 status=0
 start=$(date +%s)
-env ${env_run[@]+"${env_run[@]}"} setsid timeout --kill-after=10 "$limit" "$electron" \
-    ${x11[@]+"${x11[@]}"} "$here/out/main/index.js" --descent-spike --port "$port" \
+env ${env_unset[@]+"${env_unset[@]}"} ${env_run[@]+"${env_run[@]}"} \
+    setsid timeout --kill-after=10 "$limit" "$electron" \
+    ${switches[@]+"${switches[@]}"} "$here/out/main/index.js" --descent-spike --port "$port" \
     ${spike_args[@]+"${spike_args[@]}"} \
     "--user-data-dir=$profile" &
 client=$!

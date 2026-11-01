@@ -23,14 +23,16 @@ import type { GpuProcessGoneReport, GraphicsLaunchMode } from "./api";
 export const SAFE_MODE_SWITCH = "hyperion-graphics-safe";
 
 /**
- * The switch that makes a launch the check-only software mode: a views check on SwiftShader, its
- * fallback adapter taken as a hardware one, so that both styles draw (plan R01, R01.T16).
+ * The switch that makes a launch the check-only software mode: a views check or a descent spike on
+ * SwiftShader, its fallback adapter taken as a hardware one, so that both styles draw (plan R01,
+ * R01.T16; the spike by main's ruling of 2026-11-01).
  *
  * @remarks
- * Written without its leading dashes. Only `viewsCheck.sh --software` passes it, beside the smoke
- * harness's adapter and headless switches on the command line, which the client never sets itself.
- * The main process refuses it without `--views-check` and in a packaged build, so no player's
- * launch takes it (the owner's ruling of 2026-10-29: a test-tool exception to R01 Design note 8).
+ * Written without its leading dashes. Only `viewsCheck.sh --software` and `descentSpike.sh
+ * --software` pass it, beside the smoke harness's adapter and headless switches on the command
+ * line, which the client never sets itself. The main process refuses it without `--views-check` or
+ * `--descent-spike` and in a packaged build, so no player's launch takes it (the owner's ruling of
+ * 2026-10-29: a test-tool exception to R01 Design note 8).
  */
 export const SOFTWARE_MODE_SWITCH = "hyperion-graphics-software";
 

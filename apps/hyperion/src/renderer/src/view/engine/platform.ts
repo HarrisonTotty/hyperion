@@ -183,8 +183,9 @@ export function featuresNotEnabled(
  *
  * @remarks
  * The owner's test-tool exception to R01 Design note 8 (2026-10-29). The mode comes from the main
- * process's own switch, which it refuses without `--views-check` and in a packaged build, never
- * from the adapter, so a failed hardware path never draws the photorealistic style on SwiftShader.
+ * process's own switch, which it refuses without `--views-check` or `--descent-spike` and in a
+ * packaged build, never from the adapter, so a failed hardware path never draws the photorealistic
+ * style on SwiftShader.
  */
 export function takesFallbackAdapter(launchMode: GraphicsLaunchMode): boolean {
   return launchMode === "software";

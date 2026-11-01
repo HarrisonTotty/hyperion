@@ -12,10 +12,12 @@
 
 import type { IpcMainInvokeEvent, TraceConfig } from "electron";
 
-import type { DescentSpikeReport, SpikeEnd, SpikeResultsAnswer } from "../preload/api";
+import type { DescentSpikeReport, SpikeEnd, SpikeLaunch, SpikeResultsAnswer } from "../preload/api";
 
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
 import {
   type ChromiumSwitch,
+  type GraphicsLaunchMode,
   type GraphicsLaunchOptions,
   graphicsSwitches,
   LIST_SWITCHES,
@@ -103,6 +105,73 @@ export function launchSwitches(
     { name: "disable-dawn-features", value: DAWN_SAFETY_OFF_DISABLED.join(",") },
   ]);
 }
+
+/**
+ * The renderer's two waits of a generated world's measurement before it flies (plan R10,
+ * R10.T14.c; `bodyDescent.ts`' constants of the same names, which this project cannot import): the
+ * field's hold, at most `FIELD_HOLD_TIMEOUT_MS`, or `SERVED_FIELD_HOLD_TIMEOUT_MS` over a served
+ * world (R10.T15.b), then each site's bakes, at most `MEASURE_TIMEOUT_MS` an attempt.
+ */
+export const FIELD_HOLD_TIMEOUT_MS = 120_000;
+export const SERVED_FIELD_HOLD_TIMEOUT_MS = 600_000;
+export const MEASURE_TIMEOUT_MS = 600_000;
+
+/** The room past those waits for the site's reading and the session's own start, ms. */
+export const MEASUREMENT_MARGIN_MS = 60_000;
+
+/**
+ * How long a spike run may take before the main process ends it with status 3: the smoke's 10 s
+ * and the descent's 20.5 minutes, each with room for building the scene and writing the results;
+ * and over a generated world (R10.T14.c) 13 minutes more, its measurement's longest for one site:
+ * the field's hold at its 120 s limit, then the site's bakes at their 600 s limit, and a minute's
+ * margin, against some 40 s in a typical run on three workers; over a served world (R10.T15.b)
+ * 21 minutes more, its field's hold at its 600 s limit, since the server computes the body's coarse
+ * field before its first answer (about a minute natively at level 8, R09.T16.a).
+ *
+ * @remarks
+ * A site whose floors the profile refuses is measured afresh at the next candidate, each attempt's
+ * bakes within their own 600 s. Past one attempt at its limit this watchdog is the backstop: it ends
+ * the run, rather than the renderer's own timeouts. The spike's script (`descentSpike.sh`) keeps its
+ * limit above this one, so that the watchdog ends a run first. In the check-only software mode
+ * (plan R01, R01.T16; main's ruling for the spike, 2026-11-01) every part is
+ * {@link SOFTWARE_WAIT_FACTOR} times as long, as the views check's is, and the script's limit with
+ * it; a GPU launch's is unchanged.
+ */
+export function spikeWatchdogMs(
+  launch: Pick<SpikeLaunch, "smoke" | "world">,
+  mode: GraphicsLaunchMode,
+): number {
+  let measurementMs: number;
+  switch (launch.world) {
+    case "test-planet":
+      measurementMs = 0;
+      break;
+    case "terrain-test":
+      measurementMs = FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+    case "served":
+      measurementMs = SERVED_FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+  }
+  const ms = (launch.smoke ? 180_000 : 45 * 60_000) + measurementMs;
+  return mode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
+}
+
+/**
+ * Where a spike run's results go, from the repository's root unless `--out` names a directory:
+ * `docs/measurements/descent-spike/`, or under `target/` in the software mode, whose figures are
+ * SwiftShader's and never a GPU's, as a software views check's are (main's ruling, 2026-10-29: the
+ * main process refuses `--out` with the switch).
+ */
+export function spikeResultsDir(out: string | null, mode: GraphicsLaunchMode): string {
+  return out ?? (mode === "software" ? SOFTWARE_SPIKE_RESULTS_DIR : SPIKE_RESULTS_DIR);
+}
+
+/** A spike run's results directory, from the repository's root. */
+export const SPIKE_RESULTS_DIR = "docs/measurements/descent-spike";
+
+/** A software-mode spike run's results directory, from the repository's root. */
+export const SOFTWARE_SPIKE_RESULTS_DIR = "target/descent-spike/results";
 
 /**
  * The trace categories of every spike run (Design note 18): the timeline's frames, tasks and the
