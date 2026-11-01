@@ -314,8 +314,8 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 5, raised last by R08.T3.e's column on the published nodes", () => {
-    expect(ATMOSPHERE_OPTICS_VERSION).toBe(5);
+  it("keys on the optics' version 6, raised last by a mode's τ taken over the whole sky", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(6);
   });
 
   it.each(["unset", "airless"] as const)(

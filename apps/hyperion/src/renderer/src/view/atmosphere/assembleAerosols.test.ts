@@ -33,6 +33,7 @@ import {
   assembleMedium,
   sizeConvergenceReasons,
 } from "./assemble";
+import { columnLengthM } from "./medium";
 import { modeOptics } from "./sizeDistribution";
 
 /** The generated Earth with an inventory, assembled with no line tables. */
@@ -252,6 +253,39 @@ describe("Design note 12's τ rule", () => {
 
   it("hides a stand-in beneath a cloud past the split's depth", () => {
     expect(standInReasons(earthWith(modes(AMMONIUM_HYDROSULPHIDE, waterCloud(20))))).toEqual([]);
+  });
+});
+
+/** The vertical optical depth per channel of an assembly's term `name`, from the ground to its top. */
+function termDepth(result: AssembledMedium, name: string): ReadonlyArray<number> {
+  const medium = result.medium;
+  const term = medium?.terms.find((t) => t.name === name);
+  if (medium === undefined || term === undefined) {
+    throw new Error(`the assembly draws no ${name}`);
+  }
+  const lengthM = columnLengthM(term.density, medium.topHeightM);
+  return term.scattering.map((s, c) => (s + (term.absorption[c] ?? 0)) * lengthM);
+}
+
+// The record's τ is in-cloud, over the share of the sky the mode covers; the medium is the same at
+// every place on the body (the owner's report, 2026-11-01: a deck of 47–67% coverage drew as an
+// overcast over the whole body, its ground opaque under it).
+describe("a mode's coverage", () => {
+  const covered = (coverage: number): AssembledMedium =>
+    earthWith(modes({ ...waterCloud(2), coverage }));
+
+  it("takes a mode's τ over the whole sky: its in-cloud τ times its coverage", () => {
+    const whole = termDepth(covered(1), "aerosol:H2O");
+    const share = termDepth(covered(0.25), "aerosol:H2O");
+    // The green channel's τ lies within 1% of the record's τ(550).
+    expect(Math.abs((whole[1] ?? Number.NaN) / 2 - 1)).toBeLessThan(0.01);
+    for (const c of [0, 1, 2]) {
+      expect((share[c] ?? Number.NaN) / (whole[c] ?? Number.NaN)).toBeCloseTo(0.25, 12);
+    }
+  });
+
+  it("draws no term for a mode that covers none of the sky", () => {
+    expect(aerosolTerms(covered(0))).toEqual([]);
   });
 });
 

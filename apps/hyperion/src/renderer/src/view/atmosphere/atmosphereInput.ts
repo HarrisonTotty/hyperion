@@ -31,9 +31,10 @@ import type { BakeSpectrum } from "./spectralColour";
  * pending. 4 since R08.T4.f's part 2: VO and hot H₂O are drawn where they were pending, one raise
  * for both though they landed apart, since every cache keyed on it lasts one session. 5 since
  * R08.T3.e: a record that sends its vertical structure takes its column on the structure's nodes,
- * not isothermal at T_s.
+ * not isothermal at T_s. 6 since the owner's report of 2026-11-01: an aerosol mode's term takes
+ * its τ over the whole sky, its coverage applied.
  */
-export const ATMOSPHERE_OPTICS_VERSION = 5;
+export const ATMOSPHERE_OPTICS_VERSION = 6;
 
 /** One star lighting a body, as `lightsAt` lists it: its body ID and its spectrum in the bake bins. */
 export interface BodyLight {

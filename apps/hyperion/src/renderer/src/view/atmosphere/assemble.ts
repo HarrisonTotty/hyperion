@@ -36,7 +36,11 @@
  *   drops its reason; each is named in {@link AssembledMedium.negligible}. The layers are never
  *   filtered by the bound, so that a species with a pending part keeps its measured data and a
  *   bulk gas its pairs;
- * - Thomson scattering on e⁻'s layer, and an aerosol term for each of the inventory's modes;
+ * - Thomson scattering on e⁻'s layer, and an aerosol term for each of the inventory's modes, its
+ *   τ(550) over the whole sky, the record's in-cloud τ times its coverage (`envelope.ts`'
+ *   `skyOpticalDepth550`), since the medium is the same at every place on the body (the owner's
+ *   report, 2026-11-01: the in-cloud τ drew a deck of 47–67% coverage as an overcast over the whole
+ *   body, and its ground opaque under it);
  * - at most `MAX_TERMS` (8) terms: the molecular term, then the others of greatest vertical depth
  *   (an absorber by `absorberRankingDepth`, a mode by its own τ(550), Thomson by σ_T U, the earlier
  *   listed first on a tie), the rest left out and reported.
@@ -1234,7 +1238,8 @@ function outsideOpticsReason(mode: RecordAerosolMode, particles: AerosolParticle
 
 /**
  * The inventory's modes to draw: each of τ above 0 and base below its top, inside the column,
- * whose particles the optics on file take. A mode of τ 0 or of base equal to top is skipped
+ * whose particles the optics on file take, its τ the sky's, its in-cloud τ times its coverage (the
+ * module's remarks). A mode of τ 0 or of coverage 0 or of base equal to top is skipped
  * (review-r08-shapes-b C3: legal on the wire); one wholly below the datum is hidden by the ground;
  * one wholly above the column's top is dropped and reported; one whose sizes or optical depth the
  * generator does not model is dropped and reported (P14.T54.b); and one whose modelled particles
@@ -1256,7 +1261,8 @@ function modesOf(
   for (const [index, mode] of (inventory?.modes ?? []).entries()) {
     const sizes = mode.sizeDistribution;
     const depth = mode.opticalDepth;
-    const tau550 = depth.kind === "value" ? depth.value.tau550 : undefined;
+    // The medium is uniform over the body, so a mode's term takes the τ it puts over the whole sky.
+    const tau550 = depth.kind === "value" ? depth.value.tau550 * mode.coverage : undefined;
     if (tau550 === 0 || mode.basePa === mode.topPa || mode.topPa >= datumPa) {
       continue;
     }
