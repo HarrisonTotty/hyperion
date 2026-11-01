@@ -71,6 +71,7 @@ use super::recycling::{PulsarAt, is_millisecond_pulsar, pulsar_at};
 use super::rlof::NOVA_RATE;
 use super::star::{G, Kind, Surface};
 use super::timeline::{BinaryState, BinaryTimeline, Component, SegmentKind};
+use super::xrb_class::{SPUN_UP_GAINED_SHARE, WIND_DISC_ROCHE_FILLING, XRB_MIN_TRANSFER_RATE};
 
 /// The kinds of cataclysmic variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -212,7 +213,8 @@ pub const HMXB_MIN_DONOR_MASS: SolarMasses = SolarMasses::new(8.0);
 /// star of [`HMXB_MIN_DONOR_MASS`] or more is a supergiant X-ray binary, W: 10³⁵ erg s⁻¹, the
 /// floor of the supergiant systems' luminosities, (0.7–1) × 10³⁵ erg s⁻¹ (Lutovinov et al. 2013,
 /// MNRAS 431, 327, section 4.1; ruling 129.5). It applies to wind-fed systems alone: a pair in
-/// Roche-lobe overflow onto a compact star is an X-ray binary in quiescence too.
+/// Roche-lobe overflow onto a compact star is an X-ray binary in quiescence too, from 27 at
+/// `xrb_class::XRB_MIN_TRANSFER_RATE` or more.
 pub const XRB_MIN_LUMINOSITY: Watts = Watts::new(1.0e28);
 
 /// The least accretion luminosity at which a neutron star or black hole fed by the wind of a giant
@@ -369,12 +371,18 @@ pub struct ClassContext<'a> {
     merged_from: Option<[Phase; 2]>,
     /// The pair's stellar rules, which its Be stars' type and rotation read.
     rules: StellarRules,
+    /// Each star's mass where it first took a donor's matter in stable transfer before the state's
+    /// age, from which a B star's gain spins it to the Be threshold from
+    /// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION); `None` under the held arm,
+    /// which never asks.
+    gainer_start: [Option<SolarMasses>; 2],
 }
 
 impl<'a> ClassContext<'a> {
     /// The context of a pair of `composition`, `draws` and `params`, whose stars are the pulsars
     /// `pulsars` (`None` for a star that is not a neutron star, or one with no recorded birth),
-    /// and which, if it has merged, merged from stars of the phases `merged_from`, under the
+    /// which, if it has merged, merged from stars of the phases `merged_from`, and whose stars
+    /// first took a donor's matter in stable transfer at the masses `gainer_start`, under the
     /// stellar stage's `rules`.
     #[must_use]
     pub(crate) const fn new(
@@ -382,6 +390,7 @@ impl<'a> ClassContext<'a> {
         draws: [&'a StarDraws; 2],
         params: &'a BinaryParams,
         (pulsars, merged_from): ([Option<PulsarAt>; 2], Option<[Phase; 2]>),
+        gainer_start: [Option<SolarMasses>; 2],
         rules: StellarRules,
     ) -> Self {
         Self {
@@ -391,7 +400,19 @@ impl<'a> ClassContext<'a> {
             pulsars,
             merged_from,
             rules,
+            gainer_start,
         }
+    }
+
+    /// Whether component `d`'s star has gained [`SPUN_UP_GAINED_SHARE`] of its mass in stable
+    /// transfer by the state's age, now `star`: never under the held arm.
+    #[must_use]
+    fn spun_up(&self, d: usize, star: &StarState) -> bool {
+        self.rules.xrb_class.carves()
+            && self.gainer_start[d].is_some_and(|start| {
+                let m = start.value();
+                m > 0.0 && star.mass().value() - m >= SPUN_UP_GAINED_SHARE * m
+            })
     }
 
     /// The pair's composition.
@@ -568,6 +589,10 @@ fn transfer_class(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> Opti
         return Some(Classified::fed(class, a, rate));
     }
     if is_neutron_star_or_black_hole(accretor_phase) {
+        // From 27 an X-ray binary is fed at the floor or above (`xrb_class`).
+        if ctx.rules.xrb_class.carves() && rate < XRB_MIN_TRANSFER_RATE {
+            return None;
+        }
         let class = if donor.mass() >= HMXB_MIN_DONOR_MASS {
             BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant)
         } else {
@@ -726,7 +751,8 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         if is_neutron_star_or_black_hole(cp)
             && donor.mass() >= HMXB_MIN_DONOR_MASS
             && period <= BEX_MAX_PERIOD
-            && is_be_star(donor, ctx.composition, ctx.draws[d], ctx.rules)
+            && (is_be_star(donor, ctx.composition, ctx.draws[d], ctx.rules)
+                || (ctx.spun_up(d, donor) && is_b_main_sequence(donor, ctx.draws[d], ctx.rules)))
         {
             return Some(Classified::plain(BinaryClass::HighMassXrayBinary(
                 HmxbKind::BeX,
@@ -736,7 +762,11 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         let luminosity = accretion_luminosity(compact, rate).value();
         let massive = donor.mass() >= HMXB_MIN_DONOR_MASS;
         if is_neutron_star_or_black_hole(cp) && massive {
-            if luminosity >= XRB_MIN_LUMINOSITY.value() {
+            // From 27 a black hole takes a wind only through a disc (`xrb_class`).
+            let needs_disc = ctx.rules.xrb_class.carves() && cp == Phase::BlackHole;
+            let disc =
+                !needs_disc || fills_for_a_wind_disc(donor, compact, orbit.semi_major_axis());
+            if disc && luminosity >= XRB_MIN_LUMINOSITY.value() {
                 return Some(Classified::fed(
                     BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant),
                     c,
@@ -774,15 +804,34 @@ fn is_be_star(
     draws: &StarDraws,
     rules: StellarRules,
 ) -> bool {
-    if star.phase() != Phase::MainSequence {
-        return false;
-    }
-    let b_type = subtype_from_teff_under(star.effective_temperature(), rules)
-        .is_some_and(|code| code.letter() == SpectralLetter::B);
-    b_type
-        && rotation::fossil_field(star, draws).is_none()
+    is_b_main_sequence(star, draws, rules)
         && rotation::rotation_under(star, composition, draws, None, rules)
             .is_some_and(|spin| spin.critical_fraction() > rotation::BE_CRITICAL_FRACTION)
+}
+
+/// Whether `star` is a main-sequence B star without a fossil field (which makes it a Bp star), by
+/// its type on the dwarf sequence the stellar `rules` choose: a Be star's first tests, and from
+/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION) what a mass gainer spun up by stable
+/// transfer must be to be one.
+#[must_use]
+fn is_b_main_sequence(star: &StarState, draws: &StarDraws, rules: StellarRules) -> bool {
+    star.phase() == Phase::MainSequence
+        && subtype_from_teff_under(star.effective_temperature(), rules)
+            .is_some_and(|code| code.letter() == SpectralLetter::B)
+        && rotation::fossil_field(star, draws).is_none()
+}
+
+/// Whether `donor` fills [`WIND_DISC_ROCHE_FILLING`] of its Roche lobe beside `compact` on an
+/// orbit of semi-major axis `separation` (Eggleton 1983), where its wind forms a disc about a
+/// black hole from [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION).
+#[must_use]
+fn fills_for_a_wind_disc(donor: &StarState, compact: &StarState, separation: Metres) -> bool {
+    let (m_donor, m_compact) = (donor.mass().value(), compact.mass().value());
+    if !(m_donor > 0.0 && m_compact > 0.0) {
+        return false;
+    }
+    let lobe = roche_lobe_radius(m_donor / m_compact, separation).value();
+    donor.radius().value() * SOLAR_RADIUS_M >= WIND_DISC_ROCHE_FILLING * lobe
 }
 
 /// The rate at which component `1 − d` takes `d`'s wind, M☉ yr⁻¹: Bondi and Hoyle's share as the
@@ -893,8 +942,8 @@ const BLUE_STRAGGLER_MARGIN: f64 = 1.0e-9;
 
 impl BinaryTimeline {
     /// The context in which the state at `age` is classified: the pair's composition, draws and
-    /// parameters, and each neutron star's pulsar then, recycled by what it accreted since its
-    /// birth (`recycling.rs`).
+    /// parameters, each neutron star's pulsar then, recycled by what it accreted since its birth
+    /// (`recycling.rs`), and from 27 each star's mass where it first gained in stable transfer.
     #[must_use]
     pub fn class_context(&self, age: Years) -> ClassContext<'_> {
         let ctx = self.context();
@@ -904,11 +953,17 @@ impl BinaryTimeline {
             .filter(|&t| t <= age)
             .and_then(|t| pre_merger_state(self, t))
             .map(|state| state.stars().map(|s| s.phase()));
+        let gainer_start = if ctx.rules().xrb_class.carves() {
+            Component::BOTH.map(|c| gainer_start_mass(self, c, age))
+        } else {
+            [None; 2]
+        };
         ClassContext::new(
             ctx.composition(),
             [ctx.draws(0), ctx.draws(1)],
             ctx.params(),
             (pulsars, merged_from),
+            gainer_start,
             ctx.rules(),
         )
     }
@@ -918,6 +973,23 @@ impl BinaryTimeline {
     pub fn class_at(&self, age: Years) -> BinaryClass {
         classify(&self.state_at(age), &self.class_context(age))
     }
+}
+
+/// Component `c`'s mass where it first took a donor's matter in stable transfer before `age`, if
+/// it has (P11.T8.b's fix, from [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION)).
+#[must_use]
+fn gainer_start_mass(timeline: &BinaryTimeline, c: Component, age: Years) -> Option<SolarMasses> {
+    timeline.segments().iter().find_map(|s| match s.kind() {
+        SegmentKind::StableTransfer { donor } if donor != c && s.start() < age => {
+            Some(timeline.state_at(s.start()).stars()[c.index()].mass())
+        }
+        SegmentKind::StableTransfer { .. }
+        | SegmentKind::Detached
+        | SegmentKind::Contact
+        | SegmentKind::CommonEnvelope
+        | SegmentKind::Merged
+        | SegmentKind::Disrupted { .. } => None,
+    })
 }
 
 /// The source horizon in the pair's ages, for a system `age_at_epoch` old at the epoch:
@@ -1646,6 +1718,14 @@ mod tests {
             CarvedClass::StellarMerger | CarvedClass::NeutronStarMerger => true,
         };
         if !holds_now {
+            return false;
+        }
+        // From 27 a Be star spun up by stable transfer is one by its history, which marks do not
+        // carry (P11.T8.b's fix): its pair is not checked.
+        let context = t.class_context(now);
+        if found.class == BinaryClass::HighMassXrayBinary(HmxbKind::BeX)
+            && (0..2).any(|d| context.spun_up(d, &t.state_at(now).stars()[d]))
+        {
             return false;
         }
         let Some(marks) = marks_at(t, now) else {

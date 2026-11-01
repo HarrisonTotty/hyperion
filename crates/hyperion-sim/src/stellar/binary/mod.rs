@@ -56,6 +56,7 @@ pub mod scan;
 mod star;
 mod supernova;
 mod timeline;
+pub(crate) mod xrb_class;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

@@ -734,7 +734,7 @@ pub(crate) fn listed_entry(
         CarvedClass::XrayBinary => {
             let process = XrayBinaries::new(galaxy);
             let side = XrbSide::of(host.population(galaxy));
-            let scan = xrb_marks_at(galaxy, &process, host, side);
+            let scan = xrb_marks_at(galaxy, &process, host, side)?;
             let candidate = process.candidate_of(galaxy, &scan)?;
             XrayBinaries::test_candidate(candidate).map(ListedBinary::XrayBinary)
         }

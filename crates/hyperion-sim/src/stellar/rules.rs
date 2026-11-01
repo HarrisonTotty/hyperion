@@ -61,6 +61,11 @@
 //!   trials and its corotation through the engine's input's rules. The fitted tables keep the
 //!   version's rules until the bump refits them (`stellar/rules/heavy_donor_hold.rs` lists the
 //!   movers).
+//! - [`xrb_class`](StellarRules::xrb_class), at [`XRB_CLASS_VERSION`] (plan 11, P11.T5's and
+//!   P11.T8.b's fix): what `classify` counts as an X-ray binary, a floor on the transfer rate onto
+//!   a compact star, Be donors spun up by stable transfer and a wind-fed black hole's disc, each
+//!   read through [`XrbClassRules::carves`] and each timeline's rules
+//!   (`stellar/rules/xrb_class_hold.rs` lists the movers).
 //! - [`awd_donors`](StellarRules::awd_donors), at [`AWD_DONORS_VERSION`] (plan 11, P11.T5's fix):
 //!   which donors give an accreting white dwarf its novae, every donor below it and a hydrogen
 //!   donor alone from it, read at one choke point, `classify::nova_recurrence_under`, through each
@@ -81,6 +86,7 @@ use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
+use crate::stellar::binary::xrb_class::{XRB_CLASS_VERSION, XrbClassRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::system::{BINARY_KICKS_VERSION, BinaryKicksRules};
 
@@ -110,6 +116,8 @@ pub(crate) struct StellarRules {
     pub(crate) heavy_donor: HeavyDonorRules,
     /// Which donors give an accreting white dwarf its novae, the hold of [`AWD_DONORS_VERSION`].
     pub(crate) awd_donors: AwdDonorRules,
+    /// What `classify` counts as an X-ray binary, the hold of [`XRB_CLASS_VERSION`].
+    pub(crate) xrb_class: XrbClassRules,
 }
 
 impl StellarRules {
@@ -150,6 +158,11 @@ impl StellarRules {
             } else {
                 AwdDonorRules::EveryDonor
             },
+            xrb_class: if version.get() >= XRB_CLASS_VERSION.get() {
+                XrbClassRules::Carved
+            } else {
+                XrbClassRules::Held
+            },
         }
     }
 
@@ -169,7 +182,7 @@ impl StellarRules {
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
-    /// `heavy_donor`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors`, and P11.T10's
+    /// `heavy_donor`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, and P11.T10's
     /// `binary_kicks`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
@@ -213,3 +226,5 @@ mod ns_accretion_hold;
 mod stripping_hold;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod xrb_class_hold;

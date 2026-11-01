@@ -15,7 +15,8 @@
 //!
 //! The X-ray binaries' marks ([`XrbScanMarks`], P11.T8.b) are their kind, their place and motion
 //! at the epoch and a low-mass transient's outburst recurrence. [`scan_marks`] and [`scan_cell`]
-//! take either class's process ([`ScanProcess`]). The class's test refuses an X-ray binary
+//! take either class's process ([`ScanProcess`]). From 27 the scan refuses a candidate fed under
+//! the floor of P11.T8.b's fix, as the class's test does. The class's test refuses an X-ray binary
 //! candidate the scan keeps only if none of its Be/X donor's first
 //! [`BE_DONOR_ATTEMPTS`](crate::galaxy::catalogue_classes::binary::BE_DONOR_ATTEMPTS) draws make
 //! it plan 06's Be star, a chance under 10⁻⁴⁹ (the class's documentation).
@@ -93,6 +94,7 @@ use crate::units::{
 use super::classify::{nova_recurrence_period, recurrence_class, xrb_line};
 use super::light_curves::{XrayAccretor, eddington_luminosity};
 use super::sampler::ClassSampler;
+use super::xrb_class::XRB_MIN_TRANSFER_RATE;
 
 /// The amplitude of a host's nova phase noise at its smallest octave, cycles: 0.08, ours,
 /// provisional. It is near the largest a one-cycle lattice allows (10.3 × 0.08 = 0.82 of plan
@@ -623,26 +625,27 @@ fn xrb_scan_marks(
     bound: PerCubicLightYear,
 ) -> Option<XrbScanMarks> {
     let (site, component, host_side) = process.site(galaxy, cell, id, bound)?;
-    Some(xrb_marks_at(
+    xrb_marks_at(
         galaxy,
         process,
         BinaryHost::field(id, site, component),
         host_side,
-    ))
+    )
 }
 
 /// The scan marks of an X-ray binary on `host_side` at `host`, after its site: its kind and a
 /// transient's recurrence, its compact star's mass and its binary's shape, a catalogue high-mass
 /// host's recoil, and its place and velocity at the epoch. A catalogue candidate's
 /// ([`scan_marks`]) and a feature's list entry's (P11.T8.f), on the same draws keyed by each one's
-/// system; a list entry takes no recoil and moves with its feature.
+/// system; a list entry takes no recoil and moves with its feature. `None` from 27 for a pair fed
+/// under the floor of P11.T8.b's fix, which the class's test refuses.
 #[must_use]
 pub(crate) fn xrb_marks_at(
     galaxy: &Galaxy,
     process: &XrayBinaries,
     host: BinaryHost,
     host_side: XrbSide,
-) -> XrbScanMarks {
+) -> Option<XrbScanMarks> {
     let seed = galaxy.seed();
     let key = host.key();
     let sampler = process.sampler();
@@ -670,6 +673,13 @@ pub(crate) fn xrb_marks_at(
     };
     let accretor_mass = SolarMasses::new(sampler.draw(accretor_mark, 0.0, &mut stream));
     let shape = XrbShape::draw(sampler, kind, process.rate_split(), &mut stream);
+    let transfer_rate = shape.transfer_rate(kind.accretor(), accretor_mass);
+    // From 27 the class's test refuses a pair fed under the floor (`xrb_class`).
+    if galaxy.rules().stellar.xrb_class.carves()
+        && transfer_rate.is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE)
+    {
+        return None;
+    }
     let recoil_marks = match kind {
         XrbHostKind::BeX => Some((XrbMark::BexRecoil, XrbMark::BexSinceSupernova)),
         XrbHostKind::Supergiant => {
@@ -703,7 +713,7 @@ pub(crate) fn xrb_marks_at(
         ),
         None => (site, drawn),
     };
-    XrbScanMarks {
+    Some(XrbScanMarks {
         host,
         kind,
         position,
@@ -711,9 +721,9 @@ pub(crate) fn xrb_marks_at(
         recoil,
         recurrence,
         accretor_mass,
-        transfer_rate: shape.transfer_rate(kind.accretor(), accretor_mass),
         shape,
-    }
+        transfer_rate,
+    })
 }
 
 /// A binary catalogue class as a galaxy-wide scan walks it (P11.T8): its bound over a cell and
@@ -819,8 +829,9 @@ fn awd_scan_marks(
 /// The scan marks of an accreting white dwarf of `process`'s class at `host`, after its site:
 /// its recurrence on the class's side of L, the white dwarf's mass and the rate, its velocity, its
 /// nova series and clock, and a slow host's eruptions in the source horizon; `None` if the
-/// recurrence lands on the other side or, from 27, a fast host is fed helium. A catalogue candidate's ([`scan_marks`]) and a feature's
-/// list entry's (P11.T8.f), on the same draws keyed by each one's system.
+/// recurrence lands on the other side or, from 27, a fast host is fed helium. A catalogue
+/// candidate's ([`scan_marks`]) and a feature's list entry's (P11.T8.f), on the same draws keyed by
+/// each one's system.
 #[must_use]
 pub(crate) fn awd_marks_at(
     galaxy: &Galaxy,
