@@ -4972,9 +4972,14 @@ body {
   color: var(--accent);
 }
 
-/* A held-back GROUND: kept focusable so that it can say why, the pointer refused. */
+/*
+ * A held-back GROUND: kept focusable so that it can say why, the pointer refused, and struck
+ * through in every state, so that at rest it reads as held back and not as a page not chosen, by a
+ * shape as well as its --text-muted, taking no room (fix-r10-t12d-held-tab; lean, 2026-11-01).
+ */
 .view-place__tab[aria-disabled="true"] {
   cursor: not-allowed;
+  text-decoration: line-through;
 }
 
 .view-place__tab[aria-disabled="true"]:hover {
@@ -4982,8 +4987,10 @@ body {
 }
 
 /*
- * The held-back GROUND's reason, over the place while its tab is hovered or focused, taking none of
- * the place's room, which at the floor has no line to spare (guide draft D2; R10.T12.d's lean).
+ * The held-back GROUND's reason, over the place while its tab is hovered or focused, by the keyboard
+ * or by a press (a click or a tap focuses it without :focus-visible, and touch has no stable hover),
+ * taking none of the place's room, which at the floor has no line to spare (guide draft D2;
+ * R10.T12.d's lean).
  */
 .view-place__reason {
   position: absolute;
@@ -5002,7 +5009,7 @@ body {
   visibility: hidden;
 }
 
-.view-place__head:has(.view-place__tab[aria-disabled="true"]:is(:hover, :focus-visible))
+.view-place__head:has(.view-place__tab[aria-disabled="true"]:is(:hover, :focus))
   > .view-place__reason {
   visibility: visible;
 }

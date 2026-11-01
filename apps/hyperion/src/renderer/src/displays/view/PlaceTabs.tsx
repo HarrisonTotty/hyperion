@@ -65,10 +65,11 @@ function pageAfterKey(key: string, page: PlacePage): PlacePage | null {
  * A tab list, as the ship's other page selector, `GALAXY`'s, is (ux-reviewer's ruling, 2026-10-31):
  * one stop in the tab order, the chosen page's tab, the arrow keys, `Home` and `End` choosing a page
  * there with the focus following, and a click choosing the page under it. `GROUND` is held back
- * rather than disabled while the instrument states no body's terrain, described by its reason,
- * which stands over the place while the tab is hovered or focused, taking none of its room (guide
- * draft D2): at the floor the place has no line to spare for it (lean, 2026-11-01). The arrows
- * reach the held-back tab without choosing it, so that the keyboard shows its reason too.
+ * rather than disabled while the instrument states no body's terrain, struck through, and described
+ * by its reason, which stands over the place while the tab is hovered or focused, a press's focus
+ * included, taking none of its room (guide draft D2): at the floor the place has no line to spare
+ * for it (lean, 2026-11-01). The arrows reach the held-back tab without choosing it, so that the
+ * keyboard shows its reason too, and a click or a tap focuses it, so that a press does.
  */
 export function PlaceTabs({ page, groundReason, onPage, designator, ids }: PlaceTabsProps) {
   const offered = (each: PlacePage): boolean => each === "camera" || groundReason === null;

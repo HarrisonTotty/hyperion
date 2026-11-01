@@ -2,6 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import STYLES from "../../styles.css?raw";
+import { stylesheetRule } from "../../test/stylesheet";
 import { groundHeldBack, type PlaceIds, type PlacePage, PlaceTabs } from "./PlaceTabs";
 
 const IDS: PlaceIds = { tab: (page) => `tab-${page}`, panel: "page", reason: "reason" };
@@ -132,9 +134,41 @@ describe("PlaceTabs (R10.T12.d; guide draft D2; ux-reviewer's tab list)", () => 
     expect(tab("GROUND")).toHaveFocus();
   });
 
+  it("focuses the held-back GROUND when it is clicked, so that a press shows its reason", async () => {
+    const user = userEvent.setup();
+    renderTabs("camera", groundHeldBack("INSTRUMENT 1"));
+    await user.click(tab("GROUND"));
+    expect(tab("GROUND")).toHaveFocus();
+  });
+
+  it("keeps the held-back GROUND's reason as its description once a click has focused it", async () => {
+    const user = userEvent.setup();
+    renderTabs("camera", groundHeldBack("INSTRUMENT 1"));
+    await user.click(tab("GROUND"));
+    // The reason's two parts (`StatusText`'s state and sentence) are read with each part trimmed
+    // here, so the space after the colon is optional; Chromium keeps it (the outbox's capture).
+    expect(tab("GROUND")).toHaveAccessibleDescription(
+      /^NOT AVAILABLE: ?INSTRUMENT 1's FRAME is no body with a surface$/u,
+    );
+  });
+
   it("words the held-back reason in the guide's NOT AVAILABLE form", () => {
     expect(groundHeldBack("INSTRUMENT 2")).toBe(
       "NOT AVAILABLE: INSTRUMENT 2's FRAME is no body with a surface",
+    );
+  });
+});
+
+describe("the held-back GROUND in the stylesheet (fix-r10-t12d-held-tab)", () => {
+  it("strikes the held-back tab's name through in every state, at rest included", () => {
+    expect(stylesheetRule('.view-place__tab[aria-disabled="true"]')).toContain(
+      "text-decoration: line-through;",
+    );
+  });
+
+  it("shows the reason while the held-back tab has the focus, a press's as well as the keyboard's", () => {
+    expect(STYLES).toMatch(
+      /\.view-place__head:has\(\.view-place__tab\[aria-disabled="true"\]:is\(:hover, :focus\)\)\s*> \.view-place__reason \{\s*visibility: visible;/u,
     );
   });
 });

@@ -803,8 +803,9 @@ Four classes, shared by the whole ship:
     and its `GROUND AT LINE OF SIGHT`, in the lower plate's order and forms, whichever body that
     is. Where the place cannot hold them whole, they give way and return as the lower plate's parts
     do. While the page states the readout, the instrument draws its tripod and its list carries the
-    readout's note; otherwise neither. `GROUND` is held back, with its reason on hover and focus,
-    while the instrument states no body's terrain, and the place shows `CAMERA` until it can.
+    readout's note; otherwise neither. `GROUND` is held back, struck through, with its reason on
+    hover, focus and a press, while the instrument states no body's terrain, and the place shows
+    `CAMERA` until it can.
 
   The class covers both render styles. The wireframe style has no photometric image, so the
   rendered image's exception under "Colour" does not reach it, and its marks, graticules and
