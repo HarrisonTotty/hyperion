@@ -34012,14 +34012,21 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `crust_host`, `parent_at_epoch` (now given the seed) from `system::host_rock`, `MoonSky` from
     its planet's hosts, and `birth_host(composition, Mg/Si, [α/Fe])` from the rogue's own system.
     `formation_composition` stays at the Sun's ratios.
-  - _Left as it was:_ the solve's Earth-like core (0.325) under water beyond the snow line and an
-    enveloped outcome's are not shifted, though T51.k's factor reads them as about the host.
+  - _The solve and the giants (`fix-p14-core-share-host`'s finding 1, 2026-11-01):_ the crate's
+    `composition_about` and `giant_composition_about` (the public `composition` and
+    `giant_composition` are their `NONE` cases) and `formed_with_envelope(…, shift)` put water,
+    every envelope and a giant's heavy elements on the host's Earth-like core (`ICY_CORE` is now
+    `icy_core(shift)`); the window's `greatest` reads the same cores; `at_the_time` takes the shift.
   - _For 27's bump:_ delete what the tripwire lists; restate the `Population` halves of the
-    under-27 tests in `rocky`, `crust` and `resources` that name the hold,
+    under-27 tests in `rocky`, `crust` and `resources` that name the hold, the server's
+    `a_crust_s_wire_form_is_pinned`, and five pinned-body tests the hold moves on 24's rules:
     `under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck`,
-    `under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surface` and the
-    server's `a_crust_s_wire_form_is_pinned`. Re-bless (measured with the hold alone on 24's
-    rules) `frame/body_rotations`, `observe/in_system`, `orbit/drifting_states`,
+    `under_every_24_hold_the_four_split_bodies_read_their_floor`,
+    `the_secant_root_s_pinned_bodies_end_at_crossings`,
+    `under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surface` and
+    `under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state`.
+    Re-bless (measured with the hold alone on 24's rules) `frame/body_rotations`,
+    `observe/in_system`, `orbit/drifting_states`,
     `planetary/{resources, surface_conditions_published, surface_inputs, system_events}`, every
     `planetary/systems` golden but `eccentric_giant`, `hot_jupiter` and `t_tauri`, and the
     server's `scene_systems`. Measure again under every 27 hold.
@@ -34061,3 +34068,5 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `hierarchical_triple` and `subgiant`, `planetary/habitability`, `planetary/system_events` and
     `planetary/surface_conditions_published` (02000b2ca0000001.0d01; T56.e's .0601 no longer
     moves). Measure again under every 27 hold.
+    `planetary/systems` golden but `t_tauri`, and the server's `scene_systems`. Measure again
+    under every 27 hold.
