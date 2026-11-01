@@ -25,10 +25,13 @@
 
 use super::bound::{form_bound, spheroid_bound};
 use super::class_table::{CLASS_COUNT, ClassKey, ClassTable, FormTable};
-use super::forms::{BuildFormError, ClassKinematics, CoredPowerLaw, DiscBornForm, young_disc};
+use super::forms::{
+    BuildFormError, ClassKinematics, CoredPowerLaw, DiscBornForm, FormPoint, young_disc,
+};
 use super::marks::kind_index;
 use super::{DisplacedClassId, DisplacedKind};
 use crate::galaxy::bounds::CellBox;
+use crate::galaxy::fields::arms::ArmGeometry;
 use crate::galaxy::fields::{ComponentId, Fields};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::map::MapSelection;
@@ -55,6 +58,25 @@ impl DisplacedForm {
         match self {
             Self::Disc(form) => form.density(p),
             Self::Spheroid(spheroid) => spheroid.density(p),
+        }
+    }
+
+    /// [`density`](Self::density), bit for bit, at the point `at` with what every form shares
+    /// there (P08.T12's census).
+    #[must_use]
+    pub(crate) fn density_at(&self, at: &FormPoint<'_>) -> f64 {
+        match self {
+            Self::Disc(form) => form.density_at(at),
+            Self::Spheroid(spheroid) => spheroid.density_at_radius(at.radius(), at.z()),
+        }
+    }
+
+    /// The geometry of its arm, if it keeps one.
+    #[must_use]
+    pub(crate) fn arm_geometry(&self) -> Option<&ArmGeometry> {
+        match self {
+            Self::Disc(form) => form.arm_geometry(),
+            Self::Spheroid(_) => None,
         }
     }
 

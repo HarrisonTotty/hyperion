@@ -82,6 +82,45 @@ pub(crate) fn displaced() -> &'static Galaxy {
     })
 }
 
+/// Every class's form takes its density at a shared point ([`forms::FormPoint`], the census's
+/// per node) as at the point itself, bit for bit, and every class's arm shares the first arm's
+/// geometry, so the census finds one arm point a node: at points over the disc and the halo, the
+/// centre and the axis among them (P08.T12's census).
+#[test]
+fn every_form_s_density_at_a_shared_point_is_its_own() {
+    let classes = classes_of(displaced()).classes();
+    let geometry = classes
+        .iter()
+        .find_map(|class| class.form().and_then(DisplacedForm::arm_geometry));
+    let geometry = geometry.expect("the young disc's classes keep its arm");
+    let arms = classes
+        .iter()
+        .filter_map(|class| class.form().and_then(DisplacedForm::arm_geometry))
+        .inspect(|arm| assert_eq!(*arm, geometry, "an arm of another geometry"))
+        .count();
+    assert!(arms > 5, "{arms} arms");
+    let mut stream = Stream::open(
+        Seed::new(MILKY_WAY_SEED),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy_item(5),
+    );
+    let mut points = vec![PointLy::new(0.0, 0.0, 0.0), PointLy::new(0.0, 0.0, 300.0)];
+    points.extend((0..200).map(|_| {
+        let r = 60_000.0 * stream.uniform();
+        let theta = core::f64::consts::TAU * stream.uniform();
+        let z = 6_000.0 * (stream.uniform() - 0.5);
+        PointLy::new(r * math::cos(theta), r * math::sin(theta), z)
+    }));
+    for p in &points {
+        let at = forms::FormPoint::new(p, Some(geometry));
+        for class in classes {
+            if let Some(form) = class.form() {
+                assert_same_bits(form.density_at(&at), form.density(p));
+            }
+        }
+    }
+}
+
 /// The installed classes of a galaxy that holds them.
 fn classes_of(galaxy: &Galaxy) -> &DisplacedFields {
     galaxy

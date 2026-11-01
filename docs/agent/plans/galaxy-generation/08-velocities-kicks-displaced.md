@@ -2257,3 +2257,14 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     P15.T6.c–f lane's re-pin.
   - The checks by eye (the 2,000 ly chart 3,000 ly above the plane, the edge-on `REMNANTS` map)
     are not run: the server serves no 26 rules. Pending 26.
+- **P08.T12 perf, the census's shared form point (lane `field-grid-displaced-perf`, 2026-11-01; bit
+  for bit).** `expected_counts` takes every class's form at each node through
+  `displaced::forms::FormPoint`, which holds the node's cylindrical radius and its arm point on the
+  young disc's arm geometry, found once a node. Every class's arm shares that geometry. A form
+  whose arm has another geometry finds its own point.
+  - New: `DisplacedForm::density_at` and `arm_geometry`, `DiscBornForm::density_at`, and
+    `CoredPowerLaw::density_at_radius`. Each form's `density` delegates to its `density_at`.
+  - Tests: `every_form_s_density_at_a_shared_point_is_its_own`, in `displaced/hold.rs`.
+  - Under every 26 hold, the grid's warm plan goes from 1.04 to 0.71 ms at 1 ly and from 2.10 to
+    1.42 ms at 50 ly, against 0.08 and 0.16 ms before P08.T12. The cold remainder is the layer-E
+    records' exact fates, about 31 a cell at 0.39 ms each, which the marks' design needs.

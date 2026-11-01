@@ -46,6 +46,8 @@
 
 use super::{LayerCounts, SubstellarRequest};
 use crate::coords::GalacticPosition;
+use crate::galaxy::displaced::DisplacedForm;
+use crate::galaxy::displaced::forms::FormPoint;
 use crate::galaxy::field_share::FieldShare;
 use crate::galaxy::fields::MAX_COMPONENTS;
 use crate::galaxy::imf::MassBand;
@@ -138,15 +140,24 @@ pub fn expected_counts(
     // at the same nodes, by class index.
     let displaced = fields.displaced();
     let mut class_integrals = displaced.map_or_else(Vec::new, |d| vec![0.0; d.classes().len()]);
+    // Every class's form reads the node's cylindrical radius and its arm point, on the young
+    // disc's arm geometry, which the classes' arms share: found once a node, the forms' densities
+    // bit for bit (`FormPoint`; P08.T12, half the census's cost under every 26 hold).
+    let geometry = displaced.and_then(|d| {
+        d.classes()
+            .iter()
+            .find_map(|class| class.form().and_then(DisplacedForm::arm_geometry))
+    });
     for_each_node(&PointLy::from(centre), radius.value(), |point, weight| {
         fields.densities(point, &mut densities);
         for (integral, density) in integrals.iter_mut().zip(densities) {
             *integral += weight * density;
         }
         if let Some(displaced) = displaced {
+            let at = FormPoint::new(point, geometry);
             for (integral, class) in class_integrals.iter_mut().zip(displaced.classes()) {
                 if let Some(form) = class.form() {
-                    *integral += weight * form.density(point);
+                    *integral += weight * form.density_at(&at);
                 }
             }
         }

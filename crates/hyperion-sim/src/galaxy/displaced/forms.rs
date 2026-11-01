@@ -40,7 +40,7 @@ use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::PointLy;
 use crate::galaxy::Population;
 use crate::galaxy::bounds::{ScalarRange, UnimodalFactor};
-use crate::galaxy::fields::arms::SharpArm;
+use crate::galaxy::fields::arms::{ArmGeometry, ArmPoint, SharpArm};
 use crate::galaxy::fields::disc::ExponentialDisc;
 use crate::galaxy::fields::{BuildFieldError, Fields, Shape};
 use crate::math;
@@ -342,7 +342,14 @@ impl FlaredLayer {
     /// The density at `p`, ly⁻³: unit integral over the root cube.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        self.norm * self.shape(math::hypot(p.x, p.y), p.z)
+        self.density_at_radius(math::hypot(p.x, p.y), p.z)
+    }
+
+    /// [`density`](Self::density) at the cylindrical radius `r` (ly) and height `z` (ly), for a
+    /// caller that has the radius already ([`FormPoint`]).
+    #[must_use]
+    fn density_at_radius(&self, r: f64, z: f64) -> f64 {
+        self.norm * self.shape(r, z)
     }
 
     /// The normalisation, the inverse of the unnormalised form's integral over the cube, ly⁻³.
@@ -432,7 +439,14 @@ impl CoredPowerLaw {
     /// The density at `p`, ly⁻³: unit integral over the root cube.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        self.norm * self.shape(math::hypot(p.x, p.y), p.z)
+        self.density_at_radius(math::hypot(p.x, p.y), p.z)
+    }
+
+    /// [`density`](Self::density) at the cylindrical radius `r` (ly) and height `z` (ly), for a
+    /// caller that has the radius already ([`FormPoint`]).
+    #[must_use]
+    pub(crate) fn density_at_radius(&self, r: f64, z: f64) -> f64 {
+        self.norm * self.shape(r, z)
     }
 
     /// The normalisation, ly⁻³.
@@ -605,9 +619,15 @@ impl BallisticLayer {
     /// arm's azimuthal mean.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        let envelope = self.norm * self.envelope(math::hypot(p.x, p.y), p.z);
+        self.density_at(&FormPoint::new(p, None))
+    }
+
+    /// [`density`](Self::density), bit for bit, at the point `at` with what it shares.
+    #[must_use]
+    fn density_at(&self, at: &FormPoint<'_>) -> f64 {
+        let envelope = self.norm * self.envelope(at.r, at.p.z);
         match &self.arm {
-            Some(arm) => envelope * arm.factor(&arm.geometry().point(p.x, p.y)),
+            Some(arm) => envelope * arm.factor(&at.arm_point(arm.geometry())),
             None => envelope,
         }
     }
@@ -633,6 +653,51 @@ impl BallisticLayer {
     pub(crate) fn envelope_sup(&self, r_min: f64, r_max: f64, z_min: f64) -> f64 {
         let height = crate::galaxy::fields::vertical::locate(z_min * self.squeeze);
         self.norm * (self.squeeze * self.disc.envelope_sup(r_min, r_max, height))
+    }
+}
+
+/// What every class's form reads alike at one point (P08.T12's census, which takes every
+/// class's form at each of its nodes): the point, its cylindrical radius, and its arm point on one
+/// geometry, which the young disc's arm and every arm blurred from it share. A form whose arm has
+/// another geometry finds its own point, so a form's density at a `FormPoint` is its density at
+/// the point, bit for bit.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FormPoint<'p> {
+    p: &'p PointLy,
+    r: f64,
+    arm: Option<(ArmGeometry, ArmPoint)>,
+}
+
+impl<'p> FormPoint<'p> {
+    /// The point `p`, with its arm point on `geometry` found once, if one is given.
+    #[must_use]
+    pub(crate) fn new(p: &'p PointLy, geometry: Option<&ArmGeometry>) -> Self {
+        Self {
+            p,
+            r: math::hypot(p.x, p.y),
+            arm: geometry.map(|g| (*g, g.point(p.x, p.y))),
+        }
+    }
+
+    /// The point's cylindrical radius, ly.
+    #[must_use]
+    pub(crate) const fn radius(&self) -> f64 {
+        self.r
+    }
+
+    /// The point's height, ly.
+    #[must_use]
+    pub(crate) const fn z(&self) -> f64 {
+        self.p.z
+    }
+
+    /// The point's arm point on `geometry`: the shared one where it is that geometry's.
+    #[must_use]
+    fn arm_point(&self, geometry: &ArmGeometry) -> ArmPoint {
+        match &self.arm {
+            Some((shared, point)) if shared == geometry => *point,
+            Some(_) | None => geometry.point(self.p.x, self.p.y),
+        }
     }
 }
 
@@ -702,8 +767,14 @@ impl DiscBornForm {
     /// The density at `p`, ly⁻³.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
+        self.density_at(&FormPoint::new(p, None))
+    }
+
+    /// [`density`](Self::density), bit for bit, at the point `at` with what it shares.
+    #[must_use]
+    pub(crate) fn density_at(&self, at: &FormPoint<'_>) -> f64 {
         match self {
-            Self::Ballistic(layer) => layer.density(p),
+            Self::Ballistic(layer) => layer.density_at(at),
             Self::Fitted {
                 layer,
                 arm,
@@ -712,11 +783,22 @@ impl DiscBornForm {
                 let flat = layer.as_ref().map_or(0.0, |(w, l)| {
                     let arm_factor = arm
                         .as_ref()
-                        .map_or(1.0, |a| a.factor(&a.geometry().point(p.x, p.y)));
-                    w * l.density(p) * arm_factor
+                        .map_or(1.0, |a| a.factor(&at.arm_point(a.geometry())));
+                    w * l.density_at_radius(at.r, at.p.z) * arm_factor
                 });
-                flat + spheroid.as_ref().map_or(0.0, |(w, s)| w * s.density(p))
+                flat + spheroid
+                    .as_ref()
+                    .map_or(0.0, |(w, s)| w * s.density_at_radius(at.r, at.p.z))
             }
+        }
+    }
+
+    /// The geometry of its arm, if it keeps one.
+    #[must_use]
+    pub(crate) fn arm_geometry(&self) -> Option<&ArmGeometry> {
+        match self {
+            Self::Ballistic(layer) => layer.arm.as_ref().map(SharpArm::geometry),
+            Self::Fitted { arm, .. } => arm.as_ref().map(SharpArm::geometry),
         }
     }
 
