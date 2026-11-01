@@ -192,6 +192,7 @@ impl Track {
             built_until: outcome.built_until,
             helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
+            companion_mark_read: outcome.companion_mark_read,
         }
     }
 

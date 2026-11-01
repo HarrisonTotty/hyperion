@@ -426,7 +426,8 @@ impl StarDraws {
     /// (`star.stripped`) and the kick's (`star.kick.*`) taken from `star`'s attempt `attempt`, as
     /// [`for_attempt`](Self::for_attempt) reads them, and every other draw kept: one attempt of plan
     /// 08's kick loop, which repeats only the remnant stage on one built track (P08.T12.c, Design
-    /// note 17).
+    /// note 17). Where that track's build read the mark, the loop keeps the track's
+    /// ([`with_stripped`](Self::with_stripped); ruling 93.2, amended 2026-11-01).
     #[must_use]
     pub(crate) fn with_remnant_draws_of(self, seed: Seed, star: BodyId, attempt: u32) -> Self {
         let key = ObjectKey::from(star);
@@ -445,6 +446,17 @@ impl StarDraws {
             kick_mode: open(tags::STAR_KICK_MODE).mark(),
             kick_low: StandardNormal::draw_array(&mut open(tags::STAR_KICK_LOW)),
             kick_direction: isotropic(&mut open(tags::STAR_KICK_DIRECTION)),
+            ..self.parts
+        })
+    }
+
+    /// These draws with the companion-stripped mark `stripped` in place of their own, and every
+    /// other draw kept: an attempt of plan 08's kick loop on a track whose build read the mark,
+    /// which keeps the track's (P08.T12.c; ruling 93.2, amended 2026-11-01).
+    #[must_use]
+    pub(crate) fn with_stripped(self, stripped: Mark) -> Self {
+        Self::from_parts(StarDrawsParts {
+            stripped,
             ..self.parts
         })
     }

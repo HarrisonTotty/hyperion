@@ -4,6 +4,7 @@
 //! record alive and unconstrained; the kick loop's attempts; the count of `lifetime` calls; and
 //! layer E's living share and mass histogram at the Sun-like point against the class table.
 
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{assert_p_value, chi_square_gof, normal_cdf};
 
@@ -26,7 +27,7 @@ use crate::id::{Layer, SystemIdKind};
 use crate::rng::{PiecewiseLinear, Seed};
 use crate::stellar::brief::{BriefModel, BriefRoute};
 use crate::stellar::multiplicity::{RedrawAttempt, draw_hierarchy_of_composition, draw_star_count};
-use crate::stellar::sse::lifetime_under;
+use crate::stellar::sse::{Track, TrackOptions, lifetime_under};
 use crate::stellar::system::{
     KICK_LOOP_CAP, StarModel, SystemStars, draw_metallicity, first_attempt_models,
     grid_multiplicity, primary_draws, primary_kept_stripped_mark, primary_model,
@@ -555,6 +556,119 @@ fn the_kick_loop_over_ten_million_displaced_remnants() {
         "{} reached the cap, more than the 2,081 pinned",
         capped.len()
     );
+}
+
+/// What [`every_kept_stripped_mark_builds_the_track_built`] counts of some records: those whose
+/// track's build read the companion-stripped mark, and those whose kept attempt's mark is not the
+/// record's own. Each such record's track is built again with the kept mark, and its death must be
+/// the same, its kind and age bit for bit.
+fn kept_marks_against_their_tracks(galaxy: &Galaxy, records: &[SystemRecord]) -> (u32, u32) {
+    let (mut read, mut moved) = (0_u32, 0_u32);
+    let rules = galaxy.rules().stellar;
+    let options = TrackOptions::default().with_rules(rules);
+    for record in records {
+        let composition = draw_metallicity(galaxy, record);
+        let (kept, _) = primary_model(galaxy, record, composition);
+        let first = primary_draws(galaxy, record);
+        let Some(track) = kept.track() else { continue };
+        if track.companion_mark_read().is_some() {
+            read += 1;
+            assert_eq!(
+                kept.draws().stripped(),
+                first.stripped(),
+                "{:?}: in the electron-capture band the kept mark is the track's",
+                record.id()
+            );
+        }
+        if kept.draws().stripped() == first.stripped() {
+            continue;
+        }
+        moved += 1;
+        let m0 = track.initial_mass();
+        let own = Track::full_with(m0, &composition, &first, options);
+        let other = Track::full_with(
+            m0,
+            &composition,
+            &first.clone().with_stripped(kept.draws().stripped()),
+            options,
+        );
+        let (a, b) = (own.death(), other.death());
+        assert_eq!(
+            a.map(|d| d.kind()),
+            b.map(|d| d.kind()),
+            "{:?} at {m0:?}",
+            record.id()
+        );
+        if let (Some(a), Some(b)) = (a, b) {
+            assert_same_bits(a.age().value(), b.age().value());
+        }
+    }
+    (read, moved)
+}
+
+/// Ruling 93.2 as amended (2026-11-01): the kick loop redraws the companion-stripped mark with the
+/// remnant's and the kick's draws, except where the built track read it, in the electron-capture
+/// band of 5.5–11 M☉ (`fates::STRIPPED_WINDOW`) where the single star's and the companion-stripped
+/// star's windows disagree (`Builder::by_companion_mark`): there the kept mark is the track's.
+/// Over 200,000 displaced remnants galaxy-wide by class and the retained records of nine layer-E
+/// cells at the Sun-like point and in the bulge, every kept attempt's mark builds the same track as
+/// the one built, its death's kind and age bit for bit, on every core the machine has.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: 200,000 displaced remnants and some 500 retained records, each with its track and kick loop"]
+fn every_kept_stripped_mark_builds_the_track_built() {
+    const SYSTEMS: u64 = 200_000;
+    const PARTS: u64 = 100;
+    let galaxy = displaced();
+    let workers = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+    let next = std::sync::atomic::AtomicU64::new(0);
+    let (mut read, mut moved) = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let (mut read, mut moved) = (0_u32, 0_u32);
+                    loop {
+                        let part = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if part >= PARTS {
+                            return (read, moved);
+                        }
+                        let records = displaced_remnants(
+                            galaxy,
+                            SYSTEMS / PARTS,
+                            part * (SYSTEMS / PARTS) * 2,
+                        );
+                        let (r, m) = kept_marks_against_their_tracks(galaxy, &records);
+                        read += r;
+                        moved += m;
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a worker"))
+            .fold((0, 0), |(r, m), (r2, m2)| (r + r2, m + m2))
+    });
+    let remnants = (read, moved);
+    let mut cells = row(Layer::E, &sunlike(), 8);
+    cells.extend(row(Layer::E, &diagonal(3_200.0), 1));
+    let retained: Vec<SystemRecord> = records(galaxy, &cells)
+        .into_iter()
+        .map(|(_, record)| record)
+        .filter(|r| matches!(r.placement_class(), PlacementClass::Retained { .. }))
+        .collect();
+    let (r, m) = kept_marks_against_their_tracks(galaxy, &retained);
+    read += r;
+    moved += m;
+    println!(
+        "{} retained records and the remnants: {read} tracks read the mark ({} of them \
+         remnants), {moved} kept another mark ({} remnants), each the same track",
+        retained.len(),
+        remnants.0,
+        remnants.1
+    );
+    assert!(read > 0, "the electron-capture band is reached");
+    assert!(moved > 0, "some kept mark is not the record's own");
 }
 
 /// Design note 28's count: placement calls `lifetime` for no record of layers A to C, at most

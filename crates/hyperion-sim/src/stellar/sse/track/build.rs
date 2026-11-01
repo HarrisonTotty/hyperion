@@ -186,6 +186,9 @@ pub(crate) struct Outcome {
     pub(crate) fate: Option<Fate>,
     /// The age up to which the segments reach, years; infinite once the remnant is built.
     pub(crate) built_until: f64,
+    /// Whether the build read the star's companion-stripped mark, and its verdict
+    /// ([`Builder::companion_mark_read`]).
+    pub(crate) companion_mark_read: Option<bool>,
 }
 
 /// The phase a star enters next, with what it enters it with.
@@ -395,6 +398,19 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Whether the build has read the star's companion-stripped mark, and its verdict: `Some` once
+    /// [`by_companion_mark`](Self::by_companion_mark) has asked it, which it does only where the
+    /// two values disagree, in the band of initial masses where the single star's and the
+    /// companion-stripped star's electron-capture windows differ, so that the mark decided the
+    /// death; `None` where the mark is given (`stripped_by_companion`) or was never asked.
+    #[must_use]
+    fn companion_mark_read(&self) -> Option<bool> {
+        match &self.companion_stripped {
+            CompanionMark::Unread { read, .. } => read.get().copied(),
+            CompanionMark::Known(_) => None,
+        }
+    }
+
     /// `of(stripped)` at the star's companion-stripped mark: at once where the mark is known, and
     /// otherwise at both values, the mark read only where they differ. The window is the mark's
     /// only reader, and a star it does not split never pays for the share, whose exact path builds
@@ -481,6 +497,7 @@ impl<'a> Builder<'a> {
                     segments,
                     fate: Some(fate),
                     built_until: f64::INFINITY,
+                    companion_mark_read: self.companion_mark_read(),
                 };
             }
             bridged = matches!(entry, Entry::PostAgb(_));
@@ -517,6 +534,7 @@ impl<'a> Builder<'a> {
                     segments,
                     fate: None,
                     built_until: start,
+                    companion_mark_read: self.companion_mark_read(),
                 };
             }
         }

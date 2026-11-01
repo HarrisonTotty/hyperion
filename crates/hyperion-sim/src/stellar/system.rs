@@ -492,12 +492,21 @@ impl StarModel {
             unreachable!("matched above")
         };
         let (m0, composition) = (track.initial_mass(), *track.composition());
+        // Where the built track read the companion-stripped mark, the mark decided its death (the
+        // band where the single star's and the companion-stripped star's electron-capture windows
+        // disagree), so every attempt keeps the track's; everywhere else the mark is redrawn with
+        // the remnant's and the kick's draws (ruling 93.2, amended 2026-11-01).
+        let held = track.companion_mark_read().map(|_| self.draws.stripped());
         let (mut kept, mut attempts) = (None, KICK_LOOP_CAP);
         for k in 1..KICK_LOOP_CAP {
             let draws = self
                 .draws
                 .clone()
                 .with_remnant_draws_of(seed, star, first + k);
+            let draws = match held {
+                Some(mark) => draws.with_stripped(mark),
+                None => draws,
+            };
             let fate = track.fate_with(RemnantDraws::of(&draws));
             let stage = fate.map(|fate| {
                 RemnantStage::new(
@@ -2641,7 +2650,8 @@ pub(crate) const KICK_LOOP_CAP: u32 = 4_096;
 /// Where the record has a [`kick_constraint`](SystemRecord::kick_constraint), the remnant stage
 /// is repeated on the one track the record's draws build, with the remnant's, the stripped mark's
 /// and the kick's draws of the attempts after its mark attempt
-/// ([`StarDraws::with_remnant_draws_of`]), until the natal kick's speed falls in the range; after
+/// ([`StarDraws::with_remnant_draws_of`]; the stripped mark kept where the track's build read it,
+/// ruling 93.2 as amended 2026-11-01), until the natal kick's speed falls in the range; after
 /// [`KICK_LOOP_CAP`] attempts the last is kept with its kick scaled into the range. So an attempt
 /// costs a remnant and a kick and never a track, and the record's kick lies in its bin, which,
 /// given its mass, is exact.

@@ -453,7 +453,7 @@ impl TrackOptions {
 /// assert_eq!(sun.state_at(Years::new(1.3e10)).phase(), Phase::CarbonOxygenWhiteDwarf);
 /// # Ok::<(), &str>(())
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Track {
     coeffs: ZCoeffs,
     composition: Composition,
@@ -467,6 +467,34 @@ pub struct Track {
     helium: Option<HeliumHook>,
     /// The planetary nebula's expansion-speed rank, [`StarDraws::nebula`] (P06.T16.b).
     nebula: UnitUniform,
+    /// Whether the build read the star's companion-stripped mark, and its verdict
+    /// ([`Track::companion_mark_read`]).
+    companion_mark_read: Option<bool>,
+}
+
+/// Written by hand to leave out `companion_mark_read`, a record of what the build read rather
+/// than a part of the track, so that a track prints as it did before plan 08's guard (P08.T12.c):
+/// the binary engine's pinned timelines hash the print (`a_thousand_timelines_are_pinned`).
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "companion_mark_read is left out of the print on purpose, so that every pinned print \
+              of a track is the same bits"
+)]
+impl fmt::Debug for Track {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Track")
+            .field("coeffs", &self.coeffs)
+            .field("composition", &self.composition)
+            .field("options", &self.options)
+            .field("initial_mass", &self.initial_mass)
+            .field("eta", &self.eta)
+            .field("segments", &self.segments)
+            .field("fate", &self.fate)
+            .field("built_until", &self.built_until)
+            .field("helium", &self.helium)
+            .field("nebula", &self.nebula)
+            .finish()
+    }
 }
 
 /// Samples per living segment in [`Track::window_where`], both ends included.
@@ -718,7 +746,19 @@ impl Track {
             built_until: outcome.built_until,
             helium,
             nebula: draws.nebula(),
+            companion_mark_read: outcome.companion_mark_read,
         }
+    }
+
+    /// Whether the build read the star's provisional companion-stripped mark, and its verdict:
+    /// `Some` where the mark decided the star's death, in the band of initial masses inside
+    /// [`STRIPPED_WINDOW`](crate::stellar::fates::STRIPPED_WINDOW) where the single star's and the
+    /// companion-stripped star's electron-capture windows disagree (plan 06, design note 11), and
+    /// `None` wherever the track would be the same under either value. Plan 08's kick loop keeps
+    /// the track's mark where it is `Some` (P08.T12.c; ruling 93.2, amended 2026-11-01).
+    #[must_use]
+    pub(crate) const fn companion_mark_read(&self) -> Option<bool> {
+        self.companion_mark_read
     }
 
     /// The star's state at `age` (years since the onset of collapse).
@@ -1552,6 +1592,8 @@ impl Track {
             built_until: end,
             helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
+            // A main sequence reaches no electron-capture window.
+            companion_mark_read: None,
         })
     }
 }
@@ -1626,6 +1668,7 @@ impl Track {
             built_until: f64::INFINITY,
             helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: UnitUniform::HALF,
+            companion_mark_read: None,
         }
     }
 
