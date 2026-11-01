@@ -47,8 +47,11 @@
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
-use crate::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
+use crate::galaxy::catalogue_classes::binary::{
+    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers, XrayBinaries,
+};
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{ClassId, ClassProcess, cells_in_sphere};
 use crate::galaxy::features::centre::events::CentreVictims;
@@ -62,7 +65,7 @@ use super::centre::centre_detections;
 use super::local::{LocalEventsCache, local_events};
 use super::oneshot::one_shot_detections;
 use super::reach::class_reach;
-use super::recurrent::magnetar_detections;
+use super::recurrent::{magnetar_detections, recurrent_detections};
 use super::{
     AlertContext, AlertQuery, AlertResult, BACKGROUND_THRESHOLD_HOSTS, ClassCensus, ClassStatus,
     Detection, Unwalked,
@@ -186,9 +189,12 @@ pub trait AlertClasses {
 /// - [`ClassId::STELLAR_MERGER`] and [`ClassId::NEUTRON_STAR_MERGER`]: their luminous red novae
 ///   and kilonovae ([`one_shot_detections`], P12.T5.b), on plan 11's processes, read from their
 ///   scan marks;
-/// - not built, [`Unwalked::NotBuilt`]: the luminous blue variables' giant eruptions (P12.T5.c's
-///   walk), the X-ray binaries (P11.T8.b's class) and the two accreting white dwarf classes,
-///   whose rows wait on P11.T9.
+/// - [`ClassId::ACCRETING_WHITE_DWARF`] and [`ClassId::ACCRETING_WHITE_DWARF_SLOW`]: their novae,
+///   [`ClassId::XRAY_BINARY`]: its transients, Type I bursts and Be/X outbursts, and
+///   [`ClassId::LUMINOUS_BLUE_VARIABLE`]: its giant eruptions ([`recurrent_detections`],
+///   P12.T5.c), each counted on its own process; the dwarf novae are local (P12.T5.e).
+///
+/// Every class but the centre's victims is walked here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProductionAlertClasses;
 
@@ -229,12 +235,31 @@ impl AlertClasses for ProductionAlertClasses {
                     one_shot_detections(galaxy, ctx, query, process, out);
                 })
             }
-            ClassId::LUMINOUS_BLUE_VARIABLE => {
-                unwalked_class(class, query, Unwalked::NotBuilt("P12.T5.c"))
+            // The recurrent walk builds the class's process for each cell it scans (`scan_cell`);
+            // the one here counts the hosts.
+            ClassId::ACCRETING_WHITE_DWARF => {
+                let process = || AccretingWdFast::new(galaxy);
+                class_alerts(galaxy, query, class, process, |_| {
+                    recurrent_detections(galaxy, ctx, class, query, out);
+                })
             }
-            ClassId::XRAY_BINARY => unwalked_class(class, query, Unwalked::NotBuilt("P11.T8.b")),
-            ClassId::ACCRETING_WHITE_DWARF | ClassId::ACCRETING_WHITE_DWARF_SLOW => {
-                unwalked_class(class, query, Unwalked::NotBuilt("P11.T9"))
+            ClassId::ACCRETING_WHITE_DWARF_SLOW => {
+                let process = || AccretingWdSlow::new(galaxy);
+                class_alerts(galaxy, query, class, process, |_| {
+                    recurrent_detections(galaxy, ctx, class, query, out);
+                })
+            }
+            ClassId::XRAY_BINARY => {
+                let process = || XrayBinaries::new(galaxy);
+                class_alerts(galaxy, query, class, process, |_| {
+                    recurrent_detections(galaxy, ctx, class, query, out);
+                })
+            }
+            ClassId::LUMINOUS_BLUE_VARIABLE => {
+                let process = || LbvProcess::new(galaxy);
+                class_alerts(galaxy, query, class, process, |_| {
+                    recurrent_detections(galaxy, ctx, class, query, out);
+                })
             }
             // The victims are the centre's, walked through the global list (trait
             // documentation); a class registered later is walked by the task that adds it.
@@ -378,9 +403,9 @@ pub fn unwalked_class(class: ClassId, query: &AlertQuery, why: Unwalked) -> Clas
 ///
 /// # Panics
 ///
-/// As the walks do: [`one_shot_detections`], [`magnetar_detections`], [`centre_detections`] and
-/// [`local_events`]; and if the galaxy's centre has no model, which no galaxy the builder allows
-/// reaches ([`CentreVictims::of`]).
+/// As the walks do: [`one_shot_detections`], [`magnetar_detections`], [`recurrent_detections`],
+/// [`centre_detections`] and [`local_events`]; and if the galaxy's centre has no model, which no
+/// galaxy the builder allows reaches ([`CentreVictims::of`]).
 ///
 /// # Examples
 ///
@@ -690,38 +715,54 @@ mod tests {
         assert!(!walked.get() && !built.get());
     }
 
-    /// The production lookup names the task that builds each class it cannot walk, and walks
-    /// none of them: no detection, no host counted.
+    /// The production lookup walks the recurrent walk's classes (P12.T5.c) once the census finds
+    /// them complete, near the Sun at bright limits: the accreting white dwarfs and the luminous
+    /// blue variables in V, the X-ray binaries in X-rays. Each counts its hosts and yields the
+    /// recurrent walk's own detections.
     #[test]
-    fn the_production_classes_not_built_name_their_tasks() {
+    fn the_production_lookup_walks_the_recurrent_classes() {
+        let galaxy = Galaxy::new(Seed::new(9));
+        let v = query(sensor(AlertBand::Photometric(Band::V), 1e-4), 1 << 24);
+        let x = query(sensor(AlertBand::XRay, 1e-4), 1 << 24);
+        let mut noise = crate::galaxy::gas::noise::NoiseCache::with_capacity(4_096);
+        for (class, query) in [
+            (ClassId::ACCRETING_WHITE_DWARF, &v),
+            (ClassId::ACCRETING_WHITE_DWARF_SLOW, &v),
+            (ClassId::XRAY_BINARY, &x),
+            (ClassId::LUMINOUS_BLUE_VARIABLE, &v),
+        ] {
+            let mut ctx =
+                AlertContext::new(&mut noise, &crate::galaxy::gas::modifiers::NoModifiers);
+            let mut out = Vec::new();
+            let census =
+                ProductionAlertClasses.class_alerts(&galaxy, &mut ctx, query, class, &mut out);
+            assert_eq!(census.status(), ClassStatus::Complete, "{class}");
+            assert!(census.expected_hosts().is_some_and(|n| n > 0.0), "{class}");
+            assert!(census.reach() > LightYears::ZERO, "{class}");
+            let mut walked = Vec::new();
+            recurrent_detections(&galaxy, &mut ctx, class, query, &mut walked);
+            assert_eq!(out, walked, "{class}");
+        }
+    }
+
+    /// The production lookup walks every class but the centre's victims, which it leaves to the
+    /// global list's walk: no detection, no host counted.
+    #[test]
+    fn the_production_lookup_leaves_the_centres_victims_to_the_global_list() {
         let galaxy = Galaxy::new(Seed::new(9));
         let query = query(sensor(AlertBand::Photometric(Band::V), 1e-12), 1 << 24);
         let mut noise = crate::galaxy::gas::noise::NoiseCache::with_capacity(16);
         let mut ctx = AlertContext::new(&mut noise, &crate::galaxy::gas::modifiers::NoModifiers);
-        for (class, why) in [
-            (
-                ClassId::LUMINOUS_BLUE_VARIABLE,
-                Unwalked::NotBuilt("P12.T5.c"),
-            ),
-            (ClassId::XRAY_BINARY, Unwalked::NotBuilt("P11.T8.b")),
-            (ClassId::ACCRETING_WHITE_DWARF, Unwalked::NotBuilt("P11.T9")),
-            (
-                ClassId::ACCRETING_WHITE_DWARF_SLOW,
-                Unwalked::NotBuilt("P11.T9"),
-            ),
-            (ClassId::TIDAL_DISRUPTION_VICTIM, Unwalked::NoGlobalList),
-        ] {
-            let mut out = Vec::new();
-            let census =
-                ProductionAlertClasses.class_alerts(&galaxy, &mut ctx, &query, class, &mut out);
-            assert_eq!(census.status(), ClassStatus::Unwalked(why), "{class}");
-            assert_eq!(census.expected_hosts(), None, "{class}");
-            assert_eq!(
-                census.reach(),
-                class_reach(class, query.sensor()),
-                "{class}"
-            );
-            assert_eq!(out, [], "{class}");
-        }
+        let class = ClassId::TIDAL_DISRUPTION_VICTIM;
+        let mut out = Vec::new();
+        let census =
+            ProductionAlertClasses.class_alerts(&galaxy, &mut ctx, &query, class, &mut out);
+        assert_eq!(
+            census.status(),
+            ClassStatus::Unwalked(Unwalked::NoGlobalList)
+        );
+        assert_eq!(census.expected_hosts(), None);
+        assert_eq!(census.reach(), class_reach(class, query.sensor()));
+        assert_eq!(out, []);
     }
 }

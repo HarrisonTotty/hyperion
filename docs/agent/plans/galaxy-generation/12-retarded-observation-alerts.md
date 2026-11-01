@@ -3037,6 +3037,10 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Dwarf novae are not walked (T5.e)._ Plan 11 lists them only from an `AwdEntry` (its orbit),
     not from scan marks, and no range query's rows are catalogue hosts. They join `local_events`
     with the task that brings catalogue hosts into the range query.
+  - _In `alerts_in` (after T5.d)._ `ProductionAlertClasses` walks both white dwarf classes, the
+    X-ray binaries and the luminous blue variables with `recurrent_detections` once `class_alerts`
+    finds them complete, its own process counting the hosts and the walk building one per cell.
+    Every class is walked now but the centre's victims, through the global list.
   - _For T8.b._ No cell cache is lent for the new classes: white dwarf and X-ray binary cells are
     rescanned from their marks (`binary/awd_scan_marks`), and an LBV cell is generated whole each
     call; a server that rescans should keep LBV cells as it keeps the magnetars'.

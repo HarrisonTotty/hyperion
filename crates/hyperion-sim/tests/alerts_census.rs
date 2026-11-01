@@ -28,7 +28,7 @@ use hyperion_sim::alerts::{
     OneShotClass, OneShotEvent, SensorHorizon, SourceStatus, TYPE_IA_BAND_PEAKS, TransientKind,
     Unwalked, alerts_in, alerts_in_with, centre_detections, class_alerts, flux,
     inverse_square_flux, magnetar_detections, one_shot_detections, one_shot_scan_cell,
-    one_shot_scan_plan, transmission, unwalked_class,
+    one_shot_scan_plan, recurrent_detections, transmission, unwalked_class,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
@@ -1008,9 +1008,9 @@ fn alerts_re_observe_a_flare_from_further_on_its_line_and_its_hosts_earlier_ones
     }
 }
 
-/// The production classes at a bright visual limit near the Sun: the supernova and merger classes
-/// complete, their detections the walks' own; the others not built, each naming its task; the
-/// centre not walked without the global list (slow).
+/// The production classes at a bright visual limit near the Sun: the supernova, merger and
+/// recurrent classes complete, their detections the walks' own; the centre not walked without the
+/// global list (slow).
 #[test]
 #[ignore = "slow: walks the core collapses' cells about the Sun"]
 fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
@@ -1035,21 +1035,22 @@ fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
         &mut LocalEventsCache::default(),
     );
     let status = |class| result.class_census(class).unwrap().status();
-    assert_eq!(status(ClassId::CORE_COLLAPSE), ClassStatus::Complete);
-    assert_eq!(status(ClassId::TYPE_IA), ClassStatus::Complete);
-    assert_eq!(status(ClassId::STELLAR_MERGER), ClassStatus::Complete);
-    assert_eq!(status(ClassId::NEUTRON_STAR_MERGER), ClassStatus::Complete);
-    for (class, task) in [
-        (ClassId::LUMINOUS_BLUE_VARIABLE, "P12.T5.c"),
-        (ClassId::XRAY_BINARY, "P11.T8.b"),
-        (ClassId::ACCRETING_WHITE_DWARF, "P11.T9"),
-        (ClassId::ACCRETING_WHITE_DWARF_SLOW, "P11.T9"),
-    ] {
-        assert_eq!(
-            status(class),
-            ClassStatus::Unwalked(Unwalked::NotBuilt(task)),
-            "{class}"
-        );
+    let recurrent = [
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+        ClassId::XRAY_BINARY,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+    ];
+    for class in [
+        ClassId::CORE_COLLAPSE,
+        ClassId::TYPE_IA,
+        ClassId::STELLAR_MERGER,
+        ClassId::NEUTRON_STAR_MERGER,
+    ]
+    .into_iter()
+    .chain(recurrent)
+    {
+        assert_eq!(status(class), ClassStatus::Complete, "{class}");
     }
     assert_eq!(
         status(ClassId::TIDAL_DISRUPTION_VICTIM),
@@ -1082,6 +1083,9 @@ fn alerts_of_the_production_classes_at_a_bright_limit_are_their_walks() {
         &NeutronStarMergers::new(galaxy),
         &mut walks,
     );
+    for class in recurrent {
+        recurrent_detections(galaxy, &mut ctx, class, &query, &mut walks);
+    }
     assert_eq!(seen(result.detections()), seen(&walks));
     eprintln!(
         "{} detections; census {:?}",
