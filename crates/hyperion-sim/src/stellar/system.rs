@@ -19,11 +19,11 @@
 //! [`StarModel`] of the system's composition and age. Its [`SystemSummary`] is what the server's
 //! `system_summary` answers from, and its [`StellarBrief`] what a range query's row carries.
 
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::events::{EventSeries, tags as event_tags};
 use crate::galaxy::displaced::PlacementClass;
@@ -39,8 +39,8 @@ use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::Component as PairComponent;
 use crate::stellar::binary::ia::{IaExplosionMark, IaExplosionRules, marked_explosion};
 use crate::stellar::binary::{
-    BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, PooledIaEvent,
-    can_interact_with_tracks, carved_class, evolve_with_tracks,
+    BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, PooledIaEvent, SegmentKind,
+    SupernovaRecord, can_interact_with_tracks, carved_class, evolve_with_tracks,
 };
 use crate::stellar::classify::{
     ClassExtras, Classification, DredgeUp, HeliumSurface, LuminosityClass, PeculiarClass,
@@ -74,6 +74,7 @@ use crate::units::{
     Dex, HeliumExcess, Kelvin, KilometresPerSecond, Magnitudes, MetresPerSecond, SolarLuminosities,
     SolarMasses, SolarRadii, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The composition every star of the grid system `record` shares: \[Fe/H\] drawn from its density
 /// component's distribution at its epoch position and age, and no helium excess.
@@ -1678,6 +1679,80 @@ pub fn object_kind(
 /// Risks, "Deviations in P11.T7, as built").
 pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
 
+/// The generator version from which a system that a supernova has unbound shows only the stars it
+/// still holds (plan 11, P11.T10): [`SystemStars::summary_at`], [`SystemStars::state_at`] and
+/// [`SystemStars::brief_at`] take [`BinaryKicksRules::Alone`].
+///
+/// Below it every system takes the held arm, [`BinaryKicksRules::Paired`], the code of version 24
+/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
+/// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this constant with
+/// [`BinaryKicksRules`], the stellar rules' `binary_kicks` field, [`SystemStars::shown_at`]'s
+/// match on it and the range brief's, `stellar/rules/binary_kicks_hold.rs` with its tripwire
+/// (`the_released_stars_are_held_only_until_the_27_bump`), and re-pins the movers that module
+/// lists.
+pub(crate) const BINARY_KICKS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// What a system shows of a pair that a supernova has unbound (the stellar rules' `binary_kicks`
+/// field, the hold of [`BINARY_KICKS_VERSION`]).
+///
+/// A supernova that unbinds a pair releases the other star at about its orbital speed and the
+/// remnant at its kick (Hurley, Tout and Pols 2002, appendix A1). A released star of 2.5 M☉ or
+/// more is plan 08's independent object, a walkaway or the supernova-released share of the
+/// runaways ([`RunawayModel`](crate::galaxy::displaced::runaway::RunawayModel)), placed elsewhere;
+/// lighter ones are left out, "under 1% of the dwarfs" (brainstorm, "Displaced objects: kicks and
+/// runaways"). A grid system that went on showing it would count it twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BinaryKicksRules {
+    /// Version 26's and before: every star of the drawn hierarchy is shown at every time, a pair
+    /// the engine unbound as its two stars.
+    Paired,
+    /// Version 27's: from a supernova that unbinds the pair holding the primary, the system is its
+    /// primary alone; from one that unbinds another pair, it is what is left without that pair's
+    /// two stars (P11.T10; [`SystemStars::shown_at`]).
+    Alone,
+}
+
+/// What a system shows at one time ([`SystemStars::shown_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shown {
+    /// Every star of the drawn hierarchy.
+    Drawn,
+    /// The primary and star 1 on the drawn pair `node`, which is all a supernova left of the
+    /// system by unbinding its other pair.
+    Pair(NodeIndex),
+    /// The primary alone.
+    Alone,
+}
+
+impl Shown {
+    /// Whether star `index` is shown.
+    #[must_use]
+    pub(crate) const fn holds(self, index: u8) -> bool {
+        match self {
+            Self::Drawn => true,
+            Self::Pair(_) => index <= 1,
+            Self::Alone => index == 0,
+        }
+    }
+}
+
+/// The first supernova of `timeline` that unbinds the pair, if the pair had one by the age it was
+/// run to: a record of an unbound pair whose next segment is [`SegmentKind::Disrupted`] by its
+/// star (BSE appendix A1). A merged product's collapse, unbound for want of a companion, is not
+/// one, nor is a white dwarf's birth that sheds enough mass to unbind a wide pair (P11.T4.j): that
+/// releases its companion at a few kilometres per second, which no class places elsewhere.
+#[must_use]
+pub(crate) fn disrupting_supernova(timeline: &BinaryTimeline) -> Option<&SupernovaRecord> {
+    let segments = timeline.segments();
+    timeline.supernovae().iter().find(|sn| {
+        // The explosion opens its segment at its own age, the last segment starting at or before it.
+        let at = segments
+            .partition_point(|s| s.start() <= sn.age())
+            .saturating_sub(1);
+        !sn.bound() && segments[at].kind() == SegmentKind::Disrupted { by: sn.component() }
+    })
+}
+
 /// One pair of two stars of a system that the binary engine ran (plan 11, P11.T11): its node in
 /// the hierarchy, its two stars, inner member first, and its timeline from zero age to the
 /// system's age at +H ([`evolve`](crate::stellar::binary::evolve)).
@@ -2192,7 +2267,9 @@ impl SystemStars {
     ///
     /// A star of a pair the engine ran is summarised from its pair's state then, with the pair's
     /// class ([`StarSummary::binary_class`]); the hierarchy is the drawn one, and
-    /// [`SystemStars::state_at`] gives the pairs' orbits then.
+    /// [`SystemStars::state_at`] gives the pairs' orbits then. From version 27 a system that a
+    /// supernova has unbound holds only the stars and the hierarchy it still holds then
+    /// (`shown_at`; plan 11, P11.T10).
     ///
     /// From version 26 each star's summary holds its events running at `t` and the light they
     /// make (P06.T28.g; [`StarSummary::active_events`]). The summary depends on the system and `t`
@@ -2206,16 +2283,20 @@ impl SystemStars {
         let existence = SystemExistence::from(self.record.existence_at(t));
         let (stars, hierarchy) = match existence {
             SystemExistence::NotYetBorn => (Vec::new(), None),
-            SystemExistence::Exists => (
-                (0_u8..)
-                    .zip(self.stars.iter().zip(self.hierarchy.stars()))
-                    .filter_map(|(index, (star, slot))| {
-                        let paired = self.paired_state(index, t);
-                        star_summary_with(star, self.streams(slot.body()), t, paired)
-                    })
-                    .collect(),
-                Some(self.hierarchy.clone()),
-            ),
+            SystemExistence::Exists => {
+                let shown = self.shown_at(t);
+                (
+                    (0_u8..)
+                        .zip(self.stars.iter().zip(self.hierarchy.stars()))
+                        .filter(|&(index, _)| shown.holds(index))
+                        .filter_map(|(index, (star, slot))| {
+                            let paired = self.paired_state(index, t);
+                            star_summary_with(star, self.streams(slot.body()), t, paired)
+                        })
+                        .collect(),
+                    Some(self.shown_hierarchy(shown).into_owned()),
+                )
+            }
         };
         SystemSummary {
             time: t,
@@ -2238,7 +2319,8 @@ impl SystemStars {
     /// emitted time (plan 12; [`crate::observe::observe_hit`]), and the range brief
     /// ([`crate::stellar::brief`]) gives it at the query's time, the primary's single-star model
     /// where that is certainly the primary's state and this brief otherwise, with the first
-    /// attempt's star count (plan 11's Risks, "Deviations in P11.T7, as built").
+    /// attempt's star count (plan 11's Risks, "Deviations in P11.T7, as built"). From version 27
+    /// the count is that of the stars the system shows then (`shown_at`).
     ///
     /// # Panics
     ///
@@ -2283,12 +2365,17 @@ impl SystemStars {
             }
             Summarised::Paired(paired) => (paired.state, paired.class_extras_of(primary)),
         };
+        let count = match self.shown_at(t) {
+            Shown::Drawn => self.star_count(),
+            Shown::Pair(_) => 2,
+            Shown::Alone => 1,
+        };
         Some(StellarBrief::of(
             &state,
             primary.composition(),
             primary.draws(),
             extras,
-            (self.star_count(), primary.rules),
+            (count, primary.rules),
         ))
     }
 
@@ -2331,7 +2418,9 @@ impl SystemStars {
 
     /// The system at `t` (plan 11, P11.T11), or `None` before it is born: every star's state, from
     /// its pair's timeline where the engine ran one and otherwise from its own model, every pair's
-    /// orbit and class then, and the system's combined luminosity and mass.
+    /// orbit and class then, and the system's combined luminosity and mass. From version 27 they
+    /// are those of the stars and pairs the system shows then (`shown_at`; plan
+    /// 11, P11.T10), each pair by its node in the drawn hierarchy ([`SystemStars::hierarchy`]).
     ///
     /// Continuous in `t` across the clock window except where a star changes phase, a pair
     /// begins a new segment of its timeline, or a star dies.
@@ -2366,8 +2455,10 @@ impl SystemStars {
         if SystemExistence::from(self.record.existence_at(t)) == SystemExistence::NotYetBorn {
             return None;
         }
+        let shown = self.shown_at(t);
         let stars: Vec<StarState> = (0_u8..)
             .zip(&self.stars)
+            .filter(|&(index, _)| shown.holds(index))
             .filter_map(|(index, star)| {
                 self.paired_state(index, t)
                     .map(|paired| paired.state)
@@ -2377,6 +2468,11 @@ impl SystemStars {
         let pairs = self
             .hierarchy
             .pairs()
+            .filter(|&(node, _)| match shown {
+                Shown::Drawn => true,
+                Shown::Pair(kept) => node == kept,
+                Shown::Alone => false,
+            })
             .map(|(node, orbit)| {
                 match self
                     .pair_timeline(node)
@@ -2433,6 +2529,106 @@ impl SystemStars {
             .iter()
             .find(|pair| pair.stars[0] == StarIndex::PRIMARY)
             .and_then(|pair| pair.timeline.recoil())
+    }
+
+    /// What the system shows at `t` (plan 11, P11.T10, under [`BINARY_KICKS_VERSION`]).
+    ///
+    /// Under the held arm, and while no supernova has unbound one of its pairs by the primary's
+    /// age then, it is the drawn hierarchy ([`Shown::Drawn`]). From the first supernova that
+    /// unbinds the pair holding the primary ([`disrupting_supernova`]) it is the primary alone, its
+    /// remnant where the primary exploded, whatever else the hierarchy holds: the released star
+    /// leaves at about its orbital speed, which is far above an outer companion's, so the outer
+    /// stars are left behind as well. From one that unbinds another pair it is what is left
+    /// without that pair's two stars: the primary's own pair, stars 0 and 1, where they are all
+    /// that is left ([`Shown::Pair`]), and otherwise the primary alone (the lean of 2026-11-01:
+    /// a hierarchy left with gaps in its body indices, such as `((0, (1, 2)), 3)` without its
+    /// inner pair, has no shape of its own, and its outer star has lost the pair's mass from its
+    /// orbit).
+    ///
+    /// The released star is plan 08's independent object where it is of 2.5 M☉ or more, and left
+    /// out where it is lighter ([`BinaryKicksRules`]); the remnant a companion leaves is not, a
+    /// death the catalogue does not list (design note 16). A white dwarf's birth that unbinds a
+    /// wide pair releases nothing that is placed elsewhere, and is shown as before.
+    #[must_use]
+    pub(crate) fn shown_at(&self, t: UniverseTime) -> Shown {
+        match self.primary().rules().binary_kicks {
+            BinaryKicksRules::Paired => Shown::Drawn,
+            BinaryKicksRules::Alone => {
+                let age = self.primary().age_at(t);
+                // A bit for each star still held: 16 stars at most (`StarIndex`).
+                let all = (1_u32 << self.stars.len()) - 1;
+                let mut held = all;
+                for pair in &self.pairs {
+                    let Some(sn) = disrupting_supernova(&pair.timeline) else {
+                        continue;
+                    };
+                    if sn.age() > age {
+                        continue;
+                    }
+                    if pair.stars.contains(&StarIndex::PRIMARY) {
+                        return Shown::Alone;
+                    }
+                    for star in pair.stars {
+                        held &= !(1_u32 << star.get());
+                    }
+                }
+                if held == all {
+                    return Shown::Drawn;
+                }
+                let primary_pair = self.hierarchy.pairs().find_map(|(node, _)| {
+                    let HierarchyNode::Pair { inner, outer, .. } = *self.hierarchy.node(node)
+                    else {
+                        unreachable!("pairs are pairs");
+                    };
+                    matches!(
+                        (*self.hierarchy.node(inner), *self.hierarchy.node(outer)),
+                        (HierarchyNode::Star(a), HierarchyNode::Star(b))
+                            if a == StarIndex::PRIMARY && b.get() == 1
+                    )
+                    .then_some(node)
+                });
+                match primary_pair {
+                    Some(node) if held == 0b11 => Shown::Pair(node),
+                    Some(_) | None => Shown::Alone,
+                }
+            }
+        }
+    }
+
+    /// The hierarchy the system shows at `t`: the drawn one ([`SystemStars::hierarchy`]), and from
+    /// version 27, once a supernova has unbound one of its pairs, what that has left of it, whose
+    /// stars [`SystemStars::state_at`] gives by body index (plan 11, P11.T10). A caller that walks
+    /// the stars of the state at `t`, as the sky's census does their positions, walks this one.
+    #[must_use]
+    pub fn hierarchy_at(&self, t: UniverseTime) -> Cow<'_, SystemHierarchy> {
+        self.shown_hierarchy(self.shown_at(t))
+    }
+
+    /// The hierarchy of what `shown` shows: the drawn one, the drawn pair of the primary and star
+    /// 1 on its drawn orbit, or the primary alone.
+    #[must_use]
+    fn shown_hierarchy(&self, shown: Shown) -> Cow<'_, SystemHierarchy> {
+        let primary = self.hierarchy.star(StarIndex::PRIMARY);
+        Cow::Owned(match shown {
+            Shown::Drawn => return Cow::Borrowed(&self.hierarchy),
+            Shown::Pair(node) => {
+                let HierarchyNode::Pair { orbit, .. } = *self.hierarchy.node(node) else {
+                    unreachable!("a shown pair is a pair of the hierarchy");
+                };
+                let second = self
+                    .hierarchy
+                    .star(StarIndex::from_body(1).expect("body 1 is a star's"));
+                SystemHierarchy::binary_on(
+                    self.record.id(),
+                    primary.initial_mass(),
+                    (second.initial_mass(), second.kind()),
+                    orbit,
+                )
+            }
+            Shown::Alone => {
+                SystemHierarchy::single(self.record.id(), primary.initial_mass(), primary.kind())
+            }
+        })
     }
 
     /// The timeline of the pair at node `node`, if the engine ran it.

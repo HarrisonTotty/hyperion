@@ -50,7 +50,9 @@
 //! certified system keeps that attempt, so its count is the kept one; for the grid
 //! systems that [`SystemStars::generate`] redraws because a pair fell into a carved class (P11.T7,
 //! about 10⁻⁴ of them, every one on the paired route) it is the first attempt's, which may differ
-//! from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). The composition and
+//! from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). From version 27 a
+//! system that a supernova has unbound, always on the paired route, counts the stars it shows then
+//! (`SystemStars::shown_at`, P11.T10). The composition and
 //! the primary's draws are the ones [`SystemStars::generate`] reads, from the same streams; a
 //! main-sequence primary reads η alone, the one draw its state and class depend on.
 //!
@@ -83,8 +85,9 @@ use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    GRID_ATTEMPT, Pulses, StarModel, StarStreams, StellarBrief, SystemStars, draw_metallicity,
-    grid_multiplicity, primary_draws, primary_eta, primary_model, primary_rotation_draws,
+    GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief, SystemStars,
+    draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
+    primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, UniverseTime};
@@ -626,9 +629,12 @@ impl BriefModel {
                     (self.star_count, model.rules()),
                 )
             }),
-            Primary::Paired(stars) => stars
-                .brief_at(t)
-                .map(|brief| brief.with_star_count(self.star_count)),
+            // From version 27 a system a supernova has unbound counts the stars it shows then
+            // (P11.T10), which no other route can reach: every pair with a supernova is paired.
+            Primary::Paired(stars) => stars.brief_at(t).map(|brief| match stars.shown_at(t) {
+                Shown::Drawn => brief.with_star_count(self.star_count),
+                Shown::Pair(_) | Shown::Alone => brief,
+            }),
         }
     }
 

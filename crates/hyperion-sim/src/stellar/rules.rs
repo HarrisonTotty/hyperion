@@ -96,6 +96,11 @@
 //!   through the engine's input's rules. The pair-light and reach tables keep the version's rules
 //!   until the bump refits them, as for the merger mass (`stellar/rules/ns_accretion_hold.rs`
 //!   lists the movers).
+//! - [`binary_kicks`](StellarRules::binary_kicks), at [`BINARY_KICKS_VERSION`] (plan 11, P11.T10):
+//!   whether a system that a supernova has unbound goes on showing the star it released, both
+//!   stars of the drawn hierarchy below it, from it only the stars it still holds, chosen at one
+//!   choke point, [`SystemStars::shown_at`], which the system's summary, state and brief and the
+//!   range brief's paired route read (`stellar/rules/binary_kicks_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -106,6 +111,8 @@
 //! [`V_MAGNITUDE_VERSION`]: crate::stellar::photometry::V_MAGNITUDE_VERSION
 //! [`SystemStars::exploded_pair`]: crate::stellar::system::SystemStars::exploded_pair
 //! [`absolute_magnitude_v_under`]: crate::stellar::photometry::absolute_magnitude_v_under
+//! [`BINARY_KICKS_VERSION`]: crate::stellar::system::BINARY_KICKS_VERSION
+//! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
 
 use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
@@ -119,6 +126,7 @@ use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
 use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
+use crate::stellar::system::{BINARY_KICKS_VERSION, BinaryKicksRules};
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
 /// (decision-galaxy-25-train §1).
@@ -159,6 +167,9 @@ pub(crate) struct StellarRules {
     /// What a neutron star keeps of a companion's stable Roche-lobe overflow in the binary engine,
     /// the hold of [`NS_ACCRETION_VERSION`].
     pub(crate) ns_accretion: NsAccretionRules,
+    /// Whether a system that a supernova has unbound goes on showing the star it released, the
+    /// hold of [`BINARY_KICKS_VERSION`].
+    pub(crate) binary_kicks: BinaryKicksRules,
 }
 
 impl StellarRules {
@@ -219,6 +230,11 @@ impl StellarRules {
             } else {
                 NsAccretionRules::Eddington
             },
+            binary_kicks: if version.get() >= BINARY_KICKS_VERSION.get() {
+                BinaryKicksRules::Alone
+            } else {
+                BinaryKicksRules::Paired
+            },
         }
     }
 
@@ -233,7 +249,8 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion` and P11.T4's `ns_accretion`).
+    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
+    /// P11.T10's `binary_kicks`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -256,6 +273,8 @@ impl StellarRules {
     }
 }
 
+#[cfg(test)]
+mod binary_kicks_hold;
 #[cfg(test)]
 mod classes_hold;
 #[cfg(test)]

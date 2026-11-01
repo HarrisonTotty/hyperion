@@ -1948,7 +1948,8 @@ fn record_stars(
     tally.layer_mut(layer).generated += 1;
     let mut positions: Vec<(BodyId, SystemPosition)> =
         Vec::with_capacity(usize::from(GRID_STAR_BOUND));
-    star_positions_at(stars.hierarchy(), emitted, &mut positions);
+    // The stars the system shows then, as the state gives them (P11.T10).
+    star_positions_at(&stars.hierarchy_at(emitted), emitted, &mut positions);
     let observer_at = observer.position();
     let cut = query.cut().value();
     let mut modifiers: Vec<GasModifier> = Vec::new();
@@ -2481,7 +2482,11 @@ mod tests {
                 );
                 let table = milky_way_offsets().of(cell).value();
                 assert!(cell_bound <= table, "{record:?}: {cell_bound} over {table}");
-                star_positions_at(stars.hierarchy(), UniverseTime::EPOCH, &mut positions);
+                star_positions_at(
+                    &stars.hierarchy_at(UniverseTime::EPOCH),
+                    UniverseTime::EPOCH,
+                    &mut positions,
+                );
                 for (_, place) in &positions {
                     let r = place.metres().iter().map(|x| x * x).sum::<f64>().sqrt()
                         / METRES_PER_LIGHT_YEAR;
@@ -3335,7 +3340,11 @@ mod tests {
                     continue;
                 };
                 systems += 1;
-                star_positions_at(stars.hierarchy(), r.emitted(), &mut positions);
+                star_positions_at(
+                    &stars.hierarchy_at(r.emitted()),
+                    r.emitted(),
+                    &mut positions,
+                );
                 for (body, place) in &positions {
                     let index = usize::from(body.body_index());
                     let star = &state.stars()[index];

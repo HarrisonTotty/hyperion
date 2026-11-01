@@ -24,11 +24,17 @@ pub use members::{
 #[cfg(test)]
 use crate::Seed;
 #[cfg(test)]
+use crate::coords::GalacticPosition;
+#[cfg(test)]
 use crate::galaxy::Galaxy;
+#[cfg(test)]
+use crate::galaxy::Population;
 #[cfg(test)]
 use crate::galaxy::params::GalaxyParams;
 #[cfg(test)]
 use crate::galaxy::placement::{CellKey, generate_cell};
+#[cfg(test)]
+use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 #[cfg(test)]
 use crate::id::Layer;
 #[cfg(test)]
@@ -41,6 +47,10 @@ use crate::stellar::multiplicity::{
 };
 #[cfg(test)]
 use crate::stellar::system::{draw_metallicity, grid_multiplicity, primary_draws};
+#[cfg(test)]
+use crate::units::{SolarMasses, Years};
+#[cfg(test)]
+use hyperion_testkit::lcg::Lcg;
 
 /// A splitmix64 stream.
 pub(crate) struct Mix(pub(crate) u64);
@@ -154,4 +164,42 @@ pub(crate) fn generated_pairs(
     }
     pairs.truncate(n);
     pairs
+}
+
+/// `n` massive grid systems of `galaxy`, their primaries drawn from its mass function on
+/// 8–150 M☉ by `lcg_seed`'s stream: records of the young thin disc at the solar circle, in its
+/// first density component, each with a layer-E candidate ID of its own, and 60 Myr old, so that
+/// every primary of 8 M☉ and up has died by the epoch, as `tests/binary_system.rs`' census of the
+/// stripped marks draws them (P11.T11). Their placement class is plan 08's alive, so each draws
+/// its companions freely.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn massive_records(galaxy: &Galaxy, n: u32, lcg_seed: u64) -> Vec<SystemRecord> {
+    let imf = galaxy.mass_function();
+    let at = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0])
+        .expect("the solar circle is inside the galaxy");
+    let component = galaxy.fields().component_id(0).expect("components");
+    let mut lcg = Lcg::new(lcg_seed);
+    (0..n)
+        .map(|i| {
+            let m = imf.quantile_in(8.0, 150.0, lcg.next_f64());
+            let key = CellKey::new(
+                Layer::E,
+                [
+                    i32::try_from(i / 64 % 256).expect("small"),
+                    100 + i32::try_from(i / 64 / 256).expect("small"),
+                    0,
+                ],
+            )
+            .expect("a cell of the grid");
+            SystemRecord::from_parts(
+                key.candidate_id(i % 64).expect("a candidate"),
+                at,
+                SystemOrigin::Grid(component),
+                Population::YoungThinDisc,
+                SolarMasses::new(m),
+                Years::new(6.0e7),
+            )
+        })
+        .collect()
 }
