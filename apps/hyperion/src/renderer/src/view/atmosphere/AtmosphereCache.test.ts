@@ -2956,18 +2956,20 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     return over.view.noteFrame({ nowMs: 0, scene: sceneOf(), bodies: [lit(A)] });
   }
 
-  it("posts the bake as a haze route's, its channels at their own wavelengths and its streams' curved paths, where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
+  it("posts the bake as a haze route's, its channels at their own wavelengths, its streams' curved paths and the horizon's terms, where the route says so, and in the product not yet (R08.T14.d.4)", async () => {
     const asked = async (
       bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
     ): Promise<unknown> => {
       const over = await bakingOverPool(bakedAsHaze === undefined ? {} : { bakedAsHaze });
       const bake = lastPosted(workerAt(over.workers, 0));
-      return bake.kind === "thick-bake" ? [bake.ownWavelengths, bake.curvedStreams] : bake.kind;
+      return bake.kind === "thick-bake"
+        ? [bake.ownWavelengths, bake.curvedStreams, bake.horizonTerms]
+        : bake.kind;
     };
     expect([await asked(() => true), await asked(() => false), await asked()]).toEqual([
-      [true, true],
-      [undefined, undefined],
-      [undefined, undefined],
+      [true, true, true],
+      [undefined, undefined, undefined],
+      [undefined, undefined, undefined],
     ]);
   });
 

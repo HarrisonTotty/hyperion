@@ -19,6 +19,7 @@ import type { KeptBakeLights } from "../opticsMessages";
 import {
   bakeMultipleScattering,
   bakePointsOf,
+  type HorizonTerms,
   type MsSourceTable,
   NO_OWN_CHANNELS,
   ownWavelengthChannels,
@@ -88,6 +89,12 @@ export interface KeptBakeOptions {
    * (`bake.ts`'s remarks, "Curved streams"; R08.T14.d.4): none by default.
    */
   readonly curvedStreams?: boolean;
+  /**
+   * The horizon's first-order spherical terms its rows of a low sun take, as a haze route's bake
+   * takes both (`bake.ts`'s remarks, "The horizon's first-order terms"; R08.T14.d.4): none by
+   * default.
+   */
+  readonly horizonTerms?: HorizonTerms;
 }
 
 /**
@@ -95,7 +102,8 @@ export interface KeptBakeOptions {
  * `lights` in theirs: `prepareBake` of its column under the lights' bin curves, as the optics
  * worker forms them (`bake.ts`'s `thickBakeLights`), with the channels they allow at their own
  * wavelengths where `options.ownWavelengths` asks it (`bake.ts`'s `ownWavelengthChannels`), then
- * `bakeMultipleScattering` a band, its streams' curved paths where `options.curvedStreams` asks them.
+ * `bakeMultipleScattering` a band, its streams' curved paths where `options.curvedStreams` asks them
+ * and the horizon's terms where `options.horizonTerms` does.
  *
  * @throws RangeError as {@link keptColumnOf}, `thickBakeLights`, `prepareBake` and
  *   `bakeMultipleScattering` refuse their inputs (a band the body does not have).
@@ -119,7 +127,10 @@ export function bakeKeptCase(
     own,
   );
   const bands = options.bands ?? thickBakeBands(body).map((_, band) => band);
-  const bandOptions = options.curvedStreams === true ? { curvedStreams: true } : {};
+  const bandOptions = {
+    ...(options.curvedStreams === true ? { curvedStreams: true } : {}),
+    ...(options.horizonTerms === undefined ? {} : { horizonTerms: options.horizonTerms }),
+  };
   return bands.map((band) => bakeMultipleScattering(prepared, body, band, bandOptions));
 }
 

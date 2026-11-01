@@ -111,6 +111,33 @@
  * which a limb view reads, is otherwise lit from a full slab below (Loughman et al. 2004's limb
  * error, above). The beam and the solve are unchanged.
  *
+ * **The horizon's first-order terms** (R08.T14.d.4's Titan-class gate; a haze route's bake alone,
+ * {@link BakeBandOptions.horizonTerms}). A pseudo-spherical column holds one μ₀ at every height, so
+ * it holds none of the diffuse light that crosses the terminator from the sunward air under a higher
+ * sun, and its streams keep their cosines where on the sphere they turn: with the sun near the
+ * horizon, R ÷ H some 120, the exact pseudo-spherical answer reads Titan-class's sky at 0.69–0.84
+ * of its reference in red (the research behind the task, its reference arm A). In the column's frame
+ * the sphere's streaming operator adds, to first order in 1 ÷ r, −(sin θ₀ ÷ r) √(1 − μ²) cos Δφ
+ * ∂I ÷ ∂μ₀ (the sun's cosine moving with the sunward distance, Δφ = 0 travelling away from the sun),
+ * ((1 − μ²) ÷ r) ∂I ÷ ∂μ (each stream's cosine rising along its ray) and −(cot θ₀ ÷ r) √(1 − μ²)
+ * sin Δφ ∂I ÷ ∂Δφ (the frame turning about the vertical), the terms the pseudo-spherical
+ * approximation drops (Dahlback and Stamnes 1991, above, cited not re-read: derived here from
+ * Ω·∇ with the sun fixed in space). For each row of μ₀ ≤ {@link HORIZON_SUN_COSINE} the field is
+ * then I + B, B the solve's own field of the first two applied to the row's I, a source per stream
+ * and mode on the row's factorisation (`discreteOrdinates.ts`'s "Stream sources"): the lateral term (sin θ₀ ÷ β′r) √(1 − μ²) cos Δφ ∂I ÷ ∂μ₀ and the
+ * curvature term −((1 − μ²) ÷ β′r) ∂I ÷ ∂μ, β′ the delta-M extinction a metre, each linear in τ
+ * through a layer (its mean in one thinner than {@link HORIZON_THIN_DEPTH}). The third is left
+ * out: it vanishes with the sun on the horizon. ∂ ÷ ∂μ₀ is taken across the table's own rows,
+ * whose fields every row solves, so a row costs a source, not a solve. The terms are B's alone,
+ * so B is linear in them, and the beam, the flux records and the thermal field are unchanged.
+ *
+ * In the thin air above some 100 km the plane-parallel field brightens as τ ÷ |μ| towards the
+ * horizon, where 1 ÷ β′r passes 1 and the curvature term is no longer small: there its value follows
+ * the resolution of ∂I ÷ ∂μ. It is taken over each stream set's own cosines, the nodes' over the
+ * nodes and the view cosines' over the view cosines (lean, 2026-11-01: the research's "on the user
+ * cosines"); over both sets together it moved Titan-class's s90 some 5% brighter, and the formal
+ * solution's exact slope some 4% dimmer.
+ *
  * **Spectral** (Design note 5): each absorber in each bin is an exponential sum fitted to its bin
  * curve (`expSum.ts`), each layer reading k at its own Curtis–Godson pressure; several absorbers in
  * a bin overlap at random (the product of their sums, Lacis and Oinas 1991), one solve a product
@@ -161,14 +188,19 @@ import type { BakeSpectrum } from "../spectralColour";
 import { type BinConversion, binConversion } from "./binConversion";
 import {
   DISCRETE_ORDINATE_STREAMS,
+  type DiscreteOrdinatesProblem,
   type DiscreteOrdinatesSolution,
   doubleGaussQuadrature,
   type GroundCosines,
   groundCosinesOf,
   type GroundReflectance,
+  type ModeIntensities,
   normalizedAssociatedLegendre,
   type OrdinateLayer,
   solveDiscreteOrdinates,
+  solveDiscreteOrdinatesWithSources,
+  type StreamSource,
+  type StreamSourceMode,
 } from "./discreteOrdinates";
 import {
   EXP_SUM_OPTIONS,
@@ -1588,7 +1620,45 @@ export interface BakeBandOptions {
    * route's bake does (the module's remarks, "Curved streams"; R08.T14.d.4): none by default.
    */
   readonly curvedStreams?: boolean;
+  /**
+   * The horizon's first-order spherical terms each row of μ₀ ≤ {@link HORIZON_SUN_COSINE} takes, as
+   * a haze route's bake does (the module's remarks, "The horizon's first-order terms"; R08.T14.d.4):
+   * none by default.
+   */
+  readonly horizonTerms?: HorizonTerms;
 }
+
+/**
+ * The horizon's first-order spherical terms (the module's remarks, "The horizon's first-order
+ * terms"; R08.T14.d.4), each taken or not.
+ */
+export interface HorizonTerms {
+  /** The lateral term: the sun's cosine moving across the sunward distance, through ∂I ÷ ∂μ₀. */
+  readonly lateral: boolean;
+  /** The curvature term: each stream's cosine moving along its own ray, through ∂I ÷ ∂μ. */
+  readonly curvature: boolean;
+}
+
+/** Both of the horizon's terms, as a haze route's bake takes them. */
+export const HORIZON_TERMS: HorizonTerms = { lateral: true, curvature: true };
+
+/**
+ * The largest μ₀ whose rows take the horizon's terms: about cos 70°, the rows from s70 to the
+ * table's last below the horizontal, where the pseudo-spherical field misses its reference
+ * (R08.T14.d.4's research: the terms go as sin θ₀ ∂ln I ÷ ∂μ₀ ÷ R, small at a higher sun).
+ */
+export const HORIZON_SUN_COSINE = 0.35;
+
+/**
+ * The delta-M optical depth below which a layer takes its horizon source's mean at both faces in
+ * place of its linear run (`horizonSources`): the source a unit of τ is G ÷ β′, so in a thin layer
+ * its slope grows as 1 ÷ τ² in the particular solution, whose faces then cancel to ε ÷ τ² of it,
+ * 10⁻⁸ here, where a thin layer's own gain ∫Q dt ÷ μ is its mean's to (τ ÷ μ)². Measured
+ * 2026-11-01 on Titan-class air: the terms' sum missed their fields' sum by 2.1 × 10⁻⁵ of the
+ * table's largest J with every layer linear, and by 3.8 × 10⁻⁸, the f32 table's rounding, at
+ * 10⁻⁴ and at 10⁻².
+ */
+export const HORIZON_THIN_DEPTH = 1e-4;
 
 /**
  * Each diffuse stream's curved path's share of the plane-parallel path's opacity at every interface
@@ -1653,6 +1723,265 @@ export function curvedStreamShares(
   return shares;
 }
 
+/** x + y entry by entry; NaN where y is absent. */
+function sumOf(x: Float64Array, y: Float64Array | undefined): Float64Array {
+  const out = new Float64Array(x.length);
+  for (let i = 0; i < x.length; i += 1) {
+    out[i] = (x[i] ?? Number.NaN) + (y?.[i] ?? Number.NaN);
+  }
+  return out;
+}
+
+/** What the horizon rows' terms read of a band's solve (`horizonSources`). */
+interface HorizonGeometry {
+  /** The band's ground sphere, m. */
+  readonly radiusM: number;
+  /** The interfaces' h\*, m, from the top down: L + 1. */
+  readonly interfaceHeightsM: Float64Array;
+  /** Each layer's delta-M optical depth from the top, the solve's: L. */
+  readonly depths: Float64Array;
+  readonly sunCosines: Float64Array;
+  readonly upwardCosines: Float64Array;
+  /** The interfaces whose node fields the solve makes, the table's. */
+  readonly read: ReadonlyArray<number>;
+}
+
+/**
+ * The weights of the slope at point `i` of ascending abscissae `xs` by Lagrange's parabola through
+ * three of them, `i` and its neighbours (or the first or last three at an end): `[index, weight]`.
+ *
+ * @throws RangeError for fewer than three abscissae, or two that are equal.
+ */
+function slopeStencil(xs: ArrayLike<number>, i: number): ReadonlyArray<readonly [number, number]> {
+  if (xs.length < 3) {
+    throw new RangeError(`a slope by three points needs three abscissae, not ${xs.length}`);
+  }
+  const first = Math.min(Math.max(i - 1, 0), xs.length - 3);
+  const index = [first, first + 1, first + 2] as const;
+  const x = index.map((j) => xs[j] ?? Number.NaN);
+  const at = xs[i] ?? Number.NaN;
+  return index.map((j, a): readonly [number, number] => {
+    const [b, c] = [0, 1, 2].filter((other) => other !== a);
+    const xa = x[a] ?? Number.NaN;
+    const xb = x[b ?? -1] ?? Number.NaN;
+    const xc = x[c ?? -1] ?? Number.NaN;
+    if (xa === xb || xa === xc) {
+      throw new RangeError(`a slope by three points needs distinct abscissae, not ${xa} twice`);
+    }
+    return [j, (at - xb + (at - xc)) / ((xa - xb) * (xa - xc))];
+  });
+}
+
+/**
+ * The horizon rows' terms as the sources of their first-order fields B (the module's remarks, "The
+ * horizon's first-order terms"), one a row of `rows`, per mode: at each table interface k, on every
+ * node and user stream of signed cosine μ, G = (sin θ₀ ÷ r_k) √(1 − μ²) Σ_j c_mj ∂Iʲ ÷ ∂μ₀ −
+ * ((1 − μ²) ÷ r_k) ∂Iᵐ ÷ ∂μ, c the modes' coupling through cos Δφ (½ each to m ± 1, and all of mode 0
+ * into mode 1), linear in τ between the table's interfaces; in each layer G ÷ β′, β′ its delta-M
+ * extinction a metre, at both faces its mean where the layer is thinner than
+ * {@link HORIZON_THIN_DEPTH}. ∂ ÷ ∂μ₀ is taken across the table's own rows, and ∂ ÷ ∂μ over each
+ * hemisphere's nodes for a node and over its view cosines for a view cosine, each by Lagrange's
+ * parabola through three of them.
+ *
+ * @throws RangeError for a grid of fewer than three rows or three view cosines.
+ */
+function horizonSources(
+  solution: DiscreteOrdinatesSolution,
+  rows: ReadonlyArray<number>,
+  terms: HorizonTerms,
+  geometry: HorizonGeometry,
+): StreamSource[] {
+  const { radiusM, interfaceHeightsM, depths, sunCosines, upwardCosines, read } = geometry;
+  const { nodes } = solution.quadrature;
+  const n = nodes.length;
+  const users = upwardCosines.length;
+  const span = 2 * n;
+  const userSpan = 2 * users;
+  // Every stream: the nodes +μ, −μ, then the view cosines +μ, −μ.
+  const streams = span + userSpan;
+  const layers = depths.length;
+  const modes = solution.beams[rows[0] ?? 0]?.modes.length ?? 0;
+  const cosineOf = (e: number): number => {
+    const hemisphere = e < span ? e % n : (e - span) % users;
+    return e < span ? (nodes[hemisphere] ?? Number.NaN) : (upwardCosines[hemisphere] ?? Number.NaN);
+  };
+  const upward = (e: number): boolean => (e < span ? e < n : e - span < users);
+  // ∂ ÷ ∂μ in the signed μ, each hemisphere's nodes over its nodes and its view cosines over its
+  // view cosines, by |μ|: three entries and weights a stream, the downward hemisphere's negated.
+  const along = new Int32Array(streams * 3);
+  const alongWeights = new Float64Array(streams * 3);
+  for (const [up, nodal] of [
+    [true, true],
+    [false, true],
+    [true, false],
+    [false, false],
+  ] as const) {
+    const hemisphere = Array.from({ length: streams }, (_, e) => e)
+      .filter((e) => upward(e) === up && e < span === nodal)
+      .toSorted((x, y) => cosineOf(x) - cosineOf(y));
+    const cosines = hemisphere.map(cosineOf);
+    hemisphere.forEach((e, i) => {
+      slopeStencil(cosines, i).forEach(([j, w], t) => {
+        along[e * 3 + t] = hemisphere[j] ?? -1;
+        alongWeights[e * 3 + t] = up ? w : -w;
+      });
+    });
+  }
+  // Each row's field at the table's interfaces, `[(m × (L + 1) + k) × streams + e]`, made once for
+  // every row a slope reads.
+  const fields = new Map<number, Float64Array>();
+  const fieldOf = (row: number): Float64Array => {
+    const held = fields.get(row);
+    if (held !== undefined) {
+      return held;
+    }
+    const field = new Float64Array(modes * (layers + 1) * streams);
+    for (let m = 0; m < modes; m += 1) {
+      const mode = solution.beams[row]?.modes[m];
+      if (mode === undefined) {
+        throw new Error(`row ${row} has no mode ${m}`);
+      }
+      for (const k of read) {
+        const base = (m * (layers + 1) + k) * streams;
+        field.set(mode.quadratureUp.subarray(k * n, (k + 1) * n), base);
+        field.set(mode.quadratureDown.subarray(k * n, (k + 1) * n), base + n);
+        field.set(mode.userUp.subarray(k * users, (k + 1) * users), base + span);
+        field.set(mode.userDown.subarray(k * users, (k + 1) * users), base + span + users);
+      }
+    }
+    fields.set(row, field);
+    return field;
+  };
+  const roots = Float64Array.from({ length: streams }, (_, e) => {
+    const mu = cosineOf(e);
+    return Math.sqrt(1 - mu * mu);
+  });
+  // τ from the top at each interface, and each layer's metres a unit of its optical depth.
+  const tau = new Float64Array(layers + 1);
+  for (let p = 0; p < layers; p += 1) {
+    tau[p + 1] = (tau[p] ?? Number.NaN) + (depths[p] ?? Number.NaN);
+  }
+  const perDepth = Float64Array.from(depths, (d, p) => {
+    const thickness =
+      (interfaceHeightsM[p] ?? Number.NaN) - (interfaceHeightsM[p + 1] ?? Number.NaN);
+    return d > 0 ? thickness / d : 0;
+  });
+  // Each interface's bracketing table interfaces and its share between them in τ.
+  const made = new Uint8Array(layers + 1);
+  for (const k of read) {
+    made[k] = 1;
+  }
+  const above = new Int32Array(layers + 1);
+  const below = new Int32Array(layers + 1);
+  const shares = new Float64Array(layers + 1);
+  for (let k = 0; k <= layers; k += 1) {
+    let a = k;
+    while (a > 0 && made[a] !== 1) {
+      a -= 1;
+    }
+    let b = k;
+    while (b < layers && made[b] !== 1) {
+      b += 1;
+    }
+    above[k] = a;
+    below[k] = b;
+    const range = (tau[b] ?? Number.NaN) - (tau[a] ?? Number.NaN);
+    shares[k] = range > 0 ? ((tau[k] ?? Number.NaN) - (tau[a] ?? Number.NaN)) / range : 0;
+  }
+  const slopes = new Float64Array(modes * streams);
+  const g = new Float64Array(modes * (layers + 1) * streams);
+  return rows.map((s): StreamSource => {
+    const mu0 = sunCosines[s] ?? Number.NaN;
+    const sinSun = Math.sqrt(Math.max(1 - mu0 * mu0, 0));
+    const acrossRows = slopeStencil(sunCosines, s).map(([row, w]) => [fieldOf(row), w] as const);
+    const own = fieldOf(s);
+    g.fill(0);
+    for (const k of read) {
+      const r = radiusM + (interfaceHeightsM[k] ?? Number.NaN);
+      // ∂Iʲ ÷ ∂μ₀ at k, `[j × streams + e]`.
+      slopes.fill(0);
+      for (const [field, w] of acrossRows) {
+        for (let j = 0; j < modes; j += 1) {
+          const base = (j * (layers + 1) + k) * streams;
+          for (let e = 0; e < streams; e += 1) {
+            slopes[j * streams + e] = (slopes[j * streams + e] ?? 0) + w * (field[base + e] ?? 0);
+          }
+        }
+      }
+      for (let m = 0; m < modes; m += 1) {
+        const base = (m * (layers + 1) + k) * streams;
+        for (let e = 0; e < streams; e += 1) {
+          const root = roots[e] ?? Number.NaN;
+          let value = 0;
+          if (terms.lateral) {
+            let coupled = 0;
+            if (m >= 1) {
+              coupled += (m === 1 ? 1 : 0.5) * (slopes[(m - 1) * streams + e] ?? 0);
+            }
+            if (m + 1 < modes) {
+              coupled += 0.5 * (slopes[(m + 1) * streams + e] ?? 0);
+            }
+            value += (sinSun / r) * root * coupled;
+          }
+          if (terms.curvature) {
+            let slope = 0;
+            for (let t = 0; t < 3; t += 1) {
+              slope +=
+                (alongWeights[e * 3 + t] ?? 0) *
+                (own[base + (along[e * 3 + t] ?? 0)] ?? Number.NaN);
+            }
+            value -= ((root * root) / r) * slope;
+          }
+          g[base + e] = value;
+        }
+      }
+    }
+    // Linear in τ between the table's interfaces.
+    for (let k = 0; k <= layers; k += 1) {
+      if (made[k] === 1) {
+        continue;
+      }
+      const share = shares[k] ?? Number.NaN;
+      for (let m = 0; m < modes; m += 1) {
+        const at = (m * (layers + 1) + k) * streams;
+        const a = (m * (layers + 1) + (above[k] ?? 0)) * streams;
+        const b = (m * (layers + 1) + (below[k] ?? 0)) * streams;
+        for (let e = 0; e < streams; e += 1) {
+          const top = g[a + e] ?? Number.NaN;
+          g[at + e] = top + share * ((g[b + e] ?? Number.NaN) - top);
+        }
+      }
+    }
+    return Array.from({ length: modes }, (_, m): StreamSourceMode => {
+      const source = {
+        nodesTop: new Float64Array(layers * span),
+        nodesBottom: new Float64Array(layers * span),
+        usersTop: new Float64Array(layers * userSpan),
+        usersBottom: new Float64Array(layers * userSpan),
+      };
+      for (let p = 0; p < layers; p += 1) {
+        const factor = perDepth[p] ?? Number.NaN;
+        const top = (m * (layers + 1) + p) * streams;
+        const bottom = top + streams;
+        // A thin layer takes its mean (HORIZON_THIN_DEPTH).
+        const thin = (depths[p] ?? 0) < HORIZON_THIN_DEPTH;
+        const face = (at: number, other: number): number =>
+          factor *
+          (thin ? 0.5 * ((g[at] ?? Number.NaN) + (g[other] ?? Number.NaN)) : (g[at] ?? Number.NaN));
+        for (let e = 0; e < span; e += 1) {
+          source.nodesTop[p * span + e] = face(top + e, bottom + e);
+          source.nodesBottom[p * span + e] = face(bottom + e, top + e);
+        }
+        for (let e = 0; e < userSpan; e += 1) {
+          source.usersTop[p * userSpan + e] = face(top + span + e, bottom + span + e);
+          source.usersBottom[p * userSpan + e] = face(bottom + span + e, top + span + e);
+        }
+      }
+      return source;
+    });
+  });
+}
+
 /**
  * One solve of a band's bin for one term of its gases (the module's remarks): the delta-M layers,
  * the pseudo-spherical beams, the solve, and E at every table point of this solve alone.
@@ -1679,6 +2008,7 @@ export function bakeBinSolve(
     THICK_BAKE_MODES,
     "every",
     false,
+    undefined,
   );
 }
 
@@ -1716,6 +2046,7 @@ function solveOf(
   solveModes: number,
   interfaces: SolveInterfaces,
   curved: boolean,
+  horizon: HorizonTerms | undefined,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -1740,7 +2071,7 @@ function solveOf(
     groundCosinesOf(THICK_BAKE_STREAMS, grid.upwardCosines, grid.sunCosines),
     solveModes - 1,
   );
-  const solution = solveDiscreteOrdinates({
+  const problem: DiscreteOrdinatesProblem = {
     layers: scaled,
     groundAlbedo: groundReflectance === undefined ? (prepared.groundAlbedo[bin] ?? Number.NaN) : 0,
     ...(groundReflectance === undefined ? {} : { groundReflectance }),
@@ -1753,7 +2084,49 @@ function solveOf(
       ? {}
       : { thermal: { interfacePlanck: planck, groundPlanck: planck[layers] ?? Number.NaN } }),
     ...(interfaces === "table" ? { fieldInterfaces: tableInterfaces(prepared) } : {}),
-  });
+  };
+  // The rows that take the horizon's terms (the module's remarks), their fields I + B by row.
+  const rows =
+    horizon === undefined || !(horizon.lateral || horizon.curvature)
+      ? []
+      : Array.from(grid.sunCosines.keys()).filter(
+          (s) => (grid.sunCosines[s] ?? Number.NaN) <= HORIZON_SUN_COSINE,
+        );
+  let solution: DiscreteOrdinatesSolution;
+  const horizonFields = new Map<number, ReadonlyArray<ModeIntensities>>();
+  if (horizon === undefined || rows.length === 0) {
+    solution = solveDiscreteOrdinates(problem);
+  } else {
+    const geometry: HorizonGeometry = {
+      radiusM: radius,
+      interfaceHeightsM,
+      depths: scaledDepths,
+      sunCosines: grid.sunCosines,
+      upwardCosines: grid.upwardCosines,
+      read: tableInterfaces(prepared),
+    };
+    const sourced = solveDiscreteOrdinatesWithSources(problem, (solved) =>
+      horizonSources(solved, rows, horizon, geometry),
+    );
+    solution = sourced.solution;
+    rows.forEach((s, i) => {
+      const own = solution.beams[s]?.modes ?? [];
+      const terms = sourced.sourced[i] ?? [];
+      horizonFields.set(
+        s,
+        own.map((mode, m): ModeIntensities => {
+          const b = terms[m];
+          return {
+            mode: mode.mode,
+            quadratureUp: sumOf(mode.quadratureUp, b?.quadratureUp),
+            quadratureDown: sumOf(mode.quadratureDown, b?.quadratureDown),
+            userUp: sumOf(mode.userUp, b?.userUp),
+            userDown: sumOf(mode.userDown, b?.userDown),
+          };
+        }),
+      );
+    });
+  }
   const points = prepared.pointOptics[bin] ?? [];
   const altitudes = prepared.altitudesM.length;
   const suns = grid.sunCosines.length;
@@ -1814,8 +2187,10 @@ function solveOf(
       light[a * suns + s] =
         point.scatteringPerM *
         ((1 - point.forwardDelta) * 4 * Math.PI * meanDiffuse + point.kept * aureole);
+      // A horizon row's field is I + B (the module's remarks, "The horizon's first-order terms").
+      const field = horizonFields.get(s) ?? beam.modes;
       for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
-        const mode = beam.modes[m];
+        const mode = field[m];
         const weightedNodeL = weightedNodes[m];
         const viewMomentsL = viewMoments[m];
         const sunL = legendre.suns[m];
@@ -2093,6 +2468,7 @@ export function bakeBins(
             solveModes,
             "table",
             options?.curvedStreams === true,
+            options?.horizonTerms,
           );
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);

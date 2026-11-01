@@ -84,6 +84,7 @@ import {
   bakeMultipleScattering,
   bakePointsOf,
   gatherBins,
+  HORIZON_TERMS,
   type MsSourceTable,
   NO_OWN_CHANNELS,
   type OwnChannels,
@@ -574,9 +575,18 @@ function ownChannelsOf(
   return request.ownWavelengths === true ? ownWavelengthChannels(lights) : NO_OWN_CHANNELS;
 }
 
-/** A thick bake's request's band options: its streams' curved paths where it asks them (R08.T14.d.4). */
-function bandOptionsOf(request: { readonly curvedStreams?: boolean }): BakeBandOptions {
-  return request.curvedStreams === true ? { curvedStreams: true } : {};
+/**
+ * A thick bake's request's band options: its streams' curved paths and the horizon's terms where it
+ * asks them (R08.T14.d.4).
+ */
+function bandOptionsOf(request: {
+  readonly curvedStreams?: boolean;
+  readonly horizonTerms?: boolean;
+}): BakeBandOptions {
+  return {
+    ...(request.curvedStreams === true ? { curvedStreams: true } : {}),
+    ...(request.horizonTerms === true ? { horizonTerms: HORIZON_TERMS } : {}),
+  };
 }
 
 /** A share's one band, or a refusal: a share is of one band. */

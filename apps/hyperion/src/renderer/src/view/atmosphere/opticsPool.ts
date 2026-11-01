@@ -185,6 +185,12 @@ export interface ThickBakeAsk {
    * remarks, "Curved streams"; R08.T14.d.4): none where absent.
    */
   readonly curvedStreams?: boolean;
+  /**
+   * Whether its rows of a low sun take the horizon's first-order spherical terms, both, a haze
+   * route's (`thick/bake.ts`'s remarks, "The horizon's first-order terms"; R08.T14.d.4): none where
+   * absent.
+   */
+  readonly horizonTerms?: boolean;
 }
 
 /** How a thick bake ended. */

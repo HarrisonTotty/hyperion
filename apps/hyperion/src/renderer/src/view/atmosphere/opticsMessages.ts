@@ -107,6 +107,12 @@ export type OpticsRequest =
        * (`thick/bake.ts`'s remarks, "Curved streams"; R08.T14.d.4): none where absent.
        */
       readonly curvedStreams?: boolean;
+      /**
+       * Whether its rows of a low sun take the horizon's first-order spherical terms, both, a haze
+       * route's (`thick/bake.ts`'s remarks, "The horizon's first-order terms"; R08.T14.d.4): none
+       * where absent.
+       */
+      readonly horizonTerms?: boolean;
     }
   | {
       readonly kind: "thick-bake-bins";
@@ -122,6 +128,8 @@ export type OpticsRequest =
       readonly ownWavelengths?: boolean;
       /** As `thick-bake`'s. */
       readonly curvedStreams?: boolean;
+      /** As `thick-bake`'s. */
+      readonly horizonTerms?: boolean;
       /** The bake bins baked, ascending. */
       readonly bins: ReadonlyArray<number>;
     }

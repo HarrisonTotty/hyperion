@@ -34,6 +34,9 @@ import {
   curvedStreamShares,
   EVERY_BAKE_BIN,
   gatherBins,
+  HORIZON_SUN_COSINE,
+  HORIZON_TERMS,
+  type HorizonTerms,
   NO_OWN_CHANNELS,
   OWN_WAVELENGTH_COLUMNS,
   type OwnChannels,
@@ -1005,6 +1008,77 @@ describe("the bake's curved streams (R08.T14.d.4)", () => {
         on.some((value, i) => value !== plain[i]),
         on.every(Number.isFinite),
       ]).toEqual([true, true, true]);
+    },
+  );
+});
+
+/** The sun cosine's index of a slot value's entry `i` on `grid` (`MsSourceSlot.values`' order). */
+function sunRowOf(i: number, grid: ThickBakeGrid): number {
+  const views = 2 * grid.upwardCosines.length;
+  return Math.floor(i / (3 * THICK_BAKE_MODES * views)) % grid.sunCosines.length;
+}
+
+describe("the bake's horizon terms (R08.T14.d.4)", () => {
+  // Rows on both sides of the horizon and of HORIZON_SUN_COSINE, and view cosines enough for a slope.
+  const grid = smallGrid(
+    Float64Array.of(0.125, 0.375, 0.625, 0.875),
+    Float64Array.of(-0.05, 0.05, 0.15, 0.3, 0.45, 1),
+  );
+  const tables = once(() => {
+    const fixture = titanClassFixture();
+    const column: SpectralColumn = {
+      ...fixture.column,
+      terms: fixture.column.terms.filter((term) => term.source.kind !== "aerosol"),
+    };
+    const prepared = prepareBake(column, [lightOf(fixture)], grid);
+    const bake = (horizonTerms?: HorizonTerms): Float32Array =>
+      slotOf(
+        bakeMultipleScattering(
+          prepared,
+          fixture.body,
+          0,
+          horizonTerms === undefined ? {} : { horizonTerms },
+        ),
+      ).values;
+    return {
+      plain: bake(),
+      none: bake({ lateral: false, curvature: false }),
+      lateral: bake({ lateral: true, curvature: false }),
+      curvature: bake({ lateral: false, curvature: true }),
+      both: bake(HORIZON_TERMS),
+    };
+  });
+
+  it(
+    "bakes to the bit with neither, and moves the rows of a low sun alone with both",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      const { plain, none, both } = tables();
+      const high = (i: number): boolean =>
+        (grid.sunCosines[sunRowOf(i, grid)] ?? 0) > HORIZON_SUN_COSINE;
+      expect([
+        none.every((value, i) => Object.is(value, plain[i])),
+        both.every((value, i) => !high(i) || Object.is(value, plain[i])),
+        both.some((value, i) => !high(i) && value !== plain[i]),
+        both.every(Number.isFinite),
+      ]).toEqual([true, true, true, true]);
+    },
+  );
+
+  it(
+    "adds the two terms' fields: both moves the table by the lateral's and the curvature's moves",
+    { timeout: BAKE_TIMEOUT_MS },
+    () => {
+      const { plain, lateral, curvature, both } = tables();
+      const largest = Math.max(...Array.from(plain, Math.abs));
+      let worst = 0;
+      both.forEach((value, i) => {
+        const p = plain[i] ?? Number.NaN;
+        const sum = p + ((lateral[i] ?? Number.NaN) - p) + ((curvature[i] ?? Number.NaN) - p);
+        worst = Math.max(worst, Math.abs(value - sum));
+      });
+      // B is linear in its source; the table's f32 storage rounds each of the four bakes.
+      expect(worst / largest).toBeLessThan(1e-6);
     },
   );
 });
