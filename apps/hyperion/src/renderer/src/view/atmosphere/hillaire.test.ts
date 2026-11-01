@@ -45,6 +45,7 @@ import {
   bodyOfFigure,
   FIT_SCALE_FLOOR_M,
   COMPOSITE_MATERIAL,
+  compositeAreaOf,
   createAtmosphereFrameKernels,
   frameSourcesOf,
   geodeticOf,
@@ -78,7 +79,7 @@ import {
   withMarchOneBand,
   withMarchSpecialised,
 } from "./hillaire";
-import { marchAreaOf, marchAreaTexels } from "./marchArea";
+import { marchAreaOf, marchAreaPixels, marchAreaTexels } from "./marchArea";
 import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
@@ -2249,6 +2250,107 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     const draw = atmosphere.drawFrame(away, [NOON], SCENE);
     expect(marchesOf(engine)).toEqual([]);
     expect([...(draw.uniforms["marchArea"] ?? [])]).toEqual([0, 0, 0, 0]);
+  });
+});
+
+/**
+ * A composite's `Draw` with the camera `heightM` over the datum under an air 100 km deep, s ≡ 1, the
+ * march's share 1, no disc, and a march area of texels [8, 16)² at full resolution.
+ */
+function compositeDrawAt(heightM: number): Record<string, Float32Array> {
+  return {
+    camera: new Float32Array([0, 0, 0, heightM]),
+    curvature: new Float32Array([0, 0, 1, 0]),
+    shell: new Float32Array([100_000, 0, 0, 0]),
+    exact: new Float32Array([0, 0, 0, 1]),
+    output: new Float32Array([320, 180, 1, 0]),
+    marchArea: new Float32Array([8, 8, 16, 16]),
+    ...Object.fromEntries(
+      Array.from({ length: MAX_SKY_SOURCES }, (_, i) => [
+        [`sourceDirection${i}`, new Float32Array([0, 0, 1, 0])],
+        [`sourceDisc${i}`, new Float32Array(4)],
+      ]).flat(),
+    ),
+  };
+}
+
+describe("HillaireAtmosphere's composite over the air's area (R08.T16.a.2)", () => {
+  /** From 10⁹ m over the equator, looking at the centre: the Earth's air a few pixels across. */
+  const far: AtmosphereCamera = {
+    positionM: { x: 1e9, y: 0, z: 0 },
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: Math.PI / 3,
+    viewport: { widthPx: 320, heightPx: 180 },
+  };
+  /** The Sun as a body's sky sources give it: its disc drawn by the scene, not the composite. */
+  const sun: SunState = { ...NOON, drawsDisc: false };
+  /** An atmosphere marching the air's area, as a view's does over the shared kernels. */
+  const atmosphereOf = async (sizes = TABLE_SIZES.high): Promise<HillaireAtmosphere> => {
+    const atmosphere = new HillaireAtmosphere(
+      await countingRenderEngine(),
+      R05_EARTH_REFERENCE,
+      sizes,
+      WGS84,
+    );
+    atmosphere.setMarchCover("area");
+    return atmosphere;
+  };
+
+  it("holds a far body's full path to its march area's pixels, two more each side", async () => {
+    const atmosphere = await atmosphereOf();
+    const draw = atmosphere.drawFrame(far, [sun], SCENE);
+    const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = draw.uniforms["marchArea"] ?? [];
+    expect(x1 - x0).toBeLessThan(40);
+    expect(atmosphere.compositeArea).toEqual({
+      x: x0 - 2,
+      y: y0 - 2,
+      width: x1 - x0 + 4,
+      height: y1 - y0 + 4,
+    });
+  });
+
+  it("holds low's half resolution to the pixels whose four candidates the area holds", async () => {
+    const atmosphere = await atmosphereOf(TABLE_SIZES.low);
+    const draw = atmosphere.drawFrame(far, [sun], SCENE);
+    const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = draw.uniforms["marchArea"] ?? [];
+    expect(atmosphere.compositeArea).toEqual(marchAreaPixels({ x0, y0, x1, y1 }, 0.5, 320, 180));
+  });
+
+  it("draws the whole frame where the composite draws a source's disc", async () => {
+    const atmosphere = await atmosphereOf();
+    atmosphere.drawFrame(far, [NOON], SCENE);
+    expect(atmosphere.compositeArea).toBeNull();
+  });
+
+  it("draws the whole frame from inside the air", async () => {
+    const atmosphere = await atmosphereOf();
+    atmosphere.drawFrame(CAMERA, [sun], SCENE);
+    expect(atmosphere.compositeArea).toBeNull();
+  });
+
+  it("draws the whole frame where the area is the whole target", async () => {
+    const atmosphere = await atmosphereOf();
+    atmosphere.setMarchCover("whole frame");
+    atmosphere.drawFrame(far, [sun], SCENE);
+    expect(atmosphere.compositeArea).toBeNull();
+  });
+
+  it("draws no pixel by the full path where the air lies behind the camera", async () => {
+    const atmosphere = await atmosphereOf();
+    const away = { ...far, orientation: lookAlong({ x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }) };
+    atmosphere.drawFrame(away, [sun], SCENE);
+    expect(atmosphere.compositeArea).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+  });
+
+  it("holds the camera at the top inside the air, within the composite's f32 rounding", () => {
+    expect(compositeAreaOf(compositeDrawAt(100_000))).toBeNull();
+    expect(compositeAreaOf(compositeDrawAt(100_000.05))).toBeNull();
+    expect(compositeAreaOf(compositeDrawAt(100_001))).toEqual({
+      x: 6,
+      y: 6,
+      width: 12,
+      height: 12,
+    });
   });
 });
 

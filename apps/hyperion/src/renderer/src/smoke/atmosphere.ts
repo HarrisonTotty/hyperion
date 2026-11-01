@@ -200,10 +200,13 @@ import {
 } from "../view/atmosphere/thick/deckRead";
 import {
   type DrawItem,
+  type MaterialHandle,
+  type MeshHandle,
   type PassTimes,
   PresentationOnlyReadback,
   type RenderEngine,
   type RenderTarget,
+  type TexelRect,
   type TextureHandle,
   type ViewSize,
 } from "../view/engine/types";
@@ -212,6 +215,7 @@ import { METER_CLASS } from "../view/post/meter";
 import type { GpuTimer, TargetRounding } from "../view/engine/status";
 import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
 import { HALF_FLOAT_MAX, toneCurve } from "../view/photometry/toneCurve";
+import FRAME_WGSL from "../view/shaders/frame.wgsl?raw";
 import {
   type Checks,
   drawOf,
@@ -3495,6 +3499,191 @@ async function checkAreaBodies(
       met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
       `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
     );
+  }
+}
+
+// --- R08.T16.a.2: the composite over the air's area ----------------------------------------------
+
+/**
+ * A scene for {@link checkCompositeArea}: each pixel a light and an alpha of its own, up to some
+ * 10⁴ in red, written over what is drawn without depth, so that a pixel the scissor or the copy
+ * moved, or missed, shows; finite and not −0, as every scene pass writes light.
+ */
+const PATTERN_WGSL = `${FRAME_WGSL}
+struct Draw {
+  offsetFromCameraM : vec3f,
+  tint : vec4f,
+}
+@group(1) @binding(0) var<uniform> draw : Draw;
+
+@vertex fn vertexMain(@location(0) position : vec3f) -> @builtin(position) vec4f {
+  let viewSpace = frame.viewRotation * vec4f(position + draw.offsetFromCameraM, 1.0);
+  return frame.clipProjection * viewSpace;
+}
+
+@fragment fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
+  let p = position.xy;
+  return vec4f(
+    fract(p.x * 0.137) * 1e4 + 1.0,
+    fract(p.y * 0.291) * 3.0,
+    fract((p.x + 2.0 * p.y) * 0.053),
+    fract(p.x * p.y * 0.0107),
+  );
+}
+`;
+
+/**
+ * R08.T16.a.2: the composite drawn over the air's area alone, over a copy of the colour it reads
+ * (`FrameSubmission.colourFrom` and `scissor`, as the photorealistic renderer draws a body's
+ * composite where it can, `HillaireAtmosphere.compositeArea`), reads back as the full-screen
+ * composite byte for byte on any adapter: inside the rectangle the same draw, outside it the
+ * composite's early return, the scene's light, which the copy holds. R08.T11.d's frames of the
+ * measured Earth from above its air, over a patterned scene, the Sun's disc drawn by the scene and
+ * not the composite (`drawsDisc` false, as a body's sky sources give it); each frame names its
+ * rectangle, and the check holds that each took one.
+ */
+export async function checkCompositeArea(engine: RenderEngine, checks: Checks): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+  const [body] = AREA_BODIES;
+  const pattern = engine.createMaterial(
+    flatSpec("composite area pattern", {
+      vertexWgsl: PATTERN_WGSL,
+      fragmentWgsl: PATTERN_WGSL,
+      depthWrite: false,
+    }),
+  );
+  const patternMesh = fullScreenMesh(engine, "composite area pattern");
+  try {
+    if (body === undefined) {
+      throw new Error("R08.T11.d's check has no body");
+    }
+    const sliced = body.body();
+    const tables = new AtmosphereTables(
+      engine,
+      body.medium,
+      tableRadiusM(sliced.figure),
+      body.curves,
+      sliced,
+    );
+    try {
+      for (const frame of body.frames) {
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const reads = await compositeAreaReadsOf(engine, tables, kernels, frame, {
+          mesh: patternMesh,
+          material: pattern,
+        });
+        const differ = halvesDiffering(reads.area, reads.whole);
+        const rect = reads.rect;
+        checks.check(
+          `R08.T16.a.2 ${body.name}, ${frame.setting}, ${frame.name}: the composite over the air's area, over a copy of the scene, reads back as the full-screen composite byte for byte`,
+          rect !== null && differ.texels === 0,
+          `${differenceOf("the composite's output", differ)}; ${rect === null ? "no area: the whole frame" : `the area (${rect.x}, ${rect.y}) ${rect.width} × ${rect.height} of ${AREA_FRAME_SIZE.widthPx} × ${AREA_FRAME_SIZE.heightPx}`}`,
+        );
+      }
+    } finally {
+      tables.dispose();
+    }
+  } finally {
+    engine.releaseMesh(patternMesh);
+    engine.releaseMaterial(pattern);
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * One frame of {@link checkCompositeArea}: `tables` over a patterned scene, its composite drawn
+ * full-screen and over the air's area, each read back, and the area's rectangle.
+ */
+async function compositeAreaReadsOf(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  kernels: AtmosphereFrameKernels,
+  frame: AreaFrame,
+  pattern: { readonly mesh: MeshHandle; readonly material: MaterialHandle },
+): Promise<{
+  readonly whole: ArrayBuffer;
+  readonly area: ArrayBuffer;
+  readonly rect: TexelRect | null;
+}> {
+  const atmosphere = HillaireAtmosphere.over(
+    engine,
+    tables,
+    twinSizes(TABLE_SIZES[frame.setting]),
+    kernels,
+  );
+  const surfaceM = frame.surfaceM;
+  const drawn =
+    surfaceM === null
+      ? null
+      : {
+          mesh: fullScreenMesh(engine, "composite area surface", -surfaceM),
+          material: engine.createMaterial(flatSpec("composite area surface")),
+        };
+  const targetOf = (name: string, depth: boolean): RenderTarget =>
+    engine.createRenderTarget({
+      name,
+      size: AREA_FRAME_SIZE,
+      format: "rgba16float",
+      mips: 1,
+      depth,
+      category: "render-targets",
+    });
+  const scene = targetOf("composite area scene", true);
+  const whole = targetOf("composite area whole", false);
+  const area = targetOf("composite area", false);
+  try {
+    const figure = tablesFigureOf(tables);
+    const camera = farLimbTimingCamera(frame.distanceM, AREA_FRAME_SIZE, figure);
+    const sun: SunState = {
+      ...limbSunToward(
+        frame.distanceM,
+        figure,
+        FAR_LIMB_TIMING_SUN_ZENITH_DEG,
+        FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
+        FAR_LIMB_TIMING_FRAME,
+      ),
+      drawsDisc: false,
+    };
+    const aspect = AREA_FRAME_SIZE.widthPx / AREA_FRAME_SIZE.heightPx;
+    const surface =
+      drawn === null
+        ? []
+        : [drawOf(drawn.mesh, drawn.material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1])];
+    scene.render(
+      frameOf(
+        "composite area scene",
+        [...surface, drawOf(pattern.mesh, pattern.material, [0, 0, 0, 0])],
+        aspect,
+      ),
+    );
+    const composite = atmosphere.drawFrame(camera, [sun], {
+      colour: scene.colour,
+      depth: requireDepth(scene.depth),
+      nearM: NEAR_M,
+      exposureScale: SMOKE_EXPOSURE_SCALE,
+    });
+    const rect = atmosphere.compositeArea;
+    whole.render(frameOf("composite area whole", [composite], aspect));
+    area.render({
+      ...frameOf("composite area", [composite], aspect),
+      ...(rect === null ? {} : { colourFrom: scene.colour, scissor: rect }),
+    });
+    const [wholeBytes, areaBytes] = await Promise.all([
+      engine.readTexture(whole.colour),
+      engine.readTexture(area.colour),
+    ]);
+    return { whole: wholeBytes, area: areaBytes, rect };
+  } finally {
+    atmosphere.dispose();
+    for (const target of [scene, whole, area]) {
+      target.dispose();
+    }
+    if (drawn !== null) {
+      engine.releaseMesh(drawn.mesh);
+      engine.releaseMaterial(drawn.material);
+    }
   }
 }
 

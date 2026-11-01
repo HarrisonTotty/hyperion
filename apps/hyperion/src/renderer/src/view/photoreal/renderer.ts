@@ -83,6 +83,7 @@ import type {
   RenderEngine,
   RenderTarget,
   RenderView,
+  TexelRect,
   TextureHandle,
   ViewSize,
 } from "../engine/types";
@@ -454,6 +455,18 @@ export function lostDevice(error: unknown): boolean {
 function insideAir(air: FrameAtmosphere): boolean {
   const { heightM } = geodeticOf(air.camera.positionM, tablesFigureOf(air.tables));
   return heightM < air.tables.medium.topHeightM;
+}
+
+/** `rect` held to a target of `size`, its pixels from the top left. */
+function rectWithin(rect: TexelRect, size: ViewSize): TexelRect {
+  const x = Math.min(rect.x, size.widthPx);
+  const y = Math.min(rect.y, size.heightPx);
+  return {
+    x,
+    y,
+    width: Math.min(rect.width, size.widthPx - x),
+    height: Math.min(rect.height, size.heightPx - y),
+  };
 }
 
 /** A view's photorealistic frames on one engine (plan R07, T8.a). */
@@ -992,6 +1005,7 @@ export class PhotorealRenderer {
       const tables = air.tables;
       const lightSlots = absorberCount(tables.medium) > 0 ? tables.curves.length : Infinity;
       let composite: DrawItem;
+      let area: TexelRect | null;
       try {
         const atmosphere = this.#atmosphereOf(resources, air, frame.setting);
         const suns: ReadonlyArray<SunState> = skySources(
@@ -1008,6 +1022,7 @@ export class PhotorealRenderer {
           nearM: NEAR_PLANE_M,
           exposureScale: frame.exposureScale,
         });
+        area = atmosphere.compositeArea;
       } catch (error: unknown) {
         // The one place a body's drawing fails: item 6's failure, the cache's to hold and state.
         if (!lostDevice(error)) {
@@ -1024,12 +1039,15 @@ export class PhotorealRenderer {
       }
       // The air target the last composite did not draw into: the first after the scene's.
       const target = this.#airTarget(resources, colour === resources.airTargets[0]?.colour ? 1 : 0);
+      // Where the composite keeps the scene's light outside the air's area, it is drawn over that
+      // area alone, over a copy of the colour it reads (R08.T16.a.2): not a full-screen pass.
       target.render({
         label: ATMOSPHERE_COMPOSITE_PASS,
         viewRotation: pass.viewRotation,
         projection: pass.projection,
         draws: [composite],
         postProcesses: [],
+        ...(area === null ? {} : { colourFrom: colour, scissor: rectWithin(area, resources.size) }),
       });
       colour = target.colour;
     }

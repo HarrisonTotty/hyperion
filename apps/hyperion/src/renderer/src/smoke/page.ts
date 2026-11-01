@@ -85,6 +85,7 @@ import {
   checkFarLimb,
   checkFarLimbFootprint,
   checkLowPick,
+  checkCompositeArea,
   checkMarchArea,
   checkMarchBand,
   checkMarchOneBand,
@@ -520,6 +521,10 @@ async function run(
   // takes too, so that no part's GPU process compiles both reads' marches.
   await group(8, "R08.T11.g the one-band march with layer edges", () =>
     checkMarchOneBand(engine, checks, summary.fallback),
+  );
+  // In part 8 after R08.T11.g's, over the march by slot that R08.T11.d's group compiled.
+  await group(8, "R08.T16.a.2 the composite over the air's area", () =>
+    checkCompositeArea(engine, checks),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),

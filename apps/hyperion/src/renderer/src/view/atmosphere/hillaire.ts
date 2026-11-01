@@ -63,6 +63,7 @@ import type {
   MaterialHandle,
   MeshHandle,
   RenderEngine,
+  TexelRect,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
@@ -75,6 +76,7 @@ import {
   MARCH_TILE_TEXELS,
   type MarchArea,
   marchAreaOf,
+  marchAreaPixels,
   marchAreaTexels,
   type MarchShell,
   wholeMarchArea,
@@ -2425,6 +2427,59 @@ function marchAreaUniform(area: MarchArea, culled: boolean): Float32Array {
 }
 
 /**
+ * The share of the air's top height by which the camera's own, as the composite forms it in `f32`,
+ * must pass it before {@link compositeAreaOf} holds the camera above the top: over that product's
+ * rounding, 2⁻²⁴ of it.
+ */
+const ABOVE_TOP_MARGIN = 1e-6;
+
+/**
+ * The pixels of a frame its composite draws by its full path (R08.T16.a.2's composite over the
+ * air's area), from the composite's `Draw` as the frame filled it: a rectangle that holds every
+ * pixel `composite.wgsl` does not return early at ({@link marchAreaPixels}), or `null` where any
+ * may be one, the whole frame among them.
+ *
+ * @remarks
+ * Outside the rectangle the composite writes each pixel the scene's light, `colour × 1 + 0 ×
+ * factor` clamped to the half float's largest, its alpha the scene's: from above the air's top
+ * (`camera.w × curvature.z`, by {@link ABOVE_TOP_MARGIN}), from the march band's upper edge up
+ * (`exact.w` 1), with no source's disc drawn by the composite (each with no radius or no light),
+ * outside the march's area. A frame that meets the three draws the rectangle alone over a copy of
+ * the scene (`FrameSubmission.colourFrom`), the same bits wherever the scene's light is finite and
+ * not −0.
+ */
+export function compositeAreaOf(
+  uniforms: Readonly<Record<string, Float32Array>>,
+): TexelRect | null {
+  const member = (name: string): Float32Array => {
+    const values = uniforms[name];
+    if (values === undefined) {
+      throw new Error(`the composite's Draw has no ${name}`);
+    }
+    return values;
+  };
+  const camera = member("camera");
+  const curvature = member("curvature");
+  const topM = member("shell")[0] ?? 0;
+  const aboveTop =
+    (camera[3] ?? 0) * (curvature[2] ?? 0) >= topM * (1 + ABOVE_TOP_MARGIN) && topM > 0;
+  if (!aboveTop || (member("exact")[3] ?? 0) < 1) {
+    return null;
+  }
+  for (let i = 0; i < MAX_SKY_SOURCES; i += 1) {
+    const sinRadius = member(`sourceDirection${i}`)[3] ?? 0;
+    const disc = member(`sourceDisc${i}`);
+    if (sinRadius > 0 && (disc[0] !== 0 || disc[1] !== 0 || disc[2] !== 0)) {
+      return null;
+    }
+  }
+  const [widthPx = 0, heightPx = 0, scale = 1] = member("output");
+  const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = member("marchArea");
+  const area = marchAreaPixels({ x0, y0, x1, y1 }, scale, widthPx, heightPx);
+  return area.width === widthPx && area.height === heightPx ? null : area;
+}
+
+/**
  * Earth-like atmosphere drawn by Hillaire's four tables: the per-planet pair, rebuilt when the
  * medium changes, and the per-frame sky view, aerial perspective and ray march.
  */
@@ -2621,6 +2676,14 @@ export class HillaireAtmosphere {
       marchTiles: this.#frame.marchTiles,
       marchArea: this.#area,
     };
+  }
+
+  /**
+   * The pixels the latest {@link HillaireAtmosphere.drawFrame}'s composite draws by its full path,
+   * as its `Draw` now holds them ({@link compositeAreaOf}; R08.T16.a.2): `null` where any may be.
+   */
+  get compositeArea(): TexelRect | null {
+    return compositeAreaOf(this.#uniforms);
   }
 
   /**

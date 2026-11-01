@@ -31,6 +31,7 @@
 
 import { dot, norm, type Vec3 } from "../../geometry/vec3";
 import { rotate } from "../camera/quaternion";
+import type { TexelRect } from "../engine/types";
 import type { AtmosphereCamera } from "./hillaire";
 
 /** The side of a tile of the ray march's target, texels: its workgroups' 8 × 8 (R08.T11.d). */
@@ -92,6 +93,39 @@ export function marchAreaTexels(area: MarchArea): MarchAreaTexels {
     x1: Math.min(x0 + area.tilesAcross * MARCH_TILE_TEXELS, area.widthTexels),
     y1: Math.min(y0 + area.tilesDown * MARCH_TILE_TEXELS, area.heightTexels),
   };
+}
+
+/**
+ * The output pixels added on each side of the march area's own (R08.T16.a.2's composite over the
+ * area): over the `f32` rounding of the composite's pixel × scale against the area's edges.
+ */
+export const COMPOSITE_AREA_MARGIN_PX = 2;
+
+/**
+ * The output pixels of a frame of `widthPx` × `heightPx` whose composite can read a march texel in
+ * `texels` at the march's `scale` (`composite.wgsl`'s `marchedHere`), as a rectangle from the top
+ * left, widened by {@link COMPOSITE_AREA_MARGIN_PX} and held to the frame; empty for no texels.
+ *
+ * @remarks
+ * At full resolution a pixel reads its own texel. At half it reads the four nearest, from
+ * ⌊p × s − ½⌋ to one past, held to the target, so a pixel in the area lies within
+ * [(x0 + ½) ÷ s, (x1 − ½) ÷ s), inside [x0 ÷ s, x1 ÷ s).
+ */
+export function marchAreaPixels(
+  texels: MarchAreaTexels,
+  scale: number,
+  widthPx: number,
+  heightPx: number,
+): TexelRect {
+  if (texels.x1 <= texels.x0 || texels.y1 <= texels.y0) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  const s = Math.min(scale, 1);
+  const x = Math.max(0, Math.floor(texels.x0 / s) - COMPOSITE_AREA_MARGIN_PX);
+  const y = Math.max(0, Math.floor(texels.y0 / s) - COMPOSITE_AREA_MARGIN_PX);
+  const right = Math.min(widthPx, Math.ceil(texels.x1 / s) + COMPOSITE_AREA_MARGIN_PX);
+  const bottom = Math.min(heightPx, Math.ceil(texels.y1 / s) + COMPOSITE_AREA_MARGIN_PX);
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
 /** The whole of a target of `widthTexels` × `heightTexels`, as an area. */

@@ -444,6 +444,44 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // Some 8 px across the test's 64 px view.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = composite?.draws[0]?.uniforms["marchArea"] ?? [];
+    expect(composite?.colourFrom).toBeDefined();
+    expect(composite?.colourFrom).toBe(composite?.draws[0]?.textures["sceneColour"]);
+    // The march's area, its tiles about the view's centre, and two pixels more each side.
+    expect([x1 - x0, y1 - y0]).toEqual([16, 16]);
+    expect(composite?.scissor).toEqual({ x: x0 - 2, y: y0 - 2, width: 20, height: 20 });
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws the composite over the whole frame from inside the air (R08.T16.a.2)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // The camera 2 m over the ground, under the air's top.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, -(EARTH_RADIUS_M + 2), 0));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composite).toBeDefined();
+    expect([composite?.colourFrom, composite?.scissor]).toEqual([undefined, undefined]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
   it("draws a body past 1.1 × 10⁹ m by its disc table, with no composite, once the air forms are prepared, and by its full passes until then (R08.T16.b)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     // Some 7 px across the test's 64 px view.

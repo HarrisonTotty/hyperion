@@ -4,13 +4,16 @@ import { cross, normalise, scale, type Vec3 } from "../../geometry/vec3";
 import { lookAlong, quaternionFromAxisAngle, rotate } from "../camera/quaternion";
 import type { AtmosphereCamera, SpheroidFigure } from "./hillaire";
 import {
+  COMPOSITE_AREA_MARGIN_PX,
   MARCH_AREA_MARGIN_TEXELS,
   MARCH_TILE_CODES,
   MARCH_TILE_REACH_TEXELS,
   MARCH_TILE_TEXELS,
   type MarchArea,
   marchAreaOf,
+  marchAreaPixels,
   marchAreaTexels,
+  type MarchAreaTexels,
   type MarchShell,
   marchTileKindTwin,
   type MarchTileKind,
@@ -493,5 +496,117 @@ describe("the tile cull's kinds (R08.T11.d, decision-r08-t8-leans.md §11 Ruling
     expect(rayMarchCentreWgsl).toMatch(
       /let reachM = length\(origin\) \* k \* k \* 2\.0 \* MARCH_TILE_REACH_TEXELS\s*\* \(length\(view\.right\.xyz\) \/ size\.x \+ length\(view\.upRay\.xyz\) \/ size\.y\);\s*let boundM = 1\.01 \* reachM \+ marchArea\.bound\.y;/u,
     );
+  });
+});
+
+/**
+ * `composite.wgsl`'s `marchedHere` in `f32`: whether pixel (x, y) of a `widthPx` × `heightPx`
+ * frame reads march texels in `texels` alone, at `marchScale`.
+ */
+function marchedHereTwin(
+  x: number,
+  y: number,
+  texels: MarchAreaTexels,
+  marchScale: number,
+  widthPx: number,
+  heightPx: number,
+): boolean {
+  const s = Math.fround(marchScale);
+  const axis = (p: number, sizePx: number, low: number, high: number): boolean => {
+    if (s >= 1) {
+      return p >= low && p < high;
+    }
+    const size = Math.ceil(Math.fround(sizePx * s));
+    const base = Math.trunc(Math.fround(Math.fround(p * s) - 0.5));
+    const first = Math.min(Math.max(base, 0), size - 1);
+    const last = Math.min(Math.max(base + 1, 0), size - 1);
+    return first >= low && last < high;
+  };
+  return axis(x, widthPx, texels.x0, texels.x1) && axis(y, heightPx, texels.y0, texels.y1);
+}
+
+/**
+ * The pixels of a `widthPx` × `heightPx` frame that read march texels in `texels` alone at
+ * `marchScale` ({@link marchedHereTwin}), each as [x, y].
+ */
+function pixelsReading(
+  texels: MarchAreaTexels,
+  marchScale: number,
+  widthPx: number,
+  heightPx: number,
+): Array<readonly [number, number]> {
+  const pixels: Array<readonly [number, number]> = [];
+  for (let y = 0; y < heightPx; y += 1) {
+    for (let x = 0; x < widthPx; x += 1) {
+      if (marchedHereTwin(x, y, texels, marchScale, widthPx, heightPx)) {
+        pixels.push([x, y]);
+      }
+    }
+  }
+  return pixels;
+}
+
+describe("the composite's pixels over the march's area (R08.T16.a.2)", () => {
+  const widthPx = 96;
+  const heightPx = 54;
+
+  for (const marchScale of [1, 0.5]) {
+    it(`holds every pixel that reads the area at scale ${marchScale}, and two more each side`, () => {
+      const across = Math.ceil(widthPx * marchScale);
+      const down = Math.ceil(heightPx * marchScale);
+      for (const texels of [
+        { x0: 8, y0: 8, x1: 16, y1: 24 },
+        { x0: 0, y0: 0, x1: 8, y1: 8 },
+        { x0: across - 5, y0: down - 3, x1: across, y1: down },
+        { x0: 0, y0: 0, x1: across, y1: down },
+      ]) {
+        const rect = marchAreaPixels(texels, marchScale, widthPx, heightPx);
+        const reading = pixelsReading(texels, marchScale, widthPx, heightPx);
+        const outside = reading.filter(
+          ([x, y]) =>
+            x < rect.x || x >= rect.x + rect.width || y < rect.y || y >= rect.y + rect.height,
+        );
+        const xs = reading.map(([x]) => x);
+        const ys = reading.map(([, y]) => y);
+        // No wider than the pixels that read the area, by the margin and a pixel of the scale's.
+        expect({
+          outside,
+          left: Math.min(...xs) - rect.x <= COMPOSITE_AREA_MARGIN_PX + 1,
+          right: rect.x + rect.width - 1 - Math.max(...xs) <= COMPOSITE_AREA_MARGIN_PX + 2,
+          top: Math.min(...ys) - rect.y <= COMPOSITE_AREA_MARGIN_PX + 1,
+          bottom: rect.y + rect.height - 1 - Math.max(...ys) <= COMPOSITE_AREA_MARGIN_PX + 2,
+        }).toEqual({ outside: [], left: true, right: true, top: true, bottom: true });
+      }
+    });
+  }
+
+  it("holds the one pixel that reads a texel alone at full resolution, and no pixel reads one at half", () => {
+    const texel = { x0: 13, y0: 7, x1: 14, y1: 8 };
+    expect(pixelsReading(texel, 1, widthPx, heightPx)).toEqual([[13, 7]]);
+    expect(marchAreaPixels(texel, 1, widthPx, heightPx)).toEqual({
+      x: 11,
+      y: 5,
+      width: 5,
+      height: 5,
+    });
+    expect(pixelsReading(texel, 0.5, widthPx, heightPx)).toEqual([]);
+  });
+
+  it("holds the rectangle to the frame", () => {
+    expect(marchAreaPixels({ x0: 0, y0: 0, x1: 48, y1: 27 }, 0.5, widthPx, heightPx)).toEqual({
+      x: 0,
+      y: 0,
+      width: widthPx,
+      height: heightPx,
+    });
+  });
+
+  it("gives no pixel for no texel", () => {
+    expect(marchAreaPixels({ x0: 0, y0: 0, x1: 0, y1: 0 }, 1, widthPx, heightPx)).toEqual({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    });
   });
 });
