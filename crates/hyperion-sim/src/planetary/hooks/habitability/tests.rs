@@ -796,6 +796,105 @@ fn the_host_s_clock_reaches_the_published_assessment() {
     }
 }
 
+/// The host's limits are its zone's (`YoungHost`, `LeavingMainSequence` and `ExtrapolatedZone`
+/// read the zone's stars and clock alone): every body that `hooks_at` assesses at the epoch shares
+/// them with every other body of the sample's first systems that orbits the same host, a moon by
+/// its planet's host.
+#[test]
+fn every_body_of_one_host_shares_the_host_s_limits() {
+    use crate::planetary::placement::OrbitHost;
+    let t = UniverseTime::EPOCH;
+    let zone_level = [
+        HabitabilityLimit::YoungHost,
+        HabitabilityLimit::LeavingMainSequence,
+        HabitabilityLimit::ExtrapolatedZone,
+    ];
+    let (mut shared, mut hosts) = (0, 0);
+    for (ctx, system) in whole().iter().take(40) {
+        let mut by_host = std::collections::BTreeMap::<OrbitHost, Vec<[bool; 3]>>::new();
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let Section::Ok(assessment) = hooks.habitability() else {
+                continue;
+            };
+            let record = system.body_at(ctx, body.index(), t).unwrap();
+            let host = match record.identity().parent() {
+                Some(OrbitHost::Body(planet)) => system
+                    .body_at(ctx, planet, t)
+                    .unwrap()
+                    .identity()
+                    .parent()
+                    .expect("a moon's planet orbits a host"),
+                Some(host) => host,
+                None => continue,
+            };
+            by_host
+                .entry(host)
+                .or_default()
+                .push(zone_level.map(|limit| assessment.limits().contains(limit)));
+        }
+        for (host, limits) in by_host {
+            assert!(
+                limits.iter().all(|each| *each == limits[0]),
+                "{:?} about {host:?}: {limits:?}",
+                ctx.id()
+            );
+            shared += limits.len();
+            hosts += 1;
+        }
+    }
+    assert!(
+        shared > 100 && hosts > 20,
+        "{shared} bodies about {hosts} hosts"
+    );
+}
+
+/// A present Sun's planets read a quiet host through `hooks_at`: about a 1 M☉ star of 4.57 Gyr,
+/// every planet with a surface beyond 0.5 au, where its X-ray and ultraviolet flux is at most
+/// about 4 times the present Earth's, under `Active`'s floor of 10, is `Quiet` and takes no host
+/// limit.
+#[test]
+fn a_present_sun_s_planets_beyond_half_an_au_read_a_quiet_host() {
+    use crate::planetary::hooks::RadiationClass;
+    use crate::planetary::record::BodyKind;
+    let t = UniverseTime::EPOCH;
+    let mut checked = 0;
+    for index in 0..40 {
+        let ctx = synthetic_star(id(index), SolarMasses::new(1.0), Dex::ZERO, SOLAR_AGE).unwrap();
+        let system = generate(SEED, &ctx);
+        for body in system.bodies() {
+            let record = system.body_at(&ctx, body.index(), t).unwrap();
+            let (BodyKind::Planet, Section::Ok(orbit)) = (record.identity().kind(), record.orbit())
+            else {
+                continue;
+            };
+            if orbit.elements().semi_major_axis().value() < 0.5 * METRES_PER_AU {
+                continue;
+            }
+            let hooks = system.hooks_at(&ctx, body.index(), t).unwrap().unwrap();
+            let (Section::Ok(surface), Section::Ok(assessment)) =
+                (hooks.surface(), hooks.habitability())
+            else {
+                continue;
+            };
+            let name = body.index().body_id(ctx.id());
+            assert_eq!(surface.radiation(), RadiationClass::Quiet, "{name}");
+            for limit in [
+                HabitabilityLimit::ActiveHost,
+                HabitabilityLimit::YoungHost,
+                HabitabilityLimit::LeavingMainSequence,
+                HabitabilityLimit::ExtrapolatedZone,
+            ] {
+                assert!(!assessment.limits().contains(limit), "{name}: {limit:?}");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 10, "{checked} planets checked");
+}
+
 /// Every system of the census's FGK hosts (`census_tests`' `HostClass::FgkDwarf`: one star on its
 /// main sequence at the epoch, of 0.7–1.3 M☉) among the composition census's first
 /// [`FGK_SYSTEMS`] systems of the sample, generated whole, in the sample's order.

@@ -786,14 +786,15 @@ export interface FormattedMassFraction {
 }
 
 /**
- * Formats a mass fraction, kg per kg, to three significant figures in `%` from 0.1 %, in `ppm`
- * from 1 ppm and in `ppb` below it (plan 14, P14.T26's resources): `28.1 %`, `15.2 ppm`,
- * `23.5 ppb`; below 0.001 ppb in E notation, `4.20E-6 ppb`.
+ * Formats a mass fraction, kg per kg, to three significant figures in `%` from 0.01 %, in `ppm`
+ * from 1 ppm and in `ppb` below it (plan 14, P14.T26's resources; research's ruling of
+ * 2026-11-01): `28.1 %`, `0.0250 %`, `15.2 ppm`, `23.5 ppb`; below 0.001 ppb in E notation,
+ * `4.20E-6 ppb`.
  *
  * @remarks
  * A scaled ladder, as a pressure's is, so that a platinum-group metal's few parts per billion and a
  * rock's silicates read on one display without a run of zeros. `ppm` is 10⁻⁶ and `ppb` 10⁻⁹, the
- * short scale's billion. The switch is made after rounding, so 999.6 ppm reads `0.100 %`. A record's
+ * short scale's billion. The switch is made after rounding, so 99.996 ppm reads `0.0100 %`. A record's
  * fraction does not change with the display time, so no hysteresis is needed. The label names the
  * quantity, a mass fraction, since `%`, `ppm` and `ppb` alone do not say of what. A fraction of 0
  * reads `0.00 ppb`, which a readout that reads it `NONE` does not call this for.
@@ -805,7 +806,7 @@ export function formatMassFraction(fraction: number): FormattedMassFraction {
   if (fraction < 0 || fraction > 1) {
     throw new RangeError(`a mass fraction cannot be ${fraction}`);
   }
-  if (roundSignificant(fraction * 100, 3) >= 0.1) {
+  if (roundSignificant(fraction * 100, 3) >= 0.01) {
     return { value: significant(fraction * 100), unit: "%" };
   }
   if (roundSignificant(fraction * 1e6, 3) >= 1) {

@@ -8,6 +8,7 @@ import type {
   BodySurfaceDto,
   CrustCompositionDto,
   GasShareDto,
+  HabitabilityDto,
   MassFractionsDto,
   ResponseFor,
   SectionDto,
@@ -1753,17 +1754,32 @@ describe("SystemView's body readout", () => {
       await answerDetail(socket, earthWithHooks(hooks));
     }
 
-    /** The readout's rows in order from the one labelled `first` to its last. */
+    /** The readout's rows in order from the last one labelled `first` to its last. */
     function rowsFrom(first: string): Array<readonly [string, string]> {
       const rows = within(readout())
         .queryAllByRole("term")
         .map((term) => [term.textContent, term.nextElementSibling?.textContent ?? ""] as const);
-      return rows.slice(rows.findIndex(([label]) => label === first));
+      return rows.slice(rows.findLastIndex(([label]) => label === first));
     }
 
+    // The Solar System table's three as the sim assesses them at the Sun's present
+    // (`earth_is_temperate_mars_marginal_and_venus_a_hostile_runaway`), each in the wire's order.
     it.each([
       ["an Earth's", EARTH_HABITABILITY, "TEMPERATE"],
       ["a Mars's", MARS_HABITABILITY, "MARGINAL · FROZEN SURFACE"],
+      [
+        "a Venus's",
+        {
+          class: "hostile",
+          limits: [
+            "outside_optimistic_zone",
+            "outside_conservative_zone",
+            "runaway_greenhouse",
+            "dry_surface",
+          ],
+        } satisfies HabitabilityDto,
+        "HOSTILE · OUTSIDE OPTIMISTIC ZONE · OUTSIDE CONSERVATIVE ZONE · RUNAWAY GREENHOUSE · DRY SURFACE",
+      ],
     ])(
       "reads %s HABITABILITY as its class and its limits in words",
       async (_, habitability, words) => {
@@ -1849,8 +1865,9 @@ describe("SystemView's body readout", () => {
       });
 
       const nbsp = "\u00A0";
-      expect(rowsFrom("RESOURCES")).toEqual([
-        ["RESOURCES", "MASS FRACTION OF OUTER LAYERS"],
+      // The bulk's own MASS FRACTION row comes first; the resources' is the readout's last.
+      expect(rowsFrom("MASS FRACTION")).toEqual([
+        ["MASS FRACTION", "OUTER LAYERS"],
         ["IRON GROUP", "6.84 %"],
         ["LIGHT LITHOPHILES", "28.1 %"],
         ["RARE EARTHS", "15.2 ppm"],
@@ -1866,7 +1883,7 @@ describe("SystemView's body readout", () => {
           ].join(" · "),
         ],
         ["SILICATES", "64.8 %"],
-        ["H2O", "250 ppm"],
+        ["H2O", "0.0250 %"],
         ["OTHER ICES", "NONE"],
         ["HYDROCARBONS", "NONE"],
         ["He-3", "—"],

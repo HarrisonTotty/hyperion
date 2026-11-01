@@ -3662,6 +3662,39 @@ mod tests {
         );
     }
 
+    /// P14.T25: each of the sim's limits, in `HabitabilityLimit::ALL`'s order, crosses the wire as
+    /// its own string, the list the protocol pins and the client's words read
+    /// (`bodyWords.test.ts`), so that no limit is sent as another's.
+    #[test]
+    fn every_habitability_limit_crosses_the_wire_as_its_own_string() {
+        let sent: Vec<String> = HabitabilityLimit::ALL
+            .into_iter()
+            .map(|limit| wire_string(&habitability_limit(limit)))
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                "outside_optimistic_zone",
+                "outside_conservative_zone",
+                "no_atmosphere",
+                "below_triple_point",
+                "runaway_greenhouse",
+                "snowball",
+                "gas_envelope",
+                "tidally_locked",
+                "high_eccentricity",
+                "active_host",
+                "young_host",
+                "leaving_main_sequence",
+                "extrapolated_zone",
+                "molten_surface",
+                "dry_surface",
+                "mass_outside_temperate_range",
+                "frozen_surface",
+            ]
+        );
+    }
+
     /// A value's wire string: its serde form's text.
     fn wire_string(value: &impl serde::Serialize) -> String {
         match serde_json::to_value(value).expect("a wire enum serialises") {

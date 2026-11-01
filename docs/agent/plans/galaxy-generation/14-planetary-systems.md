@@ -33964,3 +33964,17 @@ FRACTION OF OUTER LAYERS`, `IRON GROUP`, `LIGHT LITHOPHILES`, `RARE EARTHS`, `PL
     `Modelled<f64>`, absent there, which the `He-3` row reads as `—`.
   - _Left for 27:_ a melted rock's hydrocarbons are still 0 (`NONE`) where the model leaves its
     abiotic organics out. Nothing sends the type before 27, so its shape can still change.
+  - _Served limits (2026-11-01):_ no layer at fault. The rows read as the Solar System table's were
+    other systems' generated worlds; the table is test-only and never served:
+    - `4200acaa00000006.0200`, at 2.58 au about an F0.5V star of 1.54 M☉ in a 432 Myr system,
+      radiation `active`: `TEMPERATE · ACTIVE HOST`;
+    - the circumbinary `42002cb200000009.0600`, about an A2Vm and F4.5V pair (352 Myr): `MARGINAL ·
+ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE`.
+
+    Tests added: the 17 limits' strings (server); every body of one host sharing the host's limits,
+    and a 4.57 Gyr Sun's planets beyond 0.5 au `Quiet` with no host limit, both through `hooks_at`
+    (sim); the table's Venus's words (client).
+
+  - _Units (research, 2026-11-01):_ the rows' heading reads `MASS FRACTION OUTER LAYERS`, naming
+    the quantity once as `MOLE FRACTION` does; `formatMassFraction` gives `%` from 0.01 %, `ppm`
+    from 1 ppm and `ppb` below. `TEMPERATE` stays the class.

@@ -210,8 +210,9 @@ function radioisotopesShown(resources: ResourceAbundances): Shown {
 const SYMBOL_LABELS: ReadonlySet<string> = new Set(["He-3", "H-2"]);
 
 /**
- * The rows of a body's resources (plan 14, P14.T26): `RESOURCES`, which names their quantity once,
- * the mass fraction of the body's accessible outer layers; then each of the plan's eleven, in its
+ * The rows of a body's resources (plan 14, P14.T26): `MASS FRACTION OUTER LAYERS`, which names
+ * their quantity once, as `MOLE FRACTION` names a mixture's (research's ruling of 2026-11-01), the
+ * mass fraction of the body's accessible outer layers; then each of the plan's eleven, in its
  * order, with the four radioactive isotopes after `RADIOACTIVES`. Withheld or not modelled, as every
  * server before generator version 27 sends them, `RESOURCES` reads its state once in their place.
  *
@@ -250,7 +251,7 @@ function resourcesRows(resources: Section<ResourceAbundances>): ReactNode {
     );
     return (
       <>
-        <ReadoutRow label="RESOURCES" shown={value("MASS FRACTION OF OUTER LAYERS")} wide />
+        <ReadoutRow label="MASS FRACTION" shown={value("OUTER LAYERS")} wide />
         {rows.map(row)}
         <ReadoutRow label="RADIOISOTOPES" shown={radioisotopesShown(abundances)} wide />
         {after.map(row)}
