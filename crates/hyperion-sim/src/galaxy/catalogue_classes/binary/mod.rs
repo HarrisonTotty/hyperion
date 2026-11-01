@@ -14,8 +14,9 @@
 //!
 //! # The fitted tables' hold
 //!
-//! Plan 15's P15.T10.b fits the accreting white dwarfs' tables against the engine:
-//! `tables::binary`'s `_26` items, a sampler a side and the two classes' rows of the share table.
+//! Plan 15's P15.T10.b fits the accreting white dwarfs' and the X-ray binaries' tables against the
+//! engine: `tables::binary`'s `_26` items, a sampler for each accreting class and the X-ray
+//! binaries', and their rows of the share table.
 //! They move the classes' members, so they are held until generator version 27
 //! (`BINARY_TABLES_VERSION`): a galaxy below it reads the scratch tables of P11.T7–T8, and one
 //! under `BinaryTableRules::Fitted` the fitted ones, chosen at one place, `BinaryTableRules`' two
@@ -33,7 +34,8 @@ mod xrb;
 use crate::GeneratorVersion;
 use crate::tables::binary::{
     AWD_FAST_SAMPLER_26, AWD_SAMPLER, AWD_SLOW_SAMPLER_26, AwdMark, AwdPick, CLASS_SHARES,
-    CLASS_SHARES_26, ClassSamplerTable, ClassShareTable,
+    CLASS_SHARES_26, ClassSamplerTable, ClassShareTable, XRB_SAMPLER, XRB_SAMPLER_26, XrbMark,
+    XrbPick,
 };
 
 pub use awd::{
@@ -65,11 +67,11 @@ pub(crate) const BINARY_TABLES_VERSION: GeneratorVersion = GeneratorVersion::new
 /// Which tables the binary classes read (the hold of [`BINARY_TABLES_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BinaryTableRules {
-    /// The scratch tables of P11.T7–T8 (plan 11's design note 13): [`CLASS_SHARES`], and
-    /// [`AWD_SAMPLER`] for both accreting white dwarf classes.
+    /// The scratch tables of P11.T7–T8 (plan 11's design note 13): [`CLASS_SHARES`],
+    /// [`AWD_SAMPLER`] for both accreting white dwarf classes and [`XRB_SAMPLER`].
     Scratch,
-    /// Plan 15's fitted tables (P15.T10.b): [`CLASS_SHARES_26`], and a sampler a side,
-    /// [`AWD_FAST_SAMPLER_26`] and [`AWD_SLOW_SAMPLER_26`].
+    /// Plan 15's fitted tables (P15.T10.b): [`CLASS_SHARES_26`], a sampler a side,
+    /// [`AWD_FAST_SAMPLER_26`] and [`AWD_SLOW_SAMPLER_26`], and [`XRB_SAMPLER_26`].
     Fitted,
 }
 
@@ -93,6 +95,15 @@ impl BinaryTableRules {
             (Self::Scratch, AwdSide::Fast | AwdSide::Slow) => &AWD_SAMPLER,
             (Self::Fitted, AwdSide::Fast) => &AWD_FAST_SAMPLER_26,
             (Self::Fitted, AwdSide::Slow) => &AWD_SLOW_SAMPLER_26,
+        }
+    }
+
+    /// The sampler the X-ray binaries draw from.
+    #[must_use]
+    pub(crate) const fn xrb_sampler(self) -> &'static ClassSamplerTable<XrbMark, XrbPick> {
+        match self {
+            Self::Scratch => &XRB_SAMPLER,
+            Self::Fitted => &XRB_SAMPLER_26,
         }
     }
 }

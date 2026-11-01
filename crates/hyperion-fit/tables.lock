@@ -74,6 +74,18 @@ provisional = false
 acceptance = "672 cells × 105 age bins from 33067 samples and 385968 tracks; stored radii 0.1479 to 6606.9 R☉; 214 cells may all be on their main sequence at 10¹⁰ years; 286 cells hold a sudden death, the lightest from 5.548 M☉; the slow test `the_reach_table_bounds_dense_tracks` checks the bound against dense tracks"
 
 [[table]]
+name = "binary_xrb"
+path = "binary.rs"
+task = "binary_xrb"
+revision = 0
+inputs_sha256 = "59047b1bde352b12a6b8f4ee32a5ad35446beefa81bf7d4eb690800829746bb5"
+body_sha256 = "e251371baa61edd6776358d0c13ad75dc21997b74bceaeea884e2cf8c5275ffd"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 33.0, 1.0, 1.7920606257402825, 1.5057342729821994, -1.356765764977588]
+since_generator_version = 24
+provisional = false
+acceptance = "slab members 540 of a kind and 1673 of none; young high-mass members 132; kinds 0.0552/0.2397/0.0389/0.6629/0.0013/0.0019; black-hole transients 6629 of 1e4; layers C 0.000 D 0.550 E 0.450; rates a system 1.13e-4/4.59e-5/5.56e-5/3.43e-5/3.08e-5/3.36e-5/5.61e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantRate; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_x_ray_binary_sampler_against_the_engine`"
+
+[[table]]
 name = "bowl_permanent_shadow"
 path = "bowl_permanent_shadow.rs"
 task = "bowl_permanent_shadow"

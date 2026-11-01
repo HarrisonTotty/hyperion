@@ -2,8 +2,8 @@
 //! version's rules reads the scratch tables and one under the fitted arm the fitted ones, in its
 //! processes and its class shares; the fitted tables' shapes; and, slow, the fitted rows' Milky
 //! Way counts and each fitted sampler's marks against the engine's members by a two-sample
-//! Kolmogorov–Smirnov test at 1%, over the half of a 10⁷-record census that `hyperion-fit`'s task
-//! `binary_awd` was not fitted to.
+//! Kolmogorov–Smirnov test at 1%, over the half of a 10⁷-record census that `hyperion-fit`'s tasks
+//! `binary_awd` and `binary_xrb` were not fitted to.
 //!
 //! The version in force is held bit for bit by the goldens: the held arm is the code of version 26
 //! verbatim. The bump to 27 deletes the tripwire and the held arm, and these become tests of the
@@ -24,15 +24,22 @@ use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
-use crate::galaxy::{Galaxy, POPULATIONS, PointLy};
+use crate::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use crate::math;
+use crate::orbit::Eccentricity;
 use crate::stellar::binary::CarvedClass;
-use crate::stellar::binary::testing::{CensusPart, CensusSite, ClassMember, class_census_in};
-use crate::tables::binary::{AwdDonorKind, SamplerKey};
+use crate::stellar::binary::light_curves::XrayAccretor;
+use crate::stellar::binary::sampler::ClassSampler;
+use crate::stellar::binary::testing::XrayMarks;
+use crate::stellar::binary::testing::{
+    CensusPart, CensusRecords, CensusSite, ClassMember, class_census_in,
+};
+use crate::tables::binary::{AwdDonorKind, SamplerKey, XrbHostKind};
 use crate::time::LIGHT_CROSSING_L;
+use crate::units::consts::SECONDS_PER_DAY;
 
-/// The Milky Way fixture's seed: `hyperion-fit`'s manifest `binary_awd.toml`'s, so that the census
-/// here runs the cells the fit left.
+/// The Milky Way fixture's seed: `hyperion-fit`'s manifests `binary_awd.toml`'s and
+/// `binary_xrb.toml`'s, so that the census here runs the cells the fits left.
 const SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// Every hold at the version in force but the binary tables', which are fitted.
@@ -74,8 +81,9 @@ fn the_binary_tables_are_held_only_until_the_27_bump() {
         "the 26 → 27 bump puts P15.T10.b's fitted tables on the record: delete \
          `BINARY_TABLES_VERSION`, `BinaryTableRules` with its `Scratch` arm, \
          `GalaxyRules::binary_tables`, `Galaxy::with_rules`' handling of it and this module; refit \
-         `binary_awd` at 27 and let `AWD_FAST_SAMPLER_26`, `AWD_SLOW_SAMPLER_26` and \
-         `CLASS_SHARES_26` replace `AWD_SAMPLER` and `CLASS_SHARES`"
+         `binary_awd` and `binary_xrb` at 27 and let `AWD_FAST_SAMPLER_26`, \
+         `AWD_SLOW_SAMPLER_26`, `XRB_SAMPLER_26` and `CLASS_SHARES_26` replace `AWD_SAMPLER`, \
+         `XRB_SAMPLER` and `CLASS_SHARES`"
     );
     assert_eq!(held().rules().binary_tables, BinaryTableRules::Scratch);
     assert_eq!(
@@ -115,6 +123,12 @@ fn a_galaxy_carries_the_version_s_binary_tables() {
         );
         assert_ne!(fitted_process.sampler().table(), &AWD_SAMPLER, "{side:?}");
     }
+    assert_eq!(XrayBinaries::new(held()).sampler().table(), &XRB_SAMPLER);
+    assert_eq!(
+        XrayBinaries::new(fitted()).sampler().table(),
+        &XRB_SAMPLER_26
+    );
+    assert_eq!(BinaryTableRules::Fitted.xrb_sampler(), &XRB_SAMPLER_26);
     let carved = |table: &ClassShareTable, population, band| {
         table.rows().iter().fold(0.0, |sum, row| {
             sum + row.hosts_per_formed_mass(population) * row.layer_share(band)
@@ -132,6 +146,15 @@ fn a_galaxy_carries_the_version_s_binary_tables() {
             );
         }
     }
+}
+
+/// `Galaxy::with_rules` takes a galaxy to the fitted tables as a build under them does: the same
+/// galaxy, its class shares installed again.
+#[test]
+fn with_rules_installs_the_fitted_class_shares_as_a_build_does() {
+    let moved = held().clone().with_rules(fitted_rules());
+    assert_eq!(&moved, fitted());
+    assert_eq!(moved.feature_shares(), fitted().feature_shares());
 }
 
 /// The fitted tables are in shape: every residual finite and non-decreasing, every span and limit
@@ -184,11 +207,37 @@ fn the_fitted_tables_are_in_shape() {
             assert!(rate.is_finite() && rate >= 0.0, "{side:?} {population:?}");
         }
     }
-    for class in [
-        CarvedClass::XrayBinary,
-        CarvedClass::StellarMerger,
-        CarvedClass::NeutronStarMerger,
-    ] {
+    for mark in XrbMark::ALL {
+        let law = XRB_SAMPLER_26.mark(mark);
+        assert_eq!(law.name(), XRB_SAMPLER.mark(mark).name());
+        assert!(law.residual().iter().all(|r| r.is_finite()), "{mark:?}");
+        assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{mark:?}");
+        let (lo, hi) = law.limits();
+        assert!(lo <= hi, "{mark:?}");
+        assert_eq!(
+            law.median().is_some(),
+            mark == XrbMark::LowMassDonorMass,
+            "{mark:?}"
+        );
+    }
+    let weights = |pick| XRB_SAMPLER_26.pick(pick).weights().iter().sum::<f64>();
+    assert_eq!(XRB_SAMPLER_26.pick(XrbPick::LowMassKind).weights().len(), 4);
+    assert_eq!(
+        XRB_SAMPLER_26.pick(XrbPick::HighMassKind).weights().len(),
+        2
+    );
+    let both = weights(XrbPick::LowMassKind) + weights(XrbPick::HighMassKind);
+    assert!((both - 1.0).abs() < 1e-12, "{both}");
+    let row = CLASS_SHARES_26.row(CarvedClass::XrayBinary);
+    let layers = MassBand::ALL
+        .iter()
+        .fold(0.0, |sum, &band| sum + row.layer_share(band));
+    assert!((layers - 1.0).abs() < 1e-12, "{layers}");
+    for population in POPULATIONS {
+        let rate = row.hosts_per_formed_mass(population);
+        assert!(rate.is_finite() && rate >= 0.0, "{population:?}");
+    }
+    for class in [CarvedClass::StellarMerger, CarvedClass::NeutronStarMerger] {
         assert_eq!(
             CLASS_SHARES_26.row(class),
             CLASS_SHARES.row(class),
@@ -305,10 +354,11 @@ fn the_fitted_rows_give_the_milky_way_counts() {
     );
 }
 
-/// The galaxy's novae a year under the fitted tables, as measured: some 25 times the brainstorm's
-/// 30–50 (Shafter 2017, ApJ 834, 196), from the engine's fast hosts' short recurrences, which the
-/// fit carries over, and the fast sampler's lowest sixteenth of ranks, which spreads its hosts
-/// down to five-year recurrences (the engine's own members give 435 a year; a finding).
+/// The galaxy's novae a year under the fitted tables, as measured: 23–39 times the brainstorm's
+/// 30–50 (Shafter 2017, ApJ 834, 196, gives 50, +31 −23), from the engine's fast hosts' short
+/// recurrences, which the fit carries over, and the fast sampler's lowest sixteenth of ranks,
+/// which spreads its hosts down to five-year recurrences (the engine's own members give 435 a
+/// year; a finding).
 const PINNED_NOVAE_A_YEAR: f64 = 1_159.493_184_251_161_4;
 
 /// Both classes' hosts' density at the Sun-like point under the fitted rows, pc⁻³, as measured.
@@ -327,9 +377,15 @@ const CENSUS_THREADS: usize = 16;
 /// The bands a census runs, whose primaries can make a member.
 const CENSUS_BANDS: [MassBand; 3] = [MassBand::C, MassBand::D, MassBand::E];
 
-/// The slab's census of the solar circle on the parts the fit left: each band's records in its
-/// share of the systems, the parts joined in order, on [`CENSUS_THREADS`] threads.
-fn census(galaxy: &Galaxy) -> Vec<ClassMember> {
+/// A census of `records` at `site` of the populations `whose`, on the parts the fits left: each
+/// band's records in its share of the systems, the parts joined in order, on [`CENSUS_THREADS`]
+/// threads.
+fn census(
+    galaxy: &Galaxy,
+    site: CensusSite,
+    whose: CensusRecords,
+    records: u64,
+) -> Vec<ClassMember> {
     let shares = BandShares::of(galaxy.mass_function());
     let in_bands = CENSUS_BANDS
         .iter()
@@ -347,12 +403,12 @@ fn census(galaxy: &Galaxy) -> Vec<ClassMember> {
             clippy::cast_sign_loss,
             reason = "a record count under 2⁵³, rounded to a whole count"
         )]
-        let in_band = (CENSUS_RECORDS as f64 * shares.share(band) / in_bands).round() as u64;
+        let in_band = (records as f64 * shares.share(band) / in_bands).round() as u64;
         class_census_in(
             galaxy,
             band,
-            CensusSite::SOLAR_CIRCLE,
-            None,
+            site,
+            whose,
             in_band.div_ceil(half),
             CensusPart::new(k, CENSUS_PARTS),
         )
@@ -468,7 +524,12 @@ fn kind_share(values: &[AwdValues], kind: AwdDonorKind) -> f64 {
 #[test]
 #[ignore = "slow: a census of 10⁷ records through the binary engine"]
 fn the_accreting_white_dwarf_samplers_against_the_engine() {
-    let members = census(held());
+    let members = census(
+        held(),
+        CensusSite::SOLAR_CIRCLE,
+        CensusRecords::All,
+        CENSUS_RECORDS,
+    );
     let mut misses = Vec::new();
     for side in [AwdSide::Fast, AwdSide::Slow] {
         let engine = engine_values(&members, side);
@@ -518,8 +579,8 @@ const KS_LEVEL: f64 = 0.01;
 /// the class, the mark's place in [`AWD_COMPARED`] and its distance, as measured to a millionth.
 /// Plan 11's shape, a residual of 17 ranks with one spread at every condition, holds the fitted
 /// marks' distances to some 0.02–0.03 in the fit's own sample, and further where the spread
-/// follows the condition: the slow hosts' periods and donor masses, whose helium donors are both
-/// Roche-lobe-filling and wide. The fast hosts' ages follow too from the class's floor on the age,
+/// follows the condition: the slow hosts' periods and donor masses, whose helium donors' periods
+/// run from under an hour to days. The fast hosts' ages follow too from the class's floor on the age,
 /// [`LIFETIME_MARGIN`] times the primary's single-star lifetime, which the engine's binaries pass
 /// under.
 const AWD_MISSES: [(AwdSide, usize, f64); 15] = [
@@ -538,4 +599,212 @@ const AWD_MISSES: [(AwdSide, usize, f64); 15] = [
     (AwdSide::Slow, 5, 0.060_009_181_131_146_17),
     (AwdSide::Slow, 6, 0.069_076_616_931_581_07),
     (AwdSide::Slow, 7, 0.059_791_069_888_999_626),
+];
+
+/// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, the
+/// class's expected hosts inside P11.T8.b's 0.7–1.5 × 10⁴ and its black-hole transients against
+/// its 1,300 ± 400 (Corral-Santana et al. 2016, A&A 587, A61), pinned as measured, a finding: the
+/// engine's black holes are 70% of its low-mass hosts of the class's kinds, its neutron stars'
+/// low-mass X-ray binaries being mostly ultracompact, which no kind holds; and the high-mass
+/// hosts, the young thin disc's, printed.
+#[test]
+#[ignore = "slow: ten galaxies built"]
+fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
+    for k in 0..10_u64 {
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0b17_08a0_0000_0100 | k),
+            GalaxyParams::milky_way_like(),
+            fitted_rules(),
+        )
+        .expect("the Milky Way fixture builds");
+        let process = XrayBinaries::new(&galaxy);
+        let total = process.expected_hosts(&galaxy);
+        let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
+        let high = process.expected_hosts_on(&galaxy, XrbSide::HighMass);
+        println!(
+            "Milky Way seed {k}: {total:.4e} hosts, {transients:.1} black-hole transients, \
+             {high:.1} high-mass"
+        );
+        assert!((0.7e4..=1.5e4).contains(&total), "{k}: {total}");
+        assert!(
+            (transients / PINNED_BLACK_HOLE_TRANSIENTS - 1.0).abs() < 1e-6,
+            "{k}: {transients}"
+        );
+    }
+}
+
+/// The black-hole transients at Milky Way parameters under the fitted tables, as measured.
+const PINNED_BLACK_HOLE_TRANSIENTS: f64 = 6_628.842_283_865_281;
+
+/// The young thin disc's own census of `hyperion-fit`'s `binary_xrb.toml`: its site and records.
+const YOUNG_SITE: CensusSite = CensusSite::new([0, 0, 0], [40_000, 40_000, 600]);
+
+/// The young thin disc's census's records, layers C–E together.
+const YOUNG_RECORDS: u64 = 3_000_000;
+
+/// The draws through the table a mark is compared on.
+const DRAWS: u32 = 100_000;
+
+/// The least members of the engine a mark is compared on: the fit's `min_members`.
+const MIN_MEMBERS: usize = 50;
+
+/// What an X-ray binary member of the engine gives `mark`, in the mark's unit, as the fit takes
+/// it (`hyperion-fit`'s `tasks::binary_classes::xrb::xrb_pair`): its condition, the period's
+/// log₁₀ in hours for the low-mass donor's mass and zero for the rest, and its value; `None` for a
+/// member of no kind or of another, or where the mark is not drawn from the engine.
+fn xrb_pair(x: &XrayMarks, mark: XrbMark) -> Option<(f64, f64)> {
+    let kind = x.host_kind()?;
+    let log = |v: f64| (v > 0.0).then(|| math::log10(v));
+    let low = !kind.is_high_mass();
+    let neutron = matches!(kind.accretor(), XrayAccretor::NeutronStar);
+    let (bex, supergiant) = (kind == XrbHostKind::BeX, kind == XrbHostKind::Supergiant);
+    let log_hours = x.period.and_then(|p| log(p.value() / 3_600.0));
+    let log_days = x.period.and_then(|p| log(p.value() / SECONDS_PER_DAY));
+    let recoil = x.recoil_speed.map(|v| v.value() / 1.0e3);
+    let log_since = x.since_supernova.and_then(|y| log(y.value()));
+    let only = |holds: bool, value: Option<f64>| if holds { Some((0.0, value?)) } else { None };
+    let pair = match mark {
+        XrbMark::NeutronStarMass => only(neutron, Some(x.accretor_mass.value())),
+        XrbMark::BlackHoleMass => only(!neutron, Some(x.accretor_mass.value())),
+        XrbMark::LowMassPeriod => only(low, log_hours),
+        XrbMark::LowMassDonorMass => {
+            if low {
+                Some((log_hours?, log(x.donor_mass.value())?))
+            } else {
+                None
+            }
+        }
+        XrbMark::LowMassRateExcess => only(low, x.rate_excess_dex),
+        XrbMark::NeutronStarRecurrence | XrbMark::BlackHoleRecurrence => None,
+        XrbMark::BexPeriod => only(bex, log_days),
+        XrbMark::BexEccentricity => only(bex, x.eccentricity.map(Eccentricity::value)),
+        XrbMark::BexDonorMass => only(bex, Some(x.donor_mass.value())),
+        XrbMark::SupergiantPeriod => only(supergiant, log_days),
+        XrbMark::SupergiantDonorMass => only(supergiant, Some(x.donor_mass.value())),
+        XrbMark::SupergiantRate => only(supergiant, x.transfer_rate.and_then(|r| log(r.value()))),
+        XrbMark::BexRecoil => only(bex, recoil),
+        XrbMark::SupergiantRecoil => only(supergiant, recoil),
+        XrbMark::BexSinceSupernova => only(bex, log_since),
+        XrbMark::SupergiantSinceSupernova => only(supergiant, log_since),
+        XrbMark::NeutronStarProgenitor => only(neutron, log(x.accretor_initial_mass.value())),
+        XrbMark::BlackHoleProgenitor => only(!neutron, log(x.accretor_initial_mass.value())),
+        XrbMark::DonorInitialExcess => only(
+            low,
+            log(x.donor_initial_mass.value() / x.donor_mass.value()),
+        ),
+    };
+    pair.filter(|(c, v)| c.is_finite() && v.is_finite())
+}
+
+/// [`DRAWS`] values of `mark` drawn through the fitted sampler at evenly spread ranks, given
+/// `conditions` drawn the same way for the low-mass donor's mass: hosts drawn through the table,
+/// as the class's scan draws the mark.
+fn table_draws(mark: XrbMark, conditions: &[f64]) -> Vec<f64> {
+    let sampler = ClassSampler::new(&XRB_SAMPLER_26);
+    (0..DRAWS)
+        .map(|i| {
+            let rank = (f64::from(i) + 0.5) / f64::from(DRAWS);
+            let condition = conditions.get(usize::try_from(i).expect("a draw's index"));
+            // The condition's ranks are the golden ratio's multiples, so that they and the mark's
+            // are spread independently.
+            let mixed = (f64::from(i) * 0.618_033_988_749_894_8).fract();
+            match condition {
+                Some(&c) => sampler.value_at(mark, c, mixed),
+                None => sampler.value_at(mark, 0.0, rank),
+            }
+        })
+        .collect()
+}
+
+/// The fitted X-ray binaries' sampler against the engine (P15.T10.b's acceptance; slow): for each
+/// mark fitted from the engine, values drawn through the table against the engine's members of the
+/// class's kinds in the half of the censuses the fit left, the slab's for the low-mass and history
+/// marks and the young thin disc's for the high-mass ones, by a two-sample Kolmogorov–Smirnov test
+/// at 1%. The class's hosts near the Sun are too few for a sample of its entries, so the table is
+/// drawn directly, as its scan draws it. A mark that misses is a finding, pinned at its measured
+/// distance in [`XRB_MISSES`]; a mark the engine gives under [`MIN_MEMBERS`] members, which the fit
+/// kept as the scratch table's, is not compared.
+#[test]
+#[ignore = "slow: a census of 10⁷ records through the binary engine"]
+fn the_x_ray_binary_sampler_against_the_engine() {
+    let of_class = |members: Vec<ClassMember>| -> Vec<XrayMarks> {
+        members
+            .iter()
+            .filter(|m| m.class() == CarvedClass::XrayBinary)
+            .filter_map(|m| m.xray().copied())
+            .collect()
+    };
+    let slab = of_class(census(
+        held(),
+        CensusSite::SOLAR_CIRCLE,
+        CensusRecords::All,
+        CENSUS_RECORDS,
+    ));
+    let young = of_class(census(
+        held(),
+        YOUNG_SITE,
+        CensusRecords::Of(Population::YoungThinDisc),
+        YOUNG_RECORDS,
+    ));
+    let of_kind = slab.iter().filter(|x| x.host_kind().is_some()).count();
+    println!(
+        "{} slab members, {of_kind} of a kind; {} young members",
+        slab.len(),
+        young.len()
+    );
+    let periods = table_draws(XrbMark::LowMassPeriod, &[]);
+    let mut misses = Vec::new();
+    for (k, mark) in XrbMark::ALL.into_iter().enumerate() {
+        let high_mass = XRB_SAMPLER_26.mark(mark).name().contains("bex")
+            || XRB_SAMPLER_26.mark(mark).name().contains("supergiant");
+        let pool = if high_mass { &young } else { &slab };
+        let mut engine: Vec<f64> = pool
+            .iter()
+            .filter_map(|x| xrb_pair(x, mark))
+            .map(|p| p.1)
+            .collect();
+        let name = XRB_SAMPLER_26.mark(mark).name();
+        if engine.len() < MIN_MEMBERS {
+            println!("  {name}: {} engine members, not compared", engine.len());
+            continue;
+        }
+        let conditions: &[f64] = if mark == XrbMark::LowMassDonorMass {
+            &periods
+        } else {
+            &[]
+        };
+        let mut drawn = table_draws(mark, conditions);
+        let ks = ks_two_sample(&mut drawn, &mut engine);
+        println!(
+            "  {name}: {} engine members, D {}, p {:.3e}; median table {:.4}, engine {:.4}",
+            engine.len(),
+            ks.statistic,
+            ks.p_value,
+            drawn[drawn.len() / 2],
+            engine[engine.len() / 2]
+        );
+        let pinned = XRB_MISSES.iter().find(|m| m.0 == k);
+        let held_as_pinned = pinned.is_some_and(|m| (ks.statistic - m.1).abs() < 1e-6);
+        if (pinned.is_none() && ks.p_value < KS_LEVEL) || (pinned.is_some() && !held_as_pinned) {
+            misses.push(format!("{name}: D {}, p {}", ks.statistic, ks.p_value));
+        }
+    }
+    let kinds: Vec<String> = XrbHostKind::ALL
+        .iter()
+        .map(|&kind| {
+            let n = slab.iter().filter(|x| x.host_kind() == Some(kind)).count();
+            format!("{kind:?} {n}")
+        })
+        .collect();
+    println!("  slab members by kind: {}", kinds.join(", "));
+    assert!(misses.is_empty(), "{misses:#?}");
+}
+
+/// The X-ray binaries' marks whose Kolmogorov–Smirnov test misses at 1%, each a finding: the
+/// mark's place in [`XrbMark`]'s order and its distance, as measured to a millionth. The two
+/// unconditional laws' 17 ranks miss a tail of long periods and the black holes' heaviest
+/// progenitors.
+const XRB_MISSES: [(usize, f64); 2] = [
+    (2, 0.070_388_907_014_681_92),
+    (18, 0.094_817_659_574_468_14),
 ];

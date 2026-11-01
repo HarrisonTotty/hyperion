@@ -6,16 +6,19 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::galaxy::{Galaxy, Population};
 use crate::id::Layer;
+use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements};
 use crate::rng::Threshold;
 use crate::stellar::Phase;
 use crate::stellar::binary::classify::{
-    MAGNETIC_CV_SHARE, nova_recurrence_period, white_dwarf_feeding, xray_binary_reading,
+    MAGNETIC_CV_SHARE, nova_recurrence_period, white_dwarf_feeding, xray_binary_reading, xrb_line,
 };
-use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, carved_class};
+use crate::stellar::binary::{
+    BinaryClass, BinaryTimeline, CarvedClass, HmxbKind, XrbKind, carved_class,
+};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
-use crate::tables::binary::{AwdDonorKind, CLASS_SHARES};
+use crate::tables::binary::{AwdDonorKind, CLASS_SHARES, XrbHostKind};
 use crate::units::{MetresPerSecond, Seconds, SolarMasses, SolarMassesPerYear, Years};
 
 use super::Mix;
@@ -107,6 +110,59 @@ pub struct XrayMarks {
     pub accretor_initial_mass: SolarMasses,
     /// The donor's initial mass, M☉.
     pub donor_initial_mass: SolarMasses,
+    /// The transfer rate over the irradiated disc's instability line that `classify` splits the
+    /// low-mass kinds on, dex: below 0 a transient; `None` with no rate or no orbit.
+    pub rate_excess_dex: Option<f64>,
+}
+
+impl XrayMarks {
+    /// The catalogue's kind of the member ([`XrbHostKind`]), or `None` for one its kinds do not
+    /// hold: a symbiotic X-ray binary, a black hole beside a Be star or a supergiant, or a
+    /// low-mass X-ray binary whose donor is a helium star or a white dwarf, an ultracompact one.
+    #[must_use]
+    pub const fn host_kind(&self) -> Option<XrbHostKind> {
+        let black_hole = matches!(self.accretor_phase, Phase::BlackHole);
+        let hydrogen_donor = matches!(
+            self.donor_phase,
+            Phase::Protostar
+                | Phase::PreMainSequence
+                | Phase::MainSequence
+                | Phase::Substellar
+                | Phase::HertzsprungGap
+                | Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+                | Phase::PostAgb
+        );
+        match self.class {
+            BinaryClass::LowMassXrayBinary(kind) => match (kind, black_hole, hydrogen_donor) {
+                (XrbKind::Persistent, false, true) => Some(XrbHostKind::NeutronStarPersistent),
+                (XrbKind::Transient, false, true) => Some(XrbHostKind::NeutronStarTransient),
+                (XrbKind::Persistent, true, true) => Some(XrbHostKind::BlackHolePersistent),
+                (XrbKind::Transient, true, true) => Some(XrbHostKind::BlackHoleTransient),
+                (XrbKind::Persistent | XrbKind::Transient, _, false)
+                | (XrbKind::Symbiotic, _, _) => None,
+            },
+            BinaryClass::HighMassXrayBinary(kind) => match (kind, black_hole) {
+                (HmxbKind::BeX, false) => Some(XrbHostKind::BeX),
+                (HmxbKind::Supergiant, false) => Some(XrbHostKind::Supergiant),
+                (HmxbKind::BeX | HmxbKind::Supergiant, true) => None,
+            },
+            BinaryClass::None
+            | BinaryClass::Algol
+            | BinaryClass::Contact
+            | BinaryClass::BlueStraggler
+            | BinaryClass::HotSubdwarf
+            | BinaryClass::RCoronaeBorealis
+            | BinaryClass::Symbiotic
+            | BinaryClass::CataclysmicVariable(_)
+            | BinaryClass::MillisecondPulsar
+            | BinaryClass::DoubleNeutronStar
+            | BinaryClass::DoubleWhiteDwarf
+            | BinaryClass::TypeIaProgenitor => None,
+        }
+    }
 }
 
 /// One prior member of a carved class: the grid record it came from, its class, its pair's
@@ -222,11 +278,13 @@ pub fn brute_force_class_members_in(
 }
 
 /// Where a census draws its grid records ([`class_census_in`]): the cells of its layer that meet a
-/// box about a point, within half-widths of it along x, y and z.
+/// box about a point, within half-widths of it along x, y and z, in the galactic frame of the
+/// grid's cells, light-years (plan 01's `GalacticPosition`: the centre at the origin, the disc in
+/// the x–y plane, the Sun-like point 26,000 ly out along +y).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CensusSite {
     centre_ly: [i32; 3],
-    half_widths_ly: [i32; 3],
+    half_widths_ly: [u32; 3],
 }
 
 impl CensusSite {
@@ -237,7 +295,7 @@ impl CensusSite {
 
     /// The cells within `half_widths_ly` of `centre_ly` along each axis.
     #[must_use]
-    pub const fn new(centre_ly: [i32; 3], half_widths_ly: [i32; 3]) -> Self {
+    pub const fn new(centre_ly: [i32; 3], half_widths_ly: [u32; 3]) -> Self {
         Self {
             centre_ly,
             half_widths_ly,
@@ -245,17 +303,49 @@ impl CensusSite {
     }
 
     /// The site's cells of `layer`: the first cell's coordinates, and how many along each axis.
+    ///
+    /// # Panics
+    ///
+    /// If the site's box passes the `i32` light-years of the root cube's frame, or holds more than
+    /// 2⁶⁴ cells.
+    #[must_use]
     fn cells(&self, layer: Layer) -> ([i32; 3], [u64; 3]) {
-        let size = i32::try_from(layer.cell_size_ly()).expect("a small cell size");
+        let size = i64::from(layer.cell_size_ly());
         let mut first = [0; 3];
         let mut counts = [0; 3];
         for axis in 0..3 {
-            let lo = (self.centre_ly[axis] - self.half_widths_ly[axis]).div_euclid(size);
-            let hi = (self.centre_ly[axis] + self.half_widths_ly[axis]).div_euclid(size);
-            first[axis] = lo;
-            counts[axis] = u64::try_from(hi - lo + 1).expect("a site's half-widths are positive");
+            let centre = i64::from(self.centre_ly[axis]);
+            let half = i64::from(self.half_widths_ly[axis]);
+            let lo = (centre - half).div_euclid(size);
+            let hi = (centre + half).div_euclid(size);
+            first[axis] = i32::try_from(lo).expect("a site's first cell lies in the i32 frame");
+            counts[axis] = u64::try_from(hi - lo + 1).expect("a site's cells are counted forward");
         }
+        counts[0]
+            .checked_mul(counts[1])
+            .and_then(|n| n.checked_mul(counts[2]))
+            .expect("a site holds under 2⁶⁴ cells");
         (first, counts)
+    }
+}
+
+/// Whose records a census takes ([`class_census_in`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CensusRecords {
+    /// Every population's.
+    All,
+    /// One population's alone.
+    Of(Population),
+}
+
+impl CensusRecords {
+    /// Whether a record of `population` is taken.
+    #[must_use]
+    pub const fn takes(self, population: Population) -> bool {
+        match self {
+            Self::All => true,
+            Self::Of(p) => p.index() == population.index(),
+        }
     }
 }
 
@@ -330,7 +420,7 @@ const CENSUS_CLASSES: [CarvedClass; 3] = [
 ];
 
 /// A census of the carved classes' prior members among `records` grid records of `band`'s layer at
-/// `site`, of `population` alone or of all, from the cells of `part` (plan 15's P15.T10.b): each
+/// `site`, of the populations `whose`, from the cells of `part` (plan 15's P15.T10.b): each
 /// record of each cell taken in turn, its first attempt run through the engine with no carve-out
 /// as [`brute_force_class_members`] runs it, and every pair [`carved_class`] puts in an accreting
 /// white dwarf class or the X-ray binaries' kept. Where [`brute_force_class_members`] takes a fixed
@@ -351,13 +441,14 @@ pub fn class_census_in(
     galaxy: &Galaxy,
     band: MassBand,
     site: CensusSite,
-    population: Option<Population>,
+    whose: CensusRecords,
     records: u64,
     part: CensusPart,
 ) -> ClassCensus {
     assert!(band.is_stellar(), "a census runs a stellar layer");
     let layer = Layer::from(band);
     let (first, [nx, ny, nz]) = site.cells(layer);
+    // The product cannot overflow: `cells` checks it.
     let n = nx * ny * nz;
     let stride = coprime_stride(n);
     let mut scanned = [0_u64; 7];
@@ -384,7 +475,7 @@ pub fn class_census_in(
             if ran == records {
                 break;
             }
-            if population.is_some_and(|p| p != record.population()) {
+            if !whose.takes(record.population()) {
                 continue;
             }
             scanned[record.population().index()] += 1;
@@ -401,6 +492,7 @@ pub fn class_census_in(
 
 /// The stride a census walks `n` cells by: ⌊φ⁻¹ n⌋, lowered until it is prime to `n`, so that it
 /// meets every cell once in `n` steps.
+#[must_use]
 fn coprime_stride(n: u64) -> u64 {
     const INVERSE_GOLDEN: u128 = 0x9e37_79b9_7f4a_7c15;
     let mut stride = u64::try_from((u128::from(n) * INVERSE_GOLDEN) >> 64)
@@ -413,6 +505,7 @@ fn coprime_stride(n: u64) -> u64 {
 }
 
 /// The greatest common divisor of `a` and `b`.
+#[must_use]
 const fn gcd(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         (a, b) = (b, a % b);
@@ -528,5 +621,61 @@ fn xray_marks(
         since_supernova,
         accretor_initial_mass: initial[a],
         donor_initial_mass: initial[1 - a],
+        rate_excess_dex: state
+            .transfer_rate()
+            .zip(state.orbit())
+            .map(|(rate, orbit)| {
+                let line = xrb_line(accretor.mass(), donor.mass(), orbit.semi_major_axis());
+                math::log10(rate.value() / line.value())
+            }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stride is prime to the cells' count, so that a census's walk meets every cell once in
+    /// as many steps, and the parts of one count share no cell and together hold them all.
+    #[test]
+    fn a_census_walk_meets_every_cell_once_and_its_parts_share_none() {
+        for n in [1_u64, 2, 3, 16, 97, 1_000, 4_096, 123_456] {
+            let stride = coprime_stride(n);
+            assert_eq!(gcd(stride, n), 1, "{n}");
+            let mut seen = vec![false; usize::try_from(n).unwrap()];
+            for position in 0..n {
+                let cell =
+                    usize::try_from(u128::from(position) * u128::from(stride) % u128::from(n))
+                        .unwrap();
+                assert!(!seen[cell], "{n}: cell {cell} met twice");
+                seen[cell] = true;
+            }
+            assert!(seen.iter().all(|&s| s), "{n}");
+        }
+        let count = 8;
+        let mut owner = [None; 100];
+        for index in 0..count {
+            let part = CensusPart::new(index, count);
+            let mut position = part.index;
+            while position < 100 {
+                let slot = &mut owner[usize::try_from(position).unwrap()];
+                assert!(slot.is_none(), "position {position} in two parts");
+                *slot = Some(index);
+                position += part.count;
+            }
+        }
+        assert!(owner.iter().all(Option::is_some));
+    }
+
+    /// A site's cells cover its box in each layer, its first cell the one that holds its low
+    /// corner, rounding down below zero.
+    #[test]
+    fn a_site_s_cells_cover_its_box() {
+        let site = CensusSite::new([-100, 26_000, 0], [100, 0, 64]);
+        let (first, counts) = site.cells(Layer::D);
+        assert_eq!(first, [-4, 406, -1]);
+        assert_eq!(counts, [5, 1, 3]);
+        assert!(CensusRecords::All.takes(Population::Halo));
+        assert!(!CensusRecords::Of(Population::Bulge).takes(Population::Halo));
+    }
 }

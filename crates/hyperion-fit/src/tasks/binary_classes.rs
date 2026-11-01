@@ -1,6 +1,7 @@
 //! The binary classes' samplers and share rows (plan 15, P15.T10.b), fitted against plan 11's
 //! engine: one task a class, each writing its block of the sim's `tables/binary.rs`, whose shapes
-//! and scratch tables are plan 11's. Built so far: the accreting white dwarfs' (`binary_awd`).
+//! and scratch tables are plan 11's. Built so far: the accreting white dwarfs' (`binary_awd`) and
+//! the X-ray binaries' (`binary_xrb`, [`xrb`]).
 //!
 //! # The census
 //!
@@ -28,12 +29,13 @@
 //!
 //! # A sampler
 //!
-//! Each mark of a class's sampler is fitted to its members' values ([`marks`]): a median that
+//! Each mark of a class's sampler is fitted to its members' values (`marks`): a median that
 //! follows its condition and the residual about it. A mark is fitted to its own class's members
 //! where they number at least the manifest's `min_members`, to both classes' members pooled where
 //! they do not, and keeps the scratch table's law where neither does.
 
 mod marks;
+pub mod xrb;
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -45,7 +47,8 @@ use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::math;
 use hyperion_sim::stellar::binary::CarvedClass;
 use hyperion_sim::stellar::binary::testing::{
-    AccretingMarks, CensusPart, CensusSite, ClassCensus, ClassMember, class_census_in,
+    AccretingMarks, CensusPart, CensusRecords, CensusSite, ClassCensus, ClassMember,
+    class_census_in,
 };
 use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick};
 use hyperion_sim::time::LIGHT_CROSSING_L;
@@ -109,6 +112,9 @@ pub struct CensusParams {
     pub records: u64,
     /// Each population's own census's records, layers C–E together.
     pub population_records: u64,
+    /// The young thin disc's own census's records: the manifest's `young_thin_disc_records`, or
+    /// `population_records` without it.
+    pub young_records: u64,
     /// The fit's parts, the first of `part_count`.
     pub parts: u64,
     /// The parts each census's cells are cut into.
@@ -123,18 +129,25 @@ impl CensusParams {
     /// # Errors
     ///
     /// [`ManifestParamError`] if one is missing, is not a number, or is out of range: no records,
-    /// no parts, more parts than `part_count`, or a site that is not six whole numbers, its three
-    /// half-widths not negative.
+    /// no parts, more parts than `part_count`, or a site that is not six whole numbers, its centre
+    /// within `i32` light-years and its three half-widths not negative.
     pub fn of(manifest: &Manifest) -> Result<Self, ManifestParamError> {
+        let population_records = manifest.u64("population_records")?;
+        let young_records = if manifest.params().contains_key("young_thin_disc_records") {
+            manifest.u64("young_thin_disc_records")?
+        } else {
+            population_records
+        };
         let params = Self {
             seed: manifest.u64("seed")?,
             records: manifest.u64("records")?,
-            population_records: manifest.u64("population_records")?,
+            population_records,
+            young_records,
             parts: manifest.u64("parts")?,
             part_count: manifest.u64("part_count")?,
             sites: own_sites(manifest)?,
         };
-        if params.records == 0 || params.population_records == 0 {
+        if params.records == 0 || params.population_records == 0 || params.young_records == 0 {
             return Err(ManifestParamError::new("records", "positive"));
         }
         if params.parts == 0 || params.parts > params.part_count {
@@ -153,21 +166,22 @@ fn own_sites(manifest: &Manifest) -> Result<[(Population, CensusSite); 5], Manif
     let mut out = [(Population::Halo, CensusSite::SOLAR_CIRCLE); 5];
     for (slot, &(population, key)) in out.iter_mut().zip(&OWN_SITES) {
         let bad = || ManifestParamError::new(key, "six whole numbers of light-years");
-        let numbers: Vec<i32> = manifest
+        let numbers: Vec<i64> = manifest
             .params()
             .get(key)
             .and_then(toml::Value::as_array)
-            .and_then(|a| {
-                a.iter()
-                    .map(|v| v.as_integer().and_then(|i| i32::try_from(i).ok()))
-                    .collect()
-            })
+            .and_then(|a| a.iter().map(toml::Value::as_integer).collect())
             .ok_or_else(bad)?;
-        let [x, y, z, hx, hy, hz]: [i32; 6] = numbers.try_into().map_err(|_| bad())?;
-        if hx < 0 || hy < 0 || hz < 0 {
+        let [x, y, z, hx, hy, hz]: [i64; 6] = numbers.try_into().map_err(|_| bad())?;
+        let centre = [x, y, z].map(|v| i32::try_from(v).map_err(|_| bad()));
+        let half = [hx, hy, hz].map(|v| u32::try_from(v).map_err(|_| bad()));
+        let [Ok(cx), Ok(cy), Ok(cz)] = centre else {
             return Err(bad());
-        }
-        *slot = (population, CensusSite::new([x, y, z], [hx, hy, hz]));
+        };
+        let [Ok(hx), Ok(hy), Ok(hz)] = half else {
+            return Err(bad());
+        };
+        *slot = (population, CensusSite::new([cx, cy, cz], [hx, hy, hz]));
     }
     Ok(out)
 }
@@ -185,6 +199,7 @@ pub struct BandCensus {
 
 impl BandCensus {
     /// The members of `class` whose records are of `population`.
+    #[must_use]
     fn count(&self, class: CarvedClass, population: Population) -> u64 {
         let n = self
             .members
@@ -216,12 +231,47 @@ impl Censuses {
     }
 }
 
-/// One census to run: its site, its population or all, and its records in layers C–E together.
+/// One census to run: its site, whose records it takes, and its records in layers C–E together.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CensusPlan {
     site: CensusSite,
-    population: Option<Population>,
+    whose: CensusRecords,
     records: u64,
+}
+
+/// A census could not run.
+#[derive(Debug, thiserror::Error)]
+pub enum RunCensusError {
+    /// The thread pool could not be built.
+    #[error(transparent)]
+    Threads(#[from] BuildThreadPoolError),
+    /// A part of a census ran out of its site's cells before it had its records.
+    #[error(
+        "census {census}'s site holds too few cells of layer {band:?}: a part found {found} of \
+         its {wanted} records"
+    )]
+    TooFewCells {
+        /// The census, 0 for the slab and then the populations' own in `OWN_SITES`' order.
+        census: usize,
+        /// The band.
+        band: MassBand,
+        /// The records the part found.
+        found: u64,
+        /// The records it wanted.
+        wanted: u64,
+    },
+}
+
+/// `task`'s run's error for a census's `error`: the thread pool's, or the manifest's sites'.
+#[must_use]
+fn census_error(task: &'static str, error: RunCensusError) -> RunTaskError {
+    match error {
+        RunCensusError::Threads(e) => RunTaskError::Threads(e),
+        too_few @ RunCensusError::TooFewCells { .. } => RunTaskError::Input {
+            task,
+            source: Box::new(too_few),
+        },
+    }
 }
 
 /// Runs the slab's census and each population's own in `galaxy` on `threads` threads, each band's
@@ -230,25 +280,34 @@ struct CensusPlan {
 ///
 /// # Errors
 ///
-/// [`BuildThreadPoolError`] if the thread pool cannot be built.
+/// [`RunCensusError::Threads`] if the thread pool cannot be built, and
+/// [`RunCensusError::TooFewCells`] if a site holds too few cells for its records.
 ///
 /// # Panics
 ///
-/// If a site holds too few cells for its records (`class_census_in`).
+/// If a site's cells leave the root cube or its frame (`class_census_in`).
 pub fn run_censuses(
     galaxy: &Galaxy,
     params: &CensusParams,
     threads: NonZeroUsize,
-) -> Result<Censuses, BuildThreadPoolError> {
+) -> Result<Censuses, RunCensusError> {
     let plans: Vec<CensusPlan> = std::iter::once(CensusPlan {
         site: CensusSite::SOLAR_CIRCLE,
-        population: None,
+        whose: CensusRecords::All,
         records: params.records,
     })
     .chain(params.sites.iter().map(|&(population, site)| CensusPlan {
         site,
-        population: Some(population),
-        records: params.population_records,
+        whose: CensusRecords::Of(population),
+        records: match population {
+            Population::YoungThinDisc => params.young_records,
+            Population::OldThinDisc
+            | Population::ThickDisc
+            | Population::Bulge
+            | Population::LongBar
+            | Population::NuclearDisc
+            | Population::Halo => params.population_records,
+        },
     }))
     .collect();
     let shares = BandShares::of(galaxy.mass_function());
@@ -283,6 +342,7 @@ pub fn run_censuses(
         })
         .collect();
     let n = u64::try_from(jobs.len()).expect("a few hundred jobs");
+    let mut short = None;
     map_reduce_chunks(
         n,
         1,
@@ -298,21 +358,25 @@ pub fn run_censuses(
                         galaxy,
                         band,
                         plan.site,
-                        plan.population,
+                        plan.whose,
                         wanted,
                         CensusPart::new(k, params.part_count),
                     );
-                    assert_eq!(
-                        census.scanned_total(),
-                        wanted,
-                        "census {p}'s site holds too few cells of layer {band:?} for its records"
-                    );
-                    (p, b, census)
+                    (p, b, wanted, census)
                 })
-                .collect::<Vec<(usize, usize, ClassCensus)>>()
+                .collect::<Vec<(usize, usize, u64, ClassCensus)>>()
         },
         |done| {
-            for (p, b, census) in done {
+            for (p, b, wanted, census) in done {
+                let found = census.scanned_total();
+                if found < wanted && short.is_none() {
+                    short = Some(RunCensusError::TooFewCells {
+                        census: p,
+                        band: CENSUS_BANDS[b],
+                        found,
+                        wanted,
+                    });
+                }
                 let slot = &mut joined[p][b];
                 for (count, population) in slot.scanned.iter_mut().zip(POPULATIONS) {
                     *count += census.scanned(population);
@@ -321,6 +385,9 @@ pub fn run_censuses(
             }
         },
     )?;
+    if let Some(error) = short {
+        return Err(error);
+    }
     let mut plans = joined.into_iter();
     let slab = plans.next().expect("the slab's census is the first");
     let own = params.sites.iter().map(|s| s.0).zip(plans).collect();
@@ -460,7 +527,7 @@ impl AwdParams {
     /// # Errors
     ///
     /// [`ManifestParamError`] as [`CensusParams::of`], or if the total is not positive, the least
-    /// members under 20, or the recurrence's cap not above L's.
+    /// members under 20, or the recurrence's cap not above L's or above 11.
     pub fn of(manifest: &Manifest) -> Result<Self, ManifestParamError> {
         let params = Self {
             census: CensusParams::of(manifest)?,
@@ -486,6 +553,7 @@ impl AwdParams {
 }
 
 /// log₁₀ of L, years.
+#[must_use]
 fn log_l() -> f64 {
     math::log10(LIGHT_CROSSING_L.as_julian_years_f64())
 }
@@ -497,6 +565,7 @@ pub const AWD_CLASSES: [CarvedClass; 2] =
 /// What one accreting white dwarf member, its system `age` years old at the epoch, gives `mark`:
 /// its condition and value, or `None` where it defines no such mark (a donor of another kind, a
 /// value that is not finite). Its recurrence is held at 10^`cap` years.
+#[must_use]
 fn awd_pair(m: &AccretingMarks, age: f64, mark: AwdMark, cap: f64) -> Option<(f64, f64)> {
     let log = |v: f64| (v > 0.0).then(|| math::log10(v));
     let log_recurrence = log(m.recurrence.value()).map(|r| r.min(cap));
@@ -528,9 +597,13 @@ fn awd_pair(m: &AccretingMarks, age: f64, mark: AwdMark, cap: f64) -> Option<(f6
 
 /// The accreting white dwarfs' members of `class` among `members`, with each one's system's age at
 /// the epoch, Julian years.
-fn awd_members(members: &[ClassMember], class: CarvedClass) -> Vec<(AccretingMarks, f64)> {
+#[must_use]
+fn awd_members<'a>(
+    members: impl IntoIterator<Item = &'a ClassMember>,
+    class: CarvedClass,
+) -> Vec<(AccretingMarks, f64)> {
     members
-        .iter()
+        .into_iter()
         .filter(|m| m.class() == class)
         .filter_map(|m| {
             m.accreting()
@@ -546,12 +619,9 @@ fn awd_members(members: &[ClassMember], class: CarvedClass) -> Vec<(AccretingMar
 /// Never: every donor's kind is one of [`AwdDonorKind::ALL`].
 #[must_use]
 pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] {
-    let slab: Vec<ClassMember> = censuses
-        .slab
-        .iter()
-        .flat_map(|c| c.members.iter().cloned())
-        .collect();
-    let sides = AWD_CLASSES.map(|class| awd_members(&slab, class));
+    let sides =
+        AWD_CLASSES.map(|class| awd_members(censuses.slab.iter().flat_map(|c| &c.members), class));
+    let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
     let cap = params.max_log_recurrence;
     let pairs = |members: &[(AccretingMarks, f64)], mark: AwdMark| -> Vec<(f64, f64)> {
         members
@@ -561,15 +631,15 @@ pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] 
     };
     std::array::from_fn(|side| {
         let own = &sides[side];
-        let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
         let mut sources = [MarkSource::Scratch; 11];
         let marks = std::array::from_fn(|k| {
             let mark = AwdMark::ALL[k];
-            let fit = |pairs: &[(f64, f64)]| match mark {
-                AwdMark::Recurrence => {
+            let fit = |pairs: &[(f64, f64)]| {
+                if mark == AwdMark::Recurrence {
                     unconditional(&pairs.iter().map(|p| p.1).collect::<Vec<_>>())
+                } else {
+                    conditional(pairs)
                 }
-                _ => conditional(pairs),
             };
             let mine = pairs(own, mark);
             if mine.len() >= params.min_members {
@@ -622,20 +692,19 @@ pub struct AwdFit {
     pub samplers: [AwdSampler; 2],
     /// The records the slab's census ran, and each population's own.
     pub records: (u64, u64),
-    /// The fit's galaxy's mean mass formed per system, M☉.
-    pub formed_mass: f64,
 }
 
 /// Runs the accreting white dwarfs' fit on `threads` threads.
 ///
 /// # Errors
 ///
-/// [`BuildThreadPoolError`] if the thread pool cannot be built.
+/// As [`run_censuses`].
 ///
 /// # Panics
 ///
-/// If the Milky Way fixture does not build, or a census finds no member of a class.
-pub fn fit_awd(params: &AwdParams, threads: NonZeroUsize) -> Result<AwdFit, BuildThreadPoolError> {
+/// If the Milky Way fixture does not build, or as [`share_rows`]: the censuses find no member of
+/// the classes, or run no record of a population.
+pub fn fit_awd(params: &AwdParams, threads: NonZeroUsize) -> Result<AwdFit, RunCensusError> {
     let galaxy = Galaxy::from_params(
         Seed::new(params.census.seed),
         GalaxyParams::milky_way_like(),
@@ -660,7 +729,6 @@ pub fn fit_awd(params: &AwdParams, threads: NonZeroUsize) -> Result<AwdFit, Buil
         rows: [rows[0], rows[1]],
         samplers: awd_samplers(&censuses, params),
         records,
-        formed_mass: galaxy.mean_formed_mass().value(),
     })
 }
 
@@ -671,6 +739,7 @@ const SIDES: [&str; 2] = ["FAST", "SLOW"];
 const SIDE_NAMES: [&str; 2] = ["fast", "slow"];
 
 /// The block's items for `fit`.
+#[must_use]
 fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
     let mut items = Vec::with_capacity(AWD_ITEMS.len());
     for (side, sampler) in fit.samplers.iter().enumerate() {
@@ -749,6 +818,7 @@ pub fn render_awd(fit: &AwdFit) -> RustTable {
 }
 
 /// The block's notes after its header.
+#[must_use]
 fn awd_notes(fit: &AwdFit) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
@@ -774,6 +844,7 @@ The slab's census ran {slab} records and the populations' own {own}.",
 
 /// The acceptance's figures for `fit`: each side's members, the marks' sources, the rows' layer
 /// shares and rates.
+#[must_use]
 fn awd_acceptance(fit: &AwdFit) -> String {
     let mut out = String::new();
     for (side, (sampler, row)) in fit.samplers.iter().zip(&fit.rows).enumerate() {
@@ -875,7 +946,7 @@ impl FitTask for BinaryAwdTask {
             &galaxy,
             MassBand::D,
             FINGERPRINT_CELL,
-            None,
+            CensusRecords::All,
             u64::MAX,
             CensusPart::new(0, 1),
         );
@@ -899,7 +970,7 @@ impl FitTask for BinaryAwdTask {
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
         check_manifest(self, manifest)?;
         let params = AwdParams::of(manifest)?;
-        let fit = fit_awd(&params, threads)?;
+        let fit = fit_awd(&params, threads).map_err(|e| census_error("binary_awd", e))?;
         Ok(TaskOutput {
             table: render_awd(&fit),
             source:
@@ -911,5 +982,53 @@ impl FitTask for BinaryAwdTask {
             acceptance: awd_acceptance(&fit),
             provisional: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The committed manifest, with `edit` applied to its text.
+    fn manifest(edit: impl Fn(&str) -> String) -> Manifest {
+        let text = edit(include_str!("../../manifests/binary_awd.toml"));
+        Manifest::from_bytes("manifests/binary_awd.toml".as_ref(), text.into_bytes()).unwrap()
+    }
+
+    /// The committed manifest reads, the young thin disc's census taking the populations' records
+    /// without a count of its own; a census with no records or more parts than cuts, a site with a
+    /// negative half-width or of five numbers, and a cap on the recurrence beyond the clock are
+    /// refused.
+    #[test]
+    fn the_manifest_s_parameters_are_checked() {
+        let params = AwdParams::of(&manifest(str::to_owned)).unwrap();
+        assert_eq!(params.census.records, 10_000_000);
+        assert_eq!(
+            params.census.young_records,
+            params.census.population_records
+        );
+        assert_eq!(params.census.sites[0].0, Population::YoungThinDisc);
+        let refused = |from: &str, to: &str, key: &str| {
+            let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
+            assert!(error.to_string().contains(key), "{from} → {to}: {error}");
+        };
+        refused("records = 10_000_000", "records = 0", "records");
+        refused("parts = 32", "parts = 65", "parts");
+        refused(
+            "[0, 0, 0, 800, 800, 200]",
+            "[0, 0, 0, 800, -800, 200]",
+            "nuclear_disc_site",
+        );
+        refused(
+            "[0, 0, 0, 800, 800, 200]",
+            "[0, 0, 800, 800, 200]",
+            "nuclear_disc_site",
+        );
+        refused(
+            "max_log_recurrence = 10.0",
+            "max_log_recurrence = 12.0",
+            "max_log_recurrence",
+        );
+        refused("min_members = 50", "min_members = 5", "min_members");
     }
 }

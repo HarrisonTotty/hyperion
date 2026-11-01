@@ -25,7 +25,7 @@ use crate::stellar::binary::scan::{
     RATE_EXCESS_MARGIN_DEX, eddington_rate, engine_calls, scan_cell,
 };
 use crate::stellar::sse::lifetime as sse_lifetime;
-use crate::tables::binary::MILKY_WAY_FORMED_MASS;
+use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, XRB_SAMPLER};
 use crate::time::{SourceHorizon, UniverseTime};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 

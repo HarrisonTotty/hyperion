@@ -69,6 +69,7 @@ impl FittedMark {
 }
 
 /// The median of nodes `median` over `span` at `condition`, as `ClassSampler::median` takes it.
+#[must_use]
 fn median_at((first, last): (f64, f64), median: &[f64; NODES], condition: f64) -> f64 {
     let s = ((condition - first) / (last - first)).clamp(0.0, 1.0) * 16.0;
     #[expect(
@@ -103,6 +104,7 @@ pub fn quantile(sorted: &[f64], p: f64) -> f64 {
 }
 
 /// The 17 quantiles at k ÷ 16 of `values`, which it sorts.
+#[must_use]
 fn ranks(values: &mut [f64]) -> [f64; NODES] {
     values.sort_by(f64::total_cmp);
     std::array::from_fn(|k| {
@@ -111,12 +113,17 @@ fn ranks(values: &mut [f64]) -> [f64; NODES] {
     })
 }
 
-/// The least and the greatest of `values`.
+/// The least and the greatest of `values`, by `total_cmp`, so that a −0 and a +0 among them give
+/// the same bits on every target.
+#[must_use]
 fn extent(values: impl IntoIterator<Item = f64>) -> (f64, f64) {
     values
         .into_iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
-            (lo.min(v), hi.max(v))
+            (
+                if v.total_cmp(&lo).is_lt() { v } else { lo },
+                if v.total_cmp(&hi).is_gt() { v } else { hi },
+            )
         })
 }
 
@@ -197,6 +204,7 @@ pub fn conditional(pairs: &[(f64, f64)]) -> FittedMark {
 
 /// The weighted median of `(value, weight)` pairs of total weight `total`, which it sorts: the
 /// least value at which the running weight reaches half the total.
+#[must_use]
 fn weighted_median(near: &mut [(f64, f64)], total: f64) -> f64 {
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut running = 0.0;
@@ -212,6 +220,7 @@ fn weighted_median(near: &mut [(f64, f64)], total: f64) -> f64 {
 /// The nodes with each unsupported one filled: along the line between its nearest supported
 /// neighbours, held from the nearest beyond the last, or every node the members' median if none
 /// is supported.
+#[must_use]
 fn fill(supported: &[Option<f64>; NODES], pairs: &[(f64, f64)]) -> [f64; NODES] {
     let known: Vec<(usize, f64)> = supported
         .iter()

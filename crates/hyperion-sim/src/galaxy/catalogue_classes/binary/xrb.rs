@@ -3,9 +3,11 @@
 //!
 //! The grid redraws every binary that falls into a carved class (P11.T7), so these hosts are
 //! nowhere in the cells, and the share matrix gives up what the class holds: its row of
-//! [`CLASS_SHARES`], hosts per solar mass formed, by population. The class is a Poisson process
-//! placed by thinning on the class grid of plan 09 ([`ClassProcess`]), as P11.T8.a places the
-//! accreting white dwarfs.
+//! [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES), hosts per solar mass formed, by
+//! population. The class is a Poisson process placed by thinning on the class grid of plan 09
+//! ([`ClassProcess`]), as P11.T8.a places the accreting white dwarfs. From generator version 27 it
+//! reads plan 15's fitted share row and sampler in place of the scratch ones (the hold of
+//! [`BinaryTableRules`](super::BinaryTableRules)).
 //!
 //! # The two sides
 //!
@@ -13,12 +15,12 @@
 //! populations' and the high-mass kinds (Be/X and supergiant) the young disc's. The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
-//! takes [`XRB_SAMPLER`]'s high-mass share of it, 0.16, over the young thin disc's components,
-//! and the low-mass side the rest over every other component, each side's components in
-//! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
-//! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
-//! than are catalogued; so the budget closes over the galaxy and not population by population (a
-//! finding, the row not retuned). The intensity at x is `Σ_c w_c n_c(x)`, `w_c` the hosts per
+//! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over
+//! the young thin disc's components, and the low-mass side the rest over every other component,
+//! each side's components in proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every
+//! population would give the young disc, a few tenths of a per cent of the mass formed, about 25
+//! high-mass hosts, fewer than are catalogued; so the budget closes over the galaxy and not
+//! population by population (a finding, the row not retuned). The intensity at x is `Σ_c w_c n_c(x)`, `w_c` the hosts per
 //! system its side's share gives component c, and a cell's bound `Σ_c w_c × bound_c`.
 //!
 //! # A candidate
@@ -108,7 +110,7 @@ use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{Track, ZCoeffs, turn_off_mass, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{CLASS_SHARES, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick};
+use crate::tables::binary::{ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -249,16 +251,21 @@ impl XrbComponent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct XrayBinaries {
     components: Vec<XrbComponent>,
+    sampler: ClassSampler<XrbMark, XrbPick>,
     rate_split: f64,
 }
 
 impl XrayBinaries {
-    /// The class in `galaxy`: its components, from its row of [`CLASS_SHARES`] and
-    /// [`XRB_SAMPLER`]'s high-mass share, and the rank of the instability line in the low-mass
-    /// rate's law.
+    /// The class in `galaxy`: its components, from its row of
+    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and
+    /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share, or from version 27
+    /// plan 15's fitted tables in their place (`CLASS_SHARES_26` and `XRB_SAMPLER_26`, the
+    /// module's hold), and the rank of the instability line in the low-mass rate's law.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
+        let tables = galaxy.rules().binary_tables;
+        let row = tables.class_shares().row(CarvedClass::XrayBinary);
+        let sampler = ClassSampler::new(tables.xrb_sampler());
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let rows: Vec<(ComponentId, XrbSide, f64, f64)> = fields
@@ -281,7 +288,7 @@ impl XrayBinaries {
         };
         let (low, high) = (side_hosts(XrbSide::LowMass), side_hosts(XrbSide::HighMass));
         let total = low + high;
-        let share = high_mass_share();
+        let share = high_mass_share(sampler.table());
         // Each side's hosts are its share of the row's total; a galaxy without one side's
         // components gives the other side the whole.
         let scale = |side: XrbSide| match (side, low > 0.0, high > 0.0) {
@@ -305,10 +312,10 @@ impl XrayBinaries {
             })
             .filter(|c| c.hosts_per_system > 0.0)
             .collect();
-        let rate_split =
-            ClassSampler::new(&XRB_SAMPLER).rank_of(XrbMark::LowMassRateExcess, 0.0, 0.0);
+        let rate_split = sampler.rank_of(XrbMark::LowMassRateExcess, 0.0, 0.0);
         Self {
             components,
+            sampler,
             rate_split,
         }
     }
@@ -319,7 +326,14 @@ impl XrayBinaries {
         &self.components
     }
 
-    /// The rank of [`XRB_SAMPLER`]'s low-mass rate excess at the instability line: a transient
+    /// The sampler the class draws from: [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER), or
+    /// from version 27 the fitted one.
+    #[must_use]
+    pub const fn sampler(&self) -> ClassSampler<XrbMark, XrbPick> {
+        self.sampler
+    }
+
+    /// The rank of the sampler's low-mass rate excess at the instability line: a transient
     /// draws below it and a persistent host above.
     #[must_use]
     pub const fn rate_split(&self) -> f64 {
@@ -376,7 +390,7 @@ impl XrayBinaries {
                 &XrbHostKind::LOW_MASS,
             )
         };
-        let weights = XRB_SAMPLER.pick(pick).weights();
+        let weights = self.sampler.table().pick(pick).weights();
         let place = kinds
             .iter()
             .position(|&k| k == kind)
@@ -474,7 +488,7 @@ impl XrayBinaries {
         let seed = galaxy.seed();
         let system = SystemId::from(id);
         let key = ObjectKey::from(system);
-        let sampler = ClassSampler::new(&XRB_SAMPLER);
+        let sampler = self.sampler;
         let kind = scan.kind();
         // 2. The binary now: its scan marks hold its masses, period and rate, so its orbit's
         // orientation and phase remain.
@@ -591,13 +605,13 @@ impl XrayBinaries {
     }
 }
 
-/// The high-mass side's share of the class's hosts: [`XRB_SAMPLER`]'s high-mass weights over all
+/// The high-mass side's share of the class's hosts: `table`'s high-mass weights over all
 /// its kinds' weights.
 #[must_use]
-fn high_mass_share() -> f64 {
+fn high_mass_share(table: &ClassSamplerTable<XrbMark, XrbPick>) -> f64 {
     let sum = |w: &[f64]| w.iter().fold(0.0, |s, x| s + x);
-    let low = sum(XRB_SAMPLER.pick(XrbPick::LowMassKind).weights());
-    let high = sum(XRB_SAMPLER.pick(XrbPick::HighMassKind).weights());
+    let low = sum(table.pick(XrbPick::LowMassKind).weights());
+    let high = sum(table.pick(XrbPick::HighMassKind).weights());
     high / (low + high)
 }
 

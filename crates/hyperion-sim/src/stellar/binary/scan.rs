@@ -69,7 +69,7 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::draws::isotropic;
-use crate::tables::binary::{AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick};
+use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
 use crate::units::consts::{
     SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR, SOLAR_MASS_KG, SPEED_OF_LIGHT,
@@ -603,7 +603,7 @@ fn xrb_scan_marks(
     let (site, component, host_side) = process.site(galaxy, cell, id, bound)?;
     let seed = galaxy.seed();
     let key = ObjectKey::from(SystemId::from(id));
-    let sampler = ClassSampler::new(&XRB_SAMPLER);
+    let sampler = process.sampler();
     let mut stream = Stream::open(seed, tags::CLASS_XRB_KIND, key);
     let kind = match host_side {
         XrbSide::LowMass => XrbHostKind::LOW_MASS[sampler.pick(XrbPick::LowMassKind, &mut stream)],
