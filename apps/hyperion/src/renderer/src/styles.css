@@ -4990,7 +4990,8 @@ body {
  * The held-back GROUND's reason, over the place while its tab is hovered or focused, by the keyboard
  * or by a press (a click or a tap focuses it without :focus-visible, and touch has no stable hover),
  * taking none of the place's room, which at the floor has no line to spare (guide draft D2;
- * R10.T12.d's lean).
+ * R10.T12.d's lean). A press passes through it to the camera control it covers, which takes the
+ * focus and so puts the reason away (the ux-reviewer's, 2026-11-01).
  */
 .view-place__reason {
   position: absolute;
@@ -5007,6 +5008,7 @@ body {
   letter-spacing: normal;
   text-transform: none;
   visibility: hidden;
+  pointer-events: none;
 }
 
 .view-place__head:has(.view-place__tab[aria-disabled="true"]:is(:hover, :focus))
