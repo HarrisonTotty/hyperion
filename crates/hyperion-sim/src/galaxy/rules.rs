@@ -40,8 +40,8 @@
 //!   up its ancient Type Ia. It is read where the galaxy is built, which installs layer D's
 //!   factors, so `Galaxy::with_rules` refuses to change it too.
 //! - [`feature_classes`](GalaxyRules::feature_classes), at [`FEATURE_CLASSES_VERSION`] (plan 09,
-//!   P09.T36): catalogue features list their recently dead and their luminous blue variables,
-//!   and their band-E cells give them up. It is read where a list or an
+//!   P09.T36): catalogue features and the galactic centre list their recently dead and their
+//!   luminous blue variables, and their band-E cells give them up. It is read where a list or an
 //!   interior is built, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.

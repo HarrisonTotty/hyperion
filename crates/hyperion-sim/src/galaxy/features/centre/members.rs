@@ -78,6 +78,7 @@ use super::super::nested::{NestedCell, NestedGrid};
 use super::classes::{CENTRE_FE_H, CentreClass, CentreClassKind, CentreTracer, age_components};
 use super::events::victims::CentreVictims;
 use super::profile::REACH;
+use super::recent::{list_claims, recent_member};
 use super::{CentreModel, DistributionFunction};
 
 /// The width of the centre's finest cells: 1 ⁄ 256 ly (the brainstorm, "Dense features").
@@ -540,12 +541,18 @@ impl<'a> CentrePlacement<'a> {
             SolarMasses::new(primary),
             age,
         );
-        Some(CentreMemberRecord {
+        let member = CentreMemberRecord {
             record,
             class: Some(class),
             composition: centre_composition(),
             velocity,
-        })
+        };
+        // From generator version 26 a band-E member of a young class that the centre's list holds
+        // is the list's, not the cells' (P09.T36.b).
+        if band == MassBand::E && list_claims(galaxy, &member) {
+            return None;
+        }
+        Some(member)
     }
 
     /// Every accepted member of `band` in `cell`, in index order.
@@ -777,10 +784,10 @@ pub fn resolve_centre_member(
 ///
 /// # Errors
 ///
-/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index past the victims (no other
-/// class is registered on the centre's list yet), a band that is not stellar, a cell the grid
-/// does not own, an index at or past its cell's count, or a candidate the thinning, the marks or
-/// its draw reject.
+/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index past the victims that no recent
+/// class keeps (P09.T36.b, from generator version 26; none before), a band that is not stellar, a
+/// cell the grid does not own, an index at or past its cell's count, or a candidate the thinning,
+/// the marks, its draw or the list's claim reject.
 pub fn resolve_centre_member_with(
     galaxy: &Galaxy,
     model: &CentreModel,
@@ -790,11 +797,12 @@ pub fn resolve_centre_member_with(
     match id.slot() {
         MemberSlot::FeatureLevel { index: 0 } => Ok(placement.black_hole()),
         // The disruptions' model refuses only a black hole no galaxy the builder allows has.
-        MemberSlot::FeatureLevel { index } => CentreVictims::one(galaxy, model, index)
-            .ok()
-            .flatten()
-            .map(|v| *v.member())
-            .ok_or(ResolveSystemError::NoSuchSystem),
+        MemberSlot::FeatureLevel { index } => {
+            if let Some(victim) = CentreVictims::one(galaxy, model, index).ok().flatten() {
+                return Ok(*victim.member());
+            }
+            recent_member(galaxy, model, index).ok_or(ResolveSystemError::NoSuchSystem)
+        }
         MemberSlot::InCell {
             band,
             level,

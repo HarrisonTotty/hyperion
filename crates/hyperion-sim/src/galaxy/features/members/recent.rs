@@ -1,6 +1,6 @@
 //! The recently dead and the luminous blue variables among a catalogue feature's members, on its
-//! feature-level list (plan 09, P09.T36.a; the luminous blue variables' feature half, P09.T43),
-//! from generator version 26 (`FEATURE_CLASSES_VERSION`).
+//! feature-level list (plan 09, P09.T36.a; the globulars' Type Ia of P09.T36.b; the luminous blue
+//! variables' feature half, P09.T43), from generator version 26 (`FEATURE_CLASSES_VERSION`).
 //!
 //! # The classes
 //!
@@ -27,7 +27,10 @@
 //!   claim, the class's test ([`may_host`], [`horizon_window`]) on their own marks. It is listed
 //!   where some of the sampler's nodes may host at the members' ages: on the young features.
 //!
-//! A globular lists nothing yet: its Type Ia are P09.T36.b's.
+//! A globular lists only its Type Ia (P09.T36.b): hosts drawn from the delay-time distribution on
+//! its mass, listed with no window, since a globular's gas makes no shell, so exploding within
+//! the source horizon, (−(L + H), +H], where a host with no window can be seen. It lists no core
+//! collapse: its stars are ten gigayears old.
 //!
 //! # The cells' half
 //!
@@ -90,7 +93,7 @@ use super::level_list::ListClass;
 /// under every 26 hold but the Humphreys–Davidson limit
 /// (`GalaxyRules::every_26_hold_but_the_hd_limit`; plan 09's record). The bump to 26 deletes this
 /// hold, [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the
-/// `match`es in [`FeatureStars::listing`] and [`FeatureStars::claiming`], and
+/// `match`es in [`FeatureStars::listing`], [`FeatureStars::claiming`] and the centre's list, and
 /// the tripwire (`the_feature_classes_are_held_only_until_the_26_bump`).
 pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
@@ -143,7 +146,8 @@ impl RecentClass {
 }
 
 /// A uniform distribution of ages at the epoch from `youngest` to `oldest`, a single age widened
-/// to [`SINGLE_AGE_WIDTH`] below it: what a Type Ia's delay is drawn on, for a feature's members.
+/// to [`SINGLE_AGE_WIDTH`] below it: what a Type Ia's delay is drawn on, for a feature's members
+/// and for a component of the centre's.
 ///
 /// # Panics
 ///
@@ -201,7 +205,7 @@ impl FeatureStars {
         }
     }
 
-    /// The stars of `feature`, or `None` for a cloud, a globular (P09.T36.b), a dissolved feature, a feature with no
+    /// The stars of `feature`, or `None` for a cloud, a dissolved feature, a feature with no
     /// population or a galaxy without its kinematic tables.
     #[must_use]
     fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
@@ -243,7 +247,15 @@ impl FeatureStars {
                     marks.half_mass_radius().value(),
                 )
             }
-            FeatureMarks::Globular(_) | FeatureMarks::Cloud(_) => return None,
+            FeatureMarks::Globular(marks) => (
+                marks.mass(),
+                1.0,
+                (marks.age(), marks.age()),
+                marks.fe_h(),
+                None,
+                marks.half_mass_radius().value(),
+            ),
+            FeatureMarks::Cloud(_) => return None,
         };
         let formed = SolarMasses::new(born.value() * survival);
         let band_e = formed.value() / galaxy.mean_formed_mass().value()

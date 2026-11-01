@@ -28,6 +28,7 @@ pub mod events;
 pub mod marks;
 pub mod members;
 pub mod profile;
+pub(crate) mod recent;
 pub mod source;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

@@ -1489,6 +1489,9 @@ _The field half built behind its hold (lane `p09-t2c`, step 2, 2026-10-31, at `G
   globular entry ever reports a shell. (Bound by P08.T13's interval predicate: see "From P08.T13:
   the interval predicate is part of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
 
+_Built behind its hold (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, no output
+moved): see Risks, "P09.T36 as built"._
+
 #### P09.T37 Merge into the range query
 
 `CatalogueClassSource` beside `FeatureMemberSource` and `CentreMemberSource`, all registered with
@@ -5390,3 +5393,53 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `displaced::death_in_interval_under` and `sse::lifetime_under` (`death_in_interval` keeps the
   version's). Its fate-table tier is refused under another Humphreys–Davidson arm, as the
   brief's is.
+- **P09.T36 as built (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, behind
+  `FEATURE_CLASSES_VERSION` = 26; no output moved).** With P09.T43's list halves: the nurseries'
+  variables after `TYPE_IA`, and the centre's from N + 1.
+  - _Hold._ `members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules::{Unlisted, Listed}}`,
+    `GalaxyRules::feature_classes`: one switch for the lists (`FeatureStars::listing`,
+    `CentreRecent::new`) and the band-E cells' claim (`FeatureStars::claiming`,
+    `centre_cells_claim`), so both or neither (research-leans-10, item 4).
+  - _For P09.T37._ `FeatureLevelList::{recent_entry, recent_entries}` give `RecentEntry` (class,
+    `MemberRecord`, site, window); `FeatureLevelList::member` now takes the galaxy,
+    `member(galaxy, index)`. The centre's `CentreRecent::{list, entry}` give `CentreRecentEntry`,
+    its classes from N + 1 (`FeatureLevelList::with_classes_from`). `resolve_member` and
+    `resolve_centre_member_with` resolve both. A feature's entry moves at its bulk velocity, a
+    centre entry at its tracer's DF draw; each site is the epoch position moved straight to the
+    death. `member_speed_bound` does not cover the list. A list needs the kinematic tables
+    (`bulk_velocity`).
+  - _For P09.T38._ Both sides ask `claimed_by` (features) or `claimed_at_centre` on their own marks.
+    A list draws its candidates from an envelope (`Candidates`: the masses and ages a lifetime
+    bracket or a sampler node can put in the class), which every claimed mark set must lie in
+    (`Candidates::contains`). A nursery's core collapses are drawn over the longer of the bubble's
+    and the field's caps, for a site outside the wall. The lists' density is formed mass ×
+    survival × band E's share, not the cells' depletion and remnant retention: a bound cluster's
+    cells keep few kicked neutron stars, so in 10⁴ members its cells give up 0 core collapses and
+    9 variables, while the list keeps every death at its site. T38's budgets compare the two, and
+    check the listed deaths' escaped remnants against plan 08's displaced objects. No association
+    has a nested grid in this build (`ClusterModel::from_record`), so its list is its only half.
+    The centre's cells are not walked: at 24 a neutron-star class of the young burst exhausts its
+    attempts (`draw_centre_member`'s debug assertion; a finding), so its test draws 10⁴ mark sets
+    as the list does.
+  - _Counts (seed `0x0935_0000_0000_0001`, Milky Way; deaths in (−(L + H), +H] on every side)._
+    Features: 0.839 of the core collapses (3,570 of 4,256), in 0.7–0.9. 0.442 of the 8,617
+    distinct shells, against 0.15–0.35: a finding, pinned. Globulars: 0.139 Type Ia expected, in
+    0.1–0.5, listed with no window over the horizon. Centre: 29 victims, then 565 candidates (534
+    core collapses, 11.3 Type Ia, 23.6 variables), 18 kept. The new arm's entries are pinned by
+    digest (`ENTRIES_DIGEST`, `CENTRE_ENTRIES_DIGEST`).
+  - _Leans (2026-10-31)._ No new tag: the entries read `member.mass`, `member.position`,
+    `centre.velocity` and `class.type_ia.*`, keyed by their list IDs. The centre carves band E
+    only: it draws no binary a Type Ia could come from, until plan 11 draws the centre's binaries.
+    A single age is widened to 10³ yr for the delay draw. `CentreListForecast::recent` counts the
+    classes at their bound under both arms (a check with no caller yet; the cap still leaves
+    44,537.4 indices, the 10³ seeds' worst 44,498.7).
+  - _Blocker._ `every_26_hold()`'s Humphreys–Davidson limit (P06.T42.b) moves massive tracks but
+    not `death_in_interval`'s tables, so `DeathMarks::of`'s debug assertion fires: T35's four
+    `carve_out_hold` claim tests and T2.c's `the_young_field_s_ages_follow_one_less_phi` fail on
+    the tip. T36's tests run under `GalaxyRules::every_26_hold_but_the_hd_limit()` until the 26
+    refit (P06.T42.b's tripwire) puts the fate tables and `LifetimeBracket` under the limit. The
+    bump re-measures every pinned figure under `every_26_hold()`.
+  - _Bump._ 26 deletes `FEATURE_CLASSES_VERSION`, `FeatureClassesRules`' `Unlisted` arm, the field,
+    the `match`es in `FeatureStars::listing`, `FeatureStars::claiming`, `CentreRecent::new`,
+    `recent_member` and `centre_cells_claim`, and the tripwire
+    `the_feature_classes_are_held_only_until_the_26_bump`.

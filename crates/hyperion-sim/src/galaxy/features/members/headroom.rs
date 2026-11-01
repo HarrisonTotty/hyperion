@@ -44,10 +44,12 @@
 //!
 //! # What it leaves out
 //!
-//! - **Plan 09's other classes** on the centre's list, the supernovae (P09.T36) and the luminous
-//!   blue variables (P09.T43), are not built and register nothing ([`registered_classes`]), so
-//!   they add nothing yet; plan 09 expects tens. Each must join the entries when it registers, as
-//!   the victims have.
+//! - **Plan 09's other classes** on the centre's list, its recently dead and its luminous blue
+//!   variables (P09.T36.b, held until generator version 26), join the entries at their bound
+//!   ([`CentreListForecast::recent`]): every window at its ceiling, whatever the galaxy's rules, so
+//!   that a centre the check passes keeps its room when they register. They are candidates, about
+//!   600 at Milky Way values and 1,531 at Chabrier's cap, of whom the classes' test keeps a
+//!   handful.
 //! - **Catalogue features** are not walked. A nursery's or an open cluster's initial mass is at
 //!   most [`NURSERY_MASS_MAX`], 10⁵ M☉, about 11 candidates at these rates. A globular's count is
 //!   P09.T9.e's encounter law under T8.f, which this module cannot forecast; T8.f brings it in.
@@ -64,9 +66,10 @@
 //!
 //! At `GENERATOR_VERSION` 23, against the 16-bit index, the Milky Way fixture's centre fits, at
 //! 7,145.0 candidates and 27.3 victims with 57,685.2 indices to spare at eight standard deviations
-//! (57,713.8 before the victims joined, P09.T30.b), and so do both mass functions' capped
-//! clusters, the heaviest plan 02 draws, at 18,311.6 and 12,174.9 candidates (46,112.7 and
-//! 52,449.1 to spare), and every one of the first 10³ of plan 02's seeds
+//! (57,713.8 before the victims joined, P09.T30.b; 57,060.1 once plan 09's recent classes, 597.4
+//! candidates, joined at 24, P09.T36.b), and so do both mass functions' capped clusters, the
+//! heaviest plan 02 draws, at 18,311.6 and 12,174.9 candidates (44,537.4 and 51,499.5 to spare with
+//! the recent classes), and every one of the first 10³ of plan 02's seeds
 //! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
 //! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
 //! fallback: a refit or a new class that brings the capped forecast within a factor of two of the
@@ -75,6 +78,7 @@
 //! of the 10³ seeds failed (P11.T8.e, "as measured").
 
 use crate::galaxy::features::centre::events::victims::expected_victims;
+use crate::galaxy::features::centre::recent::forecast_candidates;
 use crate::galaxy::features::centre::{BuildCentreError, CentreClasses, CentreProfile};
 #[cfg(doc)]
 use crate::galaxy::features::kinds::open_cluster::NURSERY_MASS_MAX;
@@ -91,8 +95,6 @@ use crate::units::SolarMasses;
 
 #[cfg(doc)]
 use super::FeatureLevelList;
-#[cfg(doc)]
-use super::level_list::registered_classes;
 use super::level_list::{ListIndex, fits_list_index, list_index_margin};
 
 /// The least share of a carved class's candidates that pass its test: 0.9.
@@ -134,6 +136,8 @@ pub struct CentreListForecast {
     candidates: f64,
     /// The tidal disruptions' victims expected in the source horizon.
     victims: f64,
+    /// Plan 09's recent classes' candidates at their bound (P09.T36.b).
+    recent: f64,
 }
 
 impl CentreListForecast {
@@ -162,6 +166,7 @@ impl CentreListForecast {
             hosts,
             candidates,
             victims: expected_victims(profile.black_hole()),
+            recent: forecast_candidates(primaries_formed, mass_function, mean_formed_mass),
         }
     }
 
@@ -220,11 +225,19 @@ impl CentreListForecast {
         self.victims
     }
 
-    /// The entries the centre's list expects after index 0: the victims, then the carved classes'
-    /// candidates, added in that order.
+    /// The candidates of plan 09's recent classes the centre's list expects, its core collapses,
+    /// its Type Ia and its luminous blue variables, at their bound (module documentation; P09.T36.b),
+    /// between the victims and plan 11's classes in the list's order.
+    #[must_use]
+    pub fn recent(&self) -> f64 {
+        self.recent
+    }
+
+    /// The entries the centre's list expects after index 0: the victims, plan 09's recent classes
+    /// and the carved classes' candidates, added in that order.
     #[must_use]
     pub fn entries(&self) -> f64 {
-        self.victims + self.candidates
+        self.victims + self.recent + self.candidates
     }
 
     /// Whether the entries fit the centre's list index: plus eight standard deviations and index
@@ -399,6 +412,7 @@ mod tests {
     use crate::galaxy::quad::gl32_log;
     use crate::units::Dex;
     use hyperion_testkit::float::assert_same_bits;
+    use std::num::NonZeroU16;
 
     /// The centre's index's exclusive bound, 65,536, as a double.
     const LIMIT: f64 = 65_536.0;
@@ -422,8 +436,8 @@ mod tests {
         eprintln!(
             "{label}: primaries formed {:.5e}, systems {:.5e}, mean formed mass {:.6} M_sun, \
              formed mass {:.5e} M_sun; hosts: AWD fast {:.1}, AWD slow {:.1}, XRB {:.2}, stellar \
-             mergers {:.2}, NS mergers {:.4}; candidates {:.1}, victims {:.2}; +8 sigma +1 {:.1} \
-             (margin {:.1}), +5 sigma +1 {:.1} (margin {:.1})",
+             mergers {:.2}, NS mergers {:.4}; candidates {:.1}, victims {:.2}, recent {:.1}; +8 \
+             sigma +1 {:.1} (margin {:.1}), +5 sigma +1 {:.1} (margin {:.1})",
             f.primaries_formed(),
             f.systems(),
             f.mean_formed_mass().value(),
@@ -435,6 +449,7 @@ mod tests {
             f.hosts(CarvedClass::NeutronStarMerger),
             f.candidates(),
             f.victims(),
+            f.recent(),
             LIMIT - f.margin(8.0),
             f.margin(8.0),
             LIMIT - f.margin(5.0),
@@ -493,7 +508,8 @@ mod tests {
             f.candidates()
         );
         assert!((f.victims() - 27.309).abs() < 1e-3, "{}", f.victims());
-        assert_same_bits(f.entries(), f.victims() + f.candidates());
+        assert_same_bits(f.entries(), f.victims() + f.recent() + f.candidates());
+        assert!(f.recent() > 0.0 && f.recent() < 2e4, "{}", f.recent());
         let hosts: f64 = CLASS_SHARES
             .rows()
             .iter()
@@ -566,10 +582,11 @@ mod tests {
     }
 
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
-    /// index: the default function's centre, 7,145.0 candidates and 27.3 victims, fits with
-    /// 57,685.2 indices to spare at eight standard deviations, and Kroupa's, 6,468.0 and 27.3, with
-    /// 58,394.9, as measured at `GENERATOR_VERSION` 23 and pinned to 10⁻⁵, with the primaries'
-    /// share of `m̄_f` (module documentation) to 10⁻⁴.
+    /// index: the default function's centre, 7,145.0 candidates, 27.3 victims and 597.4 of plan
+    /// 09's recent classes' candidates, fits with 57,060.1 indices to spare at eight standard
+    /// deviations, and Kroupa's, 6,468.0, 27.2 and 487.2, with 57,884.1, as measured at
+    /// `GENERATOR_VERSION` 23 (the recent classes' at 24, P09.T36.b) and pinned to 10⁻⁵, with the
+    /// primaries' share of `m̄_f` (module documentation) to 10⁻⁴.
     #[test]
     fn the_milky_way_s_centre_list_fits_under_either_mass_function() {
         let galaxy = milky_way_galaxy();
@@ -584,15 +601,15 @@ mod tests {
             (
                 MassFunctionKind::Chabrier,
                 7_144.99,
-                57_685.18,
-                57_939.25,
+                57_060.14,
+                57_324.58,
                 0.703_48,
             ),
             (
                 MassFunctionKind::Kroupa,
                 6_468.04,
-                58_394.90,
-                58_636.68,
+                57_884.08,
+                58_134.78,
                 0.713_27,
             ),
         ] {
@@ -615,9 +632,11 @@ mod tests {
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre fits the 16-bit index, with 46,112.7 indices to spare under Chabrier's function and
-    /// 52,449.1 under Kroupa's at eight standard deviations, the victims counted, as measured at `GENERATOR_VERSION` 23
-    /// and pinned to 10⁻⁵ with the candidates. The cap bounds every drawn cluster.
+    /// centre fits the 16-bit index, with 44,537.4 indices to spare under Chabrier's function and
+    /// 51,499.5 under Kroupa's at eight standard deviations, the victims and plan 09's recent
+    /// classes (1,531.0 and 917.0 candidates) counted, as measured at `GENERATOR_VERSION` 23 (the
+    /// recent classes' at 24, P09.T36.b) and pinned to 10⁻⁵ with the candidates. The cap bounds
+    /// every drawn cluster.
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
         for (kind, seed, want, at_eight) in [
@@ -625,13 +644,13 @@ mod tests {
                 MassFunctionKind::Chabrier,
                 0x1108_e000,
                 18_311.574_542_824_812,
-                46_112.75,
+                44_537.40,
             ),
             (
                 MassFunctionKind::Kroupa,
                 0x1108_e001,
                 12_174.902_962_021_803,
-                52_449.08,
+                51_499.53,
             ),
         ] {
             let params = scattered(kind, 1.0);
@@ -689,6 +708,7 @@ mod tests {
         let mut f = centre_list_forecast(milky_way_galaxy().params()).unwrap();
         // The bound is the entries', here the candidates' alone.
         f.victims = 0.0;
+        f.recent = 0.0;
         f.candidates = under;
         assert!(f.fits());
         assert!(f.margin(8.0) > 0.0, "{}", f.margin(8.0));
@@ -709,6 +729,67 @@ mod tests {
     #[should_panic(expected = "eight standard deviations")]
     fn the_list_refuses_what_the_check_refuses() {
         let _ = list_expecting(largest_fitting() * (1.0 + 1e-9));
+    }
+
+    /// The centre's list as P09.T36.b builds it, its classes from past its `victims` victims
+    /// (`FeatureLevelList::with_classes_from`), the recent classes expecting `recent` and the
+    /// carved classes `candidates`.
+    fn list_from_past_the_victims(victims: u16, recent: f64, candidates: f64) -> FeatureLevelList {
+        let profile = ClassProfile::new(ProfileShape::Plummer { scale: 3.0 }, 60.0, 1.0);
+        FeatureLevelList::with_classes_from(
+            milky_way_galaxy(),
+            0,
+            &GalacticPosition::ORIGIN,
+            MemberZero::Present,
+            ListIndex::Centre,
+            NonZeroU16::new(victims + 1).unwrap(),
+            vec![
+                ListClass::new(ClassId::CORE_COLLAPSE, recent, profile.clone()),
+                ListClass::new(ClassId::ACCRETING_WHITE_DWARF, candidates, profile),
+            ],
+        )
+    }
+
+    /// The check's bound is the list's with the victims and the recent classes counted, the list
+    /// numbering its classes from past the victims (P09.T36.b): the Milky Way's forecast, its
+    /// victims rounded to the 27 indices a list holds them in and its recent classes as forecast,
+    /// with the carved classes' candidates filling it to just under the bound, fits both; just
+    /// over, it fails the check and the list refuses to build (the next test).
+    #[test]
+    fn the_check_and_the_list_share_one_bound_past_the_victims() {
+        let largest = largest_fitting();
+        let mut f = centre_list_forecast(milky_way_galaxy().params()).unwrap();
+        f.victims = 27.0;
+        let recent = f.recent();
+        assert!(recent > 0.0, "{recent}");
+        f.candidates = largest * (1.0 - 1e-9) - f.victims - recent;
+        assert!(f.fits());
+        assert_eq!(f.verdict(), Ok(()));
+        let list = list_from_past_the_victims(27, recent, f.candidates);
+        assert_eq!(list.entries().next().map(|e| e.index()), Some(28));
+        assert!(list.len() > 60_000, "{}", list.len());
+        f.candidates = largest * (1.0 + 1e-9) - f.victims - recent;
+        assert!(!f.fits());
+        assert_eq!(
+            f.verdict(),
+            Err(ExceedFeatureListError::CentreListTooFull {
+                candidates: f.entries()
+            })
+        );
+    }
+
+    /// Just over the shared bound with the victims and the recent classes counted, the list from
+    /// past the victims refuses to build.
+    #[test]
+    #[should_panic(expected = "eight standard deviations")]
+    fn the_list_from_past_the_victims_refuses_what_the_check_refuses() {
+        let f = centre_list_forecast(milky_way_galaxy().params()).unwrap();
+        let recent = f.recent();
+        let _ = list_from_past_the_victims(
+            27,
+            recent,
+            largest_fitting() * (1.0 + 1e-9) - 27.0 - recent,
+        );
     }
 
     /// Every figure of a forecast, in a fixed order: the five counts and masses, then the hosts.

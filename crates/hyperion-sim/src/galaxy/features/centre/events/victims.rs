@@ -657,6 +657,23 @@ pub fn expected_victims(black_hole_mass: SolarMasses) -> f64 {
     disruption_rate(black_hole_mass).value() * span
 }
 
+/// The number of `galaxy`'s victims, the centre's list's first class at indices 1 to it: what
+/// [`CentreVictims::count`] gives, from the disruptions alone, with no victim drawn (P09.T36.b's
+/// classes start past it).
+///
+/// # Errors
+///
+/// As [`TidalDisruptionModel::of`], which no galaxy the builder allows reaches.
+///
+/// # Panics
+///
+/// Never: the victims are numbered by `u16` indices.
+pub(crate) fn victim_count(galaxy: &Galaxy) -> Result<u16, BuildTidalDisruptionModelError> {
+    let model = TidalDisruptionModel::of(galaxy)?;
+    Ok(u16::try_from(horizon_disruptions(&model).len())
+        .expect("the victims are numbered by u16 indices"))
+}
+
 /// The disruptions of `model` in the source horizon, in list order: by time, then by ID.
 #[must_use]
 fn horizon_disruptions(model: &TidalDisruptionModel) -> Vec<TidalDisruption> {

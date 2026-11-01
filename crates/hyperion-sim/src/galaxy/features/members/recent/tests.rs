@@ -19,6 +19,8 @@ use crate::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaState
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassProcess};
 use crate::galaxy::features::catalogue::FeatureCatalogue;
+use crate::galaxy::features::centre::events::victims::victim_count;
+use crate::galaxy::features::centre::recent::CentreRecent;
 use crate::galaxy::features::ids::{FeatureKind, FeatureProcess};
 use crate::galaxy::features::members::{
     FeatureInterior, FeatureInteriorCache, FeatureLevelList, NoInteriorCache, resolve_member,
@@ -114,11 +116,11 @@ fn list_id(feature: &FeatureRecord, index: u16) -> FeatureMemberId {
 fn the_feature_classes_are_held_only_until_the_26_bump() {
     assert!(
         GENERATOR_VERSION < FEATURE_CLASSES_VERSION,
-        "the 25 → 26 bump puts P09.T36 on the record: catalogue features list their recently \
-         dead and their luminous blue variables, and their band-E cells give them \
+        "the 25 → 26 bump puts P09.T36 on the record: catalogue features and the centre list \
+         their recently dead and their luminous blue variables, and their band-E cells give them \
          up. Delete `FEATURE_CLASSES_VERSION`, `FeatureClassesRules` with its `Unlisted` arm, \
          `GalaxyRules::feature_classes`, the `match`es in `FeatureStars::listing`, \
-         and `FeatureStars::claiming`, and this test, in the bump's own \
+         `FeatureStars::claiming` and the centre's list, and this test, in the bump's own \
          checkpoint commit, blessed at 25 (§1.6, C2)"
     );
     assert_eq!(
@@ -128,7 +130,8 @@ fn the_feature_classes_are_held_only_until_the_26_bump() {
 }
 
 /// The held arm is version 25's: a nursery that lists its classes under every 26 hold lists none
-/// under every 26 hold but this one, its list is index 0 alone and its interior claims no member.
+/// under every 26 hold but this one, its list is index 0 alone, its interior claims no member, and
+/// the centre lists nothing past its victims.
 #[test]
 fn the_held_arm_lists_nothing_and_claims_nothing() {
     let (off, on) = (held(), listed());
@@ -151,6 +154,9 @@ fn the_held_arm_lists_nothing_and_claims_nothing() {
         assert_eq!(FeatureStars::claiming(off, feature), None);
         assert!(FeatureStars::claiming(on, feature).is_some());
     }
+    let model = off.centre().unwrap();
+    let recent = CentreRecent::new(off, model, victim_count(off).unwrap());
+    assert_eq!(recent.expected(), Vec::new());
 }
 
 /// Design note 16's order: a nursery's classes are a run of `CORE_COLLAPSE`, `TYPE_IA` and
@@ -313,6 +319,47 @@ fn a_chart_finds_every_shell_of_an_association_without_its_nested_grid() {
     let (members, claimed) = cells_against_the_list(off, on, &cluster);
     eprintln!("the cluster's band-E cells: {members} members, {claimed} of them the list's");
     assert!(members > 0);
+}
+
+/// P09.T36.b: a globular lists its Type Ia alone and no entry of it ever reports a shell, over
+/// every globular of the galaxy and sixteen indices of each past its list; its cells claim
+/// nothing, and its Type Ia explode within the source horizon, where a host with no window is
+/// seen. The globulars' Type Ia expected over it sum to 0.1–0.5 over the whole system, the plan's
+/// figure (the delay-time distribution on their present mass).
+#[test]
+fn no_globular_entry_ever_reports_a_shell() {
+    let on = listed();
+    let (mut globulars, mut expected, mut entries) = (0_u32, 0.0_f64, 0_u32);
+    for feature in FeatureCatalogue::walk_process(on, FeatureProcess::Globular) {
+        globulars += 1;
+        let stars = FeatureStars::of(on, &feature).unwrap();
+        assert_eq!(FeatureStars::claiming(on, &feature), None);
+        for class in recent_classes(on, &feature) {
+            assert_eq!(class.class(), ClassId::TYPE_IA, "{:?}", feature.id());
+            expected += class.expected();
+        }
+        let list = FeatureLevelList::of(on, &feature);
+        let past = u16::try_from(list.len()).unwrap();
+        let listed = list.recent_entries(on).collect::<Vec<_>>();
+        let beyond = (past..past + 16)
+            .filter_map(|index| stars.entry(on, RecentClass::TypeIa, index, feature.position()));
+        for entry in listed.into_iter().chain(beyond) {
+            entries += 1;
+            assert_eq!(entry.class(), RecentClass::TypeIa);
+            assert!(
+                entry.window().is_none(),
+                "{:?}",
+                entry.member().record().id()
+            );
+            assert!(in_horizon(entry.site().unwrap().death()));
+        }
+        for class in [RecentClass::CoreCollapse, RecentClass::LuminousBlueVariable] {
+            assert!(stars.entry(on, class, 1, feature.position()).is_none());
+        }
+    }
+    eprintln!("{globulars} globulars expect {expected:.4} Type Ia; {entries} entries");
+    assert!(globulars > 100 && entries > 1_000, "{globulars} {entries}");
+    assert!((0.1..=0.5).contains(&expected), "{expected}");
 }
 
 /// The digest (`f64_digest`) of the new arm's entries ([`the_new_arm_s_entries_are_pinned`]):
@@ -629,12 +676,30 @@ fn feature_tallies(galaxy: &Galaxy) -> [Tally; 2] {
     .fold([Tally::default(); 2], |[a, b], [c, d]| [a.add(c), b.add(d)])
 }
 
+/// The centre's kept core collapses and Type Ia.
+fn centre_tally(galaxy: &Galaxy) -> Tally {
+    let model = galaxy.centre().unwrap();
+    let recent = CentreRecent::new(galaxy, model, victim_count(galaxy).unwrap());
+    let mut tally = Tally::default();
+    for entry in recent.list(galaxy).entries() {
+        let class = RecentClass::of(entry.class()).unwrap();
+        if class == RecentClass::LuminousBlueVariable {
+            continue;
+        }
+        if let Some(entry) = recent.entry(galaxy, model, class, entry.index()) {
+            let death = entry.site().expect("a death has a site").death();
+            tally.count(death, is_open(entry.site(), entry.window()));
+        }
+    }
+    tally
+}
+
 /// P09.T36.a's census of the sampled Milky Way under every 26 hold, each side's deaths counted
 /// in the source horizon, (−(L + H), +H], where every side is seen at its rate whatever its
-/// windows: the features' core collapses against the field's class, 0.842 of them (3,570 of
-/// 4,238), in the plan's 0.7–0.9 (ruling 118.2); and the features' shells at the
+/// windows: the features' core collapses against the field's class and the centre's, 0.839 of
+/// them (3,570 of 4,256), in the plan's 0.7–0.9 (ruling 118.2); and the features' shells at the
 /// epoch, core collapses and Type Ia, against every distinct shell of the field's two classes, the
-/// features', 0.442 of 8,616, against the plan's 0.15–0.35: pinned to 10⁻³ as
+/// features' and the centre's, 0.442 of 8,617, against the plan's 0.15–0.35: pinned to 10⁻³ as
 /// measured and logged, not tuned (a finding: 3,597 of the features' 7,569 core-collapse entries
 /// are still shells at the epoch, each ended at its bubble's wall, against 1,718 of the field's
 /// 2,433).
@@ -652,13 +717,14 @@ fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
     let field_ia = class_tally(on, &TypeIaProcess::new(on), ClassId::TYPE_IA, |e| {
         (e.site().death(), is_shell(e.supernova()))
     });
-    let deaths = core.deaths + field_core.deaths;
-    let shells = core.shells + ia.shells + field_core.shells + field_ia.shells;
+    let centre = centre_tally(on);
+    let deaths = core.deaths + field_core.deaths + centre.deaths;
+    let shells = core.shells + ia.shells + field_core.shells + field_ia.shells + centre.shells;
     let in_features = f64::from(core.deaths) / f64::from(deaths);
     let features_shells = f64::from(core.shells + ia.shells) / f64::from(shells);
     eprintln!(
         "features: core collapses {core:?}, Type Ia {ia:?}; the field: core collapses \
-         {field_core:?}, Type Ia {field_ia:?}; in features {in_features:.3} \
+         {field_core:?}, Type Ia {field_ia:?}; the centre {centre:?}; in features {in_features:.3} \
          of the {deaths} core collapses in the horizon and {features_shells:.3} of the {shells} \
          distinct shells"
     );
