@@ -598,12 +598,13 @@ acceptance = "22044 full tracks; 135 of 1357 cells (9.9%) left to the exact trac
 name = "streams"
 path = "streams.rs"
 task = "streams"
-revision = 0
-inputs_sha256 = "5b9e18c781c760ab1b96fe7f7e19b781802b810454c2427d96417ac2a8bd9921"
-body_sha256 = "afca2ac98e6e0ab584d93c38c354e16ac4717184497ce3c096d9cb6b1829cdac"
-since_generator_version = 23
-provisional = true
-acceptance = "scratch: the brainstorm's 1.5, unfitted until P15.T11.b"
+revision = 1
+inputs_sha256 = "ef50d05df9400aad1696add83b50f2cdb08ff6a4482fd7f8ef60210bc32065fa"
+body_sha256 = "86f68ddf1f29ab52d1db3670ccf4a17c26f2ccc9e9848a5fbb4acad003506344"
+fingerprint = [179.0, 518392180.0684675, 16284.311539546214, 0.55, 1000.0, 256.0, 48.0, 0.0000001992718201617912, 0.000000015659482747832038]
+since_generator_version = 24
+provisional = false
+acceptance = "k 2.108 (one sigma 1.920–2.297; 0.5–4.5) against 121 ± 11.0 globular-like known streams inside the cut (141 in the census: 13 dwarf, 2 disc, 2 wide); globular tubes 0.652% of the halo at k (0.3–1%); without the density condition 1.132, at half and twice the contrast 1.729 and 2.644; per galaxy 1.897–2.303 over 8; 8 galaxies, 1959 tubes built, 0 failed"
 
 [[table]]
 name = "stripping"

@@ -1,0 +1,17 @@
+# The census of known stellar streams (plan 15, P15.T11.b; Design note 12): each stream of the
+# galstreams library, marked globular-like or not and inside the fit's cut or not, reduced by
+# `reduce.py` from the library's tag v1.2.1 (git-ignored, `data/cache/stream_census/`) and
+# committed as facts with the citation. The columns used are the master log's `Name`, `TrackName`,
+# `Imp`, `On`, `TrackRefs` and `width_phi2`, each track summary's `mid.distance` and `width_phi2`,
+# and each track's `ra`, `dec` and `distance`.
+dataset = "stream_census"
+class = "committed"
+citation = "C. Mateu, galstreams: a library of Milky Way stellar stream footprints and tracks (2023, MNRAS 520, 5225), v1.2.1: 141 distinct streams; each stream's own references are listed in the library's master_log.discovery_refs.txt. Bonaca and Price-Whelan's census (2025, New Astron. Rev. 100, 101713) was not reached"
+url = "https://github.com/cmateu/galstreams/archive/refs/tags/v1.2.1.tar.gz"
+retrieved = "2026-11-01"
+release = "the tag v1.2.1, published 2026-06-03 (the archive's sha256 4326df71b282d2fd4a14567ae98213dd18fd129e3c34091bb446673e4829753a), reduced by reduce.py"
+licence = "BSD 3-Clause, Copyright (c) 2017, Cecilia Mateu, which allows redistribution with the notice; only names, distances, widths and the marks reduce.py derives, facts, are committed"
+
+[[files]]
+name = "census.csv"
+sha256 = "887e01186409ade3c13d59bafc34925c8057f1cee1781b1640928f95571bd4a8"

@@ -1919,8 +1919,8 @@ T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fi
 Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `HELIUM_VERSION`;
 Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
 decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
-scratch bits, no bump; Risks, "T10.a as built") and T11.a (`streams` registered, provisional;
-Risks, "T11.a as built").
+scratch bits, no bump; Risks, "T10.a as built"), T11.a (`streams` registered, provisional;
+Risks, "T11.a as built") and T11.b (fitted, held for 27; Risks, "T11.b as built").
 
 ## Verification
 
@@ -3223,3 +3223,14 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   - 26's rescan is `just fit lbv` at 26. Its checks are the sim's slow
     `lbv::sampler::tests::the_table_is_the_scan_of_plan_06_s_tracks` (moved from `tables::lbv`)
     and the fit's slow `lbv_table_is_reproduced`.
+- **T11.b as built (lane `p15-t11b`, 2026-11-01, at 24; held for 27, no output moves).**
+  - `streams` is revision 1 and `Slow` (about 5 minutes on 16 threads in release), with
+    `manifests/streams.smoke.toml` and the dataset `stream_census` (galstreams v1.2.1, reduced by
+    its `reduce.py`). The table holds `ORPHAN_STREAMS_PER_GLOBULAR` (1.5, held) and
+    `ORPHAN_STREAMS_PER_GLOBULAR_27` (2.108, one sigma 1.92–2.30), `@generated`.
+  - New doors in the sim, reading nothing generated: `DebrisPlan::orphan_beyond_count` (testing,
+    hidden) and `HaloProfile::density_without_cut`.
+  - The cut's mass is that of the stretches that pass all three conditions, and its halo the
+    components' law without the 65,000 ly cut (lean, 2026-11-01). The census's 41 tracks with
+    galstreams' 1 kpc placeholder distances (STREAMFINDER's) count as within 30 kpc (lean,
+    2026-11-01).

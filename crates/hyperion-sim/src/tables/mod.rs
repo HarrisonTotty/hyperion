@@ -422,9 +422,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "streams",
-        revision: 0,
-        since_generator_version: 23,
-        provisional: true,
+        revision: 1,
+        since_generator_version: 24,
+        provisional: false,
     },
     TableInfo {
         name: "stripping",

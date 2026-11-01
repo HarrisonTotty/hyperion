@@ -177,15 +177,27 @@ impl OrphanDraw {
     /// ([`Galaxy::with_full_potential`]).
     #[must_use]
     pub(crate) fn orphan(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
+        assert!(k < self.count, "orphan {k} of {}", self.count);
+        self.orphan_at(galaxy, k)
+    }
+
+    /// Orphan `k`'s stream for any `k`, the count aside: what a draw of more orphans, under a
+    /// larger multiplier, would give as its orphan `k`, since every draw of an orphan is keyed by
+    /// `k` alone and the multiplier sets only how many there are (plan 15's fit of it,
+    /// P15.T11.b). `None` for a galaxy with no globular-born debris, which draws none.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not that of the galaxy the draw was made in, or if `galaxy` holds no
+    /// kinematic tables ([`Galaxy::with_full_potential`]).
+    #[must_use]
+    pub(crate) fn orphan_at(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
         assert_eq!(
             galaxy.seed(),
             self.seed,
             "an orphan is drawn in the galaxy its draw was made in"
         );
-        assert!(k < self.count, "orphan {k} of {}", self.count);
-        let debris = self
-            .debris
-            .expect("a draw of orphans has the galaxy's globular-born debris");
+        let debris = self.debris?;
         let (seed, tables) = (self.seed, galaxy.potential());
         let (radial, corotation, last_merger) = (&self.radial, self.corotation, self.last_merger);
         let key = ObjectKey::galaxy_item(k);

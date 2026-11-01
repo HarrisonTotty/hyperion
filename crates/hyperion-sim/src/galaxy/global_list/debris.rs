@@ -226,6 +226,31 @@ impl DebrisPlan {
         self.orphans.orphan(galaxy, k)
     }
 
+    /// Orphan `k`'s stream as [`orphan`](Self::orphan) draws it, for any `k`, numbered `number`:
+    /// what a galaxy whose multiplier of streams per globular draws more orphans than this one
+    /// would give as its orphan `k`, since each orphan's draws are keyed by `k` alone and the
+    /// multiplier sets only how many are drawn. Its list would number it after the living
+    /// globulars, in the order the orphans are found ([`finish`](Self::finish)), and its spray's
+    /// draws are keyed by that number. Plan 15's fit of the multiplier (P15.T11.b) observes the
+    /// orphans of every multiplier on its grid through it; nothing generated reads it.
+    ///
+    /// # Panics
+    ///
+    /// As [`orphan`](Self::orphan), but for the bound on `k`.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn orphan_beyond_count(
+        &self,
+        galaxy: &Galaxy,
+        k: u64,
+        number: StreamNumber,
+    ) -> Option<StreamSpec> {
+        self.orphans
+            .orphan_at(galaxy, k)
+            .map(|orphan| StreamSpec { number, ..orphan })
+    }
+
     /// The debris, from `orphans`, orphan `k`'s [`orphan`](Self::orphan) for each `k` from 0 in
     /// turn, of which it keeps the first [`orphan_room`](Self::orphan_room) found:
     /// [`Debris::generate`]'s, bit for bit. It reads no further than it keeps.
