@@ -315,11 +315,11 @@ path = "kick_defaults.rs"
 task = "kick_defaults"
 revision = 0
 inputs_sha256 = "7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0"
-body_sha256 = "4e77d2e6c0669cc049d1d8eb6c71a660c53345473374d190ae99c939853c3c62"
-fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
-since_generator_version = 25
+body_sha256 = "804ea316d7b78a5b868ce280ffe1df497174dc23556ce6d8435a34ffa4f96e3b"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.6610504417098095, 10.017002420403667, 8.33987464516553, 10.889849369138359, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
+since_generator_version = 26
 provisional = false
-acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0710 against 0.03–0.07, escape share 0.1156 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0020 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0008 in a share (light black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: none"
+acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0709 against 0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0009 in a share (light black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: the black-hole factor at an edge of light black holes above 100 km/s's interval, 0.75–1 (closed below)"
 
 [[table]]
 name = "kick_rank"
