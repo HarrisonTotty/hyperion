@@ -246,6 +246,7 @@ impl FeatureInterior {
         memo: Option<&mut BoundMemo<'_>>,
     ) -> (CellProposal, LocalCell) {
         let local = self.grid.local_cell(cell);
+        let memo = memo.map(|memo| (memo, self.grid.corner_key(cell)));
         (self.table.proposal_with(band, &local, memo), local)
     }
 
@@ -260,7 +261,7 @@ impl FeatureInterior {
     /// An empty [`BoundMemo`] for this interior's cells: one serves the cells of one sphere.
     #[must_use]
     pub(crate) fn bound_memo(&self) -> BoundMemo<'_> {
-        self.table.bound_memo()
+        self.table.bound_memo(self.grid)
     }
 
     /// [`expected_candidates`](Self::expected_candidates), bit for bit, its bound read from and

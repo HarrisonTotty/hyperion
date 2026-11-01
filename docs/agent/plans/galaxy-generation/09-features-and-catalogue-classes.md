@@ -5487,3 +5487,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   In the band between the window decisions, a white dwarf is decided by its own main sequence's
   end mass (`sse::main_sequence_end_mass`) against its window's start, so no white dwarf above the
   ceiling builds its track.
+- **P09.T10 perf, the bound memo by corner key (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** `BoundMemo` keeps a band's bound by the cell's `nested::CornerKey`, its level and the sum
+  of the squares of its nearest corner's offsets in cells, in a vector indexed by level, band and
+  that sum, in place of a `BTreeMap` by radius. One key has one radius to the bit, which a debug
+  assertion checks. It also keeps each band's cusp slope. `MemberClassTable::bound_memo` now takes
+  the grid, and `NestedGrid::corner_key` and `corner_squares_max` are new.

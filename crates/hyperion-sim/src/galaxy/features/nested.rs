@@ -69,6 +69,22 @@ pub struct NestedCell {
     cell: [u8; 3],
 }
 
+/// A cell's nearest corner as [`NestedGrid::corner_key`] gives it: its level and the sum of the
+/// squares of the corner's offsets in cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CornerKey {
+    level: u8,
+    squares: u32,
+}
+
+impl CornerKey {
+    /// Its level and its sum of squares.
+    #[must_use]
+    pub(crate) const fn parts(self) -> (u8, u32) {
+        (self.level, self.squares)
+    }
+}
+
 impl NestedCell {
     /// Its level, 0 the innermost.
     #[must_use]
@@ -195,6 +211,44 @@ impl NestedGrid {
     #[must_use]
     pub const fn levels(&self) -> u8 {
         self.levels
+    }
+
+    /// Where `cell`'s corner nearest the centre lies: its level, and the sum of the squares of
+    /// that corner's offsets from the centre in cells (P09.T10's bound memo). Two cells of the
+    /// grid with one key have one nearest corner radius, to the bit
+    /// ([`LocalCell::nearest_radius`](super::interior::LocalCell::nearest_radius) of
+    /// [`local_cell`](Self::local_cell)): their offsets are whole numbers of one power-of-two edge,
+    /// so the squares and their sum are exact.
+    #[must_use]
+    pub(crate) fn corner_key(self, cell: NestedCell) -> CornerKey {
+        let half = i32::from(self.cells_per_axis / 2);
+        let squares = cell
+            .cell
+            .iter()
+            .map(|&c| {
+                let lo = i32::from(c) - half;
+                let d = if lo > 0 {
+                    lo
+                } else if lo + 1 < 0 {
+                    -(lo + 1)
+                } else {
+                    0
+                };
+                d.unsigned_abs() * d.unsigned_abs()
+            })
+            .sum();
+        CornerKey {
+            level: cell.level,
+            squares,
+        }
+    }
+
+    /// The largest [`CornerKey`] sum of squares a cell of the grid has: three times the square of
+    /// half its cells per axis.
+    #[must_use]
+    pub(crate) fn corner_squares_max(self) -> u32 {
+        let half = u32::from(self.cells_per_axis / 2);
+        3 * half * half
     }
 
     /// Level `level`, or `None` past the last.
