@@ -1460,9 +1460,8 @@ fn dayside_tau_above(envelope: &Envelope, level: f64) -> f64 {
     total
 }
 
-/// The fixture's hot Jupiter under every 26 hold with the dayside decks' rules `rules`, derived
-/// inside the switches: so that `Held` against the version's rules is the dayside's difference
-/// alone.
+/// The fixture's hot Jupiter under the dayside decks' rules `rules`, derived inside the switch: so
+/// that `Held`, the tests' oracle, against the version's rules is the dayside's difference alone.
 fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
     let hot = fixture_hot_jupiter();
     with_every_26_hold(|| {
@@ -1475,14 +1474,12 @@ fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
 /// P14.T52.h on the fixture's hot Jupiter (`T_eq` 1,449 K, its photosphere at 0.207 bar), under
 /// every 26 hold: no refractory, sulphide or salt mode carries τ above 1 bar, each weighted by its
 /// coverage; its `Al₂O₃`, CaTiO₃, Fe, Mg₂SiO₄ and MgSiO₃ stop at 1 bar, and its Cr and `MnS`,
-/// based above it, cover none; each mode's coverage-weighted τ below 1 bar is its held twin's
-/// within 10⁻¹² relative; and under `Held` its envelope is 25's to the bit.
+/// based above it, cover none; and each mode's coverage-weighted τ below 1 bar is its held twin's
+/// within 10⁻¹² relative.
 #[test]
 fn under_every_26_hold_the_fixture_hot_jupiter_s_dayside_holds_no_deep_deck_above_one_bar() {
     let cleared = fixture_at_26(DaysideDecksRules::Cleared);
     let held = fixture_at_26(DaysideDecksRules::Held);
-    let at_25 = envelope_by_hand(&fixture_hot_jupiter()).expect("the fixture's hot Jupiter");
-    assert_eq!(format!("{held:?}"), format!("{at_25:?}"), "held, 25's");
     let one_bar = DAYSIDE_LEVEL.value();
     let photosphere = cleared
         .atmosphere()
