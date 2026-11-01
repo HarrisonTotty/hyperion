@@ -2708,10 +2708,11 @@ mod tests {
         );
     }
 
-    /// Passes for its worker's start, then flushes: the probe after the first job fails.
+    /// Passes for its worker's start and its twin's, then flushes: the probe after the first job
+    /// fails.
     fn flushes_after_the_first_job() -> FlushProbe {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        if CALLS.fetch_add(1, Ordering::SeqCst) == 0 {
+        if CALLS.fetch_add(1, Ordering::SeqCst) < 2 {
             FlushProbe::KEEPS_SUBNORMALS
         } else {
             FlushProbe::FLUSHES_OUTPUTS

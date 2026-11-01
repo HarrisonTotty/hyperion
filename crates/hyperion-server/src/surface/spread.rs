@@ -326,10 +326,11 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
-    /// Passes for the two workers' starts, then flushes: the probe after the first job fails.
+    /// Passes for the two workers' starts and their twins', then flushes: the probe after the first
+    /// job fails.
     fn flushes_after_the_starts() -> FlushProbe {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        if CALLS.fetch_add(1, Ordering::SeqCst) < 2 {
+        if CALLS.fetch_add(1, Ordering::SeqCst) < 4 {
             FlushProbe::KEEPS_SUBNORMALS
         } else {
             FlushProbe::FLUSHES_OUTPUTS
