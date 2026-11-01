@@ -531,7 +531,9 @@ Four classes, shared by the whole ship:
 - Every button has a text label that is visible in every state. Icons are additions to a
   label, never a replacement, and come from one shared set.
 - A control shows each of these states distinctly: enabled, hovered, focused, pressed,
-  selected, disabled, and pending. A disabled control says why on hover or focus.
+  selected, disabled, and pending. A disabled control says why on hover or focus. A held-back page
+  tab is also struck through, in every state: a tab has no outline, and one not chosen is already
+  `--text-muted`, so the stroke tells the two apart by shape, taking no room.
 - Opposites come in congruent pairs in a consistent order: `ON`/`OFF`, `OPEN`/`CLOSE`,
   `ENABLE`/`INHIBIT`, `AUTO`/`MAN`. Command names must be hard to confuse with each other.
 - A view's exposure automation is commanded by the congruent pair `ENABLE` and `INHIBIT`, in that
@@ -740,11 +742,11 @@ Four classes, shared by the whole ship:
     `0.25rem` outside the bracket's place, and, while the chevrons are drawn, above or below all
     four, never on a chevron's line, and predicted paths dashed;
   - its frame name, its time, its style and its camera mode, always shown on its label block;
-  - where its camera is and where it looks, `POSITION` and `POINTING`, on the `PRIMARY` view's
-    label block and on the `CAMERA` panel of the `CONTROLS` view; an instrument's, which its slot
-    has no room for, on that panel alone, folding with it where the page folds that panel (see
-    "Layout"); and on the `CAMERA` line, while a drag or the arrows have turned a `SEAT` or `CHASE`
-    camera from its preset, its `LOOK`;
+  - where its camera is and where it looks, `POSITION` and `POINTING`, on the `PRIMARY` view's label
+    block and on the `CAMERA` panel of the `CONTROLS` view; an instrument's, which its slot has no
+    room for, on that panel's `CAMERA` page alone, folding with it where the page folds that panel
+    (see "Layout"); and on the `CAMERA` line, while a drag or the arrows have turned a `SEAT` or
+    `CHASE` camera from its preset, its `LOOK`;
   - whenever the camera is off the hull, `POSITIONS AS SEEN FROM SHIP`: positions are as seen from
     the ship at its light-time, not from the camera;
   - the canvas paired with a DOM list of what is in the view, contacts, bodies and the selection,
@@ -776,10 +778,11 @@ Four classes, shared by the whole ship:
     terrain its contour interval, and star limit, which stand beside its canvas, and its statements
     about what it draws, which run under the lines and the canvas across the slot; in its slot it states no survey line, `DATUM` or terrain readout,
     since the slot has no room for their lines, though it draws the survey's edge and states
-    its own terrain annunciations and faults; while `CONTROLS` names it, they stand on its `GROUND`
-    page (below); its exposure is the primary's, shown with
-    `SOURCE PRIMARY`; a statement of the photorealistic style that the primary's block shows already
-    is not repeated, save `ATMOSPHERE: APPROXIMATE` above a reason line of the instrument's own.
+    its own terrain annunciations and faults; while `CONTROLS` names it, its survey line, `DATUM`
+    and terrain readout stand on its `GROUND` page (below); its exposure is the primary's, shown
+    with `SOURCE PRIMARY`; a statement of the photorealistic style that the primary's block shows
+    already is not repeated, save `ATMOSPHERE: APPROXIMATE` above a reason line of the instrument's
+    own.
     `SCENE`, `METER`, `QUALITY`, `ROTATION: NOT YET MODELLED`,
     `ROTATION: NOT RESOLVED`, `EASED CAMERA MOVES` and `IMAGE: DETAIL LIMITED` stand on the
     primary's block alone. An
