@@ -2,9 +2,9 @@
  * The polarisation correction's bake (plan R08, R08.T14.e; Design note 10): its table on the bake's
  * grid, the depolarisers (test 3), the 8-stream correction against a 16-stream vector solve on four
  * columns (test 4), the modes past m = 2 (test 5), the channels against the 15 bins (test 6), the
- * predicate and the refusals. Every check is deterministic; each column's solves are made once and
- * shared by the tests that read them. Tests 4 to 6 hold T14.e's figures, which are a sun's above
- * the horizontal, on the grid's daylit rows (`bake.ts`'s `THICK_BAKE_DAY_GRID`); below it the
+ * predicate and the refusals, and R08.T15.b.2's guard of the Venus-class cases' scalar gate. Every
+ * check is deterministic; each column's solves are made once and shared by the tests that read
+ * them. Tests 4 to 6 hold T14.e's figures, which are a sun's above the horizontal, on the grid's daylit rows (`bake.ts`'s `THICK_BAKE_DAY_GRID`); below it the
  * correction is held formed and finite (R08.T14.d.2).
  */
 import { describe, expect, it } from "vitest";
@@ -723,6 +723,131 @@ describe("the channels against the 15 bins converted (test 6)", () => {
       },
     );
   }
+});
+
+/** The largest |Σ_m (vector − scalar) cos mΔφ| ÷ Σ_m scalar cos mΔφ over `points` and the azimuths. */
+function worstShare(
+  vector: Float64Array,
+  scalar: Float64Array,
+  points: ReadonlyArray<number>,
+  upTo: number,
+): number {
+  let worst = 0;
+  for (const base of points) {
+    for (const degrees of AZIMUTHS_DEG) {
+      const phi = (degrees * Math.PI) / 180;
+      const s = atAzimuth(scalar, base, upTo, phi);
+      const v = atAzimuth(vector, base, upTo, phi);
+      if (!(s > 0)) {
+        throw new Error(`the scalar I is ${s} at point ${base}, Δφ ${degrees}°`);
+      }
+      worst = Math.max(worst, Math.abs(v - s) / s);
+    }
+  }
+  return worst;
+}
+
+/** The boundaries' points, `[s][u]` at the grid's daylit μ₀ and upward view cosines. */
+function boundaryPoints(): number[] {
+  const grid = THICK_BAKE_DAY_GRID;
+  return Array.from(
+    { length: grid.sunCosines.length * grid.upwardCosines.length },
+    (_, i) => i * POLARISATION_MODES,
+  );
+}
+
+/**
+ * The Venus-class cases' guard (plan R08, R08.T15.b.2; main's ruling of 2026-11-01): the cases are
+ * gated by their references' scalar I, the Stokes mode's I weight not converging over their
+ * thousands of Rayleigh scatterings, so the polarisation the scalar reading neglects is held here,
+ * deterministically. The 16-stream vector solve against its own scalar solve (m ≤ 2), on the
+ * Venus-class column at the cases' ground albedo 0.15, on the daylit grid: vector − scalar within
+ * 1% of the scalar, a fifth of the gate's 5% term. If a changed column or matrix fails it, the
+ * scalar gate is refused for Venus. Measured (research, 2026-11-01): the ground's sky −0.62% to
+ * +0.20%, J below the cloud base −0.56% to +0.55%, the top's azimuthal mean −0.17% to +0.13%.
+ */
+describe("the Venus-class cases' scalar gate's guard (R08.T15.b.2)", () => {
+  /** The cases' ground albedo (`thickCases.ts`'s Venus cases). */
+  const CASE_ALBEDO = 0.15;
+  /** vector ÷ scalar − 1, at most: the ruling's 1%. */
+  const BOUND = 0.01;
+  const guard = once(async () => {
+    const fixture = await venusFixture();
+    const column: SpectralColumn = {
+      ...fixture.column,
+      groundAlbedo: [CASE_ALBEDO, CASE_ALBEDO, CASE_ALBEDO],
+    };
+    const prepared = preparePolarisation(column, [lightOf(fixture)], {
+      grid: THICK_BAKE_DAY_GRID,
+    });
+    const sources = [0, 1, 2].map((c) =>
+      first(polarisationSources(prepared, fixture.body, 0, c, { streams: 16 })),
+    );
+    return { column, prepared, sources };
+  });
+
+  it(
+    "holds the sky at the ground within 1% of the scalar, every μ₀, μ_v and Δφ 0–180° every 45°",
+    { timeout: COLUMN_TIMEOUT_MS },
+    async () => {
+      const { sources } = await guard();
+      for (const source of sources) {
+        expect(
+          worstShare(
+            source.groundVector,
+            source.groundScalar,
+            boundaryPoints(),
+            POLARISATION_MODES,
+          ),
+        ).toBeLessThan(BOUND);
+      }
+    },
+  );
+
+  it(
+    "holds J at every altitude below the cloud base within 1% of the scalar",
+    { timeout: COLUMN_TIMEOUT_MS },
+    async () => {
+      const { column, prepared, sources } = await guard();
+      const cloud = column.terms.find((term) => term.source.kind === "aerosol");
+      if (cloud === undefined) {
+        throw new Error("the Venus-class column has its cloud");
+      }
+      const altitudes = prepared.layering.altitudesM;
+      const baseM = Math.min(
+        ...Array.from(altitudes).filter((h) => densityAt(cloud.density, h) > 0),
+      );
+      const below = Array.from(altitudes.entries()).filter(([, h]) => h < baseM);
+      // The ground and the clear air beneath the cloud: 10 of the grid's 33 altitudes.
+      expect(below.map(([, h]) => h)).toContain(0);
+      expect(below.length).toBeGreaterThan(1);
+      const grid = THICK_BAKE_DAY_GRID;
+      const suns = grid.sunCosines.length;
+      const v2 = 2 * grid.upwardCosines.length;
+      const points = below.flatMap(([a]) =>
+        Array.from({ length: suns * v2 }, (_, i) => (a * suns * v2 + i) * POLARISATION_MODES),
+      );
+      for (const source of sources) {
+        expect(worstShare(source.vector, source.scalar, points, POLARISATION_MODES)).toBeLessThan(
+          BOUND,
+        );
+      }
+    },
+  );
+
+  it(
+    "holds the top's upward I within 1% of the scalar, its azimuthal mean (m = 0) alone",
+    { timeout: COLUMN_TIMEOUT_MS },
+    async () => {
+      const { sources } = await guard();
+      // m ≤ 2 cannot represent the droplets' lobes at the top: its sum at Δφ ≠ 0 is no usable I.
+      for (const source of sources) {
+        expect(worstShare(source.topVector, source.topScalar, boundaryPoints(), 1)).toBeLessThan(
+          BOUND,
+        );
+      }
+    },
+  );
 });
 
 /** A column of one term, on the three-bar world's air. */
