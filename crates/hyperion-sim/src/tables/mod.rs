@@ -255,9 +255,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "displaced_forms",
-        revision: 1,
-        since_generator_version: 25,
-        provisional: true,
+        revision: 3,
+        since_generator_version: 26,
+        provisional: false,
     },
     TableInfo {
         name: "dwarf_sequence",
