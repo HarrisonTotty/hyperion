@@ -4401,7 +4401,7 @@ fn table_planet_inputs(
 /// climate at its own spin (25.19°, 24.62 h; `hooks::surface`'s table) and its generated heat flow
 /// at the irradiation for its measured Bond albedo, as a record derives a body under its law, and
 /// that climate's body ([`at_its_spin`]).
-fn table_mars_at_its_spin() -> (DerivedBody, AtmosphereInputs, Atmosphere, ClimateBody) {
+pub(crate) fn table_mars_at_its_spin() -> (DerivedBody, AtmosphereInputs, Atmosphere, ClimateBody) {
     let batch = table();
     let mars = *found(&batch, "Mars");
     let inputs = table_mars_inputs(&mars);

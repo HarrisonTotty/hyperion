@@ -3,14 +3,18 @@
 //! (slow).
 
 use super::*;
-use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, historic_sun};
-use crate::planetary::derive::{DerivedBody, habitable_zone, habitable_zone_of};
-use crate::planetary::hooks::figures::tests::{europa, figures_of, figures_table, measured_europa};
-use crate::planetary::hooks::surface::tests::{conditions_of, spin_of};
-use crate::planetary::hooks::{GlobalFigures, Subsurface};
+use crate::planetary::chem::partition::CondensatePhase;
+use crate::planetary::derive::solar::{PLANETS, SOLAR_AGE, historic, historic_sun};
+use crate::planetary::derive::{habitable_zone, habitable_zone_of};
+use crate::planetary::hooks::Subsurface;
+use crate::planetary::hooks::cold_traps::{RecordColdTraps, RecordField};
+use crate::planetary::hooks::figures::table_figures;
+use crate::planetary::hooks::figures::tests::{europa, measured_europa};
+use crate::planetary::hooks::surface::tests::{inputs_of, spin_of};
+use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
 use crate::planetary::record::Section;
 use crate::planetary::system::tests::{SEED, id, whole};
-use crate::planetary::testing::synthetic_star;
+use crate::planetary::testing::{synthetic_star, with_every_26_hold};
 use crate::planetary::{PlanetarySystem, SystemContext, generate};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
@@ -42,21 +46,51 @@ fn sun_clock() -> HostClock {
     }
 }
 
-/// The table planet `name` about the present Sun at its age, as the generator's rules derive it
-/// (plan 14's Solar System table, NASA's elements), with its conditions under its own spin and
-/// its figures: its inputs as `hooks_at` would gather them.
-fn table_planet(name: &str, figures: &GlobalFigures) -> HabitabilityInputs {
-    let body: DerivedBody = crate::planetary::derive::solar::historic(name);
-    let conditions = conditions_of(&body, spin_of(name)).expect("a table planet has a surface");
+/// The table planet `name` about the present Sun at its age, by the table's record path: the
+/// generator's derivation (plan 14's Solar System table, NASA's elements), its figures, its
+/// conditions under its own spin with the figures' heat flow and ocean weight, and P14.T51.a's
+/// published condensates, whose liquid water the conditions then read, as a record's do (the path
+/// of `hooks::surface::tests::the_batch_publishes_the_table_s_condensates`): its inputs as
+/// `hooks_at` gathers them, under the rules in force where it is called.
+fn table_planet(name: &str) -> HabitabilityInputs {
+    let body = historic(name);
+    let figures = table_figures(&body).expect("a table planet has a surface");
+    let inputs = SurfaceInputs {
+        heat_flow: figures.heat_flow(),
+        ocean_weight: figures.ocean_weight(),
+        ..inputs_of(&body, spin_of(name))
+    };
+    let conditions = SurfaceConditions::derive(&inputs).expect("a table planet has a surface");
+    let traps = RecordColdTraps {
+        field: RecordField::Carried(None),
+    };
+    let (_, published) = figures.condensates_under(
+        body.atmosphere(),
+        &conditions,
+        body.surface_gravity(),
+        &traps,
+        &conditions.zonal_insolation(),
+    );
+    let conditions = conditions.with_condensates(&published);
     let &(_, _, _, a, e) = PLANETS
         .iter()
         .find(|(n, ..)| *n == name)
         .expect("a table planet");
+    let water = Gas::Water.substance();
     HabitabilityInputs {
         class: body.class(),
         mass: body.mass(),
         state: body.atmosphere().published_state(),
-        surface: Some(reading(&conditions, figures)),
+        surface: Some(SurfaceReading {
+            pressure: conditions.surface_pressure(),
+            liquid_water: conditions.liquid_water(),
+            subsurface_ocean: matches!(figures.subsurface_ocean(), Subsurface::Ocean(_)),
+            mean_temperature: conditions.mean_surface_temperature(),
+            holds_water: [CondensatePhase::Liquid, CondensatePhase::Solid]
+                .into_iter()
+                .any(|phase| published.entry(water, phase).is_some()),
+            water_state: figures.water_state(),
+        }),
         zone: Some(sun_zone()),
         semi_major_axis: Metres::new(a * METRES_PER_AU),
         eccentricity: Eccentricity::new(e).unwrap(),
@@ -66,71 +100,114 @@ fn table_planet(name: &str, figures: &GlobalFigures) -> HabitabilityInputs {
     }
 }
 
-/// What a surface of conditions `conditions` and figures `figures` gives the assessment.
-fn reading(
-    conditions: &crate::planetary::hooks::SurfaceConditions,
-    figures: &GlobalFigures,
-) -> SurfaceReading {
-    SurfaceReading {
-        pressure: conditions.surface_pressure(),
-        liquid_water: conditions.liquid_water(),
-        subsurface_ocean: matches!(figures.subsurface_ocean(), Subsurface::Ocean(_)),
-    }
-}
-
-/// The table's Earth, Mars and Venus, assessed.
-fn table_assessments() -> [(&'static str, HabitabilityAssessment); 3] {
-    let table = figures_table();
+/// The table's Earth, Mars and Venus, assessed under the rules in force where it is called.
+fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssessment); 3] {
     ["Earth", "Mars", "Venus"].map(|name| {
-        let inputs = table_planet(name, figures_of(&table, name));
-        (name, HabitabilityAssessment::assess(&inputs))
+        let inputs = table_planet(name);
+        (name, inputs, HabitabilityAssessment::assess(&inputs))
     })
 }
 
+/// The table's Earth, Mars and Venus under the rules at generator version 24 and under every 26
+/// hold (`with_every_26_hold`), each printed with its surface pressure: Earth `Temperate` with no
+/// limit, Mars a frozen `Marginal` desert, below water's triple point exactly where its pressure
+/// is, and Venus a dry `Hostile` runaway.
 #[test]
 fn earth_is_temperate_mars_marginal_and_venus_a_hostile_runaway() {
-    let [earth, mars, venus] = table_assessments();
-    for (name, assessment) in [earth, mars, venus] {
-        eprintln!(
-            "{name}: {:?} {:?}",
-            assessment.class(),
-            assessment.limits().iter().collect::<Vec<_>>()
+    let triple = water_triple_pressure().value();
+    for (rules, assessed) in [
+        ("version 24", table_assessments()),
+        ("every 26 hold", with_every_26_hold(table_assessments)),
+    ] {
+        for (name, inputs, assessment) in &assessed {
+            let surface = inputs.surface.expect("a table planet has a surface");
+            eprintln!(
+                "{rules}: {name} at {:.1} Pa, {:.1} K: {:?} {:?}",
+                surface.pressure.value(),
+                surface.mean_temperature.value(),
+                assessment.class(),
+                assessment.limits().iter().collect::<Vec<_>>()
+            );
+        }
+        let [(_, _, earth), (_, mars_inputs, mars), (_, _, venus)] = &assessed;
+        assert_eq!(earth.class(), HabitabilityClass::Temperate, "{rules}");
+        assert!(earth.limits().is_empty(), "{rules}: {:?}", earth.limits());
+        assert_eq!(mars.class(), HabitabilityClass::Marginal, "{rules}");
+        let mars_pressure = mars_inputs.surface.unwrap().pressure.value();
+        let limits = mars.limits();
+        assert!(limits.contains(HabitabilityLimit::FrozenSurface), "{rules}");
+        assert_eq!(
+            limits.contains(HabitabilityLimit::BelowTriplePoint),
+            mars_pressure < triple,
+            "{rules}"
         );
+        assert!(
+            !limits.contains(HabitabilityLimit::OutsideOptimisticZone),
+            "{rules}"
+        );
+        assert_eq!(venus.class(), HabitabilityClass::Hostile, "{rules}");
+        for limit in [
+            HabitabilityLimit::RunawayGreenhouse,
+            HabitabilityLimit::OutsideOptimisticZone,
+            HabitabilityLimit::DrySurface,
+        ] {
+            assert!(venus.limits().contains(limit), "{rules}: {limit:?}");
+        }
     }
-    assert_eq!(earth.1.class(), HabitabilityClass::Temperate);
-    assert!(earth.1.limits().is_empty(), "{:?}", earth.1.limits());
-    assert_eq!(mars.1.class(), HabitabilityClass::Marginal);
-    assert!(
-        !mars
-            .1
-            .limits()
-            .contains(HabitabilityLimit::OutsideOptimisticZone)
+}
+
+/// The table's Mars at its own spin (`derive::atmosphere::tests::table_mars_at_its_spin`), whose
+/// CO₂ cap P14.T53.h balances under every 26 hold, as the record path above does not (it derives
+/// with no spin): its surface pressure, CO₂ and N₂ and the rest, against water's triple point,
+/// 611.657 Pa. The cap's pilot settled CO₂ alone at 565.8 Pa; the surface pressure, the sum of
+/// the partial pressures, lies above the triple point, so the assessment's `BelowTriplePoint` does
+/// not fire there either. Printed, with the CO₂ share, and the limit asserted to follow the sum.
+#[test]
+fn the_cap_balanced_mars_s_surface_pressure_against_the_triple_point() {
+    use crate::planetary::derive::atmosphere::tests::table_mars_at_its_spin;
+
+    let triple = water_triple_pressure().value();
+    let (_, _, air, _) = with_every_26_hold(table_mars_at_its_spin);
+    let pressure = air.surface_pressure().expect("Mars has a surface").value();
+    let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
+    eprintln!(
+        "the table's Mars at its own spin, every 26 hold: {pressure:.2} Pa ({co2:.2} Pa of CO2), \
+         {:.2} K, {:?}; water's triple point {triple} Pa",
+        air.surface_temperature().value(),
+        air.published_state()
     );
-    assert_eq!(venus.1.class(), HabitabilityClass::Hostile);
-    assert!(
-        venus
-            .1
-            .limits()
-            .contains(HabitabilityLimit::RunawayGreenhouse)
+    let base = table_planet("Mars");
+    let surface = base.surface.expect("the table's Mars has a surface");
+    let inputs = HabitabilityInputs {
+        state: air.published_state(),
+        surface: Some(SurfaceReading {
+            pressure: Pascals::new(pressure),
+            mean_temperature: air.surface_temperature(),
+            ..surface
+        }),
+        ..base
+    };
+    let (class, limits) = assess(&inputs);
+    assert_eq!(class, HabitabilityClass::Marginal);
+    assert_eq!(
+        limits.contains(HabitabilityLimit::BelowTriplePoint),
+        pressure < triple,
+        "{pressure} Pa"
     );
-    assert!(
-        venus
-            .1
-            .limits()
-            .contains(HabitabilityLimit::OutsideOptimisticZone)
-    );
+    assert!(co2 < triple && pressure > triple, "{co2} and {pressure} Pa");
 }
 
 /// Europa, its measured bulk with its subsurface ocean by plan 14's rule under its tide and the
-/// generated Europa's air, about Jupiter's orbit (the table's): airless, beyond the zone, with an
-/// ocean beneath its ice.
+/// generated Europa's air, about Jupiter's orbit (the table's): airless, frozen, beyond the zone,
+/// with an ocean beneath its ice.
 #[test]
 fn europa_is_a_subsurface_ocean() {
     let (figures, ocean, _) = measured_europa();
     assert!(matches!(ocean, Subsurface::Ocean(_)), "{ocean:?}");
     let air = europa();
     let &(_, _, _, a, e) = PLANETS.iter().find(|(n, ..)| *n == "Jupiter").unwrap();
-    // Europa's measured mass, 4.7998 × 10²² kg (the figures' fixture), 8% water: rocky.
+    // Europa's measured mass, 4.7998 × 10²² kg (the figures' fixture), 8% water: rocky. Its
+    // surface is water ice, which a record lists as its crust's.
     let assessment = HabitabilityAssessment::assess(&HabitabilityInputs {
         class: PlanetClass::Rocky,
         mass: EarthMasses::new(4.7998e22 / EARTH_MASS_KG),
@@ -142,6 +219,9 @@ fn europa_is_a_subsurface_ocean() {
                 .expect("Europa has a surface"),
             liquid_water: false,
             subsurface_ocean: matches!(figures.subsurface_ocean(), Subsurface::Ocean(_)),
+            mean_temperature: air.atmosphere().surface_temperature(),
+            holds_water: true,
+            water_state: air.atmosphere().water_state(),
         }),
         zone: Some(sun_zone()),
         semi_major_axis: Metres::new(a * METRES_PER_AU),
@@ -161,15 +241,17 @@ fn europa_is_a_subsurface_ocean() {
         HabitabilityLimit::OutsideConservativeZone,
         HabitabilityLimit::NoAtmosphere,
         HabitabilityLimit::BelowTriplePoint,
+        HabitabilityLimit::MassOutsideTemperateRange,
+        HabitabilityLimit::FrozenSurface,
     ] {
         assert!(assessment.limits().contains(limit), "{limit:?}");
     }
+    assert!(!assessment.limits().contains(HabitabilityLimit::DrySurface));
 }
 
 /// The table's Earth's inputs, which every edge test changes one part of.
 fn earth() -> HabitabilityInputs {
-    let table = figures_table();
-    table_planet("Earth", figures_of(&table, "Earth"))
+    table_planet("Earth")
 }
 
 /// The class and limits of `inputs`.
@@ -300,11 +382,13 @@ fn an_orbit_that_leaves_the_optimistic_zone_is_highly_eccentric() {
 #[test]
 fn each_state_takes_its_limit_and_its_class() {
     let base = earth();
+    let wet = base.surface.expect("the table's Earth has a surface");
     let surface = |pressure: f64, liquid_water: bool, subsurface_ocean: bool| {
         Some(SurfaceReading {
             pressure: Pascals::new(pressure),
             liquid_water,
             subsurface_ocean,
+            ..wet
         })
     };
     let cases = [
@@ -331,7 +415,7 @@ fn each_state_takes_its_limit_and_its_class() {
             SurfaceState::MagmaOcean,
             surface(1e7, false, false),
             HabitabilityClass::Hostile,
-            &[],
+            &[HabitabilityLimit::MoltenSurface],
         ),
         (
             SurfaceState::RunawayGreenhouse,
@@ -391,6 +475,83 @@ fn each_state_takes_its_limit_and_its_class() {
             .1
             .contains(HabitabilityLimit::BelowTriplePoint)
     );
+}
+
+/// The four limits added after the plan's list (lean, 2026-11-01), each at its edge on the table's
+/// Earth: molten by its state, dry by its published water or a past runaway's, out of
+/// `Temperate`'s masses, and frozen under water's melting point short of a snowball.
+#[test]
+fn the_added_limits_are_the_generator_s_own_states_at_their_edges() {
+    let base = earth();
+    let wet = base.surface.expect("the table's Earth has a surface");
+    let limits = |state: SurfaceState, surface: SurfaceReading| {
+        let inputs = HabitabilityInputs {
+            state,
+            surface: Some(surface),
+            ..base
+        };
+        assess(&inputs).1
+    };
+    let temperate = SurfaceState::Temperate;
+    // Molten: the state alone.
+    assert!(limits(SurfaceState::MagmaOcean, wet).contains(HabitabilityLimit::MoltenSurface));
+    assert!(!limits(temperate, wet).contains(HabitabilityLimit::MoltenSurface));
+    // Dry: no published water, or a past runaway's water under a present state that is not one.
+    let dry = |state, holds_water, water_state| {
+        let surface = SurfaceReading {
+            holds_water,
+            water_state,
+            ..wet
+        };
+        limits(state, surface).contains(HabitabilityLimit::DrySurface)
+    };
+    let runaway = SurfaceState::RunawayGreenhouse;
+    assert!(!dry(temperate, true, temperate));
+    assert!(dry(temperate, false, temperate));
+    assert!(dry(temperate, true, runaway));
+    assert!(dry(SurfaceState::Snowball, true, runaway));
+    assert!(
+        !dry(runaway, true, runaway),
+        "a present runaway's own state"
+    );
+    assert!(dry(runaway, false, runaway));
+    let hidden = HabitabilityInputs {
+        state: SurfaceState::GasEnvelope,
+        surface: None,
+        ..base
+    };
+    assert!(!assess(&hidden).1.contains(HabitabilityLimit::DrySurface));
+    // Mass: the band's ends are inside it.
+    let (lo, hi) = TEMPERATE_MASSES;
+    for (mass, outside) in [
+        (lo, false),
+        (hi, false),
+        (EarthMasses::new(0.099), true),
+        (EarthMasses::new(5.01), true),
+    ] {
+        let inputs = HabitabilityInputs { mass, ..base };
+        assert_eq!(
+            assess(&inputs)
+                .1
+                .contains(HabitabilityLimit::MassOutsideTemperateRange),
+            outside,
+            "{mass:?}"
+        );
+    }
+    // Frozen: no liquid water under 273.15 K, but for a snowball.
+    let frozen = |state, liquid_water, kelvin: f64| {
+        let surface = SurfaceReading {
+            liquid_water,
+            mean_temperature: Kelvin::new(kelvin),
+            ..wet
+        };
+        limits(state, surface).contains(HabitabilityLimit::FrozenSurface)
+    };
+    assert!(frozen(temperate, false, 273.149));
+    assert!(!frozen(temperate, false, 273.15));
+    assert!(!frozen(temperate, true, 250.0));
+    assert!(!frozen(SurfaceState::Snowball, false, 200.0));
+    assert!(frozen(SurfaceState::Airless, false, 100.0));
 }
 
 #[test]
@@ -473,8 +634,8 @@ fn a_set_of_limits_holds_each_once_in_the_plan_s_order() {
     assert_eq!(all.iter().collect::<Vec<_>>(), HabitabilityLimit::ALL);
     let bits = HabitabilityLimit::ALL
         .into_iter()
-        .fold(0_u16, |bits, limit| bits | limit.bit());
-    assert_eq!(bits.count_ones(), 13, "one bit each");
+        .fold(0_u32, |bits, limit| bits | limit.bit());
+    assert_eq!(bits.count_ones(), 17, "one bit each");
     assert!(HabitabilityLimits::EMPTY.is_empty());
     assert_eq!(HabitabilityLimits::default(), HabitabilityLimits::EMPTY);
 }
@@ -488,6 +649,7 @@ fn the_published_assessment_agrees_with_the_published_surface() {
     let t = UniverseTime::EPOCH;
     let triple = water_triple_pressure().value();
     let mut classes = std::collections::BTreeMap::new();
+    let mut unexplained = Vec::new();
     for (ctx, system) in whole().iter().take(40) {
         for body in system.bodies() {
             let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
@@ -546,11 +708,22 @@ fn the_published_assessment_agrees_with_the_published_surface() {
                 }
                 HabitabilityClass::Hostile => {}
             }
+            if limits.contains(HabitabilityLimit::FrozenSurface) {
+                assert!(!conditions.liquid_water(), "{name}");
+                assert!(
+                    conditions.mean_surface_temperature().value() < WATER_MELTING_POINT.value(),
+                    "{name}"
+                );
+            }
+            if assessment.class() != HabitabilityClass::Temperate && limits.is_empty() {
+                unexplained.push(format!("{name} {:?}", assessment.class()));
+            }
             *classes.entry(class_name(assessment.class())).or_insert(0) += 1;
         }
     }
     eprintln!("the sample's first 40 systems at the epoch: {classes:?}");
     assert!(classes.values().sum::<u32>() > 100, "{classes:?}");
+    assert!(unexplained.is_empty(), "named no limit: {unexplained:?}");
 }
 
 /// A class's name in a count.
@@ -623,16 +796,11 @@ fn the_host_s_clock_reaches_the_published_assessment() {
     }
 }
 
-/// The share of the census's FGK hosts that hold a `Temperate` body at the epoch, reported and
-/// asserted only to lie in 0.01–0.3, since η⊕ is that uncertain (the plan's test). The hosts are
-/// the census's single FGK dwarfs (`census_tests`' `HostClass::FgkDwarf`: one star on its main
-/// sequence at the epoch, of 0.7–1.3 M☉) among the composition census's first [`FGK_SYSTEMS`]
-/// systems of the sample. Native only, as the census is: a share over thousands of systems, whose
-/// bits on WebAssembly the goldens check.
+/// Every system of the census's FGK hosts (`census_tests`' `HostClass::FgkDwarf`: one star on its
+/// main sequence at the epoch, of 0.7–1.3 M☉) among the composition census's first
+/// [`FGK_SYSTEMS`] systems of the sample, generated whole, in the sample's order.
 #[cfg(not(target_family = "wasm"))]
-#[test]
-#[ignore = "slow: every body of the FGK hosts among 6,800 systems, assessed at the epoch"]
-fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
+fn for_each_fgk_host(mut visit: impl FnMut(&SystemContext, &PlanetarySystem)) {
     use crate::galaxy::Galaxy;
     use crate::galaxy::params::GalaxyParams;
     use crate::planetary::testing::{SampleFilter, sample_records};
@@ -642,7 +810,6 @@ fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
         .expect("the Milky Way's parameters build a galaxy");
     let records = sample_records(&galaxy, FGK_SYSTEMS, SampleFilter::ALL)
         .expect("the solar circle holds the census's systems");
-    let (mut hosts, mut temperate, mut bodies) = (0_u32, 0_u32, 0_usize);
     for record in &records {
         let ctx = SystemContext::from_record(&galaxy, record);
         let [star] = ctx.stars() else {
@@ -652,12 +819,24 @@ fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
         let on_main_sequence = star
             .state_at(UniverseTime::EPOCH)
             .is_some_and(|state| state.phase() == Phase::MainSequence);
-        if !(on_main_sequence && (0.7..1.3).contains(&m)) {
-            continue;
+        if on_main_sequence && (0.7..1.3).contains(&m) {
+            visit(&ctx, &generate(SEED, &ctx));
         }
+    }
+}
+
+/// The share of the census's FGK hosts that hold a `Temperate` body at the epoch, reported and
+/// asserted only to lie in 0.01–0.3, since η⊕ is that uncertain (the plan's test), over
+/// [`for_each_fgk_host`]'s systems. Native only, as the census is: a share over thousands of
+/// systems, whose bits on WebAssembly the goldens check.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: every body of the FGK hosts among 6,800 systems, assessed at the epoch"]
+fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
+    let (mut hosts, mut temperate, mut bodies) = (0_u32, 0_u32, 0_usize);
+    for_each_fgk_host(|ctx, system| {
         hosts += 1;
-        let system = generate(SEED, &ctx);
-        let assessed = assessments(&ctx, &system);
+        let assessed = assessments(ctx, system);
         bodies += assessed.len();
         if assessed
             .iter()
@@ -665,7 +844,7 @@ fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
         {
             temperate += 1;
         }
-    }
+    });
     let share = f64::from(temperate) / f64::from(hosts);
     eprintln!(
         "{temperate} of {hosts} FGK hosts hold a Temperate body at the epoch ({share:.4}), \
@@ -673,6 +852,50 @@ fn the_fgk_hosts_share_with_a_temperate_body_lies_within_eta_earth_s_range() {
     );
     assert!(hosts >= 100, "{hosts} FGK hosts");
     assert!((0.01..=0.3).contains(&share), "{share}");
+}
+
+/// Every body short of `Temperate` names at least one limit, over the FGK hosts' bodies at the
+/// epoch ([`for_each_fgk_host`]): the four limits added after the plan's list (lean, 2026-11-01)
+/// leave no class unexplained. Each limit's count is printed.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: every body of the FGK hosts among 6,800 systems, assessed at the epoch"]
+fn every_body_short_of_temperate_names_a_limit() {
+    let mut counts = std::collections::BTreeMap::new();
+    let (mut assessed, mut unexplained) = (0_usize, Vec::new());
+    for_each_fgk_host(|ctx, system| {
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at(ctx, body.index(), UniverseTime::EPOCH)
+                .unwrap()
+            else {
+                continue;
+            };
+            let Section::Ok(assessment) = hooks.habitability() else {
+                continue;
+            };
+            assessed += 1;
+            for limit in assessment.limits().iter() {
+                *counts.entry(limit).or_insert(0_u32) += 1;
+            }
+            if assessment.class() != HabitabilityClass::Temperate && assessment.limits().is_empty()
+            {
+                unexplained.push(format!(
+                    "{} {:?}",
+                    body.index().body_id(ctx.id()),
+                    assessment.class()
+                ));
+            }
+        }
+    });
+    eprintln!("{assessed} bodies of the FGK hosts assessed at the epoch; each limit: {counts:?}");
+    assert!(assessed > 1_000, "{assessed}");
+    assert!(
+        unexplained.is_empty(),
+        "{} named no limit, the first: {:?}",
+        unexplained.len(),
+        &unexplained[..unexplained.len().min(20)]
+    );
 }
 
 /// The composition census's ordinary systems, whose FGK hosts the share reads.

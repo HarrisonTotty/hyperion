@@ -3023,8 +3023,8 @@ impl GlobalFigures {
     }
 
     /// The state the air's water follows ([`Atmosphere::water_state`]), which the tests read
-    /// beside the record's published state to rebuild its water ice ([`cover::IceInputs`]).
-    #[cfg(test)]
+    /// beside the record's published state to rebuild its water ice ([`cover::IceInputs`]), and
+    /// the habitability assessment's dry limit reads (P14.T25).
     #[must_use]
     pub(crate) const fn water_state(&self) -> SurfaceState {
         self.water_state

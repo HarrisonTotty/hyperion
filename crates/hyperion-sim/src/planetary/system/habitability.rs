@@ -3,7 +3,8 @@
 //! record, its seasonal orbit, its zone's habitable zone and its zone's stars.
 //!
 //! - **The record**: its state, mass and bulk class, and its surface section's state, pressure,
-//!   liquid-water flag and subsurface ocean, with its conditions' radiation class. A body whose
+//!   mean temperature, liquid-water flag, published water (liquid or ice), the state its water
+//!   follows and subsurface ocean, with its conditions' radiation class. A body whose
 //!   section is not applicable while it is present has an envelope over it: its derivation's
 //!   published state and X-ray and ultraviolet flux stand in.
 //! - **The seasonal orbit**: a planet's or a member's own record's orbit, about its zone's host,
@@ -16,7 +17,8 @@
 //!
 //! Nothing here draws, and nothing here is on the record or the wire.
 
-use crate::planetary::derive::atmosphere::SurfaceState;
+use crate::planetary::chem::partition::CondensatePhase;
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::derive::habitable_zone_of;
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::fate::BodyState;
@@ -70,6 +72,8 @@ impl PlanetarySystem {
         let (state, surface, radiation) = match record.surface() {
             Section::Ok(surface) => {
                 let conditions = surface.conditions();
+                let water = Gas::Water.substance();
+                let condensates = surface.condensates();
                 let reading = SurfaceReading {
                     pressure: conditions.surface_pressure(),
                     liquid_water: conditions.liquid_water(),
@@ -77,6 +81,11 @@ impl PlanetarySystem {
                         Subsurface::Ocean(_) => true,
                         Subsurface::NoOcean | Subsurface::NotComputed => false,
                     },
+                    mean_temperature: conditions.mean_surface_temperature(),
+                    holds_water: [CondensatePhase::Liquid, CondensatePhase::Solid]
+                        .into_iter()
+                        .any(|phase| condensates.entry(water, phase).is_some()),
+                    water_state: surface.figures().water_state(),
                 };
                 (surface.state(), Some(reading), conditions.radiation())
             }

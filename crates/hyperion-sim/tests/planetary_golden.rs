@@ -1427,9 +1427,19 @@ fn golden_systems_are_pinned() {
 }
 
 /// P14.T25: the habitability assessment `hooks_at` gives every body of the golden systems that
-/// has hooks, at the epoch: its class and its limits, or its section's state.
+/// has hooks, at the epoch: its class and the plan's limits, or its section's state, and on a
+/// line of its own the four limits added after the plan's list (lean, 2026-11-01), so that the
+/// lines pinned before them stand.
 #[test]
 fn golden_systems_habitability_is_pinned() {
+    use hyperion_sim::planetary::hooks::HabitabilityLimit;
+
+    let added = [
+        HabitabilityLimit::MoltenSurface,
+        HabitabilityLimit::DrySurface,
+        HabitabilityLimit::MassOutsideTemperateRange,
+        HabitabilityLimit::FrozenSurface,
+    ];
     let galaxy = fixture();
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
@@ -1446,11 +1456,14 @@ fn golden_systems_habitability_is_pinned() {
             };
             let id = body.index().body_id(context.id());
             match hooks.habitability() {
-                Section::Ok(assessment) => w.line(&format!(
-                    "{id}: {:?} {:?}",
-                    assessment.class(),
-                    assessment.limits().iter().collect::<Vec<_>>()
-                )),
+                Section::Ok(assessment) => {
+                    let (planned, since): (Vec<_>, Vec<_>) = assessment
+                        .limits()
+                        .iter()
+                        .partition(|limit| !added.contains(limit));
+                    w.line(&format!("{id}: {:?} {planned:?}", assessment.class()));
+                    w.line(&format!("{id}_added_limits = {since:?}"));
+                }
                 section => w.line(&format!("{id}: {:?}", section.state())),
             }
         }

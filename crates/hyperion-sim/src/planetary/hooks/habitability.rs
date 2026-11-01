@@ -33,11 +33,12 @@
 //!
 //! # The limits
 //!
-//! [`HabitabilityLimit`] is the plan's closed list. A body takes every limit that applies,
-//! whatever its class, so a `Temperate` body can be tidally locked about an active host. A body
-//! outside the optimistic zone is outside the conservative one too, and takes both. The reasons a
-//! surface holds no liquid water outside the list (a molten surface, a dry one above water's
-//! triple point, as Mars's) name no limit: the class and the state say them.
+//! [`HabitabilityLimit`] is the plan's closed list, with four the plan left out (lean,
+//! 2026-11-01): a molten surface, a dry one, a mass outside `Temperate`'s and a frozen surface,
+//! each read from the generator's own states, so that every body short of `Temperate` names a
+//! reason. A body takes every limit that applies, whatever its class, so a `Temperate` body can be
+//! tidally locked about an active host. A body outside the optimistic zone is outside the
+//! conservative one too, and takes both.
 //!
 //! # Determinism
 //!
@@ -49,10 +50,10 @@ mod tests;
 
 use crate::orbit::Eccentricity;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState, WATER_MELTING_POINT};
 use crate::planetary::derive::habitable_zone::HabitableZone;
 use crate::planetary::hooks::surface::RadiationClass;
-use crate::units::{EarthMasses, Metres, Pascals, Years};
+use crate::units::{EarthMasses, Kelvin, Metres, Pascals, Years};
 
 /// The masses of a `Temperate` body, inclusive: 0.1–5 M⊕, the plan's range. They are the masses
 /// Kopparapu et al. (2014, ApJL 787, L29) extend their zone to, from memory and not checked here.
@@ -89,7 +90,8 @@ pub enum HabitabilityClass {
     Temperate,
 }
 
-/// A limit on a body's habitability (P14.T25): the plan's closed list.
+/// A limit on a body's habitability (P14.T25): the plan's closed list, and the four after it that
+/// the plan left out (lean, 2026-11-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HabitabilityLimit {
     /// Its orbit-mean distance lies outside the optimistic zone, recent Venus to early Mars, or
@@ -129,11 +131,29 @@ pub enum HabitabilityLimit {
     /// A star of its zone lies outside Kopparapu et al.'s fit, 2,600–7,200 K
     /// ([`HabitableZone::extrapolated`]).
     ExtrapolatedZone,
+    /// Its state is [`SurfaceState::MagmaOcean`]: a molten crust, or a mean surface temperature at
+    /// or above the silicate solidus, 1,394 K
+    /// ([`SILICATE_SOLIDUS`](crate::planetary::derive::atmosphere::SILICATE_SOLIDUS), Hirschmann
+    /// 2000, G³ 1, 1042). Lean, 2026-11-01.
+    MoltenSurface,
+    /// Its surface holds no water, liquid or ice (its record's published condensates hold no
+    /// `H2O` entry), or its water follows a past runaway greenhouse
+    /// ([`Atmosphere::water_state`](crate::planetary::derive::atmosphere::Atmosphere::water_state)),
+    /// its oceans lost, under a present state that is not one. Lean, 2026-11-01.
+    DrySurface,
+    /// Its mass lies outside [`TEMPERATE_MASSES`], 0.1–5 M⊕, which `Temperate` requires. Lean,
+    /// 2026-11-01.
+    MassOutsideTemperateRange,
+    /// No liquid water stands at its surface at a mean surface temperature under water's melting
+    /// point, 273.15 K ([`WATER_MELTING_POINT`]), in a state short of
+    /// [`Snowball`](SurfaceState::Snowball)'s ice over half its surface: a cold desert, such as
+    /// Mars. Lean, 2026-11-01.
+    FrozenSurface,
 }
 
 impl HabitabilityLimit {
-    /// Every limit, in the plan's order.
-    pub const ALL: [Self; 13] = [
+    /// Every limit, in the plan's order and then the four added after it.
+    pub const ALL: [Self; 17] = [
         Self::OutsideOptimisticZone,
         Self::OutsideConservativeZone,
         Self::NoAtmosphere,
@@ -147,11 +167,15 @@ impl HabitabilityLimit {
         Self::YoungHost,
         Self::LeavingMainSequence,
         Self::ExtrapolatedZone,
+        Self::MoltenSurface,
+        Self::DrySurface,
+        Self::MassOutsideTemperateRange,
+        Self::FrozenSurface,
     ];
 
     /// The limit's bit in a [`HabitabilityLimits`].
     #[must_use]
-    const fn bit(self) -> u16 {
+    const fn bit(self) -> u32 {
         1 << match self {
             Self::OutsideOptimisticZone => 0,
             Self::OutsideConservativeZone => 1,
@@ -166,6 +190,10 @@ impl HabitabilityLimit {
             Self::YoungHost => 10,
             Self::LeavingMainSequence => 11,
             Self::ExtrapolatedZone => 12,
+            Self::MoltenSurface => 13,
+            Self::DrySurface => 14,
+            Self::MassOutsideTemperateRange => 15,
+            Self::FrozenSurface => 16,
         }
     }
 }
@@ -187,7 +215,7 @@ impl HabitabilityLimit {
 /// );
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct HabitabilityLimits(u16);
+pub struct HabitabilityLimits(u32);
 
 impl HabitabilityLimits {
     /// No limit.
@@ -217,7 +245,7 @@ impl HabitabilityLimits {
         self.0 == 0
     }
 
-    /// The limits in the set, in the plan's order ([`HabitabilityLimit::ALL`]).
+    /// The limits in the set, in [`HabitabilityLimit::ALL`]'s order.
     pub fn iter(self) -> impl Iterator<Item = HabitabilityLimit> {
         HabitabilityLimit::ALL
             .into_iter()
@@ -242,6 +270,16 @@ pub struct SurfaceReading {
     /// Whether its global figures hold a subsurface ocean
     /// ([`Subsurface::Ocean`](crate::planetary::hooks::Subsurface::Ocean)).
     pub subsurface_ocean: bool,
+    /// Its mean surface temperature, its conditions'.
+    pub mean_temperature: Kelvin,
+    /// Whether its surface holds water, liquid or ice: its record's published condensates' `H2O`
+    /// entries.
+    pub holds_water: bool,
+    /// The state its water follows
+    /// ([`Atmosphere::water_state`](crate::planetary::derive::atmosphere::Atmosphere::water_state)):
+    /// [`SurfaceState::RunawayGreenhouse`] for one whose oceans a past runaway took, whatever its
+    /// present state.
+    pub water_state: SurfaceState,
 }
 
 /// What a body's assessment reads of the stars its zone holds at the time.
@@ -314,6 +352,9 @@ pub struct HabitabilityInputs {
 ///         pressure: Pascals::new(101_325.0),
 ///         liquid_water: true,
 ///         subsurface_ocean: false,
+///         mean_temperature: Kelvin::new(288.0),
+///         holds_water: true,
+///         water_state: SurfaceState::Temperate,
 ///     }),
 ///     zone: Some(habitable_zone(SolarLuminosities::new(1.0), Kelvin::new(5_772.0))),
 ///     semi_major_axis: Metres::new(METRES_PER_AU),
@@ -377,13 +418,7 @@ impl HabitabilityAssessment {
                 .surface
                 .is_some_and(|surface| surface.pressure.value() < water_triple_pressure().value()),
         );
-        add(
-            HabitabilityLimit::RunawayGreenhouse,
-            matches!(
-                inputs.state,
-                SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope
-            ),
-        );
+        add(HabitabilityLimit::RunawayGreenhouse, runaway(inputs.state));
         add(
             HabitabilityLimit::Snowball,
             inputs.state == SurfaceState::Snowball,
@@ -415,6 +450,30 @@ impl HabitabilityAssessment {
         add(
             HabitabilityLimit::ExtrapolatedZone,
             inputs.zone.is_some_and(|zone| zone.extrapolated()),
+        );
+        add(
+            HabitabilityLimit::MoltenSurface,
+            inputs.state == SurfaceState::MagmaOcean,
+        );
+        add(
+            HabitabilityLimit::DrySurface,
+            inputs.surface.is_some_and(|surface| {
+                let lost = surface.water_state == SurfaceState::RunawayGreenhouse
+                    && !runaway(inputs.state);
+                !surface.holds_water || lost
+            }),
+        );
+        add(
+            HabitabilityLimit::MassOutsideTemperateRange,
+            !temperate_mass(inputs.mass),
+        );
+        add(
+            HabitabilityLimit::FrozenSurface,
+            inputs.surface.is_some_and(|surface| {
+                !surface.liquid_water
+                    && surface.mean_temperature.value() < WATER_MELTING_POINT.value()
+                    && inputs.state != SurfaceState::Snowball
+            }),
         );
         Self { class, limits }
     }
@@ -477,6 +536,16 @@ fn inside(d: f64, (inner, outer): (Metres, Metres)) -> bool {
 fn temperate_mass(mass: EarthMasses) -> bool {
     let (lo, hi) = TEMPERATE_MASSES;
     lo.value() <= mass.value() && mass.value() <= hi.value()
+}
+
+/// Whether `state` is a runaway greenhouse's: [`SurfaceState::RunawayGreenhouse`], or a steam
+/// envelope, which the derivation groups with it.
+#[must_use]
+const fn runaway(state: SurfaceState) -> bool {
+    matches!(
+        state,
+        SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope
+    )
 }
 
 /// Whether a solid surface in `state` lies under an air that is neither molten nor a runaway's:

@@ -33736,5 +33736,16 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `GasEnvelope`, the state the derivation's published one. `Marginal`: a surface in `Temperate`
     or `Snowball` inside the optimistic zone. Classes in the order Temperate, Marginal,
     SubsurfaceOcean, Hostile.
-  - _Gap (lean, 2026-11-01):_ the closed list names no limit for a molten surface, or a dry one
-    above the triple point (the table's Mars is `Marginal` with none).
+  - _Four limits added to the closed list (lean, 2026-11-01; research's message on the lane's
+    lean), each the generator's own state, no new threshold: `MoltenSurface`, the state
+    `MagmaOcean`; `DrySurface`, no `H2O` in the record's published condensates, or
+    `GlobalFigures::water_state` (now `pub(crate)` outside tests) `RunawayGreenhouse` under a
+    present state that is not; `MassOutsideTemperateRange`, outside 0.1–5 M⊕; `FrozenSurface`,
+    no liquid water under 273.15 K short of `Snowball`. `SurfaceReading` gains
+    `mean_temperature`, `holds_water` and `water_state`; `HabitabilityLimits` is a `u32`.
+  - _Coverage:_ every body short of `Temperate` names a limit (slow test, the FGK hosts' 7,095
+    bodies). The table's Mars is `Marginal` [FrozenSurface] at 22.27 kPa under 24's rules and
+    every 26 hold (its derivation without its spin, which the CO₂ cap needs). At its own spin
+    under every 26 hold the cap gives 829.80 Pa (590.25 Pa of CO₂), above water's triple point,
+    so `BelowTriplePoint` does not fire (the cap pilot's 565.8 Pa was its CO₂ alone).
+    `planetary/habitability` pins the four on an `_added_limits` line, so the older lines stand.
