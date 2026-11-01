@@ -1286,6 +1286,18 @@ domain_tags! {
     /// cluster's neutron stars or its blue stragglers over its binaries at the turn-off
     /// (`members::RecycledShares`); the other words are reserved.
     MEMBER_RECYCLED: System = "member.recycled";
+
+    // Plan 09, phase 7 (P09.T33.b): a core-collapse candidate's ejection, beside P09.T33.a's
+    // `class.core_collapse.*` tags above. Appended here, after P11.T8.f's `member.recycled`, because
+    // the macro's order fixes `ALL`.
+
+    /// A core-collapse candidate's ejection (P09.T33.b), keyed as its other `class.core_collapse.*`
+    /// draws are: for a field candidate, word 0 the mark that picks whether it is a runaway, a
+    /// walkaway or neither by its mass's shares, and word 1 the mark that picks its ejection age
+    /// among its kind's, the channel with it; for a runaway's or a walkaway's candidate, word 0 the
+    /// mark that picks its kind and ejection age among its class's at its mass, word 1 the rank of
+    /// its ejection speed inside its class's speed bin, and words 2–3 the ejection's direction.
+    CLASS_CORE_COLLAPSE_EJECTION: System = "class.core_collapse.ejection";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1716,6 +1728,7 @@ mod tests {
             CLASS_CORE_COLLAPSE_METALLICITY,
             CLASS_CORE_COLLAPSE_DEATH,
             CLASS_CORE_COLLAPSE_VELOCITY,
+            CLASS_CORE_COLLAPSE_EJECTION,
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.core_collapse."));

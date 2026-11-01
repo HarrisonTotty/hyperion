@@ -64,6 +64,11 @@
 //!   catalogue's classes give up the features' share of their hosts, and a feature's binary members
 //!   are drawn inside its hard–soft boundary. It is read where a list, a class's process or a
 //!   member is built, and reaches none of the galaxy's memos.
+//! - [`runaway_deaths`](GalaxyRules::runaway_deaths), at [`RUNAWAY_DEATHS_VERSION`] (plan 09,
+//!   P09.T33.b, at 27): the core-collapse class follows the young field's runaways and walkaways,
+//!   its field term at the band budget keeping only the deaths its ejection marks leave it. It is
+//!   read where the class's process is built and its candidates drawn, and reaches none of the
+//!   galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -80,6 +85,7 @@ use crate::galaxy::catalogue_classes::binary::{
     BINARY_TABLES_VERSION, BinaryTableRules, MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION,
     MergerChannelRules, MergerClassRules,
 };
+use crate::galaxy::catalogue_classes::core_collapse::{RUNAWAY_DEATHS_VERSION, RunawayDeathsRules};
 use crate::galaxy::catalogue_classes::source::{CLASS_SOURCE_VERSION, ClassSourceRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
@@ -126,6 +132,9 @@ pub(crate) struct GalaxyRules {
     pub(crate) class_source: ClassSourceRules,
     /// Whether features hold plan 11's binary classes (P11.T8.f).
     pub(crate) feature_binaries: FeatureBinariesRules,
+    /// Whether the core-collapse class follows the young field's runaways and walkaways
+    /// (P09.T33.b).
+    pub(crate) runaway_deaths: RunawayDeathsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -201,6 +210,11 @@ impl GalaxyRules {
             } else {
                 FeatureBinariesRules::Unlisted
             },
+            runaway_deaths: if version.get() >= RUNAWAY_DEATHS_VERSION.get() {
+                RunawayDeathsRules::Ejected
+            } else {
+                RunawayDeathsRules::FieldOnly
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -224,10 +238,10 @@ impl GalaxyRules {
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
     /// hold ([`GalaxyRules::every_26_hold`]), the galaxy's at 27 (`orphan_streams`, P15.T11.b,
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
-    /// P09.T37.a, and `feature_binaries`, P11.T8.f) and the stellar rules' `ia_explosion`
-    /// (P11.T6; [`StellarRules::every_27_hold`]). The planetary stage's holds at 27 are switched
-    /// on the thread instead (`planetary::testing::with_every_27_hold`), around a galaxy built
-    /// under these; a galaxy hold has no switch and joins here.
+    /// P09.T37.a, `feature_binaries`, P11.T8.f, and `runaway_deaths`, P09.T33.b) and the stellar
+    /// rules' `ia_explosion` (P11.T6; [`StellarRules::every_27_hold`]). The planetary stage's holds
+    /// at 27 are switched on the thread instead (`planetary::testing::with_every_27_hold`), around
+    /// a galaxy built under these; a galaxy hold has no switch and joins here.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.
@@ -460,6 +474,15 @@ mod tests {
             GalaxyRules::every_26_hold().feature_binaries,
             FeatureBinariesRules::Unlisted
         );
+        let runaways = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).runaway_deaths;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(runaways(v), RunawayDeathsRules::FieldOnly, "{v}");
+        }
+        assert_eq!(runaways(27), RunawayDeathsRules::Ejected);
+        assert_eq!(
+            GalaxyRules::every_27_hold().runaway_deaths,
+            RunawayDeathsRules::Ejected
+        );
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
@@ -468,6 +491,7 @@ mod tests {
                 binary_tables: BinaryTableRules::Fitted,
                 class_source: ClassSourceRules::Registered,
                 feature_binaries: FeatureBinariesRules::Listed,
+                runaway_deaths: RunawayDeathsRules::Ejected,
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
                 ..GalaxyRules::every_26_hold()
             }
