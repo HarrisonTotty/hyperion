@@ -40,7 +40,8 @@
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
- * captures, with the other captures, and R02.T19.b's datum captures after them; a plain
+ * captures and fix-view-light's of the view's light, with the other captures, and R02.T19.b's datum
+ * captures after them; a plain
  * `just test-render` runs none of them.
  *
  * With `transfer` in its query (`--smoke-transfer`; plan R10, R10.T15.b) the page runs R03.T15's
@@ -115,6 +116,7 @@ import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
+import { captureViewLight } from "./viewLight";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
@@ -697,6 +699,12 @@ async function run(
         frames.length > 0,
         `${String(frames.length)} frames`,
       );
+    });
+  }
+
+  if (captures) {
+    await group(1, "fix-view-light the view's light with the Sun in frame", async () => {
+      images = [...images, ...(await captureViewLight(engine, checks))];
     });
   }
 
