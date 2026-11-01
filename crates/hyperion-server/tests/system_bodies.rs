@@ -13,11 +13,11 @@ use std::sync::OnceLock;
 use common::surface::{Secret, check_no_seed_key};
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyHooksDto, BodyIdHex, BodyKindDto,
-    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
-    DetailLevelDto, DetailSeedHex, ErrorCode, OrbitHostDto, QueryModeDto, RequestBody,
-    RequestError, ResponseBody, SectionDto, ServerMessage, SystemBodiesDto, SystemBodiesRequest,
-    SystemIdHex, SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyIdHex, BodyKindDto, BodyPhotometryDto,
+    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, DetailLevelDto, DetailSeedHex,
+    ErrorCode, OrbitHostDto, QueryModeDto, RequestBody, RequestError, ResponseBody, SectionDto,
+    ServerMessage, SystemBodiesDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+    UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
@@ -1309,18 +1309,12 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             record.kind,
             BodyKindDto::Planet | BodyKindDto::DwarfPlanet | BodyKindDto::Moon { .. }
         );
-        let expected = if surfaced && record.state == BodyStateDto::Present {
-            let seed = detail_seed(Seed::new(SEED), index.body_id(planets.system()));
+        if surfaced && record.state == BodyStateDto::Present {
             hooks_seen += 1;
-            SectionDto::Ok(BodyHooksDto {
-                detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(seed.get())),
-                habitability: None,
-                resources: None,
-            })
+            assert_hooks_are_the_sims(record, &planets, &ctx, index, time);
         } else {
-            SectionDto::NotApplicable
-        };
-        assert_eq!(record.hooks, expected, "{}", record.id);
+            assert_eq!(record.hooks, SectionDto::NotApplicable, "{}", record.id);
+        }
         // The list's entry is the record, less its surface, envelope and hooks.
         assert_eq!(
             serde_json::to_value(summary).unwrap(),
@@ -1345,6 +1339,61 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
     );
     assert!(hooks_seen > 0, "no present body's detail seed was checked");
     client.close().await;
+}
+
+/// Holds the hooks of `record`, the present body `index`'s at `time` at `full`, to the sim's: its
+/// detail seed (R09.T1.b), and its habitability and resources to its server-only hooks
+/// (P14.T25–T26), the habitability in its state, with its class and its limits in their order, and
+/// the resources `not_modelled` below generator version 27, whatever the sim computes.
+fn assert_hooks_are_the_sims(
+    record: &BodyRecordDto,
+    planets: &PlanetarySystem,
+    ctx: &SystemContext,
+    index: hyperion_sim::planetary::BodyIndex,
+    time: UniverseTime,
+) {
+    let what = record.id.as_str();
+    let SectionDto::Ok(hooks) = &record.hooks else {
+        panic!("{what}: a present body's hooks are shown at full");
+    };
+    let seed = detail_seed(Seed::new(SEED), index.body_id(planets.system()));
+    assert_eq!(
+        hooks.detail_seed,
+        SectionDto::Ok(DetailSeedHex::from_u64(seed.get())),
+        "{what}"
+    );
+    let served = planets
+        .hooks_at(ctx, index, sim_time(time))
+        .unwrap()
+        .expect("a present body has server-only hooks");
+    let habitability = hooks
+        .habitability
+        .as_ref()
+        .expect("the server sends the habitability");
+    assert_same_state(what, habitability, served.habitability());
+    if let (SectionDto::Ok(sent), Section::Ok(sim)) = (habitability, served.habitability()) {
+        assert_eq!(
+            wire_string(&sent.class),
+            snake_case(&format!("{:?}", sim.class())),
+            "{what}"
+        );
+        let sent: Vec<String> = sent.limits.iter().map(wire_string).collect();
+        let limits: Vec<String> = sim
+            .limits()
+            .iter()
+            .map(|limit| snake_case(&format!("{limit:?}")))
+            .collect();
+        assert_eq!(sent, limits, "{what}");
+    }
+    assert_eq!(hooks.resources, Some(SectionDto::NotModelled), "{what}");
+}
+
+/// A wire enum's string, its serde form's text.
+fn wire_string(value: &impl serde::Serialize) -> String {
+    match serde_json::to_value(value).unwrap() {
+        serde_json::Value::String(text) => text,
+        other => panic!("not a wire string: {other}"),
+    }
 }
 
 /// Makes a request and reads its answer's text as it arrived (R09.T1.b): it may hold no key named

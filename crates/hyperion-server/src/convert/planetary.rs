@@ -18,18 +18,18 @@ use hyperion_protocol::{
     CometaryHaloDto, CondensateDeckDto, CraterContractDto, CraterScreeningDto,
     CraterTargetClassDto, CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto,
     DetailLevelDto, DetailSeedHex, DiscGapDto, ErrorCode, FigureDatumDto, FigureLawDto,
-    GasShareDto, GuillotProfileDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto,
-    MixingRatioNodeDto, Modelled, MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto,
-    OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto,
-    ProfileNodeDto, ProtoplanetaryDiscDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto,
-    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
-    SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
-    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
-    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
-    SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto,
-    VerticalStructureDto, WetEpochDto, ZoneDto,
+    GasShareDto, GuillotProfileDto, HabitabilityClassDto, HabitabilityDto, HabitabilityLimitDto,
+    HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, Modelled,
+    MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto,
+    OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto,
+    ProtoplanetaryDiscDto, RadiationClassDto, RadioisotopesDto, RedoxClassDto, RequestError,
+    ResourceAbundancesDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
+    SceneSystemDto, SectionDto, SeenPositionDto, SizeDistributionDto, SpinResonanceDto,
+    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
+    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto,
+    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
-use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
@@ -50,11 +50,13 @@ use hyperion_sim::planetary::hooks::aerosols::{
     ParticleSize, ShapeClass,
 };
 use hyperion_sim::planetary::hooks::crust::{CrustComposition, LidCrust};
-use hyperion_sim::planetary::hooks::figures::WetEpoch;
+use hyperion_sim::planetary::hooks::figures::{RadiogenicIsotope, WetEpoch};
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
-    AerosolInventory, ClimateRegime, MagneticField, OceanFloor, ProfileNode, RadiationClass,
-    Subsurface, SubsurfaceOcean, SurfaceModifiers, TectonicRegime, VerticalStructure,
+    AerosolInventory, BodyHooks, ClimateRegime, HabitabilityAssessment, HabitabilityClass,
+    HabitabilityLimit, MagneticField, OceanFloor, ProfileNode, RadiationClass, Resource,
+    ResourceAbundances, Subsurface, SubsurfaceOcean, SurfaceModifiers, TectonicRegime,
+    VerticalStructure,
 };
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
@@ -73,11 +75,21 @@ use hyperion_sim::time::{ClockWindow, UniverseTime};
 use hyperion_sim::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecond, Seconds,
 };
+use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 use hyperion_surface::craters::{CraterParams, Screening, TargetClass};
 
 use super::query_time;
 use super::stellar::{orbit_dto, unknown_system, wire_time};
 use super::surface::climate_model;
+
+/// The generator version from which a hooks section carries a body's resource abundances
+/// (P14.T26): 27, whose bump sets their ratios, so that no client is
+/// shown abundances that are about to move. Below it a hooks section's `resources` is
+/// `not_modelled`, whatever the sim computes; its habitability is served now. Its tripwire,
+/// `the_resources_gate_holds_until_its_version`, fails at the version, so that the bump that
+/// reaches it opens the gate (deleting this constant, its arm in `hooks` and the tripwire) or
+/// raises it.
+pub(crate) const RESOURCES_SERVED_FROM: GeneratorVersion = GeneratorVersion::new(27);
 
 /// A `system_bodies` request, checked: the system it names, decoded, the time inside the clock
 /// window, and the level asked for.
@@ -507,11 +519,20 @@ pub(crate) fn body_detail(
         .body_at(ctx, wanted.index(), wanted.time())
         .map_err(|error| body_refusal(&request.body, error))?
         .degrade(wanted.level());
+    // P14.T25–T26: the habitability and the resources are the server-only hooks', read only where
+    // the record's hooks section is shown, at a granted `full`, so that a lower level withholds
+    // them with the section.
+    let served = match record.hooks() {
+        Section::Ok(_) => planets
+            .hooks_at(ctx, wanted.index(), wanted.time())
+            .map_err(|error| body_refusal(&request.body, error))?,
+        Section::NotResolved | Section::NotModelled | Section::NotApplicable => None,
+    };
     Ok(BodyDetailDto {
         universe: request.universe,
         time: request.time,
         granted: detail_level_dto(record.level()),
-        record: body_record(&record),
+        record: body_record(&record, served.as_ref()),
     })
 }
 
@@ -618,9 +639,10 @@ fn section<T, U>(section: &Section<T>, value: impl FnOnce(&T) -> U) -> SectionDt
 }
 
 /// One body's whole record as the wire carries it: its list entry ([`body_summary`]), with its
-/// surface, envelope and hooks.
+/// surface, envelope and hooks, the hooks with what `served`, the body's server-only hooks at the
+/// record's time, gives them ([`hooks`]).
 #[must_use]
-fn body_record(record: &BodyRecord) -> BodyRecordDto {
+fn body_record(record: &BodyRecord, served: Option<&BodyHooks>) -> BodyRecordDto {
     let summary = body_summary(record);
     BodyRecordDto {
         id: summary.id,
@@ -640,7 +662,7 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
         photometry: summary.photometry,
         surface: section(record.surface(), surface),
         envelope: Some(section(record.envelope(), envelope)),
-        hooks: section(record.hooks(), hooks),
+        hooks: section(record.hooks(), |inner| hooks(inner, served)),
     }
 }
 
@@ -1696,14 +1718,99 @@ fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
 }
 
 /// A hooks section's value: the body's detail seed (the rendering plans' R09.T1.b), which the
-/// client's local synthesis draws from. The surface seed is not in the record, so it cannot reach
-/// the wire from here.
+/// client's local synthesis draws from, and from `served`, the body's server-only hooks at the
+/// record's time, its habitability (P14.T25) and, from [`RESOURCES_SERVED_FROM`], its resource
+/// abundances (P14.T26), each in the state the sim tags it with; both `not_modelled` where the
+/// sim gives the body no server-only hooks. Neither value converted here holds the surface seed,
+/// so it cannot reach the wire from here.
 #[must_use]
-fn hooks(hooks: &Hooks) -> BodyHooksDto {
+fn hooks(hooks: &Hooks, served: Option<&BodyHooks>) -> BodyHooksDto {
+    let (habitability, resources) = served.map_or(
+        (SectionDto::NotModelled, SectionDto::NotModelled),
+        |served| {
+            let resources = if GENERATOR_VERSION < RESOURCES_SERVED_FROM {
+                SectionDto::NotModelled
+            } else {
+                section(served.resources(), resource_abundances)
+            };
+            (
+                section(served.habitability(), |assessed| habitability(*assessed)),
+                resources,
+            )
+        },
+    );
     BodyHooksDto {
         detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(hooks.detail_seed().get())),
-        habitability: None,
-        resources: None,
+        habitability: Some(habitability),
+        resources: Some(resources),
+    }
+}
+
+/// A habitability assessment as the wire carries it: its class, and its limits in
+/// [`HabitabilityLimit::ALL`]'s order.
+#[must_use]
+fn habitability(assessment: HabitabilityAssessment) -> HabitabilityDto {
+    HabitabilityDto {
+        class: match assessment.class() {
+            HabitabilityClass::Hostile => HabitabilityClassDto::Hostile,
+            HabitabilityClass::SubsurfaceOcean => HabitabilityClassDto::SubsurfaceOcean,
+            HabitabilityClass::Marginal => HabitabilityClassDto::Marginal,
+            HabitabilityClass::Temperate => HabitabilityClassDto::Temperate,
+        },
+        limits: assessment.limits().iter().map(habitability_limit).collect(),
+    }
+}
+
+/// A habitability limit as the wire names it.
+#[must_use]
+fn habitability_limit(limit: HabitabilityLimit) -> HabitabilityLimitDto {
+    match limit {
+        HabitabilityLimit::OutsideOptimisticZone => HabitabilityLimitDto::OutsideOptimisticZone,
+        HabitabilityLimit::OutsideConservativeZone => HabitabilityLimitDto::OutsideConservativeZone,
+        HabitabilityLimit::NoAtmosphere => HabitabilityLimitDto::NoAtmosphere,
+        HabitabilityLimit::BelowTriplePoint => HabitabilityLimitDto::BelowTriplePoint,
+        HabitabilityLimit::RunawayGreenhouse => HabitabilityLimitDto::RunawayGreenhouse,
+        HabitabilityLimit::Snowball => HabitabilityLimitDto::Snowball,
+        HabitabilityLimit::GasEnvelope => HabitabilityLimitDto::GasEnvelope,
+        HabitabilityLimit::TidallyLocked => HabitabilityLimitDto::TidallyLocked,
+        HabitabilityLimit::HighEccentricity => HabitabilityLimitDto::HighEccentricity,
+        HabitabilityLimit::ActiveHost => HabitabilityLimitDto::ActiveHost,
+        HabitabilityLimit::YoungHost => HabitabilityLimitDto::YoungHost,
+        HabitabilityLimit::LeavingMainSequence => HabitabilityLimitDto::LeavingMainSequence,
+        HabitabilityLimit::ExtrapolatedZone => HabitabilityLimitDto::ExtrapolatedZone,
+        HabitabilityLimit::MoltenSurface => HabitabilityLimitDto::MoltenSurface,
+        HabitabilityLimit::DrySurface => HabitabilityLimitDto::DrySurface,
+        HabitabilityLimit::MassOutsideTemperateRange => {
+            HabitabilityLimitDto::MassOutsideTemperateRange
+        }
+        HabitabilityLimit::FrozenSurface => HabitabilityLimitDto::FrozenSurface,
+    }
+}
+
+/// Resource abundances as the wire carries them: each resource's fraction under its key, and the
+/// four radioactive isotopes'.
+#[must_use]
+fn resource_abundances(abundances: &ResourceAbundances) -> ResourceAbundancesDto {
+    let of = |resource| abundances.fraction(resource);
+    let isotope = |isotope| abundances.radioactive(isotope);
+    ResourceAbundancesDto {
+        iron_group: of(Resource::IronGroup),
+        light_lithophiles: of(Resource::LightLithophiles),
+        rare_earths: of(Resource::RareEarths),
+        platinum_group: of(Resource::PlatinumGroup),
+        radioactives: of(Resource::Radioactives),
+        silicates: of(Resource::Silicates),
+        water_ice: of(Resource::WaterIce),
+        other_ices: of(Resource::OtherIces),
+        hydrocarbons: of(Resource::Hydrocarbons),
+        helium_3: of(Resource::Helium3),
+        deuterium: of(Resource::Deuterium),
+        radioisotopes: RadioisotopesDto {
+            uranium_238: isotope(RadiogenicIsotope::Uranium238),
+            uranium_235: isotope(RadiogenicIsotope::Uranium235),
+            thorium_232: isotope(RadiogenicIsotope::Thorium232),
+            potassium_40: isotope(RadiogenicIsotope::Potassium40),
+        },
     }
 }
 
@@ -1849,7 +1956,8 @@ mod tests {
             .expect("the Milky Way fixture's gas is mostly neutral")
     });
 
-    /// Every golden system's records at the epoch at the `full` level, each beside its wire form.
+    /// Every golden system's records at the epoch at the `full` level, each beside its wire form
+    /// as `body_detail` sends it, its hooks with the body's server-only hooks.
     static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> = LazyLock::new(|| {
         let galaxy = &*GOLDEN_GALAXY;
         GOLDEN_SYSTEMS
@@ -1865,7 +1973,12 @@ mod tests {
                 snapshot
                     .bodies()
                     .iter()
-                    .map(|record| (record.clone(), body_record(record)))
+                    .map(|record| {
+                        let served = planets
+                            .hooks_at(&ctx, record.index(), UniverseTime::EPOCH)
+                            .expect("a body of the snapshot resolves");
+                        (record.clone(), body_record(record, served.as_ref()))
+                    })
                     .collect::<Vec<_>>()
             })
             .collect()
@@ -3051,7 +3164,7 @@ mod tests {
                 .snapshot_at(&ctx, UniverseTime::EPOCH)
                 .degrade(DetailLevel::Full);
             for record in snapshot.bodies() {
-                let SectionDto::Ok(surface) = body_record(record).surface else {
+                let SectionDto::Ok(surface) = body_record(record, None).surface else {
                     continue;
                 };
                 let Modelled::Value(sent) = surface.crust else {
@@ -3473,7 +3586,7 @@ mod tests {
                     assert!(system_plane(&planets).is_none());
                     let snapshot = planets.snapshot_at(&ctx, UniverseTime::EPOCH);
                     for record in snapshot.bodies() {
-                        let wire = body_record(record);
+                        let wire = body_record(record, None);
                         if record.index() == BodyIndex::PRIMARY {
                             assert_eq!(wire.parent, None);
                             assert_eq!(wire.orbit, SectionDto::NotApplicable);
@@ -3529,6 +3642,265 @@ mod tests {
             rings += 1;
         }
         assert!(rings > 0, "no golden system has a ring");
+    }
+
+    /// P14.T26's serve gate's tripwire: it holds until [`RESOURCES_SERVED_FROM`], and the bump
+    /// that reaches it opens it or raises it.
+    #[test]
+    fn the_resources_gate_holds_until_its_version() {
+        assert!(
+            GENERATOR_VERSION < RESOURCES_SERVED_FROM,
+            "generator version {} reaches the resources' serve gate, {}: if their ratios have \
+             landed, open it (delete `RESOURCES_SERVED_FROM`, its arm in `hooks` and this test, and \
+             let `a_full_hooks_section_carries_the_sim_s_habitability_and_holds_its_resources` \
+             read the resources as the sim's); otherwise raise the constant to the next bump",
+            GENERATOR_VERSION.get(),
+            RESOURCES_SERVED_FROM.get()
+        );
+    }
+
+    /// A value's wire string: its serde form's text.
+    fn wire_string(value: &impl serde::Serialize) -> String {
+        match serde_json::to_value(value).expect("a wire enum serialises") {
+            serde_json::Value::String(text) => text,
+            other => panic!("not a wire string: {other}"),
+        }
+    }
+
+    /// A Rust name in `snake_case`, as the wire spells an enum's variant.
+    fn snake_case(name: &str) -> String {
+        let mut out = String::new();
+        for (i, c) in name.char_indices() {
+            if c.is_ascii_uppercase() && i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        }
+        out
+    }
+
+    /// P14.T25–T26: every golden body's `full` hooks section carries its habitability in the
+    /// state the sim's server-only hooks give it, with their class and limits, in their order, and
+    /// its resources `not_modelled` behind their serve gate, whatever the sim computes; a hooks
+    /// section that is not `ok` keeps its state, with neither.
+    #[test]
+    fn a_full_hooks_section_carries_the_sim_s_habitability_and_holds_its_resources() {
+        let (mut assessed, mut computed) = (0, 0);
+        let mut classes = std::collections::BTreeSet::new();
+        for &raw in &GOLDEN_SYSTEMS {
+            let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
+            let ctx =
+                SystemContext::for_system(&GOLDEN_GALAXY, id).expect("a pinned ID names a system");
+            let planets = hyperion_sim::planetary::generate(GOLDEN_GALAXY.seed(), &ctx);
+            let snapshot = planets
+                .snapshot_at(&ctx, UniverseTime::EPOCH)
+                .degrade(DetailLevel::Full);
+            for record in snapshot.bodies() {
+                let served = planets
+                    .hooks_at(&ctx, record.index(), UniverseTime::EPOCH)
+                    .expect("a body of the snapshot resolves");
+                let wire = body_record(record, served.as_ref());
+                let SectionDto::Ok(sent) = &wire.hooks else {
+                    assert_eq!(
+                        wire.hooks,
+                        section(record.hooks(), |_| unreachable!("not ok")),
+                        "{}",
+                        wire.id
+                    );
+                    continue;
+                };
+                let served = served.expect("a body whose hooks are shown has server-only hooks");
+                assert_eq!(
+                    sent.resources,
+                    Some(SectionDto::NotModelled),
+                    "{}: behind the gate",
+                    wire.id
+                );
+                computed += usize::from(matches!(served.resources(), Section::Ok(_)));
+                let habitability = sent.habitability.as_ref().expect("the server sends it");
+                match (served.habitability(), habitability) {
+                    (Section::Ok(sim), SectionDto::Ok(dto)) => {
+                        assert_eq!(
+                            wire_string(&dto.class),
+                            snake_case(&format!("{:?}", sim.class())),
+                            "{}",
+                            wire.id
+                        );
+                        let limits: Vec<String> = dto.limits.iter().map(wire_string).collect();
+                        let expected: Vec<String> = sim
+                            .limits()
+                            .iter()
+                            .map(|limit| snake_case(&format!("{limit:?}")))
+                            .collect();
+                        assert_eq!(limits, expected, "{}", wire.id);
+                        classes.insert(wire_string(&dto.class));
+                        assessed += 1;
+                    }
+                    (sim, dto) => assert_eq!(
+                        *dto,
+                        section(sim, |_| unreachable!("not ok")),
+                        "{}",
+                        wire.id
+                    ),
+                }
+            }
+        }
+        assert!(
+            assessed > 100 && classes.len() == 4 && computed > 50,
+            "{assessed} assessed, classes {classes:?}, {computed} with resources computed"
+        );
+    }
+
+    /// The hooks of the body `index` of the golden system `raw` as `body_detail` sends them at the
+    /// epoch at `level`.
+    fn golden_hooks(raw: u64, index: u16, level: DetailLevelDto) -> SectionDto<BodyHooksDto> {
+        let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
+        let ctx =
+            SystemContext::for_system(&GOLDEN_GALAXY, id).expect("a pinned ID names a system");
+        let planets = hyperion_sim::planetary::generate(GOLDEN_GALAXY.seed(), &ctx);
+        let request = BodyDetailRequest {
+            universe: hyperion_protocol::UniverseIdHex::from_u64(1),
+            body: BodyIdHex::from_parts(raw, index),
+            time: wire_time(UniverseTime::EPOCH),
+            detail: level,
+        };
+        let wanted = DetailRequest::try_from(&request).expect("a well-formed request");
+        body_detail(request, wanted, &ctx, &planets)
+            .expect("the golden body resolves")
+            .record
+            .hooks
+    }
+
+    /// P14.T25–T26 through `body_detail`: at `full`, the golden third filler's Earth, a rocky
+    /// planet with water in its conservative zone, is `temperate`, and the close binary's Mars, a
+    /// cold desert in its optimistic zone, is `marginal` and limited by its frozen surface, each
+    /// with its resources `not_modelled` below 27; at every lower level both go with the hooks
+    /// section, `not_resolved`.
+    #[test]
+    fn body_detail_sends_an_earth_s_and_a_mars_s_habitability_at_full_only() {
+        const EARTH: (u64, u16) = (0x4200_2cb2_0000_0000, 0x0200);
+        const MARS: (u64, u16) = (0x4200_2cb2_0000_0009, 0x0600);
+        let full = |(raw, index): (u64, u16)| {
+            let SectionDto::Ok(hooks) = golden_hooks(raw, index, DetailLevelDto::Full) else {
+                panic!("{raw:016x}.{index:04x}: a present planet's hooks are shown at full");
+            };
+            assert_eq!(hooks.resources, Some(SectionDto::NotModelled));
+            let Some(SectionDto::Ok(habitability)) = hooks.habitability else {
+                panic!("{raw:016x}.{index:04x}: {:?}", hooks.habitability);
+            };
+            habitability
+        };
+        assert_eq!(full(EARTH).class, HabitabilityClassDto::Temperate);
+        let mars = full(MARS);
+        assert_eq!(mars.class, HabitabilityClassDto::Marginal);
+        assert!(
+            mars.limits.contains(&HabitabilityLimitDto::FrozenSurface),
+            "{:?}",
+            mars.limits
+        );
+        for level in [
+            DetailLevelDto::Contact,
+            DetailLevelDto::MassAndOrbit,
+            DetailLevelDto::Bulk,
+            DetailLevelDto::Surface,
+        ] {
+            for (raw, index) in [EARTH, MARS] {
+                assert_eq!(
+                    golden_hooks(raw, index, level),
+                    SectionDto::NotResolved,
+                    "{level:?}"
+                );
+            }
+        }
+    }
+
+    /// P14.T26, for the gate's opening: a computed abundance converts to each resource's and each
+    /// isotope's fraction, the sim's to the bit, on every golden body whose resources it computes.
+    #[test]
+    fn resource_abundances_convert_to_the_bit() {
+        let mut checked = 0;
+        for &raw in &GOLDEN_SYSTEMS[..6] {
+            let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
+            let ctx =
+                SystemContext::for_system(&GOLDEN_GALAXY, id).expect("a pinned ID names a system");
+            let planets = hyperion_sim::planetary::generate(GOLDEN_GALAXY.seed(), &ctx);
+            for index in planets.indices() {
+                let Some(served) = planets
+                    .hooks_at(&ctx, index, UniverseTime::EPOCH)
+                    .expect("a body of the system resolves")
+                else {
+                    continue;
+                };
+                let Section::Ok(sim) = served.resources() else {
+                    continue;
+                };
+                let dto = resource_abundances(sim);
+                let wire = serde_json::to_value(dto).expect("abundances serialise");
+                for (resource, fraction) in sim.iter() {
+                    assert_eq!(
+                        wire[resource.key()].as_f64().map(f64::to_bits),
+                        Some(fraction.to_bits()),
+                        "{index:?}: {}",
+                        resource.key()
+                    );
+                }
+                let isotopes = [
+                    (dto.radioisotopes.uranium_238, RadiogenicIsotope::Uranium238),
+                    (dto.radioisotopes.uranium_235, RadiogenicIsotope::Uranium235),
+                    (dto.radioisotopes.thorium_232, RadiogenicIsotope::Thorium232),
+                    (
+                        dto.radioisotopes.potassium_40,
+                        RadiogenicIsotope::Potassium40,
+                    ),
+                ];
+                for (sent, isotope) in isotopes {
+                    assert_eq!(
+                        sent.to_bits(),
+                        sim.radioactive(isotope).to_bits(),
+                        "{index:?}: {isotope:?}"
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "{checked} bodies' resources checked");
+    }
+
+    /// P14.T25–T26: a rogue planet's present bodies, whose derivation has no star, carry their
+    /// habitability and resources `not_modelled` in a shown hooks section.
+    #[test]
+    fn a_rogue_planet_s_habitability_and_resources_are_not_modelled() {
+        use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+        use hyperion_sim::id::Layer;
+        let galaxy = &*GOLDEN_GALAXY;
+        let (mut cell, mut shown) = (Vec::new(), 0);
+        for x in 0..40 {
+            let key = CellKey::new(Layer::RoguePlanet, [x, 6_500, 0]).expect("in the cube");
+            generate_cell(galaxy, key, &mut cell);
+            for record in &cell {
+                let ctx = SystemContext::from_record(galaxy, record);
+                let planets = hyperion_sim::planetary::generate(galaxy.seed(), &ctx);
+                let snapshot = planets
+                    .snapshot_at(&ctx, UniverseTime::EPOCH)
+                    .degrade(DetailLevel::Full);
+                for body in snapshot.bodies() {
+                    let served = planets
+                        .hooks_at(&ctx, body.index(), UniverseTime::EPOCH)
+                        .expect("a body of the snapshot resolves");
+                    let SectionDto::Ok(hooks) = body_record(body, served.as_ref()).hooks else {
+                        continue;
+                    };
+                    assert_eq!(
+                        (hooks.habitability, hooks.resources),
+                        (Some(SectionDto::NotModelled), Some(SectionDto::NotModelled)),
+                        "{:?}",
+                        body.index()
+                    );
+                    shown += 1;
+                }
+            }
+        }
+        assert!(shown > 20, "{shown} rogue bodies' hooks shown");
     }
 
     /// P14.T54.b.d: a solid planet under a supercritical envelope (P14.T53.b part 2, from
