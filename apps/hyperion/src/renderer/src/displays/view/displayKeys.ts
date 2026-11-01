@@ -4,6 +4,7 @@
  */
 import { isTextEntry } from "../../lib/textEntry";
 import type { KeyPress } from "../../view/camera/keys";
+import { STYLE_TOGGLE_KEY } from "../../view/photoreal/style";
 
 /**
  * The `GRID` row's key, `5`, after the style's `4` on the same panel: it turns the reference grid of
@@ -64,18 +65,31 @@ export const LABEL_BLOCK_FOLDS = `${LABEL_BLOCK_KEY} FOLDS LABEL BLOCK`;
 export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
 
 /**
- * The line under the key legend while `MAXIMIZE VIEW` is on: {@link MAXIMIZED_KEYS}, then what the
- * hidden panels would show of the view the keys act on, each after a middle dot: the `CONTROLS`
- * view where it is an instrument, on which a key pressed off a canvas acts (`CONTROLS
- * INSTRUMENT 1`), and its selection's name (`SELECTED TEST PLANET`), which the hidden list marks.
+ * The keys of the controls `MAXIMIZE VIEW` hides, which they show on themselves, named as the key
+ * legend names its keys, each key then what it does, so that every key is found by sight while the
+ * controls are hidden: the camera's presets, the style, the `GRID` row, the label block's key, the
+ * targets and the field of view.
+ */
+export const HIDDEN_CONTROL_KEYS = `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`;
+
+/**
+ * The parts of `MAXIMIZE VIEW`'s line after the key legend, in order: {@link MAXIMIZED_KEYS}; the
+ * hidden controls' keys ({@link HIDDEN_CONTROL_KEYS}); then what the hidden panels would show of the
+ * view the keys act on, the `CONTROLS` view where it is an instrument, on which a key pressed off a
+ * canvas acts (`CONTROLS INSTRUMENT 1`), and its selection's name (`SELECTED TEST PLANET`), which the
+ * hidden list marks. Each stands after a middle dot that leads it, and the line wraps between them.
  *
  * @param controls - The `CONTROLS` view's name, or `null` while it is `PRIMARY`.
  * @param selected - The name of the `CONTROLS` view's selection, or `null` with none.
  */
-export function maximizedKeys(controls: string | null, selected: string | null): string {
+export function maximizedKeys(
+  controls: string | null,
+  selected: string | null,
+): ReadonlyArray<string> {
   return [
     MAXIMIZED_KEYS,
+    HIDDEN_CONTROL_KEYS,
     ...(controls === null ? [] : [`CONTROLS ${controls}`]),
     ...(selected === null ? [] : [`SELECTED ${selected}`]),
-  ].join(" · ");
+  ];
 }

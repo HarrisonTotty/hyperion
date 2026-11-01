@@ -22,9 +22,11 @@ import { statusLine } from "../../test/statusLine";
 import { stylesheetRule } from "../../test/stylesheet";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { NO_OWN_SHIP } from "./CameraControls";
-import type { KeyPress } from "../../view/camera/keys";
+import { type KeyPress, VIEW_SINGLE_KEYS } from "../../view/camera/keys";
+import { STYLE_TOGGLE_KEY } from "../../view/photoreal/style";
 import {
   GRID_KEY,
+  HIDDEN_CONTROL_KEYS,
   LABEL_BLOCK_FOLDS,
   LABEL_BLOCK_KEY,
   LABEL_BLOCK_KEYS,
@@ -114,9 +116,12 @@ function maximizedPart(): HTMLElement {
   return part;
 }
 
-/** MAXIMIZE VIEW's line after the key legend, as it reads, or `null` while it is off. */
+/** MAXIMIZE VIEW's line after the key legend, its parts joined as they read, or `null` while off. */
 function maximizedLine(): string | null {
-  return maximizedPart().querySelector(".view__maximized-keys")?.textContent ?? null;
+  const parts = [...maximizedPart().querySelectorAll(".view__maximized-keys")].map(
+    (part) => part.textContent,
+  );
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** The side column's panels in the full layout, each by its region's name. */
@@ -212,6 +217,12 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
     const off = maximizedLine();
     await pressMaximize(view);
     expect([off, maximizedLine()?.startsWith(MAXIMIZED_KEYS)]).toEqual([null, true]);
+  });
+
+  it("names every key of the controls it hides on its line", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    expect(maximizedLine()).toBe(`${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS}`);
   });
 
   it("runs its line on from the key legend's, in one row that wraps between parts", async () => {
@@ -374,7 +385,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       expect([name !== null, maximizedLine()]).toEqual([
         true,
-        `${MAXIMIZED_KEYS} · SELECTED ${String(name)}`,
+        `${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS} · SELECTED ${String(name)}`,
       ]);
     });
 
@@ -388,7 +399,9 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       );
       view.advance(300);
       await pressMaximize(view);
-      expect(maximizedLine()).toBe(`${MAXIMIZED_KEYS} · CONTROLS INSTRUMENT 1`);
+      expect(maximizedLine()).toBe(
+        `${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS} · CONTROLS INSTRUMENT 1`,
+      );
     });
 
     it("stands NO OWN SHIP where the scene has none", async () => {
@@ -631,6 +644,34 @@ function press(key: string, overrides: Partial<KeyPress> = {}): KeyPress {
 }
 
 describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
+  it("names on MAXIMIZE VIEW's line each hidden control's key as VIEW binds it", () => {
+    expect([
+      VIEW_SINGLE_KEYS["1"],
+      VIEW_SINGLE_KEYS["2"],
+      VIEW_SINGLE_KEYS["3"],
+      VIEW_SINGLE_KEYS[STYLE_TOGGLE_KEY],
+      VIEW_SINGLE_KEYS["["],
+      VIEW_SINGLE_KEYS["]"],
+      VIEW_SINGLE_KEYS["+"],
+      VIEW_SINGLE_KEYS["-"],
+      viewDisplayKey(press(GRID_KEY)),
+      viewDisplayKey(press(LABEL_BLOCK_KEY)),
+      HIDDEN_CONTROL_KEYS,
+    ]).toEqual([
+      { kind: "preset", preset: "seat" },
+      { kind: "preset", preset: "chase" },
+      { kind: "preset", preset: "free" },
+      { kind: "style", style: "toggle" },
+      { kind: "target", step: -1 },
+      { kind: "target", step: 1 },
+      { kind: "fov", step: -1 },
+      { kind: "fov", step: 1 },
+      "grid",
+      "label-block",
+      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`,
+    ]);
+  });
+
   it("reads 5 as the GRID row's, 6 as MAXIMIZE VIEW's and 9 as the label block's", () => {
     expect(
       [GRID_KEY, MAXIMIZE_KEY, LABEL_BLOCK_KEY].map((key) => viewDisplayKey(press(key))),

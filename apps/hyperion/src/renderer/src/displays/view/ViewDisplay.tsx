@@ -2007,8 +2007,8 @@ function ViewStage({
     </>
   ) : null;
   // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
-  // owner's request, 2026-11-01): the line naming its key, the CONTROLS view where it is an
-  // instrument and that view's selection; then the slots held whole for want of room, as the
+  // owner's request, 2026-11-01): the line naming its key, the hidden controls' keys, the CONTROLS
+  // view where it is an instrument and that view's selection; then the slots held whole for want of room, as the
   // INSTRUMENTS panel states them folded; then every hidden panel's standing lines. They run on as
   // one line where they fit, each part after a middle dot that leads it, and wrap between parts.
   const heldWhole = instrumentViews
@@ -2030,15 +2030,15 @@ function ViewStage({
     );
   const maximizedPart = maximized ? (
     <>
-      <p className="view__keys view__foot-item">
-        {footDot}
-        <span className="view__maximized-keys">
-          {maximizedKeys(
-            controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
-            selectedName,
-          )}
-        </span>
-      </p>
+      {maximizedKeys(
+        controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
+        selectedName,
+      ).map((part) => (
+        <p className="view__keys view__foot-item" key={part}>
+          {footDot}
+          <span className="view__maximized-keys">{part}</span>
+        </p>
+      ))}
       {standingPart(
         heldWhole.length === 0 ? null : (
           <p className="view-instruments-panel__reason view-folds__standing">
