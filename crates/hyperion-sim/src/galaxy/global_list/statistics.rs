@@ -666,9 +666,16 @@ const TRIPWIRE_GALAXIES: u64 = 8;
 
 /// The most of a galaxy's placed stream members option A may drop, and of one tube's: as measured
 /// over [`TRIPWIRE_GALAXIES`] (2026-10-31, x86-64: 6.89 × 10⁻⁴, sweep galaxy 1, and 0.167, sweep
-/// galaxy 1's stream 133), with a little room. The tube's is a finding: a sixth of one stream's
-/// members inside the cube lie past its shell.
+/// galaxy 1's stream 133; at generator version 25 5.33 × 10⁻⁴, sweep galaxy 5, and 0.186, the same
+/// stream), with a little room. The tube's is a finding: a sixth of one stream's members inside the
+/// cube lie past its shell.
 const DROPPED_BOUNDS: [f64; 2] = [8e-4, 0.2];
+
+/// The fewest members a tube must expect inside the cube for its own share to be bounded
+/// ([`DROPPED_BOUNDS`]' second): below it one member is a whole share. At generator version 25
+/// sweep galaxy 1's stream 97, an orphan, expects 1.000 there and its one lies past its shell
+/// (lean, 2026-11-01: the galaxy's share still counts it).
+const TUBE_MEMBERS_JUDGED: f64 = 10.0;
 
 /// P10.T12, research-leans-10's tripwire on option A: over the first sweep galaxies, each tube at
 /// the generator's tracers, the share of a galaxy's stream members that lie outside their shells,
@@ -698,7 +705,7 @@ fn option_a_drops_a_bounded_share_over_the_sweep() {
             outside += o;
             expected += e;
             let share = f64::from(u32::try_from(o).expect("small")) / e;
-            if share > most_tube.0 {
+            if e >= TUBE_MEMBERS_JUDGED && share > most_tube.0 {
                 most_tube = (share, n, k);
             }
         }
