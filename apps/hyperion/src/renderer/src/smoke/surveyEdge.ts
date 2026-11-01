@@ -16,9 +16,15 @@
  * - with the same masks over the datum (every height 0, so that the two surfaces coincide and no
  *   relief stands one in front of the other), each surface alone into its own target: no pixel
  *   drawn by both, and each drawing its half.
+ *
+ * Then the same block on the limb (R10.T10.c's deferred finding, "the limb draw keeps no mask"),
+ * seen along the datum's tangent plane at the survey's edge, so that the limb runs across the view
+ * with the survey's last surveyed cell on its left and the first unsurveyed one on its right: the
+ * body's limb, the disc's second draw for a mesh body, drawn alone, draws no pixel over the
+ * surveyed cell, whose ground is the terrain's, and draws the limb over the other.
  */
 
-import { add, norm, scale, type Vec3, vec3 } from "../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { withTemplateCurve } from "../view/appearance/phase";
 import {
@@ -26,8 +32,11 @@ import {
   surfaceLightingDrawTextures,
   type SurfaceLightingTables,
 } from "../view/atmosphere/surfaceLighting";
+import { viewRay } from "../view/bodies/discShading";
+import { classMapTexelOf } from "../view/bodies/discSurface";
 import {
   type BodyFrameOptions,
+  type BodyFramePlan,
   type LitBodyInput,
   LitBodyRenderer,
   planLitBodies,
@@ -41,7 +50,7 @@ import {
   type Viewport,
   viewRotation4,
 } from "../view/camera/projection";
-import { lookAlong } from "../view/camera/quaternion";
+import { lookAlong, rotate } from "../view/camera/quaternion";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import type {
   BufferHandle,
@@ -56,9 +65,9 @@ import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { createSceneTarget } from "../view/photoreal/sceneTarget";
 import { METER_CLASS } from "../view/post/meter";
-import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { TERRAIN_SETTINGS, type TerrainSettings } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
-import { CoverageMask } from "../view/terrain/coverage";
+import { CoverageMask, fieldCellAt } from "../view/terrain/coverage";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
 import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
@@ -80,7 +89,9 @@ import type {
   HeightWorkerRequest,
 } from "../view/terrain/workers/messages";
 import { WIREFRAME_MATERIALS } from "../view/wireframe/submit";
+import type { CapturedImage } from "./atmosphere";
 import { type Checks, halfTexels } from "./harness";
+import { hdrCapture } from "./hdrCapture";
 import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
 import { MOON_LIKE } from "./litTerrain";
 
@@ -203,6 +214,26 @@ async function bakeAcrossTheEdge(
   }
 }
 
+/** The block's bakes on the low setting from a fresh worker, and the field's blocks it took. */
+async function bakeTheBlock(): Promise<{
+  readonly settings: TerrainSettings;
+  readonly bakes: BakedPatch[];
+  readonly blocks: FieldBlockAnswer[];
+}> {
+  const field = moonLikeFixture("first");
+  const settings = { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES };
+  const { bakes, blocks } = await bakeAcrossTheEdge(
+    blockKeys(),
+    {
+      vertexPath: settings.vertexPath,
+      normals: settings.normals,
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+    },
+    field,
+  );
+  return { settings, bakes, blocks };
+}
+
 /** A bake with every height on the datum: its own and morph heights and its origin's, 0. */
 export function onTheDatum(bake: BakedPatch): BakedPatch {
   return { ...bake, heights: new Float32Array(bake.heights.length), originHeightM: 0 };
@@ -283,6 +314,94 @@ export function poseOver(): Pose {
     camera: cameraAt(b),
     sun: scale(sun, 1 / Math.hypot(sun.x, sun.y, sun.z)),
   };
+}
+
+/** The limb's camera: its distance from the survey's edge along the datum's tangent plane, m. */
+const LIMB_RANGE_M = 200_000;
+
+/** The limb's camera's field of view across, rad: 6°, about 330 m a pixel at the limb. */
+const LIMB_FOV_RAD = (6 * Math.PI) / 180;
+
+/**
+ * The survey's +i edge on the limb: the camera {@link LIMB_RANGE_M} from the edge's point at i 48,
+ * j 46.5 of level 7 along the datum's tangent plane there towards −j, looking back along it with
+ * the datum's normal up, pitched down by half a pixel so that the limb runs along the middle of the
+ * row above the view's centre (straight to a tenth of a pixel), its left half over the survey's
+ * cell 23 and its right half over cell 24, which it does not survey, the edge between two columns;
+ * the Sun 45° up behind the camera. The ground a pixel inside the limb, which its rays meet, lies
+ * some 33 km from the edge's point towards the camera, within the survey's rows (j 44 to 48).
+ */
+export function poseAtTheLimb(): Pose {
+  const edge: PatchKey = { face: 1, level: 7, i: 48, j: 46 };
+  const { p, nu } = datumAt(edge, 0, 32);
+  const towardsLowerJ = sub(datumAt(edge, 0, 0).p, p);
+  const along = normalise(sub(towardsLowerJ, scale(nu, dot(towardsLowerJ, nu))));
+  const halfPixelRad = Math.tan(LIMB_FOV_RAD / 2) / VIEWPORT.widthPx;
+  const sun = normalise(add(nu, along));
+  return {
+    cameraM: add(p, scale(along, LIMB_RANGE_M)),
+    camera: {
+      orientation: lookAlong(add(scale(along, -1), scale(nu, -halfPixelRad)), nu),
+      fovXRad: LIMB_FOV_RAD,
+    },
+    sun,
+  };
+}
+
+/**
+ * A pixel's ray from `pose`, body-fixed, in the spheroid's scaled space (the pole stretched by
+ * a ÷ c, a sphere of radius a), with the body's centre from the camera there.
+ */
+function scaledRay(
+  pose: Pose,
+  xPx: number,
+  yPx: number,
+): { readonly ray: Vec3; readonly centre: Vec3; readonly radiusM: number } {
+  const stretch = MOON_LIKE.equatorialRadiusM / MOON_LIKE.polarRadiusM;
+  const scaled = (v: Vec3): Vec3 => vec3(v.x, v.y, v.z * stretch);
+  const ray = rotate(pose.camera.orientation, viewRay(xPx, yPx, pose.camera, VIEWPORT));
+  return {
+    ray: normalise(scaled(ray)),
+    centre: scaled(scale(pose.cameraM, -1)),
+    radiusM: MOON_LIKE.equatorialRadiusM,
+  };
+}
+
+/**
+ * The signed angle of the ray through (`xPx`, `yPx`) from the spheroid's limb, rad, positive
+ * outside: `bodyDisc.wgsl`'s `limb_angle` in `f64`.
+ */
+function limbAngleAt(pose: Pose, xPx: number, yPx: number): number {
+  const { ray, centre, radiusM } = scaledRay(pose, xPx, yPx);
+  return Math.atan2(norm(cross(ray, centre)), dot(ray, centre)) - Math.asin(radiusM / norm(centre));
+}
+
+/**
+ * The coarse cell of `level` beneath the ray through (`xPx`, `yPx`), as a mesh body's limb draw
+ * finds it (`bodyDiscDraw.wgsl`'s `limb_surveyed`), in `f64`: the ray's hit on the spheroid, or
+ * where it passes outside, the spheroid's point nearest it.
+ */
+function limbCellAt(pose: Pose, xPx: number, yPx: number, level: number): string {
+  const { ray, centre, radiusM } = scaledRay(pose, xPx, yPx);
+  const offset = sub(scale(ray, dot(ray, centre)), centre);
+  const h2 = radiusM * radiusM - dot(offset, offset);
+  const ground = h2 >= 0 ? sub(offset, scale(ray, Math.sqrt(h2))) : offset;
+  const { face, i, j } = classMapTexelOf([ground.x, ground.y, ground.z], 2 ** level);
+  return `${String(face)}/${String(i)}/${String(j)}`;
+}
+
+/** The cells `blocks` surveyed, as {@link limbCellAt} names them. */
+function surveyedCells(blocks: ReadonlyArray<FieldBlockAnswer>): ReadonlySet<string> {
+  const cells = new Set<string>();
+  for (const { fieldLevel, newlySurveyed: runs } of blocks) {
+    for (let r = 0; r + 1 < runs.length; r += 2) {
+      for (let index = runs[r] ?? 0; index < (runs[r + 1] ?? 0); index += 1) {
+        const { face, i, j } = fieldCellAt(fieldLevel, index);
+        cells.add(`${String(face)}/${String(i)}/${String(j)}`);
+      }
+    }
+  }
+  return cells;
 }
 
 /**
@@ -394,6 +513,11 @@ function referenceDraws(
   pose: Pose,
   mask: CoverageMask,
 ): ReadonlyArray<DrawItem> {
+  return renderer.meshDraws(referencePlan(pose, mask));
+}
+
+/** The reference surface's plan: the body handed over to its terrain and drawn as a mesh. */
+function referencePlan(pose: Pose, mask: CoverageMask): BodyFramePlan {
   const texture = mask.texture;
   if (texture === null) {
     throw new Error("the coverage mask holds nothing");
@@ -434,7 +558,7 @@ function referenceDraws(
   if (plan.meshes.length !== 1 || plan.meshes[0]?.role.kind !== "handed-over") {
     throw new Error("the body was not handed over to its terrain and drawn as a mesh");
   }
-  return renderer.meshDraws(plan);
+  return plan;
 }
 
 /** Draws `passes` in order into a fresh scene target from `pose` and reads it back. */
@@ -475,18 +599,7 @@ export function bodyAt(texels: Float32Array, p: number): boolean {
 
 /** R10.T10.c's survey edge: the terrain and the reference surface share the ground, once each. */
 export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Promise<void> {
-  const field = moonLikeFixture("first");
-  const settings = { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES };
-  const keys = blockKeys();
-  const { bakes, blocks } = await bakeAcrossTheEdge(
-    keys,
-    {
-      vertexPath: settings.vertexPath,
-      normals: settings.normals,
-      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
-    },
-    field,
-  );
+  const { settings, bakes, blocks } = await bakeTheBlock();
   const pose = poseOver();
   const relief = new TerrainResources(engine, settings, MOON_LIKE, "lit");
   const datum = new TerrainResources(engine, settings, MOON_LIKE, "lit");
@@ -534,11 +647,144 @@ export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Pro
         referencePixels >= 0.1 * pixels,
       `${String(bakes.length)} patches over ${String(surveyed)} surveyed runs; with relief: finite ${String(finite)}, ${String(holes)} pixels undrawn; on the datum: terrain ${String(terrainPixels)}, reference ${String(referencePixels)}, both ${String(doubles)} of ${String(pixels)}`,
     );
+    const limb = await limbFrames(engine, { renderer, mask, relief, bakes, air, shadow });
+    checkLimb(checks, limb, blocks);
   } finally {
     renderer.dispose();
     mask.release();
     relief.dispose();
     datum.dispose();
+    engine.releaseTexture(air.body);
+    engine.releaseTexture(shadow);
+  }
+}
+
+/** What the limb's frames draw with: the survey edge's renderer, mask, terrain and tables. */
+interface LimbScene {
+  readonly renderer: LitBodyRenderer;
+  readonly mask: CoverageMask;
+  /** The block's resources with its bakes' relief, placed again from the limb's pose. */
+  readonly relief: TerrainResources;
+  readonly bakes: ReadonlyArray<BakedPatch>;
+  readonly air: SurfaceLightingTables;
+  readonly shadow: TextureHandle;
+}
+
+/** The limb's two frames from {@link poseAtTheLimb}. */
+interface LimbFrames {
+  readonly pose: Pose;
+  /** The body's limb draw alone, into a cleared target. */
+  readonly alone: Float32Array;
+  /**
+   * The whole frame in the photorealistic style's order: the reference surface's mesh, the
+   * terrain with its relief, then the limb.
+   */
+  readonly whole: Float32Array;
+}
+
+/** Draws the limb's frames of `scene`. */
+async function limbFrames(engine: RenderEngine, scene: LimbScene): Promise<LimbFrames> {
+  const pose = poseAtTheLimb();
+  const plan = referencePlan(pose, scene.mask);
+  place(scene.relief, scene.bakes, pose);
+  const terrain = await terrainDraw(engine, scene.relief, pose, scene.air, scene.shadow);
+  const limb = scene.renderer.draws(plan);
+  const alone = await drawn(engine, pose, [{ label: PHOTOREAL_PASS_LABELS.discs, draws: limb }]);
+  const whole = await drawn(engine, pose, [
+    { label: PHOTOREAL_PASS_LABELS.bodies, draws: scene.renderer.meshDraws(plan) },
+    { label: "terrain", draws: [terrain] },
+    { label: PHOTOREAL_PASS_LABELS.discs, draws: limb },
+  ]);
+  return { pose, alone, whole };
+}
+
+/**
+ * The limb's check (R10.T10.c's deferred finding): the limb draw alone draws no pixel whose ground
+ * lies in a cell the survey holds, and draws the limb over the cells it does not. A pixel is on
+ * the limb where its corners lie either side of it ({@link limbAngleAt}); its ground's cell is
+ * {@link limbCellAt}'s at its centre, and a pixel whose centre lies within a quarter of a pixel of
+ * another cell across the view is left out, since the shader finds the cell in `f32`. A pixel is drawn where its light is not 0: the
+ * target is cleared to 0 and the Sun lights the limb's ground.
+ */
+function checkLimb(
+  checks: Checks,
+  frames: LimbFrames,
+  blocks: ReadonlyArray<FieldBlockAnswer>,
+): void {
+  const { pose, alone } = frames;
+  const level = blocks[0]?.fieldLevel ?? 0;
+  const surveyed = surveyedCells(blocks);
+  let onLimb = 0;
+  let overSurvey = 0;
+  let drawnOverSurvey = 0;
+  let overBare = 0;
+  let drawnOverBare = 0;
+  for (let y = 0; y < VIEWPORT.heightPx; y += 1) {
+    for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
+      const corners = [
+        limbAngleAt(pose, x, y),
+        limbAngleAt(pose, x + 1, y),
+        limbAngleAt(pose, x, y + 1),
+        limbAngleAt(pose, x + 1, y + 1),
+      ];
+      if (!(Math.min(...corners) < 0 && Math.max(...corners) > 0)) {
+        continue;
+      }
+      onLimb += 1;
+      const cell = limbCellAt(pose, x + 0.5, y + 0.5, level);
+      if (
+        limbCellAt(pose, x + 0.25, y + 0.5, level) !== cell ||
+        limbCellAt(pose, x + 0.75, y + 0.5, level) !== cell
+      ) {
+        continue;
+      }
+      const at = 4 * (y * VIEWPORT.widthPx + x);
+      const lit = (alone[at] ?? 0) > 0 || (alone[at + 1] ?? 0) > 0 || (alone[at + 2] ?? 0) > 0;
+      if (surveyed.has(cell)) {
+        overSurvey += 1;
+        drawnOverSurvey += lit ? 1 : 0;
+      } else {
+        overBare += 1;
+        drawnOverBare += lit ? 1 : 0;
+      }
+    }
+  }
+  const finite = alone.every(Number.isFinite) && frames.whole.every(Number.isFinite);
+  checks.check(
+    "R10.T10.c a mesh body's limb leaves its surveyed ground to the terrain and draws the rest",
+    finite &&
+      overSurvey >= 8 &&
+      overBare >= 8 &&
+      drawnOverSurvey === 0 &&
+      drawnOverBare >= overBare - 2,
+    `${String(onLimb)} pixels on the limb; over the survey ${String(drawnOverSurvey)} of ${String(overSurvey)} drawn; over bare ground ${String(drawnOverBare)} of ${String(overBare)} drawn; every texel finite ${String(finite)}`,
+  );
+}
+
+/**
+ * The limb's captures (R10.T10.c): the whole frame and the limb draw alone from
+ * {@link poseAtTheLimb}, each pixel 4 × 4, at the frames' pre-exposure.
+ */
+export async function captureSurveyLimb(engine: RenderEngine): Promise<CapturedImage[]> {
+  const { settings, bakes, blocks } = await bakeTheBlock();
+  const relief = new TerrainResources(engine, settings, MOON_LIKE, "lit");
+  const air = createAirlessTables(engine, "survey limb capture: no air");
+  const shadow = createShadowPlaceholder(engine);
+  const mask = new CoverageMask(engine, "survey limb capture: coverage mask");
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  try {
+    for (const block of blocks) {
+      mask.survey(block);
+    }
+    const frames = await limbFrames(engine, { renderer, mask, relief, bakes, air, shadow });
+    return [
+      hdrCapture("r10-t10c-limb-whole", frames.whole, VIEWPORT, 1, 4),
+      hdrCapture("r10-t10c-limb-alone", frames.alone, VIEWPORT, 1, 4),
+    ];
+  } finally {
+    renderer.dispose();
+    mask.release();
+    relief.dispose();
     engine.releaseTexture(air.body);
     engine.releaseTexture(shadow);
   }

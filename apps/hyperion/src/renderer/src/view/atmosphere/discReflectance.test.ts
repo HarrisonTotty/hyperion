@@ -157,8 +157,8 @@ function digestOf(source: string): string {
  * beside them and leave each to the byte (the brief's cut; R08.T11.f's cost of a branch not taken).
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "985196845268c6db"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "985196845268c6db"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "6357d9c7fe7406dc"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "6357d9c7fe7406dc"],
   ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "79ed1a28cd44f4de"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "9b82341112282393"],
   ...[

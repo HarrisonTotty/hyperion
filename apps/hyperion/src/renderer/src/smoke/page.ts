@@ -118,7 +118,7 @@ import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
-import { checkSurveyEdge } from "./surveyEdge";
+import { captureSurveyLimb, checkSurveyEdge } from "./surveyEdge";
 import { captureOccultation, checkMeshBodies } from "./meshBodies";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
@@ -705,14 +705,17 @@ async function run(
       );
     });
   }
-  // R10.T10.g's planetshine on slopes, in part 7 with the terrain's groups, so that `--part=7`
-  // takes it without part 1's captures.
+  // R10.T10.g's planetshine on slopes and R10.T10.c's limb over the survey, in part 7 with the
+  // terrain's groups, so that `--part=7` takes them without part 1's captures.
   if (captures) {
-    await group(7, "R10.T10.g the terrain light's captures", async () => {
-      const frames = await capturePlanetshineSlopes(engine);
+    await group(7, "R10.T10.g and R10.T10.c the terrain light's captures", async () => {
+      const frames = [
+        ...(await capturePlanetshineSlopes(engine)),
+        ...(await captureSurveyLimb(engine)),
+      ];
       images = [...images, ...frames];
       checks.check(
-        "R10.T10.g the terrain light's captures",
+        "R10.T10.g and R10.T10.c the terrain light's captures",
         frames.length > 0,
         `${String(frames.length)} frames`,
       );

@@ -35,11 +35,12 @@
  *
  * A disc whose relief subtends the photorealistic style's τ at its limb (plan R10, R10.T10.e; R10
  * Design note 13) is handed over to terrain (`terrain/handover.ts`' `handOverRegimes`), before
- * the promotion: its regime is `terrain`, drawn as a mesh body is, its figure the reference surface
- * beneath its terrain, discarded where its survey's coverage mask holds the ground surveyed
- * (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view that draws none
- * draws its figure whole, as a mesh body's. The hand-over counts the pixels the view is presented
- * at ({@link BodyFrameOptions.presentedPx}, R10.T10.g), R07's 3 px switch the frame's own.
+ * the promotion: its regime is `terrain`, drawn as a mesh body is, its figure and its limb the
+ * reference surface beneath its terrain, discarded where its survey's coverage mask holds the
+ * ground surveyed (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view
+ * that draws none draws its figure whole, as a mesh body's. The hand-over counts the pixels the
+ * view is presented at ({@link BodyFrameOptions.presentedPx}, R10.T10.g), R07's 3 px switch the
+ * frame's own.
  *
  * A class-map disc whose surface carries the field's normal map (plan R10, R10.T10.g) shades its
  * surveyed ground with those normals, in its draws and in the point it switches with: its records'
@@ -215,10 +216,10 @@ export interface LitBodyInput {
   /**
    * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
    * `CoverageMask.texture`) with the axes it is read in, given by a view that draws its terrain,
-   * with which its figure, once it is handed over (`terrain`), is the reference surface beneath
-   * that terrain: discarded wherever the mask holds a cell surveyed, so that the terrain alone
-   * draws that ground (R10's Design note 12). Read by no other regime; absent, the figure is drawn
-   * whole.
+   * with which its figure and its limb, once it is handed over (`terrain`), are the reference
+   * surface beneath that terrain: discarded wherever the mask holds a cell surveyed, so that the
+   * terrain alone draws that ground (R10's Design note 12). Read by no other regime; absent, the
+   * figure and the limb are drawn whole.
    */
   readonly surveyCoverage?: MeshBodyCoverage;
   /**
@@ -308,7 +309,8 @@ export type MeshBodyRole =
   | { readonly kind: "handed-over"; readonly coverage: MeshBodyCoverage | null };
 
 /**
- * The coverage mask that discards a mesh body's figure: a handed-over body's, a promoted one none.
+ * The coverage mask that discards a mesh body's figure and its limb: a handed-over body's, a
+ * promoted one none.
  *
  * @remarks
  * Over the image its datum gives way on the same mask (plan R10, R10.T16.f; `surveyedDatumsOf`).
@@ -889,6 +891,29 @@ const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   { name: "surfaceNormals", binding: SURFACE_NORMALS_BINDING, viewDimension: "2d-array" },
 ];
 
+/**
+ * The group 2 binding of a body's coverage mask (`smoothMesh.wgsl` and `bodyDiscDraw.wgsl`,
+ * R10.T10.c), past the disc's.
+ */
+const COVERAGE_MASK_BINDING = 13;
+
+/** The coverage mask's entry in the mesh's and the disc draws' layouts, read by `textureLoad`. */
+const COVERAGE_MASK_TEXTURE: TextureBindingSpec = {
+  name: "coverageMask",
+  binding: COVERAGE_MASK_BINDING,
+  viewDimension: "2d-array",
+};
+
+/**
+ * The disc draws' textures: {@link DISC_TEXTURES} with the body's coverage mask at binding 13
+ * (plan R10, R10.T10.c), which a mesh body's limb discards by over its surveyed terrain, and which
+ * is the mask of no surveyed cell for every other draw.
+ */
+const DISC_DRAW_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
+  ...DISC_TEXTURES,
+  COVERAGE_MASK_TEXTURE,
+];
+
 /** The group 2 binding of a body's disc table (`discAir.wgsl`'s `disc_reflectance`, R08.T16.b). */
 const DISC_TABLE_BINDING = 15;
 
@@ -901,20 +926,25 @@ const DISC_TABLE_TEXTURE: TextureBindingSpec = {
 };
 
 /**
- * The air forms' textures (plan R08, R08.T16.b): {@link DISC_TEXTURES} with the body's disc table
- * at binding 15, the first free past R08.T9.b's atmosphere tables, R10.T10.c's coverage mask (13)
- * and R10.T10.g's normal map (14); the plain forms' layouts are as they were.
+ * The air forms' textures (plan R08, R08.T16.b): {@link DISC_DRAW_TEXTURES} with the body's disc
+ * table at binding 15, the first free past R08.T9.b's atmosphere tables, R10.T10.c's coverage mask
+ * (13) and R10.T10.g's normal map (14); the plain forms' layouts are as they were.
  */
-const DISC_AIR_TEXTURES: ReadonlyArray<TextureBindingSpec> = [...DISC_TEXTURES, DISC_TABLE_TEXTURE];
+const DISC_AIR_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
+  ...DISC_DRAW_TEXTURES,
+  DISC_TABLE_TEXTURE,
+];
 
 /**
- * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), and its
- * rectangle's corner depths (0 for a disc body; a mesh body's limb plane's, T9).
+ * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), its
+ * rectangle's corner depths (0 for a disc body; a mesh body's limb plane's, T9), and the axes its
+ * coverage mask is read in (R10.T10.c).
  */
 const DISC_UNIFORMS = [
   { name: "disc", type: "u32" },
   { name: "edgePass", type: "u32" },
   { name: "depths", type: "vec4f" },
+  { name: "coverageAxes", type: "mat4x4f" },
 ] as const;
 
 /**
@@ -926,7 +956,11 @@ const DISC_STORAGE = [
   { name: "cellSums", binding: 5 },
 ] as const;
 
-/** The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied. */
+/**
+ * The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied, which
+ * for a handed-over mesh body discards its pixels over the ground its coverage mask holds
+ * surveyed (`bodyDiscDraw.wgsl`, R10.T10.c).
+ */
 export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> = {
   interior: {
     name: "bodies:disc",
@@ -935,7 +969,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     fragmentWgsl: DISC_SOURCE,
     uniforms: DISC_UNIFORMS,
     samplers: [],
-    textures: DISC_TEXTURES,
+    textures: DISC_DRAW_TEXTURES,
     storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
@@ -949,7 +983,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     fragmentWgsl: DISC_SOURCE,
     uniforms: DISC_UNIFORMS,
     samplers: [],
-    textures: DISC_TEXTURES,
+    textures: DISC_DRAW_TEXTURES,
     storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
@@ -1045,9 +1079,6 @@ export const BODY_DISC_EMISSIVE_AIR_MATERIALS: Readonly<
 
 const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
-/** The group 2 binding of a mesh body's coverage mask (`smoothMesh.wgsl`, R10.T10.c), past the disc's. */
-const COVERAGE_MASK_BINDING = 13;
-
 /**
  * The mesh regime's material (T9): R05's patches of a body's spheroid at zero height, one
  * instanced draw a body, opaque with depth, shading the pixels the body covers wholly from its
@@ -1067,10 +1098,7 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
     { name: "coverageAxes", type: "mat4x4f" },
   ],
   samplers: [],
-  textures: [
-    ...DISC_TEXTURES,
-    { name: "coverageMask", binding: COVERAGE_MASK_BINDING, viewDimension: "2d-array" },
-  ],
+  textures: [...DISC_TEXTURES, COVERAGE_MASK_TEXTURE],
   storageBuffers: [
     { name: "discs", binding: 0 },
     { name: "slots", binding: 3 },
@@ -1800,7 +1828,9 @@ export class LitBodyRenderer {
   /**
    * One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`; by the
    * emissive forms where its record, as drawn, carries its emission (R08.T18.a), and by the air
-   * forms where it carries its air (R08.T16.b).
+   * forms where it carries its air (R08.T16.b). A handed-over mesh body's limb takes its
+   * `coverage`, by which it leaves its surveyed ground to the terrain (R10.T10.c); every other
+   * draw `null`, the mask of no surveyed cell.
    */
   #discDraw(
     index: number,
@@ -1808,6 +1838,7 @@ export class LitBodyRenderer {
     edgePass: 0 | 1,
     depths: LimbDepths,
     drawn: DrawnPlan,
+    coverage: MeshBodyCoverage | null,
   ): DrawItem {
     const resources = this.#resources;
     const forms = formsOf(record, drawn, resources);
@@ -1819,8 +1850,12 @@ export class LitBodyRenderer {
         disc: new Float32Array([index]),
         edgePass: new Float32Array([edgePass]),
         depths: new Float32Array(depths),
+        coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
       },
-      textures: this.#recordTextures(record),
+      textures: {
+        ...this.#recordTextures(record),
+        coverageMask: coverage?.mask ?? resources.noCoverage,
+      },
       storageBuffers: { discs: resources.discs, cellSums: resources.cellSums },
     };
   }
@@ -2055,8 +2090,8 @@ export class LitBodyRenderer {
             throw new Error(`the plan's disc step ${step.index} has no record`);
           }
           draws.push(
-            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS, drawn),
-            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS, drawn),
+            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS, drawn, null),
+            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS, drawn, null),
           );
           break;
         }
@@ -2066,7 +2101,9 @@ export class LitBodyRenderer {
           if (body === undefined || record === undefined) {
             throw new Error(`the plan's limb step ${step.mesh} has no mesh or record`);
           }
-          draws.push(this.#discDraw(body.index, record, 1, body.limbDepths, drawn));
+          draws.push(
+            this.#discDraw(body.index, record, 1, body.limbDepths, drawn, coverageOf(body.role)),
+          );
           break;
         }
         case "points":

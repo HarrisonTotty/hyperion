@@ -51,7 +51,7 @@ import {
 import { bindingStages } from "../../test/wgslStages";
 import { datumNormalMap, UNREAD_TEXTURES, unreadNormalMap } from "../../test/normalMapFixtures";
 import type { DiscSurface } from "../appearance/bodyAppearance";
-import { rotation3FromRows } from "../coords/rotation";
+import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem, TextureHandle } from "../engine/types";
@@ -1901,6 +1901,46 @@ describe("mesh bodies (T9)", () => {
       "bodyRotation",
       "coverageAxes",
     ]);
+  });
+
+  it("gives a surveyed body's limb its coverage mask in its axes, and every other disc draw the mask of no surveyed cell (R10.T10.c)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = surveyedPlan();
+    const sequence = renderer.draws(plan);
+    renderer.dispose();
+    const bound = sequence
+      .filter((draw) => draw.material.name.startsWith("bodies:disc"))
+      .map((draw) => [
+        plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body,
+        draw.uniforms["edgePass"]?.[0],
+        draw.textures["coverageMask"]?.name,
+        Array.from(draw.uniforms["coverageAxes"] ?? []),
+      ]);
+    const identity = Array.from(rotationColumns(IDENTITY_ROTATION));
+    expect(bound).toEqual(
+      expect.arrayContaining([
+        [PLANET, 1, "coverage mask", Array.from(rotationColumns(SURVEY_ROTATION))],
+        [MOON, 1, "bodies:no coverage", identity],
+        [CLEAR, 0, "bodies:no coverage", identity],
+        [CLEAR, 1, "bodies:no coverage", identity],
+      ]),
+    );
+    expect(bound).toHaveLength(4);
+  });
+
+  it("reads the coverage mask in the disc draws' fragment stage alone, at the mesh's binding", () => {
+    for (const material of [BODY_DISC_MATERIALS.interior, BODY_DISC_MATERIALS.limb]) {
+      expect([
+        material.textures?.find((t) => t.name === "coverageMask"),
+        [...(bindingStages(material.vertexWgsl).get(13) ?? [])],
+        material.uniforms.map((u) => u.name),
+      ]).toEqual([
+        { name: "coverageMask", binding: 13, viewDimension: "2d-array" },
+        ["fragment"],
+        ["disc", "edgePass", "depths", "coverageAxes"],
+      ]);
+    }
   });
 
   it("writes a plan's records once for its figures and its sequence", async () => {
