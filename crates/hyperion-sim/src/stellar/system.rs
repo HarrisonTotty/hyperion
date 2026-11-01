@@ -496,14 +496,14 @@ impl StarModel {
         // band where the single star's and the companion-stripped star's electron-capture windows
         // disagree), so every attempt keeps the track's; everywhere else the mark is redrawn with
         // the remnant's and the kick's draws (ruling 93.2, amended 2026-11-01).
-        let held = track.companion_mark_read().map(|_| self.draws.stripped());
+        let held_mark = track.companion_mark_read().map(|_| self.draws.stripped());
         let (mut kept, mut attempts) = (None, KICK_LOOP_CAP);
         for k in 1..KICK_LOOP_CAP {
             let draws = self
                 .draws
                 .clone()
                 .with_remnant_draws_of(seed, star, first + k);
-            let draws = match held {
+            let draws = match held_mark {
                 Some(mark) => draws.with_stripped(mark),
                 None => draws,
             };

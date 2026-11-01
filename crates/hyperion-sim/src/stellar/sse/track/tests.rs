@@ -481,6 +481,43 @@ fn the_electron_capture_window_meets_the_iron_cores() {
     assert!(matches!(last, DeathKind::CoreCollapse { .. }));
 }
 
+/// Ruling 93.2 as amended (P08.T12.c): a star in the band where the single star's and the
+/// companion-stripped star's electron-capture windows disagree, 8.1 M☉ at Z = 0.02, reads its
+/// companion-stripped mark, which decides its death: set, it collapses by electron capture; clear,
+/// it ends as a white dwarf. Outside the band the build reads no mark: at 8.25 M☉, inside both
+/// windows, and at 15 M☉, outside the stripped window.
+#[test]
+fn the_build_reads_the_companion_mark_only_where_the_windows_disagree() {
+    use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
+    use crate::rng::Mark;
+    let solar = composition(0.02);
+    let with_mark = |stripped| {
+        StarDraws::from_parts(StarDrawsParts {
+            stripped,
+            ..StarDrawsParts::MEDIAN
+        })
+    };
+    let (set, clear) = (with_mark(Mark::from_word(0)), with_mark(NEVER_STRIPPED));
+    let track = |m: f64, draws: &StarDraws| Track::full(SolarMasses::new(m), &solar, draws);
+    let (marked, unmarked) = (track(8.1, &set), track(8.1, &clear));
+    assert_eq!(marked.companion_mark_read(), Some(true));
+    assert_eq!(unmarked.companion_mark_read(), Some(false));
+    assert_eq!(
+        marked.death().map(|d| d.kind()),
+        Some(DeathKind::ElectronCapture)
+    );
+    assert_eq!(
+        unmarked.death().map(|d| d.kind()),
+        Some(DeathKind::EnvelopeLoss)
+    );
+    for m in [8.25, 15.0] {
+        let (a, b) = (track(m, &set), track(m, &clear));
+        assert_eq!(a.companion_mark_read(), None, "{m} M☉");
+        assert_eq!(b.companion_mark_read(), None, "{m} M☉");
+        assert!(a == b, "{m} M☉: the mark moves no track outside the band");
+    }
+}
+
 /// Ruling 57: under the generator's recipes no white dwarf is heavier than the electron-capture
 /// mass of an oxygen–neon core, 1.37 M☉, and none sits at the neutron star's radius, over 5–9 M☉
 /// (where the heaviest dwarfs come from) at five metallicities; under `Hurley2000`, as in SSE,

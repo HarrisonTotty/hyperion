@@ -602,6 +602,11 @@ fn kept_marks_against_their_tracks(galaxy: &Galaxy, records: &[SystemRecord]) ->
         if let (Some(a), Some(b)) = (a, b) {
             assert_same_bits(a.age().value(), b.age().value());
         }
+        assert!(
+            own == other,
+            "{:?}: the whole track, not just its death",
+            record.id()
+        );
     }
     (read, moved)
 }

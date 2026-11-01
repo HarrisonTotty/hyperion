@@ -756,6 +756,12 @@ impl Track {
     /// companion-stripped star's electron-capture windows disagree (plan 06, design note 11), and
     /// `None` wherever the track would be the same under either value. Plan 08's kick loop keeps
     /// the track's mark where it is `Some` (P08.T12.c; ruling 93.2, amended 2026-11-01).
+    ///
+    /// It holds because the build asks the mark at one place only, where the two windows disagree
+    /// (`Builder::by_companion_mark`, from `captures_electrons`), on a builder of its own: a build
+    /// that asked it anywhere else would make it `Some` where the mark decides nothing, and the
+    /// kick loop would keep a mark it could redraw. It is part of the track's equality, and two
+    /// builds of one star to its death agree on it.
     #[must_use]
     pub(crate) const fn companion_mark_read(&self) -> Option<bool> {
         self.companion_mark_read
