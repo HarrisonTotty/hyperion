@@ -3,6 +3,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -2005,10 +2006,11 @@ function ViewStage({
       {folded("exposure") ? exposureStandingLine : null}
     </>
   ) : null;
-  // Under MAXIMIZE VIEW, under the key legend, what the hidden panels would show (the owner's
-  // request, 2026-11-01): the line naming its key, the CONTROLS view where it is an instrument and
-  // that view's selection; then the slots held whole for want of room, as the INSTRUMENTS panel
-  // states them folded; then every hidden panel's standing lines.
+  // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
+  // owner's request, 2026-11-01): the line naming its key, the CONTROLS view where it is an
+  // instrument and that view's selection; then the slots held whole for want of room, as the
+  // INSTRUMENTS panel states them folded; then every hidden panel's standing lines. They run on as
+  // one line where they fit, each part after a middle dot that leads it, and wrap between parts.
   const heldWhole = instrumentViews
     .filter(({ standing }) => standing === "held")
     .map(({ slot }) => slot.name);
@@ -2018,23 +2020,37 @@ function ViewStage({
     controlsSelection === null
       ? null
       : (rows.find((row) => row.key === targetKey(controlsSelection))?.name ?? null);
+  const footDot = <span className="view__foot-dot">·</span>;
+  const standingPart = (line: ReactNode, key: string): ReactNode =>
+    line === null ? null : (
+      <div className="view__foot-item" key={key}>
+        {footDot}
+        {line}
+      </div>
+    );
   const maximizedPart = maximized ? (
-    <div className="view__maximized">
-      <p className="view__keys">
-        {maximizedKeys(
-          controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
-          selectedName,
-        )}
+    <>
+      <p className="view__keys view__foot-item">
+        {footDot}
+        <span className="view__maximized-keys">
+          {maximizedKeys(
+            controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
+            selectedName,
+          )}
+        </span>
       </p>
-      {heldWhole.length === 0 ? null : (
-        <p className="view-instruments-panel__reason view-folds__standing">
-          <StatusText text={noRoomReason(heldWhole)} />
-        </p>
+      {standingPart(
+        heldWhole.length === 0 ? null : (
+          <p className="view-instruments-panel__reason view-folds__standing">
+            <StatusText text={noRoomReason(heldWhole)} />
+          </p>
+        ),
+        "held",
       )}
-      {cameraStanding}
-      {styleStanding}
-      {exposureStandingLine}
-    </div>
+      {standingPart(cameraStanding, "camera")}
+      {standingPart(styleStanding, "style")}
+      {standingPart(exposureStandingLine, "exposure")}
+    </>
   ) : null;
   const sideFolds: SideFolds = {
     cameraId: foldIds.camera,
@@ -2197,6 +2213,7 @@ function ViewStage({
         <div className="view__foot">
           <div className="view__foot-lines">
             {engineLine === null ? <KeyLegend id={legendId} modifier={modifier} /> : null}
+            {maximizedPart}
           </div>
           <button
             ref={maximizeRef}
@@ -2209,7 +2226,6 @@ function ViewStage({
             <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
           </button>
         </div>
-        {maximizedPart}
       </div>
       <div
         className="view__side"

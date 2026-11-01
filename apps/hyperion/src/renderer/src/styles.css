@@ -4353,8 +4353,36 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 .view__foot-lines {
+  display: flex;
   flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
   min-width: 0;
+}
+
+/*
+ * Under MAXIMIZE VIEW, each part after the legend on the foot's row: its line, then the hidden
+ * panels' standing lines, each after a middle dot that leads it, so that where they wrap no dot ends
+ * a line; the first part's dot stands only after the legend.
+ */
+.view__foot-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.view__foot-item > .view-folds__standing {
+  margin: 0;
+}
+
+.view__foot-dot {
+  color: var(--text-muted);
+}
+
+.view__foot-lines > .view__foot-item:first-child > .view__foot-dot {
+  display: none;
 }
 
 .view__maximize {
@@ -4430,20 +4458,6 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 
 .view--maximized > .view__side {
   display: none;
-}
-
-/*
- * Under the key legend while MAXIMIZE VIEW is on: its line, then the hidden panels' standing lines,
- * each a line of its own (the owner's request, 2026-11-01).
- */
-.view__maximized {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.view__maximized > .view-folds__standing {
-  margin: 0;
 }
 
 /* The descent spike fills the window and never scrolls: its lists scroll within themselves. */

@@ -105,18 +105,18 @@ function refusingMaterialsSource(): ViewEngineSource {
   };
 }
 
-/** What stands under the key legend while MAXIMIZE VIEW is on. */
+/** The view's foot's lines: the key legend, and while MAXIMIZE VIEW is on what runs on after it. */
 function maximizedPart(): HTMLElement {
-  const part = document.querySelector<HTMLElement>(".view__maximized");
+  const part = document.querySelector<HTMLElement>(".view__foot-lines");
   if (part === null) {
-    throw new Error("nothing stands under the key legend");
+    throw new Error("the view has no foot");
   }
   return part;
 }
 
-/** The line under the key legend while MAXIMIZE VIEW is on, as it reads. */
+/** MAXIMIZE VIEW's line after the key legend, as it reads, or `null` while it is off. */
 function maximizedLine(): string | null {
-  return maximizedPart().querySelector(".view__keys")?.textContent ?? null;
+  return maximizedPart().querySelector(".view__maximized-keys")?.textContent ?? null;
 }
 
 /** The side column's panels in the full layout, each by its region's name. */
@@ -207,11 +207,26 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
     expect(screen.getByRole("group", { name: "Scene" })).toBeVisible();
   });
 
-  it("names the key that shows the panels under the key legend while on, and not while off", async () => {
+  it("names the key that shows the panels after the key legend while on, and not while off", async () => {
     const view = await setup();
-    const off = screen.queryByText(MAXIMIZED_KEYS);
+    const off = maximizedLine();
     await pressMaximize(view);
-    expect([off, screen.getByText(MAXIMIZED_KEYS).tagName]).toEqual([null, "P"]);
+    expect([off, maximizedLine()?.startsWith(MAXIMIZED_KEYS)]).toEqual([null, true]);
+  });
+
+  it("runs its line on from the key legend's, in one row that wraps between parts", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    const legend = maximizedPart().querySelector(".view__keys");
+    if (legend === null) {
+      throw new Error("the view's foot has no key legend");
+    }
+    const after = legend.nextElementSibling;
+    expect([
+      legend.textContent.startsWith("FOCUSED VIEW"),
+      after !== null && after.querySelector(".view__maximized-keys") !== null,
+      stylesheetRule(".view__foot-lines"),
+    ]).toEqual([true, true, expect.stringContaining("flex-wrap: wrap;")]);
   });
 
   it("stays on through a change of scene", async () => {
