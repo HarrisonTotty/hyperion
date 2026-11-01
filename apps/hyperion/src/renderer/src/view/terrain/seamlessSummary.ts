@@ -65,6 +65,28 @@ export interface SeamEvent {
   readonly standIn: boolean;
 }
 
+/**
+ * A frame's change of the drawn ground against the frame before's (plan R10, R10.T16.i), as its
+ * instance records draw it, over the instances whose records changed: each refine, coarsen,
+ * rebake, rise and appearance, and every fade in progress.
+ */
+export interface SeamFrameChange {
+  readonly tS: number;
+  /** The largest on-screen move of the drawn surface at a ground place, pixels. */
+  readonly movePx: number;
+  /** The largest turn of the drawn shading normal at a ground place, degrees. */
+  readonly normalDeg: number;
+  /** The instances that moved more than {@link POP_PX} or turned more than {@link POP_NORMAL_DEG}. */
+  readonly pops: number;
+  /**
+   * The instances drawn where nothing was, over ground the view saw the frame before (the
+   * reference surface's), with no rise out of it.
+   */
+  readonly appears: number;
+  /** The largest move from the datum of an instance drawn where nothing was, risen or not, pixels. */
+  readonly appearMovePx: number;
+}
+
 /** A link of a missing patch's chain of ancestors at a collapse. */
 export interface SeamChainLink {
   readonly level: number;
@@ -118,6 +140,8 @@ export interface SeamRun {
   readonly frames: ReadonlyArray<SeamFrame>;
   readonly events: ReadonlyArray<SeamEvent>;
   readonly collapses: ReadonlyArray<SeamCollapse>;
+  /** The frames whose drawn ground changed or faded ({@link SeamFrameChange}). */
+  readonly frameChanges: ReadonlyArray<SeamFrameChange>;
 }
 
 /** A change moving the drawn surface more than this on screen is a pop, pixels. */
@@ -188,6 +212,15 @@ export interface SeamSummary {
     readonly over5Percent: number;
     readonly max: number;
   };
+  /** The largest move a frame made of the drawn ground at a ground place, pixels (R10.T16.i). */
+  readonly frameMovePxMax: number;
+  /** The largest turn a frame made of the drawn shading normal, and its p95 over those frames, °. */
+  readonly frameNormalDeg: { readonly p95: number; readonly max: number };
+  /** Instances a second whose change in a frame showed ({@link SeamFrameChange.pops}). */
+  readonly framePopsPerS: number;
+  /** Instances drawn over ground the view saw with no rise out of the datum, and the largest move. */
+  readonly appearsWithoutTransition: number;
+  readonly appearMovePxMax: number;
 }
 
 /**
@@ -290,6 +323,7 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
   const drawnSpanS = (last?.tS ?? 0) - drawnFromS;
   const pops = events.filter((e) => e.tS >= drawnFromS && isPop(e)).length;
   const latencies = run.latenciesS;
+  const changes = run.frameChanges;
   return {
     spanS,
     frames: frames.length,
@@ -316,5 +350,17 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
       refines.length === 0 ? 0 : refines.filter((e) => e.minFineK < 0.5).length / refines.length,
     normalJumpDeg: { p95: percentile(normals, 95) ?? 0, max: maxOf(normals) },
     bandSteps: { count: bandStepCount, over5Percent: bandOver5, max: bandMax },
+    frameMovePxMax: maxOf(changes.map((c) => c.movePx)),
+    frameNormalDeg: {
+      p95:
+        percentile(
+          changes.map((c) => c.normalDeg),
+          95,
+        ) ?? 0,
+      max: maxOf(changes.map((c) => c.normalDeg)),
+    },
+    framePopsPerS: drawnSpanS > 0 ? changes.reduce((sum, c) => sum + c.pops, 0) / drawnSpanS : 0,
+    appearsWithoutTransition: changes.reduce((sum, c) => sum + c.appears, 0),
+    appearMovePxMax: maxOf(changes.map((c) => c.appearMovePx)),
   };
 }

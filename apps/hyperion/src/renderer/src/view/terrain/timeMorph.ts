@@ -12,7 +12,10 @@
  * `TransitionFades`); the shader floors k at the fade (`fadedMorph`):
  *
  * - **refine**: a patch drawn where a coarser one was starts at a fade of 1, on its parent's mesh,
- *   and falls to its own k;
+ *   and falls to its own k. One level's fade cannot carry two levels' change, so a coarser patch
+ *   still falling goes on drawing the finer area until its fade ends, and a refine of more than
+ *   one level draws the area's nearest resident ancestor between the two first, over the area,
+ *   a level at a time;
  * - **coarsen**: a patch drawn where finer ones were waits while they rise to a fade of 1 on their
  *   parents' mesh, still drawn and pinned, and then takes their place;
  * - **rebake**: a resident patch's newer bake, stored in a spare slot, mixes its heights, normals
@@ -73,8 +76,9 @@ interface Transition {
   readonly to: number;
   startMs: number | null;
   /**
-   * A coarsen's: what is drawn in the area's place until the fade reaches 1, the finer instances
-   * that were, and parts of the coarser patch over the rest; `null` for a refine.
+   * What is drawn in the area's place until the fade reaches {@link Transition.to}: a coarsen's,
+   * the finer instances that were and parts of the coarser patch over the rest; a deferred
+   * refine's, the coarser patch still falling there, over the area; `null` for a refine.
    */
   readonly held: ReadonlyArray<HeldPatch> | null;
 }
@@ -196,9 +200,21 @@ export class TimeMorph {
     };
   }
 
-  /** Whether a coarsen's fade has reached 1, so that the pass presents its draw set again. */
+  /**
+   * Whether a hold has ended, so that the pass presents its draw set again: a coarsen's fade has
+   * reached 1, a deferred refine's 0, or a refine's hold has had no draw since the step that made
+   * it (nothing showed it: it gives way at the next present, so that the steps alone go on down).
+   */
   get swapDue(): boolean {
-    return this.#swapDue;
+    if (this.#swapDue) {
+      return true;
+    }
+    for (const transition of this.#transitions.values()) {
+      if (transition.held !== null && transition.to === 0 && transition.startMs === null) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -302,8 +318,9 @@ export class TimeMorph {
       const steady = was?.keyString === drawn.keyString;
       let swapped = false;
       if (going !== undefined && going.held !== null && !steady) {
-        // A coarsen in progress for this instance: its finer patches stay until its fade is 1.
-        if (fadeAt(going.from, going.to, going.startMs, this.#nowMs, this.#spanMs) < 1) {
+        // A coarsen in progress for this instance: its finer patches stay until its fade is 1; a
+        // deferred refine's coarser patch until its fade is 0.
+        if (!this.#reachedEnd(going)) {
           if (hold(going, views)) {
             transitions.set(areaString, going);
             continue;
@@ -322,19 +339,25 @@ export class TimeMorph {
               within: drawn.within,
               views,
             };
-      const next = swapped
-        ? null
-        : steady
-          ? (going ?? this.#releasedOver(area))
-          : this.#changeOver(area, drawn, before, cache, seenBefore);
+      const next =
+        swapped && going?.to === 1
+          ? null
+          : steady
+            ? (going ?? this.#releasedOver(area))
+            : this.#changeOver(area, drawn, before, cache, seenBefore);
       if (next !== null) {
         transitions.set(areaString, next);
         if (next.held !== null) {
           if (hold(next, views)) {
             continue;
           }
-          transitions.delete(areaString);
-          this.#coarsensSwapped += 1;
+          if (next.to === 1) {
+            transitions.delete(areaString);
+            this.#coarsensSwapped += 1;
+          } else {
+            // A refine's hold gone from the cache: the finer patch refines from 1 at once.
+            transitions.set(areaString, { ...next, from: 1, startMs: null, held: null });
+          }
         }
       }
       out.push(patch);
@@ -366,7 +389,12 @@ export class TimeMorph {
    */
   #releasedOver(area: PatchKey): Transition | null {
     for (const going of this.#transitions.values()) {
-      if (going.held !== null && going.area.level < area.level && within(area, going.area)) {
+      if (
+        going.held !== null &&
+        going.to === 1 &&
+        going.area.level < area.level &&
+        within(area, going.area)
+      ) {
         const reached = fadeAt(going.from, going.to, going.startMs, this.#nowMs, this.#spanMs);
         return reached > 0
           ? {
@@ -414,18 +442,34 @@ export class TimeMorph {
       }
       const going = this.#transitions.get(coarserString);
       if (was.patch.key.level < drawn.patch.key.level) {
-        const reached =
-          going === undefined
-            ? 1
-            : fadeAt(going.from, going.to, going.startMs, this.#nowMs, this.#spanMs);
+        if (
+          going !== undefined &&
+          (going.held === null || going.to === 0) &&
+          area.level - was.patch.key.level <= MAX_SUB_PATCH_LEVELS &&
+          !this.#reachedEnd(going)
+        ) {
+          // The coarser patch is still falling to its own mesh (or rising from the datum) there:
+          // drawn on, over this area, until it ends, the finer patch refines from its surface then
+          // (a sub-patch at most `MAX_SUB_PATCH_LEVELS` down, as the resolver's).
+          return {
+            area,
+            footprints: going.rise ? [] : [area],
+            rise: going.rise,
+            from: going.from,
+            to: going.to,
+            startMs: going.startMs,
+            held: [{ keyString: was.keyString, within: area, standIn: was.standIn }],
+          };
+        }
+        const between = this.#nextLevel(area, was.patch.key.level, drawn, cache);
         return {
           area,
           footprints: [area],
           rise: false,
-          from: reached,
+          from: 1,
           to: 0,
           startMs: null,
-          held: null,
+          held: between === null ? null : [between],
         };
       }
       // Drawn by the same patch, or a coarser one: a transition in progress there goes on over
@@ -486,6 +530,52 @@ export class TimeMorph {
       startMs: null,
       held,
     };
+  }
+
+  /**
+   * The patch a refine of `area` from a patch at level `from` to `drawn` draws first: the area's
+   * coarsest resident ancestor finer than `from` and coarser than `drawn`'s patch, over the area,
+   * at most `MAX_SUB_PATCH_LEVELS` above it; `null` where none is, and `drawn` refines from the
+   * patch at `from` itself.
+   */
+  #nextLevel(
+    area: PatchKey,
+    from: number,
+    drawn: DrawnPatch,
+    cache: ResidentLookup,
+  ): HeldPatch | null {
+    const first = Math.max(from + 1, area.level - MAX_SUB_PATCH_LEVELS);
+    for (let level = first; level < drawn.patch.key.level; level += 1) {
+      const cells = 2 ** (area.level - level);
+      const keyString = patchKeyString({
+        face: area.face,
+        level,
+        i: Math.floor(area.i / cells),
+        j: Math.floor(area.j / cells),
+      });
+      if (cache.get(keyString) !== undefined) {
+        return { keyString, within: area, standIn: true };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Whether `transition`'s fade has reached its end, {@link Transition.to}, at the latest draw; a
+   * refine's hold no draw has shown yet has (`swapDue`).
+   */
+  #reachedEnd(transition: Transition): boolean {
+    if (transition.to === 0 && transition.held !== null && transition.startMs === null) {
+      return true;
+    }
+    const fade = fadeAt(
+      transition.from,
+      transition.to,
+      transition.startMs,
+      this.#nowMs,
+      this.#spanMs,
+    );
+    return transition.to >= 1 ? fade >= 1 : fade <= 0;
   }
 
   /** `transition`'s held patches as the cache holds them now, with `views`; `null` if one is gone. */

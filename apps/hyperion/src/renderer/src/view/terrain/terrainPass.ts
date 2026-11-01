@@ -677,6 +677,11 @@ export interface TerrainPassOptions {
    */
   readonly frustumMargin?: TerrainFrustumMargin;
   /**
+   * The time a change of the drawn ground morphs in over, ms (plan R10, R10.T16.i; `timeMorph.ts`):
+   * absent, `MORPH_IN_MS`.
+   */
+  readonly morphInMs?: number;
+  /**
    * Called with each selection's input and result, right after `selectPatches` and outside the
    * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
    */
@@ -1445,6 +1450,7 @@ export class TerrainPass {
   /** The observers ({@link TerrainPass.observe}), replaced whole on each change. */
   #observers = NO_OBSERVERS;
   readonly #frustumMargin: TerrainFrustumMargin;
+  readonly #morphInMs: number | undefined;
   /** The lookahead's clock ({@link TerrainPassOptions.lookaheadClockMs}), or `null` for none. */
   readonly #lookaheadClockMs: (() => number) | null;
   /** The time of the last step on the lookahead's clock, ms; `null` before the first. */
@@ -1534,6 +1540,7 @@ export class TerrainPass {
     this.#onResident = options.onResident ?? null;
     this.#onSelect = options.onSelect ?? null;
     this.#frustumMargin = options.frustumMargin ?? "none";
+    this.#morphInMs = options.morphInMs;
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
     this.#geometry = options.geometry ?? SETTINGS[options.setting].geometry;
@@ -2723,7 +2730,7 @@ export class TerrainPass {
       cache,
       resolver: new DrawSetResolver(cache),
       holds: new CoarseFineHolds(layout.slots.slotCount),
-      morph: new TimeMorph(layout.slots.slotCount),
+      morph: new TimeMorph(layout.slots.slotCount, this.#morphInMs),
       fades: new TransitionFades(layout.slots.slotCount),
       fadesAtMs: null,
       drawnKeys: [],

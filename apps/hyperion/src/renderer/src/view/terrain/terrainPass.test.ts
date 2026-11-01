@@ -1729,10 +1729,14 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     }
     pool.layers = bodyLayers();
     const view = northPole(2_000_000);
-    // Until nothing more is asked for, so that no patch is drawn by a stand-in.
+    // Until nothing more is asked for, so that no patch is drawn by a stand-in, and then until the
+    // refines have morphed in, a level a span (R10.T16.i), so that none is held by its parent.
     for (let round = 0; round < 6; round += 1) {
       pass.frame({ ...inputAt(view), lighting: LIGHTING });
       pool.bakeDemand(pass);
+    }
+    for (let n = 1; n <= 200; n += 1) {
+      pass.frame({ ...inputAt(view, 50 * n), lighting: LIGHTING });
     }
     return { pass, pool, engine, view };
   }

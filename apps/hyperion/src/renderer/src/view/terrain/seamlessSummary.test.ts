@@ -56,6 +56,7 @@ function runOf(frames: SeamFrame[], events: SeamEvent[], more: Partial<SeamRun> 
     frames,
     events,
     collapses: [],
+    frameChanges: [],
     ...more,
   };
 }
@@ -124,6 +125,21 @@ describe("the seamless probe's summary", () => {
       normalJumpDeg: { max: 30 },
     });
     expect(summary.standInFrames).toBeCloseTo(1 / 3, 12);
+  });
+
+  it("takes the frames' largest move and turn, their pops a second and the appearances", () => {
+    const frameChanges = [
+      { tS: 1, movePx: 0.5, normalDeg: 1, pops: 0, appears: 0, appearMovePx: 0 },
+      { tS: 2, movePx: 3, normalDeg: 0.5, pops: 2, appears: 1, appearMovePx: 7 },
+    ];
+    const summary = summariseSeamRun(runOf([frameAt(0, 10), frameAt(4, 10)], [], { frameChanges }));
+    expect(summary).toMatchObject({
+      frameMovePxMax: 3,
+      frameNormalDeg: { max: 1 },
+      framePopsPerS: 0.5,
+      appearsWithoutTransition: 1,
+      appearMovePxMax: 7,
+    });
   });
 
   it("measures the bands' steps of τ′ with the excess floored at 1", () => {

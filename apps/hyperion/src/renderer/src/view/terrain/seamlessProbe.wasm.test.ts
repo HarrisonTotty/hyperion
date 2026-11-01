@@ -9,12 +9,13 @@ import {
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
 import { PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
+import { lawFor } from "../appearance/phase";
 import type { LitRegime } from "../bodies/regime";
 import { project } from "../camera/projection";
 import { relativeToCamera } from "../coords/relative";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { cameraSceneOf } from "../scene/model";
+import { cameraSceneOf, type ViewBody } from "../scene/model";
 import {
   TERRAIN_TEST_SCRIPT,
   TERRAIN_TEST_UNIVERSE,
@@ -23,25 +24,37 @@ import {
   terrainTestGolden,
 } from "../scenes/terrainScene";
 import { distanceToBoxM, relativeBounds } from "./bounds";
+import { fadedMorph, FADE_STEPS } from "./coarseFineHolds";
 import { vertexDir } from "./cube";
+import { packSurveyMask, surveyCellCode, surveyedAt } from "./gpu/resources";
+import {
+  DATUM_SLOT,
+  INSTANCE_RECORD_BYTES,
+  MAX_SUB_PATCH_LEVELS,
+  NO_PARENT_SLOT,
+} from "./gpu/uniforms";
 import { handoverTauPx, handsOver, limbDistanceM, pixelAngleRad } from "./handover";
 import { parentKey, type PatchKey, patchKeyString } from "./patchKey";
 import { type BodyFigure, spheroidNormal, surfacePoint } from "./planet";
 import {
   isDrawnHalving,
+  POP_NORMAL_DEG,
+  POP_PX,
   type SeamChainLink,
   type SeamCollapse,
   type SeamEvent,
   type SeamFrame,
+  type SeamFrameChange,
   type SeamRun,
   type SeamSummary,
   summariseSeamRun,
 } from "./seamlessSummary";
 import type { Selection, SelectionInput, ViewSelectionInput } from "./select";
 import { SELECTION_MARGIN } from "./selectionTolerance";
-import { TerrainSession, type TerrainViewReport } from "./session";
+import { TerrainSession, terrainPassViewOf, type TerrainViewReport } from "./session";
 import { decodeOctahedral } from "./shadingNormal";
-import { effectiveTauPx, morphRangeM } from "./terrainPass";
+import { effectiveTauPx, morphRangeM, type TerrainViewFrameInput } from "./terrainPass";
+import { MORPH_IN_MS } from "./timeMorph";
 import { answerRequest, type HeightModule, WorkerFields } from "./workers/heightBake";
 import type { BakedPatch, HeightWorkerReply, HeightWorkerRequest } from "./workers/messages";
 import type { WorkerLike } from "./workers/pool";
@@ -58,7 +71,11 @@ import type { WorkerLike } from "./workers/pool";
  * clock, which fakes `Date` and the timers but not `performance`. The view's hand-over is R07's
  * rule over the field header's relief (`handsOver`, its hysteresis kept), as the drawer's regime
  * plan takes it but without `handoverReliefM`'s coverage condition. The probe ignores the
- * coarse–fine holds (one edge row).
+ * coarse–fine holds (one edge row) in its events. Each frame it also draws the primary view
+ * (`TerrainSession.drawTerrain`) and reads its instance records, as the vertex shader does
+ * (`patchVertexOf`: the sub-patch's place, the rebake's mix, the holds and the fades' floor on k,
+ * the shading normal's mix to the parent's tile), to measure each frame's change of the drawn
+ * ground against the frame before's ({@link SeamFrameChange}), from one camera, the frame's.
  *
  * A whole run takes 10 to 25 minutes (pod, 16 vCPU), so `just ci` plays only the first 42 s, to the
  * hand-over and the first draws on high; the whole script on both settings, with the acceptance's
@@ -75,7 +92,9 @@ import type { WorkerLike } from "./workers/pool";
  *   refinement the rest; at 1, as before, a draft takes C and its refinement nothing. The pool
  *   reckons a draft at half a whole bake's cost (`HeightWorkerPool`'s `send`).
  * - `SEAM_FROM_S`, `SEAM_TO_S` (the script's span) and `SEAM_HZ` (60).
- * - `SEAM_STRIDE` (2): every how many vertices a change is measured at.
+ * - `SEAM_STRIDE` (2): every how many vertices a change is measured at, and `SEAM_FRAME_STRIDE` (8)
+ *   a frame's changed instances.
+ * - `SEAM_MORPH_MS`: the time morph's span (`TerrainPassOptions.morphInMs`), `MORPH_IN_MS` unset.
  * - `SEAM_TRACE_FROM_S` and `SEAM_TRACE_TO_S`: each selection between them in `meta.seamless.trace`
  *   (its margin, size, seen patches, nearest ground and levels).
  * - `SEAM_RECORD=1`: the frames, events and latencies too.
@@ -101,6 +120,8 @@ const COST_MS = numberKnob("SEAM_COST_MS", 41);
 const WORKERS = numberKnob("SEAM_WORKERS", 3);
 const HZ = numberKnob("SEAM_HZ", 60);
 const STRIDE = numberKnob("SEAM_STRIDE", 2);
+const FRAME_STRIDE = numberKnob("SEAM_FRAME_STRIDE", 8);
+const MORPH_MS = numberKnob("SEAM_MORPH_MS", MORPH_IN_MS);
 const TRACE_FROM_S = numberKnob("SEAM_TRACE_FROM_S", Number.POSITIVE_INFINITY);
 const TRACE_TO_S = numberKnob("SEAM_TRACE_TO_S", Number.NEGATIVE_INFINITY);
 const RECORD = knob("SEAM_RECORD") === "1";
@@ -261,6 +282,9 @@ function drawnAt(
 
 /** The height `heightAt` gives a bake's vertices at (u, v) of its quads, on its (0, 0)–(1, 1) diagonal. */
 function sampleOn(heightAt: (x: number, y: number) => number, u: number, v: number): number {
+  if (Number.isInteger(u) && Number.isInteger(v)) {
+    return heightAt(u, v);
+  }
   const x = Math.min(QUADS - 1, Math.max(0, Math.floor(u)));
   const y = Math.min(QUADS - 1, Math.max(0, Math.floor(v)));
   const fx = u - x;
@@ -394,6 +418,411 @@ function deltaOf(figure: BodyFigure, cam: Camera, coarse: Held, fine: Held, area
   return { maxPx, levelPx, maxNormalDeg, minFineK };
 }
 
+/** The 32-bit words of an instance record (`terrainPatch.wgsl`'s `Instance`). */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
+
+/** The record's words a drawn instance's surface reads beside its origin and its morph bands. */
+const SURFACE_WORDS = [3, 6, 7, 8, 9, 10, 11] as const;
+
+/** A frame's instance record, with the bakes its slots held then, as the probe's shader reads it. */
+interface DrawnInstance {
+  /** The area it draws: its slot's patch, or a sub-patch's part of it. */
+  readonly area: PatchKey;
+  readonly held: Held;
+  /** {@link SURFACE_WORDS}, joined: an instance of the same bake and words draws the same. */
+  readonly words: string;
+  /** A sub-patch's levels below its slot's patch and its part (i, j) there; 0 for the whole. */
+  readonly levels: number;
+  readonly partI: number;
+  readonly partJ: number;
+  readonly startM: number;
+  readonly endM: number;
+  /** The bake of its parent slot, whose normals its shading mixes to by k; `null` for none. */
+  readonly parent: Held | null;
+  readonly quadrant: number;
+  readonly holds: number;
+  readonly edgeFades: number;
+  readonly cornerFades: number;
+  readonly ownFade: number;
+  /** A rebake's fade, 0 to 1, and the older bake it mixes from, `null` for the datum's. */
+  readonly rebakeFade: number;
+  readonly older: Held | null;
+  /** Whether it rises out of the datum (its older slot the datum's, fading). */
+  readonly rises: boolean;
+}
+
+/** The primary view's drawn instances in `engine`'s latest record writes, by area, read by slot. */
+function instancesOf(
+  engine: CountingRenderEngine,
+  slots: ReadonlyMap<number, Held>,
+): Map<string, DrawnInstance> {
+  const drawn = new Map<string, DrawnInstance>();
+  for (const name of [
+    `terrain instances (${PRIMARY_VIEW_ID})`,
+    `terrain interior instances (${PRIMARY_VIEW_ID})`,
+  ]) {
+    const data = engine.writes.findLast((w) => w.buffer === name)?.data;
+    if (data === undefined) {
+      continue;
+    }
+    const u = new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+    const f = new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+    for (let base = 0; base + WORDS <= u.length; base += WORDS) {
+      const word = (n: number): number => u[base + n] ?? 0;
+      const held = slots.get(word(3));
+      if (held === undefined) {
+        continue;
+      }
+      const part = word(8);
+      const levels = part & 31;
+      const partI = (part >>> 5) & 0x1fff;
+      const partJ = (part >>> 18) & 0x1fff;
+      const s = 2 ** levels;
+      const { face, level, i, j } = held.key;
+      const area: PatchKey = { face, level: level + levels, i: i * s + partI, j: j * s + partJ };
+      const parentSlot = word(6);
+      const fades = word(11);
+      const olderSlot = fades >>> 16;
+      const rebakeFade = ((fades >>> 8) & 0xff) / FADE_STEPS;
+      drawn.set(patchKeyString(area), {
+        area,
+        held,
+        words: SURFACE_WORDS.map(word).join(),
+        levels,
+        partI,
+        partJ,
+        startM: f[base + 4] ?? 0,
+        endM: f[base + 5] ?? 0,
+        parent: parentSlot === NO_PARENT_SLOT ? null : (slots.get(parentSlot) ?? null),
+        quadrant: word(7) & 3,
+        holds: word(7) >>> 2,
+        edgeFades: word(9),
+        cornerFades: word(10),
+        ownFade: fades & 0xff,
+        rebakeFade,
+        older: rebakeFade > 0 && olderSlot !== DATUM_SLOT ? (slots.get(olderSlot) ?? null) : null,
+        rises: olderSlot === DATUM_SLOT && rebakeFade > 0,
+      });
+    }
+  }
+  return drawn;
+}
+
+/** The survey masks the lit mesh reads (`packSurveyMask`), made once a bake. */
+const PACKED_MASKS = new WeakMap<BakedPatch, Uint8Array | null>();
+
+/** Whether (u, v) of `held`'s quads lies on surveyed ground, as the lit mesh has it (`surveyedAt`). */
+function surveyedOn(held: Held, u: number, v: number): boolean {
+  let packed = PACKED_MASKS.get(held.bake);
+  if (packed === undefined) {
+    const layers = held.bake.layers;
+    packed =
+      layers === null
+        ? null
+        : packSurveyMask(layers.surveyMask, surveyCellCode(held.key.level, layers.fieldLevel));
+    PACKED_MASKS.set(held.bake, packed);
+  }
+  return packed === null || surveyedAt(packed, u, v);
+}
+
+/** `held`'s own height (`which` 0) or morph target (1) at its vertex (x, y). */
+function heightOf(held: Held, which: 0 | 1): (x: number, y: number) => number {
+  return (x, y) => held.bake.heights[2 * (y * SIDE + x) + which] ?? 0;
+}
+
+/** `a` mixed to `b` by `t`, normalised. */
+function mixed(a: Vec3, b: Vec3, t: number): Vec3 {
+  return normalise(vec3(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z)));
+}
+
+/**
+ * The shading normal `terrainPatch.wgsl`'s `shadingNormalAt` gives `held`'s tile at (u, v) of its
+ * quads, mixed to `inst`'s parent's tile by k.
+ */
+function morphedNormal(
+  held: Held,
+  inst: DrawnInstance,
+  u: number,
+  v: number,
+  k: number,
+): Vec3 | null {
+  const own = normalAt(held, u, v);
+  if (own === null || inst.parent === null || !(k > 0)) {
+    return own;
+  }
+  const coarse = normalAt(
+    inst.parent,
+    ((inst.quadrant & 1) * QUADS + u) / 2,
+    (((inst.quadrant >> 1) & 1) * QUADS + v) / 2,
+  );
+  return coarse === null ? own : mixed(own, coarse, Math.min(k, 1));
+}
+
+/** The drawn ground of a frame's instances seen from one camera: each vertex made once. */
+class DrawnSurfaces {
+  readonly #figure: BodyFigure;
+  readonly #cam: Camera;
+  readonly #made = new Map<DrawnInstance, Float64Array>();
+
+  constructor(figure: BodyFigure, cam: Camera) {
+    this.#figure = figure;
+    this.#cam = cam;
+  }
+
+  /**
+   * The drawn height and morph factor of `inst`'s grid vertex (x, y), as `patchVertexOf` makes
+   * them: its slot's heights at its place there, mixed from the older bake's by the rebake's fade,
+   * and k, CDLOD's from the vertex's distance, held and floored at the fades (`fadedMorph`).
+   */
+  vertex(inst: DrawnInstance, x: number, y: number): readonly [number, number] {
+    let made = this.#made.get(inst);
+    if (made === undefined) {
+      made = new Float64Array(2 * SIDE * SIDE).fill(Number.NaN);
+      this.#made.set(inst, made);
+    }
+    const at = 2 * (y * SIDE + x);
+    if (Number.isNaN(made[at])) {
+      const s = 2 ** inst.levels;
+      const u = (inst.partI * QUADS + x) / s;
+      const v = (inst.partJ * QUADS + y) / s;
+      const surveyed = surveyedOn(inst.held, u, v);
+      let own = surveyed ? sampleOn(heightOf(inst.held, 0), u, v) : 0;
+      let morph = surveyed ? sampleOn(heightOf(inst.held, 1), u, v) : 0;
+      if (inst.rebakeFade > 0) {
+        const older = inst.older;
+        const drawn = older !== null && surveyedOn(older, u, v);
+        own += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 0), u, v) : 0) - own);
+        morph += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 1), u, v) : 0) - morph);
+      }
+      const p = surfacePoint(this.#figure, vertexDir(inst.area, x, y), own);
+      const d = norm(sub(vec3(p[0], p[1], p[2]), this.#cam.view.camera.positionM));
+      const span = inst.endM - inst.startM;
+      const cdlod = span > 0 ? Math.min(1, Math.max(0, (d - inst.startM) / span)) : 0;
+      const k = fadedMorph(inst.holds, inst.edgeFades, inst.cornerFades, inst.ownFade, x, y, cdlod);
+      made[at] = own + k * (morph - own);
+      made[at + 1] = k;
+    }
+    return [made[at] ?? 0, made[at + 1] ?? 0];
+  }
+
+  /**
+   * `inst`'s drawn surface at (u, v) of its area's quads: its height on the mesh's triangle there,
+   * and the shading normal at its k, `terrainLitShade.wgsl`'s, the datum's `datum` off survey.
+   */
+  at(
+    inst: DrawnInstance,
+    u: number,
+    v: number,
+    datum: Vec3,
+  ): { readonly h: number; readonly normal: Vec3 | null } {
+    const h = sampleOn((x, y) => this.vertex(inst, x, y)[0], u, v);
+    const k = sampleOn((x, y) => this.vertex(inst, x, y)[1], u, v);
+    const s = 2 ** inst.levels;
+    const su = (inst.partI * QUADS + u) / s;
+    const sv = (inst.partJ * QUADS + v) / s;
+    if (!surveyedOn(inst.held, su, sv)) {
+      return { h, normal: datum };
+    }
+    let normal = morphedNormal(inst.held, inst, su, sv, k);
+    if (normal !== null && inst.rebakeFade > 0) {
+      const older =
+        inst.older !== null && surveyedOn(inst.older, su, sv)
+          ? morphedNormal(inst.older, inst, su, sv, k)
+          : datum;
+      normal = older === null ? normal : mixed(normal, older, inst.rebakeFade);
+    }
+    return { h, normal };
+  }
+}
+
+/** The keys of every strict ancestor of `drawn`'s areas, as `patchKeyString`s. */
+function ancestorsOf(drawn: ReadonlyMap<string, DrawnInstance>): Set<string> {
+  const ancestors = new Set<string>();
+  for (const inst of drawn.values()) {
+    for (let k = parentKey(inst.area); k !== null; k = parentKey(k)) {
+      const keyString = patchKeyString(k);
+      if (ancestors.has(keyString)) {
+        break;
+      }
+      ancestors.add(keyString);
+    }
+  }
+  return ancestors;
+}
+
+/**
+ * The instance of `drawn` over vertex (x, y) of `area`, and the place there in its own area's
+ * quads: `area`'s own, an ancestor's or a descendant's (the draw set never overlaps); `null` where
+ * none was. `ancestors` is {@link ancestorsOf}'s of `drawn`.
+ */
+function coverOf(
+  drawn: ReadonlyMap<string, DrawnInstance>,
+  ancestors: ReadonlySet<string>,
+  area: PatchKey,
+  x: number,
+  y: number,
+): { readonly inst: DrawnInstance; readonly u: number; readonly v: number } | null {
+  const same = drawn.get(patchKeyString(area));
+  if (same !== undefined) {
+    return { inst: same, u: x, v: y };
+  }
+  for (let k = parentKey(area); k !== null; k = parentKey(k)) {
+    const coarse = drawn.get(patchKeyString(k));
+    if (coarse !== undefined) {
+      const [u, v] = placeIn(k, area, x, y);
+      return { inst: coarse, u, v };
+    }
+  }
+  let key = area;
+  let gx = area.i * QUADS + x;
+  let gy = area.j * QUADS + y;
+  while (ancestors.has(patchKeyString(key)) && key.level < area.level + MAX_SUB_PATCH_LEVELS) {
+    gx *= 2;
+    gy *= 2;
+    const span = 2 ** (key.level + 1 - area.level);
+    // A vertex on the area's far edge is its last descendant's.
+    const i = Math.min(Math.floor(gx / QUADS), (area.i + 1) * span - 1);
+    const j = Math.min(Math.floor(gy / QUADS), (area.j + 1) * span - 1);
+    key = { face: area.face, level: key.level + 1, i, j };
+    const fine = drawn.get(patchKeyString(key));
+    if (fine !== undefined) {
+      return { inst: fine, u: gx - i * QUADS, v: gy - j * QUADS };
+    }
+  }
+  return null;
+}
+
+/** Where `rel`, from `cam`'s camera, falls in its viewport, in front of it; `null` off screen. */
+function onScreen(cam: Camera, rel: Vec3): boolean {
+  const { widthPx, heightPx } = cam.view.viewport;
+  const at = project(
+    rel,
+    { orientation: cam.view.camera.orientation, fovXRad: cam.view.fovXRad },
+    cam.view.viewport,
+  );
+  return at.inFront && at.xPx >= 0 && at.xPx <= widthPx && at.yPx >= 0 && at.yPx <= heightPx;
+}
+
+/** The grid lines a frame's changed instance is measured at: every {@link FRAME_STRIDE}th, and the last. */
+function frameLines(): number[] {
+  const lines: number[] = [];
+  for (let n = 0; n < QUADS; n += Math.max(1, FRAME_STRIDE)) {
+    lines.push(n);
+  }
+  lines.push(QUADS);
+  return lines;
+}
+
+/**
+ * The change of the drawn ground from frame `before`'s instances to `now`'s at `tS`, both drawn
+ * from camera `cam` (the frame's), over the instances of `now` whose bake or words changed: at
+ * each of their measured vertices on screen, the drawn surface's move along the datum's normal and
+ * its shading normal's turn against the instance over that ground before, or the datum's where
+ * nothing was and camera `camBefore` saw it; `null` where nothing changed.
+ */
+function frameChangeOf(
+  figure: BodyFigure,
+  cam: Camera,
+  camBefore: Camera,
+  before: ReadonlyMap<string, DrawnInstance>,
+  now: ReadonlyMap<string, DrawnInstance>,
+  tS: number,
+): SeamFrameChange | null {
+  const surfaces = new DrawnSurfaces(figure, cam);
+  const ancestors = ancestorsOf(before);
+  const lines = frameLines();
+  const pxPerRad = cam.view.viewport.widthPx / 2 / Math.tan(cam.view.fovXRad / 2);
+  let measured = 0;
+  let movePx = 0;
+  let normalDeg = 0;
+  let pops = 0;
+  let appears = 0;
+  let appearMovePx = 0;
+  for (const [areaString, inst] of now) {
+    const was = before.get(areaString);
+    if (was !== undefined && was.held === inst.held && was.words === inst.words) {
+      continue;
+    }
+    measured += 1;
+    let instPx = 0;
+    let instDeg = 0;
+    let covered = false;
+    let bare = false;
+    for (const y of lines) {
+      for (const x of lines) {
+        const dir = vertexDir(inst.area, x, y);
+        const n = spheroidNormal(figure, dir);
+        const datum = vec3(n[0], n[1], n[2]);
+        const drawn = surfaces.at(inst, x, y, datum);
+        const p = surfacePoint(figure, dir, drawn.h);
+        const rel = sub(vec3(p[0], p[1], p[2]), cam.view.camera.positionM);
+        if (!onScreen(cam, rel)) {
+          continue;
+        }
+        const cover = coverOf(before, ancestors, inst.area, x, y);
+        let then: { readonly h: number; readonly normal: Vec3 | null };
+        if (cover !== null) {
+          covered = true;
+          then = surfaces.at(cover.inst, cover.u, cover.v, datum);
+        } else {
+          // Nothing drew this ground the frame before: the reference surface did, where seen.
+          const q = surfacePoint(figure, dir, 0);
+          if (!onScreen(camBefore, sub(vec3(q[0], q[1], q[2]), camBefore.view.camera.positionM))) {
+            continue;
+          }
+          bare = true;
+          then = { h: 0, normal: datum };
+        }
+        const sinIncidence = norm(cross(datum, normalise(rel)));
+        instPx = Math.max(
+          instPx,
+          (Math.abs(drawn.h - then.h) * sinIncidence * pxPerRad) / norm(rel),
+        );
+        if (drawn.normal !== null && then.normal !== null) {
+          const a = drawn.normal;
+          const b = then.normal;
+          const cos = Math.min(1, Math.max(-1, a.x * b.x + a.y * b.y + a.z * b.z));
+          instDeg = Math.max(instDeg, (Math.acos(cos) * 180) / Math.PI);
+        }
+      }
+    }
+    movePx = Math.max(movePx, instPx);
+    normalDeg = Math.max(normalDeg, instDeg);
+    pops += instPx > POP_PX || instDeg > POP_NORMAL_DEG ? 1 : 0;
+    if (bare && !covered) {
+      appears += inst.rises ? 0 : 1;
+      appearMovePx = Math.max(appearMovePx, instPx);
+    }
+  }
+  return measured === 0 ? null : { tS, movePx, normalDeg, pops, appears, appearMovePx };
+}
+
+/** The primary view's frame of `viewReport` drawn at `tS`: its view, a sun overhead, no lights. */
+function frameInputOf(
+  viewReport: TerrainViewReport,
+  body: ViewBody,
+  tS: number,
+): TerrainViewFrameInput | null {
+  const passView = terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, body);
+  if (passView === null) {
+    return null;
+  }
+  return {
+    view: passView.view,
+    sunDirectionBodyFixed: { x: 0, y: 0, z: 1 },
+    sunIlluminanceLx: [1.3e5, 1.3e5, 1.3e5],
+    exposureScale: 1e-5,
+    lighting: {
+      lights: [],
+      occluders: [],
+      secondaries: [],
+      elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      exposureScale: 1e-5,
+    },
+    nowMs: 1000 * tS,
+  };
+}
+
 function isAncestor(a: PatchKey, b: PatchKey): boolean {
   if (a.face !== b.face || a.level >= b.level) {
     return false;
@@ -454,6 +883,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     workers: WORKERS,
     setting,
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
+    morphInMs: MORPH_MS,
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -514,6 +944,10 @@ async function play(options: ProbeOptions): Promise<Played> {
   const trace: TraceEntry[] = [];
   const latenciesS: number[] = [];
   const resident = new Map<string, Held>();
+  // The bake each slot holds, an older bake's kept in its retired slot until the slot is reused.
+  const slots = new Map<number, Held>();
+  const frameChanges: SeamFrameChange[] = [];
+  let drawnBefore = new Map<string, DrawnInstance>();
   const firstDemandS = new Map<string, number>();
   const rebaked: Array<{ readonly old: Held; readonly now: Held }> = [];
   let lastDrawn = new Map<string, DrawnArea>();
@@ -600,6 +1034,10 @@ async function play(options: ProbeOptions): Promise<Played> {
           rebaked.push({ old, now: held });
         }
         resident.set(keyString, held);
+        const slot = pass.resident(keyString)?.slot;
+        if (slot !== undefined) {
+          slots.set(slot, held);
+        }
         const askedS = firstDemandS.get(keyString);
         if (askedS !== undefined) {
           latenciesS.push(nowS - askedS);
@@ -619,10 +1057,41 @@ async function play(options: ProbeOptions): Promise<Played> {
       const tS = n * stepS;
       nowS = tS;
       fixture.notePlayed(tS);
-      session.noteView(PRIMARY_VIEW_ID, reportAt(tS));
+      const viewReport = reportAt(tS);
+      session.noteView(PRIMARY_VIEW_ID, viewReport);
       rebaked.length = 0;
+      const camBefore = latest.cam;
       session.step();
       watch();
+      // The step's draw in the primary view, as the app draws it, and its change from the frame
+      // before's; the engine's records cleared first, as a run's would fill the memory.
+      engine.writes.length = 0;
+      engine.textureWritten.length = 0;
+      engine.dispatched.length = 0;
+      engine.targetFrames.length = 0;
+      engine.depthLayerRenders.length = 0;
+      const seenBody = viewReport.scene.bodies.find((b) => b.id === body);
+      const input = seenBody === undefined ? null : frameInputOf(viewReport, seenBody, tS);
+      const drawnNow =
+        input !== null && session.drawTerrain(PRIMARY_VIEW_ID, body, input) !== null
+          ? instancesOf(engine, slots)
+          : new Map<string, DrawnInstance>();
+      const drawingPass = session.pass(body);
+      const camNow = latest.cam;
+      if (drawingPass !== null && camNow !== null && camBefore !== null && drawnBefore.size > 0) {
+        const change = frameChangeOf(
+          drawingPass.planet.figure,
+          camNow,
+          camBefore,
+          drawnBefore,
+          drawnNow,
+          tS,
+        );
+        if (change !== null) {
+          frameChanges.push(change);
+        }
+      }
+      drawnBefore = drawnNow;
       // Each frame waits on the clock its step's bakes run on, before the next frame steps.
       // oxlint-disable-next-line no-await-in-loop
       await vi.advanceTimersByTimeAsync(1000 * stepS);
@@ -805,6 +1274,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       frames,
       events,
       collapses,
+      frameChanges,
     },
     trace,
   };

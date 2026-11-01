@@ -75,6 +75,101 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     ]).toEqual([[[patchKeyString(first), 1]], [[patchKeyString(first), 0.5]], [], false]);
   });
 
+  it("draws a patch still falling over a finer one's area until its fade ends, then refines from 1", () => {
+    const [first] = CHILDREN;
+    const grandchildren = childKeys(first);
+    const [finest] = grandchildren;
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    for (const key of [first, finest]) {
+      cache.insert({
+        key,
+        generation: 1,
+        originM: vec3(0, 0, 0),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+      });
+    }
+    // `first` refines; half way down, its children are selected and `finest` is resident.
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    footprints(morph, 1_000);
+    const deeper = selectionOf([...grandchildren, ...CHILDREN.slice(1)]);
+    const held = morph.present(resolver.resolve(deeper), cache, unseen);
+    const drawer = held.patches.find(
+      (p) => p.within !== null && patchKeyString(p.within) === patchKeyString(finest),
+    );
+    expect([drawer?.keyString, footprints(morph, 1_000 + MORPH_IN_MS / 2)]).toEqual([
+      patchKeyString(first),
+      grandchildren.map((k) => [patchKeyString(k), 0.5]),
+    ]);
+    footprints(morph, 1_000 + MORPH_IN_MS);
+    expect(morph.swapDue).toBe(true);
+    const swapped = morph.present(resolver.resolve(deeper), cache, unseen);
+    expect([
+      swapped.patches.find((p) => p.keyString === patchKeyString(finest))?.within ?? null,
+      footprints(morph, 2_000),
+    ]).toEqual([null, [[patchKeyString(finest), 1]]]);
+  });
+
+  it("refines two levels a level at a time, the one between drawn first over the finer area", () => {
+    const [first] = CHILDREN;
+    const grandchildren = childKeys(first);
+    const [finest] = grandchildren;
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    const deeper = selectionOf([...grandchildren, ...CHILDREN.slice(1)]);
+    morph.present(resolver.resolve(deeper), cache, unseen);
+    morph.footprintsAt(0);
+    for (const key of [first, finest]) {
+      cache.insert({
+        key,
+        generation: 1,
+        originM: vec3(0, 0, 0),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+      });
+    }
+    const drawerOf = (drawn: DrawSet): string | undefined =>
+      drawn.patches.find((p) => patchKeyString(p.within ?? p.patch.key) === patchKeyString(finest))
+        ?.keyString;
+    const between = drawerOf(morph.present(resolver.resolve(deeper), cache, unseen));
+    footprints(morph, 1_000);
+    const still = morph.swapDue;
+    footprints(morph, 1_000 + MORPH_IN_MS);
+    const due = morph.swapDue;
+    const after = drawerOf(morph.present(resolver.resolve(deeper), cache, unseen));
+    expect([between, still, due, after, footprints(morph, 2_000)]).toEqual([
+      patchKeyString(first),
+      false,
+      true,
+      patchKeyString(finest),
+      [[patchKeyString(finest), 1]],
+    ]);
+  });
+
+  it("lets a refine's hold no draw has shown give way at the next present", () => {
+    const [first] = CHILDREN;
+    const grandchildren = childKeys(first);
+    const [finest] = grandchildren;
+    const cache = cacheWith([ROOT, first, finest]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    morph.footprintsAt(0);
+    const deeper = selectionOf([...grandchildren, ...CHILDREN.slice(1)]);
+    morph.present(resolver.resolve(deeper), cache, unseen);
+    const due = morph.swapDue;
+    const drawn = morph.present(resolver.resolve(deeper), cache, unseen);
+    expect([due, drawn.patches.some((p) => p.keyString === patchKeyString(finest))]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
   it("holds a coarsen's finer patches until its fade is 1, rising from 0, then presents the coarser", () => {
     const cache = cacheWith([ROOT, ...CHILDREN]);
     const resolver = new DrawSetResolver(cache);
