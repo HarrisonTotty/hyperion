@@ -13,6 +13,7 @@ import { quaternionFromAxisAngle, rotate } from "../camera/quaternion";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
 import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
+import { DISC_AIR_RULE } from "../post/glareAir";
 import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
   DISC_MIN_DIAMETER_PX,
@@ -26,6 +27,7 @@ import {
 import {
   angularRadiusRad,
   discLuminanceAboveRgb,
+  discLightThroughAir,
   discLuminanceAboveThroughRgb,
   discIlluminanceRgbLx,
   discLuminanceRgb,
@@ -254,7 +256,9 @@ describe("the host discs", () => {
     );
     const [clear] = layer.glareSources(LOOK, VIEWPORT, "eye");
     const air: Rgb = [0.5, 0.25, 0.125];
-    const [dimmed] = layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => air);
+    const [dimmed] = layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [
+      { kind: "uniform", transmittance: air },
+    ]);
     for (const c of [0, 1, 2] as const) {
       expect((dimmed?.luminance[c] ?? 0) / (clear?.luminance[c] ?? 1)).toBeCloseTo(air[c], 12);
     }
@@ -262,8 +266,50 @@ describe("the host discs", () => {
       discLuminanceAboveThroughRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale, air),
     );
     expect(
-      layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [0, 0, 0]),
+      layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [
+        { kind: "uniform", transmittance: [0, 0, 0] },
+      ]),
     ).toEqual([]);
+  });
+
+  it("multiply the light of the bodies' airs the same across the disc (fix-view-light)", () => {
+    const host = sunHost();
+    const through = discLightThroughAir(
+      host,
+      [
+        { kind: "uniform", transmittance: [0.5, 0.5, 0.5] },
+        { kind: "uniform", transmittance: [0.5, 0.25, 0.125] },
+      ],
+      vec3(0, 0, -1),
+      1e3,
+    );
+    expect(through.light).toEqual([0.25, 0.125, 0.0625]);
+    expect(through.excess).toEqual(discLuminanceAboveThroughRgb(host, 1e3, [0.25, 0.125, 0.0625]));
+  });
+
+  it("integrate air that changes across the disc as the same air taken whole, where it does not change (fix-view-light)", () => {
+    const host = sunHost();
+    const transmittance: Rgb = [0.5, 0.25, 0.125];
+    const level = 0.1 * host.central_luminance_cd_m2[1];
+    const through = discLightThroughAir(
+      host,
+      [
+        {
+          kind: "across",
+          vertical: vec3(0, 1, 0),
+          offsets: [...DISC_AIR_RULE.x],
+          weights: [...DISC_AIR_RULE.w],
+          lines: [...DISC_AIR_RULE.x].map(() => ({ transmittance, clear: true })),
+        },
+      ],
+      vec3(0, 0, -1),
+      level,
+    );
+    const whole = discLuminanceAboveThroughRgb(host, level, transmittance);
+    for (const c of [0, 1, 2] as const) {
+      expect(through.light[c]).toBeCloseTo(transmittance[c], 12);
+      expect(Math.abs(through.excess[c] / whole[c] - 1)).toBeLessThan(0.01);
+    }
   });
 
   it("hold the dimmed disc's light above a level: T ∫ max(0, I − level ÷ T), less than T times the clear disc's", () => {

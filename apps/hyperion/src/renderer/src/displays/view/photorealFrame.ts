@@ -56,7 +56,7 @@ import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
 import { type GlareAirOf, type HostDiscLayer, hostPlacements, NO_AIR } from "../../view/sky/disc";
-import { type GlareAir, glareAirTransmittance } from "../../view/post/glareAir";
+import { type GlareAir, glareDiscAir } from "../../view/post/glareAir";
 import {
   exposedSpriteRecord,
   type SpriteRecord,
@@ -174,11 +174,11 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
 }
 
 /**
- * The air between the camera and each host star along its line of sight, through every body's
- * atmosphere the frame draws (fix-view-light, the setting Sun's halo): the product of each one's
- * transmittance (`glareAirTransmittance`) on its tables' figure, read through the star's light slot,
- * its place in that body's brightest-first order of its lights (`lightsAt`, as `skySources` slots
- * them); none where the frame draws no air.
+ * The air between the camera and each host star across its disc, through every body's atmosphere
+ * the frame draws (fix-view-light, the setting Sun's halo): each one's (`glareDiscAir`) on its
+ * tables' figure, read through the star's light slot, its place in that body's brightest-first
+ * order of its lights (`lightsAt`, as `skySources` slots them), and slot 0's for a star outside
+ * them, as the composite reads it; none where the frame draws no air.
  */
 export function frameGlareAir(
   atmospheres: ReadonlyArray<FrameAtmosphere>,
@@ -206,17 +206,16 @@ export function frameGlareAir(
   if (airs.length === 0) {
     return NO_AIR;
   }
-  return (star, direction, angularRadiusRad) => {
-    const transmitted: [number, number, number] = [1, 1, 1];
-    for (const { air, curves, order } of airs) {
-      const slot = Math.max(0, order.indexOf(star));
-      const [r, g, b] = glareAirTransmittance(air, curves[slot] ?? [], direction, angularRadiusRad);
-      transmitted[0] *= r;
-      transmitted[1] *= g;
-      transmitted[2] *= b;
-    }
-    return transmitted;
-  };
+  return (star, direction, angularRadiusRad, distanceM) =>
+    airs.map(({ air, curves, order }) =>
+      glareDiscAir(
+        air,
+        curves[Math.max(0, order.indexOf(star))] ?? [],
+        direction,
+        angularRadiusRad,
+        distanceM,
+      ),
+    );
 }
 
 /**

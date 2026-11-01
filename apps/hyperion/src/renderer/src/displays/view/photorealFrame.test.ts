@@ -32,8 +32,7 @@ import { BAKE_BIN_COUNT } from "../../view/atmosphere/medium";
 import { bakeSpectrumOf } from "../../view/atmosphere/spectralColour";
 import { AtmosphereTables } from "../../view/atmosphere/tables";
 import type { FrameAtmosphere } from "../../view/photoreal/renderer";
-import type { Rgb } from "../../view/photometry/toneCurve";
-import { glareAirTransmittance } from "../../view/post/glareAir";
+import { type DiscAir, glareDiscAir } from "../../view/post/glareAir";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
@@ -461,8 +460,8 @@ describe("the air between the camera and a star (fix-view-light)", () => {
   }
 
   /** The glare's air of one body's medium alone, its tables' figure a sphere. */
-  function alone(curves: ReadonlyArray<AbsorberCurve>): Rgb {
-    return glareAirTransmittance(
+  function alone(curves: ReadonlyArray<AbsorberCurve>): DiscAir {
+    return glareDiscAir(
       {
         medium: EARTH_REFERENCE,
         equatorialRadiusM: EARTH_RADIUS_M,
@@ -473,6 +472,7 @@ describe("the air between the camera and a star (fix-view-light)", () => {
       curves,
       LOW_SUN,
       SUN_RADIUS_RAD,
+      AU_M,
     );
   }
 
@@ -494,12 +494,12 @@ describe("the air between the camera and a star (fix-view-light)", () => {
     ]);
     const { body, air } = earthUnder("earth", tables);
     const of = frameGlareAir([air], [body], LIGHTS);
-    expect(of(3, LOW_SUN, SUN_RADIUS_RAD)).toEqual(alone(SUN_CURVES));
-    expect(of(7, LOW_SUN, SUN_RADIUS_RAD)).toEqual(alone(FLAT_CURVES));
-    expect(of(3, LOW_SUN, SUN_RADIUS_RAD)).not.toEqual(of(7, LOW_SUN, SUN_RADIUS_RAD));
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD, AU_M)).toEqual([alone(SUN_CURVES)]);
+    expect(of(7, LOW_SUN, SUN_RADIUS_RAD, AU_M)).toEqual([alone(FLAT_CURVES)]);
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD, AU_M)).not.toEqual(of(7, LOW_SUN, SUN_RADIUS_RAD, AU_M));
   });
 
-  it("multiplies the transmittances of every body's air the line crosses", async () => {
+  it("takes every body's air the line crosses, one by one", async () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_RADIUS_M, [
       SUN_CURVES,
@@ -507,14 +507,13 @@ describe("the air between the camera and a star (fix-view-light)", () => {
     ]);
     const one = earthUnder("one", tables);
     const two = earthUnder("two", tables);
-    const both = frameGlareAir([one.air, two.air], [one.body, two.body], LIGHTS)(
-      3,
-      LOW_SUN,
-      SUN_RADIUS_RAD,
-    );
-    const single = alone(SUN_CURVES);
-    for (const c of [0, 1, 2] as const) {
-      expect(both[c] / single[c] ** 2).toBeCloseTo(1, 12);
-    }
+    expect(
+      frameGlareAir([one.air, two.air], [one.body, two.body], LIGHTS)(
+        3,
+        LOW_SUN,
+        SUN_RADIUS_RAD,
+        AU_M,
+      ),
+    ).toEqual([alone(SUN_CURVES), alone(SUN_CURVES)]);
   });
 });

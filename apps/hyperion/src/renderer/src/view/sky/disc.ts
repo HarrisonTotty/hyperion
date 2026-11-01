@@ -39,6 +39,7 @@ import { DISC_ANNULI_HIGH, eclipseVisible, type Occluder } from "../lighting/ann
 import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
 import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
 import type { GlareSource } from "../post/glare";
+import type { DiscAir } from "../post/glareAir";
 import { sceneOrigins, type ViewScene } from "../scene/model";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import type { SpriteStar } from "../wireframe/drawList";
@@ -48,12 +49,7 @@ import {
   sphereScreenRect,
   WIREFRAME_MESHES,
 } from "../wireframe/submit";
-import {
-  angularRadiusRad,
-  discLuminanceAboveThroughRgb,
-  discIlluminanceRgbLx,
-  rgbOfBvr,
-} from "./discFlux";
+import { angularRadiusRad, discLightThroughAir, discIlluminanceRgbLx, rgbOfBvr } from "./discFlux";
 import discWgsl from "./shaders/disc.wgsl?raw";
 
 /** The disc's draw into the HDR scene target: a quad over its rectangle, on the limb's plane. */
@@ -82,14 +78,20 @@ export const DISC_MATERIAL: WgslMaterialSpec = {
 export const DISC_MIN_DIAMETER_PX = 3;
 
 /**
- * The transmittance per channel of the air between the camera and a host star along its line of
- * sight, by the star's index (`HostDiscDto.star`), its unit direction in the scene's
- * camera-relative axes and its angular radius, rad.
+ * The air between the camera and a host star across its disc, one entry a body's air the line of
+ * sight crosses (`glareAir.ts`'s `glareDiscAir`), by the star's index (`HostDiscDto.star`), its
+ * disc's centre's unit direction in the scene's camera-relative axes, its angular radius, rad, and
+ * its distance, m.
  */
-export type GlareAirOf = (star: number, direction: Vec3, angularRadiusRad: number) => Rgb;
+export type GlareAirOf = (
+  star: number,
+  direction: Vec3,
+  angularRadiusRad: number,
+  distanceM: number,
+) => ReadonlyArray<DiscAir>;
 
 /** No air between the camera and any star. */
-export const NO_AIR: GlareAirOf = () => [1, 1, 1];
+export const NO_AIR: GlareAirOf = () => [];
 
 /** How far outside an eye view's frame a disc still casts glare into it, rad: 45°. */
 export const EYE_GLARE_REACH_RAD = Math.PI / 4;
@@ -402,10 +404,10 @@ export class HostDiscLayer {
    * {@link EYE_GLARE_FADE_RAD} ({@link eyeGlareShare}), its light and its excess alike; and every
    * view takes only the share of the disc's light that `occluders`, the frame's bodies, leave the
    * camera (`eclipseVisible`, by `annuli` annuli), so that a disc behind a limb casts no glare;
-   * and its light is the disc's as `air` dims it, the transmittance of the air between the camera
-   * and the star along its line of sight (`glareAir.ts`), its excess the dimmed disc's above the
-   * threshold ({@link discLuminanceAboveThroughRgb}), so that a setting star's glare is dimmed and
-   * reddened as its disc is.
+   * and its light is the disc's as `air` dims it, the air between the camera and the star across
+   * its disc (`glareAir.ts`), its excess the dimmed disc's above the threshold
+   * ({@link discLightThroughAir}), so that a setting star's glare is dimmed and reddened as the
+   * composite dims its disc.
    * A host drawn as a sprite casts none: its light is in the sprite, which the target holds, and
    * the bloom chain spreads it.
    *
@@ -446,23 +448,23 @@ export class HostDiscLayer {
               );
       });
       const visible: Rgb = [sr ?? share, sg ?? share, sb ?? share];
-      // And dimmed by the air between, as R08's composite dims the disc (fix-view-light).
-      const transmitted = air(host.star, axis, rho);
+      // And dimmed by the air between, as R08's composite dims the disc (fix-view-light); its light
+      // above the display's range the dimmed disc's, its texels kept out of the bloom chain.
+      const through = discLightThroughAir(
+        host,
+        air(host.star, axis, rho, distanceM),
+        axis,
+        BLOOM_THRESHOLD_EXPOSED / this.#exposureScale,
+      );
       const seen: Rgb = [
-        visible[0] * transmitted[0],
-        visible[1] * transmitted[1],
-        visible[2] * transmitted[2],
+        visible[0] * through.light[0],
+        visible[1] * through.light[1],
+        visible[2] * through.light[2],
       ];
       if (seen[0] + seen[1] + seen[2] === 0) {
         continue;
       }
-      // The dimmed disc's light above the display's range: its texels are kept out of the bloom
-      // chain.
-      const [er, eg, eb] = discLuminanceAboveThroughRgb(
-        host,
-        BLOOM_THRESHOLD_EXPOSED / this.#exposureScale,
-        transmitted,
-      );
+      const [er, eg, eb] = through.excess;
       const [lr, lg, lb] = rgbOfBvr(host.mean_luminance_cd_m2);
       sources.push({
         direction: axis,
