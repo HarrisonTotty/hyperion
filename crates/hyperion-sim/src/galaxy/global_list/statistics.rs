@@ -672,24 +672,33 @@ const TRIPWIRE_GALAXIES: u64 = 8;
 const DROPPED_BOUNDS: [f64; 2] = [8e-4, 0.2];
 
 /// The fewest members a tube must expect inside the cube for its own share to be bounded
-/// ([`DROPPED_BOUNDS`]' second): below it one member is a whole share. At generator version 25
-/// sweep galaxy 1's stream 97, an orphan, expects 1.000 there and its one lies past its shell
-/// (lean, 2026-11-01: the galaxy's share still counts it).
+/// ([`DROPPED_BOUNDS`]' second): below it one member is a whole share, so a smaller tube's count
+/// is bounded instead ([`SMALL_TUBE_MOST_OUTSIDE`]). At generator version 25 sweep galaxy 1's
+/// stream 97, an orphan with no knot in the cube, expects 1.000 there, and its one, of its tail,
+/// lies 0.56 ly inside its shell's inner edge (lean, 2026-11-01, the galaxy's share still counting
+/// it; research's review).
 const TUBE_MEMBERS_JUDGED: f64 = 10.0;
+
+/// The most members a tube that expects fewer than [`TUBE_MEMBERS_JUDGED`] inside the cube may
+/// have past its shell: one, the most measured at generator version 25 over 1,224 such tubes of
+/// the 3,592, the first of them stream 97 (research's review of round 7's lean, 2026-11-01).
+const SMALL_TUBE_MOST_OUTSIDE: u64 = 1;
 
 /// P10.T12, research-leans-10's tripwire on option A: over the first sweep galaxies, each tube at
 /// the generator's tracers, the share of a galaxy's stream members that lie outside their shells,
-/// which A drops from 26, and the most of one tube's, both bounded ([`DROPPED_BOUNDS`]), so that A
-/// guards the tips' remaining tail and does not hide a worse tube than it does now. It stands in
-/// for P10.T9's containment over a sample of seeds, the shells' widening not raised (option C,
-/// rejected). Only the along cells whose cut can reach past the shell are enumerated
-/// ([`dropped_of`]); it covers the first 8 of the sweep's 64, since spraying every tube costs some
-/// 340 CPU-seconds a galaxy.
+/// which A drops from 26, and the most of one tube's, both bounded ([`DROPPED_BOUNDS`]; a tube
+/// expecting few members by its count, [`SMALL_TUBE_MOST_OUTSIDE`]), so that A guards the tips'
+/// remaining tail and does not hide a worse tube than it does now. It stands in for P10.T9's
+/// containment over a sample of seeds, the shells' widening not raised (option C, rejected). Only
+/// the along cells whose cut can reach past the shell are enumerated ([`dropped_of`]); it covers
+/// the first 8 of the sweep's 64, since spraying every tube costs some 340 CPU-seconds a galaxy.
 #[test]
 #[ignore = "slow: builds eight galaxies' kinematic tables and lists, and every tube of each"]
 fn option_a_drops_a_bounded_share_over_the_sweep() {
     let mut most_galaxy = 0.0_f64;
     let mut most_tube = (0.0_f64, 0, 0);
+    let (mut small_tubes, mut tubes) = (0, 0);
+    let mut most_small = (0_u64, 0, 0);
     for n in 0..TRIPWIRE_GALAXIES {
         let galaxy = sweep_galaxy(n);
         let list = GlobalList::build(&galaxy);
@@ -705,7 +714,13 @@ fn option_a_drops_a_bounded_share_over_the_sweep() {
             outside += o;
             expected += e;
             let share = f64::from(u32::try_from(o).expect("small")) / e;
-            if e >= TUBE_MEMBERS_JUDGED && share > most_tube.0 {
+            tubes += 1;
+            if e < TUBE_MEMBERS_JUDGED {
+                small_tubes += 1;
+                if o > most_small.0 {
+                    most_small = (o, n, k);
+                }
+            } else if share > most_tube.0 {
                 most_tube = (share, n, k);
             }
         }
@@ -721,8 +736,17 @@ fn option_a_drops_a_bounded_share_over_the_sweep() {
          stream {})",
         most_tube.0, most_tube.1, most_tube.2
     );
+    eprintln!(
+        "{small_tubes} of {tubes} tubes expect under {TUBE_MEMBERS_JUDGED} members; the most of \
+         theirs outside {} (sweep galaxy {}, stream {})",
+        most_small.0, most_small.1, most_small.2
+    );
     assert!(
         most_galaxy <= DROPPED_BOUNDS[0] && most_tube.0 <= DROPPED_BOUNDS[1],
         "a galaxy drops {most_galaxy}, a tube {most_tube:?}"
+    );
+    assert!(
+        most_small.0 <= SMALL_TUBE_MOST_OUTSIDE,
+        "a tube expecting under {TUBE_MEMBERS_JUDGED} members drops {most_small:?}"
     );
 }
