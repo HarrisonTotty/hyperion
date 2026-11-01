@@ -1089,8 +1089,8 @@ function bakeBodyOf(tables: CachedTables): ThickBakeBody {
  * @param input - A server body's build's input; `null` for a kept body.
  * @param lights - The body's lights as last noted, a kept body's spectra.
  * @param haze - Whether the bake is a haze route's (R08.T14.d.4): the channels its lights allow at
- *   their own wavelengths, its streams' curved paths and the horizon's terms, which the ask then
- *   carries.
+ *   their own wavelengths and its streams' curved paths, which the ask then carries; never the
+ *   horizon's terms (main's ruling of 2026-11-01).
  * @throws RangeError as `spectralColumnOf` refuses the sources: a bug in what the body was built
  *   from.
  */
@@ -1102,7 +1102,7 @@ function thickBakeAskOf(
   lights: ReadonlyArray<BodyLight>,
   haze: boolean,
 ): ThickBakeAsk | null {
-  const levers = haze ? { ownWavelengths: true, curvedStreams: true, horizonTerms: true } : {};
+  const levers = haze ? { ownWavelengths: true, curvedStreams: true } : {};
   // A self-luminous medium's column carries its temperature, so that the bake solves its thermal
   // field beside its beams (R08.T18.b).
   const column = spectralColumnOf(built.medium, sources, built.temperature);

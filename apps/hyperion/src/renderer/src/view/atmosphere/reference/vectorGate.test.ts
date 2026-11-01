@@ -62,15 +62,17 @@
  * - **`titan-class` through its route** (R08.T14.d.4; the record's `titanClass`). The case, re-traced
  *   deep by R08.T12.h, is read as a kept case is: the `thickScattering` route `classifyRegime`
  *   gives it under a clear sky, its whole column baked at m ≤ 2 with its correction on the twin's
- *   body, the channels its methane allows solved at their own wavelengths, its diffuse streams
- *   taking their curved paths and its rows of a low sun the horizon's first-order terms, as a haze
- *   route bakes (`thick/bake.ts`'s "Own wavelengths", "Curved streams" and "The horizon's
- *   first-order terms"), and the route's twin over every geometry against
- *   the vector I, its tallies by image as
- *   the deck's envelope variant's, at the cut modes too; and the ground's downwelling flux under
- *   each aggregate against the vector flux by the tolerance test. Its verdict by image is
- *   `thick/routing.ts`'s `HAZE_GATE_TALLIES`, which opens a Titan-class world's route only on a
- *   pass.
+ *   body, the channels its methane allows solved at their own wavelengths and its diffuse streams
+ *   taking their curved paths, as a haze route bakes (`thick/bake.ts`'s "Own wavelengths" and
+ *   "Curved streams"; the horizon's first-order terms off, main's ruling of 2026-11-01), and the
+ *   route's twin over every geometry against the vector I, its tallies by image as the deck's
+ *   envelope variant's, at the cut modes too; and the ground's downwelling flux under each
+ *   aggregate against the vector flux by the tolerance test. Beside it, the diagnostic: the
+ *   analytic path with the correction over the same geometries, and each geometry's worst channel
+ *   through both paths in edge units, which ruling (1)'s exceptions are judged by, per image. Its
+ *   verdict by image is `thick/routing.ts`'s `HAZE_GATE_TALLIES`, and its misses
+ *   `HAZE_GATE_MISSES`, which open a Titan-class world's route on a pass with the haze's named
+ *   exceptions.
  *
  * The twin's values on the route and the diagnostic, each case setting's radiance and drawn-surface
  * share (the values `thickRuns.test.ts` replaces), are the record's; every other value is c1's.
@@ -103,7 +105,6 @@ import { densityAt } from "../medium";
 import { kernelMedium } from "../tables";
 import {
   bakeBinSolve,
-  HORIZON_TERMS,
   type MsSourceTable,
   ownWavelengthChannels,
   type ThickBakeBody,
@@ -157,6 +158,7 @@ import {
   caseGateSection,
   caseTwin,
   type GateCase,
+  RECORD_COLUMNS,
   recorded,
   recordedRgb,
   recordImagesOf,
@@ -243,9 +245,10 @@ const RECORD_FILE = "./vectorGate.json";
  * adds `titan-class` through its route (`titanClass`); 8 from its own wavelengths, which bakes the
  * channels the route allows at them and names them (`titanClass.ownWavelengths`); 9 from its curved
  * streams (`titanClass.curvedStreams`); 10 from the horizon's first-order terms
- * (`titanClass.horizonTerms`).
+ * (`titanClass.horizonTerms`); 11 from the haze route's bake without them, and titan-class's
+ * analytic path beside its route (`titanClass.diagnostic`, `worstByGeometry`).
  */
-const VECTOR_GATE_FORMAT = 10;
+const VECTOR_GATE_FORMAT = 11;
 
 /** Who writes the record, as each of its records' heads says. */
 const WRITER = "vectorGate.test.ts, through caseGate.ts (plan R08, R08.T14.f)";
@@ -350,8 +353,8 @@ function cutModes(bands: ReadonlyArray<MsSourceTable>, modes: number): MsSourceT
 
 /**
  * A case baked from its medium's sources under the reference Sun, on its twin's bands; as a haze
- * route bakes where `haze`, the channels its lights allow at their own wavelengths, its diffuse
- * streams on their curved paths and its rows of a low sun with the horizon's terms.
+ * route bakes where `haze`, the channels its lights allow at their own wavelengths and its diffuse
+ * streams on their curved paths.
  */
 function bakesOf(referenceCase: ReferenceCase, haze = false): CaseBakes {
   const lights = referenceCaseBakeLights(referenceCase);
@@ -360,7 +363,6 @@ function bakesOf(referenceCase: ReferenceCase, haze = false): CaseBakes {
     bands: bakeKeptCase(referenceCase, lights, body, {
       ownWavelengths: haze,
       curvedStreams: haze,
-      ...(haze ? { horizonTerms: HORIZON_TERMS } : {}),
     }),
     correction: bakeKeptCorrection(referenceCase, lights, body),
   };
@@ -1484,31 +1486,125 @@ function titanTalliesOf(values: TwinValues): unknown {
   );
 }
 
+/** Where a geometry row's verdicts and ratios begin, its red's (`caseGate.ts`'s columns). */
+const VERDICT_AT = RECORD_COLUMNS.geometry.indexOf("verdictR");
+const RATIO_AT = RECORD_COLUMNS.geometry.indexOf("ratioR");
+
+/**
+ * A geometry row's worst channel in edge units: the largest |twin − ref| ÷ (T + 4σ) of its
+ * channels not refused, and its letter; `null` for both where every channel is refused.
+ *
+ * @throws Error for a row not one.
+ */
+function worstChannelOf(row: unknown): readonly [number | null, string | null] {
+  if (!Array.isArray(row)) {
+    throw new Error("a geometry's row is not one");
+  }
+  let worst: number | null = null;
+  let letter: string | null = null;
+  for (const [c, name] of CHANNEL_NAMES.entries()) {
+    const verdict: unknown = row[VERDICT_AT + c];
+    const ratio: unknown = row[RATIO_AT + c];
+    if (verdict !== "refused" && typeof ratio === "number" && (worst === null || ratio > worst)) {
+      worst = ratio;
+      letter = name;
+    }
+  }
+  return [worst, letter];
+}
+
+/**
+ * Each geometry's worst channel through the route and through the analytic path, in edge units
+ * (`[name, route, its channel, analytic path, its channel]`), from the two sections' rows: the
+ * reading of ruling (1) per image (main, 2026-11-01; research-leans-28 §4), since a pixel takes its
+ * three channels from one path.
+ *
+ * @throws Error for sections whose geometries differ.
+ */
+function worstByGeometryOf(routed: unknown, diagnostic: unknown): unknown[] {
+  const routedRows: unknown = sectionOf(routed, "geometries");
+  const diagnosticRows: unknown = sectionOf(diagnostic, "geometries");
+  if (
+    !Array.isArray(routedRows) ||
+    !Array.isArray(diagnosticRows) ||
+    routedRows.length !== diagnosticRows.length
+  ) {
+    throw new Error("titan-class's two paths hold different geometries");
+  }
+  return routedRows.map((row: unknown, i) => {
+    const other: unknown = diagnosticRows[i];
+    const name: unknown = Array.isArray(row) ? row[0] : null;
+    if (typeof name !== "string" || !Array.isArray(other) || other[0] !== name) {
+      throw new Error(`titan-class's two paths' rows differ at ${i}`);
+    }
+    const [routedWorst, routedChannel] = worstChannelOf(row);
+    const [analyticWorst, analyticChannel] = worstChannelOf(other);
+    return [name, routedWorst, routedChannel, analyticWorst, analyticChannel];
+  });
+}
+
+/** A `titan-class` geometry's value of `quantity` in `values`, or a thrown error naming it. */
+function titanValueOf(
+  values: TwinValues,
+  quantity: "radiance" | "surfaceShare",
+  name: string,
+): Rgb {
+  const key = twinValueKey({ quantity, setting: "case", caseName: TITAN_CASE, name });
+  const value = values.get(key);
+  if (value === undefined) {
+    throw new Error(`titan-class's path holds no value ${key}`);
+  }
+  return value;
+}
+
+/**
+ * The analytic path's values as the section holds them, a geometry a row:
+ * `[name, radiance r, g, b, surface share r, g, b]`, in the reference's order.
+ */
+function titanDiagnosticRowsOf(values: TwinValues): unknown[] {
+  return titanGateCase().referenceCase.geometries.map((geometry) => {
+    const [r, g, b] = titanValueOf(values, "radiance", geometry.name);
+    const [shareR, shareG, shareB] = titanValueOf(values, "surfaceShare", geometry.name);
+    return [geometry.name, r, g, b, shareR, shareG, shareB];
+  });
+}
+
 /**
  * `titan-class`'s gate through its route (the module's remarks): the route's tallies by image and
- * its ratios against the vector I, at the cut modes too, every geometry's row, the ground's
- * downwelling flux under each aggregate against the vector flux by the tolerance test, the tables,
- * and the downwelling values the geometries' rows do not hold.
+ * its ratios against the vector I, at the cut modes too, the analytic path's beside them
+ * (`diagnostic`, from `diagnostic`'s values) and each geometry's worst channel through both, every
+ * geometry's row on the route, the ground's downwelling flux under each aggregate against the
+ * vector flux by the tolerance test, the tables, the downwelling values the geometries' rows do not
+ * hold, and the analytic path's values.
  */
-function titanSectionOf(values: TwinValues, figures: TitanFigures): Record<string, unknown> {
+function titanSectionOf(
+  values: TwinValues,
+  figures: TitanFigures,
+  diagnostic: TwinValues,
+): Record<string, unknown> {
   const gateCase = titanGateCase();
   const { referenceCase, reference } = gateCase;
   const { regime, path } = routeOf(referenceCase);
   const section = caseGateSection(gateCase, values, "vector");
   const asRecord = { cases: { [TITAN_CASE]: section } };
+  const analytic = caseGateSection(gateCase, diagnostic, "vector");
+  const asAnalytic = { cases: { [TITAN_CASE]: analytic } };
   const valueOf = (aggregate: string): Rgb => downwellingOf(values, TITAN_CASE, aggregate);
   return {
     case: TITAN_CASE,
     regime: regime.kind,
     route: path,
     radiance: "vector",
-    rule: "thick/routing.ts's hazeGatePasses: every image above the horizon passes somewhere and none misses (the deck's rule, deckGatePasses), the sun's images below the horizon TWILIGHT_REASON's",
+    rule: "thick/routing.ts's hazeGatePasses: every image the haze judges (all but ground-s80, ground-s90 and ground-s95, whose sun stands at or below HORIZON_SUN_COSINE: LOW_SUN_REASON's and TWILIGHT_REASON's) passes somewhere, and each of its misses is one of HAZE_GATE_EXCEPTIONS within its bound",
     ownWavelengths: figures.ownWavelengths,
     curvedStreams: figures.curvedStreams,
     horizonTerms: figures.horizonTerms,
     routed: recordImagesOf(asRecord, TITAN_CASE),
     routedRatios: recordRatiosOf(asRecord, TITAN_CASE),
     routedByModes: figures.byModes,
+    diagnostic: recordImagesOf(asAnalytic, TITAN_CASE),
+    diagnosticRatios: recordRatiosOf(asAnalytic, TITAN_CASE),
+    worstByGeometry: worstByGeometryOf(section, analytic),
     geometries: sectionOf(section, "geometries"),
     groundIrradiance: deckGroundIrradianceOf(reference, "vector", valueOf),
     tables: figures.tables,
@@ -1522,15 +1618,20 @@ function titanSectionOf(values: TwinValues, figures: TitanFigures): Record<strin
       const value = valueOf(a.name);
       return [key, value[0], value[1], value[2]];
     }),
+    diagnosticValues: titanDiagnosticRowsOf(diagnostic),
   };
 }
 
 /**
  * `titan-class` baked through its route, by hand (the module's remarks): its bake and correction on
- * the twin's body, the route's twin's values, and the bakes' figures, the route's tallies at the cut
- * modes among them.
+ * the twin's body, the route's twin's values and the analytic path's, and the bakes' figures, the
+ * route's tallies at the cut modes among them.
  */
-function titanGateBaked(): { readonly values: TwinValues; readonly figures: TitanFigures } {
+function titanGateBaked(): {
+  readonly values: TwinValues;
+  readonly figures: TitanFigures;
+  readonly diagnostic: TwinValues;
+} {
   const { referenceCase } = titanGateCase();
   const bakes = bakesOf(referenceCase, true);
   const specs = caseSpecs(referenceCase);
@@ -1552,10 +1653,15 @@ function titanGateBaked(): { readonly values: TwinValues; readonly figures: Tita
     figures: {
       ownWavelengths: CHANNEL_NAMES.filter((_, c) => own[c] === true),
       curvedStreams: true,
-      horizonTerms: true,
+      horizonTerms: false,
       tables: tablesOf(referenceCase, bakes),
       byModes,
     },
+    diagnostic: valuesOf(
+      twinOn("diagnostic", referenceCase, bakes),
+      referenceCase,
+      specs.filter((spec) => spec.quantity !== "downwelling"),
+    ),
   };
 }
 
@@ -1575,6 +1681,36 @@ function committedTitanValues(): Map<string, Rgb> {
     cases: { [TITAN_CASE]: { geometries: sectionOf(section, "geometries") } },
     twinValues: sectionOf(section, "downwelling"),
   });
+}
+
+/**
+ * The committed Titan-class section's analytic path's values, its `diagnosticValues` rows.
+ *
+ * @throws Error for a record whose section lacks them.
+ */
+function committedTitanDiagnostic(): Map<string, Rgb> {
+  const rows: unknown = sectionOf(committedTitanSection(), "diagnosticValues");
+  if (!Array.isArray(rows)) {
+    throw new Error("vectorGate.json's Titan-class section holds no analytic path's values");
+  }
+  const values = new Map<string, Rgb>();
+  for (const row of rows) {
+    const numbers: unknown[] = Array.isArray(row) ? row.slice(1) : [];
+    const name: unknown = Array.isArray(row) ? row[0] : null;
+    if (
+      typeof name !== "string" ||
+      numbers.length !== 6 ||
+      numbers.some((n) => typeof n !== "number")
+    ) {
+      throw new Error("vectorGate.json's Titan-class section holds an analytic path's row not one");
+    }
+    const [r, g, b, sr, sg, sb] = numbers.map(Number);
+    const keyOf = (quantity: "radiance" | "surfaceShare"): string =>
+      twinValueKey({ quantity, setting: "case", caseName: TITAN_CASE, name });
+    values.set(keyOf("radiance"), [r ?? Number.NaN, g ?? Number.NaN, b ?? Number.NaN]);
+    values.set(keyOf("surfaceShare"), [sr ?? Number.NaN, sg ?? Number.NaN, sb ?? Number.NaN]);
+  }
+  return values;
 }
 
 /**
@@ -1632,7 +1768,7 @@ function vectorGateRecord(
   const uncorrected = caseGateRecord(CASES, C1_VALUES, { writer: WRITER, radiance: "vector" });
   return {
     description:
-      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); its route below the split, the table below the deck uncorrected against the vector I, and the ground's flux against the vector flux (deck.routedBelow, R08.T15.b.2); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2); and titan-class through its route, its whole column baked at m <= 2 with its correction, the channels its methane allows at their own wavelengths (ownWavelengths), its diffuse streams on their curved paths (curvedStreams) and its rows of a low sun with the horizon's first-order terms (horizonTerms), against the vector I, its tallies by image at m <= 2 and at the cut modes, with the ground's flux under each aggregate against the vector flux (titanClass, R08.T14.d.4). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+      "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); its route below the split, the table below the deck uncorrected against the vector I, and the ground's flux against the vector flux (deck.routedBelow, R08.T15.b.2); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2); and titan-class through its route, its whole column baked at m <= 2 with its correction, the channels its methane allows at their own wavelengths (ownWavelengths), its diffuse streams on their curved paths (curvedStreams) and its rows of a low sun without the horizon's first-order terms (horizonTerms false), against the vector I, its tallies by image at m <= 2 and at the cut modes, with the ground's flux under each aggregate against the vector flux, beside its analytic path with the correction (diagnostic) and each geometry's worst channel through both paths in edge units, |twin - ref| / (T + 4 sigma) (worstByGeometry) (titanClass, R08.T14.d.4). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
     format: VECTOR_GATE_FORMAT,
     cases: Object.fromEntries(
       CASES.map(({ referenceCase }) => {
@@ -1897,7 +2033,7 @@ describe.skipIf(!BAKES)("R08.T14.f's vector gates, baked (by hand)", () => {
         cutModesRecord(cuts),
         (name) => tables.get(name) ?? null,
         deckRecordOf(deckGateBaked(), venusClassSectionOf(venusValues, venusFigures)),
-        titanSectionOf(titan.values, titan.figures),
+        titanSectionOf(titan.values, titan.figures, titan.diagnostic),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },
@@ -1932,7 +2068,13 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
     () => {
       // Through JSON, as the record is committed.
       const formed: unknown = JSON.parse(
-        JSON.stringify(titanSectionOf(committedTitanValues(), committedTitanFigures())),
+        JSON.stringify(
+          titanSectionOf(
+            committedTitanValues(),
+            committedTitanFigures(),
+            committedTitanDiagnostic(),
+          ),
+        ),
       );
       expect(formed).toEqual(committedTitanSection());
     },
@@ -1953,7 +2095,7 @@ describe.skipIf(BAKES)("R08.T14.f's vector gates' record", () => {
             new Map(VENUS_CASES.map((name) => [name, committedVenusFigures(name)])),
           ),
         ),
-        titanSectionOf(committedTitanValues(), committedTitanFigures()),
+        titanSectionOf(committedTitanValues(), committedTitanFigures(), committedTitanDiagnostic()),
       );
       await expect(expectCommittedTable(record, committed, RECORD_FILE)).resolves.toBeUndefined();
     },
