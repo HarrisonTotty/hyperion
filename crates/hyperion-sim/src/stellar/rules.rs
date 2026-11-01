@@ -72,6 +72,11 @@
 //!   timeline's rules, by `carved_class` and the census's marks. The catalogue's own timelines,
 //!   built from marks, take the version's rules (`stellar/rules/awd_donors_hold.rs` lists the
 //!   movers).
+//! - [`collapses`](StellarRules::collapses), at [`COLLAPSES_VERSION`] (plan 11, P11.T10's fix):
+//!   whether a core collapse acts on the orbit of a pair the pre-test passes over, drawn below
+//!   it, and from it such a pair run through the engine where a star of it collapses by its age,
+//!   read at one choke point, `evolve`'s pre-test, through the engine's input's rules
+//!   (`stellar/rules/collapses_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -82,6 +87,7 @@
 
 use crate::GeneratorVersion;
 use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
+use crate::stellar::binary::collapses::{COLLAPSES_VERSION, CollapseRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
@@ -118,6 +124,9 @@ pub(crate) struct StellarRules {
     pub(crate) awd_donors: AwdDonorRules,
     /// What `classify` counts as an X-ray binary, the hold of [`XRB_CLASS_VERSION`].
     pub(crate) xrb_class: XrbClassRules,
+    /// Whether a core collapse acts on the orbits the binary engine does not otherwise run, the
+    /// hold of [`COLLAPSES_VERSION`].
+    pub(crate) collapses: CollapseRules,
 }
 
 impl StellarRules {
@@ -163,6 +172,11 @@ impl StellarRules {
             } else {
                 XrbClassRules::Held
             },
+            collapses: if version.get() >= COLLAPSES_VERSION.get() {
+                CollapseRules::Applied
+            } else {
+                CollapseRules::Gated
+            },
         }
     }
 
@@ -183,7 +197,7 @@ impl StellarRules {
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
     /// `heavy_donor`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, and P11.T10's
-    /// `binary_kicks`).
+    /// `binary_kicks` and `collapses`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -212,6 +226,8 @@ mod awd_donors_hold;
 mod binary_kicks_hold;
 #[cfg(test)]
 mod classes_hold;
+#[cfg(test)]
+mod collapses_hold;
 #[cfg(test)]
 mod events_hold;
 #[cfg(test)]

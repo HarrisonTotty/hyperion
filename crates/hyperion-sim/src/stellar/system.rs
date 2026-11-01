@@ -2863,10 +2863,11 @@ fn summarised<'a>(
 /// the end of the clock window, +H, so that its timeline covers the source horizon. A pair the
 /// pre-test passes over that holds a remnant is run so that its stars' collapses act on its orbit,
 /// with their records, and the engine takes it over where a collapse leaves an orbit that can
-/// interact (P11.T4.l). Any other pair is two single stars on their orbit, in no class, whose
-/// timeline would be one detached segment of its models, so it is not run. A pair with a brown
-/// dwarf, or with a member that is itself a pair, is not run either. Each pair runs under the
-/// stellar stage's `rules`, those of the galaxy the stars were generated in.
+/// interact (P11.T4.l); under the stellar rules of P11.T10's fix, the engine runs it from the start
+/// where a star of it collapses by then. Any other pair is two single stars on their orbit, in no
+/// class, whose timeline would be one detached segment of its models, so it is not run. A pair
+/// with a brown dwarf, or with a member that is itself a pair, is not run either. Each pair runs
+/// under the stellar stage's `rules`, those of the galaxy the stars were generated in.
 #[must_use]
 fn run_pairs(
     hierarchy: &SystemHierarchy,

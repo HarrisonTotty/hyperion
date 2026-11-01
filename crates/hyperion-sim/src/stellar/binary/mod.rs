@@ -34,6 +34,7 @@ pub(crate) mod awd_donors;
 pub(crate) mod carve;
 pub(crate) mod class_merger;
 mod classify;
+pub(crate) mod collapses;
 mod common_envelope;
 mod detached;
 pub mod events;

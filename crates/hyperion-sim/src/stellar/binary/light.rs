@@ -84,7 +84,9 @@
 //!    pair's age at +H, the end of the clock window, which may lie after the window's end. A pair
 //!    it runs for its remnant alone is still one detached segment of its own models
 //!    ([`evolve`](super::evolve)'s pre-test gate), whose cooling member accretes nothing; the
-//!    engine steps the pair only if it can interact by +H. The window's ages are light-time ages,
+//!    engine steps the pair only if it can interact by +H, or, under the stellar rules of P11.T10's
+//!    fix, if a star of it collapses by then, which item 3 already refuses. The window's ages are
+//!    light-time ages,
 //!    each the age at an emission time of the source horizon (−(H + L) to +H), so the age at +H
 //!    lies at most [`RUN_HORIZON_PAST_WINDOW_YEARS`], 2H + L, past the window's end. So such a
 //!    pair is `Detached` only if items 1–3 also hold there. Otherwise it is read from the tables,

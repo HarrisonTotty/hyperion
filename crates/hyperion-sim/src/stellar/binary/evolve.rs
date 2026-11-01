@@ -167,7 +167,9 @@ pub(crate) fn can_interact_with_tracks(
 ///
 /// A pair that cannot interact ([`can_interact`]) is two single stars on their drawn orbit, whose
 /// states are plan 06's own, until a star's collapse, which BSE appendix A1 applies to that orbit
-/// (P11.T4.l). Otherwise the engine runs event to event (see the module documentation).
+/// (P11.T4.l), unless, under the stellar rules of P11.T10's fix (from version 27, `collapses.rs`),
+/// a star of it dies suddenly by `until_age`, when the engine runs it. Otherwise the engine runs
+/// event to event (see the module documentation).
 ///
 /// # Examples
 ///
@@ -273,7 +275,16 @@ fn run_pair(
         #[cfg(test)]
         PreTest::Past => false,
     };
-    if gated && !interacts(input, &members, until) {
+    // From P11.T10's fix a star's collapse by `until` runs the pair, so that it acts on the orbit
+    // (`collapses.rs`).
+    let collapses = || {
+        let pinned = pin.as_ref().map(|p| p.pin.death.age().value());
+        input
+            .rules()
+            .collapses
+            .runs_pair(first_sudden_death(&members, pinned), until)
+    };
+    if gated && !interacts(input, &members, until) && !collapses() {
         let pin = pin.map(|p| p.pin);
         return Engine::passed_over(input, ctx, until, members, pin, own_end, pre_test);
     }
@@ -286,6 +297,44 @@ fn run_pair(
         .with_own_main_sequence_end(own_end);
     engine.run();
     engine.finish()
+}
+
+/// The age of the earliest sudden death (a collapse, `DeathKind::is_sudden`) of the stars of
+/// `members` on their own tracks, years, or `None`: the primary's at its pin, `pinned_years`,
+/// where design note 16 pins it, and each other star's own track's death where the track is built
+/// to it. A white dwarf's birth is no sudden death.
+#[must_use]
+pub(super) fn first_sudden_death(members: &[Member; 2], pinned_years: Option<f64>) -> Option<f64> {
+    let own = |i: usize| match &members[i] {
+        Member::Track { track, offset } => track
+            .death()
+            .filter(|death| death.kind().is_sudden())
+            .map(|death| death.age().value() + offset),
+        Member::Shaped { .. }
+        | Member::MainSequence { .. }
+        | Member::Cooling { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => None,
+    };
+    let primary = pinned_years.or_else(|| own(0));
+    [primary, own(1)].into_iter().flatten().reduce(f64::min)
+}
+
+/// Whether [`evolve`] runs the pair of `input` through the engine to `until_age`: where
+/// [`can_interact`] says it can interact by then, or, under the stellar rules of P11.T10's fix, a
+/// star of it dies suddenly by then (`run_pair`'s pre-test), for the build-age tests.
+#[cfg(test)]
+#[must_use]
+pub(super) fn engine_runs(input: &BinaryInput, until_age: Years) -> bool {
+    let until = until_age.value().max(0.0);
+    let members = own_members(input, until, None);
+    let pinned = pinned_death(input, None).map(|p| p.pin.death.age().value());
+    interacts(input, &members, until)
+        || input
+            .rules()
+            .collapses
+            .runs_pair(first_sudden_death(&members, pinned), until)
 }
 
 /// [`evolve`] past the pre-test: the engine runs every pair, whether [`can_interact`] passes it or

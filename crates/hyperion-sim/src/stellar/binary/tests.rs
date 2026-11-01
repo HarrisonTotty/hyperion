@@ -1,10 +1,13 @@
 //! Tests of the binary engine (P11.T4).
 
+use std::sync::Arc;
+
 use super::star::positive;
 use super::*;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
+use crate::stellar::rules::StellarRules;
 use crate::units::{GravitationalParameter, Radians, Seconds, SolarMasses, Years};
 
 /// A pair of `m1` and `m2` M☉ on an orbit of `period_days` and `e`, in the reference plane.
@@ -2183,20 +2186,22 @@ enum EarlierRun {
 }
 
 /// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
-/// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
-/// as the later run, bit for bit ([`assert_same_history`]), and the same supernova records before
-/// it ([`assert_same_records`]). One it passes over is a detached segment of its stars' own forms
-/// on the drawn orbit to its first collapse (P11.T4.l). If the pre-test passes it over at `later`
-/// too, the two runs are the same to `until`, records included, bit for bit, or, where the later
-/// run's engine takes the pair over after a collapse, to that collapse, its record included;
-/// otherwise each star on its own track is the later run's to the later run's first event (a star
-/// below 0.1 M☉ on the cooling fits takes its companion's wind in the later run).
+/// `until` and to `later`. A pair that [`can_interact`] by `until`, or, under the stellar rules of
+/// P11.T10's fix, a star of which collapses by then ([`engine_runs`](super::evolve::engine_runs)),
+/// has the same history to `until` as the later run, bit for bit ([`assert_same_history`]), and
+/// the same supernova records before it ([`assert_same_records`]). One it passes over is a
+/// detached segment of its stars' own forms on the drawn orbit to its first collapse (P11.T4.l).
+/// If the pre-test passes it over at `later` too, the two runs are the same to `until`, records
+/// included, bit for bit, or, where the later run's engine takes the pair over after a collapse,
+/// to that collapse, its record included; otherwise each star on its own track is the later run's
+/// to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its companion's
+/// wind in the later run).
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
     use super::star::Member;
 
     let early = evolve_from_living_donors(input, until);
     let late = evolve_from_living_donors(input, later);
-    if can_interact(input, until) {
+    if super::evolve::engine_runs(input, until) {
         assert!(!early.hit_segment_cap(), "{}", describe(&early));
         assert_same_history(&early, &late, until);
         assert_same_records(&early, &late, until);
@@ -2209,7 +2214,7 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
     let first = &early.segments()[0];
     assert_eq!(first.kind(), SegmentKind::Detached, "{}", describe(&early));
     assert_eq!(first.end(), first_collapse, "{}", describe(&early));
-    if !can_interact(input, later) {
+    if !super::evolve::engine_runs(input, later) {
         // The same history to `until`, bit for bit, unless the pre-test asked again after a
         // collapse passes the pair at `later` and not at `until`: then the later run's engine
         // evolves the orbit from the collapse where the earlier keeps it fixed, and only the
@@ -2334,12 +2339,21 @@ fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
 /// and the wide pairs are drawn on streams of their own, so that the pairs and their first ages
 /// are the sample's as before.
 fn any_age_over(n: u32, seed: u64) -> [[u32; 4]; 3] {
+    any_age_over_under(n, seed, None)
+}
+
+/// [`any_age_over`] with each pair under `rules` where given, and otherwise the version's.
+fn any_age_over_under(n: u32, seed: u64, rules: Option<StellarRules>) -> [[u32; 4]; 3] {
     let mut mix = Mix(seed);
     let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
     let mut wide = Mix(seed ^ 0x0a77_1fa1_0000_0001);
     let mut counts = [[0_u32; 4]; 3];
     for i in 0..n {
         let input = pinned_pair(&mut mix, i);
+        let input = match rules {
+            Some(rules) => input.with_rules(rules),
+            None => input,
+        };
         let until =
             crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
         let mut runs = vec![(0, until, input.clone())];
@@ -2348,6 +2362,10 @@ fn any_age_over(n: u32, seed: u64) -> [[u32; 4]; 3] {
         }
         if i % 10 == 0 {
             let (pair, age) = wide_massive_pair(&mut wide, i);
+            let pair = match rules {
+                Some(rules) => pair.with_rules(rules),
+                None => pair,
+            };
             runs.push((2, age, pair));
         }
         for (kind, until, input) in runs {
@@ -2418,6 +2436,73 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
         "{collapsed} + {wide_collapsed} passed over through collapses"
     );
     assert_eq!(missed + wide_missed, 0, "interactions missed");
+}
+
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] under the stellar rules of P11.T10's fix
+/// (`collapses.rs`), which run a pair the pre-test passes over for a star's collapse by its age:
+/// such a pair has the same history to the earlier age as the later run, and one passed over at
+/// the earlier age keeps its stars' own forms to the later run's first event, as under the held
+/// arm. Before its collapse the later run's orbit is the engine's, which the check does not read
+/// (the fix's lean).
+#[test]
+fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_collapses_arm() {
+    use crate::stellar::binary::collapses::CollapseRules;
+    let rules = StellarRules {
+        collapses: CollapseRules::Applied,
+        ..StellarRules::of_version(crate::GENERATOR_VERSION)
+    };
+    let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
+        any_age_over_under(60, 0x0b1e_00a9, Some(rules));
+    let [[held_same, held_passed, held_collapsed, _], _, _] = any_age_over(60, 0x0b1e_00a9);
+    assert_eq!(missed + wide_missed, 0, "interactions missed");
+    assert!(
+        same > held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
+        "{same} run, {passed} passed over and {collapsed} through collapses, against {held_same}, \
+         {held_passed} and {held_collapsed} held"
+    );
+}
+
+/// A star's own sudden death runs its pair, the primary's at its pin where design note 16 pins
+/// it, and a white dwarf's birth does not: the earliest of the two stars' collapses, on their own
+/// tracks, whichever member it is.
+#[test]
+fn a_pair_s_first_sudden_death_is_either_star_s_collapse_and_no_white_dwarf_s_birth() {
+    use super::evolve::first_sudden_death;
+    use super::star::Member;
+    use crate::stellar::sse::Track;
+
+    let comp = Composition::SOLAR;
+    let member = |m: f64| Member::Track {
+        track: Arc::new(Track::full(
+            SolarMasses::new(m),
+            &comp,
+            &StarDraws::median(),
+        )),
+        offset: 0.0,
+    };
+    let death = |m: f64| {
+        let track = Track::full(SolarMasses::new(m), &comp, &StarDraws::median());
+        let death = track.death().expect("a full track dies");
+        (death.age().value(), death.kind().is_sudden())
+    };
+    let ((at_15, sudden_15), (at_3, sudden_3)) = (death(15.0), death(3.0));
+    assert!(sudden_15 && !sudden_3);
+    assert_eq!(
+        first_sudden_death(&[member(15.0), member(3.0)], None),
+        Some(at_15)
+    );
+    // The companion's own collapse, beside a star whose death is a white dwarf's birth.
+    assert_eq!(
+        first_sudden_death(&[member(3.0), member(15.0)], None),
+        Some(at_15)
+    );
+    assert_eq!(first_sudden_death(&[member(3.0), member(1.0)], None), None);
+    assert!(at_3 > 0.0);
+    // The pin's age stands for the primary's own.
+    assert_eq!(
+        first_sudden_death(&[member(15.0), member(3.0)], Some(0.5 * at_15)),
+        Some(0.5 * at_15)
+    );
 }
 
 /// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
