@@ -63,6 +63,8 @@ use self::field_share::FieldShare;
 use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
+use self::global_list::ListSourceRules;
+use self::global_list::share::discrete_share_under;
 use self::imf::{BandShares, Chabrier, Kept, Kroupa, MassFunction, MassFunctionKind};
 use self::kinematics::KinematicTables;
 use self::motion::CentreMotion;
@@ -362,8 +364,9 @@ impl Galaxy {
     ///
     /// The field share (`GalaxyRules::field_share`, P09.T2.c), the carve-out
     /// (`GalaxyRules::carve_out`, P09.T35), plan 08's displaced classes
-    /// (`GalaxyRules::displaced`, P08.T12.a) and the hypervelocity survivors' weight
-    /// (`GalaxyRules::hypervelocity`, P09.T34.b) are the holds read when the galaxy is built, so
+    /// (`GalaxyRules::displaced`, P08.T12.a), the hypervelocity survivors' weight
+    /// (`GalaxyRules::hypervelocity`, P09.T34.b) and the halo's discrete share
+    /// (`GalaxyRules::list_source`, P10.T3.d.b) are the holds read when the galaxy is built, so
     /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
     /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
     /// classes keeps its stellar rules too, whose kick law its class table was built with.
@@ -374,7 +377,8 @@ impl Galaxy {
     /// # Panics
     ///
     /// In debug builds, which every test profile is, if `rules` changes the field share, the
-    /// carve-out, the displaced classes' arm or the survivors' weight, or the stellar rules of a
+    /// carve-out, the displaced classes' arm, the survivors' weight or the list's source, or the
+    /// stellar rules of a
     /// galaxy that holds the classes, or the binary tables of a galaxy under the field share.
     #[cfg(test)]
     #[must_use]
@@ -392,6 +396,11 @@ impl Galaxy {
         debug_assert_eq!(
             rules.displaced, self.rules.displaced,
             "the displaced classes' arm is read when a galaxy is built: build it under the new \
+             rules with `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
+            rules.list_source, self.rules.list_source,
+            "the halo's discrete share is stored when a galaxy is built: build it under the new \
              rules with `Galaxy::from_params_with_rules`"
         );
         debug_assert_eq!(
@@ -484,6 +493,20 @@ impl Galaxy {
             params.mean_formed_mass(),
         );
         feature_shares.set_class_shares(rules.binary_tables.class_shares());
+        // From version 27 the halo gives up its discrete share to the global list's streams and
+        // dwarf cores, in the train whose range query first serves their members, and before the
+        // field's factors are taken from the shares (plan 10, P10.T3.d.b; `LIST_SOURCE_VERSION`).
+        match rules.list_source {
+            ListSourceRules::Unregistered => {}
+            ListSourceRules::Registered => {
+                feature_shares.set_halo_discrete(discrete_share_under(
+                    seed,
+                    &params,
+                    &potential,
+                    rules.orphan_streams,
+                ));
+            }
+        }
         let field_share = match rules.field_share {
             FieldShareRules::None => None,
             FieldShareRules::Phi => {

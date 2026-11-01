@@ -497,6 +497,9 @@ P10.T10.b's registration member (below)._
     (`the_discrete_share_census`, a unit test in `galaxy::global_list::share::tests`, slow if
     long, by name under `just test-slow`). Nothing of T3.d lands inside the potential freeze.
 
+    _Built behind the registration's hold (lane `p10-list-registration`, 2026-11-01, at
+    `GENERATOR_VERSION` 24, no output moved): see Risks, "P10.T3.d.b as built"._
+
 ### P10.T4 The global list and its bounding shells
 
 `GlobalList::build(&Galaxy)`: entry 0 is `CentreModel::as_global_entry()`; then one entry per stream
@@ -2348,3 +2351,17 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     (the globular tubes' median length falls 6.1 %); the tripwire lists both.
   - _Not met._ About 1–2 CPU-minutes: the warm-up at 27 costs some 200 CPU-s, since 27's fitted k
     gives the fixture 355 orphans against 256 (a finding).
+- **P10.T3.d.b as built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24,
+  behind `LIST_SOURCE_VERSION` = 27; no output moved).**
+  - _The hold (lean, 2026-11-01)._ The share is stored through a `GalaxyRules` field, not with
+    none as the desktop's point 1 has it, since it lands with a 27 member:
+    `GalaxyRules::list_source` (`global_list::source::{LIST_SOURCE_VERSION, ListSourceRules}`), in
+    `every_27_hold()`; tripwire `the_list_source_is_held_only_until_the_27_bump`;
+    `Galaxy::with_rules` refuses to change it. P10.T10.b's registration reads the same field
+    (`GlobalListSource::is_registered_in`), so the halo's field gives up φ in the train that
+    serves its members, and P09.T2.c's `field_factor` takes it out at once.
+  - _The call._ `Galaxy::build_field` stores `share::discrete_share_under` (new, crate-only) of
+    the seed, the parameters, the in-plane tables and `rules.orphan_streams`, after
+    `set_class_shares` and before the field share is built; `discrete_share` is it at the
+    version's streams per globular.
+  - _Test._ Slow, by name: `galaxy::global_list::share::tests::the_discrete_share_census`.

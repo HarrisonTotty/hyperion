@@ -46,8 +46,9 @@
 //!
 //! Everything comes from the galaxy's parameters, its seed (the dwarfs' stripping fractions on
 //! `dwarf.stripping`, their arguments of pericentre on `dwarf.orbit`) and its in-plane potential
-//! tables, so `Galaxy::from_params` can derive the share before the galaxy exists. Nothing is
-//! drawn here.
+//! tables, so `Galaxy::from_params` can derive the share before the galaxy exists, and from
+//! generator version 27 it does, storing it in the galaxy's feature shares
+//! (P10.T3.d.b, with the list's registration in the range query). Nothing is drawn here.
 //!
 //! [`HaloParams::discrete_share`]: crate::galaxy::params::HaloParams::discrete_share
 
@@ -116,9 +117,21 @@ pub const GLOBULAR_TUBES_INSIDE: f64 = 0.55;
 /// ```
 #[must_use]
 pub fn discrete_share(seed: Seed, params: &GalaxyParams, tables: &PotentialTables) -> f64 {
+    let orphan_streams = GalaxyRules::of_version(GENERATOR_VERSION).orphan_streams;
+    discrete_share_under(seed, params, tables, orphan_streams)
+}
+
+/// [`discrete_share`] at the streams per globular `orphan_streams` says: what the galaxy's build
+/// stores under its own rules (P10.T3.d.b), whose streams per globular its debris reads too.
+#[must_use]
+pub(crate) fn discrete_share_under(
+    seed: Seed,
+    params: &GalaxyParams,
+    tables: &PotentialTables,
+    orphan_streams: OrphanStreamsRules,
+) -> f64 {
     let mut debris = dwarfs(seed, params, tables);
     in_list_order(&mut debris);
-    let orphan_streams = GalaxyRules::of_version(GENERATOR_VERSION).orphan_streams;
     ShareFigures::of(params, tables, &debris, orphan_streams).applied()
 }
 
@@ -716,5 +729,146 @@ mod tests {
             (mean - GLOBULAR_TUBES_INSIDE).abs() < 0.03,
             "{mean} against {GLOBULAR_TUBES_INSIDE}"
         );
+    }
+
+    /// The halo's records of a block of 6 × 6 × 4 of `layer`'s cells from the one about `centre` in
+    /// `before`, a galaxy under every 27 hold but the list's source, and in `after`, the same under
+    /// every 27 hold: those of `after` are a subset of `before`'s, bit for bit and finite, and the
+    /// expected counts about the first cell are finite and no more; the two counts of records, and
+    /// of the expected, for the census's table.
+    fn halo_cell_census(
+        (before, after): (&crate::galaxy::Galaxy, &crate::galaxy::Galaxy),
+        layer: crate::id::Layer,
+        centre: &crate::coords::GalacticPosition,
+    ) -> ([usize; 2], [f64; 2]) {
+        use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+        use crate::galaxy::query::{SubstellarRequest, expected_counts};
+
+        let first = CellKey::containing(layer, centre)
+            .expect("a cell of the cube")
+            .gen_cell()
+            .to_array();
+        let halo = |galaxy| {
+            let mut halo: Vec<SystemRecord> = Vec::new();
+            let mut records = Vec::new();
+            for (i, j, k) in
+                (0..6).flat_map(|i| (0..6).flat_map(move |j| (0..4).map(move |k| (i, j, k))))
+            {
+                let key = CellKey::new(layer, [first[0] + i, first[1] + j, first[2] + k])
+                    .expect("a cell of the cube");
+                records.clear();
+                generate_cell(galaxy, key, &mut records);
+                halo.extend(
+                    records
+                        .iter()
+                        .filter(|r| r.population() == Population::Halo),
+                );
+            }
+            halo
+        };
+        let (all, kept) = (halo(before), halo(after));
+        let mut rest = all.iter();
+        for record in &kept {
+            assert!(
+                rest.any(|other| other == record),
+                "{:?} of the halo changed",
+                record.id()
+            );
+            assert!(
+                record.age_at_epoch().value().is_finite()
+                    && record.primary_initial_mass().value().is_finite()
+            );
+        }
+        let radius = LightYears::new(f64::from(layer.cell_size_ly()));
+        let counts = |galaxy| {
+            expected_counts(galaxy, centre, radius, SubstellarRequest::default()).get(layer)
+        };
+        let expected = [counts(before), counts(after)];
+        assert!(expected[1].is_finite() && expected[1] <= expected[0]);
+        assert!(kept.len() <= all.len());
+        ([all.len(), kept.len()], expected)
+    }
+
+    /// P10.T3.d.b's census: under every 27 hold a galaxy stores its applied share, the one
+    /// [`discrete_share_under`] gives its seed, parameters and in-plane tables at its streams per
+    /// globular, and the halo's field gives it up, its factor φ less in every band; and in three
+    /// blocks of cells off the plane the halo's records are a subset of the unstored galaxy's, bit
+    /// for bit and finite, and fewer over the three galaxies, and the expected counts about them
+    /// finite ([`halo_cell_census`]). Over the Milky Way fixture and two drawn galaxies, each
+    /// against itself under every 27 hold but the list's source.
+    #[test]
+    #[ignore = "slow: six galaxies under every 27 hold, their halo cells generated twice"]
+    fn the_discrete_share_census() {
+        use crate::coords::GalacticPosition;
+        use crate::galaxy::Galaxy;
+        use crate::galaxy::global_list::ListSourceRules;
+        use crate::galaxy::imf::MassBand;
+        use crate::id::Layer;
+
+        let unstored = GalaxyRules {
+            list_source: ListSourceRules::Unregistered,
+            ..GalaxyRules::every_27_hold()
+        };
+        let drawn = |seed: u64| {
+            let seed = Seed::new(seed);
+            (
+                seed,
+                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            )
+        };
+        let galaxies = [
+            (Seed::new(7), GalaxyParams::milky_way_like()),
+            drawn(0x0a10_3d0b_0000_0001),
+            drawn(0x0a10_3d0b_0000_0002),
+        ];
+        let at = |p: [f64; 3]| GalacticPosition::from_light_years(p).expect("in the cube");
+        // Off the plane, where the halo holds a good share of the field: above the Sun-like point
+        // and above the bulge.
+        let cells = [
+            (Layer::E, at([0.0, 26_000.0, 6_000.0])),
+            (Layer::D, at([8_000.0, 0.0, 4_000.0])),
+            (Layer::C, at([0.0, 26_000.0, 2_000.0])),
+        ];
+        let mut records = [0_usize; 2];
+        for (seed, params) in galaxies {
+            let before = Galaxy::from_params_with_rules(seed, params.clone(), unstored)
+                .expect("a drawn galaxy builds");
+            let after =
+                Galaxy::from_params_with_rules(seed, params.clone(), GalaxyRules::every_27_hold())
+                    .expect("a drawn galaxy builds");
+            let tables = PotentialTables::in_plane(&MassModel::new(&params));
+            let phi = discrete_share_under(seed, &params, &tables, OrphanStreamsRules::Fitted);
+            assert!(
+                phi > 0.0 && phi < params.halo().discrete_share().max(0.05),
+                "{phi}"
+            );
+            let (held, stored) = (before.feature_shares(), after.feature_shares());
+            for band in MassBand::ALL {
+                hyperion_testkit::float::assert_same_bits(
+                    stored.phi(Population::Halo, band),
+                    phi + held.phi(Population::Halo, band),
+                );
+                let moved = held.field_factor(Population::Halo, band)
+                    - stored.field_factor(Population::Halo, band);
+                assert!(
+                    (moved - phi).abs() < 1e-15,
+                    "{seed:?} {band:?}: {moved} against {phi}"
+                );
+            }
+            eprintln!("{seed:?}: the applied share {phi:.5} of the halo's budget");
+            for (layer, centre) in &cells {
+                let ([all, kept], [expected_before, expected_after]) =
+                    halo_cell_census((&before, &after), *layer, centre);
+                records[0] += all;
+                records[1] += kept;
+                eprintln!(
+                    "  {layer:?} cells from {:?} ly: halo records {all} → {kept}, expected about \
+                     the first {expected_before:.2} → {expected_after:.2}",
+                    centre.to_light_years_f64(),
+                );
+            }
+        }
+        eprintln!("the halo's records: {} → {}", records[0], records[1]);
+        assert!(records[1] < records[0], "{records:?}");
     }
 }

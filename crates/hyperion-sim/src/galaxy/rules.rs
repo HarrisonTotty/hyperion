@@ -80,6 +80,13 @@
 //!   P08.T12 at 27): a dead record's marks read its progenitor's fate from the fitted fate table
 //!   where it can stand for the track's, and draw its time since death after the table's bracket.
 //!   It is read where those marks are drawn, and reaches none of the galaxy's memos.
+//! - [`list_source`](GalaxyRules::list_source), at [`LIST_SOURCE_VERSION`] (plan 10, P10.T10.b's
+//!   registration member and P10.T3.d.b, with plan 09's P09.T37.b): the range query takes the global
+//!   list's streams, dwarf cores and galactic centre beside the grid, and the halo's field gives up
+//!   its discrete share. It is read where a caller asks for the query's sources
+//!   (`GlobalListSource::is_registered_in`) and where the galaxy is built, which stores the share
+//!   in its feature shares before the field's factors are taken from them, so `Galaxy::with_rules`
+//!   refuses to change it.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -106,7 +113,9 @@ use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureC
 use crate::galaxy::features::members::remnants::{MemberRemnantRules, TABULATED_REMNANTS_VERSION};
 use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
 use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
-use crate::galaxy::global_list::{STREAM_SHELL_VERSION, StreamShellRules};
+use crate::galaxy::global_list::{
+    LIST_SOURCE_VERSION, ListSourceRules, STREAM_SHELL_VERSION, StreamShellRules,
+};
 use crate::galaxy::placement::{PLACEMENT_FATES_VERSION, PlacementFateRules};
 use crate::stellar::rules::StellarRules;
 
@@ -158,6 +167,10 @@ pub(crate) struct GalaxyRules {
     /// How a dead record's marks read its progenitor's fate: the track's, or the fate table's
     /// where it can stand for it (P08.T12 at 27).
     pub(crate) placement_fates: PlacementFateRules,
+    /// Whether the range query registers the global list's members, the centre's among them, and
+    /// the galaxy stores the halo's discrete share (P10.T10.b's registration member, P10.T3.d.b),
+    /// which the build reads.
+    pub(crate) list_source: ListSourceRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -253,6 +266,11 @@ impl GalaxyRules {
             } else {
                 PlacementFateRules::Exact
             },
+            list_source: if version.get() >= LIST_SOURCE_VERSION.get() {
+                ListSourceRules::Registered
+            } else {
+                ListSourceRules::Unregistered
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -277,9 +295,10 @@ impl GalaxyRules {
     /// hold ([`GalaxyRules::every_26_hold`]), the galaxy's at 27 (`orphan_streams`, P15.T11.b,
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
     /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
-    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, and `placement_fates`, P08.T12 at 27) and the
-    /// stellar rules' `ia_explosion`, P11.T6, `ns_accretion` and `heavy_donor`, P11.T4, and
-    /// `binary_kicks`, P11.T10 ([`StellarRules::every_27_hold`]).
+    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and
+    /// `list_source`, P10.T10.b's registration with P10.T3.d.b) and the stellar rules' `ia_explosion`,
+    /// P11.T6, `ns_accretion` and `heavy_donor`, P11.T4, and `binary_kicks`, P11.T10
+    /// ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -559,6 +578,19 @@ mod tests {
             GalaxyRules::every_26_hold().placement_fates,
             PlacementFateRules::Exact
         );
+        let list = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).list_source;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(list(v), ListSourceRules::Unregistered, "{v}");
+        }
+        assert_eq!(list(27), ListSourceRules::Registered);
+        assert_eq!(
+            GalaxyRules::every_26_hold().list_source,
+            ListSourceRules::Unregistered
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().list_source,
+            ListSourceRules::Registered
+        );
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
@@ -571,6 +603,7 @@ mod tests {
                 hypervelocity: HypervelocityRules::Weighted,
                 orphan_spray: OrphanSprayRules::Coarse,
                 placement_fates: PlacementFateRules::Fitted,
+                list_source: ListSourceRules::Registered,
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
                 ..GalaxyRules::every_26_hold()
             }
