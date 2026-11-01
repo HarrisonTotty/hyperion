@@ -115,11 +115,11 @@ fn the_neutron_star_accretion_is_held_only_until_the_27_bump() {
 
 /// The pinned pair's neutron star at the end of the donor's first transfer, and its compact star's
 /// mass 12 Gyr on, M☉, under the held arm, the arm alone and every 27 hold, as measured
-/// (2026-11-01).
+/// (2026-11-01, at generator version 25).
 const PINNED_FIGURES: [(f64, f64); 3] = [
-    (1.811_269_924_182_425, 2.608_239_210_522_417),
-    (1.387_414_091_448_688_8, 1.483_830_969_908_127_8),
-    (1.387_414_091_448_688_8, 1.483_830_969_908_127_8),
+    (1.811_174_601_094_979, 2.608_411_194_021_577_3),
+    (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
+    (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
 ];
 
 /// Under the held arm the pinned pair's neutron star takes the donor's first transfer whole and
@@ -274,7 +274,8 @@ struct CompactFigures {
     black_holes: usize,
     /// Of those, the black holes born neutron stars.
     grown: usize,
-    /// Of those, the ones fed by a white dwarf: the relics of a donor ground down.
+    /// Of those, the ones fed by a white dwarf or a substellar object: the relics of a donor
+    /// ground down.
     grown_by_dwarfs: usize,
     /// The median mass of the black holes in low-mass X-ray binaries, M☉.
     median_black_hole: f64,
@@ -297,7 +298,10 @@ fn figures(census: &Census) -> CompactFigures {
     let by_dwarf = |m: &CensusMember| {
         matches!(
             marks(m).donor_phase,
-            Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+            Phase::HeliumWhiteDwarf
+                | Phase::CarbonOxygenWhiteDwarf
+                | Phase::OxygenNeonWhiteDwarf
+                | Phase::Substellar
         )
     };
     let black_holes: Vec<&CensusMember> = xray
@@ -334,25 +338,25 @@ fn figures(census: &Census) -> CompactFigures {
 }
 
 /// The census's figures under the version's rules and under every 27 hold, as measured
-/// (2026-11-01).
+/// (2026-11-01, at generator version 25).
 const CENSUS_FIGURES: [CompactFigures; 2] = [
     CompactFigures {
-        members: 471,
-        black_holes: 125,
-        grown: 92,
-        grown_by_dwarfs: 12,
-        median_black_hole: 2.558_032_271_359_235,
-        neutron_stars: 328,
-        most_gained: 0.800_350_712_390_030_6,
+        members: 134,
+        black_holes: 77,
+        grown: 59,
+        grown_by_dwarfs: 5,
+        median_black_hole: 2.673_097_250_365_381,
+        neutron_stars: 55,
+        most_gained: 0.786_283_605_608_198_8,
     },
     CompactFigures {
-        members: 69,
-        black_holes: 11,
-        grown: 2,
-        grown_by_dwarfs: 2,
-        median_black_hole: 2.440_977_343_551_258,
-        neutron_stars: 52,
-        most_gained: 0.121_550_101_632_53,
+        members: 31,
+        black_holes: 3,
+        grown: 1,
+        grown_by_dwarfs: 1,
+        median_black_hole: 3.384_460_342_173_085_2,
+        neutron_stars: 28,
+        most_gained: 0.118_139_154_635_990_67,
     },
 ];
 
@@ -360,9 +364,13 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
 /// under every 27 hold. Under the version's most of the black holes were born neutron stars that
 /// stable transfer grew past `MAX_NEUTRON_STAR_MASS`. Under every 27 hold:
 ///
-/// - none of the black holes not fed by a white dwarf was born a neutron star, against the brief's
-///   5%; those fed by one, the relics of a donor ground down, which the carving's ultracompact floor
-///   is to remove (`fix-p11-t8b-xrb-carving`), are pinned as measured (a finding);
+/// - none of the black holes not fed by a white dwarf or a substellar object was born a neutron
+///   star, against the brief's 5%; those fed by one, the relics of a donor ground down, which the
+///   carving's ultracompact floor is to remove (`fix-p11-t8b-xrb-carving`), are pinned as measured
+///   (a finding). At generator version 25 the one is a neutron star born at 1.861 M☉ that a
+///   1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to 0.068 M☉: 0.139 M☉
+///   gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean of land-pod's,
+///   2026-11-01, for research);
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];
 /// - the black holes' median mass in the low-mass X-ray binaries is pinned as measured, under the
 ///   brief's 5 M☉ (a finding): most are fallback black holes of 2–4 M☉ (plan 06's Mandel and
