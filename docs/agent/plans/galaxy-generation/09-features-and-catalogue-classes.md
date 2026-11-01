@@ -5685,6 +5685,24 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
       re-pinned), the features' lists' core collapses (their runaways'), the clusters' living
       counts in bands D and E and so every cluster's members, and the census brackets of
       `core_collapses_over_seeds*`, restated at the bump.
+  - _The screen (lane `p09-t33b-screen`, 2026-11-01, main's rule D; nothing moves at 24–27)._ From
+    27 a candidate the shared test cannot keep is refused before its star is built
+    (`CoreCollapseProcess::screened_candidate`): after the site's pick, a T (the death stream's
+    word 0) at or before the start of the interval of `supernova::field_window_bound`, the
+    longer of the field windows of the system's two core-collapse energy draws at the site, at
+    the field's cap (the lifetime cap only shortens a window); and at step 3, whose lifetime is
+    now its death's age (`sse::death_under`, `lifetime_of`'s own build), a death that makes no
+    supernova. `the_screen_refuses_no_entry` holds the screened cells to the unscreened
+    candidates' tested entries; the galaxy-wide census counts the unscreened
+    (`unscreened_candidate`). The held arm is not screened. At the centre's cell the test had 286
+    candidates for 21 entries (187 failing the claim, 78 with no supernova); the screen refuses
+    286 of the 287 refusals in the centre's and the sample cells.
+    - _Cost (release, one thread, 32 vCPU pod; every 27 hold before and after, its held arm)._
+      The centre's cell 349 → 111 ms (112); the inner disc's (0, 12, 0) 4.1 → 1.8 ms (2.8); the
+      Sun-like 50 ly range query's core collapses cold 186 → 66 ms (138), warm 0.22 ms. The 27
+      arm is now at or below its held arm everywhere measured, which keeps its unscreened
+      candidates' cost. The cell-wide sharing of the test's work was not needed: the claim's gas
+      costs some 3 µs a site.
 - **P09.T34.b, as built (lane `p09-t34b`, 2026-11-01, at 24; held for 27, no output moves).**
   - _The weight._ `displaced::survivors::Survivors` (new), through `ClassTable::survivors()` and
     `class_count(D, hv)`; `class_weight` stays 0. Rate × shareᵢ × (`HYPERVELOCITY_MEAN_EXIT_LY` ÷
