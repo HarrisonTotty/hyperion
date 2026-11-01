@@ -3030,8 +3030,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
       `planetary/derive/atmosphere/tests.rs`.
     - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
     - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits; the envelope's
-      own albedo, the cold giants' clouds and the ice giants' methane layer built 2026-11-01, held
-      at 27: Risks, "Deviations in P14.T24.h.b, as built".
+      own albedo, the cold giants' clouds, the ice giants' methane layer and the cold envelopes'
+      κ₁ built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -33752,6 +33752,12 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     - _The internal temperature_ is unchanged (lean, 2026-11-01). The cooling law gives Neptune
       its measured 52.6 K. The warm 1-bar profiles are the grey opacity's
       (decision-p14-t24d-profile §1.5), and a cold-opacity law would move Saturn.
+  - _Part 8, the cold envelopes' κ₁, behind part 5's hold (rule E, 2026-11-01):_
+    `GreyProfile::in_force_at(T_eff)` takes κ₁ × (T_eff ÷ 120 K)^β below 120 K, one-sided, from
+    the T_eff its caller holds; `COLD_OPACITY_REFERENCE`, `COLD_OPACITY_EXPONENT`.
+    - _β = 2.4_ is fitted on the three cold giants' 1-bar temperatures. Its T-dependence is
+      recalled, not sourced (lean, 2026-11-01).
+    - _Supersedes_ part 7's internal-temperature lean on the profile: the law, not T_int, cools it.
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
   - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's
