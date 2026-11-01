@@ -354,15 +354,16 @@ fn the_fitted_rows_give_the_milky_way_counts() {
     );
 }
 
-/// The galaxy's novae a year under the fitted tables, as measured: 23–39 times the brainstorm's
-/// 30–50 (Shafter 2017, ApJ 834, 196, gives 50, +31 −23), from the engine's fast hosts' short
-/// recurrences, which the fit carries over, and the fast sampler's lowest sixteenth of ranks,
-/// which spreads its hosts down to five-year recurrences (the engine's own members give 435 a
-/// year; a finding).
-const PINNED_NOVAE_A_YEAR: f64 = 1_159.493_184_251_161_4;
+/// The galaxy's novae a year under the fitted tables, as measured (at generator version 25, on its
+/// refit; 1,159 at 24): 22–37 times the brainstorm's 30–50 (Shafter 2017, ApJ 834, 196, gives 50,
+/// +31 −23), from the engine's fast hosts' short recurrences, which the fit carries over, and the
+/// fast sampler's lowest sixteenth of ranks, which spreads its hosts down to five-year recurrences
+/// (at 24 the engine's own members gave 435 a year; a finding).
+const PINNED_NOVAE_A_YEAR: f64 = 1_104.966_535_226_393_3;
 
-/// Both classes' hosts' density at the Sun-like point under the fitted rows, pc⁻³, as measured.
-const PINNED_LOCAL_DENSITY: f64 = 6.282_877_827_348_966e-6;
+/// Both classes' hosts' density at the Sun-like point under the fitted rows, pc⁻³, as measured (at
+/// generator version 25, on its refit).
+const PINNED_LOCAL_DENSITY: f64 = 6.354_014_921_231_408e-6;
 
 /// The census's records, layers C–E together: the fit's, `binary_awd.toml`'s.
 const CENSUS_RECORDS: u64 = 10_000_000;
@@ -582,29 +583,28 @@ const KS_LEVEL: f64 = 0.01;
 /// follows the condition: the slow hosts' periods and donor masses, whose helium donors' periods
 /// run from under an hour to days. The fast hosts' ages follow too from the class's floor on the age,
 /// [`LIFETIME_MARGIN`] times the primary's single-star lifetime, which the engine's binaries pass
-/// under.
-const AWD_MISSES: [(AwdSide, usize, f64); 15] = [
-    (AwdSide::Fast, 1, 0.051_149),
-    (AwdSide::Fast, 2, 0.056_226_587_242_404_924),
-    (AwdSide::Fast, 3, 0.079_204_353_712_850_23),
-    (AwdSide::Fast, 4, 0.068_120_048_777_492_17),
-    (AwdSide::Fast, 5, 0.053_822),
-    (AwdSide::Fast, 6, 0.051_494),
-    (AwdSide::Fast, 7, 0.118_744_681_411_038_11),
-    (AwdSide::Slow, 0, 0.023_019_275_349_038_47),
-    (AwdSide::Slow, 1, 0.093_721_596_531_430_3),
-    (AwdSide::Slow, 2, 0.079_192_000_805_544_56),
-    (AwdSide::Slow, 3, 0.229_452_717_423_154_46),
-    (AwdSide::Slow, 4, 0.185_664_112_774_470_7),
-    (AwdSide::Slow, 5, 0.060_009_181_131_146_17),
-    (AwdSide::Slow, 6, 0.069_076_616_931_581_07),
-    (AwdSide::Slow, 7, 0.059_791_069_888_999_626),
+/// under. At generator version 25, on the refitted tables, the fast hosts' primary and donor
+/// initial masses pass at 1% (p 0.076 and 0.058) and are no longer pinned.
+const AWD_MISSES: [(AwdSide, usize, f64); 13] = [
+    (AwdSide::Fast, 1, 0.064_646_787_242_449_6),
+    (AwdSide::Fast, 2, 0.061_621_222_487_845_85),
+    (AwdSide::Fast, 3, 0.091_212_050_040_853_7),
+    (AwdSide::Fast, 4, 0.086_297_947_756_192_48),
+    (AwdSide::Fast, 7, 0.103_950_426_545_477_04),
+    (AwdSide::Slow, 0, 0.020_076_105_497_966_124),
+    (AwdSide::Slow, 1, 0.070_039_647_822_084_27),
+    (AwdSide::Slow, 2, 0.060_175_646_102_016_23),
+    (AwdSide::Slow, 3, 0.198_388_011_322_418_54),
+    (AwdSide::Slow, 4, 0.198_949_608_541_687_03),
+    (AwdSide::Slow, 5, 0.055_094_700_210_750_86),
+    (AwdSide::Slow, 6, 0.107_057_831_651_133_58),
+    (AwdSide::Slow, 7, 0.060_881_423_325_645_834),
 ];
 
 /// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, the
 /// class's expected hosts inside P11.T8.b's 0.7–1.5 × 10⁴ and its black-hole transients against
 /// its 1,300 ± 400 (Corral-Santana et al. 2016, A&A 587, A61), pinned as measured, a finding: the
-/// engine's black holes are 70% of its low-mass hosts of the class's kinds, its neutron stars'
+/// engine's black holes are 75% of its low-mass hosts (70% at 24) of the class's kinds, its neutron stars'
 /// low-mass X-ray binaries being mostly ultracompact, which no kind holds; and the high-mass
 /// hosts, the young thin disc's, printed.
 #[test]
@@ -633,8 +633,9 @@ fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
     }
 }
 
-/// The black-hole transients at Milky Way parameters under the fitted tables, as measured.
-const PINNED_BLACK_HOLE_TRANSIENTS: f64 = 6_628.842_283_865_281;
+/// The black-hole transients at Milky Way parameters under the fitted tables, as measured (at
+/// generator version 25, on its refit).
+const PINNED_BLACK_HOLE_TRANSIENTS: f64 = 7_536.849_840_543_357;
 
 /// The young thin disc's own census of `hyperion-fit`'s `binary_xrb.toml`: its site and records.
 const YOUNG_SITE: CensusSite = CensusSite::new([0, 0, 0], [40_000, 40_000, 600]);
@@ -803,8 +804,6 @@ fn the_x_ray_binary_sampler_against_the_engine() {
 /// The X-ray binaries' marks whose Kolmogorov–Smirnov test misses at 1%, each a finding: the
 /// mark's place in [`XrbMark`]'s order and its distance, as measured to a millionth. The two
 /// unconditional laws' 17 ranks miss a tail of long periods and the black holes' heaviest
-/// progenitors.
-const XRB_MISSES: [(usize, f64); 2] = [
-    (2, 0.070_388_907_014_681_92),
-    (18, 0.094_817_659_574_468_14),
-];
+/// progenitors (the same two at generator version 25, on the refit).
+const XRB_MISSES: [(usize, f64); 2] =
+    [(2, 0.076_333_827_160_493_8), (18, 0.111_183_103_448_275_87)];
