@@ -16,6 +16,7 @@ import {
   SMALL_BIAS_ANALOGUES,
   SMALL_BIAS_MAX_ABS_DG,
 } from "./aerosol";
+import { bitsOf } from "../../test/bits";
 import { gaussLegendre } from "../lighting/quadrature";
 import { hydrostaticColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt, phaseAt } from "./medium";
@@ -24,6 +25,7 @@ import { indexAt } from "./materials/materials";
 import {
   type AerosolMode,
   type ModeOptics,
+  PHASE_TABLE_MU,
   PHASE_TABLE_U,
   resolveModeMaterial,
   sphereModeOptics,
@@ -133,6 +135,30 @@ describe("optics by shape", () => {
         550,
       ),
     ).toThrow(RangeError);
+  });
+});
+
+describe("the optics kept (R08.T16.b.2's lever)", () => {
+  it("gives a mode asked again the bits of a fresh computation, in a copy its caller may change", async () => {
+    // Cosines equal to the tables' in another array are computed afresh, never kept.
+    const fresh = await bitsOf(aerosolModeOptics(SULPHATE, 433, Float64Array.from(PHASE_TABLE_MU)));
+    const first = aerosolModeOptics(SULPHATE, 433);
+    expect(await bitsOf(first)).toBe(fresh);
+    first.matrix?.a1.fill(Number.NaN);
+    const again = aerosolModeOptics(SULPHATE, 433);
+    expect(again).not.toBe(first);
+    expect(await bitsOf(again)).toBe(fresh);
+  });
+
+  it("keeps a mode apart from one that differs in a field or the wavelength", async () => {
+    const wider = {
+      kind: "distribution",
+      mode: { ...SULPHATE.mode, sizes: { ...SULPHATE.mode.sizes, effectiveVariance: 0.25 } },
+    } as const;
+    const ofWider = await bitsOf(aerosolModeOptics(wider, 433, Float64Array.from(PHASE_TABLE_MU)));
+    expect(await bitsOf(aerosolModeOptics(SULPHATE, 433))).not.toBe(ofWider);
+    expect(await bitsOf(aerosolModeOptics(wider, 433))).toBe(ofWider);
+    expect(aerosolModeOptics(SULPHATE, 434).wavelengthNm).toBe(434);
   });
 });
 

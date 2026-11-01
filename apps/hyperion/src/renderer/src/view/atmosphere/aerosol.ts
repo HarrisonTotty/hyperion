@@ -76,7 +76,49 @@ export type AerosolParticles =
   | { readonly kind: "aggregate"; readonly mode: AggregateMode };
 
 /**
+ * The most modes' optics at the phase tables' cosines {@link aerosolModeOptics} keeps, the least
+ * recently asked let go first: a giant's four decks at its 15 bake bins, its scale's 550 nm and its
+ * correction's channels, about 80, with room for a second body's.
+ */
+export const MODE_OPTICS_KEPT = 160;
+
+/** The optics kept, by {@link modeOpticsKey}, the least recently asked first. */
+const keptModeOptics = new Map<string, ModeOptics>();
+
+/**
+ * A mode's key: the wavelength and its particles' every field, a number by its shortest round-trip
+ * form. JSON writes a number that is not finite as null and −0 as 0, and drops a field set to
+ * `undefined`, so those are written by name, and every string marked apart from them.
+ */
+function modeOpticsKey(particles: AerosolParticles, wavelengthNm: number): string {
+  const fields = JSON.stringify(particles, (_key, value: unknown) => {
+    if (typeof value === "string") {
+      return `s${value}`;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) && !Object.is(value, -0) ? value : `n${numberName(value)}`;
+    }
+    return value === undefined ? "u" : value;
+  });
+  return `${numberName(wavelengthNm)} ${fields}`;
+}
+
+/** A number's shortest round-trip form, −0 kept apart from 0. */
+function numberName(value: number): string {
+  return Object.is(value, -0) ? "-0" : String(value);
+}
+
+/**
  * A mode's optics at one wavelength by its shape (the module's remarks).
+ *
+ * @remarks
+ * Its optics at the phase tables' cosines are kept ({@link MODE_OPTICS_KEPT}, by every field of its
+ * particles and the wavelength), and a mode asked again is given a copy of them (plan R08,
+ * R08.T16.b.2's lever, main's 2026-11-01): a preparation asks each mode at its scale's 550 nm once a
+ * call and its reference bin's twice, and every band's job of a giant's deck asks its Mie afresh,
+ * the most of the job's time. The optics are a pure function of the particles and the wavelength,
+ * so the copy is the bits a new computation gives, and a caller that changes its copy changes no
+ * other's.
  *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
@@ -87,6 +129,33 @@ export function aerosolModeOptics(
   particles: AerosolParticles,
   wavelengthNm: number,
   mu: Float64Array = PHASE_TABLE_MU,
+): ModeOptics {
+  if (mu !== PHASE_TABLE_MU) {
+    return computedModeOptics(particles, wavelengthNm, mu);
+  }
+  const key = modeOpticsKey(particles, wavelengthNm);
+  let optics = keptModeOptics.get(key);
+  if (optics === undefined) {
+    optics = computedModeOptics(particles, wavelengthNm, mu);
+  } else {
+    keptModeOptics.delete(key);
+  }
+  keptModeOptics.set(key, optics);
+  while (keptModeOptics.size > MODE_OPTICS_KEPT) {
+    const oldest = keptModeOptics.keys().next();
+    if (oldest.done === true) {
+      break;
+    }
+    keptModeOptics.delete(oldest.value);
+  }
+  return structuredClone(optics);
+}
+
+/** {@link aerosolModeOptics}'s computation, by the particles' kind. */
+function computedModeOptics(
+  particles: AerosolParticles,
+  wavelengthNm: number,
+  mu: Float64Array,
 ): ModeOptics {
   let optics: ModeOptics;
   switch (particles.kind) {
