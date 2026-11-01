@@ -498,7 +498,7 @@ fn bin_tallies(galaxy: &Galaxy) -> [BinTally; SURVEYS.len()] {
 /// for all primaries. Plan 08's displaced runaways and walkaways are left out too, single by
 /// construction, as are the surveys' cluster stars here, which plan 09's features hold; their share
 /// of the living primaries is recorded (de Wit et al. 2005, A&A 437, 247, find most Galactic field
-/// O stars to be runaways).
+/// O stars to be runaways; recalled, not checked against the paper in the pod).
 ///
 /// - Against the model: the weighted count the draw made multiple in each bin, every companion
 ///   dropped or not, against `Σ w p` with p the model's
@@ -812,9 +812,12 @@ const INTEGRAND_RECORDS: usize = 5_000;
 /// with each primary reweighted by the ratio of the two functions' densities, each normalised over
 /// the stellar range, which leaves its companions as drawn: the model's companions depend on the
 /// primary's mass alone. Each figure stands beside the as-drawn quadrature
-/// ([`all_stars_fraction_below_as_drawn`]), which leaves out the direct construction's subsystems,
-/// the stability test's drops and plan 08's displaced singles; the default's stars per system and
-/// stars below 0.5 M☉ per system are recorded by layer against the quadrature's integrand.
+/// ([`all_stars_fraction_below_as_drawn`]), which takes every companion's mass ratio against the
+/// primary, where the spine construction draws a companion inside a secondary against that star
+/// (most of the generated systems' surplus below 0.5 M☉ in layers B–D), and leaves out the direct
+/// construction's subsystems, the stability test's drops and plan 08's displaced singles; the
+/// default's stars per system and stars below 0.5 M☉ per system are recorded by layer against the
+/// quadrature's integrand.
 #[test]
 #[ignore = "slow: 1.5 × 10⁶ generated hierarchies"]
 fn all_stars_below_half_a_solar_mass_match_the_census() {
