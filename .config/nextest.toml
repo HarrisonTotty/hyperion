@@ -353,6 +353,13 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(/^stellar::rules::ia_hold::slow::under_every_27_hold_/)"
 threads-required = 16
 
+# P11.T12's statistical suite draws its generated records in 64 fixed parts on eight threads of
+# its own (`in_shares`, `THREADS` in `tests/binaries_statistical.rs`), so each test reserves eight
+# slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=binaries_statistical)"
+threads-required = 8
+
 # R10.T4.a's level bounds (`level_bound_worlds`, one slow test) measure each of the six sample worlds
 # on a thread of its own, its body's σ on one more and its points and patches on four more
 # (`THREADS`): up to 36 threads at once, more than a run's pool, so the test takes every slot and
