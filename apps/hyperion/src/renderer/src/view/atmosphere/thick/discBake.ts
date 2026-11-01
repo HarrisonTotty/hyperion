@@ -69,13 +69,7 @@ import {
   extinction,
   phaseAt,
 } from "../medium";
-import {
-  distanceToTopM,
-  intersectsGround,
-  localRadiusM,
-  type Shell,
-  transmittanceUvToRMu,
-} from "../opticalDepth";
+import { distanceToTopM, localRadiusM, type Shell, transmittanceUvToRMu } from "../opticalDepth";
 import type { MsSourceTable, ThickBakeBand } from "./bake";
 import {
   deckGroundInto,
@@ -180,6 +174,11 @@ interface BandTerm {
 interface BandFrame {
   readonly shell: Shell;
   readonly terms: ReadonlyArray<BandTerm>;
+  /**
+   * The terms that scatter in some channel, by index, those the single scattering sums: another's
+   * every product is ±0, which leaves a sum from +0 as it was (R08.T16.b.2's lever).
+   */
+  readonly scatteringTerms: ReadonlyArray<number>;
   /** The absorbers' amounts' kinds, in their order. */
   readonly absorberKinds: ReadonlyArray<AbsorberCurve["kind"]>;
   /** The medium's pressure over 1 bar at a height, or `null` with no pressure profile. */
@@ -218,6 +217,7 @@ function bandFrameOf(medium: AtmosphereMedium, band: ThickBakeBand): BandFrame {
       topRadiusM: band.bottomRadiusM + medium.topHeightM,
     },
     terms,
+    scatteringTerms: terms.flatMap((term, k) => (term.scattering.some((s) => s !== 0) ? [k] : [])),
     absorberKinds: kinds,
     pressureBarOf: medium.pressureBar === undefined ? null : densityLookup(medium.pressureBar),
   };
@@ -268,13 +268,55 @@ function curveDepthOf(
  * One band's star transmittance, one light slot's: {@link DISC_SUN_TABLE}'s nodes on Bruneton's
  * mapping of the band's shell, each its ray's optical depth to the top with the slot's curves added.
  */
-interface SunTable {
+interface SunTable extends ShellTerms {
   readonly shell: Shell;
-  /** The top's radius squared, m², and √(top² − bottom²), m: the mapping's terms. */
-  readonly top2: number;
-  readonly bigH: number;
   /** Optical depth per channel, `[(v × cosines + u) × 3 + c]`. */
   readonly depth: Float64Array;
+}
+
+/** A shell's terms in Bruneton's mapping, which the star's table and its steps' places take. */
+interface ShellTerms {
+  /** The top's radius squared, m², √(top² − bottom²), m, and the bottom's radius squared, m². */
+  readonly top2: number;
+  readonly bigH: number;
+  readonly bottom2: number;
+}
+
+/** A shell's {@link ShellTerms}. */
+function shellTermsOf(shell: Shell): ShellTerms {
+  const { bottomRadiusM: bottom, topRadiusM: top } = shell;
+  return {
+    top2: top * top,
+    bigH: Math.sqrt(top * top - bottom * bottom),
+    bottom2: bottom ** 2,
+  };
+}
+
+/**
+ * A radius's place in the star's table, {@link sunTransmittanceInto}'s terms that do not depend on
+ * the sun's cosine (R08.T16.b.2's lever: a view step takes them once for its every node).
+ */
+interface SunPlace {
+  /** The radius held in the shell, m, and its square, m². */
+  readonly r: number;
+  readonly r2: number;
+  /** The mapping's d_min, m, and d_max − d_min. */
+  readonly dMin: number;
+  readonly span: number;
+  /** The table's radius row below the radius and the fraction of the way to the next. */
+  readonly y0: number;
+  readonly fy: number;
+}
+
+/** Radius `rM`'s {@link SunPlace} in a shell of terms `terms`. */
+function sunPlaceOf(shell: Shell, terms: ShellTerms, rM: number): SunPlace {
+  const r = Math.min(Math.max(rM, shell.bottomRadiusM), shell.topRadiusM);
+  // `opticalDepth.ts`'s `transmittanceRMuToUv`, its shell's terms taken once a table.
+  const rho = Math.sqrt(Math.max(r * r - terms.bottom2, 0));
+  const dMin = shell.topRadiusM - r;
+  const y = Math.min(Math.max(rho / terms.bigH, 0), 1) * (DISC_SUN_TABLE.radii - 1);
+  const y0 = Math.min(Math.floor(y), DISC_SUN_TABLE.radii - 2);
+  return { r, r2: r * r, dMin, span: rho + terms.bigH - dMin, y0, fy: y - y0 };
 }
 
 /** A band's ray integrals to the top at each node of the star's table, before any curve. */
@@ -339,13 +381,7 @@ function sunTableOf(
       depth[node * 3 + 2] = (depth[node * 3 + 2] ?? 0) + added[2];
     });
   }
-  const { bottomRadiusM: bottom, topRadiusM: top } = frame.shell;
-  return {
-    shell: frame.shell,
-    top2: top * top,
-    bigH: Math.sqrt(top * top - bottom * bottom),
-    depth,
-  };
+  return { shell: frame.shell, ...shellTermsOf(frame.shell), depth };
 }
 
 /**
@@ -358,26 +394,31 @@ function sunTransmittanceInto(
   mu: number,
   out: [number, number, number],
 ): void {
-  const shell = table.shell;
-  const r = Math.min(Math.max(rM, shell.bottomRadiusM), shell.topRadiusM);
-  if (intersectsGround(shell, r, mu)) {
+  sunTransmittanceAtInto(table, sunPlaceOf(table.shell, table, rM), mu, out);
+}
+
+/** {@link sunTransmittanceInto} at a radius's {@link SunPlace} in the table's shell. */
+function sunTransmittanceAtInto(
+  table: SunTable,
+  place: SunPlace,
+  mu: number,
+  out: [number, number, number],
+): void {
+  const { r, r2 } = place;
+  // `opticalDepth.ts`'s `intersectsGround`.
+  if (mu < 0 && r2 * (mu * mu - 1) + table.bottom2 >= 0) {
     out[0] = 0;
     out[1] = 0;
     out[2] = 0;
     return;
   }
-  const { cosines, radii } = DISC_SUN_TABLE;
-  // `opticalDepth.ts`'s `transmittanceRMuToUv`, its shell's terms taken once a table.
-  const rho = Math.sqrt(Math.max(r * r - shell.bottomRadiusM ** 2, 0));
-  const d = Math.max(-r * mu + Math.sqrt(Math.max(r * r * (mu * mu - 1) + table.top2, 0)), 0);
-  const dMin = shell.topRadiusM - r;
-  const u = (d - dMin) / (rho + table.bigH - dMin);
+  const cosines = DISC_SUN_TABLE.cosines;
+  const d = Math.max(-r * mu + Math.sqrt(Math.max(r2 * (mu * mu - 1) + table.top2, 0)), 0);
+  const u = (d - place.dMin) / place.span;
   const x = Math.min(Math.max(u, 0), 1) * (cosines - 1);
-  const y = Math.min(Math.max(rho / table.bigH, 0), 1) * (radii - 1);
   const x0 = Math.min(Math.floor(x), cosines - 2);
-  const y0 = Math.min(Math.floor(y), radii - 2);
   const fx = x - x0;
-  const fy = y - y0;
+  const { y0, fy } = place;
   const depth = table.depth;
   const i00 = (y0 * cosines + x0) * 3;
   const i10 = i00 + 3;
@@ -400,6 +441,17 @@ interface ViewStep {
   readonly heightM: number;
   /** The thick table's rows about its height. */
   readonly row: ThickRow;
+  /** Its normal's components, x ÷ r and z ÷ r. */
+  readonly nx: number;
+  readonly nz: number;
+  /** The view's travel cosine towards the camera there, −(d · n), and 1 − its square. */
+  readonly travel: number;
+  readonly travelSine2: number;
+  /** The table's travel cosine below it ({@link travelPlaceOf}) and the fraction to the next. */
+  readonly v0: number;
+  readonly fv: number;
+  /** Its radius's place in the star's table. */
+  readonly sunPlace: SunPlace;
   /** Each term's scattering at the step per channel, the band's frame: `[term × 3 + c]`. */
   readonly scattering: Float64Array;
   /** The kernels' σ_s,k per channel there. */
@@ -443,6 +495,7 @@ function viewRayOf(
   const R = frame.shell.bottomRadiusM;
   const sinView = Math.sqrt(Math.max(1 - muView * muView, 0));
   const length = distanceToTopM(frame.shell, R, muView);
+  const shellTerms = shellTermsOf(frame.shell);
   const terms = frame.terms;
   const absorbers = frame.absorberKinds.length;
   const throughput = Array.from({ length: slots }, (): [number, number, number] => [1, 1, 1]);
@@ -504,12 +557,24 @@ function viewRayOf(
         slotThroughput[c] = (slotThroughput[c] ?? 1) * exp(-stepDepth);
       }
     }
+    const nx = x / rM;
+    const nz = z / rM;
+    const travel = sinView * nx + muView * nz;
+    const place = travelPlaceOf(travel);
+    const v0 = Math.min(Math.floor(place), THICK_TRAVEL_COSINES - 2);
     out.push({
       x,
       z,
       rM,
       heightM,
       row: thickRowAt(source, heightM),
+      nx,
+      nz,
+      travel,
+      travelSine2: 1 - travel * travel,
+      v0,
+      fv: place - v0,
+      sunPlace: sunPlaceOf(frame.shell, shellTerms, rM),
       scattering,
       kernelScattering,
       throughput: before,
@@ -623,28 +688,35 @@ function addDecodedSums(
   }
 }
 
+/** A travel cosine's place on the table's travel cosines, as `read.ts`'s `addThickLayer` finds it. */
+function travelPlaceOf(muTravel: number): number {
+  return Math.min(
+    Math.max((muTravel + 1) * (THICK_TRAVEL_COSINES / 2) - 0.5, 0),
+    THICK_TRAVEL_COSINES - 1,
+  );
+}
+
 /**
  * `read.ts`'s `addThickLayer` on a decoded layer, at weight 1, into `sums` ({@link READ_SUMS}):
  * linear in h, μ₀ and μ_v between the cells' centres, but below μ₀ = 1/64 J⁰ geometric in μ₀ where
- * both rows hold it above 0, G and G₂ linear as their ratios to it (`read.ts`'s remarks).
+ * both rows hold it above 0, G and G₂ linear as their ratios to it (`read.ts`'s remarks). The travel
+ * cosine is given by its place, the cosine below it `v0` and the fraction `fv` to the next
+ * ({@link travelPlaceOf}).
  */
 function decodedReadInto(
   decoded: Float64Array,
   row: ThickRow,
   muSun: number,
-  muTravel: number,
+  v0: number,
+  fv: number,
   sums: Float64Array,
 ): void {
-  sums.fill(0);
+  for (let i = 0; i < READ_SUMS; i += 1) {
+    sums[i] = 0;
+  }
   const x = thickSunPlace(muSun);
   const s0 = Math.min(Math.floor(x), THICK_SUN_COSINES - 2);
   const fs = x - s0;
-  const y = Math.min(
-    Math.max((muTravel + 1) * (THICK_TRAVEL_COSINES / 2) - 0.5, 0),
-    THICK_TRAVEL_COSINES - 1,
-  );
-  const v0 = Math.min(Math.floor(y), THICK_TRAVEL_COSINES - 2);
-  const fv = y - v0;
   const a0 = row.lower;
   const ta = row.t;
   for (let da = 0; da < 2; da += 1) {
@@ -701,7 +773,9 @@ export function decodedThickRead(
   sums: Float64Array,
   out: ThickSource,
 ): void {
-  decodedReadInto(decoded, row, muSun, muTravel, sums);
+  const place = travelPlaceOf(muTravel);
+  const v0 = Math.min(Math.floor(place), THICK_TRAVEL_COSINES - 2);
+  decodedReadInto(decoded, row, muSun, v0, place - v0, sums);
   for (let c = 0; c < 3; c += 1) {
     out.level[c] = sums[c] ?? 0;
     out.slope[c] = sums[3 + c] ?? 0;
@@ -761,26 +835,28 @@ function nodeAirInto(
   const sinView = Math.sqrt(Math.max(1 - muView * muView, 0));
   // The march's ray runs towards the datum: d = −v, v = (sin θ_v, 0, μ_v) towards the camera.
   const dDotS = -(sinView * s.x + muView * s.z);
-  const phases = frame.terms.map((term) => phaseAt(term.phase, dDotS));
+  const { terms, scatteringTerms } = frame;
+  const phases = new Float64Array(terms.length * 3);
+  for (const k of scatteringTerms) {
+    phases.set(phaseAt(terms[k]?.phase ?? { kind: "none" }, dDotS), k * 3);
+  }
   let red = 0;
   let green = 0;
   let blue = 0;
   for (const step of ray.steps) {
-    const nx = step.x / step.rM;
-    const nz = step.z / step.rM;
-    const muSunHere = nx * s.x + nz * s.z;
-    // The view's travel cosine towards the camera, −(d · n), and h⊥ = d · s − (d · n)(s · n).
-    const travel = sinView * nx + muView * nz;
+    const muSunHere = step.nx * s.x + step.nz * s.z;
+    // h⊥ = d · s − (d · n)(s · n), the travel cosine −(d · n).
+    const travel = step.travel;
     const horizontal = dDotS + travel * muSunHere;
-    sunTransmittanceInto(sun, step.rM, muSunHere, scratch.toSun);
+    sunTransmittanceAtInto(sun, step.sunPlace, muSunHere, scratch.toSun);
     let single0 = 0;
     let single1 = 0;
     let single2 = 0;
-    for (let k = 0; k < phases.length; k += 1) {
-      const p = phases[k] ?? [0, 0, 0];
-      single0 += (step.scattering[k * 3] ?? 0) * p[0];
-      single1 += (step.scattering[k * 3 + 1] ?? 0) * p[1];
-      single2 += (step.scattering[k * 3 + 2] ?? 0) * p[2];
+    for (const k of scatteringTerms) {
+      const o = k * 3;
+      single0 += (step.scattering[o] ?? 0) * (phases[o] ?? 0);
+      single1 += (step.scattering[o + 1] ?? 0) * (phases[o + 1] ?? 0);
+      single2 += (step.scattering[o + 2] ?? 0) * (phases[o + 2] ?? 0);
     }
     const tableShare = 1 - thickAnalyticShare(muSunHere);
     let multiple0 = 0;
@@ -788,9 +864,9 @@ function nodeAirInto(
     let multiple2 = 0;
     if (tableShare > 0) {
       const { sums } = scratch;
-      decodedReadInto(decoded, step.row, muSunHere, travel, sums);
+      decodedReadInto(decoded, step.row, muSunHere, step.v0, step.fv, sums);
       // J = J⁰ + G h⊥ + G₂ (2h⊥² − (1 − μ_v²)(1 − μ₀²)), as `read.ts`'s `thickJInto` forms it.
-      const crossed = (1 - travel * travel) * (1 - muSunHere * muSunHere);
+      const crossed = step.travelSine2 * (1 - muSunHere * muSunHere);
       const harmonic = 2 * horizontal * horizontal - crossed;
       const j0 = (sums[0] ?? 0) + (sums[3] ?? 0) * horizontal + (sums[6] ?? 0) * harmonic;
       const j1 = (sums[1] ?? 0) + (sums[4] ?? 0) * horizontal + (sums[7] ?? 0) * harmonic;
