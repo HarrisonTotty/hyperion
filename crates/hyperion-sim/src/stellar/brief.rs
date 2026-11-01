@@ -244,7 +244,7 @@ const WHITE_DWARF_CORNERS: [(f64, f64, f64); 9] = [
 
 /// An iron core's corners: its death age and its two cores; its remnant's kind is decided by the
 /// cores alone.
-const IRON_CORE_CORNERS: [(f64, f64, f64); 9] = WHITE_DWARF_CORNERS;
+pub(crate) const IRON_CORE_CORNERS: [(f64, f64, f64); 9] = WHITE_DWARF_CORNERS;
 
 impl BriefModel {
     /// The brief model of the grid system `record` in `galaxy`: a star system's, or a free-floating

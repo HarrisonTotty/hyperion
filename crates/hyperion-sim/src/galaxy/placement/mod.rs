@@ -28,6 +28,8 @@ mod carve_out_hold;
 mod cell;
 #[cfg(test)]
 mod displaced_hold;
+#[cfg(test)]
+mod fates_hold;
 mod generate;
 mod headroom;
 #[cfg(test)]
@@ -57,7 +59,10 @@ pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
-pub(crate) use marks::{ballistic_motion, is_ballistic, is_helium_donor, survivor_flight};
+pub(crate) use marks::{
+    PLACEMENT_FATES_VERSION, PlacementFateRules, ballistic_motion, is_ballistic, is_helium_donor,
+    survivor_flight,
+};
 pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
 pub use resolve::{resolve, resolve_list_member_with, resolve_with};
 

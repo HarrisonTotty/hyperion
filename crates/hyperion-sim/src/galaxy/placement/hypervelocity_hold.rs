@@ -28,7 +28,8 @@ use hyperion_testkit::threads::in_shares;
 use super::candidate::Picked;
 use super::velocity_hold::exempt_classes_padded;
 use super::{
-    CellKey, NoCache, SystemRecord, generate_cell, is_helium_donor, marks, survivor_flight,
+    CellKey, NoCache, PlacementFateRules, SystemRecord, generate_cell, is_helium_donor, marks,
+    survivor_flight,
 };
 use crate::Seed;
 use crate::coords::GalacticPosition;
@@ -346,12 +347,15 @@ fn check_survivor(
             );
             let death = primary.death().expect("a dead progenitor").age().value();
             match marked {
-                Marked::Lifetime(life) => {
-                    assert_same_bits(
-                        death,
-                        life.expect("a C/O donor's marks give its progenitor's lifetime"),
-                    );
-                }
+                Marked::Lifetime(Some(life)) => assert_same_bits(death, life),
+                // Where the fate table read the progenitor's fate (P08.T12 at 27), the marks give
+                // no lifetime.
+                Marked::Lifetime(None) => assert_eq!(
+                    galaxy.rules().placement_fates,
+                    PlacementFateRules::Fitted,
+                    "a C/O donor's marks give its progenitor's lifetime but where the table read \
+                     its fate"
+                ),
                 Marked::Generated => {}
             }
             let age = record.age_at_epoch().value();

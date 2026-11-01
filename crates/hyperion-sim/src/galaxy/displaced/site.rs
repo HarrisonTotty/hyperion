@@ -549,7 +549,7 @@ fn with_eta(draws: &StarDraws, eta: StandardNormal) -> &StarDraws {
 /// The fate table's bracket on the exact death age, [d ÷ (1 + m), d ÷ (1 − m)] with d the table's
 /// death age and m [`table_margin`]; its upper end is infinite for a margin of 1 or more.
 #[must_use]
-fn table_bracket(fate: &FittedFate) -> (Years, Years) {
+pub(crate) fn table_bracket(fate: &FittedFate) -> (Years, Years) {
     let margin = table_margin(fate);
     let d = fate.death_age.value();
     let hi = if margin < 1.0 {

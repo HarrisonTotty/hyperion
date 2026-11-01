@@ -38,6 +38,13 @@
 //!   runaway's from those after its ejection, on `runaway.ejection`), draws its metallicity at
 //!   that age and takes the same fraction of `lifetime(m, Z)` as its age, so that it is alive.
 //!
+//! From generator version 27 ([`PLACEMENT_FATES_VERSION`], the redesign research-leans-19 §3
+//! sketched) a dead record's fate is the fitted fate table's wherever it can stand for the track's
+//! ([`table_fate`]): its route decides the redraw, and the time since death is drawn after the
+//! upper end of the table's lifetime bracket in place of the death age, so that the record is dead
+//! by the bracket. Where it cannot, the exact fate is taken, as before. The record's age is then no
+//! longer its lifetime plus `s` to the bit, but at most the bracket's width more.
+//!
 //! So placement calls `lifetime` at most twice per accepted layer-E record, and nothing else of
 //! the stellar stage but the metallicity draw. A living record's metallicity age is stored with
 //! it, at single precision, and the stellar stage's [`draw_metallicity`] reads it, so that it finds
@@ -54,6 +61,7 @@ use std::cell::Cell;
 
 use super::candidate::Picked;
 use super::{CellKey, SystemRecord};
+use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
@@ -64,6 +72,7 @@ use crate::galaxy::displaced::marks::{
     time_since_death,
 };
 use crate::galaxy::displaced::runaway::Ejected;
+use crate::galaxy::displaced::site::table_bracket;
 use crate::galaxy::displaced::survivors::{DonorKind, SurvivorFlight, donor_progenitor_mass};
 use crate::galaxy::displaced::{
     BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
@@ -71,15 +80,76 @@ use crate::galaxy::displaced::{
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::id::{BodyId, SystemId};
+use crate::math;
 use crate::rng::{Mark, ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
-use crate::stellar::Composition;
+use crate::stellar::brief::{IRON_CORE_CORNERS, STATED_FACTOR};
 use crate::stellar::draws::StarDraws;
+use crate::stellar::fates::{FateRoute, FittedFates, stripped_mark_matters};
 use crate::stellar::remnant::RemnantKind;
+use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, TrackOptions, fate_of, lifetime_under};
 use crate::stellar::system::{draw_metallicity, metallicity_of, primary_draws};
+use crate::stellar::{Composition, Phase};
 use crate::units::{LightYears, SolarMasses, Years};
 
 use super::record::KickConstraint;
+
+/// The generator version from which a dead record's marks read its progenitor's fate from the
+/// fitted fate table where it can stand for the track's (plan 08, P08.T12 at 27; the hold of
+/// [`PlacementFateRules`]).
+///
+/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
+/// [`PlacementFateRules::Exact`], so every generated value keeps its bits. The tests reach the new
+/// arm through a galaxy built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this
+/// hold, [`PlacementFateRules`] with its `Exact` arm, the galaxy's `placement_fates` field and its
+/// tripwire (`the_placement_fates_are_held_only_until_the_27_bump`).
+pub(crate) const PLACEMENT_FATES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// How a dead record's marks read its progenitor's fate (the hold of [`PLACEMENT_FATES_VERSION`]).
+///
+/// It is read where a retained record's, a displaced remnant's or a C/O survivor's marks are
+/// drawn, and reaches none of the galaxy's memos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PlacementFateRules {
+    /// Version 26's and before: the exact fate ([`fate_of`]) decides the redraw, and the time
+    /// since death is drawn after its death age.
+    Exact,
+    /// Version 27's: the fate table's route decides the redraw where it can stand for the track's
+    /// ([`table_fate`]), and the time since death is drawn after its lifetime bracket's upper
+    /// end; elsewhere the exact fate, as under [`PlacementFateRules::Exact`].
+    Fitted,
+}
+
+/// The initial masses, M☉, below which the Humphreys–Davidson arms build the same track, bit for
+/// bit, by the least \[Fe/H\] of `z_fit` from which each holds, ascending: no lighter star's track
+/// reaches the limit, past which the arms' winds part (`wind`'s), so that the fate table, fitted
+/// under the version's arm, is the table of either arm's fates there. The hold's sweep finds the
+/// first track the arms part at 31.7 M☉ at the least `z_fit`, 39.2 at \[Fe/H\] −0.55, 42.8 at
+/// −0.25, 49.4 at 0, 51.5 at +0.05 and 54.4 at +0.1, rising with the metallicity between; each
+/// step is about nine tenths of the first at its least \[Fe/H\] (−2.3 is `Z_FIT_MIN`'s).
+pub(super) const HD_FREE_MASSES: [(f64, f64); 6] = [
+    (-2.3, 30.0),
+    (-0.55, 36.0),
+    (-0.25, 39.0),
+    (0.0, 45.0),
+    (0.05, 47.0),
+    (0.1, 50.0),
+];
+
+/// The initial mass below which the Humphreys–Davidson arms build the same track for a star of
+/// `composition` ([`HD_FREE_MASSES`]), read at the \[Fe/H\] of its `z_fit`, as the fate table
+/// reads it.
+#[must_use]
+pub(super) fn hd_free_mass(composition: &Composition) -> SolarMasses {
+    let fe_h = math::log10(composition.z_fit().value() / 0.02);
+    let step = HD_FREE_MASSES
+        .iter()
+        .rev()
+        .find(|&&(least, _)| fe_h >= least)
+        .unwrap_or(&HD_FREE_MASSES[0]);
+    SolarMasses::new(step.1)
+}
 
 /// The attempts layer D's runaway reduction makes before it keeps the last: a star is rejected
 /// with the probability that it is an ejected runaway or walkaway, a few per cent at 2.5–8 M☉, so
@@ -104,7 +174,8 @@ pub(super) struct DrawnMarks {
     /// the record stores it.
     pub(super) metallicity_age_years: Option<f32>,
     /// The primary's lifetime at its own composition and draws, where the marks computed it:
-    /// what the carve-out hook's exact step reads instead of computing it again (P08.T13).
+    /// what the carve-out hook's exact step reads instead of computing it again (P08.T13). A dead
+    /// record whose fate the table read ([`PlacementFateRules::Fitted`]) has none.
     pub(super) lifetime: Option<Years>,
 }
 
@@ -242,27 +313,149 @@ impl Star<'_> {
 struct Progenitor {
     mass: SolarMasses,
     component: ComponentId,
-    fate: Fate,
+    fate: FateRead,
 }
 
-/// The fate of a star of `m`, `composition` and `draws` under the galaxy's stellar rules: the
-/// track's fate, bit for bit, at the cost of [`lifetime`], whose death age it holds; counted in
-/// test builds as a lifetime call.
+/// What a dead record's marks read of its progenitor's fate: the track's, or the fate table's
+/// where it can stand for it ([`table_fate`], from [`PLACEMENT_FATES_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum FateRead {
+    /// The track's fate, bit for bit.
+    Exact(Fate),
+    /// The fate table's: its route, whether the star leaves a remnant, which is the same at every
+    /// corner of the table's error box, and the upper end of the table's bracket on the death age.
+    Table {
+        route: FateRoute,
+        remnant: bool,
+        upper: Years,
+    },
+}
+
+impl FateRead {
+    /// Whether the star leaves a remnant.
+    #[must_use]
+    fn leaves_remnant(&self) -> bool {
+        match self {
+            Self::Exact(fate) => fate.remnant.kind() != RemnantKind::None,
+            Self::Table { remnant, .. } => *remnant,
+        }
+    }
+
+    /// Whether the star dies by an iron core's collapse.
+    #[must_use]
+    fn iron_core(&self) -> bool {
+        match self {
+            Self::Exact(fate) => fate.iron_core.is_some(),
+            Self::Table { route, .. } => *route == FateRoute::IronCore,
+        }
+    }
+
+    /// The age after which the time since death is drawn, the death age or the upper end of the
+    /// table's bracket on it, and the death age where it is the track's.
+    #[must_use]
+    pub(super) fn death_bound(&self) -> (Years, Option<Years>) {
+        match self {
+            Self::Exact(fate) => {
+                let life = fate.death.age();
+                (life, Some(life))
+            }
+            Self::Table { upper, .. } => (*upper, None),
+        }
+    }
+}
+
+/// The fate of a star of `m`, `composition` and `draws` under the galaxy's stellar rules: the fate
+/// table's where the galaxy's rules read it and it can stand for the track's ([`table_fate`]),
+/// and otherwise the track's, bit for bit, at the cost of [`lifetime`], whose death age it holds;
+/// counted in test builds as a lifetime call.
 #[must_use]
-fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &StarDraws) -> Fate {
-    #[cfg(test)]
-    LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
+fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &StarDraws) -> FateRead {
     let m = if m > MAX_INITIAL_MASS {
         MAX_INITIAL_MASS
     } else {
         m
     };
-    fate_of(
+    let rules = galaxy.rules();
+    if rules.placement_fates == PlacementFateRules::Fitted
+        && let Some(read) = table_fate(rules.stellar, m, composition, draws)
+    {
+        return read;
+    }
+    #[cfg(test)]
+    LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
+    FateRead::Exact(fate_of(
         m,
         composition,
         draws,
-        TrackOptions::default().with_rules(galaxy.rules().stellar),
-    )
+        TrackOptions::default().with_rules(rules.stellar),
+    ))
+}
+
+/// The fate table's read of the fate of a star of `m` (at most [`MAX_INITIAL_MASS`]),
+/// `composition` and `draws` under the stellar rules `rules`, or `None` where it cannot stand for
+/// the track's:
+///
+/// - under a Humphreys–Davidson arm the table was not fitted for, from [`hd_free_mass`] up;
+/// - where the table does not answer ([`FittedFates::fate_fitted`]): outside its domain, across a
+///   change of route, or in a cell whose validation failed;
+/// - for a white dwarf's route or no remnant's, where the companion-stripped mark can move the
+///   fate ([`stripped_mark_matters`]). An iron core's and an electron capture's it cannot: the
+///   stripped star's window of electron capture is wider than the single star's, but ends where
+///   the iron cores begin as the single star's does, so the track reads the mark only for a star
+///   that would otherwise leave a white dwarf (`Builder::by_companion_mark`);
+/// - for an iron core of which some corner of its two cores' box, taken at [`STATED_FACTOR`]
+///   times their bounds, leaves a remnant and another none (the range brief's guard asks the kind
+///   at the bounds);
+/// - where the bracket on the death age has no upper end.
+///
+/// The bracket is the carve-out's ([`table_bracket`]), the range brief's margin about the table's
+/// death age.
+#[must_use]
+pub(super) fn table_fate(
+    rules: StellarRules,
+    m: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+) -> Option<FateRead> {
+    if !(rules.hd_limit.fitted_tables_hold() || m < hd_free_mass(composition)) {
+        return None;
+    }
+    let fate = FittedFates::generator().fate_fitted(m, composition, draws.eta())?;
+    let remnant = match fate.route {
+        FateRoute::HeliumWhiteDwarf
+        | FateRoute::CarbonOxygenWhiteDwarf
+        | FateRoute::OxygenNeonWhiteDwarf
+        | FateRoute::BridgedCarbonOxygenWhiteDwarf
+        | FateRoute::BridgedOxygenNeonWhiteDwarf
+        | FateRoute::NoRemnant => {
+            if stripped_mark_matters(m, composition, draws) {
+                return None;
+            }
+            fate.route != FateRoute::NoRemnant
+        }
+        FateRoute::ElectronCapture => true,
+        FateRoute::IronCore => {
+            let remnant_draws = RemnantDraws::of(draws);
+            let leaves = |&(_, a, b): &(f64, f64, f64)| {
+                let shift = (0.0, STATED_FACTOR * a, STATED_FACTOR * b);
+                fate.remnant(remnant_draws, shift).phase != Phase::NoRemnant
+            };
+            let centre = leaves(&(0.0, 0.0, 0.0));
+            if !IRON_CORE_CORNERS
+                .iter()
+                .all(|corner| leaves(corner) == centre)
+            {
+                return None;
+            }
+            centre
+        }
+    };
+    let (_, upper) = table_bracket(&fate);
+    upper.value().is_finite().then_some(FateRead::Table {
+        route: fate.route,
+        remnant,
+        upper,
+    })
 }
 
 /// Whether `fate` can leave a remnant kicked into a speed bin whose least speed is above zero
@@ -270,9 +463,8 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
 /// iron core's collapse gives the ordinary mode's kicks (a white dwarf's are about 1 km/s and an
 /// electron-capture neutron star's 5 km/s, plan 06's P06.T19).
 #[must_use]
-fn kickable(fate: &Fate, reach: Reach) -> bool {
-    fate.remnant.kind() != RemnantKind::None
-        && (reach == Reach::Slowest || fate.iron_core.is_some())
+fn kickable(fate: &FateRead, reach: Reach) -> bool {
+    fate.leaves_remnant() && (reach == Reach::Slowest || fate.iron_core())
 }
 
 /// The speed bin a dead record's kick must reach: the slowest, which any remnant's does, or a
@@ -354,21 +546,22 @@ fn progenitor(
 
 /// A dead record's age and lifetime: the time since death on `[lo, hi]` of its birth component's
 /// ages after its lifetime, at the rank `u`, and the lifetime itself, its fate's death age (Design
-/// note 19 at the reference composition).
+/// note 19 at the reference composition). A fate the table read has no lifetime: the time since
+/// death is drawn after the upper end of the table's bracket on it ([`FateRead::death_bound`]).
 fn dead_age(
     galaxy: &Galaxy,
     star: &Progenitor,
     (lo, hi): (Years, Option<Years>),
     u: f64,
-) -> (Years, Years) {
-    let life = star.fate.death.age();
+) -> (Years, Option<Years>) {
+    let (bound, life) = star.fate.death_bound();
     let ages = galaxy.fields().component(star.component).ages();
-    let since = time_since_death(ages, life, lo, hi, u);
-    (Years::new(life.value() + since.value()), life)
+    let since = time_since_death(ages, bound, lo, hi, u);
+    (Years::new(bound.value() + since.value()), life)
 }
 
 /// The primary's draws at attempt 0.
-fn draws_of(galaxy: &Galaxy, id: SystemId) -> StarDraws {
+pub(super) fn draws_of(galaxy: &Galaxy, id: SystemId) -> StarDraws {
     StarDraws::for_star(galaxy.seed(), BodyId::new(id, 0))
 }
 
@@ -442,7 +635,7 @@ fn stay(
                 placement: PlacementClass::Retained { speed },
                 attempt: 0,
                 metallicity_age_years: None,
-                lifetime: Some(life),
+                lifetime: life,
             }
         }
     }
@@ -494,7 +687,7 @@ fn displaced_marks(
             placement,
             attempt: 0,
             metallicity_age_years: None,
-            lifetime: Some(life),
+            lifetime: life,
         };
     }
     let mass = SolarMasses::new(
@@ -609,7 +802,7 @@ fn survivor_marks(
                 placement,
                 attempt: 0,
                 metallicity_age_years: None,
-                lifetime: Some(life),
+                lifetime: life,
             }
         }
     }

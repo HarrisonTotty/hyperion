@@ -256,6 +256,12 @@ threads-required = 8
 filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::binary::tables_hold::the_.*_against_the_engine$/)"
 threads-required = 16
 
+# P08.T12 at 27's sweep of the Humphreys–Davidson arms runs on four threads of its own
+# (`placement::fates_hold`'s `SLOW_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::placement::fates_hold::below_the_hd_free_masses_the_arms_build_the_same_fates_over_every_mass)"
+threads-required = 4
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"
