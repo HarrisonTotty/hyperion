@@ -9,13 +9,18 @@
  * Four framings, each settled and captured with its verdict:
  *
  * - (a) `LIT` on the crescent planet with the Sun at the frame's left edge: the disc saturated
- *   (sRGB 250 or more), the sky beyond 30° from the Sun at a median below code 32; and the same
+ *   (sRGB 250 or more), the sky beyond 30° from the Sun no brighter than the closed form at 30°
+ *   (the brief's code 32 is a finding: the eye's tail is drawn whole); and the same
  *   framing turned 1.1° so that the Sun is just outside, whose exposure is within 0.3 EV of it.
  * - (b) The first framing under `AVG`: the frame's median below code 128, the disc saturated.
  * - (c) The Sun alone in a dark field under `AVG`: the frame's median below code 64, the white
  *   frame's regression capture.
  *
- * The meter classes the scene target holds tell the disc, the lit planet and the sky apart.
+ * The meter classes the scene target holds tell the disc, the lit planet and the sky apart. Each
+ * framing's frames are held back as the view holds a cut's (`AutoExposure.holds`), and its first
+ * presented frame must stand within 0.25 EV of the settled exposure; and the Sun's halo,
+ * read as the sky's median code at angles from 1° to 24°, must follow the glare sources' closed
+ * form through the tone curve to 3 codes (R07.T14's glare, fix-view-light's follow-up).
  */
 
 import { photorealFrame } from "../displays/view/photorealFrame";
@@ -32,6 +37,9 @@ import {
   VIEW_CAMERA,
 } from "../view/photometry/exposure";
 import { PhotorealRenderer } from "../view/photoreal/renderer";
+import { type GlareSource, glareSourceVeilOf, glareSpreadTerms } from "../view/post/glare";
+import { tonemapTexel } from "../view/post/tonemap";
+import { DEFAULT_EYE_OBSERVER } from "../view/sky/eye";
 import { AutoExposure } from "../view/post/autoExposure";
 import type { Histogram } from "../view/post/histogram";
 import { METER_CLASS, type MeterMode } from "../view/post/meter";
@@ -102,8 +110,15 @@ const START: ExposureControl = { kind: "auto", ev100: -1 };
 interface Settled {
   readonly ev100: number;
   readonly frames: number;
+  /** The frames held back before the first presented, as the view holds a cut's (`holds`). */
+  readonly held: number;
+  /** The applied EV100 of the first frame presented. */
+  readonly firstPresentedEv100: number;
   readonly srgb: Uint8Array;
   readonly hdr: Float32Array;
+  /** The last presented frame's glare sources and pre-exposure, for the halo's closed form. */
+  readonly glare: ReadonlyArray<GlareSource>;
+  readonly preExposure: number;
 }
 
 /** Waits for the renderer's next histogram, read back after its frame's copy has settled. */
@@ -146,13 +161,18 @@ async function settle(
     meter: framing.meter,
   });
   exposure.cut();
-  exposure.noteImage(true);
   let histogram: Histogram | undefined;
   let last = Number.NaN;
   let frames = 0;
+  let held = 0;
+  let firstPresentedEv100 = Number.NaN;
   let srgb: Uint8Array = new Uint8Array(0);
+  let glare: ReadonlyArray<GlareSource> = [];
+  let preExposure = 1;
   for (; frames < MAX_FRAMES; frames += 1) {
     const ev100 = controlEv100(exposure.step(histogram, STEP_S).control);
+    // As the view's loop holds a cut's frames until its reading.
+    const present = !exposure.holds;
     const frame = photorealFrame({
       run,
       pose,
@@ -168,16 +188,27 @@ async function settle(
       previousRegimes: new Map(),
       overlay: null,
       meter: framing.meter,
+      present,
     });
     renderer.render(view, frame);
-    // The canvas is read back in the task that drew it, each frame before the next.
-    // oxlint-disable-next-line no-await-in-loop
-    const bytes = await view.readBack();
-    srgb = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+    exposure.noteImage(true);
+    if (present) {
+      if (Number.isNaN(firstPresentedEv100)) {
+        firstPresentedEv100 = ev100;
+      }
+      glare = frame.glareSources;
+      preExposure = frame.exposureScale;
+      // The canvas is read back in the task that drew it, each frame before the next.
+      // oxlint-disable-next-line no-await-in-loop
+      const bytes = await view.readBack();
+      srgb = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+    } else {
+      held += 1;
+    }
     // The next frame's exposure is metered from this frame's histogram, as the view's loop does.
     // oxlint-disable-next-line no-await-in-loop
     histogram = await nextHistogram(renderer);
-    if (Math.abs(ev100 - last) < SETTLED_EV) {
+    if (present && Math.abs(ev100 - last) < SETTLED_EV) {
       break;
     }
     last = ev100;
@@ -189,9 +220,84 @@ async function settle(
   return {
     ev100: last,
     frames: frames + 1,
+    held,
+    firstPresentedEv100,
     srgb,
     hdr: halfTexels(await engine.readTexture(colours.drawn)),
+    glare,
+    preExposure,
   };
+}
+
+/** The angles from the Sun's centre the halo's profile is read at, deg. */
+const PROFILE_DEG: ReadonlyArray<number> = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24];
+
+/** One angle of the halo's profile: the sky's median code there and the closed form's. */
+interface ProfilePoint {
+  readonly deg: number;
+  readonly measured: number;
+  readonly closedForm: number;
+}
+
+/**
+ * The halo's radial profile in `settled`, framed as `framing`: the median green code of the sky's
+ * pixels within 3% of each angle from the Sun, against the code the glare sources' closed form
+ * gives there through the tone curve and the encoding (`tonemapTexel`, no dither).
+ */
+function haloProfile(settled: Settled, framing: Framing): ProfilePoint[] {
+  const toStar = rotateInto(framing, TO_STAR);
+  const terms = glareSpreadTerms("eye", DEFAULT_EYE_OBSERVER);
+  const bins = PROFILE_DEG.map((): number[] => []);
+  for (let y = 0; y < VIEWPORT.heightPx; y += 1) {
+    for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
+      const i = y * VIEWPORT.widthPx + x;
+      if (Math.round(settled.hdr[4 * i + 3] ?? 1) !== METER_CLASS.other) {
+        continue;
+      }
+      const d = pixelDirection(x, y);
+      const cos = d.x * toStar.x + d.y * toStar.y + d.z * toStar.z;
+      const deg = (Math.acos(Math.min(1, cos)) * 180) / Math.PI;
+      PROFILE_DEG.forEach((at, k) => {
+        if (Math.abs(deg / at - 1) <= 0.03) {
+          bins[k]?.push(settled.srgb[4 * i + 1] ?? 0);
+        }
+      });
+    }
+  }
+  return PROFILE_DEG.flatMap((deg, k): ProfilePoint[] => {
+    const measured = bins[k] ?? [];
+    return measured.length < 16
+      ? []
+      : [{ deg, measured: median(measured), closedForm: closedFormCode(settled, deg, terms) }];
+  });
+}
+
+/**
+ * The green code the glare sources' closed form gives the sky at `deg` from the Sun in `settled`,
+ * through the tone curve and the encoding (`tonemapTexel`, no dither).
+ */
+function closedFormCode(
+  settled: Settled,
+  deg: number,
+  terms = glareSpreadTerms("eye", DEFAULT_EYE_OBSERVER),
+): number {
+  const theta = (deg * Math.PI) / 180;
+  const light: [number, number, number] = [0, 0, 0];
+  for (const source of settled.glare) {
+    const veil = glareSourceVeilOf(source, theta, terms);
+    for (const c of [0, 1, 2] as const) {
+      light[c] += veil[c] * settled.preExposure;
+    }
+  }
+  const [, g] = tonemapTexel(light, 1, null);
+  return Math.round(g * 255);
+}
+
+/** A profile as a check's detail: `deg°: measured/closed form`. */
+function profileText(profile: ReadonlyArray<ProfilePoint>): string {
+  return profile
+    .map((point) => `${String(point.deg)}°: ${String(point.measured)}/${String(point.closedForm)}`)
+    .join(", ");
 }
 
 /** The median of `values`, or `NaN` for none. */
@@ -280,7 +386,14 @@ export async function captureViewLight(
   const renderer = new PhotorealRenderer(engine, "smoke view light");
   const discs = new HostDiscLayer(engine);
   const images: CapturedImage[] = [];
-  const results = new Map<string, { readonly settled: Settled; readonly figures: Figures }>();
+  const results = new Map<
+    string,
+    {
+      readonly settled: Settled;
+      readonly figures: Figures;
+      readonly profile: ReadonlyArray<ProfilePoint>;
+    }
+  >();
   try {
     await renderer.prepare(VIEWPORT, "high", "eye", {
       orientation: lookAlong(SUN_IN_FRAME.forward, SUN_IN_FRAME.up),
@@ -290,7 +403,11 @@ export async function captureViewLight(
       // Each framing settles before the next, as the views' frames do.
       // oxlint-disable-next-line no-await-in-loop
       const settled = await settle(engine, renderer, view, discs, framing);
-      results.set(framing.name, { settled, figures: figures(settled, framing) });
+      results.set(framing.name, {
+        settled,
+        figures: figures(settled, framing),
+        profile: haloProfile(settled, framing),
+      });
       images.push({
         name: `fix-view-light-${framing.name}`,
         width: VIEWPORT.widthPx,
@@ -314,10 +431,13 @@ export async function captureViewLight(
   const outside = results.get("a-lit-sun-just-outside");
   const b = results.get("b-avg-sun-in-frame");
   const c = results.get("c-avg-sun-alone");
+  // The brief's figure for the sky beyond 30°, code 32, was set before the eye's tail was drawn
+  // whole; the sky is held to the closed form there instead, and the figure logged.
+  const atThirty = a === undefined ? Number.NaN : closedFormCode(a.settled, 30);
   checks.check(
-    "fix-view-light (a) LIT with the Sun in frame: the disc saturated, the sky beyond 30° below code 32",
-    a !== undefined && a.figures.disc >= 250 && a.figures.farSky < 32,
-    said("a-lit-sun-in-frame"),
+    "fix-view-light (a) LIT with the Sun in frame: the disc saturated, the sky beyond 30° no brighter than the closed form at 30°",
+    a !== undefined && a.figures.disc >= 250 && a.figures.farSky <= atThirty + 3,
+    `${said("a-lit-sun-in-frame")}; the closed form at 30° ${String(atThirty)}`,
   );
   checks.check(
     "fix-view-light (a) LIT's exposure within 0.3 EV of the same framing with the Sun just outside",
@@ -336,5 +456,29 @@ export async function captureViewLight(
     c !== undefined && c.figures.frame < 64,
     said("c-avg-sun-alone"),
   );
+  for (const [name, result] of [
+    ["a-lit-sun-in-frame", a],
+    ["b-avg-sun-in-frame", b],
+    ["c-avg-sun-alone", c],
+  ] as const) {
+    const profile = result?.profile ?? [];
+    checks.check(
+      `fix-view-light (${name.slice(0, 1)}) the Sun's halo falls as the closed form: every angle within 3 codes, sky median/closed form`,
+      profile.length >= 5 &&
+        profile.every((point) => Math.abs(point.measured - point.closedForm) <= 3),
+      profileText(profile),
+    );
+  }
+  for (const framing of FRAMINGS) {
+    const result = results.get(framing.name);
+    checks.check(
+      `fix-view-light (${framing.name.slice(0, 1)}) a cut's first presented frame is metered: within 0.25 EV of the settled, its frames before held back (${framing.name})`,
+      result !== undefined &&
+        Math.abs(result.settled.firstPresentedEv100 - result.settled.ev100) <= 0.25,
+      result === undefined
+        ? "not drawn"
+        : `first presented EV100 ${result.settled.firstPresentedEv100.toFixed(2)} after ${String(result.settled.held)} held, settled ${result.settled.ev100.toFixed(2)}`,
+    );
+  }
   return images;
 }
