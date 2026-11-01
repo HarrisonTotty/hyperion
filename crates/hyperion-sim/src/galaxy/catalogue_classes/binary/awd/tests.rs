@@ -23,6 +23,7 @@ use crate::galaxy::catalogue_classes::{
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement;
+use crate::id::SystemId;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_cell};
 use crate::tables::binary::MILKY_WAY_FORMED_MASS;

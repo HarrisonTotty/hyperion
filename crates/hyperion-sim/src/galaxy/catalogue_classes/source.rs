@@ -16,8 +16,12 @@
 //! - **Hits.** The class's cells whose entries can lie in the sphere at any time
 //!   ([`cells_in_sphere`], padded by the class's reach of 4,096 ly, which bounds every member's
 //!   travel over its entry's lifetime, so no layer's walk pad applies: a Type Ia's survivor, which
-//!   outruns layer D's, is found as its record asks), each candidate kept as the cell keeps it, and
-//!   each member a system ([`ClassProcess::system`]) tested at the sphere's time: one that exists
+//!   outruns layer D's, is found as its record asks) that draw any candidate ([`occupied_cells`]),
+//!   each candidate kept as the cell keeps it, and each member a system ([`ClassProcess::system`])
+//!   tested at the sphere's time. A class that reads its candidates' place first
+//!   ([`ClassProcess::epoch_place`], the grid's rule 11) has only those built whose place lies
+//!   within the sphere padded at plan 03's [`PAD_SPEED`] (P09.T40): its members move from there
+//!   below that, so no other can reach the sphere. A member that exists
 //!   then and whose present position, the remnant's after an explosion, lies inside the unpadded
 //!   radius is a hit, with its record of origin
 //!   [`SystemOrigin::CatalogueSystem`](crate::galaxy::placement::SystemOrigin::CatalogueSystem).
@@ -34,9 +38,8 @@
 //!
 //! Each class's process is built once a call, and each candidate is resolved once
 //! ([`resolve_entry`]), never once a member read: a Type Ia's survivor alone is resolved again.
-//! The source keeps nothing between calls, so a cold query generates every class cell about it
-//! (P09.T40's `CatalogueClassCellCache` is the lever). Sums run in a fixed order: the classes in
-//! [`ALL_CLASSES`] order, then their cells in the walk's order.
+//! Sums run in a fixed order: the classes in [`ALL_CLASSES`] order, then their cells in the walk's
+//! order.
 //!
 //! The range query registers the source from generator version 27, the hold's
 //! (`CLASS_SOURCE_VERSION`; [`CatalogueClassSource::registered_in`]); below it a query takes the
@@ -45,13 +48,17 @@
 #[cfg(test)]
 mod tests;
 
-use super::grid::{ClassLookup, ClassProcess, ClassVisitor, ProductionClasses, candidate_count};
-use super::{ALL_CLASSES, CatalogueCellKey, ClassId, cells_in_sphere, resolve_entry};
+use super::grid::{ClassLookup, ClassProcess, ClassVisitor, ProductionClasses};
+use super::{
+    ALL_CLASSES, CatalogueCellKey, ClassId, cells_in_sphere, occupied_cells, resolve_entry,
+};
 use crate::GeneratorVersion;
 use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{Existence, SystemRecord};
-use crate::galaxy::query::{LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource};
+use crate::galaxy::query::{
+    LayerCounts, LayerSet, PAD_SPEED, QuerySphere, SystemHit, SystemSource, pad_for,
+};
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
@@ -347,16 +354,26 @@ impl ClassVisitor for Hits<'_> {
             // No member of the class can be in a layer asked for.
             return;
         }
-        for key in cells_in_sphere(class, sphere) {
-            let bound = process.bound(galaxy, &key);
-            for index in 0..candidate_count(galaxy.seed(), &key, bound) {
+        let reach = place_reach(sphere);
+        for (key, count) in occupied_cells(galaxy, process, cells_in_sphere(class, sphere)) {
+            for index in 0..count {
                 let id = key
                     .candidate_id(index, 0)
                     .expect("a cell's count is held under 2^24, so its candidates have IDs");
+                let place = process.epoch_place(galaxy, &key, id);
+                if place.is_some_and(|place| {
+                    LightYears::from(sphere.centre().distance_to(&place)).value() > reach.value()
+                }) {
+                    continue;
+                }
                 let Ok(first) = resolve_entry(galaxy, process, id) else {
                     continue;
                 };
                 let system = process.system(galaxy, &first);
+                debug_assert!(
+                    place.is_none_or(|place| *system.record().epoch_position() == place),
+                    "the {class} candidate {id:?}'s place read first is its entry's (rule 11)"
+                );
                 push_hit(
                     system.record(),
                     system.position_at(sphere.time()),
@@ -386,6 +403,20 @@ impl ClassVisitor for Hits<'_> {
             }
         }
     }
+}
+
+/// How far from `sphere`'s centre a class host may lie at the epoch and still be inside the sphere
+/// at its time, for a host moving straight below [`PAD_SPEED`] (the grid's rule 11): its radius
+/// plus the farthest such a host drifts, with margins over the rounding of the drift and of the
+/// distance, some 10⁻¹¹ ly about a point of the root cube, far below them.
+#[must_use]
+fn place_reach(sphere: &QuerySphere) -> LightYears {
+    /// The relative margin on the drift.
+    const DRIFT_MARGIN: f64 = 1e-9;
+    /// The absolute margin, ly.
+    const NEAR_MARGIN_LY: f64 = 1e-6;
+    let drift = pad_for(sphere.time(), PAD_SPEED).value();
+    LightYears::new(sphere.radius().value() + drift * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY)
 }
 
 /// Appends `record`'s hit to `out` if it is in `layers`, exists at the sphere's time and lies, at

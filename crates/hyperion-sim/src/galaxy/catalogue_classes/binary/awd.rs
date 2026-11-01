@@ -61,7 +61,7 @@
 //! system's age, and the pair's timeline, which gives both stars' states
 //! ([`AwdEntry::stars`]).
 
-use super::super::grid::{CatalogueMember, ClassProcess};
+use super::super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
@@ -71,10 +71,10 @@ use crate::galaxy::bounds::CellBox;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::{Galaxy, PointLy, Population};
-use crate::id::{BodyId, CatalogueSystemId, SystemId};
+use crate::id::{BodyId, CatalogueSystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
-use crate::rng::{ObjectKey, Stream, tags};
+use crate::rng::{Stream, tags};
 use crate::stellar::binary::sampler::ClassSampler;
 use crate::stellar::binary::scan::{AwdScanMarks, scan_marks};
 use crate::stellar::binary::{
@@ -312,10 +312,7 @@ impl AwdProcess {
         if bound.value().is_nan() || bound.value() <= 0.0 {
             return None;
         }
-        let key = ObjectKey::from(SystemId::from(id));
-        let mut stream = Stream::open(galaxy.seed(), tags::CLASS_AWD_SITE, key);
-        let site =
-            cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
+        let (site, mut stream) = site_stream(galaxy, cell, id, tags::CLASS_AWD_SITE);
         let mut weights = [0.0; MAX_COMPONENTS];
         let n = self.weights(galaxy, &PointLy::from(&site), &mut weights);
         let picked = stream.mark().pick_weighted(&weights[..n], bound.value())?;
@@ -904,6 +901,16 @@ macro_rules! awd_class_process {
                 member: &CatalogueMember<AwdEntry>,
             ) -> Option<SystemStars> {
                 Some(member.entry().value().stars(galaxy))
+            }
+
+            /// The site, where the host sits at the epoch, moving at its component's draw.
+            fn epoch_place(
+                &self,
+                galaxy: &Galaxy,
+                cell: &CatalogueCellKey,
+                id: CatalogueSystemId,
+            ) -> Option<GalacticPosition> {
+                Some(site_stream(galaxy, cell, id, tags::CLASS_AWD_SITE).0)
             }
         }
     };

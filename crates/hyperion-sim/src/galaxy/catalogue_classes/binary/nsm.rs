@@ -41,11 +41,12 @@
 //! ([`NsmEntry::stars`]); its kilonova at T is P11.T9's one-shot event. Its record is a catalogue
 //! system's, counted in its primary progenitor's layer, E.
 
-use super::super::grid::{CatalogueMember, ClassProcess};
+use super::super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::hosts::ClassHosts;
+use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::SystemRecord;
 use crate::id::{BodyId, CatalogueSystemId};
@@ -420,6 +421,16 @@ impl ClassProcess for NeutronStarMergers {
 
     fn stars(&self, galaxy: &Galaxy, member: &CatalogueMember<NsmEntry>) -> Option<SystemStars> {
         Some(member.entry().value().stars(galaxy))
+    }
+
+    /// The site, where the entry sits at the epoch, moving at its component's draw.
+    fn epoch_place(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+    ) -> Option<GalacticPosition> {
+        Some(site_stream(galaxy, cell, id, tags::CLASS_NSM_SITE).0)
     }
 }
 

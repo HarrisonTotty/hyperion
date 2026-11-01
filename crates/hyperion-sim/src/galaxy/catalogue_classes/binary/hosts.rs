@@ -10,14 +10,15 @@
 //! density bound over the cell's closed box, and a candidate's site is thinned on the intensity
 //! there ÷ the bound, the same mark picking its component.
 
+use super::super::grid::site_stream;
 use super::feature::catalogue_share;
 use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, ClassId};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::{Galaxy, PointLy};
-use crate::id::{CatalogueSystemId, SystemId};
-use crate::rng::{DomainTag, ObjectKey, Stream};
+use crate::id::CatalogueSystemId;
+use crate::rng::DomainTag;
 use crate::stellar::binary::CarvedClass;
 use crate::tables::binary::CLASS_SHARES;
 use crate::units::PerCubicLightYear;
@@ -148,10 +149,7 @@ impl ClassHosts {
         if bound.value().is_nan() || bound.value() <= 0.0 {
             return None;
         }
-        let key = ObjectKey::from(SystemId::from(id));
-        let mut stream = Stream::open(galaxy.seed(), tag, key);
-        let site =
-            cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
+        let (site, mut stream) = site_stream(galaxy, cell, id, tag);
         let mut weights = [0.0; MAX_COMPONENTS];
         let n = self.weights(galaxy, &PointLy::from(&site), &mut weights);
         let picked = stream.mark().pick_weighted(&weights[..n], bound.value())?;

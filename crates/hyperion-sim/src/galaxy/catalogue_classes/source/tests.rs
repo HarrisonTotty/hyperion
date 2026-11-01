@@ -558,3 +558,186 @@ fn the_grid_keeps_no_host_s_twin_and_the_source_suppresses_nothing() {
     }
     assert!(layer_e > 0);
 }
+
+/// A process that hides its class's place read first, and gives every other answer as `P` does:
+/// what the source walks without rule 11's lever.
+struct NoPlace<'a, P>(&'a P);
+
+impl<P: ClassProcess> ClassProcess for NoPlace<'_, P> {
+    type Candidate = P::Candidate;
+    type Entry = P::Entry;
+
+    fn class(&self) -> ClassId {
+        self.0.class()
+    }
+
+    fn bound(&self, galaxy: &Galaxy, cell: &CatalogueCellKey) -> crate::units::PerCubicLightYear {
+        self.0.bound(galaxy, cell)
+    }
+
+    fn candidate(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: crate::units::PerCubicLightYear,
+    ) -> Option<P::Candidate> {
+        self.0.candidate(galaxy, cell, id, bound)
+    }
+
+    fn test(&self, galaxy: &Galaxy, candidate: P::Candidate) -> Option<P::Entry> {
+        self.0.test(galaxy, candidate)
+    }
+
+    fn members(&self, entry: &P::Entry) -> u8 {
+        self.0.members(entry)
+    }
+
+    fn system(
+        &self,
+        galaxy: &Galaxy,
+        member: &crate::galaxy::catalogue_classes::CatalogueMember<P::Entry>,
+    ) -> CatalogueSystem {
+        self.0.system(galaxy, member)
+    }
+
+    fn event_time(&self, galaxy: &Galaxy, id: CatalogueSystemId) -> Option<UniverseTime> {
+        self.0.event_time(galaxy, id)
+    }
+}
+
+/// The production lookup with its processes' places hidden ([`NoPlace`]): of one class, or of
+/// every class.
+#[derive(Debug, Clone, Copy)]
+struct Unplaced(Option<ClassId>);
+
+impl ClassLookup for Unplaced {
+    fn visit_class<V: ClassVisitor>(
+        &self,
+        galaxy: &Galaxy,
+        class: ClassId,
+        visitor: V,
+    ) -> Option<V::Output> {
+        /// The visit of `V` with the process's place hidden.
+        struct Hide<V>(V);
+        impl<V: ClassVisitor> ClassVisitor for Hide<V> {
+            type Output = V::Output;
+            fn visit<P: ClassProcess>(self, process: &P) -> V::Output {
+                self.0.visit(&NoPlace(process))
+            }
+        }
+        if self.0.is_some_and(|only| only != class) {
+            return None;
+        }
+        ProductionClasses.visit_class(galaxy, class, Hide(visitor))
+    }
+}
+
+/// `class`'s place read first for the candidate whose entry `id` is a member of.
+fn place_of(galaxy: &Galaxy, class: ClassId, id: CatalogueSystemId) -> Option<GalacticPosition> {
+    /// The place of candidate `id`.
+    struct Place<'a> {
+        galaxy: &'a Galaxy,
+        id: CatalogueSystemId,
+    }
+    impl ClassVisitor for Place<'_> {
+        type Output = Option<GalacticPosition>;
+        fn visit<P: ClassProcess>(self, process: &P) -> Option<GalacticPosition> {
+            let key = CatalogueCellKey::of(self.id).expect("a class cell's ID");
+            process.epoch_place(self.galaxy, &key, entry_of(self.id))
+        }
+    }
+    ProductionClasses
+        .visit_class(galaxy, class, Place { galaxy, id })
+        .expect("a registered class")
+}
+
+/// The grid's rule 11 as each class keeps it: the accreting white dwarfs, the two merger classes
+/// and the luminous blue variables read their place first, and it is every member's epoch
+/// position, bit for bit, each moving below plan 03's `PAD_SPEED`, over each class's first cells
+/// with entries; the supernova classes and the X-ray binaries read none.
+#[test]
+fn the_classes_that_read_their_place_first_keep_their_entries_there() {
+    let galaxy = at_27();
+    let placed = [
+        ClassId::STELLAR_MERGER,
+        ClassId::NEUTRON_STAR_MERGER,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ];
+    let mut checked = 0;
+    for class in registered_classes(galaxy) {
+        for host in first_hosts(galaxy, class, 3) {
+            let place = place_of(galaxy, class, host.id);
+            assert_eq!(place.is_some(), placed.contains(&class), "{class}");
+            if let Some(place) = place {
+                assert_eq!(
+                    *host.system.record().epoch_position(),
+                    place,
+                    "{:?}",
+                    host.id
+                );
+                assert_eq!(host.system.position_at(UniverseTime::EPOCH), place);
+                let speed = host
+                    .system
+                    .motion()
+                    .velocity_at(UniverseTime::EPOCH)
+                    .speed()
+                    .value();
+                assert!(speed < 1e3 * PAD_SPEED.value(), "{class}: {speed} m/s");
+                assert_eq!(
+                    host.system.motion().velocity_at(at(-1_000)),
+                    host.system.motion().velocity_at(at(1_000))
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 10, "{checked}");
+}
+
+/// The place read first changes no hit: about each place-reading class's first host, at both ends
+/// of the clock window and at the epoch, the class's hits are those it finds with its place hidden,
+/// and about a point of the outer disc every class's are, bit for bit and in order.
+#[test]
+fn the_place_read_first_changes_no_hit() {
+    let galaxy = at_27();
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let hits = |source: &dyn SystemSource, sphere: &QuerySphere| {
+        let mut out = Vec::new();
+        source.systems_in_sphere(galaxy, sphere, stellar, &mut out);
+        out
+    };
+    let mut found = 0;
+    for class in [
+        ClassId::STELLAR_MERGER,
+        ClassId::NEUTRON_STAR_MERGER,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ] {
+        let host = first_hosts(galaxy, class, 1)[0];
+        let placed = CatalogueClassSource::with_lookup(Only(class));
+        let unplaced = CatalogueClassSource::with_lookup(Unplaced(Some(class)));
+        for t in [at(-1_000), UniverseTime::EPOCH, at(1_000)] {
+            let place = host.system.position_at(t);
+            let sphere = QuerySphere::new(place, LightYears::new(2.0), t, LightYears::ZERO)
+                .expect("a sphere");
+            let expected = hits(&unplaced, &sphere);
+            found += expected.len();
+            assert_eq!(hits(&placed, &sphere), expected, "{class} at {t}");
+        }
+    }
+    assert!(found >= 15, "{found}");
+    let outer = GalacticPosition::from_light_years([0.0, 48_000.0, 0.0]).expect("in the cube");
+    let sphere = QuerySphere::new(outer, LightYears::new(40.0), at(900), LightYears::ZERO)
+        .expect("a sphere");
+    let unplaced = CatalogueClassSource::with_lookup(Unplaced(None));
+    assert_eq!(
+        hits(&CatalogueClassSource::new(), &sphere),
+        hits(&unplaced, &sphere)
+    );
+}

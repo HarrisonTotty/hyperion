@@ -66,16 +66,18 @@ use super::system::CatalogueSystem;
 #[cfg(doc)]
 use super::system::system_of;
 use super::type_ia::TypeIaProcess;
-use crate::coords::ROOT_HALF_WIDTH_LY;
+use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::ResolveSystemError;
 #[cfg(doc)]
 use crate::galaxy::placement::SystemOrigin;
+#[cfg(doc)]
+use crate::galaxy::query::PAD_SPEED;
 use crate::galaxy::query::QuerySphere;
-use crate::id::CatalogueSystemId;
+use crate::id::{CatalogueSystemId, SystemId};
 #[cfg(doc)]
 use crate::rng::Threshold;
-use crate::rng::{ObjectKey, Seed, Stream, tags};
+use crate::rng::{DomainTag, ObjectKey, Seed, Stream, tags};
 use crate::stellar::system::SystemStars;
 use crate::time::UniverseTime;
 use crate::units::PerCubicLightYear;
@@ -142,6 +144,17 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 ///     candidate's cell box at T, as a supernova's site is, and anything the event leaves within
 ///     [`LIFETIME_REACH`] of the cell, as a magnetar's remnant is. A class that reads no time first
 ///     gives `None`, the default, and every candidate is built.
+/// 11. **The place, read first.** A class each of whose entries sits at the epoch at its
+///     candidate's site, every member there and moving straight at under plan 03's
+///     [`PAD_SPEED`] (plan 08's escape cut, which every velocity drawn from a component's law
+///     keeps), may give that site through [`epoch_place`](Self::epoch_place): the first three
+///     words of the site's own stream (`site_stream`), read before any other of the
+///     candidate's draws, bit for bit every member's epoch position (plan 09, P09.T40). A range
+///     query then builds only the candidates whose place lies within its sphere padded for that
+///     speed. The accreting white dwarfs, the two merger classes and the luminous blue variables
+///     give it. The supernova classes, whose entries move from their sites for up to the
+///     interval, and the X-ray binaries, which their recoil carries off theirs, give `None`, the
+///     default.
 ///
 /// # Examples
 ///
@@ -290,6 +303,35 @@ pub trait ClassProcess {
     fn event_time(&self, _galaxy: &Galaxy, _id: CatalogueSystemId) -> Option<UniverseTime> {
         None
     }
+
+    /// Where every member of the entry candidate `id` of `cell` would make is at the epoch, read
+    /// first from its own stream (rule 11), or `None`, the default, for a class whose candidates
+    /// read none first. Like [`event_time`](Self::event_time), it says nothing of whether the
+    /// candidate is kept.
+    fn epoch_place(
+        &self,
+        _galaxy: &Galaxy,
+        _cell: &CatalogueCellKey,
+        _id: CatalogueSystemId,
+    ) -> Option<GalacticPosition> {
+        None
+    }
+}
+
+/// Candidate `id`'s site in `cell`, from the first three words of its `tag` stream, and the stream
+/// after them, from which the class draws the mark that thins the site: one place for rule 11's
+/// read-first site and the candidate's own, so that the two cannot drift (plan 09, P09.T40).
+#[must_use]
+pub(crate) fn site_stream(
+    galaxy: &Galaxy,
+    cell: &CatalogueCellKey,
+    id: CatalogueSystemId,
+    tag: DomainTag,
+) -> (GalacticPosition, Stream) {
+    let key = ObjectKey::from(SystemId::from(id));
+    let mut stream = Stream::open(galaxy.seed(), tag, key);
+    let site = cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
+    (site, stream)
 }
 
 /// One entry of a class cell: its candidate's ID, its number of members and what the class kept

@@ -93,7 +93,7 @@
 //! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
 use super::core_collapse::class_site_velocity;
-use super::grid::{CatalogueMember, ClassProcess};
+use super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
 use super::supernova::{DeathMarks, Surroundings, claims};
@@ -522,9 +522,7 @@ impl ClassProcess for LbvProcess {
         if bound.value().is_nan() || bound.value() <= 0.0 {
             return None;
         }
-        let mut stream = Stream::open(seed, tags::CLASS_LBV_SITE, key);
-        let site =
-            cell.position_from_words([stream.next_u64(), stream.next_u64(), stream.next_u64()]);
+        let (site, mut stream) = site_stream(galaxy, cell, id, tags::CLASS_LBV_SITE);
         let point = PointLy::from(&site);
         let mut weights = [0.0; MAX_COMPONENTS];
         let n = self.weights(galaxy, &point, &mut weights);
@@ -590,6 +588,16 @@ impl ClassProcess for LbvProcess {
         let entry = member.entry().value();
         CatalogueSystem::new(entry.record, entry.motion)
             .with_stars(entry.composition, MultiplicityContext::Free)
+    }
+
+    /// The site, the host's epoch position (module documentation, "Sites at the epoch").
+    fn epoch_place(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+    ) -> Option<GalacticPosition> {
+        Some(site_stream(galaxy, cell, id, tags::CLASS_LBV_SITE).0)
     }
 }
 
