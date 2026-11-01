@@ -899,8 +899,8 @@ describe("the VIEW display", () => {
     const names = screen
       .getAllByRole("button")
       .map((button) => button.textContent)
-      .filter((name) => name === "ENABLE" || name === "INHIBIT");
-    expect(names).toEqual(["ENABLE", "INHIBIT"]);
+      .filter((name) => name === "7 ENABLE" || name === "8 INHIBIT");
+    expect(names).toEqual(["7 ENABLE", "8 INHIBIT"]);
   });
 });
 
@@ -1595,10 +1595,10 @@ describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
     advance(300);
     await settle();
     advance(300);
-    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     advance(600);
     expect(exposureReadout()).toMatch(/^EV100 -?\d+\.\d AUTO$/);
-    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    await user.click(screen.getByRole("button", { name: "8 INHIBIT" }));
     advance(1000);
     await settle();
     advance(1000);
@@ -1640,6 +1640,124 @@ async function advanceReading(view: Setup, ms: number): Promise<void> {
   }
 }
 
+/** The exposure's `MAN` field. */
+function manField(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("textbox", {
+    name: /MAN/u,
+  });
+}
+
+describe("the exposure's keys, 7 ENABLE and 8 INHIBIT (the owner's request, 2026-11-01)", () => {
+  /** PHASE TEST drawn photorealistic, its image metered, the exposure still at MAN. */
+  async function meteredMan(): Promise<Setup> {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(100);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(300);
+    return view;
+  }
+
+  it("shows each key on its button, named by aria-keyshortcuts", async () => {
+    await meteredMan();
+    expect(
+      ["7 ENABLE", "8 INHIBIT"].map((name) =>
+        screen.getByRole("button", { name }).getAttribute("aria-keyshortcuts"),
+      ),
+    ).toEqual(["7", "8"]);
+  });
+
+  it("enters AUTO by 7 once the image is metered", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("7");
+    view.advance(600);
+    expect(exposureReadout()).toMatch(/AUTO$/u);
+  });
+
+  it("inhibits AUTO by 8, as INHIBIT does", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("7");
+    view.advance(600);
+    await view.user.keyboard("8");
+    view.advance(600);
+    expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/u);
+  });
+
+  it("holds ENABLE back under AUTO when keyed, its button stating why", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("7");
+    view.advance(600);
+    await view.user.keyboard("7");
+    view.advance(600);
+    const enableButton = screen.getByRole("button", { name: "7 ENABLE" });
+    expect([
+      exposureReadout(),
+      enableButton.getAttribute("aria-disabled"),
+      describedText(enableButton),
+    ]).toEqual([expect.stringMatching(/AUTO$/u), "true", "NOT AVAILABLE: the exposure is AUTO"]);
+  });
+
+  it("holds INHIBIT back under MAN when keyed, its button stating why", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("8");
+    view.advance(600);
+    const inhibitButton = screen.getByRole("button", { name: "8 INHIBIT" });
+    expect([
+      exposureReadout(),
+      inhibitButton.getAttribute("aria-disabled"),
+      describedText(inhibitButton),
+    ]).toEqual([expect.stringMatching(/MAN$/u), "true", "NOT AVAILABLE: the exposure is MAN"]);
+  });
+
+  it("types 7 into the MAN field as a digit, with no ENABLE", async () => {
+    const view = await meteredMan();
+    await view.user.click(manField());
+    await view.user.keyboard("7");
+    view.advance(600);
+    expect([manField(), exposureReadout()]).toEqual([
+      expect.objectContaining({ value: "7" }),
+      expect.stringMatching(/MAN$/u),
+    ]);
+  });
+
+  it("types 8 into the MAN field as a digit, with no INHIBIT", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("7");
+    view.advance(600);
+    await view.user.click(manField());
+    await view.user.keyboard("8");
+    view.advance(600);
+    expect([manField(), exposureReadout()]).toEqual([
+      expect.objectContaining({ value: "8" }),
+      expect.stringMatching(/AUTO$/u),
+    ]);
+  });
+
+  it.each(["Control", "Alt", "Meta"])("leaves 7 to the platform under %s", async (modifier) => {
+    const view = await meteredMan();
+    await view.user.keyboard(`{${modifier}>}7{/${modifier}}`);
+    view.advance(600);
+    expect(exposureReadout()).toMatch(/MAN$/u);
+  });
+
+  it("stands a keyed command's reason on the view's foot while MAXIMIZE VIEW hides its button", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("6");
+    view.advance(300);
+    await view.user.keyboard("8");
+    view.advance(300);
+    expect(document.querySelector(".view__foot-lines")?.textContent).toContain(
+      "INHIBIT NOT AVAILABLE: the exposure is MAN",
+    );
+  });
+});
+
 describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
   /** PHASE TEST drawn photorealistic, its image metered under AVG and the exposure at AUTO. */
   async function meteredAuto(): Promise<Setup> {
@@ -1654,7 +1772,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
     view.advance(300);
     await settle();
     view.advance(300);
-    await view.user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await view.user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     view.advance(600);
     return view;
   }
@@ -1675,7 +1793,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
     ]);
     expect(describedText(meterPanel().getByRole("button", { name: "LIT" }))).toBe(NO_LIT_SIDE);
     expect(exposureReadout()).toMatch(/INHIBITED · NO LIT SIDE$/u);
-    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+    expect(screen.getByRole("button", { name: "7 ENABLE" })).toHaveAccessibleDescription(
       "NO LIT SIDE",
     );
   });
@@ -1692,7 +1810,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
       screen.queryByText(/^AUTO NOT AVAILABLE/u),
       exposureReadout(),
     ];
-    expect(describedText(screen.getByRole("button", { name: "ENABLE" }))).toBe(
+    expect(describedText(screen.getByRole("button", { name: "7 ENABLE" }))).toBe(
       "NOT AVAILABLE: not yet metered",
     );
     await advanceReading(view, 300);
@@ -1740,7 +1858,7 @@ describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
     advance(300);
     await settle();
     advance(300);
-    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     advance(600);
     await user.click(screen.getByRole("button", { name: "WIREFRAME" }));
     // The wireframe draws no image to meter: the system inhibits AUTO once the meter times out.
@@ -1758,7 +1876,7 @@ describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
     advance(300);
     await settle();
     advance(300);
-    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     advance(600);
     expect([trapped, manual, exposureReadout()]).toEqual([
       expect.stringMatching(/INHIBITED · NO IMAGE TO METER$/),

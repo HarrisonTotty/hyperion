@@ -668,14 +668,18 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
       { kind: "fov", step: 1 },
       "grid",
       "label-block",
-      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`,
+      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, 7 ENABLE, 8 INHIBIT, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`,
     ]);
   });
 
-  it("reads 5 as the GRID row's, 6 as MAXIMIZE VIEW's and 9 as the label block's", () => {
-    expect(
-      [GRID_KEY, MAXIMIZE_KEY, LABEL_BLOCK_KEY].map((key) => viewDisplayKey(press(key))),
-    ).toEqual(["grid", "maximize", "label-block"]);
+  it("reads 5 as the GRID row's, 6 as MAXIMIZE VIEW's, 7 and 8 as ENABLE and INHIBIT and 9 as the label block's", () => {
+    expect(["5", "6", "7", "8", "9"].map((key) => viewDisplayKey(press(key)))).toEqual([
+      "grid",
+      "maximize",
+      "enable",
+      "inhibit",
+      "label-block",
+    ]);
   });
 
   it("reads no other key", () => {
@@ -687,19 +691,28 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
     ]);
   });
 
-  it("passes a key repeat through", () => {
-    expect(viewDisplayKey(press(MAXIMIZE_KEY, { repeat: true }))).toBeNull();
+  /** VIEW's display keys, 5 to 9. */
+  const DISPLAY_KEYS = ["5", "6", "7", "8", "9"];
+
+  it("passes a key repeat of each through", () => {
+    expect(DISPLAY_KEYS.map((key) => viewDisplayKey(press(key, { repeat: true })))).toEqual(
+      DISPLAY_KEYS.map(() => null),
+    );
   });
 
   it.each(["ctrlKey", "altKey", "metaKey", "shiftKey"] as const)(
-    "passes a press with %s through",
+    "passes a press of each with %s through",
     (modifier) => {
-      expect(viewDisplayKey(press(MAXIMIZE_KEY, { [modifier]: true }))).toBeNull();
+      expect(DISPLAY_KEYS.map((key) => viewDisplayKey(press(key, { [modifier]: true })))).toEqual(
+        DISPLAY_KEYS.map(() => null),
+      );
     },
   );
 
-  it("passes a press in a text field through", () => {
+  it("passes a press of each in a text field through", () => {
     const field = document.createElement("input");
-    expect(viewDisplayKey(press(GRID_KEY, { target: field }))).toBeNull();
+    expect(DISPLAY_KEYS.map((key) => viewDisplayKey(press(key, { target: field })))).toEqual(
+      DISPLAY_KEYS.map(() => null),
+    );
   });
 });

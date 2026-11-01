@@ -120,7 +120,14 @@ import {
   PRIMARY_VIEW_NAME,
   viewDisplayName,
 } from "./viewNames";
-import { autoNotAvailable, ExposurePanel, exposureNote } from "./ExposurePanel";
+import {
+  autoNotAvailable,
+  type ExposureCommandName,
+  exposureCommandRefusal,
+  exposureCommandResult,
+  ExposurePanel,
+  exposureNote,
+} from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
@@ -517,6 +524,8 @@ interface KeyTargets {
   readonly controlsView: ViewId;
   /** Gives a view's `GRID` its other setting, where its row stands (`GRID_KEY`). */
   readonly toggleGrid: (view: ViewId) => void;
+  /** Gives the exposure's command keyed (`ENABLE_KEY`, `INHIBIT_KEY`), as its button would. */
+  readonly keyExposure: (command: ExposureCommandName) => void;
 }
 
 /** A view's budget, which `viewBudgets` gives every view listed. */
@@ -1550,6 +1559,19 @@ function ViewStage({
       instruments.setGrid(each.slot.slot, !each.slot.grid);
     }
   };
+  // The exposure's command by its key, which acts only as its button would: one held back stays held
+  // back, and while MAXIMIZE VIEW hides the button its reason stands on the view's foot, for as long
+  // as the exposure it was keyed under stands (the owner's request, 2026-11-01).
+  const [keyedRefusal, setKeyedRefusal] = useState<KeyedRefusal | null>(null);
+  const keyExposure = (keyed: ExposureCommandName): void => {
+    const result = exposureCommandResult(keyed, exposure, meteringFor(metering, meter));
+    if (result.kind === "accepted") {
+      setKeyedRefusal(null);
+      onExposureChange(result.control);
+    } else {
+      setKeyedRefusal({ command: keyed, exposure });
+    }
+  };
   // The keys' listener reads the latest views and commands through a ref, current after every
   // commit, so that it is added once.
   const keysRef = useRef<KeyTargets>({
@@ -1558,6 +1580,7 @@ function ViewStage({
     canvases: [],
     controlsView,
     toggleGrid,
+    keyExposure,
   });
   useLayoutEffect(() => {
     keysRef.current = {
@@ -1566,6 +1589,7 @@ function ViewStage({
       canvases: instruments.slots.map((slot) => ({ id: slot.id, canvas: slot.canvas })),
       controlsView,
       toggleGrid,
+      keyExposure,
     };
   });
 
@@ -1575,7 +1599,14 @@ function ViewStage({
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       const action = viewKeyAction(event);
-      const gridKey = viewDisplayKey(event) === "grid";
+      const displayKey = viewDisplayKey(event);
+      // The exposure is the display's, every view's, whichever view a key acts on.
+      if (displayKey === "enable" || displayKey === "inhibit") {
+        event.preventDefault();
+        keysRef.current.keyExposure(displayKey);
+        return;
+      }
+      const gridKey = displayKey === "grid";
       if (action === null && !gridKey) {
         return;
       }
@@ -2020,6 +2051,15 @@ function ViewStage({
     controlsSelection === null
       ? null
       : (rows.find((row) => row.key === targetKey(controlsSelection))?.name ?? null);
+  // A command keyed and held back while its button is hidden: its name and its button's reason.
+  const keyedWhy =
+    maximized && keyedRefusal !== null && keyedRefusal.exposure === exposure
+      ? exposureCommandRefusal(keyedRefusal.command, exposure, meterShown)
+      : null;
+  const keyedReason =
+    keyedWhy === null || keyedRefusal === null
+      ? null
+      : `${EXPOSURE_COMMAND_NAMES[keyedRefusal.command]} ${keyedWhy}`;
   const footDot = <span className="view__foot-dot">·</span>;
   const standingPart = (line: ReactNode, key: string): ReactNode =>
     line === null ? null : (
@@ -2050,6 +2090,14 @@ function ViewStage({
       {standingPart(cameraStanding, "camera")}
       {standingPart(styleStanding, "style")}
       {standingPart(exposureStandingLine, "exposure")}
+      {standingPart(
+        keyedReason === null ? null : (
+          <p className="view-exposure__reason view-folds__standing">
+            <StatusText text={keyedReason} renderPart={exposureNote} />
+          </p>
+        ),
+        "keyed",
+      )}
     </>
   ) : null;
   const sideFolds: SideFolds = {
@@ -2494,6 +2542,18 @@ function interimAt(
   return input;
 }
 
+/** An exposure command keyed and held back, and the exposure it was keyed under. */
+interface KeyedRefusal {
+  readonly command: ExposureCommandName;
+  readonly exposure: ExposureControl;
+}
+
+/** The exposure's commands by the names their buttons carry. */
+const EXPOSURE_COMMAND_NAMES: Readonly<Record<ExposureCommandName, string>> = {
+  enable: "ENABLE",
+  inhibit: "INHIBIT",
+};
+
 /**
  * `MAXIMIZE VIEW`'s setting (the owner's request, 2026-11-01): `off`; on with the primary's label
  * block `folded` to its summary; or on with the whole `block`.
@@ -2846,7 +2906,8 @@ function ViewPanels({
  * free camera's ramp and damping (Design note 18).
  *
  * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `4` the style, `5`
- * the `GRID` while its row stands, `6` `MAXIMIZE VIEW` and while it is on `9` the label block, `]`
+ * the `GRID` while its row stands, `6` `MAXIMIZE VIEW` and while it is on `9` the label block, `7`
+ * `ENABLE` and `8` `INHIBIT`, each acting only where its button would, `]`
  * and `[` the next and previous target,
  * `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown, and the platform's primary modifier with the

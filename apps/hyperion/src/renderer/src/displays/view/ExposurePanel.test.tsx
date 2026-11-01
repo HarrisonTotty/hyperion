@@ -139,7 +139,7 @@ describe("ExposurePanel", () => {
         onChange={() => undefined}
       />,
     );
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect(enable).toHaveAttribute("aria-disabled", "true");
     expect(describedText(enable)).toBe("NOT AVAILABLE: the exposure is AUTO");
   });
@@ -148,7 +148,7 @@ describe("ExposurePanel", () => {
     render(
       <ExposurePanel exposure={DEFAULT_EXPOSURE} metering={METERED} onChange={() => undefined} />,
     );
-    const inhibit = screen.getByRole("button", { name: "INHIBIT" });
+    const inhibit = screen.getByRole("button", { name: "8 INHIBIT" });
     expect(inhibit).toHaveAttribute("aria-disabled", "true");
     expect(describedText(inhibit)).toBe("NOT AVAILABLE: the exposure is MAN");
   });
@@ -321,7 +321,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     await user.click(field);
     await user.keyboard("2{Enter}");
     expect(reading()).toBe("EV100 2.0 MAN");
-    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+    expect(screen.getByRole("button", { name: "7 ENABLE" })).toHaveAccessibleDescription(
       "NO IMAGE TO METER",
     );
   });
@@ -340,7 +340,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     await user.keyboard("99");
     await user.tab();
     const refused = [field.value, field.getAttribute("aria-invalid")];
-    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     expect([refused, field.value, field.getAttribute("aria-invalid"), reading()]).toEqual([
       ["99", "true"],
       "—",
@@ -377,7 +377,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     );
     const iso = screen.getAllByRole("term").at(-1);
     const notAvailable = noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER");
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect([
       iso?.textContent,
       iso !== undefined && follows(iso, field),
@@ -513,7 +513,7 @@ const INHIBIT_CONSEQUENCE = "Then AUTO resumes only on ENABLE";
 /** Renders the panel at a control and returns its `INHIBIT` button. */
 function inhibitAt(exposure: ExposureControl, metering: Metering = METERED): HTMLElement {
   render(<ExposurePanel exposure={exposure} metering={metering} onChange={() => undefined} />);
-  return screen.getByRole("button", { name: "INHIBIT" });
+  return screen.getByRole("button", { name: "8 INHIBIT" });
 }
 
 describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
@@ -563,13 +563,13 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
 
   it("changes nothing when the held-back INHIBIT is pressed", async () => {
     const { user, onChange } = renderEntry(OPERATOR);
-    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    await user.click(screen.getByRole("button", { name: "8 INHIBIT" }));
     expect([onChange.mock.calls.length, reading()]).toEqual([0, "EV100 4.0 INHIBITED · OPERATOR"]);
   });
 
   it("offers ENABLE there beside a metered value, with nothing beside it", () => {
     inhibitAt(OPERATOR);
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect([enable.getAttribute("aria-disabled"), enable.getAttribute("aria-describedby")]).toEqual(
       [null, null],
     );
@@ -577,7 +577,7 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
 
   it("holds ENABLE back there by NO IMAGE TO METER while nothing is metered", () => {
     inhibitAt(OPERATOR, NO_IMAGE);
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect(enable).toHaveAttribute("aria-disabled", "true");
     expect(enable).toHaveAccessibleDescription("NO IMAGE TO METER");
   });
@@ -590,7 +590,7 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
   it("holds NO IMAGE TO METER unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
     inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, NO_IMAGE);
     // ENABLE's row: the button and the reason beside it.
-    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    const enableRow = screen.getByRole("button", { name: "7 ENABLE" }).parentElement;
     expect([
       runsOf(noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER")),
       enableRow === null ? null : runsOf(enableRow),
@@ -650,7 +650,7 @@ function standingLine(): string | null {
 
 /** The `ENABLE` button. */
 function enableButton(): HTMLElement {
-  return screen.getByRole("button", { name: "ENABLE" });
+  return screen.getByRole("button", { name: "7 ENABLE" });
 }
 
 describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
@@ -691,7 +691,7 @@ describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
 
   it("takes the inhibit over on INHIBIT, as the operator's", async () => {
     const { user, onChange } = renderEntry(weighedNothing("lit"), nothingWeighed("lit"));
-    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    await user.click(screen.getByRole("button", { name: "8 INHIBIT" }));
     expect([onChange.mock.calls.at(-1)?.[0], reading()]).toEqual([
       { kind: "inhibited", ev100: 11.7, reason: "operator" },
       "EV100 11.7 INHIBITED · OPERATOR",
@@ -700,7 +700,7 @@ describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
 
   it("holds each meter's status unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
     inhibitAt(weighedNothing("average"), nothingWeighed("average"));
-    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    const enableRow = screen.getByRole("button", { name: "7 ENABLE" }).parentElement;
     expect([
       runsOf(noteOf("AUTO NOT AVAILABLE: STAR DISC ONLY")),
       enableRow === null ? null : runsOf(enableRow),

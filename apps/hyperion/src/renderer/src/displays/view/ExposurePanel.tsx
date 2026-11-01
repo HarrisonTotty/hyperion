@@ -19,6 +19,7 @@ import {
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import { type Metering, meterStatus } from "../../view/post/autoExposure";
+import { ENABLE_KEY, INHIBIT_KEY } from "./displayKeys";
 import { readingParts, unbrokenRuns } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
 
@@ -100,6 +101,36 @@ function refusalWords(reason: RefusalReason, metering: Metering): string {
   return reason === "not_metered" ? notMeteredWords(metering) : REFUSAL_WORDS[reason];
 }
 
+/** The exposure's congruent pair: `ENABLE` and `INHIBIT`, pressed or keyed. */
+export type ExposureCommandName = "enable" | "inhibit";
+
+/**
+ * What `command` does to the exposure as it stands, whether pressed or keyed (`ENABLE_KEY`,
+ * `INHIBIT_KEY`): `ENABLE` takes the meter's value, and neither acts where its button is held back.
+ */
+export function exposureCommandResult(
+  command: ExposureCommandName,
+  exposure: ExposureControl,
+  metering: Metering,
+): ExposureCommandResult {
+  return command === "enable"
+    ? enable(exposure, metering.kind === "metered" ? metering.ev100 : null)
+    : inhibit(exposure);
+}
+
+/**
+ * Why `command` is held back, in its button's words (`NOT AVAILABLE: the exposure is AUTO`), or
+ * `null` where it acts.
+ */
+export function exposureCommandRefusal(
+  command: ExposureCommandName,
+  exposure: ExposureControl,
+  metering: Metering,
+): string | null {
+  const result = exposureCommandResult(command, exposure, metering);
+  return result.kind === "refused" ? refusalWords(result.reason, metering) : null;
+}
+
 /**
  * The exposure's status phrases, which a note never breaks inside (decision-r07-owner-ux-signoff,
  * item 1): the operator's inhibit, as the reading shows it, and the causes that hold `ENABLE`
@@ -172,6 +203,8 @@ const INHIBIT_CONSEQUENCE = `Then ${ENABLE_ONLY}`;
 
 interface ExposureCommandProps {
   readonly label: string;
+  /** Its single key, shown before its label and named by `aria-keyshortcuts`. */
+  readonly commandKey: string;
   readonly result: ExposureCommandResult;
   /** The meter as it stands, which words a refusal for want of a metered value. */
   readonly metering: Metering;
@@ -191,6 +224,7 @@ interface ExposureCommandProps {
  */
 function ExposureCommand({
   label,
+  commandKey,
   result,
   metering,
   consequence,
@@ -209,13 +243,14 @@ function ExposureCommand({
         // Held back rather than disabled, so that it keeps focus and can say why.
         aria-disabled={refused ? "true" : undefined}
         aria-describedby={note === undefined ? undefined : noteId}
+        aria-keyshortcuts={commandKey}
         onClick={() => {
           if (result.kind === "accepted") {
             onChange(result.control);
           }
         }}
       >
-        {label}
+        <span className="control__key">{commandKey}</span> {label}
       </button>
       {note === undefined ? null : (
         <span
@@ -546,13 +581,15 @@ export function ExposurePanel({
       <div className="view-exposure__commands">
         <ExposureCommand
           label="ENABLE"
-          result={enable(exposure, metering.kind === "metered" ? metering.ev100 : null)}
+          commandKey={ENABLE_KEY}
+          result={exposureCommandResult("enable", exposure, metering)}
           metering={metering}
           onChange={onChange}
         />
         <ExposureCommand
           label="INHIBIT"
-          result={inhibit(exposure)}
+          commandKey={INHIBIT_KEY}
+          result={exposureCommandResult("inhibit", exposure, metering)}
           metering={metering}
           consequence={inhibitStates ? INHIBIT_CONSEQUENCE : undefined}
           onChange={onChange}

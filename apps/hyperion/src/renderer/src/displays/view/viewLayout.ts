@@ -56,6 +56,11 @@ export const FULL_MIN_WIDTH_REM = 99;
  *   only while the photorealistic style is asked for and offered, so never beside the style's
  *   reason (R10.T12.d's lean): the panel's tallest stays the reason with `BASELINE`, 182.5 px, the
  *   `GRID` row with `BASELINE` 179.5 px. Beside the reason it would have made the column 832 px.
+ * - **The exposure's keys** (`7 ENABLE`, `8 INHIBIT`, the owner's request, 2026-11-01), each shown
+ *   before its button's label, were re-measured hidden and offscreen at 1920 × 1080 (B612's shipped
+ *   fonts, in a pod): no state of the second column grows, its tallest without the refused entry
+ *   770.5 px before and after, so 792 px with it; in the compact layout's column a state grows by
+ *   at most 3 px, its tallest unchanged at 615 px.
  * - **The `GROUND` page** (R10.T12.d) stands in the camera panel's place in the first column, which
  *   it never makes taller: its parts give way, with the list at its floor, before it would.
  * - **Before.** 752 px, 47 rem, before R10.T12.a; 731.5 px (45.75 rem) before P05.T13, the

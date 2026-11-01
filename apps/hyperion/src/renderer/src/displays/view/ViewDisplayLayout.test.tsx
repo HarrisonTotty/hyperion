@@ -262,7 +262,7 @@ describe("VIEW's full layout (R07.T19.b)", () => {
       region("Exposure meter PRIMARY"),
       document.activeElement ===
         within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
-          name: "INHIBIT",
+          name: "8 INHIBIT",
         }),
     ]).toEqual(["LIT", null, true]);
   });

@@ -22,8 +22,18 @@ export const MAXIMIZE_KEY = "6";
  */
 export const LABEL_BLOCK_KEY = "9";
 
-/** What a display key asks: the `GRID` row's other setting, `MAXIMIZE VIEW`'s, or the label block's. */
-export type ViewDisplayKey = "grid" | "maximize" | "label-block";
+/**
+ * The exposure's congruent pair's keys, `7` `ENABLE` then `8` `INHIBIT`, adjacent and in the
+ * guide's order: each acts as its button does, and never where its button is held back.
+ */
+export const ENABLE_KEY = "7";
+export const INHIBIT_KEY = "8";
+
+/**
+ * What a display key asks: the `GRID` row's other setting, `MAXIMIZE VIEW`'s, the label block's,
+ * or the exposure's `ENABLE` or `INHIBIT`.
+ */
+export type ViewDisplayKey = "grid" | "maximize" | "label-block" | "enable" | "inhibit";
 
 /**
  * The display key of a press while `VIEW` is visible, or `null` where it has none or must pass
@@ -48,6 +58,10 @@ export function viewDisplayKey(press: KeyPress): ViewDisplayKey | null {
     key = "maximize";
   } else if (press.key === LABEL_BLOCK_KEY) {
     key = "label-block";
+  } else if (press.key === ENABLE_KEY) {
+    key = "enable";
+  } else if (press.key === INHIBIT_KEY) {
+    key = "inhibit";
   }
   return key;
 }
@@ -67,10 +81,10 @@ export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
 /**
  * The keys of the controls `MAXIMIZE VIEW` hides, which they show on themselves, named as the key
  * legend names its keys, each key then what it does, so that every key is found by sight while the
- * controls are hidden: the camera's presets, the style, the `GRID` row, the label block's key, the
- * targets and the field of view.
+ * controls are hidden: the camera's presets, the style, the `GRID` row, the exposure's pair, the
+ * label block's key, the targets and the field of view.
  */
-export const HIDDEN_CONTROL_KEYS = `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`;
+export const HIDDEN_CONTROL_KEYS = `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${ENABLE_KEY} ENABLE, ${INHIBIT_KEY} INHIBIT, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`;
 
 /**
  * The parts of `MAXIMIZE VIEW`'s line after the key legend, in order: {@link MAXIMIZED_KEYS}; the

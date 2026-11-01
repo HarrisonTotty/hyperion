@@ -255,7 +255,16 @@ export class ViewControls {
   /** A command of the shown `EXPOSURE` panel (`ENABLE`, `INHIBIT`), or `null`. */
   exposureButton(label: string): HTMLButtonElement | null {
     const panel = this.#document.querySelector("section.view-exposure:not([hidden])");
-    return panel === null ? null : buttonIn(panel, label);
+    if (panel === null) {
+      return null;
+    }
+    // Each reads its key before its label, `7 ENABLE` (the owner's request, 2026-11-01).
+    return (
+      [...panel.querySelectorAll("button")].find((button) => {
+        const text = button.textContent.trim();
+        return text === label || text.endsWith(` ${label}`);
+      }) ?? null
+    );
   }
 
   /**
