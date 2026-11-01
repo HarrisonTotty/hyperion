@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { planeParallelBeam } from "./discreteOrdinates";
-import { SLANT_FACTOR_FLOOR, sphericalBeamPath } from "./sphericalBeam";
+import { SLANT_FACTOR_FLOOR, sphericalBeamPath, sphericalSlantDepths } from "./sphericalBeam";
 
 /** A column of `count` layers, its interfaces from the top down, evenly over `topM`. */
 function interfaces(topM: number, count: number): Float64Array {
@@ -389,5 +389,19 @@ describe("the pseudo-spherical beam below the horizontal (R08.T14.d.2)", () => {
       const b = below.slantOpticalDepth[k] ?? Number.NaN;
       expect(Math.abs(a - b)).toBeLessThanOrEqual(1e-5 * a);
     }
+  });
+});
+
+describe("the slant depths alone (R08.T14.d.4's curved streams)", () => {
+  it("are the beam's slant depths at the interfaces asked, to the bit, above and below the horizontal", () => {
+    const heights = interfaces(300_000, 24);
+    const depths = exponentialDepths(heights, 8);
+    const asked = [0, 3, 12, 23, 24];
+    const same = [...COSINES, ...BELOW, -0.6, -1].every((mu) => {
+      const whole = sphericalBeamPath(2_575_000, heights, depths, mu).slantOpticalDepth;
+      const alone = sphericalSlantDepths(2_575_000, heights, depths, mu, asked);
+      return asked.every((k, i) => Object.is(alone[i], whole[k]));
+    });
+    expect(same).toBe(true);
   });
 });

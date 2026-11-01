@@ -275,6 +275,66 @@ export function sphericalBeamPath(
   };
 }
 
+/**
+ * τ_s at each of `interfaces` (indices into `interfaceHeightsM`, from the top), each the value
+ * {@link sphericalBeamPath}'s `slantOpticalDepth` holds there, to the bit, without the beam's
+ * transmissions and slant factors: +∞ in the planet's shadow. For `bake.ts`'s curved streams
+ * (R08.T14.d.4), which read the slant at the table's interfaces alone.
+ *
+ * @param interfaceHeightsM - As {@link sphericalBeamPath}'s, strictly descending (unchecked).
+ * @param layerOpticalDepths - As {@link sphericalBeamPath}'s, finite and at least 0 (unchecked).
+ * @throws RangeError for a radius not finite and above 0, or μ₀ outside [−1, 1].
+ */
+export function sphericalSlantDepths(
+  bottomRadiusM: number,
+  interfaceHeightsM: Float64Array,
+  layerOpticalDepths: ArrayLike<number>,
+  beamCosine: number,
+  interfaces: ArrayLike<number>,
+): Float64Array {
+  if (!(Number.isFinite(bottomRadiusM) && bottomRadiusM > 0)) {
+    throw new RangeError(`a column's sphere has a radius above 0, not ${bottomRadiusM} m`);
+  }
+  if (!(beamCosine >= -1 && beamCosine <= 1)) {
+    throw new RangeError(`μ₀ lies in [−1, 1], not ${beamCosine}`);
+  }
+  const layers = interfaceHeightsM.length - 1;
+  const height = (k: number): number => interfaceHeightsM[k] ?? Number.NaN;
+  const depthOf = (p: number): number => layerOpticalDepths[p] ?? Number.NaN;
+  const out = new Float64Array(interfaces.length);
+  if (!(beamCosine > 0)) {
+    const sines = (1 - beamCosine) * (1 + beamCosine);
+    const radius2 = bottomRadiusM * bottomRadiusM;
+    for (let i = 0; i < interfaces.length; i += 1) {
+      const h = height(interfaces[i] ?? Number.NaN);
+      out[i] =
+        (bottomRadiusM + h) * (bottomRadiusM + h) * sines > radius2
+          ? slantBelowHorizon(bottomRadiusM, height, depthOf, layers, h, beamCosine)
+          : Number.POSITIVE_INFINITY;
+    }
+    return out;
+  }
+  for (let i = 0; i < interfaces.length; i += 1) {
+    const k = interfaces[i] ?? Number.NaN;
+    const from = height(k);
+    let sum = 0;
+    for (let q = 0; q < k; q += 1) {
+      const tau = depthOf(q);
+      if (tau === 0) {
+        continue;
+      }
+      const top = height(q);
+      const bottom = height(q + 1);
+      const chord =
+        distanceTo(bottomRadiusM, from, top, beamCosine) -
+        distanceTo(bottomRadiusM, from, bottom, beamCosine);
+      sum += (tau * chord) / (top - bottom);
+    }
+    out[i] = sum;
+  }
+  return out;
+}
+
 /** {@link sphericalBeamPath} for μ₀ ≤ 0 (the module's remarks, "Below the horizontal"). */
 function beamBelowHorizon(
   bottomRadiusM: number,

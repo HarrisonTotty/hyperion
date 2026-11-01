@@ -178,7 +178,7 @@ import {
   type ExpSumOptions,
   fitExpSum,
 } from "./expSum";
-import { type SphericalBeam, sphericalBeamPath } from "./sphericalBeam";
+import { type SphericalBeam, sphericalBeamPath, sphericalSlantDepths } from "./sphericalBeam";
 import { EMISSION_CHANNEL_WEIGHTS, planckRadiance } from "../thermal";
 import {
   mediumTemperatureK,
@@ -1604,6 +1604,8 @@ export interface BakeBandOptions {
  * @param interfaceHeightsM - The interfaces' h\*, m, from the top down: L + 1.
  * @param depths - Each layer's vertical optical depth from the top, the solve's: L.
  * @param cosines - The streams' cosines, each in (0, 1].
+ * @param interfaces - The interfaces whose shares are made, indices from the top; every one by
+ *   default. The others hold 1.
  */
 export function curvedStreamShares(
   radiusM: number,
@@ -1611,6 +1613,7 @@ export function curvedStreamShares(
   depths: Float64Array,
   cosines: ArrayLike<number>,
   travel: "up" | "down",
+  interfaces: ArrayLike<number> = Array.from({ length: depths.length + 1 }, (_, q) => q),
 ): Float64Array {
   const layers = depths.length;
   const count = cosines.length;
@@ -1631,15 +1634,17 @@ export function curvedStreamShares(
   const shares = new Float64Array((layers + 1) * count).fill(1);
   for (let j = 0; j < count; j += 1) {
     const mu = cosines[j] ?? Number.NaN;
-    const path = sphericalBeamPath(
+    const slants = sphericalSlantDepths(
       radiusM,
       interfaceHeightsM,
       depths,
       travel === "up" ? -mu : mu,
-    ).slantOpticalDepth;
-    for (let q = 0; q <= layers; q += 1) {
+      interfaces,
+    );
+    for (let i = 0; i < interfaces.length; i += 1) {
+      const q = interfaces[i] ?? Number.NaN;
       const flat = -expm1(-(column[q] ?? 0) / mu);
-      const slant = path[q] ?? Number.POSITIVE_INFINITY;
+      const slant = slants[i] ?? Number.POSITIVE_INFINITY;
       if (flat > 0 && Number.isFinite(slant)) {
         shares[q * count + j] = -expm1(-slant) / flat;
       }
@@ -1760,8 +1765,12 @@ function solveOf(
   const { nodes, weights } = solution.quadrature;
   const n = nodes.length;
   // Each stream's curved path's share (the module's remarks, "Curved streams"), or none.
+  // At the table's interfaces alone, where the source is formed.
+  const read = curved ? tableInterfaces(prepared) : [];
   const sharesOf = (cosines: ArrayLike<number>, travel: "up" | "down"): Float64Array | null =>
-    curved ? curvedStreamShares(radius, interfaceHeightsM, scaledDepths, cosines, travel) : null;
+    curved
+      ? curvedStreamShares(radius, interfaceHeightsM, scaledDepths, cosines, travel, read)
+      : null;
   const nodesUp = sharesOf(nodes, "up");
   const nodesDown = sharesOf(nodes, "down");
   const usersUp = sharesOf(grid.upwardCosines, "up");
