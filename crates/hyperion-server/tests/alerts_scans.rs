@@ -341,8 +341,10 @@ async fn alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_d
         settled.expected_hosts.is_some_and(|hosts| hosts > 0.0),
         "{settled:?}"
     );
+    // The day's detections come from the next window's scan, whose X-ray binaries are walked in the
+    // background again, so they may arrive before the move is answered or after it.
     let id = move_to(&mut client, subscription, &sun, after(start, DAY)).await;
-    let arrived = contacts_until_answered(&mut client, id).await;
+    let arrived = contacts_until(&mut client, id, |_| true).await;
     assert!(!arrived.is_empty(), "the X-ray binaries' detections arrive");
     client.close().await;
     server.stop().await;
