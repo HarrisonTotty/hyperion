@@ -23,7 +23,8 @@
 //!   where no corner's exact fate is a white dwarf. Between, its track tests the window at its own
 //!   composition in the mass its main sequence ends with, between its track mass and that less
 //!   the cluster's white dwarfs' main-sequence loss ([`white_dwarf_main_sequence_loss`]): it is
-//!   kept below the window's start and refused where even the lighter mass is past it.
+//!   kept below the window's start and refused where even the lighter mass is past it, and in
+//!   the band between its own main sequence's end mass decides.
 //! - **A neutron star** is refused when the ordinary mode's slowest kick, the rank clamp's floor
 //!   (about 33 km/s), is at or above the escape speed, in a cluster old enough that its star has
 //!   surely died, and a low-mode kick, judged on its pair's systemic speed, either is too fast or
@@ -389,7 +390,14 @@ pub(crate) fn tabulated_fit(
             if m0.value() < start {
                 return kept();
             }
-            None
+            // In the band between, the mass its main sequence ends with decides, found from its
+            // main sequence alone, a fifth of its track.
+            let options = TrackOptions::default().with_rules(rules);
+            if sse::main_sequence_end_mass(m0, composition, &draws, options).value() < start {
+                kept()
+            } else {
+                Some(false)
+            }
         }
         ClassKind::NeutronStar => {
             let law = StandardKickLaw::under(rules);
@@ -1330,6 +1338,87 @@ mod tests {
         );
         assert!(
             kept > 20 && refused > 20 && 10 * left < kept + refused,
+            "{kept}, {refused}, {left}"
+        );
+    }
+
+    /// A white dwarf above each fixture globular's ceiling is decided only as its track decides
+    /// it, and nearly always: over 64 members' first four attempts at sixteen masses from the
+    /// ceiling to the stripped and the unstripped refusals' tops, at no and the greatest helium
+    /// excess.
+    #[test]
+    fn a_white_dwarf_above_the_ceiling_is_decided_as_its_track_decides() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let (mut kept, mut refused, mut left) = (0_u32, 0_u32, 0_u32);
+        for (feature, model, _) in clusters(galaxy) {
+            let v_eff = model.escape_speed_effective().value();
+            let table = model.remnant_table(rules);
+            let (bottom, top) = (
+                table.white_dwarf_ceiling.value(),
+                table.highest_iron_core_mass.value() + WHITE_DWARF_TOP_MARGIN,
+            );
+            for index in 0..64 {
+                let system = SystemId::from(
+                    FeatureMemberId::new(
+                        feature.id().feature_ref(),
+                        MemberSlot::InCell {
+                            band: MassBand::C.layer(),
+                            level: 0,
+                            cell: [8, 8, 8],
+                            index,
+                        },
+                    )
+                    .unwrap(),
+                );
+                for enrichment in [0.0, 1.0] {
+                    let abundances = MemberAbundances::of(
+                        enrichment,
+                        model.initial_mass(),
+                        model.parameters().fe_h,
+                        Dex::new(0.0),
+                    );
+                    let comp =
+                        Composition::from_fe_h(model.parameters().fe_h, abundances.helium_excess);
+                    for attempt in 0..4 {
+                        let address = (galaxy.seed(), system, attempt);
+                        for i in 0..16 {
+                            let mass = bottom + (top - bottom) * f64::from(i) / 16.0;
+                            let speeds = (v_eff, v_eff);
+                            let Some(fits) = tabulated_fit(
+                                (ClassKind::WhiteDwarf, mass),
+                                &comp,
+                                address,
+                                (model.age(), speeds),
+                                &model,
+                                rules,
+                            ) else {
+                                left += 1;
+                                continue;
+                            };
+                            let track = remnant_fits(
+                                ClassKind::WhiteDwarf,
+                                mass,
+                                &comp,
+                                address,
+                                model.age(),
+                                speeds,
+                                rules,
+                            );
+                            assert_eq!(
+                                fits, track,
+                                "{mass} M☉, {comp:?}, attempt {attempt} of member {index}"
+                            );
+                            kept += u32::from(fits);
+                            refused += u32::from(!fits);
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("white dwarfs above the ceiling: {kept} kept, {refused} refused, {left} left");
+        assert!(
+            kept > 100 && refused > 100 && 50 * left < kept + refused,
             "{kept}, {refused}, {left}"
         );
     }

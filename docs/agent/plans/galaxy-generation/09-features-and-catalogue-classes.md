@@ -5483,3 +5483,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   each. A white dwarf below the ceiling reads only its kick's speed, through
   `StandardKickLaw::white_dwarf_kick_speed` (which replaces `white_dwarf_kick`; `maxwellian` takes
   its speed from `maxwellian_speed`). A neutron star refused by its mark reads only the mark.
+- **P09.T10 perf, the white dwarfs' band (lane `galaxy-centre-core`, 2026-11-01; bit for bit).**
+  In the band between the window decisions, a white dwarf is decided by its own main sequence's
+  end mass (`sse::main_sequence_end_mass`) against its window's start, so no white dwarf above the
+  ceiling builds its track.
