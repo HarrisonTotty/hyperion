@@ -287,7 +287,7 @@ describe("the descent spike over a served world (R10.T15.b)", () => {
     expect(failed).toEqual([SERVED_LINK_INCOMPATIBLE]);
   });
 
-  it("says the star discs were not received, with the failure's code and words, in plain text", async () => {
+  it("says the star discs were not received, with the server's words and not its code, in plain text", async () => {
     const { socket, failed } = renderServed(FIXTURE_EARTH);
     await play(() => {
       socket.serverWelcomes(23);
@@ -302,10 +302,8 @@ describe("the descent spike over a served world (R10.T15.b)", () => {
       }
       socket.serverRejects(sky.id, { code: "queue_full", message: "busy", field: null });
     });
-    const said = starDiscsNotReceived("queue_full: busy");
-    expect(said).toBe(
-      "TERRAIN NOT MEASURED: star discs not received (queue_full: busy), relaunch to retry",
-    );
+    const said = starDiscsNotReceived("busy");
+    expect(said).toBe("TERRAIN NOT MEASURED: star discs not received (busy), relaunch to retry");
     expect(shownLine(said).fault).toBe(false);
     expect(failed).toEqual([said]);
   });

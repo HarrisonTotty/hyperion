@@ -307,8 +307,9 @@ export interface HostDiscRequests {
 }
 
 /**
- * A served body's host discs, or why the server's sky gave none: its failure's code and words
- * (`reason`, `queue_full: the pool is full`), and the sentence for a log that names the body.
+ * A served body's host discs, or why the server's sky gave none: its failure's words (`reason`,
+ * `the pool is full`), shown as every request's refusal is, its code never reaching the screen;
+ * and the sentence for a log, which names the body and the code.
  */
 export type HostDiscsRead =
   | { readonly ok: true; readonly discs: ReadonlyArray<HostDiscDto> }
@@ -343,11 +344,11 @@ export async function servedHostDiscs(
   if (outcome.ok) {
     return { ok: true, discs: outcome.response.hosts };
   }
-  const reason = `${outcome.error.code}: ${outcome.error.message}`;
+  const { code, message } = outcome.error;
   return {
     ok: false,
-    reason,
-    message: `the sky's host discs at ${served.body.id} failed: ${reason}`,
+    reason: message,
+    message: `the sky's host discs at ${served.body.id} failed: ${code}: ${message}`,
   };
 }
 

@@ -311,7 +311,7 @@ describe("a served body's host discs", () => {
     ]);
   });
 
-  it("gives the server's refusal as its reason, naming its code", async () => {
+  it("gives the server's words as its reason, and names its code only in the log", async () => {
     const read = await servedHostDiscs(
       {
         requestBulk: () => ({
@@ -327,7 +327,7 @@ describe("a served body's host discs", () => {
     );
     expect(read).toEqual({
       ok: false,
-      reason: "queue_full: the pool is full",
+      reason: "the pool is full",
       message: `the sky's host discs at ${FIXTURE_EARTH} failed: queue_full: the pool is full`,
     });
   });

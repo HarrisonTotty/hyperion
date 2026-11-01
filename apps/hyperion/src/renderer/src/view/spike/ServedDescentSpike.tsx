@@ -32,8 +32,8 @@ export const SERVED_LINK_INCOMPATIBLE = `${LINK_STATUS_LABEL.incompatible}: serv
 
 /**
  * The status where the served world's host discs could not be had of the server's sky, a request
- * that a relaunch may answer, with the failure's own code and words (`reason`, as
- * `servedHostDiscs` gives it).
+ * that a relaunch may answer, with the server's reason in its own words (`reason`, as
+ * `servedHostDiscs` gives it), as the guide's row has it: `(<the server's reason>)`.
  */
 export function starDiscsNotReceived(reason: string): string {
   return `TERRAIN NOT MEASURED: star discs not received (${reason}), ${SPIKE_RETRY}`;
