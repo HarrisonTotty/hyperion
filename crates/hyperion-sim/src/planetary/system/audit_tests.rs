@@ -64,7 +64,6 @@ use crate::planetary::hooks::surface::night_floor;
 use crate::planetary::moons::regular::WATER_DENSITY;
 use crate::planetary::record::{BulkProperties, Modelled};
 use crate::planetary::system::moon_ice::HOT_ICE_LIMIT;
-use crate::planetary::system::planet_lag::planet_lag_in_force;
 use crate::substance::Element;
 use crate::substance::phase::{high_pressure_melting, ice_ih_melting_temperature};
 use crate::units::{Kelvin, Kilograms, Metres, Pascals, WattsPerSquareMetre};
@@ -623,14 +622,13 @@ impl AuditBody {
         // (`member_lag`).
         let asked = icy_member_ice(case.body).is_some()
             || SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice;
-        // From 26 an airless planet over a hot ice bulk takes the lag (`planet_lag`): its lagged
+        // An airless planet over a hot ice bulk takes the lag (`planet_lag`, from 26): its lagged
         // derivation is airless, its bulk ice and its T0 hot, as its bare one was.
-        let airless_ice_planet = planet_lag_in_force()
-            && matches!(
-                case.derived.atmosphere().published_state(),
-                SurfaceState::Airless | SurfaceState::Tenuous
-            )
-            && SurfaceMaterial::of(&case.derived.fractions()) == SurfaceMaterial::Ice
+        let airless_ice_planet = matches!(
+            case.derived.atmosphere().published_state(),
+            SurfaceState::Airless | SurfaceState::Tenuous
+        ) && SurfaceMaterial::of(&case.derived.fractions())
+            == SurfaceMaterial::Ice
             && hot;
         match &case.body.part {
             Part::Planet(_) if lagged && !airless_ice_planet => {

@@ -1,6 +1,6 @@
 //! The wrong classes P14.T33.c's census found under the version's rules, stated by name under every
 //! 26 hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
-//! the three airless planets over a hot ice bulk (`PLANET_LAG_VERSION`), the 29 runaways over a
+//! the three airless planets over a hot ice bulk (P14.T56.g's planet lag), the 29 runaways over a
 //! sea (`SEA_DECK_VERSION`) and the two hot `Snowball`s a locked world's deck set off
 //! (`LOCKED_CLIMATE_VERSION`), each body generated afresh in its system, as the census walks it;
 //! and the Solar System table, unchanged to the bit by the eyeball's rule and the dry deck.
@@ -25,8 +25,7 @@ use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhaseTemplate};
 use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::surface::Forcing;
-use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
-use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
+use crate::planetary::record::{RecordSection, SectionState};
 use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
 
 /// The census's 13 `Snowball`s above 273.15 K under the version's rules, every one locked 1:1.
@@ -258,32 +257,6 @@ fn assert_airless_ice_planets_take_the_rock_lag(bodies: &[(usize, &str)]) {
             (0.9..=1.0).contains(&t_eq_over_t0),
             "{}: {t_eq_over_t0}",
             body.1
-        );
-        let records = |rules| {
-            with_every_26_hold(|| {
-                with_planet_lag(rules, || {
-                    let ctx = SystemContext::from_record(&sample.0, &sample.1[body.0]);
-                    generate(SEED, &ctx)
-                        .snapshot_at(&ctx, crate::time::UniverseTime::EPOCH)
-                        .bodies()
-                        .to_vec()
-                })
-            })
-        };
-        let (held, lagged) = (
-            records(PlanetLagRules::Held),
-            records(PlanetLagRules::Airless),
-        );
-        let moved: Vec<String> = held
-            .iter()
-            .zip(&lagged)
-            .filter(|(a, b)| a != b)
-            .map(|(_, record): (_, &BodyRecord)| record.identity().id().to_string())
-            .collect();
-        assert_eq!(
-            moved,
-            [body.1],
-            "only the lagged planet moves in its system"
         );
     }
 }

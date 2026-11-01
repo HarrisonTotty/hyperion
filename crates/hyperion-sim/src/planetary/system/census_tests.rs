@@ -932,7 +932,7 @@ const FIXED_UNDER_25: [&str; 1] = ["the audit's M6 fails on members"];
 /// ([`Census::assert_fixed_under_26`]), with 25's ([`FIXED_UNDER_25`]): no `Snowball` above
 /// 273.15 K and none its own figures do not make (`LOCKED_STATE_VERSION`), no runaway over a sea
 /// (`SEA_DECK_VERSION`); and of the audit's, none of M3 and M6 on any kind of body (the moon's own
-/// sky; `PLANET_LAG_VERSION`). The envelope watch's count is printed, not asserted: no rule yet
+/// sky; P14.T56.g's planet lag). The envelope watch's count is printed, not asserted: no rule yet
 /// keeps a body whose passes settle on a critical point on one side of it.
 const FIXED_UNDER_26: [&str; 9] = [
     "a Snowball above 273.15 K",

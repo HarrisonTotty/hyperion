@@ -440,9 +440,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the dry deck, `SEA_DECK_VERSION` (P14.T53.b part 1 (b)–(c)), at `SeaDeckRules::Dry` through
 ///   `with_sea_deck`: (c) reads the published label, and a decked runaway over liquid water is
 ///   solved without the deck;
-/// - the planets' lag, `PLANET_LAG_VERSION` (P14.T56.g's rule for an airless planet), at
-///   `PlanetLagRules::Airless` through `with_planet_lag`: an airless or tenuous planet over a hot
-///   ice bulk derived once more under the rock lag.
 /// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
 /// - the tidal and encounter stripping, `STRIP_VERSION` (P14.T29), at `StripRules::Stripped`
@@ -482,13 +479,11 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
-    use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
-    let run = move || with_planet_lag(PlanetLagRules::Airless, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
