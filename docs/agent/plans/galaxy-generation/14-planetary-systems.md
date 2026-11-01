@@ -3191,7 +3191,8 @@ one log-normal draw per resource of 0.3 dex for what the model leaves out.
   at fixed composition; radioactives halve over 4.5 Gyr for the U-238 share; a metal-poor halo
   planet is poorer in every metal than its disc twin.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::resources`.
-- _Built_ 2026-11-01, server-only, on no record: Risks, "Deviations in P14.T26, as built".
+- _Built_ 2026-11-01, server-only, on no record: Risks, "Deviations in P14.T26, as built". Its
+  abundances by ratio to the rock, held at 27: Risks, "Deviations in P14.T26's ratios, as built".
 
 ### Phase F: special hosts
 
@@ -33886,3 +33887,24 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     and the server's `planetary.json` giants' envelopes; restate the 26 tests the hold breaks
     (`photochem`'s `the_network_dissociates_as_parmentier_s_fit_does`, the 26 equilibrium tests
     `carriers.rs` reruns). The slow tier was not measured.
+- **Deviations in P14.T26's ratios, as built (`fix-p14-t26-ratios`, 2026-11-01).** Held at 27
+  (`hooks::resources::RESOURCE_RATIOS_VERSION`; `ResourceRatiosRules::{Held, Ratios}`,
+  `with_resource_ratios`, one line in `with_every_27_hold`; tripwire
+  `the_resource_ratios_are_held_only_until_the_27_bump`). Nothing moves at 24, 25 or 26.
+  - _`ResourceInputs` gains_ `host_magnesium_to_silicon` and `host_carbon_to_oxygen` (plain
+    `f64`s), which `resource_section` fills from the system's `HostAbundances`
+    (`PlanetarySystem::host_abundances`, now the crust's and the envelope's too).
+    `crust::{core_share, iron_oxide_per_iron}` are `pub(crate)`.
+  - _The arm:_ no 10^[Fe/H]. s = 10^(−[α/Fe]) on the non-α lithophiles, rare earths, ⁴⁰K and a
+    crust's V–Ni and platinum group; a bulk's metal is its own, a crust's Fe its mantle's `FeO`;
+    hydrocarbons × host C/O ÷ solar. The odds form and the fill cap stay; neither binds
+    (`under_27_neither_the_odds_nor_the_cap_binds`: under 2%, and metals ≤ 0.93 of the solids).
+  - _Restated tests (lean, 2026-11-01):_ "iron group scales with 10^[Fe/H]" becomes
+    `under_27_the_metallicity_moves_no_fraction_at_fixed_ratios`; "poorer in every metal" becomes
+    `under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals`. The built tests run on
+    `Held`; the bounds and ²³⁸U tests run under both arms.
+  - _For 27's bump:_ delete what the tripwire lists; delete or restate the three held tests (the
+    iron group's scale, the halo planet, the crust at solar abundances); re-bless
+    `planetary/resources` by name. Measured under every 27 hold: 193 of its 358 `Ok` bodies move
+    by the ratios (1,948 lines), and 20 bodies by the other holds (5 of them changing state). No
+    other golden reads it.

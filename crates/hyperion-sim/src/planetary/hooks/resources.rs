@@ -35,7 +35,7 @@
 //!   earths CI's in proportion to its aluminium, as refractory lithophiles are.
 //!
 //! Each metal group is its reservoirs' shares times their concentrations, scaled by its host's
-//! abundances by the rules its hold gives ([`RESOURCE_RATIOS_VERSION`]):
+//! abundances by the rules its hold gives (`RESOURCE_RATIOS_VERSION`):
 //!
 //! - **Below generator version 27**, as the plan writes it: times 10^\[Fe/H\], and for the α
 //!   elements among the light lithophiles (Mg, Ca, Ti) 10^(\[Fe/H\] + \[α/Fe\]).
@@ -152,8 +152,9 @@ pub(crate) enum ResourceRatiosRules {
     /// Version 26's and before: the metals take 10^\[Fe/H\], the α lithophiles
     /// 10^(\[Fe/H\] + \[α/Fe\]), and a crust's iron is the bulk silicate Earth's.
     Held,
-    /// Version 27's: each element keeps its ratio to the rock's α elements, the others taking
-    /// 10^(−\[α/Fe\]), a bulk's metal is its own and a crust's iron its own mantle's `FeO`.
+    /// Version 27's: a kilogram of rock keeps its α elements, uranium and thorium whatever its
+    /// host's \[Fe/H\], the other metals taking 10^(−\[α/Fe\]); a bulk's metal is its own, and a
+    /// crust's iron its own mantle's `FeO`.
     Ratios,
 }
 
@@ -458,12 +459,12 @@ pub struct ResourceInputs<'a> {
     pub age: Years,
     /// Its host's Mg/Si by number (P14.T50.a's
     /// [`HostAbundances::magnesium_to_silicon`](crate::planetary::chem::HostAbundances::magnesium_to_silicon),
-    /// as its crust reads it), positive, from which from generator version 27
-    /// ([`RESOURCE_RATIOS_VERSION`]) a silicate crust's iron, its mantle's `FeO`, follows.
+    /// as its crust reads it), positive: from generator version 27 (`RESOURCE_RATIOS_VERSION`) a
+    /// silicate crust's iron is its mantle's `FeO`, which reads it.
     pub host_magnesium_to_silicon: f64,
     /// Its host's C/O by number
     /// ([`HostAbundances::carbon_to_oxygen`](crate::planetary::chem::HostAbundances::carbon_to_oxygen)),
-    /// positive, over the Sun's of which from generator version 27 a bulk's hydrocarbons scale.
+    /// positive: from generator version 27 a bulk's hydrocarbons scale with it over the Sun's.
     pub host_carbon_to_oxygen: f64,
 }
 
