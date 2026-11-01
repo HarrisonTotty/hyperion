@@ -367,6 +367,17 @@ impl SystemRecord {
             ..self
         }
     }
+
+    /// This record with its primary's initial mass `mass`, every other mark kept: with
+    /// [`with_age_at_epoch`](Self::with_age_at_epoch), a test's way to sample the marks of a
+    /// layer-E record across its band (plan 09, P09.T38's complementarity).
+    #[must_use]
+    pub(crate) const fn with_primary_initial_mass(self, mass: SolarMasses) -> Self {
+        Self {
+            primary_initial_mass: mass,
+            ..self
+        }
+    }
 }
 
 impl SystemRecord {

@@ -1223,3 +1223,83 @@ fn lbv_hosts_over_seeds() {
         );
     }
 }
+
+/// P09.T38's fault, fixed at 27 and held there: a living runaway or walkaway of the grid is one of
+/// plan 08's displaced systems, which the class, drawing the field's systems alone, never places.
+/// Under the 26 arm the grid's claim takes it all the same when its window overlaps the source
+/// horizon, so that nobody holds it; under every 27 hold the grid keeps it. A living field star
+/// so aged is claimed under either arm.
+#[test]
+fn a_displaced_host_is_the_grid_s_from_27() {
+    use crate::galaxy::displaced::DisplacedKind;
+    use crate::galaxy::rules::GalaxyRules;
+    /// `base` re-massed to 60 M☉ and aged a thousand years into its window, read from a probe
+    /// long dead, whose track covers its whole life.
+    fn host_of(galaxy: &Galaxy, base: &SystemRecord) -> SystemRecord {
+        let probe = base
+            .with_primary_initial_mass(SolarMasses::new(60.0))
+            .with_age_at_epoch(Years::new(3.0e7));
+        let probed = SystemStars::generate_in(galaxy, &probe, MultiplicityContext::ForcedSingle);
+        let (start, _) = probed.lbv_window().expect("a 60 M☉ star has a window");
+        let since = start.since_epoch().as_julian_years_f64();
+        probe.with_age_at_epoch(Years::new(3.0e7 + since + 1.0e3))
+    }
+    for (rules, claimed) in [
+        (GalaxyRules::every_26_hold(), true),
+        (GalaxyRules::every_27_hold(), false),
+    ] {
+        let galaxy =
+            Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+                .expect("the Milky Way fixture builds");
+        let (mut cell, mut ejected, mut field) = (Vec::new(), None, None);
+        for x in (-4_096..4_096).step_by(128) {
+            let at = GalacticPosition::from_light_years([f64::from(x), 26_000.0, 0.0])
+                .expect("in the cube");
+            placement::generate_cell(
+                &galaxy,
+                CellKey::containing(Layer::E, &at).expect("a cell"),
+                &mut cell,
+            );
+            ejected = ejected.or_else(|| {
+                cell.iter().copied().find(|r| {
+                    matches!(
+                        r.placement_class(),
+                        PlacementClass::Displaced {
+                            kind: DisplacedKind::Runaway | DisplacedKind::Walkaway,
+                            ..
+                        }
+                    )
+                })
+            });
+            field = field.or_else(|| {
+                cell.iter()
+                    .copied()
+                    .find(|r| r.placement_class() == PlacementClass::Alive)
+            });
+            if ejected.is_some() && field.is_some() {
+                break;
+            }
+        }
+        let ejected = host_of(
+            &galaxy,
+            &ejected.expect("a runaway or walkaway at the Sun's radius"),
+        );
+        let field = host_of(
+            &galaxy,
+            &field.expect("a living field star at the Sun's radius"),
+        );
+        for host in [ejected, field] {
+            assert!(may_host(host.primary_initial_mass(), host.age_at_epoch()));
+            assert!(
+                horizon_window(&SystemStars::generate_in(
+                    &galaxy,
+                    &host,
+                    MultiplicityContext::ForcedSingle
+                ))
+                .is_some()
+            );
+        }
+        assert_eq!(lbv_claims(&galaxy, &ejected), claimed, "{rules:?}");
+        assert!(lbv_claims(&galaxy, &field), "{rules:?}");
+    }
+}

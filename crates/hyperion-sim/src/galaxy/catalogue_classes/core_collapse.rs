@@ -171,13 +171,16 @@ const RATE_MARGIN: f64 = 1.0 / 1_099_511_627_776.0;
 /// The generator version from which the core-collapse class follows the young field's runaways and
 /// walkaways (plan 09, P09.T33.b): the field term at its band budget keeps the deaths its ejection
 /// marks leave it, and one term per band-E runaway and walkaway class of the thin disc and the
-/// nuclear disc places the rest (module documentation).
+/// nuclear disc places the rest (module documentation). From it too the luminous blue variables'
+/// claim leaves the displaced classes' systems on the grid, since that class follows the field's
+/// alone (P09.T38's fault; `lbv::claims_its_placement`).
 ///
 /// Below it the class takes the held arm, [`RunawayDeathsRules::FieldOnly`], the code of version 26
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`RunawayDeathsRules`] with
 /// its `FieldOnly` arm, the galaxy rules' `runaway_deaths` field, the match on it in
-/// [`CoreCollapseProcess::new`] (whose terms `candidate` and `bound` read), and the tripwire
+/// [`CoreCollapseProcess::new`] (whose terms `candidate` and `bound` read) and the one in
+/// `lbv::claims_its_placement`, and the tripwire
 /// (`the_runaway_deaths_are_held_only_until_the_27_bump`).
 pub(crate) const RUNAWAY_DEATHS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 

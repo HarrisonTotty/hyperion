@@ -74,6 +74,10 @@
 //!   its epoch position moved along its velocity to T, as plan 08's `explosion_site` moves a grid
 //!   record's, then [`DeathMarks::of`] and [`claims`] in the field.
 //!
+//! On the grid's side the claim, `lbv_claims`, asks the same of a layer-E record, and from 27 of a
+//! field system's alone: the class's candidates are the field's, so a displaced class's system
+//! (a runaway, a walkaway, a kicked remnant) stays on the grid (P09.T38).
+//!
 //! **No redraw (lean, 2026-10-31).** The plan has a candidate redraw its star with
 //! `StarDraws::for_attempt` until its window overlaps. No draw moves a window, so a redraw would
 //! keep every candidate whose first attempt fails failing, at the cost of a track per attempt: the
@@ -92,7 +96,7 @@
 //! [`tables::lbv`]: crate::tables::lbv
 //! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
-use super::core_collapse::class_site_velocity;
+use super::core_collapse::{RunawayDeathsRules, class_site_velocity};
 use super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
@@ -100,7 +104,7 @@ use super::supernova::{DeathMarks, Surroundings, claims};
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::bounds::{BOUND_MARGIN, CellBox};
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
+use crate::galaxy::displaced::{ExplosionSite, PlacementClass, death_in_interval_under};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
@@ -188,7 +192,8 @@ pub fn horizon_window(stars: &SystemStars) -> Option<(UniverseTime, UniverseTime
 /// (`claims_with` asks its claim only of a record with a recent death) must not hold it. It is
 /// the class's test on the grid's side: P09.T35's carve-out asks it under its claimed arm, from
 /// generator version 26 (`placement::candidate::catalogue_claims`), and until then the grid keeps
-/// every system the class places too.
+/// every system the class places too. From 27 it claims the field's systems alone
+/// ([`claims_its_placement`]).
 ///
 /// # Panics
 ///
@@ -196,6 +201,7 @@ pub fn horizon_window(stars: &SystemStars) -> Option<(UniverseTime, UniverseTime
 #[must_use]
 pub(crate) fn lbv_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
     record.layer() == Layer::E
+        && claims_its_placement(galaxy, record)
         && may_host(record.primary_initial_mass(), record.age_at_epoch())
         && horizon_window(&SystemStars::generate_with(
             galaxy,
@@ -204,6 +210,26 @@ pub(crate) fn lbv_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
             MultiplicityContext::ForcedSingle,
         ))
         .is_some()
+}
+
+/// Whether the class may claim a grid record of `record`'s placement class: any below 27, and from
+/// 27 (the runaways' hold, [`RunawayDeathsRules::Ejected`], P09.T33.b) a field system's alone, not
+/// one of plan 08's displaced classes (a runaway, a walkaway or a kicked remnant).
+///
+/// The class draws the field's systems at their share of each component
+/// ([`Galaxy::field_component_share`], the stay share under plan 08's displaced classes), so no
+/// candidate of it can be a displaced system: under the held arm a displaced record whose window
+/// overlaps the source horizon is claimed by nobody, a lost system (P09.T38's complementarity, a
+/// fault fixed at 27, its output held). From 27 the grid keeps it, a host the class does not list,
+/// until the class follows the runaways as the core collapses do (P09.T43's runaway half).
+#[must_use]
+pub(crate) fn claims_its_placement(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    match galaxy.rules().runaway_deaths {
+        RunawayDeathsRules::FieldOnly => true,
+        RunawayDeathsRules::Ejected => {
+            !matches!(record.placement_class(), PlacementClass::Displaced { .. })
+        }
+    }
 }
 
 /// One of the young field's components, as the class thins on it.
