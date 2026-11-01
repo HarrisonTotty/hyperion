@@ -60,7 +60,7 @@ import {
 } from "../../view/scenes/terrainScene";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { TerrainFixture } from "./useTerrainSession";
-import { MAXIMIZE_KEY } from "./displayKeys";
+import { LABEL_BLOCK_KEY, MAXIMIZE_KEY } from "./displayKeys";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { GROUND_NOTE_NAME } from "./ViewMarkList";
 import { type ViewFrameDrawn, ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
@@ -70,6 +70,7 @@ import {
   ROTATION_NOT_RESOLVED,
   runPose,
   SCENE_OPTIONS,
+  TERRAIN_READOUT_FOLDED,
 } from "./viewRun";
 
 afterEach(() => {
@@ -1410,6 +1411,50 @@ function instrumentGroundNote(): HTMLElement | null {
     name: GROUND_NOTE_NAME,
   });
 }
+
+/** The primary's statements, as they read. */
+function primaryStatementTexts(): ReadonlyArray<string> {
+  return within(primaryLabelBlock())
+    .queryAllByText((_, element) => element?.classList.contains("view-label__statement") === true)
+    .map((line) => line.textContent);
+}
+
+describe("the primary's lower plate under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
+  it("folds the lower plate with the label block's summary, which names it folded", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    const before = lowerPlate() !== null;
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 2);
+    expect([
+      before,
+      lowerPlate(),
+      primaryStatementTexts().some((line) => line.includes(TERRAIN_READOUT_FOLDED)),
+    ]).toEqual([true, null, true]);
+  });
+
+  it("draws no tripod while the lower plate is folded", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 2);
+    const sights = sightsOver(view, 600).primary;
+    expect(sights.length > 0 && sights.every((point) => point === undefined)).toBe(true);
+  });
+
+  it("shows the lower plate whole by the label block's key, its tripod with its readout", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    await view.user.keyboard(MAXIMIZE_KEY);
+    await readFor(view, 2);
+    await view.user.keyboard(LABEL_BLOCK_KEY);
+    await readFor(view, 4);
+    expect([
+      lowerPlate() !== null,
+      sightsOver(view, 600).primary.some((point) => point !== undefined),
+    ]).toEqual([true, true]);
+  });
+});
 
 describe("an instrument's GROUND page in the camera panel's place (R10.T12.d; draft D2)", () => {
   it("selects CAMERA as the display mounts", async () => {

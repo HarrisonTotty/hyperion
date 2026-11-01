@@ -97,7 +97,6 @@ import {
   withPermission,
 } from "./styleRefusals";
 import {
-  LABEL_BLOCK_FOLDS,
   LABEL_BLOCK_KEY,
   LABEL_BLOCK_KEYS,
   MAXIMIZE_KEY,
@@ -1029,8 +1028,14 @@ function ViewStage({
   // latest publish, on the lower plate; the tripod and the list's note only while the plate states
   // the readout (decision-r10-view-block-room §3).
   const terrainLines = useTerrainLines(ground, faults);
-  const lowerParts = terrainLowerParts(terrainLines);
-  const readoutAnswer = standingReadout(terrainLines, room.readout);
+  // While MAXIMIZE VIEW folds the label block to its summary, the lower plate folds with it, by
+  // the same rule and the same key, its tripod and its list note with its readout (the owner's
+  // request, 2026-11-01).
+  const summary = maximize === "folded";
+  const terrainParts = terrainLowerParts(terrainLines);
+  const lowerFolded = summary && terrainParts.length > 0;
+  const lowerParts = lowerFolded ? [] : terrainParts;
+  const readoutAnswer = lowerFolded ? null : standingReadout(terrainLines, room.readout);
   const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
   const hasPoint = sightPoint?.hasPoint;
   const pointRangeM = sightPoint?.rangeM ?? null;
@@ -1794,13 +1799,12 @@ function ViewStage({
   // The count line counts the range query's rows: none while the scene's own field is drawn.
   const primaryCount = viewSky.drawn === null && !shown.sceneStars ? countLine : null;
   // The upper plate as it stands: while MAXIMIZE VIEW folds it, its summary, the readings an
-  // operator acts on and the key that shows the whole block, and nothing that scrolls (the owner's
-  // request, 2026-11-01); its faults stand in either.
-  const summary = maximize === "folded";
+  // operator acts on and the key that shows the whole block, with what it folds counted on that
+  // key's line, and nothing that scrolls (the owner's request, 2026-11-01); whole, as off, its
+  // reasons folded behind their notes as ever; its faults stand in either.
   const plateLines = summary ? summaryLines(primaryLines) : primaryLines;
-  // Its statements fold to one line while MAXIMIZE VIEW is on, after the label block key's.
-  const plateStatements = maximized
-    ? summaryStatements(primaryStatements, summary ? LABEL_BLOCK_KEYS : LABEL_BLOCK_FOLDS)
+  const plateStatements = summary
+    ? summaryStatements(primaryStatements, LABEL_BLOCK_KEYS, lowerFolded)
     : primaryStatements;
   const plateCount = summary ? null : primaryCount;
 
@@ -2958,20 +2962,22 @@ function ViewPanels({
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.
  *
- * `MAXIMIZE VIEW`, its toggle at the end of the key legend's row and its key `6`, is an interim layout until
- * the panels are designed again (the owner's request, 2026-11-01). On, the stage takes the
- * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
- * restores them as they were; the scene bar and the header strip stay; the primary's label block
- * folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera, its field of
- * view and its exposure, each at its longest value's width (`summaryLines`), then
- * `9 SHOWS LABEL BLOCK` with its statements folded to one line after it (`summaryStatements`),
- * until its key `9`, or its `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows the whole block,
- * `9 FOLDS LABEL BLOCK` with its statements still folded, and folds it again; the instruments open stand in their slots over the
- * stage, which they are part of; and after the key legend, running on along its row where they fit,
- * a line names the key that shows the panels again, every hidden control's key
- * (`HIDDEN_CONTROL_KEYS`), the `CONTROLS` view where it is an instrument and that view's selection,
+ * `MAXIMIZE VIEW`, its toggle at the end of the key legend's row and its key `6`, is an interim
+ * layout until the panels are designed again (the owner's request, 2026-11-01). On, the stage takes
+ * the display's whole body: the side columns are hidden, their panels kept as they stand, so that
+ * off restores them as they were; the scene bar and the header strip stay; the primary's label
+ * block folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera, its
+ * field of view and its exposure, each at its longest value's width (`summaryLines`), then
+ * `9 SHOWS LABEL BLOCK` with what it folds counted after it, its statements' groups as their fold
+ * counts them and the lower plate, which folds with it (`summaryStatements`), until its key `9`, or
+ * its `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows both plates whole as they stand off,
+ * each note's reasons folded behind it, and folds them again; the instruments open stand in their
+ * slots over the stage, which they are part of; and after the key legend, running on along its row
+ * where they fit, a line names the key that shows the panels again, every hidden control's key
+ * (`hiddenControlKeys`), the `CONTROLS` view where it is an instrument and that view's selection,
  * and the hidden panels' faults and statuses stand after it, as the compact layout's do under its
- * row of disclosure buttons, with the reason of an `ENABLE` or `INHIBIT` keyed and held back. Every key acts as before, and the focus in a panel hidden goes to the
+ * row of disclosure buttons, with the reason of an `ENABLE` or `INHIBIT` keyed and held back. Every
+ * key acts as before, and the focus in a panel hidden goes to the
  * `CONTROLS` view's canvas. The setting is the display's own and is kept through every scene and
  * while another display is shown.
  *

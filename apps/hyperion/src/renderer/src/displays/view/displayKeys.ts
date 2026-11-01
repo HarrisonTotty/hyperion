@@ -71,9 +71,6 @@ export function viewDisplayKey(press: KeyPress): ViewDisplayKey | null {
 /** The label block's summary's key line: `9 SHOWS LABEL BLOCK`. */
 export const LABEL_BLOCK_KEYS = `${LABEL_BLOCK_KEY} SHOWS LABEL BLOCK`;
 
-/** The whole label block's key line while `MAXIMIZE VIEW` is on: `9 FOLDS LABEL BLOCK`. */
-export const LABEL_BLOCK_FOLDS = `${LABEL_BLOCK_KEY} FOLDS LABEL BLOCK`;
-
 /**
  * The head of the line under the key legend while `MAXIMIZE VIEW` is on, in the legend's form:
  * where its key acts, then the key and what it does, `MAXIMIZE VIEW: 6 SHOWS PANELS`.

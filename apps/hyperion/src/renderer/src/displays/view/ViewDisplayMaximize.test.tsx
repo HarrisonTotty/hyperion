@@ -27,7 +27,6 @@ import { STYLE_TOGGLE_KEY } from "../../view/photoreal/style";
 import {
   GRID_KEY,
   hiddenControlKeys,
-  LABEL_BLOCK_FOLDS,
   LABEL_BLOCK_KEY,
   LABEL_BLOCK_KEYS,
   MAXIMIZE_KEY,
@@ -543,15 +542,14 @@ describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 20
     expect(primaryLabels()).toEqual(["STYLE", "GRID", "CAMERA", "FOV", "EXPOSURE"]);
   });
 
-  it("shows the whole block by its key, its statements still folded after the key that folds it", async () => {
+  it("shows the whole block by its key as it stands off, its lines and its statements", async () => {
     const view = await setup();
-    const whole = primaryLabels();
+    await view.user.keyboard("3");
+    view.advance(300);
+    const whole = [primaryLabels(), primaryStatements()];
     await pressMaximize(view);
     await pressLabelBlock(view);
-    expect([primaryLabels(), primaryStatements()[0]?.startsWith(LABEL_BLOCK_FOLDS)]).toEqual([
-      whole,
-      true,
-    ]);
+    expect([primaryLabels(), primaryStatements()]).toEqual(whole);
   });
 
   it("folds the whole block again by its key", async () => {

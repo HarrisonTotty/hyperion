@@ -892,8 +892,8 @@ export function statementText(statement: LabelStatement): string {
   return typeof statement === "string" ? statement : statement.text;
 }
 
-/** Whether a statement is a {@link SentenceStatement}. */
-function isSentence(statement: LabelStatement): boolean {
+/** Whether a statement is a {@link SentenceStatement}, one of a note's reasons. */
+function isSentence(statement: LabelStatement): statement is SentenceStatement {
   return typeof statement !== "string" && statement.standing === "sentence";
 }
 
@@ -1038,25 +1038,32 @@ export function instrumentPhotorealStatements(
 }
 
 /**
- * The `PRIMARY` view's statements as its upper plate states them while `MAXIMIZE VIEW` is on (the
- * owner's request, 2026-11-01): folded to one line, `STATEMENTS: 3 FOLDED`, counting each note with
- * the reasons straight after it as one, before each request's status, which stands as it is; none
- * where there is nothing to fold.
- *
- * @remarks
- * A request's status (`ATMOSPHERE REJECTED`, the server's refusal in `--text` or its failure in
- * `--status-caution`) is never folded, so that a body whose air was refused is never read as
- * airless, and a failure stands as no fault line ever folds.
+ * A note with the reasons that follow it, `ATMOSPHERE: APPROXIMATE` and its sentences, which the
+ * plate folds behind the note (`LabelStatements`); any other statement with none.
  */
-export function maximizedStatements(
+export interface StatementGroup {
+  readonly statement: LabelStatement;
+  readonly reasons: ReadonlyArray<SentenceStatement>;
+}
+
+/**
+ * The statements in order as the plate sets them, each sentence with the note before it, so that
+ * the reasons' fold and `MAXIMIZE VIEW`'s summary count one group alike (the owner's request,
+ * 2026-11-01).
+ */
+export function statementGroups(
   statements: ReadonlyArray<LabelStatement>,
-): ReadonlyArray<LabelStatement> {
-  const folded = statements.filter((statement) => !isRequestStatus(statement));
-  const standing = statements.filter(isRequestStatus);
-  // A note's reasons are the sentences straight after it (`atmosphereNotes`' order); a sentence
-  // with no note before it is a group of its own.
-  const groups = folded.filter((statement, i) => i === 0 || !isSentence(statement)).length;
-  return groups === 0 ? standing : [`STATEMENTS: ${String(groups)} FOLDED`, ...standing];
+): ReadonlyArray<StatementGroup> {
+  const groups: StatementGroup[] = [];
+  for (const statement of statements) {
+    const last = groups.at(-1);
+    if (isSentence(statement) && last !== undefined && typeof last.statement === "string") {
+      groups[groups.length - 1] = { ...last, reasons: [...last.reasons, statement] };
+    } else {
+      groups.push({ statement, reasons: [] });
+    }
+  }
+  return groups;
 }
 
 /**
@@ -1084,19 +1091,40 @@ export function summaryLines(lines: ReadonlyArray<LabelLine>): ReadonlyArray<Lab
 }
 
 /**
- * The statements of the label block's summary while `MAXIMIZE VIEW` folds it: one line, `keyLine`,
- * the key that shows the whole block, with the statements' fold after a middle dot
- * (`9 SHOWS LABEL BLOCK · STATEMENTS: 2 FOLDED`), then each request's status as
- * {@link maximizedStatements} stands it.
+ * The statements of the `PRIMARY` view's label block's summary while `MAXIMIZE VIEW` folds it (the
+ * owner's request, 2026-11-01): one line, `keyLine`, the key that shows the whole block, with after
+ * a middle dot what the summary folds, the statements' groups counted as their fold counts them, a
+ * note with its reasons as one (`STATEMENTS: 2 FOLDED`), and the lower plate while it folds too
+ * (`TERRAIN READOUT FOLDED`); then each request's status as it stands.
+ *
+ * @remarks
+ * A request's status (`ATMOSPHERE REJECTED`, the server's refusal in `--text` or its failure in
+ * `--status-caution`) is never folded, so that a body whose air was refused is never read as
+ * airless, and a failure stands as no fault line ever folds.
+ *
+ * @param terrainFolded - Whether the lower plate, the survey line, `DATUM` and the terrain readout,
+ *   folds with the summary.
  */
 export function summaryStatements(
   statements: ReadonlyArray<LabelStatement>,
   keyLine: string,
+  terrainFolded: boolean,
 ): ReadonlyArray<LabelStatement> {
-  const folded = maximizedStatements(statements);
-  const [head, ...rest] = folded;
-  return typeof head === "string" ? [`${keyLine} · ${head}`, ...rest] : [keyLine, ...folded];
+  const groups = statementGroups(statements);
+  const standing = groups
+    .filter(({ statement }) => isRequestStatus(statement))
+    .map(({ statement }) => statement);
+  const folded = groups.length - standing.length;
+  const parts = [
+    keyLine,
+    ...(folded === 0 ? [] : [`STATEMENTS: ${String(folded)} FOLDED`]),
+    ...(terrainFolded ? [TERRAIN_READOUT_FOLDED] : []),
+  ];
+  return [parts.join(" · "), ...standing];
 }
+
+/** What the summary says of the lower plate it folds: `TERRAIN READOUT FOLDED`. */
+export const TERRAIN_READOUT_FOLDED = "TERRAIN READOUT FOLDED";
 
 /**
  * Each body kind's name in the list's `KIND` column, as the guide's nomenclature names it (its

@@ -64,7 +64,6 @@ import {
   type LabelStatement,
   labelStatements,
   markRows,
-  maximizedStatements,
   rangesFromCamera,
   ROTATION_NOT_MODELLED,
   ROTATION_NOT_RESOLVED,
@@ -78,7 +77,9 @@ import {
   startRun,
   startServerRun,
   stepRun,
+  statementGroups,
   summaryStatements,
+  TERRAIN_READOUT_FOLDED,
   surveyEdgeNotes,
   withGridLine,
   withSceneStarsLine,
@@ -966,7 +967,7 @@ describe("an instrument's photorealistic statements (decision-r07-t19-layout, it
   });
 });
 
-describe("the primary's statements while MAXIMIZE VIEW is on (the owner's request, 2026-11-01)", () => {
+describe("the label block's summary's statements under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
   const note = "ATMOSPHERE: APPROXIMATE";
   const thick: LabelStatement = {
     text: "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
@@ -979,45 +980,40 @@ describe("the primary's statements while MAXIMIZE VIEW is on (the owner's reques
   const albedo = "BODY PHOTOMETRY: NOT YET MODELLED";
   const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
   const refused: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /3", standing: "refused" };
+  const KEY = "9 SHOWS LABEL BLOCK";
 
-  it("folds every note to one line that counts them", () => {
-    expect(maximizedStatements([POSITIONS_FROM_SHIP, albedo])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  it("counts what it folds after the key line, on one line", () => {
+    expect(summaryStatements([POSITIONS_FROM_SHIP, albedo], KEY, false)).toEqual([
+      `${KEY} · STATEMENTS: 2 FOLDED`,
+    ]);
   });
 
-  it("counts a note and the reasons straight after it as one", () => {
-    expect(maximizedStatements([albedo, note, water, thick])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  it("counts a note and its reasons as one, as their fold groups them", () => {
+    expect([
+      summaryStatements([albedo, note, water, thick], KEY, false),
+      statementGroups([albedo, note, water, thick]).map(({ reasons }) => reasons.length),
+    ]).toEqual([[`${KEY} · STATEMENTS: 2 FOLDED`], [0, 2]]);
   });
 
-  it("keeps a server's refusal standing after the line, so that no body reads as airless", () => {
-    expect(maximizedStatements([albedo, refused])).toEqual(["STATEMENTS: 1 FOLDED", refused]);
+  it("names the lower plate it folds after the statements", () => {
+    expect(summaryStatements([albedo], KEY, true)).toEqual([
+      `${KEY} · STATEMENTS: 1 FOLDED · ${TERRAIN_READOUT_FOLDED}`,
+    ]);
   });
 
-  it("keeps a request's failure standing after the line", () => {
-    expect(maximizedStatements([albedo, failed, note, water])).toEqual([
-      "STATEMENTS: 2 FOLDED",
+  it("keeps each request's status standing after the line, so that no body reads as airless", () => {
+    expect(summaryStatements([albedo, refused, failed, note, water], KEY, false)).toEqual([
+      `${KEY} · STATEMENTS: 2 FOLDED`,
+      refused,
       failed,
     ]);
   });
 
-  it("states no line where there is nothing to fold", () => {
-    expect([maximizedStatements([]), maximizedStatements([failed])]).toEqual([[], [failed]]);
-  });
-});
-
-describe("the label block's summary's statements (the owner's request, 2026-11-01)", () => {
-  const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
-
-  it("sets the fold after the key line, on one line", () => {
-    expect(summaryStatements([POSITIONS_FROM_SHIP], "9 SHOWS LABEL BLOCK")).toEqual([
-      "9 SHOWS LABEL BLOCK · STATEMENTS: 1 FOLDED",
+  it("states the key line alone where there is nothing to fold", () => {
+    expect([summaryStatements([], KEY, false), summaryStatements([failed], KEY, false)]).toEqual([
+      [KEY],
+      [KEY, failed],
     ]);
-  });
-
-  it("states the key line alone where there is nothing to fold, a request's status after it", () => {
-    expect([
-      summaryStatements([], "9 SHOWS LABEL BLOCK"),
-      summaryStatements([failed], "9 SHOWS LABEL BLOCK"),
-    ]).toEqual([["9 SHOWS LABEL BLOCK"], ["9 SHOWS LABEL BLOCK", failed]]);
   });
 });
 

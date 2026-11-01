@@ -4,38 +4,18 @@ import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StatusText } from "../../components/StatusText";
 import { LabelStatementLine } from "./LabelStatementLine";
 import type { ReasonFolds } from "./reasonFolds";
-import { type LabelStatement, type SentenceStatement, statementText } from "./viewRun";
+import {
+  type LabelStatement,
+  type SentenceStatement,
+  statementGroups,
+  statementText,
+} from "./viewRun";
 
 /** Props of {@link LabelStatements}. */
 export interface LabelStatementsProps {
   readonly statements: ReadonlyArray<LabelStatement>;
   /** Which notes' reasons stand opened, held above the plate (`reasonFolds.ts`). */
   readonly folds: ReasonFolds;
-}
-
-/** A note with the sentences that follow it, `ATMOSPHERE: APPROXIMATE` and its reasons. */
-interface StatementGroup {
-  readonly statement: LabelStatement;
-  readonly reasons: ReadonlyArray<SentenceStatement>;
-}
-
-/** Whether a statement is a sentence, one of a note's reasons. */
-function isReason(statement: LabelStatement): statement is SentenceStatement {
-  return typeof statement !== "string" && statement.standing === "sentence";
-}
-
-/** The statements in order, each sentence with the note before it. */
-function groupsOf(statements: ReadonlyArray<LabelStatement>): ReadonlyArray<StatementGroup> {
-  const groups: StatementGroup[] = [];
-  for (const statement of statements) {
-    const last = groups.at(-1);
-    if (isReason(statement) && last !== undefined && typeof last.statement === "string") {
-      groups[groups.length - 1] = { ...last, reasons: [...last.reasons, statement] };
-    } else {
-      groups.push({ statement, reasons: [] });
-    }
-  }
-  return groups;
 }
 
 /** Props of {@link FoldedNote}. */
@@ -99,7 +79,7 @@ function FoldedNote({ note, reasons, folds }: FoldedNoteProps) {
  * while the scene is, and an instrument's slot's, kept while it is held.
  */
 export function LabelStatements({ statements, folds }: LabelStatementsProps) {
-  return groupsOf(statements).map(({ statement, reasons }) => (
+  return statementGroups(statements).map(({ statement, reasons }) => (
     <Fragment key={statementText(statement)}>
       {reasons.length === 0 || typeof statement !== "string" ? (
         <LabelStatementLine statement={statement} />
