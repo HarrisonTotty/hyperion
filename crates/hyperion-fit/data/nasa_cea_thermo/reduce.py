@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Reduce NASA CEA's `thermo.inp` to the records P14.T49.d and P14.T52.a read, kept verbatim
-(plan 14, P14.T49.d and P14.T52.a; `thermo_equilibrium`).
+"""Reduce NASA CEA's `thermo.inp` to the records P14.T49.d, P14.T52.a and P14.T52.e read, kept
+verbatim (plan 14, P14.T49.d, P14.T52.a and P14.T52.e; `thermo_equilibrium`).
 
 Reads `thermo.inp` (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556, the record layout of
 their Appendix C, Table C1, p. 43) of NASA's `nasa/cea` repository at commit 2f79a647e85737742fb08a127da00d1ea1d069da, from
@@ -9,7 +9,8 @@ its SHA-256, and writes beside this file, or to the path given as the second arg
 in the same layout holding only:
 
 - every substance-registry gas row's record (FeH has none), the S, N and C atoms P14.T52.a
-  appends among them (decision-p14-t52a-rows);
+  appends among them (decision-p14-t52a-rows), and P14.T52.e's carriers, which join the registry
+  at generator version 27;
 - the reference elements' records: the gases H2, N2, O2, CL2 and the noble gases, the electron
   gas e-, graphite, every other element's condensed Ref-Elm records and its gas form (the monatomic
   gas for the metals, S2 for sulphur, P2 for phosphorus);
@@ -44,6 +45,7 @@ ROWS = [
     "Na", "K", "Fe", "Mg", "Si", "Ca", "Ti", "SiO", "TiO", "VO", "AL", "V", "Mn", "Ni", "Zn",
     "Na+", "Mg+", "AL+", "Si+", "K+", "Ca+", "Ti+", "V+", "Cr+", "Mn+", "Fe+", "Ni+", "Zn+",
     "HCL", "Cr", "S", "N", "C",
+    "SH", "OH", "S+", "C+", "H+", "N+", "O+",
 ]
 # The reference elements' records that are not rows.
 REFERENCES = [
@@ -55,7 +57,7 @@ REFERENCES = [
 # The cross-checks' records that are not rows (graphite's sublimation reads the C row's too).
 CROSS_CHECKS = ["MgSO4(II)", "MgSO4(I)", "MgO(cr)", "SO3", "C2", "C3", "C4", "C5"]
 # The change notice (Apache 2.0, §4(b)), the output's first line.
-NOTICE = b"! Changed by HYPERION: reduce.py kept only the 113 records P14.T49.d and P14.T52.a read.\r\n"
+NOTICE = b"! Changed by HYPERION: reduce.py kept only the 120 records P14.T49.d, P14.T52.a and P14.T52.e read.\r\n"
 
 
 def records(lines: list[bytes]) -> tuple[int, list[tuple[str, int, int]], int, int]:

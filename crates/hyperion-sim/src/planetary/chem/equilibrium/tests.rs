@@ -620,8 +620,13 @@ const CASES: [Case; 12] = [
 
 #[test]
 fn every_asserted_case_is_within_its_tolerance() {
+    every_case_is_within_its_tolerance(&CASES);
+}
+
+/// Each of `cases` solved and held to FastChem's values within its tolerances.
+fn every_case_is_within_its_tolerance(cases: &[Case]) {
     let network = network();
-    for case in &CASES {
+    for case in cases {
         let g = gas(case.metallicity, case.c_to_o, Some(case.elements));
         let got = solve_at(&network, &g, case.temperature, case.bar);
         for &(key, want, tolerance) in case.species {
@@ -1079,28 +1084,52 @@ fn hill(id: SubstanceId) -> String {
         .collect()
 }
 
-/// P14.T52.e's tripwire: no `NOT_CARRIED` species is a registry gas row, and the set is sorted by
-/// formula, charge and isomer, and unique. As a row joins the network its entry must go.
+/// P14.T52.e's tripwire: no species the network in force does not carry ([`not_carried`]) is a
+/// registry gas row, under 26's registry and 27's; each of [`CARRIED_FROM_27`]'s is one under
+/// 27's alone; and both sets are sorted by formula, charge and isomer, and unique. As a row joins
+/// the network its entry must go.
 #[test]
 fn no_species_not_carried_is_a_registry_gas_row() {
-    let rows: Vec<(String, i8)> = crate::substance::ids()
-        .filter(|id| id.substance().gas().is_some())
-        .map(|id| (hill(id), id.substance().charge()))
-        .collect();
+    use crate::substance::{CarriersRules, with_carriers};
     assert_eq!(hill(row("CH3OH")), "CH4O");
     assert_eq!(hill(row("NH3")), "H3N");
-    for entry in &NOT_CARRIED {
-        assert!(
-            !rows.contains(&(entry.formula.to_owned(), entry.charge)),
-            "{} ({}) is a registry gas row",
-            entry.formula,
-            entry.charge
-        );
-        assert!(entry.largest_share >= 0.01 && entry.largest_share <= 1.0);
+    for rules in [CarriersRules::Held, CarriersRules::Carried] {
+        with_carriers(rules, || {
+            let rows: Vec<(String, i8)> = crate::substance::ids()
+                .filter(|id| id.substance().gas().is_some())
+                .map(|id| (hill(id), id.substance().charge()))
+                .collect();
+            for entry in not_carried() {
+                assert!(
+                    !rows.contains(&(entry.formula.to_owned(), entry.charge)),
+                    "{:?}: {} ({}) is a registry gas row",
+                    rules,
+                    entry.formula,
+                    entry.charge
+                );
+                assert!(entry.largest_share >= 0.01 && entry.largest_share <= 1.0);
+            }
+            for entry in &CARRIED_FROM_27 {
+                assert_eq!(
+                    rows.contains(&(entry.formula.to_owned(), entry.charge)),
+                    rules == CarriersRules::Carried,
+                    "{:?}: {} ({})",
+                    rules,
+                    entry.formula,
+                    entry.charge
+                );
+            }
+        });
     }
-    for pair in NOT_CARRIED.windows(2) {
-        let key = |e: &NotCarried| (e.formula, e.charge, e.isomer);
-        assert!(key(&pair[0]) < key(&pair[1]), "{:?}", pair[1]);
+    assert_eq!(
+        not_carried().count(),
+        NOT_CARRIED.len() + CARRIED_FROM_27.len()
+    );
+    for set in [&NOT_CARRIED[..], &CARRIED_FROM_27[..]] {
+        for pair in set.windows(2) {
+            let key = |e: &NotCarried| (e.formula, e.charge, e.isomer);
+            assert!(key(&pair[0]) < key(&pair[1]), "{:?}", pair[1]);
+        }
     }
 }
 
@@ -1258,3 +1287,5 @@ fn the_start_takes_the_major_elements_atoms() {
         assert!(all_in - solved[4] > 5.0, "{t} K, {bar} bar");
     }
 }
+
+mod carriers;

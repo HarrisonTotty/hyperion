@@ -582,6 +582,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a body's bulk iron with its solids' minor oxides and following its core,
 ///   `MINOR_OXIDES_VERSION` (P14.T51.k), at `MinorOxidesRules::Chondritic` through
 ///   `with_minor_oxides`: the mantle `FeO` and the secondary crust that read it.
+/// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
+///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
+///   network carries, P and Cl solved.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 27 adds its switch
@@ -590,6 +593,8 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
+    use crate::substance::{CarriersRules, with_carriers};
+    let run = move || with_carriers(CarriersRules::Carried, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 
@@ -816,6 +821,27 @@ mod tests {
             Z0BranchRules::Held
         );
         assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
+    }
+
+    /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it, inside
+    /// 26's and where a test sets it back.
+    #[test]
+    fn the_carriers_hold_is_in_force_inside_27_s_helper_alone() {
+        use crate::substance::{CarriersRules, with_carriers};
+        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
+        assert_eq!(
+            with_every_27_hold(CarriersRules::in_force),
+            CarriersRules::Carried
+        );
+        assert_eq!(
+            with_every_26_hold(CarriersRules::in_force),
+            CarriersRules::Held
+        );
+        assert_eq!(
+            with_every_27_hold(|| with_carriers(CarriersRules::Held, CarriersRules::in_force)),
+            CarriersRules::Held
+        );
+        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
     }
 
     #[test]

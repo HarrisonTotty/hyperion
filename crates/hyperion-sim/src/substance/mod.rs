@@ -108,6 +108,7 @@ pub use thermo::{
 };
 
 use crate::planetary::derive::atmosphere::Gas;
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 use rows::ROWS;
 
 /// A row of the substance registry: its index, append-only and never renumbered.
@@ -137,10 +138,10 @@ use rows::ROWS;
 pub struct SubstanceId(u16);
 
 impl SubstanceId {
-    /// The row at `index`, or `None` past the last row.
+    /// The row at `index`, or `None` past the last row in force ([`ids`]).
     #[must_use]
     pub fn from_index(index: u16) -> Option<Self> {
-        (usize::from(index) < ROWS.len()).then_some(Self(index))
+        (usize::from(index) < rows_in_force()).then_some(Self(index))
     }
 
     /// The row's index.
@@ -397,14 +398,106 @@ pub fn by_key(key: &str) -> Option<SubstanceId> {
     ids().find(|id| id.substance().key.as_str() == key)
 }
 
-/// Every row, in registry order.
+/// Every row in force, in registry order: rows 115 on, P14.T52.e's carriers, from generator
+/// version 27 ([`CARRIERS_VERSION`]) alone.
 ///
 /// # Panics
 ///
 /// Never: the registry holds far fewer than 65,536 rows, so each index fits a `u16`.
 pub fn ids() -> impl ExactSizeIterator<Item = SubstanceId> {
-    (0..ROWS.len())
-        .map(|i| SubstanceId(u16::try_from(i).expect("the registry holds fewer than 65,536 rows")))
+    (0..rows_in_force()).map(row_id)
+}
+
+/// The rows P14.T52.e appends, which join the registry at [`CARRIERS_VERSION`], in registry
+/// order; none once they are in force.
+///
+/// For `hyperion-fit`'s `thermo_equilibrium`, which emits their records ahead of the bump, and
+/// for the tests that compare the version with them and without. Nothing on the record reads a
+/// row through it.
+pub fn carriers_ahead() -> impl ExactSizeIterator<Item = SubstanceId> {
+    (rows_in_force()..ROWS.len()).map(row_id)
+}
+
+/// The row at `index`, which the registry holds.
+fn row_id(index: usize) -> SubstanceId {
+    SubstanceId(u16::try_from(index).expect("the registry holds fewer than 65,536 rows"))
+}
+
+/// The first of P14.T52.e's rows: those before it are in force at every version.
+const CARRIERS_FROM: usize = 115;
+
+/// The generator version from which the equilibrium network's further carriers join the registry
+/// (P14.T52.e): 27, the planetary bump after 26's.
+///
+/// They are rows 115 on: SH, OH, S⁺, C⁺, H⁺, N⁺ and O⁺, the hot giants' and ultra-hot
+/// photospheres' missing carriers, which
+/// [`planetary::chem::equilibrium`](crate::planetary::chem::equilibrium)'s network carries. Since
+/// the network is every gas row with a record, a row's joining moves its output, a
+/// generator-version change.
+/// Below it [`CarriersRules::in_force`] is [`CarriersRules::Held`]: [`ids`], [`by_key`] and
+/// [`SubstanceId::from_index`] stop at row 114, so the registry, its golden and fixture, and every
+/// output that reads them are version 26's bit for bit. 27's bump deletes this hold,
+/// [`CarriersRules`] with its `Held` arm, [`carriers_ahead`], the tests' switch, its line in
+/// `with_every_27_hold` and its tripwire (`the_carriers_are_held_only_until_the_27_bump`).
+pub(crate) const CARRIERS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether P14.T52.e's rows are in force ([`CARRIERS_VERSION`]'s hold).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum CarriersRules {
+    /// Version 26's and before: the registry stops at row 114.
+    Held,
+    /// Version 27's: the rows from 115 on.
+    Carried,
+}
+
+impl CarriersRules {
+    /// The rules this generator version gives: carried from [`CARRIERS_VERSION`], held below it;
+    /// in the tests, the rules a test's switch sets on its thread ([`with_carriers`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = CARRIERS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= CARRIERS_VERSION {
+            Self::Carried
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The carriers' rules a test sets on its thread, `None` for the version's.
+    static CARRIERS_RULES: core::cell::Cell<Option<CarriersRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the carriers' rules `rules` on this thread, for the tests to reach 27's
+/// registry and network ahead of the bump; the version's rules are set back after, a panic in
+/// `run` included. A network reads the registry as it is built, so a test builds it inside the
+/// switch. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_carriers<R>(rules: CarriersRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<CarriersRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CARRIERS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(CARRIERS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The number of rows in force.
+#[must_use]
+fn rows_in_force() -> usize {
+    match CarriersRules::in_force() {
+        CarriersRules::Held => CARRIERS_FROM,
+        CarriersRules::Carried => ROWS.len(),
+    }
 }
 
 #[cfg(test)]
@@ -599,6 +692,82 @@ mod tests {
         "C",
     ];
 
+    /// P14.T52.e's carriers, rows 115 on, in force from generator version 27.
+    const CARRIERS: [&str; 7] = ["SH", "OH", "S+", "C+", "H+", "N+", "O+"];
+
+    /// P14.T52.e's carriers follow row 114 under 27's registry, and below it no id, key or index
+    /// reaches them: the registry is version 26's.
+    #[test]
+    fn the_carriers_follow_row_114_under_27_s_registry_alone() {
+        let keys = |rows: &mut dyn Iterator<Item = SubstanceId>| -> Vec<String> {
+            rows.map(|id| id.substance().key().as_str().to_owned())
+                .collect()
+        };
+        assert_eq!(ids().len(), CARRIERS_FROM);
+        assert_eq!(keys(&mut carriers_ahead()), CARRIERS);
+        for key in CARRIERS {
+            assert_eq!(by_key(key), None, "{key}");
+        }
+        let past = u16::try_from(CARRIERS_FROM).unwrap();
+        assert_eq!(SubstanceId::from_index(past), None);
+        with_carriers(CarriersRules::Carried, || {
+            assert_eq!(ids().len(), CARRIERS_FROM + CARRIERS.len());
+            assert_eq!(keys(&mut ids().skip(CARRIERS_FROM)), CARRIERS);
+            assert_eq!(carriers_ahead().len(), 0);
+            assert_eq!(by_key("OH").map(SubstanceId::index), Some(past + 1));
+            assert!(SubstanceId::from_index(past).is_some());
+        });
+        assert_eq!(ids().len(), CARRIERS_FROM);
+    }
+
+    /// Under 27's registry the carriers meet every rule the rows do: grammatical, unique keys that
+    /// spell their stoichiometry and charge, molar masses from their formulae, sources named, gas
+    /// columns, and client flags that wait for R08.T4.i.
+    #[test]
+    fn the_carriers_meet_the_rows_rules_under_27_s_registry() {
+        with_carriers(CarriersRules::Carried, || {
+            substance_keys_are_unique_and_grammatical();
+            substance_formula_keys_match_their_stoichiometry();
+            substance_molar_masses_are_their_formulae_s();
+            substance_values_name_their_sources();
+            substance_gas_rows_carry_their_gas_columns();
+            substance_client_flags_follow_the_ruling();
+        });
+    }
+
+    /// P14.T52.e's tripwire: its carriers are held until the 27 bump, and the tests' switch
+    /// reaches them meanwhile.
+    #[test]
+    fn the_carriers_are_held_only_until_the_27_bump() {
+        assert!(
+            GENERATOR_VERSION < CARRIERS_VERSION,
+            "the 26 → 27 bump puts P14.T52.e's carriers in the registry: delete `CARRIERS_VERSION`, \
+             `CarriersRules` with its `Held` arm and `rows_in_force`'s check of it, \
+             `carriers_ahead` and hyperion-fit's `thermo_equilibrium_27` (moving its rows into \
+             `thermo_equilibrium`), the tests' `with_carriers`, its line in `with_every_27_hold` \
+             with its test `the_carriers_hold_is_in_force_inside_27_s_helper_alone`, this test and \
+             `a_panic_inside_the_carriers_switch_sets_the_rules_back`; re-bless \
+             `substance/registry`, `substance/formation`, `planetary/equilibrium` and \
+             `packages/protocol/fixtures/substances.json`"
+        );
+        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
+        assert_eq!(
+            with_carriers(CarriersRules::Carried, CarriersRules::in_force),
+            CarriersRules::Carried
+        );
+        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
+    }
+
+    /// The switch sets the version's rules back when `run` panics.
+    #[test]
+    fn a_panic_inside_the_carriers_switch_sets_the_rules_back() {
+        let caught = std::panic::catch_unwind(|| {
+            with_carriers(CarriersRules::Carried, || panic!("inside the switch"));
+        });
+        assert!(caught.is_err());
+        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
+    }
+
     /// P14.T49.b's and P14.T52.a's rows follow rows 0–8 in [`APPENDED`]'s order.
     #[test]
     fn substance_rows_9_onward_are_the_plan_s_in_order() {
@@ -639,8 +808,9 @@ mod tests {
             let optics = row.optics();
             if row.gas().is_some() {
                 let noble = matches!(key, "Ne" | "Kr" | "Xe");
-                // The atoms P14.T52.a appends wait for R08.T4.i's answers.
-                let awaiting = matches!(key, "S" | "N" | "C");
+                // The atoms P14.T52.a appends and P14.T52.e's carriers wait for R08.T4.i's
+                // answers.
+                let awaiting = matches!(key, "S" | "N" | "C") || CARRIERS.contains(&key);
                 assert_eq!(optics.absorber(), !noble && !awaiting, "{key}");
                 assert_eq!(
                     optics.rayleigh(),

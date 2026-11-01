@@ -14,7 +14,9 @@
 //! P14.T49.b appends rows 9–111 in its plan's order and gives every gas row its molecular
 //! constants ([`MolecularConstants`]), over which [`thermo`](super::thermo) sums its heat
 //! capacity. P14.T52.a appends rows 112–114, the S, N and C atoms its equilibrium speciation
-//! carries (decision-p14-t52a-rows), whose client optics R08.T4.i owes. P14.T54.a's switch
+//! carries (decision-p14-t52a-rows), whose client optics R08.T4.i owes, and P14.T52.e rows 115 on,
+//! its further carriers, in force from generator version 27 (`CARRIERS_VERSION`), their client
+//! optics R08.T4.i's too. P14.T54.a's switch
 //! retired the `c_p` ÷ R classes rows 0–8 held for generator version 22, and turned on the
 //! `absorber` flags held until then: `H2`'s, `He`'s, `N2`'s and `CO2`'s, for their
 //! collision-induced and band absorption, and those of the fifteen rows
@@ -52,7 +54,7 @@ use super::thermo::{
 use super::{Basis, ClientOptics, Element, Source, Substance, SubstanceKey, SubstanceKind};
 
 /// The rows, in registry order.
-pub(super) static ROWS: [Substance; 115] = [
+pub(super) static ROWS: [Substance; 122] = [
     HYDROGEN,
     HELIUM,
     WATER,
@@ -168,6 +170,13 @@ pub(super) static ROWS: [Substance; 115] = [
     ATOMIC_SULPHUR,
     ATOMIC_NITROGEN,
     ATOMIC_CARBON,
+    MERCAPTO,
+    HYDROXYL,
+    SULPHUR_ION,
+    CARBON_ION,
+    PROTON,
+    NITROGEN_ION,
+    OXYGEN_ION,
 ];
 
 /// The molar masses' source: P14.T13's `Gas::molar_mass_g_per_mol` for rows 0–8, and for every
@@ -315,10 +324,10 @@ const NO_CLIENT_OPTICS: ClientOptics = ClientOptics {
 };
 
 /// The client optics of a gas row whose answers R08 owes (R08.T4.i; decision-p14-t52a-rows): the
-/// S, N and C atoms P14.T52.a appends. The client neither scatters nor absorbs by them until
-/// R08.T4.i gives their Rayleigh scattering from their static polarisabilities and their
-/// absorption from their atomic lines; their flags turn on at the first bump after that
-/// (P14.T54.b's, if in time).
+/// S, N and C atoms P14.T52.a appends, and P14.T52.e's carriers. The client neither scatters nor
+/// absorbs by them until R08.T4.i gives their Rayleigh scattering from their static
+/// polarisabilities and their absorption from their lines and bands; their flags turn on at the
+/// first bump after that.
 const AWAITING_CLIENT_OPTICS: ClientOptics = ClientOptics {
     rayleigh: false,
     absorber: false,
@@ -3283,6 +3292,230 @@ const ATOMIC_CARBON: Substance = Substance {
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 4 levels below 15,000 cm⁻¹ (Haris and Kramida 2017, ApJS 233, 16; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values). The cut holds `c_p` within 0.01 per cent of CEA's to 3,000 K, and runs 0.41 per cent below it at 5,000 K and 1.0 per cent at 6,000 K, where the levels above the cut, ¹S₀ first, are populated",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// Row 115, the mercapto radical SH, which holds up to 48% of the sulphur between Visscher,
+/// Lodders and Fegley 2006's H₂S and S fields (their §3.1, eqs. 4 and 7; P14.T52.e).
+const MERCAPTO: Substance = Substance {
+    key: SubstanceKey::new_const("SH"),
+    kind: SubstanceKind::Molecule,
+    elements: &[(Element::H, 1), (Element::S, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(33.068),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::Linear,
+            vibrations: &[vibration(2591.8, 1)],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &MERCAPTO_STATES,
+            }],
+        },
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X²Πᵢ's ω_e (2,711.6) and ω_e x_e (59.9) cm⁻¹, both bracketed as uncertain, so the fundamental is 2,591.8 cm⁻¹; its ²Π₃/₂ ground and ²Π₁/₂ at |A₀| = 376.96 cm⁻¹ (Ramsay 1952, H&H's note 7), each g = 2; A²Σ⁺ at 31,038 cm⁻¹ lies above the cut. Its `c_p` meets CEA's within 0.54 per cent to 700 K and 0.88 per cent to 1,000 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// SH's spin–orbit pair, `(energy, g)` in cm⁻¹ above the ground: X²Π₃/₂ and X²Π₁/₂ at |A₀|
+/// (Huber and Herzberg 1979, note 7: A₀ = −376.96, Ramsay 1952).
+const MERCAPTO_STATES: [Level; 2] = [level(0.0, 2.0), level(376.96, 2.0)];
+
+/// Row 116, the hydroxyl radical OH, which holds up to 21% of the oxygen on the hottest daysides
+/// (P14.T52.e).
+const HYDROXYL: Substance = Substance {
+    key: SubstanceKey::new_const("OH"),
+    kind: SubstanceKind::Molecule,
+    elements: &[(Element::H, 1), (Element::O, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(17.007),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::Linear,
+            vibrations: &[vibration(3_567.998_4, 1)],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &HYDROXYL_STATES,
+            }],
+        },
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X²Πᵢ's ω_e 3,737.761 and ω_e x_e 84.881 3 cm⁻¹, so the fundamental is 3,567.998 4 cm⁻¹; its ²Π₃/₂ ground and ²Π₁/₂ at |A₀| = 139.21 cm⁻¹ (Maillard, Chauville et al. 1976, H&H's note 21), each g = 2; A²Σ⁺ at 32,684.1 cm⁻¹ lies above the cut. Its `c_p` meets CEA's within 0.73 per cent from 200 to 700 K and 0.62 per cent to 1,000 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// OH's spin–orbit pair, `(energy, g)` in cm⁻¹ above the ground: X²Π₃/₂ and X²Π₁/₂ at |A₀|
+/// (Huber and Herzberg 1979, note 21: `A_v` = −139.21 − 0.275 v, Maillard, Chauville et al. 1976).
+const HYDROXYL_STATES: [Level; 2] = [level(0.0, 2.0), level(139.21, 2.0)];
+
+/// Row 117, the first ion of S, which takes the sulphur below 10⁻⁴ bar at 5,000 K and above
+/// (P14.T52.e).
+const SULPHUR_ION: Substance = Substance {
+    key: SubstanceKey::new_const("S+"),
+    kind: SubstanceKind::Ion,
+    elements: &[(Element::S, 1)],
+    charge: 1,
+    molar_mass_g_per_mol: Some(32.059_451_420_091_12),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &SULPHUR_ION_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 3 levels below 15,000 cm⁻¹ (Martin, Zalubas and Musgrove 1990, J. Phys. Chem. Ref. Data 19, 821; NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs). Its `c_p` meets CEA's within 0.1 per cent to 1,500 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// The S⁺ ion's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹ above the
+/// ground (Martin, Zalubas and Musgrove 1990, as NIST's Atomic Spectra Database lists them): the
+/// ⁴S°₃/₂ ground and ²D°₃/₂ and ²D°₅/₂, the [S II] 6,731 and 6,716 Å lines' upper levels, with ²P°
+/// above the cut at 24,524.83 cm⁻¹.
+const SULPHUR_ION_LEVELS: [Level; 3] = [
+    level(0.0, 4.0),
+    level(14_852.94, 4.0),
+    level(14_884.73, 6.0),
+];
+
+/// Row 118, the first ion of C, which holds up to 6% of the carbon at 10 mbar or more, and most
+/// of it at 6,000 K and 10⁻⁴ bar (P14.T52.e).
+const CARBON_ION: Substance = Substance {
+    key: SubstanceKey::new_const("C+"),
+    kind: SubstanceKind::Ion,
+    elements: &[(Element::C, 1)],
+    charge: 1,
+    molar_mass_g_per_mol: Some(12.010_451_420_091_12),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &CARBON_ION_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 2 levels below 15,000 cm⁻¹ (Moore 1993, CRC Series in Evaluated Data in Atomic Physics (Tables of Spectra of H, C, N and O); NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs). Its `c_p` meets CEA's within 0.01 per cent to 1,500 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// The C⁺ ion's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹ above the
+/// ground (Moore 1993, as NIST's Atomic Spectra Database lists them in Barklem and Collet 2016's
+/// copy): the ²P°₁/₂ ground and ²P°₃/₂, with ⁴P above the cut at 43,003.3 cm⁻¹. The [C II]
+/// 157.74 µm line puts ²P°₃/₂ at 63.395 cm⁻¹, 0.04 per cent below, which moves no `c_p` digit.
+const CARBON_ION_LEVELS: [Level; 2] = [level(0.0, 2.0), level(63.42, 4.0)];
+
+/// Row 119, the proton H⁺, which gives most of the electrons above about 5,000 K at 10 mbar or
+/// less (P14.T52.e).
+const PROTON: Substance = Substance {
+    key: SubstanceKey::new_const("H+"),
+    kind: SubstanceKind::Ion,
+    elements: &[(Element::H, 1)],
+    charge: 1,
+    molar_mass_g_per_mol: Some(1.007_451_420_091_12),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[],
+        },
+        sources: &[Source {
+            covers: "molecular constants",
+            citation: "the bare proton, translation alone: `c_p` ÷ R is 5/2, as CEA's record holds it",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// Row 120, the first ion of N, 4.5% of the nitrogen at 6,000 K and 10⁻⁶ bar (P14.T52.e).
+const NITROGEN_ION: Substance = Substance {
+    key: SubstanceKey::new_const("N+"),
+    kind: SubstanceKind::Ion,
+    elements: &[(Element::N, 1)],
+    charge: 1,
+    molar_mass_g_per_mol: Some(14.006_451_420_091_12),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &NITROGEN_ION_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 3 levels below 15,000 cm⁻¹ (Moore 1993, CRC Series in Evaluated Data in Atomic Physics (Tables of Spectra of H, C, N and O); NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs). Its `c_p` meets CEA's within 0.02 per cent to 1,500 K",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// The N⁺ ion's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹ above the
+/// ground (Moore 1993, as NIST's Atomic Spectra Database lists them): the ³P₀, ³P₁ and ³P₂ ground
+/// term, with ¹D₂ above the cut at 15,316.2 cm⁻¹.
+const NITROGEN_ION_LEVELS: [Level; 3] = [level(0.0, 1.0), level(48.7, 3.0), level(130.8, 5.0)];
+
+/// Row 121, the first ion of O, 5.4% of the oxygen at 6,000 K and 10⁻⁶ bar (P14.T52.e).
+const OXYGEN_ION: Substance = Substance {
+    key: SubstanceKey::new_const("O+"),
+    kind: SubstanceKind::Ion,
+    elements: &[(Element::O, 1)],
+    charge: 1,
+    molar_mass_g_per_mol: Some(15.998_451_420_091_12),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its ⁴S°₃/₂ ground alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Moore 1993, CRC Series in Evaluated Data in Atomic Physics (Tables of Spectra of H, C, N and O); NIST's Atomic Spectra Database as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs: ²D° at 26,810.55 cm⁻¹ lies above the cut). It meets CEA's within 0.01 per cent to 1,500 K",
             basis: Basis::Fact,
         }],
     }),

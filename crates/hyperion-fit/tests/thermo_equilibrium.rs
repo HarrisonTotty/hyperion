@@ -1,4 +1,5 @@
-//! The committed thermochemistry is exactly what `run thermo_equilibrium --since <current>` would
+//! The committed thermochemistry is exactly what `run thermo_equilibrium --since <current>` (and
+//! `run thermo_equilibrium_27`, P14.T52.e's carriers held until 27) would
 //! write (plan 14, P14.T49.d; plan 15, P15.T2), from the committed subset of NASA's CEA library.
 //!
 //! CI runs this, so a library or a record list changed without a rerun, or a table edited by hand,
@@ -30,6 +31,28 @@ fn thermo_equilibrium_table_is_reproduced() {
         "crates/hyperion-sim/src/tables/thermo.rs",
         "thermo_equilibrium",
         COMMITTED,
+        &planned.text,
+    );
+    assert!(!planned.body_changed);
+}
+
+/// The carriers' table the sim compiles, as committed (P14.T52.e, held until 27).
+const COMMITTED_27: &str = include_str!("../../hyperion-sim/src/tables/thermo_27.rs");
+
+#[test]
+fn thermo_equilibrium_27_table_is_reproduced() {
+    let planned = rerender(
+        registry(),
+        find("thermo_equilibrium_27").expect("thermo_equilibrium_27 is registered"),
+        &Workspace::repository(),
+        NonZeroUsize::MIN,
+        GENERATOR_VERSION.get(),
+    )
+    .expect("the thermo_equilibrium_27 task runs");
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/thermo_27.rs",
+        "thermo_equilibrium_27",
+        COMMITTED_27,
         &planned.text,
     );
     assert!(!planned.body_changed);

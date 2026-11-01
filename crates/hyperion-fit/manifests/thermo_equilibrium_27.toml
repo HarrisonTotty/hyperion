@@ -1,0 +1,10 @@
+# The thermochemistry of P14.T52.e's carriers (plan 14): NASA's CEA records of the rows that join
+# the substance registry at generator version 27, re-emitted to 6,000 K as `thermo_equilibrium`'s
+# into `tables::thermo_27`, which `hyperion_sim::substance::formation` reads under 27's registry
+# alone (the sim's `CARRIERS_VERSION` hold). The bump to 27 moves the carriers into
+# `thermo_equilibrium`'s table and deletes this instance.
+task = "thermo_equilibrium_27"
+datasets = ["nasa_cea_thermo"]
+
+[params]
+upper_temperature_k = 6000.0

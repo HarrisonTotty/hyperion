@@ -1,7 +1,8 @@
 # NASA Glenn's thermodynamic records, as NASA's CEA (Chemical Equilibrium with Applications) ships
-# them in data/thermo.inp: the 113 records plan 14's P14.T49.d and P14.T52.a read (every
-# substance-registry gas row's but FeH's, which the file lacks, with the S, N and C atoms P14.T52.a
-# appends; the elements' reference states; and the MgSO4 and graphite cross-checks' species),
+# them in data/thermo.inp: the 120 records plan 14's P14.T49.d, P14.T52.a and P14.T52.e read
+# (every substance-registry gas row's but FeH's, which the file lacks, with the S, N and C atoms
+# P14.T52.a appends and P14.T52.e's carriers, which join the registry at generator version 27; the
+# elements' reference states; and the MgSO4 and graphite cross-checks' species),
 # extracted verbatim by `reduce.py`, with the file's header, CRLF line ends and END lines, so that
 # the subset is a CEA library itself, and one `!` line ahead of the header stating the change
 # (Apache 2.0, §4(b)). Under Apache 2.0, whose text is kept beside it (LICENSE.txt) and whose notice
@@ -13,9 +14,9 @@ class = "committed"
 citation = "B. J. McBride, M. J. Zehe and S. Gordon (2002), NASA Glenn Coefficients for Calculating Thermodynamic Properties of Individual Species, NASA/TP-2002-211556 (NASA Glenn Research Center); the records of data/thermo.inp of NASA's CEA, with the species' own sources as each record's comment names them, and C. Snyder's (NASA GRC) 2019-2021 updates"
 url = "https://raw.githubusercontent.com/nasa/cea/2f79a647e85737742fb08a127da00d1ea1d069da/data/thermo.inp"
 retrieved = "2026-10-16"
-release = "nasa/cea at commit 2f79a647e85737742fb08a127da00d1ea1d069da, data/thermo.inp (1,234,323 bytes, sha256 fa7746572952d74e249e818a82a35c113829742fb421a308e167185528884363; its temperature line dated 9/8/2021), reduced by reduce.py to 113 records with its one-line change notice, 79,513 bytes"
+release = "nasa/cea at commit 2f79a647e85737742fb08a127da00d1ea1d069da, data/thermo.inp (1,234,323 bytes, sha256 fa7746572952d74e249e818a82a35c113829742fb421a308e167185528884363; its temperature line dated 9/8/2021), reduced by reduce.py to 120 records with its one-line change notice, 85,402 bytes"
 licence = "Apache License 2.0 (the repository's LICENSE.txt, kept here unmodified as LICENSE.txt); the repository's NOTICE.txt: \"CEA – Chemical Equilibrium with Applications. Copyright (c) 2025, United States Government as represented by the Administrator of the National Aeronautics and Space Administration. Licensed under the Apache License, Version 2.0\", naming data/thermo.inp and NASA TP-2002-211556 as its source. NTRS marks the TP GOV_PUBLIC_USE_PERMITTED (decision-composition §5)"
 
 [[files]]
 name = "thermo.inp"
-sha256 = "2a0daa6f8e8a167f7abdda246e3ec44e0c9655edb325f4342cf59295939c8f52"
+sha256 = "bc5421e853c0348d93b3fe4edb771b29ca8e30079c24de157b79c95a4b132bec"

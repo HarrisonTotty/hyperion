@@ -127,6 +127,7 @@ pub mod stripping;
 pub mod stripping_helium;
 pub mod substance_albedo;
 pub mod thermo;
+pub mod thermo_27;
 pub mod type_ia_delay;
 pub mod wd_cooling;
 
@@ -446,6 +447,12 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "thermo_equilibrium",
+        revision: 0,
+        since_generator_version: 24,
+        provisional: false,
+    },
+    TableInfo {
+        name: "thermo_equilibrium_27",
         revision: 0,
         since_generator_version: 24,
         provisional: false,

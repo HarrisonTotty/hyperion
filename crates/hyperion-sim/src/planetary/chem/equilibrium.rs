@@ -22,13 +22,14 @@
 //!   (Visscher, Lodders and Fegley 2006, ApJ 648, 1181: "Hydrogen sulfide (H₂S) is the dominant
 //!   S-bearing gas throughout substellar atmospheres") in its field and the S atom beyond it (the
 //!   reach, below), and every other registry gas of these elements: the atoms H, C, N, O and S,
-//!   H⁻, O₂, O₃, N₂O, SO₂, CH₃OH and C₂H₆.
+//!   H⁻, O₂, O₃, N₂O, SO₂, CH₃OH and C₂H₆; and from generator version 27 (P14.T52.e's
+//!   carriers, behind `CARRIERS_VERSION`) SH, OH and the first ions H⁺, C⁺, N⁺, O⁺ and S⁺.
 //! - **The trace elements**, every other element, each in species that hold one atom of it and no
 //!   other trace element: each metal as its neutral atom and its first ion, with SiO, TiO and VO;
 //!   phosphorus as PH₃, chlorine as HCl, the noble gases as their atoms. Given the major
 //!   elements' pressures, a trace element's species share its abundance in closed form, each in
 //!   proportion to its K × Π `p_b^ν`, so that each element's species sum to its abundance exactly.
-//!   Neither second ions nor H⁺ is carried: second ions hold under 10⁻³ of the first below
+//!   Second ions are not carried, nor H⁺ below generator version 27: second ions hold under 10⁻³ of the first below
 //!   5,000 K at 10 mbar or more (plan 14), though Ca²⁺ reaches 1.3% of Ca⁺ at 6,000 K and 10 mbar
 //!   and 14% at 10⁻⁴ bar (Saha, Ca II's 11.87 eV); H⁺ holds 2.0 × 10⁻⁷ of the hydrogen at 4,600 K
 //!   and 0.05 bar, but 1.0 × 10⁻⁵ at 5,000 K and 10 mbar, and gives most of the electrons above
@@ -37,9 +38,12 @@
 //!   ([`BuildNetworkError::TwoTraceAtoms`]); P14.T52.e's P₂ and chlorides will need P and Cl among
 //!   the solved elements.
 //!
-//! The charge is balanced over the metals' first ions, the electrons and H⁻: each ion's K is that
-//! of M ⇌ M⁺ + e⁻ from CEA's records, the Saha equation with the species' own partition
-//! functions.
+//! The charge is balanced over the metals' first ions (and from 27 the major elements'), the
+//! electrons and H⁻: each ion's K is that of M ⇌ M⁺ + e⁻ from CEA's records, the Saha equation with
+//! the species' own partition functions. Under 27's network SH holds the sulphur in its field
+//! between Visscher, Lodders and Fegley's eqs. 4 and 7, OH 13% of the oxygen at 3,000 K and
+//! 10 mbar, and the electrons at 6,000 K and 10 mbar are FastChem's within 0.2%, H⁺ giving four
+//! fifths of them (the tests' `carriers`).
 //!
 //! # The solution
 //!
@@ -165,9 +169,11 @@
 //! mass for a host at \[Fe/H\] = +0.3 (decision-p14-t50b-envelope §5: "Below about 5 M⊕ an
 //! envelope's metals exceed 0.2 per H atom").
 //!
-//! The network is the registry's, so a species that is not a row is not carried ([`NOT_CARRIED`],
+//! The network is the registry's, so a species that is not a row is not carried ([`not_carried`],
 //! a closed set, for the composition audit), and its element is held by the carriers that are.
-//! From FastChem's gas-only grid at protosolar abundances:
+//! From FastChem's gas-only grid at protosolar abundances, for 26's network (from 27 SH, OH, S⁺, C⁺
+//! and H⁺ are carried, [`CARRIED_FROM_27`], so that the bullets on sulphur, oxygen, the non-metals'
+//! ions and the electrons are 26's):
 //!
 //! - **Sulphur**: H₂S holds the sulphur in Visscher, Lodders and Fegley's H₂S field (§3.1: SH
 //!   takes over where log p < 6.82 − 17,570 ÷ T, their eq. 4, and S where log p < 4.80 −
@@ -217,8 +223,8 @@ use std::fmt;
 
 use crate::math;
 use crate::substance::{
-    BalanceReactionError, Element, Reaction, SubstanceId, SubstanceKey, by_key, formation_range,
-    ids,
+    BalanceReactionError, CarriersRules, Element, Reaction, SubstanceId, SubstanceKey, by_key,
+    formation_range, ids,
 };
 use crate::units::{Kelvin, Pascals};
 
@@ -305,7 +311,8 @@ pub struct NotCarried {
 /// carried: a closed set, for the composition audit (P14.T33.c's census).
 ///
 /// It is sorted by formula, charge and isomer. P14.T52.e adds rows from it, and each entry goes
-/// as its row joins.
+/// as its row joins: its carriers' entries, which the network carries from generator version 27,
+/// are [`CARRIED_FROM_27`]'s (62 entries before it, 55 after).
 ///
 /// The set is closed by a rule, not by hand (decision-p14-t52a-rows): every gas species of
 /// FastChem 4.0.3's full network (its `logK.dat`, gas phase only, the 25 elements at the
@@ -319,7 +326,7 @@ pub struct NotCarried {
 /// cases (the tests' documentation). FeH, a registry row with no record, is
 /// [`formation::NOT_MODELLED`](crate::substance::formation::NOT_MODELLED)'s, not this set's; it
 /// holds at most 2.8% of the iron (5,000 K, 100 bar).
-pub const NOT_CARRIED: [NotCarried; 62] = [
+pub const NOT_CARRIED: [NotCarried; 55] = [
     NotCarried {
         formula: "Al2O",
         isomer: None,
@@ -376,16 +383,6 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         charge: 1,
         element: Element::Ar,
         largest_share: 0.011,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "C",
-        isomer: None,
-        charge: 1,
-        element: Element::C,
-        largest_share: 0.88,
         temperature: Kelvin::new(6000.0),
         pressure: Pascals::new(1e-1),
         condensed: false,
@@ -551,16 +548,6 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         condensed: true,
     },
     NotCarried {
-        formula: "H",
-        isomer: None,
-        charge: 1,
-        element: Element::H,
-        largest_share: 0.062,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
         formula: "H2K2O2",
         isomer: None,
         charge: 0,
@@ -721,31 +708,11 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         condensed: true,
     },
     NotCarried {
-        formula: "HO",
-        isomer: None,
-        charge: 0,
-        element: Element::O,
-        largest_share: 0.21,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
-    },
-    NotCarried {
         formula: "HP",
         isomer: None,
         charge: 0,
         element: Element::P,
         largest_share: 0.37,
-        temperature: Kelvin::new(4000.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "HS",
-        isomer: None,
-        charge: 0,
-        element: Element::S,
-        largest_share: 0.48,
         temperature: Kelvin::new(4000.0),
         pressure: Pascals::new(1e7),
         condensed: false,
@@ -781,16 +748,6 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         condensed: false,
     },
     NotCarried {
-        formula: "N",
-        isomer: None,
-        charge: 1,
-        element: Element::N,
-        largest_share: 0.045,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
         formula: "NP",
         isomer: None,
         charge: 0,
@@ -809,16 +766,6 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         temperature: Kelvin::new(300.0),
         pressure: Pascals::new(1e1),
         condensed: true,
-    },
-    NotCarried {
-        formula: "O",
-        isomer: None,
-        charge: 1,
-        element: Element::O,
-        largest_share: 0.054,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
     },
     NotCarried {
         formula: "O10P4",
@@ -901,16 +848,6 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         condensed: false,
     },
     NotCarried {
-        formula: "S",
-        isomer: None,
-        charge: 1,
-        element: Element::S,
-        largest_share: 0.97,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
         formula: "S2",
         isomer: None,
         charge: 0,
@@ -941,6 +878,91 @@ pub const NOT_CARRIED: [NotCarried; 62] = [
         condensed: false,
     },
 ];
+
+/// The species of [`NOT_CARRIED`]'s rule that P14.T52.e's rows carry from generator version 27
+/// (`CARRIERS_VERSION`), with the shares the run gave them uncarried: below 27 they are not carried,
+/// and [`not_carried`] lists them with the rest. Sorted as [`NOT_CARRIED`]; 27's bump deletes it.
+pub const CARRIED_FROM_27: [NotCarried; 7] = [
+    NotCarried {
+        formula: "C",
+        isomer: None,
+        charge: 1,
+        element: Element::C,
+        largest_share: 0.88,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "H",
+        isomer: None,
+        charge: 1,
+        element: Element::H,
+        largest_share: 0.062,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "HO",
+        isomer: None,
+        charge: 0,
+        element: Element::O,
+        largest_share: 0.21,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e7),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "HS",
+        isomer: None,
+        charge: 0,
+        element: Element::S,
+        largest_share: 0.48,
+        temperature: Kelvin::new(4000.0),
+        pressure: Pascals::new(1e7),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "N",
+        isomer: None,
+        charge: 1,
+        element: Element::N,
+        largest_share: 0.045,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "O",
+        isomer: None,
+        charge: 1,
+        element: Element::O,
+        largest_share: 0.054,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+    NotCarried {
+        formula: "S",
+        isomer: None,
+        charge: 1,
+        element: Element::S,
+        largest_share: 0.97,
+        temperature: Kelvin::new(6000.0),
+        pressure: Pascals::new(1e-1),
+        condensed: false,
+    },
+];
+
+/// The species the network in force does not carry: [`NOT_CARRIED`], and below generator version
+/// 27 [`CARRIED_FROM_27`] too, each in its own order.
+pub fn not_carried() -> impl Iterator<Item = &'static NotCarried> {
+    let held = CarriersRules::in_force() == CarriersRules::Held;
+    NOT_CARRIED
+        .iter()
+        .chain(CARRIED_FROM_27.iter().filter(move |_| held))
+}
 
 /// Which composition a [`GasEquilibrium`] holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -993,6 +1015,9 @@ struct StartSpecies {
     carbon_atom: Option<usize>,
     nitrogen_atom: Option<usize>,
     sulphur_atom: Option<usize>,
+    /// OH and SH, from generator version 27: each beside its element's atom in the start.
+    hydroxyl: Option<usize>,
+    mercapto: Option<usize>,
 }
 
 /// The equilibrium network: every gas row of the registry with a thermochemical record (the
@@ -1006,6 +1031,9 @@ pub struct Network {
     /// The basis species' places, in [`MAJOR_ELEMENTS`]' order, then the electron's.
     basis: [usize; CHARGE + 1],
     start: StartSpecies,
+    /// Whether a major element has a cation in the network (H⁺, C⁺, N⁺, O⁺ and S⁺, from
+    /// generator version 27), which the start's electrons then count.
+    major_cations: bool,
     /// The lowest and highest temperatures at which every species' record holds.
     floor: Kelvin,
     ceiling: Kelvin,
@@ -1418,12 +1446,16 @@ impl Network {
             carbon_atom: find("C"),
             nitrogen_atom: find("N"),
             sulphur_atom: find("S"),
+            hydroxyl: find("OH"),
+            mercapto: find("SH"),
         };
+        let major_cations = species.iter().any(|s| s.trace.is_none() && s.charge > 0);
         Ok(Self {
             species,
             traces: traces.into_iter().map(|(t, _)| t).collect(),
             basis,
             start,
+            major_cations,
             floor,
             ceiling,
         })
@@ -1997,10 +2029,10 @@ impl<'a> State<'a> {
         slot.map(|i| self.log_k[i])
     }
 
-    /// The pressure of the major element's atom at `slot` over its basis species', at p(H₂) =
-    /// e^`log_hydrogen` (K p(H₂)^ν, ν the atom's H₂ coefficient: −2 for C, −3/2 for N, −1 for
-    /// S), its exponent held under [`START_LOG_BOUND`]; zero where the network or the gas has no
-    /// such atom.
+    /// The pressure of the major element's atom (or radical) at `slot` over its basis species', at
+    /// p(H₂) = e^`log_hydrogen` (K p(H₂)^ν, ν its H₂ coefficient: −2 for C, −3/2 for N, −1 for S,
+    /// −1/2 for OH and SH), its exponent held under [`START_LOG_BOUND`]; zero where the network or
+    /// the gas has no such species.
     #[must_use]
     fn atom_ratio(&self, slot: Option<usize>, log_hydrogen: f64) -> f64 {
         slot.filter(|&i| self.present[i]).map_or(0.0, |i| {
@@ -2033,8 +2065,10 @@ impl<'a> State<'a> {
             y[2] = math::ln(pair_root(self.gas.majors[2] * nuclei, 1.0 + atom, kappa));
         }
         if self.active[4] {
-            // H₂S against the atom: S = p(H₂S) (1 + σ), p(S) = σ p(H₂S).
-            let atom = self.atom_ratio(self.network.start.sulphur_atom, log_hydrogen);
+            // H₂S against the atom and SH: S = p(H₂S) (1 + σ), p(S) + p(SH) = σ p(H₂S); 26's
+            // network has no SH, whose ratio is then zero, the same bits.
+            let atom = self.atom_ratio(self.network.start.sulphur_atom, log_hydrogen)
+                + self.atom_ratio(self.network.start.mercapto, log_hydrogen);
             y[4] = math::ln(self.gas.majors[4] * nuclei / (1.0 + atom));
         }
         if self.active[CHARGE] {
@@ -2059,9 +2093,9 @@ impl<'a> State<'a> {
     }
 
     /// CO against CH₄ and H₂O at p(H₂) = e^`log_hydrogen` and hydrogen nuclei `nuclei`, bar:
-    /// p(CO) = κ p(CH₄)' p(H₂O)', with p(H₂O)' the oxygen in water and atoms (p(O) = λ p(H₂O),
-    /// λ = K ÷ p(H₂)), p(CH₄)' the carbon in methane and atoms (p(C) = μ p(CH₄), μ = K ÷ p(H₂)²)
-    /// and κ = K ÷ (p(H₂)³ (1 + λ) (1 + μ)), whatever the C/O; then the carbon not in CO shared
+    /// p(CO) = κ p(CH₄)' p(H₂O)', with p(H₂O)' the oxygen in water, atoms and OH (p(O) + p(OH) =
+    /// λ p(H₂O), λ = K ÷ p(H₂) + K' ÷ √p(H₂)), p(CH₄)' the carbon in methane and atoms (p(C) =
+    /// μ p(CH₄), μ = K ÷ p(H₂)²) and κ = K ÷ (p(H₂)³ (1 + λ) (1 + μ)), whatever the C/O; then the carbon not in CO shared
     /// between CH₄, C and C₂H₂, e = m (1 + μ) + 2 κ m² with κ = K ÷ p(H₂)³, which holds a
     /// carbon-rich gas's excess where the hydrogen is dissociated. p(CH₄) and p(H₂O), bar.
     #[must_use]
@@ -2069,9 +2103,11 @@ impl<'a> State<'a> {
         let start = &self.network.start;
         let carbon = self.gas.majors[1] * nuclei;
         let oxygen = self.gas.majors[3] * nuclei;
+        // OH beside the O atom (from generator version 27; 26's network has none, whose ratio is
+        // then zero, the same bits).
         let lambda = self.log_k_of(start.oxygen_atom).map_or(0.0, |lk| {
             math::exp((lk - log_hydrogen).min(START_LOG_BOUND))
-        });
+        }) + self.atom_ratio(start.hydroxyl, log_hydrogen);
         let mu = self.atom_ratio(start.carbon_atom, log_hydrogen);
         let (methane, water) = if self.active[1] && self.active[3] {
             let kappa = self.log_k_of(start.carbon_monoxide).map_or(0.0, |lk| {
@@ -2104,8 +2140,10 @@ impl<'a> State<'a> {
 
     /// The electrons by Saha's closed form, each ion a minor share of its element: p(e⁻)² (1 + K'
     /// √p(H₂)) = Σ ε N R, R each trace element's cations over its neutral species at p(e⁻) = 1
-    /// bar, and at most every trace atom ionised. The natural log of p(e⁻), bar, at the start's
-    /// other unknowns `y` and hydrogen nuclei `nuclei`.
+    /// bar, and at most every trace atom ionised; where the network holds the major elements'
+    /// cations (from generator version 27), with each one's p(X⁺) p(e⁻) at the other unknowns
+    /// added to the sum and its element's atoms to the bound. The natural log of p(e⁻), bar, at
+    /// the start's other unknowns `y` and hydrogen nuclei `nuclei`.
     #[must_use]
     fn start_electrons(&self, y: &[f64; UNKNOWNS], nuclei: f64) -> f64 {
         let network = self.network;
@@ -2136,7 +2174,24 @@ impl<'a> State<'a> {
         let hydride = self
             .log_k_of(network.start.hydride)
             .map_or(0.0, |lk| math::exp(lk + 0.5 * y[0]));
-        let all_ionised = self.gas.traces.iter().sum::<f64>() * nuclei;
+        let mut all_ionised = self.gas.traces.iter().sum::<f64>() * nuclei;
+        // 26's network has no major cation, and keeps its start's bits by skipping this.
+        if network.major_cations {
+            let mut ionisable = [false; 5];
+            for (i, s) in network.species.iter().enumerate() {
+                if s.trace.is_none() && s.charge > 0 && self.present[i] {
+                    cations += bounded_exp(self.exponent(i, &probe));
+                    for (k, &count) in s.counts.iter().enumerate() {
+                        ionisable[k] |= count > 0;
+                    }
+                }
+            }
+            for (k, &held) in ionisable.iter().enumerate() {
+                if held {
+                    all_ionised += self.gas.majors[k] * nuclei;
+                }
+            }
+        }
         let electrons = (cations / (1.0 + hydride))
             .sqrt()
             .min(all_ionised)

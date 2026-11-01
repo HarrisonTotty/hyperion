@@ -150,7 +150,8 @@ class Reference:
 
 REFS = {el: Reference(el) for el in list(GAS_REF) + ["C"] + list(COND_REF)}
 
-# Registry gas rows (key, CEA name), in registry order; FeH has no record.
+# Registry gas rows (key, CEA name), in registry order; FeH has no record. The last are P14.T52.e's
+# carriers, which join the registry at generator version 27.
 ROWS = [
     ("H2", "H2"), ("He", "He"), ("H2O", "H2O"), ("CH4", "CH4"), ("NH3", "NH3"), ("N2", "N2"),
     ("O2", "O2"), ("CO2", "CO2"), ("Ar", "Ar"), ("Ne", "Ne"), ("Kr", "Kr"), ("Xe", "Xe"),
@@ -163,6 +164,8 @@ ROWS = [
     ("K+", "K+"), ("Ca+", "Ca+"), ("Ti+", "Ti+"), ("V+", "V+"), ("Cr+", "Cr+"), ("Mn+", "Mn+"),
     ("Fe+", "Fe+"), ("Ni+", "Ni+"), ("Zn+", "Zn+"), ("HCl", "HCL"), ("Cr", "Cr"), ("S", "S"),
     ("N", "N"), ("C", "C"),
+    ("SH", "SH"), ("OH", "OH"), ("S+", "S+"), ("C+", "C+"), ("H+", "H+"), ("N+", "N+"),
+    ("O+", "O+"),
 ]
 
 

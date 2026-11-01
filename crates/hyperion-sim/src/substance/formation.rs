@@ -60,9 +60,10 @@
 //! # What is not modelled
 //!
 //! `FeH` has no CEA record ([`NOT_MODELLED`]; a closed set, for the composition audit), so P14.T52.d
-//! takes its thermochemistry from elsewhere or labels it. OH, the P and Cl atoms and their ions,
-//! which P14.T52.a's closed form may want, are not registry rows: CEA holds them, and a row added
-//! later takes its record by a refit.
+//! takes its thermochemistry from elsewhere or labels it. P14.T52.e's carriers (SH, OH, S⁺, C⁺,
+//! H⁺, N⁺ and O⁺), rows from generator version 27, take their records from `tables::thermo_27`
+//! until then; the P and Cl atoms and their ions are not registry rows: CEA holds them, and a row
+//! added later takes its record by a refit.
 //!
 //! # A second thermochemistry
 //!
@@ -81,6 +82,7 @@ use std::fmt;
 use super::{Element, SubstanceId, SubstanceKey};
 use crate::math;
 use crate::tables::thermo as table;
+use crate::tables::thermo_27 as carriers;
 use crate::units::Kelvin;
 
 /// One NASA 9-coefficient interval as the table holds it: its lower and upper bounds, K, then a₁…a₇,
@@ -95,8 +97,10 @@ pub const NOT_MODELLED: [(&str, &str); 1] = [(
      its thermochemistry from elsewhere or stays labelled",
 )];
 
-/// Each gas row's record, by key, in registry order: every gas row but [`NOT_MODELLED`]'s.
-const RECORDS: [(&str, &[Interval]); 60] = [
+/// Each gas row's record, by key, in registry order: every gas row but [`NOT_MODELLED`]'s, with
+/// P14.T52.e's carriers last, from their own table (`tables::thermo_27`), which join the registry
+/// at generator version 27 (`CARRIERS_VERSION`); until then no id reaches theirs.
+const RECORDS: [(&str, &[Interval]); 67] = [
     ("H2", &table::H2),
     ("He", &table::HE),
     ("H2O", &table::H2O),
@@ -157,6 +161,13 @@ const RECORDS: [(&str, &[Interval]); 60] = [
     ("S", &table::S),
     ("N", &table::N),
     ("C", &table::C),
+    ("SH", &carriers::SH),
+    ("OH", &carriers::OH),
+    ("S+", &carriers::S_PLUS),
+    ("C+", &carriers::C_PLUS),
+    ("H+", &carriers::H_PLUS),
+    ("N+", &carriers::N_PLUS),
+    ("O+", &carriers::O_PLUS),
 ];
 
 /// G ÷ RT of piecewise `intervals` at `t` kelvin, from the first interval that holds it (the lower
@@ -583,7 +594,10 @@ impl Error for BalanceReactionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::substance::{EQUILIBRIUM_HYDROGEN, by_key, heat_capacity_over_r_at, ids};
+    use crate::substance::{
+        CarriersRules, EQUILIBRIUM_HYDROGEN, by_key, carriers_ahead, heat_capacity_over_r_at, ids,
+        with_carriers,
+    };
 
     /// The row whose key is `key`.
     fn row(key: &str) -> SubstanceId {
@@ -606,8 +620,8 @@ mod tests {
     /// fa7746572952d74e249e818a82a35c113829742fb421a308e167185528884363), gives the same output
     /// byte for byte. A metal's atom has `K_f` = 1 by definition above its switch, so it is taken
     /// below it: at 500 K, at its switch rounded down to 100 K, and midway; every other row at
-    /// 500, 2,500 and 5,000 K.
-    const CEA: [(&str, [f64; 3], [f64; 3]); 60] = [
+    /// 500, 2,500 and 5,000 K. P14.T52.e's carriers are last (2026-11-01).
+    const CEA: [(&str, [f64; 3], [f64; 3]); 67] = [
         ("H2", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         ("He", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         (
@@ -1076,12 +1090,83 @@ mod tests {
                 0.632_436_910_023_108_6,
             ],
         ),
+        (
+            "SH",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -9.845_357_134_978_128,
+                -0.817_373_596_036_857,
+                -0.033_689_645_633_207_074,
+            ],
+        ),
+        (
+            "OH",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -3.066_169_985_248_021,
+                -0.014_174_508_658_892_48,
+                0.328_765_914_704_599_6,
+            ],
+        ),
+        (
+            "S+",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -125.991_392_245_589_03,
+                -20.235_430_768_227_6,
+                -6.770_588_549_214_912,
+            ],
+        ),
+        (
+            "C+",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -179.967_143_243_603_5,
+                -27.339_893_284_740_445,
+                -7.836_573_980_945_608,
+            ],
+        ),
+        (
+            "H+",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -156.952_871_749_317_84,
+                -26.994_499_191_347_078,
+                -10.127_624_207_643_933,
+            ],
+        ),
+        (
+            "N+",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -192.019_370_266_260_1,
+                -33.185_066_070_279_994,
+                -12.718_449_492_154_056,
+            ],
+        ),
+        (
+            "O+",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -159.896_010_193_637_04,
+                -27.306_281_336_762_375,
+                -10.154_521_287_362_25,
+            ],
+        ),
     ];
 
     /// Three values per species to 10⁻⁴ in log K (the plan's test): CEA's records as the
     /// independent Python evaluation gives them. Measured, every value is the Python's to the bit.
     #[test]
     fn substance_formation_reproduces_the_cea_records() {
+        // Under 27's registry, so that P14.T52.e's carriers are rows; the others' are the same.
+        with_carriers(CarriersRules::Carried, || {
+            the_cea_records_are_reproduced_under_the_rules_in_force();
+        });
+    }
+
+    /// [`substance_formation_reproduces_the_cea_records`]'s checks, every entry's row in force.
+    fn the_cea_records_are_reproduced_under_the_rules_in_force() {
         let mut worst = 0.0_f64;
         for (key, temperatures, values) in CEA {
             for (t, expected) in temperatures.into_iter().zip(values) {
@@ -1122,17 +1207,32 @@ mod tests {
         "Cr+", "Mn+", "Ni+", "Zn+", "TiO", "VO", "SiO", "FeH", "OH", "S", "N", "C",
     ];
 
-    /// The species T52.a may want that are not registry rows: CEA holds each, and a row added
-    /// later takes its record by a refit.
+    /// The species T52.a may want that are not registry rows below generator version 27: CEA holds
+    /// each, and a row added later takes its record by a refit.
     const NOT_ROWS: [&str; 5] = ["P", "Cl", "P+", "Cl+", "OH"];
 
+    /// Those of [`NOT_ROWS`] that P14.T52.e's carriers make rows at 27.
+    const ROWS_AT_27: [&str; 1] = ["OH"];
+
     /// Every gas row that T52.a or T52.b names has an entry, but `FeH`, which CEA does not hold (and
-    /// the five species that are not rows); and every gas row of the registry has one but `FeH`.
+    /// the species that are not rows); and every gas row of the registry has one but `FeH`, the
+    /// records of P14.T52.e's carriers following, under 26's registry and 27's.
     #[test]
     fn substance_formation_every_gas_row_of_the_chemistry_has_an_entry() {
+        for rules in [CarriersRules::Held, CarriersRules::Carried] {
+            with_carriers(rules, || every_gas_row_has_an_entry(rules));
+        }
+    }
+
+    /// [`substance_formation_every_gas_row_of_the_chemistry_has_an_entry`]'s checks under `rules`.
+    fn every_gas_row_has_an_entry(rules: CarriersRules) {
+        let not_rows: Vec<&str> = NOT_ROWS
+            .into_iter()
+            .filter(|key| rules == CarriersRules::Held || !ROWS_AT_27.contains(key))
+            .collect();
         for key in NAMED {
             match by_key(key) {
-                None => assert!(NOT_ROWS.contains(&key), "{key} is a row"),
+                None => assert!(not_rows.contains(&key), "{key} is a row"),
                 Some(id) => {
                     assert!(id.substance().gas().is_some(), "{key} is a gas row");
                     let modelled = formation_range(id).is_some();
@@ -1140,10 +1240,12 @@ mod tests {
                 }
             }
         }
-        for key in NOT_ROWS {
+        for &key in &not_rows {
             assert_eq!(by_key(key), None, "{key}");
         }
+        // The carriers ahead of their bump have their records already, last.
         let gas_rows: Vec<String> = ids()
+            .chain(carriers_ahead())
             .filter(|id| id.substance().gas().is_some())
             .map(|id| id.substance().key().as_str().to_owned())
             .collect();
@@ -1173,6 +1275,12 @@ mod tests {
     /// below or above it, nor at a temperature that is not positive and finite.
     #[test]
     fn substance_formation_is_never_extrapolated() {
+        // Under 27's registry, so that every record's row is in force.
+        with_carriers(CarriersRules::Carried, no_record_is_extrapolated);
+    }
+
+    /// [`substance_formation_is_never_extrapolated`]'s checks.
+    fn no_record_is_extrapolated() {
         for &(key, _) in &RECORDS {
             let (lower, upper) = formation_range(row(key)).unwrap();
             let (lower, upper) = (lower.value(), upper.value());

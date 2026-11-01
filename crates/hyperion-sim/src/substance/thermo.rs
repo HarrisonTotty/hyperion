@@ -1468,6 +1468,105 @@ mod tests {
                 (1500.0, 2.50274),
             ],
         ),
+        (
+            "SH",
+            &[
+                (300.0, 3.90485),
+                (400.0, 3.82124),
+                (500.0, 3.77011),
+                (600.0, 3.76282),
+                (700.0, 3.78948),
+                (800.0, 3.83661),
+                (1000.0, 3.95367),
+                (1200.0, 4.06811),
+                (1500.0, 4.21538),
+            ],
+        ),
+        (
+            "OH",
+            &[
+                (200.0, 3.67018),
+                (300.0, 3.59359),
+                (400.0, 3.56045),
+                (500.0, 3.54741),
+                (600.0, 3.54973),
+                (700.0, 3.56672),
+                (800.0, 3.59763),
+                (1000.0, 3.69018),
+                (1200.0, 3.80023),
+                (1500.0, 3.96465),
+            ],
+        ),
+        (
+            "S+",
+            &[
+                (300.0, 2.5),
+                (400.0, 2.5),
+                (500.0, 2.5),
+                (600.0, 2.5),
+                (700.0, 2.5),
+                (800.0, 2.5),
+                (1000.0, 2.5),
+                (1200.0, 2.49846),
+                (1500.0, 2.50225),
+            ],
+        ),
+        (
+            "C+",
+            &[
+                (300.0, 2.52227),
+                (400.0, 2.51233),
+                (500.0, 2.50781),
+                (600.0, 2.50538),
+                (700.0, 2.50393),
+                (800.0, 2.50299),
+                (1000.0, 2.5019),
+                (1200.0, 2.50131),
+                (1500.0, 2.50085),
+            ],
+        ),
+        (
+            "H+",
+            &[
+                (300.0, 2.5),
+                (400.0, 2.5),
+                (500.0, 2.5),
+                (600.0, 2.5),
+                (700.0, 2.5),
+                (800.0, 2.5),
+                (1000.0, 2.5),
+                (1200.0, 2.5),
+                (1500.0, 2.5),
+            ],
+        ),
+        (
+            "N+",
+            &[
+                (300.0, 2.5592),
+                (400.0, 2.53298),
+                (500.0, 2.52092),
+                (600.0, 2.51443),
+                (700.0, 2.51054),
+                (800.0, 2.50804),
+                (1000.0, 2.50511),
+                (1200.0, 2.50314),
+                (1500.0, 2.50266),
+            ],
+        ),
+        (
+            "O+",
+            &[
+                (300.0, 2.5),
+                (400.0, 2.5),
+                (500.0, 2.5),
+                (600.0, 2.5),
+                (700.0, 2.5),
+                (800.0, 2.5),
+                (1000.0, 2.5),
+                (1200.0, 2.50032),
+                (1500.0, 2.49973),
+            ],
+        ),
     ];
 
     /// The rows the ruling holds closest: within 1 per cent to 1,000 K and 2 per cent to 1,500 K
@@ -1476,10 +1575,26 @@ mod tests {
 
     /// Every gas row's sum against NASA Glenn: H₂ (in equilibrium), He, N₂, O₂, CO, CO₂, H₂O and
     /// Ar within 1 per cent from 200 to 1,000 K and 2 per cent to 1,500 K, and every other row
-    /// NASA Glenn has within 2 per cent to 700 K and 3 per cent to 1,000 K.
+    /// NASA Glenn has within 2 per cent to 700 K and 3 per cent to 1,000 K: P14.T52.e's carriers
+    /// with them, under 27's registry, and every row in force with and without them.
     #[test]
     fn the_heat_capacities_follow_nasa_glenn() {
+        use crate::substance::{CarriersRules, with_carriers};
+        for rules in [CarriersRules::Held, CarriersRules::Carried] {
+            with_carriers(
+                rules,
+                the_heat_capacities_follow_nasa_glenn_under_the_rules_in_force,
+            );
+        }
+    }
+
+    /// [`the_heat_capacities_follow_nasa_glenn`] under the registry in force: every oracle whose
+    /// row is in force, and an oracle for every gas row.
+    fn the_heat_capacities_follow_nasa_glenn_under_the_rules_in_force() {
         for &(key, oracle) in NASA_GLENN {
+            if by_key(key).is_none() {
+                continue;
+            }
             let close = CLOSE.contains(&key);
             let molecular = if key == "H2" {
                 EQUILIBRIUM_HYDROGEN

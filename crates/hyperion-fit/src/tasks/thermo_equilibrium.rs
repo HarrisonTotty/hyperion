@@ -2,6 +2,14 @@
 //! gas row and of the elements' reference states, re-emitted for
 //! `hyperion_sim::substance::formation`, which gives each row's equilibrium constant of formation.
 //!
+//! **P14.T52.e's carriers, held.** The rows P14.T52.e appends join the registry at generator
+//! version 27 (the sim's `CARRIERS_VERSION`), and the table that output reads since 24 cannot
+//! change before then (plan 15, Design note 10). Their records are the task's second table,
+//! [`ThermoEquilibrium27Task`]'s `thermo_27`, from `manifests/thermo_equilibrium_27.toml`, emitted
+//! at the version in force and read by `substance::formation` only under 27's registry. The bump to
+//! 27 moves [`CARRIERS`] into [`ROWS`] and their items into [`ITEMS`], re-emits `thermo` at 27,
+//! and deletes [`ThermoEquilibrium27Task`] with its manifest, table and lock entry.
+//!
 //! # The data
 //!
 //! NASA Glenn's 9-coefficient records (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556; the
@@ -62,7 +70,7 @@ use std::num::NonZeroUsize;
 
 use hyperion_sim::math;
 pub use hyperion_sim::substance::formation::NOT_MODELLED;
-use hyperion_sim::substance::{Element, by_key, ids};
+use hyperion_sim::substance::{Element, SubstanceId, by_key, carriers_ahead, ids};
 
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, SimFingerprint};
@@ -1018,7 +1026,7 @@ fn record_doc(subject: &str, records: &[&Record]) -> Vec<String> {
 /// The library's terms for `key`'s stoichiometry and charge: each element in capitals with its
 /// count, then `E` at minus the charge.
 #[must_use]
-fn registry_formula(id: hyperion_sim::substance::SubstanceId) -> Vec<(String, f64)> {
+fn registry_formula(id: SubstanceId) -> Vec<(String, f64)> {
     let row = id.substance();
     let mut formula: Vec<(String, f64)> = row
         .elements()
@@ -1514,6 +1522,202 @@ impl FitTask for ThermoEquilibriumTask {
     }
 }
 
+/// The second table's revision, [`ThermoEquilibrium27Task`]'s.
+pub const CARRIERS_REVISION: u32 = 0;
+
+/// P14.T52.e's carriers, the rows that join the registry at generator version 27, in registry
+/// order: each row's key and its CEA record's name.
+pub const CARRIERS: [(&str, &str); 7] = [
+    ("SH", "SH"),
+    ("OH", "OH"),
+    ("S+", "S+"),
+    ("C+", "C+"),
+    ("H+", "H+"),
+    ("N+", "N+"),
+    ("O+", "O+"),
+];
+
+/// The second table's items, in order: [`CARRIERS`]' records.
+pub const CARRIER_ITEMS: [&str; 7] = ["SH", "OH", "S_PLUS", "C_PLUS", "H_PLUS", "N_PLUS", "O_PLUS"];
+
+/// The carriers' items, each checked against its row's stoichiometry and charge.
+///
+/// # Errors
+///
+/// [`FitThermoError::Rows`] if the rows ahead of their bump are not [`CARRIERS`] (so, at 27's
+/// bump, once they are in force, this table has nothing left to hold); [`FitThermoError`] for a
+/// record that is missing, names a gas twice or has another formula, or whose intervals do not
+/// join or lie above [`UPPER_TEMPERATURE_K`].
+pub fn fit_carriers(library: &[Record]) -> Result<Fit, FitThermoError> {
+    let rows: Vec<SubstanceId> = carriers_ahead()
+        .filter(|id| id.substance().gas().is_some())
+        .collect();
+    let keys: Vec<String> = rows
+        .iter()
+        .map(|id| id.substance().key().as_str().to_owned())
+        .collect();
+    if keys
+        .iter()
+        .map(String::as_str)
+        .ne(CARRIERS.iter().map(|(k, _)| *k))
+    {
+        return Err(FitThermoError::Rows { found: keys });
+    }
+    let mut dropped = Vec::new();
+    let mut items = Vec::with_capacity(CARRIERS.len());
+    for (&(key, name), id) in CARRIERS.iter().zip(&rows) {
+        let records = find(library, &[name], Phase::Gas)?;
+        let mut found = records[0].formula.clone();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        let expected = registry_formula(*id);
+        if !same_formula(&found, &expected) {
+            return Err(FitThermoError::Formula {
+                key: key.to_owned(),
+                found,
+                expected,
+            });
+        }
+        let item = item_name(key);
+        items.push(Item::Record {
+            doc: record_doc(&format!("`{key}`, a carrier of 27's network"), &records),
+            intervals: pieces(&item, &records, &mut dropped)?,
+            name: item,
+        });
+    }
+    Ok(Fit { items, dropped })
+}
+
+/// The second table's rendering: the main table's, with its own summary.
+#[must_use]
+pub fn render_carriers(fit: &Fit) -> RustTable {
+    let mut table = render(fit);
+    table.summary = vec![
+        "The thermochemistry of P14.T52.e's carriers (plan 14), which `substance::formation`"
+            .to_owned(),
+        "reads under 27's registry: NASA's CEA records, as `thermo`'s.".to_owned(),
+    ];
+    table.notes = [
+        "Each record is NASA Glenn's 9-coefficient polynomials (McBride, Zehe and Gordon 2002,",
+        "NASA/TP-2002-211556, eqs. (1)-(3)) re-emitted, one interval a row as",
+        "`[T_lo, T_hi, a1, ..., a7, b1, b2]`, K and the file's coefficients to the nearest f64, from",
+        "the subset of CEA's `data/thermo.inp` in the dataset `nasa_cea_thermo` (Apache 2.0), as",
+        "`thermo`'s rows are; their formation constants read `thermo`'s reference states. The",
+        "table is held apart until generator version 27, whose bump moves it into `thermo`.",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    table
+}
+
+/// The second table's acceptance line.
+#[must_use]
+fn carriers_acceptance(fit: &Fit) -> String {
+    let intervals: usize = fit
+        .items
+        .iter()
+        .map(|i| match i {
+            Item::Record { intervals, .. } => intervals.len(),
+            Item::Switch { .. } => 0,
+        })
+        .sum();
+    format!(
+        "{} carriers of P14.T52.e, the registry's gas rows from generator version 27, {} items of \
+         {intervals} intervals re-emitted from the records to the bit; dropped as empty: {}",
+        CARRIERS.len(),
+        fit.items.len(),
+        if fit.dropped.is_empty() {
+            "none".to_owned()
+        } else {
+            fit.dropped.join(", ")
+        },
+    )
+}
+
+/// The second table: P14.T52.e's carriers' records, held until 27 (the [module](self)'s
+/// documentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct ThermoEquilibrium27Task;
+
+impl FitTask for ThermoEquilibrium27Task {
+    fn name(&self) -> &'static str {
+        "thermo_equilibrium_27"
+    }
+
+    fn class(&self) -> TaskClass {
+        TaskClass::Fast
+    }
+
+    fn table_path(&self) -> &'static str {
+        "thermo_27.rs"
+    }
+
+    fn revision(&self) -> u32 {
+        CARRIERS_REVISION
+    }
+
+    fn items(&self) -> &'static [&'static str] {
+        &CARRIER_ITEMS
+    }
+
+    /// The carriers the table follows: each row's index, charge and stoichiometry, as
+    /// [`ThermoEquilibriumTask`]'s probes.
+    fn fingerprint(&self) -> SimFingerprint {
+        let mut probes = Vec::new();
+        for id in carriers_ahead().filter(|id| id.substance().gas().is_some()) {
+            let row = id.substance();
+            let key = row.key();
+            probes.push((format!("{key} index"), f64::from(id.index())));
+            probes.push((format!("{key} charge"), f64::from(row.charge())));
+            for &(element, count) in row.elements() {
+                let place = Element::ALL
+                    .iter()
+                    .position(|&e| e == element)
+                    .and_then(|place| u8::try_from(place).ok())
+                    .expect("every element is one of Element::ALL's 25");
+                probes.push((format!("{key} element"), f64::from(place)));
+                probes.push((format!("{key} {}", element.symbol()), f64::from(count)));
+            }
+        }
+        SimFingerprint::new(probes)
+    }
+
+    fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
+        check_manifest(self, manifest)?;
+        manifest.expect_params(&parameters())?;
+        let dataset = manifest.load_dataset(DATASET)?;
+        let input = |source: Box<dyn std::error::Error + Send + Sync>| RunTaskError::Input {
+            task: "thermo_equilibrium_27",
+            source,
+        };
+        let bytes = dataset
+            .files
+            .iter()
+            .find(|(name, _)| name == LIBRARY)
+            .map(|(_, bytes)| bytes)
+            .ok_or_else(|| input(Box::new(FitThermoError::NoLibrary(LIBRARY))))?;
+        let text =
+            std::str::from_utf8(bytes).map_err(|_| input(Box::new(ParseThermoError::NotAscii)))?;
+        let library = parse(text).map_err(|e| input(Box::new(e)))?;
+        let fitted = fit_carriers(&library).map_err(|e| input(Box::new(e)))?;
+        let names: Vec<&str> = fitted.items.iter().map(Item::name).collect();
+        if names != CARRIER_ITEMS {
+            return Err(input(Box::new(FitThermoError::Items {
+                found: names.into_iter().map(str::to_owned).collect(),
+            })));
+        }
+        Ok(TaskOutput {
+            source: "NASA Glenn's 9-coefficient records (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556) \
+                     in `data/thermo.inp` of NASA's CEA, nasa/cea at 2f79a647 (Apache 2.0), the subset of the \
+                     dataset `nasa_cea_thermo`: P14.T52.e's carriers"
+                .to_owned(),
+            acceptance: carriers_acceptance(&fitted),
+            table: render_carriers(&fitted),
+            provisional: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1620,12 +1824,12 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
         assert_eq!(parse(&bound), malformed(5, "a field is not a number"));
     }
 
-    /// Every item is found in the committed library, in the task's order, and the only empty
-    /// intervals are `Si(cr)`'s and `Ca(a)`'s.
+    /// Every item is found in the committed library (its 120 records, P14.T52.e's carriers'
+    /// among them), in the task's order, and the only empty intervals are `Si(cr)`'s and `Ca(a)`'s.
     #[test]
     fn thermo_equilibrium_the_library_holds_every_item() {
         let library = library();
-        assert_eq!(library.len(), 113);
+        assert_eq!(library.len(), 120);
         let fitted = fit(&library).unwrap();
         let names: Vec<&str> = fitted.items().iter().map(Item::name).collect();
         assert_eq!(names, ITEMS);
@@ -1640,6 +1844,26 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
         }
         let table = render(&fitted);
         assert_eq!(table.item_names(), ITEMS);
+    }
+
+    /// The second table's items are found in the committed library too, P14.T52.e's carriers in
+    /// the registry's order, each checked against its row, with no interval dropped.
+    #[test]
+    fn thermo_equilibrium_the_library_holds_every_carrier() {
+        let library = library();
+        let fitted = fit_carriers(&library).unwrap();
+        let names: Vec<&str> = fitted.items().iter().map(Item::name).collect();
+        assert_eq!(names, CARRIER_ITEMS);
+        assert_eq!(fitted.dropped(), [] as [String; 0]);
+        let keys: Vec<&str> = CARRIERS.iter().map(|&(key, _)| key).collect();
+        let rows: Vec<String> = carriers_ahead()
+            .map(|id| id.substance().key().as_str().to_owned())
+            .collect();
+        assert_eq!(rows, keys);
+        for (&(key, _), name) in CARRIERS.iter().zip(CARRIER_ITEMS) {
+            assert_eq!(item_name(key), name);
+        }
+        assert_eq!(render_carriers(&fitted).item_names(), CARRIER_ITEMS);
     }
 
     /// Each switch is where the condensed phases' G per atom meets the gas form's, the miss
