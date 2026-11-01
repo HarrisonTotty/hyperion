@@ -187,6 +187,8 @@ async function bakeAcrossTheEdge(
           // No readout is asked here (R10.T12).
           case "ground-readout":
           case "ground-readout-failed":
+          // No bake is drafted here, so none is refined (R10.T6.a).
+          case "normals-refined":
             fail(`the worker answered ${JSON.stringify(reply)}`);
             return;
         }

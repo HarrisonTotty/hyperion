@@ -52,6 +52,7 @@ import {
   WASM_HORIZON_LAYER,
   WASM_LINE_OF_SIGHT,
   WASM_NORMAL_SCALE,
+  WASM_NORMALS_DRAFTED,
   WASM_NORMALS_LAYER,
   WASM_SIGMA_SURVEY,
   WASM_VERTEX_PATH,
@@ -72,6 +73,7 @@ import {
   type SurfaceGroundReadout,
   type WeightsLayerSetting,
 } from "./messages";
+import { draftVertexBits, mergeRefinedNormals } from "./draftNormals";
 import { needsRebake } from "./rebake";
 
 /** The module's bytes, from the `data:` URL Vite inlines them as. */
@@ -337,6 +339,22 @@ function rootDoubledNormals(face: Face): Float32Array {
   return normals;
 }
 
+/** `bake` without its normals, whether they are a draft, and its completeness. */
+function withoutNormals(bake: BakedPatch): unknown {
+  const { layers } = bake;
+  return {
+    ...bake,
+    normals: null,
+    drafted: null,
+    layers: layers === null ? null : { ...layers, complete: null },
+  };
+}
+
+/** A half-float array's bits. */
+function halfBitsOf(n: Float16Array): Uint16Array {
+  return new Uint16Array(n.buffer, n.byteOffset, n.length);
+}
+
 /** The runs of a block's answer, in the fixture's words. */
 function runWords(runs: Uint32Array): string[] {
   const words: string[] = [];
@@ -415,6 +433,7 @@ describe("the height worker's fields on the real module", () => {
     expect(WASM_HORIZON_LAYER.skipped).toBe(HorizonLayer.Skipped);
     expect(WASM_NORMALS_LAYER.baked).toBe(NormalsLayer.Baked);
     expect(WASM_NORMALS_LAYER.skipped).toBe(NormalsLayer.Skipped);
+    expect(WASM_NORMALS_DRAFTED).toBe(NormalsLayer.Drafted);
     expect(WASM_LINE_OF_SIGHT.ground).toBe(LineOfSightKind.Ground);
     expect(WASM_LINE_OF_SIGHT["no-ground"]).toBe(LineOfSightKind.NoGround);
     expect(WASM_LINE_OF_SIGHT["not-surveyed"]).toBe(LineOfSightKind.NotSurveyed);
@@ -704,6 +723,68 @@ describe("the height worker's fields on the real module", () => {
       );
     }
     direct.free();
+  });
+
+  it("drafts each fixture patch at double normals, its refined normals making it the whole bake, bit for bit (R10.T6.a)", () => {
+    const fields = heldFields();
+    const patches = recordsOf("patch");
+    expect(patches).toHaveLength(6);
+    let differing = 0;
+    for (const record of patches) {
+      const [, name, face, level, i, j, path, , weights] = record.head;
+      const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+      const settings: BakeSettings = {
+        vertexPath: lookup(VERTEX_PATHS, path),
+        normals: "double",
+        source: {
+          kind: "body",
+          body: FIXTURE.body,
+          detailSeed: FIXTURE.seed,
+          weights: lookup(WEIGHTS, weights) satisfies WeightsLayerSetting,
+        },
+      };
+      const asked = (draft: boolean): BakedPatch => {
+        const { reply } = answerRequest(
+          module,
+          { kind: "bake", id: 3, key, generation: 5, settings, ...(draft ? { draft: true } : {}) },
+          fields,
+        );
+        if (reply.kind !== "baked") {
+          throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+        }
+        return reply.bake;
+      };
+      const whole = asked(false);
+      const draft = asked(true);
+      const { reply, transfer } = answerRequest(
+        module,
+        { kind: "refine-normals", id: 4, key, generation: 6, settings },
+        fields,
+      );
+      if (reply.kind !== "normals-refined") {
+        throw new Error(`${String(name)} was not refined: ${JSON.stringify(reply)}`);
+      }
+      const { refined } = reply;
+      expect([whole.drafted, draft.drafted, refined.key, refined.generation]).toEqual([
+        undefined,
+        true,
+        key,
+        6,
+      ]);
+      expect(transfer).toEqual([refined.normals.buffer]);
+      // Everything but the normals between the vertices is the whole bake's already.
+      expect(withoutNormals(draft)).toEqual(withoutNormals(whole));
+      const merged = mergeRefinedNormals(draftVertexBits(draft.normals), refined.normals);
+      expect(halfBitsOf(merged)).toEqual(halfBitsOf(whole.normals));
+      // A patch off the survey is the datum's, whose mean between the vertices is its own.
+      differing += halfBitsOf(draft.normals).some((b, n) => b !== halfBitsOf(whole.normals)[n])
+        ? 1
+        : 0;
+      expect((draft.layers?.complete ?? false) && refined.complete).toBe(
+        whole.layers?.complete ?? false,
+      );
+    }
+    expect(differing).toBeGreaterThanOrEqual(4);
   });
 
   it("bakes the horizon maps the native bake does, their words, completeness and refused cells", () => {

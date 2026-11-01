@@ -178,6 +178,8 @@ import type {
   FieldBlockAnswer,
   HeightSourceSetting,
 } from "./workers/messages";
+import { draftVertexBits, mergeRefinedNormals } from "./workers/draftNormals";
+import type { RefinedDraft, RefineRequest } from "./workers/pool";
 import { needsRebake, type RebakeLayers } from "./workers/rebake";
 
 export { DEFAULT_TERRAIN_VIEW } from "./gpu/resources";
@@ -326,6 +328,15 @@ export interface TerrainPool {
    * never so, as for the descent spike's pool.
    */
   readonly unavailable?: boolean;
+  /**
+   * Asks for the normals a drafted bake left between its vertices ({@link BakedPatch.drafted};
+   * R10.T6.a's progressive bake), at a lower priority than any bake; absent, a draft stays drawn.
+   */
+  refine?(r: RefineRequest): void;
+  /** Drops a refinement asked, whose answer is then not told. */
+  dropRefinement?(keyString: string): void;
+  /** Listens for refined normals; returns the function that stops listening. */
+  onRefined?(cb: (refined: RefinedDraft) => void): () => void;
 }
 
 /**
@@ -628,6 +639,14 @@ interface Resident {
   readonly interior: boolean;
 }
 
+/** A drafted bake waiting for its refined normals. */
+interface Draft {
+  /** Its vertices' packed normals, {@link draftVertexBits}' of its tile. */
+  readonly vertexBits: Uint16Array;
+  /** The refinement's {@link RefineRequest.ticket}. */
+  readonly ticket: number;
+}
+
 /** A resident patch's place for the graticule at one step (R10.T11), kept until the step changes. */
 interface HeldGraticule {
   readonly stepRad: number;
@@ -656,6 +675,13 @@ interface Device {
   readonly pool: TerrainPool;
   readonly offBaked: () => void;
   readonly offFailed: () => void;
+  readonly offRefined: () => void;
+  /**
+   * The resident patches whose bakes are drafts (R10.T6.a's progressive bake), by key string: each
+   * one's vertices' packed normals ({@link draftVertexBits}) and the ticket of the refinement
+   * asked, until its refined normals land.
+   */
+  readonly drafts: Map<string, Draft>;
   /** A lit terrain's tables of no air, for a body without an atmosphere; `null` for the spike's. */
   readonly airless: SurfaceLightingTables | null;
   material: MaterialHandle | null;
@@ -1094,6 +1120,8 @@ export class TerrainPass {
   readonly #survey: TerrainSurveyLookup | null;
   readonly #measureSelection: boolean;
   readonly #onResident: ((key: PatchKey) => void) | null;
+  /** The last draft's refinement ticket ({@link RefineRequest.ticket}), from 0. */
+  #tickets = 0;
   readonly #onSelect: ((input: SelectionInput, selection: Selection) => void) | null;
   /** The observers ({@link TerrainPass.observe}), replaced whole on each change. */
   #observers = NO_OBSERVERS;
@@ -2005,6 +2033,11 @@ export class TerrainPass {
         pool.onFailed?.((failure) => {
           this.#givenUp(device, failure.keyString);
         }) ?? ((): void => undefined),
+      offRefined:
+        pool.onRefined?.((refined) => {
+          this.#refined(device, refined);
+        }) ?? ((): void => undefined),
+      drafts: new Map(),
       airless:
         this.#shading === "lit" ? createAirlessTables(this.#engine, "terrain: no air") : null,
       material: null,
@@ -2029,6 +2062,7 @@ export class TerrainPass {
     const old = this.#device;
     old.offBaked();
     old.offFailed();
+    old.offRefined();
     old.pool.terminate();
     // Nothing is resident now: every view's draw set misses its patches, so no mask is given.
     this.#settleAll(old);
@@ -2130,6 +2164,7 @@ export class TerrainPass {
     });
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
+    this.#draft(device, bake, keyString);
     this.#landed(device, keyString);
     const askedAtMs = this.#askedAtMs.get(keyString);
     if (askedAtMs !== undefined && this.#lookaheadClockMs !== null) {
@@ -2149,8 +2184,67 @@ export class TerrainPass {
     }
   }
 
+  /**
+   * Keeps a drafted bake's vertices' normals and asks for its refinement, at its request's priority;
+   * a whole bake drops any refinement of the draft it replaced.
+   */
+  #draft(device: Device, bake: BakedPatch, keyString: string): void {
+    const { pool } = device;
+    if (bake.drafted === true && pool.refine !== undefined) {
+      this.#tickets += 1;
+      const ticket = this.#tickets;
+      device.drafts.set(keyString, { vertexBits: draftVertexBits(bake.normals), ticket });
+      const priority = device.residents.get(keyString)?.request.priority ?? 0;
+      pool.refine({ key: bake.key, priority, ticket });
+    } else if (device.drafts.delete(keyString)) {
+      pool.dropRefinement?.(keyString);
+    }
+  }
+
+  /**
+   * A draft's refined normals: its slot's normals made the whole bake's and written alone, and its
+   * completeness the draft's and theirs, which R10's rebake rule reads; dropped unless the draft
+   * they refine is still the one held.
+   */
+  #refined(device: Device, refined: RefinedDraft): void {
+    if (device !== this.#device || this.#disposed) {
+      return;
+    }
+    const keyString = patchKeyString(refined.key);
+    const draft = device.drafts.get(keyString);
+    const held = device.cache.get(keyString);
+    if (draft === undefined || draft.ticket !== refined.ticket || held === undefined) {
+      return;
+    }
+    device.drafts.delete(keyString);
+    const normals = mergeRefinedNormals(draft.vertexBits, refined.normals);
+    let written: ReturnType<TerrainResources["uploadNormals"]>;
+    try {
+      written = device.resources.uploadNormals(held.slot, normals);
+    } catch (error: unknown) {
+      if (!(error instanceof EngineUnavailable)) {
+        throw error;
+      }
+      // Refined during a loss: the restore's rebuild bakes the patch again.
+      return;
+    }
+    const resident = device.residents.get(keyString);
+    const layers = resident?.layers ?? null;
+    if (
+      written.kind === "uploaded" &&
+      !refined.complete &&
+      resident !== undefined &&
+      layers !== null
+    ) {
+      device.residents.set(keyString, { ...resident, layers: { ...layers, complete: false } });
+    }
+  }
+
   /** A patch no longer resident: evicted, or refused by its slot. */
   #forget(device: Device, keyString: string): void {
+    if (device.drafts.delete(keyString)) {
+      device.pool.dropRefinement?.(keyString);
+    }
     device.residents.delete(keyString);
     device.givenUp.delete(keyString);
     device.graticules.delete(keyString);

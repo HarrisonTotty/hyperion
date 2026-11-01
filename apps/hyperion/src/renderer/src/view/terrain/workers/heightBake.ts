@@ -42,6 +42,7 @@ import type {
   HeightWorkerRequest,
   HorizonLayerSetting,
   NormalsLayerSetting,
+  RefinedNormals,
   SigmaSurveySetting,
   SurfaceGroundReadout,
   SurfaceLineOfSight,
@@ -53,7 +54,12 @@ import type {
   TestPlanetRidges,
   WeightsLayerSetting,
 } from "./messages";
-import { bakeTransferables, blockTransferables, classMapTransferables } from "./messages";
+import {
+  bakeTransferables,
+  blockTransferables,
+  classMapTransferables,
+  refinedTransferables,
+} from "./messages";
 
 /** The version of the test planet this client's code was written against, the surface crate's
  * `TEST_PLANET_VERSION` (pinned to it by `heightWasm.test.ts`). A module that bakes another
@@ -95,6 +101,12 @@ export const WASM_NORMALS_LAYER = { baked: 0, skipped: 1 } as const satisfies Re
 >;
 
 /**
+ * The module's `NormalsLayer::Drafted` (`src/wasm.rs`'s `JsNormalsLayer`): a body's bake whose
+ * normals between the vertices are a draft, which `refineNormals` makes later (R10.T6.a).
+ */
+export const WASM_NORMALS_DRAFTED = 2;
+
+/**
  * The module's `SigmaSurvey` enum values (`src/wasm.rs`'s `JsSigmaSurvey`): whether a field started
  * surveys its σ by level (R10.T4.c).
  */
@@ -117,6 +129,13 @@ export interface WasmBakedPatch {
   readonly originHeightM: number;
   readonly skirtDepthM: number;
   /** Releases the bake's memory inside the module. */
+  free(): void;
+}
+
+/** The module's `RefinedNormals`: the normals a drafted bake left between its vertices. */
+export interface WasmRefinedNormals {
+  normals(): Float32Array;
+  readonly complete: boolean;
   free(): void;
 }
 
@@ -271,6 +290,16 @@ export interface WasmSurfaceFields {
   fieldChunk(system: bigint, body: number, block: Uint8Array): WasmFieldBlock;
   fieldRelease(system: bigint, body: number): boolean;
   readonly heldBytes: number;
+  refineNormals(
+    system: bigint,
+    body: number,
+    seed: bigint,
+    face: number,
+    level: number,
+    i: number,
+    j: number,
+    normals: number,
+  ): WasmRefinedNormals | undefined;
   bake(
     system: bigint,
     body: number,
@@ -645,6 +674,9 @@ export class WorkerFields {
    * (`TerrainLayers.maturity`, R10.T1.c's client half); `null` where the field cannot make it yet:
    * none is held, or a surveyed vertex reads a cell still to come.
    *
+   * @param draft - Whether to draft the normals between the vertices ({@link BakedPatch.drafted},
+   *   {@link WASM_NORMALS_DRAFTED}), which only double normals that are baked have: any other bake
+   *   is made whole.
    * @throws Whatever the module throws for a key out of range.
    */
   bake(
@@ -652,7 +684,10 @@ export class WorkerFields {
     generation: number,
     settings: BakeSettings,
     source: Extract<HeightSourceSetting, { kind: "body" }>,
+    draft = false,
   ): BakedPatch | null {
+    const normalsLayer = source.normals ?? "baked";
+    const drafted = draft && settings.normals === "double" && normalsLayer === "baked";
     const baked = this.#module.bake(
       ...bodyArgs(source.body),
       hexToU64(source.detailSeed),
@@ -664,7 +699,7 @@ export class WorkerFields {
       WASM_NORMAL_SCALE[settings.normals],
       WASM_WEIGHTS_LAYER[source.weights],
       WASM_HORIZON_LAYER[source.horizon ?? source.weights],
-      WASM_NORMALS_LAYER[source.normals ?? "baked"],
+      drafted ? WASM_NORMALS_DRAFTED : WASM_NORMALS_LAYER[normalsLayer],
       0,
     );
     if (baked === undefined) {
@@ -692,7 +727,7 @@ export class WorkerFields {
         }
         maturity = { codes, nodes };
       }
-      return patchOf(baked, key, generation, {
+      const patch = patchOf(baked, key, generation, {
         palette,
         weights: baked.weights(),
         surveyMask: baked.surveyMask(),
@@ -708,8 +743,41 @@ export class WorkerFields {
         horizonRefusedCells: baked.horizonRefusedCells(),
         ...(maturity === null ? {} : { maturity }),
       });
+      return drafted ? { ...patch, drafted: true } : patch;
     } finally {
       baked.free();
+    }
+  }
+
+  /**
+   * The normals a drafted bake of `key` left between its vertices, over `source`'s body's field at
+   * the settings' normal resolution ({@link RefinedNormals}); `null` where the field cannot make
+   * them yet, as {@link WorkerFields.bake}'s.
+   *
+   * @throws Whatever the module throws for a key out of range.
+   */
+  refineNormals(
+    key: PatchKey,
+    generation: number,
+    settings: BakeSettings,
+    source: Extract<HeightSourceSetting, { kind: "body" }>,
+  ): RefinedNormals | null {
+    const refined = this.#module.refineNormals(
+      ...bodyArgs(source.body),
+      hexToU64(source.detailSeed),
+      key.face,
+      key.level,
+      key.i,
+      key.j,
+      WASM_NORMAL_SCALE[settings.normals],
+    );
+    if (refined === undefined) {
+      return null;
+    }
+    try {
+      return { key, generation, normals: refined.normals(), complete: refined.complete };
+    } finally {
+      refined.free();
     }
   }
 
@@ -1114,6 +1182,8 @@ export function answerRequest(
   switch (request.kind) {
     case "bake":
       return answerBake(module, request, fields);
+    case "refine-normals":
+      return answerRefine(request, fields);
     case "field-init":
       return fieldAnswer(
         request.id,
@@ -1197,7 +1267,7 @@ function answerBake(
     const bake =
       source.kind === "test-planet"
         ? bakeKey(module, key, generation, settings, source.ridges)
-        : fields.bake(key, generation, settings, source);
+        : fields.bake(key, generation, settings, source, request.draft === true);
     if (bake === null) {
       return {
         reply: {
@@ -1209,6 +1279,51 @@ function answerBake(
       };
     }
     return { reply: { kind: "baked", id: request.id, bake }, transfer: bakeTransferables(bake) };
+  } catch (error: unknown) {
+    if (isTrap(error)) {
+      throw error;
+    }
+    return {
+      reply: {
+        kind: "bake-failed",
+        id: request.id,
+        message: `patch ${patchKeyString(key)}: ${messageOf(error)}`,
+      },
+      transfer: [],
+    };
+  }
+}
+
+/**
+ * Answers a `refine-normals` request: the normals between the vertices of a body's drafted bake, or
+ * `bake-unsurveyed` and `bake-failed` as a bake's (the test planet drafts none, so it has none to
+ * refine); a trap is rethrown, as a bake's is.
+ */
+function answerRefine(
+  request: Extract<HeightWorkerRequest, { kind: "refine-normals" }>,
+  fields: WorkerFields,
+): HeightAnswer {
+  const { key, generation, settings } = request;
+  const source = settings.source;
+  try {
+    if (source.kind === "test-planet") {
+      throw new Error("the test planet's bakes are made whole, with no normals to refine");
+    }
+    const refined = fields.refineNormals(key, generation, settings, source);
+    if (refined === null) {
+      return {
+        reply: {
+          kind: "bake-unsurveyed",
+          id: request.id,
+          message: `patch ${patchKeyString(key)}: the field held of ${source.body} cannot refine it yet`,
+        },
+        transfer: [],
+      };
+    }
+    return {
+      reply: { kind: "normals-refined", id: request.id, refined },
+      transfer: refinedTransferables(refined),
+    };
   } catch (error: unknown) {
     if (isTrap(error)) {
       throw error;

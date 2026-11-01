@@ -198,6 +198,7 @@ function fakeModule(
     get heldBytes() {
       return [...held.values()].reduce((a, b) => a + b, 0);
     },
+    refineNormals: () => undefined,
     bake: (system, body, _seed, _face, _level, _i, _j, _vertexPath, _normals, weights, horizon) => {
       bake?.layersAsked.push({ weights, horizon });
       return bake !== undefined && held.has(key(system, body)) ? fakeBaked(bake.codes) : undefined;

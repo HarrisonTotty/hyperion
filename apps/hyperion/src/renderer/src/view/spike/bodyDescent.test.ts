@@ -449,6 +449,11 @@ class StubSession implements BodyDescentSession {
         failed.add(cb);
         return () => failed.delete(cb);
       },
+      // Its bakes are whole, never drafts, so none is refined.
+      refine: () => undefined,
+      dropRefinement: () => undefined,
+      refiningCount: 0,
+      onRefined: () => () => undefined,
       terminate: () => {
         record.terminated = true;
       },

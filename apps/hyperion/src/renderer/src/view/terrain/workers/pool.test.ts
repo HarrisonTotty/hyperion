@@ -15,6 +15,7 @@ import type {
   SurfaceGroundReadout,
   TerrainLayers,
 } from "./messages";
+import { NORMALS_BETWEEN } from "./messages";
 import {
   defaultHeightWorkers,
   type FieldChange,
@@ -1558,5 +1559,160 @@ describe("the height-worker pool's readout worker (R10.T12.c)", () => {
     const lane = pool.lane(laneSettings());
     giveUp(created, 1);
     expect([lane.unavailable, workerAt(created, 0).terminated]).toEqual([true, false]);
+  });
+});
+
+/** The moon's lit bakes on the high setting: double normals, which a lane may draft. */
+function highSettings(source: HeightSourceSetting = MOON_SOURCE): BakeSettings {
+  return { vertexPath: "baked-offsets", normals: "double", source };
+}
+
+/** The bakes a worker was sent, as each key and whether it was drafted. */
+function draftsOf(w: ScriptedHeightWorker): string[] {
+  return w.received.flatMap((m) =>
+    m.kind === "bake" ? [`${patchKeyString(m.key)}${m.draft === true ? " drafted" : ""}`] : [],
+  );
+}
+
+/** Answers a worker's oldest refinement, complete or not. */
+function answerRefinement(w: ScriptedHeightWorker, complete = true): void {
+  const next = w.pendingRefinements[0];
+  if (next === undefined) {
+    throw new Error("no refinement is pending");
+  }
+  w.reply({
+    kind: "normals-refined",
+    id: next.id,
+    refined: {
+      key: next.key,
+      generation: next.generation,
+      normals: new Float32Array(2 * NORMALS_BETWEEN),
+      complete,
+    },
+  });
+}
+
+describe("the height-worker pool's progressive bakes (R10.T6.a)", () => {
+  it("drafts a body's bakes at double normals while others wait behind them, and the last whole", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lane = pool.lane(highSettings());
+    lane.reprioritise([req(1, 3), req(2, 2), req(3, 1)]);
+    const worker = workerAt(created, 0);
+    worker.bakeOldest();
+    worker.bakeOldest();
+    expect(draftsOf(worker)).toEqual([
+      `${patchKeyString(keyAt(1))} drafted`,
+      `${patchKeyString(keyAt(2))} drafted`,
+      patchKeyString(keyAt(3)),
+    ]);
+  });
+
+  it("drafts nothing at mesh normals, with its normals skipped, or of the test planet", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    for (const settings of [
+      laneSettings(),
+      highSettings({ ...MOON_SOURCE, normals: "skipped" }),
+      highSettings(TEST_PLANET),
+    ]) {
+      const lane = pool.lane(settings);
+      lane.reprioritise([req(1, 3), req(2, 2), req(3, 1)]);
+      const worker = workerAt(created, 0);
+      while (worker.pendingBakes.length > 0) {
+        worker.bakeOldest();
+      }
+      lane.terminate();
+    }
+    expect(draftsOf(workerAt(created, 0)).filter((line) => line.endsWith("drafted"))).toEqual([]);
+  });
+
+  it("refines once no bake is queued, to workers with nothing in flight, best first, with their tickets", () => {
+    const { pool, created } = fieldsOnly(2);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lane = pool.lane(highSettings());
+    const told: string[] = [];
+    lane.onRefined((r) => told.push(`${patchKeyString(r.key)} ${String(r.ticket)}`));
+    lane.reprioritise([req(1, 1), req(2, 1), req(3, 1)]);
+    lane.refine({ key: keyAt(7), priority: 1, ticket: 70 });
+    lane.refine({ key: keyAt(8), priority: 5, ticket: 80 });
+    const [a, b] = [workerAt(created, 0), workerAt(created, 1)];
+    // The three bakes go first, two to one worker; nothing refines while any waits.
+    expect([a.pendingRefinements.length, b.pendingRefinements.length]).toEqual([0, 0]);
+    a.bakeOldest();
+    b.bakeOldest();
+    expect(lane.queuedCount).toBe(0);
+    // Worker b is idle: the best refinement; worker a still has a bake in flight, so none.
+    expect([a.pendingRefinements.length, b.pendingRefinements.map((m) => m.key)]).toEqual([
+      0,
+      [keyAt(8)],
+    ]);
+    a.bakeOldest();
+    expect(a.pendingRefinements.map((m) => m.key)).toEqual([keyAt(7)]);
+    answerRefinement(a);
+    answerRefinement(b);
+    expect([told, lane.refiningCount]).toEqual([
+      [`${patchKeyString(keyAt(7))} 70`, `${patchKeyString(keyAt(8))} 80`],
+      0,
+    ]);
+  });
+
+  it("tells no refinement dropped, and one asked again in flight once, with the later ticket", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lane = pool.lane(highSettings());
+    const told: number[] = [];
+    lane.onRefined((r) => told.push(r.ticket));
+    lane.refine({ key: keyAt(1), priority: 1, ticket: 1 });
+    const worker = workerAt(created, 0);
+    lane.dropRefinement(patchKeyString(keyAt(1)));
+    answerRefinement(worker);
+    lane.refine({ key: keyAt(2), priority: 1, ticket: 2 });
+    // Asked again in flight, for a newer draft: the normals refined are the key's over the field,
+    // whichever draft asked, so the flight answers the later ticket and none is sent again.
+    lane.refine({ key: keyAt(2), priority: 1, ticket: 3 });
+    answerRefinement(worker);
+    expect([told, worker.pendingRefinements.length, lane.refiningCount]).toEqual([[3], 0, 0]);
+  });
+
+  it("asks an incomplete refinement made before a block again, and waits one the field cannot make for its next", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lane = pool.lane(highSettings());
+    const told: boolean[] = [];
+    lane.onRefined((r) => told.push(r.complete));
+    lane.refine({ key: keyAt(1), priority: 1, ticket: 1 });
+    const worker = workerAt(created, 0);
+    pool.fieldChunk(MOON, blockOf(8, 1));
+    answerRefinement(worker, false);
+    expect([told, worker.pendingRefinements.length]).toEqual([[], 1]);
+    const pending = worker.pendingRefinements[0];
+    if (pending === undefined) {
+      throw new Error("no refinement is pending");
+    }
+    worker.reply({ kind: "bake-unsurveyed", id: pending.id, message: "a margin to come" });
+    expect(worker.pendingRefinements).toEqual([]);
+    pool.fieldChunk(MOON, blockOf(8, 2));
+    answerBlock(worker, 2, 0);
+    answerRefinement(worker, false);
+    expect(told).toEqual([false]);
+  });
+
+  it("asks a failed worker's refinement again, and drops a refused one", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lane = pool.lane(highSettings());
+    const told: number[] = [];
+    lane.onRefined((r) => told.push(r.ticket));
+    lane.refine({ key: keyAt(1), priority: 1, ticket: 1 });
+    workerAt(created, 0).fail();
+    const replacement = workerAt(created, 1);
+    replacement.answerFields();
+    const pending = replacement.pendingRefinements[0];
+    if (pending === undefined) {
+      throw new Error("no refinement is pending");
+    }
+    replacement.reply({ kind: "bake-failed", id: pending.id, message: "refused" });
+    expect([told, lane.refiningCount]).toEqual([[], 0]);
   });
 });

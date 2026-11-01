@@ -186,6 +186,9 @@ export function countedWorker(inner: WorkerLike, traffic: MutableWorkerTraffic):
   traffic.made += 1;
   traffic.live += 1;
   let live = true;
+  // A drafted bake's refinements (R10.T6.a), which are answered `bake-failed` and
+  // `bake-unsurveyed` as bakes are, by request ID: none is a bake.
+  const refining = new Set<number>();
   inner.addEventListener("message", (event: MessageEvent<HeightWorkerReply>) => {
     switch (event.data.kind) {
       case "baked":
@@ -193,7 +196,12 @@ export function countedWorker(inner: WorkerLike, traffic: MutableWorkerTraffic):
         break;
       case "bake-failed":
       case "bake-unsurveyed":
-        traffic.refused += 1;
+        if (!refining.delete(event.data.id)) {
+          traffic.refused += 1;
+        }
+        break;
+      case "normals-refined":
+        refining.delete(event.data.id);
         break;
       case "field-held":
       case "field-refused":
@@ -220,6 +228,9 @@ export function countedWorker(inner: WorkerLike, traffic: MutableWorkerTraffic):
           break;
         case "field-release":
           traffic.releases += 1;
+          break;
+        case "refine-normals":
+          refining.add(message.id);
           break;
         case "class-map":
         case "ground-readout":

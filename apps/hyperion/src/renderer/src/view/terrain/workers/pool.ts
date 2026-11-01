@@ -49,7 +49,7 @@
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import { type LevelBounds, SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
-import { patchKeyString, unreachable } from "../patchKey";
+import { type PatchKey, patchKeyString, unreachable } from "../patchKey";
 import { fillsHole } from "../priority";
 import type { PatchRequest } from "../select";
 import type {
@@ -163,6 +163,29 @@ export interface HeightWorkerPoolOptions {
 }
 
 /** A request given up because its bake failed, for the metrics and the console. */
+/**
+ * A refinement of a drafted bake (plan R10, R10.T6.a's progressive bake): the normals its
+ * draft left between the vertices ({@link RefinedNormals}).
+ */
+export interface RefineRequest {
+  readonly key: PatchKey;
+  /** The order among refinements, higher first, as a bake's priority orders bakes. */
+  readonly priority: number;
+  /** The asker's token for the draft it refines, handed back with its normals. */
+  readonly ticket: number;
+}
+
+/** A drafted bake's normals between its vertices, as the pool hands them to its lane's listeners. */
+export interface RefinedDraft {
+  readonly key: PatchKey;
+  /** The request's {@link RefineRequest.ticket}. */
+  readonly ticket: number;
+  /** {@link RefinedNormals.normals}. */
+  readonly normals: Float32Array;
+  /** {@link RefinedNormals.complete}. */
+  readonly complete: boolean;
+}
+
 export interface BakeFailure {
   readonly keyString: string;
   readonly message: string;
@@ -233,6 +256,18 @@ interface Lane {
   readonly waiting: Map<string, PatchRequest>;
   readonly bakedListeners: Set<(bake: BakedPatch) => void>;
   readonly failureListeners: Set<(failure: BakeFailure) => void>;
+  /**
+   * Whether its bakes may be drafted ({@link BakedPatch.drafted}): a body's, at double normals that
+   * are baked.
+   */
+  readonly drafts: boolean;
+  /** Its refinements asked and not yet told, queued, waiting or in flight, by key string. */
+  readonly refining: Map<string, RefineRequest>;
+  /** Those of them queued, not yet sent to a worker. */
+  readonly refinements: Map<string, RefineRequest>;
+  /** Those of them the source body's field could not make yet, until its next block. */
+  readonly waitingRefinements: Map<string, RefineRequest>;
+  readonly refinedListeners: Set<(refined: RefinedDraft) => void>;
   generation: number;
   terminated: boolean;
 }
@@ -242,6 +277,8 @@ interface InFlight {
   /** The lane it was asked through; its answer reaches that lane alone. */
   readonly lane: Lane;
   readonly request: PatchRequest;
+  /** The refinement it is, or `null` for a bake. */
+  readonly refine: RefineRequest | null;
   readonly keyString: string;
   readonly generation: number;
   /** The source body's field when the request was sent; `null` for the test planet, or none. */
@@ -337,9 +374,38 @@ function newLane(index: number, settings: BakeSettings): Lane {
     waiting: new Map(),
     bakedListeners: new Set(),
     failureListeners: new Set(),
+    drafts:
+      settings.normals === "double" &&
+      settings.source.kind === "body" &&
+      (settings.source.normals ?? "baked") === "baked",
+    refining: new Map(),
+    refinements: new Map(),
+    waitingRefinements: new Map(),
+    refinedListeners: new Set(),
     generation: 0,
     terminated: false,
   };
+}
+
+/** Drops `keyString`'s refinement of `lane`, queued, waiting or in flight. */
+function dropRefinementOf(lane: Lane, keyString: string): void {
+  lane.refining.delete(keyString);
+  lane.refinements.delete(keyString);
+  lane.waitingRefinements.delete(keyString);
+}
+
+/** Orders refinements: higher priority first, then the older lane's, then by key string. */
+function refinesBefore(
+  a: { readonly lane: Lane; readonly keyString: string; readonly r: RefineRequest },
+  b: { readonly lane: Lane; readonly keyString: string; readonly r: RefineRequest },
+): boolean {
+  if (a.r.priority !== b.r.priority) {
+    return a.r.priority > b.r.priority;
+  }
+  if (a.lane.index !== b.lane.index) {
+    return a.lane.index < b.lane.index;
+  }
+  return a.keyString < b.keyString;
 }
 
 /**
@@ -399,6 +465,22 @@ export interface HeightWorkerLane {
   onBaked(cb: (bake: BakedPatch) => void): () => void;
   /** Listens for the lane's requests given up because their bake failed; returns the unsubscribe. */
   onFailed(cb: (failure: BakeFailure) => void): () => void;
+  /**
+   * Asks for the normals a drafted bake of `r.key` left between its vertices, or re-scores the ask
+   * (plan R10, R10.T6.a's progressive bake). Refinements wait behind every bake of every lane, and
+   * go only to a worker with nothing in flight, so that no bake waits behind more than one; their
+   * answers reach {@link HeightWorkerLane.onRefined} with the ticket asked, a later ask of the key
+   * replacing an earlier one's.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  refine(r: RefineRequest): void;
+  /** Drops `keyString`'s refinement, queued, waiting or in flight: its answer is not told. */
+  dropRefinement(keyString: string): void;
+  /** The lane's refinements asked and not yet told. */
+  readonly refiningCount: number;
+  /** Listens for the lane's refined normals; returns the function that stops listening. */
+  onRefined(cb: (refined: RefinedDraft) => void): () => void;
   /**
    * Ends the lane: drops its queued, waiting and in-flight requests and its listeners, and leaves
    * the pool's fields, class-map queries and other lanes; a second call does nothing.
@@ -651,6 +733,16 @@ export class HeightWorkerPool {
       },
       onBaked: (cb) => listen(lane.bakedListeners, cb),
       onFailed: (cb) => listen(lane.failureListeners, cb),
+      refine: (r) => {
+        this.laneRefine(lane, r);
+      },
+      dropRefinement: (keyString) => {
+        dropRefinementOf(lane, keyString);
+      },
+      get refiningCount(): number {
+        return lane.refining.size;
+      },
+      onRefined: (cb) => listen(lane.refinedListeners, cb),
       terminate: () => {
         this.dropLane(lane);
       },
@@ -699,6 +791,27 @@ export class HeightWorkerPool {
   /** Listens for the own lane's requests given up because their bake failed; returns the unsubscribe. */
   onFailed(cb: (failure: BakeFailure) => void): () => void {
     return this.own === null ? () => undefined : listen(this.own.failureListeners, cb);
+  }
+
+  /**
+   * {@link HeightWorkerLane.refine} of the pool's own lane.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
+   */
+  refine(r: RefineRequest): void {
+    this.laneRefine(this.ownLane(), r);
+  }
+
+  /** {@link HeightWorkerLane.dropRefinement} of the pool's own lane; none for a pool without one. */
+  dropRefinement(keyString: string): void {
+    if (this.own !== null) {
+      dropRefinementOf(this.own, keyString);
+    }
+  }
+
+  /** Listens for the own lane's refined normals; returns the unsubscribe. */
+  onRefined(cb: (refined: RefinedDraft) => void): () => void {
+    return this.own === null ? () => undefined : listen(this.own.refinedListeners, cb);
   }
 
   /** Listens for a body's field refused by a worker; returns the unsubscribe. */
@@ -880,6 +993,19 @@ export class HeightWorkerPool {
     this.pump();
   }
 
+  /** {@link HeightWorkerLane.refine} of `lane`. */
+  private laneRefine(lane: Lane, r: RefineRequest): void {
+    this.assertLane(lane);
+    const keyString = patchKeyString(r.key);
+    lane.refining.set(keyString, r);
+    if (lane.waitingRefinements.has(keyString)) {
+      lane.waitingRefinements.set(keyString, r);
+    } else if (!this.isRefining(lane, keyString)) {
+      lane.refinements.set(keyString, r);
+    }
+    this.pump();
+  }
+
   /** {@link HeightWorkerLane.reprioritise} of `lane`. */
   private laneReprioritise(lane: Lane, demand: ReadonlyArray<PatchRequest>): void {
     this.assertLane(lane);
@@ -951,6 +1077,10 @@ export class HeightWorkerPool {
     lane.wanted.clear();
     lane.bakedListeners.clear();
     lane.failureListeners.clear();
+    lane.refining.clear();
+    lane.refinements.clear();
+    lane.waitingRefinements.clear();
+    lane.refinedListeners.clear();
   }
 
   private assertLive(): void {
@@ -977,10 +1107,24 @@ export class HeightWorkerPool {
     return this.own;
   }
 
+  /** Whether a bake of `keyString` of `lane` is in flight. */
   private isInFlight(lane: Lane, keyString: string): boolean {
+    return this.inFlightOf(lane, keyString, "bake");
+  }
+
+  /** Whether a refinement of `keyString` of `lane` is in flight. */
+  private isRefining(lane: Lane, keyString: string): boolean {
+    return this.inFlightOf(lane, keyString, "refine");
+  }
+
+  private inFlightOf(lane: Lane, keyString: string, kind: "bake" | "refine"): boolean {
     for (const slot of this.slots) {
       for (const inFlight of slot.inFlight.values()) {
-        if (inFlight.lane === lane && inFlight.keyString === keyString) {
+        if (
+          inFlight.lane === lane &&
+          inFlight.keyString === keyString &&
+          (inFlight.refine === null) === (kind === "bake")
+        ) {
           return true;
         }
       }
@@ -1000,7 +1144,8 @@ export class HeightWorkerPool {
 
   /**
    * Hands queued requests to workers with room, the best request first, one a worker a round and
-   * the least loaded workers first, so that no worker idles while another holds two.
+   * the least loaded workers first, so that no worker idles while another holds two; once no bake
+   * is queued, the best refinements to the workers with nothing in flight.
    */
   private pump(): void {
     if (this.terminated) {
@@ -1012,22 +1157,82 @@ export class HeightWorkerPool {
           continue;
         }
         const next = this.best();
-        if (next === null) {
+        if (next !== null) {
+          this.send(slot, next);
+          continue;
+        }
+        const refine = load === 0 ? this.bestRefinement() : null;
+        if (refine === null) {
           return;
         }
-        this.send(slot, next);
+        this.sendRefinement(slot, refine.lane, refine.keyString, refine.r);
       }
     }
+  }
+
+  /** The best queued refinement over every lane whose body's field is started, or `null`. */
+  private bestRefinement(): {
+    readonly lane: Lane;
+    readonly keyString: string;
+    readonly r: RefineRequest;
+  } | null {
+    let best: {
+      readonly lane: Lane;
+      readonly keyString: string;
+      readonly r: RefineRequest;
+    } | null = null;
+    for (const lane of this.lanes) {
+      if (lane.sourceBody === null || !this.fields.has(lane.sourceBody)) {
+        continue;
+      }
+      for (const [keyString, r] of lane.refinements) {
+        const candidate = { lane, keyString, r };
+        if (best === null || refinesBefore(candidate, best)) {
+          best = candidate;
+        }
+      }
+    }
+    return best;
+  }
+
+  private sendRefinement(slot: Slot, lane: Lane, keyString: string, r: RefineRequest): void {
+    lane.refinements.delete(keyString);
+    const field = this.sourceField(lane);
+    const inFlight: InFlight = {
+      id: this.takeId(),
+      lane,
+      request: { key: r.key, priority: r.priority, forced: false },
+      refine: r,
+      keyString,
+      generation: lane.generation,
+      field,
+      blocksAtSend: field?.blocks.length ?? 0,
+    };
+    slot.inFlight.set(inFlight.id, inFlight);
+    slot.worker.postMessage(
+      {
+        kind: "refine-normals",
+        id: inFlight.id,
+        key: r.key,
+        generation: inFlight.generation,
+        settings: lane.settings,
+      },
+      [],
+    );
   }
 
   private send(slot: Slot, next: Candidate): void {
     const { lane, queued } = next;
     lane.queue.delete(queued.keyString);
+    // A draft while other bakes wait behind it: its first draw at half a whole bake's cost, its
+    // normals between the vertices after them (R10.T6.a's progressive bake).
+    const draft = lane.drafts && this.best() !== null;
     const field = this.sourceField(lane);
     const inFlight: InFlight = {
       id: this.takeId(),
       lane,
       request: queued.request,
+      refine: null,
       keyString: queued.keyString,
       generation: lane.generation,
       field,
@@ -1041,6 +1246,7 @@ export class HeightWorkerPool {
         key: queued.request.key,
         generation: inFlight.generation,
         settings: lane.settings,
+        ...(draft ? { draft: true } : {}),
       },
       [],
     );
@@ -1090,6 +1296,13 @@ export class HeightWorkerPool {
   /** Puts a request back in its lane's queue if its key is still wanted and not queued already. */
   private requeue(inFlight: InFlight): void {
     const { lane } = inFlight;
+    if (inFlight.refine !== null) {
+      const asked = lane.refining.get(inFlight.keyString);
+      if (!lane.terminated && asked !== undefined && !lane.refinements.has(inFlight.keyString)) {
+        lane.refinements.set(inFlight.keyString, asked);
+      }
+      return;
+    }
     if (
       !lane.terminated &&
       lane.wanted.has(inFlight.keyString) &&
@@ -1117,7 +1330,7 @@ export class HeightWorkerPool {
       case "baked": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
-        if (inFlight === undefined || inFlight.lane.terminated) {
+        if (inFlight === undefined || inFlight.lane.terminated || inFlight.refine !== null) {
           return;
         }
         const { lane } = inFlight;
@@ -1127,6 +1340,33 @@ export class HeightWorkerPool {
           lane.wanted.delete(inFlight.keyString);
           tell(lane.bakedListeners, reply.bake, "bakes");
         }
+        return;
+      }
+      case "normals-refined": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight === undefined || inFlight.lane.terminated || inFlight.refine === null) {
+          return;
+        }
+        const { lane, keyString } = inFlight;
+        const asked = lane.refining.get(keyString);
+        if (asked === undefined || lane.refinements.has(keyString)) {
+          // Dropped, or asked again since with a ticket of its own, which is queued.
+          return;
+        }
+        const { refined } = reply;
+        if (this.refineStale(inFlight, refined.complete)) {
+          this.requeue(inFlight);
+          return;
+        }
+        lane.refining.delete(keyString);
+        const told: RefinedDraft = {
+          key: refined.key,
+          ticket: asked.ticket,
+          normals: refined.normals,
+          complete: refined.complete,
+        };
+        tell(lane.refinedListeners, told, "refined normals");
         return;
       }
       case "bake-unsurveyed": {
@@ -1143,6 +1383,11 @@ export class HeightWorkerPool {
         ) {
           // A block came since, which may hold what it lacked, or the field started anew.
           this.requeue(inFlight);
+        } else if (inFlight.refine !== null) {
+          const asked = inFlight.lane.refining.get(inFlight.keyString);
+          if (asked !== undefined) {
+            inFlight.lane.waitingRefinements.set(inFlight.keyString, asked);
+          }
         } else if (inFlight.lane.wanted.has(inFlight.keyString)) {
           inFlight.lane.waiting.set(inFlight.keyString, inFlight.request);
         }
@@ -1151,6 +1396,11 @@ export class HeightWorkerPool {
       case "bake-failed": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
+        if (inFlight?.refine !== null && inFlight?.refine !== undefined) {
+          // A refinement refused: the draft stays drawn, a shading loss alone (R05 Design note 25).
+          inFlight.lane.refining.delete(inFlight.keyString);
+          return;
+        }
         if (inFlight !== undefined && !inFlight.lane.terminated) {
           const { lane } = inFlight;
           lane.wanted.delete(inFlight.keyString);
@@ -1359,6 +1609,19 @@ export class HeightWorkerPool {
     return staleInFlight(layers);
   }
 
+  /**
+   * Whether refined normals made after `inFlight` was sent are stale on arrival: their body's field
+   * started anew or was released since, or blocks came since and they are incomplete, so that a
+   * block may hold what they lacked.
+   */
+  private refineStale(inFlight: InFlight, complete: boolean): boolean {
+    const field = this.sourceField(inFlight.lane);
+    if (field !== inFlight.field) {
+      return true;
+    }
+    return field !== null && field.blocks.length !== inFlight.blocksAtSend && !complete;
+  }
+
   /** After a block of `body`'s field: the requests of its lanes waiting for it are asked again. */
   private afterBlock(body: BodyIdHex): void {
     for (const lane of this.lanes) {
@@ -1371,6 +1634,12 @@ export class HeightWorkerPool {
         }
       }
       lane.waiting.clear();
+      for (const [keyString, r] of lane.waitingRefinements) {
+        if (!lane.refinements.has(keyString) && !this.isRefining(lane, keyString)) {
+          lane.refinements.set(keyString, r);
+        }
+      }
+      lane.waitingRefinements.clear();
     }
     this.pump();
   }

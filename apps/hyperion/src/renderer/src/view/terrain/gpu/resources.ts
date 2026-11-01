@@ -1317,6 +1317,32 @@ export class TerrainResources {
   }
 
   /**
+   * Writes the normals tile of the bake `slot` holds, and nothing else: a drafted bake made whole by
+   * its refined normals (plan R10, R10.T6.a's progressive bake), its slot's other fields as its
+   * {@link TerrainResources.upload} wrote them.
+   *
+   * @returns `refused` with nothing written for a slot past the layout's count, as `upload`'s.
+   * @throws RangeError for a layout that holds no normals (the wireframe's), or normals of another
+   *   count than a tile's.
+   */
+  uploadNormals(slot: number, normals: Float16Array): SlotUploadResult {
+    const made = this.#made;
+    if (!Number.isInteger(slot) || slot < 0 || slot >= made.layout.slots.slotCount) {
+      return { kind: "refused", reason: "slot-outside-layout" };
+    }
+    const { atlas } = made.layout;
+    if (made.normals === null || atlas === null) {
+      throw new RangeError("the layout holds no normals to write");
+    }
+    const n = atlas.samplesPerSide;
+    if (normals.length !== n * n * 2) {
+      throw new RangeError(`${normals.length / 2} normals, where a tile holds ${n} × ${n}`);
+    }
+    this.#writeNormals(slot, made, normals);
+    return UPLOADED;
+  }
+
+  /**
    * Writes a frame's instances and contacts into `view`'s buffers and sets its indirect draw's
    * instance count.
    *

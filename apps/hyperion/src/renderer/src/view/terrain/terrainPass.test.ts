@@ -79,9 +79,11 @@ import { distanceToBoxFromM } from "./viewGeometry";
 import {
   type BakedPatch,
   type BakeSettings,
+  NORMALS_BETWEEN,
   PALETTE_NONE,
   type TerrainLayers,
 } from "./workers/messages";
+import type { RefinedDraft, RefineRequest } from "./workers/pool";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
@@ -99,7 +101,34 @@ class FakePool implements TerrainPool {
   unavailable = false;
   readonly #listeners = new Set<(bake: BakedPatch) => void>();
   readonly #failures = new Set<(failure: { readonly keyString: string }) => void>();
+  readonly #refinedListeners = new Set<(refined: RefinedDraft) => void>();
+  /** The refinements asked, in order (R10.T6.a's progressive bake). */
+  readonly refines: RefineRequest[] = [];
+  /** The refinements dropped, by key string, in order. */
+  readonly dropped: string[] = [];
   terminated = false;
+
+  refine(r: RefineRequest): void {
+    this.refines.push(r);
+  }
+
+  dropRefinement(keyString: string): void {
+    this.dropped.push(keyString);
+  }
+
+  onRefined(cb: (refined: RefinedDraft) => void): () => void {
+    this.#refinedListeners.add(cb);
+    return () => {
+      this.#refinedListeners.delete(cb);
+    };
+  }
+
+  /** Tells the pass `refined`, as the pool does a refinement's answer. */
+  refined(refined: RefinedDraft): void {
+    for (const listener of this.#refinedListeners) {
+      listener(refined);
+    }
+  }
 
   onFailed(cb: (failure: { readonly keyString: string }) => void): () => void {
     this.#failures.add(cb);
@@ -146,7 +175,11 @@ class FakePool implements TerrainPool {
     return demand.length;
   }
 
-  deliver(pass: TerrainPass, key: PatchRequest["key"]): void {
+  deliver(
+    pass: TerrainPass,
+    key: PatchRequest["key"],
+    normals?: { readonly fill: number; readonly drafted: boolean },
+  ): void {
     const n = normalsAtlasOf(pass.layout).samplesPerSide;
     const bake: BakedPatch = {
       key,
@@ -154,12 +187,13 @@ class FakePool implements TerrainPool {
       originM: { x: 1_000, y: 2_000, z: PLANET.figure.polarRadiusM },
       heights: new Float32Array(65 * 65 * 2),
       offsets: this.settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
-      normals: new Float16Array(n * n * 2),
+      normals: new Float16Array(n * n * 2).fill(normals?.fill ?? 0),
       heightRangeM: [0, 0],
       boundingRadiusM: 1,
       originHeightM: 0,
       skirtDepthM: 1,
       layers: this.layersOf.get(patchKeyString(key)) ?? this.layers,
+      ...(normals?.drafted === true ? { drafted: true } : {}),
     };
     for (const listener of this.#listeners) {
       listener(bake);
@@ -1854,4 +1888,119 @@ describe("the terrain pass's lookahead (R10.T14.b)", () => {
       frame.selection.demand.filter((r) => pass.resident(patchKeyString(r.key)) === undefined),
     );
   });
+});
+
+/** The half-float bits of `value`. */
+function halfBits(value: number): number {
+  return new Uint16Array(Float16Array.of(value).buffer)[0] ?? -1;
+}
+
+/** The normals tiles written, oldest first, each as its texels' half-float bits. */
+function normalsTiles(engine: CountingRenderEngine): Uint16Array[] {
+  return engine.textureWritten
+    .filter((w) => w.texture === "terrain normals")
+    .map((w) => new Uint16Array(w.data.buffer, w.data.byteOffset, w.data.byteLength / 2));
+}
+
+/** Sample (`x`, `y`)'s first component in a written tile of 129 × 129 and its gutter. */
+function tileTexel(tile: Uint16Array, x: number, y: number): number {
+  const stored = 129 + 2;
+  return tile[2 * ((y + 1) * stored + (x + 1))] ?? -1;
+}
+
+describe("the terrain pass's drafted bakes (R10.T6.a's progressive bake)", () => {
+  it("asks a draft's refinement at its request's priority and writes its normals alone, the vertices' kept", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    const fake = pool();
+    const request = fake.demand[0];
+    if (request === undefined) {
+      throw new Error("nothing demanded");
+    }
+    fake.deliver(pass, request.key, { fill: 0.5, drafted: true });
+    expect(fake.refines).toEqual([{ key: request.key, priority: request.priority, ticket: 1 }]);
+    const writes = engine.counts.bufferWrites;
+    const tiles = normalsTiles(engine).length;
+    fake.refined({
+      key: request.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN).fill(0.25),
+      complete: true,
+    });
+    const tile = normalsTiles(engine).at(-1);
+    expect([normalsTiles(engine).length, engine.counts.bufferWrites]).toEqual([tiles + 1, writes]);
+    if (tile === undefined) {
+      throw new Error("no normals were written");
+    }
+    expect([0, 1, 2, 3].map((x) => tileTexel(tile, x, 0))).toEqual([
+      halfBits(0.5),
+      halfBits(0.25),
+      halfBits(0.5),
+      halfBits(0.25),
+    ]);
+    expect([tileTexel(tile, 0, 1), tileTexel(tile, 1, 1), tileTexel(tile, 128, 128)]).toEqual([
+      halfBits(0.25),
+      halfBits(0.25),
+      halfBits(0.5),
+    ]);
+  });
+
+  it("drops a draft's refinement once a whole bake or an eviction replaces it, and writes nothing for its ticket", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    pass.frame(inputAt(northPole(2_000_000)));
+    const fake = pool();
+    const [first, second] = fake.demand;
+    if (first === undefined || second === undefined) {
+      throw new Error("two patches are demanded");
+    }
+    fake.deliver(pass, first.key, { fill: 0.5, drafted: true });
+    fake.deliver(pass, first.key, { fill: 0.5, drafted: false });
+    expect(fake.dropped).toEqual([patchKeyString(first.key)]);
+    const tiles = normalsTiles(engine).length;
+    fake.refined({
+      key: first.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN),
+      complete: true,
+    });
+    // A later draft's refinement is told with its own ticket alone.
+    fake.deliver(pass, second.key, { fill: 0.5, drafted: true });
+    fake.refined({
+      key: second.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN),
+      complete: true,
+    });
+    expect([normalsTiles(engine).length, fake.refines.map((r) => r.ticket)]).toEqual([
+      tiles + 1,
+      [1, 2],
+    ]);
+  });
+
+  it.each([true, false])(
+    "takes a bake as complete where its refinement is (%s), so that a block bakes it again where not",
+    async (complete) => {
+      const { pass, pool } = await passOn("high");
+      pass.frame(inputAt(northPole(2_000_000)));
+      const fake = pool();
+      fake.layers = bodyLayers();
+      const request = fake.demand[0];
+      if (request === undefined) {
+        throw new Error("nothing demanded");
+      }
+      fake.deliver(pass, request.key, { fill: 0.5, drafted: true });
+      fake.refined({
+        key: request.key,
+        ticket: 1,
+        normals: new Float32Array(2 * NORMALS_BETWEEN),
+        complete,
+      });
+      let settled = false;
+      pass.fieldChanged({ newlySurveyed: new Uint32Array(), newlyHeld: new Uint32Array() }, () => {
+        settled = true;
+      });
+      expect(settled).toBe(complete);
+    },
+  );
 });

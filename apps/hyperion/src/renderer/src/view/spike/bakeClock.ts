@@ -188,6 +188,7 @@ function noRequests(): Record<BakeClockRequestKind, number> {
     "field-release": 0,
     "class-map": 0,
     "ground-readout": 0,
+    "refine-normals": 0,
   };
 }
 
@@ -202,6 +203,7 @@ function noReplies(): Record<BakeClockReplyKind, number> {
     "class-map-failed": 0,
     "ground-readout": 0,
     "ground-readout-failed": 0,
+    "normals-refined": 0,
   };
 }
 
@@ -422,6 +424,7 @@ export class BakeClock {
       case "class-map-failed":
       case "ground-readout":
       case "ground-readout-failed":
+      case "normals-refined":
         break;
     }
     state.lastReplyMs = replyMs;

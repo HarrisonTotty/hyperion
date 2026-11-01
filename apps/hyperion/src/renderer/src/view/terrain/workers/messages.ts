@@ -19,6 +19,10 @@
  * `ground-readout` query a view's whole terrain readout where its line of sight meets the ground
  * (R10.T12), whose answer's types live here with the readings', the worker's wrappers of the
  * module answering in them (`heightBake.ts`).
+ *
+ * A body's bake at double normals may be a draft (plan R10, R10.T6.a's progressive bake): its
+ * normals between the vertices the vertices' mean, which a later `refine-normals` request makes,
+ * bit for bit the whole bake's; the render thread puts them in the draft's place.
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -56,6 +60,39 @@ export interface BakedPatch {
   readonly skirtDepthM: number;
   /** R10's layers, for a body's patch; `null` for the test planet's, which has none. */
   readonly layers: TerrainLayers | null;
+  /**
+   * Present where the bake drafted its normals ({@link NORMALS_BETWEEN} of them, plan R10,
+   * R10.T6.a's progressive bake): each vertex's exact, and each between the vertices the mean of
+   * theirs about it, the mesh's shading (R05 Design note 25's fallback), until the patch's
+   * {@link RefinedNormals} replace them. Its layers' `complete` is then the draft's alone.
+   */
+  readonly drafted?: true;
+}
+
+/**
+ * The samples of the double normals' 129 × 129 grid between the vertices, three in four: those a
+ * draft's {@link RefinedNormals} make (`hyperion_surface::patch::normals::NORMALS_BETWEEN`).
+ */
+export const NORMALS_BETWEEN = 129 * 129 - 65 * 65;
+
+/**
+ * The normals a drafted bake left between its vertices, made after it (`refineNormals`), bit for bit
+ * the whole bake's there.
+ */
+export interface RefinedNormals {
+  readonly key: PatchKey;
+  /** The generation of the request it answers. */
+  readonly generation: number;
+  /**
+   * The octahedral pairs of the samples between the vertices, row by row over the 129 × 129 grid,
+   * each skipping the vertices: {@link NORMALS_BETWEEN} pairs, as the module gives them, unpacked.
+   */
+  readonly normals: Float32Array;
+  /**
+   * Whether every height they read was the field's own: the drafted bake with them is complete
+   * where both are.
+   */
+  readonly complete: boolean;
 }
 
 /** The palette byte of no entry, and of an empty slot's class and entry (`src/wasm.rs`). */
@@ -496,6 +533,22 @@ export type HeightWorkerRequest =
       readonly key: PatchKey;
       readonly generation: number;
       readonly settings: BakeSettings;
+      /**
+       * Present to draft the normals ({@link BakedPatch.drafted}): taken by a body's bake at double
+       * normals that are baked, and ignored by any other.
+       */
+      readonly draft?: true;
+    }
+  /**
+   * Make the normals a drafted bake of `key` left between its vertices ({@link RefinedNormals});
+   * the answer carries the same `id`, `bake-unsurveyed` or `bake-failed` as a bake's would.
+   */
+  | {
+      readonly kind: "refine-normals";
+      readonly id: number;
+      readonly key: PatchKey;
+      readonly generation: number;
+      readonly settings: BakeSettings;
     }
   /**
    * Start `body`'s field from its first block, R09's block 0, which carries the whole header,
@@ -535,6 +588,8 @@ export type HeightWorkerRequest =
 export type HeightWorkerReply =
   /** The bake of request `id`. */
   | { readonly kind: "baked"; readonly id: number; readonly bake: BakedPatch }
+  /** The normals between the vertices of `refine-normals` request `id`. */
+  | { readonly kind: "normals-refined"; readonly id: number; readonly refined: RefinedNormals }
   /** Request `id` could not be baked. */
   | { readonly kind: "bake-failed"; readonly id: number; readonly message: string }
   /**
@@ -631,6 +686,11 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
     }
   }
   return buffers;
+}
+
+/** The buffer a worker transfers with refined normals. */
+export function refinedTransferables(refined: RefinedNormals): Transferable[] {
+  return [refined.normals.buffer];
 }
 
 /** The buffers a worker transfers with a block's answer. */

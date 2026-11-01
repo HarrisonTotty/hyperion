@@ -94,6 +94,14 @@ export class ScriptedHeightWorker implements WorkerLike {
     return this.received.flatMap((m) => (m.kind === "bake" && !answered.has(m.id) ? [m] : []));
   }
 
+  /** The refinements still awaiting an answer, oldest first (R10.T6.a's progressive bake). */
+  get pendingRefinements(): Extract<HeightWorkerRequest, { kind: "refine-normals" }>[] {
+    const answered = new Set(this.answered);
+    return this.received.flatMap((m) =>
+      m.kind === "refine-normals" && !answered.has(m.id) ? [m] : [],
+    );
+  }
+
   /** The field messages received, oldest first. */
   get fieldMessages(): FieldMessage[] {
     return this.received.flatMap((m) =>
