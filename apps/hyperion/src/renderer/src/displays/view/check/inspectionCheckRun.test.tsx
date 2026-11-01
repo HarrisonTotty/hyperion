@@ -1,6 +1,7 @@
 import { RequestClient } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
+import type { InspectionTimingWindow } from "../../../../../preload/api";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import {
   closeRateStep,
@@ -11,6 +12,29 @@ import {
   recordInspectionCheck,
   runInspectionCheck,
 } from "./inspectionCheckRun";
+
+/** A profiled window, as the frame profile measured it. */
+const WINDOW: InspectionTimingWindow = {
+  name: "orbit",
+  startMs: 0,
+  endMs: 1,
+  canvas: { widthPx: 1, heightPx: 1 },
+  scales: [],
+  intervalsMs: [],
+  mainThreadMs: [],
+  submitMs: [],
+  gpuMs: [],
+  passes: [],
+  untimedFrames: 0,
+  memory: {
+    uploaded: { count: 0, bytes: 0 },
+    created: { count: 0, bytes: 0 },
+    destroyed: { count: 0, bytes: 0 },
+    uploads: [],
+  },
+  position: null,
+  statements: [],
+};
 
 /** A body the launch names. */
 const BODY = "61ffd967fe000023.0100";
@@ -110,6 +134,7 @@ describe("the inspection run (the owner's request)", () => {
         }),
       new AbortController().signal,
       {
+        windows: [WINDOW],
         write: () => {
           order.push("write timing");
           return Promise.resolve();
@@ -118,6 +143,45 @@ describe("the inspection run (the owner's request)", () => {
     );
 
     expect(order).toEqual(["write timing", "end pass"]);
+  });
+
+  it("writes the windows it measured before it ends failed, a later step having failed", async () => {
+    const order: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await recordInspectionCheck(
+      {
+        end: (outcome) => {
+          order.push(`end ${outcome.status}`);
+          return Promise.resolve();
+        },
+      },
+      () =>
+        Promise.reject(new Error("views check: the primary did not draw 5 frames within 300 s")),
+      new AbortController().signal,
+      {
+        windows: [WINDOW],
+        write: () => {
+          order.push("write timing");
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(order).toEqual(["write timing", "end fail"]);
+  });
+
+  it("writes no timing file where it measured no window", async () => {
+    const write = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    const end = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await recordInspectionCheck(
+      { end },
+      () => Promise.reject(new Error("views check: VIEW BODY was held back")),
+      new AbortController().signal,
+      { windows: [], write },
+    );
+
+    expect([write.mock.calls.length, end.mock.calls.length]).toEqual([0, 1]);
   });
 
   it("ends failed with the reason the run threw", async () => {

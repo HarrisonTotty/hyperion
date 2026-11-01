@@ -592,10 +592,21 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
 /** What {@link recordInspectionCheck} asks of the main process. */
 export type InspectionCheckEnding = Pick<ViewsCheckApi, "end">;
 
+/** A failure's reason, logged with what failed. */
+function failureOf(error: unknown, what: string): string {
+  console.error(`views check: ${what}:`, error);
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Runs `run` and ends the check with its outcome: passed once its capture is taken, and with the
  * frame profile once its timing file is written, or failed with the reason it threw; nothing at all
  * once `signal` has stopped it.
+ *
+ * @remarks
+ * The frame profile's windows are written whether the run passed or not, once any was measured: a
+ * run that fails at a later step, as a slow machine's may wait out a step's frames, keeps the
+ * profile it took (the owner's report, 2026-11-01).
  *
  * @param profile - The frame profile whose windows the run measured, written before the end;
  *   `null` on a launch without it.
@@ -604,21 +615,26 @@ export async function recordInspectionCheck(
   api: InspectionCheckEnding,
   run: () => Promise<InspectionCapture>,
   signal: AbortSignal,
-  profile: Pick<InspectionProfiler, "write"> | null,
+  profile: Pick<InspectionProfiler, "windows" | "write"> | null,
 ): Promise<void> {
+  let failure: string | null = null;
   try {
     await run();
-    if (signal.aborted) {
-      return;
-    }
-    await profile?.write();
-    await api.end({ status: "pass" });
   } catch (error: unknown) {
     if (signal.aborted) {
       return;
     }
-    const reason = error instanceof Error ? error.message : String(error);
-    console.error("views check: the inspection run failed:", error);
-    await api.end({ status: "fail", reason });
+    failure = failureOf(error, "the inspection run failed");
   }
+  if (signal.aborted) {
+    return;
+  }
+  if (profile !== null && profile.windows.length > 0) {
+    try {
+      await profile.write();
+    } catch (error: unknown) {
+      failure ??= failureOf(error, "the frame profile was not written");
+    }
+  }
+  await api.end(failure === null ? { status: "pass" } : { status: "fail", reason: failure });
 }
