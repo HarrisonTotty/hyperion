@@ -1,12 +1,12 @@
 name,track,ref,distance_mid_kpc,width_deg,width_pc,globular_like,kind,reason,in_cut
 20.0-1,20.0-1-M18,mateu2018,26.84,1.800,843,no,wide,843 pc wide with no progenitor known,yes
 300S,300S-F18,fu2018,15.93,0.400,111,yes,globular,thin at 111 pc with no dwarf progenitor known,yes
-AAU-AliqaUma,AAU-AliqaUma-L21,li2021,21.98,0.260,100,yes,globular,thin at 100 pc with no dwarf progenitor known,yes
+AAU-AliqaUma,AAU-AliqaUma-L21,li2021,21.98,0.260,100,no,duplicate,one stream with AAU-ATLAS (Li et al. 2021),yes
 AAU-ATLAS,AAU-ATLAS-L21,li2021,21.48,0.300,112,yes,globular,thin at 112 pc with no dwarf progenitor known,yes
 Acheron,Acheron-G09,grillmair2009,3.66,0.400,26,yes,globular,thin at 26 pc with no dwarf progenitor known,yes
 ACS,ACS-R21,ramos2021,11.70,2.100,429,no,disc,a disc structure of the anticentre (Ramos et al. 2021),yes
 Alpheus,Alpheus-G13,grillmair2013,1.80,1.400,44,yes,globular,thin at 44 pc with no dwarf progenitor known,yes
-Aquarius,Aquarius-W11,williams2011,4.09,3.777,270,yes,globular,thin at 270 pc with no dwarf progenitor known,yes
+Aquarius,Aquarius-W11,williams2011,4.09,3.777,270,no,dwarf,not a globular by its spread in metallicity (Casey et al. 2014),yes
 C-10,C-10-I24,ibata2024,,0.527,,yes,globular,no dwarf progenitor known; width unknown,yes
 C-11,C-11-I24,ibata2024,,2.199,,yes,globular,no dwarf progenitor known; width unknown,yes
 C-12,C-12-I24,ibata2024,,0.796,,yes,globular,no dwarf progenitor known; width unknown,yes
@@ -130,10 +130,10 @@ SGP-S,SGP-S-Y22,yang2022,9.50,0.600,99,yes,globular,thin at 99 pc with no dwarf 
 Slidr,Slidr-I21,ibata2021,3.07,1.715,92,yes,globular,thin at 92 pc with no dwarf progenitor known,yes
 Spectre,Spectre-C22,chandra2022,12.50,0.459,100,yes,globular,thin at 100 pc with no dwarf progenitor known,yes
 Styx,Styx-G09,grillmair2009,45.00,1.400,1100,no,dwarf,the Bootes III dwarf (Grillmair 2009),no
-Svol,Svol-I21,ibata2021,7.08,1.049,130,yes,globular,progenitor NGC 5272 (galstreams: M3),yes
+Svol,Svol-I21,ibata2021,7.08,1.049,130,no,duplicate,M3's stream as M3-Svol (galstreams),yes
 Sylgr,Sylgr-I21,ibata2021,3.31,1.161,67,yes,globular,thin at 67 pc with no dwarf progenitor known,yes
 Tri-Pis,Tri-Pis-B12,bonaca2012,26.00,0.200,91,yes,globular,thin at 91 pc with no dwarf progenitor known,yes
-TucanaIII,TucanaIII-S19,shipp2019,25.30,0.115,51,no,dwarf,the Tucana III ultra-faint dwarf (Drlica-Wagner et al. 2015; Li et al. 2018),yes
+TucanaIII,TucanaIII-S19,shipp2019,25.30,0.115,51,no,dwarf,the Tucana III ultra-faint dwarf candidate (Drlica-Wagner et al. 2015; Li et al. 2018),yes
 Turbio,Turbio-S18,shipp2018,16.60,0.200,58,yes,globular,thin at 58 pc with no dwarf progenitor known,yes
 Turranburra,Turranburra-S19,shipp2019,27.50,0.474,228,yes,globular,thin at 228 pc with no dwarf progenitor known,yes
 Wambelong,Wambelong-S18,shipp2018,15.10,0.400,105,yes,globular,thin at 105 pc with no dwarf progenitor known,yes

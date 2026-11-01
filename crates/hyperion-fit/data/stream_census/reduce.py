@@ -13,20 +13,22 @@ of Ibata et al. 2024), the width (deg, the master log's or the summary's where t
 the width in parsecs at the mid-point's distance (empty where either is unknown), whether it is
 globular-like, its kind and why, and whether it lies inside the fit's cut:
 
-- **kind**, in this order: `globular` for a named globular progenitor (GC below); `dwarf` for a
-  dwarf-galaxy progenitor, named or shown by a spread in metallicity (DWARF); `disc` for a structure
-  of the disc (DISC); `wide` for a stream wider than 300 pc at its mid-point's distance with none of
-  those, the thin streams' limit of Bonaca and Price-Whelan's census (2024, arXiv:2405.19410, Table
-  A.1, as plan 10's records cite it); and `globular` for every other, thin or of unknown width: a
-  thin stream with no known dwarf progenitor is taken for a dissolved globular. Mass does not split
-  them: a dwarf's stream may be as light as a globular's.
+- **kind**, in this order: `duplicate` for a second track of a stream already counted under
+  another name (DUPLICATE); `globular` for a named globular progenitor (GC below); `dwarf` for a
+  progenitor that is a dwarf galaxy or not a globular, named or shown by a spread in metallicity
+  (DWARF); `disc` for a structure of the disc (DISC); `wide` for a stream wider than 300 pc at its
+  mid-point's distance with none of those, the limit of the thin streams the sim's orphan mass law
+  is drawn from (`global_list::orphans::MASS_LAW`, after Bonaca and Price-Whelan 2025,
+  arXiv:2405.19410, Table A.1, as the sim cites it); and `globular` for every other, thin or of
+  unknown width: a thin stream with no known dwarf progenitor is taken for a dissolved globular.
+  Mass does not split them: a dwarf's stream may be as light as a globular's.
 - **in_cut**: some point of the track lies within 30 kpc of the Sun and more than 15 degrees from
   the Galactic plane, the fit's cut (`manifests/streams.toml`). A track whose distances are the
   placeholder is in the cut by its latitude alone: STREAMFINDER's Gaia DR3 streams lie well within
   30 kpc. No mass is cut, since galstreams gives none.
 
-Latitudes are from the ICRS to Galactic rotation of the Hipparcos catalogue (ESA 1997, vol. 1,
-§1.5.3, eq. 1.5.11).
+Latitudes are from the ICRS to Galactic rotation, the transpose of the Hipparcos catalogue's A_G
+(ESA 1997, vol. 1, §1.5.3).
 """
 import csv
 import math
@@ -41,13 +43,17 @@ MAX_DISTANCE_KPC = 30.0
 MIN_LATITUDE_DEG = 15.0
 WIDE_PC = 300.0
 
-# ICRS to Galactic (ESA 1997, eq. 1.5.11).
+# ICRS to Galactic: the transpose of A_G (ESA 1997, vol. 1, §1.5.3).
 A_G = [
     [-0.0548755604162154, -0.8734370902348850, -0.4838350155487132],
     [0.4941094278755837, -0.4448296299600112, 0.7469822444972189],
     [-0.8676661490190047, -0.1980763734312015, 0.4559837761750669],
 ]
 
+DUPLICATE = {
+    "AAU-AliqaUma": "one stream with AAU-ATLAS (Li et al. 2021)",
+    "Svol": "M3's stream as M3-Svol (galstreams)",
+}
 GC = {
     "C-19": "a dissolved globular below the metallicity floor (Martin et al. 2022)",
     "Eridanus": "the Eridanus globular (Myeong et al. 2017)",
@@ -72,9 +78,9 @@ GC = {
     "Pal15": "Palomar 15",
     "Pal5": "Palomar 5",
     "Phoenix": "a dissolved metal-poor globular (Wan et al. 2020)",
-    "Svol": "NGC 5272 (galstreams: M3)",
 }
 DWARF = {
+    "Aquarius": "not a globular by its spread in metallicity (Casey et al. 2014)",
     "Cetus": "the Cetus dwarf's stream (Newberg et al. 2009; Yuan et al. 2021)",
     "Cetus-New": "the Cetus dwarf's stream (Yuan et al. 2021)",
     "Cetus-Palca": "the Cetus dwarf's stream (Yuan et al. 2021)",
@@ -87,7 +93,7 @@ DWARF = {
     "Palca": "part of the Cetus dwarf's stream (Yuan et al. 2021)",
     "Sagittarius": "the Sagittarius dwarf (Ibata et al. 1994)",
     "Styx": "the Bootes III dwarf (Grillmair 2009)",
-    "TucanaIII": "the Tucana III ultra-faint dwarf (Drlica-Wagner et al. 2015; Li et al. 2018)",
+    "TucanaIII": "the Tucana III ultra-faint dwarf candidate (Drlica-Wagner et al. 2015; Li et al. 2018)",
 }
 DISC = {
     "ACS": "a disc structure of the anticentre (Ramos et al. 2021)",
@@ -140,7 +146,9 @@ def main() -> None:
                 d <= MAX_DISTANCE_KPC and b > MIN_LATITUDE_DEG
                 for d, b in zip(distances, latitudes)
             )
-        if name in GC:
+        if name in DUPLICATE:
+            kind, reason = "duplicate", DUPLICATE[name]
+        elif name in GC:
             kind, reason = "globular", "progenitor " + GC[name]
         elif name in DWARF:
             kind, reason = "dwarf", DWARF[name]

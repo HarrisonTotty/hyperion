@@ -3226,8 +3226,10 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
 - **T11.b as built (lane `p15-t11b`, 2026-11-01, at 24; held for 27, no output moves).**
   - `streams` is revision 1 and `Slow` (about 5 minutes on 16 threads in release), with
     `manifests/streams.smoke.toml` and the dataset `stream_census` (galstreams v1.2.1, reduced by
-    its `reduce.py`). The table holds `ORPHAN_STREAMS_PER_GLOBULAR` (1.5, held) and
-    `ORPHAN_STREAMS_PER_GLOBULAR_27` (2.108, one sigma 1.92–2.30), `@generated`.
+    its `reduce.py`: 118 globular-like streams inside the cut). Its galaxies are built under 27's
+    rules (`FIT_VERSION`, `Galaxy::from_params_at_version`), and its fingerprint probes their living
+    tubes and first orphan. The table holds `ORPHAN_STREAMS_PER_GLOBULAR` (1.5, held) and
+    `ORPHAN_STREAMS_PER_GLOBULAR_27` (2.057, one sigma 1.87–2.24), `@generated`.
   - New doors in the sim, reading nothing generated: `DebrisPlan::orphan_beyond_count` (testing,
     hidden) and `HaloProfile::density_without_cut`.
   - The cut's mass is that of the stretches that pass all three conditions, and its halo the
@@ -3240,9 +3242,9 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     `the_orphan_streams_are_held_only_until_the_27_bump`). `discrete_share` reads the version's
     rules; P10.T3.d.b, when it stores the share, passes the galaxy's. P10.T12's tests read k through
     the galaxy's rules, not the table's item.
-  - _For the 27 bump_ (measured with the hold turned on at 24): delete the hold and the held item
-    with its test; re-pin `the_milky_way_s_list_is_pinned_ordered_and_pure`'s 352 legs (496 at
-    2.11) and re-bless `galaxy/global_list/list`; widen the slow
+  - _For the 27 bump_ (measured with the hold turned on at 24, at 2.11): delete the hold and the
+    held item with its test; re-pin `the_milky_way_s_list_is_pinned_ordered_and_pure`'s 352 legs
+    (496 at 2.11) and re-bless `galaxy/global_list/list`; widen the slow
     `the_applied_share_over_2000_galaxies_is_summarised`'s `GLOBULAR_SHARE_PIN` (sweep galaxy 295
     at 5.4% against 4.5%) and its median window, then re-bless `galaxy/global_list/discrete_share`.
     `GLOBULAR_TUBES_INSIDE` still holds (its slow test passes at 27). No other golden of the sim's

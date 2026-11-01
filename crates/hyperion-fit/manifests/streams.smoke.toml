@@ -4,6 +4,7 @@ task = "streams"
 datasets = ["stream_census"]
 
 [params]
+generator_version = 27
 grid_low = 0.5
 grid_high = 4.5
 grid_steps = 8

@@ -18,21 +18,25 @@
 //! and latitude ([`census`]), the one-sigma interval where it meets that count plus or minus its
 //! square root, each linear between the grid's nodes.
 //!
+//! The galaxies are built under generator version 27's rules ([`FIT_VERSION`], through
+//! `Galaxy::from_params_at_version`), every hold at 27 in force: 27 is the version that reads the
+//! fitted value, and holds before it move the living globulars' tubes (P09.T13's bound share at
+//! 26). The orphans' count under those rules is not read, since the fit draws its own.
+//!
 //! The table holds two items: the held multiplier, the brainstorm's 1.5, which every generator
 //! version below 27 reads, and the fitted one, `ORPHAN_STREAMS_PER_GLOBULAR_27`, which the sim's
 //! `orphan_streams` hold reads from 27 on (the `displaced_forms_26` pattern). The value is a
 //! parameter of the generator version whatever the fit says.
 //!
-//! The census is galstreams v1.2.1 (Mateu 2023, MNRAS 520, 5225): Bonaca and Price-Whelan's
-//! count (2025, New Astron. Rev. 100, 101713, §2.2) could not be reached for this fit, and their
-//! "over 120 reported, wide and thin" stands as the plan cites it.
+//! The census is galstreams v1.2.1 (Mateu 2023, MNRAS 520, 5225). Bonaca and Price-Whelan's
+//! count (2025, New Astron. Rev. 100, 101713, §2.2) could not be reached for this fit: their "over
+//! 120 reported, wide and thin" stands as the plan cites it, unread here.
 
 pub mod census;
 pub mod observe;
 
 use std::num::NonZeroUsize;
 
-use hyperion_sim::Seed;
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use hyperion_sim::galaxy::global_list::orphans::MASS_LAW;
 use hyperion_sim::galaxy::global_list::share::GLOBULAR_TUBES_INSIDE;
@@ -43,8 +47,9 @@ use hyperion_sim::galaxy::global_list::{
 };
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::{Galaxy, Population};
+use hyperion_sim::{GeneratorVersion, Seed};
 
-use self::census::{Census, StreamKind};
+use self::census::{Census, ParseCensusError, StreamKind};
 use self::observe::{Cut, SmoothHalo, observers, seen_masses};
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
@@ -59,6 +64,10 @@ const TASK: &str = "streams";
 
 /// The census of known streams the fit counts against.
 pub const DATASET: &str = "stream_census";
+
+/// The generator version whose rules the fit's galaxies are built under: 27, the version that
+/// reads the fitted value (module documentation). The manifest records it.
+pub const FIT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// The brainstorm's multiplier, the held item that every generator version below 27 reads
 /// ("Streams and accreted structure": "globular streams number about 1.5 per globular").
@@ -75,23 +84,23 @@ pub const CONTRAST_PROBES: [f64; 4] = [1.0, 0.0, 0.5, 2.0];
 /// sprays of streams that never come near.
 pub const REACH_MARGIN: f64 = 1.25;
 
-/// The fit's parameters, from its manifest.
+/// The fit's parameters, from its manifest, checked by [`from_manifest`](Self::from_manifest).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FitParams {
     /// The grid of k: its least and greatest nodes and the steps between them.
-    pub grid: (f64, f64, u32),
+    grid: (f64, f64, u32),
     /// The first galaxy's seed; galaxy `n` takes `seed + n`.
-    pub seed: u64,
+    seed: u64,
     /// The galaxies drawn at the Milky Way's values.
-    pub galaxies: u32,
+    galaxies: u32,
     /// The orphans drawn in each galaxy, from index 0.
-    pub orphans: u64,
+    orphans: u32,
     /// The observers' distance from the centre, ly.
-    pub observer_radius_ly: f64,
+    observer_radius_ly: f64,
     /// The observers in each galaxy, evenly spaced in azimuth.
-    pub observers: u32,
+    observers: u32,
     /// The detectability cut.
-    pub cut: Cut,
+    cut: Cut,
 }
 
 impl FitParams {
@@ -99,10 +108,10 @@ impl FitParams {
     ///
     /// # Errors
     ///
-    /// [`ManifestParamError`] for a parameter that is missing or out of its range: a grid that is
-    /// not increasing and positive with at least one step, no galaxy, no orphan or more than
-    /// 2,048, no observer, or a cut constant that is not positive and finite (the latitude below
-    /// 90°, the contrast non-negative).
+    /// [`ManifestParamError`] for a parameter that is missing or out of its range: a generator
+    /// version other than [`FIT_VERSION`], a grid that is not increasing and positive with at
+    /// least one step, no galaxy, no orphan or more than 2,048, no observer, or a cut constant that
+    /// is not positive and finite (the latitude below 90°, the contrast non-negative).
     pub fn from_manifest(manifest: &Manifest) -> Result<Self, ManifestParamError> {
         let positive = |key: &str| {
             let v = manifest.f64(key)?;
@@ -119,6 +128,12 @@ impl FitParams {
                 .filter(|v| (1..=max).contains(v))
                 .ok_or_else(|| ManifestParamError::new(key, &format!("1 to {max}")))
         };
+        if manifest.u64("generator_version")? != u64::from(FIT_VERSION.get()) {
+            return Err(ManifestParamError::new(
+                "generator_version",
+                &format!("{}, the rules the fingerprint probes", FIT_VERSION.get()),
+            ));
+        }
         let (low, high) = (positive("grid_low")?, positive("grid_high")?);
         if high <= low {
             return Err(ManifestParamError::new("grid_high", "above grid_low"));
@@ -139,16 +154,28 @@ impl FitParams {
             grid: (low, high, steps),
             seed: manifest.u64("seed")?,
             galaxies: count("galaxies", 1_000)?,
-            orphans: u64::from(count("orphans_per_galaxy", 2_048)?),
+            orphans: count("orphans_per_galaxy", 2_048)?,
             observer_radius_ly: positive("observer_kpc")? * LIGHT_YEARS_PER_KILOPARSEC,
             observers: count("observers", 360)?,
             cut: Cut {
                 min_mass_solar_masses: positive("min_mass_msun")?,
                 max_distance_ly: positive("max_distance_kpc")? * LIGHT_YEARS_PER_KILOPARSEC,
                 min_contrast: contrast,
-                min_latitude: latitude.to_radians(),
+                min_latitude_rad: latitude.to_radians(),
             },
         })
+    }
+
+    /// The galaxies the fit draws, at the Milky Way's values.
+    #[must_use]
+    pub const fn galaxies(&self) -> u32 {
+        self.galaxies
+    }
+
+    /// Galaxy `n`'s seed.
+    #[must_use]
+    pub fn seed(&self, n: u32) -> Seed {
+        Seed::new(self.seed.wrapping_add(u64::from(n)))
     }
 
     /// The grid's nodes of k, from the least to the greatest.
@@ -171,7 +198,7 @@ pub struct GalaxySeen {
     /// Its living globulars with a tube, L.
     pub living: u32,
     /// The orphans drawn, from index 0.
-    pub orphans: u64,
+    pub orphans: u32,
     /// The living streams seen, entry `o × P + p` for observer `o` and contrast probe `p` of
     /// [`CONTRAST_PROBES`].
     pub living_seen: Vec<u32>,
@@ -188,7 +215,7 @@ pub struct GalaxySeen {
 impl GalaxySeen {
     /// The count observer `o` expects at k with contrast probe `p`: the living streams it sees
     /// plus its share of the orphans times their mean count, `max(0, k N − L)` (module
-    /// documentation).
+    /// documentation), the share none where no orphan was drawn.
     ///
     /// # Panics
     ///
@@ -196,11 +223,11 @@ impl GalaxySeen {
     #[must_use]
     pub fn expected(&self, k: f64, o: usize, p: usize) -> f64 {
         let at = o * CONTRAST_PROBES.len() + p;
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "orphans drawn number at most 2,048"
-        )]
-        let share = f64::from(self.orphans_seen[at]) / self.orphans as f64;
+        let share = if self.orphans == 0 {
+            0.0
+        } else {
+            f64::from(self.orphans_seen[at]) / f64::from(self.orphans)
+        };
         let mean = (k * f64::from(self.globulars) - f64::from(self.living)).max(0.0);
         f64::from(self.living_seen[at]) + share * mean
     }
@@ -221,8 +248,8 @@ impl GalaxySeen {
 pub struct StreamsFit {
     /// The census's globular-like streams inside the cut, the count matched.
     pub observed: u32,
-    /// The census's streams, and those it marks dwarf, disc and wide.
-    pub census: [u32; 4],
+    /// The census's streams, and those it marks dwarf, disc, wide and duplicate.
+    pub census: [u32; 5],
     /// What each galaxy shows.
     pub galaxies: Vec<GalaxySeen>,
     /// The grid's nodes of k.
@@ -274,33 +301,39 @@ impl StreamsFit {
             |k: Option<f64>| k.map_or_else(|| "off the grid".to_owned(), |k| format!("{k:.2}"));
         let (low, high, _) = params.grid;
         let cut = params.cut;
-        wrap(&format!(
-            "Globular-cluster streams per globular cluster of the untruncated system, living \
-             clusters' tubes and orphans together, from generator version 27 (P15.T11.b): {}, one \
-             sigma {}–{}. Fitted on a grid of {low:.2}–{high:.2} so that plan 10's generator at the \
-             Milky Way's values ({} galaxies), seen from the plane at {:.0} kpc through the \
+        let mut doc = wrap(&format!(
+            "Globular-cluster streams per globular cluster from generator version 27 (P15.T11.b): \
+             {}, one sigma {}–{}.",
+            shown(self.k[0]),
+            shown(self.interval.0),
+            shown(self.interval.1),
+        ));
+        doc.push(String::new());
+        doc.extend(wrap(&format!(
+            "The untruncated system's, living clusters' tubes and orphans together, fitted on a grid \
+             of {low:.2}–{high:.2} so that plan 10's generator at the Milky Way's values ({} \
+             galaxies under version {}'s rules), seen from the plane at {:.0} kpc through the \
              detectability cut (above {:.0} M☉ of a stream within {:.0} kpc, where its axis is at \
              least {:.0} times as dense as the smooth halo and more than {:.0}° from the plane), \
              shows the {} globular-like known streams the census finds within the same distance \
              and latitude (galstreams v1.2.1, Mateu 2023, MNRAS 520, 5225; `data/stream_census`), \
              with their Poisson error. The cut moves it: {} without the density condition, {} at \
              {:.0} times the halo and {} at {:.0}.",
-            shown(self.k[0]),
-            shown(self.interval.0),
-            shown(self.interval.1),
             self.galaxies.len(),
+            FIT_VERSION.get(),
             params.observer_radius_ly / LIGHT_YEARS_PER_KILOPARSEC,
             cut.min_mass_solar_masses,
             cut.max_distance_ly / LIGHT_YEARS_PER_KILOPARSEC,
             cut.min_contrast,
-            cut.min_latitude.to_degrees(),
+            cut.min_latitude_rad.to_degrees(),
             self.observed,
             shown(self.k[1]),
             shown(self.k[2]),
             cut.min_contrast * CONTRAST_PROBES[2],
             shown(self.k[3]),
             cut.min_contrast * CONTRAST_PROBES[3],
-        ))
+        )));
+        doc
     }
 
     /// The acceptance line: the figures the header and the lock file record.
@@ -317,7 +350,8 @@ impl StreamsFit {
         let failed: u32 = self.galaxies.iter().map(|g| g.failed).sum();
         format!(
             "k {} (one sigma {}–{}; 0.5–4.5) against {} ± {:.1} globular-like known streams \
-             inside the cut ({} in the census: {} dwarf, {} disc, {} wide); globular tubes {} of \
+             inside the cut ({} in the census: {} dwarf, {} disc, {} wide, {} duplicate); globular \
+             tubes {} of \
              the halo at k (0.3–1%); without the density condition {}, at half and twice the \
              contrast {} and {}; per galaxy {}; {} galaxies, {} tubes built, {} failed",
             shown(self.k[0]),
@@ -329,6 +363,7 @@ impl StreamsFit {
             self.census[1],
             self.census[2],
             self.census[3],
+            self.census[4],
             self.share
                 .map_or_else(|| "none".to_owned(), |s| format!("{:.3}%", 100.0 * s)),
             shown(self.k[1]),
@@ -404,6 +439,7 @@ pub fn fit_of(params: &FitParams, census: &Census, galaxies: Vec<GalaxySeen>) ->
             census.of_kind(StreamKind::Dwarf),
             census.of_kind(StreamKind::Disc),
             census.of_kind(StreamKind::Wide),
+            census.of_kind(StreamKind::Duplicate),
         ],
         galaxies,
         grid,
@@ -420,8 +456,8 @@ pub fn fit_of(params: &FitParams, census: &Census, galaxies: Vec<GalaxySeen>) ->
 ///
 /// # Errors
 ///
-/// [`RunTaskError::Input`] if the galaxy cannot be built, [`RunTaskError::Threads`] if the pool
-/// cannot.
+/// [`RunTaskError::Input`] if the galaxy, its spray's table of the potential or an orphan's
+/// number on the list cannot be made, [`RunTaskError::Threads`] if the pool cannot.
 ///
 /// # Panics
 ///
@@ -436,7 +472,7 @@ pub fn observe_galaxy(
         task: TASK,
         source,
     };
-    let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like())
+    let galaxy = Galaxy::from_params_at_version(seed, GalaxyParams::milky_way_like(), FIT_VERSION)
         .map_err(|e| input(Box::new(e)))?
         .with_full_potential();
     let living: Vec<StreamSpec> = Debris::generate(&galaxy)
@@ -446,8 +482,7 @@ pub fn observe_galaxy(
         .cloned()
         .collect();
     let plan = Debris::plan(&galaxy);
-    let orphans = numbered_orphans(&plan, &galaxy, living.len(), params.orphans)
-        .map_err(|e| input(e.into()))?;
+    let orphans = numbered_orphans(&plan, &galaxy, living.len(), params.orphans)?;
     let tables = galaxy.potential();
     let force = SprayForce::new(tables).map_err(|e| input(Box::new(e)))?;
     let halo = SmoothHalo::of(&galaxy);
@@ -479,6 +514,8 @@ pub fn observe_galaxy(
                     {
                         return Seen::Far;
                     }
+                    // A spray or a reduction that fails is not dropped: it counts as unseen and
+                    // in `failed`, which the acceptance line reports.
                     let tube = Spray::new(seed, &force, tables, spec, &SprayParams::default())
                         .ok()
                         .and_then(|spray| {
@@ -546,20 +583,22 @@ enum Seen {
 ///
 /// # Errors
 ///
-/// A message if a number would pass the list's 4,096 streams.
+/// [`RunTaskError::Input`] if a number would pass the list's 4,096 streams.
 fn numbered_orphans(
     plan: &DebrisPlan,
     galaxy: &Galaxy,
     living: usize,
-    count: u64,
-) -> Result<Vec<Option<StreamSpec>>, String> {
+    count: u32,
+) -> Result<Vec<Option<StreamSpec>>, RunTaskError> {
+    let input = |source: Box<dyn std::error::Error + Send + Sync>| RunTaskError::Input {
+        task: TASK,
+        source,
+    };
     let mut next = living;
     let mut orphans = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
-    for k in 0..count {
-        let number = u16::try_from(next)
-            .ok()
-            .and_then(|n| StreamNumber::new(n).ok())
-            .ok_or_else(|| format!("orphan {k} would be stream {next}, past the list's 4,096"))?;
+    for k in 0..u64::from(count) {
+        let short = u16::try_from(next).map_err(|e| input(Box::new(e)))?;
+        let number = StreamNumber::new(short).map_err(|e| input(Box::new(e)))?;
         let orphan = plan.orphan_beyond_count(galaxy, k, number);
         if orphan.is_some() {
             next += 1;
@@ -603,9 +642,10 @@ pub fn render(fitted: f64, fitted_doc: Vec<String>) -> RustTable {
             "Two items: the brainstorm's 1.5, which plan 10's P10.T3.b entered by hand and \
              P15.T11.a registered, read below generator version 27, and P15.T11.b's fit, read from \
              27 on by the sim's `orphan_streams` hold. The fit counts the thin, globular-like \
-             streams of the known census, which is far from complete: Bonaca and Price-Whelan \
-             (2025, New Astron. Rev. 100, 101713, §2.2) report over 120 streams, wide and thin \
-             together, and galstreams v1.2.1 (Mateu 2023, MNRAS 520, 5225) lists 141. Plan 15 \
+             streams of the known census, which is far from complete: plan 15 cites Bonaca and \
+             Price-Whelan (2025, New Astron. Rev. 100, 101713, §2.2) for over 120 streams, wide and \
+             thin together, which this fit could not read, and galstreams v1.2.1 (Mateu 2023, \
+             MNRAS 520, 5225) lists 141 of which the census keeps 118 globular-like. Plan 15 \
              holds the value uncertain threefold. It is a parameter of the generator version \
              whatever the fit says.",
         ),
@@ -638,6 +678,9 @@ pub struct StreamsTask;
 /// The census's file in its dataset.
 const CENSUS_FILE: &str = "census.csv";
 
+/// The seed of the galaxy the fingerprint probes: the production manifest's first.
+const FINGERPRINT_SEED: u64 = 0x0f11_b000_0000_0000;
+
 impl FitTask for StreamsTask {
     fn name(&self) -> &'static str {
         TASK
@@ -662,10 +705,16 @@ impl FitTask for StreamsTask {
         ]
     }
 
-    /// The Milky Way fixture's globulars and halo, the smooth halo's density beyond the cut that
-    /// the cut compares against, the orphans' mean mass and the share's inside fraction, and the
-    /// spray's and the reduction's sizes. The fit's sprays, tubes and orbits are the generator's
-    /// own, and its potential is probed by the tasks of plan 02's tables.
+    /// The Milky Way fixture's globulars and halo budget, the orphans' mean mass and the share's
+    /// inside fraction, the spray's and the reduction's sizes, and from the fit's first galaxy,
+    /// built as the fit builds it: its living globulars' tubes, their count and mass, its first
+    /// orphan's mass and turning points, and the smooth halo the cut compares against, beyond the
+    /// placed halo's cut. A change to the potential, the globulars' histories or the orphans' law
+    /// moves one of them; the spray and the reduction are probed by their sizes alone.
+    ///
+    /// # Panics
+    ///
+    /// If the Milky Way fixture does not build, which it always does.
     fn fingerprint(&self) -> SimFingerprint {
         let milky_way = GalaxyParams::milky_way_like();
         let mut probes = vec![
@@ -692,21 +741,51 @@ impl FitTask for StreamsTask {
             ("tube::KNOTS_PER_ARM".to_owned(), f64::from(KNOTS_PER_ARM)),
             ("tube::KERNEL_TRACERS".to_owned(), f64::from(KERNEL_TRACERS)),
         ];
-        if let Ok(galaxy) = Galaxy::from_params(Seed::new(0x0f11_b000_0000_0000), milky_way) {
-            let halo = SmoothHalo::of(&galaxy);
-            let ly = LIGHT_YEARS_PER_KILOPARSEC;
-            for (name, at) in [
-                (
-                    "smooth halo at (8, 0, 10) kpc (M☉/ly³)",
-                    [8.0 * ly, 0.0, 10.0 * ly],
-                ),
-                (
-                    "smooth halo at (0, 30, 15) kpc (M☉/ly³)",
-                    [0.0, 30.0 * ly, 15.0 * ly],
-                ),
-            ] {
-                probes.push((name.to_owned(), halo.density(at)));
-            }
+        let galaxy =
+            Galaxy::from_params_at_version(Seed::new(FINGERPRINT_SEED), milky_way, FIT_VERSION)
+                .expect("the Milky Way fixture builds")
+                .with_full_potential();
+        let debris = Debris::generate(&galaxy);
+        let living: Vec<&StreamSpec> = debris
+            .streams()
+            .iter()
+            .filter(|s| matches!(s.origin(), StreamOrigin::LivingGlobular(_)))
+            .collect();
+        #[expect(clippy::cast_precision_loss, reason = "at most 4,096 living tubes")]
+        let count = living.len() as f64;
+        probes.push(("living tubes".to_owned(), count));
+        probes.push((
+            "living tubes' mass (M☉)".to_owned(),
+            living.iter().fold(0.0, |m, s| m + s.mass().value()),
+        ));
+        if let Some(orphan) = debris
+            .streams()
+            .iter()
+            .find(|s| s.origin() == StreamOrigin::Orphan)
+        {
+            probes.push(("first orphan's mass (M☉)".to_owned(), orphan.mass().value()));
+            probes.push((
+                "first orphan's pericentre (ly)".to_owned(),
+                orphan.orbit().pericentre().value(),
+            ));
+            probes.push((
+                "first orphan's apocentre (ly)".to_owned(),
+                orphan.orbit().apocentre().value(),
+            ));
+        }
+        let halo = SmoothHalo::of(&galaxy);
+        let ly = LIGHT_YEARS_PER_KILOPARSEC;
+        for (name, at) in [
+            (
+                "smooth halo at (8, 0, 10) kpc (M☉/ly³)",
+                [8.0 * ly, 0.0, 10.0 * ly],
+            ),
+            (
+                "smooth halo at (0, 30, 15) kpc (M☉/ly³)",
+                [0.0, 30.0 * ly, 15.0 * ly],
+            ),
+        ] {
+            probes.push((name.to_owned(), halo.density(at)));
         }
         SimFingerprint::new(probes)
     }
@@ -715,22 +794,21 @@ impl FitTask for StreamsTask {
         check_manifest(self, manifest)?;
         let params = FitParams::from_manifest(manifest)?;
         let dataset = manifest.load_dataset(DATASET)?;
-        let input = |why: String| RunTaskError::Input {
+        let input = |source: Box<dyn std::error::Error + Send + Sync>| RunTaskError::Input {
             task: TASK,
-            source: why.into(),
+            source,
         };
         let bytes = dataset
             .files
             .iter()
             .find(|(name, _)| name == CENSUS_FILE)
             .map(|(_, bytes)| bytes)
-            .ok_or_else(|| input(format!("the census dataset holds no {CENSUS_FILE}")))?;
-        let text = std::str::from_utf8(bytes).map_err(|e| input(e.to_string()))?;
-        let census = Census::parse(text).map_err(input)?;
+            .ok_or_else(|| input(Box::new(ParseCensusError::Missing)))?;
+        let text = std::str::from_utf8(bytes).map_err(|e| input(Box::new(e)))?;
+        let census = Census::parse(text).map_err(|e| input(Box::new(e)))?;
         let mut galaxies = Vec::with_capacity(usize::try_from(params.galaxies).unwrap_or(0));
         for n in 0..params.galaxies {
-            let seed = Seed::new(params.seed.wrapping_add(u64::from(n)));
-            galaxies.push(observe_galaxy(seed, &params, threads)?);
+            galaxies.push(observe_galaxy(params.seed(n), &params, threads)?);
         }
         let fit = fit_of(&params, &census, galaxies);
         let provisional = (!fit.passes()).then_some("P15.T11.b");
@@ -760,7 +838,8 @@ mod tests {
     }
 
     const PARAMS: &str = "task = \"streams\"\ndatasets = [\"stream_census\"]\n[params]\n\
-        grid_low = 0.5\ngrid_high = 4.5\ngrid_steps = 40\nseed = 1\ngalaxies = 2\n\
+        generator_version = 27\ngrid_low = 0.5\ngrid_high = 4.5\ngrid_steps = 40\nseed = 1\n\
+        galaxies = 2\n\
         orphans_per_galaxy = 16\nobserver_kpc = 8.0\nobservers = 4\nmin_mass_msun = 1000.0\n\
         max_distance_kpc = 30.0\nmin_contrast = 10.0\nmin_latitude_deg = 15.0\n";
 
@@ -772,7 +851,8 @@ mod tests {
         assert_eq!(grid.len(), 41);
         assert!((grid[1] - 0.6).abs() < 1e-12 && (grid[40] - 4.5).abs() < 1e-12);
         assert!((params.observer_radius_ly - 26_092.510_216).abs() < 1e-3);
-        assert!((params.cut.min_latitude - 15.0_f64.to_radians()).abs() < 1e-15);
+        assert!((params.cut.min_latitude_rad - 15.0_f64.to_radians()).abs() < 1e-15);
+        assert_eq!(params.seed(3), Seed::new(4));
         let bad = PARAMS.replace("grid_high = 4.5", "grid_high = 0.4");
         assert_eq!(
             FitParams::from_manifest(&manifest(&bad)),
@@ -783,6 +863,65 @@ mod tests {
             FitParams::from_manifest(&manifest(&none)),
             Err(ManifestParamError::new("galaxies", "1 to 1000"))
         );
+        let other = PARAMS.replace("generator_version = 27", "generator_version = 26");
+        assert_eq!(
+            FitParams::from_manifest(&manifest(&other)),
+            Err(ManifestParamError::new(
+                "generator_version",
+                "27, the rules the fingerprint probes"
+            ))
+        );
+    }
+
+    /// A census of `n` globular-like streams inside the cut.
+    fn census(n: usize) -> Census {
+        let rows = (0..n).map(|i| format!("S-{i},S-{i},r,10.0,0.2,35,yes,globular,thin,yes"));
+        let text = std::iter::once(census::COLUMNS.join(","))
+            .chain(rows)
+            .collect::<Vec<_>>()
+            .join("\n");
+        Census::parse(&text).unwrap()
+    }
+
+    /// A made-up galaxy of 100 expected globulars and 30 living tubes whose four observers each see
+    /// 10 living streams and a quarter of the orphans: a count of 2.5 + 25 k.
+    fn galaxy(seed: u64) -> GalaxySeen {
+        let entries = 4 * CONTRAST_PROBES.len();
+        GalaxySeen {
+            seed,
+            globulars: 100,
+            living: 30,
+            orphans: 200,
+            living_seen: vec![10; entries],
+            orphans_seen: vec![50; entries],
+            orphans_dropped: 0,
+            tubes: 0,
+            failed: 0,
+        }
+    }
+
+    /// The counts 2.5 + 25 k meet a census of 60 at k = 2.3, with the one-sigma interval where they
+    /// meet 60 ∓ √60, and the fit passes; a census they never reach commits the grid's end,
+    /// provisionally.
+    #[test]
+    fn the_fit_meets_the_census_on_the_grid_and_commits_its_end_off_it() {
+        let params = FitParams::from_manifest(&manifest(PARAMS)).unwrap();
+        let fit = fit_of(&params, &census(60), vec![galaxy(1), galaxy(2)]);
+        let k = fit.k[0].unwrap();
+        assert!((k - 2.3).abs() < 1e-12, "{k}");
+        let sigma = 60.0_f64.sqrt();
+        let (low, high) = (fit.interval.0.unwrap(), fit.interval.1.unwrap());
+        assert!((low - (57.5 - sigma) / 25.0).abs() < 1e-12, "{low}");
+        assert!((high - (57.5 + sigma) / 25.0).abs() < 1e-12, "{high}");
+        assert!((fit.value() - k).abs() < f64::MIN_POSITIVE);
+        assert_eq!(fit.per_galaxy.len(), 2);
+        assert!(fit.passes(), "{fit:?}");
+        let off = fit_of(&params, &census(200), vec![galaxy(1)]);
+        assert_eq!(off.k[0], None);
+        assert!((off.value() - 4.5).abs() < f64::MIN_POSITIVE);
+        assert!(!off.passes());
+        let below = fit_of(&params, &census(5), vec![galaxy(1)]);
+        assert!((below.value() - 0.5).abs() < f64::MIN_POSITIVE);
     }
 
     #[test]
@@ -869,7 +1008,8 @@ mod tests {
             .filter(|s| matches!(s.origin(), StreamOrigin::LivingGlobular(_)))
             .count();
         let count = plan.orphan_count();
-        let drawn = numbered_orphans(&plan, &galaxy, living, count + 32).unwrap();
+        let drawn =
+            numbered_orphans(&plan, &galaxy, living, u32::try_from(count).unwrap() + 32).unwrap();
         let listed: Vec<&StreamSpec> = debris
             .streams()
             .iter()

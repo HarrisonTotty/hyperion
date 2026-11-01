@@ -245,10 +245,12 @@ impl HaloProfile {
         self.envelope(p.x * p.x + p.y * p.y, p.z)
     }
 
-    /// The component's law at `p` with no cut, systems per cubic light-year: the density inside
-    /// the cut, and beyond it the law the cut stops, `n0 (1 + m² ÷ a²)^(−γ ÷ 2) B(m)` with the same
-    /// `n0`. The cut keeps the placed halo inside the root cube; a halo observed beyond 65,000 ly,
-    /// as plan 15's census of streams sees it (P15.T11.b), goes on falling by that law.
+    /// The component's law at `p` with no cut, systems per cubic light-year.
+    ///
+    /// It is the density inside the cut, and beyond it the law the cut stops,
+    /// `n0 (1 + m² ÷ a²)^(−γ ÷ 2) B(m)` with the same `n0`. The cut keeps the placed halo inside the
+    /// root cube; a halo observed beyond 65,000 ly, as plan 15's census of streams sees it
+    /// (P15.T11.b), goes on falling by that law.
     #[must_use]
     pub fn density_without_cut(&self, p: &PointLy) -> f64 {
         self.n0 * self.profile(self.radius_sq(p.x * p.x + p.y * p.y, p.z))

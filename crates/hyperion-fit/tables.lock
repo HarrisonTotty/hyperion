@@ -599,12 +599,12 @@ name = "streams"
 path = "streams.rs"
 task = "streams"
 revision = 1
-inputs_sha256 = "ef50d05df9400aad1696add83b50f2cdb08ff6a4482fd7f8ef60210bc32065fa"
-body_sha256 = "86f68ddf1f29ab52d1db3670ccf4a17c26f2ccc9e9848a5fbb4acad003506344"
-fingerprint = [179.0, 518392180.0684675, 16284.311539546214, 0.55, 1000.0, 256.0, 48.0, 0.0000001992718201617912, 0.000000015659482747832038]
+inputs_sha256 = "25b77310b661620a3d6e4f86b0adbd84933ceb51978477c1d8aa6969132f85b1"
+body_sha256 = "88d44896ed4a2e98ac2bdb347241f686ea0ec2fef8c81610be1ea6a7463609df"
+fingerprint = [179.0, 518392180.0684675, 16284.311539546214, 0.55, 1000.0, 256.0, 48.0, 9.0, 125912.81534453211, 4029.3862368191535, 26906.38315002864, 59210.52588693579, 0.0000001992718201617912, 0.000000015659482747832038]
 since_generator_version = 24
 provisional = false
-acceptance = "k 2.108 (one sigma 1.920–2.297; 0.5–4.5) against 121 ± 11.0 globular-like known streams inside the cut (141 in the census: 13 dwarf, 2 disc, 2 wide); globular tubes 0.652% of the halo at k (0.3–1%); without the density condition 1.132, at half and twice the contrast 1.729 and 2.644; per galaxy 1.897–2.303 over 8; 8 galaxies, 1959 tubes built, 0 failed"
+acceptance = "k 2.057 (one sigma 1.871–2.243; 0.5–4.5) against 118 ± 10.9 globular-like known streams inside the cut (141 in the census: 14 dwarf, 2 disc, 2 wide, 2 duplicate); globular tubes 0.636% of the halo at k (0.3–1%); without the density condition 1.104, at half and twice the contrast 1.693 and 2.579; per galaxy 1.851–2.247 over 8; 8 galaxies, 1959 tubes built, 0 failed"
 
 [[table]]
 name = "stripping"

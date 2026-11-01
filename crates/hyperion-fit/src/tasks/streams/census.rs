@@ -21,12 +21,14 @@ pub const COLUMNS: [&str; 10] = [
 pub enum StreamKind {
     /// A globular cluster, named or by the stream's thinness.
     Globular,
-    /// A dwarf galaxy, by name or by a spread in metallicity.
+    /// A dwarf galaxy, or at least no globular, by name or by a spread in metallicity.
     Dwarf,
     /// A structure of the disc, not a stream of the halo.
     Disc,
     /// Wider than the census's 300 pc with no progenitor known.
     Wide,
+    /// A second track of a stream the census counts under another name.
+    Duplicate,
 }
 
 /// One stream of the census.
@@ -48,53 +50,95 @@ pub struct Census {
     pub streams: Vec<CensusStream>,
 }
 
+/// `census.csv` could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum ParseCensusError {
+    /// The census's dataset holds no `census.csv`.
+    #[error("the census dataset holds no census.csv")]
+    Missing,
+    /// The header is not [`COLUMNS`].
+    #[error("the census's header is {found}, not the expected columns")]
+    Header {
+        /// The header found.
+        found: String,
+    },
+    /// A row has another number of cells than [`COLUMNS`].
+    #[error("line {line} of the census has {cells} cells, not 10")]
+    Cells {
+        /// The line, counted from 1.
+        line: usize,
+        /// Its cells.
+        cells: usize,
+    },
+    /// A cell is not one the census uses.
+    #[error("line {line} of the census has `{value}` for {column}")]
+    Value {
+        /// The line, counted from 1.
+        line: usize,
+        /// The cell's column.
+        column: &'static str,
+        /// The cell.
+        value: String,
+    },
+    /// `globular_like` is not `yes` exactly when `kind` is `globular`.
+    #[error("line {line} of the census marks globular_like against its kind")]
+    Disagrees {
+        /// The line, counted from 1.
+        line: usize,
+    },
+}
+
 impl Census {
     /// The census in `text`, `census.csv`'s bytes.
     ///
     /// # Errors
     ///
-    /// A message naming the line, if the header is not [`COLUMNS`], a row has another number of
-    /// cells, or a cell of `globular_like`, `kind` or `in_cut` is not one the file uses, or if
-    /// `globular_like` disagrees with `kind`.
-    pub fn parse(text: &str) -> Result<Self, String> {
+    /// [`ParseCensusError`] if the header is not [`COLUMNS`], a row has another number of cells,
+    /// a cell of `globular_like`, `kind` or `in_cut` is not one the file uses, or `globular_like`
+    /// disagrees with `kind`.
+    pub fn parse(text: &str) -> Result<Self, ParseCensusError> {
         let mut lines = text.lines();
-        let header: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
-        if header != COLUMNS {
-            return Err(format!("line 1: the header is {header:?}, not {COLUMNS:?}"));
+        let header = lines.next().unwrap_or_default();
+        if !header.split(',').eq(COLUMNS) {
+            return Err(ParseCensusError::Header {
+                found: header.to_owned(),
+            });
         }
         let mut streams = Vec::new();
-        for (i, line) in lines.enumerate() {
-            let at = i + 2;
-            let cells: Vec<&str> = line.split(',').collect();
+        for (i, row) in lines.enumerate() {
+            let line = i + 2;
+            let cells: Vec<&str> = row.split(',').collect();
             if cells.len() != COLUMNS.len() {
-                return Err(format!(
-                    "line {at}: {} cells, not {}",
-                    cells.len(),
-                    COLUMNS.len()
-                ));
+                return Err(ParseCensusError::Cells {
+                    line,
+                    cells: cells.len(),
+                });
             }
-            let yes = |cell: &str, column: &str| match cell {
+            let value = |column: &'static str, value: &str| ParseCensusError::Value {
+                line,
+                column,
+                value: value.to_owned(),
+            };
+            let yes = |column: &'static str, cell: &str| match cell {
                 "yes" => Ok(true),
                 "no" => Ok(false),
-                _ => Err(format!("line {at}: {column} is `{cell}`, not yes or no")),
+                _ => Err(value(column, cell)),
             };
             let kind = match cells[7] {
                 "globular" => StreamKind::Globular,
                 "dwarf" => StreamKind::Dwarf,
                 "disc" => StreamKind::Disc,
                 "wide" => StreamKind::Wide,
-                other => return Err(format!("line {at}: kind `{other}` is unknown")),
+                "duplicate" => StreamKind::Duplicate,
+                other => return Err(value("kind", other)),
             };
-            if yes(cells[6], "globular_like")? != (kind == StreamKind::Globular) {
-                return Err(format!(
-                    "line {at}: globular_like `{}` disagrees with kind `{}`",
-                    cells[6], cells[7]
-                ));
+            if yes("globular_like", cells[6])? != (kind == StreamKind::Globular) {
+                return Err(ParseCensusError::Disagrees { line });
             }
             streams.push(CensusStream {
                 name: cells[0].to_owned(),
                 kind,
-                in_cut: yes(cells[9], "in_cut")?,
+                in_cut: yes("in_cut", cells[9])?,
             });
         }
         Ok(Self { streams })
@@ -140,26 +184,42 @@ mod tests {
         let text = format!(
             "{HEADER}\nGD-1,GD-1-I21,ibata2021,7.62,0.652,87,yes,globular,thin,yes\n\
              Pal15,Pal15-M17,myeong2017,38.40,0.100,67,yes,globular,progenitor Palomar 15,no\n\
-             Sagittarius,Sagittarius-A20,antoja2020,28.82,6.000,3018,no,dwarf,the Sgr dwarf,yes\n"
+             Sagittarius,Sagittarius-A20,antoja2020,28.82,6.000,3018,no,dwarf,the Sgr dwarf,yes\n\
+             Svol,Svol-I21,ibata2021,7.08,1.049,130,no,duplicate,M3's stream,yes\n"
         );
         let census = Census::parse(&text).unwrap();
-        assert_eq!(census.streams.len(), 3);
+        assert_eq!(census.total(), 4);
         assert_eq!(census.globular_in_cut(), 1);
         assert_eq!(census.of_kind(StreamKind::Dwarf), 1);
+        assert_eq!(census.of_kind(StreamKind::Duplicate), 1);
     }
 
     #[test]
-    fn a_row_whose_mark_disagrees_with_its_kind_is_refused() {
+    fn a_malformed_census_is_refused_with_its_line() {
         let text = format!("{HEADER}\nOrphan,Orphan-K23,koposov2023,17.87,0,,yes,dwarf,x,yes\n");
         assert_eq!(
             Census::parse(&text),
-            Err("line 2: globular_like `yes` disagrees with kind `dwarf`".to_owned())
+            Err(ParseCensusError::Disagrees { line: 2 })
         );
-        assert!(Census::parse("name,track\n").is_err());
-        let short = format!("{HEADER}\nGD-1,GD-1-I21\n");
         assert_eq!(
-            Census::parse(&short),
-            Err("line 2: 2 cells, not 10".to_owned())
+            Census::parse("name,track\n"),
+            Err(ParseCensusError::Header {
+                found: "name,track".to_owned()
+            })
+        );
+        assert_eq!(
+            Census::parse(&format!("{HEADER}\nGD-1,GD-1-I21\n")),
+            Err(ParseCensusError::Cells { line: 2, cells: 2 })
+        );
+        assert_eq!(
+            Census::parse(&format!(
+                "{HEADER}\nGD-1,a,b,1,1,1,yes,globular,thin,maybe\n"
+            )),
+            Err(ParseCensusError::Value {
+                line: 2,
+                column: "in_cut",
+                value: "maybe".to_owned()
+            })
         );
     }
 }
