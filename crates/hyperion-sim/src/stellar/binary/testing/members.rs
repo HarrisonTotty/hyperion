@@ -374,7 +374,7 @@ impl<'a> MemberCells<'a> {
     ///
     /// # Panics
     ///
-    /// If [`KEPT_CLASSES`] lacks `class`, which a cell would then hold none of. Never else: the
+    /// If the cells keep no members of `class`, a carved class added and not kept. Never else: the
     /// layers' cells are a few light-years to 128 ly, and the cells it opens lie inside the root
     /// cube.
     #[must_use]
