@@ -706,7 +706,10 @@ fn centre_tally(galaxy: &Galaxy) -> Tally {
     let recent = CentreRecent::new(galaxy, model, victim_count(galaxy).unwrap());
     let mut tally = Tally::default();
     for entry in recent.list(galaxy).entries() {
-        let class = RecentClass::of(entry.class()).unwrap();
+        // From 27 the centre lists plan 11's binary classes too, which are no recent deaths.
+        let Some(class) = RecentClass::of(entry.class()) else {
+            continue;
+        };
         if class == RecentClass::LuminousBlueVariable {
             continue;
         }
@@ -757,4 +760,29 @@ fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
         (features_shells / 0.4460 - 1.0).abs() < 1e-3,
         "{features_shells}"
     );
+}
+
+/// P09.T33.b's fix (research-leans-21) measured, not asserted: under every 27 hold, where a
+/// feature's runaways die in the field, the features' share of the core collapses in the source
+/// horizon against the field's class and the centre's, as P09.T36.a's census counts them (about
+/// 0.67 expected, φ̄ ≈ 0.83 × (1 − 0.19); 0.838 under every 26 hold).
+#[test]
+#[ignore = "slow: every catalogue feature's list and the core collapses' cells of the Milky Way"]
+fn the_features_share_of_core_collapses_under_every_27_hold_measured() {
+    let galaxy = milky_way(GalaxyRules::every_27_hold());
+    let [core, _] = feature_tallies(&galaxy);
+    let field_core = class_tally(
+        &galaxy,
+        galaxy.core_collapse(),
+        ClassId::CORE_COLLAPSE,
+        |e| (e.site().death(), is_shell(e.supernova())),
+    );
+    let centre = centre_tally(&galaxy);
+    let deaths = core.deaths + field_core.deaths + centre.deaths;
+    let in_features = f64::from(core.deaths) / f64::from(deaths);
+    eprintln!(
+        "every 27 hold: features {core:?}, the field's class {field_core:?}, the centre {centre:?}; \
+         in features {in_features:.3} of the {deaths} core collapses in the horizon"
+    );
+    assert!(deaths > 1_000, "{deaths}");
 }
