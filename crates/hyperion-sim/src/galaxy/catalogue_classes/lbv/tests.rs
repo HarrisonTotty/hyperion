@@ -1233,16 +1233,22 @@ fn lbv_hosts_over_seeds() {
 fn a_displaced_host_is_the_grid_s_from_27() {
     use crate::galaxy::displaced::DisplacedKind;
     use crate::galaxy::rules::GalaxyRules;
-    /// `base` re-massed to 60 M☉ and aged a thousand years into its window, read from a probe
-    /// long dead, whose track covers its whole life.
-    fn host_of(galaxy: &Galaxy, base: &SystemRecord) -> SystemRecord {
-        let probe = base
-            .with_primary_initial_mass(SolarMasses::new(60.0))
-            .with_age_at_epoch(Years::new(3.0e7));
-        let probed = SystemStars::generate_in(galaxy, &probe, MultiplicityContext::ForcedSingle);
-        let (start, _) = probed.lbv_window().expect("a 60 M☉ star has a window");
-        let since = start.since_epoch().as_julian_years_f64();
-        probe.with_age_at_epoch(Years::new(3.0e7 + since + 1.0e3))
+    /// `base` aged a thousand years into its window at the first of a few masses at which its
+    /// primary has one, read from a probe long dead, whose track covers its whole life; none if
+    /// at none of them (a metal-rich star's window can close).
+    fn host_of(galaxy: &Galaxy, base: &SystemRecord) -> Option<SystemRecord> {
+        [60.0, 80.0, 100.0, 120.0, 150.0]
+            .into_iter()
+            .find_map(|mass| {
+                let probe = base
+                    .with_primary_initial_mass(SolarMasses::new(mass))
+                    .with_age_at_epoch(Years::new(3.0e7));
+                let probed =
+                    SystemStars::generate_in(galaxy, &probe, MultiplicityContext::ForcedSingle);
+                let (start, _) = probed.lbv_window()?;
+                let since = start.since_epoch().as_julian_years_f64();
+                Some(probe.with_age_at_epoch(Years::new(3.0e7 + since + 1.0e3)))
+            })
     }
     for (rules, claimed) in [
         (GalaxyRules::every_26_hold(), true),
@@ -1251,43 +1257,47 @@ fn a_displaced_host_is_the_grid_s_from_27() {
         let galaxy =
             Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
                 .expect("the Milky Way fixture builds");
+        // The arms' ridges at the Sun's radius, where the young field's layer E is richest.
         let (mut cell, mut ejected, mut field) = (Vec::new(), None, None);
-        for x in (-4_096..4_096).step_by(128) {
-            let at = GalacticPosition::from_light_years([f64::from(x), 26_000.0, 0.0])
-                .expect("in the cube");
+        let arms = galaxy.fields().arms();
+        let ridges = (0..4).flat_map(|arm| {
+            let (sin, cos) = crate::math::sin_cos(arms.ridge_azimuth(26_000.0, arm));
+            (-16..16).map(move |step| {
+                let along = 128.0 * f64::from(step);
+                [
+                    26_000.0 * cos - along * sin,
+                    26_000.0 * sin + along * cos,
+                    0.0,
+                ]
+            })
+        });
+        for at in ridges {
+            let at = GalacticPosition::from_light_years(at).expect("in the cube");
             placement::generate_cell(
                 &galaxy,
                 CellKey::containing(Layer::E, &at).expect("a cell"),
                 &mut cell,
             );
-            ejected = ejected.or_else(|| {
-                cell.iter().copied().find(|r| {
-                    matches!(
-                        r.placement_class(),
-                        PlacementClass::Displaced {
-                            kind: DisplacedKind::Runaway | DisplacedKind::Walkaway,
-                            ..
-                        }
-                    )
-                })
-            });
-            field = field.or_else(|| {
-                cell.iter()
-                    .copied()
-                    .find(|r| r.placement_class() == PlacementClass::Alive)
-            });
+            for record in &cell {
+                let displaced = match record.placement_class() {
+                    PlacementClass::Displaced {
+                        kind: DisplacedKind::Runaway | DisplacedKind::Walkaway,
+                        ..
+                    } => true,
+                    PlacementClass::Alive => false,
+                    PlacementClass::Retained { .. } | PlacementClass::Displaced { .. } => continue,
+                };
+                let slot = if displaced { &mut ejected } else { &mut field };
+                if slot.is_none() {
+                    *slot = host_of(&galaxy, record);
+                }
+            }
             if ejected.is_some() && field.is_some() {
                 break;
             }
         }
-        let ejected = host_of(
-            &galaxy,
-            &ejected.expect("a runaway or walkaway at the Sun's radius"),
-        );
-        let field = host_of(
-            &galaxy,
-            &field.expect("a living field star at the Sun's radius"),
-        );
+        let ejected = ejected.expect("a runaway or walkaway on the ridges");
+        let field = field.expect("a living field star on the ridges");
         for host in [ejected, field] {
             assert!(may_host(host.primary_initial_mass(), host.age_at_epoch()));
             assert!(
