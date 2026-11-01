@@ -529,7 +529,7 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
   dwarf cores and streams where they hold class members). Tests: a class over the limit returns no
   detections and says so; halving the reach brings it back; a window split in two gives the
   whole's onsets, each once, and its first half the whole's events in progress (Design note 6); any
-  order of classes gives the same result.
+  order of classes gives the same result. _Built 2026-10-31 (Risks, "P12.T5.d as built")._
 - **P12.T5.e Local events.** `local_events`: for the systems of an observed-mode range result,
   flares, glitches, FU Orionis outbursts and dwarf novae over each system's retarded interval,
   through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2), and X-ray bursts
@@ -2892,3 +2892,44 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   `summary_observed_in`. The server's `system_motion` and `observe_row` take a
   `&dyn FeatureInteriorCache`. `resolve_system`, `extinction`, `scene_ship`, the observed rows and
   the observed summary pass the server's; the scene's core passes none.
+- **P12.T5.d as built (lane `p12-t5d`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves and nothing is blessed. Files `alerts/{census,centre}.rs`;
+  `alerts/{mod,oneshot,arriving}.rs`; `DisruptionTail::peak_bolometric_watts` (plan 09, the same
+  bits as before). Rebased onto P12.T8.b.1 and P12.T9.a.
+  - _Signature._ `alerts_in(galaxy, ctx, query, observed, stars, cache)`: T5.e's rows and caches,
+    `&[]` for none. `alerts_in_with` takes an `AlertClasses` lookup (`ProductionAlertClasses` in
+    production); a lookup answers with `class_alerts(galaxy, query, class, process, walk)`, which
+    builds the process only for a class whose cells it counts, or `unwalked_class`.
+  - _Types._ `ClassStatus::Unwalked(Unwalked::{NotBuilt(task), NoGlobalList})`;
+    `ClassCensus::expected_hosts` is an `Option<f64>`; `AlertResult::{sources, class_census}` with
+    `SourceCensus`, `AlertSource::{Centre, DwarfCores, FeatureLists}` and `SourceStatus`.
+    `AlertContext::with_global_list` lends plan 10's list; without it the centre is not walked.
+  - _The census (lean, 2026-10-31)._ Plan 09's `expected_hosts_in_sphere` is not built, so a
+    class's expected hosts are Σ bound × volume over its cells within its reach widened by 1%: the
+    candidates its walk draws, an upper bound. A walk of more than `BACKGROUND_THRESHOLD_CELLS`
+    (10⁵) cells is `NeedsBackgroundScan`, uncounted: past a reach of some 10,500 ly, a V limit
+    under 1.8 × 10⁻⁷ W m⁻² for the core collapses or 1.1 × 10⁻⁶ for the Type Ia, and for the core
+    collapses any X-ray limit under 1.4 × 10⁻³, through their magnetars.
+  - _Walked._ The core collapses (supernovae and magnetars) and the Type Ia (new
+    `impl OneShotClass for TypeIaProcess`); the centre through the global list
+    (`centre_detections`: the flares in X-rays, whatever the classes asked, and the tails in
+    X-rays and, as a 23,174 K blackbody's share of their whole light, photometrically: lean,
+    `TAIL_TEMPERATURE`, Gezari 2021's median); the local events. Not built, each named in the
+    result: the luminous blue variables (P12.T5.c), the X-ray binaries (P11.T8.b), the accreting
+    white dwarfs and the mergers (P11.T9), the dwarf cores' lists (P10.T7.b) and the features'
+    (P09.T36).
+  - _Lights (P12.T8.b.1's, for the centre)._ Two new `Source`s in `arriving.rs`: a centre flare,
+    its own 2–10 keV light, knots at its onset, peak and end; a tail, its band's share of its whole
+    light (`XRAY_SHARE` in X-rays, bit for bit `luminosity_watts_at`), knots at its disruption, its
+    fallback time rounded up to the nanosecond, and `ClockWindow::END`, since a tail falls for
+    ever. Each is the walk's flux at the detection's own time.
+  - _For T8.b._ Interactive: one `alerts_in`. A `NeedsBackgroundScan` class: the new
+    `one_shot_scan_plan` and `one_shot_scan_cell` with the class's process built once (the Type
+    Ia's costs 37 ms), and `scan_plan` and `scan_cell` for its recurrent kinds, which stay T5.c's
+    (main's ruling of 2026-10-31). If lane `p12-t5b-classes` lands its Type Ia `OneShotClass`
+    first, it replaces this one.
+  - _For T8.c._ `ClassStatus::Unwalked` and an uncounted class (`expected_hosts` of `None`) have
+    no value in T9.a's `ClassCensusDto` yet (its statuses are `complete`, `over_limit` and
+    `pending`, and its `expected_hosts` an `f64`).
+  - _Tests._ `tests/alerts_census.rs`, on toy classes and the Milky Way fixture's centre. The
+    shared re-observation test runs on the centre's flares while the novae wait on P11.T9 (lean).

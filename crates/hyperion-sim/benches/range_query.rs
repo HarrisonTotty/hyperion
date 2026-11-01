@@ -116,6 +116,12 @@
 //! the same observed rows, warm, for a sensor with V, K and radio bands, over a day and a year from
 //! the query's time: what they add to the observed query, against the plan's under 1 ms, a miss
 //! being a finding. Plan 12's Risks ("P12.T5.e as built") name the lever.
+//!
+//! `alerts_in_sun_day` is plan 12's "what went off?" (P12.T5.d) for the same rows and a sensor with
+//! an X-ray band as well, over a day, with the global list lent: the census of every class (the
+//! supernova classes reach the whole Galaxy, so they wait for the background, uncounted), the
+//! centre's flares and disruptions, and the local events, warm. The galaxy has its kinematic
+//! tables, which the global list needs.
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -125,7 +131,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::local::LocalEventsCache;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, local_events,
+    AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, alerts_in, local_events,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::events::TimeWindow;
@@ -133,6 +139,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
+use hyperion_sim::galaxy::global_list::GlobalList;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{
@@ -410,12 +417,80 @@ fn local_events_50ly(c: &mut Criterion) {
     group.finish();
 }
 
+/// Plan 12's `alerts_in` (P12.T5.d) for one Sun-like observer's day: the observed 50 ly query's
+/// rows, warm, a sensor with V and K limits of 10⁻¹⁵ W m⁻², a radio band and an X-ray limit of
+/// 10⁻¹⁵ W m⁻², and the galaxy's global list.
+fn alerts_in_sun_day(c: &mut Criterion) {
+    let galaxy = galaxy().with_full_potential();
+    let list = GlobalList::build(&galaxy);
+    let query = RangeQuery::builder(sunlike_point(), LightYears::new(50.0))
+        .mode(QueryMode::ObservedFrom(sunlike_point()))
+        .build()
+        .expect("50 ly at the Sun-like point is a query");
+    let mut stars = WarmStars::default();
+    let found = range_query_observed(&galaxy, &mut Warm::default(), &mut stars, &[], &query)
+        .expect("the Sun-like point holds no centre member");
+    let w = WattsPerSquareMetre::new;
+    let limits = |detect| BandLimits::new(w(detect), w(detect * 100.0)).expect("positive limits");
+    let sensor = SensorHorizon::new([
+        (AlertBand::Photometric(Band::V), limits(1e-15)),
+        (AlertBand::Photometric(Band::K), limits(1e-15)),
+        (AlertBand::Photometric(Band::Radio), limits(1e-28)),
+        (AlertBand::XRay, limits(1e-15)),
+    ])
+    .expect("four bands");
+    let day = UniverseTime::EPOCH
+        .checked_add(Span::from_seconds(86_400))
+        .expect("a day after the epoch is on the clock");
+    let window = TimeWindow::new(UniverseTime::EPOCH, day).expect("a window");
+    let alerts = AlertQuery::builder(sunlike_point(), window, sensor)
+        .build()
+        .expect("the window lies in the clock window");
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut ctx = AlertContext::new(&mut noise, &NoModifiers).with_global_list(&list);
+    let mut cache = LocalEventsCache::with_capacity(4_096);
+    let result = alerts_in(
+        &galaxy,
+        &mut ctx,
+        &alerts,
+        found.observed(),
+        &mut stars,
+        &mut cache,
+    );
+    eprintln!(
+        "alerts_in_sun_day: {} detections from {} systems; census {:?}; sources {:?}",
+        result.detections().len(),
+        found.observed().len(),
+        result
+            .census()
+            .iter()
+            .map(|c| (c.class().name(), c.status(), c.expected_hosts()))
+            .collect::<Vec<_>>(),
+        result.sources(),
+    );
+    let mut group = c.benchmark_group("alerts");
+    group.bench_function("alerts_in_sun_day", |b| {
+        b.iter(|| {
+            alerts_in(
+                black_box(&galaxy),
+                &mut ctx,
+                black_box(&alerts),
+                found.observed(),
+                &mut stars,
+                &mut cache,
+            )
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     query,
     expected,
     local,
     long_range,
     observed,
-    local_events_50ly
+    local_events_50ly,
+    alerts_in_sun_day
 );
 criterion_main!(query);

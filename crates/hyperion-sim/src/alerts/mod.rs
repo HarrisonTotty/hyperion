@@ -18,13 +18,15 @@
 //! - a source's light in each band ([`light`]): the bands' top hats, a blackbody's share of its
 //!   light in a band, and plan 09's supernova templates band by band (P12.T5.b);
 //! - the one-shot classes' walk ([`oneshot`]), the supernovae (P12.T5.b), and the recurrent
-//!   classes' ([`recurrent`]), so far the core collapses' magnetars (P12.T5.c).
+//!   classes' ([`recurrent`]), so far the core collapses' magnetars (P12.T5.c);
+//! - the galactic centre's walk ([`centre`]), its black hole's flares and tidal disruptions, and
+//!   the local events of a range query's systems ([`local`](mod@local), P12.T5.e);
+//! - "what went off?" ([`alerts_in`], [`census`]): the census per class (Design note 7), each
+//!   class's walk, the global list's centre and the local events, merged (P12.T5.d).
 //!
-//! The walk itself belongs to the later subtasks: the one-shot classes (P12.T5.b), the recurrent
-//! ones (P12.T5.c), the census with the feature-level and global lists (P12.T5.d) and the local
-//! events of a range query's systems (P12.T5.e). They build the [`Detection`]s, the
-//! [`ClassCensus`] and the [`AlertResult`], which have no public constructor. Nothing here draws a
-//! random number or changes generated output: alerts only read.
+//! The walks build the [`Detection`]s, and the census the [`ClassCensus`], the [`SourceCensus`]
+//! and the [`AlertResult`], none of which has a public constructor. Nothing here draws a random
+//! number or changes generated output: alerts only read.
 
 use std::error::Error;
 use std::fmt;
@@ -38,12 +40,15 @@ use crate::galaxy::gas::ccm::Band;
 use crate::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, Sightline, sightline};
 use crate::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use crate::galaxy::gas::noise::NoiseCache;
+use crate::galaxy::global_list::GlobalList;
 use crate::id::{EventId, SystemId};
 use crate::observe::{Bearing, Retardation};
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, WattsPerSquareMetre};
 
 pub mod arriving;
+pub mod census;
+pub mod centre;
 pub mod light;
 pub mod local;
 pub mod oneshot;
@@ -54,9 +59,17 @@ pub mod registry;
 pub mod testing;
 
 pub use arriving::{ArrivingLight, DetectionLight};
+pub use census::{
+    AlertClasses, AlertSource, BACKGROUND_THRESHOLD_CELLS, ProductionAlertClasses, SourceCensus,
+    SourceStatus, alerts_in, alerts_in_with, class_alerts, unwalked_class,
+};
+pub use centre::{TAIL_TEMPERATURE, centre_detections};
 pub use light::{band_share, supernova_luminosity, supernova_peak};
 pub use local::{LocalEventsCache, local_events};
-pub use oneshot::{NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections};
+pub use oneshot::{
+    NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, one_shot_detections,
+    one_shot_scan_cell, one_shot_scan_plan,
+};
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,
     xray_optical_depth,
@@ -564,8 +577,8 @@ pub enum DetectionPhase {
 /// arrived, how bright it is and where it appears.
 ///
 /// Built by the alert walks (P12.T5.b–P12.T5.e), through its crate-private constructor: the
-/// one-shot classes' by [`one_shot_detections`], the magnetars' by [`magnetar_scan_cell`] and the
-/// local events' by [`local_events`].
+/// one-shot classes' by [`one_shot_detections`], the magnetars' by [`magnetar_scan_cell`], the
+/// galactic centre's by [`centre_detections`] and the local events' by [`local_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detection {
     event: EventId,
@@ -714,19 +727,34 @@ pub enum ClassStatus {
     Complete,
     /// The class expects more hosts in its reach than the query's host limit: no detections.
     OverLimit,
-    /// The class expects more than [`BACKGROUND_THRESHOLD_HOSTS`] in its reach: the caller scans it
-    /// in the background, and until then it yields nothing.
+    /// The class expects more than [`BACKGROUND_THRESHOLD_HOSTS`] in its reach, or its walk spans
+    /// more than [`BACKGROUND_THRESHOLD_CELLS`] class cells: the caller scans it in the
+    /// background, and until then it yields nothing.
     NeedsBackgroundScan,
+    /// The class was not walked, for the reason given: no detections, and none claimed.
+    Unwalked(Unwalked),
+}
+
+/// Why a class or a source was not walked (P12.T5.d): "a source not built yet answers none, with
+/// its reason in the result".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Unwalked {
+    /// Its walk, or the source its hosts or events come from, is not built: the task named builds
+    /// it, as the registry's [`TransientRow::pending`] names a row's.
+    NotBuilt(&'static str),
+    /// It is walked through plan 10's global list, and the caller lent the context none
+    /// ([`AlertContext::with_global_list`]).
+    NoGlobalList,
 }
 
 /// One class's census in an [`AlertResult`] (plan 12's Provides).
 ///
-/// Built by `alerts_in` (P12.T5.d).
+/// Built by [`alerts_in`]'s census ([`class_alerts`], [`unwalked_class`]).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ClassCensus {
     class: ClassId,
     reach: LightYears,
-    expected_hosts: f64,
+    expected_hosts: Option<f64>,
     status: ClassStatus,
 }
 
@@ -743,10 +771,12 @@ impl ClassCensus {
         self.reach
     }
 
-    /// The hosts it is expected to have in the widened reach sphere, from plan 09's class
-    /// density, decided before walking.
+    /// The hosts it is expected to have in the widened reach sphere, counted before walking: an
+    /// upper bound, the candidates its walk would draw ([`class_alerts`]), or the hosts of the
+    /// centre's list. `None` where they were not counted: a class not walked, or one whose walk
+    /// spans more than [`BACKGROUND_THRESHOLD_CELLS`] cells.
     #[must_use]
-    pub const fn expected_hosts(&self) -> f64 {
+    pub const fn expected_hosts(&self) -> Option<f64> {
         self.expected_hosts
     }
 
@@ -757,14 +787,15 @@ impl ClassCensus {
     }
 }
 
-/// What went off: the detections, by arrival and then by event, and a census per class asked
-/// about (plan 12's Provides).
+/// What went off: the detections, by arrival and then by event, a census per class asked about,
+/// and one per source beyond the class grids (plan 12's Provides).
 ///
-/// Built by `alerts_in` (P12.T5.d).
+/// Built by [`alerts_in`] (P12.T5.d).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlertResult {
     detections: Vec<Detection>,
     census: Vec<ClassCensus>,
+    sources: Vec<SourceCensus>,
 }
 
 impl AlertResult {
@@ -779,6 +810,19 @@ impl AlertResult {
     pub fn census(&self) -> &[ClassCensus] {
         &self.census
     }
+
+    /// The census of each source beyond the class grids, in [`AlertSource::ALL`]'s order: whether
+    /// it was walked, and if not, why.
+    #[must_use]
+    pub fn sources(&self) -> &[SourceCensus] {
+        &self.sources
+    }
+
+    /// The census of `class`, or `None` for a class the query did not ask about.
+    #[must_use]
+    pub fn class_census(&self, class: ClassId) -> Option<&ClassCensus> {
+        self.census.iter().find(|census| census.class == class)
+    }
 }
 
 /// The caller's caches and sources, since the sim holds none (plan 12's Provides).
@@ -790,13 +834,16 @@ impl AlertResult {
 /// [`NoModifiers`](crate::galaxy::gas::modifiers::NoModifiers). T5.b's is the one-shot classes'
 /// cells ([`OneShotCells`], [`with_one_shot_cells`](Self::with_one_shot_cells)) and T5.c's the
 /// magnetars' ([`MagnetarCells`], [`with_magnetar_cells`](Self::with_magnetar_cells)); without
-/// them, each cell is generated for its visit. The later walks add theirs: plan 09's
-/// `FeatureCatalogue` with its cell cache (P12.T5.d) and plan 10's `GlobalList` (P12.T5.d).
+/// them, each cell is generated for its visit. T5.d's is plan 10's [`GlobalList`]
+/// ([`with_global_list`](Self::with_global_list)), through whose entries [`alerts_in`] walks the
+/// galactic centre; without it, the centre is not walked and the result says so. Plan 09's
+/// feature-level lists hold no class yet (P09.T36), so no feature catalogue joins it.
 pub struct AlertContext<'a> {
     noise: &'a mut NoiseCache,
     gas: &'a dyn GasModifierSource,
     one_shot_cells: Option<&'a mut dyn OneShotCells>,
     magnetar_cells: Option<&'a mut dyn MagnetarCells>,
+    global_list: Option<&'a GlobalList>,
     /// The modifiers of the last line of sight, kept for its allocation.
     modifiers: Vec<GasModifier>,
 }
@@ -816,8 +863,26 @@ impl<'a> AlertContext<'a> {
             gas,
             one_shot_cells: None,
             magnetar_cells: None,
+            global_list: None,
             modifiers: Vec::new(),
         }
+    }
+
+    /// The same context, lending [`alerts_in`] `galaxy`'s global list, `list` (P12.T5.d): it
+    /// walks the entries that hold class members ([`GlobalList::entries_with_class_members`]).
+    /// The list must be the galaxy's own ([`GlobalList::build`]), as a cell cache must.
+    #[must_use]
+    pub fn with_global_list(self, list: &'a GlobalList) -> Self {
+        Self {
+            global_list: Some(list),
+            ..self
+        }
+    }
+
+    /// The global list lent, if any.
+    #[must_use]
+    pub(crate) const fn global_list(&self) -> Option<&'a GlobalList> {
+        self.global_list
     }
 
     /// The same context, lending the one-shot walk its classes' cells from `cells` (P12.T5.b).

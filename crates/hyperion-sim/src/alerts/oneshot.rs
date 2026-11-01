@@ -36,9 +36,10 @@
 //!    on a tie, if it reaches the limit there.
 //!
 //! The walk is complete for any reach, the cube's diagonal included; whether a class is walked
-//! interactively at all is the census's (P12.T5.d, Design note 7). A class's cells cost
-//! milliseconds each (P09.T33.a), so the caller lends the walk a cache of them
-//! ([`OneShotCells`], [`AlertContext::with_one_shot_cells`]).
+//! interactively at all is the census's (P12.T5.d, Design note 7), and a class it sends to the
+//! background is walked cell by cell ([`one_shot_scan_plan`], [`one_shot_scan_cell`]), which
+//! merge to the same detections. A class's cells cost milliseconds each (P09.T33.a), so the
+//! caller lends the walk a cache of them ([`OneShotCells`], [`AlertContext::with_one_shot_cells`]).
 //!
 //! # What a detection reports
 //!
@@ -57,6 +58,7 @@ use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
 use crate::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
+use crate::galaxy::catalogue_classes::type_ia::{TypeIaEntry, TypeIaProcess};
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassProcess, cells_in_sphere,
 };
@@ -136,9 +138,9 @@ impl OneShotEvent {
 /// A one-shot class's process, as the walk reads it (P12.T5.b): the kind of event its entries
 /// make, and each entry's.
 ///
-/// Implemented for plan 09's core collapses ([`CoreCollapseProcess`]); P09.T34.a's Type Ia process
-/// implements it the same way, from its entries' [`SupernovaEntry`] and member 0's motion, and
-/// plan 11's two merger classes from their own events (P11.T9).
+/// Implemented for plan 09's core collapses ([`CoreCollapseProcess`]) and its Type Ia
+/// ([`TypeIaProcess`], P09.T34.a), each from its entries' [`SupernovaEntry`] and member 0's
+/// motion; plan 11's two merger classes implement it from their own events (P11.T9).
 pub trait OneShotClass: ClassProcess {
     /// The kind of event the class's entries make.
     #[must_use]
@@ -155,6 +157,18 @@ impl OneShotClass for CoreCollapseProcess {
     }
 
     fn event(&self, entry: &CoreCollapseEntry) -> OneShotEvent {
+        OneShotEvent::of_supernova(entry.supernova(), *entry.motion())
+    }
+}
+
+impl OneShotClass for TypeIaProcess {
+    fn kind(&self) -> TransientKind {
+        TransientKind::TypeIa
+    }
+
+    /// The explosion of the entry's [`SupernovaEntry`], member 0, the white dwarf's system, moving
+    /// as it does before and after T.
+    fn event(&self, entry: &TypeIaEntry) -> OneShotEvent {
         OneShotEvent::of_supernova(entry.supernova(), *entry.motion())
     }
 }
@@ -297,18 +311,11 @@ pub fn one_shot_detections<P: OneShotClass>(
     out: &mut Vec<Detection>,
 ) {
     let class = process.class();
-    if !query.classes().contains(class) {
-        return;
-    }
     let kind = process.kind();
-    let reach = kind_reach(kind, query.sensor());
-    if reach <= LightYears::ZERO {
+    let Some(sphere) = walk_sphere(process, query) else {
         return;
-    }
+    };
     let observer = *query.observer_position();
-    let window = query.window();
-    let sphere = QuerySphere::new(observer, reach, window.start(), LightYears::ZERO)
-        .expect("a reach is a positive length within the cube's diagonal");
     let mut candidates = Vec::new();
     for key in cells_in_sphere(class, &sphere) {
         ctx.one_shot_events(
@@ -323,6 +330,102 @@ pub fn one_shot_detections<P: OneShotClass>(
             },
         );
     }
+    let start = out.len();
+    for candidate in candidates {
+        if let Some(detection) = detect(galaxy, ctx, query, process, kind, &candidate) {
+            out.push(detection);
+        }
+    }
+    out[start..].sort_by(|a, b| {
+        a.arrival
+            .cmp(&b.arrival)
+            .then_with(|| a.event.cmp(&b.event))
+    });
+}
+
+/// The sphere `process`'s walk covers for `query`: its kind's reach about the observer at the
+/// window's start (module documentation, step 2), or `None` if the query does not ask about the
+/// class or the sensor sees nothing of its kind.
+///
+/// # Panics
+///
+/// If the reach is not finite, which [`kind_reach`] never gives.
+#[must_use]
+fn walk_sphere<P: OneShotClass>(process: &P, query: &AlertQuery) -> Option<QuerySphere> {
+    if !query.classes().contains(process.class()) {
+        return None;
+    }
+    let reach = kind_reach(process.kind(), query.sensor());
+    (reach > LightYears::ZERO).then(|| {
+        QuerySphere::new(
+            *query.observer_position(),
+            reach,
+            query.window().start(),
+            LightYears::ZERO,
+        )
+        .expect("a reach is a positive length within the cube's diagonal")
+    })
+}
+
+/// The cells of `process`'s class that [`one_shot_detections`] walks for `query`, in key order:
+/// the class's cells within its kind's reach ([`cells_in_sphere`]); none if the query does not ask
+/// about the class or the sensor sees nothing of its kind (P12.T5.d).
+///
+/// A class that `alerts_in`'s census sends to the background (Design note 7) is walked in chunks
+/// of these with [`one_shot_scan_cell`], as the recurrent kinds are with
+/// [`scan_plan`](super::scan_plan).
+///
+/// # Panics
+///
+/// If the reach is not finite, which [`kind_reach`] never gives.
+#[must_use]
+pub fn one_shot_scan_plan<P: OneShotClass>(
+    process: &P,
+    query: &AlertQuery,
+) -> Vec<CatalogueCellKey> {
+    walk_sphere(process, query).map_or_else(Vec::new, |sphere| {
+        cells_in_sphere(process.class(), &sphere).collect()
+    })
+}
+
+/// Appends to `out` the detections of the one-shot events of `process`'s cell `cell` that
+/// `query`'s sensor sees in its window, sorted by arrival and then by event (P12.T5.d): nothing for
+/// a cell of another class, or one the query does not ask about.
+///
+/// A pure function of one class cell, which a background scan runs in chunks: over every cell of
+/// [`one_shot_scan_plan`], merged by arrival and then by event, the detections are
+/// [`one_shot_detections`]' own, each to the bit, in any order of the cells and with any cache.
+/// A cell beyond the plan adds nothing, since no event beyond its kind's reach reaches the limit.
+///
+/// # Panics
+///
+/// As [`one_shot_detections`].
+pub fn one_shot_scan_cell<P: OneShotClass>(
+    galaxy: &Galaxy,
+    ctx: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    process: &P,
+    cell: CatalogueCellKey,
+    out: &mut Vec<Detection>,
+) {
+    let class = process.class();
+    if cell.class() != class || !query.classes().contains(class) {
+        return;
+    }
+    let kind = process.kind();
+    let observer = *query.observer_position();
+    let mut candidates = Vec::new();
+    ctx.one_shot_events(
+        cell,
+        &mut || events_of(galaxy, process, cell),
+        &mut |events| {
+            candidates.extend(
+                events
+                    .iter()
+                    .filter_map(|event| candidate(event, &observer, query)),
+            );
+        },
+    );
     let start = out.len();
     for candidate in candidates {
         if let Some(detection) = detect(galaxy, ctx, query, process, kind, &candidate) {

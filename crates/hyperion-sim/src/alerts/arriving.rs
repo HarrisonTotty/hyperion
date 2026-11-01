@@ -16,6 +16,10 @@
 //! - A magnetar's short burst or giant flare is a top hat in X-rays, its 2–10 keV light from its
 //!   onset to its end, as the recurrent walk reads it ([`recurrent`](super::recurrent); research's
 //!   ruling of 2026-10-31).
+//! - The galactic centre's flares and disruptions ([`centre`](super::centre), P12.T5.d): a flare is
+//!   its own 2–10 keV light above the quiescence; a disruption's tail is its band's share of the
+//!   tail's whole light, the 2–10 keV share or a hot blackbody's in a photometric band. Both leave
+//!   the black hole at rest at the origin, so their light time is the detection's.
 //! - A pulsar glitch gives no light a sensor counts as flux, which its light says
 //!   ([`DetectionLight::Unlit`]).
 //!
@@ -25,10 +29,11 @@
 //! Nothing here draws a random number or changes generated output: lights only read.
 
 use crate::galaxy::catalogue_classes::supernova::SupernovaKind;
+use crate::galaxy::features::centre::events::{CentreFlare, DisruptionTail};
 use crate::observe::light_time;
 use crate::stellar::events::flares::Flare;
 use crate::stellar::events::fu_orionis::Outburst;
-use crate::time::{Span, UniverseTime};
+use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Metres, Watts, WattsPerSquareMetre, Years};
 
@@ -81,6 +86,10 @@ enum Source {
     /// A magnetar's outburst: its light in the band from its onset, inclusive, to its end,
     /// exclusive, both as emitted.
     TopHat(Watts, UniverseTime, UniverseTime),
+    /// One of the central black hole's flares, its own light in 2–10 keV.
+    CentreFlare(CentreFlare),
+    /// A tidal disruption's tail, and its band's share of the tail's whole light.
+    Tail(DisruptionTail, f64),
 }
 
 impl ArrivingLight {
@@ -160,6 +169,39 @@ impl ArrivingLight {
         }
     }
 
+    /// The light in X-rays of `flare`, one of the central black hole's, `distance` away through a
+    /// line of sight of `transmission` in X-rays: it arrives one [`light_time`] after it left the
+    /// black hole, which is at rest (P12.T5.d).
+    #[must_use]
+    pub(super) fn centre_flare(flare: CentreFlare, distance: Metres, transmission: f64) -> Self {
+        Self {
+            source: Source::CentreFlare(flare),
+            band: AlertBand::XRay,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
+    /// The light in `band` of `tail`, of `share` of its whole light there, `distance` away through
+    /// a line of sight of `transmission` in the band: it arrives one [`light_time`] after it left
+    /// the black hole (P12.T5.d).
+    #[must_use]
+    pub(super) fn disruption_tail(
+        (tail, share): (DisruptionTail, f64),
+        band: AlertBand,
+        distance: Metres,
+        transmission: f64,
+    ) -> Self {
+        Self {
+            source: Source::Tail(tail, share),
+            band,
+            delay: light_time(distance),
+            distance,
+            transmission,
+        }
+    }
+
     /// The band the flux is in: the detection's.
     #[must_use]
     pub const fn band(&self) -> AlertBand {
@@ -202,6 +244,10 @@ impl ArrivingLight {
                     Watts::ZERO
                 }
             }
+            Source::CentreFlare(flare) => Watts::new(flare.luminosity_watts_at(self.emitted(t))),
+            Source::Tail(tail, share) => {
+                Watts::new(share * tail.bolometric_watts_at(self.emitted(t)))
+            }
         };
         inverse_square_flux(luminosity, self.distance)
             .map_or(WattsPerSquareMetre::new(0.0), |bare| {
@@ -213,7 +259,12 @@ impl ArrivingLight {
     /// monotone: zero before the first, and constant from the last.
     ///
     /// A flare's and an outburst's are their onset, peak and end, arriving one light time later, and
-    /// a magnetar's top hat its onset and end, the light constant between and gone at the end. A
+    /// a magnetar's top hat its onset and end, the light constant between and gone at the end. The
+    /// centre's flares' are their onset, peak and end too. A disruption's tail's are its
+    /// disruption, dark until its fallback time, then that time, at which the light is its peak,
+    /// rounded up to the nanosecond so that it holds the peak and not the dark before it, and from
+    /// which it falls for ever under either of the tails' laws ([`DisruptionTail`]), so its last is
+    /// the clock window's end, past which no observer's time lies, if the peak arrives before it. A
     /// supernova's are its arrival and the ages of the grid its peak is taken on (the explosion,
     /// every hour of the first day, and every twentieth of a day to 1,096 days;
     /// [`light`](super::light)), then 228 years, when no template gives light. Every template
@@ -257,6 +308,23 @@ impl ArrivingLight {
                 increasing([outburst.onset(), outburst.peak(), outburst.end()].map(arrive))
             }
             Source::TopHat(_, onset, end) => increasing([onset, end].map(arrive)),
+            Source::CentreFlare(flare) => {
+                let peak = Span::from_seconds_f64(flare.duration_seconds() / 2.0)
+                    .and_then(|half| flare.onset().checked_add(half))
+                    .expect("a flare peaks hours after an onset the clock holds");
+                increasing([flare.onset(), peak, flare.end()].map(arrive))
+            }
+            Source::Tail(tail, _) => {
+                let peak = Span::from_seconds_f64(tail.fallback_time().value())
+                    .and_then(|fallback| fallback.checked_add(Span::new(0, 1).ok()?))
+                    .and_then(|fallback| tail.disruption().checked_add(fallback))
+                    .expect("a tail peaks months after a disruption the clock holds");
+                let mut knots = increasing([tail.disruption(), peak].map(arrive));
+                if knots.last().is_some_and(|&last| last < ClockWindow::END) {
+                    knots.push(ClockWindow::END);
+                }
+                knots
+            }
         }
     }
 

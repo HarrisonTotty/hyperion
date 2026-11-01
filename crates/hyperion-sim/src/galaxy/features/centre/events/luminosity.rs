@@ -343,10 +343,15 @@ impl DisruptionTail {
     /// efficiency lowers it.
     #[must_use]
     pub fn peak_luminosity_watts(&self) -> f64 {
-        XRAY_SHARE
-            * self
-                .eddington_watts
-                .min(self.accreted_watts(self.peak_rate_kg_per_s))
+        XRAY_SHARE * self.peak_bolometric_watts()
+    }
+
+    /// The most it ever gives over every band, W: its light at `t_fb`, of which
+    /// [`peak_luminosity_watts`](Self::peak_luminosity_watts) is the 2–10 keV share.
+    #[must_use]
+    pub fn peak_bolometric_watts(&self) -> f64 {
+        self.eddington_watts
+            .min(self.accreted_watts(self.peak_rate_kg_per_s))
     }
 
     /// The light of accretion at `rate_kg_per_s` before Eddington's cap, W: `ε Ṁ c²` with the
