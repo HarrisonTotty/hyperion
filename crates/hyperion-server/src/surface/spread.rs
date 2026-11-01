@@ -26,14 +26,16 @@ use hyperion_sim::planetary::surface::Spread;
 
 use crate::compute::{CancelToken, CpuPool, JobError, JobReceiver, Priority};
 
-/// The most tasks a pass's spread runs at once: four months' orographic solves.
+/// The most tasks a pass's spread runs at once: two months' orographic solves.
 ///
 /// Why: each month solved at once holds its own working state. On the reference Earth at level 8
-/// (pod, 16 vCPU, release, 2026-11-01), the climate step took 30.9 s with the months in order, and
-/// 27.3, 26.9 and 27.0 s four, six and twelve at a time. The pass's peak resident set was 416 MB in
-/// order, and 762, 884 and 1,393 MB. Four take most of the time for under a quarter of the twelve's
-/// memory, beside R09.T17.a's bound of passes (decision-r09-pass-cost §C).
-const WIDTH: usize = 4;
+/// (pod, 16 vCPU, release, 2026-11-01, each run its own process), the climate step took 30.9 s with
+/// the months in order, and 28.8, 27.8 and 27.4 s two, three and four at a time; the pass's peak
+/// resident set was 417 MB in order, and 598, 729 and 763 MB. Under the server's body seed the step
+/// took 42.4 s in order and 40.0, 39.3 and 38.9 s. Two keep 58–69% of four's gain for about half its
+/// memory beside R09.T17.a's bound of passes (decision-r09-pass-cost §C); three save little memory
+/// over four.
+const WIDTH: usize = 2;
 
 /// One task of a pass.
 type Task = Box<dyn FnOnce() + Send>;
