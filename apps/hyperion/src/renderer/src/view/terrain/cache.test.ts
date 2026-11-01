@@ -157,16 +157,33 @@ describe("the patch cache", () => {
     expect(unpinnedFirst).not.toContain(patchKeyString(AA));
   });
 
-  it("evicts a drawn patch once only forced patches remain beside it", () => {
+  it("refuses an arrival once only forced patches and the selection remain beside it", () => {
     const cache = cacheOf(6);
     const forced = [B, C, D, AA, AB];
     insertAll(cache, [A, ...forced]);
     frame(cache, selectionOf([A, ...forced], forced));
-    expect(cache.insert(resident(AC))).toEqual({
-      kind: "stored",
-      slot: expect.any(Number),
-      evicted: patchKeyString(A),
-    });
+    expect(cache.insert(resident(AC))).toEqual({ kind: "refused" });
+    expect(cache.has(patchKeyString(A))).toBe(true);
+  });
+
+  it("refuses an arrival rather than evict the selection or its resident ancestors, and reports it", () => {
+    const cache = cacheOf(7);
+    const [BA] = childKeys(B);
+    insertAll(cache, [ROOT, A, AA, AB, AC, B, C]);
+    // AD and B's children are selected and unbaked, so A stands in for AD, over AA, AB and AC, and B
+    // for its children; the root is pinned as their ancestor, and C alone is unpinned.
+    frame(cache, selectionOf([AA, AB, AC, AD, ...childKeys(B)]));
+    expect(cache.pressure()).toEqual({ forced: 0, drawn: 6, exceeded: false });
+    const elsewhere: PatchKey = { face: 1, level: 10, i: 0, j: 0 };
+    const results = [AD, BA, elsewhere].map((key) => cache.insert(resident(key)));
+    expect(results.map((r) => (r.kind === "stored" ? r.evicted : r.kind))).toEqual([
+      patchKeyString(C),
+      "refused",
+      "refused",
+    ]);
+    expect([ROOT, A, AA, AB, AC, AD, B].every((k) => cache.has(patchKeyString(k)))).toBe(true);
+    expect(cache.pressure().exceeded).toBe(true);
+    expect(cache.refusals).toBe(2);
   });
 
   it("keeps a forced-region patch under any eviction pressure", () => {
@@ -622,7 +639,8 @@ describe("the patch cache under churn (the high-bound ruling's F3)", () => {
       frame(cache, selectionOf(selected, [], hidden));
       for (const key of selected) {
         if (!cache.has(patchKeyString(key))) {
-          evictedBy(cache.insert(resident(key)));
+          // Refused where the selection's chain fills the slots.
+          cache.insert(resident(key));
         }
         expect(cache.usedSlots).toBeLessThanOrEqual(cache.slotCount);
         expect(cache.heldBytes).toBe(cache.usedSlots * cache.layout.bytesPerSlot);
@@ -880,13 +898,16 @@ describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () =
   // range with its skirts, moved it again (2026-10-20): low past its slots in 110 frames, from 107;
   // the rest as it was. R10.T1.c's maturity layer, which grows the lit slot by 19,972 B, moved it
   // again (2026-10-22): low past its 375 slots (422 before) in 242 frames, from 110, and high's pins
-  // peaking at 832 of its 1,208 slots (1,286 before), from 887; the forced peak as it was.
+  // peaking at 832 of its 1,208 slots (1,286 before), from 887; the forced peak as it was. An arrival
+  // outside the forced region refused, not given a slot of the selection's chain, reports the pins
+  // exceeded (2026-11-01, the seamless lane): low past its slots in 702 frames, from 242, and the
+  // wireframe's in 149, from 4; the forced patches all kept resident, as before.
   const REPLAYS = [
     replayed("the low setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.low, "lit"), low.view, {
       frames: 723,
       peakForced: 71,
       peakPins: 375,
-      exceededFrames: 242,
+      exceededFrames: 702,
     }),
     replayed("the high setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"), high.view, {
       frames: 723,
@@ -898,7 +919,7 @@ describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () =
       "the wireframe's",
       terrainSlotLayout(wireframeTerrainSettings("high"), "wire"),
       { ...high.view, tauPx: WIREFRAME_TERRAIN_TAU_PX },
-      { frames: 723, peakForced: 71, peakPins: 520, exceededFrames: 4 },
+      { frames: 723, peakForced: 71, peakPins: 520, exceededFrames: 149 },
     ),
   ];
 

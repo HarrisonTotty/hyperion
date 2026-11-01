@@ -7,8 +7,10 @@
  * eviction order, and the terrain pass (T11) writes each patch's bytes into the GPU buffers at the
  * slot it is given. Eviction is least recently used among unpinned patches. Two pins: a patch in a
  * grounded body's forced region is never evicted, whatever the budget; a patch in the current draw
- * set, the selection or the selection's resident ancestors is evicted only after everything
- * unpinned, and among patches used as recently the deepest goes first. The baked patches the
+ * set, the selection or the selection's resident ancestors (the selection's chain) is never evicted
+ * for an arrival outside the forced region, which is refused instead, and is evicted for a forced
+ * one only after everything unpinned, the deepest first among patches used as recently. The baked
+ * patches the
  * selection found hidden ({@link Selection.hiddenBaked}) are not pinned, but are used each frame
  * they are hidden, and among the unpinned patches used as recently they go last. The six roots are
  * never evicted either, so that once baked every selected patch has a resident ancestor to stand in
@@ -49,7 +51,10 @@ export interface CachedPatch extends ResidentPatch {
 export type CacheInsert =
   /** The patch holds `slot`, having evicted the patch keyed `evicted` if it is not `null`. */
   | { readonly kind: "stored"; readonly slot: number; readonly evicted: string | null }
-  /** Every slot is pinned by the forced region or a root, so nothing could be evicted. */
+  /**
+   * Every slot is pinned by the forced region, a root or, for a patch outside the forced region,
+   * the selection's chain, so nothing could be evicted.
+   */
   | { readonly kind: "refused" };
 
 /** The pins against the slots, which the metrics and the annunciation read. */
@@ -114,6 +119,7 @@ export class PatchCache implements HeightRangeLookup {
   private refused = false;
   /** The last retain found the pins beyond the slots, or a refusal before it. */
   private exceededAtRetain = false;
+  private refusalCount = 0;
 
   constructor(layout: SlotLayout) {
     this.layout = layout;
@@ -139,6 +145,14 @@ export class PatchCache implements HeightRangeLookup {
    */
   get heldBytes(): number {
     return this.entries.size * this.layout.bytesPerSlot;
+  }
+
+  /**
+   * How many inserts it has refused in its life ({@link CacheInsert}'s `refused`): each one a bake
+   * made and thrown away, which the terrain pass asks for again at its next demand.
+   */
+  get refusals(): number {
+    return this.refusalCount;
   }
 
   /** The cached patch keyed by `keyString` (a `patchKeyString`), if it is resident. */
@@ -171,11 +185,20 @@ export class PatchCache implements HeightRangeLookup {
   /**
    * Stores a baked patch, in its own slot if it is already resident (a newer bake), else in a free
    * slot, else in the slot of the evicted patch: the least recently used unpinned one, the hidden
-   * baked patches last among those used as recently, then the least recently used of those the
-   * selection, its ancestors or the draw set pins; the deepest first among patches used as
-   * recently. A forced or root patch is never evicted.
+   * baked patches last among those used as recently, the deepest first among patches used as
+   * recently. A forced or root patch is never evicted, nor, for a patch outside the forced region,
+   * one the selection, its resident ancestors or the draw set pins: with only those left the
+   * arrival is refused, and the pins are reported as exceeding the slots ({@link
+   * PatchCache.pressure}). A forced arrival takes the least recently used of those pinned patches
+   * instead, the deepest first among those used as recently.
    *
    * @remarks
+   * An arrival that evicted a drawn patch, or an ancestor of one, made the drawn ground collapse to
+   * a coarser ancestor over its whole area: one missing patch, two or more levels down, and every
+   * resident patch beside it was drawn by that ancestor (TERRAIN TEST, 3 workers × 41 ms: 52 frames
+   * on high and 36 on low whose drawn set fell below half the frame before's). A refused bake costs
+   * a bake again, once the camera has moved enough that the selection lets go of a pinned patch.
+   *
    * Only the {@link ResidentPatch} fields are kept: the terrain pass hands over the worker's whole
    * bake, whose heights, offsets and normals its slot already holds, and keeping them here would
    * hold about 51 KB a patch in the renderer, about 66 MB with R05's spike layout's 1,296 low slots
@@ -197,10 +220,12 @@ export class PatchCache implements HeightRangeLookup {
     }
     let slot = this.freeSlots.pop();
     let evicted: string | null = null;
+    const forced = this.forcedKeys.has(keyString);
     if (slot === undefined) {
-      evicted = this.victim();
+      evicted = this.victim(forced);
       if (evicted === null) {
         this.refused = true;
+        this.refusalCount += 1;
         return { kind: "refused" };
       }
       const victim = this.entries.get(evicted);
@@ -210,7 +235,6 @@ export class PatchCache implements HeightRangeLookup {
       slot = victim.patch.slot;
       this.forget(evicted, victim);
     }
-    const forced = this.forcedKeys.has(keyString);
     const entry: Entry = {
       patch: cachedPatch(patch, slot, keyString),
       lastUsed: this.tick,
@@ -343,14 +367,17 @@ export class PatchCache implements HeightRangeLookup {
     this.pinnedDrawn = drawn;
   }
 
-  /** The patch to evict, or `null` if every resident patch is forced or a root. */
-  private victim(): string | null {
+  /**
+   * The patch to evict for an arrival, or `null` if every resident patch is forced or a root, or,
+   * unless `forcedArrival`, pinned by the selection's chain.
+   */
+  private victim(forcedArrival: boolean): string | null {
     let best: string | null = null;
     let bestRank = 0;
     let bestUsed = 0;
     let bestLevel = 0;
     for (const [keyString, entry] of this.entries) {
-      if (entry.forced || entry.patch.key.level === 0) {
+      if (entry.forced || entry.patch.key.level === 0 || (entry.drawn && !forcedArrival)) {
         continue;
       }
       const rank = entry.drawn ? 2 : entry.hidden ? 1 : 0;
