@@ -46,7 +46,7 @@ use crate::units::{KilometresPerSecond, LightYears, Seconds};
 use super::super::{FeatureId, FeatureProcess};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
-use super::super::interior::{BoundMemo, LocalCell};
+use super::super::interior::LocalCell;
 use super::super::nested::box_distance;
 use super::local_offset;
 use super::placement::FeatureInterior;
@@ -341,7 +341,7 @@ impl SystemSource for FeatureMemberSource<'_> {
             cells.extend(interior.grid().cells_touching(&local, radius));
             // Most cells' bounds repeat a mirror's (`BoundMemo`): two fifths of a globular core's
             // 50 ly query outside its remnant draws were these, measured on a pod of 16 vCPU.
-            let mut memo = BoundMemo::default();
+            let mut memo = interior.bound_memo();
             for band in BANDS_COARSEST_FIRST {
                 let expected = cells.iter().fold(0.0, |sum, &cell| {
                     sum + interior.expected_candidates_with(band, cell, &mut memo)
@@ -369,7 +369,7 @@ impl SystemSource for FeatureMemberSource<'_> {
         let mut members = Vec::new();
         for interior in self.interiors_near(galaxy, sphere.centre(), padded) {
             let local = local_offset(interior.feature().position(), sphere.centre());
-            let mut memo = BoundMemo::default();
+            let mut memo = interior.bound_memo();
             let bound = interior.member_speed_bound();
             let within = member_reach(sphere.radius(), t, bound);
             for band in BANDS_COARSEST_FIRST {
@@ -928,7 +928,7 @@ mod tests {
                     cell,
                     &near,
                     reach,
-                    (&mut kept, &mut BoundMemo::default()),
+                    (&mut kept, &mut interior.bound_memo()),
                 );
                 all.retain(|(_, p)| {
                     let (dx, dy, dz) = (p.x - near.x, p.y - near.y, p.z - near.z);

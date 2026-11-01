@@ -5445,10 +5445,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `the_feature_classes_are_held_only_until_the_26_bump`.
 - **P09.T10 perf, white dwarfs above the ceiling at 26 (lane `galaxy-centre-core`, 2026-10-31).**
   `RemnantTable` gains `unstripped_white_dwarf_ceiling` (the edge less 0.2 M☉) and
-  `highest_iron_core_mass`; `white_dwarf_ceiling` and `capture_window_top` are fields only (their
-  functions are gone, `white_dwarf_edge` and `highest_iron_core_mass` remain). Above the ceiling a
-  white dwarf reads its mark as its track does: unstripped, kept below its own ceiling; refused
-  `WHITE_DWARF_TOP_MARGIN` (0.3 M☉) above `m_cc` less its window's width.
+  `highest_iron_core_mass`. Its fields are private, and `capture_window_top()` is derived from
+  the highest `m_cc`. The functions for the ceiling and the window's top are gone;
+  `white_dwarf_edge` and `highest_iron_core_mass` remain. Above the ceiling a white dwarf reads
+  its mark as its track does, through `sse::is_companion_stripped_under` (now `pub(crate)`). An
+  unstripped one is kept below its own ceiling. Any is refused `WHITE_DWARF_TOP_MARGIN` (0.3 M☉)
+  above `m_cc` less its window's width.
 - **P09.T10 perf, a slow pair's stripped neutron stars at 26 (lane `galaxy-centre-core`,
   2026-10-31).** `ClusterModel::co_core_floor(rules)` (`remnants::co_core_floor`, lazy in its own
   `RulesCell`, which replaces `RemnantTableCell`): the lightest mass from which every corner's exact
@@ -5457,5 +5459,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
 - **P09.T10 perf, the census's cell bounds (lane `galaxy-centre-core`, 2026-11-01; bit for bit).**
   `interior::BoundMemo`: a sphere's profiled bounds by band and corner radius (keyed by value),
   read through `MemberClassTable::proposal_with`, `FeatureInterior::expected_candidates_with` and
-  `members_in_cell_near`, which now takes `(out, memo)`. `FeatureMemberSource` keeps one memo per
-  interior per call.
+  `members_in_cell_near`, which now takes `(out, memo)`. A memo is made by its table
+  (`MemberClassTable::bound_memo`, `FeatureInterior::bound_memo`). It serves only that table, which
+  a debug assertion checks. `FeatureMemberSource` keeps one memo per interior per call. The tail's
+  bound stays each cell's own. Sharing it across bands was not taken: in a core query a cell's
+  bounding sphere ends short of the tidal radius, where the tails begin, so each band's tail bound
+  is a dot product and a comparison.

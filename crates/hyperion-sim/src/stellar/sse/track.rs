@@ -1376,7 +1376,7 @@ pub(crate) fn is_companion_stripped(
 /// [`is_companion_stripped`] for a track built under the stellar stage's `rules`: the share's
 /// exact path, which a star with a helium excess takes, builds its own track under them.
 #[must_use]
-fn is_companion_stripped_under(
+pub(crate) fn is_companion_stripped_under(
     m0: SolarMasses,
     comp: &Composition,
     draws: &StarDraws,

@@ -236,14 +236,14 @@ impl FeatureInterior {
         self.proposal_with(band, cell, None)
     }
 
-    /// [`proposal`](Self::proposal), bit for bit, its bound read from and kept in `memo`, which
-    /// serves this interior's cells alone.
+    /// [`proposal`](Self::proposal), bit for bit, its bound read from and kept in `memo`, this
+    /// interior's own ([`bound_memo`](Self::bound_memo)).
     #[must_use]
     fn proposal_with(
         &self,
         band: MassBand,
         cell: NestedCell,
-        memo: Option<&mut BoundMemo>,
+        memo: Option<&mut BoundMemo<'_>>,
     ) -> (CellProposal, LocalCell) {
         let local = self.grid.local_cell(cell);
         (self.table.proposal_with(band, &local, memo), local)
@@ -257,14 +257,20 @@ impl FeatureInterior {
         proposal.expected(&local)
     }
 
+    /// An empty [`BoundMemo`] for this interior's cells: one serves the cells of one sphere.
+    #[must_use]
+    pub(crate) fn bound_memo(&self) -> BoundMemo<'_> {
+        self.table.bound_memo()
+    }
+
     /// [`expected_candidates`](Self::expected_candidates), bit for bit, its bound read from and
-    /// kept in `memo` ([`BoundMemo`]), which serves this interior's cells alone.
+    /// kept in `memo` ([`BoundMemo`]), this interior's own ([`bound_memo`](Self::bound_memo)).
     #[must_use]
     pub(crate) fn expected_candidates_with(
         &self,
         band: MassBand,
         cell: NestedCell,
-        memo: &mut BoundMemo,
+        memo: &mut BoundMemo<'_>,
     ) -> f64 {
         let (proposal, local) = self.proposal_with(band, cell, Some(memo));
         proposal.expected(&local)
@@ -408,7 +414,8 @@ impl FeatureInterior {
     /// A range query keeps only the members its sphere holds at its time, and a member's draw, its
     /// class, mass, age and velocity, is nearly all its cost: in a 1 ly query about a globular's
     /// centre the cells it touches hold four times the members its sphere does (measured
-    /// 2026-10-30).
+    /// 2026-10-30). The cell's bound is read from and kept in `memo`, this interior's own
+    /// ([`bound_memo`](Self::bound_memo)), which a query shares over the cells it walks.
     pub(crate) fn members_in_cell_near(
         &self,
         galaxy: &Galaxy,
@@ -416,7 +423,7 @@ impl FeatureInterior {
         cell: NestedCell,
         near: &PointLy,
         within: LightYears,
-        (out, memo): (&mut Vec<(MemberRecord, PointLy)>, &mut BoundMemo),
+        (out, memo): (&mut Vec<(MemberRecord, PointLy)>, &mut BoundMemo<'_>),
     ) {
         let within = within.value();
         out.clear();
@@ -638,7 +645,7 @@ mod tests {
                 let radius = LightYears::new(50.0);
                 let cells: Vec<NestedCell> =
                     interior.grid().cells_touching(&near, radius).collect();
-                let mut memo = BoundMemo::default();
+                let mut memo = interior.bound_memo();
                 let (mut with, mut without) = (Vec::new(), Vec::new());
                 for band in MassBand::ALL {
                     for &cell in &cells {
@@ -670,9 +677,13 @@ mod tests {
                             cell,
                             &near,
                             radius,
-                            (&mut without, &mut BoundMemo::default()),
+                            (&mut without, &mut interior.bound_memo()),
                         );
-                        assert_eq!(with, without, "{band:?} {cell:?}");
+                        assert_eq!(
+                            format!("{with:?}"),
+                            format!("{without:?}"),
+                            "{band:?} {cell:?}"
+                        );
                     }
                 }
             }

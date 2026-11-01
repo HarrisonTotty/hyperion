@@ -90,38 +90,43 @@ impl LocalCell {
 /// the nested grid's cells, whose corners lie at exact multiples of a power-of-two edge, repeat
 /// their corner radii across the grid's mirrors and permutations, so a 50 ly query in a globular's
 /// core finds most of its 60,000 census bounds here (P09.T10; a pod of 16 vCPU). A radius is
-/// looked up by its value, so a bound is reused only for the very radius it was found at.
-#[derive(Debug, Default)]
-pub(crate) struct BoundMemo(BTreeMap<(usize, Radius), f64>);
+/// looked up by its value, so a bound is reused only for the very radius it was found at. A memo
+/// is made by its table ([`MemberClassTable::bound_memo`]) and serves that table alone.
+#[derive(Debug)]
+pub(crate) struct BoundMemo<'t> {
+    table: &'t MemberClassTable,
+    bounds: BTreeMap<(usize, RadiusLy), f64>,
+}
 
 #[cfg(test)]
-impl BoundMemo {
+impl BoundMemo<'_> {
     /// The bounds it holds.
+    #[must_use]
     pub(crate) fn len(&self) -> usize {
-        self.0.len()
+        self.bounds.len()
     }
 }
 
 /// A corner radius as [`BoundMemo`]'s key, ly: ordered and equal by `total_cmp`, so that equal
 /// keys are the same value.
 #[derive(Debug, Clone, Copy)]
-struct Radius(f64);
+struct RadiusLy(f64);
 
-impl PartialEq for Radius {
+impl PartialEq for RadiusLy {
     fn eq(&self, other: &Self) -> bool {
         self.0.total_cmp(&other.0).is_eq()
     }
 }
 
-impl Eq for Radius {}
+impl Eq for RadiusLy {}
 
-impl PartialOrd for Radius {
+impl PartialOrd for RadiusLy {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Radius {
+impl Ord for RadiusLy {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.total_cmp(&other.0)
     }
@@ -453,22 +458,41 @@ impl MemberClassTable {
         self.cell_bound_with(band, cell, None)
     }
 
+    /// An empty [`BoundMemo`] for this table's cells.
+    #[must_use]
+    pub(crate) fn bound_memo(&self) -> BoundMemo<'_> {
+        BoundMemo {
+            table: self,
+            bounds: BTreeMap::new(),
+        }
+    }
+
     /// [`cell_bound`](Self::cell_bound), bit for bit, its profiled classes' bound read from
     /// `memo` where it holds the band's at the cell's corner radius, and kept there otherwise.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `memo` was made by another table.
     #[must_use]
     fn cell_bound_with(
         &self,
         band: MassBand,
         cell: &LocalCell,
-        memo: Option<&mut BoundMemo>,
+        memo: Option<&mut BoundMemo<'_>>,
     ) -> f64 {
         let (centre, radius) = cell.bounding_sphere();
         let nearest = cell.nearest_radius();
         let profiled = match memo {
-            Some(memo) => *memo
-                .0
-                .entry((band.index(), Radius(nearest)))
-                .or_insert_with(|| self.bound(band, nearest)),
+            Some(memo) => {
+                debug_assert!(
+                    std::ptr::eq(memo.table, self),
+                    "a bound memo serves the table that made it"
+                );
+                *memo
+                    .bounds
+                    .entry((band.index(), RadiusLy(nearest)))
+                    .or_insert_with(|| self.bound(band, nearest))
+            }
             None => self.bound(band, nearest),
         };
         (profiled + self.tail(band).map_or(0.0, |t| t.bound(&centre, radius))) * (1.0 + 1e-12)
@@ -617,13 +641,13 @@ impl MemberClassTable {
     }
 
     /// [`proposal`](Self::proposal), bit for bit, a uniform cell's profiled bound read from and
-    /// kept in `memo` ([`BoundMemo`]).
+    /// kept in `memo` ([`BoundMemo`]), made by this table.
     #[must_use]
     pub(crate) fn proposal_with(
         &self,
         band: MassBand,
         cell: &LocalCell,
-        memo: Option<&mut BoundMemo>,
+        memo: Option<&mut BoundMemo<'_>>,
     ) -> CellProposal {
         match self.cusp_slope(band) {
             Some(slope) if cell.nearest_radius() <= 0.0 => {
