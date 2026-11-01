@@ -7248,3 +7248,13 @@ galaxy_sweeps`.
   M ÷ `τ_KH` and transfers at it wherever a step at it leaves it overfilling (lean, 2026-11-01: a
   cap alone never binds on the engine's equilibrium radii). Test helper:
   `testing::remnant_pair::thermal_rate`.
+- **P11.T4's black-hole low-mass X-ray binaries, diagnosed, not yet fixed** (lane
+  `fix-p11-t4-bh-lmxb-masses`, 2026-11-01). Of 10⁷ slab records under every 27 hold, no black-hole
+  primary beside a companion born under 1.5 M☉ becomes an X-ray binary: the common envelope merges
+  70 of 136 before the collapse, a main-sequence primary over its critical ratio 35, and 17 stay
+  detached (`testing::census::tests::the_black_holes_low_mass_companions_end_by_fallback`). The
+  envelope is not what holds the median under 5 M☉: with λ raised to 2 or 10 for donors over
+  8 M☉ the genuine black-hole LMXBs rise from 14 to 58 or 94, but their median stays at 3.0–3.1
+  M☉, since most are plan 06's partial-fallback holes, 0.8 `M_CO` ≈ 2–3.5 M☉. Open: the remnant
+  recipe (lean: Fryer et al. 2012's rapid model, held at 27, which decides the type too). Test
+  helper: `testing::census::slab_pairs`.

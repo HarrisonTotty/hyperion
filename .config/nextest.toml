@@ -317,6 +317,12 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(=stellar::rules::ns_accretion_hold::census_of_the_neutron_star_accretion)"
 threads-required = 16
 
+# P11.T4's diagnosis of the black holes' low-mass companions runs one slab census the same way, so
+# it reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::binary::testing::census::tests::the_black_holes_low_mass_companions_end_by_fallback)"
+threads-required = 16
+
 # P11.T4's heavy-donor census runs its two slab censuses the same way, so it reserves sixteen slots
 # too.
 [[profile.slow.overrides]]

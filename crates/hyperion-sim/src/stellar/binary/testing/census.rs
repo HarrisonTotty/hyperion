@@ -82,12 +82,36 @@ pub(crate) struct Census {
 
 /// A census of `records` grid records of `galaxy` in the slab, the members of `classes` among their
 /// first attempts' pairs, on at most [`THREADS`] threads (the same members on any number).
+#[must_use]
+pub(crate) fn slab_census(galaxy: &Galaxy, records: u64, classes: &[CarvedClass]) -> Census {
+    let (scanned, members) = slab_pairs(galaxy, records, |record, timeline, initial| {
+        let age = record.age_at_epoch();
+        let class = carved_class(timeline, age).filter(|c| classes.contains(c))?;
+        Some(CensusMember {
+            timeline: timeline.clone(),
+            accreting: accreting_marks(timeline, age, initial),
+            xray: (class == CarvedClass::XrayBinary)
+                .then(|| xray_marks(timeline, age, initial))
+                .flatten(),
+        })
+    });
+    Census { scanned, members }
+}
+
+/// What `keep` makes of the first attempts' pairs of `records` grid records of `galaxy` in the
+/// slab, in part order, and the records scanned in each band, band A first: `keep` is given each
+/// pair's record, its timeline and its stars' initial masses in the engine's order. On at most
+/// [`THREADS`] threads, the same on any number.
 ///
 /// Band b gives round(`records` × its share) records, split evenly between the parts. Each part
 /// draws random cells of the band's layer in the slab from its own stream and takes their records
 /// in order until it has its count.
 #[must_use]
-pub(crate) fn slab_census(galaxy: &Galaxy, records: u64, classes: &[CarvedClass]) -> Census {
+pub(crate) fn slab_pairs<T: Send>(
+    galaxy: &Galaxy,
+    records: u64,
+    keep: impl Fn(&SystemRecord, &BinaryTimeline, [SolarMasses; 2]) -> Option<T> + Sync,
+) -> ([u64; 5], Vec<T>) {
     let shares = BandShares::of(galaxy.mass_function());
     let parts = u64::try_from(PARTS).expect("a few parts");
     let wanted: Vec<[u64; 5]> = (0..parts)
@@ -105,7 +129,7 @@ pub(crate) fn slab_census(galaxy: &Galaxy, records: u64, classes: &[CarvedClass]
         })
         .collect();
     let found = in_shares(PARTS, THREADS, |p| {
-        let mut members = Vec::new();
+        let mut kept = Vec::new();
         let mut cell = Vec::new();
         for (index, band) in (0_u64..).zip(MassBand::ALL) {
             let mut left = wanted[p][usize::try_from(index).expect("five bands")];
@@ -129,32 +153,28 @@ pub(crate) fn slab_census(galaxy: &Galaxy, records: u64, classes: &[CarvedClass]
                         break;
                     }
                     left -= 1;
-                    members_of(galaxy, record, classes, &mut members);
+                    pairs_of(galaxy, record, &keep, &mut kept);
                 }
             }
         }
-        members
+        kept
     });
     let scanned = MassBand::ALL.map(|band| wanted.iter().map(|w| w[band.index()]).sum());
-    Census {
-        scanned,
-        members: found.into_iter().flatten().collect(),
-    }
+    (scanned, found.into_iter().flatten().collect())
 }
 
-/// The members of `classes` among the first attempt's pairs of grid record `record`.
-fn members_of(
+/// What `keep` makes of the first attempt's pairs of grid record `record`, into `out`.
+fn pairs_of<T>(
     galaxy: &Galaxy,
     record: &SystemRecord,
-    classes: &[CarvedClass],
-    out: &mut Vec<CensusMember>,
+    keep: &impl Fn(&SystemRecord, &BinaryTimeline, [SolarMasses; 2]) -> Option<T>,
+    out: &mut Vec<T>,
 ) {
-    let age = record.age_at_epoch();
     let primary = StarModel::new_under(
         record.primary_initial_mass(),
         draw_metallicity(galaxy, record),
         primary_draws(galaxy, record),
-        age,
+        record.age_at_epoch(),
         galaxy.rules().stellar,
     )
     .expect("a stellar layer's primary is a star with a finite age");
@@ -166,19 +186,124 @@ fn members_of(
         RedrawAttempt::FIRST,
     );
     for pair in stars.pairs() {
-        let timeline = pair.timeline();
-        let Some(class) = carved_class(timeline, age).filter(|c| classes.contains(c)) else {
-            continue;
-        };
         let initial = pair
             .stars()
             .map(|star| stars.stars()[usize::from(star.get())].initial_mass());
-        out.push(CensusMember {
-            timeline: timeline.clone(),
-            accreting: accreting_marks(timeline, age, initial),
-            xray: (class == CarvedClass::XrayBinary)
-                .then(|| xray_marks(timeline, age, initial))
-                .flatten(),
+        out.extend(keep(record, pair.timeline(), initial));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::rules::GalaxyRules;
+    use crate::planetary::testing::with_every_27_hold;
+    use crate::rng::Seed;
+    use crate::stellar::binary::SegmentKind;
+    use crate::stellar::remnant::KickMode;
+
+    /// How a pair whose primary leaves a black hole beside a companion born under 1.5 M☉ ends.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum End {
+        /// Merged before the collapse, out of a common envelope.
+        MergedBeforeInEnvelope,
+        /// Merged before the collapse in another way: a main-sequence donor over its critical
+        /// ratio, or a collision.
+        MergedBeforeOtherwise,
+        /// Unbound by the collapse.
+        Unbound,
+        /// Merged after the collapse.
+        MergedAfter,
+        /// An X-ray binary where its class reads it.
+        XrayBinary,
+        /// In stable transfer at another age after the collapse.
+        TransferringElsewhen,
+        /// Detached after the collapse, never transferring.
+        Detached,
+    }
+
+    /// The census's black-hole primaries beside low-mass companions under every 27 hold, by their
+    /// fallback (complete first) and their end, as measured (2026-11-01).
+    const ENDS: [((bool, End), usize); 9] = [
+        ((true, End::MergedBeforeInEnvelope), 21),
+        ((true, End::MergedBeforeOtherwise), 21),
+        ((true, End::TransferringElsewhen), 1),
+        ((true, End::Detached), 14),
+        ((false, End::MergedBeforeInEnvelope), 49),
+        ((false, End::MergedBeforeOtherwise), 14),
+        ((false, End::Unbound), 12),
+        ((false, End::MergedAfter), 1),
+        ((false, End::Detached), 3),
+    ];
+
+    /// P11.T4's diagnosis of the black-hole low-mass X-ray binaries (`fix-p11-t4-bh-lmxb-masses`):
+    /// of 10⁷ slab records under every 27 hold, the pairs whose primary leaves a black hole beside a
+    /// companion born under 1.5 M☉, counted by the hole's fallback (complete, no kick, or partial)
+    /// and by how the pair ends. None is an X-ray binary: the common envelope merges most of them
+    /// before the collapse (63 of its 70 around a Hertzsprung-gap primary), and a main-sequence
+    /// primary over its critical ratio most of the rest. The heavy holes are complete fallback's
+    /// (median 8 M☉); partial fallback's, 0.8 `M_CO`, are 2–3.5 M☉.
+    #[test]
+    #[ignore = "slow: 10⁷ grid records' pairs run through the binary engine"]
+    fn the_black_holes_low_mass_companions_end_by_fallback() {
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0b17_15a0_0000_0001),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral");
+        let (_, ends) = with_every_27_hold(|| {
+            slab_pairs(&galaxy, 10_000_000, |record, timeline, initial| {
+                if initial[1].value() >= 1.5 {
+                    return None;
+                }
+                let collapse = timeline
+                    .supernovae()
+                    .iter()
+                    .find(|s| s.remnant().kind() == RemnantKind::BlackHole)?;
+                let complete = collapse
+                    .kick()
+                    .is_none_or(|k| k.mode() == KickMode::FallbackNone);
+                let at = collapse.age().value();
+                let segments = timeline.segments();
+                let out_of_envelope = segments
+                    .windows(2)
+                    .find(|w| w[1].kind() == SegmentKind::Merged)
+                    .is_some_and(|w| w[0].kind() == SegmentKind::CommonEnvelope);
+                let end = match timeline.merger_age() {
+                    Some(t) if t.value() < at && out_of_envelope => End::MergedBeforeInEnvelope,
+                    Some(t) if t.value() < at => End::MergedBeforeOtherwise,
+                    _ if !collapse.bound() => End::Unbound,
+                    Some(_) => End::MergedAfter,
+                    None if carved_class(timeline, record.age_at_epoch())
+                        == Some(CarvedClass::XrayBinary) =>
+                    {
+                        End::XrayBinary
+                    }
+                    None if segments.iter().any(|s| {
+                        s.start().value() >= at
+                            && matches!(s.kind(), SegmentKind::StableTransfer { .. })
+                    }) =>
+                    {
+                        End::TransferringElsewhen
+                    }
+                    None => End::Detached,
+                };
+                Some((complete, end))
+            })
         });
+        let mut counts: BTreeMap<(bool, End), usize> = BTreeMap::new();
+        for key in ends {
+            *counts.entry(key).or_default() += 1;
+        }
+        for (key, n) in &counts {
+            println!("{key:?}: {n}");
+        }
+        assert_eq!(counts.get(&(false, End::XrayBinary)), None);
+        assert_eq!(counts.get(&(true, End::XrayBinary)), None);
+        assert_eq!(counts, BTreeMap::from(ENDS));
     }
 }
