@@ -1,6 +1,6 @@
 //! The last skies' final replies, kept (rendering plan R06, R06.T11.l; the owner's priority,
 //! 2026-11-01): a sky asked again exactly as one already finished is answered from memory, with no
-//! job on the pool.
+//! sky job on the pool, only the one that serialises its reply's frame.
 //!
 //! VIEW asks its camera's sky as each inspection opens, and a relaunched client or a reopened
 //! inspection asks the same sky again. Near the Sun its census is the full cold one, hours of CPU
@@ -12,12 +12,15 @@
 //! Only a final reply is kept, once made, so a sky asked again while the first is still under way
 //! computes its own. [`SKY_REPLY_CACHE_BYTES`] bounds what is kept: the last one or two skies.
 
+use std::mem::size_of;
+
 use hyperion_protocol::{
-    ConeDto, EyeDto, GalacticPosition, SkyRequest, SystemIdHex, UniverseIdHex, UniverseTime,
+    ConeDto, EyeDto, GalacticPosition, HostDiscDto, ResponseBody, SkyGapDto, SkyLayerCensusDto,
+    SkyRequest, SkyResponse, SystemIdHex, UniverseIdHex, UniverseTime,
 };
 
 use crate::bulk::{Answer, BulkPayload};
-use crate::cache::{HeapBytes, Insertion, LruCounters, SharedByteLru};
+use crate::cache::{ByteLru, HeapBytes, Insertion, LruCounters, SharedByteLru};
 use crate::compute::GalaxyKey;
 use crate::config::KeptSkies;
 use crate::limits::SKY_REPLY_CACHE_BYTES;
@@ -85,20 +88,45 @@ impl SkyReplyKey {
     }
 }
 
-/// A sky's final reply as it was sent, with its JSON's length.
+/// A sky's final reply as it was sent.
 #[derive(Debug)]
 struct KeptReply {
     answer: Answer,
-    json_bytes: usize,
 }
 
 impl HeapBytes for KeptReply {
-    /// The payload's bytes and the JSON's length, which stands for what the response's body holds
-    /// on the heap, its layers' radii by ray the most of it.
+    /// The payload's bytes and what the response's body holds on the heap ([`body_heap_bytes`]).
     fn heap_bytes(&self) -> usize {
         let payload = self.answer.bulk.as_ref().map_or(0, BulkPayload::len);
-        payload.saturating_add(self.json_bytes)
+        payload.saturating_add(body_heap_bytes(&self.answer.body))
     }
+}
+
+/// What a sky response's body holds on the heap: its box, its universe's text and its lists, each
+/// layer's radii by ray the most of them, some 12 kB a layer at 1,536 rays. Counted from the lists'
+/// own lengths, so that keeping a reply never serialises it on the runtime. A body of another kind
+/// is never kept, and counts nothing.
+fn body_heap_bytes(body: &ResponseBody) -> usize {
+    let ResponseBody::Sky(sky) = body else {
+        return 0;
+    };
+    let SkyResponse {
+        universe,
+        census,
+        hosts,
+        not_modelled,
+        ..
+    } = sky.as_ref();
+    let radii: usize = census
+        .iter()
+        .map(|layer| layer.complete_to_rays_ly.capacity() * size_of::<f64>())
+        .sum();
+    size_of::<SkyResponse>()
+        + universe.as_str().len()
+        + census.capacity() * size_of::<SkyLayerCensusDto>()
+        + radii
+        + hosts.capacity() * size_of::<HostDiscDto>()
+        + not_modelled.capacity() * size_of::<SkyGapDto>()
 }
 
 /// The last skies' final replies, in [`SKY_REPLY_CACHE_BYTES`], or none where the switch is off
@@ -126,6 +154,13 @@ impl SkyReplyCache {
         Self { replies }
     }
 
+    /// Whether it keeps replies at all: false where the switch is off, so that a caller need not
+    /// copy a reply only for it to be dropped.
+    #[must_use]
+    pub(crate) fn is_kept(&self) -> bool {
+        self.replies.is_some()
+    }
+
     /// The final reply kept for `key`, if one is.
     #[must_use]
     pub(crate) fn get(&self, key: &SkyReplyKey) -> Option<Answer> {
@@ -134,22 +169,16 @@ impl SkyReplyCache {
     }
 
     /// Keeps `answer`, the final reply of the sky `key`, the least recently used going to make
-    /// room. A reply larger than the whole budget is not kept.
-    pub(crate) fn keep(&self, key: SkyReplyKey, answer: &Answer) {
+    /// room. A reply larger than the whole budget is not kept, and nothing is where the switch is
+    /// off.
+    pub(crate) fn keep(&self, key: SkyReplyKey, answer: Answer) {
         let Some(replies) = &self.replies else {
             return;
         };
-        let json_bytes = serde_json::to_vec(&answer.body)
-            .expect("a response body always serialises: it holds no map with non-string keys")
-            .len();
-        let kept = KeptReply {
-            answer: answer.clone(),
-            json_bytes,
-        };
-        if let Insertion::Refused(_) = replies.insert(key, kept.into()) {
+        if let Insertion::Refused(refused) = replies.insert(key, KeptReply { answer }.into()) {
             tracing::debug!(
                 budget_bytes = replies.counters().budget(),
-                json_bytes,
+                charged_bytes = ByteLru::<SkyReplyKey, KeptReply>::charge(&refused),
                 "a sky's final reply is larger than the kept skies' budget, and is not kept"
             );
         }
@@ -176,7 +205,6 @@ mod tests {
     use hyperion_sim::GeneratorVersion;
 
     use super::*;
-    use crate::cache::ByteLru;
 
     /// A sky near the Sun at the epoch to a camera's V 10, with an eye.
     fn request() -> SkyRequest {
@@ -363,7 +391,7 @@ mod tests {
         let replies = SkyReplyCache::new(KeptSkies::Kept);
         let sent = answer(1_000);
         assert_eq!(replies.get(&key(1)), None);
-        replies.keep(key(1), &sent);
+        replies.keep(key(1), sent.clone());
         assert_eq!(replies.get(&key(1)), Some(sent.clone()));
         assert_eq!(replies.get(&key(2)), None);
         let counters = replies.counters();
@@ -373,7 +401,7 @@ mod tests {
         );
 
         let off = SkyReplyCache::new(KeptSkies::Off);
-        off.keep(key(1), &sent);
+        off.keep(key(1), sent.clone());
         assert_eq!(off.get(&key(1)), None);
         assert_eq!(off.counters(), LruCounters::default());
     }
@@ -386,12 +414,11 @@ mod tests {
         let full = answer(300_000);
         let charge = ByteLru::<SkyReplyKey, KeptReply>::charge(&KeptReply {
             answer: full.clone(),
-            json_bytes: serde_json::to_vec(&full.body).unwrap().len(),
         });
-        assert!(charge > 7_494_912 + 5 * RAYS * 17, "{charge}");
+        assert!(charge > 7_494_912 + 5 * RAYS * 8, "{charge}");
         assert!(2 * charge <= SKY_REPLY_CACHE_BYTES, "{charge}");
         for n_max in 1..=3 {
-            replies.keep(key(n_max), &full);
+            replies.keep(key(n_max), full.clone());
         }
         assert_eq!(replies.counters().entries(), 2, "{:?}", replies.counters());
         assert_eq!(replies.get(&key(1)), None, "the oldest went");
@@ -402,8 +429,8 @@ mod tests {
     #[test]
     fn a_reply_over_the_budget_is_not_kept() {
         let replies = SkyReplyCache::with_budget(KeptSkies::Kept, 1 << 20);
-        replies.keep(key(1), &answer(10));
-        replies.keep(key(2), &answer(300_000));
+        replies.keep(key(1), answer(10));
+        replies.keep(key(2), answer(300_000));
         assert_eq!(replies.get(&key(2)), None);
         assert!(replies.get(&key(1)).is_some());
         assert_eq!(replies.counters().refused(), 1);

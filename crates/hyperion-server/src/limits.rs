@@ -206,9 +206,9 @@ pub const SPRAY_FORCE_CACHE_BYTES: usize = 1 << 20;
 
 /// The byte budget of the last skies' final replies, kept (rendering plan R06, R06.T11.l): 16 MiB,
 /// two skies at `N_max`'s 3 × 10⁵ stars, each a payload of 7.49 MB (24 bytes a star and 6 × 64²
-/// texels of 12 bytes) and its JSON, so that a relaunched client's or a reopened view's sky is
+/// texels of 12 bytes) and its body, so that a relaunched client's or a reopened view's sky is
 /// answered from memory. A setting's smaller `N_max` keeps more. Each is charged its payload and
-/// its JSON's length.
+/// what its response's body holds, some 12 kB a layer of radii by ray.
 pub const SKY_REPLY_CACHE_BYTES: usize = 16 << 20;
 
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).

@@ -52,10 +52,11 @@
 //!
 //! `--keep-skies` keeps the final replies of the last skies finished, in
 //! [`SKY_REPLY_CACHE_BYTES`](crate::limits::SKY_REPLY_CACHE_BYTES), and answers a sky asked again
-//! exactly as one of them from memory, with no job on the pool (rendering plan R06, R06.T11.l; the
-//! owner's priority, 2026-11-01). It is a different cache from `--sky-cache`'s: whole replies, not
-//! census cells, so it saves nothing for a sky asked from anywhere else, but a relaunched client's
-//! or a reopened view's repeated sky costs nothing. `--keep-skies=false` computes every sky afresh.
+//! exactly as one of them from memory, with no sky job on the pool (rendering plan R06, R06.T11.l;
+//! the owner's priority, 2026-11-01). It is a different cache from `--sky-cache`'s: whole replies,
+//! not census cells, so it saves nothing for a sky asked from anywhere else, but a relaunched
+//! client's or a reopened view's repeated sky costs next to nothing. `--keep-skies=false` computes
+//! every sky afresh.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;

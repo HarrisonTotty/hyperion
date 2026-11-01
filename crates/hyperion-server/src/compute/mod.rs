@@ -79,8 +79,8 @@ pub use global_list::{
 pub use global_list::{GlobalListService, HeldGlobalList};
 pub use key::GalaxyKey;
 pub use pool::{
-    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, Priority, Promotion, ShutDownPoolError,
-    StartPoolError, SubmitJobError,
+    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, PoolThread, Priority, Promotion,
+    ShutDownPoolError, StartPoolError, SubmitJobError,
 };
 #[cfg(test)]
 pub(crate) use range::served_sources;

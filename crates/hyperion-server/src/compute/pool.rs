@@ -163,9 +163,8 @@ pub enum StartPoolError {
         /// The failing worker's index: its thread is `hyperion-cpu-{worker}`, and its twin's
         /// `hyperion-low-{worker}`. The lowest, if several failed.
         worker: usize,
-        /// Whether it was the twin's probe that failed, and not the worker's own: the worker's is
-        /// named where both failed.
-        twin: bool,
+        /// Which of the two failed: the worker is named where both did.
+        thread: PoolThread,
         /// What its probe saw.
         probe: FlushProbe,
     },
@@ -182,7 +181,7 @@ impl fmt::Display for StartPoolError {
             Self::SpawnWorker { .. } => f.write_str("failed to spawn a cpu worker thread"),
             Self::FloatingPointMode {
                 worker,
-                twin: false,
+                thread: PoolThread::Worker,
                 probe,
             } => write!(
                 f,
@@ -191,7 +190,7 @@ impl fmt::Display for StartPoolError {
             ),
             Self::FloatingPointMode {
                 worker,
-                twin: true,
+                thread: PoolThread::Twin,
                 probe,
             } => write!(
                 f,
@@ -209,6 +208,16 @@ impl Error for StartPoolError {
             Self::SpawnWorker { source } => Some(source),
         }
     }
+}
+
+/// One of a worker's two threads: the worker, which runs its interactive jobs, or its twin, which
+/// runs its bulk and background jobs at a lower OS priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PoolThread {
+    /// The worker itself, `hyperion-cpu-N`.
+    Worker,
+    /// The worker's twin, `hyperion-low-N`.
+    Twin,
 }
 
 /// The pool did not shut down cleanly.
@@ -342,7 +351,8 @@ impl CpuPool {
     ///
     /// [`StartPoolError::CapacityTooLarge`] if a capacity exceeds [`Semaphore::MAX_PERMITS`],
     /// [`StartPoolError::SpawnWorker`] if a thread cannot be spawned, and
-    /// [`StartPoolError::FloatingPointMode`] if a worker's floating-point mode flushes subnormals.
+    /// [`StartPoolError::FloatingPointMode`] if a worker's floating-point mode, or its twin's,
+    /// flushes subnormals.
     pub fn new(
         workers: NonZeroUsize,
         interactive_capacity: NonZeroUsize,
@@ -418,7 +428,7 @@ impl CpuPool {
                 });
             }
         }
-        let shared = Arc::new(Shared::new(probe, gate));
+        let shared = Arc::new(Shared::new(workers, probe, gate));
         let mut handles = Vec::with_capacity(workers.get());
         // Bounded by the threads, a worker and its twin for each, each of which sends exactly one
         // report.
@@ -448,7 +458,7 @@ impl CpuPool {
         }
         if let Some(Probed {
             worker,
-            twin,
+            thread,
             probe,
         }) = failed
         {
@@ -461,7 +471,7 @@ impl CpuPool {
             }
             return Err(StartPoolError::FloatingPointMode {
                 worker,
-                twin,
+                thread,
                 probe,
             });
         }
@@ -848,11 +858,18 @@ impl BulkGate {
     }
 }
 
+/// How often the pool logs at `info` that it is busy, while it stays busy: every 30 s, so that a
+/// long census that holds every worker shows in the log with what it holds (rendering plan R06,
+/// R06.T11.m). A pool busy for less logs nothing.
+const BUSY_LOG_EVERY: Duration = Duration::from_secs(30);
+
 /// What the pool and its workers share.
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
     available: Condvar,
+    /// How many workers it runs, for the log.
+    workers: NonZeroUsize,
     /// Checks a worker's floating-point mode: [`probe_flush_to_zero`] except in tests.
     probe: fn() -> FlushProbe,
     /// Where a taken bulk or background job waits before it runs: a test's, or none.
@@ -868,6 +885,9 @@ struct State {
     /// A worker's probe failed after a job: no job runs and no submission is taken any more.
     faulted: bool,
     counters: PoolCounters,
+    /// When the pool was last logged busy, or since when it has been busy if it has not been
+    /// logged yet ([`BUSY_LOG_EVERY`]); none while it is idle.
+    busy_logged: Option<Instant>,
 }
 
 impl State {
@@ -876,13 +896,40 @@ impl State {
         self.counters.queued_bulk = self.bulk.len();
         self.counters.queued_background = self.background.len();
     }
+
+    /// Marks the pool busy from `now`, when a worker takes a job, unless it is busy already.
+    fn mark_busy(&mut self, now: Instant) {
+        self.busy_logged.get_or_insert(now);
+    }
+
+    /// Whether the pool, as a job finishes at `now`, is due its busy line: it is still busy, and
+    /// `every` has passed since it was last logged, or since it became busy. The mark moves to
+    /// `now` when it is due, and is cleared when the pool is idle.
+    fn busy_log_due(&mut self, now: Instant, every: Duration) -> bool {
+        let idle = self.counters.running == 0
+            && self.interactive.is_empty()
+            && self.bulk.is_empty()
+            && self.background.is_empty();
+        if idle {
+            self.busy_logged = None;
+            return false;
+        }
+        let due = self
+            .busy_logged
+            .is_some_and(|logged| now.saturating_duration_since(logged) >= every);
+        if due {
+            self.busy_logged = Some(now);
+        }
+        due
+    }
 }
 
 impl Shared {
-    fn new(probe: fn() -> FlushProbe, gate: Option<BulkGate>) -> Self {
+    fn new(workers: NonZeroUsize, probe: fn() -> FlushProbe, gate: Option<BulkGate>) -> Self {
         Self {
             state: Mutex::default(),
             available: Condvar::new(),
+            workers,
             probe,
             gate,
         }
@@ -936,6 +983,8 @@ impl Shared {
             if let Some(queued) = next {
                 state.refresh_depths();
                 state.counters.running += 1;
+                // Busy from the first job taken after it was last idle.
+                state.mark_busy(Instant::now());
                 let admission = if state.faulted {
                     Admission::Refuse
                 } else {
@@ -952,14 +1001,32 @@ impl Shared {
 
     /// Records a finished job. Called before its reply is sent, so that a requester who has its
     /// result sees it counted.
+    ///
+    /// Every [`BUSY_LOG_EVERY`] while the pool stays busy, it also logs at `info` the workers busy,
+    /// this job's among them, and the jobs queued.
     fn finish(&self, outcome: &Outcome) {
         let mut state = self.lock();
-        state.counters.running = state.counters.running.saturating_sub(1);
+        let busy = state.counters.running;
+        state.counters.running = busy.saturating_sub(1);
         match outcome {
             Outcome::Completed => state.counters.completed += 1,
             Outcome::Cancelled => state.counters.cancelled += 1,
             Outcome::Panicked(_) => state.counters.panicked += 1,
             Outcome::Refused => {}
+        }
+        let due = state.busy_log_due(Instant::now(), BUSY_LOG_EVERY);
+        let counters = state.counters;
+        drop(state);
+        if due {
+            tracing::info!(
+                busy_workers = busy,
+                workers = self.workers.get(),
+                queued_interactive = counters.queued_interactive,
+                queued_bulk = counters.queued_bulk,
+                queued_background = counters.queued_background,
+                completed = counters.completed,
+                "the cpu pool is busy"
+            );
         }
     }
 
@@ -1098,7 +1165,10 @@ where
         } else if token.is_cancelled() {
             (Err(JobError::Cancelled), Outcome::Cancelled)
         } else {
-            match panic::catch_unwind(AssertUnwindSafe(|| work(&token))) {
+            let started = Instant::now();
+            let ran = panic::catch_unwind(AssertUnwindSafe(|| work(&token)));
+            token.add_worked(started.elapsed());
+            match ran {
                 Ok(value) => (Ok(value), Outcome::Completed),
                 Err(payload) => (
                     Err(JobError::Panicked),
@@ -1145,8 +1215,8 @@ impl<T> Drop for Reply<T> {
 struct Probed {
     /// The worker's index, its twin's too.
     worker: usize,
-    /// Whether the twin sent it, and not the worker.
-    twin: bool,
+    /// Which of the two sent it.
+    thread: PoolThread,
     probe: FlushProbe,
 }
 
@@ -1154,7 +1224,7 @@ impl Probed {
     /// Whether this is named before `other` when both fail: the lower worker first, and a worker
     /// before its twin.
     fn precedes(&self, other: &Self) -> bool {
-        (self.worker, self.twin) < (other.worker, other.twin)
+        (self.worker, self.thread) < (other.worker, other.thread)
     }
 }
 
@@ -1195,7 +1265,7 @@ fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<Probed>,
     // stopping, and nobody needs the report.
     let _ = report.send(Probed {
         worker: index,
-        twin: false,
+        thread: PoolThread::Worker,
         probe,
     });
     // Dropped before working, so that the constructor's wait ends even if another thread's probe
@@ -1222,7 +1292,7 @@ fn start_twin(
     // As the worker's own report.
     let _ = report.send(Probed {
         worker: index,
-        twin: true,
+        thread: PoolThread::Twin,
         probe,
     });
     drop(report);
@@ -2073,13 +2143,16 @@ mod tests {
         let error = probing_pool(4, flushes_on_workers_1_and_2).unwrap_err();
         let StartPoolError::FloatingPointMode {
             worker,
-            twin,
+            thread,
             probe,
         } = error
         else {
             panic!("expected a floating-point mode error, got {error:?}");
         };
-        assert_eq!((worker, twin, probe), (1, false, FlushProbe::FLUSHES_BOTH));
+        assert_eq!(
+            (worker, thread, probe),
+            (1, PoolThread::Worker, FlushProbe::FLUSHES_BOTH)
+        );
         assert_eq!(
             error.to_string(),
             "the floating-point mode of the cpu worker hyperion-cpu-1 flushes subnormal results to \
@@ -2098,7 +2171,7 @@ mod tests {
                 error,
                 StartPoolError::FloatingPointMode {
                     worker: 2,
-                    twin: true,
+                    thread: PoolThread::Twin,
                     probe: FlushProbe::FLUSHES_OUTPUTS,
                 }
             ),
@@ -2304,6 +2377,72 @@ mod tests {
         let lowered = started.max(10);
         assert_eq!(nices, [started, lowered, started, lowered, started]);
         pool.shutdown().await.unwrap();
+    }
+
+    /// A job's running time is counted on its token and every clone of it; a job skipped unrun
+    /// counts none.
+    #[tokio::test]
+    async fn a_jobs_running_time_is_counted_on_its_token() {
+        const RUNS_FOR: Duration = Duration::from_millis(2);
+        let pool = pool(1, 4, 4);
+        let token = CancelToken::new();
+        let receiver = pool
+            .submit(Priority::Bulk, token.clone(), |_| {
+                let started = Instant::now();
+                while started.elapsed() < RUNS_FOR {
+                    std::hint::spin_loop();
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(result(receiver).await, Ok(()));
+        let worked = token.worked();
+        assert!(worked >= RUNS_FOR, "{worked:?}");
+
+        let cancelled = CancelToken::new();
+        cancelled.cancel();
+        let skipped = pool
+            .submit(Priority::Bulk, cancelled.clone(), |_| ())
+            .await
+            .unwrap();
+        assert_eq!(result(skipped).await, Err(JobError::Cancelled));
+        assert_eq!(cancelled.worked(), Duration::ZERO);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// The busy line is due once [`BUSY_LOG_EVERY`] has passed since the pool became busy, then
+    /// again each interval after the last line, while it stays busy; an idle pool clears the mark,
+    /// so that the next busy spell counts from its own first job.
+    #[test]
+    fn the_busy_line_is_due_each_interval_while_the_pool_stays_busy() {
+        assert_eq!(BUSY_LOG_EVERY, Duration::from_secs(30), "the brief's 30 s");
+        let every = BUSY_LOG_EVERY;
+        let start = Instant::now();
+        let at = |after: Duration| start + after;
+        let mut state = State::default();
+        state.mark_busy(start);
+        state.counters.running = 2;
+        // A second job taken later moves nothing.
+        state.mark_busy(at(every / 2));
+        assert!(!state.busy_log_due(at(every / 2), every));
+        assert!(
+            state.busy_log_due(at(every), every),
+            "an interval after the first job"
+        );
+        assert!(!state.busy_log_due(at(every + every / 2), every));
+        assert!(
+            state.busy_log_due(at(every * 2), every),
+            "an interval after the last line"
+        );
+        // The last job finishes with nothing queued: idle.
+        state.counters.running = 0;
+        assert!(!state.busy_log_due(at(every * 5), every));
+        assert_eq!(state.busy_logged, None);
+        // The next busy spell counts from its own first job.
+        state.counters.running = 1;
+        state.mark_busy(at(every * 6));
+        assert!(!state.busy_log_due(at(every * 6 + every / 2), every));
+        assert!(state.busy_log_due(at(every * 7), every));
     }
 
     #[tokio::test]

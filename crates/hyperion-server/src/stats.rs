@@ -154,8 +154,8 @@ impl ServerStats {
     }
 
     /// The kept skies' final replies and their use, including their byte budget: a hit is a sky
-    /// asked again exactly, answered with no job (rendering plan R06, R06.T11.l). All zeros with
-    /// `--keep-skies=false`.
+    /// asked again exactly, answered with no sky job (rendering plan R06, R06.T11.l). All zeros
+    /// with `--keep-skies=false`.
     #[must_use]
     pub fn sky_replies(&self) -> LruCounters {
         self.sky_replies

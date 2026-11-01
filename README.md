@@ -170,6 +170,7 @@ An option given on the command line wins over its variable.
 | `--surface-cache`       | `HYPERION_SURFACE_CACHE_MB`    | `128`                                                  | Cache of bodies' surface fields, in MiB      |
 | `--surface-passes`      | `HYPERION_SURFACE_PASSES`      | the lesser of 4 and the workers less one, at least one | Coarse surface passes run at once            |
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                                     | Serve `sky` requests                         |
+| `--keep-skies`          | `HYPERION_KEEP_SKIES`          | on                                                     | Answer a sky asked again from memory         |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
 `--stop-on-stdin-close` is for a server run as another program's child. The parent stops it by
@@ -194,6 +195,12 @@ would hold up to 1,280 MiB for no saving a player would feel (rendering plan R06
 `1280` is the size that holds a sky near the Sun and the cells a 1,000 ly jump adds, the value to
 set for a warm sky. The default returns to it once a sky asked again costs at most half of the
 first.
+
+`--keep-skies` keeps the final replies of the last skies finished, up to 16 MiB, about two skies,
+and answers a sky asked again exactly as one of them from memory: a relaunched client's or a
+reopened view's sky costs next to nothing, while a sky asked from anywhere else is computed as
+before (rendering plan R06, R06.T11.l). `--keep-skies=false` computes every sky afresh. It takes
+the same values as `--serve-sky`.
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

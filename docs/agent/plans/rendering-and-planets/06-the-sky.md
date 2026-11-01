@@ -2816,6 +2816,17 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
     `stats.rs`, `lib.rs`, `tests/sky.rs`.
   - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
 
+- **R06.T11.m The sky's log at info (new; the owner's priority, 2026-11-01; no output moves).**
+  Every sky line was at debug and `Server::stats()` is never printed, so the Mac's 450–540% showed
+  nothing in the log. At info: each sky's start, its first and final replies (or its end without
+  one) with the wall time and its jobs' seconds, a kept hit, and every 30 s while the pool stays
+  busy its busy workers and queued jobs.
+  - **Tests:** a token counts its jobs' running time and a skipped job none; a sky's start and
+    final-reply lines, and a repeat's kept-reply line, read back from a subscriber.
+  - **Files:** `crates/hyperion-server/src/compute/{cancel,pool}.rs`, `requests/sky.rs`,
+    `tests/sky.rs`.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -9903,8 +9914,12 @@ CensusCost)`.
     `hyperion-low-N`, lowered once at start, and waits for it, rather than lowering and restoring
     its own priority per job: Linux never lets an unprivileged thread lower its nice again
     (`RLIMIT_NICE` 0), so a restore would fail there (lean, 2026-11-01).
-  - `StartPoolError::FloatingPointMode` gains `twin: bool`; the pool starts and probes twice as
-    many threads.
+  - `StartPoolError::FloatingPointMode` gains `thread: PoolThread` (`Worker`, `Twin`; exported from
+    `compute`); the pool starts and probes twice as many threads. A test probe that counts calls
+    counts the twins' starts too (`surface/{service,spread}.rs`, `tests/flush_to_zero.rs`).
+  - An interactive job still waits for the bulk job its worker's twin runs, now lowered: a census
+    job ends at 50 ms of wall time, but an unsliced bulk or background job holds longer under
+    contention.
 
 - **Deviations in T11.l, as built (2026-11-01).**
   - `ServerConfigBuilder::kept_skies(KeptSkies)` (`KeptSkies::{Off, Kept}`, exported) and
@@ -9912,3 +9927,18 @@ CensusCost)`.
     cache sets `KeptSkies::Off`, as `tests/sky.rs`'s `cached_sky_server` now does.
   - A hit still runs one interactive job, its response's frame (large responses serialise on the
     pool). Only final replies are kept: two identical skies at once both compute.
+  - A kept reply is charged its payload and its body's lists by their lengths, never its JSON, so
+    keeping one serialises nothing on the runtime. A reply that comes to depend on anything but
+    the request, the galaxy and the server's fixed configuration must join `SkyReplyKey`.
+  - Also changed: `bulk.rs` (`BulkPayload::len`), `requests/mod.rs` (the re-export), the root
+    README's options.
+
+- **Deviations in T11.m, as built (2026-11-01).**
+  - `CancelToken::worked() -> Duration` (`pub(crate)`): the time workers spent running jobs queued
+    under the token or its clones, counted before each result is sent. A sky's `job_s` is its own jobs';
+    the galaxy's and the sky tables' shared builds have tokens of their own.
+  - `job_s` is wall time on the workers (no per-thread CPU clock without `unsafe`), so it overstates
+    CPU-s while a lowered twin is preempted. The busy line's 30 s count from the pool's first job
+    after it was last idle, and it is written as a job finishes, so none comes during one job.
+  - A sky cancelled, superseded or whose connection closed logs "given up before its final reply"
+    from a drop guard, since its aborted task never returns.

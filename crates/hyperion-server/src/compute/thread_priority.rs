@@ -31,9 +31,9 @@ pub(crate) const LOWERED: ThreadPriority = if cfg!(windows) {
 /// Lowers the calling thread to [`LOWERED`] for good, and says what the OS gave it, or `None`
 /// where it refused or has no such setting.
 ///
-/// A refusal is logged at `warn` and a weaker grant at `debug`. On Linux a thread already at a
-/// nice above 10, because the server was started under `nice`, keeps it: the call never raises a
-/// thread's priority.
+/// A refusal is logged at `warn` and a weaker grant at `debug`. On Linux an unprivileged thread
+/// already at a nice above 10, because the server was started under `nice`, keeps it, since the
+/// kernel refuses to lower a nice without `CAP_SYS_NICE`; a privileged one is set to 10.
 pub(crate) fn lower_this_thread() -> Option<AppliedPriority> {
     let current = std::thread::current();
     let thread = current.name().unwrap_or("unnamed");
@@ -87,6 +87,18 @@ mod tests {
             started,
             "the test's own thread is untouched"
         );
+    }
+
+    /// The level is the brief's on each platform: gdt-cpus's `BelowNormal` on Windows, and its
+    /// `Lowest`, nice 10 and `QOS_CLASS_UTILITY`, elsewhere.
+    #[test]
+    fn the_lowered_level_is_below_normal_on_windows_and_the_lowest_elsewhere() {
+        let expected = if cfg!(windows) {
+            ThreadPriority::BelowNormal
+        } else {
+            ThreadPriority::Lowest
+        };
+        assert_eq!(LOWERED, expected);
     }
 
     /// A thread lowered on macOS or Windows is given [`LOWERED`] itself: `QOS_CLASS_UTILITY`, or

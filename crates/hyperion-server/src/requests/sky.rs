@@ -35,8 +35,13 @@
 //! rendering plan R13's R13.T2; off (`--serve-sky=false`), the request never reaches this handler.
 //!
 //! The last skies' final replies are kept ([`kept`], R06.T11.l), and a sky asked again exactly as
-//! one of them is answered with its kept reply alone, with no job on the pool, unless the server is
-//! started with `--keep-skies=false`.
+//! one of them is answered with its kept reply alone, with no sky job on the pool, unless the server
+//! is started with `--keep-skies=false`.
+//!
+//! Each sky logs at `info` that it started, its first reply and its final reply, or that it ended
+//! without one, with the request's wall time and the time its own jobs ran on the pool's workers,
+//! the CPU-s it cost and any time a worker was preempted, which leaves out the galaxy's and the
+//! tables' shared builds (R06.T11.m).
 
 mod kept;
 
@@ -120,7 +125,7 @@ const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 /// before it, and the census runs on meanwhile.
 ///
 /// A sky asked exactly as one whose final reply is kept is answered with that reply alone, once its
-/// request is checked, and runs no job (R06.T11.l); a final reply made here is kept.
+/// request is checked, and runs no sky job (R06.T11.l); a final reply made here is kept.
 ///
 /// # Errors
 ///
@@ -140,29 +145,117 @@ pub(crate) async fn answer(
     let started = Instant::now();
     let universe = openable_universe(&state, &request.universe)?;
     let asked = SkyAsk::try_from(&request)?;
-    let kept = SkyReplyKey::of(universe.key(), &request);
+    let key = universe.key();
+    let kept = SkyReplyKey::of(key, &request);
+    log_start(&request);
     if let Some(answer) = state.sky_replies.get(&kept) {
+        tracing::info!(
+            wall_s = seconds(started),
+            "a sky is answered with its kept final reply"
+        );
         return Ok(answer);
     }
-    let galaxy = state.galaxies.get(universe.key()).await?;
+    let mut end = SkyEnd {
+        token: &token,
+        started,
+        ended: Ended::GivenUp,
+    };
+    let answered = computed(&state, &request, key, asked, &token, &replies, started).await;
+    match &answered {
+        Ok(answer) => {
+            end.ended = Ended::Replied;
+            if state.sky_replies.is_kept() {
+                state.sky_replies.keep(kept, answer.clone());
+            }
+        }
+        Err(error) => end.ended = Ended::Failed(error.code),
+    }
+    answered
+}
+
+/// How a sky's request ended, for [`SkyEnd`]'s line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ended {
+    /// Its final reply was made, and logged.
+    Replied,
+    /// It failed, with this code.
+    Failed(ErrorCode),
+    /// It was dropped at an `.await` before either: cancelled, superseded, or its connection
+    /// closed, which aborts its task.
+    GivenUp,
+}
+
+/// Logs at `info`, when dropped, that a sky ended without its final reply, with its wall time and
+/// its jobs' seconds so far (R06.T11.m): an aborted request never returns, so only a drop sees it.
+struct SkyEnd<'a> {
+    token: &'a CancelToken,
+    started: Instant,
+    ended: Ended,
+}
+
+impl Drop for SkyEnd<'_> {
+    fn drop(&mut self) {
+        let (wall_s, job_s) = (seconds(self.started), self.token.worked().as_secs_f64());
+        match self.ended {
+            Ended::Replied => {}
+            Ended::Failed(code) => {
+                tracing::info!(?code, wall_s, job_s, "a sky ended without its final reply");
+            }
+            Ended::GivenUp => {
+                tracing::info!(wall_s, job_s, "a sky was given up before its final reply");
+            }
+        }
+    }
+}
+
+/// Logs at `info` that a sky has started: where it is seen from and what it asks.
+fn log_start(request: &SkyRequest) {
+    tracing::info!(
+        universe = %request.universe,
+        cell_ly = ?request.observer.cell_ly,
+        eye = request.eye.is_some(),
+        camera_limit_v = request.camera_limit_v,
+        n_max = request.n_max,
+        cone = request.cone.is_some(),
+        exclude_system = request.exclude_system.is_some(),
+        "a sky started"
+    );
+}
+
+/// [`answer`] for a sky whose reply is not kept, in the galaxy `key`, `asked` its request
+/// checked and `started` when the request began: its census, band, discs and every reply.
+///
+/// # Errors
+///
+/// As [`answer`], after the request is checked.
+async fn computed(
+    state: &Arc<AppState>,
+    request: &SkyRequest,
+    key: GalaxyKey,
+    asked: SkyAsk,
+    token: &CancelToken,
+    replies: &Replies,
+    started: Instant,
+) -> Result<Answer, RequestError> {
+    let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
-        check_exclude(&state, &galaxy, system, named, token.clone()).await?;
+        check_exclude(state, &galaxy, system, named, token.clone()).await?;
     }
     let pool = &state.pool;
-    let tables = state.sky_tables.get(universe.key(), &galaxy).await?;
+    let tables = state.sky_tables.get(key, &galaxy).await?;
     phase("tables", started);
     // The request's illumination first: the eye's cut, its visibility and every reply's band read
     // it (decision-r06-t9g-dgl.md, §3.4).
-    let light = compute::sky::illumination(pool, &galaxy, &tables, asked.observer, &token).await?;
+    let light = compute::sky::illumination(pool, &galaxy, &tables, asked.observer, token).await?;
     phase("illumination", started);
     let seen = match asked.eye {
         Some(eye) => {
             let at = (asked.observer, eye);
-            let cut = compute::sky::eye_cut(pool, &galaxy, &tables, at, &light, &token).await?;
+            let cut = compute::sky::eye_cut(pool, &galaxy, &tables, at, &light, token).await?;
             phase("eye cut", started);
             let visibility = if asked.counts_by_visibility() {
                 Some(
-                    compute::sky::eye_visibility(pool, &galaxy, &tables, at, cut, &light, &token)
+                    compute::sky::eye_visibility(pool, &galaxy, &tables, at, cut, &light, token)
                         .await?,
                 )
             } else {
@@ -182,54 +275,48 @@ pub(crate) async fn answer(
     // The query at the ceiling the sky is served at (rendering plan R13, R13.T2.b), which the census,
     // the band and every reply read.
     let (query, plan) =
-        compute::sky::plan(pool, &galaxy, &tables, asked_query, edges, &token).await?;
+        compute::sky::plan(pool, &galaxy, &tables, asked_query, edges, token).await?;
     let plan = Arc::new(plan);
     phase("plan", started);
     let inputs = CensusInputs {
         galaxy,
-        key: universe.key(),
+        key,
         tables,
         cells: Arc::clone(&state.sky_cells),
         query: Arc::clone(&query),
     };
     // Every reply carries the discs, which read no census.
     let hosts = match asked.exclude {
-        Some(system) => {
-            discs(
-                &state,
-                universe.key(),
-                &inputs.galaxy,
-                system,
-                &query,
-                &token,
-            )
-            .await?
-        }
+        Some(system) => discs(state, key, &inputs.galaxy, system, &query, token).await?,
         None => Vec::new(),
     };
     let steps = compute::sky::delivery_steps(&plan, state.sky_caps.delivery_order());
     // Every step's progress fits, so the census never waits for a reply to be made.
     let (sink, mut censused) = mpsc::channel(steps.len());
     let census =
-        compute::sky::census_in_steps(pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE, sink, &token)
+        compute::sky::census_in_steps(pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE, sink, token)
             .map_err(RequestError::from);
     let reply = Reply {
-        state: &state,
-        request: &request,
+        state,
+        request,
         inputs: &inputs,
         plan: &plan,
         hosts: &hosts,
-        token: &token,
+        token,
         started,
     };
-    let ((), answer) = try_join(census, reply.each(&mut censused, &replies)).await?;
-    state.sky_replies.keep(kept, &answer);
+    let ((), answer) = try_join(census, reply.each(&mut censused, replies)).await?;
     Ok(answer)
 }
 
 /// The milliseconds since `started`, for the log.
 fn millis(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1e3
+}
+
+/// The seconds since `started`, for the log at `info`.
+fn seconds(started: Instant) -> f64 {
+    started.elapsed().as_secs_f64()
 }
 
 /// Logs that a sky's `step` is done, `started` being when its request began: what T17 times.
@@ -268,13 +355,15 @@ impl Reply<'_> {
         let marches =
             compute::sky::march(pool, self.inputs, self.plan.replies(), self.token).await?;
         phase("march", self.started);
+        let mut made = 0;
         while let Some(step) = censused.recv().await {
             let last = step.last;
-            let answer = self.of(step, &marches).await?;
+            let answer = self.of(step, &marches, made).await?;
             if last {
                 return Ok(answer);
             }
             replies.send(pool, self.token, answer).await?;
+            made += 1;
         }
         Err(request_error(
             ErrorCode::Internal,
@@ -286,6 +375,9 @@ impl Reply<'_> {
     /// from the request's one march at that census's radii, with the eye's limits and offsets
     /// where the eye is asked, and the payload, each as bulk jobs.
     ///
+    /// `made` replies came before it. The first and the final are logged at `info`, with the
+    /// request's wall time and its jobs' time so far (R06.T11.m).
+    ///
     /// # Errors
     ///
     /// Those of [`compute::sky::bulk`] and the band's jobs.
@@ -293,6 +385,7 @@ impl Reply<'_> {
         &self,
         step: CensusStep,
         marches: &[Arc<BandMarch>],
+        made: usize,
     ) -> Result<Answer, ComputeError> {
         let (pool, query, last) = (&self.state.pool, &self.inputs.query, step.last);
         let (worked, layers) = (step.worked_in_all(), step.layers());
@@ -345,6 +438,30 @@ impl Reply<'_> {
             &bulk,
             &encoded,
         );
+        let (listed, wall_s, job_s) = (
+            census.listed().len(),
+            seconds(self.started),
+            self.token.worked().as_secs_f64(),
+        );
+        let complete_to_ly = completeness.least_edge().map(LightYears::value);
+        if last {
+            let replies = made + 1;
+            tracing::info!(
+                listed,
+                replies,
+                wall_s,
+                job_s,
+                "a sky's final reply is made"
+            );
+        } else if made == 0 {
+            tracing::info!(
+                listed,
+                complete_to_ly,
+                wall_s,
+                job_s,
+                "a sky's first reply is made"
+            );
+        }
         Ok(Answer {
             body: ResponseBody::Sky(Box::new(body)),
             bulk: Some(bulk),

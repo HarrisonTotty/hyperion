@@ -35,7 +35,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use common::{BinaryHeader, Frame, TestClient, TestServer};
 use hyperion_protocol::{
@@ -769,7 +769,10 @@ async fn a_skys_manifest_matches_what_was_sent() {
     let again = served(&mut client, sky(&universe)).await;
     let warm = server.stats().sky_cells();
     assert_eq!(again.payload(), payload);
-    assert_eq!(again.response.bulk, response.bulk);
+    assert_eq!(
+        again.response, *response,
+        "computed again, the whole reply is the first's: what the kept skies rely on (R06.T11.l)"
+    );
     assert_eq!(
         (
             warm.cache().hits() - cold.cache().hits(),
@@ -873,6 +876,111 @@ async fn a_repeated_identical_sky_is_its_kept_reply_and_queues_no_census_job() {
     assert_eq!(computed.sky_replies().entries(), 2);
     client.close().await;
     server.stop().await;
+}
+
+/// Where the log test's subscriber writes: a buffer it shares.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tracing_subscriber::fmt::MakeWriter<'_> for Captured {
+    type Writer = Self;
+
+    fn make_writer(&self) -> Self {
+        self.clone()
+    }
+}
+
+impl Captured {
+    /// A subscriber of `info` and above that writes here, for `tracing::subscriber::set_default`.
+    fn subscriber(&self) -> impl tracing::Subscriber + Send + Sync + use<> {
+        tracing_subscriber::fmt()
+            .with_writer(self.clone())
+            .with_max_level(tracing::Level::INFO)
+            .with_ansi(false)
+            .finish()
+    }
+
+    /// What was written, as text.
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+/// A sky logs at `info` that it started and that its final reply is made, with the wall time and
+/// its jobs' time, and a sky asked again exactly that it is answered with its kept reply
+/// (R06.T11.m). The runtime runs on the test's thread, so the subscriber set for it sees the
+/// handler's lines.
+#[tokio::test]
+async fn a_sky_logs_its_start_and_its_final_reply_at_info() {
+    let captured = Captured::default();
+    let _default = tracing::subscriber::set_default(captured.subscriber());
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    let first = served(&mut client, sky(&universe)).await;
+    let _ = served(&mut client, sky(&universe)).await;
+    client.close().await;
+    server.stop().await;
+
+    let log = captured.text();
+    let lines = |message: &str| -> Vec<&str> {
+        log.lines().filter(|line| line.contains(message)).collect()
+    };
+    assert_eq!(lines("a sky started").len(), 2, "{log}");
+    assert_eq!(
+        lines("a sky is answered with its kept final reply").len(),
+        1,
+        "{log}"
+    );
+    let finals = lines("a sky's final reply is made");
+    assert_eq!(finals.len(), 1, "{log}");
+    let listed = format!("listed={}", first.response.listed);
+    for field in [listed.as_str(), "wall_s=", "job_s=", "replies="] {
+        assert!(finals[0].contains(field), "{field} in {}", finals[0]);
+    }
+}
+
+/// A sky cancelled while its census runs logs at `info` that it was given up, with its wall time
+/// and its jobs' seconds so far (R06.T11.m): the cancel aborts its task at an `.await`, so only the
+/// request's drop sees it.
+#[tokio::test]
+async fn a_cancelled_sky_logs_at_info_that_it_was_given_up() {
+    let captured = Captured::default();
+    let _default = tracing::subscriber::set_default(captured.subscriber());
+    let (server, _data_dir) = sky_server(LONG_CAP_LY, 1).await;
+    let (mut client, universe) = opened(&server).await;
+    let sky_id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    census_under_way(&server).await;
+    client.cancel(sky_id).await;
+    expect_cancelled(&mut client, sky_id).await;
+    server
+        .stats_until("the cancelled sky has ended", |stats| {
+            stats.requests().in_flight() == 0
+        })
+        .await;
+    client.close().await;
+    server.stop().await;
+
+    let log = captured.text();
+    let ended: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("a sky was given up before its final reply"))
+        .collect();
+    assert_eq!(ended.len(), 1, "{log}");
+    for field in ["wall_s=", "job_s="] {
+        assert!(ended[0].contains(field), "{field} in {}", ended[0]);
+    }
+    assert!(!log.contains("a sky's final reply is made"), "{log}");
 }
 
 /// Waits until the one worker holds a census job and more wait in the bulk queue, and none in the
@@ -1476,13 +1584,21 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
 }
 
 /// Two identical skies asked at once share one build of the galaxy's tables, and send the same
-/// bytes (R06.T11.c).
+/// bytes and the same reply (R06.T11.c).
 ///
 /// Their tables hold no star, a build of moments, so the second may find them held rather than
-/// join the first's build: `compute::sky_tables`' unit test pins the single flight itself.
+/// join the first's build: `compute::sky_tables`' unit test pins the single flight itself. The
+/// server keeps no sky's reply, so that the second is computed whenever it comes (R06.T11.l).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_identical_sky_shares_the_tables_build() {
-    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 3).await;
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 3)
+        .kept_skies(KeptSkies::Off)
+        .build();
+    let (server, _data_dir) = (TestServer::start_with(config).await, data_dir);
     let (mut first, universe) = opened(&server).await;
     let mut second = server.connected().await;
     let one = first.send_request(RequestBody::Sky(sky(&universe))).await;
@@ -1492,7 +1608,7 @@ async fn a_second_identical_sky_shares_the_tables_build() {
         answer_to(&mut second, other).await,
     );
     assert_eq!(one.payload(), other.payload());
-    assert_eq!(one.response.bulk, other.response.bulk);
+    assert_eq!(one.response, other.response);
     let tables = server.stats().sky_tables();
     assert_eq!(tables.builds(), 1, "{tables:?}");
     assert_eq!(tables.cache().entries(), 1, "{tables:?}");

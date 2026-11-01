@@ -28,7 +28,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 
-use hyperion_server::compute::{CpuPool, FlushProbe, StartPoolError, probe_flush_to_zero};
+use hyperion_server::compute::{
+    CpuPool, FlushProbe, PoolThread, StartPoolError, probe_flush_to_zero,
+};
 
 /// Set in the child's environment to the mode it runs under; unset, the child test does nothing.
 const MARKER: &str = "HYPERION_FLUSH_TO_ZERO_CHILD";
@@ -65,11 +67,11 @@ fn under_a_preloaded_mode_the_probes_fail_and_the_pool_refuses_to_start() {
     match CpuPool::new(n(2), n(4), n(4)) {
         Err(StartPoolError::FloatingPointMode {
             worker,
-            twin,
+            thread,
             probe,
         }) => {
             // Every thread flushes, and the first worker itself is named before its twin.
-            assert_eq!((worker, twin, probe), (0, false, expected));
+            assert_eq!((worker, thread, probe), (0, PoolThread::Worker, expected));
         }
         other => panic!("the pool started or failed otherwise under {mode}: {other:?}"),
     }
