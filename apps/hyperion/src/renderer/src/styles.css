@@ -1192,6 +1192,18 @@ body {
   display: block;
 }
 
+/* How the stream overlay stands, under its toggles in the face-on view's words (plan 10, P10.T11). */
+.map-view__stream-status {
+  margin-top: 0.25rem;
+}
+
+/* A status's figures, in B612 Mono, their padding kept, so that a count holds its field. */
+.status-text__figures {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
 /* Compact, it stands in the tabs' row at its right, so that the row keeps its height. */
 .galaxy-map__grid--compact > .galaxy-map__controls > .galaxy-map__wait {
   position: absolute;
@@ -1472,8 +1484,22 @@ body {
   pointer-events: none;
 }
 
-.map-features :is(path, circle) {
+.map-features :is(path, circle, polyline) {
   vector-effect: non-scaling-stroke;
+}
+
+/* A stream's track (plan 10, P10.T11): the guide's solid 1px --text-muted line, cased as a line
+   over a raster is, its corners round so that a sharp turn of a tip keeps its casing. */
+.map-streams__casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(3px * var(--line-scale));
+  stroke-linejoin: round;
+}
+
+.map-streams__line {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+  stroke-linejoin: round;
 }
 
 .map-features__casing {
@@ -1522,6 +1548,13 @@ body {
 
 .map-features__sample circle {
   stroke-width: calc(1px * var(--line-scale));
+}
+
+/* A stream's sample: a short run of its line, as the map draws it, at its width. */
+.map-features__sample line {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+  vector-effect: non-scaling-stroke;
 }
 
 /* A mark pegged to the picture's edge: the arrow beside it says which way its point lies. */

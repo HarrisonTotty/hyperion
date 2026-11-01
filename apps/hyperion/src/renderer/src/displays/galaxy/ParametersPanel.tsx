@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { RequestStatus } from "../../components/RequestStatus";
 import { UnitLabel } from "../../components/UnitLabel";
 import { formatListPosition, formatNumber } from "../../lib/format";
+import { toGlobalFeaturesRequest, toGlobalList } from "../../lib/galaxy/globalWire";
 import { formatHex64 } from "../../lib/seed";
 import { useUniverse } from "../../lib/universe";
 import { type ScrollMetrics, useScrollMetrics } from "../../lib/useScrollMetrics";
@@ -11,6 +12,7 @@ import { REQUEST_TIMEOUT_MS, useServerRequest } from "../../lib/useServerRequest
 import { windowRange } from "../../lib/windowRange";
 import { usePageTabFocus } from "./pageTabFocus";
 import { groupLabel } from "./parameterLabels";
+import { progenitorGroups } from "./progenitorReadings";
 import { type ParameterReading, toReading } from "./parameterReadings";
 
 /**
@@ -158,7 +160,9 @@ function ParameterList({ groups }: ParameterListProps) {
  * open universe, and again whenever another is opened or the operator asks with `RETRY` after a
  * failure; `RETRY` goes as the request goes pending, so it hands the focus to the page's tab.
  * Labels come from the client's glossary, and a key it lacks is shown as itself (plan 05, design
- * note D8a). Values are right-aligned in B612 Mono with their units beside them; nothing is
+ * note D8a). After the parameters' groups come the galaxy's accreted progenitors, one group each,
+ * which the global list carries (plan 10, P10.T11; `progenitorGroups`), with `PROGENITORS PENDING`
+ * above the list until they arrive and a failure with `RETRY`, which asks for both again. Values are right-aligned in B612 Mono with their units beside them; nothing is
  * converted. All rows stay in the DOM, since there are a few dozen, and the list scrolls inside the
  * page, from the keyboard too, with the position of the rows in view beneath it.
  */
@@ -171,6 +175,14 @@ export function ParametersPanel() {
     REQUEST_TIMEOUT_MS,
     retries,
   );
+  // The accreted progenitors come with the global list, not with the parameters (plan 10, P10.T11).
+  const listState = useServerRequest<"global_features">(
+    open === null ? null : toGlobalFeaturesRequest(open.id),
+    REQUEST_TIMEOUT_MS,
+    retries,
+  );
+  const progenitors =
+    listState.kind === "ok" ? progenitorGroups(toGlobalList(listState.response).progenitors) : [];
 
   return (
     <div className="parameters">
@@ -192,7 +204,16 @@ export function ParametersPanel() {
             <dt>GEN VER</dt>
             <dd>{formatNumber(state.response.generator_version, 0)}</dd>
           </dl>
-          <ParameterList groups={toGroups(state.response.groups)} />
+          {/* While the parameters are on show, how the progenitors that follow them stand. */}
+          <RequestStatus
+            state={listState}
+            subject="PROGENITORS"
+            onRetry={() => {
+              focusPageTab?.();
+              setRetries((count) => count + 1);
+            }}
+          />
+          <ParameterList groups={[...toGroups(state.response.groups), ...progenitors]} />
         </>
       ) : null}
     </div>

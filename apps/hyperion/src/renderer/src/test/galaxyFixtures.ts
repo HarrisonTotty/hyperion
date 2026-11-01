@@ -382,6 +382,7 @@ export function everyGalaxyParameter(
         aNumber("halo.dominant_merger.flattening", 0.7, "none", "drawn"),
         aNumber("halo.dominant_merger.break_radius", 62_000, "ly", "drawn"),
         aNumber("halo.dominant_merger.break_steepening", 1.5, "none", "drawn"),
+        aNumber("halo.discrete_share", 0.085, "none", "drawn"),
       ],
     },
     {

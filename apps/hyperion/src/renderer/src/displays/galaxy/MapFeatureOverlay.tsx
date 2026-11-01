@@ -1,7 +1,8 @@
 import { mapFeatureKindWords } from "../../lib/galaxy/featureWords";
 import { MAP_FEATURE_KINDS } from "../../lib/galaxy/featureWire";
 import { MAP_FEATURE_MARK_REM, type PlacedMapFeature } from "../../lib/galaxy/mapFeatures";
-import { SYMBOL_STROKE_PX, symbolOutline } from "../../spatial/symbols";
+import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
+import { featureCrossPath } from "./featureCross";
 
 /** Props of {@link MapFeatureOverlay}. */
 export interface MapFeatureOverlayProps {
@@ -15,15 +16,6 @@ export interface MapFeatureOverlayProps {
   readonly remPx: number;
   /** Whether the features are a snapshot the link no longer backs: they are then muted. */
   readonly stale: boolean;
-}
-
-/** The Greek cross's outline about the origin at `radiusPx`, as an SVG path's data. */
-function crossPath(radiusPx: number): string {
-  const outline = symbolOutline("greek-cross");
-  const points = outline.kind === "polygon" ? outline.points : [];
-  return `${points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x * radiusPx} ${point.y * radiusPx}`)
-    .join(" ")} Z`;
 }
 
 /** The overlay's accessible name: what it draws, kind by kind in the toggles' order, in words. */
@@ -57,7 +49,7 @@ export function MapFeatureOverlay({
   stale,
 }: MapFeatureOverlayProps) {
   // Drawn inside the mark's diameter, as a spatial display's outline is.
-  const cross = crossPath((MAP_FEATURE_MARK_REM * remPx) / 2 - SYMBOL_STROKE_PX / 2);
+  const cross = featureCrossPath((MAP_FEATURE_MARK_REM * remPx) / 2 - SYMBOL_STROKE_PX / 2);
   const circles = places.filter((place) => place.circlePx !== null);
   const crosses = places.filter((place) => place.cross);
   const labels = places.flatMap((place) => (place.label === null ? [] : [place]));

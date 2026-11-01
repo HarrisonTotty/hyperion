@@ -130,6 +130,8 @@ export const PARAMETER_LABELS: Readonly<Record<string, string>> = {
   "halo.dominant_merger.flattening": "MAJOR MERGER FLATTENING",
   "halo.dominant_merger.break_radius": "MAJOR MERGER BREAK",
   "halo.dominant_merger.break_steepening": "BREAK STEEPENING",
+  // The halo's discrete share's drawn ceiling, its streams and dwarf cores (plan 10, P10.T10.a).
+  "halo.discrete_share": "DISCRETE SHARE",
 
   "arms.count": "ARMS",
   "arms.pitch": "ARM PITCH",

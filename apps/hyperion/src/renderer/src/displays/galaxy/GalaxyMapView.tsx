@@ -25,7 +25,8 @@ import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { formatNumber, formatSci } from "../../lib/format";
-import { placeMapFeatures } from "../../lib/galaxy/mapFeatures";
+import { crossBoxes, labelBoxes, placeMapFeatures } from "../../lib/galaxy/mapFeatures";
+import { placeStreamOverlay, type StreamOverlayKind } from "../../lib/galaxy/streamTracks";
 import {
   type MapGeometry,
   mapGeometry,
@@ -39,13 +40,19 @@ import {
   reducedLevels,
   turnClockwise,
 } from "../../lib/galaxy/mapPicture";
-import type { CentreLy, MapFeatureLayer } from "../../lib/galaxy/model";
+import type {
+  CentreLy,
+  GlobalListModel,
+  MapFeatureLayer,
+  StreamTrack,
+} from "../../lib/galaxy/model";
 import { buildRamp, type DecodedCodes, parseHexColour, rasterise } from "../../lib/galaxy/ramp";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import { DensityLegend } from "./DensityLegend";
 import { ExtinctionLegend } from "./ExtinctionLegend";
 import { MapFeatureOverlay } from "./MapFeatureOverlay";
+import { StreamTrackOverlay } from "./StreamTrackOverlay";
 import {
   ARROW_KEYS,
   cursorInView,
@@ -788,6 +795,15 @@ interface GalaxyMapViewProps {
   readonly featureLayers: ReadonlyArray<MapFeatureLayer> | null;
   /** The kinds the overlay draws. */
   readonly featureKinds: ReadonlySet<MapFeatureKindWire>;
+  /**
+   * The global list the stream overlay draws the dwarf cores of, from the page's one request (plan
+   * 10, P10.T11), or `null` while it has none.
+   */
+  readonly globalList: GlobalListModel | null;
+  /** The tracks on hand, by stream number. */
+  readonly streamTracks: ReadonlyMap<number, StreamTrack>;
+  /** The kinds the stream overlay draws. */
+  readonly streamKinds: ReadonlySet<StreamOverlayKind>;
   /** The overlay's `FEATURES` toggles, which the face-on view stands under its legends. */
   readonly featureControls?: ReactNode;
 }
@@ -835,6 +851,9 @@ function MapViewBody({
   remPx,
   featureLayers,
   featureKinds,
+  globalList,
+  streamTracks,
+  streamKinds,
   featureControls,
   onRetry,
 }: MapViewBodyProps) {
@@ -1051,6 +1070,39 @@ function MapViewBody({
           }),
     [view, geometry, featureLayers, featureKinds, pictureWidthPx, pictureHeightPx, remPx],
   );
+  // Placed once per picture, list, tracks, kinds and size, its labels clear of the features'.
+  const streamPlaces = useMemo(() => {
+    if (geometry === null || globalList === null) {
+      return null;
+    }
+    const picturePx = { widthPx: pictureWidthPx, heightPx: pictureHeightPx, remPx };
+    const masses = new Map(globalList.streams.map((stream) => [stream.number, stream.massMsun]));
+    return placeStreamOverlay(
+      view,
+      geometry,
+      picturePx,
+      {
+        tracks: [...streamTracks.values()].map((track) => ({
+          track,
+          massMsun: masses.get(track.number) ?? 0,
+        })),
+        cores: globalList.cores,
+        streamsShown: streamKinds.has("stream"),
+        coresShown: streamKinds.has("dwarf_core"),
+      },
+      [...labelBoxes(featurePlaces, picturePx), ...crossBoxes(featurePlaces, picturePx)],
+    );
+  }, [
+    view,
+    geometry,
+    globalList,
+    streamTracks,
+    streamKinds,
+    featurePlaces,
+    pictureWidthPx,
+    pictureHeightPx,
+    remPx,
+  ]);
 
   let status: ReactNode;
   switch (decoding.kind) {
@@ -1100,6 +1152,15 @@ function MapViewBody({
             setFocused(false);
           }}
         />
+        {streamPlaces === null ? null : (
+          <StreamTrackOverlay
+            places={streamPlaces}
+            widthPx={pictureWidthPx}
+            heightPx={pictureHeightPx}
+            remPx={remPx}
+            stale={linkDown}
+          />
+        )}
         {featureLayers === null ? null : (
           <MapFeatureOverlay
             places={featurePlaces}
@@ -1246,6 +1307,13 @@ function MapViewBody({
  * placed on this view's picture by `placeMapFeatures`; a feature beyond the view's extent is not
  * drawn, and none is pegged. It is muted while the link is down, as the picture is stale then.
  * The face-on view stands the page's `FEATURES` toggles under its legends.
+ *
+ * Under the feature overlay stands the page's stream overlay (plan 10, P10.T11;
+ * {@link StreamTrackOverlay}): each track on hand as a thin cased line, cut at the view's extent
+ * and labelled `STREAM` at a tip inside the view, and each dwarf core as the open cross, labelled
+ * `DWARF CORE`, placed by `placeStreamOverlay` with their labels clear of the features' labels and
+ * marks; muted while the link
+ * is down, as the features are.
  */
 export function GalaxyMapView(props: GalaxyMapViewProps) {
   const [attempt, setAttempt] = useState(0);

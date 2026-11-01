@@ -62,11 +62,17 @@ describe("toSystemOrigin (plan 09, P09.T41.c)", () => {
     expect(toSystemOrigin(origin)).toEqual(model);
   });
 
-  it.each<SystemOriginWire>([
-    { type: "stream", stream: 3 },
-    { type: "dwarf_core", core: 0 },
-  ])("reads plan 10's member %o as unknown until P10.T11 names it", (origin) => {
-    expect(toSystemOrigin(origin)).toEqual({ kind: "unknown" });
+  it.each<[SystemOriginWire, unknown]>([
+    [
+      { type: "stream", stream: 3 },
+      { kind: "stream", stream: 3 },
+    ],
+    [
+      { type: "dwarf_core", core: 0 },
+      { kind: "dwarf_core", core: 0 },
+    ],
+  ])("reads plan 10's member %o by its entry's number (P10.T11)", (origin, model) => {
+    expect(toSystemOrigin(origin)).toEqual(model);
   });
 
   it("reads an origin it does not know, a pinned system's, as unknown", () => {

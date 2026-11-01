@@ -158,6 +158,9 @@ describe("GalaxyMapPanel's feature overlay (plan 09, P09.T41.b)", () => {
       [true, "GC"],
       [true, "CENTRE"],
       [true, "SNR"],
+      // The stream overlay's (plan 10, P10.T11).
+      [true, "STREAM"],
+      [true, "DWARF CORE"],
     ]);
   });
 

@@ -18,6 +18,7 @@ import type { AlertsView } from "../../lib/useAlerts";
 import { useUniverse } from "../../lib/universe";
 import type { RequestState } from "../../lib/useServerRequest";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
+import { useStreamReadout } from "./useStreamReadout";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
 import { selectionMarkId } from "./chartModel";
 import { FeatureList } from "./FeatureList";
@@ -236,6 +237,9 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
   // (plan 12, P12.T11).
   const chartMode = result?.mode ?? NOW_MODE;
   const summary = useSystemSummary(summaryTarget, chartTime, generation, chartMode);
+  // A stream member's stream, for its rows under the member's ORIGIN (plan 10, P10.T11).
+  const memberOf = chart.selected?.origin.kind === "stream" ? chart.selected.origin.stream : null;
+  const stream = useStreamReadout(open?.id ?? null, memberOf, generation);
   const stars = summary.shown?.kind === "ok" ? summary.shown.model : null;
   // The selection is read as observed only where its row carries an observation, so its stars
   // must be answered in that mode, and in `now` for a row a server answered so.
@@ -383,6 +387,7 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
           starsAt={summary.shownEmitted}
           extinction={answer.kind === "line" ? answer.line : null}
           features={chart.features?.features}
+          stream={memberOf === null ? null : stream}
         />
       ) : (
         <FeatureReadout
@@ -406,6 +411,10 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
             />
           ) : (
             <RequestStatus state={summary.state} onRetry={retry} />
+          )}
+          {/* The link's state is said once, by the summary's status. */}
+          {stream.state === null || stream.state.kind === "link_down" ? null : (
+            <RequestStatus state={stream.state} subject="STREAM" onRetry={retry} />
           )}
           {extinctionStatus}
         </>

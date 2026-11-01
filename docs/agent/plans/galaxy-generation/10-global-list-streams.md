@@ -783,6 +783,8 @@ as built". Its registration member is not._
 
 ### P10.T11 Client
 
+_Built (lane `p10-t10b-t11`, 2026-11-01, at `GENERATOR_VERSION` 24); see "P10.T11 as built" in Risks._
+
 The galaxy map gains `StreamTrackOverlay`: tracks as thin lines in both views, dwarf cores as
 feature marks, a toggle and a legend, and a stated count of tracks still pending, since unfetched
 data must not look like absence. The chart's readout shows a member's stream or core, and
@@ -2309,3 +2311,16 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `resolve_with` (`convert.rs` has no production `resolve` left). Extinction's line ends and the
     scene's frame stay on `resolve`, since both refuse a list member's motion whichever resolver
     finds it; `system_bodies` and `body_detail` too, so a list member has no planets yet.
+- **P10.T11 as built (lane `p10-t10b-t11`, 2026-11-01, at `GENERATOR_VERSION` 24).** No
+  generated output moved; no `PROTOCOL_VERSION` bump.
+  - _Wire._ Optional fields: a dwarf core's `position` and `extent_ly`, a ready track's
+    `length_ly`, and a track point's `dispersion_km_s` (one axis's rms, as T12 measures it).
+  - _Client._ `useGlobalList` asks the list again every 10 s while a track is missing and fetches
+    the tracks held, four at a time (`StreamTrackFetcher`); `StreamTrackOverlay` draws under the
+    feature overlay; `StreamReadout` and `useStreamReadout`; the progenitors on `PARAMETERS`.
+  - _Leans (2026-11-01)._ `TRACKS PENDING <n> OF <m>` is a draft guide row for the owner, standing
+    under the overlay's toggles (lean, 2026-11-01). `STREAM` and `DWARF CORE` toggle with
+    `FEATURES` (lean, 2026-11-01). `StreamReadout` is the selected stream member's rows in the
+    system readout, since the overlay takes no pointer (lean, 2026-11-01).
+  - _For the registration member._ The readout's rows and `ORIGIN` `STREAM <n>` appear once a range
+    row carries the `stream` origin, which needs `convert::placed_by`'s arm.

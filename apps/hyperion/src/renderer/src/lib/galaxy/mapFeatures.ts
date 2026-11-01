@@ -66,20 +66,45 @@ export interface PlacedMapFeature {
 }
 
 /** A label's box, CSS px. */
-interface Box {
+export interface LabelBox {
   readonly leftPx: number;
   readonly topPx: number;
   readonly widthPx: number;
   readonly heightPx: number;
 }
 
-function overlap(a: Box, b: Box): boolean {
+function overlap(a: LabelBox, b: LabelBox): boolean {
   return (
     a.leftPx < b.leftPx + b.widthPx &&
     b.leftPx < a.leftPx + a.widthPx &&
     a.topPx < b.topPx + b.heightPx &&
     b.topPx < a.topPx + a.heightPx
   );
+}
+
+/** A point on a view's picture, CSS px from its top left. */
+export interface PicturePointPx {
+  readonly xPx: number;
+  readonly yPx: number;
+}
+
+/**
+ * Where a point of a view's plane stands on its picture, CSS px from its top left, inside the
+ * extent or not: its x and, face-on, its y or, edge-on, its z, in light-years.
+ */
+export function mapPlanePx(
+  view: MapView,
+  geometry: MapGeometry,
+  picture: MapPicturePx,
+  horizontalLy: number,
+  verticalLy: number,
+): PicturePointPx {
+  const { horizontal, vertical } = geometry;
+  // On the raster: across from its left edge, down from its top row.
+  const left = (horizontalLy - horizontal.minLy) / (horizontal.maxLy - horizontal.minLy);
+  const top = (vertical.maxLy - verticalLy) / (vertical.maxLy - vertical.minLy);
+  const screen = view === "face_on" ? { left: 1 - top, top: left } : { left, top };
+  return { xPx: screen.left * picture.widthPx, yPx: screen.top * picture.heightPx };
 }
 
 /**
@@ -93,7 +118,7 @@ export function mapPointPx(
   geometry: MapGeometry,
   picture: MapPicturePx,
   positionLy: Vec3,
-): { readonly xPx: number; readonly yPx: number } | null {
+): PicturePointPx | null {
   const vertical = view === "face_on" ? positionLy.y : positionLy.z;
   const { horizontal, vertical: verticalRange } = geometry;
   if (
@@ -102,15 +127,11 @@ export function mapPointPx(
   ) {
     return null;
   }
-  // On the raster: across from its left edge, down from its top row.
-  const left = (positionLy.x - horizontal.minLy) / (horizontal.maxLy - horizontal.minLy);
-  const top = (verticalRange.maxLy - vertical) / (verticalRange.maxLy - verticalRange.minLy);
-  const screen = view === "face_on" ? { left: 1 - top, top: left } : { left, top };
-  return { xPx: screen.left * picture.widthPx, yPx: screen.top * picture.heightPx };
+  return mapPlanePx(view, geometry, picture, positionLy.x, vertical);
 }
 
 /** CSS px of the picture per light-year: the same along both of its axes. */
-function pxPerLy(view: MapView, geometry: MapGeometry, picture: MapPicturePx): number {
+export function pxPerLy(view: MapView, geometry: MapGeometry, picture: MapPicturePx): number {
   // The face-on picture's width is the raster's height, turned.
   const acrossLy =
     view === "face_on"
@@ -149,6 +170,89 @@ interface Candidate {
   readonly text: string;
   /** Larger is labelled first. */
   readonly priority: number;
+}
+
+/**
+ * The label `text` beside a mark or a line's end at `at`, `gapPx` from it plus the guide's gap: to
+ * its right, or to its left where that runs past the picture's edge, or `null` where neither side
+ * fits inside the picture clear of the boxes `taken`, to which its own box is then added.
+ */
+export function placeLabel(
+  at: PicturePointPx,
+  text: string,
+  gapPx: number,
+  picture: MapPicturePx,
+  taken: LabelBox[],
+): MapFeatureLabel | null {
+  const fontPx = LABEL_FONT_REM * picture.remPx;
+  const fromPx = gapPx + LABEL_GAP_REM * picture.remPx;
+  const widthPx = text.length * LABEL_CHARACTER_EM * fontPx;
+  const heightPx = LABEL_LINE_EM * fontPx;
+  const topPx = at.yPx - heightPx / 2;
+  const sides = [at.xPx + fromPx, at.xPx - fromPx - widthPx];
+  const leftPx = sides.find((left) => {
+    const box = { leftPx: left, topPx, widthPx, heightPx };
+    return (
+      left >= 0 &&
+      left + widthPx <= picture.widthPx &&
+      topPx >= 0 &&
+      topPx + heightPx <= picture.heightPx &&
+      !taken.some((other) => overlap(box, other))
+    );
+  });
+  if (leftPx === undefined) {
+    return null;
+  }
+  taken.push({ leftPx, topPx, widthPx, heightPx });
+  // The baseline a third of the line below the mark's centre, centring capitals on it.
+  return { text, leftPx, baselinePx: at.yPx + fontPx / 3 };
+}
+
+/**
+ * The boxes of the labels `places` carries, for a later placement to keep clear of: the stream
+ * overlay's, which the features' labels go before.
+ */
+export function labelBoxes(
+  places: ReadonlyArray<PlacedMapFeature>,
+  picture: MapPicturePx,
+): LabelBox[] {
+  const fontPx = LABEL_FONT_REM * picture.remPx;
+  const heightPx = LABEL_LINE_EM * fontPx;
+  return places.flatMap((place) =>
+    place.label === null
+      ? []
+      : [
+          {
+            leftPx: place.label.leftPx,
+            topPx: place.yPx - heightPx / 2,
+            widthPx: place.label.text.length * LABEL_CHARACTER_EM * fontPx,
+            heightPx,
+          },
+        ],
+  );
+}
+
+/**
+ * The boxes the crosses of `places` cover, for a later placement's labels to keep clear of: the
+ * stream overlay's, which no feature's mark may lose to.
+ */
+export function crossBoxes(
+  places: ReadonlyArray<PlacedMapFeature>,
+  picture: MapPicturePx,
+): LabelBox[] {
+  const radiusPx = (MAP_FEATURE_MARK_REM * picture.remPx) / 2;
+  return places.flatMap((place) =>
+    place.cross
+      ? [
+          {
+            leftPx: place.xPx - radiusPx,
+            topPx: place.yPx - radiusPx,
+            widthPx: 2 * radiusPx,
+            heightPx: 2 * radiusPx,
+          },
+        ]
+      : [],
+  );
 }
 
 /**
@@ -222,31 +326,14 @@ export function placeMapFeatures(
   }
 
   const labels = new Map<string, MapFeatureLabel>();
-  const taken: Box[] = [];
-  const fontPx = LABEL_FONT_REM * picture.remPx;
-  const gapPx = markRadiusPx + LABEL_GAP_REM * picture.remPx;
+  const taken: LabelBox[] = [];
   const byPriority = candidates.toSorted((a, b) =>
     a.priority === b.priority ? (a.place.key < b.place.key ? -1 : 1) : b.priority - a.priority,
   );
   for (const { place, text } of byPriority) {
-    const widthPx = text.length * LABEL_CHARACTER_EM * fontPx;
-    const heightPx = LABEL_LINE_EM * fontPx;
-    const topPx = place.yPx - heightPx / 2;
-    const sides = [place.xPx + gapPx, place.xPx - gapPx - widthPx];
-    const leftPx = sides.find((left) => {
-      const box = { leftPx: left, topPx, widthPx, heightPx };
-      return (
-        left >= 0 &&
-        left + widthPx <= picture.widthPx &&
-        topPx >= 0 &&
-        topPx + heightPx <= picture.heightPx &&
-        !taken.some((other) => overlap(box, other))
-      );
-    });
-    if (leftPx !== undefined) {
-      taken.push({ leftPx, topPx, widthPx, heightPx });
-      // The baseline a third of the line below the mark's centre, centring capitals on it.
-      labels.set(place.key, { text, leftPx, baselinePx: place.yPx + fontPx / 3 });
+    const label = placeLabel(place, text, markRadiusPx, picture, taken);
+    if (label !== null) {
+      labels.set(place.key, label);
     }
   }
 

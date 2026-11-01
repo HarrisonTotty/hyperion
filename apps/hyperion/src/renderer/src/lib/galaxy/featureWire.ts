@@ -261,10 +261,10 @@ export function toCatalogueClass(value: CatalogueClassWire): CatalogueClass {
 }
 
 /**
- * What placed a range row's system (plan 09, P09.T39): `not_sent` for a row without the key, from a
- * server that does not say, and `unknown` for an origin this build does not know, or for plan 10's
- * members of streams and dwarf cores until P10.T11 names them, so that the readout's switches stay
- * exhaustive and the reading is Missing.
+ * What placed a range row's system (plan 09, P09.T39; plan 10, P10.T11): `not_sent` for a row
+ * without the key, from a server that does not say, and `unknown` for an origin this build does not
+ * know, so that the readout's switches stay exhaustive and the reading is Missing. A stream's or a
+ * dwarf core's member names its entry by its number on the galaxy's global list.
  */
 export function toSystemOrigin(origin: SystemOriginWire | undefined): SystemOrigin {
   if (origin === undefined) {
@@ -285,11 +285,13 @@ export function toSystemOrigin(origin: SystemOriginWire | undefined): SystemOrig
     case "catalogue_system":
       model = { kind: "catalogue_system", catalogueClass: toCatalogueClass(origin.class) };
       break;
-    // Plan 10's members, which no server sends before P10.T10.b registers the global list's
-    // source; the readout names their stream or core from P10.T11, and reads Missing until then.
+    // Plan 10's members, which no server sends before P10.T10.b's registration of the global
+    // list's source (with P09.T37).
     case "stream":
+      model = { kind: "stream", stream: origin.stream };
+      break;
     case "dwarf_core":
-      model = { kind: "unknown" };
+      model = { kind: "dwarf_core", core: origin.core };
       break;
   }
   return model;

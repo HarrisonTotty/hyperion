@@ -92,14 +92,16 @@ const NUMBER_TEXT: Readonly<Record<Unit, (value: number) => string>> = {
 };
 
 /**
- * The digits of a number in `unit`, or `null` when this build does not know the unit.
+ * The digits of a number in `unit`, or `null` when this build does not know the unit: how the
+ * galaxy's parameters write it, and the global list's streams and progenitors too (plan 10,
+ * P10.T11).
  *
  * @remarks
  * `Unit` is one of the enums galaxy plan 04 names as growing, which a newer server may send a new
  * string of without a protocol bump (`decision-gg-port-d0.md` §1). The value then reads Missing,
  * never as an empty cell or as a number in a unit the operator is not shown.
  */
-function numberText(value: number, unit: Unit): string | null {
+export function numberText(value: number, unit: Unit): string | null {
   // The decoder trusts the generated types, so an unknown string arrives typed as a `Unit`.
   return Object.hasOwn(NUMBER_TEXT, unit) ? NUMBER_TEXT[unit](value) : null;
 }

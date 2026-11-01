@@ -689,6 +689,11 @@ describe("GalaxyMapPanel", () => {
       expect(within(panel()).getByRole("checkbox", { name: "CENTRE" })).toHaveFocus();
       await user.tab();
       expect(within(panel()).getByRole("checkbox", { name: "SNR" })).toHaveFocus();
+      // The stream overlay's, beside them (plan 10, P10.T11).
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "STREAM" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "DWARF CORE" })).toHaveFocus();
       await user.tab();
       expect(
         within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),

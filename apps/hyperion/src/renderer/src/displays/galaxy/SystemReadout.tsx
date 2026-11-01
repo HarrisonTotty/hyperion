@@ -47,6 +47,7 @@ import {
 import { type ChartDistanceUnit, formatChartDistance, formatChartOffset } from "./chartModel";
 import { TIME_WIDTH_CH } from "./chartReadings";
 import { OriginReadings } from "./OriginReadings";
+import type { StreamReadoutQuery } from "./useStreamReadout";
 import { PrimaryReadings } from "./PrimaryReadings";
 import type { LineExtinction } from "./useExtinction";
 import { SystemReading as Reading } from "./SystemReading";
@@ -119,6 +120,11 @@ export interface SystemReadoutProps {
    * P09.T41.c); none when absent.
    */
   readonly features?: ReadonlyArray<ChartFeature> | undefined;
+  /**
+   * What a stream member's readout reads of its stream, which the panel asks for (plan 10,
+   * P10.T11; `useStreamReadout`); none when absent, and then no stream's rows stand.
+   */
+  readonly stream?: StreamReadoutQuery | null | undefined;
 }
 
 /** The features of a readout given none, one list for every render. */
@@ -349,6 +355,7 @@ export function SystemReadout({
   starsAt = null,
   extinction,
   features = NO_FEATURES,
+  stream = null,
 }: SystemReadoutProps) {
   // The summary is a snapshot when the chart's answer is, as well as when it lags the chart.
   const summaryStale = stale || starsStale;
@@ -562,7 +569,7 @@ export function SystemReadout({
             {system === null ? (
               <Reading label="ORIGIN" value={null} wide stale={stale} />
             ) : (
-              <OriginReadings system={system} features={features} stale={stale} />
+              <OriginReadings system={system} features={features} stale={stale} stream={stream} />
             )}
             <Reading
               label="[Fe/H]"

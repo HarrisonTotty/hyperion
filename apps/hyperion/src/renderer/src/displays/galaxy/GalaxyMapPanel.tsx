@@ -1,10 +1,18 @@
 import type { MapFeatureKindWire, MapPopulation, UniverseInfo } from "@hyperion/protocol";
-import { type CSSProperties, useEffect, useId, useState, useSyncExternalStore } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useId,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import { formatScaleLength } from "../../lib/format";
 import { MAP_FEATURE_KINDS } from "../../lib/galaxy/featureWire";
+import { STREAM_OVERLAY_KINDS, type StreamOverlayKind } from "../../lib/galaxy/streamTracks";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { populationLabel } from "../../lib/galaxy/wire";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
@@ -30,7 +38,9 @@ import {
   overlayHasRoom,
 } from "./mapLayout";
 import { StaleWaits, staleWaitText } from "./staleWaits";
+import { streamTrackStatus } from "./streamTrackStatus";
 import { useGalaxyFeatures } from "./useGalaxyFeatures";
+import { useGlobalList } from "./useGlobalList";
 
 /**
  * The name of each population a map may count, in the order offered.
@@ -133,6 +143,41 @@ interface GalaxyMapPanelProps {
   readonly shown: boolean;
 }
 
+/** A run of figures in a status's words: digits, their group commas and their padding. */
+const FIGURES = /([\d,\u00a0]*\d)/u;
+
+/**
+ * A status's words with each run of figures set in B612 Mono, as every number is, so that a count
+ * padded to its field's width keeps its place (`TRACKS PENDING 12 OF 261`).
+ */
+function withFigures(part: string): ReactNode {
+  const pieces: ReactNode[] = [];
+  let offset = 0;
+  for (const [index, piece] of part.split(FIGURES).entries()) {
+    // The split's odd pieces are its figures; each is known by where it starts in the words.
+    pieces.push(
+      index % 2 === 1 ? (
+        <span key={`figures:${String(offset)}`} className="status-text__figures">
+          {piece}
+        </span>
+      ) : (
+        piece
+      ),
+    );
+    offset += piece.length;
+  }
+  return pieces;
+}
+
+/** `kinds` with `kind` put on if it was off, or taken off if it was on. */
+function toggled<K>(kinds: ReadonlySet<K>, kind: K): ReadonlySet<K> {
+  const next = new Set(kinds);
+  if (!next.delete(kind)) {
+    next.add(kind);
+  }
+  return next;
+}
+
 /**
  * The `GALAXY MAP` page: the open universe's galaxy face-on above edge-on, and the choice of
  * population they count.
@@ -186,6 +231,18 @@ interface GalaxyMapPanelProps {
  * stale view's wait stands, the page's line for the views' wait says how the features stand:
  * `FEATURES PENDING` until they arrive, a failure with `RETRY`, or the shown kinds the server does
  * not generate, `SNR NOT YET MODELLED`, so that no kind is ever read as none.
+ *
+ * It owns the stream overlay as well (plan 10, P10.T11): it asks for the global list, and again
+ * every few seconds while any of its streams' tracks is not on hand, and for the tracks of the
+ * streams the server holds (`useGlobalList`), which both views draw, and holds which of `STREAM`
+ * and `DWARF CORE` are drawn, both to start with, through toggles beside the features'. Under those
+ * toggles, where neither the link's state nor a stale view's wait stands, so that it takes no place
+ * of the page's one line for the views' wait, which stands in the tabs' row when the page is
+ * compact, the page says how the overlay stands (`streamTrackStatus`): `TRACKS PENDING` until the
+ * list arrives, a failure with `RETRY`, `TRACK DATA INVALID:` or `DWARF CORE DATA INVALID:` with
+ * `RETRY` for an answer that cannot be drawn, and then `TRACKS PENDING 12 OF 261` while any track
+ * is not drawn yet, its figures in B612 Mono in a field as wide as the total's, so that a track not
+ * yet drawn never reads as no stream.
  */
 export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMapPanelProps) {
   const populationName = useId();
@@ -207,6 +264,10 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   );
   const [featureGeneration, setFeatureGeneration] = useState(0);
   const featureQuery = useGalaxyFeatures(open?.id ?? null, featureGeneration);
+  const [streamKinds, setStreamKinds] = useState<ReadonlySet<StreamOverlayKind>>(
+    () => new Set(STREAM_OVERLAY_KINDS),
+  );
+  const globalList = useGlobalList(open?.id ?? null);
   const { ref, size } = useElementSize();
   const [staleWaits] = useState(() => new StaleWaits());
   const waits = useSyncExternalStore(staleWaits.subscribe, staleWaits.getSnapshot);
@@ -216,6 +277,14 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   // What the page says of its feature overlay, where neither of those stands (plan 09, P09.T41.b).
   const featureStatus =
     linkReason === null && staleWait === null ? mapFeatureStatus(featureQuery, featureKinds) : null;
+  // And of its stream tracks, which say how many are still being computed (plan 10, P10.T11).
+  const trackStatus =
+    linkReason === null && staleWait === null
+      ? streamTrackStatus(globalList, {
+          streams: streamKinds.has("stream"),
+          cores: streamKinds.has("dwarf_core"),
+        })
+      : null;
   const inhibited = linkReason !== null;
   const layout = mapLayout(size);
   const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout, choices);
@@ -433,19 +502,37 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             remPx={remPx}
             featureLayers={featureQuery.layers}
             featureKinds={featureKinds}
+            globalList={globalList.list}
+            streamTracks={globalList.tracks}
+            streamKinds={streamKinds}
             featureControls={
-              <MapFeatureToggles
-                shown={featureKinds}
-                onToggle={(kind) => {
-                  setFeatureKinds((kinds) => {
-                    const next = new Set(kinds);
-                    if (!next.delete(kind)) {
-                      next.add(kind);
-                    }
-                    return next;
-                  });
-                }}
-              />
+              <>
+                <MapFeatureToggles
+                  shown={featureKinds}
+                  onToggle={(kind) => {
+                    setFeatureKinds((kinds) => toggled(kinds, kind));
+                  }}
+                  streamKinds={streamKinds}
+                  onToggleStream={(kind) => {
+                    setStreamKinds((kinds) => toggled(kinds, kind));
+                  }}
+                />
+                {/* How the stream overlay stands, under its toggles (plan 10, P10.T11). */}
+                {trackStatus === null ? null : (
+                  <div className="map-view__stream-status">
+                    <StatusLine
+                      text={trackStatus.text}
+                      standing={trackStatus.standing}
+                      action={
+                        trackStatus.retry
+                          ? { label: "RETRY", onAction: globalList.retry }
+                          : undefined
+                      }
+                      renderPart={withFigures}
+                    />
+                  </div>
+                )}
+              </>
             }
           />
           <GalaxyMapView
@@ -464,6 +551,9 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             remPx={remPx}
             featureLayers={featureQuery.layers}
             featureKinds={featureKinds}
+            globalList={globalList.list}
+            streamTracks={globalList.tracks}
+            streamKinds={streamKinds}
           />
         </div>
       )}

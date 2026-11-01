@@ -16,6 +16,8 @@ import type {
 } from "../../lib/galaxy/model";
 import { placedOriginWords, placementLabel, populationLabel } from "../../lib/galaxy/wire";
 import { formatHex64 } from "../../lib/seed";
+import { StreamReadout } from "./StreamReadout";
+import type { StreamReadoutQuery } from "./useStreamReadout";
 import { SystemReading as Reading } from "./SystemReading";
 
 /** The words for what is not there: no remnant, no nebula, no emission. */
@@ -52,8 +54,9 @@ function gridShown(system: ChartSystem): OriginShown {
  * A system's `ORIGIN`: its birth population and placement for one its layer's grid placed (plan 08,
  * P08.T15.a), its feature's kind and designation for a feature's member (`OC GPF F207`, or `FEATURE`
  * and its feature's ID where the chart holds no such feature), `CENTRE` for the centre's, its class in
- * words for a catalogue system; Missing for an origin, a population or a class this build does not
- * know; and `NOT YET MODELLED`, a status, for a row from a server that does not say.
+ * words for a catalogue system, `STREAM` or `DWARF CORE` and its number on the global list for a
+ * member of either (plan 10, P10.T11); Missing for an origin, a population or a class this build
+ * does not know; and `NOT YET MODELLED`, a status, for a row from a server that does not say.
  *
  * @remarks
  * A row whose origin is not sent but whose placement is, as a server built since P08.T15.a sends
@@ -92,6 +95,12 @@ function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>)
       shown = words === null ? { kind: "missing" } : { kind: "value", text: words };
       break;
     }
+    case "stream":
+      shown = { kind: "value", text: `STREAM ${String(origin.stream)}` };
+      break;
+    case "dwarf_core":
+      shown = { kind: "value", text: `DWARF CORE ${String(origin.core)}` };
+      break;
     case "unknown":
       shown = { kind: "missing" };
       break;
@@ -99,13 +108,27 @@ function originShown(system: ChartSystem, features: ReadonlyArray<ChartFeature>)
   return shown;
 }
 
-/** Whether a system is a member of a feature or of the centre, whose readout names its class. */
+/**
+ * Whether a system is a member of a feature, of the centre or of the global list, whose readout
+ * names its class, or carries a member class whatever its origin.
+ */
 function isMember(system: ChartSystem): boolean {
-  return (
-    system.origin.kind === "feature_member" ||
-    system.origin.kind === "centre_member" ||
-    system.memberClass !== null
-  );
+  let member: boolean;
+  switch (system.origin.kind) {
+    case "feature_member":
+    case "centre_member":
+    case "stream":
+    case "dwarf_core":
+      member = true;
+      break;
+    case "not_sent":
+    case "grid":
+    case "catalogue_system":
+    case "unknown":
+      member = false;
+      break;
+  }
+  return member || system.memberClass !== null;
 }
 
 /** Julian years in a kiloyear and in a megayear, for the ages' ladder. */
@@ -280,12 +303,15 @@ export interface OriginReadingsProps {
   readonly features: ReadonlyArray<ChartFeature>;
   /** Whether the chart's answer, which the row is read from, is stale. */
   readonly stale: boolean;
+  /** What a stream member's readout reads of its stream, or `null` where it was not asked. */
+  readonly stream: StreamReadoutQuery | null;
 }
 
 /**
  * The system readout's readings of what placed the selected system (plan 09, P09.T41.c): its
- * `ORIGIN`, a grid system's with its placement (plan 08, P08.T15.a), a member's `MEMBER CLASS`, and
- * a supernova catalogue entry's state.
+ * `ORIGIN`, a grid system's with its placement (plan 08, P08.T15.a), a stream member's stream
+ * ({@link StreamReadout}; plan 10, P10.T11), a member's `MEMBER CLASS`, and a supernova
+ * catalogue entry's state.
  *
  * @remarks
  * Readings of the row, a `dt` and its `dd` each, for the readout's own list. `ORIGIN` always
@@ -299,7 +325,7 @@ export interface OriginReadingsProps {
  * class this build does not know reads Missing, and every other reading as before (plan 04's
  * reserved list).
  */
-export function OriginReadings({ system, features, stale }: OriginReadingsProps) {
+export function OriginReadings({ system, features, stale, stream }: OriginReadingsProps) {
   const origin = originShown(system, features);
   return (
     <>
@@ -311,6 +337,10 @@ export function OriginReadings({ system, features, stale }: OriginReadingsProps)
         stale={stale}
         status={origin.kind === "status"}
       />
+      {/* A stream member's stream (plan 10, P10.T11). */}
+      {system.origin.kind === "stream" && stream !== null ? (
+        <StreamReadout stream={system.origin.stream} query={stream} features={features} />
+      ) : null}
       {isMember(system) ? (
         <Reading
           label="MEMBER CLASS"

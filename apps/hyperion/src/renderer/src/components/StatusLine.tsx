@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
 import { StatusText } from "./StatusText";
 
@@ -27,6 +27,11 @@ interface StatusLineProps {
   readonly id?: string | undefined;
   /** What the operator can do about it, offered after the text. */
   readonly action?: StatusAction | undefined;
+  /**
+   * How a part of the words is set, where it holds figures set in a field ({@link StatusText}'s
+   * `renderPart`); the words as they stand where absent.
+   */
+  readonly renderPart?: ((part: string) => ReactNode) | undefined;
 }
 
 /**
@@ -48,7 +53,7 @@ interface StatusLineProps {
  * caller whose own region must carry a request's state renders the words itself, from
  * `RequestStatus`'s `annunciation`, as `CensusReadout` does.
  */
-export function StatusLine({ text, standing, id, action }: StatusLineProps) {
+export function StatusLine({ text, standing, id, action, renderPart }: StatusLineProps) {
   const ownId = useId();
   const textId = id ?? ownId;
   return (
@@ -61,7 +66,7 @@ export function StatusLine({ text, standing, id, action }: StatusLineProps) {
             : "request-status__text"
         }
       >
-        <StatusText text={text} />
+        <StatusText text={text} renderPart={renderPart} />
       </output>
       {action === undefined ? null : (
         <button

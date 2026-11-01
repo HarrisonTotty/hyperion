@@ -245,12 +245,12 @@ export interface ChartSystem {
 export type CatalogueClass = CatalogueClassWire | "unknown";
 
 /**
- * What placed a system (plan 09, P09.T39): a layer's grid, a feature, the galactic centre or a
- * catalogue class; `not_sent` for a row from a server that does not say, as one before P09.T40
- * does not and P09.T40's does not before its members' gate opens (P09.T2.c, version 26); and
- * `unknown` for an origin this build does not know, which the enum's growing allows (plan 04's
- * reserved list), and for plan 10's members of streams and dwarf cores until P10.T11 names them;
- * either reads Missing.
+ * What placed a system (plan 09, P09.T39): a layer's grid, a feature, the galactic centre, a
+ * catalogue class, or a stream or a dwarf core of the global list by its number (plan 10,
+ * P10.T11); `not_sent` for a row from a server that does not say, as one before P09.T40 does not
+ * and P09.T40's does not before its members' gate opens (P09.T2.c, version 26); and `unknown` for
+ * an origin this build does not know, which the enum's growing allows (plan 04's reserved list),
+ * which reads Missing.
  */
 export type SystemOrigin =
   | { readonly kind: "not_sent" }
@@ -258,6 +258,8 @@ export type SystemOrigin =
   | { readonly kind: "feature_member"; readonly feature: FeatureIdHex }
   | { readonly kind: "centre_member" }
   | { readonly kind: "catalogue_system"; readonly catalogueClass: CatalogueClass }
+  | { readonly kind: "stream"; readonly stream: number }
+  | { readonly kind: "dwarf_core"; readonly core: number }
   | { readonly kind: "unknown" };
 
 /**
@@ -552,4 +554,79 @@ export interface BlackHoleModel {
   readonly luminosityW: number | null;
   /** Its disruptions at or before the time, newest first. */
   readonly disruptions: ReadonlyArray<TidalDisruption>;
+}
+
+/** A stellar stream of the galaxy's global list (plan 10, P10.T10.a). */
+export interface GlobalStream {
+  /** Its number on the list: what its track and its members' origins name it by. */
+  readonly number: number;
+  /** Its tube's mass, in M☉. */
+  readonly massMsun: number;
+  /** The living globular it is still being stripped from, or `null` for an orphan's or a dwarf's. */
+  readonly progenitor: FeatureIdHex | null;
+  /** Whether the server holds its track, so that asking for it is answered at once. */
+  readonly trackReady: boolean;
+}
+
+/** The surviving core of a dwarf galaxy on the global list (plan 10, P10.T10.a and P10.T11). */
+export interface GlobalDwarfCore {
+  /** Its number on the list: what its members' origins name it by. */
+  readonly number: number;
+  /** Its mass still bound, in M☉. */
+  readonly massMsun: number;
+  /** Its centre in the `GALACTIC` frame, or `null` from a server that does not send it. */
+  readonly positionLy: Vec3 | null;
+  /** The radius its members lie within, or `null` from a server that does not send it. */
+  readonly extentLy: number | null;
+}
+
+/** One accreted galaxy of the galaxy's history (plan 10, P10.T10.a). */
+export interface AccretedProgenitor {
+  /** The last major merger, or a dwarf accreted in the last 6 Gyr. */
+  readonly kind: "dominant_merger" | "recent";
+  /** Its stellar mass, in M☉. */
+  readonly massMsun: number;
+  /** How long before the epoch it was accreted, in Gyr. */
+  readonly accretedGyr: number;
+  /** Its orbit's pericentre and apocentre about the galactic centre, in light-years. */
+  readonly pericentreLy: number;
+  readonly apocentreLy: number;
+  /** The number of the stream it left on the list, or `null`. */
+  readonly stream: number | null;
+  /** The number of its core on the list, or `null`. */
+  readonly core: number | null;
+}
+
+/** The galaxy's global list as the client reads it (plan 10, P10.T11). */
+export interface GlobalListModel {
+  /** Its streams by number. */
+  readonly streams: ReadonlyArray<GlobalStream>;
+  /** Its dwarf cores by number. */
+  readonly cores: ReadonlyArray<GlobalDwarfCore>;
+  /** The last major merger, then the recent progenitors in their history's order. */
+  readonly progenitors: ReadonlyArray<AccretedProgenitor>;
+}
+
+/** One point of a stream's track: a knot of its tube, at the epoch. */
+export interface TrackPoint {
+  /** The centre line's point in the `GALACTIC` frame. */
+  readonly positionLy: Vec3;
+  /** The tube's rms widths along its frame's normal and binormal, in light-years. */
+  readonly normalWidthLy: number;
+  readonly binormalWidthLy: number;
+  /** The tracers' mean speed there, galactic, in km/s. */
+  readonly speedKmS: number;
+  /** Their rms velocity dispersion along one axis, in km/s, or `null` from a server that does not send it. */
+  readonly dispersionKmS: number | null;
+}
+
+/** A stream's track: its centre line from the trailing arm's tip to the leading arm's. */
+export interface StreamTrack {
+  /** The stream's number. */
+  readonly number: number;
+  /** The centre line's length, in light-years, or `null` from a server that does not send it. */
+  readonly lengthLy: number | null;
+  /** The trailing arm, tip to root, then the leading arm, root to tip. */
+  readonly trailing: ReadonlyArray<TrackPoint>;
+  readonly leading: ReadonlyArray<TrackPoint>;
 }

@@ -86,6 +86,9 @@ function viewOf(
           remPx={16}
           featureLayers={null}
           featureKinds={new Set()}
+          globalList={null}
+          streamTracks={new Map()}
+          streamKinds={new Set()}
         />
       </Activity>
     </ServerLinkHarness>
