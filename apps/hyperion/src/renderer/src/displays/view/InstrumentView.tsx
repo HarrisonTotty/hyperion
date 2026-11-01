@@ -18,6 +18,7 @@ import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
 import { LabelStatements } from "./LabelStatements";
+import type { ReasonFolds } from "./reasonFolds";
 import {
   CONTOUR_INTERVAL_LABEL,
   instrumentPhotorealStatements,
@@ -61,6 +62,11 @@ export interface InstrumentViewProps {
    * has kept failing (plan R10, R10.T16.b and R10.T16.e); each its own fault line.
    */
   readonly faults: ReadonlyArray<string>;
+  /**
+   * Which of its notes' reasons stand opened, held in its slot's state so that it returns from a
+   * hold as it was (the owner's request, 2026-11-01).
+   */
+  readonly folds: ReasonFolds;
   /** The ID of the text describing the canvases' keys. */
   readonly legendId: string;
   readonly onKeyDown: (event: KeyboardEvent<HTMLCanvasElement>) => void;
@@ -162,6 +168,7 @@ export function InstrumentView({
   primaryPhotorealStatements,
   skyAwaiting,
   faults,
+  folds,
   legendId,
   onKeyDown,
   onKeyUp,
@@ -251,6 +258,7 @@ export function InstrumentView({
                 drawn,
               )}
               statements={[]}
+              folds={folds}
               countLine={null}
               faults={faults}
             />
@@ -284,7 +292,7 @@ export function InstrumentView({
       </div>
       {statements.length === 0 ? null : (
         <div className="view-instrument__statements" id={statementsId}>
-          <LabelStatements statements={statements} />
+          <LabelStatements statements={statements} folds={folds} />
         </div>
       )}
     </section>

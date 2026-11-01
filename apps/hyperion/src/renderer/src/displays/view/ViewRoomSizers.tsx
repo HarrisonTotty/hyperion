@@ -15,8 +15,11 @@ export const COLUMNS_CLASS = "view-label--columns";
 
 /** Props of {@link ViewRoomSizers}. */
 export interface ViewRoomSizersProps {
-  /** The upper plate's content, for its copy beside the slots. */
-  readonly upper: Pick<ViewLabelBlockProps, "lines" | "statements" | "countLine" | "faults">;
+  /** The upper plate's content, its reasons opened as the live plate's, for its copy beside the slots. */
+  readonly upper: Pick<
+    ViewLabelBlockProps,
+    "lines" | "statements" | "folds" | "countLine" | "faults"
+  >;
   /** The lower plate's parts, or none while the view states no terrain lines. */
   readonly lower: ReadonlyArray<LowerPlatePart<ReactNode>>;
   /**

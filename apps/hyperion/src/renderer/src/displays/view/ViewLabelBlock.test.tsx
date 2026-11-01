@@ -113,16 +113,18 @@ describe("the view's label block", () => {
       "H2O: its absorption estimated, not measured, for KX 4417 /3",
     ];
 
-    /** The block with the note and its two reasons. */
+    const statements = [
+      "ATMOSPHERE: APPROXIMATE",
+      ...reasons.map((text) => ({ text, standing: "sentence" as const })),
+    ];
+
+    /** The block with the note and its two reasons, holding its own folds. */
     function renderFolded(): ReturnType<typeof userEvent.setup> {
       const user = userEvent.setup();
       render(
         <ViewLabelBlock
           lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
-          statements={[
-            "ATMOSPHERE: APPROXIMATE",
-            ...reasons.map((text) => ({ text, standing: "sentence" as const })),
-          ]}
+          statements={statements}
           countLine={null}
           faults={[]}
         />,
@@ -167,14 +169,45 @@ describe("the view's label block", () => {
       expect(reasonsShown()).toEqual([true, true]);
     });
 
-    it("shows them while the pointer rests on the control", async () => {
+    it("opens them on a press alone, not while the pointer rests on the control", async () => {
       const user = renderFolded();
-      const control = screen.getByRole("button", { name: "2 REASONS" });
 
-      await user.hover(control);
-      expect(reasonsShown()).toEqual([true, true]);
-      await user.unhover(control);
+      await user.hover(screen.getByRole("button", { name: "2 REASONS" }));
+
       expect(reasonsShown()).toEqual([false, false]);
+    });
+
+    it("sets the count in B612 Mono, as every number is", () => {
+      renderFolded();
+
+      expect(
+        screen.getByRole("button", { name: "2 REASONS" }).querySelector(".field__value")
+          ?.textContent,
+      ).toBe("2");
+    });
+
+    it("stands them as the folds held above it say, and tells those folds of a press", async () => {
+      const user = userEvent.setup();
+      const toggled: string[] = [];
+      render(
+        <ViewLabelBlock
+          lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+          statements={statements}
+          folds={{
+            opened: new Set(["ATMOSPHERE: APPROXIMATE"]),
+            toggle: (note) => {
+              toggled.push(note);
+            },
+          }}
+          countLine={null}
+          faults={[]}
+        />,
+      );
+      expect(reasonsShown()).toEqual([true, true]);
+
+      await user.click(screen.getByRole("button", { name: "2 REASONS" }));
+
+      expect(toggled).toEqual(["ATMOSPHERE: APPROXIMATE"]);
     });
   });
 

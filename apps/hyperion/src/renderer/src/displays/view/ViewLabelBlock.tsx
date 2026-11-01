@@ -5,6 +5,7 @@ import { StatusLine } from "../../components/StatusLine";
 import { formatListPosition } from "../../lib/format";
 import { type ItemsInView, useItemsInView } from "../../lib/itemsInView";
 import { LabelStatements } from "./LabelStatements";
+import { type ReasonFolds, useReasonFolds } from "./reasonFolds";
 import type { UpperRoom } from "./viewRoom";
 import {
   type LabelField,
@@ -24,6 +25,12 @@ export interface ViewLabelBlockProps {
    * R08.T10.b), a server's own failure in `--status-caution`.
    */
   readonly statements: ReadonlyArray<LabelStatement>;
+  /**
+   * Which notes' reasons stand opened among the statements, held above the plate, so that the
+   * room's hidden copy of the plate stands as it does (the owner's request, 2026-11-01); absent,
+   * the block holds its own, every note folded as it mounts.
+   */
+  readonly folds?: ReasonFolds | undefined;
   /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */
   readonly countLine: string | null;
   /**
@@ -327,7 +334,7 @@ export function readingParts(
  * rest are upper case whole and tracked whole, as before (P05.T13). A sentence statement,
  * `ATMOSPHERE: APPROXIMATE`'s reasons, is set whole with no letter spacing, nothing in it tracked
  * (`LabelStatementLine`; plan R08, R08.T10.d), and folded behind its note's `4 REASONS` control
- * until opened (`LabelStatements`; the owner's request, 2026-11-01). The stars' count line is a
+ * until opened (`LabelStatements`, through `folds`; the owner's request, 2026-11-01). The stars' count line is a
  * reading of numbers, so an `output` in B612 Mono (the guide's "Typography"), not a statement.
  *
  * On the `PRIMARY` view's upper plate (`scrollsFrom`, plan R10, R10.T12.b;
@@ -343,6 +350,7 @@ export function readingParts(
 export function ViewLabelBlock({
   lines,
   statements,
+  folds: given,
   countLine,
   faults,
   id,
@@ -350,6 +358,8 @@ export function ViewLabelBlock({
   className,
   ref,
 }: ViewLabelBlockProps) {
+  const ownFolds = useReasonFolds();
+  const folds = given ?? ownFolds;
   const room = scroll?.room ?? WHOLE;
   const from = scroll?.from;
   const split = from === undefined ? -1 : lines.findIndex((line) => line.label === from);
@@ -364,6 +374,7 @@ export function ViewLabelBlock({
   const contentKey = [
     ...lines.map((line) => `${line.label} ${line.value}`),
     ...statements.map(statementText),
+    ...[...folds.opened].map((note) => `OPENED ${note}`),
     countLine ?? "",
     ...faults,
   ].join("\n");
@@ -448,7 +459,7 @@ export function ViewLabelBlock({
             {rest.length === 0 ? null : <dl className="view-label__lines">{rest.map(lineOf)}</dl>}
           </>
         )}
-        <LabelStatements statements={statements} />
+        <LabelStatements statements={statements} folds={folds} />
         {countLine === null ? null : (
           <p className="view-label__count">
             <output aria-live="off">{countLine}</output>

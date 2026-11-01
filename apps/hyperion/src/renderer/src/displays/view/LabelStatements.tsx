@@ -1,13 +1,16 @@
-import { Fragment, useId, useState } from "react";
+import { Fragment, useId } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StatusText } from "../../components/StatusText";
 import { LabelStatementLine } from "./LabelStatementLine";
+import type { ReasonFolds } from "./reasonFolds";
 import { type LabelStatement, type SentenceStatement, statementText } from "./viewRun";
 
 /** Props of {@link LabelStatements}. */
 export interface LabelStatementsProps {
   readonly statements: ReadonlyArray<LabelStatement>;
+  /** Which notes' reasons stand opened, held above the plate (`reasonFolds.ts`). */
+  readonly folds: ReasonFolds;
 }
 
 /** A note with the sentences that follow it, `ATMOSPHERE: APPROXIMATE` and its reasons. */
@@ -35,27 +38,22 @@ function groupsOf(statements: ReadonlyArray<LabelStatement>): ReadonlyArray<Stat
   return groups;
 }
 
-/** The count of a note's reasons as its control reads it: `1 REASON`, `4 REASONS`. */
-export function reasonsLabel(count: number): string {
-  return count === 1 ? "1 REASON" : `${String(count)} REASONS`;
-}
-
 /** Props of {@link FoldedNote}. */
 interface FoldedNoteProps {
   readonly note: string;
   readonly reasons: ReadonlyArray<SentenceStatement>;
+  readonly folds: ReasonFolds;
 }
 
 /**
  * A note with its reasons folded behind it: the note as it always stands, then on its line a
- * display control naming the reasons' count, which shows them under the note while a press has
- * opened them, or while the pointer rests on it until a press folds them.
+ * display control naming the reasons' count, which opens them under the note on a press and folds
+ * them on another.
  */
-function FoldedNote({ note, reasons }: FoldedNoteProps) {
+function FoldedNote({ note, reasons, folds }: FoldedNoteProps) {
   const reasonsId = useId();
-  const [opened, setOpened] = useState(false);
-  const [pointed, setPointed] = useState(false);
-  const shown = opened || pointed;
+  const opened = folds.opened.has(note);
+  const count = reasons.length;
   return (
     <>
       <p className="view-label__statement view-label__statement--folds">
@@ -65,28 +63,21 @@ function FoldedNote({ note, reasons }: FoldedNoteProps) {
         <button
           type="button"
           className="control disclosure view-label__reasons"
-          aria-expanded={shown}
+          aria-expanded={opened}
           aria-controls={reasonsId}
           onClick={() => {
-            // A press decides, the pointer resting on the control or not, until it next comes.
-            setOpened((was) => !was);
-            setPointed(false);
-          }}
-          // A shortcut only: a press, by pointer, touch or key, opens them as well.
-          onPointerEnter={() => {
-            setPointed(true);
-          }}
-          onPointerLeave={() => {
-            setPointed(false);
+            folds.toggle(note);
           }}
         >
-          <DisclosureGlyph expanded={shown} />
-          {reasonsLabel(reasons.length)}
+          <DisclosureGlyph expanded={opened} />
+          {/* A count, set in B612 Mono with tabular figures as every number is. */}
+          <span className="field__value">{String(count)}</span>
+          {count === 1 ? " REASON" : " REASONS"}
         </button>
       </p>
-      {/* Its lines are made only while shown, so that a scroll counts no folded line. */}
-      <div className="view-label__reasons-list" id={reasonsId} hidden={!shown}>
-        {shown
+      {/* Its lines are made only while opened, so that a scroll counts no folded line. */}
+      <div className="view-label__reasons-list" id={reasonsId} hidden={!opened}>
+        {opened
           ? reasons.map((reason) => <LabelStatementLine statement={reason} key={reason.text} />)
           : null}
       </div>
@@ -100,19 +91,20 @@ function FoldedNote({ note, reasons }: FoldedNoteProps) {
  * it as the view opens, so that they do not cover the picture (the owner's request, 2026-11-01).
  *
  * @remarks
- * The note stands as it always does, steady, in `--text`; its reasons' control after it on its
- * line, `4 REASONS` led by the disclosure chevron, is a display control, which opens them, each on
- * a line of its own under the note, when pressed and closes them when pressed again, and shows
- * them while the pointer rests on it, so that nothing depends on the pointer alone. Each note's
- * fold is its own and is kept while its block stays mounted; a new scene's block starts folded.
+ * The note stands as it always does, steady, in `--text`; its reasons' control after it, on its
+ * line where it fits, `4 REASONS` led by the disclosure chevron, is a display control, which opens
+ * them, each on a line of its own under the note, when pressed by pointer, touch or key, and folds
+ * them when pressed again. Each note's fold is its own, held above the plate in `folds`, so that the
+ * room's hidden copy of the plate stands as it does: the stage's for the `PRIMARY` view, kept
+ * while the scene is, and an instrument's slot's, kept while it is held.
  */
-export function LabelStatements({ statements }: LabelStatementsProps) {
+export function LabelStatements({ statements, folds }: LabelStatementsProps) {
   return groupsOf(statements).map(({ statement, reasons }) => (
     <Fragment key={statementText(statement)}>
       {reasons.length === 0 || typeof statement !== "string" ? (
         <LabelStatementLine statement={statement} />
       ) : (
-        <FoldedNote note={statement} reasons={reasons} />
+        <FoldedNote note={statement} reasons={reasons} folds={folds} />
       )}
     </Fragment>
   ));

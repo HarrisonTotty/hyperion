@@ -1,4 +1,5 @@
 import { act, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +43,7 @@ import { viewId } from "../../view/camera/state";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import { InstrumentView } from "./InstrumentView";
+import { type ReasonFolds, useReasonFolds } from "./reasonFolds";
 import type { Instrument } from "./useInstruments";
 import type { ViewEngineSource } from "./useViewEngine";
 import { type LabelStatement, STAR_SOURCE, startRun } from "./viewRun";
@@ -1063,10 +1065,19 @@ describe("VIEW's instruments held for the stage's room (R10.T12.b)", () => {
   });
 });
 
-/** `INSTRUMENT 1` drawing PHASE TEST photorealistically, its atmosphere's reasons given. */
+/** Holds an instrument's folds, as its slot's state does. */
+function SlotFolds({ children }: { readonly children: (folds: ReasonFolds) => ReactNode }) {
+  return children(useReasonFolds());
+}
+
+/**
+ * `INSTRUMENT 1` drawing PHASE TEST photorealistically, its atmosphere's reasons given, its folds
+ * held as its slot's are, or `folds` where given.
+ */
 function renderInstrument(
   reasons: ReadonlyArray<string>,
   primary: ReadonlyArray<LabelStatement>,
+  folds?: ReasonFolds,
 ): void {
   const instrument: Instrument = {
     slot: 1,
@@ -1077,6 +1088,7 @@ function renderInstrument(
     selection: null,
     grid: true,
     slopeBaselineM: 2,
+    reasonsOpened: new Set(),
     shown: {
       ground: null,
       run: startRun(phaseScene()),
@@ -1103,7 +1115,7 @@ function renderInstrument(
     panelSize: null,
     panelRef: () => undefined,
   };
-  render(
+  const view = (held: ReasonFolds): ReactNode => (
     <InstrumentView
       instrument={instrument}
       exposure={DEFAULT_EXPOSURE}
@@ -1114,6 +1126,7 @@ function renderInstrument(
       primaryPhotorealStatements={primary}
       skyAwaiting={false}
       faults={[]}
+      folds={held}
       legendId="legend"
       onKeyDown={() => undefined}
       onKeyUp={() => undefined}
@@ -1123,8 +1136,9 @@ function renderInstrument(
       onPress={() => undefined}
       onTurn={() => undefined}
       onPick={() => undefined}
-    />,
+    />
   );
+  render(folds === undefined ? <SlotFolds>{view}</SlotFolds> : view(folds));
 }
 
 /** `INSTRUMENT 1`'s panel, its statements queried within it. */
@@ -1146,6 +1160,18 @@ describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () =
     expect(
       panel.getByText(statusLine(note)).closest("p")?.nextElementSibling?.firstElementChild,
     ).toBe(panel.getByText(thick));
+  });
+
+  it("stands its reasons opened as its slot holds them, as it returns from a hold as it was", () => {
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }], {
+      opened: new Set([note]),
+      toggle: () => undefined,
+    });
+    const panel = instrumentPanel();
+    expect([
+      panel.getByRole("button", { name: "1 REASON" }).getAttribute("aria-expanded"),
+      panel.queryByText(thick) !== null,
+    ]).toEqual(["true", true]);
   });
 
   it("drops a reason the primary shows already", () => {

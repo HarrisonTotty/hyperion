@@ -64,6 +64,7 @@ import {
   readoutBodyOf,
 } from "./groundReadout";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import { NONE_OPENED, toggledNote } from "./reasonFolds";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
 import {
@@ -174,6 +175,12 @@ export interface Instrument {
    * R10.T12.d), which the `BASELINE` row sets while `CONTROLS` names it.
    */
   readonly slopeBaselineM: SlopeBaselineM;
+  /**
+   * The notes whose reasons stand opened on its plate (`reasonFolds.ts`; the owner's request,
+   * 2026-11-01): none as it opens, and kept while it is held for the stage's room, so that it
+   * returns as it was.
+   */
+  readonly reasonsOpened: ReadonlySet<string>;
   /** What it last drew, or `null` while it is closed. */
   readonly shown: InstrumentShown | null;
   /** Whether the engine refused its canvas, so that it draws nothing until it is opened again. */
@@ -294,6 +301,8 @@ export interface Instruments {
   readonly setGrid: (slot: InstrumentSlot, on: boolean) => void;
   /** Sets a slot's `BASELINE`, which its next readout asks at once (plan R10, R10.T12.d). */
   readonly setBaseline: (slot: InstrumentSlot, baselineM: SlopeBaselineM) => void;
+  /** Opens a note's reasons on a slot's plate, or folds them where they stand opened. */
+  readonly foldReasons: (slot: InstrumentSlot, note: string) => void;
   /**
    * A key pressed on a slot's canvas: a flight key held, or its rate stepped.
    *
@@ -319,6 +328,7 @@ interface SlotState {
   readonly selection: CameraTarget | null;
   readonly grid: boolean;
   readonly slopeBaselineM: SlopeBaselineM;
+  readonly reasonsOpened: ReadonlySet<string>;
   readonly shown: InstrumentShown | null;
   readonly refused: boolean;
 }
@@ -329,6 +339,7 @@ const CLOSED: SlotState = {
   selection: null,
   grid: true,
   slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
+  reasonsOpened: NONE_OPENED,
   shown: null,
   refused: false,
 };
@@ -601,6 +612,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           grid: true,
           // Its own BASELINE, 2 m as it opens (R10.T12.d).
           slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
+          // Every note's reasons folded as it opens (the owner's request, 2026-11-01).
+          reasonsOpened: NONE_OPENED,
           shown: {
             run,
             anchors: [],
@@ -666,6 +679,15 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const setBaseline = useCallback((slot: InstrumentSlot, baselineM: SlopeBaselineM): void => {
     setSlots((previous) =>
       withSlot(previous, slot, (state) => ({ ...state, slopeBaselineM: baselineM })),
+    );
+  }, []);
+
+  const foldReasons = useCallback((slot: InstrumentSlot, note: string): void => {
+    setSlots((previous) =>
+      withSlot(previous, slot, (state) => ({
+        ...state,
+        reasonsOpened: toggledNote(state.reasonsOpened, note),
+      })),
     );
   }, []);
 
@@ -887,6 +909,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         selection: state.selection,
         grid: state.grid,
         slopeBaselineM: state.slopeBaselineM,
+        reasonsOpened: state.reasonsOpened,
         shown: state.shown,
         refused: state.refused,
         size: slot === 1 ? stageOne.size : stageTwo.size,
@@ -910,6 +933,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     select,
     setGrid,
     setBaseline,
+    foldReasons,
     keyDown,
     keyUp,
     releaseKeys,

@@ -144,6 +144,7 @@ import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "
 import type { PlacePage } from "./PlaceTabs";
 import { useGroundPage } from "./useGroundPage";
 import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
+import { useReasonFolds } from "./reasonFolds";
 import {
   columnsFit,
   INSTRUMENT_SLOT_REM,
@@ -1689,6 +1690,9 @@ function ViewStage({
     litLabels,
     shown.atmosphere,
   );
+  // Which of the primary's notes' reasons stand opened, held here so that the live plate and the
+  // room's copy of it stand alike, and kept while the scene is (the owner's request, 2026-11-01).
+  const primaryFolds = useReasonFolds();
   const primaryStatements: ReadonlyArray<LabelStatement> = [
     ...labelStatements(shown.run, primaryTerrain),
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
@@ -2039,6 +2043,7 @@ function ViewStage({
                 id={`${legendId}-label`}
                 lines={primaryLines}
                 statements={blockStatements}
+                folds={primaryFolds}
                 countLine={primaryCount}
                 faults={faults}
                 scroll={{ from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }}
@@ -2078,6 +2083,12 @@ function ViewStage({
                       primaryPhotorealStatements={primaryPhotoreal}
                       skyAwaiting={viewSky.awaiting}
                       faults={slotFaults}
+                      folds={{
+                        opened: slot.reasonsOpened,
+                        toggle: (note) => {
+                          instruments.foldReasons(slot.slot, note);
+                        },
+                      }}
                       legendId={legendId}
                       onKeyDown={(event) => {
                         // A view key on its canvas makes it the CONTROLS view before it acts.
@@ -2114,6 +2125,7 @@ function ViewStage({
                   upper={{
                     lines: primaryLines,
                     statements: blockStatements,
+                    folds: primaryFolds,
                     countLine: primaryCount,
                     faults,
                   }}
