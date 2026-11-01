@@ -2086,6 +2086,18 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - The new arm reads the provisional `displaced_forms`; the lane that commits P15.T6.c–f's
     production table re-pins the 26-arm figures by name (`DISPLACED_DENSITIES_DIGEST` and the
     tests' printed counts).
+  - Rebased onto P09.T2.c's field share and P09.T35's carve-out (2026-10-31): `with_rules`
+    refuses a change of any of the three build-time holds; the expected counts sum the field's
+    components at `field_component_share`, then the classes at their budget shares; the stay
+    shares read `budget_stay_share`, and φ and the carve-out thin a field pick in its slice after
+    its marks (φ reads the age), never a displaced pick, whose weight is the budget's.
+  - Layer D's composition: the classes take `1 − stay_D` of a component's layer D and the
+    ancient Type Ia come out of what stays, so `layer_d_kept` is `1 − (1 − kept) ÷ stay_D` in the
+    stay's slice (0 should the ancient share exceed the stay).
+  - The tip's φ and carve-out hold tests that test their own hold compare galaxies under
+    `displaced::hold::field_only_rules()` (every 26 hold but the classes); P08.T12's own tests
+    compare `field_only()` with `displaced()`, so the classes alone move. Under the classes the
+    carve-out pre-pin's first cell holds no claimed death; its records move anyway.
 
 - **P08.T12.b as built (2026-10-31, at `GENERATOR_VERSION` 24, behind `DISPLACED_VERSION` = 26;
   no output moves at 24).**
@@ -2173,8 +2185,8 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - Lean (2026-10-31): a ballistic runaway's time since ejection is rebuilt from its marks (one
     `lifetime` call in the velocity draw) and rescaled as its age was.
   - A ballistic remnant's velocity reads its natal kick through `primary_model`, so it builds a
-    track. Once P09.T35 sets `RECENT_DEATH_CLAIM` that cost reaches placement's hook as well: a
-    case for P08.T16's bench. A scaled ballistic draw reports `ESCAPE_CUT_ATTEMPTS`, and
+    track. Under every 26 hold P09.T35's claim is live (`recent_death_claim`), so placement's hook
+    pays that cost too: a case for P08.T16's bench. A scaled ballistic draw reports `ESCAPE_CUT_ATTEMPTS`, and
     `tests/galaxy_velocity.rs` holds `PAD_SPEED` only where the cut is it.
   - Tests: `placement/velocity_hold.rs`. The per-class test and
     `no_record_reaches_its_layers_pad_speed` are slow, run by name. On the provisional table the

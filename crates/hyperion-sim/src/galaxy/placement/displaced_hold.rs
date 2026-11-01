@@ -24,7 +24,7 @@ use super::{
 };
 use crate::coords::GalacticPosition;
 use crate::galaxy::displaced::PlacementClass;
-use crate::galaxy::displaced::hold::{displaced, held};
+use crate::galaxy::displaced::hold::{displaced, field_only, field_only_rules};
 use crate::galaxy::displaced::marks::kind_index;
 use crate::galaxy::imf::{MassBand, MassFunctionKind};
 use crate::galaxy::params::GalaxyParams;
@@ -88,14 +88,20 @@ fn index_of(record: &SystemRecord) -> u32 {
 
 /// Plan 03's goldens for layers A to C are unchanged under both arms, and those of D and E move
 /// (D2's placement half): in the pinned cells of both pinned galaxies, every A-to-C cell's
-/// candidate count and records are the field's bit for bit under every 26 hold, every D and E
+/// candidate count and records are the field's bit for bit under every 26 hold, the field's under
+/// every other 26 hold ([`field_only_rules`]), every D and E
 /// cell's bound moves, and every layer-E cell's candidates or records. (Layer D's Sun-like cell
 /// keeps its 16 systems in the fixture: its stay shares lose some 3% to the runaways and
 /// walkaways, which moves no candidate of so small a cell.)
 #[test]
 fn plan_03_s_layers_a_to_c_are_unchanged_and_d_and_e_move() {
     let drawn_seed = Seed::new(DRAWN_SEED);
-    let drawn_held = Galaxy::new(drawn_seed);
+    let drawn_held = Galaxy::from_params_with_rules(
+        drawn_seed,
+        GalaxyParams::from_seed(drawn_seed, MassFunctionKind::default()),
+        field_only_rules(),
+    )
+    .expect("the drawn galaxy builds");
     let drawn_displaced = Galaxy::from_params_with_rules(
         drawn_seed,
         GalaxyParams::from_seed(drawn_seed, MassFunctionKind::default()),
@@ -104,7 +110,7 @@ fn plan_03_s_layers_a_to_c_are_unchanged_and_d_and_e_move() {
     .expect("the drawn galaxy builds its displaced classes");
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for (tag, old, new) in [
-        ("mw", held(), displaced()),
+        ("mw", field_only(), displaced()),
         ("drawn", &drawn_held, &drawn_displaced),
     ] {
         for key in pinned_cells(old) {
@@ -337,12 +343,13 @@ fn the_hook_is_asked_once_per_accepted_layer_e_candidate_under_every_26_hold() {
 
 /// C1, the census at the hold's landing: over every stellar layer's cell at six places (the
 /// Sun-like point, the outer bulge, an arm ridge, 3,000 ly above the Sun-like point, the halo
-/// 15,000 ly up and 400 ly from the centre), candidates and systems with the field alone against
-/// under every 26 hold, the movers by count, the largest count change, and the systems of displaced
+/// 15,000 ly up and 400 ly from the centre), candidates and systems with the field alone, under
+/// every other 26 hold, against under every 26 hold, the movers by count, the largest count
+/// change, and the systems of displaced
 /// classes. Layers A to C never move; every moved record is finite.
 #[test]
 fn the_census_moves_only_layers_d_and_e() {
-    let (old, new) = (held(), displaced());
+    let (old, new) = (field_only(), displaced());
     let places = [
         ("sun", sunlike()),
         ("bulge", diagonal(3_200.0)),
@@ -446,8 +453,9 @@ fn placement_code(class: PlacementClass) -> f64 {
 /// attempt, metallicity age and metallicity), with the kick loop's kept attempt, natal kick and
 /// remnant mass for the first 40 constrained records of each cell. Blessed natively on x86-64; the wasip1 suite compares it
 /// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
-/// production table lands.
-const DISPLACED_CELLS_DIGEST: u64 = 0x8f22_77f1_1c91_9546;
+/// production table lands; re-pinned on the rebase onto P09.T2.c's field share and P09.T35's
+/// carve-out, which every 26 hold composes with the classes.
+const DISPLACED_CELLS_DIGEST: u64 = 0x28ad_3219_49f4_c7d9;
 
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
 /// WebAssembly suite's filter).

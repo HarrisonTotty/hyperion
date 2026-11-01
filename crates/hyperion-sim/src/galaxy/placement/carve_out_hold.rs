@@ -31,6 +31,7 @@ use crate::galaxy::catalogue_classes::type_ia::ancient_share;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, ClassId, ClassProcess,
 };
+use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::displaced::site::{
     CARVE_OUT_VERSION, CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
 };
@@ -182,7 +183,10 @@ fn the_carve_out_is_held_only_until_the_26_bump() {
 
 /// D3: a galaxy built the usual way carries the version's carve-out; one built under the
 /// version's rules explicitly is the same galaxy; and one built under every 26 hold claims, its
-/// layer D keeping each component's `1 − ancient_share` of its population, bit for bit.
+/// layer D keeping each component's `1 − ancient_share` of its population, bit for bit. Plan 08's
+/// displaced classes, also in every 26 hold, take their share of layer D's budget first (P08.T12),
+/// so the field keeps `1 − ancient_share ÷ stay` of what stays, `stay` the class table's budget
+/// stay share.
 #[test]
 fn a_galaxy_carries_the_version_s_carve_out() {
     let explicit = Galaxy::from_params_with_rules(
@@ -199,7 +203,17 @@ fn a_galaxy_carries_the_version_s_carve_out() {
         let kept = claimed()
             .layer_d_kept(id)
             .expect("every 26 hold installs layer D's factors");
-        assert_same_bits(kept, 1.0 - ancient_share(claimed(), component.population()));
+        let stay = claimed()
+            .class_table()
+            .expect("every 26 hold installs the displaced classes")
+            .budget_stay_share(MassBand::D, id);
+        let budget = 1.0 - ancient_share(claimed(), component.population());
+        let composed = if stay > 0.0 {
+            (1.0 - (1.0 - budget) / stay).max(0.0)
+        } else {
+            budget
+        };
+        assert_same_bits(kept, composed);
         assert!(kept > 0.0 && kept <= 1.0, "{id:?}: {kept}");
         assert_eq!(unclaimed().layer_d_kept(id), None);
     }
@@ -279,8 +293,9 @@ fn layer_d_gives_up_its_ancient_type_ia() {
 /// The digest (`f64_digest`) of the claimed records of D2's sample under every 26 hold: each
 /// record's ID (high, low 32 bits), mass and age, and its class (0 for a core collapse, 1 for a
 /// luminous blue variable), in cell and index order. Blessed natively on x86-64; the wasip1 suite
-/// compares it.
-const CLAIMED_DIGEST: u64 = 0x6a23_e5cc_d964_6405;
+/// compares it. Re-pinned by name when plan 08's displaced classes joined every 26 hold
+/// (P08.T12), whose marks redraw layer E's records.
+const CLAIMED_DIGEST: u64 = 0xaffe_e469_e328_58fa;
 
 /// D2 under every 26 hold: in the sample's layer-E cells on the arm ridges, the classes claim
 /// some of the records the grid places without the carve-out, each the core collapses' or the
@@ -721,12 +736,24 @@ fn only_layer_e_is_claimed() {
 const PRE_PIN_CELLS: [[i32; 3]; 3] = [[147, 56, 0], [-68, 141, 0], [87, 168, 0]];
 
 /// The pre-pin's premise: each of its cells holds a record that the core collapses claim under
-/// every 26 hold, so that the bump cannot leave its golden unmoved.
+/// every 26 hold but plan 08's displaced classes, so that the bump cannot leave its golden unmoved.
+/// The classes redraw every layer-E record's marks (P08.T12.c), which moves the pre-pin's cells
+/// at the bump in any case, and under them its first cell holds no claimed death.
 #[test]
 fn the_pre_pin_s_cells_hold_claimed_deaths() {
+    let field_only = |carve_out| {
+        milky_way(GalaxyRules {
+            carve_out,
+            ..field_only_rules()
+        })
+    };
+    let (off, on) = (
+        field_only(CarveOutRules::Unclaimed),
+        field_only(CarveOutRules::Claimed),
+    );
     for cell in PRE_PIN_CELLS {
         let key = CellKey::new(Layer::E, cell).unwrap();
-        let claimed = carved(unclaimed(), claimed(), &[key]);
+        let claimed = carved(&off, &on, &[key]);
         assert!(
             claimed
                 .iter()
@@ -854,8 +881,9 @@ fn the_claimed_cells_are_order_independent() {
 }
 
 /// The digest of [`the_moving_galaxy_s_claims_are_pinned`]'s claimed records, as
-/// [`CLAIMED_DIGEST`]'s. Blessed natively on x86-64; the wasip1 suite compares it.
-const MOVING_CLAIMED_DIGEST: u64 = 0xedb7_59ce_6a73_27b1;
+/// [`CLAIMED_DIGEST`]'s. Blessed natively on x86-64; the wasip1 suite compares it. Re-pinned by
+/// name with [`CLAIMED_DIGEST`] (P08.T12).
+const MOVING_CLAIMED_DIGEST: u64 = 0x8588_9f94_f2b6_7124;
 
 /// The claims of a galaxy with its kinematic tables, as every production galaxy has them: each
 /// site is the epoch position moved along the record's drawn velocity to its death. The pre-pin's

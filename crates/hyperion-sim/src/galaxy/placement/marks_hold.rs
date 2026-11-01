@@ -543,8 +543,10 @@ fn the_kick_loop_over_ten_million_displaced_remnants() {
 }
 
 /// Design note 28's count: placement calls `lifetime` for no record of layers A to C, at most
-/// twice for each accepted layer-E record and never for a thinned one, and for under a tenth of
-/// layer D's records at the Sun-like point.
+/// twice for each accepted layer-E record and never for a candidate the pick thins, and for under
+/// a tenth of layer D's records at the Sun-like point. A candidate dropped after its marks, by the
+/// field's share φ (P09.T2.c), a catalogue class's claim (P09.T35) or the loss cone, made its
+/// marks' calls, at most two as well.
 #[test]
 fn placement_calls_lifetime_twice_per_layer_e_record_at_most_and_for_few_of_layer_d() {
     let galaxy = displaced();
@@ -553,6 +555,7 @@ fn placement_calls_lifetime_twice_per_layer_e_record_at_most_and_for_few_of_laye
         let layer = spec.layer();
         let keys = row(layer, &sunlike(), if layer == Layer::E { 8 } else { 2 });
         let (mut records, mut with_calls, mut most) = (0_u32, 0_u32, 0_u64);
+        let mut dropped = 0_u32;
         for key in keys {
             for index in 0..candidate_count(galaxy, key) {
                 let before = calls();
@@ -566,16 +569,29 @@ fn placement_calls_lifetime_twice_per_layer_e_record_at_most_and_for_few_of_laye
                     }
                     CandidateOutcome::Thinned
                     | CandidateOutcome::ClaimedByCatalogue
-                    | CandidateOutcome::InLossCone => assert_eq!(made, 0),
+                    | CandidateOutcome::InLossCone => {
+                        if pick_of(galaxy, key, index).is_none() {
+                            assert_eq!(made, 0);
+                        } else {
+                            dropped += u32::from(made > 0);
+                            most = most.max(made);
+                        }
+                    }
                 }
             }
+        }
+        if dropped > 0 {
+            println!(
+                "layer {}: {dropped} candidates dropped after their marks called lifetime",
+                layer.letter()
+            );
         }
         println!(
             "layer {}: {with_calls} of {records} records call lifetime, at most {most} each",
             layer.letter()
         );
         match layer {
-            Layer::A | Layer::B | Layer::C => assert_eq!(with_calls, 0),
+            Layer::A | Layer::B | Layer::C => assert_eq!(with_calls + dropped, 0),
             Layer::D => assert!(with_calls * 10 < records, "{with_calls} of {records}"),
             Layer::E => assert!(most <= 2, "{most}"),
             Layer::BrownDwarf | Layer::RoguePlanet => unreachable!("stellar layers only"),

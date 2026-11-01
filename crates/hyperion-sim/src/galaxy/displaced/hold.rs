@@ -44,6 +44,29 @@ pub(crate) fn held() -> &'static Galaxy {
     })
 }
 
+/// Every 26 hold but plan 08's displaced classes: P09.T2.c's field share and P09.T35's carve-out
+/// with the field alone in layers D and E.
+pub(crate) const fn field_only_rules() -> GalaxyRules {
+    GalaxyRules {
+        displaced: DisplacedRules::FieldOnly,
+        ..GalaxyRules::every_26_hold()
+    }
+}
+
+/// The Milky Way fixture under every 26 hold but the displaced classes ([`field_only_rules`]): the
+/// field the classes are installed over, so that against [`displaced`] the classes alone move.
+pub(crate) fn field_only() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params_with_rules(
+            Seed::new(MILKY_WAY_SEED),
+            GalaxyParams::milky_way_like(),
+            field_only_rules(),
+        )
+        .expect("the Milky Way fixture builds")
+    })
+}
+
 /// The Milky Way fixture under every 26 hold: the displaced classes installed. A shared fixture
 /// built under explicit rules (decision-galaxy-25-train §1.5), the same value whichever test reads
 /// it first.
@@ -145,9 +168,11 @@ fn the_version_s_galaxy_holds_no_displaced_class() {
 
 /// `with_rules` refuses another displaced arm, which the build reads.
 #[test]
-#[should_panic(expected = "the build reads the displaced classes' arm")]
+#[should_panic(expected = "the displaced classes' arm is read when a galaxy is built")]
 fn with_rules_refuses_another_displaced_arm() {
-    let _ = held().clone().with_rules(GalaxyRules::every_26_hold());
+    let _ = field_only()
+        .clone()
+        .with_rules(GalaxyRules::every_26_hold());
 }
 
 /// D4: the same seed twice under every 26 hold gives the same galaxy, classes, shares and
@@ -180,16 +205,16 @@ fn the_same_seed_twice_gives_the_same_classes() {
 /// re-pinned by name when the production table lands.
 const DISPLACED_DENSITIES_DIGEST: u64 = 0xdc00_744a_6513_cb6a;
 
-/// D2 under every 26 hold: the classes move layers D and E, and nothing else. At 400 points over
-/// the cube layers A to C and the substellar layers keep their densities bit for bit, and so do
-/// the census's counts of them in three spheres, while every layer-D and layer-E density moves
-/// at some point and every one stays finite and non-negative; the share matrix's population
-/// columns are the field's, bit for bit. Named `pinned` for the WebAssembly suite's filter (D5):
+/// D2 under every 26 hold: the classes move layers D and E, and nothing else. Against the field
+/// under every other 26 hold ([`field_only`]), at 400 points over the cube layers A to C and the
+/// substellar layers keep their densities bit for bit, and so do the census's counts of them in
+/// three spheres, while every layer-D and layer-E density moves at some point and every one stays
+/// finite and non-negative; the share matrix's population columns are the field's, bit for bit. Named `pinned` for the WebAssembly suite's filter (D5):
 /// the new arm adds the class table's quadrature and the forms' normalisations to the build, so
 /// a digest of what it gives is pinned, as blessed natively.
 #[test]
 fn the_displaced_classes_move_layers_d_and_e_and_no_other_pinned() {
-    let (held, displaced) = (held(), displaced());
+    let (held, displaced) = (field_only(), displaced());
     let (old, new) = (held.fields(), displaced.fields());
     let mut moved = [0_u32; 2];
     let mut values = Vec::new();
@@ -401,8 +426,8 @@ fn midpoint_sphere(
 }
 
 /// P08.T12.a: layer E's expected count in a 50 ly sphere at the Sun-like point is the field's, at
-/// its stay shares, plus the displaced classes', each by direct integration, to 1%; and the
-/// displaced part is there.
+/// its stay shares and the field share φ's factors (P09.T2.c), plus the displaced classes', each
+/// by direct integration, to 1%; and the displaced part is there.
 #[test]
 fn layer_e_in_a_50_ly_sphere_at_the_sun_is_field_plus_displaced() {
     let galaxy = displaced();
@@ -413,10 +438,9 @@ fn layer_e_in_a_50_ly_sphere_at_the_sun_is_field_plus_displaced() {
         let mut densities = [0.0; crate::galaxy::fields::MAX_COMPONENTS];
         fields.densities(p, &mut densities);
         fields
-            .components()
-            .iter()
+            .component_ids()
             .zip(densities)
-            .map(|(c, d)| shares.component_share(MassBand::E, c) * d)
+            .map(|(id, d)| galaxy.field_component_share(MassBand::E, id) * d)
             .sum::<f64>()
     });
     let moved = midpoint_sphere(&centre, 50.0, 64, |p| {
@@ -434,7 +458,7 @@ fn layer_e_in_a_50_ly_sphere_at_the_sun_is_field_plus_displaced() {
     )
     .get(Layer::E);
     let held_count = expected_counts(
-        held(),
+        field_only(),
         &sunlike(),
         LightYears::new(50.0),
         SubstellarRequest::None,

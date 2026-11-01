@@ -1,9 +1,9 @@
 //! The tests of P09.T2.c's hold, [`FIELD_SHARE_VERSION`] (decision-galaxy-25-train §1.5 and
-//! §1.6): its tripwire; the version's rules (D3); under every 26 hold, the field's factors and its
-//! young ages against `1 − φ`, the budget's map and fields bit for bit, the field's records a
-//! subset of the budget's with only counts moving (D2, pinned for the WebAssembly suite, D5), the
-//! same seed twice (D4), the expected counts, the catalogue classes' and the class table's field,
-//! and the census C1.
+//! §1.6): its tripwire; the version's rules (D3); under every 26 hold but plan 08's displaced
+//! classes, the field's factors and its young ages against `1 − φ`, the budget's map and fields
+//! bit for bit, the field's records a subset of the budget's with only counts moving (D2, pinned
+//! for the WebAssembly suite, D5), the same seed twice (D4), the expected counts, the catalogue
+//! classes' and the class table's field, and the census C1.
 //!
 //! The bit-identity of the version in force is held by the goldens, the young field's pre-pin
 //! (`placement/young_field`, D1) among them. The bump to 26 deletes the tripwire and the held arm,
@@ -23,6 +23,7 @@ use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules, YOUNG_AGE_LIMIT}
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
+use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::features::shares::phi_young;
 use crate::galaxy::map::{MapSelection, MapSpec, MapView, render_rows};
 use crate::galaxy::placement::{
@@ -48,14 +49,17 @@ fn held() -> &'static Galaxy {
     })
 }
 
-/// The fixture built under every 26 hold: the field gives up φ.
+/// The fixture built under every 26 hold but plan 08's displaced classes: the field gives up φ.
+/// The classes redraw layers D and E from their own marks and add their own columns to the budget
+/// (P08.T12), so φ's tests hold them back; their composition with φ is P08.T12's tests'
+/// (`displaced::hold`, `placement::displaced_hold` and `placement::marks_hold`).
 fn field() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_26_hold(),
+            field_only_rules(),
         )
         .expect("the Milky Way fixture builds")
     })
@@ -156,7 +160,7 @@ fn a_galaxy_carries_the_version_s_field_share() {
     assert_eq!(&explicit, held());
     assert!(explicit.field_share().is_none());
     assert_ne!(field(), held());
-    assert_eq!(field().rules(), GalaxyRules::every_26_hold());
+    assert_eq!(field().rules(), field_only_rules());
     let substellar = field()
         .clone()
         .with_substellar_params(crate::galaxy::substellar::SubstellarParams::generator_default());
@@ -346,13 +350,13 @@ fn the_field_keeps_a_subset_of_the_budget_s_records_pinned() {
     assert_eq!(digest, FIELD_RECORDS_DIGEST, "{digest:#018x}");
 }
 
-/// D4: the same seed twice under every 26 hold gives the same field, and the same records.
+/// D4: the same seed twice under [`field`]'s rules gives the same field, and the same records.
 #[test]
 fn the_same_seed_twice_gives_the_same_field() {
     let again = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        field_only_rules(),
     )
     .expect("the Milky Way fixture builds");
     assert_eq!(&again, field());
@@ -608,12 +612,12 @@ fn kind(record: &SystemRecord) -> (Layer, &'static str) {
     (record.layer(), record.population().name())
 }
 
-/// The census's galaxies: the fixture and two drawn from their seeds, each under every 26 hold
-/// with the field share off and on.
+/// The census's galaxies: the fixture and two drawn from their seeds, each under [`field`]'s
+/// rules with the field share off and on.
 fn census_galaxies() -> Vec<(String, Galaxy, Galaxy)> {
     let off = GalaxyRules {
         field_share: FieldShareRules::None,
-        ..GalaxyRules::every_26_hold()
+        ..field_only_rules()
     };
     let fixture = GalaxyParams::milky_way_like();
     let budget = Galaxy::from_params_with_rules(Seed::new(SEED), fixture, off).unwrap();
@@ -625,8 +629,7 @@ fn census_galaxies() -> Vec<(String, Galaxy, Galaxy)> {
         );
         let budget = Galaxy::from_params_with_rules(Seed::new(seed), params.clone(), off).unwrap();
         let kept =
-            Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_26_hold())
-                .unwrap();
+            Galaxy::from_params_with_rules(Seed::new(seed), params, field_only_rules()).unwrap();
         galaxies.push((format!("seed {seed:#x}"), budget, kept));
     }
     galaxies
