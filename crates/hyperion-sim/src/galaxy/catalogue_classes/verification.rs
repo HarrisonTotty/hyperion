@@ -8,12 +8,15 @@
 //! - [`budgets`]: field, members and catalogue systems against each population's budget in twelve
 //!   test volumes, the centre's left out.
 //! - [`shells`]: the distinct shells of every source at the epoch, over seeds, by phase and size.
+//! - [`recent_in_range`]: every recent entry of the features' and the centre's lists (P09.T36)
+//!   inside a range query's sphere returned once by the sources the server registers (P09.T37).
 //!
 //! The per-class tests stay where they are (`core_collapse`, `lbv`, `type_ia`, plan 11's binary
 //! classes, the features' and the centre's lists); these are the shared, sampled ones.
 
 mod budgets;
 mod complementarity;
+mod recent_in_range;
 mod shells;
 
 use crate::Seed;
