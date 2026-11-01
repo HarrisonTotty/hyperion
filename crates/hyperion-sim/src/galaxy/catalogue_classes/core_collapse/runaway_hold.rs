@@ -157,30 +157,24 @@ fn the_runaway_deaths_are_held_only_until_the_27_bump() {
 }
 
 /// Under the held arm the class's process and cells are every 26 hold's, bit for bit: the field
-/// alone turns the new arm on. P15.T10.b's fitted share rows, another hold at 27, put some of the
-/// accreting white dwarfs' and X-ray binaries' hosts in layer E, which moves the young field's
-/// band-E shares the class reads, so they are set back with it (land-pod, 2026-11-01: the test
-/// failed so on hold/after-25 at 24 too).
+/// alone turns the new arm on. Two other 27 holds move the young components' shares, so they are
+/// held back too: plan 15's fitted binary tables (P15.T10.b), through the features' share φ, and
+/// the hypervelocity survivors' weight (P09.T34.b), through layer D's. The survivors' weight is
+/// read where the galaxy is built, so the held arm's galaxy is built under its rules.
 #[test]
 fn the_held_arm_is_every_26_hold_s() {
-    let every_26 = Galaxy::from_params_with_rules(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
-    )
-    .expect("the Milky Way fixture's gas is mostly neutral")
-    .with_full_potential();
-    let held = Galaxy::from_params_with_rules(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules {
-            runaway_deaths: RunawayDeathsRules::FieldOnly,
-            binary_tables: GalaxyRules::every_26_hold().binary_tables,
-            ..GalaxyRules::every_27_hold()
-        },
-    )
-    .expect("the Milky Way fixture's gas is mostly neutral")
-    .with_full_potential();
+    let built = |rules| {
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+            .with_full_potential()
+    };
+    let every_26 = built(GalaxyRules::every_26_hold());
+    let held = built(GalaxyRules {
+        runaway_deaths: RunawayDeathsRules::FieldOnly,
+        binary_tables: crate::galaxy::catalogue_classes::binary::BinaryTableRules::Scratch,
+        hypervelocity: crate::galaxy::displaced::survivors::HypervelocityRules::Unweighted,
+        ..GalaxyRules::every_27_hold()
+    });
     let process = CoreCollapseProcess::new(&every_26);
     assert_eq!(process, CoreCollapseProcess::new(&held));
     assert_eq!(process.ejected_terms(), []);
