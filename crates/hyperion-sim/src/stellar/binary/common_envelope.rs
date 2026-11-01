@@ -1036,7 +1036,8 @@ impl Engine {
     /// √(`τ_KH` `τ_dyn`), of which a main-sequence accretor keeps what its thermal timescale allows
     /// (equation 64) and a giant all, or, under [`MergerMassRules::Pair`] (P11.T4.d, from 26), a
     /// main-sequence accretor both stars' masses as the collision of two main-sequence stars does
-    /// (section 2.7.3); a white dwarf's, neutron star's or black hole's coalesces with its
+    /// (section 2.7.3) and a Hertzsprung-gap accretor the whole donor, as BSE's code gives any
+    /// accretor of k 2–6; a white dwarf's, neutron star's or black hole's coalesces with its
     /// companion as a collision does.
     pub(super) fn merge_dynamically(&mut self, d: usize) {
         let o = 1 - d;
@@ -1068,9 +1069,17 @@ impl Engine {
                     }
                 }
             } else {
+                // From 26 a Hertzsprung-gap accretor takes the whole donor, as BSE's own dynamical
+                // branch gives an accretor of k 2–6 (`evolv2.f`: "Add all the material to the
+                // giant's envelope", `dm2 = dm1`). Either arm's star sits at the accretor's place
+                // in the gap on its own mass's track, whose core it takes.
+                let gap_total = match self.ctx.rules().merger_mass {
+                    MergerMassRules::ThermalLimit => total,
+                    MergerMassRules::Pair => mo + md,
+                };
                 self.new_star(
                     Kind::HertzsprungGap,
-                    total,
+                    gap_total,
                     so.state.core_mass().value(),
                     0.0,
                     so.state.phase_fraction(),

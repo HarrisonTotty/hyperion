@@ -7053,13 +7053,22 @@ galaxy_sweeps`.
   the accretor's mass (0.454 + 0.138 → 0.1375 M☉; 719 of 803 main-sequence mergers among 3,000
   engine mergers under 99% of the pair). From `MERGER_MASS_VERSION` = 26
   (`stellar/binary/merger_mass.rs`, `StellarRules::merger_mass`) it takes the collision rule, T4.d's
-  table 2: M_d + M_a at eq. 80's age of both stars, no mass lost (lean, 2026-10-31). The science
-  check recalls that BSE's own dynamical branch keeps only the thermal share too (not read at
-  source), so the new arm is a departure from BSE. A Hertzsprung-gap accretor's branch is
-  unchanged. The brief's gate refuses the pair-light and reach tables under the new arm. Movers:
-  `stellar/binary_timelines`, `sky/census_near_sun`, `sky/band_face_row`; the bump re-blesses them
-  and refits those tables.
-  - _Acceptance:_ `cargo test -p hyperion-sim stellar::rules::merger_mass_hold`; slow, its two
+  table 2: M_d + M_a at eq. 80's age of both stars, no mass lost (lean, 2026-10-31). BSE's own
+  dynamical branch (`evolv2.f`, read in COSMIC v3.4.0 by research-leans-16) keeps only the thermal
+  share for a main-sequence accretor; its `mix.f` merges two main-sequence stars with M₁ + M₂, and
+  COSMIC moved that accretor to full accretion on 2023-07-20. The same branch gives an accretor of
+  k 2–6 the whole donor, so from 26 the Hertzsprung-gap accretor does too (amendment,
+  2026-11-01): `mo + md` through the same `new_star`, which places the star at the accretor's
+  place in the gap on its new mass's track and takes that track's core (it reads no core for a
+  gap star); 1.3 + 0.6 M☉ leaves 1.29981 M☉ held and 1.89978 under the arm. No grid pair reaches
+  that branch (none of 6,000 engine mergers), so its pin is a pair built for it and run through
+  the engine's own dynamical merger (`class_merger::secondary_dynamical_merger`, test-only). The
+  brief's gate refuses the pair-light and reach tables under the new arm. Movers:
+  `stellar/binary_timelines`, `sky/census_near_sun`, `sky/band_face_row`, all the main-sequence
+  accretor's (the gap accretor's arm, forced on alone at 24, moves no test or slow census); the
+  bump re-blesses them and refits those tables.
+  - _Acceptance:_ `cargo test -p hyperion-sim stellar::rules::merger_mass_hold` (with the pinned
+    gap accretor, the held figure and the pair less its stars' winds under the arm); slow, its two
     ignored tests (the same 3,000 records re-run under the arm alone and under every 26 hold, each
     main-sequence merger keeping the pair less the product's own wind, at least 0.99893).
 - **P11.T8.c's channels, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13

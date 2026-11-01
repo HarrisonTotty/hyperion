@@ -3,23 +3,28 @@
 //!
 //! A low-mass (BSE's k = 0) main-sequence donor over its critical mass ratio transfers
 //! dynamically and the pair merges (`Engine::merge_dynamically`, BSE section 2.6.4). As built, a
-//! main-sequence accretor keeps only what its thermal timescale allows of the donor,
-//! √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it, a small fraction, and the rest leaves the pair, so the
-//! product is the accretor's mass: a 0.454 + 0.138 M☉ pair leaves 0.1375 M☉. That is BSE's own
-//! dynamical branch, which also ends in a single star (as recalled of their code; not read at
-//! source). P11.T4.d's rule as main reads it (the brief of 2026-10-31) is the collision matrix's
-//! instead (their table 2, section 2.7.3), whose two main-sequence stars merge with their masses,
-//! as the engine's own collisions and contacts already merge them (`Engine::main_sequence_merger`):
-//! a departure from BSE's dynamical branch (lean, 2026-10-31). From 26 the dynamical merger takes
-//! that rule: a main-sequence star of M₁ + M₂ at the fractional age 0.1 Σ Mᵢ τᵢ ÷ M (their
-//! equation 80, not read at source) of both stars, with no mass lost.
+//! main-sequence or Hertzsprung-gap accretor keeps only what its thermal timescale allows of the
+//! donor, √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it, a small fraction, and the rest leaves the pair, so
+//! the product is the accretor's mass: a 0.454 + 0.138 M☉ pair leaves 0.1375 M☉.
+//!
+//! BSE's own code, read as COSMIC carries it (research-leans-16; v3.4.0's `evolv2.f`, the original
+//! branch), restricts a main-sequence accretor so ("Restrict accretion to thermal timescale of
+//! secondary", `dm2 = taum/tkh(j2)*dm1`), but gives an accretor of k 2–6, the gap among them, the
+//! whole donor ("Add all the material to the giant's envelope", `dm2 = dm1`). Its collision rule,
+//! `mix.f`, merges two main-sequence stars with M₁ + M₂, and COSMIC changed the dynamical branch's
+//! main-sequence accretor to full accretion on 2023-07-20 ("This will lead to a merger of the two
+//! MS stars"). P11.T4.d's rule as main reads it (the brief of 2026-10-31) is that collision rule.
+//! From 26 the dynamical merger takes it: a main-sequence accretor and the donor make a
+//! main-sequence star of M₁ + M₂ at the fractional age 0.1 Σ Mᵢ τᵢ ÷ M (their equation 80) of
+//! both stars, and a gap accretor takes the whole donor, at its place in the gap on its new mass's
+//! track, each with no mass lost.
 
 use crate::GeneratorVersion;
 use crate::stellar::rules::StellarRules;
 
 /// The generator version whose stellar rules merge a dynamically transferring main-sequence pair
-/// with both stars' masses (P11.T4.d's fix): `Engine::merge_dynamically`'s main-sequence accretor
-/// takes [`MergerMassRules::Pair`].
+/// with both stars' masses (P11.T4.d's fix): `Engine::merge_dynamically`'s main-sequence and
+/// Hertzsprung-gap accretors take [`MergerMassRules::Pair`].
 ///
 /// Below it every pair takes the held arm, [`MergerMassRules::ThermalLimit`], the code of version
 /// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
@@ -30,16 +35,19 @@ use crate::stellar::rules::StellarRules;
 /// tables, which the engine's runs fit.
 pub(crate) const MERGER_MASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
-/// What a dynamically transferring pair's main-sequence merger keeps (the stellar rules'
-/// `merger_mass` field, the hold of [`MERGER_MASS_VERSION`]).
+/// What a dynamically transferring pair's merger keeps when its accretor is on the main sequence
+/// or in the Hertzsprung gap (the stellar rules' `merger_mass` field, the hold of
+/// [`MERGER_MASS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MergerMassRules {
     /// Version 25's and before: the accretor and what its thermal timescale allows of the donor,
-    /// ΔM, at a tenth of the accretor's fractional age, 0.1 `M_a` `τ_a` ÷ (`M_a` + ΔM) (equation 80
-    /// with the donor's term dropped; BSE's dynamical branch, section 2.6.4, places it otherwise).
+    /// ΔM, a main-sequence accretor at a tenth of its fractional age, 0.1 `M_a` `τ_a` ÷ (`M_a` +
+    /// ΔM) (equation 80 with the donor's term dropped; BSE's dynamical branch, section 2.6.4,
+    /// places it otherwise), a gap accretor at its own place in the gap.
     ThermalLimit,
     /// Version 26's: both stars' masses, at both stars' fractional age (BSE's collision of two
-    /// main-sequence stars, section 2.7.3 and equation 80).
+    /// main-sequence stars, `mix.f`, section 2.7.3 and equation 80, and COSMIC's dynamical branch
+    /// since 2023-07-20); a gap accretor the whole donor (BSE's `evolv2.f` for k 2–6).
     Pair,
 }
 

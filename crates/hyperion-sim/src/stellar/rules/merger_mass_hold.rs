@@ -8,6 +8,12 @@
 //! - Under the arm a pinned grid system moves: its pair of 0.454 and 0.138 M☉ merged dynamically
 //!   and kept the accretor's mass, and keeps both; and a cell's systems whose pairs merge in no
 //!   such way move under neither arm. The same seed twice under the arm gives the same system.
+//! - Under the arm a pinned Hertzsprung-gap accretor (1.3 M☉, beside a 0.6 M☉ donor) takes the
+//!   whole donor, where the held arm keeps the thermal share: a pair built for it and run through
+//!   the engine's own dynamical merger, since the grid's pairs seldom come to one (none of 6,000
+//!   engine mergers of the sampler test's streams, 401 of them with a star in the gap, as
+//!   measured 2026-11-01; a low-mass donor fills its lobe beside a heavier gap star only once
+//!   that star overfills its own).
 //! - Slow: over the same 3,000 engine mergers the stellar merger class's sampler test draws
 //!   (`testing::brute_force_merger_members_in`), every main-sequence merger keeps the pair's mass
 //!   under the arm, and under every 26 hold; and the class's sampler against those mergers under
@@ -19,7 +25,8 @@
 //! layer-B white dwarf too cool for the photometry tables, the product of a pair that kept its
 //! mass) and `sky/band_face_row` (two more stars listed within 100 ly). No census of the binaries
 //! moves out of its bounds (`binary_system`, `binary_carve`, `binary_classes`, the pair-light and
-//! reach tables' bounds), and no golden of the catalogue classes moves.
+//! reach tables' bounds), and no golden of the catalogue classes moves. The gap accretor's arm,
+//! turned on alone at the version, moves no test and no slow census (2026-11-01).
 
 use std::sync::OnceLock;
 
@@ -30,14 +37,19 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{self, CellKey, SystemRecord, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId};
+use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::Seed;
-use crate::stellar::Phase;
-use crate::stellar::binary::CarvedClass;
+use crate::stellar::binary::class_merger::secondary_dynamical_merger;
 use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_in};
+use crate::stellar::binary::{BinaryInput, CarvedClass};
+use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
+use crate::stellar::sse::Track;
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
+use crate::stellar::{Composition, Phase};
 use crate::time::{ClockWindow, UniverseTime};
-use crate::units::Years;
+use crate::units::consts::SOLAR_RADIUS_M;
+use crate::units::{GravitationalParameter, Metres, Radians, SolarMasses, Years};
 
 /// The seed of the Milky Way fixture the tests share, P11.T8.c's slow sampler test's.
 const SEED: u64 = 0x0b17_08c0_0000_0002;
@@ -191,6 +203,96 @@ fn the_pinned_system_s_merger_keeps_both_stars_under_the_arm() {
     };
     assert!((now(&after.0) / total - 1.0).abs() < 1e-6);
     assert!(now(&before.0) < 0.95 * total);
+}
+
+/// The pinned gap-accretor pair: a 0.6 M☉ low-mass main-sequence secondary at its lobe beside a
+/// 1.3 M☉ primary halfway through the Hertzsprung gap, solar, at the median draws.
+const GAP_PAIR: [f64; 2] = [1.3, 0.6];
+
+/// The pinned gap-accretor merger's product under the held arm and under the arm, M☉, as measured
+/// (2026-11-01): the accretor's 1.29978 M☉ at the merger and 2.6 × 10⁻⁵ M☉ of the donor, against
+/// both stars' 1.89978 M☉ (the pair less the 2.2 × 10⁻⁴ M☉ its stars' winds took before).
+const GAP_PRODUCT: [f64; 2] = [1.299_806_206_392_41, 1.899_780_424_594_525_6];
+
+/// The gap-accretor pair of [`GAP_PAIR`] under `rules`, the secondary filling its lobe on a
+/// circular orbit; and its age, years.
+fn gap_pair(rules: StellarRules) -> (BinaryInput, Years) {
+    let [m1, m2] = GAP_PAIR;
+    let comp = Composition::SOLAR;
+    let draws = [StarDraws::median(), StarDraws::median()];
+    let full = Track::to_age(SolarMasses::new(m1), &comp, &draws[0], Years::new(2.0e10));
+    let age = full
+        .age_in_phase(Phase::HertzsprungGap, 0.5)
+        .expect("the primary's track passes the gap");
+    let donor = Track::to_age(SolarMasses::new(m2), &comp, &draws[1], Years::new(age))
+        .state_at(Years::new(age));
+    let lobe = roche_lobe_radius(m2 / m1, Metres::new(1.0)).value();
+    let a = Metres::new(donor.radius().value() * SOLAR_RADIUS_M / lobe);
+    let orbit = KeplerElements::from_semi_major_axis(
+        a,
+        GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+        Eccentricity::CIRCULAR,
+        Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).expect("zero angles"),
+        Radians::ZERO,
+    )
+    .expect("a bound orbit");
+    let input = BinaryInput::new(
+        SolarMasses::new(m1),
+        SolarMasses::new(m2),
+        comp,
+        orbit,
+        draws,
+        Years::new(age),
+    )
+    .expect("a valid pair")
+    .with_rules(rules);
+    (input, Years::new(age))
+}
+
+/// A Hertzsprung-gap accretor's dynamical merger with a low-mass main-sequence donor (BSE's
+/// `evolv2.f`, k 2–6, from 26): under the held arm the gap star keeps only the thermal share of
+/// the donor, the old figure; under the arm alone and under every 26 hold it takes the whole donor,
+/// the pair less the product's own wind (none at the merger). Under each it stays in the gap at
+/// the accretor's place there, on its own mass's track.
+#[test]
+fn the_gap_accretor_takes_the_whole_donor_under_the_arm() {
+    let mut products = Vec::new();
+    for rules in [version(), pair_rules(), StellarRules::every_26_hold()] {
+        let (input, age) = gap_pair(rules);
+        let until = Years::new(age.value() + 1.0e3);
+        let product = secondary_dynamical_merger(&input, age, until);
+        println!(
+            "{:?}: {:?} {:.17} M_sun at {:.6} of the gap",
+            rules.merger_mass,
+            product.phase(),
+            product.mass().value(),
+            product.phase_fraction()
+        );
+        assert_eq!(product.phase(), Phase::HertzsprungGap);
+        assert!(
+            (product.phase_fraction() - 0.5).abs() < 1e-3,
+            "{rules:?}: {}",
+            product.phase_fraction()
+        );
+        products.push(product.mass().value());
+    }
+    let total = GAP_PAIR[0] + GAP_PAIR[1];
+    let held = products[0];
+    assert!(held < 0.95 * total, "{held}");
+    assert!((held / GAP_PAIR[0] - 1.0).abs() < 1e-3, "{held}");
+    for arm in &products[1..] {
+        assert!(
+            *arm >= (1.0 - MERGER_MASS_TOLERANCE) * total,
+            "{arm} against {total}"
+        );
+        assert!(*arm <= total, "{arm} against {total}");
+    }
+    for (m, pinned) in products
+        .iter()
+        .zip([GAP_PRODUCT[0], GAP_PRODUCT[1], GAP_PRODUCT[1]])
+    {
+        assert!((m - pinned).abs() < 1e-12, "{products:?}");
+    }
 }
 
 /// The same seed twice under the arm gives the same system.

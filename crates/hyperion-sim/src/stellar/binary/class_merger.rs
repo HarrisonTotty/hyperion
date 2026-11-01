@@ -109,6 +109,22 @@ fn engine_at(input: &BinaryInput, age: Years, until: Years) -> (Arc<Context>, En
     (ctx, engine)
 }
 
+/// The star `input`'s pair leaves if, at `age`, its secondary transfers dynamically and the pair
+/// merges (`Engine::merge_dynamically`), the engine built as [`onset_merger`] builds it, each star
+/// on its own track to `until` (years): the tests' reach of a merger the grid's pairs seldom come
+/// to, a low-mass main-sequence donor onto a Hertzsprung-gap accretor.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn secondary_dynamical_merger(
+    input: &BinaryInput,
+    age: Years,
+    until: Years,
+) -> StarState {
+    let (ctx, mut engine) = engine_at(input, age, until);
+    engine.merge_dynamically(1);
+    engine.members[0].state_at(&ctx, 0, age.value())
+}
+
 /// The kinds of the segments the engine records at the onset of transfer from `input`'s primary
 /// at `age`, and the kind it is in after: for an evolved donor the class keeps, a detached
 /// history, a common envelope, then the merged star.
