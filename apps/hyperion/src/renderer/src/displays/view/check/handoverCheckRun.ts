@@ -58,6 +58,7 @@ import type { NormalMapTexels } from "../../../view/bodies/discNormals";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
 import { PHASE_SCENE_NAME } from "../../../view/scenes/phaseScene";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
+import { SERVER_SCENE_NAME } from "../viewRun";
 import {
   approachDurationS,
   approachPart,
@@ -123,6 +124,12 @@ export interface HandoverCheckTiming {
   readonly readBacksInFlight: number;
   /** How long a look may run past its script's length before it is given up, ms. */
   readonly overrunMs: number;
+  /**
+   * What the overrun counts from: `"start"`, the look's start plus its script's length, on the wall
+   * clock; or `"stall"`, the script's last step, so that a look is given up only once its script has
+   * stood still for the overrun (the software mode's, whose frames carry the script slowly).
+   */
+  readonly overrunFrom: "start" | "stall";
 }
 
 /**
@@ -136,6 +143,7 @@ export const HANDOVER_CHECK_TIMING: HandoverCheckTiming = {
   settleMs: 3_000,
   readBacksInFlight: 3,
   overrunMs: 60_000,
+  overrunFrom: "start",
 };
 
 /**
@@ -156,6 +164,68 @@ export const SERVED_HANDOVER_CHECK_TIMING: HandoverCheckTiming = {
  */
 export function handoverCheckTimingFor(served: boolean): HandoverCheckTiming {
   return served ? SERVED_HANDOVER_CHECK_TIMING : HANDOVER_CHECK_TIMING;
+}
+
+/**
+ * The kept scene the check chooses before its first photorealistic press, or `null` to stay where
+ * `VIEW` opened, `pressed` telling which scene is chosen.
+ *
+ * @remarks
+ * A served launch links to the server, so that `VIEW` opens on `SERVER` with no universe open, whose
+ * primary never turns photorealistic, and the check would wait there to its end (R10.T15.b.2's
+ * runs); it goes to `PHASE TEST` first. A fixture's launch has no link and opens on a kept scene.
+ */
+export function sceneBeforeTheLooks(pressed: (scene: string) => boolean): string | null {
+  return pressed(SERVER_SCENE_NAME) ? PHASE_SCENE_NAME : null;
+}
+
+/**
+ * When a look is given up: once the wall clock passes its start plus its script's length and the
+ * overrun, or, where the overrun counts from the script's last step
+ * ({@link HandoverCheckTiming.overrunFrom}), once its script has stood still for the overrun.
+ *
+ * @remarks
+ * A kept scene's script steps at most `MAX_FREE_STEP_S` (0.25 s) a frame, so on SwiftShader, whose
+ * served frames at the high setting took about 2.4 s each in a pod, a look's script runs at about a
+ * tenth of the wall clock's pace, and a look of some 270 s takes about 45 minutes (R10.T15.b.2's
+ * runs). The software mode therefore counts from the last step, and the main process's watchdog
+ * bounds the whole run; a GPU launch keeps the wall clock's bound.
+ */
+export class LookDeadline {
+  readonly #timing: Pick<HandoverCheckTiming, "overrunMs" | "overrunFrom">;
+  readonly #endMs: number;
+  /** The script's time at its last step, s, or `null` before the first reading. */
+  #lastS: number | null = null;
+  /** When the script last stepped, ms: the look's start until it steps. */
+  #lastStepMs: number;
+
+  /**
+   * @param startMs - When the look starts, ms on the page's clock.
+   * @param durationS - Its script's length, s.
+   */
+  constructor(
+    timing: Pick<HandoverCheckTiming, "overrunMs" | "overrunFrom">,
+    startMs: number,
+    durationS: number,
+  ) {
+    this.#timing = timing;
+    this.#endMs = startMs + durationS * 1000 + timing.overrunMs;
+    this.#lastStepMs = startMs;
+  }
+
+  /** Whether the look is given up at `nowMs`, ms, its script then at `scriptS`, s. */
+  passed(nowMs: number, scriptS: number): boolean {
+    if (this.#timing.overrunFrom === "start") {
+      return nowMs > this.#endMs;
+    }
+    if (this.#lastS === null) {
+      this.#lastS = scriptS;
+    } else if (scriptS > this.#lastS) {
+      this.#lastS = scriptS;
+      this.#lastStepMs = nowMs;
+    }
+    return nowMs > this.#lastStepMs + this.#timing.overrunMs;
+  }
 }
 
 /** What the hand-over check drives and reads. */
@@ -506,7 +576,7 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
       { label: `${look.name}-back`, atS: durationS - 1.5 },
     ];
     const taken = new Set<string>();
-    const deadlineMs = deps.nowMs() + durationS * 1000 + timing.overrunMs;
+    const deadline = new LookDeadline(timing, deps.nowMs(), durationS);
     const lock = new LockWatch(exposure.lockedReading);
     const play = async (): Promise<void> => {
       stopped();
@@ -520,7 +590,7 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
       if (tS >= durationS - 0.5) {
         return;
       }
-      if (deps.nowMs() > deadlineMs) {
+      if (deadline.passed(deps.nowMs(), tS)) {
         failures.push(`the look's script stood at ${tS.toFixed(1)} s at its deadline`);
         return;
       }
@@ -606,6 +676,12 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
       "VIEW did not show its primary view",
       () => driver.controls.styleOf(PRIMARY_NAME) !== null,
     );
+    const opening = sceneBeforeTheLooks(
+      (name) => driver.controls.sceneButton(name)?.getAttribute("aria-pressed") === "true",
+    );
+    if (opening !== null) {
+      await driver.chooseScene(opening);
+    }
     await driver.configure({ primary: "photorealistic", instruments: [null, null] });
     await until(
       "VIEW did not size its primary and its scene target",

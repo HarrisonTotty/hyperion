@@ -74,7 +74,8 @@ export function terrainCheckTimingOf(
 
 /**
  * The hand-over check's timing for a launch: its waits, the survey's among them, and a look's
- * overrun stretched in the software mode.
+ * overrun stretched in the software mode, the overrun counted from the look's script's last step
+ * rather than its start (`LookDeadline`), since SwiftShader's frames carry the script slowly.
  */
 export function handoverCheckTimingOf(
   timing: HandoverCheckTiming,
@@ -86,6 +87,7 @@ export function handoverCheckTimingOf(
         waitMs: stretched(timing.waitMs),
         surveyWaitMs: stretched(timing.surveyWaitMs),
         overrunMs: stretched(timing.overrunMs),
+        overrunFrom: "stall",
       }
     : timing;
 }

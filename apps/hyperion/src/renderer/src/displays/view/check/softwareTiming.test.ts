@@ -51,13 +51,15 @@ describe("the software mode's timings (R01.T16)", () => {
     }
   });
 
-  it("stretch the hand-over check's waits and a look's overrun", () => {
+  it("stretch the hand-over check's waits and a look's overrun, counted from its script's last step", () => {
     expect(handoverCheckTimingOf(HANDOVER_CHECK_TIMING, "software")).toEqual({
       ...HANDOVER_CHECK_TIMING,
       waitMs: 300_000,
       surveyWaitMs: 300_000,
       overrunMs: 300_000,
+      overrunFrom: "stall",
     });
+    expect(HANDOVER_CHECK_TIMING.overrunFrom).toBe("start");
   });
 
   it("stretch a served world's survey wait of 5 minutes to 25 (R10.T15.b)", () => {

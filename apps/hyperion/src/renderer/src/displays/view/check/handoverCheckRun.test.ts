@@ -5,9 +5,11 @@ import {
   HANDOVER_CHECK_TIMING,
   type HandoverCheckEnding,
   handoverCheckTimingFor,
+  LookDeadline,
   parseExposureReading,
   recordHandoverCheck,
   regimeOf,
+  sceneBeforeTheLooks,
   SERVED_HANDOVER_CHECK_TIMING,
 } from "./handoverCheckRun";
 
@@ -23,6 +25,42 @@ describe("a frame's regime", () => {
     [["sky:stars"], "none"],
   ] as const)("of the materials %j is %s", (materials, regime) => {
     expect(regimeOf(materials)).toBe(regime);
+  });
+});
+
+describe("the scene the check opens on (R10.T15.b.2)", () => {
+  it("leaves SERVER, where a served launch opens with no universe, for PHASE TEST", () => {
+    expect(sceneBeforeTheLooks((scene) => scene === "SERVER")).toBe("PHASE TEST");
+  });
+
+  it("stays on a kept scene, where a fixture's launch opens", () => {
+    expect(sceneBeforeTheLooks((scene) => scene === "PRECISION TEST")).toBeNull();
+    expect(sceneBeforeTheLooks(() => false)).toBeNull();
+  });
+});
+
+describe("a look's deadline (R10.T15.b.2)", () => {
+  it("passes on the wall clock at the script's length and the overrun, however the script runs", () => {
+    const deadline = new LookDeadline({ overrunMs: 60_000, overrunFrom: "start" }, 1_000, 100);
+    expect(deadline.passed(161_000, 99)).toBe(false);
+    expect(deadline.passed(161_001, 99.5)).toBe(true);
+  });
+
+  it("passes in the software mode only once the script has stood still for the overrun", () => {
+    const deadline = new LookDeadline({ overrunMs: 300_000, overrunFrom: "stall" }, 0, 270);
+    // SwiftShader's frames carry the script at a tenth of the wall clock's pace: still running.
+    for (let n = 1; n <= 100; n += 1) {
+      expect(deadline.passed(n * 25_000, n * 2.5)).toBe(false);
+    }
+    // Then the script stands at 250 s: given up 300 s after its last step.
+    expect(deadline.passed(2_500_000 + 300_000, 250)).toBe(false);
+    expect(deadline.passed(2_500_000 + 300_001, 250)).toBe(true);
+  });
+
+  it("gives a software look whose script never starts the overrun from its start", () => {
+    const deadline = new LookDeadline({ overrunMs: 300_000, overrunFrom: "stall" }, 1_000, 270);
+    expect(deadline.passed(301_000, 0)).toBe(false);
+    expect(deadline.passed(301_001, 0)).toBe(true);
   });
 });
 
