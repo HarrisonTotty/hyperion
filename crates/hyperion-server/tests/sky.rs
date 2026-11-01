@@ -46,7 +46,7 @@ use hyperion_protocol::{
 };
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
-use hyperion_server::{ServerConfigBuilder, ServerStats, SkyService};
+use hyperion_server::{KeptSkies, ServerConfigBuilder, ServerStats, SkyService};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
@@ -139,12 +139,14 @@ async fn sky_server_with(caps: SkyCaps, workers: usize) -> (TestServer, TempDir)
 const SIZED_SKY_CACHE_BYTES: usize = 1_280 << 20;
 
 /// A server as [`sky_server`]'s, its caps forced to `radius_ly`, with the sky's cell cache at
-/// [`SIZED_SKY_CACHE_BYTES`] rather than off, and its data directory.
+/// [`SIZED_SKY_CACHE_BYTES`] rather than off, and its data directory. It keeps no sky's final
+/// reply, so that a sky asked again reads the cells again (R06.T11.l).
 async fn cached_sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
     let caps = SkyCaps::forced(LightYears::new(radius_ly)).expect("a small forced cap");
     let data_dir = tempfile::tempdir().expect("a temporary directory");
     let config = sky_config(data_dir.path(), caps, workers)
         .sky_cache_bytes(SIZED_SKY_CACHE_BYTES)
+        .kept_skies(KeptSkies::Off)
         .build();
     (TestServer::start_with(config).await, data_dir)
 }
@@ -808,6 +810,67 @@ async fn a_skys_manifest_matches_what_was_sent() {
     assert!(moved.response.listed > 0, "the moved sky lists stars");
     assert_stars_are_the_sims(&moved, &sim_census(&query), "20 ly along x");
 
+    client.close().await;
+    server.stop().await;
+}
+
+/// A sky asked again exactly as one finished is answered with its kept final reply alone, the same
+/// response and payload, and the pool runs only the job that serialises that reply's frame: no
+/// census job and no other of the sky's (R06.T11.l). A sky one field away is computed afresh, and
+/// kept beside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_repeated_identical_sky_is_its_kept_reply_and_queues_no_census_job() {
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    let first = served(&mut client, sky(&universe)).await;
+    let before = server.stats();
+    assert_eq!(
+        before.sky_replies().entries(),
+        1,
+        "{:?}",
+        before.sky_replies()
+    );
+
+    let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    let again = replies_to(&mut client, id).await;
+    let after = server.stats();
+    assert_eq!(again.len(), 1, "the kept final reply alone");
+    assert_eq!(again[0].response, first.response);
+    assert_eq!(again[0].payload(), first.payload());
+    let (pool, kept) = (after.pool(), after.sky_replies());
+    assert_eq!(
+        (
+            pool.completed(),
+            pool.queued_bulk(),
+            pool.queued_background(),
+            pool.running()
+        ),
+        (before.pool().completed() + 1, 0, 0, 0),
+        "the reply's frame alone, serialised on the pool: {:?}, then {pool:?}",
+        before.pool()
+    );
+    assert_eq!(
+        (kept.hits(), kept.entries()),
+        (before.sky_replies().hits() + 1, 1),
+        "{kept:?}"
+    );
+
+    let fewer = served(
+        &mut client,
+        SkyRequest {
+            n_max: Some(10),
+            ..sky(&universe)
+        },
+    )
+    .await;
+    let computed = server.stats();
+    assert!(
+        computed.pool().completed() > after.pool().completed() + 1,
+        "computed afresh: {pool:?}, then {:?}",
+        computed.pool()
+    );
+    assert!(fewer.response.listed <= 10, "{}", fewer.response.listed);
+    assert_eq!(computed.sky_replies().entries(), 2);
     client.close().await;
     server.stop().await;
 }

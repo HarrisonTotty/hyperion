@@ -120,6 +120,12 @@ impl BulkPayload {
         }
     }
 
+    /// The payload's length, bytes.
+    #[must_use]
+    pub(crate) fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
     /// The payload's bytes, whole, for a test to decode.
     #[cfg(test)]
     #[must_use]

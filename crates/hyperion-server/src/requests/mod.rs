@@ -29,6 +29,8 @@ mod surface;
 mod system;
 mod universe;
 
+pub(crate) use sky::SkyReplyCache;
+
 pub(crate) use self::system::bodies_of;
 pub(crate) use self::universe::openable_universe;
 

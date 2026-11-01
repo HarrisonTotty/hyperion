@@ -29,6 +29,7 @@ pub struct ServerStats {
     briefs: LruCounters,
     sky_cells: SkyCellCounters,
     sky_tables: SkyTablesCounters,
+    sky_replies: LruCounters,
     surface: SurfaceCounters,
     extinction_maps: LruCounters,
     sightlines: LruCounters,
@@ -57,6 +58,7 @@ impl ServerStats {
             briefs: state.briefs.counters(),
             sky_cells: state.sky_cells.counters(),
             sky_tables: state.sky_tables.counters(),
+            sky_replies: state.sky_replies.counters(),
             surface: state.surface.counters(),
             extinction_maps: state.extinction_maps.counters(),
             sightlines: state.sightlines.counters(),
@@ -149,6 +151,14 @@ impl ServerStats {
     #[must_use]
     pub fn sky_tables(&self) -> SkyTablesCounters {
         self.sky_tables
+    }
+
+    /// The kept skies' final replies and their use, including their byte budget: a hit is a sky
+    /// asked again exactly, answered with no job (rendering plan R06, R06.T11.l). All zeros with
+    /// `--keep-skies=false`.
+    #[must_use]
+    pub fn sky_replies(&self) -> LruCounters {
+        self.sky_replies
     }
 
     /// The surface service's cache's contents and use, including its byte budget, and the coarse

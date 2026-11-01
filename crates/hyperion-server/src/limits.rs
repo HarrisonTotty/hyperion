@@ -204,6 +204,13 @@ pub const CENTRE_ORBIT_CACHE_BYTES: usize = 128 << 20;
 /// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.
 pub const SPRAY_FORCE_CACHE_BYTES: usize = 1 << 20;
 
+/// The byte budget of the last skies' final replies, kept (rendering plan R06, R06.T11.l): 16 MiB,
+/// two skies at `N_max`'s 3 × 10⁵ stars, each a payload of 7.49 MB (24 bytes a star and 6 × 64²
+/// texels of 12 bytes) and its JSON, so that a relaunched client's or a reopened view's sky is
+/// answered from memory. A setting's smaller `N_max` keeps more. Each is charged its payload and
+/// its JSON's length.
+pub const SKY_REPLY_CACHE_BYTES: usize = 16 << 20;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
@@ -256,6 +263,11 @@ mod tests {
         assert_eq!(MAX_EXTINCTION_TARGETS, 64);
         assert_eq!(MAX_FEATURE_CELLS, 512);
         assert_eq!(GALAXY_FEATURES_CACHE_BYTES, 1 << 20, "1 MiB");
+        assert_eq!(
+            SKY_REPLY_CACHE_BYTES,
+            16 << 20,
+            "16 MiB, two skies at N_max"
+        );
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

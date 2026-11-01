@@ -33,6 +33,14 @@
 //!
 //! The server answers `sky` only behind its switch, `--serve-sky` (R06.T11.c), on by default since
 //! rendering plan R13's R13.T2; off (`--serve-sky=false`), the request never reaches this handler.
+//!
+//! The last skies' final replies are kept ([`kept`], R06.T11.l), and a sky asked again exactly as
+//! one of them is answered with its kept reply alone, with no job on the pool, unless the server is
+//! started with `--keep-skies=false`.
+
+mod kept;
+
+pub(crate) use kept::SkyReplyCache;
 
 use std::fmt;
 use std::num::NonZeroU32;
@@ -84,6 +92,7 @@ use crate::compute::{
     self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
+use kept::SkyReplyKey;
 
 /// The longest a sky holds before it is asked again, s: one Julian year (Design note 13).
 const VALID_FOR_S: f64 = SECONDS_PER_JULIAN_YEAR;
@@ -110,6 +119,9 @@ const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 /// shared by every sky of the galaxy at any time. A reply waits for the connection to take the one
 /// before it, and the census runs on meanwhile.
 ///
+/// A sky asked exactly as one whose final reply is kept is answered with that reply alone, once its
+/// request is checked, and runs no job (R06.T11.l); a final reply made here is kept.
+///
 /// # Errors
 ///
 /// Those of [`openable_universe`]; `bad_request` naming the first field at fault, in the order
@@ -128,6 +140,10 @@ pub(crate) async fn answer(
     let started = Instant::now();
     let universe = openable_universe(&state, &request.universe)?;
     let asked = SkyAsk::try_from(&request)?;
+    let kept = SkyReplyKey::of(universe.key(), &request);
+    if let Some(answer) = state.sky_replies.get(&kept) {
+        return Ok(answer);
+    }
     let galaxy = state.galaxies.get(universe.key()).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
         check_exclude(&state, &galaxy, system, named, token.clone()).await?;
@@ -207,6 +223,7 @@ pub(crate) async fn answer(
         started,
     };
     let ((), answer) = try_join(census, reply.each(&mut censused, &replies)).await?;
+    state.sky_replies.keep(kept, &answer);
     Ok(answer)
 }
 

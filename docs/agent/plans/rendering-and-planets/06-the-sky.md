@@ -2803,6 +2803,19 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
   - **Files:** `crates/hyperion-server/src/compute/{pool,thread_priority}.rs`, the manifests.
   - **Acceptance:** `cargo test -p hyperion-server compute::`, `just cross-clippy`, `just smart-ci`.
 
+- **R06.T11.l The last skies kept (new; the owner's priority, 2026-11-01; no output moves).** A
+  relaunch or a reopened inspection asks VIEW's sky again, and with `--sky-cache` 0 paid its whole
+  census again. The server keeps the last skies' final replies, exactly, keyed by the galaxy and
+  every field of the request, in `limits::SKY_REPLY_CACHE_BYTES` (16 MiB, two skies at `N_max`),
+  under its own switch, `--keep-skies` (on by default). A hit is answered with the final reply
+  alone and runs no sky job.
+  - **Tests:** the key holds every field the reply depends on; a repeated identical sky queues no
+    census job (the pool's counters) and is the first's reply, bytes and all; the budget keeps two
+    skies at `N_max`; the switch.
+  - **Files:** `crates/hyperion-server/src/requests/sky{,/kept}.rs`, `config.rs`, `limits.rs`,
+    `stats.rs`, `lib.rs`, `tests/sky.rs`.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -9892,3 +9905,10 @@ CensusCost)`.
     (`RLIMIT_NICE` 0), so a restore would fail there (lean, 2026-11-01).
   - `StartPoolError::FloatingPointMode` gains `twin: bool`; the pool starts and probes twice as
     many threads.
+
+- **Deviations in T11.l, as built (2026-11-01).**
+  - `ServerConfigBuilder::kept_skies(KeptSkies)` (`KeptSkies::{Off, Kept}`, exported) and
+    `ServerStats::sky_replies() -> LruCounters`. A test that asks one sky twice to read the cell
+    cache sets `KeptSkies::Off`, as `tests/sky.rs`'s `cached_sky_server` now does.
+  - A hit still runs one interactive job, its response's frame (large responses serialise on the
+    pool). Only final replies are kept: two identical skies at once both compute.

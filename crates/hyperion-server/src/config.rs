@@ -26,14 +26,15 @@
 //! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                              |
 //! | `--surface-passes`       | `HYPERION_SURFACE_PASSES`          | the lesser of 4 and the workers less one, at least one |
 //! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                                     |
+//! | `--keep-skies`           | `HYPERION_KEEP_SKIES`              | on                                                     |
 //! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
-//! `--serve-sky` and `--stop-on-stdin-close` are switches. Their variables take clap's boolish
-//! values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`,
-//! `off` or `0` for off. They refuse anything else, the empty string included.
-//! `--stop-on-stdin-close`, off by default, takes no value: given, it is on. `--serve-sky`, on by
-//! default, also takes one of those values after an equals sign, so that the command line can turn
-//! it off: `--serve-sky=false`. Given alone, it is on.
+//! `--serve-sky`, `--keep-skies` and `--stop-on-stdin-close` are switches. Their variables take
+//! clap's boolish values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`,
+//! `f`, `false`, `off` or `0` for off. They refuse anything else, the empty string included.
+//! `--stop-on-stdin-close`, off by default, takes no value: given, it is on. `--serve-sky` and
+//! `--keep-skies`, on by default, also take one of those values after an equals sign, so that the
+//! command line can turn them off: `--serve-sky=false`. Given alone, each is on.
 //!
 //! `--serve-sky` is the sky's switch (rendering plan R06, R06.T11.c), added off by the
 //! orchestrator's ruling of 2026-10-07. It is on by default since RM3's interim sky, rendering plan
@@ -48,6 +49,13 @@
 //! 1,280 MiB is R06.T8.n's sized budget, the value to set for a warm sky: one near-Sun sky and a
 //! 1,000 ly jump's new cells. The default returns to it once a repeated sky costs at most half of a
 //! cold one.
+//!
+//! `--keep-skies` keeps the final replies of the last skies finished, in
+//! [`SKY_REPLY_CACHE_BYTES`](crate::limits::SKY_REPLY_CACHE_BYTES), and answers a sky asked again
+//! exactly as one of them from memory, with no job on the pool (rendering plan R06, R06.T11.l; the
+//! owner's priority, 2026-11-01). It is a different cache from `--sky-cache`'s: whole replies, not
+//! census cells, so it saves nothing for a sky asked from anywhere else, but a relaunched client's
+//! or a reopened view's repeated sky costs nothing. `--keep-skies=false` computes every sky afresh.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -108,6 +116,8 @@ pub const ENV_SURFACE_CACHE_MB: &str = "HYPERION_SURFACE_CACHE_MB";
 pub const ENV_SURFACE_PASSES: &str = "HYPERION_SURFACE_PASSES";
 /// The variable that turns the sky off, or on, for `--serve-sky`.
 pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
+/// The variable that turns the kept skies off, or on, for `--keep-skies`.
+pub const ENV_KEEP_SKIES: &str = "HYPERION_KEEP_SKIES";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
@@ -347,6 +357,20 @@ pub struct ServerArgs {
     )]
     serve_sky: SkyService,
 
+    /// Answer a sky asked again exactly from the last skies' final replies, kept;
+    /// `--keep-skies=false` computes every sky afresh
+    #[arg(
+        long,
+        value_name = "BOOL",
+        env = ENV_KEEP_SKIES,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value = "true",
+        default_missing_value = "true",
+        value_parser = BoolishValueParser::new().map(kept_skies),
+    )]
+    keep_skies: KeptSkies,
+
     /// Stop gracefully when standard input closes, for a server run as another program's child
     #[arg(
         long,
@@ -373,6 +397,23 @@ pub enum SkyService {
     /// an open starts its galaxy's sky tables (R06.T11.g).
     #[default]
     Served,
+}
+
+/// Whether the server keeps the last skies' final replies and answers a sky asked again exactly
+/// from them: its switch, `--keep-skies` (rendering plan R06, R06.T11.l; the owner's priority,
+/// 2026-11-01).
+///
+/// VIEW asks its camera's sky as each inspection opens, and a relaunch or a reopened inspection asks
+/// the same sky again: near the Sun its census is hours of CPU, all paid again without them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum KeptSkies {
+    /// Every sky is computed afresh, as before R06.T11.l.
+    Off,
+    /// The final replies of the last skies finished are kept, in
+    /// [`SKY_REPLY_CACHE_BYTES`](crate::limits::SKY_REPLY_CACHE_BYTES), and a sky asked again
+    /// exactly as one of them is answered from it: the default.
+    #[default]
+    Kept,
 }
 
 /// Whether opening a universe starts its galaxy's global list and its streams' tube tables on the
@@ -453,6 +494,16 @@ fn sky_service(serve: bool) -> SkyService {
     }
 }
 
+/// The kept skies that a switch asks for.
+#[must_use]
+fn kept_skies(keep: bool) -> KeptSkies {
+    if keep {
+        KeptSkies::Kept
+    } else {
+        KeptSkies::Off
+    }
+}
+
 /// The stop on standard input that a switch asks for.
 #[must_use]
 fn stdin_stop(watch: bool) -> StdinStop {
@@ -486,6 +537,7 @@ impl From<ServerArgs> for ServerConfig {
             surface_cache,
             surface_passes,
             serve_sky,
+            keep_skies,
             stop_on_stdin_close,
         } = args;
         let builder = Self::builder()
@@ -507,6 +559,7 @@ impl From<ServerArgs> for ServerConfig {
             .sky_tables_bytes(sky_tables.bytes)
             .surface_cache_bytes(surface_cache.bytes)
             .sky_service(serve_sky)
+            .kept_skies(keep_skies)
             .stdin_stop(stop_on_stdin_close);
         // Not given, the bound follows the workers (`ServerConfig::surface_passes`).
         match surface_passes {
@@ -587,6 +640,7 @@ pub struct ServerConfig {
     /// (`default_surface_passes`).
     surface_passes: Option<NonZeroUsize>,
     sky_service: SkyService,
+    kept_skies: KeptSkies,
     global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
     stdin_stop: StdinStop,
@@ -722,6 +776,13 @@ impl ServerConfig {
         self.sky_service
     }
 
+    /// Whether the server keeps the last skies' final replies (rendering plan R06, R06.T11.l's
+    /// switch).
+    #[must_use]
+    pub fn kept_skies(&self) -> KeptSkies {
+        self.kept_skies
+    }
+
     /// Whether an open starts its galaxy's global list and tube tables (plan 10, P10.T10.b).
     #[must_use]
     pub fn global_list_warm_up(&self) -> GlobalListWarmUp {
@@ -811,6 +872,7 @@ impl Default for ServerConfigBuilder {
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
                 surface_passes: None,
                 sky_service: SkyService::default(),
+                kept_skies: KeptSkies::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
                 stdin_stop: StdinStop::default(),
@@ -979,6 +1041,13 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Whether the server keeps the last skies' final replies; [`KeptSkies::Kept`] by default.
+    #[must_use]
+    pub fn kept_skies(mut self, kept: KeptSkies) -> Self {
+        self.config.kept_skies = kept;
+        self
+    }
+
     /// Whether an open starts its galaxy's global list and tube tables;
     /// [`GlobalListWarmUp::AtOpen`] by default.
     #[must_use]
@@ -1134,7 +1203,8 @@ mod tests {
     /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, feature
     /// cells, feature interiors, class cells, alert scans, the sky's cells, the sky tables and the
     /// surface),
-    /// the sky's switch, the feature members' gate and the stop on standard input.
+    /// the sky's switch, the kept skies' switch, the feature members' gate and the stop on
+    /// standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
@@ -1142,6 +1212,7 @@ mod tests {
         usize,
         [usize; 14],
         SkyService,
+        KeptSkies,
         FeatureMembers,
         StdinStop,
     );
@@ -1169,6 +1240,7 @@ mod tests {
                 config.surface_cache_bytes(),
             ],
             config.sky_service(),
+            config.kept_skies(),
             config.feature_members(),
             config.stdin_stop(),
         )
@@ -1209,6 +1281,7 @@ mod tests {
                     128 * 1024 * 1024,
                 ],
                 SkyService::Served,
+                KeptSkies::Kept,
                 FeatureMembers::Held,
                 StdinStop::Ignore,
             )
@@ -1257,6 +1330,7 @@ mod tests {
             "--surface-passes",
             "29",
             "--serve-sky=false",
+            "--keep-skies=no",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -1283,6 +1357,7 @@ mod tests {
                     23 << 20
                 ],
                 SkyService::Unsupported,
+                KeptSkies::Off,
                 FeatureMembers::Held,
                 StdinStop::Watch,
             )
@@ -1334,6 +1409,23 @@ mod tests {
         );
     }
 
+    /// The kept skies' switch is on unless it is turned off, as the sky's own is (R06.T11.l).
+    #[test]
+    fn the_skies_are_kept_unless_their_switch_is_off() {
+        assert_eq!(config(&[]).kept_skies(), KeptSkies::Kept);
+        assert_eq!(config(&["--keep-skies"]).kept_skies(), KeptSkies::Kept);
+        assert_eq!(config(&["--keep-skies=on"]).kept_skies(), KeptSkies::Kept);
+        for off in ["false", "no", "off", "0"] {
+            let flag = format!("--keep-skies={off}");
+            assert_eq!(config(&[&flag]).kept_skies(), KeptSkies::Off, "{flag}");
+        }
+        assert_eq!(refusal(&["--keep-skies=maybe"]), ErrorKind::ValueValidation);
+        assert_eq!(
+            refusal(&["--keep-skies", "false"]),
+            ErrorKind::UnknownArgument
+        );
+    }
+
     #[test]
     fn an_ipv6_address_is_accepted() {
         assert_eq!(
@@ -1381,6 +1473,7 @@ mod tests {
                 (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
                 (Some("surface-passes"), Some("HYPERION_SURFACE_PASSES")),
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
+                (Some("keep-skies"), Some("HYPERION_KEEP_SKIES")),
                 (
                     Some("stop-on-stdin-close"),
                     Some("HYPERION_STOP_ON_STDIN_CLOSE")
@@ -1655,6 +1748,7 @@ mod tests {
             .surface_cache_bytes(100)
             .surface_passes(NonZeroUsize::new(3).unwrap())
             .sky_service(SkyService::Unsupported)
+            .kept_skies(KeptSkies::Off)
             .feature_members(FeatureMembers::Served)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1667,6 +1761,7 @@ mod tests {
                 3,
                 [10, 20, 30, 40, 50, 60, 70, 110, 120, 140, 130, 80, 90, 100],
                 SkyService::Unsupported,
+                KeptSkies::Off,
                 FeatureMembers::Served,
                 StdinStop::Watch,
             )

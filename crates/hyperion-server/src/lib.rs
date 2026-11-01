@@ -54,7 +54,7 @@ use crate::limits::{
     GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
     TUBE_TABLE_CACHE_BYTES,
 };
-use crate::requests::{Handler, Handlers};
+use crate::requests::{Handler, Handlers, SkyReplyCache};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
 use crate::surface::SurfaceService;
@@ -62,7 +62,7 @@ use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
 pub use config::{
-    FEATURE_MEMBERS_FROM, FeatureMembers, GlobalListWarmUp, ServerArgs, ServerConfig,
+    FEATURE_MEMBERS_FROM, FeatureMembers, GlobalListWarmUp, KeptSkies, ServerArgs, ServerConfig,
     ServerConfigBuilder, SkyService,
 };
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
@@ -177,6 +177,9 @@ pub(crate) struct AppState {
     /// The census cells' entries built so far, in blocks, in the configured byte budget: what a
     /// sky's census jobs read and share (rendering plan R06, R06.T11.b and T8.h; Design note 12).
     pub(crate) sky_cells: Arc<SharedSkyCellCache>,
+    /// The last skies' final replies, which a sky asked again exactly is answered with, unless the
+    /// switch turns them off (rendering plan R06, R06.T11.l).
+    pub(crate) sky_replies: SkyReplyCache,
     /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
     /// budget (rendering plan R09, R09.T17; Design note 19).
     pub(crate) surface: SurfaceService,
@@ -295,6 +298,7 @@ impl Server {
                 sky_caps: config.sky_caps(),
                 sky_tables,
                 sky_cells,
+                sky_replies: SkyReplyCache::new(config.kept_skies()),
                 surface,
                 contacts: alerts::UniverseContacts::new(),
                 alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
@@ -485,6 +489,7 @@ fn log_start(config: &ServerConfig) {
         surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
         surface_passes = config.surface_passes().get(),
         sky_service = ?config.sky_service(),
+        kept_skies = ?config.kept_skies(),
         extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
         sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
         alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
