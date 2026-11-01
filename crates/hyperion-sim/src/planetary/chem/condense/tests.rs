@@ -1281,9 +1281,8 @@ fn under_the_false_position_r_w_is_the_bisections_within_their_width() {
 /// of itself at 24 and its optical depth within 10⁻¹² of its own, every other figure the same.
 #[test]
 fn under_every_26_hold_jupiter_s_decks_keep_their_sizes_within_1e_12() {
-    use crate::planetary::testing::with_every_26_hold;
     let at_24 = jupiter_clouds();
-    let at_26 = with_every_26_hold(jupiter_clouds);
+    let at_26 = jupiter_clouds();
     assert_eq!(at_24.decks().len(), at_26.decks().len());
     let mut worst: f64 = 0.0;
     for (before, after) in at_24.decks().iter().zip(at_26.decks()) {

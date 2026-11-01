@@ -1137,10 +1137,13 @@ fn type_ia_over_seeds_under_every_26_hold() {
                 )
             },
         );
-        let galaxy =
-            &Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_26_hold())
-                .unwrap()
-                .with_full_potential();
+        let galaxy = &Galaxy::from_params_with_rules(
+            Seed::new(seed),
+            params,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .unwrap()
+        .with_full_potential();
         let census = census(galaxy);
         let process = TypeIaProcess::new(galaxy);
         let rate = process.delays().rate_per_year();

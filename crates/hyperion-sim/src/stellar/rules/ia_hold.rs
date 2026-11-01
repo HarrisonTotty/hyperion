@@ -136,7 +136,7 @@ fn the_type_ia_explosion_is_held_only_until_the_27_bump() {
     assert_eq!(at(26), IaExplosionRules::Pooled);
     assert_eq!(at(27), IaExplosionRules::Marked);
     assert_eq!(
-        StellarRules::every_26_hold().ia_explosion,
+        StellarRules::of_version(crate::GENERATOR_VERSION).ia_explosion,
         IaExplosionRules::Pooled
     );
     assert_eq!(

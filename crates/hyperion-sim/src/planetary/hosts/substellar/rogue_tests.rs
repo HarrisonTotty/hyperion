@@ -27,7 +27,6 @@ use crate::planetary::satellites::{
     Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_inside,
 };
 use crate::planetary::system::{PlanetarySystem, RoguePlanet, generate};
-use crate::planetary::testing::with_every_26_hold;
 use crate::stellar::substellar::giant_cooling;
 use crate::stellar::system::draw_metallicity;
 use crate::time::{ClockWindow, UniverseTime};
@@ -788,7 +787,7 @@ fn a_birth_orbit_reads_words_two_to_four_of_its_object_s_origin_stream() {
 #[test]
 fn a_rogue_planet_s_system_is_the_same_every_time_and_in_every_order() {
     let records = rogue_planets(200);
-    with_every_26_hold(|| {
+    {
         let whole = |record: &SystemRecord| {
             let ctx = SystemContext::for_system(galaxy(), record.id()).unwrap();
             let system = generate(seed(), &ctx);
@@ -843,5 +842,5 @@ fn a_rogue_planet_s_system_is_the_same_every_time_and_in_every_order() {
             first.iter().any(|(system, _)| !system.bodies().is_empty()),
             "some of the sample have satellites"
         );
-    });
+    };
 }

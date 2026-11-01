@@ -17,7 +17,6 @@ use crate::planetary::hooks::envelope_atmosphere::{ABSORBER_LEVEL, COMPOSITION_L
 use crate::planetary::hooks::surface::STANDARD_GRAVITY;
 use crate::planetary::hooks::surface::atmosphere_mole_fractions;
 use crate::planetary::record::{Modelled, Section};
-use crate::planetary::testing::with_every_26_hold;
 use crate::substance::{SubstanceId, by_key};
 use crate::time::UniverseTime;
 use crate::units::WattsPerSquareMetre;
@@ -230,7 +229,7 @@ fn sample_sets(ids: &[&str]) -> Vec<(String, AuditSet)> {
 
 /// The census under every 26 hold.
 fn census_under(sets: &[(String, AuditSet)]) -> Vec<CensusBody> {
-    with_every_26_hold(|| census_of(sets))
+    census_of(sets)
 }
 
 /// decision-p14-t53a-thick-co2 §11.1's three systems water worlds, under every 26 hold: each is a
@@ -286,7 +285,7 @@ fn under_every_26_hold_the_three_systems_water_worlds_take_their_steam_envelope(
 fn under_every_26_hold_a_supercritical_envelope_is_the_same_alone_and_in_any_order() {
     let ids: Vec<&str> = WATER_WORLDS.iter().map(|&(system, _)| system).collect();
     let mut supercritical = 0;
-    with_every_26_hold(|| {
+    {
         for (name, (_, seed, ctx)) in sample_sets(&ids) {
             let system = generate(seed, &ctx);
             let t = UniverseTime::EPOCH;
@@ -316,6 +315,6 @@ fn under_every_26_hold_a_supercritical_envelope_is_the_same_alone_and_in_any_ord
                 )
             });
         }
-    });
+    };
     assert_eq!(supercritical, 3, "the three water worlds' envelopes");
 }

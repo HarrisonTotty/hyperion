@@ -776,7 +776,6 @@ fn mars_like_matches_its_golden() {
 #[test]
 #[ignore = "slow: eight fast worlds' coarse passes, about 15 s in the test profile (pod, 16 vCPU)"]
 fn under_every_26_hold_the_pore_gas_moves_mars_and_europa() {
-    use crate::planetary::testing::with_every_26_hold;
     use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
     let worlds = [
@@ -787,10 +786,9 @@ fn under_every_26_hold_the_pore_gas_moves_mars_and_europa() {
     ];
     let mut moved = Vec::new();
     for (name, inputs) in &worlds {
-        let held = with_every_26_hold(|| {
-            with_regolith_inertia(RegolithInertiaRules::Vacuum, || fast_text(name, inputs))
-        });
-        let aired = with_every_26_hold(|| fast_text(name, inputs));
+        let held =
+            { with_regolith_inertia(RegolithInertiaRules::Vacuum, || fast_text(name, inputs)) };
+        let aired = fast_text(name, inputs);
         let changed = held
             .lines()
             .zip(aired.lines())
@@ -842,9 +840,7 @@ fn locked_earth_like_matches_its_golden() {
 #[ignore = "slow: the reference locked Earth's coarse pass at level 8, about 22 s in the test \
             profile"]
 fn under_every_26_hold_r09_shows_the_locked_earth_s_sea_under_its_deck() {
-    let field = crate::planetary::testing::with_every_26_hold(|| {
-        coarse_pass(reference::SEED, &reference::locked_earth_like())
-    });
+    let field = { coarse_pass(reference::SEED, &reference::locked_earth_like()) };
     let header = field.header();
     let graph = CellGraph::for_field(header.level());
     let climate = field.climate_layer();

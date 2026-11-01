@@ -15,7 +15,6 @@ use super::*;
 use crate::planetary::derive::photometry::area_mix::{
     IcyRegolithRules, with_icy_regolith, with_scattering_held,
 };
-use crate::planetary::testing::with_every_26_hold;
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
 /// The records whose state the pore gas flips over the census, by ID in the census's order: none
@@ -47,18 +46,17 @@ fn census() -> &'static Census {
         let sets = thin_air_sets();
         let frost = IcyRegolithRules::Frost;
         let start = Instant::now();
-        let held = with_every_26_hold(|| {
+        let held = {
             with_icy_regolith(frost, || {
                 with_scattering_held(|| {
                     with_regolith_inertia(RegolithInertiaRules::Vacuum, || thin_air_census(&sets))
                 })
             })
-        });
+        };
         let walk_held = start.elapsed();
         let start = Instant::now();
-        let aired = with_every_26_hold(|| {
-            with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets)))
-        });
+        let aired =
+            { with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets))) };
         eprintln!(
             "the walks: the pore gas held {walk_held:?}, in force {:?}, {} bodies",
             start.elapsed(),
@@ -162,8 +160,8 @@ fn under_every_26_hold_the_pore_gas_repeats() {
         .iter()
         .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone()))
         .collect();
-    let first = with_every_26_hold(|| thin_air_census(&sets));
-    let second = with_every_26_hold(|| thin_air_census(&sets));
+    let first = thin_air_census(&sets);
+    let second = thin_air_census(&sets);
     assert_eq!(first.len(), second.len());
     for (a, b) in first.iter().zip(&second) {
         assert!(same(a, b), "{}: {} against {}", a.label, a.line(), b.line());

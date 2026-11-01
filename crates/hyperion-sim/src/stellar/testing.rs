@@ -1163,10 +1163,10 @@ mod tests {
         let galaxy = Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_26_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("Milky Way parameters build");
-        let rules = StellarRules::every_26_hold();
+        let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
         let t = galaxy_counts_with(&galaxy, 4_000, |inputs, ages, t| {
             observe_young_and_chemical(inputs, ages, rules, t);
         });

@@ -228,8 +228,8 @@ fn the_envelope_bond_is_held_only_until_the_27_bump() {
 #[test]
 fn under_its_hold_a_giant_keeps_the_class_table_to_the_bit() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
-    let at_26 = with_every_26_hold(solar_system);
+    use crate::planetary::testing::with_every_27_hold;
+    let at_26 = solar_system();
     let held =
         with_every_27_hold(|| with_envelope_bond(EnvelopeBondRules::ClassTable, solar_system));
     for (name, ..) in GIANTS {
@@ -439,8 +439,8 @@ fn the_same_inputs_give_the_same_bits() {
 #[ignore = "slow: timing"]
 fn the_snapshot_path_s_cost_a_pass_is_stated() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
-    let table = with_every_26_hold(solar_system);
+    use crate::planetary::testing::with_every_27_hold;
+    let table = solar_system();
     for (name, ..) in GIANTS {
         let inputs = giant_inputs(found(&table, name));
         with_every_27_hold(|| {

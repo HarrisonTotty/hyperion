@@ -1031,15 +1031,18 @@ fn core_collapses_over_seeds_under_every_26_hold() {
         );
         let off = GalaxyRules {
             field_share: FieldShareRules::None,
-            ..GalaxyRules::every_26_hold()
+            ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
         };
         let budget = Galaxy::from_params_with_rules(Seed::new(seed), params.clone(), off)
             .unwrap()
             .with_full_potential();
-        let field =
-            Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_26_hold())
-                .unwrap()
-                .with_full_potential();
+        let field = Galaxy::from_params_with_rules(
+            Seed::new(seed),
+            params,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .unwrap()
+        .with_full_potential();
         let share = field
             .field_share()
             .expect("every 26 hold installs the field");

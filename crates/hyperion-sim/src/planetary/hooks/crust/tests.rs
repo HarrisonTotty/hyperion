@@ -385,7 +385,7 @@ fn an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt() {
 /// switch and 27's helper reach the minor oxides, and 26's helper does not.
 #[test]
 fn the_minor_oxides_are_held_only_until_the_27_bump() {
-    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < MINOR_OXIDES_VERSION,
         "the 26 → 27 bump puts P14.T51.k's minor oxides and its core's factor in a body's bulk \
@@ -405,10 +405,7 @@ fn the_minor_oxides_are_held_only_until_the_27_bump() {
         with_every_27_hold(MinorOxidesRules::in_force),
         MinorOxidesRules::Chondritic
     );
-    assert_eq!(
-        with_every_26_hold(MinorOxidesRules::in_force),
-        MinorOxidesRules::Held
-    );
+    assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
     assert_eq!(
         with_every_27_hold(|| {
             with_minor_oxides(MinorOxidesRules::Held, MinorOxidesRules::in_force)

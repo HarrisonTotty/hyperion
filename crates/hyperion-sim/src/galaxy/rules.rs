@@ -240,24 +240,12 @@ impl GalaxyRules {
         }
     }
 
-    /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
-    /// version's rules with the holds that turn on at 26 (none of the galaxy's since P09.T35's
-    /// `carve_out` was retargeted to 27; [`StellarRules::every_26_hold`]).
-    ///
-    /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
-    /// struct-update syntax over it.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_26_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(26))
-    }
-
-    /// Every 26 hold with those retargeted from 26 to 27 in force too (train 26, 2026-11-01:
-    /// P09.T2.c's `field_share`, P09.T35's `carve_out` (2026-11-02), P09.T36's `feature_classes`,
-    /// P11.T8.c–d's `merger_class`, P08.T12's `displaced` and the stellar rules' `merger_mass`,
-    /// P11.T4.d; [`StellarRules::every_26_hold_with_its_retargets`]): the rules their tests, and
-    /// those of the 27 holds built over them, were measured under while they were held at 26. The
-    /// 27 bump deletes it with them.
+    /// The version's rules with the holds retargeted from 26 to 27 in force too (train 26,
+    /// 2026-11-01: P09.T2.c's `field_share`, P09.T35's `carve_out` (2026-11-02), P09.T36's
+    /// `feature_classes`, P11.T8.c–d's `merger_class`, P08.T12's `displaced` and the stellar rules'
+    /// `merger_mass`, P11.T4.d; [`StellarRules::every_26_hold_with_its_retargets`]): the rules
+    /// their tests, and those of the 27 holds built over them, were measured under while they were
+    /// held at 26. The 27 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
@@ -268,20 +256,20 @@ impl GalaxyRules {
             merger_class: MergerClassRules::Channels,
             displaced: DisplacedRules::Displaced,
             stellar: StellarRules::every_26_hold_with_its_retargets(),
-            ..Self::of_version(GeneratorVersion::new(26))
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 
-    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
-    /// hold ([`GalaxyRules::every_26_hold`]), the galaxy's at 27 (`orphan_streams`, P15.T11.b,
+    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
+    /// version's rules with the galaxy's holds at 27 (`orphan_streams`, P15.T11.b,
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
     /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
     /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and
     /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
-    /// `field_share`, P09.T2.c, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
-    /// `displaced`, P08.T12) and the stellar rules' `ia_explosion`, P11.T6, `ns_accretion` and
-    /// `heavy_donor`, P11.T4, `binary_kicks`, P11.T10, and `merger_mass`, P11.T4.d
-    /// ([`StellarRules::every_27_hold`]).
+    /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
+    /// P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules' `ia_explosion`, P11.T6,
+    /// `ns_accretion` and `heavy_donor`, P11.T4, `binary_kicks`, P11.T10, and `merger_mass`,
+    /// P11.T4.d ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -305,7 +293,7 @@ mod tests {
     use crate::rng::Seed;
 
     /// D3: a galaxy built the usual way carries the version's rules, and equals one built under
-    /// them explicitly; one built under every 26 hold does not.
+    /// them explicitly; one built under every 27 hold does not.
     #[test]
     fn a_galaxy_carries_the_version_s_rules() {
         let seed = Seed::new(0x0928_bb00_0000_0001);
@@ -320,18 +308,18 @@ mod tests {
         .expect("the Milky Way fixture builds");
         assert_eq!(built, explicit);
         assert_eq!(format!("{built:?}"), format!("{explicit:?}"));
-        let at_26 = Galaxy::from_params_with_rules(
+        let at_27 = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_26_hold(),
+            GalaxyRules::every_27_hold(),
         )
         .expect("the Milky Way fixture builds");
-        assert_ne!(built, at_26);
-        assert_eq!(at_26.rules(), GalaxyRules::every_26_hold());
+        assert_ne!(built, at_27);
+        assert_eq!(at_27.rules(), GalaxyRules::every_27_hold());
         // The rules ride the builders that return the same galaxy with something added or
         // changed; `with_full_potential`'s is held by the exact orbit's D4 test, which builds one.
-        let substellar = at_26.with_substellar_params(SubstellarParams::generator_default());
-        assert_eq!(substellar.rules(), GalaxyRules::every_26_hold());
+        let substellar = at_27.with_substellar_params(SubstellarParams::generator_default());
+        assert_eq!(substellar.rules(), GalaxyRules::every_27_hold());
     }
 
     /// `Galaxy::with_rules` keeps the centre's model while the stellar rules stay as they were, and
@@ -377,8 +365,8 @@ mod tests {
             DisplacedRules::Displaced
         );
         assert_eq!(
-            GalaxyRules::every_26_hold().stellar,
-            StellarRules::every_26_hold()
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).stellar,
+            StellarRules::of_version(crate::GENERATOR_VERSION)
         );
         for v in [23, 24, 25, 26] {
             assert_eq!(
@@ -388,9 +376,10 @@ mod tests {
         }
     }
 
-    /// Each galaxy hold at 26 is held below it and new from it on, in every 26 hold.
+    /// Each hold retargeted from 26 to 27 (train 26) is held below 27 and new from it on, in every
+    /// 27 hold.
     #[test]
-    fn each_26_hold_turns_on_at_26() {
+    fn each_retargeted_hold_turns_on_at_27() {
         let field = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).field_share;
         for v in [23, 24, 25, 26] {
             assert_eq!(field(v), FieldShareRules::None, "{v}");
@@ -441,7 +430,7 @@ mod tests {
         }
         assert_eq!(orphans(27), OrphanStreamsRules::Fitted);
         assert_eq!(
-            GalaxyRules::every_26_hold().orphan_streams,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_streams,
             OrphanStreamsRules::Brainstorm
         );
         assert_eq!(
@@ -454,7 +443,7 @@ mod tests {
         }
         assert_eq!(tables(27), BinaryTableRules::Fitted);
         assert_eq!(
-            GalaxyRules::every_26_hold().binary_tables,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).binary_tables,
             BinaryTableRules::Scratch
         );
         assert_eq!(
@@ -467,7 +456,7 @@ mod tests {
         }
         assert_eq!(source(27), ClassSourceRules::Registered);
         assert_eq!(
-            GalaxyRules::every_26_hold().class_source,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).class_source,
             ClassSourceRules::Unregistered
         );
         assert_eq!(
@@ -480,7 +469,7 @@ mod tests {
         }
         assert_eq!(binaries(27), FeatureBinariesRules::Listed);
         assert_eq!(
-            GalaxyRules::every_26_hold().feature_binaries,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).feature_binaries,
             FeatureBinariesRules::Unlisted
         );
         let runaways = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).runaway_deaths;
@@ -498,7 +487,7 @@ mod tests {
         }
         assert_eq!(survivors(27), HypervelocityRules::Weighted);
         assert_eq!(
-            GalaxyRules::every_26_hold().hypervelocity,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).hypervelocity,
             HypervelocityRules::Unweighted
         );
         assert_eq!(
@@ -511,7 +500,7 @@ mod tests {
         }
         assert_eq!(spray(27), OrphanSprayRules::Coarse);
         assert_eq!(
-            GalaxyRules::every_26_hold().orphan_spray,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_spray,
             OrphanSprayRules::Exact
         );
         let fates = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).placement_fates;
@@ -520,7 +509,7 @@ mod tests {
         }
         assert_eq!(fates(27), PlacementFateRules::Fitted);
         assert_eq!(
-            GalaxyRules::every_26_hold().placement_fates,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).placement_fates,
             PlacementFateRules::Exact
         );
         let list = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).list_source;
@@ -529,7 +518,7 @@ mod tests {
         }
         assert_eq!(list(27), ListSourceRules::Registered);
         assert_eq!(
-            GalaxyRules::every_26_hold().list_source,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION).list_source,
             ListSourceRules::Unregistered
         );
         assert_eq!(

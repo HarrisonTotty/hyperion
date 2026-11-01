@@ -423,7 +423,8 @@ mod tests {
     /// class but the dwarfs', on either arm of the dwarf sequence.
     #[test]
     fn the_subtype_is_monotone_in_teff_for_every_class() {
-        let arms = [VERSION, StellarRules::every_26_hold()].map(DwarfSequence::of);
+        let arms =
+            [VERSION, StellarRules::of_version(crate::GENERATOR_VERSION)].map(DwarfSequence::of);
         for (class, dwarfs) in LuminosityClass::ALL
             .into_iter()
             .flat_map(|class| arms.map(|arm| (class, arm)))

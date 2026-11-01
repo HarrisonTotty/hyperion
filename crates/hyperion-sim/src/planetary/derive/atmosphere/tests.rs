@@ -6716,10 +6716,9 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
     use crate::planetary::system::envelope::{
         DeriveEnvelopeError, SupercriticalOf, supercritical_envelope_of,
     };
-    use crate::planetary::testing::with_every_26_hold;
     for (share, inside_the_grid) in [(0.01, true), (0.25, false)] {
         let inputs = wet_runaway_earth(share * EARTH_MASS_KG, 0.3, 300.0);
-        let (air, envelope) = with_every_26_hold(|| {
+        let (air, envelope) = {
             let air = atmosphere(&inputs);
             let g = MetresPerSecondSquared::new(
                 GRAVITATIONAL_CONSTANT * inputs.mass.value() / math::powi(inputs.radius.value(), 2),
@@ -6732,7 +6731,7 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
                 stellar_flux: WattsPerSquareMetre::from(inputs.flux),
             });
             (air, envelope)
-        });
+        };
         let envelope = envelope.expect("a steam envelope's model");
         let atmosphere = envelope.atmosphere();
         let profile = atmosphere.profile();
@@ -6773,7 +6772,7 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
     }
     // A temperate Earth's air hides no surface: its model is refused, never invented.
     let earth = earth_inputs(255.0, Insolation::Habitable);
-    let refused = with_every_26_hold(|| {
+    let refused = {
         let air = atmosphere(&earth);
         supercritical_envelope_of(&SupercriticalOf {
             air: &air,
@@ -6782,7 +6781,7 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
             equilibrium_temperature: earth.equilibrium,
             stellar_flux: WattsPerSquareMetre::from(earth.flux),
         })
-    });
+    };
     assert!(
         matches!(refused, Err(DeriveEnvelopeError::NoSupercriticalReservoir)),
         "{refused:?}"

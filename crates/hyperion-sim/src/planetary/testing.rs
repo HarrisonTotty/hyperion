@@ -404,25 +404,7 @@ impl Error for SampleContextsError {
     }
 }
 
-/// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
-/// test that asserts a 26 figure: the holds at 26, each with its switch, which sets its rules back
-/// as it returns, a panic in `run` included. A test may set one hold back inside it to compare 26
-/// with and without it.
-///
-/// The holds at 26:
-///
-///
-/// A system or a record is read under the rules in force when it is generated: one generated
-/// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
-/// 26's, so a test generates afresh inside it. A later hold at 26 adds its switch here; 26's bump
-/// deletes this helper with its holds.
-#[cfg(test)]
-pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    run()
-}
-
-/// `run`'s result with every 26 hold ([`with_every_26_hold`]) and those retargeted from 26 to 27
-/// in force on this thread (train 26, 2026-11-01: P14.T49.m's icy regolith and P14.T24.h.b's minor
+/// `run`'s result with the holds retargeted from 26 to 27 in force on this thread (train 26, 2026-11-01: P14.T49.m's icy regolith and P14.T24.h.b's minor
 /// clouds, organic sediment, Rayleigh adding and haze layer): the rules their tests were measured
 /// under while they were held at 26. The 27 bump deletes it with them.
 #[cfg(test)]
@@ -437,13 +419,13 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    with_every_26_hold(run)
+    run()
 }
 
 /// `run`'s result with every landed hold at generator version 27 in force on this thread, for a
-/// test that asserts a 27 figure: every 26 hold ([`with_every_26_hold`]) and those at 27, each with
-/// its switch, which sets its rules back as it returns, a panic in `run` included. A test may set
-/// one hold back inside it to compare 27 with and without it.
+/// test that asserts a 27 figure: those at 27, each with its switch, which sets its rules back as
+/// it returns, a panic in `run` included. A test may set one hold back inside it to compare 27 with
+/// and without it.
 ///
 /// The holds at 27:
 ///
@@ -493,12 +475,10 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
 ///
-/// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
-/// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
-/// system's equilibrium network is first built, lazily, so a test reads its envelopes inside the
-/// switch too. A later hold at 27 adds its switch here; 26's bump, which deletes
-/// [`with_every_26_hold`], leaves this helper its 27 switches alone, and 27's bump deletes it with
-/// its holds.
+/// A system or a record is read under the rules in force when it is generated, so a test
+/// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
+/// first built, lazily, so a test reads its envelopes inside the switch too. A later hold at 27
+/// adds its switch here, and 27's bump deletes it with its holds.
 ///
 /// The galaxy's own holds at 27 travel with its rules, not the thread: a test builds its galaxy
 /// under `GalaxyRules::every_27_hold()` (P15.T11.b's `orphan_streams`, P11.T8.c's
@@ -539,7 +519,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
+    with_minor_oxides(MinorOxidesRules::Chondritic, run)
 }
 
 #[cfg(test)]
@@ -712,8 +692,8 @@ mod tests {
         ));
     }
 
-    /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it, inside
-    /// 26's and where a test sets it back.
+    /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it and where a
+    /// test sets it back.
     #[test]
     fn the_carriers_hold_is_in_force_inside_27_s_helper_alone() {
         use crate::substance::{CarriersRules, with_carriers};
@@ -721,10 +701,6 @@ mod tests {
         assert_eq!(
             with_every_27_hold(CarriersRules::in_force),
             CarriersRules::Carried
-        );
-        assert_eq!(
-            with_every_26_hold(CarriersRules::in_force),
-            CarriersRules::Held
         );
         assert_eq!(
             with_every_27_hold(|| with_carriers(CarriersRules::Held, CarriersRules::in_force)),

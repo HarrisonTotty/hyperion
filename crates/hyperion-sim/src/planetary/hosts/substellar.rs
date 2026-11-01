@@ -388,7 +388,6 @@ mod tests {
     use crate::planetary::params::{HILL_STABLE_GAP, SPACING_GIANT_MASS};
     use crate::planetary::placement::{OrbitHost, mutual_hill_radius};
     use crate::planetary::system::{PlanetarySystem, generate, generate_planets};
-    use crate::planetary::testing::with_every_26_hold;
     use crate::stellar::multiplicity::SlotKind;
     use crate::stellar::system::SystemStars;
     use crate::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
@@ -805,7 +804,7 @@ mod tests {
     #[test]
     fn a_brown_dwarf_s_system_is_the_same_every_time_and_in_every_order() {
         let records = brown_dwarfs(60);
-        with_every_26_hold(|| {
+        {
             let whole = |record: &SystemRecord| {
                 let ctx = SystemContext::for_system(galaxy(), record.id()).unwrap();
                 let system = generate(seed(), &ctx);
@@ -830,6 +829,6 @@ mod tests {
                     .any(|(system, _)| system.planets().next().is_some()),
                 "some of the sample host planets"
             );
-        });
+        };
     }
 }

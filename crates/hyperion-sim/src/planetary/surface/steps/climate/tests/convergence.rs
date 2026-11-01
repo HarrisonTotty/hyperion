@@ -24,7 +24,6 @@ use crate::planetary::surface::grid::CellGraph;
 use crate::planetary::surface::inputs::CoarseInputs;
 use crate::planetary::surface::reference;
 use crate::planetary::surface::steps::{Pass, Working, craters, plates, relief};
-use crate::planetary::testing::with_every_26_hold;
 use hyperion_surface::field::coarse_level;
 
 /// How near plan 14's mean a kept run's surface mean must lie, K: 0.3, the ruled Earth's (decision-
@@ -343,13 +342,13 @@ const CENSUS_SEEDS: [u64; 12] = [
     9,
 ];
 
-/// The small Earth's climate step under seed `seed` with version 26's holds in force
-/// ([`with_every_26_hold`]): what it did that is no output.
+/// The small Earth's climate step under seed `seed` at the version's rules: what it did that is no
+/// output.
 fn small_earth_under_26(seed: u64) -> Diagnostics {
     staged_under(
         SurfaceSeed::new(seed),
         &reference::small_earth(),
-        |pass, working| with_every_26_hold(|| run_diagnosed(pass, working)),
+        run_diagnosed,
     )
 }
 

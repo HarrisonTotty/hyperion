@@ -1312,7 +1312,7 @@ fn the_measured_moons_tides_on_their_shell_are_pinned() {
 // P14.T56.e: the porous core, behind its hold at 27 (`POROUS_CORE_VERSION`; the lane's science
 // draft, decision-p14-t56d-membrane §2.4).
 
-use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+use crate::planetary::testing::with_every_27_hold;
 
 impl Measured {
     /// The rock under its water, as its ocean branch's column spreads it.
@@ -1348,10 +1348,7 @@ fn the_porous_core_is_held_only_until_the_27_bump() {
         with_every_27_hold(PorousCoreRules::in_force),
         PorousCoreRules::Porous
     );
-    assert_eq!(
-        with_every_26_hold(PorousCoreRules::in_force),
-        PorousCoreRules::Held
-    );
+    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
     assert_eq!(
         with_every_27_hold(|| with_porous_core(PorousCoreRules::Held, PorousCoreRules::in_force)),
         PorousCoreRules::Held
@@ -1750,7 +1747,6 @@ fn the_surface_heat_is_held_only_until_the_27_bump() {
         Radiated
     );
     assert_eq!(with_every_27_hold(SurfaceHeatRules::in_force), Radiated);
-    assert_eq!(with_every_26_hold(SurfaceHeatRules::in_force), Held);
     assert_eq!(
         with_every_27_hold(|| with_surface_heat(Held, SurfaceHeatRules::in_force)),
         Held

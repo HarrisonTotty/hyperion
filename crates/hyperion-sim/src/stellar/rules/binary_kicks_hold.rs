@@ -161,10 +161,6 @@ fn the_released_stars_are_held_only_until_the_27_bump() {
     }
     assert_eq!(at(27), BinaryKicksRules::Alone);
     assert_eq!(
-        StellarRules::every_26_hold().binary_kicks,
-        BinaryKicksRules::Paired
-    );
-    assert_eq!(
         StellarRules::every_27_hold().binary_kicks,
         BinaryKicksRules::Alone
     );

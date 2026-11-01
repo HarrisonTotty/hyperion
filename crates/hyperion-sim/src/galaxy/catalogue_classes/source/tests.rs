@@ -55,7 +55,7 @@ fn at_26() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_26_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds")
     })
@@ -855,7 +855,7 @@ fn the_x_ray_binaries_layers_follow_the_binary_tables_hold() {
         BinaryTableRules::Fitted
     );
     assert_eq!(
-        GalaxyRules::every_26_hold().binary_tables,
+        GalaxyRules::of_version(crate::GENERATOR_VERSION).binary_tables,
         BinaryTableRules::Scratch
     );
     let hosts = first_hosts(at_27(), ClassId::XRAY_BINARY, 3);

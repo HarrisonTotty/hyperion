@@ -209,7 +209,7 @@ mod tests {
             (5.0, 4.0, Phase::EarlyAgb, false),
         ];
         let version = StellarRules::of_version(crate::GENERATOR_VERSION);
-        for rules in [version, StellarRules::every_26_hold()] {
+        for rules in [version, StellarRules::of_version(crate::GENERATOR_VERSION)] {
             for (m1, m2, phase, merges) in cases {
                 let (input, age) = pair_at_lobe(m1, m2, phase);
                 let input = input.with_rules(rules);

@@ -1084,7 +1084,7 @@ mod tests {
             composition(z),
             StarDraws::median(),
             Years::new(1.2e10),
-            StellarRules::every_26_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("in range")
     }
@@ -1235,7 +1235,7 @@ mod tests {
             .expect("formed")
             .phase()
         };
-        let full = StellarRules::every_26_hold();
+        let full = StellarRules::of_version(crate::GENERATOR_VERSION);
         for rank in [0.05, 0.5, 0.95] {
             let disc = disc_lifetime(SolarMasses::new(1.0), UnitUniform::new(rank).unwrap());
             let class = young(1.0, 2e6, rank, full);

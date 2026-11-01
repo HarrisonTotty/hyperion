@@ -677,7 +677,7 @@ mod tests {
             Galaxy::from_params_with_rules(
                 Seed::new(0x0910_0000),
                 GalaxyParams::milky_way_like(),
-                GalaxyRules::every_26_hold(),
+                GalaxyRules::of_version(crate::GENERATOR_VERSION),
             )
             .expect("the Milky Way fixture builds")
         })

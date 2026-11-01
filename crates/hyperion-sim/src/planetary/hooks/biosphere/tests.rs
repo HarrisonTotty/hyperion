@@ -19,7 +19,7 @@ use crate::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
 use crate::planetary::hooks::surface::tests::table;
 use crate::planetary::record::{BodyKind, Modelled};
 use crate::planetary::system::tests::SEED;
-use crate::planetary::testing::{SAMPLE_CENTRE_LY, with_every_26_hold};
+use crate::planetary::testing::SAMPLE_CENTRE_LY;
 use crate::planetary::{SystemContext, generate};
 use crate::time::UniverseTime;
 use crate::units::{LightYears, Metres};
@@ -624,7 +624,7 @@ fn every_generated_body_is_abiotic_over_every_layer() {
         surfaces
     };
     let at_25 = census();
-    let under_26 = with_every_26_hold(census);
+    let under_26 = census();
     for (rules, surfaces) in [("25", &at_25), ("26", &under_26)] {
         eprintln!("surfaces under {rules}: {surfaces:?}");
         for kind in ["planets", "members", "moons"] {

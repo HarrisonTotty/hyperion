@@ -728,23 +728,6 @@ mod tests {
         cell[0]
     }
 
-    /// The galaxy of [`galaxy`]'s seed and parameters at version 26's rules, for the holds at 26.
-    fn galaxy_26() -> &'static Galaxy {
-        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| {
-            use hyperion_sim::GeneratorVersion;
-            use hyperion_sim::galaxy::imf::MassFunctionKind;
-            use hyperion_sim::galaxy::params::GalaxyParams;
-            let seed = Seed::new(0x4d2);
-            Galaxy::from_params_at_version(
-                seed,
-                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-                GeneratorVersion::new(26),
-            )
-            .expect("a drawn galaxy builds")
-        })
-    }
-
     /// The template's system with its primary of `mass` M☉ and `age` years old at the epoch.
     fn system(mass: f64, age: f64) -> SystemStars {
         system_in(galaxy(), mass, age)
@@ -1042,7 +1025,7 @@ mod tests {
     /// with none running the list is sent empty and `M_V` is the track's.
     #[test]
     fn from_26_the_running_events_and_their_light_are_sent() {
-        let stars = system_in(galaxy_26(), 0.2, 3e8);
+        let stars = system_in(galaxy(), 0.2, 3e8);
         let at = |hours: i64| {
             UniverseTime::EPOCH
                 .checked_add(hyperion_sim::time::Span::from_seconds(3_600 * hours))
@@ -1125,7 +1108,7 @@ mod tests {
     /// composed luminosity and its `M_V`, with the track's temperature.
     #[test]
     fn from_26_a_thermal_pulse_s_radius_is_sent() {
-        let death = system_in(galaxy_26(), 3.0, 1e8)
+        let death = system_in(galaxy(), 3.0, 1e8)
             .primary()
             .lifetime()
             .expect("a 3 M☉ star dies")
@@ -1140,7 +1123,7 @@ mod tests {
             })
         };
         let stars = (1..200)
-            .map(|k| system_in(galaxy_26(), 3.0, death - 7_000.0 * f64::from(k)))
+            .map(|k| system_in(galaxy(), 3.0, death - 7_000.0 * f64::from(k)))
             .find(in_transient)
             .expect("a pulse's transient in the last 1.4 Myr");
         let summary = stars.summary_at(years(0));

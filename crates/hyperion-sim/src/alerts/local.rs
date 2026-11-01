@@ -1985,7 +1985,7 @@ mod tests {
                 Seed::new(31),
                 crate::galaxy::imf::MassFunctionKind::default(),
             ),
-            GalaxyRules::every_26_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the seed's galaxy builds");
         let seen = |galaxy: &Galaxy, rows: &[ObservedSystem], cache: &mut LocalEventsCache| {

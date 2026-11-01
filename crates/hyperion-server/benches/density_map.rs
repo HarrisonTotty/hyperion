@@ -76,9 +76,9 @@
 //! load of 22, against a target of 50 ms: **met by hundreds of times**, which is design note 21
 //! working — a band never runs on the runtime.
 //!
-//! # The remnants map under every 26 hold, measured 2026-11-01
+//! # The remnants map under every 27 hold, measured 2026-11-01 (at 26, before P08.T12 rode 27)
 //!
-//! `remnants_26` builds the fixture galaxy at generator version 26, the first whose galaxies hold
+//! `remnants_27` builds the fixture galaxy at generator version 27, the first whose galaxies hold
 //! plan 08's displaced classes, and renders its layer-E remnants map on the pool as the service
 //! bands it (P08.T15.b; lane `perf-remnants-map`). Release profile, on a pod's 16 vCPU (an EPYC
 //! 7571) with `HYPERION_WORKERS=16`. "Before" is the base tree, banded in 16 consecutive rows,
@@ -220,9 +220,9 @@ fn measurement_time(view: MapView, population: MapPopulation, workers: NonZeroUs
         (MapView::FaceOn, MapPopulation::All, 1) => 90,
         (MapView::FaceOn, MapPopulation::All, _) => 30,
         // 37 ms and 117 ms: a young-only map integrates the young thin disc alone. The remnants
-        // map is not measured here: it is empty below generator version 26, which holds no
-        // displaced class, and the service builds the version in force; `remnants_26` measures it
-        // under every 26 hold (plan 08, P08.T15.b).
+        // map is not measured here: it is empty below generator version 27, which holds no
+        // displaced class, and the service builds the version in force; `remnants_27` measures it
+        // under every 27 hold (plan 08, P08.T15.b).
         (MapView::FaceOn, MapPopulation::Young, _) | (_, MapPopulation::LayerERemnants, _) => 10,
         // About 13 s on eight workers and 53 s on one: 0.40 ms a pixel over 131,072, plan 02's
         // line-of-sight integral per spheroid component.
@@ -235,27 +235,27 @@ fn measurement_time(view: MapView, population: MapPopulation, workers: NonZeroUs
     Duration::from_secs(seconds)
 }
 
-/// The layer-E remnants map under every 26 hold (plan 08, P08.T15.b), built cold face-on and
+/// The layer-E remnants map under every 27 hold (plan 08, P08.T15.b), built cold face-on and
 /// edge-on at 128 and 256 pixels on the pool [`remnants_workers`] gives.
 ///
-/// The service builds its galaxies at the generator version in force, and below 26 no galaxy holds
-/// a displaced class, so its map would be empty: this group builds the fixture galaxy at 26 and
+/// The service builds its galaxies at the generator version in force, and below 27 no galaxy holds
+/// a displaced class, so its map would be empty: this group builds the fixture galaxy at 27 and
 /// renders it on the pool as the service does ([`remnants_map`]).
-fn remnants_26(c: &mut Criterion) {
+fn remnants_27(c: &mut Criterion) {
     let runtime = runtime();
     let seed = Seed::new(SEED);
     let galaxy = Arc::new(
         Galaxy::from_params_at_version(
             seed,
             GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-            GeneratorVersion::new(26),
+            GeneratorVersion::new(27),
         )
-        .expect("the fixture galaxy builds under every 26 hold"),
+        .expect("the fixture galaxy builds under every 27 hold"),
     );
     let workers = remnants_workers();
     let pool = CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
         .expect("the pool starts");
-    let mut group = c.benchmark_group("remnants_26");
+    let mut group = c.benchmark_group("remnants_27");
     // An edge-on build is seconds long, so a sample is one iteration, as in `map_512`.
     group.sampling_mode(SamplingMode::Flat);
     group.sample_size(10);
@@ -431,7 +431,7 @@ fn population_label(population: MapPopulation) -> &'static str {
 criterion_group!(
     density_map,
     map_512,
-    remnants_26,
+    remnants_27,
     quantise_512,
     quantise_1024
 );

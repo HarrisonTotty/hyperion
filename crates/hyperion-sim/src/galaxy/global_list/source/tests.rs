@@ -42,19 +42,13 @@ fn tables() -> &'static PotentialTables {
     TABLES.get_or_init(|| PotentialTables::full(&MassModel::new(&GalaxyParams::milky_way_like())))
 }
 
-/// The fixture galaxy under the version's rules and under every 26 hold.
-fn galaxy(at_26: bool) -> &'static Galaxy {
-    static HELD: OnceLock<Galaxy> = OnceLock::new();
-    static AT_26: OnceLock<Galaxy> = OnceLock::new();
-    let build = |rules| {
-        Galaxy::from_params_with_rules(SEED, GalaxyParams::milky_way_like(), rules)
+/// The fixture galaxy.
+fn galaxy() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
             .expect("the Milky Way fixture builds")
-    };
-    if at_26 {
-        AT_26.get_or_init(|| build(GalaxyRules::every_26_hold()))
-    } else {
-        HELD.get_or_init(|| build(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
-    }
+    })
 }
 
 /// The three test streams, numbered 0–2.
@@ -70,7 +64,7 @@ fn streams() -> Vec<StreamSpec> {
 /// A small dwarf core, number 0: 2,000 M☉ still bound of 6,000 at an accretion 3 Gyr ago, at
 /// (30,000, 20,000, 5,000) ly on an orbit between 30,000 and 120,000 ly.
 fn core() -> DwarfCoreSpec {
-    let galaxy = galaxy(false);
+    let galaxy = galaxy();
     let orbit = SphericalOrbit::between(
         tables(),
         LightYears::new(30_000.0),
@@ -103,7 +97,7 @@ fn tube_of(spec: &StreamSpec, per_arm: u32) -> TubeTable {
     let tracers = Spray::new(SEED, &force, tables, spec, &params)
         .expect("a finite stripping time")
         .tracers();
-    let mean = galaxy(false).mean_system_mass(Population::Halo);
+    let mean = galaxy().mean_system_mass(Population::Halo);
     TubeTable::from_tracers(SEED, mean, spec, &tracers).expect("enough tracers an arm")
 }
 
@@ -160,7 +154,7 @@ impl TubeLookup for Lookup {
 fn lookup() -> &'static Lookup {
     static LOOKUP: OnceLock<Lookup> = OnceLock::new();
     LOOKUP.get_or_init(|| {
-        let list = GlobalList::of_parts(galaxy(false), tables(), streams(), vec![core()]);
+        let list = GlobalList::of_parts(galaxy(), tables(), streams(), vec![core()]);
         Lookup::new(list, 64, false)
     })
 }
@@ -191,53 +185,49 @@ fn ids(hits: &[SystemHit]) -> Vec<u64> {
     hits.iter().map(|hit| hit.id().raw()).collect()
 }
 
-/// P10.T9: a query whose sphere meets no stream's shell builds no table, from version 26, and one
-/// on a stream's axis builds its stream's alone; below 26 the source visits every stream, since a
-/// member may lie outside its shell then. The list here is `pal5_like`'s and `gd1_like`'s, since
+/// P10.T9: a query whose sphere meets no stream's shell builds no table, and one on a stream's
+/// axis builds its stream's alone (to version 25 the source visited every stream, since a member
+/// could lie outside its shell then). The list here is `pal5_like`'s and `gd1_like`'s, since
 /// `sagittarius_like`'s shell holds the whole cube.
 #[test]
 fn a_query_that_touches_no_shell_builds_no_table() {
     let streams = streams()[..2].to_vec();
-    for at_26 in [true, false] {
-        let galaxy = galaxy(at_26);
-        let list = GlobalList::of_parts(galaxy, tables(), streams.clone(), Vec::new());
-        let lookup = Lookup::new(list, 64, false);
-        let source = GlobalListSource::new(galaxy, &lookup, &NoCentreOrbitCache)
-            .expect("no centre to build");
-        // 2,000 ly from the centre, inside both shells' holes.
-        let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
-        for years in [0, 1_000] {
-            let s = sphere(inner, 50.0, years);
-            let census = source.expected_in_sphere(galaxy, &s);
-            assert_eq!(census, LayerCounts::ZERO, "{at_26} {years}");
-            assert_eq!(hits(&source, galaxy, &s), Vec::new(), "{at_26} {years}");
-        }
-        let expected = if at_26 { 0 } else { 2 * 2 * 2 };
-        assert_eq!(lookup.handed(), expected, "{at_26}: tables handed out");
-        // A query on pal5's axis, inside its shell and not gd1's: below gd1's inner radius.
-        let gd1_inner = lookup.list.entries()[1].shell().inner().value();
-        let on_axis = (1..100)
-            .map(|k| lookup.tubes[0].locate(f64::from(k) / 100.0, 0.0, 0.0))
-            .find(|p| {
-                let [x, y, z] = p.to_light_years_f64();
-                (x * x + y * y + z * z).sqrt() < gd1_inner - 1_000.0
-            })
-            .expect("pal5's tube comes within gd1's hole");
-        let s = sphere(on_axis, 50.0, 0);
-        assert!(!lookup.list.entries()[1].shell().touches(&s));
-        let before = lookup.handed();
+    let galaxy = galaxy();
+    let list = GlobalList::of_parts(galaxy, tables(), streams.clone(), Vec::new());
+    let lookup = Lookup::new(list, 64, false);
+    let source =
+        GlobalListSource::new(galaxy, &lookup, &NoCentreOrbitCache).expect("no centre to build");
+    // 2,000 ly from the centre, inside both shells' holes.
+    let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
+    for years in [0, 1_000] {
+        let s = sphere(inner, 50.0, years);
         let census = source.expected_in_sphere(galaxy, &s);
-        assert!(census.get(Layer::A) > 0.0, "{census:?}");
-        let handed = lookup.handed() - before;
-        assert_eq!(handed, if at_26 { 1 } else { 2 }, "{at_26}");
+        assert_eq!(census, LayerCounts::ZERO, "{years}");
+        assert_eq!(hits(&source, galaxy, &s), Vec::new(), "{years}");
     }
+    assert_eq!(lookup.handed(), 0, "tables handed out");
+    // A query on pal5's axis, inside its shell and not gd1's: below gd1's inner radius.
+    let gd1_inner = lookup.list.entries()[1].shell().inner().value();
+    let on_axis = (1..100)
+        .map(|k| lookup.tubes[0].locate(f64::from(k) / 100.0, 0.0, 0.0))
+        .find(|p| {
+            let [x, y, z] = p.to_light_years_f64();
+            (x * x + y * y + z * z).sqrt() < gd1_inner - 1_000.0
+        })
+        .expect("pal5's tube comes within gd1's hole");
+    let s = sphere(on_axis, 50.0, 0);
+    assert!(!lookup.list.entries()[1].shell().touches(&s));
+    let before = lookup.handed();
+    let census = source.expected_in_sphere(galaxy, &s);
+    assert!(census.get(Layer::A) > 0.0, "{census:?}");
+    let handed = lookup.handed() - before;
+    assert_eq!(handed, 1);
 }
 
 /// P10.T10.b's registration: a range query reads only the streams [`GlobalListSource::streams_read`]
 /// names, so a server that builds those tables first leaves none for the query to build. Through a
 /// lookup that records the streams it hands out, on `pal5_like`'s axis at the epoch and a
-/// millennium on and inside every shell's hole a millennium back, under either shell rule; below 26
-/// it names every stream.
+/// millennium on and inside every shell's hole a millennium back.
 #[test]
 fn a_query_reads_only_the_streams_it_is_said_to() {
     use std::collections::BTreeSet;
@@ -263,33 +253,28 @@ fn a_query_reads_only_the_streams_it_is_said_to() {
     let lookup = lookup();
     let on_axis = lookup.tubes[0].locate(0.5, 0.0, 0.0);
     let inner = GalacticPosition::from_light_years([2_000.0, 0.0, 0.0]).expect("in range");
-    for at_26 in [true, false] {
-        let galaxy = galaxy(at_26);
-        for (centre, years) in [(on_axis, 0), (on_axis, 1_000), (inner, -1_000)] {
-            let recording = Recording {
-                inner: lookup,
-                read: Mutex::default(),
-            };
-            let source = GlobalListSource::new(galaxy, &recording, &NoCentreOrbitCache)
-                .expect("no centre to build");
-            let query = RangeQuery::builder(centre, LightYears::new(50.0))
-                .time(UniverseTime::from_julian_years(years).expect("in the clock window"))
-                .build()
-                .expect("a query in the cube");
-            let _ = range_query(galaxy, &mut NoCache::new(), &[&source], &query);
-            let said: BTreeSet<u16> = GlobalListSource::streams_read(galaxy, &lookup.list, &query)
-                .iter()
-                .map(|number| number.get())
-                .collect();
-            let read = recording.read.into_inner().expect("not poisoned");
-            assert!(
-                read.is_subset(&said),
-                "{at_26} {years}: read {read:?}, said {said:?}"
-            );
-            if !at_26 {
-                assert_eq!(said.len(), lookup.list.debris().streams().len());
-            }
-        }
+    let galaxy = galaxy();
+    for (centre, years) in [(on_axis, 0), (on_axis, 1_000), (inner, -1_000)] {
+        let recording = Recording {
+            inner: lookup,
+            read: Mutex::default(),
+        };
+        let source = GlobalListSource::new(galaxy, &recording, &NoCentreOrbitCache)
+            .expect("no centre to build");
+        let query = RangeQuery::builder(centre, LightYears::new(50.0))
+            .time(UniverseTime::from_julian_years(years).expect("in the clock window"))
+            .build()
+            .expect("a query in the cube");
+        let _ = range_query(galaxy, &mut NoCache::new(), &[&source], &query);
+        let said: BTreeSet<u16> = GlobalListSource::streams_read(galaxy, &lookup.list, &query)
+            .iter()
+            .map(|number| number.get())
+            .collect();
+        let read = recording.read.into_inner().expect("not poisoned");
+        assert!(
+            read.is_subset(&said),
+            "{years}: read {read:?}, said {said:?}"
+        );
     }
 }
 
@@ -298,7 +283,7 @@ fn a_query_reads_only_the_streams_it_is_said_to() {
 /// time the query is asked at (the census is the epoch's); it is the cells' sum by hand.
 #[test]
 fn the_census_is_the_cells_sum_and_independent_of_the_cache() {
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let kept = lookup();
     let rebuilt = Lookup::new(kept.list.clone(), 64, true);
     let a = GlobalListSource::new(galaxy, kept, &NoCentreOrbitCache).expect("no centre");
@@ -342,7 +327,7 @@ fn the_census_is_the_cells_sum_and_independent_of_the_cache() {
 #[test]
 fn the_source_s_answers_are_order_independent() {
     use hyperion_testkit::order::assert_order_independent;
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let lookup = lookup();
     let core = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache)
         .expect("no centre")
@@ -411,7 +396,7 @@ fn the_source_s_answers_are_order_independent() {
 /// every core member lies inside its entry's shell; and the census counts the cells it touches.
 #[test]
 fn a_core_s_hits_are_every_member_inside_the_sphere() {
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let lookup = lookup();
     let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
     let model = source
@@ -458,7 +443,7 @@ fn a_core_s_hits_are_every_member_inside_the_sphere() {
 /// sphere at its time; a query asking for layer A alone gets layer A's hits alone.
 #[test]
 fn hits_are_global_list_members_of_the_layers_asked() {
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let lookup = lookup();
     let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
     let centre = lookup.tubes[0].locate(0.45, 0.0, 0.0);
@@ -492,7 +477,7 @@ fn hits_are_global_list_members_of_the_layers_asked() {
 /// grid's, and the census counts its members.
 #[test]
 fn the_range_query_merges_the_list_s_members() {
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let lookup = lookup();
     let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
     // About a member of the small core, which lies dense.
@@ -551,7 +536,6 @@ fn the_list_source_is_held_only_until_the_27_bump() {
             .feature_shares()
             .phi_globular(Population::Halo, MassBand::A),
     );
-    assert!(!GlobalListSource::is_registered_in(galaxy(true)));
     let at_27 = Galaxy::from_params_with_rules(
         SEED,
         GalaxyParams::milky_way_like(),
@@ -609,17 +593,15 @@ fn brute_force(
 fn generator_lookup() -> &'static Lookup {
     static LOOKUP: OnceLock<Lookup> = OnceLock::new();
     LOOKUP.get_or_init(|| {
-        let list =
-            GlobalList::of_parts(galaxy(false), tables(), streams()[..2].to_vec(), Vec::new());
+        let list = GlobalList::of_parts(galaxy(), tables(), streams()[..2].to_vec(), Vec::new());
         Lookup::new(list, 1_000, false)
     })
 }
 
 /// P10.T9: a query on the axis of `gd1_like`, and on `pal5_like`'s, at the generator's 2,000
 /// tracers, equals a brute-force enumeration of every member of its tube, at the epoch and a
-/// millennium either way, under both arms of the stream shell's hold (from 26 the members inside
-/// the shell); every member of `gd1_like` lies inside its shell, and of `pal5_like`'s some lie
-/// outside, which 26 drops (printed); and no member moves faster than its tube's speed bound.
+/// millennium either way, the members inside the shell; every member of `gd1_like` lies inside
+/// its shell, and of `pal5_like`'s some lie outside, which the source drops (printed); and no member moves faster than its tube's speed bound.
 #[test]
 #[ignore = "slow: sprays two test streams of 2,000 tracers and enumerates every member of their tubes"]
 fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
@@ -627,9 +609,9 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
     for (n, name) in [(1, "gd1"), (0, "pal5")] {
         let tube = &lookup.tubes[n];
         let shell = lookup.list.entries()[n].shell();
-        let held = galaxy(false);
-        let shares = StreamBandShares::of(held, &lookup.list.debris().streams()[n]);
-        let all = every_member(held, tube, &shares);
+        let galaxy = galaxy();
+        let shares = StreamBandShares::of(galaxy, &lookup.list.debris().streams()[n]);
+        let all = every_member(galaxy, tube, &shares);
         let outside = all
             .iter()
             .filter(|m| {
@@ -652,31 +634,25 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
         if name == "gd1" {
             assert_eq!(outside, 0, "{name}");
         }
-        for at_26 in [false, true] {
-            let galaxy = galaxy(at_26);
-            let source =
-                GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
-            for (u, radius, occupied) in
-                [(0.2, 60.0, false), (0.5, 300.0, true), (0.9, 150.0, false)]
-            {
-                for years in [0, 1_000, -1_000] {
-                    let s = sphere(tube.locate(u, 0.0, 0.0), radius, years);
-                    let got = hits(&source, galaxy, &s);
-                    let mine: Vec<SystemHit> = got
-                        .into_iter()
-                        .filter(|hit| {
-                            matches!(
-                                hit.id().kind(),
-                                crate::id::SystemIdKind::Stream(id) if usize::from(id.number()) == n
-                            )
-                        })
-                        .collect();
-                    let want = brute_force(&all, &shell, &s);
-                    assert_eq!(ids(&mine), ids(&want), "{name} {at_26} {u} {years}");
-                    assert_eq!(mine, want, "{name} {at_26} {u} {years}");
-                    if occupied {
-                        assert_ne!(want.len(), 0, "{name}: no member on the axis");
-                    }
+        let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
+        for (u, radius, occupied) in [(0.2, 60.0, false), (0.5, 300.0, true), (0.9, 150.0, false)] {
+            for years in [0, 1_000, -1_000] {
+                let s = sphere(tube.locate(u, 0.0, 0.0), radius, years);
+                let got = hits(&source, galaxy, &s);
+                let mine: Vec<SystemHit> = got
+                    .into_iter()
+                    .filter(|hit| {
+                        matches!(
+                            hit.id().kind(),
+                            crate::id::SystemIdKind::Stream(id) if usize::from(id.number()) == n
+                        )
+                    })
+                    .collect();
+                let want = brute_force(&all, &shell, &s);
+                assert_eq!(ids(&mine), ids(&want), "{name} {u} {years}");
+                assert_eq!(mine, want, "{name} {u} {years}");
+                if occupied {
+                    assert_ne!(want.len(), 0, "{name}: no member on the axis");
                 }
             }
         }
@@ -698,11 +674,11 @@ const PAL5_OUTSIDE_PINNED: usize = 2;
 #[ignore = "slow: sprays two test streams under eight seeds and enumerates their tubes"]
 fn over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells() {
     use crate::galaxy::global_list::spray::Arm;
-    let held = galaxy(false);
-    let list = GlobalList::of_parts(held, tables(), streams()[..2].to_vec(), Vec::new());
+    let galaxy = galaxy();
+    let list = GlobalList::of_parts(galaxy, tables(), streams()[..2].to_vec(), Vec::new());
     let force = SprayForce::new(tables()).expect("the full tables");
     let params = SprayParams::new(NonZeroU32::new(1_000).expect("not zero"));
-    let mean = held.mean_system_mass(Population::Halo);
+    let mean = galaxy.mean_system_mass(Population::Halo);
     let radius = |x: GalacticDisplacement| {
         let [a, b, c] = x.metres();
         (a * a + b * b + c * c).sqrt() / METRES_PER_LIGHT_YEAR
@@ -710,7 +686,7 @@ fn over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells() {
     for (n, name) in [(0, "pal5"), (1, "gd1")] {
         let spec = &list.debris().streams()[n];
         let shell = list.entries()[n].shell();
-        let shares = StreamBandShares::of(held, spec);
+        let shares = StreamBandShares::of(galaxy, spec);
         for k in 0..8 {
             let seed = Seed::new(SEED.get() + k);
             let tracers = Spray::new(seed, &force, tables(), spec, &params)
@@ -737,7 +713,7 @@ fn over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells() {
                     );
                 }
             }
-            let all = every_member(held, &tube, &shares);
+            let all = every_member(galaxy, &tube, &shares);
             let outside = all
                 .iter()
                 .filter(|m| {
@@ -768,7 +744,7 @@ fn over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells() {
 #[ignore = "slow: sprays a test stream of 2,000 tracers"]
 fn a_query_on_a_globular_stream_s_axis_generates_its_cells_members() {
     let lookup = generator_lookup();
-    let galaxy = galaxy(true);
+    let galaxy = galaxy();
     let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("no centre");
     let tube = &lookup.tubes[0];
     let shares = StreamBandShares::of(galaxy, &lookup.list.debris().streams()[0]);
@@ -808,72 +784,57 @@ impl TubeLookup for One {
     }
 }
 
-/// P10.T9: from version 26 `resolve_with` refuses a drawn stream's member outside its entry's
-/// shell, as the source leaves it out, and below 26 resolves it; with the list's own shell both
-/// resolve it. The shell is the empty one here, so that every member is outside.
+/// P10.T9: `resolve_with` refuses a drawn stream's member outside its entry's shell, as the source
+/// leaves it out, and resolves it with the list's own shell (to version 25 it resolved both). The
+/// shell is the empty one here, so that every member is outside.
 #[test]
 #[ignore = "slow: builds a Milky Way galaxy's kinematic tables, its list and a tube"]
 fn resolve_with_refuses_a_stream_member_outside_its_shell_from_26() {
     use crate::galaxy::placement::resolve_with;
-    for at_26 in [false, true] {
-        let rules = if at_26 {
-            GalaxyRules::every_26_hold()
-        } else {
-            GalaxyRules::of_version(crate::GENERATOR_VERSION)
-        };
-        let galaxy = Galaxy::from_params_with_rules(
-            Seed::new(0x0a10_8b01),
-            GalaxyParams::milky_way_like(),
-            rules,
-        )
+    let galaxy = Galaxy::from_params(Seed::new(0x0a10_8b01), GalaxyParams::milky_way_like())
         .expect("builds")
         .with_full_potential();
-        let list = GlobalList::build(&galaxy);
-        let spec = &list.debris().streams()[0];
-        let tube = Arc::new(TubeTable::build(&galaxy, spec).expect("the full potential"));
-        let shares = StreamBandShares::of(&galaxy, spec);
-        let shell = list.stream_entry(spec.number()).expect("listed").shell();
-        let centre = tube.locate(0.5, 0.0, 0.0);
-        let mut members = Vec::new();
-        let mut found = None;
-        for cell in tube.cells_touching(&centre, LightYears::new(100.0)) {
-            stream_cell_members(&galaxy, &tube, &shares, cell, MassBand::A, &mut members);
-            if let Some(m) = members.iter().find(|m| {
-                shell.contains(
-                    &GalacticPosition::ORIGIN.displacement_to(m.record().epoch_position()),
-                )
-            }) {
-                found = Some(*m);
-                break;
-            }
+    let list = GlobalList::build(&galaxy);
+    let spec = &list.debris().streams()[0];
+    let tube = Arc::new(TubeTable::build(&galaxy, spec).expect("the full potential"));
+    let shares = StreamBandShares::of(&galaxy, spec);
+    let shell = list.stream_entry(spec.number()).expect("listed").shell();
+    let centre = tube.locate(0.5, 0.0, 0.0);
+    let mut members = Vec::new();
+    let mut found = None;
+    for cell in tube.cells_touching(&centre, LightYears::new(100.0)) {
+        stream_cell_members(&galaxy, &tube, &shares, cell, MassBand::A, &mut members);
+        if let Some(m) = members.iter().find(|m| {
+            shell.contains(&GalacticPosition::ORIGIN.displacement_to(m.record().epoch_position()))
+        }) {
+            found = Some(*m);
+            break;
         }
-        let member = found.expect("a member inside the shell on the axis");
-        let id = member.record().id();
-        let own = One(list.clone(), Arc::clone(&tube));
-        assert_eq!(resolve_with(&galaxy, id, &own), Ok(*member.record()));
-        assert_eq!(
-            crate::galaxy::placement::resolve_list_member_with(&galaxy, id, &own),
-            Ok(member)
-        );
-        let mut emptied = list.clone();
-        let index = emptied
-            .entries
-            .iter()
-            .position(|e| e.kind() == GlobalEntryKind::Stream(spec.number()))
-            .expect("listed");
-        emptied.entries[index] = GlobalEntry::new(
-            GlobalEntryKind::Stream(spec.number()),
-            spec.mass(),
-            BoundingShell::new(LightYears::new(1.0), LightYears::ZERO),
-        );
-        let empty = One(emptied, tube);
-        let want = if at_26 {
-            Err(crate::galaxy::placement::ResolveSystemError::NoSuchSystem)
-        } else {
-            Ok(*member.record())
-        };
-        assert_eq!(resolve_with(&galaxy, id, &empty), want, "{at_26}");
     }
+    let member = found.expect("a member inside the shell on the axis");
+    let id = member.record().id();
+    let own = One(list.clone(), Arc::clone(&tube));
+    assert_eq!(resolve_with(&galaxy, id, &own), Ok(*member.record()));
+    assert_eq!(
+        crate::galaxy::placement::resolve_list_member_with(&galaxy, id, &own),
+        Ok(member)
+    );
+    let mut emptied = list.clone();
+    let index = emptied
+        .entries
+        .iter()
+        .position(|e| e.kind() == GlobalEntryKind::Stream(spec.number()))
+        .expect("listed");
+    emptied.entries[index] = GlobalEntry::new(
+        GlobalEntryKind::Stream(spec.number()),
+        spec.mass(),
+        BoundingShell::new(LightYears::new(1.0), LightYears::ZERO),
+    );
+    let empty = One(emptied, tube);
+    assert_eq!(
+        resolve_with(&galaxy, id, &empty),
+        Err(crate::galaxy::placement::ResolveSystemError::NoSuchSystem)
+    );
 }
 
 /// A lookup that builds each of a drawn galaxy's tables on first use and keeps it.
@@ -907,13 +868,9 @@ fn a_drawn_galaxy_s_source_holds_the_centre_s_and_resolves_its_members() {
     use crate::galaxy::features::centre::CentreMemberSource;
     use crate::galaxy::placement::resolve_with;
     use crate::id::SystemIdKind;
-    let galaxy = Galaxy::from_params_with_rules(
-        Seed::new(0x0a10_8b01),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
-    )
-    .expect("builds")
-    .with_full_potential();
+    let galaxy = Galaxy::from_params(Seed::new(0x0a10_8b01), GalaxyParams::milky_way_like())
+        .expect("builds")
+        .with_full_potential();
     let full = GlobalList::build(&galaxy);
     let spec = full.debris().streams()[0].clone();
     let entry = *full.stream_entry(spec.number()).expect("listed");

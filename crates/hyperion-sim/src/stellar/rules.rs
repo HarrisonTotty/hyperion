@@ -139,17 +139,7 @@ impl StellarRules {
         }
     }
 
-    /// Every stellar hold at 26 in force, for a test that asserts a 26 figure without a galaxy.
-    ///
-    /// It is the stellar part of `GalaxyRules::every_26_hold()`, so a later hold at 26 joins both
-    /// with nothing to edit.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_26_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(26))
-    }
-
-    /// Every stellar hold at 26 with those retargeted from 26 to 27 in force too (P11.T4.d's
+    /// The version's stellar rules with those retargeted from 26 to 27 in force too (P11.T4.d's
     /// `merger_mass`): the stellar part of [`GalaxyRules::every_26_hold_with_its_retargets`].
     ///
     /// [`GalaxyRules::every_26_hold_with_its_retargets`]:
@@ -159,13 +149,13 @@ impl StellarRules {
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
             merger_mass: MergerMassRules::Pair,
-            ..Self::of_version(GeneratorVersion::new(26))
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
-    /// `heavy_donor`, and P11.T10's `binary_kicks`).
+    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
+    /// `heavy_donor`, P11.T4.d's `merger_mass`, and P11.T10's `binary_kicks`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

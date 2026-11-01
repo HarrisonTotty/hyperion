@@ -15,7 +15,6 @@ use crate::planetary::derive::atmosphere::{
 use crate::planetary::derive::photometry::area_mix::{
     IcyRegolithRules, with_icy_regolith, with_scattering_held,
 };
-use crate::planetary::testing::with_every_26_hold;
 use crate::units::Kelvin;
 use hyperion_testkit::float::assert_same_bits;
 
@@ -76,20 +75,18 @@ fn census() -> &'static Census {
         // crossing; 26's bump restates this census.
         let frost = IcyRegolithRules::Frost;
         let held = settled_log::capture(|| {
-            with_every_26_hold(|| {
+            {
                 with_icy_regolith(frost, || {
                     with_scattering_held(|| {
                         with_line_switch(LineSwitchRules::Held, || thin_air_census(&sets))
                     })
                 })
-            })
+            }
         });
         let walk_held = start.elapsed();
         let start = Instant::now();
         let switched = settled_log::capture(|| {
-            with_every_26_hold(|| {
-                with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets)))
-            })
+            with_icy_regolith(frost, || with_scattering_held(|| thin_air_census(&sets)))
         });
         eprintln!(
             "the walks: the line held {walk_held:?}, read once {:?}, {} bodies",
@@ -236,11 +233,11 @@ fn named_under(
         .unwrap_or_else(|| panic!("{id}'s system is in the sample"));
     let sets = [("sample", SEED, ctx.clone())];
     let (bodies, solves) = settled_log::capture(|| {
-        with_every_26_hold(|| {
+        {
             with_icy_regolith(icy, || {
                 with_scattering_held(|| with_line_switch(rules, || thin_air_census(&sets)))
             })
-        })
+        }
     });
     let body = bodies
         .into_iter()
@@ -311,12 +308,12 @@ fn under_every_26_hold_count_vii_s_first_system_repeats() {
         .find(|ctx| ctx.id().to_string() == "01ffeb2d20000000")
         .expect("e101's system is in the sample");
     let records = || {
-        with_every_26_hold(|| {
+        {
             format!(
                 "{:?}",
                 generate(SEED, ctx).snapshot_at(ctx, crate::time::UniverseTime::EPOCH)
             )
-        })
+        }
     };
     assert_eq!(records(), records());
 }

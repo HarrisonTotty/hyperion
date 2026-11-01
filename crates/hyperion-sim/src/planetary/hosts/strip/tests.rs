@@ -20,7 +20,6 @@ use crate::galaxy::query::{QuerySphere, cells_in_sphere};
 use crate::id::{CentreMemberId, Layer, MemberSlot, SystemId};
 use crate::orbit::Eccentricity;
 use crate::planetary::record::BodyKind;
-use crate::planetary::testing::with_every_26_hold;
 use crate::planetary::{PlanetarySystem, generate, generate_planets};
 use crate::time::UniverseTime;
 use crate::units::{AstronomicalUnits, GravitationalParameter, KilometresPerSecond};
@@ -425,7 +424,7 @@ fn a_hundredth_of_a_light_year_from_the_black_hole_keeps_nothing_beyond_2_7_au()
     let sphere = tidal_radius(galaxy, &state, m);
     assert!((in_au(sphere) - 2.7).abs() < 0.05, "{} au", in_au(sphere));
     let mut checked = 0;
-    with_every_26_hold(|| {
+    {
         for i in 0..24 {
             let ctx = sun(i, 4.57e9).tidal_radius(sphere).build().unwrap();
             let strip = ctx.strip_radius();
@@ -440,7 +439,7 @@ fn a_hundredth_of_a_light_year_from_the_black_hole_keeps_nothing_beyond_2_7_au()
                 }
             }
         }
-    });
+    };
     assert!(checked > 10, "{checked} planets inside 1.32 au");
 }
 
@@ -448,7 +447,7 @@ fn a_hundredth_of_a_light_year_from_the_black_hole_keeps_nothing_beyond_2_7_au()
 /// its encounter cut, about 0.11 au after 12 Gyr, is far inside its galactic sphere of influence.
 #[test]
 fn a_member_of_a_dense_globular_core_keeps_nothing_beyond_a_few_au() {
-    with_every_26_hold(|| {
+    {
         for i in 0..24 {
             let ctx = sun(i, 1.2e10)
                 .encounter_environment(core(1e4))
@@ -459,7 +458,7 @@ fn a_member_of_a_dense_globular_core_keeps_nothing_beyond_a_few_au() {
             assert!(strip < ctx.tidal_radius() * 1e-5);
             assert_inside(&ctx, &generate(SEED, &ctx));
         }
-    });
+    };
 }
 
 /// A field star at 26,000 ly is unaffected inside 10⁴ au: outside the Kepler regime its context
@@ -501,7 +500,7 @@ fn a_free_floating_brown_dwarf_takes_the_field_rule_at_its_own_mass() {
         &mut cell,
     );
     assert!(!cell.is_empty(), "layer F is empty at the solar circle");
-    with_every_26_hold(|| {
+    {
         for record in cell.iter().take(6) {
             let ctx = SystemContext::from_record(galaxy, record);
             assert_eq!(ctx.host_kind(), crate::planetary::HostKind::BrownDwarf);
@@ -519,7 +518,7 @@ fn a_free_floating_brown_dwarf_takes_the_field_rule_at_its_own_mass() {
             assert!(in_au(strip) > 1e4, "{} au", in_au(strip));
             assert_inside(&ctx, &generate(SEED, &ctx));
         }
-    });
+    };
 }
 
 // Every body inside its strip radius.
@@ -544,7 +543,7 @@ fn no_body_lies_beyond_its_strip_radius() {
     ];
     let mut planets = 0;
     let mut cases = 0;
-    with_every_26_hold(|| {
+    {
         for (i, tidal) in [0.05, 0.4, 3.0, 20.0, 150.0, 2e3, 3e5]
             .into_iter()
             .enumerate()
@@ -588,7 +587,7 @@ fn no_body_lies_beyond_its_strip_radius() {
                 cases += 1;
             }
         }
-    });
+    };
     assert!(
         cases > 80 && planets > 50,
         "{planets} planets in {cases} systems"
@@ -652,7 +651,7 @@ fn the_stripping_is_the_same_in_every_run_and_every_order() {
             .iter()
             .map(|m| *m.record()),
     );
-    with_every_26_hold(|| {
+    {
         for record in &records {
             let first = SystemContext::from_record(galaxy, record);
             let second = SystemContext::from_record(galaxy, record);
@@ -676,7 +675,7 @@ fn the_stripping_is_the_same_in_every_run_and_every_order() {
                 .expect("a grid system or a feature member has stars");
             SystemContext::from_stars_with(galaxy, &keep, &stars)
         });
-    });
+    };
 }
 
 // The movers.

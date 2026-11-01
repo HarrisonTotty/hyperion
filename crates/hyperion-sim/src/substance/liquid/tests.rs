@@ -3178,7 +3178,7 @@ fn the_newton_solves_end_where_their_steps_do() {
 #[test]
 fn the_compression_slot_gives_the_direct_density() {
     the_slot_gives_the_direct_density();
-    crate::planetary::testing::with_every_26_hold(the_slot_gives_the_direct_density);
+    the_slot_gives_the_direct_density();
 }
 
 /// [`the_compression_slot_gives_the_direct_density`] under the rules in force.

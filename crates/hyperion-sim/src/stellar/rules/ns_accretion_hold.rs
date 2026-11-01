@@ -98,7 +98,7 @@ fn the_neutron_star_accretion_is_held_only_until_the_27_bump() {
     }
     assert_eq!(at(27), NsAccretionRules::Efficiency);
     assert_eq!(
-        StellarRules::every_26_hold().ns_accretion,
+        StellarRules::of_version(crate::GENERATOR_VERSION).ns_accretion,
         NsAccretionRules::Eddington
     );
     assert_eq!(

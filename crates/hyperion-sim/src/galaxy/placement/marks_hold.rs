@@ -852,13 +852,13 @@ fn layer_e_s_living_share_and_masses_at_the_sun_match_the_class_table() {
     assert_p_value("layer E's living masses at the Sun", fit.p_value, 0.01);
 }
 
-/// Every 26 hold but the field share and the carve-out, which thin and claim layer E's records
-/// after their marks: the rules under which the marks are the budget's.
+/// Every 26 hold with its retargets but the field share and the carve-out, which thin and claim
+/// layer E's records after their marks: the rules under which the marks are the budget's.
 const fn marks_rules() -> GalaxyRules {
     GalaxyRules {
         field_share: FieldShareRules::None,
         carve_out: CarveOutRules::Unclaimed,
-        ..GalaxyRules::every_26_hold()
+        ..GalaxyRules::every_26_hold_with_its_retargets()
     }
 }
 

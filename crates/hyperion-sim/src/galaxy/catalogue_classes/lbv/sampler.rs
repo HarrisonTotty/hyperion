@@ -322,7 +322,7 @@ mod tests {
         assert_same_bits(held.0.value(), span.0.value());
         assert_same_bits(held.1.value(), span.1.value());
         assert_ne!(
-            window_span_under(m, one, StellarRules::every_26_hold()),
+            window_span_under(m, one, StellarRules::of_version(crate::GENERATOR_VERSION)),
             window_span(m, one)
         );
     }

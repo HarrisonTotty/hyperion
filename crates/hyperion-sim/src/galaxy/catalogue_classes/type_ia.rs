@@ -1116,7 +1116,7 @@ mod tests {
             Galaxy::from_params_with_rules(
                 Seed::new(0x0918_0001),
                 GalaxyParams::milky_way_like(),
-                GalaxyRules::every_26_hold(),
+                GalaxyRules::of_version(crate::GENERATOR_VERSION),
             )
             .unwrap()
         }

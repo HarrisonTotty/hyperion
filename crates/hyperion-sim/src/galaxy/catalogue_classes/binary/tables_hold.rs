@@ -91,7 +91,7 @@ fn the_binary_tables_are_held_only_until_the_27_bump() {
         BinaryTableRules::Scratch
     );
     assert_eq!(
-        GalaxyRules::every_26_hold().binary_tables,
+        GalaxyRules::of_version(crate::GENERATOR_VERSION).binary_tables,
         BinaryTableRules::Scratch
     );
     assert_eq!(

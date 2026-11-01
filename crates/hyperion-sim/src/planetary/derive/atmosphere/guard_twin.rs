@@ -42,7 +42,6 @@ use crate::planetary::placement::{
     HostPlacement, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs,
     ZoneHierarchy, ZoneStar, place, stable_zones,
 };
-use crate::planetary::testing::with_every_26_hold;
 use crate::stellar::Composition;
 use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
@@ -806,7 +805,6 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
         assert_held_at_saturation, assert_monotone, assert_no_deck_at_or_above_the_critical_point,
     };
     use crate::planetary::system::envelope::{SupercriticalOf, supercritical_envelope_of};
-    use crate::planetary::testing::with_every_26_hold;
     use crate::units::WattsPerSquareMetre;
     let six: std::collections::BTreeSet<&str> = CLOSURE_JUMPS
         .iter()
@@ -815,7 +813,7 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
         .collect();
     assert_eq!(six.len(), 6, "the guard's six");
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
-    with_every_26_hold(|| {
+    {
         guard_walk(&mut |sample| {
             let id = sample.id();
             if !six.contains(id.as_str()) {
@@ -873,7 +871,7 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
             }
             *seen.entry(id).or_default() += 1;
         });
-    });
+    };
     assert_eq!(seen.len(), 6, "{seen:?}");
     assert!(seen.values().all(|&n| n == 3), "{seen:?}");
 }
@@ -1106,9 +1104,7 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
         };
         // P14.T24.h.b's holds are set back inside 26's helper: its adding rule takes
         // 42002cb20001885b.0100 to 1,231.2 K with the melt's hold set back (1,428.1 K without it).
-        let every_26 = |run: &dyn Fn() -> (DerivedBody, Kelvin)| {
-            with_every_26_hold(|| with_scattering_held(run))
-        };
+        let every_26 = |run: &dyn Fn() -> (DerivedBody, Kelvin)| with_scattering_held(run);
         let bodies = vec![
             with_melt_oxygen(MeltOxygenRules::Held, derive),
             every_26(&|| with_melt_oxygen(MeltOxygenRules::Held, derive)),
@@ -1192,14 +1188,14 @@ fn under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air() {
     let (mut samples, mut movers, mut to_main) = (0_u32, 0_u32, Vec::new());
     guard_walk(&mut |sample| {
         let id = format!("{} at {:+} yr", sample.id(), sample.years);
-        let derived = with_every_26_hold(|| {
+        let derived = {
             with_scattering_held(|| {
                 (
                     sample.derive(),
                     with_melt_oxygen(MeltOxygenRules::Held, || sample.derive()),
                 )
             })
-        });
+        };
         let ((after, hottest), (before, _)) = match derived {
             (Some(after), Some(before)) => (after, before),
             (None, None) => return,

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::planetary::derive::solar::SOLAR_AGE;
-use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+use crate::planetary::testing::with_every_27_hold;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
 /// Saturn's and Jupiter's GM, km³ s⁻² (JPL's "Planet GM values", SAT441 and JUP365, read
@@ -91,7 +91,7 @@ fn the_eccentricity_damping_is_held_only_until_the_27_bump() {
         with_every_27_hold(EccentricityDampingRules::in_force),
         Damped
     );
-    assert_eq!(with_every_26_hold(EccentricityDampingRules::in_force), Held);
+    assert_eq!(EccentricityDampingRules::in_force(), Held);
     assert_eq!(
         with_every_27_hold(|| with_eccentricity_damping(Held, EccentricityDampingRules::in_force)),
         Held

@@ -710,10 +710,8 @@ fn trapped_area(condensates: &Condensates, gas: Gas) -> f64 {
 fn under_every_26_hold_the_icy_lids_movers_are_stated() {
     use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
     use crate::planetary::hooks::crust::CrustLid;
-    use crate::planetary::testing::with_every_26_hold;
-    let lagged = with_every_26_hold(trap_bodies_afresh);
-    let held =
-        with_every_26_hold(|| with_icy_regolith(IcyRegolithRules::Frost, trap_bodies_afresh));
+    let lagged = trap_bodies_afresh();
+    let held = with_icy_regolith(IcyRegolithRules::Frost, trap_bodies_afresh);
     assert_eq!(lagged.len(), held.len());
     let (mut movers, mut flips, mut icy, mut bare) = (0_u32, 0_u32, 0_u32, 0_u32);
     let water = Gas::Water.substance();
@@ -784,9 +782,8 @@ fn under_every_26_hold_the_icy_lids_movers_are_stated() {
 #[ignore = "slow: the 60 systems generated twice under every 26 hold"]
 fn under_every_26_hold_the_scattering_movers_are_stated() {
     use crate::planetary::derive::photometry::area_mix::with_scattering_held;
-    use crate::planetary::testing::with_every_26_hold;
-    let now = with_every_26_hold(trap_bodies_afresh);
-    let held = with_every_26_hold(|| with_scattering_held(trap_bodies_afresh));
+    let now = trap_bodies_afresh();
+    let held = with_scattering_held(trap_bodies_afresh);
     assert_eq!(now.len(), held.len());
     let mut counts: BTreeMap<&'static str, u32> = BTreeMap::new();
     let mut flips = 0_u32;

@@ -391,7 +391,7 @@ mod tests {
     /// the tests' switch and 27's helper reach the host's, and 26's helper does not.
     #[test]
     fn the_core_share_is_held_only_until_the_27_bump() {
-        use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+        use crate::planetary::testing::with_every_27_hold;
         assert!(
             GENERATOR_VERSION < CORE_SHARE_HOST_VERSION,
             "the 26 → 27 bump makes a rocky body's core share answer to its host's iron: delete \
@@ -410,10 +410,7 @@ mod tests {
             with_every_27_hold(CoreShareRules::in_force),
             CoreShareRules::Host
         );
-        assert_eq!(
-            with_every_26_hold(CoreShareRules::in_force),
-            CoreShareRules::Population
-        );
+        assert_eq!(CoreShareRules::in_force(), CoreShareRules::Population);
         assert_eq!(
             with_every_27_hold(|| {
                 with_core_share(CoreShareRules::Population, CoreShareRules::in_force)

@@ -3427,7 +3427,7 @@ mod tests {
             )
             .unwrap()
         };
-        let full = StellarRules::every_26_hold();
+        let full = StellarRules::of_version(crate::GENERATOR_VERSION);
         let young = model(1.0, 2e6, full);
         let state = young.state_at(UniverseTime::EPOCH).unwrap();
         assert_eq!(
@@ -3461,7 +3461,7 @@ mod tests {
             Composition::SOLAR,
             StarDraws::median(),
             Years::new(3e8),
-            StellarRules::every_26_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap();
         let streams = streams(BodyId::new(test_system(), 0));

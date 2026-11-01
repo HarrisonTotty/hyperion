@@ -556,7 +556,7 @@ fn the_ranks_are_the_stream_s_first_eleven_words() {
 /// scale, the tests' switch and 27's helper reach the ratios, and 26's helper does not.
 #[test]
 fn the_resource_ratios_are_held_only_until_the_27_bump() {
-    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < RESOURCE_RATIOS_VERSION,
         "the 26 → 27 bump puts P14.T26's ratios in a body's resources: delete \
@@ -575,10 +575,7 @@ fn the_resource_ratios_are_held_only_until_the_27_bump() {
         with_every_27_hold(ResourceRatiosRules::in_force),
         ResourceRatiosRules::Ratios
     );
-    assert_eq!(
-        with_every_26_hold(ResourceRatiosRules::in_force),
-        ResourceRatiosRules::Held
-    );
+    assert_eq!(ResourceRatiosRules::in_force(), ResourceRatiosRules::Held);
     assert_eq!(
         with_every_27_hold(|| {
             with_resource_ratios(ResourceRatiosRules::Held, ResourceRatiosRules::in_force)

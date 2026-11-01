@@ -186,10 +186,13 @@ fn with_its_events_composed_the_carbon_star_s_class_is_its_brief_s() {
     let both = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture's gas is mostly neutral");
-    assert_eq!(both.rules().stellar, StellarRules::every_26_hold());
+    assert_eq!(
+        both.rules().stellar,
+        StellarRules::of_version(crate::GENERATOR_VERSION)
+    );
     let record = carbon_star();
     let stars = SystemStars::generate(&both, record);
     let model = BriefModel::new(&both, record);

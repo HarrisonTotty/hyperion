@@ -14,7 +14,7 @@ use crate::planetary::hooks::surface::tests::{inputs_of, spin_of};
 use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
 use crate::planetary::record::Section;
 use crate::planetary::system::tests::{SEED, id, whole};
-use crate::planetary::testing::{synthetic_star, with_every_26_hold};
+use crate::planetary::testing::synthetic_star;
 use crate::planetary::{PlanetarySystem, SystemContext, generate};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
@@ -117,7 +117,7 @@ fn earth_is_temperate_mars_marginal_and_venus_a_hostile_runaway() {
     let triple = water_triple_pressure().value();
     for (rules, assessed) in [
         ("version 25", table_assessments()),
-        ("every 26 hold", with_every_26_hold(table_assessments)),
+        ("every 26 hold", table_assessments()),
     ] {
         for (name, inputs, assessment) in &assessed {
             let surface = inputs.surface.expect("a table planet has a surface");
@@ -167,7 +167,7 @@ fn the_cap_balanced_mars_s_surface_pressure_against_the_triple_point() {
     use crate::planetary::derive::atmosphere::tests::table_mars_at_its_spin;
 
     let triple = water_triple_pressure().value();
-    let (_, _, air, _) = with_every_26_hold(table_mars_at_its_spin);
+    let (_, _, air, _) = table_mars_at_its_spin();
     let pressure = air.surface_pressure().expect("Mars has a surface").value();
     let co2 = air.partial_pressures().of(Gas::CarbonDioxide).value();
     eprintln!(

@@ -11,7 +11,6 @@ use super::tests::{
 use super::*;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState, settled_log};
 use crate::planetary::hooks::surface::{CapBalanceRules, rotates, with_cap_balance};
-use crate::planetary::testing::with_every_26_hold;
 
 /// The records whose state or figures the cap moves over the census (the census at the tip,
 /// 2026-10-31, the cap's scope read on CO₂'s inventory and a capped CO₂ held at its cap), by ID in
@@ -71,13 +70,10 @@ fn census() -> &'static Census {
     CENSUS.get_or_init(|| {
         let sets = thin_air_sets();
         let start = Instant::now();
-        let held = with_every_26_hold(|| {
-            with_cap_balance(CapBalanceRules::Held, || thin_air_census(&sets))
-        });
+        let held = { with_cap_balance(CapBalanceRules::Held, || thin_air_census(&sets)) };
         let walk_held = start.elapsed();
         let start = Instant::now();
-        let (balanced, solves) =
-            settled_log::capture(|| with_every_26_hold(|| thin_air_census(&sets)));
+        let (balanced, solves) = settled_log::capture(|| thin_air_census(&sets));
         eprintln!(
             "the walks: the cap held {walk_held:?}, balanced {:?}, {} bodies, {} published solves",
             start.elapsed(),
@@ -340,13 +336,13 @@ fn under_every_26_hold_the_cap_s_close_binary_repeats() {
         .find(|(name, ..)| *name == "close_binary")
         .expect("the golden close binary");
     let records = || {
-        with_every_26_hold(|| {
+        {
             format!(
                 "{:?}",
                 generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx)
                     .snapshot_at(ctx, crate::time::UniverseTime::EPOCH)
             )
-        })
+        }
     };
     assert_eq!(records(), records());
 }
