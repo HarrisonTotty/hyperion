@@ -24,7 +24,10 @@ use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::PhasePoint;
-use crate::tables::{helium, helium_26};
+// The committed table is a candidate's and the tests' alone; every track reads the fitted one.
+#[cfg(any(test, feature = "testing"))]
+use crate::tables::helium;
+use crate::tables::helium_26;
 #[cfg(any(test, feature = "testing"))]
 use crate::units::HeliumExcess;
 use crate::units::{SolarMasses, SolarRadii};
