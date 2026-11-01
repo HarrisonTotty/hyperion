@@ -10053,7 +10053,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (`discLuminanceAboveThroughRgb` where the air is the same across it). The science check
     (2026-11-02) found the first form, one line through the centre raised by the disc's radius
     where it met the ground, at 0.45/0.33/0.15 of the disc's light at 0° and 2.6 to 5.5 times it
-    just below. Not taken: a cloud deck's table, the gravity bands' scale heights and refraction,
-    as the composite takes none of them for the disc; the ground the lines meet is the datum, the
-    share's the body's sphere.
+    just below. Its second check found the occluder spheres of radius √(ac) at odds with the
+    datum near an oblate ground (a camera 2 m up past about 45° of latitude inside the sphere, so
+    no glare; the sphere's horizon 3.3° low at the equator): a body whose air the frame draws and
+    that looks 5° or more in radius (`GLARE_NEAR_BODY_RAD`) now hides the disc by its lines alone
+    (`GroundBy` `"lines"`, the light over the whole disc's), left out of `glareOccluders`, which
+    puts every other near body on the sphere of the datum's radius towards the camera and a far
+    one on √(ac) (`"occluders"`, the light over the part they leave). Not taken: a cloud deck's
+    table, the gravity bands' scale heights and refraction, as the composite takes none of them
+    for the disc.
   - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
