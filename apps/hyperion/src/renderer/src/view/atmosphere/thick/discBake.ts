@@ -104,11 +104,9 @@ import {
   THICK_TRAVEL_COSINES,
   thickAnalyticShare,
   thickCurveChannel,
-  thickJInto,
   type ThickRow,
   thickRowAt,
   type ThickSource,
-  thickSourceScratch,
   thickSunPlace,
 } from "./read";
 import { cos, exp, expm1, log, sin } from "../../../lib/pinnedMath";
@@ -601,50 +599,43 @@ export function decodedThickLayer(table: PackedThickTable, layer: number): Float
   return out;
 }
 
-/** A decoded texel (a, s, v) added into `out` at weight `w`. */
-function addDecoded(
+/**
+ * The read's sums, J⁰, G and G₂ per channel at `[0 … 2]`, `[3 … 5]` and `[6 … 8]`, each formed from
+ * 0 by the read's additions in its order (R08.T16.b.2's lever: a node's every step reads the table,
+ * and these sums keep its bits with no call and no clearing an addition).
+ */
+const READ_SUMS = 9;
+
+/** The texel (a, s, v)'s values in `decoded`, at weight `w`, added into `sums`. */
+function addDecodedSums(
   decoded: Float64Array,
   a: number,
   s: number,
   v: number,
   w: number,
-  out: ThickSource,
+  sums: Float64Array,
 ): void {
   const o = ((a * THICK_SUN_COSINES + s) * THICK_TRAVEL_COSINES + v) * DECODED_TEXEL;
-  for (const c of CHANNELS) {
-    out.level[c] += w * (decoded[o + c] ?? 0);
-    out.slope[c] += w * (decoded[o + 3 + c] ?? 0);
-    out.curve[c] += w * (decoded[o + 6 + c] ?? 0);
+  for (let c = 0; c < 3; c += 1) {
+    sums[c] = (sums[c] ?? 0) + w * (decoded[o + c] ?? 0);
+    sums[3 + c] = (sums[3 + c] ?? 0) + w * (decoded[o + 3 + c] ?? 0);
+    sums[6 + c] = (sums[6 + c] ?? 0) + w * (decoded[o + 6 + c] ?? 0);
   }
 }
 
-/** A {@link ThickSource} set to 0. */
-function clearSource(out: ThickSource): void {
-  out.level.fill(0);
-  out.slope.fill(0);
-  out.curve.fill(0);
-}
-
-/** The decoded read's scratch: the two rows of a geometric step. */
-interface DecodedScratch {
-  readonly lower: ThickSource;
-  readonly upper: ThickSource;
-}
-
 /**
- * `read.ts`'s `addThickLayer` on a decoded layer, at weight 1 into a cleared `out`: linear in h,
- * μ₀ and μ_v between the cells' centres, but below μ₀ = 1/64 J⁰ geometric in μ₀ where both rows
- * hold it above 0, G and G₂ linear as their ratios to it (`read.ts`'s remarks).
+ * `read.ts`'s `addThickLayer` on a decoded layer, at weight 1, into `sums` ({@link READ_SUMS}):
+ * linear in h, μ₀ and μ_v between the cells' centres, but below μ₀ = 1/64 J⁰ geometric in μ₀ where
+ * both rows hold it above 0, G and G₂ linear as their ratios to it (`read.ts`'s remarks).
  */
-export function decodedThickRead(
+function decodedReadInto(
   decoded: Float64Array,
   row: ThickRow,
   muSun: number,
   muTravel: number,
-  scratch: DecodedScratch,
-  out: ThickSource,
+  sums: Float64Array,
 ): void {
-  clearSource(out);
+  sums.fill(0);
   const x = thickSunPlace(muSun);
   const s0 = Math.min(Math.floor(x), THICK_SUN_COSINES - 2);
   const fs = x - s0;
@@ -661,45 +652,71 @@ export function decodedThickRead(
     for (let dv = 0; dv < 2; dv += 1) {
       const w = wa * (dv === 0 ? 1 - fv : fv);
       if (s0 >= THICK_SUN_COSINES_BELOW) {
-        addDecoded(decoded, a0 + da, s0, v0 + dv, w * (1 - fs), out);
-        addDecoded(decoded, a0 + da, s0 + 1, v0 + dv, w * fs, out);
+        addDecodedSums(decoded, a0 + da, s0, v0 + dv, w * (1 - fs), sums);
+        addDecodedSums(decoded, a0 + da, s0 + 1, v0 + dv, w * fs, sums);
         continue;
       }
-      const { lower, upper } = scratch;
       const lowerAt = ((a0 + da) * THICK_SUN_COSINES + s0) * THICK_TRAVEL_COSINES + v0 + dv;
       const upperAt = lowerAt + THICK_TRAVEL_COSINES;
-      clearSource(lower);
-      clearSource(upper);
-      addDecoded(decoded, a0 + da, s0, v0 + dv, 1, lower);
-      addDecoded(decoded, a0 + da, s0 + 1, v0 + dv, 1, upper);
-      for (const c of CHANNELS) {
-        const l0 = lower.level[c];
-        const l1 = upper.level[c];
+      const lower = lowerAt * DECODED_TEXEL;
+      const upper = upperAt * DECODED_TEXEL;
+      for (let c = 0; c < 3; c += 1) {
+        // Each row's values as a sum from 0 at weight 1 would hold them, a negative zero made +0.
+        const l0 = 0 + (decoded[lower + c] ?? 0);
+        const l1 = 0 + (decoded[upper + c] ?? 0);
+        const g0 = 0 + (decoded[lower + 3 + c] ?? 0);
+        const g1 = 0 + (decoded[upper + 3 + c] ?? 0);
+        const h0 = 0 + (decoded[lower + 6 + c] ?? 0);
+        const h1 = 0 + (decoded[upper + 6 + c] ?? 0);
         if (l0 > 0 && l1 > 0) {
           // J⁰_lower^(1 − f) J⁰_upper^f, as `read.ts`'s `addGeometric` forms it by two powers.
           const level = exp(
-            (1 - fs) * (decoded[lowerAt * DECODED_TEXEL + 9 + c] ?? Number.NaN) +
-              fs * (decoded[upperAt * DECODED_TEXEL + 9 + c] ?? Number.NaN),
+            (1 - fs) * (decoded[lower + 9 + c] ?? Number.NaN) +
+              fs * (decoded[upper + 9 + c] ?? Number.NaN),
           );
-          out.level[c] += w * level;
-          out.slope[c] +=
-            w * level * ((1 - fs) * (lower.slope[c] / l0) + fs * (upper.slope[c] / l1));
-          out.curve[c] +=
-            w * level * ((1 - fs) * (lower.curve[c] / l0) + fs * (upper.curve[c] / l1));
+          sums[c] = (sums[c] ?? 0) + w * level;
+          sums[3 + c] = (sums[3 + c] ?? 0) + w * level * ((1 - fs) * (g0 / l0) + fs * (g1 / l1));
+          sums[6 + c] = (sums[6 + c] ?? 0) + w * level * ((1 - fs) * (h0 / l0) + fs * (h1 / l1));
         } else {
-          out.level[c] += w * ((1 - fs) * l0 + fs * l1);
-          out.slope[c] += w * ((1 - fs) * lower.slope[c] + fs * upper.slope[c]);
-          out.curve[c] += w * ((1 - fs) * lower.curve[c] + fs * upper.curve[c]);
+          sums[c] = (sums[c] ?? 0) + w * ((1 - fs) * l0 + fs * l1);
+          sums[3 + c] = (sums[3 + c] ?? 0) + w * ((1 - fs) * g0 + fs * g1);
+          sums[6 + c] = (sums[6 + c] ?? 0) + w * ((1 - fs) * h0 + fs * h1);
         }
       }
     }
   }
 }
 
+/**
+ * `read.ts`'s `addThickLayer` on a decoded layer, at weight 1 into `out`, as the bake's march reads
+ * it ({@link decodedReadInto}'s sums).
+ *
+ * @param sums - {@link READ_SUMS} entries of scratch, any values.
+ */
+export function decodedThickRead(
+  decoded: Float64Array,
+  row: ThickRow,
+  muSun: number,
+  muTravel: number,
+  sums: Float64Array,
+  out: ThickSource,
+): void {
+  decodedReadInto(decoded, row, muSun, muTravel, sums);
+  for (let c = 0; c < 3; c += 1) {
+    out.level[c] = sums[c] ?? 0;
+    out.slope[c] = sums[3 + c] ?? 0;
+    out.curve[c] = sums[6 + c] ?? 0;
+  }
+}
+
+/** A scratch of {@link READ_SUMS} for {@link decodedThickRead}. */
+export function decodedReadScratch(): Float64Array {
+  return new Float64Array(READ_SUMS);
+}
+
 /** The scratch a node's march reads the thick table into. */
-interface NodeScratch extends DecodedScratch {
-  readonly source: ThickSource;
-  readonly j: [number, number, number];
+interface NodeScratch {
+  readonly sums: Float64Array;
   readonly toSun: [number, number, number];
   readonly deck: DeckReadScratch;
   readonly reflected: [number, number, number];
@@ -708,10 +725,7 @@ interface NodeScratch extends DecodedScratch {
 /** A fresh {@link NodeScratch}. */
 function nodeScratch(): NodeScratch {
   return {
-    source: thickSourceScratch(),
-    lower: thickSourceScratch(),
-    upper: thickSourceScratch(),
-    j: [0, 0, 0],
+    sums: decodedReadScratch(),
     toSun: [0, 0, 0],
     deck: deckReadScratch(),
     reflected: [0, 0, 0],
@@ -773,11 +787,17 @@ function nodeAirInto(
     let multiple1 = 0;
     let multiple2 = 0;
     if (tableShare > 0) {
-      decodedThickRead(decoded, step.row, muSunHere, travel, scratch, scratch.source);
-      thickJInto(scratch.source, muSunHere, travel, horizontal, scratch.j);
-      multiple0 = tableShare * Math.max(scratch.j[0], 0) * step.kernelScattering[0];
-      multiple1 = tableShare * Math.max(scratch.j[1], 0) * step.kernelScattering[1];
-      multiple2 = tableShare * Math.max(scratch.j[2], 0) * step.kernelScattering[2];
+      const { sums } = scratch;
+      decodedReadInto(decoded, step.row, muSunHere, travel, sums);
+      // J = J⁰ + G h⊥ + G₂ (2h⊥² − (1 − μ_v²)(1 − μ₀²)), as `read.ts`'s `thickJInto` forms it.
+      const crossed = (1 - travel * travel) * (1 - muSunHere * muSunHere);
+      const harmonic = 2 * horizontal * horizontal - crossed;
+      const j0 = (sums[0] ?? 0) + (sums[3] ?? 0) * horizontal + (sums[6] ?? 0) * harmonic;
+      const j1 = (sums[1] ?? 0) + (sums[4] ?? 0) * horizontal + (sums[7] ?? 0) * harmonic;
+      const j2 = (sums[2] ?? 0) + (sums[5] ?? 0) * horizontal + (sums[8] ?? 0) * harmonic;
+      multiple0 = tableShare * Math.max(j0, 0) * step.kernelScattering[0];
+      multiple1 = tableShare * Math.max(j1, 0) * step.kernelScattering[1];
+      multiple2 = tableShare * Math.max(j2, 0) * step.kernelScattering[2];
     }
     const at = slot * 3;
     red +=

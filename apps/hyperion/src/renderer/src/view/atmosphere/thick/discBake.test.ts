@@ -12,6 +12,7 @@ import {
   integratedRadianceAt,
 } from "../../../test/discAirCases";
 import { earthBody } from "../../../test/atmosphereFixtures";
+import { bitsOf } from "../../../test/bits";
 import { patternedDeckTables, patternedThickBake } from "../../../test/thickTables";
 import { seededRandom } from "../../../test/seededRandom";
 import {
@@ -32,6 +33,7 @@ import { thickBakeBands, type ThickBakeBody } from "./bake";
 import { deckGroundInto, deckReadScratch, packDeckTable } from "./deckRead";
 import {
   decodedThickLayer,
+  decodedReadScratch,
   decodedThickRead,
   discAirMarcher,
   discSunFloorOf,
@@ -88,7 +90,7 @@ describe("the disc's bake's read of J (R08.T16.b)", () => {
     const random = seededRandom(7);
     for (const layer of [0, 1]) {
       const decoded = decodedThickLayer(packed, layer);
-      const scratch = { lower: thickSourceScratch(), upper: thickSourceScratch() };
+      const scratch = decodedReadScratch();
       for (let i = 0; i < 400; i += 1) {
         const heightM = random() * 100_000;
         // A third of the points below μ₀ = 1/64, the geometric step's.
@@ -252,6 +254,13 @@ describe("the measured Earth's disc table (R08.T16.b)", () => {
     sums.set(phaseDeg, taken);
     return taken;
   };
+
+  it("bakes the bits it baked before the march's read took its sums in place (R08.T16.b.2's lever)", async () => {
+    // Its rows below the horizontal take the read's geometric step, those above its linear one.
+    expect(await bitsOf(bakedOf().table)).toBe(
+      "ec3ff49c1c2b22a1c88f2033c0090828d0e2b97e28dbe487995b950e57840a15",
+    );
+  });
 
   it("has one layer, a body of one band, which reads as before at every latitude", () => {
     const { table } = bakedOf();

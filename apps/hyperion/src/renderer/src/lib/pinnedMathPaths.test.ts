@@ -61,6 +61,12 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/thick/read.ts",
     "../view/atmosphere/thick/spectralColumn.ts",
     "../view/atmosphere/thick/sphericalBeam.ts",
+    // The solvers' and the disc table's bit-exact pins (R08.T14.b, R08.T16.b.2's levers): the
+    // linear algebra the solvers take, and the disc's march, its grid and its deck's read.
+    "../view/atmosphere/thick/linearAlgebra.ts",
+    "../view/atmosphere/thick/discBake.ts",
+    "../view/atmosphere/discTable.ts",
+    "../view/atmosphere/thick/deckRead.ts",
     // Three more whose platform maths moved no bit under the nudge, pinned at no cost: the channel
     // fit, which `channels.json` records, the Earth line paths' fixture, and the sweep boundary's
     // near-sun test, which `sweepBoundary.json`'s classes read.
@@ -103,7 +109,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 67;
+const LISTED = 71;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {
