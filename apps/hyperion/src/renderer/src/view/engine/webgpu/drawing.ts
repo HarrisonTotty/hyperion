@@ -14,7 +14,7 @@
  */
 
 import { BUFFER_USAGE } from "../gpuFlags";
-import type { TextureSpec } from "../memory";
+import { extentOf, type TextureSpec } from "../memory";
 import {
   type BufferHandle,
   type DepthLayerPass,
@@ -22,6 +22,7 @@ import {
   type FrameSubmission,
   type PostProcessItem,
   type SamplerSpec,
+  type TexelRect,
   type TextureHandle,
   type ViewSize,
   type WgslMaterialSpec,
@@ -53,10 +54,28 @@ export const CLEAR_COLOUR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
 
 /**
  * The load operation of a frame's draws' pass: `load` when it asks to keep what an earlier
- * submission drew and has no post-processes, whose chain starts clear; `clear` otherwise.
+ * submission drew, or a copy of another's colour, and has no post-processes, whose chain starts
+ * clear; `clear` otherwise.
  */
 export function sceneLoadOp(frame: FrameSubmission, hasPostProcesses: boolean): GPULoadOp {
-  return !hasPostProcesses && frame.colourLoad === "load" ? "load" : "clear";
+  return !hasPostProcesses && (frame.colourLoad === "load" || frame.colourFrom !== undefined)
+    ? "load"
+    : "clear";
+}
+
+/**
+ * Checks a frame's scissor against its output's size.
+ *
+ * @throws RangeError when the scissor is not whole pixels within the output.
+ */
+export function assertScissorWithin(scissor: TexelRect, size: ViewSize): void {
+  const { x, y, width, height } = scissor;
+  const whole = [x, y, width, height].every((value) => Number.isInteger(value) && value >= 0);
+  if (!whole || x + width > size.widthPx || y + height > size.heightPx) {
+    throw new RangeError(
+      `scissor (${x}, ${y}) ${width} × ${height} is not within ${size.widthPx} × ${size.heightPx}`,
+    );
+  }
 }
 
 /** The format of a post-process chain's intermediates. */
@@ -97,6 +116,8 @@ export interface PostProcessRecord {
 export interface FrameOutput {
   readonly size: ViewSize;
   readonly colour: GPUTextureView;
+  /** The texture {@link FrameSubmission.colourFrom} is copied into; `null` on a view's canvas. */
+  readonly colourTexture: GPUTexture | null;
   readonly colourFormat: GPUTextureFormat;
   readonly depth: GPUTextureView | null;
   /** Two `rgba16float` textures of the output's size, asked for only when there are post-processes. */
@@ -380,6 +401,10 @@ export class Drawing {
 
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
+    // Another pass's colour, copied in, under a scissor that leaves the rest of it as it was.
+    if (frame.colourFrom !== undefined && intermediates === null) {
+      this.#copyColour(encoder, frame.colourFrom, output);
+    }
     // A frame drawn over an earlier one keeps its colour and depth (R07.T16's symbology).
     const load = sceneLoadOp(frame, intermediates !== null);
     const scene = encoder.beginRenderPass({
@@ -399,6 +424,10 @@ export class Drawing {
           }),
       ...optionalTimestamps(timestamps(frame.label)),
     });
+    if (frame.scissor !== undefined && intermediates === null) {
+      const { x, y, width, height } = frame.scissor;
+      scene.setScissorRect(x, y, width, height);
+    }
     scene.setBindGroup(0, this.#frameBindGroup);
     for (const resolved of draws) {
       encodeDraw(scene, resolved, this.#ring.bindGroup(resolved.slot));
@@ -671,6 +700,27 @@ export class Drawing {
       );
     }
     return this.#viewOf(texture, declared, depth);
+  }
+
+  /**
+   * Encodes the copy of `source`'s level 0 into `output`'s colour, before the frame's draws' pass.
+   *
+   * @throws Error on a view's canvas, or for a source whose size or format is not the output's.
+   */
+  #copyColour(encoder: GPUCommandEncoder, source: TextureHandle, output: FrameOutput): void {
+    const destination = output.colourTexture;
+    if (destination === null) {
+      throw new Error(`a view takes no copy of ${source.name} into its canvas`);
+    }
+    const { texture, spec } = this.#host.textureOf(source);
+    const { width, height } = extentOf(spec.size);
+    const { widthPx, heightPx } = output.size;
+    if (width !== widthPx || height !== heightPx || spec.format !== output.colourFormat) {
+      throw new Error(
+        `${source.name} (${width} × ${height}, ${spec.format}) is not the output's ${widthPx} × ${heightPx} ${output.colourFormat}`,
+      );
+    }
+    encoder.copyTextureToTexture({ texture }, { texture: destination }, [width, height]);
   }
 
   /** A view of every mip of `texture` as `dimension`, its depth aspect alone for a depth format. */

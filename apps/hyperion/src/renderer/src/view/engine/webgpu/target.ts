@@ -23,7 +23,7 @@ import {
   type TextureHandle,
   type ViewSize,
 } from "../types";
-import type { FrameOutput } from "./drawing";
+import { assertScissorWithin, type FrameOutput } from "./drawing";
 import { type IntermediateHost, Intermediates } from "./intermediates";
 
 /** What a target needs of the engine that made it. */
@@ -48,7 +48,12 @@ export function colourSpec(spec: RenderTargetSpec, size: ViewSize): TextureSpec 
     dimension: "2d",
     format: spec.format,
     mips: spec.mips,
-    usage: TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
+    // COPY_DST for a frame that takes another target's colour first (`FrameSubmission.colourFrom`).
+    usage:
+      TEXTURE_USAGE.RENDER_ATTACHMENT |
+      TEXTURE_USAGE.TEXTURE_BINDING |
+      TEXTURE_USAGE.COPY_SRC |
+      TEXTURE_USAGE.COPY_DST,
     category: spec.category,
   };
 }
@@ -183,7 +188,9 @@ export class WebGpuRenderTarget implements RenderTarget {
    * Renders `frame` into the target.
    *
    * @throws {@link DepthSelfSample} when a draw samples this target's own depth.
-   * @throws {@link ColourSelfSample} when a draw or a post-process samples its own colour.
+   * @throws {@link ColourSelfSample} when a draw or a post-process samples its own colour, or the
+   *   frame copies it into itself.
+   * @throws RangeError for a scissor outside the target.
    */
   render(frame: FrameSubmission): void {
     if (this.#disposed) {
@@ -192,10 +199,18 @@ export class WebGpuRenderTarget implements RenderTarget {
     assertNoDepthSelfSample(this.name, this.depth, frame.draws);
     assertNoColourSelfSample(this.name, this.colour, frame);
     const { size, colour, depth } = this.#attachments;
+    if (frame.colourFrom === colour) {
+      throw new ColourSelfSample(this.name, "the frame's colour copy");
+    }
+    if (frame.scissor !== undefined) {
+      assertScissorWithin(frame.scissor, size);
+    }
     const host = this.#host;
+    const texture = host.gpuTextureOf(colour);
     host.renderFrame(frame, {
       size,
-      colour: host.gpuTextureOf(colour).createView({ baseMipLevel: 0, mipLevelCount: 1 }),
+      colour: texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }),
+      colourTexture: texture,
       colourFormat: this.#spec.format,
       depth: depth === null ? null : host.gpuTextureOf(depth).createView(),
       intermediates: () => this.#intermediates.at(size),

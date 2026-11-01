@@ -13,6 +13,7 @@ import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
+  ColourSelfSample,
   type DepthLayerPass,
   DepthSelfSample,
   type DrawItem,
@@ -22,6 +23,7 @@ import {
   type PassTimes,
   PresentationOnlyReadback,
   type RenderTarget,
+  type TexelRect,
   type TextureHandle,
   type WgslMaterialSpec,
 } from "../types";
@@ -676,6 +678,102 @@ describe("mesh and material releases (R10.T16.b)", () => {
     // Every cached group is gone, the released material's among them: the kept one's is made again.
     drawEach(target, mesh, [kept], tiles);
     expect(gpu.bindGroups.length).toBeGreaterThan(made);
+  });
+});
+
+/** A `widthPx` × 4 `rgba16float` target named `name`, without depth. */
+function targetOf(engine: WebGpuRenderEngine, name: string, widthPx = 4): RenderTarget {
+  return engine.createRenderTarget({
+    name,
+    size: { widthPx, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+}
+
+/** `draws` into `target` over a copy of `from`'s colour, under `scissor`. */
+function over(
+  target: RenderTarget,
+  from: TextureHandle,
+  scissor: TexelRect,
+  draws: ReadonlyArray<DrawItem>,
+): void {
+  target.render({
+    label: "over part",
+    viewRotation: IDENTITY_4,
+    projection: IDENTITY_4,
+    draws,
+    postProcesses: [],
+    colourFrom: from,
+    scissor,
+  });
+}
+
+/** The texture of a copy's source or destination. */
+function copiedTexture(info: unknown): unknown {
+  return typeof info === "object" && info !== null && "texture" in info ? info.texture : null;
+}
+
+describe("a frame over part of a target (R08.T16.a.2)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("copies the other target's colour in, loads it, and draws under the scissor", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const scene = targetOf(engine, "scene");
+    const out = targetOf(engine, "out");
+    over(out, scene.colour, { x: 1, y: 2, width: 3, height: 2 }, [
+      drawItem(mesh, material, { tiles }),
+    ]);
+    const [buffer] = submittedAs(gpu, "over part");
+    const ops = buffer?.commands.map(({ op }) => op) ?? [];
+    const copy = buffer?.commands.find(({ op }) => op === "copyTextureToTexture")?.args ?? [];
+    expect({
+      first: ops.slice(0, 2),
+      copy: [copiedTexture(copy[0]), copiedTexture(copy[1]), copy[2]],
+      load: renderPasses(buffer ?? new FakeCommandBuffer("", [])).map((pass) =>
+        Array.from(pass.colorAttachments, (attachment) => attachment?.loadOp),
+      ),
+      scissor: buffer?.commands.find(({ op }) => op === "setScissorRect")?.args,
+      drawn: ops.indexOf("drawIndexed") > ops.indexOf("setScissorRect"),
+    }).toEqual({
+      first: ["copyTextureToTexture", "beginRenderPass"],
+      copy: [engine.gpuTextureOf(scene.colour), engine.gpuTextureOf(out.colour), [4, 4]],
+      load: [["load"]],
+      scissor: [1, 2, 3, 2],
+      drawn: true,
+    });
+  });
+
+  it("makes each target's colour a copy's destination", async () => {
+    const { engine } = await engineOn();
+    const out = targetOf(engine, "out");
+    expect(engine.gpuTextureOf(out.colour).usage & TEXTURE_USAGE.COPY_DST).toBe(
+      TEXTURE_USAGE.COPY_DST,
+    );
+  });
+
+  it("refuses a copy of its own colour, a scissor outside it and a source of another size, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const out = targetOf(engine, "out");
+    const wide = targetOf(engine, "wide", 8);
+    const whole = { x: 0, y: 0, width: 4, height: 4 };
+    expect(() => {
+      over(out, out.colour, whole, []);
+    }).toThrow(ColourSelfSample);
+    expect(() => {
+      over(out, wide.colour, { x: 2, y: 0, width: 3, height: 4 }, []);
+    }).toThrow(RangeError);
+    expect(() => {
+      over(out, wide.colour, whole, []);
+    }).toThrow(/wide:colour \(8 × 4, rgba16float\) is not the output's 4 × 4 rgba16float/u);
+    expect(submittedAs(gpu, "over part")).toEqual([]);
   });
 });
 

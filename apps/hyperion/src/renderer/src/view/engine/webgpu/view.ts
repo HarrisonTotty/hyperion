@@ -138,6 +138,7 @@ export class WebGpuView implements RenderView {
     this.#host.renderFrame(frame, {
       size,
       colour: texture.createView({ format: colourFormat }),
+      colourTexture: null,
       colourFormat,
       depth: this.#depthAt(size),
       intermediates: () => this.#intermediates.at(size),

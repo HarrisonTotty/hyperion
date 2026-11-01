@@ -418,6 +418,19 @@ export interface FrameSubmission {
    * expires once the task yields.
    */
   readonly colourLoad?: "clear" | "load";
+  /**
+   * A texture of the output's size and format whose level 0 is copied into the output's colour
+   * before the draws, whose pass then loads colour and depth as `colourLoad: "load"` does: with
+   * {@link FrameSubmission.scissor}, a pass over part of a frame whose rest keeps an earlier pass's
+   * colour (R08.T16.a.2's composite over the air's area). A target's only: a view refuses it.
+   * Ignored where the frame has post-processes.
+   */
+  readonly colourFrom?: TextureHandle;
+  /**
+   * The output's pixels the draws may write, from its top left; the whole output where absent.
+   * Ignored where the frame has post-processes.
+   */
+  readonly scissor?: TexelRect;
 }
 
 /** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */
