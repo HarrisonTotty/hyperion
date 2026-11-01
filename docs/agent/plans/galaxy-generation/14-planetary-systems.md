@@ -34023,8 +34023,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck`,
     `under_every_24_hold_the_four_split_bodies_read_their_floor`,
     `the_secant_root_s_pinned_bodies_end_at_crossings`,
-    `under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surface` and
-    `under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state`.
+    `part_three_returns_the_census_s_methane_snowball_its_surface` and
+    `the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state` (their names at 25).
     Re-bless (measured with the hold alone on 24's rules) `frame/body_rotations`,
     `observe/in_system`, `orbit/drifting_states`,
     `planetary/{resources, surface_conditions_published, surface_inputs, system_events}`, every

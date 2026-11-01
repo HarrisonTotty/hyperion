@@ -953,15 +953,15 @@ mod tests {
         .expect("a drawn galaxy builds")
     }
 
-    /// The test galaxy's seed under version 24's rules, the version in force: [`galaxy`]'s, built
+    /// The test galaxy's seed under version 24's rules, the version before the one in force, built
     /// by its version so that a bump does not change it unseen.
     fn galaxy_24() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| galaxy_at(24))
     }
 
-    /// The test galaxy's seed under version 25's rules, every hold at 25 in force: no displaced
-    /// class yet.
+    /// The test galaxy's seed under version 25's rules, the version in force: [`galaxy`]'s, with
+    /// no displaced class yet.
     fn galaxy_25() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| galaxy_at(25))
