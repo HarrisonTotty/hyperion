@@ -169,25 +169,23 @@ export function deckGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean 
 /**
  * `titan-class`'s recorded verdict by image through its route (R08.T14.d.4): `vectorGate.json`'s
  * `titanClass.routed.images`, its whole column baked at m ≤ 2 with its correction as a haze route
- * bakes it, its green and blue at their own wavelengths and its diffuse streams on their curved paths
- * (`bake.ts`'s "Own wavelengths" and "Curved streams"), against the re-traced reference's vector I
- * (R08.T12.h's), held to the file by the test. 160 of its 360 values pass, 25 miss and 175 are
- * refused, so the route stays closed ({@link THICK_ROUTE_RANGES}); every miss is red:
+ * bakes it, its green and blue at their own wavelengths, its diffuse streams on their curved paths
+ * and its rows of a low sun with the horizon's first-order terms (`bake.ts`'s "Own wavelengths",
+ * "Curved streams" and "The horizon's first-order terms"), against the re-traced reference's
+ * vector I (R08.T12.h's), held to the file by the test. 182 of its 360 values pass, 3 miss and 175
+ * are refused, so the route stays closed ({@link THICK_ROUTE_RANGES}); every miss is red and bright:
  *
- * - twilight at the horizon, `ground-s90`, dim in red in all 21 of its views (0.76–0.88 of the
- *   reference; green and blue refused, as dim), at every mode count and with the streams curved
- *   or not, on a sphere some 120 scale heights in radius (Earth's some 750), its horizontally
- *   uniform column lit by no air sunward of it;
- * - the sky at s30 (v30, a45 and a180, to 1.10) and the disc at p60 (1.07), bright, the red still the
- *   bins' (its methane's curve at the floor), the sky's within the gate at m < 8;
- * - the forward view at s80 (v60, a0: 0.92), dim.
+ * - the sky at s30 (v30, a45 and a180: 1.07 and 1.10 of the reference), within the gate at m < 8;
+ * - the disc at p60 (1.07), mode-free, the red still the bins' (its methane's curve at the floor).
+ *
+ * The horizon's 21 views at s90, dim in red at 0.76–0.88 without the terms, read 0.99–1.04.
  */
 export const HAZE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
   { image: "ground-s0", comparisons: 12, passes: 12, misses: 0, refusals: 0 },
   { image: "ground-s30", comparisons: 60, passes: 48, misses: 2, refusals: 10 },
   { image: "ground-s60", comparisons: 60, passes: 36, misses: 0, refusals: 24 },
-  { image: "ground-s80", comparisons: 63, passes: 33, misses: 1, refusals: 29 },
-  { image: "ground-s90", comparisons: 63, passes: 0, misses: 21, refusals: 42 },
+  { image: "ground-s80", comparisons: 63, passes: 34, misses: 0, refusals: 29 },
+  { image: "ground-s90", comparisons: 63, passes: 21, misses: 0, refusals: 42 },
   { image: "ground-s95", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
   { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
   { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
@@ -259,8 +257,9 @@ export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> =
 
 /**
  * Whether a body routed `regime` is baked as a haze route's bake is (R08.T14.d.4): the channels its
- * lights allow at their own wavelengths and its diffuse streams' curved paths (`bake.ts`'s remarks,
- * "Own wavelengths" and "Curved streams"). A `thickScattering` world that `ranges` route outside
+ * lights allow at their own wavelengths, its diffuse streams' curved paths and the horizon's
+ * first-order terms (`bake.ts`'s remarks, "Own wavelengths", "Curved streams" and "The horizon's
+ * first-order terms"). A `thickScattering` world that `ranges` route outside
  * {@link THICK_ROUTE_RANGE}, by the haze's range, whose gate was baked so; never one
  * {@link THICK_ROUTE_RANGE} holds, whose kept cases' gates were baked without them.
  *

@@ -5994,7 +5994,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       Saturn-class routed, the correction on; Mars-, Venus- and Titan-class left APPROXIMATE;
       precondition 5's frame and the UHD 620 host's bake time pending, the owner's runs.
       Titan-class gated 2026-11-01 on its re-traced reference: it misses, and is not routed (Risks,
-      "R08.T14.d.4's Titan-class gate").
+      "R08.T14.d.4's Titan-class gate"); with the horizon's terms, 3 misses are left (Risks,
+      "R08.T14.d.4's horizon terms").
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -24450,6 +24451,21 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _The modes after both levers:_ m < 8 clears s30's two red views (23 misses); m = 3 alone trades
     them for s30's a135 (24). Not built: a second texel and its read for two views while the horizon
     holds 21.
+- **R08.T14.d.4's horizon terms** (2026-11-01; lane `fix-titan-horizon`; tallies and times in the
+  lane's outbox).
+  - _Built_: `discreteOrdinates.ts`'s `solveDiscreteOrdinatesWithSources` (`StreamSource`,
+    `StreamSourceMode`): signed per-stream sources, linear in τ a layer, on each mode's factorisation.
+    `bake.ts`'s `HorizonTerms`, `HORIZON_TERMS`, `HORIZON_SUN_COSINE` 0.35, `HORIZON_THIN_DEPTH` 10⁻⁴,
+    `BakeBandOptions.horizonTerms`; `horizonTerms` rides `ThickBakeAsk`, `thick-bake`,
+    `thick-bake-bins` and `KeptBakeOptions`, set by `bakedAsHaze`. Off, every bake is bit for bit.
+  - _titan-class_: `vectorGate.json` format 10 adds `titanClass.horizonTerms`; 182 pass, 3 miss, 175
+    refused (`HAZE_GATE_TALLIES`), s90 red 0.99–1.04. Left for main's ruling: s30-v30-a45 and -a180
+    red (1.07, 1.10) and disc-p60 red (1.07); the m < 8 texel unbuilt, the route closed.
+  - _∂I ÷ ∂μ over each stream set's own cosines_ (lean, 2026-11-01): above some 100 km the curvature
+    term is past first order, and the slope over both sets together, or the formal solution's exact
+    one, moves s90 ±5%. Alone, the terms move s90-v0 red ×1.80 and ×0.44, not the arms' 1.6 and 0.87.
+  - _Not taken_: the ceiling's fallbacks (findings.txt), since the bake alone is over 5 s; the
+    cot θ₀ azimuth term (0 at the horizon). _Pending, the owner's runs_: the UHD 620 host's time.
 - **The composite over the air's area, as built** (2026-11-01; lane `r08-t16a2`, chained; main's
   next lever after the early return; measurements in the lane's outbox).
   - _The engine_ (`engine/types.ts`, `webgpu/drawing.ts`, `webgpu/target.ts`): a target's frame may
