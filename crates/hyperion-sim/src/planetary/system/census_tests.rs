@@ -49,10 +49,10 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::planetary::chem::condense::NotFormed;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Gas, SurfaceState, WATER_MELTING_POINT,
 };
-use crate::planetary::derive::atmosphere::{SNOWBALL_ICE_COVER, locked_state_in_force};
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
@@ -930,8 +930,8 @@ const FIXED_UNDER_25: [&str; 1] = ["the audit's M6 fails on members"];
 
 /// The findings a hold at 26 fixes, each held at none under every 26 hold
 /// ([`Census::assert_fixed_under_26`]), with 25's ([`FIXED_UNDER_25`]): no `Snowball` above
-/// 273.15 K and none its own figures do not make (`LOCKED_STATE_VERSION`), no runaway over a sea
-/// (`SEA_DECK_VERSION`); and of the audit's, none of M3 and M6 on any kind of body (the moon's own
+/// 273.15 K and none its own figures do not make (P14.T53.e's eyeball, from 26), no runaway over a sea
+/// (P14.T53.b's dry deck, from 26); and of the audit's, none of M3 and M6 on any kind of body (the moon's own
 /// sky; P14.T56.g's planet lag). The envelope watch's count is printed, not asserted: no rule yet
 /// keeps a body whose passes settle on a critical point on one side of it.
 const FIXED_UNDER_26: [&str; 9] = [
@@ -1007,11 +1007,11 @@ fn lists_liquid_water(surface: &Surface) -> bool {
 
 /// Whether the published figures of the `Snowball` `surface` make it one by P14.T53.e's rule 5
 /// under the rules in force: its ices on at least [`SNOWBALL_ICE_COVER`] of its surface, and from
-/// 26 on a world locked 1:1 no open water (`LOCKED_STATE_VERSION`).
+/// 26 on a world locked 1:1 no open water (P14.T53.e's eyeball).
 fn rule_5_holds(surface: &Surface) -> bool {
     let locked = surface.climate_regime().forcing() == Forcing::Locked;
     surface.figures().ice_fraction() >= SNOWBALL_ICE_COVER
-        && !(locked_state_in_force() && locked && lists_liquid_water(surface))
+        && !(locked && lists_liquid_water(surface))
 }
 
 /// The entries of `map`, each as `text` names it with its count, joined.

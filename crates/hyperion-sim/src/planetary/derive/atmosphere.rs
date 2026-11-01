@@ -65,7 +65,6 @@
 
 mod escaping;
 mod present;
-mod sea_deck;
 mod supercritical;
 mod surface_mix;
 
@@ -81,19 +80,11 @@ pub(crate) use escaping::{
     LineSwitchRules, MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log,
     water_phase, with_line_switch, with_melt_oxygen, with_resolve_check, with_thermostat,
 };
-#[cfg(test)]
-pub(crate) use present::{
-    LockedStateRules, SNOWBALL_ICE_COVER, present_climate_state, with_locked_state,
-};
-// Its one reader beyond `present`, the census, is native only.
-#[cfg(all(test, not(target_family = "wasm")))]
-pub(crate) use present::locked_state_in_force;
 pub(crate) use present::{
     PresentClimate, PresentFigures, Rotation, published_ice_cover, published_label, state_to_carry,
 };
-pub(crate) use sea_deck::sea_deck_in_force;
 #[cfg(test)]
-pub(crate) use sea_deck::{SeaDeckRules, with_sea_deck};
+pub(crate) use present::{SNOWBALL_ICE_COVER, present_climate_state};
 pub(crate) use supercritical::{SupercriticalReservoir, has_surface_section};
 #[cfg(test)]
 pub(crate) use surface_mix::floor_read;
@@ -3864,15 +3855,14 @@ fn retained(
 /// [`SurfaceState::RunawayGreenhouse`] under the deck whose mean surface temperature is below
 /// [`ACID_CYCLING_TEMPERATURE`], or from 26 whose published condensates list liquid water, since
 /// no acid haze is sustained over a sea (Loftus, Wordsworth and Morley 2019, ApJ 887, 231;
-/// `sea_deck`'s `SEA_DECK_VERSION`). It reads that first solve alone, so that the second solve,
+/// research-census-25 §4, from 26). It reads that first solve alone, so that the second solve,
 /// whose deck is fixed, is published as it ends: no feedback, nothing returns to the decked branch,
 /// and a dry one at a temperature that is not a number keeps the deck.
 #[must_use]
 pub(crate) fn solved_without_the_deck(air: &Atmosphere) -> bool {
     air.state == SurfaceState::RunawayGreenhouse
         && air.runaway_deck == RunawayDeck::Kept
-        && (air.surface_temperature.value() < ACID_CYCLING_TEMPERATURE.value()
-            || (air.liquid_water && sea_deck_in_force()))
+        && (air.surface_temperature.value() < ACID_CYCLING_TEMPERATURE.value() || air.liquid_water)
 }
 
 /// The state a body's passes publish (P14.T53.b part 1 (c); decision-t53b-arm-c §4), as the pass's
@@ -3932,7 +3922,7 @@ pub(crate) fn water_saturation_temperature(pressure: Pascals) -> Option<Kelvin> 
 /// - its published state is [`SurfaceState::Temperate`]: to version 25 its
 ///   [`state`](Atmosphere::state), and from 26 its
 ///   [`published_state`](Atmosphere::published_state), so that a first solve part 3 labels a steam
-///   envelope is published as it stands (`sea_deck`);
+///   envelope is published as it stands (research-census-25 §4);
 /// - its climate's division stores no carbon for want of water: a past runaway's, its water lost,
 ///   or a dry world's between the limits;
 /// - the condensates its published pass lists hold no liquid water;
@@ -3944,12 +3934,7 @@ pub(crate) fn water_saturation_temperature(pressure: Pascals) -> Option<Kelvin> 
 /// feedback, and nothing returns to `Temperate`. A temperature that is not a number is not judged.
 #[must_use]
 pub(crate) fn solved_as_a_hothouse(air: &Atmosphere) -> bool {
-    let state = if sea_deck_in_force() {
-        air.published_state()
-    } else {
-        air.state
-    };
-    state == SurfaceState::Temperate
+    air.published_state() == SurfaceState::Temperate
         && air.dry_division
         && !air.liquid_water
         && air

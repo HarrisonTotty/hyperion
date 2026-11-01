@@ -45,74 +45,6 @@ use super::{Atmosphere, Gas, RunawayDeck, SurfaceState, water_saturation_tempera
 use crate::planetary::chem::partition::{CondensatePhase, Condensates};
 use crate::planetary::hooks::figures::published_ice_cover_of;
 use crate::units::{Kelvin, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which rule 5 also needs no open water on a world locked 1:1: 26, the
-/// planetary bump after 25's (research-census-25 §1, ruled 2026-10-31).
-///
-/// It is this rule's one hold. Below it [`LockedStateRules::in_force`] is
-/// [`LockedStateRules::Held`]: rule 5 reads the ice cover alone, and every figure is version 24's
-/// and 25's bit for bit. 26's bump deletes this hold, [`LockedStateRules`] with its `Held` arm,
-/// the tests' switch and its tripwire (`the_locked_state_is_held_only_until_the_26_bump`).
-pub(crate) const LOCKED_STATE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether rule 5 reads a locked world's open water (its hold, [`LOCKED_STATE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum LockedStateRules {
-    /// Version 25's and before: rule 5 is the ice cover alone, on every world.
-    Held,
-    /// Version 26's: on a world locked 1:1 rule 5 also needs no open water, so an eyeball, its
-    /// substellar sea open under its frozen night, is not a `Snowball`.
-    Eyeball,
-}
-
-impl LockedStateRules {
-    /// The rules this generator version gives: the eyeball's from [`LOCKED_STATE_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_locked_state`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = LOCKED_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= LOCKED_STATE_VERSION {
-            Self::Eyeball
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The locked state's rules a test sets on its thread, `None` for the version's.
-    static LOCKED_RULES: core::cell::Cell<Option<LockedStateRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the locked state's rules `rules` on this thread, for the tests to reach
-/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_locked_state<R>(rules: LockedStateRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<LockedStateRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            LOCKED_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(LOCKED_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether rule 5 reads a locked world's open water ([`LockedStateRules::Eyeball`]); never under
-/// its hold.
-#[must_use]
-pub(crate) fn locked_state_in_force() -> bool {
-    LockedStateRules::in_force() == LockedStateRules::Eyeball
-}
 
 /// The share of the surface its published ices must cover for rule 5 to publish
 /// [`SurfaceState::Snowball`]: 0.5, the share poleward of 30° latitude in both hemispheres
@@ -168,12 +100,12 @@ pub(crate) struct PresentFigures {
     /// Its surface pressure, `None` for a gas envelope.
     pub(crate) surface_pressure: Option<Pascals>,
     /// How it turns under its seasonal host: locked 1:1, with no solar day, or not
-    /// ([`LOCKED_STATE_VERSION`]'s rule 5).
+    /// (generator version 26's rule 5).
     pub(crate) rotation: Rotation,
 }
 
 /// How a body turns under its seasonal host, as rule 5 reads it from 26
-/// ([`LOCKED_STATE_VERSION`]).
+/// (from generator version 26).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Rotation {
     /// It has a solar day (the climate's `rotates`), or its passes read no spin (the stand-in).
@@ -184,7 +116,7 @@ pub(crate) enum Rotation {
 
 /// The state a pass's published figures `figures` give by rules 5–7 (the [module](self)'s): a
 /// `Snowball` under ice on at least [`SNOWBALL_ICE_COVER`] of its surface, from 26 on a world
-/// locked 1:1 only with no open water too ([`LOCKED_STATE_VERSION`]), else a
+/// locked 1:1 only with no open water too (from generator version 26), else a
 /// `RunawayGreenhouse` with no liquid water at or above water's saturation temperature at its
 /// surface pressure, else `Temperate`.
 ///
@@ -196,8 +128,7 @@ pub(crate) fn present_climate_state(figures: &PresentFigures) -> PresentClimate 
     // A locked world's frozen night over an open substellar sea is the eyeball state, not a
     // snowball: a sea under ice is ice, and open water marks the climate not globally glaciated
     // (Pierrehumbert 2011, ApJL 726, L8; Checlair, Menou and Abbot 2017, ApJ 845, 132).
-    let eyeball =
-        figures.rotation == Rotation::Locked && figures.liquid_water && locked_state_in_force();
+    let eyeball = figures.rotation == Rotation::Locked && figures.liquid_water;
     if figures.ice_cover >= SNOWBALL_ICE_COVER && !eyeball {
         PresentClimate::Snowball
     } else if !figures.liquid_water
@@ -218,24 +149,22 @@ pub(crate) fn present_climate_state(figures: &PresentFigures) -> PresentClimate 
 /// Every figure is kept, a label as `SteamEnvelope`'s is: from 26 it is the state rules 5–7 give
 /// those figures for
 ///
-/// - a `Snowball` its figures do not make by rule 5 ([`LOCKED_STATE_VERSION`];
+/// - a `Snowball` its figures do not make by rule 5 (generator version 26;
 ///   research-census-25 §1): the last pass of a two-state cycle the passes end on, solved under
 ///   the `Snowball` its previous pass carried while its own figures, an open sea and no ice, give
 ///   another state;
-/// - a `RunawayGreenhouse` whose figures list liquid water (`sea_deck`'s `SEA_DECK_VERSION`;
+/// - a `RunawayGreenhouse` whose figures list liquid water (the dry deck, from 26;
 ///   research-census-25 §4): a sea that still stands once the deck is gone is no runaway's;
 ///
-/// and `state` otherwise, and under the holds.
+/// and `state` otherwise.
 #[must_use]
 pub(crate) fn published_label(
     state: SurfaceState,
     figures: impl FnOnce() -> PresentFigures,
 ) -> SurfaceState {
     match state {
-        SurfaceState::Snowball if locked_state_in_force() => {
-            present_climate_state(&figures()).state()
-        }
-        SurfaceState::RunawayGreenhouse if super::sea_deck_in_force() => {
+        SurfaceState::Snowball => present_climate_state(&figures()).state(),
+        SurfaceState::RunawayGreenhouse => {
             let figures = figures();
             if figures.liquid_water {
                 present_climate_state(&figures).state()
@@ -246,9 +175,7 @@ pub(crate) fn published_label(
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
-        | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => state,
     }
@@ -340,32 +267,8 @@ mod tests {
         }
     }
 
-    /// The locked state is held until the 25 → 26 bump: the rules in force are version 25's, rule
-    /// 5 the ice cover alone.
-    #[test]
-    fn the_locked_state_is_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < LOCKED_STATE_VERSION,
-            "the 25 → 26 bump puts the eyeball's rule 5 on the record (research-census-25 §1): \
-             delete `LOCKED_STATE_VERSION`, `LockedStateRules` with its `Held` arm, \
-             `locked_state_in_force`, the tests' `with_locked_state`, its switch in \
-             `with_every_26_hold` and this test"
-        );
-        assert_eq!(LockedStateRules::in_force(), LockedStateRules::Held);
-        assert!(!locked_state_in_force());
-        assert!(with_locked_state(
-            LockedStateRules::Eyeball,
-            locked_state_in_force
-        ));
-        assert!(crate::planetary::testing::with_every_26_hold(
-            locked_state_in_force
-        ));
-        assert!(!locked_state_in_force());
-    }
-
-    /// From 26 a locked world at 0.58 ice with an open sea is `Temperate`, the same world frozen
-    /// over a `Snowball`, and a turning one at 0.58 ice with an open sea stays a `Snowball`; under
-    /// the hold the locked eyeball is a `Snowball`, as at 25.
+    /// A locked world at 0.58 ice with an open sea is `Temperate`, the same world frozen over a
+    /// `Snowball`, and a turning one at 0.58 ice with an open sea stays a `Snowball`.
     #[test]
     fn a_locked_eyeball_is_temperate_and_a_frozen_one_a_snowball() {
         let eyeball = PresentFigures {
@@ -378,19 +281,16 @@ mod tests {
             ..eyeball
         };
         let turning = figures(0.58, true, 281.0, 1.8e5);
-        let at_26 =
-            |f: &PresentFigures| with_locked_state(LockedStateRules::Eyeball, || state_of(f));
-        assert_eq!(at_26(&eyeball), SurfaceState::Temperate);
-        assert_eq!(at_26(&frozen), SurfaceState::Snowball);
-        assert_eq!(at_26(&turning), SurfaceState::Snowball);
-        assert_eq!(state_of(&eyeball), SurfaceState::Snowball);
+        assert_eq!(state_of(&eyeball), SurfaceState::Temperate);
+        assert_eq!(state_of(&frozen), SurfaceState::Snowball);
+        assert_eq!(state_of(&turning), SurfaceState::Snowball);
     }
 
-    /// The published label keeps a solved `Snowball` under 25's rules; under the eyeball's it
-    /// labels a locked one with an open sea and no ice (a two-state cycle's last pass) by its own
-    /// figures, and keeps a frozen one and every other state.
+    /// The published label labels a locked `Snowball` with an open sea and no ice (a two-state
+    /// cycle's last pass) by its own figures, and keeps a frozen one and every state but a
+    /// runaway, which the same open sea relabels.
     #[test]
-    fn a_two_state_cycle_s_snowball_is_labelled_by_its_figures_only_under_26() {
+    fn a_two_state_cycle_s_snowball_is_labelled_by_its_figures() {
         let locked = |f: PresentFigures| PresentFigures {
             rotation: Rotation::Locked,
             ..f
@@ -398,57 +298,43 @@ mod tests {
         let cycle = locked(figures(0.0, true, 314.3, 9.9e5));
         let frozen = locked(figures(0.7, false, 250.0, 2.1e5));
         let label = |state, f: PresentFigures| published_label(state, || f);
-        let at_26 = |state, f| with_locked_state(LockedStateRules::Eyeball, || label(state, f));
         assert_eq!(
             label(SurfaceState::Snowball, cycle),
-            SurfaceState::Snowball,
-            "under 25's rules"
-        );
-        assert_eq!(
-            at_26(SurfaceState::Snowball, cycle),
             SurfaceState::Temperate
         );
         assert_eq!(
-            at_26(SurfaceState::Snowball, frozen),
+            label(SurfaceState::Snowball, frozen),
             SurfaceState::Snowball
         );
         for state in [
             SurfaceState::GasEnvelope,
             SurfaceState::MagmaOcean,
             SurfaceState::Airless,
-            SurfaceState::RunawayGreenhouse,
             SurfaceState::Temperate,
             SurfaceState::Tenuous,
             SurfaceState::SteamEnvelope,
         ] {
-            assert_eq!(at_26(state, cycle), state, "{state:?}");
+            assert_eq!(label(state, cycle), state, "{state:?}");
         }
     }
 
-    /// The published label keeps a solved `RunawayGreenhouse` under 25's rules; under the dry
-    /// deck's it labels one that lists liquid water by its own figures, and keeps a dry one and
-    /// every other state.
+    /// The published label labels a `RunawayGreenhouse` that lists liquid water by its own
+    /// figures, and keeps a dry one and every state but a `Snowball`, which the same open sea and
+    /// no ice relabel.
     #[test]
-    fn a_runaway_over_a_sea_is_labelled_by_its_figures_only_under_26() {
-        use super::super::{SeaDeckRules, with_sea_deck};
+    fn a_runaway_over_a_sea_is_labelled_by_its_figures() {
         let sea = PresentFigures {
             rotation: Rotation::Locked,
             ..figures(0.0, true, 498.9, 8.19e7)
         };
         let dry = figures(0.0, false, 737.0, 9.2e6);
         let label = |state, f: PresentFigures| published_label(state, || f);
-        let at_26 = |state, f| with_sea_deck(SeaDeckRules::Dry, || label(state, f));
         assert_eq!(
             label(SurfaceState::RunawayGreenhouse, sea),
-            SurfaceState::RunawayGreenhouse,
-            "under 25's rules"
-        );
-        assert_eq!(
-            at_26(SurfaceState::RunawayGreenhouse, sea),
             SurfaceState::Temperate
         );
         assert_eq!(
-            at_26(SurfaceState::RunawayGreenhouse, dry),
+            label(SurfaceState::RunawayGreenhouse, dry),
             SurfaceState::RunawayGreenhouse
         );
         for state in [
@@ -456,11 +342,10 @@ mod tests {
             SurfaceState::MagmaOcean,
             SurfaceState::Airless,
             SurfaceState::Temperate,
-            SurfaceState::Snowball,
             SurfaceState::Tenuous,
             SurfaceState::SteamEnvelope,
         ] {
-            assert_eq!(at_26(state, sea), state, "{state:?}");
+            assert_eq!(label(state, sea), state, "{state:?}");
         }
     }
 

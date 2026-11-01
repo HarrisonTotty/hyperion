@@ -6218,7 +6218,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let crust = record_crust(sky.crust_lid, &figures, (&conditions, table));
     // From 26 a `Snowball` its own published figures do not make by rule 5, and a runaway that
     // still lists liquid water, are labelled by rules 5–7 on them, label only (P14.T53.e and
-    // P14.T53.b; `LOCKED_STATE_VERSION`, `SEA_DECK_VERSION`).
+    // P14.T53.b; the eyeball and the dry deck, from 26).
     let state = published_label(air.state(), || PresentFigures {
         ice_cover: figures.ice_fraction(),
         liquid_water: published

@@ -1,9 +1,8 @@
 //! The wrong classes P14.T33.c's census found under the version's rules, stated by name under every
-//! 26 hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
+//! 26 hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (P14.T53.e's eyeball, from 26),
 //! the three airless planets over a hot ice bulk (P14.T56.g's planet lag), the 29 runaways over a
-//! sea (`SEA_DECK_VERSION`) and the two hot `Snowball`s a locked world's deck set off
-//! (P14.T24.j's deck), each body generated afresh in its system, as the census walks it;
-//! and the Solar System table, unchanged to the bit by the eyeball's rule and the dry deck.
+//! sea (P14.T53.b's dry deck, from 26) and the two hot `Snowball`s a locked world's deck set off
+//! (P14.T24.j's deck), each body generated afresh in its system, as the census walks it.
 //!
 //! The bodies are named by their system's rank in the census's sample and their ID. The tests are
 //! native only, as the census is: on WebAssembly their dozens of systems would run on one thread.
@@ -17,13 +16,11 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::derive::atmosphere::{
-    Gas, LockedStateRules, SNOWBALL_ICE_COVER, SeaDeckRules, SurfaceMaterial, SurfaceState,
-    WATER_MELTING_POINT, with_locked_state, with_sea_deck,
+    Gas, SNOWBALL_ICE_COVER, SurfaceMaterial, SurfaceState, WATER_MELTING_POINT,
 };
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
 use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhaseTemplate};
-use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{RecordSection, SectionState};
 use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
@@ -450,17 +447,4 @@ fn the_census_s_critical_n2_envelopes_stay_hidden() {
             body.1
         );
     }
-}
-
-/// The Solar System table (Venus, Earth, Mars and Titan among its bodies) is derived the same, to
-/// the bit, under the version's rules with the eyeball's rule and the dry deck each on and held
-/// (the planets' lag is a generated system's, which the table is not).
-#[test]
-fn the_solar_system_table_is_unchanged_by_the_census_s_26_rules() {
-    let held = historic_table();
-    assert_eq!(
-        with_locked_state(LockedStateRules::Eyeball, historic_table),
-        held
-    );
-    assert_eq!(with_sea_deck(SeaDeckRules::Dry, historic_table), held);
 }

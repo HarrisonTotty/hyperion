@@ -431,12 +431,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   `SubstellarHostRules::BrownDwarfs` through `with_substellar_hosts`.
 /// - a rogue planet's bodies, `ROGUE_PLANET_HOSTS_VERSION` (P14.T27.b), at
 ///   `RoguePlanetRules::Bodies` through `with_rogue_planets`.
-/// - the eyeball, `LOCKED_STATE_VERSION` (P14.T53.e's rule 5 on a world locked 1:1), at
-///   `LockedStateRules::Eyeball` through `with_locked_state`: rule 5 also needs no open water
-///   there;
-/// - the dry deck, `SEA_DECK_VERSION` (P14.T53.b part 1 (b)–(c)), at `SeaDeckRules::Dry` through
-///   `with_sea_deck`: (c) reads the published label, and a decked runaway over liquid water is
-///   solved without the deck;
 /// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
@@ -453,8 +447,7 @@ pub fn admit_free_floating_hosts_in_this_process() {
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{
-        LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
-        with_locked_state, with_melt_oxygen, with_sea_deck,
+        LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
     };
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::substellar::{
@@ -463,8 +456,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
-    let run = move || with_locked_state(LockedStateRules::Eyeball, run);
-    let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     let run = move || {
