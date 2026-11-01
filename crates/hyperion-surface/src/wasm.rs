@@ -83,10 +83,11 @@
 //!   `horizon` a `HorizonLayer` and `normalsLayer` a `NormalsLayer`, each `Baked` (0) or
 //!   `Skipped` (1), its `normals()` empty where the normals are skipped, and returns a
 //!   `BakedTerrain`, or `undefined` where the field cannot make it yet: none is held, or a
-//!   surveyed vertex reads a cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and R10's layers:
-//!   `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry (255 for no
-//!   entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8, vertex (x, y)
-//!   at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when skipped;
+//!   surveyed vertex reads a cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and
+//!   R10's layers: `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry
+//!   (255 for no entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8,
+//!   vertex (x, y) at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when
+//!   skipped;
 //!   `maturity()`, a `Uint16Array` of 65 × 65 × 2, vertex (x, y) at `2 (65 y + x)`: its
 //!   maturity's code at the patch's band level n, then at n − 1 (R10.T1.c's client half;
 //!   [`TerrainLayers::maturity`], each value c the unorm16 code of r = √(D ÷ `m_body`), so that m =

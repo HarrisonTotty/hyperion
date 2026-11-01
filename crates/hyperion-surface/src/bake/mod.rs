@@ -63,6 +63,7 @@ use crate::field::ResolutionCode;
 use crate::height::HeightSample;
 use crate::material::{MAX_CLASSES, kept_omitted_rms, patch_maturity, weights_with_sample};
 use crate::num;
+pub use crate::patch::NormalsLayer;
 use crate::patch::{BakeOptions, HeightSource, PATCH_VERTICES, PatchBake, bake_with_heights};
 use crate::reading::SurveyView;
 use crate::scatter::ExtraLayer;
@@ -85,17 +86,6 @@ pub enum WeightsLayer {
     Baked,
     /// None: the palette is empty and the weights are not made, for a style that draws no
     /// material, as the wireframe's depth-only terrain (R10.T11).
-    Skipped,
-}
-
-/// Whether a bake makes R05's normals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NormalsLayer {
-    /// At the options' [`NormalScale`](crate::patch::NormalScale), for a style that shades the
-    /// ground (R10.T10).
-    Baked,
-    /// None: [`PatchBake::normals`] is empty and no height is asked for them, for a style that
-    /// draws no shading, as the wireframe's depth-only terrain (R10.T11), whose slot holds none.
     Skipped,
 }
 

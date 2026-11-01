@@ -37,7 +37,6 @@ pub mod collision;
 pub mod normals;
 pub mod vertex;
 
-use crate::bake::NormalsLayer;
 use crate::cube::{PATCH_QUADS, PatchKey};
 use crate::height::HeightSample;
 use crate::num;
@@ -150,6 +149,16 @@ impl NormalScale {
             Self::Double => 2 * PATCH_VERTICES - 1,
         }
     }
+}
+
+/// Whether a bake makes its normals, which R10's bake takes beside [`BakeOptions`] (R10.T11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NormalsLayer {
+    /// At [`BakeOptions::normals`]' resolution, for a style that shades the ground (R10.T10).
+    Baked,
+    /// None: [`PatchBake::normals`] is empty and no height is asked for them, for a style that
+    /// draws no shading, as the wireframe's depth-only terrain (R10.T11), whose slot holds none.
+    Skipped,
 }
 
 /// What a bake makes.
