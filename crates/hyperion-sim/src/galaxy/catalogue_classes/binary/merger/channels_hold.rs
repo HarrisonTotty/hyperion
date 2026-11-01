@@ -4,15 +4,26 @@
 //! class is its held arm verbatim (the class's own tests and golden hold it); these hold the new
 //! arm, under every 26 hold.
 //!
-//! - The tripwire, and each channel's share within 3σ of its weight.
+//! - The tripwire, and each channel's share against its weight (χ², α = 10⁻³).
 //! - Every evolved donor is past its main sequence and living at T, fills its lobe on its orbit,
-//!   detached before T as the engine's segment before a common envelope is, and its merged star is
-//!   the engine's helper's for its own pair, rebuilt from the entry, bit for bit (and the helper the
-//!   engine's own common envelope, `stellar::binary::class_merger`'s test).
+//!   detached before T; the engine itself, run on the pair rebuilt from the entry, sends its onset
+//!   of transfer to a common envelope after a detached history, and leaves the entry's merged star
+//!   bit for bit.
+//! - Every contact pair's mass ratio lies in the contact mark's 0.06–0.15.
 //! - Every entry is its class at every age, the rate stays Kochanek et al.'s, under one candidate
-//!   in ten fails, and the scan keeps exactly the cells' entries without the engine.
+//!   in ten fails, the scan keeps exactly the cells' entries without stepping the engine, and the
+//!   cells do not depend on the order they are generated in.
 //! - Slow: the sampler against the engine's own mergers under every 26 hold, χ² per degree of
-//!   freedom by mark, pinned as measured, and the engine's channel split printed.
+//!   freedom by mark, pinned as measured, and the engine's channel split and its evolved donors'
+//!   kinds before the merger printed.
+//!
+//! The movers under the hold, found by turning it on at the version (and back off) over the sim's,
+//! the server's and the fitting crate's tests and the merger classes' slow tests: the goldens
+//! `catalogue_classes/stellar_mergers` and `catalogue_classes/neutron_star_mergers` (its remnant
+//! masses, P11.T8.d's rider); the version-arm tests of `merger/tests.rs` (every age, one ID, the
+//! contact pair, the pinned layers) and `nsm/tests.rs`'s
+//! `the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass`; and the galaxy-wide scan's pin
+//! of `tests/binary_mergers.rs`. No other golden and no census moves.
 
 use std::sync::OnceLock;
 
@@ -23,8 +34,9 @@ use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
+use crate::stellar::binary::BinaryInput;
+use crate::stellar::binary::class_merger::{evolved_donor_merger, onset_segment_kinds};
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
-use crate::stellar::binary::{BinaryInput, class_merger::evolved_donor_merger};
 use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
 
@@ -40,14 +52,15 @@ const EVOLVED: [Phase; 5] = [
     Phase::ThermallyPulsingAgb,
 ];
 
-/// The fixture under every 26 hold, with its kinematic tables; built once.
+/// The fixture built under every 26 hold, with its kinematic tables: built so, since the field share
+/// and the carve-out are read when a galaxy is built; built once.
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
-        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        let params = GalaxyParams::milky_way_like();
+        Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_26_hold())
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
-            .with_rules(GalaxyRules::every_26_hold())
     })
 }
 
@@ -95,8 +108,8 @@ fn the_merger_class_is_held_only_until_the_26_bump() {
         GENERATOR_VERSION < MERGER_CLASS_VERSION,
         "the bump to 26 deletes P11.T8.c's channel hold: `MERGER_CLASS_VERSION`, \
          `MergerClassRules` with its `ContactOnly` arm, `GalaxyRules::merger_class`, the scan's \
-         match on it and its contact-only path's mark `MergerMark::MassRatio`, and this module's \
-         tripwire"
+         match on it and its contact-only path's mark `MergerMark::MassRatio`, the neutron-star \
+         remnant's match in `scan::nsm::remnant_mass_under`, and this module's tripwire"
     );
     let at = |v: u32| GalaxyRules::of_version(GeneratorVersion::new(v)).merger_class;
     for v in [GENERATOR_VERSION.get(), 25] {
@@ -109,31 +122,55 @@ fn the_merger_class_is_held_only_until_the_26_bump() {
     );
 }
 
-/// Each channel's share of the entries lies within 3σ of its weight, binomially.
+/// Each channel's share of the entries is its weight, by χ² at α = 10⁻³: the channel's word is the
+/// scan's first on its stream, and the engine refuses so few candidates of either channel that the
+/// shares stay the weights'.
 #[test]
 fn each_channel_s_share_is_its_weight() {
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
     let n = all_entries().count();
     let evolved = all_entries()
         .filter(|e| e.scan().channel() == MergerChannel::EvolvedDonor)
         .count();
-    let weight = MERGER_SAMPLER.pick(MergerPick::Channel).weights()[1];
+    let weights = MERGER_SAMPLER.pick(MergerPick::Channel).weights();
+    let counts = [n - evolved, evolved].map(|c| u64::try_from(c).expect("a few hundred"));
     #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
-    let (share, sigma) = (
-        evolved as f64 / n as f64,
-        (weight * (1.0 - weight) / n as f64).sqrt(),
+    let expected = [weights[0] * n as f64, weights[1] * n as f64];
+    #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
+    let share = evolved as f64 / n as f64;
+    println!(
+        "{evolved} of {n} evolved donors: {share:.3} against {}",
+        weights[1]
     );
-    println!("{evolved} of {n} evolved donors: {share:.3} against {weight}");
     assert!(n > 200, "{n}");
-    assert!(
-        (share - weight).abs() < 3.0 * sigma,
-        "{share} against {weight}"
+    assert_p_value(
+        "the evolved donors' share",
+        chi_square_gof(&counts, &expected).p_value,
+        ALPHA,
     );
 }
 
+/// Every contact pair's mass ratio lies in the contact mark's 0.06–0.15: its primary is heavy
+/// enough that the secondary at the largest ratio is a track's.
+#[test]
+fn every_contact_pair_is_at_the_tidal_limit() {
+    let mut checked = 0;
+    for entry in all_entries() {
+        if entry.scan().channel() != MergerChannel::Contact {
+            continue;
+        }
+        let q = entry.scan().secondary_mass().value() / entry.scan().primary_mass().value();
+        assert!((0.06..=0.15).contains(&q), "{:?}: q {q}", entry.scan().id());
+        checked += 1;
+    }
+    assert!(checked > 10, "{checked}");
+}
+
 /// Every evolved donor is past its main sequence and living at T, its companion on its main
-/// sequence; it fills its Roche lobe on its circular orbit; the pair is detached before T, as the
-/// engine's segment before a common envelope is; and its merged star is the engine's helper's for
-/// its own pair, rebuilt from the entry, bit for bit.
+/// sequence; it fills its Roche lobe on its circular orbit; the pair is detached before T; and the
+/// engine, built at T on the pair rebuilt from the entry's own marks (with the entry's angles,
+/// which no onset reads), finds the onset unstable, a detached history then a common envelope,
+/// and leaves the entry's merged star bit for bit.
 #[test]
 fn every_evolved_donor_merges_as_the_engine_merges_it() {
     let galaxy = galaxy();
@@ -176,6 +213,16 @@ fn every_evolved_donor_merges_as_the_engine_merges_it() {
         );
         let rebuilt = evolved_donor_merger(&input, t, until).expect("the entry's pair merges");
         assert_eq!(&rebuilt, entry.product());
+        let (kinds, after) = onset_segment_kinds(&input, t, until);
+        assert_eq!(
+            (kinds.as_slice(), after),
+            (
+                &[SegmentKind::Detached, SegmentKind::CommonEnvelope][..],
+                SegmentKind::Merged
+            ),
+            "{:?}",
+            entry.scan().id()
+        );
         checked += 1;
     }
     assert!(checked > 100, "{checked}");
@@ -255,6 +302,23 @@ fn under_one_in_ten_fails_and_the_scan_keeps_the_entries() {
     assert_eq!(engine_calls(), before);
 }
 
+/// The cells under every 26 hold do not depend on the order they are generated in, nor on what was
+/// resolved between them: the channel, the evolved donor's living-mass search and the engine built
+/// at its merger keep no state.
+#[test]
+fn the_channels_cells_do_not_depend_on_order() {
+    use hyperion_testkit::order::assert_order_independent;
+    let galaxy = galaxy();
+    let process = StellarMergers::new(galaxy);
+    let cells: Vec<CatalogueCellKey> = sample_cells().into_iter().take(4).collect();
+    assert_order_independent(&cells, |key| {
+        let stray =
+            CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
+        let _ = crate::galaxy::placement::resolve(galaxy, SystemId::from(stray));
+        CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
+    });
+}
+
 /// `n` engine mergers of the stellar merger class in `galaxy`, drawn on 16 streams at once and
 /// joined in stream order, as `tests/common/binaries.rs` draws them.
 fn members(galaxy: &Galaxy, n: usize) -> Vec<crate::stellar::binary::testing::MergerMember> {
@@ -331,6 +395,7 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
     }
     catalogue.truncate(1_000);
     let mut split = [0.0_f64; 3];
+    let mut kinds = [0.0_f64; 3];
     let engine: Vec<([f64; 3], f64)> = members(galaxy, 3_000)
         .iter()
         .filter_map(|m| {
@@ -354,6 +419,17 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
                 2
             };
             split[slot] += m.weight();
+            if slot == 1 {
+                let kind = match before.kind() {
+                    SegmentKind::Detached => 0,
+                    SegmentKind::StableTransfer { .. } => 1,
+                    SegmentKind::Contact
+                    | SegmentKind::CommonEnvelope
+                    | SegmentKind::Merged
+                    | SegmentKind::Disrupted { .. } => 2,
+                };
+                kinds[kind] += m.weight();
+            }
             let marks = [
                 math::log10(a + b),
                 a.min(b) / a.max(b),
@@ -369,6 +445,14 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
         split[0] / total,
         split[1] / total,
         split[2] / total
+    );
+    let evolved: f64 = kinds.iter().sum();
+    println!(
+        "  the engine's evolved donors just before the merger: detached {:.3}, in stable transfer \
+         {:.3}, other {:.3}; the class's all detached",
+        kinds[0] / evolved,
+        kinds[1] / evolved,
+        kinds[2] / evolved
     );
     let mut measured = [0.0; 3];
     for (k, name) in ["log total mass", "mass ratio", "log primary mass"]
@@ -387,10 +471,10 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
 }
 
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass,
-/// as measured (2026-10-31; 41.9, 12.0 and 65.3 for version 24's contact-only class against the
+/// as measured (2026-11-01; 41.9, 12.0 and 65.3 for version 24's contact-only class against the
 /// version's engine): all over P15.T10.b's 3.1, a finding.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    8.609_333_736_664_277,
-    3.214_846_698_572_936_5,
-    16.405_062_483_273_43,
+    14.228_190_907_849_914,
+    12.142_134_904_433_062,
+    16.023_765_912_665_29,
 ];

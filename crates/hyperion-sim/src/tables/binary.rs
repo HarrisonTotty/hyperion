@@ -7,7 +7,7 @@
 //! source: the brainstorm's counts at Milky Way parameters (plan 11, P11.T7): 9 × 10⁶ accreting
 //!   white dwarfs (Pala et al. 2020, MNRAS 494, 3799; the brainstorm's 6–12 × 10⁶, split in
 //!   halves by design note 12), 10⁴ X-ray binaries (Corral-Santana et al. 2016, A&A 587, A61),
-//!   9 × 10⁴ stellar mergers in the source horizon (0.35 a year, Kochanek et al. 2014, MNRAS 443,
+//!   9 × 10⁴ stellar mergers in the source horizon (0.34 a year, Kochanek et al. 2014, MNRAS 443,
 //!   1319, × 264,144 years) and 10 neutron-star mergers
 //!
 //! [`CLASS_SHARES`] (P11.T7) is the share matrix's row for each carved class: how many hosts a
@@ -737,7 +737,8 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///   Majoris pairs hold mass ratios from about 0.07 to 1 (Rucinski 1993, PASP 105, 1433), and the
 ///   pairs that merge are the low ones, below Rasio's (1995, ApJ 444, L41) tidal limit near 0.09
 ///   and just above it: V1309 Scorpii's progenitor, the contact pair whose merger was seen in
-///   2008, held a mass ratio near 0.1 (Tylenda et al. 2011, A&A 528, A114).
+///   2008 (Tylenda et al. 2011, A&A 528, A114), held a mass ratio near 0.1 (Stępień, Pamyatnykh
+///   and Różyczka 2011, A&A 531, A18).
 /// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
 ///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
 ///
@@ -748,13 +749,17 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///   et al. 2017, ApJ 835, 282) and M101 OT2015-1's a yellow supergiant of about 18 M☉
 ///   (Blagorodnova et al. 2017, ApJ 834, 107); and the engine's own mergers, its pre-main-sequence
 ///   ones left out, are mostly evolved stars beside a main-sequence companion and a quarter or so
-///   two main-sequence stars, of which few are in contact (`stellar/rules/merger_class_hold.rs`
-///   prints its split).
-/// - **The contact pair's mass ratio**: 0.06–0.15, median 0.09, at Rasio's (1995) tidal limit,
+///   two main-sequence stars, of which few are in contact
+///   (`galaxy/catalogue_classes/binary/merger/channels_hold.rs`'s
+///   `the_channel_sampler_against_the_engine_under_every_26_hold` prints its split).
+/// - **The contact pair's mass ratio**: 0.06–0.15, median 0.09, about Rasio's (1995) tidal limit,
 ///   below which a contact pair is unstable and coalesces on the main sequence, as the engine's
-///   contact rule merges it; V1309 Scorpii's was about 0.1 (Tylenda et al. 2011).
+///   contact rule merges it; V1309 Scorpii's was about 0.1 (Stępień et al. 2011). The limits are
+///   scratch, ours. The contact pair's primary is at least 0.1 ÷ 0.15 M☉, so that its secondary is
+///   a track's at that ratio.
 /// - **The evolved donor's companion**: q = M₂ ÷ M₁ of initial masses, 0.05–1, median 0.6, broad
-///   up to the twins, the engine's own evolved donors' (weighted median 0.63), scratch.
+///   up to the twins, the engine's own evolved donors' (weighted median 0.63), scratch; the scan
+///   draws it below the ratio at which the engine finds the donor's transfer unstable.
 /// - **The evolved donor's mass** is a rank that leaves the galaxy's mass function over the masses
 ///   past their main sequence and living at the merger as it is.
 pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(

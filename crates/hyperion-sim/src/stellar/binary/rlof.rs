@@ -147,6 +147,16 @@ pub(super) enum Stability {
     Merge,
 }
 
+/// The mass ratio, donor over accretor, above which transfer from a giant-branch or asymptotic
+/// giant-branch donor whose core is `core_share` of its mass is dynamically unstable, at the giant
+/// radius exponent `x`: (1.67 − x + 2 `core_share`⁵) ÷ 2.13 (BSE section 2.6.1, after Hjellming and
+/// Webbink 1987). [`Engine::stability`] reads it, and so does the stellar merger class's evolved
+/// donor (P11.T8.c's channels), which draws its companion inside it.
+#[must_use]
+pub(super) fn giant_critical_ratio(core_share: f64, x: f64) -> f64 {
+    (1.67 - x + 2.0 * crate::math::powi(core_share, 5)) / 2.13
+}
+
 /// How much of the transfer the accretor takes, and what it does.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Accretion {
@@ -343,8 +353,7 @@ impl Engine {
             Kind::LowMassMainSequence if q > LOW_MASS_MAIN_SEQUENCE_Q => Stability::Merge,
             Kind::GiantBranch | Kind::EarlyAgb | Kind::PulsingAgb => {
                 let share = sd.state.core_mass().value() / md;
-                let q_crit =
-                    (1.67 - self.ctx.giant_exponent() + 2.0 * crate::math::powi(share, 5)) / 2.13;
+                let q_crit = giant_critical_ratio(share, self.ctx.giant_exponent());
                 if q > q_crit || inside_core {
                     Stability::CommonEnvelope
                 } else {

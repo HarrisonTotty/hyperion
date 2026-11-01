@@ -1,6 +1,7 @@
 //! The scan marks of the binary catalogue classes (plan 11's Provides; P11.T8.a and P11.T8.b;
 //! design notes 10 and 12): what a galaxy-wide scan needs of a host, drawn first and on draws of
-//! its own, without the rest of the system and without the binary engine.
+//! its own, without the rest of the system and without running the binary engine (from 26 a
+//! stellar merger's evolved donor asks one onset of an engine built at its merger, `merger`).
 //!
 //! Ten million accreting white dwarfs must be walked in seconds (design note 10), so a host's scan
 //! marks are its first draws: its site and the thinning that places it, its nova recurrence period
@@ -49,6 +50,7 @@ use std::cell::Cell;
 mod merger;
 mod nsm;
 
+pub(crate) use merger::evolved_product;
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
 #[cfg(test)]
 pub(crate) use nsm::remnant_mass_under;

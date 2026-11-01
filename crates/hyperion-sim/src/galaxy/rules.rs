@@ -131,8 +131,7 @@ impl GalaxyRules {
     /// P09.T35, `feature_classes`, P09.T36, and `merger_class`, P11.T8.c–d; the stellar rules'
     /// `dwarf_sequence`, P06.T23.a, `helium`, P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`,
     /// P06.T43.b, `stripping`, P11.T1.d, `peculiar_classes`, P06.T24.b, `star_events`, P06.T28.g,
-    /// and `merger_mass`, P11.T4.d;
-    /// [`StellarRules::every_26_hold`]).
+    /// and `merger_mass`, P11.T4.d; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.

@@ -18,37 +18,42 @@
 //! (`class.merger.binary`), on which it builds:
 //!
 //! - **the pair before T**, in contact as W Ursae Majoris pairs and V1309 Scorpii's progenitor are
-//!   (Tylenda et al. 2011, A&A 528, A114): each star at its own track's state at T, its radius its
+//!   (Tylenda et al. 2011, A&A 528, A114, saw that pair merge): each star at its own track's state
+//!   at T, its radius its
 //!   Roche lobe's (Eggleton 1983) on the circular orbit on which the primary fills its lobe, so
 //!   that the period follows from the primary's radius and the mass ratio;
 //! - **the merged star from T**: plan 11's rule for two main-sequence stars (P11.T4.d; Hurley,
-//!   Tout and Pols 2002, section 2.7.4 and equation 80), a main-sequence star of the pair's mass at
+//!   Tout and Pols 2002, section 2.7.3 and equation 80), a main-sequence star of the pair's mass at
 //!   the fractional age 0.1 Σ Mᵢ τᵢ ÷ M on its own track, rejuvenated as the engine's product is,
 //!   so that a pair the engine merges and an entry agree.
 //!
 //! # The engine's channels, from 26
 //!
 //! From [`MERGER_CLASS_VERSION`] (research-leans-13 §2(c): the engine merges only some contact
-//! pairs on the main sequence, and the progenitors seen are mostly evolved) the scan draws a
-//! channel first, by `MERGER_SAMPLER`'s weights: a contact pair as above, its mass ratio at the
-//! tidal limit, or an **evolved donor**, past its main sequence and living at T, beside a
-//! main-sequence companion. Before T the evolved donor fills its lobe on a circular orbit,
-//! detached, as the engine's segment before a common envelope is ([`MergerPair::before`]); from T
-//! it is the star that envelope leaves, the engine's own, through the helpers its common envelope
-//! calls (`stellar::binary::class_merger`), so that the two agree bit for bit.
+//! pairs on the main sequence, and the progenitors seen are mostly evolved, as M31-LRN-2015's and
+//! M101 OT2015-1's were, MacLeod et al. 2017 and Blagorodnova et al. 2017, `MERGER_SAMPLER`'s
+//! doc) the scan draws a channel first, by `MERGER_SAMPLER`'s weights: a contact pair as above,
+//! its mass ratio at the tidal limit, or an **evolved donor**, past its main sequence and living
+//! at T, beside a main-sequence companion. The scan asks the engine itself, built at T and not
+//! stepped, what the onset of transfer from the donor at its lobe does
+//! (`stellar::binary::class_merger`): its stability test, then a common envelope; the candidate is
+//! kept only if that merges the pair into one star. Before T the evolved donor fills its lobe on
+//! a circular orbit, detached, as the engine's segment before that onset is
+//! ([`MergerPair::before`]); from T it is the star the engine's envelope leaves, bit for bit.
 //!
 //! # The test
 //!
-//! The candidate's [`BinaryTimeline::from_marks`] is the contact pair from zero age to T and the
-//! merged star from T, without the engine. It is an entry if and only if [`carved_class`] of that
-//! timeline is [`CarvedClass::StellarMerger`], the one test the grid applies to an evolved pair
-//! (design note 10); a merger in the horizon of two living stars always is.
+//! The candidate's [`BinaryTimeline::from_marks`] is the pair before T (the contact pair, or from
+//! 26 the evolved donor's detached pair) from zero age to T and the merged star from T, built from
+//! its marks. It is an entry if and only if [`carved_class`] of that timeline is
+//! [`CarvedClass::StellarMerger`], the one test the grid applies to an evolved pair (design note
+//! 10); a merger in the horizon of a pair with a living star always is.
 //!
 //! # The entry
 //!
 //! An entry has one member, its system, at its site at the epoch, moving at its velocity on a
 //! straight line: over the source horizon a merger below 4,600 km/s stays within plan 09's 4,096 ly
-//! reach of its cell. Before T it is the contact pair, from T the merged star, under the same ID
+//! reach of its cell. Before T it is its pair, from T the merged star, under the same ID
 //! ([`MergerEntry::stars`]); its luminous red nova at T is P11.T9's one-shot event. Its record is a
 //! catalogue system's, counted in its primary's layer.
 
@@ -64,7 +69,7 @@ use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{ObjectKey, Stream, tags};
-use crate::stellar::binary::scan::{MergerScanMarks, merger_scan_marks};
+use crate::stellar::binary::scan::{MergerScanMarks, evolved_product, merger_scan_marks};
 use crate::stellar::binary::{
     BinaryMarks, BinaryTimeline, CarvedClass, MarkedMerger, SegmentKind, carved_class,
 };
@@ -188,19 +193,17 @@ impl StellarMergers {
         let mean_anomaly = Radians::new(std::f64::consts::TAU * stream.uniform());
         let angles = (orientation, mean_anomaly);
         let draws = [0, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
-        let (pair, product) = match scan.evolved() {
+        let rules = galaxy.rules().stellar;
+        let (pair, product) = match scan.evolved_separation() {
             None => (
                 MergerPair::contact(scan.stars(), angles),
-                main_sequence_product(
-                    scan.stars(),
-                    scan.composition(),
-                    &draws[0],
-                    galaxy.rules().stellar,
-                ),
+                main_sequence_product(scan.stars(), scan.composition(), &draws[0], rules),
             ),
-            Some((separation, product)) => (
+            Some(separation) => (
                 MergerPair::evolved(scan.stars(), separation, angles),
-                product,
+                evolved_product(&scan, &draws, rules).expect(
+                    "the scan kept this pair because the engine's onset merges this same input",
+                ),
             ),
         };
         let marks = BinaryMarks::merger(
@@ -309,6 +312,7 @@ impl MergerPair {
     /// The evolved donor's pair of `stars` (their own states at T) on its circular orbit of
     /// `separation`, the scan's, on which the donor fills its lobe, oriented and phased by
     /// `angles`; each star at its own radius.
+    #[must_use]
     fn evolved(
         stars: &[StarState; 2],
         separation: Metres,

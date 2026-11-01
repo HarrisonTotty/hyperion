@@ -7068,14 +7068,26 @@ galaxy_sweeps`.
     (`MergerClassRules::{ContactOnly, Channels}`); the held arm is the class verbatim.
   - _From 26_ the scan draws `MERGER_SAMPLER`'s new choice `Channel` first on `class.merger.mass`:
     `MergerChannel::Contact` or `MergerChannel::EvolvedDonor`, scratch 0.15 / 0.85. The contact
-    pair's q takes `ContactMassRatio` (0.06–0.15, median 0.09). An evolved donor's mass is drawn between the
-    turn-off at T and the heaviest mass whose death (plan 06's fate at its own draws) comes after
-    T (`EvolvedPrimaryRank`), its companion by `EvolvedMassRatio` on its main sequence; it fills its
-    lobe on a circular orbit, `SegmentKind::Detached` before T (`MergerPair::before`); the product
-    is `stellar::binary::class_merger::evolved_donor_merger`, which builds the engine at T and calls
-    the engine's own `envelope_outcome`, `coalesced_product` and `Engine::product_member`
-    (extracted from `resolve_common_envelope` and `coalesce`, moving nothing); a pair the envelope
-    leaves apart is refused. `ContactPair` is now `MergerPair`.
+    pair's q takes `ContactMassRatio` (0.06–0.15, median 0.09), its primary at least 0.1 ÷ 0.15
+    M☉. An evolved donor's mass is drawn between the turn-off at T and the heaviest mass whose
+    death (plan 06's fate) comes after T (`EvolvedPrimaryRank`); its companion by
+    `EvolvedMassRatio` on its main sequence and inside the ratio the engine's stability test finds
+    unstable (`class_merger::unstable_companion_ratio`, from `rlof::giant_critical_ratio`, `GAP_Q`,
+    `CODE_Q`); it fills its lobe on a circular orbit, `SegmentKind::Detached` before T.
+  - _The engine decides._ `stellar::binary::class_merger` builds the engine at T and runs its
+    `roche_onset` alone (stability, then the common envelope through `envelope_outcome`,
+    `coalesced_product` and `Engine::product_member`, extracted from `resolve_common_envelope` and
+    `coalesce`, moving nothing); a candidate is kept only if that leaves one star. The scan asks
+    `evolved_donor_merges`, the candidate builds the star (`scan::evolved_product`).
+    `ContactPair` is now `MergerPair`.
+  - _Deviation: the scan builds an engine._ For an evolved donor the scan builds the pair's two
+    tracks and an `Engine` at T and runs about 6–12 plan 06 fates for the living-mass bracket; it
+    never steps the engine (`run_pair`), so `engine_calls()` stays zero.
+  - _Movers under the hold:_ goldens `catalogue_classes/stellar_mergers` and
+    `catalogue_classes/neutron_star_mergers`; the version-arm tests of `merger/tests.rs` and
+    `nsm/tests.rs`; the galaxy-wide scan's pin in `tests/binary_mergers.rs`.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`,
+    `stellar::binary::class_merger`; slow, `channels_hold`'s sampler test (with `--ignored`).
 - **P11.T8.d's rider, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13 §2(b)).
   Under `MERGER_CLASS_VERSION` `NsmScanMarks::remnant_mass` is the pair's mass less the published
   ejecta (`scan::remnant_mass_under`; GW170817's 2.74 → 2.69 M☉), and the remnant's state takes it;

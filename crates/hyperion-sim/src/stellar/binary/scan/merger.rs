@@ -1,5 +1,6 @@
 //! The stellar mergers' scan marks (P11.T8.c; design note 10): what a galaxy-wide scan needs of a
-//! merger, drawn first and on draws of its own, without the binary engine.
+//! merger, drawn first and on draws of its own, without running the binary engine (from 26 an
+//! evolved donor's onset is asked of an engine built at T and not stepped).
 //!
 //! A stellar merger is a one-shot entry: one merger at its time T, uniform over the source horizon
 //! ([`horizon_time`]), which P11.T9's luminous red nova and P12.T5.b's walk read with the pair's
@@ -20,17 +21,20 @@
 //! 6. its velocity at the site, plan 08's draw of its component's law (`class.merger.velocity`).
 //!
 //! From `MERGER_CLASS_VERSION` (26) the pair's words begin with the channel
-//! (`MergerChannel`): a contact pair, as above but its mass ratio at the tidal limit, or an
-//! evolved donor, past its main sequence and living at T, its mass between the turn-off and the
-//! heaviest mass whose death comes after T, beside a main-sequence companion, on the circular orbit
-//! on which it fills its lobe; the scan then asks the engine's helper what their common envelope
-//! leaves (`class_merger`), and keeps the candidate only if the envelope merges them.
+//! (`MergerChannel`): a contact pair, as above but its mass ratio at the tidal limit and its
+//! primary heavy enough to hold a secondary there, or an evolved donor, past its main sequence
+//! and living at T, its mass between the turn-off and the heaviest mass whose death comes after
+//! T, beside a main-sequence companion inside the ratio the engine's stability test finds
+//! unstable, on the circular orbit on which it fills its lobe. For an evolved donor the scan
+//! builds the engine at T, without stepping it, and runs its onset of transfer (`class_merger`):
+//! the stability test, then the common envelope; it keeps the candidate only if that merges the
+//! pair into one star.
 //!
-//! A candidate is kept exactly when both stars are on their main sequences at the merger, which
-//! refuses only a star still contracting towards it in a young population (or, at a turn-off, a
-//! track's draws ending it a little earlier than the median's). The class's own test cannot refuse
-//! a candidate the scan keeps: a merger in the horizon of a pair with a living star is a stellar
-//! merger.
+//! Under the version's rules a candidate is kept exactly when both stars are on their main
+//! sequences at the merger, which refuses only a star still contracting towards it in a young
+//! population (or, at a turn-off, a track's draws ending it a little earlier than the median's).
+//! The class's own test cannot refuse a candidate the scan keeps: a merger in the horizon of a
+//! pair with a living star is a stellar merger.
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
@@ -44,7 +48,9 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::binary::BinaryInput;
-use crate::stellar::binary::class_merger::evolved_donor_merger;
+use crate::stellar::binary::class_merger::{
+    evolved_donor_merger, evolved_donor_merges, unstable_companion_ratio,
+};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{
@@ -100,10 +106,9 @@ pub struct MergerScanMarks {
     merger_time: UniverseTime,
     age_at_epoch: Years,
     composition: Composition,
-    channel: MergerChannel,
+    drawn: Drawn,
     masses: [SolarMasses; 2],
     stars: [StarState; 2],
-    evolved: Option<(Metres, StarState)>,
 }
 
 impl MergerScanMarks {
@@ -206,14 +211,20 @@ impl MergerScanMarks {
     /// channels from 26 (`MergerClassRules`).
     #[must_use]
     pub const fn channel(&self) -> MergerChannel {
-        self.channel
+        match self.drawn {
+            Drawn::Contact => MergerChannel::Contact,
+            Drawn::EvolvedDonor { .. } => MergerChannel::EvolvedDonor,
+        }
     }
 
-    /// For an evolved donor, the separation on which it fills its Roche lobe and the star its
-    /// common envelope leaves at T, the engine's own; `None` for a contact pair.
+    /// For an evolved donor, the separation on which it fills its Roche lobe at T, on which its
+    /// common envelope merges the pair; `None` for a contact pair.
     #[must_use]
-    pub(crate) const fn evolved(&self) -> Option<(Metres, StarState)> {
-        self.evolved
+    pub const fn evolved_separation(&self) -> Option<Metres> {
+        match self.drawn {
+            Drawn::Contact => None,
+            Drawn::EvolvedDonor { separation } => Some(separation),
+        }
     }
 }
 
@@ -350,28 +361,39 @@ pub fn merger_scan_marks(
         merger_time,
         age_at_epoch,
         composition,
-        channel: pair.channel,
+        drawn: pair.drawn,
         masses: pair.masses,
         stars: pair.stars,
-        evolved: pair.evolved,
     })
 }
 
-/// A merger's pair as the scan draws it: its channel, initial masses and states at T, and for an
-/// evolved donor the separation on which its donor fills its lobe and the star its common
-/// envelope leaves.
+/// A merger's channel as the scan drew it (P11.T8.c's channels), with what the channel carries:
+/// for an evolved donor the separation on which it fills its Roche lobe at T.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Drawn {
+    /// A contact pair of two main-sequence stars.
+    Contact,
+    /// An evolved donor, which the engine's onset of transfer merges with its companion.
+    EvolvedDonor {
+        /// The pair's separation at T, m.
+        separation: Metres,
+    },
+}
+
+/// A merger's pair as the scan draws it: its channel, initial masses and states at T.
 struct DrawnPair {
-    channel: MergerChannel,
+    drawn: Drawn,
     masses: [SolarMasses; 2],
     stars: [StarState; 2],
-    evolved: Option<(Metres, StarState)>,
 }
 
 /// A contact pair of two main-sequence stars at `merger_age` (`at`), drawn on `stream` (the
-/// pair's words): the primary's layer among those with main-sequence stars at T and its mass in
-/// the galaxy's mass function below the turn-off then, and the mass ratio from `at`'s mark, held
-/// so that the secondary is at least plan 06's least track mass; `None` unless both stars are on
-/// their main sequences at T. Version 25's class verbatim under its mark.
+/// pair's words): the primary's layer among those with main-sequence stars at T whose primaries
+/// can hold a secondary of plan 06's least track mass at the mark's largest ratio, its mass in the
+/// galaxy's mass function in that range below the turn-off then, and the mass ratio from `at`'s
+/// mark, held so that the secondary is at least that least mass; `None` unless both stars are on
+/// their main sequences at T. Version 25's class verbatim under its mark, whose largest ratio, 1,
+/// cuts no primary.
 fn contact_pair(
     galaxy: &Galaxy,
     composition: &Composition,
@@ -382,10 +404,14 @@ fn contact_pair(
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
     let turn_off = turn_off_mass(Years::new(merger_age.value().max(0.0)), composition).value();
     let floor = MIN_INITIAL_MASS.value();
+    // The lightest primary whose secondary at the mark's largest ratio is a track's.
+    let lightest = floor / MERGER_SAMPLER.mark(mass_ratio).limits().1;
+    let range = |band: MassBand| (band.lo().max(floor).max(lightest), band.hi().min(turn_off));
     let shares = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
     let mut weights = [0.0; 5];
     for ((weight, &share), band) in weights.iter_mut().zip(shares).zip(MassBand::ALL) {
-        if band.lo().max(floor) < turn_off {
+        let (lo, hi) = range(band);
+        if lo < hi {
             *weight = share;
         }
     }
@@ -393,8 +419,7 @@ fn contact_pair(
     let mark = stream.mark();
     let fallback = weights.iter().rposition(|&w| w > 0.0)?;
     let layer = mark.pick_weighted(&weights, total).unwrap_or(fallback);
-    let band = MassBand::ALL[layer];
-    let (lo, hi) = (band.lo().max(floor), band.hi().min(turn_off));
+    let (lo, hi) = range(MassBand::ALL[layer]);
     let rank = sampler.draw(MergerMark::PrimaryRank, 0.0, stream);
     let m1 = galaxy.mass_function().quantile_in(lo, hi, rank);
     let q_floor = sampler.rank_of(mass_ratio, 0.0, floor / m1);
@@ -404,10 +429,9 @@ fn contact_pair(
     let rules = galaxy.rules().stellar;
     let star = |k: usize| main_sequence_at(masses[k], composition, &draws[k], rules, merger_age);
     Some(DrawnPair {
-        channel: MergerChannel::Contact,
+        drawn: Drawn::Contact,
         masses,
         stars: [star(0)?, star(1)?],
-        evolved: None,
     })
 }
 
@@ -421,18 +445,27 @@ const EVOLVED_PHASES: [Phase; 5] = [
     Phase::ThermallyPulsingAgb,
 ];
 
-/// Bisections in log mass for the heaviest star still living at a merger: 48, far below a part in
-/// 10⁶ of the mass.
-const LIVING_BISECTIONS: u32 = 48;
+/// The step, dex, by which the bracket of the heaviest star still living at a merger widens from
+/// the turn-off: 0.15. Past the main sequence a star lives some 10–20% of its life, a few
+/// hundredths of a dex in mass, so one step nearly always brackets it.
+const LIVING_BRACKET_DEX: f64 = 0.15;
+
+/// Bisections of that bracket: 10, to 1.5 × 10⁻⁴ dex. The edge needs no more: the range runs to
+/// the bracket's dead side, so a donor drawn a little past the edge is dead at T and refused by its
+/// own state, and each bisection costs a fate, some 0.4 ms (plan 06's `fate_of`, measured in a
+/// release build).
+const LIVING_BISECTIONS: u32 = 10;
 
 /// An evolved donor and its companion at the merger (`at`: the system's age at the epoch and at
 /// T), drawn on `stream` (the pair's words, after the channel's): the donor's layer among those
 /// with stars past their main sequence and living at T, its mass in the galaxy's mass function
 /// between the turn-off then and the heaviest mass whose death, plan 06's fate of its own draws,
-/// comes after T; the companion's mass by the evolved mark, on its main sequence at T; the
-/// circular orbit on which the donor fills its Roche lobe (Eggleton 1983); and the star the common
-/// envelope leaves, the engine's own (`class_merger`). `None` unless the donor is in one of
-/// [`EVOLVED_PHASES`] at T, the companion on its main sequence, and the envelope merges them.
+/// comes after T ([`heaviest_living`]); then its state at T, and the companion's mass by the
+/// evolved mark inside the ratio the engine's stability test finds unstable for that donor
+/// (`class_merger::unstable_companion_ratio`), on its main sequence at T; the circular orbit on
+/// which the donor fills its Roche lobe (Eggleton 1983). `None` unless the donor is in one of
+/// [`EVOLVED_PHASES`] at T, the companion on its main sequence, and the engine's onset of
+/// transfer, its stability test and common envelope (`class_merger`), merges them into one star.
 fn evolved_pair(
     galaxy: &Galaxy,
     composition: &Composition,
@@ -443,40 +476,13 @@ fn evolved_pair(
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
     let rules = galaxy.rules().stellar;
     let options = TrackOptions::default().with_rules(rules);
-    let t = merger_age.value();
-    if t.is_nan() || t <= 0.0 {
+    if merger_age.value().is_nan() || merger_age.value() <= 0.0 {
         return None;
     }
-    let turn_off = turn_off_mass(merger_age, composition).value();
+    let turn_off = turn_off_mass(merger_age, composition);
     let floor = MIN_INITIAL_MASS.value();
-    // The heaviest initial mass living at T: its own death, at the donor's draws, comes at T.
-    // The round trip through log₁₀ can land a part in 10¹⁶ above the track's 150 M☉.
-    let dead_by = |log_m: f64| {
-        fate_of(
-            SolarMasses::new(math::exp10(log_m).min(MAX_INITIAL_MASS.value())),
-            composition,
-            &draws[0],
-            options,
-        )
-        .death
-        .age()
-        .value()
-            <= t
-    };
-    let (mut lo, mut hi) = (math::log10(turn_off), math::log10(MAX_INITIAL_MASS.value()));
-    let living_end = if dead_by(hi) {
-        for _ in 0..LIVING_BISECTIONS {
-            let mid = f64::midpoint(lo, hi);
-            if dead_by(mid) {
-                hi = mid;
-            } else {
-                lo = mid;
-            }
-        }
-        math::exp10(lo).min(MAX_INITIAL_MASS.value())
-    } else {
-        MAX_INITIAL_MASS.value()
-    };
+    let living_end = heaviest_living(composition, &draws[0], options, merger_age, turn_off).value();
+    let turn_off = turn_off.value();
     let shares = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
     let mut weights = [0.0; 5];
     for ((weight, &share), band) in weights.iter_mut().zip(shares).zip(MassBand::ALL) {
@@ -492,16 +498,8 @@ fn evolved_pair(
     let (m_lo, m_hi) = (band.lo().max(turn_off), band.hi().min(living_end));
     let rank = sampler.draw(MergerMark::EvolvedPrimaryRank, 0.0, stream);
     let m1 = galaxy.mass_function().quantile_in(m_lo, m_hi, rank);
-    // The companion on its main sequence at T: below the turn-off, at least the least track mass.
-    let ranks = (
-        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, floor / m1),
-        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, turn_off / m1),
-    );
-    let q = sampler.draw_in_ranks(MergerMark::EvolvedMassRatio, 0.0, ranks, stream);
-    let m2 = (q * m1).clamp(floor, turn_off.min(m1));
-    let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
     let donor = Track::to_age_with(
-        track_mass_of(masses[0]),
+        track_mass_of(SolarMasses::new(m1)),
         composition,
         &draws[0],
         options,
@@ -511,19 +509,69 @@ fn evolved_pair(
     if !EVOLVED_PHASES.contains(&donor.phase()) {
         return None;
     }
+    // The companion on its main sequence at T, below the turn-off and inside the unstable ratio
+    // of the donor's mass now (its own mass now is at most its initial mass, so the ratio holds),
+    // at least the least track mass.
+    let unstable = unstable_companion_ratio(&donor, composition)? * donor.mass().value();
+    let ceiling = turn_off.min(unstable).min(m1);
+    if ceiling <= floor {
+        return None;
+    }
+    let ranks = (
+        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, floor / m1),
+        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, ceiling / m1),
+    );
+    let q = sampler.draw_in_ranks(MergerMark::EvolvedMassRatio, 0.0, ranks, stream);
+    let m2 = (q * m1).clamp(floor, ceiling);
+    let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
     let companion = main_sequence_at(masses[1], composition, &draws[1], rules, merger_age)?;
+    let stars = [donor, companion];
     let (md, mc) = (donor.mass().value(), companion.mass().value());
     let share = roche_lobe_radius(md / mc, Metres::new(1.0)).value();
     let separation = Metres::new(donor.radius().value() * SOLAR_RADIUS_M / share);
+    let input = evolved_input(
+        (masses, &stars),
+        separation,
+        composition,
+        draws,
+        (age_at_epoch, rules),
+    );
+    let until = evolved_until(age_at_epoch, merger_age);
+    evolved_donor_merges(&input, merger_age, until).then_some(DrawnPair {
+        drawn: Drawn::EvolvedDonor { separation },
+        masses,
+        stars,
+    })
+}
+
+/// The engine's input for an evolved donor's pair of initial `masses` and states at T `stars`, on
+/// the circular orbit of `separation` about their masses then, with zero angles, at `composition`
+/// with the stars' `draws`, the system `age_at_epoch` old at the epoch, under the stellar `rules`:
+/// the one input both the scan's test and the candidate's star read.
+///
+/// # Panics
+///
+/// Never: zero angles are an orientation, a donor's positive radius over its lobe's share of the
+/// separation is a positive separation about a positive mass, and the masses are tracks' at a
+/// finite age.
+#[must_use]
+fn evolved_input(
+    (masses, stars): ([SolarMasses; 2], &[StarState; 2]),
+    separation: Metres,
+    composition: &Composition,
+    draws: &[StarDraws; 2],
+    (age_at_epoch, rules): (Years, StellarRules),
+) -> BinaryInput {
     let orbit = KeplerElements::from_semi_major_axis(
         separation,
-        GravitationalParameter::from_solar_masses(SolarMasses::new(md + mc)),
+        GravitationalParameter::from_solar_masses(stars[0].mass() + stars[1].mass()),
         Eccentricity::CIRCULAR,
-        Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).ok()?,
+        Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+            .expect("zero angles are an orientation"),
         Radians::ZERO,
     )
-    .ok()?;
-    let input = BinaryInput::new(
+    .expect("a donor's positive radius over its lobe's share is a positive separation");
+    BinaryInput::new(
         masses[0],
         masses[1],
         *composition,
@@ -531,16 +579,86 @@ fn evolved_pair(
         draws.clone(),
         age_at_epoch,
     )
-    .ok()?
-    .with_rules(rules);
-    let until = Years::new(t.max(age_at_epoch.value()) + CLOCK_WINDOW_H.as_julian_years_f64());
-    let product = evolved_donor_merger(&input, merger_age, until)?;
-    Some(DrawnPair {
-        channel: MergerChannel::EvolvedDonor,
-        masses,
-        stars: [donor, companion],
-        evolved: Some((separation, product)),
-    })
+    .expect("masses drawn in 0.1–150 M☉ and a finite age are an input")
+    .with_rules(rules)
+}
+
+/// The heaviest initial mass whose death, plan 06's fate at the donor's `draws` under `options`,
+/// comes after the merger at `merger_age`, from the turn-off `turn_off` up, bracketed in
+/// [`LIVING_BRACKET_DEX`] steps and bisected [`LIVING_BISECTIONS`] times: the bracket's dead side,
+/// so that the range it ends misses no living mass.
+#[must_use]
+fn heaviest_living(
+    composition: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    merger_age: Years,
+    turn_off: SolarMasses,
+) -> SolarMasses {
+    let t = merger_age.value();
+    // The round trip through log₁₀ can land a part in 10¹⁶ above the track's 150 M☉.
+    let dead_by = |log_m: f64| {
+        fate_of(
+            SolarMasses::new(math::exp10(log_m).min(MAX_INITIAL_MASS.value())),
+            composition,
+            draws,
+            options,
+        )
+        .death
+        .age()
+        .value()
+            <= t
+    };
+    let ceiling = math::log10(MAX_INITIAL_MASS.value());
+    let mut lo = math::log10(turn_off.value());
+    let mut hi = (lo + LIVING_BRACKET_DEX).min(ceiling);
+    while !dead_by(hi) && hi < ceiling {
+        lo = hi;
+        hi = (hi + LIVING_BRACKET_DEX).min(ceiling);
+    }
+    if !dead_by(hi) {
+        return MAX_INITIAL_MASS;
+    }
+    for _ in 0..LIVING_BISECTIONS {
+        let mid = f64::midpoint(lo, hi);
+        if dead_by(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    SolarMasses::new(math::exp10(hi).min(MAX_INITIAL_MASS.value()))
+}
+
+/// The age the engine of an evolved donor's pair is run to: H past the later of T and the epoch, as
+/// `SystemStars` runs its pairs.
+#[must_use]
+fn evolved_until(age_at_epoch: Years, merger_age: Years) -> Years {
+    Years::new(merger_age.value().max(age_at_epoch.value()) + CLOCK_WINDOW_H.as_julian_years_f64())
+}
+
+/// The star an evolved donor's merger leaves at T (P11.T8.c's channels), the engine's own for the
+/// pair of `scan`, the scan's own input rebuilt from its marks ([`evolved_input`]) with the stars'
+/// `draws` under the stellar `rules`; `None` for a contact pair, and for an evolved donor whose
+/// onset the engine does not merge, which the scan never keeps.
+#[must_use]
+pub(crate) fn evolved_product(
+    scan: &MergerScanMarks,
+    draws: &[StarDraws; 2],
+    rules: StellarRules,
+) -> Option<StarState> {
+    let Drawn::EvolvedDonor { separation } = scan.drawn else {
+        return None;
+    };
+    let input = evolved_input(
+        (scan.masses, &scan.stars),
+        separation,
+        &scan.composition,
+        draws,
+        (scan.age_at_epoch, rules),
+    );
+    let until = evolved_until(scan.age_at_epoch, scan.merger_age());
+    evolved_donor_merger(&input, scan.merger_age(), until)
 }
 
 /// Appends to `out` the scan marks of every entry of the stellar merger class cell `key`, in index

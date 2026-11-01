@@ -1,40 +1,99 @@
 //! The engine's merger of an evolved donor with its companion, as the stellar merger class's
-//! evolved donors read it (plan 11, P11.T8.c's channels, at 26): the common envelope the engine's
-//! collision of a giant-like star starts (BSE sections 2.7.1–2.7.4, their table 2), through the
-//! engine's own helpers, so that the class and the engine agree bit for bit.
+//! evolved donors read it (plan 11, P11.T8.c's channels, at 26): the onset of Roche-lobe overflow
+//! from a donor at its lobe, which the engine's own stability test sends to a common envelope
+//! (BSE sections 2.6.1 and 2.7.1–2.7.4, their table 2), run by the engine itself, so that the
+//! class and the engine agree bit for bit.
 //!
 //! The pair is the engine's at the merger: each star on its own track at its initial mass, the
-//! donor the primary, on the input's orbit. Nothing is stepped: the engine is built at the
-//! merger's age and asked only what the envelope leaves ([`envelope_outcome`], then
-//! [`coalesced_product`] and [`Engine::product_member`]), as `Engine::common_envelope` asks it.
+//! donor the primary, on the input's circular orbit at the lobe. The engine is built at the
+//! merger's age and asked for one event, its `roche_onset`, which carries both stars, tests the
+//! transfer's stability and, for an unstable giant, resolves the common envelope through the
+//! helpers the engine's every common envelope calls (`envelope_outcome`, `coalesced_product`,
+//! `Engine::product_member`). A pair is the class's only if that leaves one star: stable
+//! transfer, cores that survive the envelope and an envelope that leaves nothing are none.
 
 use std::sync::Arc;
 
-use crate::stellar::StarState;
+use crate::stellar::sse::giant_radius_exponent;
+use crate::stellar::{Composition, StarState};
 use crate::units::Years;
 use crate::units::consts::SOLAR_RADIUS_M;
 
 use super::BinaryInput;
-use super::common_envelope::{
-    CoalescedProduct, EnvelopeOutcome, Side, coalesced_product, envelope_binding, envelope_outcome,
-};
 use super::evolve::{Engine, LiveOrbit, own_members};
-use super::timeline::Context;
+use super::rlof::{CODE_Q, GAP_Q, giant_critical_ratio};
+use super::star::Kind;
+use super::timeline::{Context, SegmentKind};
 
-/// The star the merger of `input`'s pair at `age` leaves (P11.T8.c's evolved donors): the
-/// common envelope around its primary, a giant-like donor, and its companion on the input's
-/// orbit, resolved as the engine resolves one, with the engine's run to `until` (years) for the
-/// product's track; `None` where the envelope leaves the cores apart, nothing is left, or a star
-/// has no structure then.
-///
-/// The engine's own `common_envelope` reads the same helpers at the same structures, so a pair
-/// the engine merges this way leaves the same star bit for bit.
+/// The star the onset of transfer from `input`'s primary at `age` leaves, run by the engine as
+/// [`onset_merger`] runs it, with each star's track built to `until` (years); `None` unless the
+/// engine merges the pair there into one star.
 #[must_use]
 pub(crate) fn evolved_donor_merger(
     input: &BinaryInput,
     age: Years,
     until: Years,
 ) -> Option<StarState> {
+    let (ctx, engine) = onset_merger(input, age, until)?;
+    Some(engine.members[0].state_at(&ctx, 0, age.value()))
+}
+
+/// Whether the onset of transfer from `input`'s primary at `age` merges the pair into one star:
+/// [`evolved_donor_merger`]'s test, by the same [`onset_merger`], without reading the star.
+#[must_use]
+pub(crate) fn evolved_donor_merges(input: &BinaryInput, age: Years, until: Years) -> bool {
+    onset_merger(input, age, until).is_some()
+}
+
+/// The largest mass ratio, companion over donor's mass now, at which the onset of transfer from
+/// `donor` is unstable in the engine (`Engine::stability`): the inverse of its critical ratio for
+/// a Hertzsprung-gap donor (`GAP_Q`), a core-helium-burning one (`CODE_Q`) or a giant-branch and
+/// asymptotic giant-branch one ([`giant_critical_ratio`] of its core's share, at `composition`'s
+/// giant radius exponent); `None` for a donor of another kind. A giant whose lobe falls inside its
+/// core is unstable at any ratio, which this leaves out, so a companion drawn inside it is always
+/// sent to a common envelope and the engine's test still decides.
+#[must_use]
+pub(crate) fn unstable_companion_ratio(
+    donor: &StarState,
+    composition: &Composition,
+) -> Option<f64> {
+    let md = donor.mass().value();
+    let critical = match Kind::of(donor.phase(), md) {
+        Kind::HertzsprungGap => GAP_Q,
+        Kind::CoreHeliumBurning => CODE_Q,
+        Kind::GiantBranch | Kind::EarlyAgb | Kind::PulsingAgb => giant_critical_ratio(
+            donor.core_mass().value() / md,
+            giant_radius_exponent(composition),
+        ),
+        Kind::LowMassMainSequence
+        | Kind::MainSequence
+        | Kind::HeliumMainSequence
+        | Kind::HeliumGap
+        | Kind::HeliumGiant
+        | Kind::HeliumWhiteDwarf
+        | Kind::CarbonOxygenWhiteDwarf
+        | Kind::OxygenNeonWhiteDwarf
+        | Kind::NeutronStar
+        | Kind::BlackHole
+        | Kind::Massless => return None,
+    };
+    Some(1.0 / critical)
+}
+
+/// The engine of `input`'s pair after the onset of transfer from its primary at `age`, and its
+/// context, if the onset merges the pair into one star: built at `age`, each star on its own track
+/// to `until` (years), on the input's orbit, and run through its `roche_onset` alone.
+#[must_use]
+fn onset_merger(input: &BinaryInput, age: Years, until: Years) -> Option<(Arc<Context>, Engine)> {
+    let (ctx, mut engine) = engine_at(input, age, until);
+    engine.roche_onset(0);
+    (engine.kind == SegmentKind::Merged && !engine.members[0].is_gone()).then_some((ctx, engine))
+}
+
+/// The engine of `input`'s pair built at `age`, each star on its own track to `until`, and its
+/// context.
+#[must_use]
+fn engine_at(input: &BinaryInput, age: Years, until: Years) -> (Arc<Context>, Engine) {
     let (age, until) = (age.value(), until.value().max(age.value()));
     let ctx = Arc::new(Context::of(input));
     let members = own_members(input, until, None);
@@ -47,33 +106,27 @@ pub(crate) fn evolved_donor_merger(
         orbit.mean_anomaly_at_epoch(),
     );
     let engine = Engine::new(Arc::clone(&ctx), age, until, members, live, None);
-    let product = engine.envelope_merger(0)?;
-    let member = engine.product_member(product);
-    (!member.is_gone()).then(|| member.state_at(&ctx, 0, age))
+    (ctx, engine)
 }
 
-impl Engine {
-    /// What a common envelope around member `d`, a giant-like donor, and its companion leaves if
-    /// their cores coalesce, as [`Engine::common_envelope`] would resolve it now, with nothing
-    /// changed; `None` if they survive it or a star has no structure.
-    #[must_use]
-    fn envelope_merger(&self, d: usize) -> Option<CoalescedProduct> {
-        let o = 1 - d;
-        let (md, td) = self.current(d);
-        let (mo, to) = self.current(o);
-        let sd = self.structure(d, self.age, md, td)?;
-        let so = self.structure(o, self.age, mo, to)?;
-        let a_i = self.orbit.as_ref().map_or(0.0, |orbit| orbit.a);
-        let (s1, s2) = (Side::of(&sd), Side::of(&so));
-        let params = *self.ctx.params();
-        let binding = envelope_binding(&s1, &s2, params.lambda);
-        match envelope_outcome(s1, s2, binding, a_i, &params) {
-            EnvelopeOutcome::Survives { .. } => None,
-            EnvelopeOutcome::Coalesces(remains) => {
-                Some(coalesced_product(&remains, self.ctx.giant_exponent()))
-            }
-        }
-    }
+/// The kinds of the segments the engine records at the onset of transfer from `input`'s primary
+/// at `age`, and the kind it is in after: for an evolved donor the class keeps, a detached
+/// history, a common envelope, then the merged star.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn onset_segment_kinds(
+    input: &BinaryInput,
+    age: Years,
+    until: Years,
+) -> (Vec<SegmentKind>, SegmentKind) {
+    let (_, mut engine) = engine_at(input, age, until);
+    engine.roche_onset(0);
+    let kinds = engine
+        .segments
+        .iter()
+        .map(super::timeline::Segment::kind)
+        .collect();
+    (kinds, engine.kind)
 }
 
 #[cfg(test)]
@@ -118,49 +171,55 @@ mod tests {
         (input, age)
     }
 
-    /// The helper leaves the star the engine's own common envelope leaves, bit for bit: an engine
-    /// built at the same age on the same pair, its `common_envelope` resolved with every side
-    /// effect, holds the helper's star in the primary's place, and where the envelope leaves the
-    /// cores apart the helper has none.
+    /// Under the version's rules and every 26 hold, for donors from the Hertzsprung gap to the
+    /// early asymptotic giant branch beside light and heavy companions: the merge test and the
+    /// star agree; a pair kept went through the engine's own common envelope at the onset, after a
+    /// detached history, into the merged star; a companion inside [`unstable_companion_ratio`]
+    /// always reaches the envelope; and the outcomes are pinned.
     #[test]
-    fn the_helper_s_merger_is_the_engine_s_common_envelope_s() {
-        let mut merged = 0;
-        // Donors from the Hertzsprung gap to the early asymptotic giant branch beside light and
-        // heavy companions: seven envelopes merge the pair, the last leaves the cores apart.
+    fn the_class_s_merger_is_the_engine_s_onset_s() {
+        use crate::stellar::rules::StellarRules;
+        // (donor, companion, phase, whether the engine merges them).
         let cases = [
-            (1.3, 0.25, Phase::HertzsprungGap),
-            (1.3, 0.25, Phase::FirstGiantBranch),
-            (2.5, 0.3, Phase::FirstGiantBranch),
-            (5.0, 1.0, Phase::CoreHeliumBurning),
-            (1.3, 1.0, Phase::FirstGiantBranch),
-            (12.0, 3.0, Phase::HertzsprungGap),
-            (2.0, 1.8, Phase::EarlyAgb),
-            (5.0, 4.0, Phase::EarlyAgb),
+            (1.3, 0.25, Phase::HertzsprungGap, true),
+            (1.3, 0.25, Phase::FirstGiantBranch, true),
+            (2.5, 0.3, Phase::FirstGiantBranch, true),
+            (5.0, 1.0, Phase::CoreHeliumBurning, true),
+            (1.3, 1.0, Phase::FirstGiantBranch, true),
+            (12.0, 3.0, Phase::HertzsprungGap, false),
+            (2.0, 1.8, Phase::EarlyAgb, true),
+            (5.0, 4.0, Phase::EarlyAgb, false),
         ];
-        for (m1, m2, phase) in cases {
-            let (input, age) = pair_at_lobe(m1, m2, phase);
-            let until = Years::new(age + 2.0e3);
-            let helper = evolved_donor_merger(&input, Years::new(age), until);
-            let ctx = Arc::new(Context::of(&input));
-            let members = own_members(&input, until.value(), None);
-            let orbit = input.orbit();
-            let live = LiveOrbit::new(
-                age,
-                orbit.semi_major_axis().value() / SOLAR_RADIUS_M,
-                0.0,
-                *orbit.orientation(),
-                orbit.mean_anomaly_at_epoch(),
-            );
-            let mut engine = Engine::new(Arc::clone(&ctx), age, until.value(), members, live, None);
-            engine.common_envelope(0);
-            let engine_merged = engine.kind == crate::stellar::binary::SegmentKind::Merged;
-            println!("{m1} + {m2}, {phase:?} at {age:e}: merged {engine_merged}");
-            assert_eq!(helper.is_some(), engine_merged);
-            if let Some(star) = helper {
-                assert_eq!(star, engine.members[0].state_at(&ctx, 0, age));
-                merged += 1;
+        let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+        for rules in [version, StellarRules::every_26_hold()] {
+            for (m1, m2, phase, merges) in cases {
+                let (input, age) = pair_at_lobe(m1, m2, phase);
+                let input = input.with_rules(rules);
+                let (at, until) = (Years::new(age), Years::new(age + 2.0e3));
+                let star = evolved_donor_merger(&input, at, until);
+                let (kinds, after) = onset_segment_kinds(&input, at, until);
+                println!("{m1} + {m2}, {phase:?}: {kinds:?} then {after:?}");
+                assert_eq!(evolved_donor_merges(&input, at, until), star.is_some());
+                assert_eq!(star.is_some(), merges, "{m1} + {m2}, {phase:?}");
+                let enveloped = kinds.contains(&SegmentKind::CommonEnvelope);
+                if star.is_some() {
+                    assert!(enveloped, "{kinds:?}");
+                    assert_eq!(kinds[0], SegmentKind::Detached);
+                    assert_eq!(after, SegmentKind::Merged);
+                }
+                let donor = Track::to_age(
+                    SolarMasses::new(m1),
+                    &Composition::SOLAR,
+                    &StarDraws::median(),
+                    at,
+                )
+                .state_at(at);
+                let ratio = unstable_companion_ratio(&donor, &Composition::SOLAR)
+                    .expect("an evolved donor has a critical ratio");
+                if m2 < ratio * donor.mass().value() {
+                    assert!(enveloped, "{m1} + {m2}, {phase:?}: {kinds:?}");
+                }
             }
         }
-        assert_eq!(merged, cases.len() - 1);
     }
 }
