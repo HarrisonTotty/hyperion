@@ -24,6 +24,7 @@
 
 use super::EllipsoidAxes;
 use super::draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, WORDS_PER_ATTEMPT, basis, norm, scaled_to};
+use crate::coords::GalacticPosition;
 use crate::galaxy::displaced::SPEED_EDGES;
 use crate::galaxy::displaced::class_table::ClassKey;
 use crate::galaxy::displaced::runaway::{Ejected, RUNAWAY_CUT_OF_V_C, WALKAWAY_CUT};
@@ -31,11 +32,12 @@ use crate::galaxy::displaced::{DisplacedClassId, DisplacedFields, DisplacedKind,
 use crate::galaxy::placement::{SystemRecord, ballistic_motion};
 use crate::galaxy::query::{PAD_SPEED, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
+use crate::id::Layer;
 use crate::math;
 use crate::rng::{ObjectKey, Stream, Threshold, tags};
 use crate::stellar::system::{draw_metallicity, primary_model};
-use crate::units::KilometresPerSecond;
 use crate::units::consts::SPEED_OF_LIGHT;
+use crate::units::{KilometresPerSecond, LightYears, Years};
 
 /// The first word of `system.velocity` the outbound marks are read from: the outbound mark of
 /// attempt `k` is word `OUTBOUND_WORD + k`, past every attempt's normals.
@@ -84,6 +86,64 @@ pub(super) fn draw_displaced(
         galaxy.kinematics().is_some(),
         "velocities need the kinematic tables, which Galaxy::with_full_potential builds"
     );
+    let key = displaced.class(class).key();
+    let source = key
+        .source()
+        .expect("only the hypervelocity survivors have no source, and they have no weight");
+    let v_ref = displaced.class_table().speed_scale(source).value();
+    let ballistic = ballistic_motion(galaxy, record).map(|(height, since)| {
+        let (speed, azimuth) = kick(galaxy, displaced, record, (key, kind), v_ref);
+        BallisticKick {
+            height,
+            since,
+            speed,
+            azimuth,
+        }
+    });
+    class_velocity(
+        galaxy,
+        displaced,
+        class,
+        (record.epoch_position(), record.layer()),
+        ballistic,
+        stream,
+    )
+}
+
+/// A ballistic member's motion as its class's velocity reads it (Design note 22): its height
+/// above the midplane, its time since its kick, its kick's speed (km/s) and the kick's azimuth
+/// (radians from the galactic +x axis).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BallisticKick {
+    /// The height above the midplane, ly.
+    pub(crate) height: LightYears,
+    /// The time since the kick.
+    pub(crate) since: Years,
+    /// The kick's speed, km/s.
+    pub(crate) speed: f64,
+    /// The kick's azimuth, radians from the galactic +x axis.
+    pub(crate) azimuth: f64,
+}
+
+/// The velocity of a member of class `class` at `position` in layer `layer` (whose pad speed cuts
+/// the classes the escape cut exempts), by this module's law with its cut, drawn on `stream` (the
+/// member's velocity stream): the circular velocity at the position plus the kick for a member of
+/// a ballistic bin, its `ballistic` motion; the class's Gaussian otherwise. A grid record's
+/// velocity ([`draw_displaced`]), and from 27 a runaway's or walkaway's death in the core-collapse
+/// class (P09.T33.b), at its death site.
+///
+/// # Panics
+///
+/// If the class has no row of kinematics (the hypervelocity survivors, which have no weight).
+#[must_use]
+pub(crate) fn class_velocity(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    class: DisplacedClassId,
+    (position, layer): (&GalacticPosition, Layer),
+    ballistic: Option<BallisticKick>,
+    stream: &mut Stream,
+) -> VelocityDraw {
     let entry = displaced.class(class);
     let key = entry.key();
     let table = displaced.class_table();
@@ -91,11 +151,10 @@ pub(super) fn draw_displaced(
         .source()
         .expect("only the hypervelocity survivors have no source, and they have no weight");
     let v_ref = table.speed_scale(source).value();
-    let position = record.epoch_position();
     let p = PointLy::from(position);
     let axes = basis(position, &p, EllipsoidAxes::Cylindrical);
     let cut = if is_exempt(key) {
-        pad_speed(record.layer()).value()
+        pad_speed(layer).value()
     } else {
         let r_cyl = math::hypot(p.x, p.y);
         let escape = galaxy
@@ -111,8 +170,13 @@ pub(super) fn draw_displaced(
             escape.min(PAD_SPEED.value())
         }
     };
-    if let Some((height, since)) = ballistic_motion(galaxy, record) {
-        let (speed, azimuth) = kick(galaxy, displaced, record, (key, kind), v_ref);
+    if let Some(BallisticKick {
+        height,
+        since,
+        speed,
+        azimuth,
+    }) = ballistic
+    {
         let vertical = if since.value() > 0.0 {
             (height.value() / since.value() * SPEED_OF_LIGHT / 1_000.0).clamp(-speed, speed)
         } else {

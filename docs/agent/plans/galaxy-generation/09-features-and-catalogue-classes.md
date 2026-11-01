@@ -1327,8 +1327,8 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
 
 **P09.T33.a built** (2026-10-29; no output moves): see "P09.T33.a as built" under Risks.
 
-**P09.T33.b not built** (2026-10-29): it waits on P08.T12's displaced fields; see "P09.T33.b not
-built" under Risks.
+**P09.T33.b built behind its hold** (lane `p09-t33b`, 2026-11-01, at `GENERATOR_VERSION` 24, no
+output moved): see "P09.T33.b, as built" under Risks.
 
 - **P09.T33.a Field deaths.** `CoreCollapseProcess` on 512 ly cells: sites follow what dies in the
   field, which is the young field with its (1 − φ(a)) age factor. Envelope = site density bound ×
@@ -5533,3 +5533,71 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     core collapses 0.32 s, and the other four under 45 ms. For T40: the cache is the lever. So is a
     reach per class: the accreting white dwarfs', the two merger classes' and the luminous blue
     variables' entries sit in their cells at the epoch, and need only the cells within R + v|t|.
+- **P09.T33.b, as built (lane `p09-t33b`, 2026-11-01, at `GENERATOR_VERSION` 24, behind
+  `RUNAWAY_DEATHS_VERSION` = 27; no output moves at 24–26).**
+  - _Hold._ `core_collapse::{RUNAWAY_DEATHS_VERSION, RunawayDeathsRules::{FieldOnly, Ejected}}`,
+    `GalaxyRules::runaway_deaths` in `every_27_hold`; tripwire
+    `the_runaway_deaths_are_held_only_until_the_27_bump` (`core_collapse/runaway_hold.rs`).
+    `CoreCollapseProcess::new` matches it once; `candidate` and `bound` read its terms: the new arm
+    needs the class table and a term, so a galaxy without P08.T12's displaced classes keeps the
+    held arm. The held arm's bound and first entries under every 26 hold are pinned bit for bit
+    (`the_held_arm_s_cell_is_pinned_under_every_26_hold`, checked against the base's code).
+  - _Tag._ `class.core_collapse.ejection`, appended after `body.resources` (the tags golden
+    extended by one line).
+  - _The field term (departure)._ From 27 it reads the band budget taken to the field
+    (`Galaxy::field_part`), not `field_component_share`'s stay share (plan 08's "P09.T33.b's lane
+    decides"), then drops a death whose ejection marks put an ejection before it: the kind by
+    `runaway_share` and `walkaway_share`, then one pick among the kind's `ejection_ages` (the
+    channel with it), judged at the source's `reference_lifetime`.
+  - _The terms (`EjectedTerm`)._ One per young component of an ejecting source × each of its
+    source's band-E classes with a form that takes a share of some star's deaths (12 thin-disc
+    classes, speed bins 0–1 × age bins 0–5; 2 nuclear-disc classes per nuclear component): the
+    class's form × the component's band-E systems taken to the field × `largest_share` × the
+    field's largest death rate. `largest_share` is a rigorous bound per interval of the class
+    table's 33 mass nodes (`SourceNodes`, built once per source).
+    - _Departure (pending the owner's ruling, below)._ The terms take the field's part (1 − φ) of
+      the budget, as the field term does, not the budget the grid's displaced classes weigh: the
+      features keep φ of the young disc and list their members' deaths themselves (P09.T36.a), so
+      a budget-wide term counted φ × P of the young disc's deaths twice (about 0.44 of them at the
+      fixture; the review's must-fix).
+    - _Departure, the key._ A class is that of the ejection's speed bin and the age bin of
+      `reference_lifetime − ejection age`: the analogue, for a star dying now, of the grid's time
+      since ejection at the epoch, so that the classes take the closed form's share exactly.
+    - _Departure, the mass._ A candidate thins its mass on its class's share of that mass's deaths
+      (`ejected_parts`), not on the class table's conditional mass weight, which counts the
+      class's living members at the epoch; its ejection age is one of the table's `ejection_ages`
+      nodes, as the grid's `since_ejection` picks one.
+    - _Velocity._ Plan 08's law of the class at the death site (Design note 22,
+      `kinematics::class_velocity`, split out of `draw_displaced` with the grid's arithmetic
+      unchanged): the ballistic bins' circular velocity plus the ejection (speed in its bin by
+      `speed_in_bin`, an azimuth, v_z = z ÷ s with s the time since the ejection), the class's
+      Gaussian otherwise, on `class.core_collapse.velocity`.
+    - _Metallicity._ At the source's reference site, plan 08's `formation_site` for a displaced
+      record, at age zero as T33.a's candidates read theirs.
+  - _Readable by P09.T43 and the rest:_ `CoreCollapseEntry::ejection()` (`Ejection`: class, kind,
+    ejection age, speed). The grid's carve-out already asks every layer-E record its claim
+    (P09.T35), a runaway's and a walkaway's with the rest, so the "_Waiting._" join needs no code.
+    A grid runaway is alive at the epoch, so its death falls in the interval only within +H; the
+    test moves 110 grid runaways and walkaways into the interval (`SystemRecord::with_age_at_epoch`,
+    test-only) and both sides agree on every death and claim.
+  - _Measured._ Galaxy-wide, the candidates' ejected share is the closed form's: 0.514 against
+    0.518 under every 27 hold (z = −0.91), 0.534 against 0.534 where the field is the budget
+    (z = −0.04; the record's 49.4% is the same share over the shell-making deaths alone). Cost
+    (release, one thread, every 27 hold against the held arm): the solar circle's cell 4.5 ms
+    against none, the inner disc's (0, 12, 0) 4.3 against 3.2 ms, the centre's 479 against 162
+    ms (43,811 candidates); the process's build 0.42 ms against 2 µs, which the production lookup
+    pays each visit.
+  - _Pending the owner's ruling._ Where a feature's ejected members die: kept in their features'
+    lists (as built, the brainstorm's "four in five" in features intact), or the features drop
+    them by the same ejection marks and the terms take the whole budget, as the grid's displaced
+    classes weigh it (physically the runaways' origin; features then hold about 0.39 of core
+    collapses). Walkaways, released at 30 km/s or less a few Myr before they die, mostly die
+    within a few hundred light-years of their feature (science check).
+  - _Not done._ `FormTable::committed()` is still provisional until P15.T6's forms (held for train
+    26); the terms read it as P08.T12 does. The class's `MAX_PARTS` buffers and the lazy pick spare
+    the candidate a vector; the class table's `ejection_ages` still returns one per call.
+  - _For P09.T38._ The grid's living layer-E field records draw their age below their lifetime
+    without regard to an ejection by then (`placement/marks.rs`'s `stay`), so the grid carves a
+    little more field deaths than the class's field term places (from reading, not measured).
+  - _Movers at 27._ `catalogue_classes/core_collapse` (the class's entries), and the slow census
+    brackets of `core_collapses_over_seeds*`, restated at the bump.

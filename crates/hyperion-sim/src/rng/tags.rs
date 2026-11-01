@@ -1009,7 +1009,9 @@ domain_tags! {
     CLASS_CORE_COLLAPSE_DEATH: System = "class.core_collapse.death";
 
     /// A core-collapse candidate's velocity at its site, galactic: plan 08's draw of its
-    /// component's law, four words per attempt of the escape cut (P09.T33.a).
+    /// component's law, four words per attempt of the escape cut (P09.T33.a); from 27 a runaway's
+    /// or a walkaway's, its displaced class's law, as plan 08's members of the class draw theirs
+    /// (P09.T33.b).
     CLASS_CORE_COLLAPSE_VELOCITY: System = "class.core_collapse.velocity";
 
     // Plan 09, phase 7 (P09.T34.a): a Type Ia candidate's draws beside phase 4's
@@ -1296,7 +1298,8 @@ domain_tags! {
     /// walkaway or neither by its mass's shares, and word 1 the mark that picks its ejection age
     /// among its kind's, the channel with it; for a runaway's or a walkaway's candidate, word 0 the
     /// mark that picks its kind and ejection age among its class's at its mass, word 1 the rank of
-    /// its ejection speed inside its class's speed bin, and words 2–3 the ejection's direction.
+    /// its ejection speed inside its class's speed bin, and word 2 its azimuth, which its class's
+    /// velocity reads in the ballistic bins.
     CLASS_CORE_COLLAPSE_EJECTION: System = "class.core_collapse.ejection";
 }
 

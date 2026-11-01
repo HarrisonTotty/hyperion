@@ -69,32 +69,34 @@
 //! A massive star of the young field may die away from where it was born: plan 08's runaways and
 //! walkaways (`displaced::runaway`), ejected by an encounter in its young cluster or by its
 //! companion's supernova, at the shares, speeds and ejection ages of `RunawayModel`. From
-//! [`RUNAWAY_DEATHS_VERSION`] (P09.T33.b) the class follows them too, in the same cells and index
+//! `RUNAWAY_DEATHS_VERSION` (27, P09.T33.b) the class follows them too, in the same cells and index
 //! space:
 //!
-//! - **The field term** takes its component's band budget, not the share the field keeps of its
-//!   systems now (`ShareMatrix::component_share`'s stay share), times the field's factor, and
-//!   keeps a death only if its ejection marks say it was not ejected before it died
-//!   (`class.core_collapse.ejection`): its kind by its mass's runaway and walkaway shares, then its
-//!   ejection age among its kind's (the channel with it), judged at its source's reference
+//! - **The field term** takes its component's band budget taken to the field, not the share the
+//!   field keeps of its systems now (`ShareMatrix::component_share`'s stay share), and keeps a
+//!   death only if its ejection marks say it was not ejected before it died
+//!   (`class.core_collapse.ejection`): its kind by its mass's runaway and walkaway shares, then
+//!   its ejection age among its kind's (the channel with it), judged at its source's reference
 //!   lifetime, at which the class table counts its classes.
 //! - **One term per band-E class of plan 08's runaways and walkaways** of each young component of
-//!   the thin disc and the nuclear disc ([`EjectedTerm`]): the class of the ejection's speed bin
-//!   and of the age bin of the time from the ejection to the death. Its density is the class's
-//!   form (P08.T12.a's displaced fields) × the component's band budget × the largest share of a
-//!   star's deaths the class can take × the component's largest death rate; the site's mark picks
-//!   a term as it picks a component. Its candidate draws its mass from the band, thinned on its
-//!   class's share of that mass's deaths against the largest, then its kind and ejection age
-//!   among the class's, its speed inside the class's bin and an isotropic direction; its
-//!   \[Fe/H\] at its source's reference site, where its marks were weighed; its velocity its
-//!   component's law at the site plus the ejection's; then the death-rate thinning and the shared
-//!   test of a field candidate. A runaway's or walkaway's term takes its component's budget, as
-//!   the displaced classes do: no field factor thins it.
+//!   the thin disc and the nuclear disc (`EjectedTerm`): the class of the ejection's speed bin and
+//!   of the age bin of the time from the ejection to the death. Its density is the class's form
+//!   (P08.T12.a's displaced fields) × the component's band-E systems taken to the field × the
+//!   largest share of a star's deaths the class can take × the field's largest death rate; the
+//!   site's mark picks a term as it picks a component. Its candidate draws its mass from the band,
+//!   thinned on its class's share of that mass's deaths against the largest, then its kind and
+//!   ejection age among the class's, its speed inside the class's bin and an azimuth; its
+//!   \[Fe/H\] at its source's reference site, where plan 08's displaced records read theirs; its
+//!   velocity by its class's law at the site, plan 08's (Design note 22), as the grid's members of
+//!   the class move; then the field's death-rate thinning and the shared test.
 //!
-//! So a star's deaths split between the field and the classes at its mass exactly as the model's
-//! shares do: the field drops what the classes take, mass by mass, and the class's ejected share is
-//! `RunawayModel`'s closed form. The grid side already asks every layer-E record its claim
-//! (P09.T35), a runaway's or a walkaway's with the rest.
+//! So the field's part of each star's deaths splits between the field term and the classes at its
+//! mass exactly as the model's shares do: the field drops what the classes take, mass by mass, and
+//! the class's ejected share is `RunawayModel`'s closed form. The features keep the rest of the
+//! young disc's stars and list their deaths themselves (P09.T36.a), ejected or not, so nothing is
+//! counted twice; where a feature's ejected members should die is the owner's (plan 09's Risks,
+//! "P09.T33.b, as built"). The grid side already asks every layer-E record its claim (P09.T35), a
+//! runaway's and a walkaway's with the rest.
 //!
 //! # The entry
 //!
@@ -120,7 +122,7 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::ages::YOUNG_AGE_LIMIT;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::displaced::class_table::{ClassKey, ClassTable, ejects};
-use crate::galaxy::displaced::marks::age_bin_years;
+use crate::galaxy::displaced::marks::{MARK_MASS_NODES, age_bin_years};
 use crate::galaxy::displaced::runaway::{
     Ejected, RUNAWAY_CUT_OF_V_C, RUNAWAY_MIN_SPEED, RUNAWAY_SHARE_HIGH, RunawayModel, WALKAWAY_CUT,
 };
@@ -130,21 +132,21 @@ use crate::galaxy::displaced::{
 };
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
-use crate::galaxy::kinematics::draw_on;
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::kinematics::{BallisticKick, class_velocity, draw_on};
+use crate::galaxy::placement::{SystemOrigin, SystemRecord, is_ballistic};
 use crate::galaxy::query::epoch_velocity;
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, PointLy, Population};
-use crate::id::{BodyId, CatalogueSystemId, SystemId};
-use crate::rng::{DomainTag, ObjectKey, Stream, Threshold, tags};
+use crate::id::{BodyId, CatalogueSystemId, Layer, SystemId};
+use crate::rng::{DomainTag, Mark, ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
-use crate::stellar::draws::{StarDraws, isotropic};
+use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{SystemStars, track_mass_of};
 use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
 use crate::units::{
-    Dex, HeliumExcess, KilometresPerSecond, MetresPerSecond, PerCubicLightYear, SolarMasses, Years,
+    Dex, HeliumExcess, KilometresPerSecond, LightYears, PerCubicLightYear, SolarMasses, Years,
 };
 
 /// The ages at the epoch below which a component's stars can die within the supernova test's
@@ -171,8 +173,9 @@ const RATE_MARGIN: f64 = 1.0 / 1_099_511_627_776.0;
 /// Below it the class takes the held arm, [`RunawayDeathsRules::FieldOnly`], the code of version 26
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`RunawayDeathsRules`] with
-/// its `FieldOnly` arm, the galaxy rules' `runaway_deaths` field, the matches on it in
-/// [`CoreCollapseProcess::new`], and the tripwire (`the_runaway_deaths_are_held_only_until_the_27_bump`).
+/// its `FieldOnly` arm, the galaxy rules' `runaway_deaths` field, the match on it in
+/// [`CoreCollapseProcess::new`] (whose terms `candidate` and `bound` read), and the tripwire
+/// (`the_runaway_deaths_are_held_only_until_the_27_bump`).
 pub(crate) const RUNAWAY_DEATHS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether the core-collapse class follows the young field's runaways and walkaways (the galaxy
@@ -190,76 +193,51 @@ pub(crate) enum RunawayDeathsRules {
 
 /// One of the runaway and walkaway terms the class follows from 27 (plan 09, P09.T33.b): plan 08's
 /// band-E displaced class `class`, of a young component's source, whose density is its form, and
-/// the deaths of that component's stars ejected into it.
+/// the deaths of that component's field stars ejected into it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EjectedTerm {
+pub(crate) struct EjectedTerm {
+    /// The displaced class whose form the term's deaths follow.
     class: DisplacedClassId,
+    /// The young component the term's stars were born in.
     component: ComponentId,
+    /// The component's source, whose classes, reference lifetimes and speed scale it reads.
     source: BirthSource,
+    /// The class's speed bin: the ejection's.
     speed: SpeedBin,
+    /// The class's age bin, the time from the ejection to the death, for a thin-disc class;
+    /// `None` for a nuclear-disc class, which has speed bins only.
     age: Option<AgeBin>,
+    /// The component's band-E systems taken to the field ([`Galaxy::field_part`]): the features
+    /// keep the rest of its young stars and list their deaths themselves (P09.T36.a).
     systems: f64,
+    /// An upper bound, over every mass, on the share of a band-E star's deaths that the class
+    /// takes ([`largest_ejected_share`]), raised by 2⁻⁴⁰. The candidate thins its mass against it.
     largest_share: f64,
+    /// The bound on the component's field's deaths per system over the interval, the field term's
+    /// own ([`YoungComponent::deaths_per_system`]).
     deaths_per_system: f64,
 }
 
 impl EjectedTerm {
-    /// The displaced class whose form the term's deaths follow.
+    /// The term's weight at `point`, recent deaths per cubic light-year: its systems × its class's
+    /// form there × its largest share × its deaths per system.
     #[must_use]
-    pub const fn class(&self) -> DisplacedClassId {
-        self.class
-    }
-
-    /// The young component the term's stars were born in.
-    #[must_use]
-    pub const fn component(&self) -> ComponentId {
-        self.component
-    }
-
-    /// The class's speed bin: the ejection's.
-    #[must_use]
-    pub const fn speed(&self) -> SpeedBin {
-        self.speed
-    }
-
-    /// The class's age bin, the time from the ejection to the death, for a thin-disc class;
-    /// `None` for a nuclear-disc class, which has speed bins only.
-    #[must_use]
-    pub const fn age(&self) -> Option<AgeBin> {
-        self.age
-    }
-
-    /// The component's systems in band E, its band budget: the displaced classes' weights are
-    /// shares of it, and no field factor thins it.
-    #[must_use]
-    pub const fn systems(&self) -> f64 {
+    fn weight_at(&self, displaced: &DisplacedFields, point: &PointLy) -> f64 {
         self.systems
-    }
-
-    /// An upper bound on the share of a band-E star's deaths that the class takes, over every
-    /// mass: each kind's largest lifetime share (0.30 for a runaway, W for a walkaway) times its
-    /// speed law's share in the class's bin. The candidate thins its mass against it.
-    #[must_use]
-    pub const fn largest_share(&self) -> f64 {
-        self.largest_share
-    }
-
-    /// The bound on the component's deaths per system over the interval: its budget's largest age
-    /// density below [`RECENT_DEATH_AGES`], per year, raised by 2⁻⁴⁰, × the interval's length.
-    #[must_use]
-    pub const fn deaths_per_system(&self) -> f64 {
-        self.deaths_per_system
+            * displaced.density(self.class, point)
+            * self.largest_share
+            * self.deaths_per_system
     }
 }
 
 /// How a runaway's or a walkaway's candidate was ejected (plan 09, P09.T33.b): its class, its kind,
-/// its ejection age at its source's reference lifetime and the ejection's velocity, galactic.
+/// its ejection age at its source's reference lifetime and its ejection speed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ejection {
     class: DisplacedClassId,
     kind: DisplacedKind,
     age: Years,
-    velocity: GalacticVelocity,
+    speed: KilometresPerSecond,
 }
 
 impl Ejection {
@@ -281,11 +259,11 @@ impl Ejection {
         self.age
     }
 
-    /// The ejection's velocity, galactic: its speed inside the class's bin along an isotropic
-    /// direction, which the candidate adds to its component's law at the site.
+    /// The ejection's speed, inside the class's speed bin: plan 08's law of its kind (Design note
+    /// 24), which the class's velocity reads in its ballistic bins.
     #[must_use]
-    pub const fn velocity(&self) -> GalacticVelocity {
-        self.velocity
+    pub const fn speed(&self) -> KilometresPerSecond {
+        self.speed
     }
 }
 
@@ -321,9 +299,10 @@ impl YoungComponent {
 /// The core-collapse class's process (plan 09, P09.T33.a): the young field's recent deaths of
 /// massive stars (module documentation).
 ///
-/// Built from the galaxy alone, cheaply, each time the production lookup visits the class: it holds
-/// the young field's components, with their layer-E shares and largest death rates, and the
-/// field's thinning interval.
+/// Built from the galaxy alone each time the production lookup visits the class: it holds the
+/// young field's components, with their layer-E shares and largest death rates, and the field's
+/// thinning interval; from 27 (P09.T33.b) also the runaway and walkaway terms, whose bounds read
+/// the class table's ejection ages at its 33 band-E mass nodes, some two hundred lookups.
 ///
 /// # Examples
 ///
@@ -358,7 +337,9 @@ pub struct CoreCollapseProcess {
     /// The field's thinning interval, at the field's cap.
     interval: SupernovaInterval,
     /// From 27 (P09.T33.b), the runaway and walkaway terms, in the components' order and then the
-    /// classes'; empty under the held arm.
+    /// classes'; empty under the held arm, and wherever the new arm finds no term to place them.
+    /// The candidates read whether it is empty, so that the field drops a death only where a term
+    /// takes it.
     ejected: Vec<EjectedTerm>,
 }
 
@@ -455,7 +436,8 @@ impl CoreCollapseEntry {
 
 impl CoreCollapseProcess {
     /// The process in `galaxy`: its young field's components, the largest death rate and the
-    /// field's interval.
+    /// field's interval; from 27 the runaway and walkaway terms, and the field's components at
+    /// their band budgets (P09.T33.b).
     ///
     /// # Panics
     ///
@@ -467,23 +449,11 @@ impl CoreCollapseProcess {
         let interval = SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::Field);
         let interval_years = interval.length().as_julian_years_f64();
         let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
-        let displaced = ejecting(galaxy);
-        let components: Vec<YoungComponent> = fields
+        let held: Vec<YoungComponent> = fields
             .component_ids()
             .filter_map(|id| {
-                // The field's share and ages: the budget's until P09.T2.c's version 26. From 27
-                // the share is the band budget's taken to the field, not what the field keeps of
-                // the component's systems now: the ejection marks thin the field's deaths instead.
-                let share = match displaced {
-                    None => galaxy.field_component_share(MassBand::E, id),
-                    Some(_) => galaxy.field_part(
-                        id,
-                        MassBand::E,
-                        galaxy
-                            .shares()
-                            .share(MassBand::E, fields.component(id).population()),
-                    ),
-                };
+                // The field's share and ages: the budget's until P09.T2.c's version 26.
+                let share = galaxy.field_component_share(MassBand::E, id);
                 let ages = galaxy.field_ages(id);
                 let rate = ages.max_pdf_between(floor, RECENT_DEATH_AGES);
                 // The old thin disc's youngest sub-disc starts at the limit, which the range's
@@ -497,9 +467,32 @@ impl CoreCollapseProcess {
                 )
             })
             .collect();
+        let displaced = match galaxy.rules().runaway_deaths {
+            RunawayDeathsRules::FieldOnly => None,
+            RunawayDeathsRules::Ejected => fields.displaced(),
+        };
         let ejected = displaced.map_or_else(Vec::new, |displaced| {
-            ejected_terms(galaxy, displaced, &components, interval_years)
+            ejected_terms(galaxy, displaced, &held)
         });
+        let ejecting = !ejected.is_empty();
+        // From 27 the field's share is its band budget's taken to the field, not what the field
+        // keeps of the component's systems now: the ejection marks thin its deaths instead.
+        let components = if ejecting {
+            held.into_iter()
+                .map(|young| YoungComponent {
+                    share: galaxy.field_part(
+                        young.id,
+                        MassBand::E,
+                        galaxy
+                            .shares()
+                            .share(MassBand::E, fields.component(young.id).population()),
+                    ),
+                    ..young
+                })
+                .collect()
+        } else {
+            held
+        };
         Self {
             components,
             interval,
@@ -509,8 +502,9 @@ impl CoreCollapseProcess {
 
     /// The runaway and walkaway terms the class follows: none under the held arm (from 27,
     /// P09.T33.b; module documentation).
+    #[cfg(test)]
     #[must_use]
-    pub fn ejected_terms(&self) -> &[EjectedTerm] {
+    pub(crate) fn ejected_terms(&self) -> &[EjectedTerm] {
         &self.ejected
     }
 
@@ -538,45 +532,78 @@ impl CoreCollapseProcess {
         self.components.len()
     }
 
-    /// The runaway and walkaway terms' weights at `point`, after the components' in `out` (from
-    /// 27): each term's systems × its class's form there × its largest share × its deaths per
-    /// system, recent deaths per cubic light-year.
-    fn ejected_weights(&self, displaced: &DisplacedFields, point: &PointLy, out: &mut Vec<f64>) {
-        out.extend(self.ejected.iter().map(|term| {
-            term.systems
-                * displaced.density(term.class, point)
-                * term.largest_share
-                * term.deaths_per_system
-        }));
+    /// The galaxy's displaced classes where the process follows their runaways and walkaways: where
+    /// it holds a term.
+    #[must_use]
+    fn ejecting<'g>(&self, galaxy: &'g Galaxy) -> Option<&'g DisplacedFields> {
+        if self.ejected.is_empty() {
+            None
+        } else {
+            galaxy.fields().displaced()
+        }
     }
 }
 
-/// The galaxy's displaced classes if the core-collapse class follows their runaways and walkaways:
-/// under the new arm of [`RUNAWAY_DEATHS_VERSION`] in a galaxy that holds them (P09.T33.b).
+/// The index `mark` picks among `weights` against `bound`, as [`Mark::pick_weighted`] picks over a
+/// slice: the first whose running total's ratio to the bound lies above the mark, or `None` past
+/// them all. Here each weight is computed only as the pick reaches it, so a term's form is read
+/// only when no earlier weight took the mark.
 #[must_use]
-fn ejecting(galaxy: &Galaxy) -> Option<&DisplacedFields> {
-    match galaxy.rules().runaway_deaths {
-        RunawayDeathsRules::FieldOnly => None,
-        RunawayDeathsRules::Ejected => galaxy.fields().displaced(),
+fn pick_lazily(mark: Mark, weights: impl IntoIterator<Item = f64>, bound: f64) -> Option<usize> {
+    let mut sum = 0.0;
+    for (index, weight) in weights.into_iter().enumerate() {
+        sum += weight;
+        if mark.is_below(Threshold::from_ratio(sum, bound)) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// A source's band-E mass nodes as the terms' bound reads them (P09.T33.b): the class table's
+/// masses, their reference lifetimes, and each kind's ejection ages at each node.
+struct SourceNodes {
+    masses: [f64; MARK_MASS_NODES],
+    lifetimes: [f64; MARK_MASS_NODES],
+    ages: Vec<[Vec<(Years, f64)>; 2]>,
+}
+
+impl SourceNodes {
+    /// `source`'s nodes in `table`.
+    #[must_use]
+    fn of(table: &ClassTable, source: BirthSource) -> Self {
+        let masses = *table.nodes(MassBand::E).masses();
+        let lifetimes = masses.map(|m| {
+            table
+                .reference_lifetime(source, MassBand::E, SolarMasses::new(m))
+                .value()
+        });
+        let ages = masses
+            .iter()
+            .map(|&m| KINDS.map(|kind| table.ejection_ages(source, kind, SolarMasses::new(m))))
+            .collect();
+        Self {
+            masses,
+            lifetimes,
+            ages,
+        }
     }
 }
 
-/// The runaway and walkaway terms of `galaxy`'s young field (P09.T33.b): for each young component
-/// of a source that ejects (the thin disc and the nuclear disc), in the components' order, each of
-/// its source's classes with a form whose speed bin holds either kind, in the classes' order; at
-/// the component's band budget, its budget's largest death rate over the interval of
-/// `interval_years`, and the class's largest share of a star's deaths.
+/// The runaway and walkaway terms of `galaxy`'s young field `components` (P09.T33.b): for each
+/// young component of a source that ejects (the thin disc and the nuclear disc), in the
+/// components' order, each of its source's classes with a form that can take a share of some
+/// band-E star's deaths, in the classes' order; at the component's band-E systems taken to the
+/// field, the field's largest death rate, and the class's largest share of a star's deaths.
 #[must_use]
 fn ejected_terms(
     galaxy: &Galaxy,
     displaced: &DisplacedFields,
     components: &[YoungComponent],
-    interval_years: f64,
 ) -> Vec<EjectedTerm> {
     let table = displaced.class_table();
     let model = table.runaway_model();
     let fields = galaxy.fields();
-    let floor = Years::new(-CLOCK_WINDOW_H.as_julian_years_f64());
     let mut terms = Vec::new();
     for young in components {
         let source = table.component_source(young.id);
@@ -584,15 +611,17 @@ fn ejected_terms(
             continue;
         }
         let component = fields.component(young.id);
-        let systems =
-            component.count() * galaxy.shares().share(MassBand::E, component.population());
-        let rate = component.ages().max_pdf_between(floor, RECENT_DEATH_AGES);
-        if systems <= 0.0 || rate <= 0.0 {
+        let systems = galaxy.field_part(
+            young.id,
+            MassBand::E,
+            component.count() * galaxy.shares().share(MassBand::E, component.population()),
+        );
+        if systems <= 0.0 {
             continue;
         }
-        let deaths_per_system = rate * (1.0 + RATE_MARGIN) * interval_years;
-        let v_ref = table.speed_scale(source);
-        let speeds = KINDS.map(|kind| model.speed_bins(kind, v_ref));
+        let nodes = SourceNodes::of(table, source);
+        let speeds = KINDS.map(|kind| model.speed_bins(kind, table.speed_scale(source)));
+        let tau_unit = table.scales().tau_unit();
         for (index, class) in displaced.classes().iter().enumerate() {
             let (speed, age) = match class.key() {
                 ClassKey::Thin { speed, age } if source == BirthSource::ThinDisc => {
@@ -604,8 +633,12 @@ fn ejected_terms(
             if class.form().is_none() {
                 continue;
             }
-            let largest_share =
-                largest_ejected_share(table, (source, speed, age), &speeds) * (1.0 + RATE_MARGIN);
+            let largest_share = largest_ejected_share(
+                &nodes,
+                model,
+                (speed, age.map(|age| age_bin_years(age, tau_unit))),
+                &speeds,
+            ) * (1.0 + RATE_MARGIN);
             if largest_share <= 0.0 {
                 continue;
             }
@@ -617,7 +650,7 @@ fn ejected_terms(
                 age,
                 systems,
                 largest_share,
-                deaths_per_system,
+                deaths_per_system: young.deaths_per_system,
             });
         }
     }
@@ -627,9 +660,14 @@ fn ejected_terms(
 /// The two kinds of an ejected star, in the order the terms sum them.
 const KINDS: [Ejected; 2] = [Ejected::Runaway, Ejected::Walkaway];
 
-/// An upper bound, over band E's masses, on the share of a star's deaths that the class of
-/// `source`'s speed bin `speed` and (for a thin-disc class) age bin `age` takes, [`ejected_parts`]'
-/// sum, its kinds' shares in the bin `speeds` (P09.T33.b).
+/// The most ways a star of a given mass can die in one term ([`ejected_parts`]): every ejection
+/// age of both kinds, a runaway's two 16-node rules and a walkaway's one.
+const MAX_PARTS: usize = 48;
+
+/// An upper bound, over band E's masses, on the share of a star's deaths that the class of speed
+/// bin `speed` and, for a thin-disc class, the age bin spanning `bin` (years) takes,
+/// [`ejected_parts`]' sum, its kinds' shares in the speed bins `speeds`, at its source's `nodes`
+/// (P09.T33.b).
 ///
 /// Between two of the class table's mass nodes a star's reference lifetime is linear in log mass,
 /// so its range there is its ends'. Where the nodes' lifetimes do not rise with mass, an ejection
@@ -642,41 +680,29 @@ const KINDS: [Ejected; 2] = [Ejected::Runaway, Ejected::Walkaway];
 /// ejection age counts, each kind's largest share at any mass.
 #[must_use]
 fn largest_ejected_share(
-    table: &ClassTable,
-    (source, speed, age): (BirthSource, SpeedBin, Option<AgeBin>),
+    nodes: &SourceNodes,
+    model: RunawayModel,
+    (speed, bin): (SpeedBin, Option<(Years, Option<Years>)>),
     speeds: &[[f64; SPEED_BINS]; 2],
 ) -> f64 {
-    let model = table.runaway_model();
-    let masses = table.nodes(MassBand::E).masses();
-    let lifetimes: Vec<f64> = masses
-        .iter()
-        .map(|&m| {
-            table
-                .reference_lifetime(source, MassBand::E, SolarMasses::new(m))
-                .value()
-        })
-        .collect();
-    if lifetimes.windows(2).any(|w| w[1] > w[0]) {
+    if nodes.lifetimes.windows(2).any(|w| w[1] > w[0]) {
         return KINDS.iter().zip(speeds).fold(0.0, |sum, (&kind, bins)| {
             sum + largest_lifetime_share(model, kind) * bins[speed.index()]
         });
     }
-    let bin = age.map(|age| age_bin_years(age, table.scales().tau_unit()));
     let mut largest = 0.0_f64;
-    for (pair, lives) in masses.windows(2).zip(lifetimes.windows(2)) {
-        let (light, heavy) = (SolarMasses::new(pair[0]), SolarMasses::new(pair[1]));
-        let (shortest, longest) = (lives[1], lives[0]);
+    for i in 0..MARK_MASS_NODES - 1 {
+        let heavy = SolarMasses::new(nodes.masses[i + 1]);
+        let (shortest, longest) = (nodes.lifetimes[i + 1], nodes.lifetimes[i]);
         let mut interval = 0.0;
-        for (&kind, bins) in KINDS.iter().zip(speeds) {
+        for (k, (&kind, bins)) in KINDS.iter().zip(speeds).enumerate() {
             let share = lifetime_share(model, kind, heavy) * bins[speed.index()];
             if share <= 0.0 {
                 continue;
             }
-            let at_light = table.ejection_ages(source, kind, light);
-            let at_heavy = table.ejection_ages(source, kind, heavy);
-            let weight = at_light
+            let weight = nodes.ages[i][k]
                 .iter()
-                .zip(&at_heavy)
+                .zip(&nodes.ages[i + 1][k])
                 .filter(|((early, _), (late, _))| {
                     let earliest = early.value().min(late.value());
                     let latest = early.value().max(late.value());
@@ -722,20 +748,27 @@ struct EjectedPart {
     share: f64,
 }
 
-/// The share of a band-E star of initial mass `m`'s deaths that `term`'s class takes, into `parts`
-/// by kind and ejection age, and their sum (P09.T33.b): for each kind and each of its ejection
-/// ages (the class table's `ejection_ages`, both channels), the kind's lifetime share × the
-/// ejection's weight × its speed law's share in the class's bin, where the ejection comes before
-/// the star's death at its source's reference lifetime and, for a thin-disc class, the time from it
-/// to the death lies in the class's age bin. Summed over a source's classes it is the share of the
-/// star's deaths after an ejection, which the field term's marks drop.
+/// No part: a buffer's filler.
+const NO_PART: EjectedPart = EjectedPart {
+    kind: Ejected::Runaway,
+    age: Years::ZERO,
+    share: 0.0,
+};
+
+/// The share of a band-E star of initial mass `m`'s deaths that `term`'s class takes, by kind and
+/// ejection age into the first parts of `parts`, with their number and sum (P09.T33.b): for each
+/// kind and each of its ejection ages (the class table's `ejection_ages`, both channels), the
+/// kind's lifetime share × the ejection's weight × its speed law's share in the class's bin,
+/// where the ejection comes before the star's death at its source's reference lifetime and, for a
+/// thin-disc class, the time from it to the death lies in the class's age bin. Summed over a
+/// source's classes it is the share of the star's deaths after an ejection, which the field
+/// term's marks drop.
 fn ejected_parts(
     table: &ClassTable,
     term: &EjectedTerm,
     m: SolarMasses,
-    parts: &mut Vec<EjectedPart>,
-) -> f64 {
-    parts.clear();
+    parts: &mut [EjectedPart; MAX_PARTS],
+) -> (usize, f64) {
     let model = table.runaway_model();
     let life = table
         .reference_lifetime(term.source, MassBand::E, m)
@@ -744,7 +777,7 @@ fn ejected_parts(
     let bin = term
         .age
         .map(|age| age_bin_years(age, table.scales().tau_unit()));
-    let mut total = 0.0;
+    let (mut count, mut total) = (0, 0.0);
     for kind in KINDS {
         let share = lifetime_share(model, kind, m);
         let speed = model.speed_bins(kind, v_ref)[term.speed.index()];
@@ -759,16 +792,22 @@ fn ejected_parts(
             if age.value() >= life || !in_bin {
                 continue;
             }
+            // Both kinds' ages number 48 at most, so every part has its slot.
+            let Some(slot) = parts.get_mut(count) else {
+                debug_assert!(false, "more than {MAX_PARTS} ejection ages at {m:?}");
+                continue;
+            };
             let part = share * weight * speed;
             total += part;
-            parts.push(EjectedPart {
+            *slot = EjectedPart {
                 kind,
                 age,
                 share: part,
-            });
+            };
+            count += 1;
         }
     }
-    total
+    (count, total)
 }
 
 /// Whether a field candidate of `source`, of initial mass `m`, was ejected before it died, by its
@@ -798,12 +837,11 @@ fn ejected_before_death(
         Some(_) | None => return false,
     };
     let ages = table.ejection_ages(source, kind, m);
-    let weights: Vec<f64> = ages.iter().map(|&(_, w)| w).collect();
-    let total = weights.iter().fold(0.0, |sum, w| sum + w);
-    let Some(last) = weights.iter().rposition(|&w| w > 0.0) else {
+    let total = ages.iter().fold(0.0, |sum, &(_, w)| sum + w);
+    let Some(last) = ages.iter().rposition(|&(_, w)| w > 0.0) else {
         return false;
     };
-    let i = stream.mark().pick_weighted(&weights, total).unwrap_or(last);
+    let i = pick_lazily(stream.mark(), ages.iter().map(|&(_, w)| w), total).unwrap_or(last);
     ages[i].0 < table.reference_lifetime(source, MassBand::E, m)
 }
 
@@ -861,8 +899,10 @@ impl ClassProcess for CoreCollapseProcess {
 
     /// Σ, over the young field's components in order, its layer-E share × its density bound over
     /// the cell's closed box ([`Component::bound`](crate::galaxy::fields::Component::bound)) × its
-    /// deaths per system: each term bounds the matching weight of the site's thinning, in the same
-    /// arithmetic, so their sum bounds the weights' running total.
+    /// deaths per system, and from 27 (P09.T33.b) then over the runaway and walkaway terms in
+    /// order, each one's systems × its class's form bound over the box (plan 08's P08.T11) × its
+    /// largest share × its deaths per system: each term bounds the matching weight of the site's
+    /// thinning, in the same arithmetic, so their sum bounds the weights' running total.
     ///
     /// # Panics
     ///
@@ -876,7 +916,7 @@ impl ClassProcess for CoreCollapseProcess {
         });
         // From 27, the runaway and walkaway terms after the components, each its class's form
         // bound over the cell in the terms' weights' arithmetic (P09.T33.b).
-        let total = fields.displaced().map_or(field, |displaced| {
+        let total = self.ejecting(galaxy).map_or(field, |displaced| {
             self.ejected.iter().fold(field, |sum, term| {
                 sum + term.systems
                     * displaced.bound(term.class, &cube)
@@ -908,16 +948,19 @@ impl ClassProcess for CoreCollapseProcess {
         let mut weights = [0.0; MAX_COMPONENTS];
         let n = self.weights(galaxy, &point, &mut weights);
         let mark = stream.mark();
-        let displaced = ejecting(galaxy);
-        let picked = match displaced.filter(|_| !self.ejected.is_empty()) {
+        let displaced = self.ejecting(galaxy);
+        let picked = match displaced {
             None => mark.pick_weighted(&weights[..n], bound.value())?,
-            Some(displaced) => {
-                // From 27 the same mark picks a runaway or walkaway term after the components.
-                let mut all = Vec::with_capacity(n + self.ejected.len());
-                all.extend_from_slice(&weights[..n]);
-                self.ejected_weights(displaced, &point, &mut all);
-                mark.pick_weighted(&all, bound.value())?
-            }
+            // From 27 the same mark picks a runaway or walkaway term after the components.
+            Some(displaced) => pick_lazily(
+                mark,
+                weights[..n].iter().copied().chain(
+                    self.ejected
+                        .iter()
+                        .map(|term| term.weight_at(displaced, &point)),
+                ),
+                bound.value(),
+            )?,
         };
         if let (Some(displaced), Some(term)) = (displaced, picked.checked_sub(n)) {
             return self.ejected_candidate(galaxy, displaced, (id, site), &self.ejected[term]);
@@ -1121,12 +1164,16 @@ impl CoreCollapseProcess {
     /// 2. its primary's initial mass in band E, thinned on the class's share of that mass's deaths
     ///    against the term's largest (the mass stream's words 0 and 1); then its kind and ejection
     ///    age among the class's by their shares (ejection word 0), its speed inside the class's bin
-    ///    (word 1) and an isotropic direction (words 2–3); and its \[Fe/H\] from its component's
-    ///    law at its source's reference site, at age zero;
+    ///    (word 1) and an azimuth (word 2); and its \[Fe/H\] from its component's law at its
+    ///    source's reference site, at age zero;
     /// 3. its primary's draws and lifetime, as a field candidate's;
     /// 4. T across the interval, and its age at the epoch;
-    /// 5. thinned on its component's budget's age density at that age against the term's largest;
-    /// 6. its velocity: its component's law at the site plus the ejection's.
+    /// 5. thinned on its component's field's age density at that age, as a field candidate is;
+    /// 6. its velocity at the site by its class's law, plan 08's (Design note 22): in a ballistic
+    ///    bin the circular velocity plus the ejection, its vertical part its height over the time
+    ///    since the ejection at its reference lifetime; otherwise the class's Gaussian, on
+    ///    `class.core_collapse.velocity`.
+    #[must_use]
     fn ejected_candidate(
         &self,
         galaxy: &Galaxy,
@@ -1147,15 +1194,19 @@ impl CoreCollapseProcess {
                 .mass_function()
                 .sample_in_band(MassBand::E, &mut stream),
         );
-        let mut parts = Vec::with_capacity(32);
-        let share = ejected_parts(table, term, mass, &mut parts);
+        let mut parts = [NO_PART; MAX_PARTS];
+        let (count, share) = ejected_parts(table, term, mass, &mut parts);
         if !stream.decide(Threshold::from_ratio(share, term.largest_share)) {
             return None;
         }
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_EJECTION, key);
-        let shares: Vec<f64> = parts.iter().map(|part| part.share).collect();
-        let last = parts.len() - 1;
-        let part = parts[stream.mark().pick_weighted(&shares, share).unwrap_or(last)];
+        let last = count.checked_sub(1)?;
+        let picked = pick_lazily(
+            stream.mark(),
+            parts[..count].iter().map(|part| part.share),
+            share,
+        );
+        let part = parts[picked.unwrap_or(last)];
         let ejection_speed = speed_in_bin(
             table.runaway_model(),
             part.kind,
@@ -1163,12 +1214,7 @@ impl CoreCollapseProcess {
             table.speed_scale(term.source),
             stream.uniform(),
         );
-        let metres_per_second = MetresPerSecond::from(ejection_speed).value();
-        let ejection = GalacticVelocity::new(
-            isotropic(&mut stream)
-                .components()
-                .map(|c| c * metres_per_second),
-        );
+        let azimuth = std::f64::consts::TAU * stream.uniform();
         let feh = laws.metallicity(&table.reference_site(term.source), Years::ZERO);
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_METALLICITY, key);
         let composition = Composition::from_fe_h(
@@ -1184,16 +1230,27 @@ impl CoreCollapseProcess {
             galaxy.rules().stellar,
         )
         .value();
-        // 4–5. T, the age, and the budget's death rate there.
+        // 4–5. T, the age, and the field's death rate there.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
         let death = self.death_at(stream.uniform());
         let age_at_epoch = Years::new(life - death.since_epoch().as_julian_years_f64());
-        let deaths = laws.ages().pdf(age_at_epoch) * self.interval.length().as_julian_years_f64();
+        let deaths = galaxy.field_ages(component).pdf(age_at_epoch)
+            * self.interval.length().as_julian_years_f64();
         if !stream.decide(Threshold::from_ratio(deaths, term.deaths_per_system)) {
             return None;
         }
-        // 6. The one velocity.
-        let velocity = site_velocity(galaxy, component, &site, key) + ejection;
+        // 6. The one velocity, by the class's law at the site.
+        let since = table
+            .reference_lifetime(term.source, MassBand::E, mass)
+            .value()
+            - part.age.value();
+        let ballistic = is_ballistic(displaced.class(term.class).key()).then(|| BallisticKick {
+            height: LightYears::new(PointLy::from(&site).z),
+            since: Years::new(since),
+            speed: ejection_speed.value(),
+            azimuth,
+        });
+        let velocity = ejected_velocity(galaxy, displaced, term.class, &site, ballistic, key);
         let kind = match part.kind {
             Ejected::Runaway => DisplacedKind::Runaway,
             Ejected::Walkaway => DisplacedKind::Walkaway,
@@ -1212,7 +1269,7 @@ impl CoreCollapseProcess {
                 class: term.class,
                 kind,
                 age: part.age,
-                velocity: ejection,
+                speed: ejection_speed,
             }),
         })
     }
@@ -1251,6 +1308,35 @@ fn site_velocity(
         tags::CLASS_CORE_COLLAPSE_VELOCITY,
         key,
     )
+}
+
+/// A runaway's or a walkaway's candidate's velocity at its death site `site`, galactic (from 27,
+/// P09.T33.b): plan 08's law of its displaced class `class` (Design note 22,
+/// `kinematics::class_velocity`), as the grid's members of the class move, with its `ballistic`
+/// motion in the class's ballistic bins, on `class.core_collapse.velocity`; or zero in a galaxy
+/// built without its kinematic tables, as a field candidate's is.
+#[must_use]
+fn ejected_velocity(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    class: DisplacedClassId,
+    site: &GalacticPosition,
+    ballistic: Option<BallisticKick>,
+    key: ObjectKey,
+) -> GalacticVelocity {
+    if galaxy.kinematics().is_none() {
+        return GalacticVelocity::default();
+    }
+    let mut stream = Stream::open(galaxy.seed(), tags::CLASS_CORE_COLLAPSE_VELOCITY, key);
+    class_velocity(
+        galaxy,
+        displaced,
+        class,
+        (site, Layer::E),
+        ballistic,
+        &mut stream,
+    )
+    .velocity()
 }
 
 /// A class candidate's velocity at its site, galactic: the core collapses', the Type Ia's and the

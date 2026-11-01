@@ -355,6 +355,20 @@ pub enum Existence {
     Exists,
 }
 
+#[cfg(test)]
+impl SystemRecord {
+    /// This record with its age at the epoch `age`, every other mark kept, its placement class
+    /// and metallicity age among them: a test's way to move a living grid runaway's death into
+    /// the supernova test's interval (plan 09, P09.T33.b).
+    #[must_use]
+    pub(crate) const fn with_age_at_epoch(self, age: Years) -> Self {
+        Self {
+            age_at_epoch: age,
+            ..self
+        }
+    }
+}
+
 impl SystemRecord {
     /// A record from its parts, for non-grid sources (plans 09 and 10) and for tests.
     ///
