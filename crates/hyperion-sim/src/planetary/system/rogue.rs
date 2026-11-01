@@ -373,7 +373,8 @@ impl PlanetarySystem {
 
     /// [`hooks_at`](Self::hooks_at) in a rogue planet's system: the body's surface seed, its bulk
     /// composition `NotModelled` (it reads a derivation's element inventory, which the derivation
-    /// with no star does not take), and its record's surface's state; `None` for a ring.
+    /// with no star does not take), its record's surface's state, and its habitability
+    /// `NotModelled` where it is present (P14.T25); `None` for a ring.
     pub(super) fn rogue_hooks(
         &self,
         ctx: &SystemContext,
@@ -398,7 +399,16 @@ impl PlanetarySystem {
             Section::NotModelled => (Section::NotModelled, Section::NotModelled),
             Section::NotApplicable => (Section::NotApplicable, Section::NotApplicable),
         };
-        Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
+        // Its habitability reads the surface, which no rogue planet's derivation models.
+        let habitability = match record.identity().state() {
+            BodyState::Present => Section::NotModelled,
+            BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
+                Section::NotApplicable
+            }
+        };
+        Ok(Some(
+            BodyHooks::new(seed, bulk, surface, figures).with_habitability(habitability),
+        ))
     }
 
     /// The record of the object at `t`, labelled `label` (see the [module](self) documentation).

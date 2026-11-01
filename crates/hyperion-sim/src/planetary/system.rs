@@ -233,6 +233,7 @@ use envelope::{
     DeriveEnvelopeError, EnvelopeOf, SupercriticalOf, record_envelope,
     record_supercritical_envelope,
 };
+use habitability::Unseen;
 use modifiers::{
     ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
     record_modifiers, weathering_case,
@@ -2503,12 +2504,13 @@ impl PlanetarySystem {
         })
     }
 
-    /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b): its surface seed, its bulk
+    /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b, T25): its surface seed, its bulk
     /// composition, the mass fractions its record gives with the volatile inventory of its
-    /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], and its surface conditions and
+    /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], its surface conditions and
     /// global figures, its record's surface section's ([`record::Surface`](crate::planetary::record::Surface),
-    /// P14.T48.e, in the same state); `None` for a ring, a belt or the halo. Server-only, and not
-    /// part of the body's record (the [`hooks`] module documentation).
+    /// P14.T48.e, in the same state), and its habitability assessment (`system::habitability`);
+    /// `None` for a ring, a belt or the halo. Server-only, and not part of the body's record (the
+    /// [`hooks`] module documentation).
     ///
     /// # Errors
     ///
@@ -2544,7 +2546,10 @@ impl PlanetarySystem {
         let cosines = HourCosines::new();
         let (primary_record, now) =
             self.primary_record(&epoch, &cosines, primary, primary_label, &fate);
-        let (bulk, record) = match &body.part {
+        // The seasonal orbit the habitability reads (P14.T25): a planet's or a member's own, and a
+        // moon's planet's.
+        let seasonal = primary_record.orbit().ok().copied();
+        let (bulk, record, unseen, whose) = match &body.part {
             Part::Planet(_) | Part::Member(_) => {
                 let bulk = match now.derived {
                     Some(d) => {
@@ -2554,13 +2559,18 @@ impl PlanetarySystem {
                     }
                     None => Section::NotApplicable,
                 };
-                (bulk, primary_record)
+                let unseen = now.derived.map(|d| Unseen {
+                    state: d.atmosphere().published_state(),
+                    xuv_flux: d.xuv_flux(),
+                });
+                (bulk, primary_record, unseen, SeasonsFrom::Own)
             }
             Part::Moon(moon) => {
                 let label = label::label(self, index).expect("every body of a system has a label");
                 let record = self.satellite_record(&epoch, &cosines, body, label, &now, &fate);
                 let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
-                let bulk = if state == BodyState::Present && now.position.is_some() {
+                let present = state == BodyState::Present && now.position.is_some();
+                let derived = if present {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                     let at = MoonNow {
                         body,
@@ -2570,24 +2580,28 @@ impl PlanetarySystem {
                         fate: &fate,
                     };
                     let spin = Self::moon_spin(body, &fate, t);
-                    match self.moon_derived_with(&epoch, &cosines, &at, spin, PassDriver::Solve) {
-                        Some(derived) => {
-                            let properties = Self::moon_bulk_of(moon, &derived, &now);
-                            bulk_composition(
-                                ctx,
-                                properties.fractions(),
-                                *derived.element_inventory(),
-                            )
-                        }
-                        None => Section::NotModelled,
-                    }
+                    self.moon_derived_with(&epoch, &cosines, &at, spin, PassDriver::Solve)
                 } else {
-                    Section::NotApplicable
+                    None
                 };
-                (bulk, record)
+                let bulk = match &derived {
+                    Some(derived) => {
+                        let properties = Self::moon_bulk_of(moon, derived, &now);
+                        bulk_composition(ctx, properties.fractions(), *derived.element_inventory())
+                    }
+                    None if present => Section::NotModelled,
+                    None => Section::NotApplicable,
+                };
+                let unseen = derived.map(|d| Unseen {
+                    state: d.atmosphere().published_state(),
+                    xuv_flux: d.xuv_flux(),
+                });
+                (bulk, record, unseen, SeasonsFrom::Planet)
             }
             Part::Ring(_) => unreachable!("a ring has no surface seed"),
         };
+        let habitability =
+            self.habitability_section(&epoch, (primary, seasonal.as_ref(), whose), &record, unseen);
         let (surface, figures) = match record.into_surface() {
             Section::Ok(surface) => {
                 let (conditions, figures) = surface.into_parts();
@@ -2597,7 +2611,9 @@ impl PlanetarySystem {
             Section::NotModelled => (Section::NotModelled, Section::NotModelled),
             Section::NotApplicable => (Section::NotApplicable, Section::NotApplicable),
         };
-        Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
+        Ok(Some(
+            BodyHooks::new(seed, bulk, surface, figures).with_habitability(habitability),
+        ))
     }
 
     /// The surface section and the envelope's tag of a present body whose bulk is `bulk` and whose
@@ -6912,6 +6928,7 @@ pub(crate) mod envelope;
 pub(crate) mod events;
 #[cfg(test)]
 mod exposed_ice_tests;
+mod habitability;
 #[cfg(test)]
 mod line_switch_tests;
 #[cfg(test)]

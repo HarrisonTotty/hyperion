@@ -1021,6 +1021,18 @@ impl Track {
             .map(|next| Years::new(next.start))
     }
 
+    /// The age at which the main sequence ends, whether or not the track is built past it: the end
+    /// of its last main-sequence segment, which a track built to an age on its main sequence holds
+    /// whole ([`Track::to_age`]); `None` for a track that does not reach its main sequence or has
+    /// none. Plan 14's habitability assessment reads it (P14.T25).
+    #[must_use]
+    pub(crate) fn main_sequence_ends(&self) -> Option<Years> {
+        self.segments
+            .iter()
+            .rfind(|segment| matches!(segment.model, Model::MainSequence { .. }))
+            .map(|segment| Years::new(segment.end))
+    }
+
     /// The age at which the star leaves `stage`, if the track has been built past it: the start of
     /// the first segment beyond the stage, or its death if it dies in it (plan 08's stripping band,
     /// ruling 123.2). Core helium burning includes a naked helium star's main sequence.

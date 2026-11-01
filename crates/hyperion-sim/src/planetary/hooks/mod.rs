@@ -1,8 +1,8 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T48.a–d, T48.f, T52.d; the rendering plans'
-//! R09.T1.b):
+//! Built so far (P14.T23, T24.a, T24.b, T24.d, T24.e, T25, T48.a–d, T48.f, T52.d; the rendering
+//! plans' R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -53,12 +53,16 @@
 //! - [`small_bodies`]: a small body's [`TaxonomicClass`] (P14.T51.e), a label and not a substance,
 //!   from its kind, its lid's lithology, its veneer and its weathering clocks. It is pure; its
 //!   wiring puts it on the record from generator version 24.
+//! - [`habitability`]: a body's [`HabitabilityAssessment`] at a time (P14.T25), a class of whether
+//!   liquid water stands on or under its surface and its limits from a closed list, read from its
+//!   record, its seasonal orbit's place in its zone and its zone's stars. It says nothing about
+//!   life, and it is not on the record.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
 //! bump. [`BodyHooks`] holds them with the seed and the composition, from
-//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The habitability
-//! assessment (T25) and the resource abundances (T26) join it with their tasks.
+//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at), and with the
+//! habitability assessment (T25). The resource abundances (T26) join it with their task.
 //!
 //! # The surface seed stays on the server
 //!
@@ -74,6 +78,7 @@ pub mod cold_traps;
 pub mod crust;
 pub mod envelope_atmosphere;
 pub mod figures;
+pub mod habitability;
 pub mod modifiers;
 pub(crate) mod ocean;
 pub mod seed;
@@ -91,6 +96,9 @@ pub use envelope_atmosphere::{
 pub use figures::{
     GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
     TectonicRegime, impactors,
+};
+pub use habitability::{
+    HabitabilityAssessment, HabitabilityClass, HabitabilityLimit, HabitabilityLimits,
 };
 pub use modifiers::{DeriveModifiersError, ModifierInputs, SurfaceModifiers};
 pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
@@ -171,20 +179,22 @@ impl BulkComposition {
     }
 }
 
-/// What the layers above read of a body at a time (P14.T23, T24.a, T24.b): its surface seed, its
-/// bulk composition, its surface conditions and its global figures. Server-only (see the
-/// [module](self) documentation).
+/// What the layers above read of a body at a time (P14.T23, T24.a, T24.b, T25): its surface seed,
+/// its bulk composition, its surface conditions, its global figures and its habitability
+/// assessment. Server-only (see the [module](self) documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BodyHooks {
     surface_seed: SurfaceSeed,
     bulk: Section<BulkComposition>,
     surface: Section<SurfaceConditions>,
     figures: Section<GlobalFigures>,
+    habitability: Section<HabitabilityAssessment>,
 }
 
 impl BodyHooks {
     /// The hooks of a body of surface seed `surface_seed`, bulk composition `bulk`, surface
-    /// conditions `surface` and global figures `figures`.
+    /// conditions `surface` and global figures `figures`, its habitability not modelled until
+    /// [`with_habitability`](Self::with_habitability).
     #[must_use]
     pub const fn new(
         surface_seed: SurfaceSeed,
@@ -197,6 +207,16 @@ impl BodyHooks {
             bulk,
             surface,
             figures,
+            habitability: Section::NotModelled,
+        }
+    }
+
+    /// The same hooks with the habitability assessment `habitability` (P14.T25).
+    #[must_use]
+    pub fn with_habitability(self, habitability: Section<HabitabilityAssessment>) -> Self {
+        Self {
+            habitability,
+            ..self
         }
     }
 
@@ -228,5 +248,14 @@ impl BodyHooks {
     #[must_use]
     pub const fn figures(&self) -> &Section<GlobalFigures> {
         &self.figures
+    }
+
+    /// The habitability assessment at the time (P14.T25): [`Section::Ok`] for a present body
+    /// whose surface section is built, or that has none beneath an envelope, which is
+    /// [`Hostile`](HabitabilityClass::Hostile); [`Section::NotApplicable`] for one not present;
+    /// and the surface's state where that is not modelled or not resolved.
+    #[must_use]
+    pub const fn habitability(&self) -> &Section<HabitabilityAssessment> {
+        &self.habitability
     }
 }

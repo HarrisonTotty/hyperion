@@ -1177,8 +1177,7 @@ pub(in crate::planetary::hooks::figures) fn sidereal_period(name: &str) -> Secon
 
 /// The table's bodies with their figures about the present Sun, each turning in its own day,
 /// with its crater inputs ([`table_craters`]).
-pub(in crate::planetary::hooks::figures) fn figures_table()
--> Vec<(&'static str, DerivedBody, GlobalFigures)> {
+pub(crate) fn figures_table() -> Vec<(&'static str, DerivedBody, GlobalFigures)> {
     crate::planetary::derive::solar::historic_table()
         .into_iter()
         .map(|(name, body)| {
@@ -1254,7 +1253,7 @@ pub(in crate::planetary::hooks::figures) fn table_craters(
     }
 }
 
-pub(in crate::planetary::hooks::figures) fn figures_of<'a>(
+pub(crate) fn figures_of<'a>(
     table: &'a [(&'static str, DerivedBody, GlobalFigures)],
     name: &str,
 ) -> &'a GlobalFigures {
@@ -1712,7 +1711,7 @@ pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -
 }
 
 /// Europa at its measured mass and elements: 4.7998 × 10²² kg at 671,034 km, e = 0.0094.
-pub(in crate::planetary::hooks::figures) fn europa() -> DerivedMoon {
+pub(crate) fn europa() -> DerivedMoon {
     jovian(4.7998e22, 671_034.0, 0.0094)
 }
 
@@ -1844,8 +1843,7 @@ const EUROPA_MEASURED: (f64, f64, f64, f64) = (1.560_8e6, 3_013.0, 0.08, 102.0);
 
 /// Europa's measured bulk with its subsurface ocean under the tide P14.T17.b's rule raises at its
 /// measured elements about the table's Jupiter, at its own radius.
-pub(in crate::planetary::hooks::figures) fn measured_europa()
--> (GlobalFigures, Subsurface, WattsPerSquareMetre) {
+pub(crate) fn measured_europa() -> (GlobalFigures, Subsurface, WattsPerSquareMetre) {
     let derived = europa();
     let radius = EUROPA_MEASURED.0;
     let tide = WattsPerSquareMetre::new(

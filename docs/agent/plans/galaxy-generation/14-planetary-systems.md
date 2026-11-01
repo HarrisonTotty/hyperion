@@ -3173,6 +3173,8 @@ function of time. It says nothing about life.
   `SubsurfaceOcean`; the share of FGK hosts with a `Temperate` body is reported by the slow test and
   asserted only to lie in 0.01–0.3, since η⊕ is that uncertain.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::habitability`.
+- _Built_ 2026-11-01, server-only and off the record (`planetary/habitability`, new): Risks,
+  "Deviations in P14.T25, as built".
 
 #### P14.T26 Resource abundances
 
@@ -33714,3 +33716,25 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     movers, 1,626 of them airless. `line_switch_tests` walk every 26 hold
     (`with_every_26_hold_but_the_pore_gas` deleted). `substance/thermal`'s `[pore gas]` gains each
     air's `… under the air` lines.
+- **Deviations in P14.T25, as built (lane p14-t25, 2026-11-01).** Server-only: nothing generated
+  moves (`golden_diff.py`: one new golden, `planetary/habitability`, the golden systems' at the
+  epoch).
+  - _API:_ `hooks::habitability`'s `HabitabilityAssessment::assess` on `HabitabilityInputs`
+    (with `SurfaceReading` and `HostClock`), giving a `HabitabilityClass` and
+    `HabitabilityLimits` of `HabitabilityLimit`s, wired by `system/habitability.rs`.
+    `BodyHooks::with_habitability` and `habitability()`; `BodyHooks::new` keeps its four
+    arguments, so P14.T26 adds its field the same way. A rogue planet's is `NotModelled`. The
+    record's `Full` level and the wire are later.
+  - _The zone (lean, 2026-11-01):_ the seasonal orbit's (a moon's planet's) orbit-mean distance
+    a (1 − e²)^¼ against `HabitableZone`'s edges, inclusive. `HighEccentricity`: that mean inside the
+    optimistic zone, the pericentre or apocentre outside it.
+  - _The host (lean, 2026-11-01):_ `ActiveHost` at `RadiationClass::Active` or above; `YoungHost` a
+    protostar or pre-main-sequence star in the zone; `LeavingMainSequence` its track's main-sequence
+    end within 1 Gyr, or a living star past it. New `Track::main_sequence_ends` (`pub(crate)`).
+  - _The surface (lean, 2026-11-01):_ `TidallyLocked` a planet's or member's 1:1 lock, never a
+    moon's; `NoAtmosphere` `Airless` or `Tenuous`; no surface section is `Hostile` with
+    `GasEnvelope`, the state the derivation's published one. `Marginal`: a surface in `Temperate`
+    or `Snowball` inside the optimistic zone. Classes in the order Temperate, Marginal,
+    SubsurfaceOcean, Hostile.
+  - _Gap (lean, 2026-11-01):_ the closed list names no limit for a molten surface, or a dry one
+    above the triple point (the table's Mars is `Marginal` with none).

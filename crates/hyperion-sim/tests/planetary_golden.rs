@@ -1426,6 +1426,38 @@ fn golden_systems_are_pinned() {
     }
 }
 
+/// P14.T25: the habitability assessment `hooks_at` gives every body of the golden systems that
+/// has hooks, at the epoch: its class and its limits, or its section's state.
+#[test]
+fn golden_systems_habitability_is_pinned() {
+    let galaxy = fixture();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let t = UniverseTime::EPOCH;
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        w.line(&format!("{} {:#018x}:", golden.name, golden.id));
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at(&context, body.index(), t)
+                .expect("a body of the system")
+            else {
+                continue;
+            };
+            let id = body.index().body_id(context.id());
+            match hooks.habitability() {
+                Section::Ok(assessment) => w.line(&format!(
+                    "{id}: {:?} {:?}",
+                    assessment.class(),
+                    assessment.limits().iter().collect::<Vec<_>>()
+                )),
+                section => w.line(&format!("{id}: {:?}", section.state())),
+            }
+        }
+    }
+    golden!("planetary/habitability", w.as_str());
+}
+
 /// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
 /// exactly when its class has a solid surface, and then never in the gas-envelope state, or, from
 /// generator version 24, its class has a solid surface under a supercritical envelope (P14.T53.b
