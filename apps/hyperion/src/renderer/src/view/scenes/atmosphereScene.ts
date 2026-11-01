@@ -14,8 +14,10 @@
  *   `TEST VENUS 5.80 MPa` (`venus-58bar`, the same air and deck at plan 14's 5.80 MPa),
  *   `TEST TITAN` (`titan-class`, a Titan-class air under its tholin haze) and
  *   `TEST SATURN NH3 ICE DECK` (`giant-deck`, the Saturn-class air over a thick NH3 ice deck, on a
- *   sphere of Saturn's mean radius); and `TEST MOON`, airless, of the Moon's radius, full in
- *   `TEST EARTH`'s night sky.
+ *   sphere of Saturn's mean radius); `TEST JUPITER` (R08.T16.a.2), the hand Jupiter
+ *   (`test/giantFixtures.ts`), a gas envelope on Jupiter's figure and spin (f 0.065) given as a
+ *   record and built as a generated giant's is; and `TEST MOON`, airless, of the Moon's radius,
+ *   full in `TEST EARTH`'s night sky.
  * - **Its layout** ({@link ATMOSPHERE_FIXTURES}): `TEST EARTH` 1 au out along +x, and the other air
  *   fixtures a quarter of the way round the star, 1.41 au from it, so that its night is lit by its
  *   moon alone; there each after `TEST EARTH O3 SLAB` lies {@link ATMOSPHERE_LEG_M} from the one
@@ -24,12 +26,15 @@
  *   flown from one to the next at a few radii sees each at about 60° of phase, passing none on its
  *   way, and no fixture stands in another's shadow. The legs between `TEST EARTH` and the others
  *   come on each at 45°.
- * - **Its media** are the cases' own, in two loads ({@link AtmosphereFixtureLoad}), both started
+ * - **Its media** are the cases' own, in three loads ({@link AtmosphereFixtureLoad}), all started
  *   when `VIEW` chooses the scene (its `SceneOption`'s `prepare`, from an effect;
  *   {@link prepareAtmosphereScene}), never as the scene is made: the cloud-free four from a lazy
  *   import of `reference/cases.ts`, which pulls the optics' data that no other kept scene needs;
- *   and the thick four from `thickCases.ts`, whose Mie runs for about a minute, built by a worker
- *   of their own (`reference/thickCases.worker.ts`; {@link loadThickCases}), off the render thread.
+ *   the thick four from `thickCases.ts`, whose Mie runs for about a minute, built by a worker
+ *   of their own (`reference/thickCases.worker.ts`; {@link loadThickCases}), off the render thread;
+ *   and `TEST JUPITER`'s record from a lazy import of `test/giantFixtures.ts`, which the
+ *   atmosphere cache builds in its optics workers, as it builds a server body's reply (its setting
+ *   `record`, `ATMOSPHERE: PENDING` until it lands, about 8 s of k-tables and optics).
  *   Each air body is stated `loading` (`ATMOSPHERE: PENDING`) until its load lands, then its case's
  *   medium, built once and held, since the atmosphere cache compares a kept medium by identity. A
  *   failed load is logged once and states each of its air bodies `failed`, item 6's failure, which
@@ -38,7 +43,9 @@
  *   load's bodies are drawn as it lands. Each air body is drawn on its medium's own figure, the one
  *   its tables take (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or
  *   Saturn's spheroid; before its load lands, on the same figures restated here, which the test
- *   holds to the cases'. Its disc is a grey Lambert sphere of its medium's ground albedo,
+ *   holds to the cases'. `TEST JUPITER` is drawn on its medium's datum, the 1-bar figure lowered
+ *   to its column's base (`envelope.ts`'s `loweredFigure`), restated as its figure, black, its
+ *   envelope's floor. Its disc is a grey Lambert sphere of its medium's ground albedo,
  *   provisional (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march
  *   draws at the limb is the disc's (`decision-r08-t10b-depth.md`, text B).
  * - **The moonlit night.** The own ship, `TEST HULL`, stands body-fixed {@link ATMOSPHERE_SHIP_HEIGHT_M}
@@ -56,6 +63,7 @@
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import type { BodyDetail } from "../../lib/system/model";
 import {
   type BodyPhotometry,
   PROVISIONAL_LABELS,
@@ -133,20 +141,30 @@ export const ATMOSPHERE_TITAN = keptBody(BODY_INDEX_BASE + 8);
 /** `TEST SATURN NH3 ICE DECK`. */
 export const ATMOSPHERE_GIANT_DECK = keptBody(BODY_INDEX_BASE + 9);
 
+/** `TEST JUPITER` (R08.T16.a.2). */
+export const ATMOSPHERE_JUPITER = keptBody(BODY_INDEX_BASE + 10);
+
 /** A cloud-free reference case an air fixture carries, by its name in `reference/cases.ts`. */
 export type AtmosphereCloudFreeCase = "earth" | "earth-ozone-slab" | "mars" | "saturn-oblate";
 
 /** A cloudy or hazy reference case an air fixture carries, by its name in `thickCases.ts`. */
 export type AtmosphereThickCase = keyof ThickFixtureCases;
 
-/** The reference case an air fixture carries. */
-export type AtmosphereFixtureCase = AtmosphereCloudFreeCase | AtmosphereThickCase;
+/**
+ * A record an air fixture carries, which the atmosphere cache builds as a server body's reply
+ * (R08.T16.a.2): `hand-jupiter`, `test/giantFixtures.ts`'s hand Jupiter.
+ */
+export type AtmosphereRecordCase = "hand-jupiter";
+
+/** The reference case, or the record, an air fixture carries. */
+export type AtmosphereFixtureCase =
+  AtmosphereCloudFreeCase | AtmosphereThickCase | AtmosphereRecordCase;
 
 /**
  * Where an air fixture's case is loaded from: `cases`, the lazy import of `reference/cases.ts`;
- * `thick`, the thick cases' worker.
+ * `thick`, the thick cases' worker; `giant`, the lazy import of the hand Jupiter's record.
  */
-export type AtmosphereFixtureLoad = "cases" | "thick";
+export type AtmosphereFixtureLoad = "cases" | "thick" | "giant";
 
 /** The load a case comes in. */
 export function fixtureLoadOf(caseName: AtmosphereFixtureCase): AtmosphereFixtureLoad {
@@ -163,6 +181,9 @@ export function fixtureLoadOf(caseName: AtmosphereFixtureCase): AtmosphereFixtur
     case "titan-class":
     case "giant-deck":
       load = "thick";
+      break;
+    case "hand-jupiter":
+      load = "giant";
       break;
   }
   return load;
@@ -278,6 +299,20 @@ const TITAN_GROUND_ALBEDO = 0.3;
 /** The giant's ground under its deck: black (`GIANT_GROUND_ALBEDO`). */
 const GIANT_GROUND_ALBEDO = 0;
 
+/**
+ * The hand Jupiter's medium's datum, the figure its tables take (R08.T16.a.1's `loweredFigure`):
+ * Jupiter's 1-bar figure (Archinal et al. 2018's 71,492 and 66,854 km) lowered by the 1-bar
+ * level's h\* above its column's base, m, restated from its assembly (the test holds the two
+ * equal).
+ */
+const JUPITER_DATUM: AtmosphereFixtureFigure = {
+  equatorialRadiusM: 70_183_624.506_832_39,
+  polarRadiusM: 65_720_387.822_647_646,
+};
+
+/** An envelope's floor, the hand Jupiter's ground: black, below τ(550) 1,100 of its gas. */
+const ENVELOPE_GROUND_ALBEDO = 0;
+
 /** A sphere of `radiusM`. */
 function sphere(radiusM: number): AtmosphereFixtureFigure {
   return { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
@@ -356,6 +391,15 @@ export const ATMOSPHERE_FIXTURES: ReadonlyArray<AtmosphereFixture> = [
     figure: sphere(GIANT_SPHERE_M),
     surfaceless: true,
     groundAlbedo: GIANT_GROUND_ALBEDO,
+  },
+  {
+    id: ATMOSPHERE_JUPITER,
+    designation: "TEST JUPITER",
+    caseName: "hand-jupiter",
+    centreM: legsOn(7),
+    figure: JUPITER_DATUM,
+    surfaceless: true,
+    groundAlbedo: ENVELOPE_GROUND_ALBEDO,
   },
 ];
 
@@ -615,6 +659,8 @@ function cloudFreeCaseOf(cases: AtmosphereFixtureCases, name: AtmosphereFixtureC
     case "titan-class":
     case "giant-deck":
       throw new Error(`ATMOSPHERE TEST loads case ${name} from the thick cases' worker`);
+    case "hand-jupiter":
+      throw new Error(`ATMOSPHERE TEST loads ${name}'s record, not a case`);
   }
   return found;
 }
@@ -634,47 +680,76 @@ function thickCaseOf(cases: ThickFixtureCases, name: AtmosphereFixtureCase): Fix
     case "mars":
     case "saturn-oblate":
       throw new Error(`ATMOSPHERE TEST loads case ${name} from reference/cases.ts`);
+    case "hand-jupiter":
+      throw new Error(`ATMOSPHERE TEST loads ${name}'s record, not a case`);
   }
   return found;
 }
 
 /**
- * The scene's whole media from each load's: `failed` once either has failed, `ready` with every
- * fixture's once both have landed, and `loading` until then.
+ * The held settings of the air fixtures of the `giant` load: each the `record` setting of `detail`,
+ * on its fixture's restated datum, which its assembly's tables take.
+ */
+function heldRecords(detail: BodyDetail): ReadonlyMap<BodyIdHex, HeldMedium> {
+  const media = new Map<BodyIdHex, HeldMedium>();
+  for (const fixture of ATMOSPHERE_FIXTURES) {
+    if (fixtureLoadOf(fixture.caseName) === "giant") {
+      media.set(fixture.id, { figure: fixture.figure, setting: { kind: "record", detail } });
+    }
+  }
+  return media;
+}
+
+/**
+ * The scene's whole media from each load's: `failed` once any has failed, `ready` with every
+ * fixture's once all have landed, and `loading` until then.
  */
 function wholeMediaOf(loads: AtmosphereFixtureLoads): AtmosphereFixtureMedia {
-  const { cases, thick } = loads;
-  if (cases.kind === "failed" || thick.kind === "failed") {
+  const { cases, thick, giant } = loads;
+  if (cases.kind === "failed" || thick.kind === "failed" || giant.kind === "failed") {
     return MEDIA_FAILED;
   }
-  if (cases.kind === "ready" && thick.kind === "ready") {
-    return { kind: "ready", media: new Map([...cases.media, ...thick.media]) };
+  if (cases.kind === "ready" && thick.kind === "ready" && giant.kind === "ready") {
+    return {
+      kind: "ready",
+      media: new Map([...cases.media, ...thick.media, ...giant.media]),
+    };
   }
   return MEDIA_LOADING;
 }
 
 /**
- * The scene's media, loaded once a page from the reference cases in two loads (the module's
- * remarks): both started at the first {@link AtmosphereFixtures.ready}, each fixture's medium built
- * once when its load lands and held, or its load's failure logged once.
+ * The scene's media, loaded once a page from the reference cases and the hand Jupiter's record in
+ * three loads (the module's remarks): all started at the first {@link AtmosphereFixtures.ready},
+ * each fixture's medium built, or its record set, once when its load lands and held, or its load's
+ * failure logged once.
  */
 export class AtmosphereFixtures {
   readonly #load: () => Promise<AtmosphereFixtureCases>;
   readonly #loadThick: () => Promise<ThickFixtureCases>;
-  #loads: AtmosphereFixtureLoads = { cases: MEDIA_LOADING, thick: MEDIA_LOADING };
+  readonly #loadGiant: () => Promise<BodyDetail>;
+  #loads: AtmosphereFixtureLoads = {
+    cases: MEDIA_LOADING,
+    thick: MEDIA_LOADING,
+    giant: MEDIA_LOADING,
+  };
   #media: AtmosphereFixtureMedia = MEDIA_LOADING;
   #ready: Promise<void> | null = null;
 
   /**
    * @param load - Loads the cloud-free cases: the lazy import of `reference/cases.ts` in the app.
    * @param loadThick - Loads the thick cases: their worker's in the app ({@link loadThickCases}).
+   * @param loadGiant - Loads `TEST JUPITER`'s record: the lazy import of `test/giantFixtures.ts`'s
+   *   hand Jupiter in the app ({@link loadHandJupiter}).
    */
   constructor(
     load: () => Promise<AtmosphereFixtureCases>,
     loadThick: () => Promise<ThickFixtureCases>,
+    loadGiant: () => Promise<BodyDetail>,
   ) {
     this.#load = load;
     this.#loadThick = loadThick;
+    this.#loadGiant = loadGiant;
   }
 
   /** The scene's whole media as they stand, which a run that waits for every fixture reads. */
@@ -688,7 +763,7 @@ export class AtmosphereFixtures {
   }
 
   /**
-   * Starts both loads where they have not started, and returns what settles once each has landed
+   * Starts every load where it has not started, and returns what settles once each has landed
    * or failed; it never rejects, a failure being its load's `failed`, held for the page: a dynamic
    * import that failed stays failed in it, as a build that threw would again
    * (`decision-r08-t10b-ux.md`, item 4).
@@ -703,6 +778,7 @@ export class AtmosphereFixtures {
         const cases = await this.#loadThick();
         return heldMedia("thick", (name) => thickCaseOf(cases, name));
       }),
+      this.#landed("giant", async () => heldRecords(await this.#loadGiant())),
     ]).then(() => undefined);
     return this.#ready;
   }
@@ -776,12 +852,24 @@ export function loadThickCases(
 }
 
 /**
- * The page's media, from the lazy import of `reference/cases.ts` and the thick cases' worker,
- * shared by every scene made.
+ * `TEST JUPITER`'s record, the hand Jupiter's (`test/giantFixtures.ts`), from a lazy import: a test
+ * fixture, which the console's other scenes never load, built from the protocol fixture's Jupiter
+ * and the sim's envelope-profile golden (lean, 2026-11-01: the views check's hand Jupiter drawn
+ * through a generated giant's path).
+ */
+export async function loadHandJupiter(): Promise<BodyDetail> {
+  const { handJupiterRecord } = await import("../../test/giantFixtures");
+  return handJupiterRecord();
+}
+
+/**
+ * The page's media, from the lazy imports of `reference/cases.ts` and the hand Jupiter and the
+ * thick cases' worker, shared by every scene made.
  */
 const PAGE_FIXTURES = new AtmosphereFixtures(
   () => import("../atmosphere/reference/cases"),
   () => loadThickCases(),
+  loadHandJupiter,
 );
 
 /**

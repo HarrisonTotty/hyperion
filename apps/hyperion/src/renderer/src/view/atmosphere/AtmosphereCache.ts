@@ -8,7 +8,9 @@
  * **What is wanted.** Each view opens a handle ({@link AtmosphereCache.openView}) and notes each
  * frame's bodies through it. A body in the `disc`, `mesh` or `terrain` regime is wanted (item 8),
  * as is the camera's local body where terrain draws it, which R08.T10.b passes as `terrain`; a
- * point never is. A kept scene's body brings its own setting and is never asked for.
+ * point never is. A kept scene's body brings its own setting and is never asked for: its medium,
+ * or a record as a server sends one, which is built from as a server body's reply is
+ * (R08.T16.a.2's hand Jupiter).
  *
  * **Requests** (`body_detail`, `lib/system/bodiesWire.ts`'s `toBodyDetailRequest`), at most one a
  * body a trigger: the body's first want; a change of the scene's arrival; a change of its granted
@@ -124,7 +126,8 @@
  * and given to its tables when it lands (`AtmosphereTables.setDiscReflectance`), kept with the entry
  * as a bake is. R07's disc reads it beyond the 10⁹ m boundary in place of the full passes. It
  * changes no label: until it lands, and where it fails (one `console.error`, never item 6's fault),
- * the body is drawn by the full passes at every distance, as before.
+ * the body is drawn by the full passes at every distance, as before. A gas envelope asks none yet
+ * (R08.T16.a.2's lean: its disc is R08.T16.b.2's to check at 10⁹ m).
  *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
  * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
@@ -132,7 +135,8 @@
  * its tables are made of its upper medium on the deck's datum (`thick/deckRead.ts`'s
  * `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick bake's place, every band
  * in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own figure, its split the regime's
- * `deckAltitudeM` over a floor of the ground, or of an envelope where the body's cover is one's, and
+ * `deckAltitudeM` over a floor of the ground, or of an envelope where the body's cover is one's (a
+ * kept scene's cover's, or a record's whose assembly drew its gas envelope, R08.T16.a.2), and
  * given to its tables when it lands (`AtmosphereTables`' `setDeckTables`, with the correction over
  * the deck the same job bakes). Its labels and its failures are a thick bake's; it asks no
  * correction of its own.
@@ -349,6 +353,14 @@ export type KeptBodyAtmosphere =
       readonly cover?: BodyCover;
     }
   /**
+   * A record the scene gives as a server would send it (R08.T16.a.2's hand Jupiter, a gas envelope
+   * drawn as a generated giant's is): built in the optics workers from it, its frame's lights and
+   * its photometry's ground, as a server body's reply is, under `ATMOSPHERE: PENDING` until it
+   * lands, and built again for a changed light set. Compared by identity: another object builds
+   * the body again.
+   */
+  | { readonly kind: "record"; readonly detail: BodyDetail }
+  /**
    * A medium the scene is still building, its fixtures' optics loading lazily (R08.T10.b): nothing
    * drawn, and `ATMOSPHERE: PENDING` under the view's hold, as a server body's asked record.
    */
@@ -430,7 +442,8 @@ export interface AtmosphereEntry<T> {
   readonly regime: AtmosphereRegime | null;
   /**
    * Whether the body's cover is a gas envelope's, whose deck reads to the envelope's floor
-   * (`thick/deck.ts`'s `DeckFloor`; R08.T15.a.2): a kept scene's cover's, never a server body's.
+   * (`thick/deck.ts`'s `DeckFloor`; R08.T15.a.2): a kept scene's cover's, or for a record, whether
+   * its assembly drew its gas envelope (`DrawnMedium.envelope`, R08.T16.a.2).
    */
   readonly envelope: boolean;
   /**
@@ -586,19 +599,20 @@ interface ToDraw extends Labelled {
   readonly key: string;
   readonly regime: AtmosphereRegime | null;
   /**
-   * Whether the body's cover is a gas envelope's (R08.T15.a.2): a kept scene's cover's; never a
-   * server body's, whose assembly draws a surface's air alone (`assemble.ts`'s `bodyCoverOf`).
+   * Whether the body's cover is a gas envelope's (R08.T15.a.2): a kept scene's cover's, or for a
+   * record, whether its assembly drew its gas envelope (`assemble.ts`'s `bodyCoverOf`;
+   * R08.T16.a.2).
    */
   readonly envelope: boolean;
   readonly built: BuiltAtmosphere | null;
   /**
-   * The input a server body was built from, which its thick bake asks with; `null` for a kept
-   * scene's body, whose bake carries its own lights.
+   * The input a record was built from, a server body's or a kept scene's, which its thick bake asks
+   * with; `null` for a kept scene's medium, whose bake carries its own lights.
    */
   readonly input: BodyAtmosphereInput | null;
 }
 
-/** A server body's build under way. */
+/** A record's build under way, a server body's or a kept scene's. */
 interface Building {
   readonly kind: "building";
   readonly key: string;
@@ -873,6 +887,9 @@ function sameKept(a: KeptBodyAtmosphere | null, b: KeptBodyAtmosphere): boolean 
   if (a === null || a.kind !== b.kind) {
     return false;
   }
+  if (a.kind === "record") {
+    return b.kind === "record" && a.detail === b.detail;
+  }
   return a.kind !== "medium" || (b.kind === "medium" && a.built === b.built && a.cover === b.cover);
 }
 
@@ -898,7 +915,7 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
     labels,
     reasons,
     regime: assembled.regime,
-    envelope: false,
+    envelope: drawn.envelope !== undefined,
     built: curved
       ? {
           medium: assembled.medium,
@@ -1350,9 +1367,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     for (const body of wanted.values()) {
       const held = this.#heldFor(body);
       if (body.kept !== undefined) {
-        // A kept body's lights, which its scene's medium does not depend on, are its bake's.
+        // A kept body's lights, which its scene's medium does not depend on, are its bake's; a
+        // kept record is built under them, as a server body's reply is.
+        const relit = !sameLights(held.lights, body.lights);
         held.lights = body.lights;
-        this.#keep(held, body.kept);
+        this.#keep(held, body.kept, relit);
       } else if (scene !== null) {
         this.#want(held, body, scene);
       }
@@ -1435,13 +1454,24 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     return held;
   }
 
-  /** Takes a kept scene's setting of a body, its entry made at once where it changed. */
-  #keep(held: HeldBody<T>, kept: KeptBodyAtmosphere): void {
+  /**
+   * Takes a kept scene's setting of a body, its entry made at once where it changed; a record's
+   * built, as a server body's reply is, where it changed or, `relit`, its lights did.
+   */
+  #keep(held: HeldBody<T>, kept: KeptBodyAtmosphere, relit: boolean): void {
     if (sameKept(held.keptSetting, kept)) {
+      if (relit && kept.kind === "record" && held.problem === null) {
+        this.#rebuild(held);
+      }
       return;
     }
     held.keptSetting = kept;
     held.problem = null;
+    held.reply = kept.kind === "record" ? kept.detail : null;
+    if (kept.kind !== "record") {
+      // A record's build under way, for a setting the scene has left.
+      this.#cancelBuild(held);
+    }
     let entry: ToDraw;
     switch (kept.kind) {
       case "unset":
@@ -1456,6 +1486,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           input: null,
         };
         break;
+      case "record":
+        this.#rebuild(held);
+        return;
       case "loading":
         held.build = null;
         this.#dropDrawn(held);
@@ -2127,7 +2160,9 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
    * table, with one `console.error`.
    */
   #disc(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere): void {
-    if (built.sources === undefined || built.sources.length === 0) {
+    // A gas envelope's disc waits on R08.T16.b.2's check of it at 10⁹ m (lean, 2026-11-01): the
+    // full passes draw it at every distance until then.
+    if (entry.envelope || built.sources === undefined || built.sources.length === 0) {
       return;
     }
     try {
@@ -2439,13 +2474,16 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
 
 /**
  * Whether a body is pending, with nothing drawn and no problem: a server body asked, waiting or
- * building; a kept one whose scene is still building its medium (R08.T10.b).
+ * building; a kept one whose scene is still building its medium (R08.T10.b), or whose record is
+ * building (R08.T16.a.2).
  */
 function isPending(held: HeldBody<unknown>): boolean {
   if (held.problem !== null || held.drawn !== null) {
     return false;
   }
-  return held.kept
-    ? held.keptSetting?.kind === "loading"
-    : held.fetch.kind !== "idle" || held.build !== null;
+  if (held.kept) {
+    const kind = held.keptSetting?.kind;
+    return kind === "loading" || (kind === "record" && held.build !== null);
+  }
+  return held.fetch.kind !== "idle" || held.build !== null;
 }

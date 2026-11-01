@@ -10,6 +10,8 @@
  * - **The k-tables.** Each line species' tables are loaded once a worker, on the first request
  *   whose input lists it (`assemble.ts`'s `lineSpeciesOf`), and kept for the worker's life: in its
  *   heap, not the per-planet row (Design note 11).
+ * - **The assembly** is made under {@link OPTICS_ASSEMBLY}: a gas envelope sent `ok` takes its
+ *   medium (R08.T16.a.2).
  * - **The media.** The last {@link OPTICS_MEDIA_KEPT} bodies' assemblies are kept by their key
  *   (`atmosphereKey`), so that a worker that assembled a body serves its curve shares and join
  *   from the same specs. A worker asked for a share of a body it has not assembled forms the
@@ -111,6 +113,14 @@ import { CHANNEL_WAVELENGTHS_NM } from "./medium";
 /** How many bodies' assemblies, or absorber specs, a worker keeps, by key, the latest asked. */
 export const OPTICS_MEDIA_KEPT = 2;
 
+/**
+ * What every assembly a worker makes takes beside its k-tables (R08.T16.a.2): a gas envelope sent
+ * `ok` drawn ({@link AssembleOptions.envelopes}), split at its floor (`thick/regime.ts`'s
+ * `classifyRegime`), its deck baked where its gate opens the route (`thick/routing.ts`'s
+ * `deckRouted`) and drawn by the analytic term under `ATMOSPHERE: APPROXIMATE` until then.
+ */
+export const OPTICS_ASSEMBLY: AssembleOptions = { envelopes: true };
+
 /** What a worker's jobs take from outside: how its k-tables are read. */
 export interface OpticsJobsDeps {
   /**
@@ -169,14 +179,14 @@ export class OpticsJobs {
         request.kind === "polarisation-gather" ||
         request.kind === "deck-gather"
           ? []
-          : lineSpeciesOf(request.input);
+          : lineSpeciesOf(request.input, OPTICS_ASSEMBLY);
     } catch (error: unknown) {
       return failed(request, error);
     }
     const kDistributions = await this.#tablesOf(species);
     let reply: OpticsReply;
     try {
-      reply = structuredClone(this.#reply(request, { kDistributions }));
+      reply = structuredClone(this.#reply(request, { ...OPTICS_ASSEMBLY, kDistributions }));
     } catch (error: unknown) {
       return failed(request, error);
     }

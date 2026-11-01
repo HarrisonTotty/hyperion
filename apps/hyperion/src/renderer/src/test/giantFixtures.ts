@@ -24,7 +24,8 @@ import type {
   GasShareDto,
 } from "@hyperion/protocol";
 
-import { type DetailAnswer, withRecord } from "./atmosphereRecords";
+import type { BodyDetail } from "../lib/system/model";
+import { type DetailAnswer, detailOf, withRecord } from "./atmosphereRecords";
 import { type GoldenEnvelope, goldenEnvelope } from "./envelopeProfileGolden";
 import { earthDetail, jupiterDetail } from "./planetaryFixture";
 
@@ -262,6 +263,15 @@ export function handJupiterDetail(nh3FSed?: number): DetailAnswer {
       value: { ...earthRotation.value, initial_rate_rad_s: JUPITER_SPIN_RAD_S },
     },
   }));
+}
+
+/**
+ * The hand Jupiter's record as the client converts a reply ({@link handJupiterDetail}'s): what
+ * `ATMOSPHERE TEST`'s `TEST JUPITER` gives the atmosphere cache, which builds it as a server body's
+ * (R08.T16.a.2).
+ */
+export function handJupiterRecord(): BodyDetail {
+  return detailOf(handJupiterDetail());
 }
 
 /** The hand ice giant's CH₄ deck's τ(550): 13.5, B3 k-1's 01ffeb2d5fff0001.0700's. */

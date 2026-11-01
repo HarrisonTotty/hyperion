@@ -29,9 +29,11 @@ import {
   captureFrames,
   exposureEv100,
   fixtureCaptureLabel,
+  JUPITER_CAPTURE_RANGES_M,
   heldMs,
   legRateStep,
   quantile,
+  rangeCaptureLabel,
   rateStepOfCameraLine,
   recordAtmosphereCheck,
   runAtmosphereCheck,
@@ -72,35 +74,74 @@ describe("the atmosphere run's captures' labels", () => {
       "fixture-test-venus-5-80-mpa",
       "fixture-test-titan",
       "fixture-test-saturn-nh3-ice-deck",
+      "fixture-test-jupiter",
     ]);
   });
 
   it("refuse a designation that makes no capture label", () => {
     expect(() => fixtureCaptureLabel("TEST MARS · 2")).toThrow("makes no capture label");
   });
+
+  it("name a range's capture by its fixture and its whole kilometres (R08.T16.a.2)", () => {
+    expect(
+      JUPITER_CAPTURE_RANGES_M.map((rangeM) => rangeCaptureLabel("TEST JUPITER", rangeM)),
+    ).toEqual([
+      "fixture-test-jupiter-950000-km",
+      "fixture-test-jupiter-500000-km",
+      "fixture-test-jupiter-220000-km",
+      "fixture-test-jupiter-150000-km",
+    ]);
+  });
+
+  it("refuse a range of no whole kilometres", () => {
+    expect(() => rangeCaptureLabel("TEST JUPITER", 1.5e8 + 1)).toThrow("makes no capture label");
+  });
 });
+
+/** Two captures' labels and ranges in their labels' order. */
+function byLabel(a: readonly [string, number], b: readonly [string, number]): number {
+  return a[0].localeCompare(b[0]);
+}
 
 describe("the atmosphere run's tour", () => {
   const legs = atmosphereLegs(atmosphereSeatM(), ATMOSPHERE_TOUR);
   const captured = legs.flatMap((leg) => (leg.capture === null ? [] : [leg.capture]));
 
-  it("captures every air fixture once, each at its goal's range", () => {
-    expect(
-      captured
-        .map((each) => [each.label, each.rangeM])
-        .toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    ).toEqual(
-      ATMOSPHERE_FIXTURES.map((fixture) => [
-        fixtureCaptureLabel(fixture.designation),
-        ATMOSPHERE_GOAL_RADII * fixture.figure.equatorialRadiusM,
-      ]).toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  it("captures every air fixture but the giant once, each at its goal's range, and TEST JUPITER at each of its ranges", () => {
+    expect(captured.map((each) => [each.label, each.rangeM] as const).toSorted(byLabel)).toEqual(
+      [
+        ...ATMOSPHERE_FIXTURES.filter(({ designation }) => designation !== "TEST JUPITER").map(
+          (fixture) =>
+            [
+              fixtureCaptureLabel(fixture.designation),
+              ATMOSPHERE_GOAL_RADII * fixture.figure.equatorialRadiusM,
+            ] as const,
+        ),
+        ...JUPITER_CAPTURE_RANGES_M.map(
+          (rangeM) => [rangeCaptureLabel("TEST JUPITER", rangeM), rangeM] as const,
+        ),
+      ].toSorted(byLabel),
     );
   });
 
   it("comes on each fixture's day side, between 40° and 75° of phase", () => {
     expect(captured.map(({ phaseDeg }) => phaseDeg > 40 && phaseDeg < 75)).toEqual(
-      ATMOSPHERE_FIXTURES.map(() => true),
+      captured.map(() => true),
     );
+  });
+
+  it("closes on TEST JUPITER along one line from inside 10⁹ m to its limb (R08.T16.a.2)", () => {
+    const jupiter = legs.filter((leg) => leg.target === "TEST JUPITER");
+    const [first] = jupiter;
+    if (first === undefined) {
+      throw new Error("the tour has no leg to TEST JUPITER");
+    }
+    const along = normalise(sub(first.centreM, first.fromM));
+    expect([
+      jupiter.map((leg) => leg.capture?.rangeM),
+      jupiter.every((leg) => dot(normalise(sub(leg.centreM, leg.toM)), along) > 1 - 1e-12),
+      norm(sub(first.centreM, first.fromM)) > 1e9,
+    ]).toEqual([JUPITER_CAPTURE_RANGES_M, true, true]);
   });
 
   it("chains its legs and their stages, each starting where the one before ended", () => {
@@ -138,16 +179,25 @@ describe("the atmosphere run's tour", () => {
       ["TEST VENUS 5.80 MPa", 2],
       ["TEST TITAN", 2],
       ["TEST SATURN NH3 ICE DECK", 1],
+      ["TEST JUPITER", 1],
+      ["TEST JUPITER", 1],
+      ["TEST JUPITER", 1],
+      ["TEST JUPITER", 1],
       ["TEST EARTH", 3],
     ]);
   });
 
-  it("passes no body but its target within five of its radii, but the planet it climbs from", () => {
+  it("passes no body but its target within five of its radii, but the planet it climbs from and a body it flies away from", () => {
     const near = legs.flatMap((leg, i) =>
       OBSTACLES.filter(
         (body) =>
           body.designation !== leg.target &&
           !(i === 0 && body.designation === "TEST EARTH") &&
+          // The leg after TEST JUPITER's last capture starts at 2.1 of its radii, flying away.
+          !(
+            body.designation === legs[i - 1]?.target &&
+            dot(sub(leg.toM, leg.fromM), sub(leg.fromM, body.centreM)) > 0
+          ) &&
           closestM(leg.fromM, leg.toM, body.centreM) < 5 * body.radiusM,
       ).map((body) => `${leg.target}: ${body.designation}`),
     );
@@ -176,8 +226,8 @@ describe("the atmosphere run's tour", () => {
 
   it("refuses a fixture the scene does not have", () => {
     expect(() =>
-      atmosphereLegs(atmosphereSeatM(), [{ kind: "fixture", designation: "TEST JUPITER" }]),
-    ).toThrow("has no fixture TEST JUPITER");
+      atmosphereLegs(atmosphereSeatM(), [{ kind: "fixture", designation: "TEST NEPTUNE" }]),
+    ).toThrow("has no fixture TEST NEPTUNE");
   });
 
   it("refuses a leg towards a body that would reach it", () => {
@@ -434,6 +484,8 @@ class FakeView {
   readonly flightKeys: string[] = [];
   /** Called as a flight key is pressed. */
   onHold: () => void = () => undefined;
+  /** Until when, ms of the test's clock, a body's record is building: `ATMOSPHERE: PENDING`. */
+  buildingUntilMs: number | null = null;
   readonly #clock: () => number;
   readonly #media: () => AtmosphereFixtureMedia;
   readonly #speeds: AutoSpeeds;
@@ -573,8 +625,11 @@ class FakeView {
     if (this.scene !== ATMOSPHERE_SCENE_NAME) {
       return [];
     }
-    return this.#media().kind === "loading"
-      ? [ATMOSPHERE_STATEMENTS.atmospherePending]
+    if (this.#media().kind === "loading") {
+      return [ATMOSPHERE_STATEMENTS.atmospherePending];
+    }
+    return this.buildingUntilMs !== null && this.#clock() < this.buildingUntilMs
+      ? [ATMOSPHERE_STATEMENTS.atmospherePending, ...PLATE_STATEMENTS]
       : PLATE_STATEMENTS;
   }
 
@@ -899,6 +954,26 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
       ["moonlit-night", "photorealistic"],
       ["fixture-test-earth-o3-slab", "wireframe"],
     ]);
+  });
+
+  it("captures a fixture only once no ATMOSPHERE: PENDING stands, as while TEST JUPITER's record builds (R08.T16.a.2)", async () => {
+    const run = fakeRun();
+    let holds = 0;
+    let buildingUntilMs = 0;
+    // From the fixture's leg's first hold, a record builds for 40 s of the test's clock.
+    run.view.onHold = () => {
+      holds += 1;
+      if (holds === 2) {
+        buildingUntilMs = run.deps.nowMs() + 40_000;
+        run.view.buildingUntilMs = buildingUntilMs;
+      }
+    };
+    const record = await runAtmosphereCheck(run.deps);
+    const [, fixture] = record.captures;
+    expect([
+      (fixture?.atMs ?? 0) >= buildingUntilMs,
+      fixture?.statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
+    ]).toEqual([true, false]);
   });
 
   it("takes the night only once AUTO has settled there, and records the wait", async () => {

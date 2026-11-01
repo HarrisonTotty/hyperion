@@ -24,6 +24,7 @@ import {
 } from "../../test/atmosphereRecords";
 import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
+import { handJupiterRecord } from "../../test/giantFixtures";
 import { standInThickCases } from "../../test/thickFixtureStandIns";
 import { earthDetail, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import { ATMOSPHERE_FIXTURES, AtmosphereFixtures, fixtureLoadOf } from "../scenes/atmosphereScene";
@@ -301,6 +302,7 @@ describe("a kept scene's medium at the cache (R08.T13.d)", () => {
     const fixtures = new AtmosphereFixtures(
       () => Promise.resolve(cases),
       () => Promise.resolve(standInThickCases()),
+      () => Promise.resolve(handJupiterRecord()),
     );
     await fixtures.ready();
     const media = fixtures.loads.cases;

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { add, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
+import type { BodyDetail } from "../../lib/system/model";
+import { detailOf, recordInput } from "../../test/atmosphereRecords";
+import { handJupiterDetail, handJupiterRecord } from "../../test/giantFixtures";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import { standInThickCases } from "../../test/thickFixtureStandIns";
 import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
+import { assembleMedium } from "../atmosphere/assemble";
 import { tableRadiusM } from "../atmosphere/hillaire";
 import * as cases from "../atmosphere/reference/cases";
 import giantDeckCase from "../atmosphere/reference/giant-deck.case.json" with { type: "json" };
@@ -25,6 +29,7 @@ import {
   ATMOSPHERE_EARTH,
   ATMOSPHERE_EARTH_CENTRE_M,
   ATMOSPHERE_FIXTURES,
+  ATMOSPHERE_JUPITER,
   ATMOSPHERE_MOON_CENTRE_M,
   ATMOSPHERE_MOON_RADIUS_M,
   ATMOSPHERE_SCENE_NAME,
@@ -50,17 +55,30 @@ import { AU_M } from "./kept";
 /** The thick cases' stand-ins every held load lands, by case. */
 const THICK = standInThickCases();
 
+/** The hand Jupiter's record every held load of the giant lands. */
+const JUPITER = handJupiterRecord();
+
+/** Loads `TEST JUPITER`'s record at once: {@link JUPITER}. */
+const loadJupiter = (): Promise<BodyDetail> => Promise.resolve(JUPITER);
+
+/** The air fixtures whose loads build a medium: every one but the record's. */
+const MEDIUM_FIXTURES = ATMOSPHERE_FIXTURES.filter(
+  ({ caseName }) => fixtureLoadOf(caseName) !== "giant",
+);
+
 /**
- * Loads the test lands when it chooses: the cloud-free cases' with the real cases, and the thick
- * cases' with their stand-ins ({@link THICK}).
+ * Loads the test lands when it chooses: the cloud-free cases' with the real cases, the thick
+ * cases' with their stand-ins ({@link THICK}), and the giant's with the hand Jupiter's record.
  */
 function heldLoad(): {
   readonly fixtures: AtmosphereFixtures;
   readonly land: () => void;
   readonly landThick: () => void;
+  readonly landGiant: () => void;
 } {
   let release: ((loaded: AtmosphereFixtureCases) => void) | null = null;
   let releaseThick: ((loaded: ThickFixtureCases) => void) | null = null;
+  let releaseGiant: ((loaded: BodyDetail) => void) | null = null;
   const fixtures = new AtmosphereFixtures(
     () =>
       new Promise<AtmosphereFixtureCases>((resolve) => {
@@ -69,6 +87,10 @@ function heldLoad(): {
     () =>
       new Promise<ThickFixtureCases>((resolve) => {
         releaseThick = resolve;
+      }),
+    () =>
+      new Promise<BodyDetail>((resolve) => {
+        releaseGiant = resolve;
       }),
   );
   const land = (): void => {
@@ -83,11 +105,17 @@ function heldLoad(): {
     }
     releaseThick(THICK);
   };
-  return { fixtures, land, landThick };
+  const landGiant = (): void => {
+    if (releaseGiant === null) {
+      throw new Error("the giant's load was never asked for");
+    }
+    releaseGiant(JUPITER);
+  };
+  return { fixtures, land, landThick, landGiant };
 }
 
 /** The air fixtures of `load`. */
-function fixturesOf(load: "cases" | "thick"): typeof ATMOSPHERE_FIXTURES {
+function fixturesOf(load: "cases" | "thick" | "giant"): typeof ATMOSPHERE_FIXTURES {
   return ATMOSPHERE_FIXTURES.filter(({ caseName }) => fixtureLoadOf(caseName) === load);
 }
 
@@ -113,6 +141,8 @@ function caseNamed(name: (typeof ATMOSPHERE_FIXTURES)[number]["caseName"]): Fixt
     case "giant-deck":
       found = THICK[name];
       break;
+    case "hand-jupiter":
+      throw new Error("TEST JUPITER carries a record, not a case");
   }
   return found;
 }
@@ -157,13 +187,19 @@ function settingKinds(scene: ViewScene): ReadonlyArray<readonly [string, string 
   );
 }
 
+/** The setting's kind an air fixture of `load` takes once its load lands. */
+function landedKind(load: string): string {
+  return load === "giant" ? "record" : "medium";
+}
+
 /** A loaded scene's fixtures' media. */
 async function loadedScene(): Promise<ViewScene> {
-  const { fixtures, land, landThick } = heldLoad();
+  const { fixtures, land, landThick, landGiant } = heldLoad();
   const scene = atmosphereScene(fixtures);
   prepareAtmosphereScene(fixtures);
   land();
   landThick();
+  landGiant();
   await fixtures.ready();
   return scene.sceneAt(0);
 }
@@ -191,7 +227,7 @@ function builtOf(setting: KeptBodyAtmosphere | undefined, designation: string) {
 describe("ATMOSPHERE TEST's bodies", () => {
   const scene = atmosphereScene(heldLoad().fixtures).sceneAt(0);
 
-  it("are the star, the eight air fixtures and the moon, by their designations", () => {
+  it("are the star, the nine air fixtures and the moon, by their designations", () => {
     expect(scene.bodies.map((body) => [body.designation, body.kind])).toEqual([
       ["TEST STAR", "star"],
       ["TEST EARTH", "planet"],
@@ -202,11 +238,12 @@ describe("ATMOSPHERE TEST's bodies", () => {
       ["TEST VENUS 5.80 MPa", "planet"],
       ["TEST TITAN", "planet"],
       ["TEST SATURN NH3 ICE DECK", "planet"],
+      ["TEST JUPITER", "planet"],
       ["TEST MOON", "moon"],
     ]);
   });
 
-  it("carries the four cloud-free cases from the import and the four thick from the worker", () => {
+  it("carries the four cloud-free cases from the import, the four thick from the worker and the hand Jupiter's record", () => {
     expect(ATMOSPHERE_FIXTURES.map(({ caseName }) => [caseName, fixtureLoadOf(caseName)])).toEqual([
       ["earth", "cases"],
       ["earth-ozone-slab", "cases"],
@@ -216,6 +253,7 @@ describe("ATMOSPHERE TEST's bodies", () => {
       ["venus-58bar", "thick"],
       ["titan-class", "thick"],
       ["giant-deck", "thick"],
+      ["hand-jupiter", "giant"],
     ]);
   });
 
@@ -240,7 +278,8 @@ describe("ATMOSPHERE TEST's bodies", () => {
       bodyNamed(scene, "TEST MOON").radiusM,
       bodyNamed(scene, "TEST SATURN").surfaceless,
       bodyNamed(scene, "TEST SATURN NH3 ICE DECK").surfaceless,
-    ]).toEqual([{ kind: "airless" }, ATMOSPHERE_MOON_RADIUS_M, true, true]);
+      bodyNamed(scene, "TEST JUPITER").surfaceless,
+    ]).toEqual([{ kind: "airless" }, ATMOSPHERE_MOON_RADIUS_M, true, true, true]);
   });
 
   it("lays the fixtures out about 1 au from the star, TEST EARTH a quarter round from the rest", () => {
@@ -289,8 +328,8 @@ describe("ATMOSPHERE TEST's bodies", () => {
 });
 
 describe("ATMOSPHERE TEST's media", () => {
-  it("are loading until their load lands, then each case's medium, each load on its own", async () => {
-    const { fixtures, land, landThick } = heldLoad();
+  it("are loading until their load lands, then each case's medium or the record, each load on its own", async () => {
+    const { fixtures, land, landThick, landGiant } = heldLoad();
     const scene = atmosphereScene(fixtures);
     const before = settingKinds(scene.sceneAt(0));
     prepareAtmosphereScene(fixtures);
@@ -300,8 +339,19 @@ describe("ATMOSPHERE TEST's media", () => {
     });
     const cloudFree = [settingKinds(scene.sceneAt(1)), fixtures.media.kind];
     landThick();
+    await vi.waitFor(() => {
+      expect(fixtures.loads.thick.kind).toBe("ready");
+    });
+    const thickToo = [settingKinds(scene.sceneAt(2)), fixtures.media.kind];
+    landGiant();
     await fixtures.ready();
-    expect([before, cloudFree, settingKinds(scene.sceneAt(2)), fixtures.media.kind]).toEqual([
+    expect([
+      before,
+      cloudFree,
+      thickToo,
+      settingKinds(scene.sceneAt(3)),
+      fixtures.media.kind,
+    ]).toEqual([
       ATMOSPHERE_FIXTURES.map(({ designation }) => [designation, "loading"]),
       [
         ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
@@ -310,30 +360,63 @@ describe("ATMOSPHERE TEST's media", () => {
         ]),
         "loading",
       ],
-      ATMOSPHERE_FIXTURES.map(({ designation }) => [designation, "medium"]),
+      [
+        ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
+          designation,
+          fixtureLoadOf(caseName) === "giant" ? "loading" : "medium",
+        ]),
+        "loading",
+      ],
+      ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
+        designation,
+        landedKind(fixtureLoadOf(caseName)),
+      ]),
       "ready",
     ]);
   });
 
-  it("holds each built medium from frame to frame, so the cache makes its tables once", async () => {
-    const { fixtures, land, landThick } = heldLoad();
+  it("holds each built medium and the record from frame to frame, so the cache makes their tables once", async () => {
+    const { fixtures, land, landThick, landGiant } = heldLoad();
     const scene = atmosphereScene(fixtures);
     prepareAtmosphereScene(fixtures);
     land();
     landThick();
+    landGiant();
     await fixtures.ready();
     const [first, later] = [scene.sceneAt(0), scene.sceneAt(30)].map((frame) =>
-      ATMOSPHERE_FIXTURES.map(({ designation }) =>
-        builtOf(bodyNamed(frame, designation).atmosphere, designation),
-      ),
+      ATMOSPHERE_FIXTURES.map(({ designation }) => bodyNamed(frame, designation).atmosphere),
     );
-    expect(first?.every((built, i) => built === later?.[i])).toBe(true);
+    expect(first?.every((setting, i) => setting === later?.[i])).toBe(true);
   });
+
+  it("gives TEST JUPITER the hand Jupiter's record, built by the cache as a server body's reply", async () => {
+    const scene = await loadedScene();
+    const jupiter = bodyNamed(scene, "TEST JUPITER");
+    expect([jupiter.id, jupiter.atmosphere]).toEqual([
+      ATMOSPHERE_JUPITER,
+      { kind: "record", detail: JUPITER },
+    ]);
+  });
+
+  it("restates TEST JUPITER's datum and its black floor as the hand Jupiter's assembly takes them", () => {
+    const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
+      envelopes: true,
+    });
+    if (assembled.medium === undefined) {
+      throw new Error("the hand Jupiter draws a medium");
+    }
+    const [fixture] = fixturesOf("giant");
+    expect([
+      fixture?.figure,
+      fixture?.groundAlbedo,
+      assembled.drawn.envelope === undefined,
+    ]).toEqual([assembled.drawn.body.figure, assembled.medium.groundAlbedo[1], false]);
+  }, 120_000);
 
   it("are each its case's medium, with its curves where it has absorbers", async () => {
     const scene = await loadedScene();
     expect(
-      ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => {
+      MEDIUM_FIXTURES.map(({ designation, caseName }) => {
         const built = builtOf(bodyNamed(scene, designation).atmosphere, designation);
         const referenceCase = caseNamed(caseName);
         return [
@@ -343,7 +426,7 @@ describe("ATMOSPHERE TEST's media", () => {
         ];
       }),
     ).toEqual(
-      ATMOSPHERE_FIXTURES.map(({ caseName }) => {
+      MEDIUM_FIXTURES.map(({ caseName }) => {
         const { curves } = caseNamed(caseName);
         return [true, true, curves.length === 0 ? null : curves];
       }),
@@ -352,12 +435,12 @@ describe("ATMOSPHERE TEST's media", () => {
 
   it("draws each air body on its medium's own figure, the one its tables take", async () => {
     const scene = await loadedScene();
-    const drawn = ATMOSPHERE_FIXTURES.map(({ designation }) => {
+    const drawn = MEDIUM_FIXTURES.map(({ designation }) => {
       const body = bodyNamed(scene, designation);
       const figure = body.appearance?.figure;
       return [figure?.equatorialRadiusM, figure?.polarRadiusM, body.radiusM];
     });
-    const tables = ATMOSPHERE_FIXTURES.map(({ designation }) => {
+    const tables = MEDIUM_FIXTURES.map(({ designation }) => {
       // `tablesFigureOf`'s rule, from what the tables are built of: their body's spheroid, or a
       // sphere of their ground's radius.
       const built = builtOf(bodyNamed(scene, designation).atmosphere, designation);
@@ -370,7 +453,7 @@ describe("ATMOSPHERE TEST's media", () => {
 
   it("restates each case's figure, so that the body is drawn on it before the cases load", () => {
     const saturn = cases.SATURN_OBLATE_SPHEROID;
-    expect(ATMOSPHERE_FIXTURES.map(({ figure }) => figure)).toEqual([
+    expect(MEDIUM_FIXTURES.map(({ figure }) => figure)).toEqual([
       {
         equatorialRadiusM: cases.EARTH_REFERENCE_RADIUS_M,
         polarRadiusM: cases.EARTH_REFERENCE_RADIUS_M,
@@ -420,7 +503,7 @@ describe("ATMOSPHERE TEST's media", () => {
     const load = vi.fn<() => Promise<AtmosphereFixtureCases>>(() =>
       Promise.reject(new Error("no optics")),
     );
-    const fixtures = new AtmosphereFixtures(load, () => Promise.resolve(THICK));
+    const fixtures = new AtmosphereFixtures(load, () => Promise.resolve(THICK), loadJupiter);
     const scene = atmosphereScene(fixtures);
     prepareAtmosphereScene(fixtures);
     await fixtures.ready();
@@ -435,7 +518,7 @@ describe("ATMOSPHERE TEST's media", () => {
     ]).toEqual([
       ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
         designation,
-        fixtureLoadOf(caseName) === "cases" ? "failed" : "medium",
+        { cases: "failed", thick: "medium", giant: "record" }[fixtureLoadOf(caseName)],
       ]),
       "failed",
       1,
@@ -448,7 +531,7 @@ describe("ATMOSPHERE TEST's media", () => {
     const loadThick = vi.fn<() => Promise<ThickFixtureCases>>(() =>
       Promise.reject(new Error("the thick cases' worker failed (error)")),
     );
-    const fixtures = new AtmosphereFixtures(() => Promise.resolve(cases), loadThick);
+    const fixtures = new AtmosphereFixtures(() => Promise.resolve(cases), loadThick, loadJupiter);
     const scene = atmosphereScene(fixtures);
     prepareAtmosphereScene(fixtures);
     await fixtures.ready();
@@ -462,7 +545,38 @@ describe("ATMOSPHERE TEST's media", () => {
     ]).toEqual([
       ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
         designation,
-        fixtureLoadOf(caseName) === "thick" ? "failed" : "medium",
+        { cases: "medium", thick: "failed", giant: "record" }[fixtureLoadOf(caseName)],
+      ]),
+      "failed",
+      1,
+      1,
+    ]);
+  });
+
+  it("states TEST JUPITER failed, the others drawn, and logs once, when its record's import fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const loadGiant = vi.fn<() => Promise<BodyDetail>>(() =>
+      Promise.reject(new Error("no hand Jupiter")),
+    );
+    const fixtures = new AtmosphereFixtures(
+      () => Promise.resolve(cases),
+      () => Promise.resolve(THICK),
+      loadGiant,
+    );
+    const scene = atmosphereScene(fixtures);
+    prepareAtmosphereScene(fixtures);
+    await fixtures.ready();
+    prepareAtmosphereScene(fixtures);
+    await fixtures.ready();
+    expect([
+      settingKinds(scene.sceneAt(0)),
+      fixtures.media.kind,
+      error.mock.calls.length,
+      loadGiant.mock.calls.length,
+    ]).toEqual([
+      ATMOSPHERE_FIXTURES.map(({ designation, caseName }) => [
+        designation,
+        fixtureLoadOf(caseName) === "giant" ? "failed" : "medium",
       ]),
       "failed",
       1,
@@ -471,7 +585,7 @@ describe("ATMOSPHERE TEST's media", () => {
   });
 
   it("starts nothing as the scene is made, its loads from prepare alone", async () => {
-    const { fixtures, land, landThick } = heldLoad();
+    const { fixtures, land, landThick, landGiant } = heldLoad();
     const scene = atmosphereScene(fixtures);
     const before = fixtures.media.kind;
     expect(() => {
@@ -480,9 +594,13 @@ describe("ATMOSPHERE TEST's media", () => {
     expect(() => {
       landThick();
     }).toThrow("the thick load was never asked for");
+    expect(() => {
+      landGiant();
+    }).toThrow("the giant's load was never asked for");
     prepareAtmosphereScene(fixtures);
     land();
     landThick();
+    landGiant();
     await fixtures.ready();
     expect([before, settingKinds(scene.sceneAt(0))[0]]).toEqual([
       "loading",

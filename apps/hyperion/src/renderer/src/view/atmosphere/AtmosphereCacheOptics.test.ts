@@ -14,12 +14,14 @@ import {
   saturnBody,
 } from "../../test/atmosphereFixtures";
 import { detailOf, recordInput, SUN_LIGHT } from "../../test/atmosphereRecords";
+import { handJupiterDetail } from "../../test/giantFixtures";
 import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
 import { hotToyTable, microtasks, NOT_MODELLED, toyLoader, toyTable } from "../../test/opticsFakes";
 import {
   earthDetail,
   earthDetailOfAnOlderServer,
   FIXTURE_SYSTEM,
+  jupiterDetail,
 } from "../../test/planetaryFixture";
 import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
 import {
@@ -36,7 +38,7 @@ import {
 import { type AssembledMedium, lineSpeciesOf } from "./assemble";
 import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
 import { R05_EARTH_REFERENCE } from "./earth";
-import { OpticsJobs } from "./opticsJobs";
+import { OPTICS_ASSEMBLY, OpticsJobs } from "./opticsJobs";
 import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
 import {
   type DeckBakeAsk,
@@ -52,6 +54,7 @@ import {
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import { sphereBakeBody } from "./thick/keptBake";
+import { THICK_REASON } from "./thick/regime";
 import { channelSource } from "./thick/spectralColumn";
 
 /** A second star, cooler than the Sun. */
@@ -282,6 +285,51 @@ describe("an optics worker's answers", () => {
     failing = false;
     expect((await jobs.answer(request)).reply.kind).toBe("assembled");
   });
+});
+
+describe("an optics worker's gas envelopes (R08.T16.a.2)", () => {
+  it.each([
+    ["the hand Jupiter", handJupiterDetail],
+    ["the protocol fixture's generated Jupiter", jupiterDetail],
+  ] as const)(
+    "assembles %s's envelope, split at its floor, its volatile decks drawn, APPROXIMATE with the thick reason",
+    async (_, detail) => {
+      const jobs = new OpticsJobs(toyLoader());
+      const { reply } = await jobs.answer({
+        kind: "assemble",
+        id: 1,
+        input: recordInput(detailOf(detail())),
+      });
+      if (reply.kind !== "assembled" || reply.assembled.medium === undefined) {
+        throw new Error(`the giant was answered ${reply.kind} with no medium`);
+      }
+      const { medium, drawn, regime, labels, reasons } = reply.assembled;
+      const names = new Set(medium.terms.map((term) => term.name));
+      expect([
+        regime,
+        ["aerosol:NH3", "aerosol:NH4SH", "aerosol:H2O"].map((name) => names.has(name)),
+        labels.includes("atmosphereNotYetModelled"),
+        labels.includes("atmosphereApproximate"),
+        reasons.includes(THICK_REASON),
+      ]).toEqual([
+        { kind: "cloudDeck", deckAltitudeM: drawn.envelope?.floorAltitudeM },
+        [true, true, true],
+        false,
+        true,
+        true,
+      ]);
+    },
+    120_000,
+  );
+
+  it("loads the envelope's line species as it assembles it", async () => {
+    const asked: string[] = [];
+    const jobs = new OpticsJobs(toyLoader(asked));
+    const input = recordInput(detailOf(handJupiterDetail()));
+    await jobs.answer({ kind: "assemble", id: 1, input });
+    const species = lineSpeciesOf(input, OPTICS_ASSEMBLY);
+    expect([lineSpeciesOf(input), species.length > 0, asked]).toEqual([[], true, species]);
+  }, 120_000);
 });
 
 describe("transferablesOf", () => {

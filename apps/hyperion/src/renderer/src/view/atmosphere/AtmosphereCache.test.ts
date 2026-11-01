@@ -19,8 +19,10 @@ import {
 } from "vitest";
 
 import { toBodyDetail } from "../../lib/system/bodiesWire";
+import type { BodyDetail } from "../../lib/system/model";
 import { earthBody, saturnBody, venusClassMedium } from "../../test/atmosphereFixtures";
 import { type DetailAnswer, SUN_LIGHT, withRecord } from "../../test/atmosphereRecords";
+import { handJupiterRecord } from "../../test/giantFixtures";
 import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
 import { BodyDetailSeam } from "../../test/bodyDetailSeam";
@@ -1717,6 +1719,166 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     tables.deckThrows = null;
     note(h, body, 1, null);
     expect([during, tables.decks.at(-1) === decks]).toEqual([0, true]);
+  });
+});
+
+/**
+ * R05's Earth as a gas envelope's assembly (R08.T16.a.2): `thickAssembly`'s, split at a floor 5 km
+ * up (`cloudDeck`), its drawn medium carrying the envelope's floor, or none where `envelope` is
+ * false (a surface's air split at its deck's top).
+ */
+function envelopeAssembly(envelope = true): AssembledMedium {
+  const thick = thickAssembly();
+  if (thick.medium === undefined) {
+    throw new Error("the thick assembly draws a medium");
+  }
+  return {
+    ...thick,
+    drawn: {
+      ...thick.drawn,
+      ...(envelope
+        ? {
+            envelope: {
+              floorPa: 5e4,
+              floorAltitudeM: 5_000,
+              pressuresPa: new Float64Array([1e5, 5e4]),
+              dropped: [],
+            },
+          }
+        : {}),
+    },
+    regime: { kind: "cloudDeck", deckAltitudeM: 5_000 },
+  };
+}
+
+/** A record's ground as the cache draws it: its photometry's p q, clamped to [0, 1]. */
+function photometryGround(detail: BodyDetail): readonly [number, number, number] {
+  const { geometricAlbedo: p, phaseIntegral: q } = heldAppearanceOf(detail.record).photometry;
+  return clampedGroundAlbedo([p[0] * q[0], p[1] * q[1], p[2] * q[2]]);
+}
+
+/** The latest build the builder was asked, or a test failure. */
+function latestBuild(h: Harness): ScriptedBuild {
+  const build = h.builder.builds.at(-1);
+  if (build === undefined) {
+    throw new Error("no build was asked");
+  }
+  return build;
+}
+
+describe("a gas envelope's entry (R08.T16.a.2)", () => {
+  /** A kept body's frame entry. */
+  function kept(id: BodyIdHex, setting: KeptBodyAtmosphere): AtmosphereFrameBody {
+    return { ...lit(id), kept: setting };
+  }
+
+  /** The hand Jupiter's record, as `ATMOSPHERE TEST`'s `TEST JUPITER` gives it. */
+  const JUPITER = handJupiterRecord();
+
+  it("marks a server body whose assembly drew its gas envelope an envelope's, and asks its routed deck's bake over the envelope's floor", async () => {
+    const h = harness(undefined, routedDeck);
+    await drawn(h, [lit(A)], envelopeAssembly());
+    expect([h.cache.entryOf(A)?.envelope, latestDeck(h).ask.split]).toEqual([
+      true,
+      { altitudeM: 5_000, floor: "envelope" },
+    ]);
+  });
+
+  it("keeps a server body's surface air split at its deck over the ground", async () => {
+    const h = harness(undefined, routedDeck);
+    await drawn(h, [lit(A)], envelopeAssembly(false));
+    expect([h.cache.entryOf(A)?.envelope, latestDeck(h).ask.split]).toEqual([
+      false,
+      { altitudeM: 5_000, floor: "ground" },
+    ]);
+  });
+
+  it("draws an envelope by the analytic term under the product's closed route, APPROXIMATE with its reason, asking no bake", async () => {
+    const h = harness(undefined, "product", "product");
+    const report = await drawn(h, [lit(A)], envelopeAssembly());
+    expect([
+      h.cache.entryOf(A)?.envelope,
+      madeAt(h, 0).built.medium,
+      h.builder.decks.length,
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      report.labels,
+      report.reasons.get(A),
+    ]).toEqual([true, R05_EARTH_REFERENCE, 0, 0, 0, ["atmosphereApproximate"], [THICK_REASON]]);
+  });
+
+  it("asks an envelope no disc table, which R08.T16.b.2 checks at 10⁹ m, and a surface's split air one", async () => {
+    const envelope = harness();
+    await drawn(envelope, [lit(A)], envelopeAssembly());
+    const surface = harness();
+    await drawn(surface, [lit(A)], envelopeAssembly(false));
+    expect([envelope.builder.discs.length, surface.builder.discs.length]).toEqual([0, 1]);
+  });
+
+  it("builds a kept scene's record as a server body's reply, pending until it lands, asking nothing of the server", async () => {
+    const h = harness();
+    const setting: KeptBodyAtmosphere = { kind: "record", detail: JUPITER };
+    const pending = note(h, [kept(A, setting)], 0, null);
+    const build = latestBuild(h);
+    const asked = [
+      h.seam.asked.length,
+      h.builder.builds.length,
+      build.input,
+      pending.pending,
+      h.cache.entryOf(A),
+    ];
+    build.settle({ kind: "built", assembled: envelopeAssembly() });
+    await microtasks();
+    const report = note(h, [kept(A, setting)], 1, null);
+    expect([
+      asked,
+      h.builder.builds.length,
+      h.cache.entryOf(A)?.envelope,
+      h.cache.entryOf(A)?.regime,
+      report.pending,
+      report.labels,
+    ]).toEqual([
+      [
+        0,
+        1,
+        {
+          kind: "record",
+          detail: JUPITER,
+          lights: [SUN_LIGHT],
+          groundAlbedo: photometryGround(JUPITER),
+        },
+        true,
+        null,
+      ],
+      1,
+      true,
+      { kind: "cloudDeck", deckAltitudeM: 5_000 },
+      false,
+      ["atmosphereApproximate"],
+    ]);
+  });
+
+  it("builds a kept record again for a changed light set, and not for the same", () => {
+    const h = harness();
+    const setting: KeptBodyAtmosphere = { kind: "record", detail: JUPITER };
+    const other: BodyLight = { star: `${FIXTURE_SYSTEM}.0101`, spectrum: SUN_LIGHT.spectrum };
+    note(h, [kept(A, setting)], 0, null);
+    note(h, [kept(A, setting)], 1, null);
+    const same = h.builder.builds.length;
+    note(h, [{ ...lit(A, "disc", [SUN_LIGHT, other]), kept: setting }], 2, null);
+    expect([same, h.builder.builds.length, latestBuild(h).input]).toEqual([
+      1,
+      2,
+      expect.objectContaining({ lights: [SUN_LIGHT, other] }),
+    ]);
+  });
+
+  it("cancels a kept record's build when the scene sets another setting", () => {
+    const h = harness();
+    note(h, [kept(A, { kind: "record", detail: JUPITER })], 0, null);
+    const build = latestBuild(h);
+    note(h, [kept(A, { kind: "loading" })], 1, null);
+    expect([build.settled, h.cache.entryOf(A)]).toEqual([true, null]);
   });
 });
 

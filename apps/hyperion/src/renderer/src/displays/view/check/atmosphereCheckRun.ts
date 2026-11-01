@@ -23,7 +23,10 @@
  *    within {@link AtmosphereCheckTiming.legMaxS}. At the end of a fixture's leg,
  *    {@link ATMOSPHERE_GOAL_RADII} radii from it, once the camera's coast has run out, `AUTO` has
  *    settled and a few frames are drawn, it is captured as `fixture-<designation in lower kebab
- *    case>` ({@link fixtureCaptureLabel}). The tour first climbs from the seat towards `TEST MOON`,
+ *    case>` ({@link fixtureCaptureLabel}), or at a range step's range as that and its kilometres
+ *    ({@link rangeCaptureLabel}), once no `ATMOSPHERE: PENDING` stands, since `TEST JUPITER`'s
+ *    record is built only as it is first drawn larger than a point. The tour first climbs from the
+ *    seat towards `TEST MOON`,
  *    high in the night sky, since the line from the seat to the first fixture runs down through
  *    `TEST EARTH`.
  *
@@ -101,11 +104,22 @@ const MOON_DESIGNATION = "TEST MOON";
 
 /**
  * A step of the tour: to a fixture, to {@link ATMOSPHERE_GOAL_RADII} radii from it, captured
- * there; or towards a body (a fixture or `TEST MOON`) by a distance, captured nowhere.
+ * there; to a fixture's range, m from its centre, captured there (R08.T16.a.2's giant from 10⁹ m
+ * to its limb); or towards a body (a fixture or `TEST MOON`) by a distance, captured nowhere.
  */
 export type AtmosphereTourStep =
   | { readonly kind: "fixture"; readonly designation: string }
+  | { readonly kind: "range"; readonly designation: string; readonly rangeM: number }
   | { readonly kind: "toward"; readonly designation: string; readonly distanceM: number };
+
+/**
+ * The ranges `TEST JUPITER` is captured at, m from its centre, in turn (R08.T16.a.2): 9.5 × 10⁸,
+ * inside the 10⁹ m boundary within which the full passes draw a giant's medium; 5 × 10⁸;
+ * 2.2 × 10⁸, at which its limb's shell of some ten scale heights is resolved at R02's centre-pixel
+ * scale (plan R08's R08.T16.a); and 1.5 × 10⁸, its disc some 57° across, its limb within the
+ * primary's 60° field all round.
+ */
+export const JUPITER_CAPTURE_RANGES_M: ReadonlyArray<number> = [9.5e8, 5e8, 2.2e8, 1.5e8];
 
 /**
  * The tour, from the seat on `TEST EARTH`'s night side: a climb of 5 × 10⁷ m, some eight of
@@ -114,7 +128,8 @@ export type AtmosphereTourStep =
  * each fixture on the scene's legs: `TEST EARTH O3 SLAB` a quarter of the way round the star,
  * seen at about 45° of phase, `TEST MARS`, `TEST SATURN` and R08.T12.b.2's four under cloud or
  * haze, `TEST VENUS`, `TEST VENUS 5.80 MPa`, `TEST TITAN` and `TEST SATURN NH3 ICE DECK`, at about
- * 60°, and back to `TEST EARTH`, which so comes on its day side at about 45°.
+ * 60°, `TEST JUPITER` at each of {@link JUPITER_CAPTURE_RANGES_M} in turn, and back to
+ * `TEST EARTH`, which so comes on its day side at about 45°.
  */
 export const ATMOSPHERE_TOUR: ReadonlyArray<AtmosphereTourStep> = [
   { kind: "toward", designation: MOON_DESIGNATION, distanceM: 5e7 },
@@ -125,6 +140,11 @@ export const ATMOSPHERE_TOUR: ReadonlyArray<AtmosphereTourStep> = [
   { kind: "fixture", designation: "TEST VENUS 5.80 MPa" },
   { kind: "fixture", designation: "TEST TITAN" },
   { kind: "fixture", designation: "TEST SATURN NH3 ICE DECK" },
+  ...JUPITER_CAPTURE_RANGES_M.map((rangeM): AtmosphereTourStep => ({
+    kind: "range",
+    designation: "TEST JUPITER",
+    rangeM,
+  })),
   { kind: "fixture", designation: "TEST EARTH" },
 ];
 
@@ -192,6 +212,22 @@ export function fixtureCaptureLabel(designation: string): string {
   return label;
 }
 
+/**
+ * A range capture's label: its fixture's ({@link fixtureCaptureLabel}) and its range in whole
+ * kilometres, `fixture-test-jupiter-950000-km`.
+ *
+ * @throws Error as {@link fixtureCaptureLabel} does, or for a range that is not a positive whole
+ *   number of kilometres the label holds.
+ */
+export function rangeCaptureLabel(designation: string, rangeM: number): string {
+  const rangeKm = rangeM / 1000;
+  const label = `${fixtureCaptureLabel(designation)}-${String(rangeKm)}-km`;
+  if (!Number.isInteger(rangeKm) || rangeKm <= 0 || !/^[a-z0-9-]{1,48}$/u.test(label)) {
+    throw new Error(`views check: ${designation} at ${String(rangeM)} m makes no capture label`);
+  }
+  return label;
+}
+
 /** A body the tour may fly to: its designation, centre and equatorial radius. */
 interface TourBody {
   readonly designation: string;
@@ -241,7 +277,7 @@ export function stageRangesM(
 /**
  * The tour's legs from `startM` (the seat's eye), each along the line from where the one before
  * ended to its target's centre, in stages ({@link stageRangesM}): to {@link ATMOSPHERE_GOAL_RADII}
- * radii from a fixture, or `distanceM` towards a body.
+ * radii from a fixture, to a range step's range, or `distanceM` towards a body.
  *
  * @throws Error for a tour naming a body the scene does not have, or a leg the camera could not
  *   fly forward (a start within the goal's distance, or a leg towards a body that would reach it).
@@ -265,6 +301,9 @@ export function atmosphereLegs(
     switch (step.kind) {
       case "fixture":
         endRangeM = goalRadii * body.radiusM;
+        break;
+      case "range":
+        endRangeM = step.rangeM;
         break;
       case "toward":
         endRangeM = startRangeM - step.distanceM;
@@ -300,19 +339,40 @@ export function atmosphereLegs(
       toM,
       distanceM: startRangeM - endRangeM,
       stages,
-      capture:
-        step.kind === "fixture"
-          ? {
-              label: fixtureCaptureLabel(body.designation),
-              designation: body.designation,
-              rangeM: endRangeM,
-              phaseDeg: phaseAngleDeg(body.centreM, toM),
-            }
-          : null,
+      capture: legCapture(step, body, endRangeM, toM),
     });
     atM = toM;
   }
   return legs;
+}
+
+/** A leg's capture at its end, `toM`, `endRangeM` from `body`'s centre: none towards a body. */
+function legCapture(
+  step: AtmosphereTourStep,
+  body: TourBody,
+  endRangeM: number,
+  toM: Vec3,
+): AtmosphereLegCapture | null {
+  let label: string | null;
+  switch (step.kind) {
+    case "fixture":
+      label = fixtureCaptureLabel(body.designation);
+      break;
+    case "range":
+      label = rangeCaptureLabel(body.designation, step.rangeM);
+      break;
+    case "toward":
+      label = null;
+      break;
+  }
+  return label === null
+    ? null
+    : {
+        label,
+        designation: body.designation,
+        rangeM: endRangeM,
+        phaseDeg: phaseAngleDeg(body.centreM, toM),
+      };
 }
 
 /**
@@ -938,6 +998,11 @@ export async function runAtmosphereCheck(
     }
     await flyLeg(leg);
     if (leg.capture !== null) {
+      // A record's medium (`TEST JUPITER`'s) is built once the body is drawn larger than a point.
+      await until(
+        `${ATMOSPHERE_PENDING} still stood at ${leg.capture.label}`,
+        () => !plate().statements.includes(ATMOSPHERE_PENDING),
+      );
       await capture(leg.capture.label, {
         designation: leg.capture.designation,
         rangeM: norm(sub(leg.centreM, reckonedM)),

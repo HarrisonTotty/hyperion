@@ -296,9 +296,9 @@ export type AssembledMedium =
 /** What the assembly takes beside its input. */
 export interface AssembleOptions {
   /**
-   * Whether a gas envelope sent `ok` takes its medium (R08.T16.a): `false` if absent, so that the
-   * console draws no giant before R08.T16.a.2 routes it through its floor's split (lean,
-   * 2026-10-31), and the envelope keeps `atmosphereNotYetModelled` as before.
+   * Whether a gas envelope sent `ok` takes its medium (R08.T16.a): `false` if absent, when the
+   * envelope keeps `atmosphereNotYetModelled`; the optics workers' `true` since R08.T16.a.2
+   * (`opticsJobs.ts`'s `OPTICS_ASSEMBLY`), which split it at its floor (`classifyRegime`).
    */
   readonly envelopes?: boolean;
   /**
