@@ -10008,3 +10008,27 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     shade at x4, and once a source for the azimuth. Passing the cosines through would keep the
     picture within G10, but not bit for bit. Not measured. H1's exact hoist of the latitude's side
     was slower.
+- **The view's light (fix-view-light, 2026-11-01: the owner's white frame and slow dimming).**
+  - _The meter holds the veil._ `histogram.wgsl` and `cpuHistogram` add every glare source's veil
+    at each weighed texel (`meteredVeil`, through `glare_per_unit`), reversing Design note 12's "the
+    veil is drawn but not metered"; Design note 10's disc rule holds (the disc's texels weigh 0).
+    It spreads the source's whole light, the new `GlareSource.luminance`, packed in
+    `GlareSourceGpu.inside.w`, since the excess the image draws vanishes at the exposure it calls
+    for. `HistogramRequest.glare` and `histogramParams`' fourth argument, the sources' count, are
+    new; the renderer writes the sources before the histogram's dispatch.
+  - _The cut._ `AutoExposure.cut()` snaps to the next reading; `readingRange` and
+    `CLIPPED_TOP_FRACTION` make a clipped reading a bound. `HistogramReader.dropInFlight` and
+    `PhotorealRenderer.dropHistograms` drop the histograms of frames before an in-scene cut. VIEW
+    cuts at each stage's start, a system jump, an uneased preset or target (`commandCutsImage`),
+    the inspection's framing, the image coming to be drawn and AUTO entered from another level.
+    The frames before the first reading draw at the old exposure, as the brief asks; the UX review
+    holds a cut onto a brighter scene to the guide's flash rule (QUESTION for main).
+  - _The speeds, settled._ `SMOOTHING_SPEED_EV_PER_S` is one number, 24 EV/s either way (was
+    `{ brighten: 3, darken: 1 }`), a camera's AE; the eye's adaptation is not modelled.
+  - _The inspection's opening at its meter_ (owner-view-body's `opensAtMeter`) is a cut's first
+    reading: a clipped one is a bound the next readings snap past. This lane's own VIEW BODY lean
+    was dropped for it.
+  - _Next:_ a held host disc's glare goes through the bloom chain, whose coarsest level takes the
+    eye PSF's far tail: at `AVG`'s exposure the Sun's halo is a plateau to about 8°. Routing a glare
+    source's light above the bloom threshold through the closed form would fix it (findings).
+  - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
