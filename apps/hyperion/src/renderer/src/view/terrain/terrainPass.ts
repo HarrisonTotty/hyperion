@@ -337,6 +337,8 @@ export interface TerrainPool {
   dropRefinement?(keyString: string): void;
   /** Listens for refined normals; returns the function that stops listening. */
   onRefined?(cb: (refined: RefinedDraft) => void): () => void;
+  /** The refinements asked and not yet told; absent, none. */
+  readonly refiningCount?: number;
 }
 
 /**
@@ -1287,6 +1289,15 @@ export class TerrainPass {
    * or `null` before any selection and while faulted (R10.T16.c's survey edge and the tests read
    * them between steps).
    */
+  /**
+   * The drafted bakes' refinements asked and not yet landed (R10.T6.a's progressive bake): 0 once
+   * every resident patch's normals are its whole bake's, as they are always where its pool drafts
+   * none. A frame drawn before they land may shade otherwise than one drawn after.
+   */
+  get refining(): number {
+    return this.#device.pool.refiningCount ?? 0;
+  }
+
   get lastStep(): Pick<TerrainStep, "selection" | "drawSet"> | null {
     const selected = this.#selected;
     return selected === null || this.#faulted

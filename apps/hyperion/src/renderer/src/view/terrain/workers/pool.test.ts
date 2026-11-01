@@ -1664,6 +1664,7 @@ describe("the height-worker pool's progressive bakes (R10.T6.a)", () => {
     ]);
     a.bakeOldest();
     expect(a.pendingRefinements.map((m) => m.key)).toEqual([keyAt(7)]);
+    expect(lane.refiningCount).toBe(2);
     answerRefinement(a);
     answerRefinement(b);
     expect([told, lane.refiningCount]).toEqual([

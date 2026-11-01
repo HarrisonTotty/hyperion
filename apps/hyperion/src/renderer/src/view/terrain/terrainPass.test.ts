@@ -106,6 +106,8 @@ class FakePool implements TerrainPool {
   readonly refines: RefineRequest[] = [];
   /** The refinements dropped, by key string, in order. */
   readonly dropped: string[] = [];
+  /** The refinements asked and not yet told, as the pool counts them. */
+  refiningCount = 0;
   terminated = false;
 
   refine(r: RefineRequest): void {
@@ -1920,6 +1922,8 @@ describe("the terrain pass's drafted bakes (R10.T6.a's progressive bake)", () =>
     }
     fake.deliver(pass, request.key, { fill: 0.5, drafted: true });
     expect(fake.refines).toEqual([{ key: request.key, priority: request.priority, ticket: 1 }]);
+    fake.refiningCount = 1;
+    expect(pass.refining).toBe(1);
     const writes = engine.counts.bufferWrites;
     const tiles = normalsTiles(engine).length;
     fake.refined({

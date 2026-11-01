@@ -835,6 +835,11 @@ export class HeightWorkerPool {
     }
   }
 
+  /** {@link HeightWorkerLane.refiningCount} of the pool's own lane; 0 for a pool without one. */
+  get refiningCount(): number {
+    return this.own?.refining.size ?? 0;
+  }
+
   /** Listens for the own lane's refined normals; returns the unsubscribe. */
   onRefined(cb: (refined: RefinedDraft) => void): () => void {
     return this.own === null ? () => undefined : listen(this.own.refinedListeners, cb);

@@ -285,7 +285,9 @@ function chordSagM(level: number): number {
  * Streams `pass` until its view's frame gives the mask and draws its terrain whole, or time runs
  * out: every patch its own bake; or, given the body-fixed points a check reads (`near`), every
  * patch drawn and none standing in whose square holds one of them and whose chords sag more than
- * {@link STAND_IN_SAG_M} below the datum (154 m at level 0, 0.6 m at level 4). The grazing views'
+ * {@link STAND_IN_SAG_M} below the datum (154 m at level 0, 0.6 m at level 4); and, either way, no
+ * draft waiting for its refined normals (R10.T6.a), so that the frames a check compares shade alike.
+ * The grazing views'
  * ground out to the horizon goes on standing in over the survey's margin, which the checks never
  * read, and their fine patches at the points stream for longer than the part allows.
  */
@@ -314,9 +316,10 @@ async function settled(
       frame.terrainDraws.length >= 1 &&
       drawSet !== undefined &&
       drawSet.missing === 0 &&
+      pass.refining === 0 &&
       (near === null ? drawSet.standingIn === 0 : !standsInNear());
     if (done || now - started > STREAM_TIMEOUT_MS) {
-      const state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in${near === null ? "" : `, near ${String(standsInNear())}`}`;
+      const state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in, ${String(pass.refining)} refining${near === null ? "" : `, near ${String(standsInNear())}`}`;
       return { done, frame, state };
     }
     // Streaming runs in the workers; give them the event loop between frames.

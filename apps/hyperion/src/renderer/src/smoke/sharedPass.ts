@@ -268,7 +268,8 @@ async function drawView(
 
 /**
  * Steps `pass` over `views` and draws each, every 50 ms, until every view's draw set leaves nothing
- * missing or standing in, or the time runs out; the last frames, by view.
+ * missing or standing in and no draft waits for its refined normals (R10.T6.a), or the time runs
+ * out; the last frames, by view.
  */
 async function stream(
   pass: TerrainPass,
@@ -290,7 +291,8 @@ async function stream(
         nowMs: now,
       }),
     );
-    const settled = frames.every((f) => !f.missing && !f.standingIn && f.draws.length > 0);
+    const settled =
+      frames.every((f) => !f.missing && !f.standingIn && f.draws.length > 0) && pass.refining === 0;
     if (settled || now - started > timeoutMs) {
       return { settled, frames };
     }
@@ -715,7 +717,12 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         passView.id,
         frameInput(view, light, false, performance.now()),
       );
-      settled = !streaming.missing && !streaming.standingIn && streaming.draws.length > 0;
+      // No draft waits for its normals either: the two draws compared below read one slot's.
+      settled =
+        !streaming.missing &&
+        !streaming.standingIn &&
+        streaming.draws.length > 0 &&
+        made.refining === 0;
       if (!settled) {
         // The workers bake and the engine answers on the event loop, between the polls.
         // oxlint-disable-next-line no-await-in-loop
