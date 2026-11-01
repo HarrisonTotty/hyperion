@@ -33811,13 +33811,19 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   Only the new `planetary/resources` golden and `rng/tags`'s `body.resources` line are added.
   - _For the record's `Full` level:_ `Resource::ALL`, 11 in the plan's order with `Resource::key`;
     `ResourceAbundances::{fraction, iter, radioactive}`; `body.resources` words 0–10 read, 11–15
-    reserved (open question 17's base metals).
+    reserved (request 17's base metals).
   - _The layer_ (lean, 2026-11-01): `OuterLayer::of_lid` on the record's crust lid (bulk, silicate
-    crust, ice shell) or the envelope's 1-bar gas; its depth stays open (open question 18). No crust
+    crust, ice shell) or the envelope's 1-bar gas; its depth stays open (request 18). No crust
     or envelope modelled gives `NotModelled`. Solid layers carry their water's deuterium too (at
     VSMOW), and an absent [α/Fe] is read as 0.
   - _The draws_ (lean, 2026-11-01): each multiple scales its resource's odds, m w ÷ (1 + m (w − 1)),
     all divided by their sum above 1: the plan's 0.3 dex on trace groups, less on major parts.
   - _[Fe/H] on the majors_ (lean, 2026-11-01): the light lithophiles take 10^[α/H] on their odds,
     not their share; the iron group and trace groups on their share (the plan's test), the metals
-    capped at the layer's solids.
+    capped at the layer's solids. A bulk's metal the scaled groups leave counts as silicates.
+  - _Tests:_ the 10^[Fe/H] scaling is exact at the median ranks only (the odds draws break it), to
+    +0.3, below the cap; the halo test leaves out the constructed 7σ ranks, where the division by
+    the sum evens the metals out.
+  - _Gas and airless (lean, 2026-11-01):_ an envelope's D/H is protosolar (Lodders 2010), 2.9 ×
+    10⁻⁵ of a Jupiter by mass against the brainstorm's 3–4 × 10⁻⁵, with no ice-giant enrichment;
+    an airless body's helium-3 is 0 until request 18.

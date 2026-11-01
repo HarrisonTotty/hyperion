@@ -19,7 +19,7 @@
 //! - **An ice shell** over a body whose ocean froze (an `H2O` lid): its ices alone.
 //! - **A gas envelope's gas at 1 bar** (P14.T52.d's composition), which a scoop takes.
 //!
-//! The layer's depth or mass is open (the life brainstorm's open question 18): every fraction is
+//! The layer's depth or mass is open (the life brainstorm's request 18): every fraction is
 //! per unit mass of the layer, whatever its depth.
 //!
 //! # The mean
@@ -27,11 +27,11 @@
 //! A solid layer is a mix of reservoirs, each with a column of concentrations at the solar
 //! \[Fe/H\] and \[α/Fe\] and the present Solar System's age:
 //!
-//! - an undifferentiated body's metal, CI chondrites' siderophiles ([`METAL`]): the iron group and
+//! - an undifferentiated body's metal, CI chondrites' siderophiles (`METAL`): the iron group and
 //!   the platinum group in CI's proportion;
 //! - an undifferentiated body's rock, CI chondrites' rock less their metal, water and nitrogen
-//!   ([`CI_ROCK`]), whose carbon is organic matter;
-//! - a differentiated body's silicate, the bulk silicate Earth ([`BULK_SILICATE`]), its rare
+//!   (`CI_ROCK`), whose carbon is organic matter;
+//! - a differentiated body's silicate, the bulk silicate Earth (`BULK_SILICATE`), its rare
 //!   earths CI's in proportion to its aluminium, as refractory lithophiles are.
 //!
 //! Each metal group is its reservoirs' shares times their concentrations, times 10^\[Fe/H\], and
@@ -68,7 +68,7 @@
 //! a major one, the silicates or a shell's water, moves less and stays below 1 (to first order its
 //! scatter is σ (1 − m)). Where the drawn fractions sum to more than 1, each is divided by their
 //! sum. Each fraction lies in 0–1 and they sum to at most 1, to rounding; at the median ranks they
-//! are the mean's to the bit.
+//! are the mean's, to rounding (exactly, unless the mean's own parts sum past 1 by rounding).
 //!
 //! Multiplying the fractions themselves and closing them over the layer (the compositional
 //! closure) was set aside: it scatters a major part against another by σ√2, so that a crust's
@@ -79,7 +79,7 @@
 //! - The crust's enrichment in incompatible elements: a differentiated body's layer is its whole
 //!   silicate, the bulk silicate Earth, whose uranium is 20.3 ppb against the continental crust's
 //!   part per million.
-//! - An airless surface's implanted helium-3 (the life brainstorm's open question 18): zero on
+//! - An airless surface's implanted helium-3 (the life brainstorm's request 18): zero on
 //!   every solid layer.
 //! - The ice giants' deuterium enrichment by their ices: every envelope's hydrogen is protosolar.
 //! - Life's organic matter, the abiotic organics of a body whose rock melted, an ordinary
@@ -122,7 +122,7 @@ pub const RESOURCE_SCATTER_DEX: f64 = 0.3;
 
 /// Words of [`tags::BODY_RESOURCES`] a body reads or reserves: words 0–10, one rank per resource
 /// in [`Resource::ALL`]'s order, then five reserved, for the base and precious metals the life
-/// brainstorm's open question 17 asks for.
+/// brainstorm's request 17 asks for.
 pub const RESOURCE_WORDS: u64 = 16;
 
 /// CI chondrites' hydrogen, kg per kg: 19,700 ppm (Lodders 2010, arXiv:1010.2746, Table 2,
@@ -171,8 +171,9 @@ pub const BULK_SILICATE_EARTH_IRON_GROUP: [f64; 6] =
     [82e-6, 2_625e-6, 1_045e-6, 62_600e-6, 105e-6, 1_960e-6];
 
 /// The bulk silicate Earth's platinum group, kg per kg: Ru 5.0, Rh 0.9, Pd 3.9, Os 3.4, Ir 3.2 and
-/// Pt 7.1 ppb (McDonough and Sun 1995, Table 5; the lane's memory, not re-read): what the core
-/// left behind, about 1/140 of CI's.
+/// Pt 7.1 ppb (McDonough and Sun 1995, Table 5; the lane's memory, not re-read), about 1/140 of
+/// CI's: mostly the late veneer accreted after the core formed (Day, Pearson and Taylor 2007,
+/// Science 315, 217; not read), which this model gives every differentiated body as Earth's.
 pub const BULK_SILICATE_EARTH_PLATINUM_GROUP: [f64; 6] =
     [5.0e-9, 0.9e-9, 3.9e-9, 3.4e-9, 3.2e-9, 7.1e-9];
 
@@ -387,6 +388,10 @@ impl ResourceDraws {
     /// The draws of the body `body` in the universe of `seed`: words 0–10 of its
     /// [`tags::BODY_RESOURCES`] stream, one open uniform each, in turn.
     ///
+    /// # Panics
+    ///
+    /// Never: an open uniform lies strictly between 0 and 1.
+    ///
     /// # Examples
     ///
     /// ```
@@ -401,10 +406,6 @@ impl ResourceDraws {
     /// assert_ne!(ResourceDraws::for_body(seed, b), ResourceDraws::for_body(seed, c));
     /// # Ok::<(), hyperion_sim::id::DecodeSystemIdError>(())
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// Never: an open uniform lies strictly between 0 and 1.
     #[must_use]
     pub fn for_body(seed: Seed, body: BodyId) -> Self {
         let mut stream = Stream::open(seed, tags::BODY_RESOURCES, ObjectKey::from(body));
@@ -574,7 +575,7 @@ impl Mean {
 /// the solar \[Fe/H\] and \[α/Fe\] and, for its radioactive elements, the present Solar System's
 /// age ([`RADIOGENIC_REFERENCE_AGE`]).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Column {
+pub(crate) struct Column {
     iron_group: f64,
     platinum_group: f64,
     alpha_lithophiles: f64,
@@ -587,33 +588,9 @@ pub struct Column {
 }
 
 impl Column {
-    /// The iron group's concentration.
-    #[must_use]
-    pub const fn iron_group(&self) -> f64 {
-        self.iron_group
-    }
-
-    /// The platinum group's concentration.
-    #[must_use]
-    pub const fn platinum_group(&self) -> f64 {
-        self.platinum_group
-    }
-
-    /// The rare earths' concentration.
-    #[must_use]
-    pub const fn rare_earths(&self) -> f64 {
-        self.rare_earths
-    }
-
-    /// The light lithophile metals' concentration, its α elements' and the others' summed.
-    #[must_use]
-    pub const fn light_lithophiles(&self) -> f64 {
-        self.alpha_lithophiles + self.other_lithophiles
-    }
-
     /// The radioactive isotope `isotope`'s concentration at the present Solar System's age.
     #[must_use]
-    pub const fn isotope(&self, isotope: RadiogenicIsotope) -> f64 {
+    pub(crate) const fn isotope(&self, isotope: RadiogenicIsotope) -> f64 {
         let element = match isotope {
             RadiogenicIsotope::Uranium238 | RadiogenicIsotope::Uranium235 => self.uranium,
             RadiogenicIsotope::Thorium232 => self.thorium,
@@ -651,12 +628,13 @@ pub const CI_METAL_MASS_FRACTION: f64 = sum(&CI_IRON_GROUP) + sum(&CI_PLATINUM_G
 pub const CI_ROCK_MASS_FRACTION: f64 =
     1.0 - CI_WATER_MASS_FRACTION - CI_NITROGEN_MASS_FRACTION - CI_METAL_MASS_FRACTION;
 
-/// ⁴⁰K's share of potassium, which the light lithophiles leave to the radioactives.
+/// The mass share of potassium that is not ⁴⁰K, about 0.999 88, which the light lithophiles keep:
+/// its ⁴⁰K goes to the radioactives.
 const POTASSIUM_STABLE_SHARE: f64 = 1.0 - RadiogenicIsotope::Potassium40.share_of_element();
 
 /// An undifferentiated body's metal: CI chondrites' iron and platinum groups in their proportion,
 /// summing to 1.
-pub const METAL: Column = Column {
+pub(crate) const METAL: Column = Column {
     iron_group: sum(&CI_IRON_GROUP) / CI_METAL_MASS_FRACTION,
     platinum_group: sum(&CI_PLATINUM_GROUP) / CI_METAL_MASS_FRACTION,
     alpha_lithophiles: 0.0,
@@ -670,7 +648,7 @@ pub const METAL: Column = Column {
 
 /// An undifferentiated body's rock: CI chondrites' lithophiles and carbon per unit of their rock
 /// ([`CI_ROCK_MASS_FRACTION`]), with their uranium, thorium and potassium as measured today.
-pub const CI_ROCK: Column = Column {
+pub(crate) const CI_ROCK: Column = Column {
     iron_group: 0.0,
     platinum_group: 0.0,
     alpha_lithophiles: sum(&CI_ALPHA_LITHOPHILES) / CI_ROCK_MASS_FRACTION,
@@ -688,7 +666,7 @@ pub const CI_ROCK: Column = Column {
 /// A differentiated body's silicate: the bulk silicate Earth, its rare earths CI's times its
 /// aluminium over theirs (refractory lithophiles in chondritic proportion, McDonough and Sun 1995),
 /// and no carbon.
-pub const BULK_SILICATE: Column = Column {
+pub(crate) const BULK_SILICATE: Column = Column {
     iron_group: sum(&BULK_SILICATE_EARTH_IRON_GROUP),
     platinum_group: sum(&BULK_SILICATE_EARTH_PLATINUM_GROUP),
     alpha_lithophiles: sum(&BULK_SILICATE_EARTH_ALPHA_LITHOPHILES),

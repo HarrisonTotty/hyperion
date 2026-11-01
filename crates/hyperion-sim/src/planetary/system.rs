@@ -7009,6 +7009,8 @@ pub(crate) mod planet_lag;
 mod pore_gas_tests;
 #[cfg(test)]
 mod present_state_tests;
+#[cfg(test)]
+mod resources_tests;
 mod rogue;
 mod second_generation;
 pub(crate) mod small_bodies;

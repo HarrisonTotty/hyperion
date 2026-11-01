@@ -40,6 +40,7 @@ use hyperion_sim::planetary::derive::{
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::figures::interior::RadiogenicIsotope;
 use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
@@ -1471,9 +1472,9 @@ fn golden_systems_habitability_is_pinned() {
     golden!("planetary/habitability", w.as_str());
 }
 
-/// P14.T26: every golden system's bodies' resource abundances at the epoch, each fraction by its
-/// bits, from `hooks_at`, over the crust's lid or the envelope's gas; a body whose abundances are
-/// not `Ok` by its section's state.
+/// P14.T26: every golden system's bodies' resource abundances at the epoch, each fraction and each
+/// radioactive isotope's by its bits, from `hooks_at`, over the crust's lid or the envelope's gas;
+/// a body whose abundances are not `Ok` by its section's state.
 #[test]
 fn the_golden_systems_resource_abundances_are_pinned() {
     let galaxy = fixture();
@@ -1494,6 +1495,12 @@ fn the_golden_systems_resource_abundances_are_pinned() {
                 Section::Ok(abundances) => {
                     for (resource, x) in abundances.iter() {
                         w.f64(&format!("{name} {}", resource.key()), x);
+                    }
+                    for isotope in RadiogenicIsotope::ALL {
+                        w.f64(
+                            &format!("{name} {isotope:?}"),
+                            abundances.radioactive(isotope),
+                        );
                     }
                     pinned_bodies += 1;
                 }

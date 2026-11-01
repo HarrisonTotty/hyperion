@@ -391,15 +391,49 @@ fn a_giant_s_gas_holds_its_helium_3_and_deuterium() {
     assert_eq!(none.total(), 0.0);
 }
 
-/// The median ranks give every multiple 1, so that the fractions are the mean's to the bit.
+/// The median ranks give every multiple 1, and so the mean's fractions and isotopes, to rounding,
+/// over every layer, both sides of the snow line and the halo's to the metal-rich disc's hosts.
 #[test]
-fn the_median_ranks_give_the_mean() {
+fn the_median_ranks_give_the_mean_to_rounding() {
     for resource in Resource::ALL {
         assert_eq!(
             ResourceDraws::MEDIAN.multiple(resource),
             1.0,
             "{resource:?}"
         );
+    }
+    let gas = jupiter_gas();
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-15 * a.abs().max(b.abs());
+    for (of, side) in [
+        (earth(), SnowLineSide::Inside),
+        (icy(), SnowLineSide::Beyond),
+    ] {
+        for (fe_h, alpha_fe) in [(-2.5, 0.4), (0.0, 0.0), (0.5, -0.1)] {
+            let bulk = bulk_of(of, fe_h, alpha_fe);
+            for (layer, solid) in [
+                (OuterLayer::Bulk, Some(Solid::Bulk)),
+                (OuterLayer::SilicateCrust, Some(Solid::SilicateCrust)),
+                (OuterLayer::IceShell, Some(Solid::IceShell)),
+                (OuterLayer::Gas(&gas), None),
+            ] {
+                let inputs = ResourceInputs {
+                    bulk: &bulk,
+                    formed: side,
+                    layer,
+                    age: NOW,
+                };
+                let mean = solid.map_or_else(|| gas_mean(&gas), |solid| solid_mean(&inputs, solid));
+                let median = ResourceAbundances::derive(&inputs, &ResourceDraws::MEDIAN);
+                for (resource, x) in median.iter() {
+                    let m = mean.fractions[resource.index()];
+                    assert!(close(x, m), "{resource:?} on {layer:?}: {x} against {m}");
+                }
+                for (isotope, &m) in RadiogenicIsotope::ALL.iter().zip(&mean.radioactive) {
+                    let x = median.radioactive(*isotope);
+                    assert!(close(x, m), "{isotope:?} on {layer:?}: {x} against {m}");
+                }
+            }
+        }
     }
 }
 

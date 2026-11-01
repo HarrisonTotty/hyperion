@@ -896,6 +896,15 @@ fn a_rogue_planet_s_system_is_the_same_every_time_and_in_every_order() {
                 );
                 let hooks = system.hooks_at(&ctx, index, UniverseTime::EPOCH).unwrap();
                 assert_eq!(hooks.is_some(), body.identity().kind() != BodyKind::Ring);
+                // Its resources read a bulk no rogue planet's derivation models (P14.T26).
+                if let Some(hooks) = &hooks {
+                    let expected = if body.identity().state() == BodyState::Present {
+                        SectionState::NotModelled
+                    } else {
+                        SectionState::NotApplicable
+                    };
+                    assert_eq!(hooks.resources().state(), expected, "{:?}", record.id());
+                }
                 assert_eq!(
                     system.surface_seed(index).unwrap().is_some(),
                     body.identity().kind() != BodyKind::Ring

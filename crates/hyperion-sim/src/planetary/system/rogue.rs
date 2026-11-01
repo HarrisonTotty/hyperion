@@ -373,9 +373,9 @@ impl PlanetarySystem {
 
     /// [`hooks_at`](Self::hooks_at) in a rogue planet's system: the body's surface seed, its bulk
     /// composition `NotModelled` (it reads a derivation's element inventory, which the derivation
-    /// with no star does not take), its record's surface's state, its habitability `NotModelled`
-    /// where it is present (P14.T25), and its resource abundances in its bulk's state, since they
-    /// read it (P14.T26); `None` for a ring.
+    /// with no star does not take), its record's surface's state, and its habitability (P14.T25)
+    /// and resource abundances (P14.T26) `NotModelled` where it is present, since they read its
+    /// surface and its bulk; `None` for a ring.
     pub(super) fn rogue_hooks(
         &self,
         ctx: &SystemContext,
@@ -400,17 +400,13 @@ impl PlanetarySystem {
             Section::NotModelled => (Section::NotModelled, Section::NotModelled),
             Section::NotApplicable => (Section::NotApplicable, Section::NotApplicable),
         };
-        // Its habitability reads the surface, which no rogue planet's derivation models.
-        let habitability = match record.identity().state() {
-            BodyState::Present => Section::NotModelled,
-            BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
-                Section::NotApplicable
-            }
-        };
-        let resources = match &bulk {
-            Section::NotApplicable => Section::NotApplicable,
-            Section::Ok(_) | Section::NotResolved | Section::NotModelled => Section::NotModelled,
-        };
+        // Its habitability reads the surface, and its resources the bulk, which no rogue planet's
+        // derivation models.
+        let state = record.identity().state();
+        let (habitability, resources) = (
+            not_modelled_if_present(state),
+            not_modelled_if_present(state),
+        );
         Ok(Some(
             BodyHooks::new(seed, bulk, surface, figures)
                 .with_habitability(habitability)
@@ -565,4 +561,16 @@ fn not_present(builder: BodyRecordBuilder) -> BodyRecordBuilder {
         .figure(Section::NotApplicable)
         .rotation(Section::NotApplicable)
         .hooks(Section::NotApplicable)
+}
+
+/// A section a rogue planet's derivation does not model, in a body of state `state`: not modelled
+/// where it is present, and not applicable otherwise.
+#[must_use]
+const fn not_modelled_if_present<T>(state: BodyState) -> Section<T> {
+    match state {
+        BodyState::Present => Section::NotModelled,
+        BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
+            Section::NotApplicable
+        }
+    }
 }
