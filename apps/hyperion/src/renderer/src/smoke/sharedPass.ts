@@ -43,9 +43,10 @@ import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import type { MemoryCategory } from "../view/engine/memory";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
-import type { DepthLayerPass, DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
+import type { DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
-import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { GEOMETRY_BEFORE_R14, SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
 import { allocationTally } from "../view/terrain/gpu/allocationTally";
 import type { PatchKey } from "../view/terrain/patchKey";
@@ -55,8 +56,6 @@ import { TerrainShadows } from "../view/terrain/shadows/terrainShadows";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import type { TerrainLighting } from "../view/terrain/terrainMaterial";
 import {
-  ALL_LEVERS,
-  NO_LEVERS,
   TerrainPass,
   type TerrainPassView,
   type TerrainView,
@@ -90,6 +89,7 @@ const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "atmosphere-tables",
   "atmosphere-view",
   "coarse-field-gpu",
+  "geometry-clusters",
   "height-cache",
   "shadows",
   "sky-cube",
@@ -528,12 +528,13 @@ async function texelsOf(
   }
 }
 
-/** Each caster pass's instances drawn, by direct count, joined: the terrain's and the others'. */
-function casterCounts(passes: ReadonlyArray<DepthLayerPass>): string {
-  return passes
-    .map((each) => String(each.draws.reduce((sum, d) => sum + (d.instanceCount ?? 0), 0)))
-    .join(", ");
+/** The sum of `values`. */
+function sum(values: ReadonlyArray<number>): number {
+  return values.reduce((a, b) => a + b, 0);
 }
+
+/** A lit mesh patch's triangles, as a caster draws it. */
+const LIT_PATCH_TRIANGLES = LIT_PATCH_INDICES / 3;
 
 /**
  * A smoke kernel that copies one layer of the cascades' depth into a buffer as its bits, row by
@@ -730,6 +731,8 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
       }
     }
     made.step({ views: [passView], grounded: [] });
+    // The cluster path's counters sampled (plan R14, R14.T1.b), for the casters' triangles.
+    made.measureClusters(true);
     const frame = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const living = tally.liveBytes(CASCADE_MEMORY_CATEGORY) - before;
     const cascades = frame.cascades;
@@ -778,21 +781,30 @@ export async function checkShadowCascades(engine: RenderEngine, checks: Checks):
         seen.brighter <= NEVER_BRIGHTER,
       `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
     );
-    // The same frame with plan R14's levers off, as the pass drew it before them: its cascades'
-    // layers and its frame, byte for byte, from the same selection and residents (R14.T1).
-    made.setLevers(NO_LEVERS);
+    // The same frame by the way back (`GEOMETRY_BEFORE_R14`), as the pass drew it before plan R14:
+    // its cascades' layers and its frame, byte for byte, from the same selection and residents.
+    made.setGeometry(GEOMETRY_BEFORE_R14);
     const unlevered = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const shadowedBefore = await texelsOf(engine, "cascades: before R14", view, unlevered.draws);
     const layersBefore =
       target === null
         ? ["none"]
         : await layerDigests(engine, target.depth, target.layers, target.sizePx);
-    made.setLevers(ALL_LEVERS);
+    made.setGeometry(SETTINGS.high.geometry);
+    // Each cascade's caster triangles: the lit mesh's patches and the cluster path's counts.
+    const stats = made.clusterStats(passView.id);
+    const triangles = (litMesh: ReadonlyArray<number>, clusters: typeof stats): number[] =>
+      litMesh.map((n, k) => n * LIT_PATCH_TRIANGLES + (clusters?.[k]?.triangles ?? 0));
+    const casting = triangles(cascades?.litMeshCasters ?? [], stats);
+    const prior = triangles(unlevered.cascades?.litMeshCasters ?? [], null);
+    const ratio = (sum(casting) / Math.max(1, sum(prior))).toFixed(3);
     checks.check(
       "R14.T1 the cascades' layers and the frame they shadow are those the pass drew before plan R14, byte for byte",
       bytesDigest(shadowedBefore) === bytesDigest(shadowed) &&
-        layersBefore.join() === layers.join(),
-      `${path}; ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches; caster instances by cascade ${casterCounts(passes)}, ${casterCounts(unlevered.cascades?.passes ?? [])} before; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}; before ${layersBefore.join(", ")}`,
+        layersBefore.join() === layers.join() &&
+        cascades?.clustered === true &&
+        stats !== null,
+      `${path}; ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches, the interior cast by clusters ${String(cascades?.clustered)}; caster triangles by cascade ${casting.join(", ")} (clusters ${(stats ?? []).map((each) => String(each.clusters)).join(", ")}), ${prior.join(", ")} before, ${ratio} of them; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}; before ${layersBefore.join(", ")}`,
     );
     made.dispose();
     pass = null;

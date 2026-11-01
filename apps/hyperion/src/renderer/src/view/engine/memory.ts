@@ -16,6 +16,9 @@
  *   the medium's terms and density and phase tables that they and the per-frame kernels read
  *   (R08.T6.b), and the absorber-column table and the lights' curves of growth (R08.T6.c).
  * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
+ * - `geometry-clusters`: plan R14's cluster path: each terrain slot's cluster records, each view's
+ *   buckets (their lists and indirect arguments), its cull inputs and its counters' read-back ring
+ *   (R14.T1.b).
  * - `coarse-field-gpu`: the brainstorm's "coarse field, GPU copy", each body's coverage mask, a
  *   byte a coarse cell a face (R10.T7, R10 Design note 12), and the disc's class map once R10.T10.d
  *   files it here; the fields themselves stay in the height workers.
@@ -31,6 +34,7 @@ export type MemoryCategory =
   | "atmosphere-tables"
   | "atmosphere-view"
   | "coarse-field-gpu"
+  | "geometry-clusters"
   | "height-cache"
   | "shadows"
   | "sky-cube"

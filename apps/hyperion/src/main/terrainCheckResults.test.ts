@@ -698,6 +698,12 @@ describe("the terrain run's summary and its files", () => {
     expect(text).toContain("| terrain-loss |");
   });
 
+  it("states each phase's triangles a frame, lit and casting, over the draws that counted them (plan R14)", () => {
+    const text = terrainCheckMarkdown(buildTerrainCheckResults(input()));
+    expect(text).toContain("## Triangles a frame (plan R14)");
+    expect(text).toContain("| terrain-alone | 0.444 M, 0.531 M; 3 | 0.968 M, 1.032 M; 2 |");
+  });
+
   it("states the machine's CPU governor, as T20's summary does", () => {
     expect(terrainCheckMarkdown(buildTerrainCheckResults(input()))).toContain("governor schedutil");
   });

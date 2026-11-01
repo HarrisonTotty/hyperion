@@ -1278,6 +1278,13 @@ export interface TerrainCheckPhaseRecord {
   readonly frameGpuMs: ReadonlyArray<number>;
   /** The patches `TEST MOON`'s pass drew, at each of the primary's draws while it had a pass. */
   readonly patchesDrawn: ReadonlyArray<number>;
+  /**
+   * The terrain's triangles at those draws (plan R14, R14.T1.b; `TerrainPass.counts`): the lit
+   * draws', and the shadow cascades' casters', every cascade's, at those draws that drew cascades
+   * and whose cluster counts had come back.
+   */
+  readonly trianglesDrawn: ReadonlyArray<number>;
+  readonly casterTriangles: ReadonlyArray<number>;
   /** Bakes posted to the height workers, and their answers, over the window. */
   readonly bakes: {
     readonly posted: number;

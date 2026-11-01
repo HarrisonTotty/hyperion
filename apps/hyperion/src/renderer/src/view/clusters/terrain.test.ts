@@ -1,0 +1,296 @@
+/**
+ * Terrain as the cluster path's first consumer (plan R14, R14.T1.b): its clusters cover the
+ * interior patches' mesh exactly at stride 1, its templates stitch at every stride, and its records'
+ * spheres hold every vertex the GPU can place, morphs and skirt feet included.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import type { Vec3 } from "../../geometry/vec3";
+import { WGS84_FIGURE } from "../../test/terrainFixtures";
+import { vertexDir } from "../terrain/cube";
+import { litInteriorMeshData } from "../terrain/gpu/resources";
+import { patchTerms } from "../terrain/gpu/uniforms";
+import {
+  faceDifferenceMorphF32,
+  faceDifferencePositionF32,
+  directionDifferenceF32,
+  normalDifferenceF32,
+  type SlotTermsF32,
+} from "../terrain/gpu/vertexEmulation";
+import type { PatchKey } from "../terrain/patchKey";
+import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet";
+import { CLUSTER_RECORD_BYTES } from "./record";
+import {
+  edgeVertex,
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+  terrainClusterGrid,
+  terrainClusterPlace,
+  terrainTemplateRef,
+  writeTerrainClusterRecords,
+} from "./terrain";
+import { STRIDES, terrainClusterMesh } from "./templates";
+
+const MESH = terrainClusterMesh();
+
+/** A template vertex's (lx, ly, code). */
+function local(v: number): readonly [number, number, number] {
+  const p = MESH.mesh.positions;
+  return [p[3 * v] ?? Number.NaN, p[3 * v + 1] ?? Number.NaN, p[3 * v + 2] ?? Number.NaN];
+}
+
+/** Template `t`'s triangles of cluster `cluster`, each its three vertices' lit-mesh (x, y, code). */
+function clusterTriangles(t: number, cluster: number): string[] {
+  const template = MESH.templates[t];
+  const indices = MESH.mesh.indices ?? new Uint32Array();
+  const out: string[] = [];
+  for (let n = 0; n < (template?.indexCount ?? 0); n += 3) {
+    const at = (template?.firstIndex ?? 0) + n;
+    out.push(
+      [0, 1, 2]
+        .map((k) => terrainClusterGrid(cluster, local(indices[at + k] ?? 0)).join(" "))
+        .join(" | "),
+    );
+  }
+  return out;
+}
+
+describe("terrain's clusters (plan R14, R14.T1.b)", () => {
+  it("are 64 blocks of 8 × 8 quads and 32 skirt-foot strips of 8, eight an edge", () => {
+    const places = Array.from({ length: TERRAIN_CLUSTERS_PER_PAGE }, (_, c) =>
+      terrainClusterPlace(c),
+    );
+    expect(places.filter((p) => p.shape === "terrain-block")).toHaveLength(TERRAIN_BLOCKS);
+    expect(
+      [0, 1, 2, 3].map(
+        (e) => places.filter((p) => p.shape === "terrain-skirt" && p.edge === e).length,
+      ),
+    ).toEqual([8, 8, 8, 8]);
+    expect(() => terrainClusterPlace(96)).toThrow(RangeError);
+  });
+
+  it("draw at stride 1 exactly the interior mesh's triangles, each in its own vertex order", () => {
+    const lit = litInteriorMeshData();
+    const at = (v: number): string =>
+      [0, 1, 2].map((k) => String(lit.positions[3 * v + k] ?? Number.NaN)).join(" ");
+    const interior = new Set<string>();
+    for (let n = 0; n < lit.indices.length; n += 3) {
+      interior.add([0, 1, 2].map((k) => at(lit.indices[n + k] ?? 0)).join(" | "));
+    }
+    const drawn: string[] = [];
+    for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+      const t = cluster < TERRAIN_BLOCKS ? 0 : STRIDES.length;
+      drawn.push(...clusterTriangles(t, cluster));
+    }
+    expect([drawn.length, new Set(drawn).size]).toEqual([lit.indices.length / 3, interior.size]);
+    expect(drawn.filter((triangle) => !interior.has(triangle))).toEqual([]);
+  });
+
+  it("give each template its triangles: 128, 32, 8 and 2 a block, 16, 8, 4 and 2 a strip", () => {
+    expect(MESH.templates.map((t) => [t.shape, t.stride, t.triangles, t.indexCount / 3])).toEqual([
+      ["terrain-block", 1, 128, 128],
+      ["terrain-block", 2, 32, 32],
+      ["terrain-block", 4, 8, 8],
+      ["terrain-block", 8, 2, 2],
+      ["terrain-skirt", 1, 16, 16],
+      ["terrain-skirt", 2, 8, 8],
+      ["terrain-skirt", 4, 4, 4],
+      ["terrain-skirt", 8, 2, 2],
+    ]);
+    expect(MESH.templates.map((t) => t.errorScale)).toEqual([1, 2, 4, 8, 1, 2, 4, 8]);
+  });
+
+  it("wind every block triangle anticlockwise in the grid's (x, y), as the lit mesh does, at every stride", () => {
+    for (let t = 0; t < STRIDES.length; t += 1) {
+      for (const triangle of clusterTriangles(t, 27)) {
+        const [a, b, c] = triangle.split(" | ").map((v) => v.split(" ").map(Number));
+        const cross =
+          ((b?.[0] ?? 0) - (a?.[0] ?? 0)) * ((c?.[1] ?? 0) - (a?.[1] ?? 0)) -
+          ((b?.[1] ?? 0) - (a?.[1] ?? 0)) * ((c?.[0] ?? 0) - (a?.[0] ?? 0));
+        expect(cross).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("share every edge vertex of a block at stride s with its neighbour at s, and close each strip to its block", () => {
+    /** The grid vertices a cluster's template at `t` draws. */
+    const verticesOf = (t: number, cluster: number): Set<string> =>
+      new Set(clusterTriangles(t, cluster).flatMap((triangle) => triangle.split(" | ")));
+    STRIDES.forEach((stride, l) => {
+      // Block (3, 4) and its right-hand neighbour (4, 4) along x = 32.
+      const left = verticesOf(l, 4 * 8 + 3);
+      const right = verticesOf(l, 4 * 8 + 4);
+      const seam = [...left].filter((v) => v.startsWith("32 "));
+      expect(seam).toHaveLength(8 / stride + 1);
+      expect(seam.filter((v) => !right.has(v))).toEqual([]);
+      // Edge 0's strip 3 hangs from block (3, 0): its grid vertices are the block's on y = 0.
+      const strip = [...verticesOf(STRIDES.length + l, TERRAIN_BLOCKS + 3)].filter((v) =>
+        v.endsWith(" 0"),
+      );
+      const blockEdge = [...verticesOf(l, 3)].filter((v) => v.endsWith(" 0 0"));
+      expect(strip.toSorted()).toEqual(blockEdge.toSorted());
+    });
+  });
+
+  it("name each cluster's first vertex and a strip's edge in its template reference", () => {
+    for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+      const ref = terrainTemplateRef(cluster);
+      const [x, y] = terrainClusterGrid(cluster, [0, 0, 0]);
+      const place = terrainClusterPlace(cluster);
+      expect([ref & 0xff, (ref >> 8) & 0xff, ref >> 16]).toEqual([x, y, place.edge]);
+    }
+    expect(edgeVertex(2, 8)).toEqual([56, 64]);
+  });
+});
+
+/** A seeded uniform generator in [0, 1) (mulberry32). */
+function random(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** `key`'s terms on `figure` at origin height `h0M`, narrowed as its slot record holds them. */
+function termsF32(key: PatchKey, figure: BodyFigure, h0M: number): SlotTermsF32 {
+  const terms = patchTerms(key, figure, h0M);
+  const f = Math.fround;
+  const v = (a: Vec3): Vec3 => ({ x: f(a.x), y: f(a.y), z: f(a.z) });
+  const [a, e1, e2] = terms.axes;
+  return {
+    axisA: v(a),
+    axisE1: v(e1),
+    axisE2: v(e2),
+    s0: f(terms.st0[0]),
+    t0: f(terms.st0[1]),
+    u0: f(terms.uv0[0]),
+    v0: f(terms.uv0[1]),
+    step: f(terms.step),
+    scale: v(terms.scale),
+    m0: v(terms.m0),
+    nu0: v(terms.nu0),
+    h0M: f(h0M),
+    straddles: terms.straddles,
+  };
+}
+
+const MOON_LIKE_FIGURE: BodyFigure = {
+  equatorialRadiusM: 1_737_400,
+  polarRadiusM: 1_736_000,
+  pole: null,
+};
+
+describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
+  /** Every vertex the GPU places of a random patch, its morphs and its feet, against its clusters. */
+  function worstOutside(figure: BodyFigure, key: PatchKey, seed: number): number {
+    const next = random(seed);
+    const planet = planetGeometry(figure, null);
+    const span = 50 + 9_000 * next();
+    const low = -span * next();
+    const high = low + span;
+    const skirtDepthM = 1 + 500 * next();
+    const own = Float64Array.from({ length: 65 * 65 }, () => Math.fround(low + span * next()));
+    const morph = Float64Array.from({ length: 65 * 65 }, () => Math.fround(low + span * next()));
+    const h0M = own[32 * 65 + 32] ?? 0;
+    const [ox, oy, oz] = surfacePoint(figure, vertexDir(key, 32, 32), h0M);
+    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    writeTerrainClusterRecords(
+      planet,
+      { key, originM: { x: ox, y: oy, z: oz }, heightRangeM: [low, high], skirtDepthM },
+      records,
+      0,
+    );
+    const rec = termsF32(key, figure, h0M);
+    const sphere = (cluster: number): readonly [Vec3, number] => {
+      const at = cluster * CLUSTER_RECORD_BYTES;
+      return [
+        {
+          x: records.getFloat32(at, true),
+          y: records.getFloat32(at + 4, true),
+          z: records.getFloat32(at + 8, true),
+        },
+        records.getFloat32(at + 12, true),
+      ];
+    };
+    let worst = -Infinity;
+    const check = (cluster: number, p: Vec3): void => {
+      const [c, r] = sphere(cluster);
+      worst = Math.max(worst, Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z) - r);
+    };
+    for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+      const block = cluster < TERRAIN_BLOCKS;
+      const t = block ? 0 : STRIDES.length;
+      const template = MESH.templates[t];
+      const indices = MESH.mesh.indices ?? new Uint32Array();
+      for (let n = 0; n < (template?.indexCount ?? 0); n += 1) {
+        const [x, y, code] = terrainClusterGrid(
+          cluster,
+          local(indices[(template?.firstIndex ?? 0) + n] ?? 0),
+        );
+        const q0 = faceDifferencePositionF32(rec, x, y, own[y * 65 + x] ?? 0);
+        const q1 = faceDifferenceMorphF32(rec, x, y, (px, py) => morph[py * 65 + px] ?? 0);
+        const nu = (() => {
+          const d = normalDifferenceF32(rec, directionDifferenceF32(rec, x, y));
+          return { x: rec.nu0.x + d.x, y: rec.nu0.y + d.y, z: rec.nu0.z + d.z };
+        })();
+        for (const k of [0, 0.25, 0.5, 0.75, 1]) {
+          const q = {
+            x: q0.x + k * (q1.x - q0.x),
+            y: q0.y + k * (q1.y - q0.y),
+            z: q0.z + k * (q1.z - q0.z),
+          };
+          const h = (own[y * 65 + x] ?? 0) * (1 - k) + (morph[y * 65 + x] ?? 0) * k;
+          if (code === 0) {
+            check(cluster, q);
+          } else {
+            // `lit_place`'s foot: min(h − d, 0) along the datum's normal from the morphed vertex.
+            const drop = Math.min(h - skirtDepthM, 0) - h;
+            check(cluster, { x: q.x + drop * nu.x, y: q.y + drop * nu.y, z: q.z + drop * nu.z });
+          }
+        }
+      }
+    }
+    return worst;
+  }
+
+  it.each([
+    ["an Earth's root", WGS84_FIGURE, { face: 1, level: 0, i: 0, j: 0 }],
+    ["an Earth's level 3", WGS84_FIGURE, { face: 4, level: 3, i: 5, j: 2 }],
+    ["an Earth's level 9 at a face's corner", WGS84_FIGURE, { face: 2, level: 9, i: 511, j: 0 }],
+    ["an Earth's level 16", WGS84_FIGURE, { face: 0, level: 16, i: 40_000, j: 31_000 }],
+    ["an Earth's finest level", WGS84_FIGURE, { face: 5, level: 19, i: 300_001, j: 7 }],
+    ["a Moon's level 2", MOON_LIKE_FIGURE, { face: 3, level: 2, i: 1, j: 3 }],
+    ["a Moon's level 12", MOON_LIKE_FIGURE, { face: 1, level: 12, i: 2_047, j: 2_048 }],
+  ] as const)(
+    "hold every vertex of %s, morphed and as skirt feet, inside their clusters' spheres",
+    (_name, figure, key) => {
+      for (const seed of [1, 2, 3]) {
+        expect(worstOutside(figure, key, seed)).toBeLessThan(0);
+      }
+    },
+  );
+
+  it("write each record strided, never discarding, with (0, +∞) for its error bytes", () => {
+    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    const key = { face: 0, level: 5, i: 3, j: 4 } as const;
+    const [x, y, z] = surfacePoint(WGS84_FIGURE, vertexDir(key, 32, 32), 0);
+    const started = performance.now();
+    writeTerrainClusterRecords(
+      planetGeometry(WGS84_FIGURE, null),
+      { key, originM: { x, y, z }, heightRangeM: [-100, 400], skirtDepthM: 20 },
+      records,
+      0,
+    );
+    const tookMs = performance.now() - started;
+    const at = (cluster: number, word: number): number =>
+      records.getUint32(cluster * 32 + 4 * word, true);
+    expect([at(0, 4), at(0, 5), at(0, 7), at(TERRAIN_BLOCKS, 7)]).toEqual([0, 0x7f80_0000, 0, 1]);
+    // A slot's records are written at its upload, some ten a second: well under a frame's time.
+    expect(tookMs).toBeLessThan(50);
+  });
+});

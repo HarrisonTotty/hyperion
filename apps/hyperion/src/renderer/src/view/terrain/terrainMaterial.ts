@@ -101,6 +101,8 @@ import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
+import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
+import terrainClusterShadowWgsl from "./shaders/terrainClusterShadow.wgsl?raw";
 import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
@@ -134,6 +136,8 @@ export const TERRAIN_LIT_BINDINGS = {
   shadowCompare: 20,
   /** The table below a cloud deck over a surface, R08's surface lighting's eighth (R08.T15.b.2). */
   belowDeck: 21,
+  /** The cluster path's bucket lists, which its terrain vertex stage reads (plan R14, R14.T1.b). */
+  clusterLists: 22,
 } as const;
 
 /**
@@ -477,6 +481,82 @@ export function terrainShadowMaterialSpec(
   };
 }
 
+/** terrainLit.wgsl's vertex stage's head, which a cluster draw's source calls as `lit_vertex`. */
+const LIT_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> LitVertexOut {";
+
+/** {@link LIT_VERTEX_HEAD} as a function, no longer an entry point. */
+const LIT_VERTEX_FUNCTION = "fn lit_vertex(grid : vec3f, instance : u32) -> LitVertexOut {";
+
+/**
+ * A lit terrain source with its vertex stage taken by the cluster path (plan R14, R14.T1.b): the
+ * lit material's `vertexMain` renamed `lit_vertex`, a function, and `terrainCluster.wgsl`'s entry
+ * point appended, which hands it each template vertex as the lit mesh's own grid vertex and its
+ * instance, read from a bucket's list; every placement and varying as the lit mesh's.
+ *
+ * @throws Error unless the lit vertex stage's head occurs exactly once in `source`.
+ */
+export function withClusterVertex(source: string): string {
+  const parts = source.split(LIT_VERTEX_HEAD);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a cluster draw's source needs terrainLit.wgsl's vertex stage once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${terrainClusterWgsl}`;
+}
+
+/** The console names of the two paths' cluster casters (plan R14, R14.T1.b). */
+const CLUSTER_SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER SHADOWS OFFSETS",
+  "face-differences": "TERRAIN CLUSTER SHADOWS",
+};
+
+/**
+ * The interior patches' caster into the high setting's shadow cascades on the cluster path, for a
+ * vertex path (plan R14, R14.T1.b; `terrainClusterShadow.wgsl`): the caster's states, depth bias
+ * and `unclippedDepth`, its uniforms with `clusterBase`, a bucket's list base, after them, drawn
+ * with the terrain cluster mesh (`clusters/templates.ts`) from a bucket's list
+ * ({@link withClusterVertex}), and no survey discard, which an interior patch never takes.
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone: R05's (four on `face-differences`), the survey mask,
+ * which `lit_place` reads for the fins, and the lists, seven at most against WebGPU's eight.
+ */
+export function terrainClusterShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const source = withClusterVertex(
+    LIT_TERRAIN_SOURCE + terrainClusterShadowWgsl + PATH_SOURCES[path],
+  );
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-cluster-shadow-${path}`,
+    displayName: CLUSTER_SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...LIT_DRAW_UNIFORMS, { name: "clusterBase", type: "u32" }],
+    samplers: [],
+    textures: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+    depthBiasAway: {
+      constant: CASCADE_DEPTH_BIAS.constant,
+      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+      clamp: CASCADE_DEPTH_BIAS.clamp,
+    },
+    unclippedDepth,
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
@@ -514,6 +594,15 @@ export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
 export const TERRAIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainShadowMaterialSpec("baked-offsets", false),
   terrainShadowMaterialSpec("face-differences", false),
+];
+
+/**
+ * Both paths' cluster casters (plan R14, R14.T1.b), for the catalogue, compiled for `depth-only`
+ * without `unclippedDepth`, as the casters' are.
+ */
+export const TERRAIN_CLUSTER_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterShadowMaterialSpec("baked-offsets", false),
+  terrainClusterShadowMaterialSpec("face-differences", false),
 ];
 
 /**

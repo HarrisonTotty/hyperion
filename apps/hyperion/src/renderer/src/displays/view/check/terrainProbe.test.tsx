@@ -112,7 +112,7 @@ function frame(label: string, materials: ReadonlyArray<string> = []): FrameSubmi
  */
 function watchedSession(
   handing: Set<string>,
-  patches: { count: number },
+  patches: { count: number; measured?: boolean },
   blind: ReadonlySet<string> = new Set(),
 ): WatchedSession {
   return {
@@ -121,6 +121,14 @@ function watchedSession(
       lastStep: { drawSet: patches },
       maxPatches: 604,
       seesPatch: (id) => handing.has(id) && !blind.has(id),
+      // Its interior patches' triangles, and its casters' once it draws 15 (plan R14).
+      counts: () => ({
+        drawnTriangles: 8_704 * patches.count,
+        casterTriangles: patches.count === 15 ? [1, 2, 3, 4] : null,
+      }),
+      measureClusters: (on) => {
+        patches.measured = on;
+      },
     }),
     wirePass: () => null,
     coverageMask: () => null,
@@ -442,7 +450,7 @@ describe("the terrain probe (R10.T16.d)", () => {
     const stop = probe.start();
     const handing = new Set<string>();
     const blind = new Set<string>();
-    const patches = { count: 0 };
+    const patches: { count: number; measured?: boolean } = { count: 0 };
     const release = probe.watchTerrain(watchedSession(handing, patches, blind));
     const primary = engine.createView(document.createElement("canvas"), "view");
     const target = engine.createRenderTarget({
@@ -502,6 +510,11 @@ describe("the terrain probe (R10.T16.d)", () => {
       missedFrames: 0,
     });
     expect(record.patchesDrawn).toEqual([0, 12, 12, 15, 15, 15]);
+    expect([record.trianglesDrawn, record.casterTriangles, patches.measured]).toEqual([
+      [0, 12, 12, 15, 15, 15].map((n) => 8_704 * n),
+      [10, 10, 10],
+      true,
+    ]);
     expect(record.memory).toMatchObject({
       workerFieldBytes: 1_000,
       sessionGpuBytes: [{ category: "coarse-field-gpu", bytes: 24_576 }],

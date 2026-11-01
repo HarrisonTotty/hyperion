@@ -6,7 +6,7 @@
  * one list from each to its {@link ViewSettings}. Later plans extend this module only by adding a
  * field to {@link ViewSettings}, with its high and low values in {@link SETTINGS}: R05.T12.c the
  * atmosphere's table sizes, R06 the sky, R07 its styles' passes, R08 the atmosphere's view, R11
- * decoration, R12 the ladder. They never add a setting name or a second list. Each feature builds its
+ * decoration, R12 the ladder, R14 the cluster path's geometry. They never add a setting name or a second list. Each feature builds its
  * low form beside its high form (the budget's third rule), so a field is never added for one setting
  * alone.
  *
@@ -20,6 +20,7 @@ import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
+import type { Stride } from "../clusters/templates";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
@@ -65,6 +66,39 @@ export interface TerrainSettings {
 }
 
 /**
+ * How the terrain's geometry is drawn (plan R14, the cluster path, terrain its first consumer): the
+ * way back to the geometry drawn before plan R14, kept compiled and selectable at every setting,
+ * and each lever of R14's first phase.
+ */
+export interface GeometrySettings {
+  /**
+   * Whether the terrain draws through plan R14's path: its interior patches by a mesh of their own,
+   * without the survey discard (R14.T1.a), and their casters through the cluster cull (R14.T1.b).
+   * `false` is the way back: every patch drawn and cast by the lit mesh, every other field of these
+   * settings unread.
+   */
+  readonly clusterPath: boolean;
+  /** R14.T1.c: casters culled by the view depths their receivers sample each cascade at. */
+  readonly casterDepthCull: boolean;
+  /** R14.T1.d: the coarsest stride a caster may take at its cascade's texel; 1 keeps stride 1. */
+  readonly casterStrideCap: Stride;
+  /**
+   * R14.T1.e: the overlay's terrain depth: redrawn by the lit mesh (`redraw`, as before), read from
+   * the photorealistic pass's depth (`scene-depth`), or drawn through the cluster path
+   * (`cluster`).
+   */
+  readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
+}
+
+/** The way back (plan R14): the terrain's geometry as it was drawn before plan R14. */
+export const GEOMETRY_BEFORE_R14: GeometrySettings = {
+  clusterPath: false,
+  casterDepthCull: false,
+  casterStrideCap: 1,
+  overlayDepth: "redraw",
+};
+
+/**
  * Everything the view's quality setting decides, one field per feature.
  *
  * @remarks
@@ -92,6 +126,8 @@ export interface ViewSettings {
   readonly budget: ViewBudgetSettings;
   /** The photorealistic style's passes: the histogram, bloom and the lit bodies (R07.T17). */
   readonly photoreal: PhotorealSettings;
+  /** How the terrain's geometry is drawn (plan R14). */
+  readonly geometry: GeometrySettings;
 }
 
 /**
@@ -194,6 +230,12 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       discAnnuli: DISC_ANNULI_HIGH,
       planetshineSources: PLANETSHINE_SOURCES_HIGH,
     },
+    geometry: {
+      clusterPath: true,
+      casterDepthCull: false,
+      casterStrideCap: 1,
+      overlayDepth: "redraw",
+    },
   },
   low: {
     terrain: {
@@ -213,6 +255,12 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       bloom: BLOOM_LEVELS.low,
       discAnnuli: DISC_ANNULI_LOW,
       planetshineSources: PLANETSHINE_SOURCES_LOW,
+    },
+    geometry: {
+      clusterPath: true,
+      casterDepthCull: false,
+      casterStrideCap: 1,
+      overlayDepth: "redraw",
     },
   },
 };

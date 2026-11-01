@@ -21,7 +21,11 @@ import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { DepthLayerPass, DrawItem, MaterialHandle, MeshHandle } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
-import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import { cascadeKeeps, cullTwin } from "../clusters/cull";
+import { type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
+import type { ClusterRecord } from "../clusters/record";
+import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { GEOMETRY_BEFORE_R14, TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { vertexDir, vertexSpacing } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { TERRAIN_SHADOW_PASS_LABEL } from "./gpu/material";
@@ -51,6 +55,7 @@ import {
   type TerrainView,
   type TerrainViewFrame,
   type TerrainViewFrameInput,
+  TERRAIN_CLUSTER_CULL_LABEL,
 } from "./terrainPass";
 import {
   type BakedPatch,
@@ -377,6 +382,109 @@ function terrainCaster(pass: DepthLayerPass): DrawItem {
   return draw;
 }
 
+/** The `u32` words last written to `buffer`. */
+function wordsIn(engine: CountingRenderEngine, buffer: string): number[] {
+  const data = engine.writes.findLast((w) => w.buffer === buffer)?.data ?? new Uint8Array();
+  return [...new Uint32Array(data.slice().buffer)];
+}
+
+/** A `u32`'s bits as an `f32`. */
+function f32Of(bits: number): number {
+  return new Float32Array(Uint32Array.of(bits).buffer)[0] ?? Number.NaN;
+}
+
+/** A clustered pass's list entries a pass, from its slots. */
+function PASS_ENTRIES(made: Made): number {
+  return made.pass.layout.slots.slotCount * 4 * TERRAIN_CLUSTERS_PER_PAGE;
+}
+
+/** A streamed pass at {@link NEAR} whose every bake is wholly surveyed: its patches interior. */
+async function clusteredPass(): Promise<Made> {
+  const made = await litPass();
+  made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+  // Until nothing more is asked for, so that no patch is drawn by a stand-in.
+  stream(made, [passView(PRIMARY, NEAR)], 24);
+  return made;
+}
+
+/** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
+function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
+  const view = new DataView(words.buffer, words.byteOffset, words.byteLength);
+  const out: CascadeCullPass[] = [];
+  for (let at = 0; at + CULL_PASS_BYTES <= view.byteLength; at += CULL_PASS_BYTES) {
+    if (view.getUint32(at, true) !== 1) {
+      continue;
+    }
+    const f = (o: number): number => view.getFloat32(at + o, true);
+    const axis = (o: number): Vec3 => ({ x: f(o), y: f(o + 4), z: f(o + 8) });
+    out.push({
+      kind: "cascade",
+      axes: [axis(32), axis(48), axis(64)],
+      centreFromCameraLightM: axis(80),
+      radiusM: f(20),
+      depthFarM: f(24),
+      toleranceM: f(16),
+      strideCap: 1,
+      receivers: null,
+    });
+  }
+  return out;
+}
+
+/** The instances' origins and pages as last written to `buffer`. */
+function instanceOrigins(
+  engine: CountingRenderEngine,
+  buffer: string,
+): Array<{ readonly originM: Vec3; readonly page: number }> {
+  const data = engine.writes.findLast((w) => w.buffer === buffer)?.data ?? new Uint8Array();
+  const view = new DataView(data.slice().buffer);
+  const out: Array<{ readonly originM: Vec3; readonly page: number }> = [];
+  for (let at = 0; at + INSTANCE_RECORD_BYTES <= view.byteLength; at += INSTANCE_RECORD_BYTES) {
+    out.push({
+      originM: {
+        x: view.getFloat32(at, true),
+        y: view.getFloat32(at + 4, true),
+        z: view.getFloat32(at + 8, true),
+      },
+      page: view.getUint32(at + 12, true),
+    });
+  }
+  return out;
+}
+
+/** Each slot's cluster records as last written, by slot and cluster. */
+function clusterRecordsOf(
+  engine: CountingRenderEngine,
+): (page: number, cluster: number) => ClusterRecord {
+  const bySlot = new Map<number, DataView>();
+  for (const write of engine.writes) {
+    if (write.buffer === "terrain cluster records") {
+      bySlot.set(write.offsetBytes / (96 * 32), new DataView(write.data.slice().buffer));
+    }
+  }
+  return (page, cluster) => {
+    const view = bySlot.get(page);
+    if (view === undefined) {
+      throw new Error(`slot ${String(page)} has no cluster records`);
+    }
+    const at = cluster * 32;
+    return {
+      centreM: {
+        x: view.getFloat32(at, true),
+        y: view.getFloat32(at + 4, true),
+        z: view.getFloat32(at + 8, true),
+      },
+      radiusM: view.getFloat32(at + 12, true),
+      mode: "strided",
+      errorsM: null,
+      templateRef: view.getUint32(at + 24, true),
+      shape: (view.getUint32(at + 28, true) & 0xf) === 0 ? "terrain-block" : "terrain-skirt",
+      mayDiscard: false,
+      material: 0,
+    };
+  };
+}
+
 /** Whether `texels` is a whole number of texels, to 10⁻⁶ texel. */
 function wholeTexels(texels: number): boolean {
   return Math.abs(texels - Math.round(texels)) < 1e-6;
@@ -602,20 +710,190 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     }
   });
 
-  it("casts the interior patches' records as it casts the others' (R14.T1.a)", async () => {
-    const made = await litPass();
-    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
-    stream(made, [passView(PRIMARY, NEAR)]);
+  it("casts the interior patches' clusters through the cluster path, the edge patches' by the lit mesh (R14.T1.b)", async () => {
+    const made = await clusteredPass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const cast = cascadesOf(frame);
+    const dispatched = made.engine.dispatched.filter((d) => d.kernel === "cluster cull");
     const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
-    const cast = recordsIn(made.engine, `terrain casters (${PRIMARY}) 1`);
     expect([
       frame.draws.map((draw) => draw.mesh.name),
-      interior.length > 0,
-      cast.length > 0,
-      subsequence(cast, interior),
-      terrainCaster(cascadesOf(frame).passes[0] ?? fail()).mesh.name,
-    ]).toEqual([["terrain lit interior patch"], true, true, true, "terrain lit patch"]);
+      cast.clustered,
+      cast.litMeshCasters,
+      dispatched.map((d) => [d.pass, d.workgroups]),
+      dispatched[0]?.bindings.buffers["instance_words"]?.name,
+    ]).toEqual([
+      ["terrain lit interior patch"],
+      true,
+      [0, 0, 0, 0],
+      [[TERRAIN_CLUSTER_CULL_LABEL, [interior.length, 1, 1]]],
+      `terrain interior instances (${PRIMARY})`,
+    ]);
+    // Dispatched before the caster passes are rendered, its buckets cleared before it.
+    const render = made.engine.depthLayerRenders.at(-1);
+    expect(render?.passes.length).toBe(4);
+  });
+
+  it("takes as each interior record's cull input the cascades castsInto admits its patch to, and its level's largest spacing (R14.T1.b)", async () => {
+    const made = await clusteredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    // The same frame by the way back casts the same records by the lit mesh.
+    made.pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const back = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const byCascade = [1, 2, 3, 4].map((n) =>
+      recordsIn(made.engine, `terrain casters (${PRIMARY}) ${String(n)}`),
+    );
+    const masks = interior.map((record) =>
+      byCascade.reduce(
+        (mask, records, k) => (records.includes(record) ? mask | (1 << k) : mask),
+        0,
+      ),
+    );
+    expect([inputs.length, interior.length > 0]).toEqual([2 * interior.length, true]);
+    expect(interior.map((_, n) => inputs[2 * n])).toEqual(masks);
+    expect(masks.some((mask) => mask !== 0)).toBe(true);
+    const units = new Set(interior.map((_, n) => f32Of(inputs[2 * n + 1] ?? 0)));
+    const levels = [...units].map((unit) => {
+      for (let level = 0; level <= MAX_LEVEL; level += 1) {
+        if (Math.fround(vertexSpacing(PLANET.figure.equatorialRadiusM, level).maxM) === unit) {
+          return level;
+        }
+      }
+      return -1;
+    });
+    expect(levels.filter((level) => level < 0)).toEqual([]);
+    expect([
+      cascadesOf(back).clustered,
+      cascadesOf(back).litMeshCasters.some((n) => n > 0),
+    ]).toEqual([false, true]);
+  });
+
+  it("draws each cascade's buckets after the lit mesh's casters, by the cluster caster at stride 1 (R14.T1.b)", async () => {
+    const made = await clusteredPass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const pass = cascadesOf(frame).passes[2] ?? fail();
+    const buckets = pass.draws.filter((draw) => draw.mesh.name === "terrain clusters");
+    expect(
+      buckets.map((draw) => [
+        draw.material.name,
+        draw.indirect?.buffer.name,
+        draw.indirect?.offsetBytes,
+        draw.storageBuffers?.["clusterLists"]?.name,
+        draw.storageBuffers?.["instances"]?.name,
+        draw.uniforms["clusterBase"]?.[0],
+      ]),
+    ).toEqual([
+      [
+        `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
+        `terrain clusters (${PRIMARY}) arguments`,
+        (2 * 8 + 0) * 20,
+        `terrain clusters (${PRIMARY}) lists`,
+        `terrain interior instances (${PRIMARY})`,
+        2 * PASS_ENTRIES(made),
+      ],
+      [
+        `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
+        `terrain clusters (${PRIMARY}) arguments`,
+        (2 * 8 + 4) * 20,
+        `terrain clusters (${PRIMARY}) lists`,
+        `terrain interior instances (${PRIMARY})`,
+        2 * PASS_ENTRIES(made) + 4 * 64 * made.pass.layout.slots.slotCount,
+      ],
+    ]);
+  });
+
+  it("casts by the lit mesh alone by the way back, and where no patch is interior (R14.T1.b)", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const back = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const edge = await streamedAt(NEAR);
+    const edgeFrame = edge.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([
+      made.engine.dispatched.filter((d) => d.kernel === "cluster cull").length,
+      cascadesOf(back).clustered,
+      edge.engine.dispatched.filter((d) => d.kernel === "cluster cull").length,
+      cascadesOf(edgeFrame).clustered,
+    ]).toEqual([0, false, 0, false]);
+  });
+
+  it("refuses in its twin every cluster of a patch castsInto refuses, and keeps one only where its sphere meets the cascade's box (R14.T1.b)", async () => {
+    const made = await clusteredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const instances = instanceOrigins(made.engine, `terrain interior instances (${PRIMARY})`);
+    const records = clusterRecordsOf(made.engine);
+    const twin = cullTwin(
+      {
+        instances: instances.map((instance, n) => ({
+          ...instance,
+          passMask: inputs[2 * n] ?? 0,
+          unitM: f32Of(inputs[2 * n + 1] ?? 0),
+        })),
+        records: (page, cluster) => records(page, cluster),
+        clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+        rotationColumns: [
+          { x: 1, y: 0, z: 0 },
+          { x: 0, y: 1, z: 0 },
+          { x: 0, y: 0, z: 1 },
+        ],
+        passes,
+        places: passes.map((_, k) => ({ bucketBase: 8 * k, listBase: 0 })),
+        templates: 8,
+      },
+      0,
+    );
+    let entries = 0;
+    for (const [bucket, list] of twin) {
+      const k = Math.floor(bucket / 8);
+      for (const entry of list) {
+        const n = Math.floor(entry / 256);
+        entries += 1;
+        expect(((inputs[2 * n] ?? 0) >> k) & 1).toBe(1);
+        // Stride 1 alone: a block's bucket 0, a strip's 4.
+        expect([0, 4]).toContain(bucket % 8);
+      }
+    }
+    expect(entries).toBeGreaterThan(0);
+    // Every cluster of a patch admitted to a cascade and inside its box is kept.
+    const kept = new Set([...twin.values()].flat().map(String));
+    const refused: string[] = [];
+    instances.forEach((instance, n) => {
+      for (let k = 0; k < passes.length; k += 1) {
+        if ((((inputs[2 * n] ?? 0) >> k) & 1) === 0) {
+          continue;
+        }
+        const pass = passes[k] ?? fail();
+        for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+          const record = records(instance.page, cluster);
+          const centre = add(instance.originM, record.centreM);
+          if (
+            cascadeKeeps(pass, centre, record.radiusM, 0) &&
+            !kept.has(String(n * 256 + cluster))
+          ) {
+            refused.push(`${String(n)}:${String(cluster)} in ${String(k)}`);
+          }
+        }
+      }
+    });
+    expect(refused).toEqual([]);
+  });
+
+  it("writes each slot's 96 cluster records at its upload, and samples its counters only when measured (R14.T1.b)", async () => {
+    const made = await clusteredPass();
+    const writes = made.engine.writes.filter((w) => w.buffer === "terrain cluster records");
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.every((w) => w.bytes === 96 * 32 && w.offsetBytes % (96 * 32) === 0)).toBe(true);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const copies = (): number =>
+      made.engine.dispatched.filter((d) => d.kernel === "cluster stats copy").length;
+    const unmeasured = copies();
+    made.pass.measureClusters(true);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([unmeasured, copies(), made.pass.clusterStats(PRIMARY)]).toEqual([0, 1, null]);
   });
 
   it("gives two views of one pass each their own four passes, of their own records", async () => {

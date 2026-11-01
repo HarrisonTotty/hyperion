@@ -41,6 +41,9 @@ import {
   fittedTerrainLayout,
   GRID_INDICES,
   GRID_VERTICES,
+  CLUSTER_CASTER_PASSES,
+  CLUSTER_RECORDS_SLOT_BYTES,
+  CULL_INPUT_BYTES,
   INDIRECT_ARGS_BYTES,
   isInteriorBake,
   LIT_INTERIOR_INDICES,
@@ -1330,6 +1333,60 @@ describe("the terrain's resources", () => {
     resources.viewBuffers("view");
     resources.dispose();
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
+  it("make a clustered lit layout's records, cluster mesh and each view's buckets under geometry-clusters (R14.T1.b)", async () => {
+    const engine = await countingRenderEngine();
+    const created: Array<readonly [string, string]> = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        created.push([event.name, event.category]);
+      }
+    });
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const slots = resources.layout.slots.slotCount;
+    const clusters = resources.clusterBuffers("view");
+    expect([
+      resources.clusterMesh?.name,
+      resources.clusterRecords?.bytes,
+      clusters?.cullInputs.bytes,
+      clusters?.buckets.passes,
+      created.filter(([, category]) => category === "geometry-clusters").map(([name]) => name),
+    ]).toEqual([
+      "terrain clusters",
+      slots * CLUSTER_RECORDS_SLOT_BYTES,
+      slots * CULL_INPUT_BYTES,
+      CLUSTER_CASTER_PASSES,
+      [
+        "terrain cluster records",
+        "terrain clusters (view) lists",
+        "terrain clusters (view) arguments",
+        "terrain clusters (view) cull inputs",
+      ],
+    ]);
+    const before = engine.live.buffers;
+    resources.releaseView("view");
+    expect(before - engine.live.buffers).toBe(3);
+    resources.dispose();
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
+  it("make no cluster records unless clustered, and refuse a clustered upload without its bake's origin (R14.T1.b)", async () => {
+    const engine = await countingRenderEngine();
+    const plain = new TerrainResources(engine, LOW, WGS84, "lit");
+    expect([plain.clusterMesh, plain.clusterRecords, plain.clusterBuffers("view")]).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    const clustered = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const writes = engine.writes.length;
+    expect(() => clustered.upload({ ...upload(0, 65, false), layers: mappedLayers() })).toThrow(
+      /origin and height range/u,
+    );
+    expect(engine.writes.length).toBe(writes);
+    plain.dispose();
+    clustered.dispose();
   });
 
   it("refuse, writing nothing, more of a cascade's casters than the slots (R10.T9.b)", async () => {

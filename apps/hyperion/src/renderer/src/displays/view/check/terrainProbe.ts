@@ -115,6 +115,16 @@ export interface WatchedPass {
   /** The selection budget, half the cache's slots (`TerrainPass.maxPatches`). */
   readonly maxPatches: number;
   seesPatch(id: string): boolean;
+  /**
+   * The view's triangles at its last draw (plan R14, R14.T1.b; `TerrainPass.counts`); absent on a
+   * fake that draws none.
+   */
+  counts?(id: string): {
+    readonly drawnTriangles: number;
+    readonly casterTriangles: ReadonlyArray<number> | null;
+  } | null;
+  /** The cluster path's measurement switch (`TerrainPass.measureClusters`), which the run turns on. */
+  measureClusters?(on: boolean): void;
 }
 
 /**
@@ -341,6 +351,9 @@ interface TerrainFrame {
   readonly views: Map<string, TerrainFrameView>;
   /** The patches the pass drew, at the primary's scene target's submission, if it had a pass. */
   patches: number | null;
+  /** Its triangles then, the lit draws' and the casters' (`null` where not known; plan R14). */
+  triangles: number | null;
+  casterTriangles: number | null;
 }
 
 /** A read-back of a view's scene target. */
@@ -865,10 +878,19 @@ export class TerrainProbe {
         nonFiniteTexels: readBacks.reduce((sum, each) => sum + each.nonFinite, 0),
       };
     });
-    const patchesDrawn = [...this.#frames]
-      .filter(([atMs, frame]) => atMs >= start.atMs && atMs < end.atMs && frame.patches !== null)
+    const inWindow = [...this.#frames]
+      .filter(([atMs]) => atMs >= start.atMs && atMs < end.atMs)
       .toSorted(([a], [b]) => a - b)
-      .map(([, frame]) => frame.patches ?? 0);
+      .map(([, frame]) => frame);
+    const patchesDrawn = inWindow.flatMap((frame) =>
+      frame.patches === null ? [] : [frame.patches],
+    );
+    const trianglesDrawn = inWindow.flatMap((frame) =>
+      frame.triangles === null ? [] : [frame.triangles],
+    );
+    const casterTriangles = inWindow.flatMap((frame) =>
+      frame.casterTriangles === null ? [] : [frame.casterTriangles],
+    );
     return {
       name,
       startMs: start.atMs,
@@ -880,6 +902,8 @@ export class TerrainProbe {
       mainThreadMs: window.mainThreadMs,
       frameGpuMs: window.frameGpuMs,
       patchesDrawn,
+      trianglesDrawn,
+      casterTriangles,
       bakes: {
         posted: end.workers.bakesPosted - start.workers.bakesPosted,
         baked: end.workers.baked - start.workers.baked,
@@ -925,6 +949,14 @@ export class TerrainProbe {
       seen.views.set(view, part);
       if (pass !== null && owner === `${view}:hdr` && view === "view") {
         seen.patches = pass.lastStep?.drawSet.count ?? 0;
+        // The run measures: the cluster path's counters are read back from here on (plan R14).
+        pass.measureClusters?.(true);
+        const counts = pass.counts?.(view) ?? null;
+        seen.triangles = counts?.drawnTriangles ?? null;
+        seen.casterTriangles =
+          counts?.casterTriangles === null || counts?.casterTriangles === undefined
+            ? null
+            : counts.casterTriangles.reduce((sum, n) => sum + n, 0);
       }
     }
     if (SCENE_TARGET.test(owner)) {
@@ -951,7 +983,13 @@ export class TerrainProbe {
     if (known !== undefined) {
       return known;
     }
-    const frame: TerrainFrame = { scriptS: this.#scriptS, views: new Map(), patches: null };
+    const frame: TerrainFrame = {
+      scriptS: this.#scriptS,
+      views: new Map(),
+      patches: null,
+      triangles: null,
+      casterTriangles: null,
+    };
     this.#frames.set(frameMs, frame);
     return frame;
   }

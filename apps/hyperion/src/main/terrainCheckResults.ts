@@ -286,6 +286,12 @@ export interface TerrainPhaseFigures {
     readonly max: number;
     readonly last: number;
   } | null;
+  /**
+   * The terrain's triangles a primary draw (plan R14, R14.T1.b): its lit draws', and its shadow
+   * cascades' casters', each over the draws that counted them; `null` where none did.
+   */
+  readonly triangles: CountStats | null;
+  readonly casterTriangles: CountStats | null;
   readonly bakes: TerrainCheckPhaseRecord["bakes"];
   /** Bakes answered a second over the window. */
   readonly bakedPerS: number;
@@ -398,6 +404,32 @@ function slotOf(name: ViewsCheckViewName): ViewSlotName {
   return slot;
 }
 
+/** A count's mean and largest, in millions, and its draws; a dash for none. */
+function countText(stats: CountStats | null): string {
+  return stats === null
+    ? "—"
+    : `${(stats.mean / 1e6).toFixed(3)} M, ${(stats.max / 1e6).toFixed(3)} M; ${String(stats.draws)}`;
+}
+
+/** A count's draws, mean and largest. */
+export interface CountStats {
+  readonly draws: number;
+  readonly mean: number;
+  readonly max: number;
+}
+
+/** `counts`' draws, mean and largest; `null` for none. */
+function countStats(counts: ReadonlyArray<number>): CountStats | null {
+  if (counts.length === 0) {
+    return null;
+  }
+  return {
+    draws: counts.length,
+    mean: counts.reduce((sum, count) => sum + count, 0) / counts.length,
+    max: counts.reduce((most, count) => Math.max(most, count), 0),
+  };
+}
+
 function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): TerrainPhaseFigures {
   const expected = TERRAIN_PHASES[setting].find((plan) => plan.name === record.name)?.views ?? [];
   const held =
@@ -450,6 +482,8 @@ function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): T
             max: patches.reduce((most, count) => Math.max(most, count), 0),
             last,
           },
+    triangles: countStats(record.trianglesDrawn),
+    casterTriangles: countStats(record.casterTriangles),
     bakes: record.bakes,
     bakedPerS: windowS > 0 ? record.bakes.baked / windowS : 0,
     fieldPosts: record.fieldPosts,
@@ -1042,6 +1076,17 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     ...phases.map(
       (phase) =>
         `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${phase.windowS.toFixed(1)} | ${phase.script.startS.toFixed(1)} → ${phase.script.endS.toFixed(1)} | ${durations(phase.animationFrames)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${phase.patchesDrawn === null ? "—" : `${phase.patchesDrawn.mean.toFixed(1)}, ${String(phase.patchesDrawn.max)}`} | ${String(phase.bakes.baked)} (${phase.bakedPerS.toFixed(1)}) | ${String(phase.fieldPosts.inits)}, ${String(phase.fieldPosts.chunks)} | ${String(phase.fieldAsks)}, ${String(phase.blocksSent)} |`,
+    ),
+    "",
+    "## Triangles a frame (plan R14)",
+    "",
+    "The terrain's triangles at the primary's draws: its lit draws', and its shadow cascades' casters', every cascade's, over the draws that counted them (`TerrainPass.counts`).",
+    "",
+    "| Phase | Lit (mean, max; draws) | Casters (mean, max; draws) |",
+    "| --- | --- | --- |",
+    ...phases.map(
+      (phase) =>
+        `| ${phase.name} | ${countText(phase.triangles)} | ${countText(phase.casterTriangles)} |`,
     ),
     "",
     "## Views (provisional)",

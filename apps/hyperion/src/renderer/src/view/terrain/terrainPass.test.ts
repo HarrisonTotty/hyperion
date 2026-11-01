@@ -9,7 +9,12 @@ import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { scale, sub, type Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
-import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
+import {
+  GEOMETRY_BEFORE_R14,
+  SETTINGS,
+  TERRAIN_SETTINGS,
+  terrainSettingsFor,
+} from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
 import { DEFAULT_TERRAIN_VIEW, LIT_INTERIOR_INDICES, normalsAtlasOf } from "./gpu/resources";
 import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
@@ -62,10 +67,8 @@ import { microtasks } from "../../test/opticsFakes";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
-  ALL_LEVERS,
   effectiveTauPx,
   morphRangeM,
-  NO_LEVERS,
   SELECT_MEASURE,
   type TerrainFrame,
   type TerrainFrameInput,
@@ -1495,8 +1498,11 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     }
     pool.layers = bodyLayers();
     const view = northPole(2_000_000);
-    pass.frame({ ...inputAt(view), lighting: LIGHTING });
-    pool.bakeDemand(pass);
+    // Until nothing more is asked for, so that no patch is drawn by a stand-in.
+    for (let round = 0; round < 6; round += 1) {
+      pass.frame({ ...inputAt(view), lighting: LIGHTING });
+      pool.bakeDemand(pass);
+    }
     return { pass, pool, engine, view };
   }
 
@@ -1569,14 +1575,14 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     expect(view0.patches).toEqual({ interior: first.drawSet.count - 1, edge: 1 });
   });
 
-  it("draws as before the split with the interior lever off, from the same records, and splits again with it on", async () => {
+  it("draws as before the split by the way back, from the same records, and splits again on the cluster path", async () => {
     const { pass, engine, view } = await interiorPass();
     const path = pass.layout.vertexPath;
     const split = pass.frame({ ...inputAt(view), lighting: LIGHTING });
-    pass.setLevers(NO_LEVERS);
+    pass.setGeometry(GEOMETRY_BEFORE_R14);
     const before = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     const slots = Array.from(before.drawSet.slots.subarray(0, before.drawSet.count));
-    expect([named(before), writtenSlots(engine), pass.levers]).toEqual([
+    expect([named(before), writtenSlots(engine), pass.geometry]).toEqual([
       [
         [
           "terrain lit patch",
@@ -1586,11 +1592,27 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
         ],
       ],
       slots,
-      NO_LEVERS,
+      GEOMETRY_BEFORE_R14,
     ]);
-    pass.setLevers(ALL_LEVERS);
+    pass.setGeometry(SETTINGS.low.geometry);
     const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(named(again)).toEqual(named(split));
+  });
+
+  it("draws a stand-in by the lit mesh, never by the interior mesh, whatever its bake", async () => {
+    const { pass, pool, engine } = await interiorPass();
+    // Nearer, the selection asks for finer patches, which their resident ancestors stand in for.
+    const nearer = northPole(200_000);
+    pass.frame({ ...inputAt(nearer), lighting: LIGHTING });
+    const frame = pass.frame({ ...inputAt(nearer), lighting: LIGHTING });
+    const standIns = frame.drawSet.patches
+      .filter(({ standIn }) => standIn)
+      .map(({ patch }) => patch.slot);
+    expect([standIns.length > 0, pool.demand.length > 0]).toEqual([true, true]);
+    expect(standIns.filter((slot) => !writtenSlots(engine).includes(slot))).toEqual([]);
+    expect(
+      standIns.filter((slot) => writtenSlots(engine, "terrain interior instances").includes(slot)),
+    ).toEqual([]);
   });
 
   it("draws every patch by the lit mesh where the interior form cannot be made, and reports it", async () => {

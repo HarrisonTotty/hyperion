@@ -88,6 +88,8 @@ function phase(
     mainThreadMs: [4, 5],
     frameGpuMs: [2.5, 2.6],
     patchesDrawn: [40, 52, 61],
+    trianglesDrawn: [348_160, 452_608, 530_944],
+    casterTriangles: [903_168, 1_032_192],
     bakes: { posted: 300, baked: 296, refused: 1 },
     fieldPosts: { inits: 3, chunks: 21, releases: 0 },
     fieldAsks: 2,

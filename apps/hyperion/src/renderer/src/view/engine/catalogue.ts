@@ -76,7 +76,10 @@ import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
+  TERRAIN_CLUSTER_SHADOW_MATERIALS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
   TERRAIN_LIT_EMISSIVE_MATERIALS,
@@ -239,10 +242,10 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, and its interior patches' form without the
- * survey discard (plan R14, R14.T1.a), R10.T16.c's lit terrain as depth
- * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
- * vertex path, and R10.T9.b's shadow casters, one per vertex path, for the cascades' `depth-only`
- * layers.
+ * survey discard (plan R14, R14.T1.a), R10.T16.c's lit terrain as depth alone for the symbology's
+ * pass, one per vertex path, R10.T11's wireframe terrain, one per vertex path, and R10.T9.b's
+ * shadow casters, one per vertex path, and plan R14's cluster casters (R14.T1.b), for the cascades'
+ * `depth-only` layers, and the cluster path's cull and counters.
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -253,11 +256,16 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     ...TERRAIN_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
-  ...TERRAIN_SHADOW_MATERIALS.map((spec): CatalogueEntry => ({
-    kind: "material",
-    spec,
-    targets: ["depth-only"],
-  })),
+  ...[...TERRAIN_SHADOW_MATERIALS, ...TERRAIN_CLUSTER_SHADOW_MATERIALS].map(
+    (spec): CatalogueEntry => ({
+      kind: "material",
+      spec,
+      targets: ["depth-only"],
+    }),
+  ),
+  // Plan R14's cluster path (R14.T1.b): its cull and the copy of its counters.
+  { kind: "compute", spec: CLUSTER_CULL_KERNEL },
+  { kind: "compute", spec: CLUSTER_STATS_KERNEL },
 ];
 
 /**

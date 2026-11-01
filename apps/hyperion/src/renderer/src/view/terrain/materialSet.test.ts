@@ -40,14 +40,16 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's five, on its own path, the shadow cascades' caster (R10.T9.b) and the interior
- * patches' lit form (plan R14, R14.T1.a) among them: what every compile below is held to.
+ * The high setting's six, on its own path, the shadow cascades' caster (R10.T9.b), the interior
+ * patches' lit form (plan R14, R14.T1.a) and their cluster caster (R14.T1.b) among them: what every
+ * compile below is held to.
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
+  `terrain-cluster-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
 ];
 
@@ -97,6 +99,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "lit-interior", path: "baked-offsets" },
       { kind: "depth", path: "baked-offsets" },
       { kind: "shadow", path: "baked-offsets" },
+      { kind: "shadow-cluster", path: "baked-offsets" },
       { kind: "wire", path: "baked-offsets" },
     ]);
   });
@@ -120,6 +123,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "lit-interior", path: "face-differences" },
       { kind: "depth", path: "face-differences" },
       { kind: "shadow", path: "face-differences" },
+      { kind: "shadow-cluster", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
     ]);
   });
@@ -186,7 +190,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
   it("compiles its setting's materials as it is made", async () => {
     const engine = await countingRenderEngine();
     const set = new TerrainMaterialSet(engine, "high");
-    expect([await set.compiled, compiles(engine)]).toEqual([5, HIGH]);
+    expect([await set.compiled, compiles(engine)]).toEqual([6, HIGH]);
   });
 
   it("compiles each against a mesh of its pass's layout, released once compiled", async () => {
@@ -195,6 +199,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([
       [
+        layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
@@ -211,7 +216,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     const first = await set.material("lit", "baked-offsets");
     const second = await set.material("lit", "baked-offsets");
-    expect([second, compiles(engine).length]).toEqual([first, 5]);
+    expect([second, compiles(engine).length]).toEqual([first, 6]);
   });
 
   it("compiles a material of another path at its first ask, once", async () => {
@@ -220,7 +225,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     await set.material("wire", "face-differences");
     await set.material("wire", "face-differences");
-    expect(compiles(engine, 5)).toEqual([
+    expect(compiles(engine, 6)).toEqual([
       `terrain-wire-face-differences canvas ${COMPILE_MESH_NAME}`,
     ]);
   });
@@ -229,10 +234,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     const engine = await countingRenderEngine();
     engine.failMaterials((name) => name === "terrain-depth-baked-offsets");
     const set = new TerrainMaterialSet(engine, "high");
-    expect(await set.compiled).toBe(4);
+    expect(await set.compiled).toBe(5);
     engine.failMaterials(() => false);
     const depth = await set.material("depth", "baked-offsets");
-    expect([depth.name, compiles(engine).length]).toEqual(["terrain-depth-baked-offsets", 6]);
+    expect([depth.name, compiles(engine).length]).toEqual(["terrain-depth-baked-offsets", 7]);
   });
 
   it("compiles nothing while the device is lost, and its setting once the device is restored", async () => {
@@ -246,7 +251,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     expect([lit.name, compiles(engine), engine.live.materials]).toEqual([
       "terrain-lit-baked-offsets",
       HIGH,
-      5,
+      6,
     ]);
   });
 
@@ -259,10 +264,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await settle();
     const after = await set.material("lit", "baked-offsets");
-    expect([after === before, compiles(engine, 5), engine.live.materials]).toEqual([
+    expect([after === before, compiles(engine, 6), engine.live.materials]).toEqual([
       false,
       HIGH,
-      5,
+      6,
     ]);
   });
 
@@ -279,7 +284,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     const after = await (asked[0] ?? Promise.reject(new Error("never asked")));
-    expect([after === before, engine.live.materials]).toEqual([false, 5]);
+    expect([after === before, engine.live.materials]).toEqual([false, 6]);
     set.dispose();
     expect(engine.live.materials).toBe(0);
   });
@@ -292,8 +297,8 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
     await settle();
-    // The setting's five compiled again on the restored device, and nothing else held.
-    expect(engine.live.materials).toBe(5);
+    // The setting's six compiled again on the restored device, and nothing else held.
+    expect(engine.live.materials).toBe(6);
   });
 
   it("releases every material when let go, and refuses asks after", async () => {
@@ -322,7 +327,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     await settle();
-    expect([compiles(engine, 5), engine.live.materials]).toEqual([HIGH, 5]);
+    expect([compiles(engine, 6), engine.live.materials]).toEqual([HIGH, 6]);
   });
 
   it("releases a compile that ends after it is let go", async () => {
@@ -340,6 +345,6 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     set.dispose();
     engine.restore();
     await settle();
-    expect(compiles(engine).length).toBe(5);
+    expect(compiles(engine).length).toBe(6);
   });
 });

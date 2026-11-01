@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GEOMETRY_BEFORE_R14,
   QUALITY_SETTINGS,
   SETTINGS,
   TERRAIN_SETTINGS,
@@ -119,5 +120,24 @@ describe("the quality settings", () => {
 
   it("refuses the low setting with the baked-offsets path", () => {
     expect(() => terrainSettingsFor("low", { vertexPath: "baked-offsets" })).toThrow(RangeError);
+  });
+});
+
+describe("the geometry's settings (plan R14)", () => {
+  it("draws through the cluster path on both settings, its later levers off, and keeps the way back", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      expect(SETTINGS[setting].geometry).toEqual({
+        clusterPath: true,
+        casterDepthCull: false,
+        casterStrideCap: 1,
+        overlayDepth: "redraw",
+      });
+    }
+    expect(GEOMETRY_BEFORE_R14).toEqual({
+      clusterPath: false,
+      casterDepthCull: false,
+      casterStrideCap: 1,
+      overlayDepth: "redraw",
+    });
   });
 });

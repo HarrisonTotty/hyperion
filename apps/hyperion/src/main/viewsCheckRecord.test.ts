@@ -200,6 +200,8 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["phases", 0, "views", 0, "missedFrames"], -1],
     [["phases", 0, "views", 0, "firstTerrainMs"], "soon"],
     [["phases", 0, "patchesDrawn"], [1.5]],
+    [["phases", 0, "trianglesDrawn"], [-1]],
+    [["phases", 0, "casterTriangles"], null],
     [["phases", 0, "bakes", "baked"], null],
     [["phases", 0, "memory", "liveBytes", 0, "bytes"], -2],
     [["faults", 0, "kind"], "device-gone"],

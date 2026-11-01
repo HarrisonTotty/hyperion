@@ -55,7 +55,7 @@ import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { overlaySubmission } from "../view/photoreal/overlay";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { type PhotorealOverlay, PhotorealRenderer } from "../view/photoreal/renderer";
-import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { GEOMETRY_BEFORE_R14, SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
 import {
@@ -69,8 +69,6 @@ import { type PatchKey, sameKey } from "../view/terrain/patchKey";
 import { planetGeometry } from "../view/terrain/planet";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import {
-  ALL_LEVERS,
-  NO_LEVERS,
   TerrainPass,
   type TerrainDrawnPatches,
   type TerrainPool,
@@ -522,8 +520,8 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       `settled ${String(withRelief.done)}; finite ${String(finite)}, ${String(pixels - covered)} pixels undrawn of ${String(pixels)}; digest ${bytesDigest(both)}`,
     );
 
-    // The same frame with plan R14's levers off, from the same selection and residents, as the pass
-    // drew it before them, and with them on again, after it: byte for byte (R14.T1.a).
+    // The same frame by the way back (`GEOMETRY_BEFORE_R14`), from the same selection and residents,
+    // as the pass drew it before plan R14, and on its path again after it: byte for byte (R14.T1.a).
     const patches = drawnPatches.get(relief) ?? { interior: 0, edge: 0 };
     const reliefFrame = async (): Promise<Float32Array> => {
       const frame = liveFrame(relief, mask, pose, performance.now());
@@ -531,9 +529,9 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
       ]);
     };
-    relief.setLevers(NO_LEVERS);
+    relief.setGeometry(GEOMETRY_BEFORE_R14);
     const unlevered = await reliefFrame();
-    relief.setLevers(ALL_LEVERS);
+    relief.setGeometry(SETTINGS.low.geometry);
     const levered = await reliefFrame();
     const digests = [both, unlevered, levered].map((texels) => bytesDigest(texels));
     const litTriangles =
@@ -542,7 +540,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     checks.check(
       "R14.T1.a the interior patches' draw, without fins, skirt heads or discard, draws the frame the lit mesh draws, byte for byte",
       withRelief.done && patches.interior > 0 && new Set(digests).size === 1,
-      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} with the levers, ${digests[1] ?? ""} without, ${digests[2] ?? ""} with them again`,
+      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} on the cluster path, ${digests[1] ?? ""} by the way back, ${digests[2] ?? ""} on the path again`,
     );
 
     // On the datum: each surface alone, through the same live path.

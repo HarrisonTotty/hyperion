@@ -41,6 +41,14 @@
  */
 
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
+import { ClusterBuckets } from "../../clusters/buckets";
+import { CLUSTER_RECORD_BYTES } from "../../clusters/record";
+import {
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+  writeTerrainClusterRecords,
+} from "../../clusters/terrain";
+import { terrainClusterMesh } from "../../clusters/templates";
 import { packPhaseFactorRows } from "../../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../../engine/gpuFlags";
 import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../../engine/platform";
@@ -55,6 +63,7 @@ import type { TerrainSettings, TerrainVertexPath } from "../../quality/qualitySe
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
 import { bindingCeilingSlots } from "../cacheBudget";
 import type { PatchKey } from "../patchKey";
+import { type PlanetGeometry, planetGeometry } from "../planet";
 import type { CascadeIndex } from "../shadows/cascadeShadow";
 import {
   CLASS_LAWS_BYTES,
@@ -89,6 +98,7 @@ import {
   TerrainPhaseRows,
 } from "../terrainMaterial";
 import type { TerrainLayers } from "../workers/messages";
+import type { Vec3 } from "../../../geometry/vec3";
 import {
   CONTACTS_HEADER_BYTES,
   CONTACT_RECORD_BYTES,
@@ -158,6 +168,18 @@ export const LIT_PATCH_INDICES =
  * and fins that a patch with no unsurveyed vertex collapses or discards whole.
  */
 export const LIT_INTERIOR_INDICES = GRID_INDICES + 4 * QUADS * 6;
+
+/** Terrain's cluster mesh and its eight templates (plan R14, R14.T1.b), made once. */
+export const TERRAIN_CLUSTER_MESH = terrainClusterMesh();
+
+/** The passes a view's cluster buckets hold (plan R14, R14.T1.b): one a shadow cascade. */
+export const CLUSTER_CASTER_PASSES = 4;
+
+/** Bytes of a slot's cluster records: its patch's 96 clusters (plan R14, R14.T1.b). */
+export const CLUSTER_RECORDS_SLOT_BYTES = TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES;
+
+/** Bytes of an interior record's cull input: its passes' mask and its error unit, two `u32`. */
+export const CULL_INPUT_BYTES = 8;
 
 /**
  * The rows a lit layout's phase table is first made with: row 0 and the three laws at L(0) = 1 and
@@ -774,6 +796,12 @@ export interface SlotUpload {
   readonly skirtDepthM: number;
   /** R10's layers of a body's bake, which a lit layout draws; `null` for the test planet's. */
   readonly layers: TerrainLayers | null;
+  /**
+   * The bake's origin, body-fixed, m (`f64`), and its height range, both channels', m: what a
+   * clustered layout's records are made from (plan R14, R14.T1.b); absent elsewhere.
+   */
+  readonly originM?: Vec3;
+  readonly heightRangeM?: readonly [number, number];
 }
 
 /**
@@ -840,6 +868,15 @@ export interface TerrainViewBuffers {
   readonly interior: TerrainInteriorBuffers | null;
 }
 
+/**
+ * One view's cluster path buffers (plan R14, R14.T1.b): its buckets, one pass a shadow cascade, and
+ * each interior record's cull input ({@link CULL_INPUT_BYTES}), one per slot at most.
+ */
+export interface TerrainClusterBuffers {
+  readonly buckets: ClusterBuckets;
+  readonly cullInputs: BufferHandle;
+}
+
 /** One view's interior patches' frame buffers (plan R14, R14.T1.a). */
 export interface TerrainInteriorBuffers {
   /** Their instance records ({@link INSTANCE_RECORD_BYTES} each), one per slot at most. */
@@ -870,6 +907,15 @@ interface MadeFields {
   readonly mesh: MeshHandle;
   /** A lit layout's interior patches' mesh (plan R14, R14.T1.a); `null` on the other layouts. */
   readonly interiorMesh: MeshHandle | null;
+  /**
+   * The cluster path's (plan R14, R14.T1.b), on a lit layout whose resources draw it: terrain's
+   * cluster mesh and each slot's cluster records ({@link CLUSTER_RECORDS_SLOT_BYTES}); `null`
+   * otherwise.
+   */
+  readonly clusterMesh: MeshHandle | null;
+  readonly clusterRecords: BufferHandle | null;
+  /** Each view's cluster buffers, made at its first cluster frame on the device (R14.T1.b). */
+  readonly clusters: Map<string, TerrainClusterBuffers>;
   /** Each view's frame buffers, made at its first frame on the device. */
   readonly views: Map<string, TerrainViewBuffers>;
   /** Each view's caster buffers, made at its first caster frame on the device (R10.T9.b). */
@@ -923,17 +969,31 @@ export class TerrainResources {
   #noHorizon: Uint32Array | null = null;
   /** Every handle released ({@link TerrainResources.dispose}): nothing more is made. */
   #disposed = false;
+  /** Whether a lit layout's slots hold the cluster path's records (plan R14, R14.T1.b). */
+  readonly #clustered: boolean;
+  /** The figure as the cluster records' bounds read it, with no level table. */
+  readonly #planet: PlanetGeometry;
+  /** One slot's cluster records, written whole at each upload. */
+  readonly #clusterRecord = new ArrayBuffer(CLUSTER_RECORDS_SLOT_BYTES);
 
+  /**
+   * @param clustered - Whether a lit layout's slots hold the cluster path's records and its views
+   *   its buckets (plan R14, R14.T1.b): the high setting's, whose interior patches cast through
+   *   it; `false` by default, when every upload is as before.
+   */
   constructor(
     engine: RenderEngine,
     terrain: TerrainSettings,
     figure: SpheroidFigure,
     shading: TerrainShading = "spike",
+    clustered = false,
   ) {
     this.#engine = engine;
     this.#terrain = terrain;
     this.#figure = figure;
     this.#shading = shading;
+    this.#clustered = clustered && TERRAIN_SHADING_TRAITS[shading].lit;
+    this.#planet = planetGeometry({ ...figure, pole: null }, null);
     this.#made = this.#make();
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
     this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
@@ -971,6 +1031,70 @@ export class TerrainResources {
    */
   get interiorMesh(): MeshHandle | null {
     return this.#made.interiorMesh;
+  }
+
+  /**
+   * Terrain's cluster mesh (plan R14, R14.T1.b; {@link TERRAIN_CLUSTER_MESH}), on a lit layout
+   * made with its clusters; `null` otherwise.
+   */
+  get clusterMesh(): MeshHandle | null {
+    return this.#made.clusterMesh;
+  }
+
+  /**
+   * Each slot's cluster records, {@link CLUSTER_RECORDS_SLOT_BYTES} a slot, written at its upload
+   * (plan R14, R14.T1.b), on a lit layout made with its clusters; `null` otherwise.
+   */
+  get clusterRecords(): BufferHandle | null {
+    return this.#made.clusterRecords;
+  }
+
+  /**
+   * `view`'s cluster path buffers (plan R14, R14.T1.b), made at its first call on the current
+   * device: its buckets for {@link CLUSTER_CASTER_PASSES} passes of terrain's templates, each with
+   * room for every cluster of its shape of every slot, named `terrain clusters (view)`, and its
+   * cull inputs; released with its other buffers. `null` on a layout made without clusters.
+   *
+   * @throws Error once the resources are disposed.
+   */
+  clusterBuffers(view: string): TerrainClusterBuffers | null {
+    if (this.#disposed) {
+      throw new Error("the terrain's resources were disposed: they make nothing more");
+    }
+    const made = this.#made;
+    if (made.clusterRecords === null) {
+      return null;
+    }
+    let buffers = made.clusters.get(view);
+    if (buffers === undefined) {
+      const slots = made.layout.slots.slotCount;
+      const named =
+        view === DEFAULT_TERRAIN_VIEW ? "terrain clusters" : `terrain clusters (${view})`;
+      const { templates } = TERRAIN_CLUSTER_MESH;
+      buffers = {
+        buckets: new ClusterBuckets(
+          this.#engine,
+          named,
+          CLUSTER_CASTER_PASSES,
+          templates,
+          templates.map(
+            (t) =>
+              slots *
+              (t.shape === "terrain-block"
+                ? TERRAIN_BLOCKS
+                : TERRAIN_CLUSTERS_PER_PAGE - TERRAIN_BLOCKS),
+          ),
+        ),
+        cullInputs: this.#engine.createBuffer({
+          name: `${named} cull inputs`,
+          bytes: slots * CULL_INPUT_BYTES,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "geometry-clusters",
+        }),
+      };
+      made.clusters.set(view, buffers);
+    }
+    return buffers;
   }
 
   /**
@@ -1042,6 +1166,11 @@ export class TerrainResources {
     if (casters !== undefined) {
       this.#made.casters.delete(view);
       this.#releaseCasters(casters);
+    }
+    const clusters = this.#made.clusters.get(view);
+    if (clusters !== undefined) {
+      this.#made.clusters.delete(view);
+      this.#releaseClusters(clusters);
     }
   }
 
@@ -1178,15 +1307,16 @@ export class TerrainResources {
    * bake skipped it, and its survey mask with the code of its survey's cell size
    * ({@link packSurveyMask}, R10.T10.c). On the wireframe's layout (R10.T11) it writes the heights,
    * the offsets on their path, the record and the survey mask alone: the bake's normals are not
-   * kept.
+   * kept. On a clustered layout (plan R14, R14.T1.b) it writes the slot's cluster records last,
+   * from the bake's key, origin, height range and skirt depth (`clusters/terrain.ts`).
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
    * count or whose offsets the new vertex path does not take; or, on a lit or wireframe layout, a
    * bake without R10's layers; else `uploaded`.
    * @throws RangeError also for class weights, a maturity layer's codes or nodes, a horizon map or
-   * a survey mask of another size than a slot's, or a field level that is not an integer, before
-   * any write.
+   * a survey mask of another size than a slot's, a field level that is not an integer, or, on a
+   * clustered layout, a bake without its origin or height range, before any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
    */
   upload(patch: SlotUpload): SlotUploadResult {
@@ -1231,6 +1361,14 @@ export class TerrainResources {
     ) {
       throw new RangeError(
         `a horizon map of ${String(horizonBytes)} B, where a slot holds ${String(HORIZON_MAP_BYTES)} B`,
+      );
+    }
+    if (
+      this.#made.clusterRecords !== null &&
+      (patch.originM === undefined || patch.heightRangeM === undefined)
+    ) {
+      throw new RangeError(
+        "a clustered layout's upload needs its bake's origin and height range for its cluster records",
       );
     }
     const surveyMask =
@@ -1312,6 +1450,29 @@ export class TerrainResources {
     }
     if (surveyMask !== null) {
       this.#writeField("survey-mask", slot, surveyMask);
+    }
+    const clusterRecords = this.#made.clusterRecords;
+    if (
+      clusterRecords !== null &&
+      patch.originM !== undefined &&
+      patch.heightRangeM !== undefined
+    ) {
+      writeTerrainClusterRecords(
+        this.#planet,
+        {
+          key: patch.key,
+          originM: patch.originM,
+          heightRangeM: patch.heightRangeM,
+          skirtDepthM: patch.skirtDepthM,
+        },
+        new DataView(this.#clusterRecord),
+        0,
+      );
+      this.#engine.writeBuffer(
+        clusterRecords,
+        slot * CLUSTER_RECORDS_SLOT_BYTES,
+        new Uint8Array(this.#clusterRecord),
+      );
     }
     return UPLOADED;
   }
@@ -1437,7 +1598,7 @@ export class TerrainResources {
    * and a disposal releases the rest (the batch review's S3).
    */
   #release(made: Made): void {
-    const { lit, normals, interiorMesh } = made;
+    const { lit, normals, interiorMesh, clusterMesh, clusterRecords } = made;
     const releases: Array<() => void> = [
       ...[...made.fields.values()].map((buffer) => () => {
         this.#engine.releaseBuffer(buffer);
@@ -1462,6 +1623,20 @@ export class TerrainResources {
               this.#engine.releaseMesh(interiorMesh);
             },
           ]),
+      ...(clusterMesh === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseMesh(clusterMesh);
+            },
+          ]),
+      ...(clusterRecords === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseBuffer(clusterRecords);
+            },
+          ]),
       ...(lit === null
         ? []
         : [
@@ -1475,9 +1650,13 @@ export class TerrainResources {
       ...[...made.casters.values()].map((casters) => () => {
         this.#releaseCasters(casters);
       }),
+      ...[...made.clusters.values()].map((clusters) => () => {
+        this.#releaseClusters(clusters);
+      }),
     ];
     made.views.clear();
     made.casters.clear();
+    made.clusters.clear();
     for (const release of releases) {
       try {
         release();
@@ -1485,6 +1664,11 @@ export class TerrainResources {
         console.error("a terrain resource could not be released:", error);
       }
     }
+  }
+
+  #releaseClusters(clusters: TerrainClusterBuffers): void {
+    clusters.buckets.dispose();
+    this.#engine.releaseBuffer(clusters.cullInputs);
   }
 
   #releaseCasters(casters: TerrainCasterBuffers): void {
@@ -1730,6 +1914,7 @@ export class TerrainResources {
     const rest = (): MadeFields => {
       const mesh = engine.createMesh(terrainMeshSpec(layout.shading));
       const interiorMesh = traits.lit ? engine.createMesh(terrainInteriorMeshSpec()) : null;
+      const clustered = this.#clustered;
       // Every view's buffers, the default view's included, are made at its first frame.
       const views = new Map<string, TerrainViewBuffers>();
       const casters = new Map<string, TerrainCasterBuffers>();
@@ -1739,6 +1924,16 @@ export class TerrainResources {
         slotRecords,
         mesh,
         interiorMesh,
+        clusterMesh: clustered ? engine.createMesh(TERRAIN_CLUSTER_MESH.mesh) : null,
+        clusterRecords: clustered
+          ? engine.createBuffer({
+              name: "terrain cluster records",
+              bytes: slotCount * CLUSTER_RECORDS_SLOT_BYTES,
+              usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+              category: "geometry-clusters",
+            })
+          : null,
+        clusters: new Map(),
         views,
         casters,
       };
