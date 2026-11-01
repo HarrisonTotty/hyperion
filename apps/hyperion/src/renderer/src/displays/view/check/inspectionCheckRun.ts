@@ -7,16 +7,18 @@
  * @remarks
  * In order:
  *
- * 1. The universe's name and the body's system, as a range query's row describes it, are asked of
- *    the server once the link is up (`list_universes`, `resolve_system` at the epoch).
+ * 1. The universe's name, the body's system, as a range query's row describes it, and the body's
+ *    record are asked of the server once the link is up (`list_universes`, `resolve_system` and
+ *    `body_detail` at the epoch).
  * 2. The universe is opened on `GALAXY` (`F2`, its row's `OPEN UNIVERSE`), and the system on
  *    `SYSTEM` through `App`'s opening, as `OPEN SYSTEM` opens a charted system, at the epoch.
  * 3. On `SYSTEM` the body's row is selected in the body list, `FOCUS BODY` pressed, which focuses it
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
  * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, the
- *    exposure must stand at `AUTO`, which the inspection opens on, and the ground at the line of
- *    sight on the lower plate must read the body's surveyed ground (`ELEVATION`), the inspection
- *    having surveyed it as it opened, or the plate must say `TERRAIN: NOT YET MODELLED`. Once
+ *    exposure must stand at `AUTO`, which the inspection opens on, and, for a body whose record
+ *    (`body_detail`, asked in step 1) has a surface, the ground at the line of sight on the lower
+ *    plate must read the body's surveyed ground (`ELEVATION`), the inspection having surveyed it as
+ *    it opened, or the plate must say `TERRAIN: NOT YET MODELLED`; a giant states none. Once
  *    `AUTO` has settled and a few frames are drawn the page is captured as
  *    `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels hidden and the stage
  *    the display's whole body, as `inspection-<system>-<index>-maximized` (the owner's request,
@@ -310,6 +312,15 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     time: EPOCH,
   });
   const record = resolved.record;
+  // The body's record, whose surface section says whether the view states its ground at all, and
+  // whose figure gives the radius the camera closes in to.
+  const { record: detail } = await asked({
+    kind: "body_detail",
+    universe: universe.id,
+    body: served.body,
+    time: EPOCH,
+    detail: "full",
+  });
 
   // 2. The universe opened on GALAXY, and the system on SYSTEM.
   pressKey(document.body, "F2");
@@ -381,11 +392,15 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   );
   const grounded = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.groundWaitMs } });
   const ground = (): ReadonlyArray<string> => lowerPlateLines(document);
-  await grounded.until(
-    "the ground at the line of sight did not read surveyed",
-    () => inspectionGround(ground()) !== "waiting",
-    () => ground().join("; "),
-  );
+  // A body with no surface, a giant, states no ground: no lower plate stands for it.
+  const hasSurface = detail.surface.state === "ok";
+  if (hasSurface) {
+    await grounded.until(
+      "the ground at the line of sight did not read surveyed",
+      () => inspectionGround(ground()) !== "waiting",
+      () => ground().join("; "),
+    );
+  }
   const read = (): number => {
     const line = plate().line("EXPOSURE");
     const ev = exposureEv100(line);
@@ -470,13 +485,6 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   }
 
   // 5. Closed in over the surveyed ground, and captured.
-  const { record: detail } = await asked({
-    kind: "body_detail",
-    universe: universe.id,
-    body: served.body,
-    time: EPOCH,
-    detail: "full",
-  });
   const radiusM =
     detail.figure?.state === "ok"
       ? detail.figure.value.equatorial_radius_m
