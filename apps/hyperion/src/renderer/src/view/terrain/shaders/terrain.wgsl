@@ -21,7 +21,8 @@ struct Draw {
 @group(1) @binding(0) var<uniform> draw : Draw;
 
 struct VertexOut {
-  @builtin(position) clip : vec4f,
+  // `@invariant` (W3C WGSL), as the lit terrain's (`terrainLit.wgsl`'s `LitVertexOut`).
+  @builtin(position) @invariant clip : vec4f,
   // The vertex's place in its patch, (x, y) ÷ 64.
   @location(0) patchUv : vec2f,
   @location(1) @interpolate(flat) slot : u32,

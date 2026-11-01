@@ -164,14 +164,16 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f42c280bcdf436a"],
   ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "8386129da1b73e0c"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bc5c9ada26f0f319"],
+  // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
+  // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   ...[
-    ["terrain-lit-baked-offsets", "7193d9cd210fae4f"],
-    ["terrain-lit-face-differences", "55f9745e1498290a"],
+    ["terrain-lit-baked-offsets", "ea5729c9cc03dc52"],
+    ["terrain-lit-face-differences", "1e09b82bdc268533"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "4453d1c82ebce7c8"],
-    ["terrain-depth-face-differences", "60212a5b00c773d1"],
-    ["terrain-shadow-baked-offsets", "3a12ec1c40e69ab8"],
-    ["terrain-shadow-face-differences", "be182c8f800204c1"],
+    ["terrain-depth-baked-offsets", "ad72f4d0d11e9cb9"],
+    ["terrain-depth-face-differences", "99f1e21d2397fb4c"],
+    ["terrain-shadow-baked-offsets", "49480d876414b105"],
+    ["terrain-shadow-face-differences", "898a0f38a9b3528"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

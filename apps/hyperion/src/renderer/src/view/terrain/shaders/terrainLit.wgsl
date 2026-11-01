@@ -220,7 +220,11 @@ fn angular_radius(radius : f32, distance : f32) -> f32 {
 }
 
 struct LitVertexOut {
-  @builtin(position) clip : vec4f,
+  // `@invariant` (W3C WGSL, the `invariant` attribute): every pipeline that places a patch's vertex
+  // by `lit_place` (the lit mesh's, the interior patches' and the cluster path's, plan R14; the
+  // casters', the depth's) computes its clip position to the same bits, so that their depths agree
+  // where their triangles meet and a split of one draw into several moves no pixel.
+  @builtin(position) @invariant clip : vec4f,
   // The vertex's place in its patch, (x, y) ÷ 64.
   @location(0) patchUv : vec2f,
   @location(1) @interpolate(flat) slot : u32,

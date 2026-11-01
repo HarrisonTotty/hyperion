@@ -89,7 +89,8 @@ const HALF_PI : f32 = 1.5707963267948966;
 const TWO_PI : f32 = 6.283185307179586;
 
 struct WireVertexOut {
-  @builtin(position) clip : vec4f,
+  // `@invariant` (W3C WGSL), as the lit terrain's (`terrainLit.wgsl`'s `LitVertexOut`).
+  @builtin(position) @invariant clip : vec4f,
   // The vertex's place in its patch, (x, y) ÷ 64.
   @location(0) patchUv : vec2f,
   @location(1) @interpolate(flat) slot : u32,
