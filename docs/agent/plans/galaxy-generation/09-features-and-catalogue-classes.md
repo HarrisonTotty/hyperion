@@ -5811,3 +5811,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     (lean, 2026-11-01). The recent dead of P09.T36.b's list are not placed by the source yet.
   - _Bench._ `feature_range_query`'s `list_at_27`; the figures, and the 5 ms miss, are in the
     lane's outbox.
+- **P09.T37's placement by ID (lane `p10-placed-motion-27`, 2026-11-01, at 24, behind the 27
+  holds; no output moved).** The centre's members and the class hosts a query returns are placed
+  by their IDs at their rows' positions (`CentrePath`; plan 10's "P10.T10.b's placement as
+  built"). A centre recent entry is placed straight at its velocity until its source lands (lean,
+  2026-11-01).

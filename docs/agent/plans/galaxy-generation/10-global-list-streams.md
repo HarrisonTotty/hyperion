@@ -730,7 +730,9 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
 _T10.a built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24); see "P10.T10.a as built"
 in Risks. T10.b's additions built (lane `p10-t10b-t11`, 2026-11-01, at 24); see "P10.T10.b's additions
 as built". Its registration member built behind its hold (lane `p10-list-registration`, 2026-11-01,
-at 24, no output moved); see "P10.T10.b's registration member as built"._
+at 24, no output moved); see "P10.T10.b's registration member as built". Its placement by ID built
+(lane `p10-placed-motion-27`, 2026-11-01, at 24, no output moved); see "P10.T10.b's placement as
+built"._
 
 - **P10.T10.a Protocol.** New kinds of plan 04's `RequestBody` and `ResponseBody`, added to
   `REQUEST_KINDS`: `GlobalFeatures { universe }` → `GlobalEntryWire` list (kind, number, mass,
@@ -2388,3 +2390,25 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     census takes no list source.
   - _Test._ Slow, by name, on eight workers:
     `requests::galaxy::registration::from_27_a_range_query_serves_the_list_s_members_and_the_centre_s`.
+- **P10.T10.b's placement as built (lane `p10-placed-motion-27`, 2026-11-01, at
+  `GENERATOR_VERSION` 24, behind the 27 holds, with P09.T37; no output moved, no wire change).**
+  The registration member's _Left_, but the sky's census.
+  - _Items._ Server `convert::{SystemLine, MotionReads, ListMembers}`; `system_motion` takes a
+    `MotionReads` and is `SystemLine::of(..)?.at(galaxy, t)`; `RowReads::motion`;
+    `SystemStarsHandle::with_stars_of`; `SharedBriefCache::get_or_build_listed`; `Ship::frame_line`,
+    `ShipStandIn::with_frame`; `requests::scene::frame_line`. Sim `features::centre::CentrePath`,
+    `GlobalMemberRecord::position_at`, `Trajectory` for `CatalogueMotion`,
+    `observe::{observe_hit_on, summary_observed_on}` (`observe_on_line` folded in),
+    `BriefModel::of_global_member`, `TraceMotionError::Disrupted`.
+  - _Gates._ Centre and list members on `list_source` (`GlobalListSource::is_registered_in`),
+    hosts on `class_source`; below 27 the old refusals at every time.
+  - _Contract._ The three kinds sit at their rows' positions bit for bit; a centre member's velocity
+    is its orbit's at `t`, its row's the epoch's. `scene_ship` places the frame at the pose's time
+    and at `ClockWindow::END` (a victim disrupted inside the window is refused); the core reads the
+    frame's path from the stand-in, with no cache.
+  - _Recent entries (lean, 2026-11-01)._ A centre recent entry drifts straight at its velocity, as
+    `hit_at` rounds it (`CentrePath`'s `Straight`); `fix-p09-recent-dead`'s placement must agree.
+  - _Briefs._ List rows carry their member record's; centre rows none: the server generates no
+    centre member's stars (no multiplicity context is ruled for the centre's cells).
+  - _Test._ Slow, by name: `requests::galaxy::placed::from_27_every_system_a_query_returns_is_placed_by_its_id`.
+    Rows at the epoch and ±10³ yr; at ±10⁴ yr against the sources, since no query reaches past ±H.
