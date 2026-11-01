@@ -7744,6 +7744,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `tests/golden/planetary/equilibrium.golden`, and `packages/protocol/fixtures/substances.json`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::equilibrium`;
     `cargo test -p hyperion-sim substance::`; `just fit-check`.
+  - _Built_ 2026-11-01, held at 27 (`CARRIERS_VERSION`): Risks, "Deviations in P14.T52.e, as
+    built".
 - **P14.T52.f A base at its condensable's critical point** (a rider of 24's shape, holding
   nothing; decision-n2-critical-decks, 2026-10-23; built by p14-wire-24 as one fix commit in its
   B1 fix or B2's first commit, before P14.T54.b.i, else 25 with `PROTOCOL_VERSION` 4).
@@ -33827,3 +33829,60 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _Gas and airless (lean, 2026-11-01):_ an envelope's D/H is protosolar (Lodders 2010), 2.9 ×
     10⁻⁵ of a Jupiter by mass against the brainstorm's 3–4 × 10⁻⁵, with no ice-giant enrichment;
     an airless body's helium-3 is 0 until request 18.
+- **Deviations in P14.T52.e, as built (`p14-t52e`, 2026-11-01).** Held at 27
+  (`substance::CARRIERS_VERSION`; `CarriersRules::{Held, Carried}`, the tests' `with_carriers`, a
+  line in `with_every_27_hold`). Nothing moves at 24, 25 or 26: below 27 `ids`, `by_key` and
+  `SubstanceId::from_index` stop at row 114 (`golden_diff.py`: no golden changed).
+  - _Rows 115–126:_ `SH`, `OH`, `S+`, `C+`, `H+`, `N+`, `O+`, `P`, `P2`, `PO`, `PH2`, `Cl`, each
+    with T49.b's gas columns and its CEA record, every client flag false
+    (`AWAITING_CLIENT_OPTICS`): R08.T4.i owes the twelve their Rayleigh and absorption answers.
+    `substance::carriers_ahead()` lists them before the bump (for `hyperion-fit`).
+  - _The network at 27:_ P and Cl are solved elements (`SOLVED_FROM_27`, PH₃ and HCl their basis),
+    their unknowns after the nuclei's so that 26's network keeps its bits; a row with two trace
+    atoms is refused until both are solved (P₂ with 26's solved elements:
+    `under_27_diphosphorus_is_refused_until_phosphorus_is_solved`). `NOT_CARRIED` goes 62 → 50 at
+    27; the twelve moved are `CARRIED_FROM_27`, and `not_carried()` is the list in force.
+  - _The refit (deviation):_ `thermo` is read since 24 and may not change before the bump, so the
+    carriers' records are a second table, `tables::thermo_27`, from the task
+    `thermo_equilibrium_27` (`manifests/thermo_equilibrium_27.toml`), re-emitted by the
+    first-emission path (decision-p14-t49h-liquids §5); P₂'s record is `thermo`'s reference gas.
+    The committed subset holds 124 records (`thermo.inp`, SHA-256 b21186de…98415e6).
+  - _Not built (lean, 2026-11-01):_ `SiS`, a gas-only artefact above (cooler than) the silicate
+    decks, which would move a fifth of a 1,000 K gas's sulphur and most of the held floor's from
+    H₂S (the NH₄SH deck's); it joins with the network's condensation. `TiO2` and `VO2` wait for
+    their molecular constants (JANAF's and Jacox's were not reachable): the next step, with `PS`,
+    `PH` and `P+` from the table below.
+  - _The rest of `NOT_CARRIED` over 10% of an element_ (FastChem 4.0.3's grid, its largest share;
+    "condensed" where its equilibrium condensation holds the element there):
+
+    | Species  | Share   | Where                       |     | Species | Share   | Where                      |
+    | -------- | ------- | --------------------------- | --- | ------- | ------- | -------------------------- |
+    | Al₂O     | Al 0.75 | 500 K, 10⁻⁶ bar, condensed  |     | HKO     | K 0.42  | 800 K, 100 bar, condensed  |
+    | AlCl     | Cl 0.20 | 1,200 K, 10⁻⁶ bar           |     | MnH     | Mn 1.00 | 300 K, 100 bar, condensed  |
+    | AlH      | Al 0.43 | 2,500 K, 100 bar            |     | NH      | N 0.12  | 6,000 K, 100 bar           |
+    | AlOH     | Al 0.63 | 1,500 K, 100 bar, condensed |     | NiH     | Ni 0.73 | 500 K, 100 bar, condensed  |
+    | AlO₂H    | Al 0.98 | 300 K, 1 bar, condensed     |     | PH      | P 0.37  | 4,000 K, 100 bar           |
+    | CaCl     | Cl 0.14 | 1,200 K, 0.01 bar           |     | SiH     | Si 0.17 | 5,000 K, 100 bar           |
+    | CaCl₂    | Cl 0.77 | 1,000 K, 10⁻⁴ bar           |     | NiS     | Ni 1.00 | 300 K, 10⁻⁴ bar, condensed |
+    | CaH      | Ca 0.11 | 4,000 K, 100 bar            |     | P₄O₁₀   | P 1.00  | 300 K, 10⁻⁶ bar, condensed |
+    | Ca(OH)₂  | Ca 1.00 | 300 K, 10⁻⁶ bar, condensed  |     | TiO₂    | Ti 1.00 | 300 K, 10⁻⁶ bar, condensed |
+    | CaOH     | Ca 0.18 | 2,000 K, 100 bar, condensed |     | VO₂     | V 1.00  | 300 K, 10⁻⁶ bar, condensed |
+    | Cl⁺      | Cl 0.41 | 6,000 K, 10⁻⁶ bar           |     | P⁺      | P 0.99  | 6,000 K, 10⁻⁶ bar          |
+    | K₂Cl₂    | K 0.45  | 300 K, 10⁻⁴ bar, condensed  |     | PS      | P 0.38  | 1,200 K, 10⁻⁶ bar          |
+    | Na₂Cl₂   | Cl 0.80 | 800 K, 100 bar              |     | SiS     | S 0.82  | 300 K, 10⁻⁶ bar, condensed |
+    | KCl      | K 0.44  | 800 K, 0.01 bar, condensed  |     | CrS     | Cr 0.69 | 300 K, 100 bar, condensed  |
+    | NaCl     | Cl 0.76 | 1,200 K, 100 bar            |     | Fe(OH)₂ | Fe 1.00 | 300 K, 10⁻⁶ bar, condensed |
+    | K₂(OH)₂  | K 0.68  | 500 K, 100 bar, condensed   |     | Mg(OH)₂ | Mg 1.00 | 300 K, 10⁻⁶ bar, condensed |
+    | Na₂(OH)₂ | Na 0.94 | 300 K, 100 bar, condensed   |     | SiH₄    | Si 1.00 | 300 K, 100 bar, condensed  |
+
+  - _For 27's bump:_ delete what `the_carriers_are_held_only_until_the_27_bump` lists; move
+    `thermo_equilibrium_27`'s carriers into `thermo_equilibrium`'s `ROWS` and `ITEMS` (P₂ a row and
+    still the reference gas), re-emit `thermo` at 27 and delete `thermo_27`; fold `SOLVED_FROM_27`
+    and `CARRIED_FROM_27` in. Re-bless the hold's movers (measured with it alone in force on 24's
+    rules): `substance/registry` and `substance/formation` and `substances.json` (extended, rows
+    115–126), `planetary/equilibrium` (e⁻ at 6,000 K and 10⁻⁴ bar ×51, H⁺ carried),
+    `planetary/quench` (a 700 K planet's PH₃ −41% at 1 bar), `planetary/envelope_atmosphere`
+    (KELT-9b's e⁻ +2.6%; the cold giants in their last bits), `planetary/condense` (under 0.04%),
+    and the server's `planetary.json` giants' envelopes; restate the 26 tests the hold breaks
+    (`photochem`'s `the_network_dissociates_as_parmentier_s_fit_does`, the 26 equilibrium tests
+    `carriers.rs` reruns). The slow tier was not measured.
