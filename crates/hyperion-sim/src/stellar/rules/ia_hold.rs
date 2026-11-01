@@ -18,14 +18,16 @@
 //!   lies within 0.3–4.5%, and the pool's present rate over the Type Ia rate is recorded against
 //!   the observed 4.5–7.
 //!
-//! The movers under the arm, found by turning it on at the version (and back off), over the sim's,
-//! the server's and the fitting crate's tests and 31 slow tests of the binaries, the systems and
-//! the bounds (2026-11-01): no golden; one fitted table, `sky_binary_light_c`, whose fingerprint
-//! probe moves (`the_committed_tables_are_fresh`), so the bump refits the sky's binary-light
-//! tables; and this module's tests. No census of the binaries or the systems moves out of its
-//! bounds (`binary_carve`, `binary_system`, `binary_classes`, `binary_mergers`, `binary_awd`,
-//! `binary_xrb`, `stellar_system`, `stellar_briefs`), and the hierarchy bound and the census's
-//! star bound hold.
+//! The movers under the arm, found by turning it on at the version over the sim's, the server's
+//! and the fitting crate's tests and the 22 slow tests of the binary and system censuses
+//! (2026-11-01, only detonatable candidates exploding): one golden, `sky/census_near_sun`
+//! (`the_census_near_the_sun_is_pinned`, its layer-D count); one fitted table,
+//! `sky_binary_light_d`, whose fingerprint probe moves (`the_committed_tables_are_fresh`), so the
+//! bump refits the sky's binary-light tables; and this module's tests. No census of the binaries
+//! or the systems moves out of its bounds (`binary_carve`, `binary_system`, `binary_classes`,
+//! `binary_mergers`, `binary_awd`, `binary_xrb`, `stellar_system`, `stellar_briefs`,
+//! `alerts_recurrent_binaries`). At a sixth of every candidate (before) no golden moved, and
+//! `sky_binary_light_c`'s probe did.
 
 use std::sync::OnceLock;
 

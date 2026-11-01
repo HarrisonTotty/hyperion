@@ -7,7 +7,7 @@
 //! do not set the rate, which they are known to underpredict several times over (Claeys et al.
 //! 2014, A&A 563, A83): an independent mark thins the pool towards the observed rate (the
 //! brainstorm's "Supernova remnants: one route, not two"). Only a candidate that can detonate
-//! explodes ([`is_detonatable`], ruling 129.1's rule): a merger above the Chandrasekhar mass or
+//! explodes (`is_detonatable`, ruling 129.1's rule): a merger above the Chandrasekhar mass or
 //! with a dwarf of 0.85 M☉ or more, or an accretion onto a dwarf of 0.85 M☉ or more (Shen et al.
 //! 2018, ApJ 865, 15). Such a candidate explodes when its pair's integer draw on `binary.ia_mark`
 //! ([`tags::BINARY_IA_MARK`]), at word 64n of redraw attempt n and keyed by the star the pair's
@@ -73,7 +73,7 @@ impl IaExplosionMark {
     }
 
     /// Whether pooled `event` explodes as a Type Ia supernova: it can detonate
-    /// ([`is_detonatable`]), and the mark is below η of its delay bin and channel in `table`.
+    /// (`is_detonatable`), and the mark is below η of its delay bin and channel in `table`.
     #[must_use]
     pub fn explodes(self, event: &PooledIaEvent, table: &IaYieldTable) -> bool {
         is_detonatable(event)

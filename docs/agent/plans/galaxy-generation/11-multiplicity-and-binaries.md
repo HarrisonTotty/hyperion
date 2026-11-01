@@ -7183,6 +7183,12 @@ galaxy_sweeps`.
     about 0.3% of layer D beside T7's.
   - _Acceptance:_ `cargo test -p hyperion-sim binary::ia`, `stellar::rules::ia_hold` and
     `tables::binary`; slow, the two `ia_hold::slow` tests (`just test-slow`).
+  - _Only a detonatable candidate explodes (lane `fix-p11-t6-ia-eligible`, 2026-11-01, main's
+    lean; still held at 27)._ `IaExplosionMark::explodes` also asks `ia::is_detonatable`
+    (ruling 129.1's rule by masses; an accretion by its dwarf's mass at ignition), `IA_YIELD` is 1
+    everywhere, and layer D redraws 1.4%. `PINNED` is `[2, 406, 0]` record 4; the old pin is
+    `TOO_LIGHT`, kept. _At the bump_ the movers are now the golden `sky/census_near_sun` and
+    `sky_binary_light_d`'s probe (refit `_c` to `_e`), not those above (`ia_hold.rs`'s header).
 - **Deviations in P11.T8.f, as built** (lane `p11-t8f`, 2026-11-01; at version 24 behind
   `FEATURE_BINARIES_VERSION` = 27; `golden_diff.py` extended only, `rng/tags.golden` gaining
   `member.recycled`).

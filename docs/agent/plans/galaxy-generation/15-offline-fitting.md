@@ -3278,3 +3278,18 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     take the science check's wording at that refit (lean, 2026-11-01; hashed now). _For
     P11.T8.f:_ the young thin disc's accreting rates are 1/19
     (fast) and 1/440 (slow) of the old thin disc's.
+- **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
+  research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
+  - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is
+    P11.T6's detonatable candidates (ruling 129.1's rule), per M☉ formed, from the engine run over
+    a Hubble time on layer-C to -E binaries weighed by band share. The target is the bin's share
+    of 1.3 × 10⁻³.
+  - _Acceptance:_ η is 1 wherever the pool is short, each such bin's shortfall in the header (as
+    built at αλ = 0.5: every bin; the pool to date is about a third of the yield).
+  - _Acceptance:_ the exploded yield is min(pool, target) per bin, to its Poisson error.
+  - _Acceptance:_ rerunning the fit returns η within its error.
+  - _Recorded, not asserted:_ the present-day rate of all double-white-dwarf contacts (stable ones
+    included, the last Gyr, over ψ at the same ages) against Maoz, Hallakoun and Badenes's 4.5–7,
+    as a finding while the engine's αλ stands (as built: about 0.5–0.9).
+  - Dropped: "the mark averages about one in six (0.1–0.25)", "bins at the cap hold under a tenth
+    of the yield" and "the pool's merger rate is 4.5–7 times the Ia rate".
