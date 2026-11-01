@@ -244,6 +244,7 @@ fn every_exempt_class_is_padded_with_the_survivors_weight() {
 /// the rules asked differ from the galaxy's in the weight alone, since `with_rules` refuses the
 /// other holds read at a build first (P10.T3.d.b's halo share among them).
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "the hypervelocity survivors' weight is read when")]
 fn with_rules_refuses_to_change_the_survivors_weight() {
     let galaxy = weighted();
