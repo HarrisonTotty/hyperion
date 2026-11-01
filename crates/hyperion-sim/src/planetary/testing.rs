@@ -447,9 +447,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
-/// - an envelope's formation draws, `FORMATION_DRAWS_VERSION` (P14.T50.d), at
-///   `FormationDrawRules::Drawn` through `with_formation_draws`: its enrichment's scatter and its
-///   solids' share, on its own stream.
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
 ///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
@@ -460,7 +457,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
     use crate::planetary::derive::atmosphere::{
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
@@ -479,7 +475,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
-    let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)

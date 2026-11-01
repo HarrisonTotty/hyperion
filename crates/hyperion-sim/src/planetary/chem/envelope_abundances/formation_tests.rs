@@ -9,11 +9,11 @@ use hyperion_testkit::golden::GoldenWriter;
 
 use super::tests::{synthetic, table_giant};
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::id::SystemId;
 use crate::planetary::chem::AbundanceDraws;
 use crate::planetary::derive::composition::giant_heavy_elements;
 use crate::planetary::derive::radius::CoreComposition;
-use crate::planetary::testing::with_every_26_hold;
 use crate::rng::tags::SELFTEST_STREAM;
 
 /// How many envelopes each statistical test draws.
@@ -441,35 +441,6 @@ fn the_same_seed_gives_the_same_draws_twice() {
         assert_same_bits(a.enrichment.value(), stream.uniform_open());
         assert_same_bits(a.solids.value(), stream.uniform_open());
     }
-}
-
-/// P14.T50.d is held until the 25 → 26 bump: the rules in force are the trend's, and the tests'
-/// switch and 26's helper reach the draws.
-#[test]
-fn the_formation_draws_are_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < FORMATION_DRAWS_VERSION,
-        "the 25 → 26 bump puts P14.T50.d's formation draws on the record: delete \
-         `FORMATION_DRAWS_VERSION`, `FormationDrawRules` with its `Trend` arm and its match in \
-         `system::envelope::envelope_of`, the tests' `with_formation_draws`, its switch in \
-         `with_every_26_hold` (and the helper, if no other 26 hold is left), and this test"
-    );
-    assert_eq!(FormationDrawRules::in_force(), FormationDrawRules::Trend);
-    assert_eq!(
-        with_formation_draws(FormationDrawRules::Drawn, FormationDrawRules::in_force),
-        FormationDrawRules::Drawn
-    );
-    assert_eq!(
-        with_every_26_hold(FormationDrawRules::in_force),
-        FormationDrawRules::Drawn
-    );
-    assert_eq!(
-        with_every_26_hold(|| {
-            with_formation_draws(FormationDrawRules::Trend, FormationDrawRules::in_force)
-        }),
-        FormationDrawRules::Trend
-    );
-    assert_eq!(FormationDrawRules::in_force(), FormationDrawRules::Trend);
 }
 
 /// P14.T50.d's golden, `planetary/envelope_formation`: the draws of three bodies, and with each

@@ -182,8 +182,8 @@
 //! This module is pure. P14.T52.a speciates its abundances and P14.T52.d publishes them in the
 //! record's envelope section, which the record builds from generator version 24 (P14.T54.b.i; at
 //! 23 nothing on the record called it; decision-bump-plan-after-22 §1.3). The formation draws are
-//! on it from 26, behind their hold (`FORMATION_DRAWS_VERSION`); below it the record's envelope
-//! is [`EnvelopeAbundances::derive`]'s.
+//! on it from 26; below it the record's envelope was [`EnvelopeAbundances::derive`]'s, the tests'
+//! oracle.
 //!
 //! # Determinism
 //!
@@ -195,6 +195,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::HostAbundances;
@@ -209,31 +210,24 @@ use crate::substance::Element;
 use crate::units::{
     Dex, EarthMasses, JupiterMasses, Kelvin, Metres, MetresPerSecondSquared, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
-/// The generator version from which an envelope's formation draws are on the record (P14.T50.d):
-/// 26, the planetary bump after 25's, whose list froze without it.
-///
-/// It is P14.T50.d's one hold. Below it [`FormationDrawRules::in_force`] is
-/// [`FormationDrawRules::Trend`]: every record's envelope is [`EnvelopeAbundances::derive`]'s, as
-/// every figure on the record is version 25's bit for bit. 26's bump deletes this hold,
-/// [`FormationDrawRules`] with its `Trend` arm, the tests' switch and its tripwire
-/// (`the_formation_draws_are_held_only_until_the_26_bump`).
-pub(crate) const FORMATION_DRAWS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether a record's envelope reads its formation draws (its hold, [`FORMATION_DRAWS_VERSION`]).
+/// Whether a record's envelope reads its formation draws (P14.T50.d): the draws, from generator
+/// version 26, and in the tests the trend, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum FormationDrawRules {
     /// Version 25's and before: the trend's E and the gas phase's C/O
-    /// ([`EnvelopeAbundances::derive`]).
+    /// ([`EnvelopeAbundances::derive`]), the tests' oracle of the draws ([`with_formation_draws`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tests' oracle of the draws")
+    )]
     Trend,
     /// Version 26's: the body's draws ([`EnvelopeAbundances::derive_drawn`]).
     Drawn,
 }
 
 impl FormationDrawRules {
-    /// The rules this generator version gives: the draws from [`FORMATION_DRAWS_VERSION`], the
-    /// trend below it; in the tests, the rules a test's switch sets on its thread
+    /// The rules in force: the draws; in the tests, the rules a test's switch sets on its thread
     /// ([`with_formation_draws`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
@@ -241,24 +235,19 @@ impl FormationDrawRules {
         if let Some(rules) = RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= FORMATION_DRAWS_VERSION {
-            Self::Drawn
-        } else {
-            Self::Trend
-        }
+        Self::Drawn
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The formation draws' rules a test sets on its thread, `None` for the version's.
+    /// The formation draws' rules a test sets on its thread, `None` for the draws.
     static RULES: core::cell::Cell<Option<FormationDrawRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the formation draws' rules `rules` on this thread, for the tests to reach
-/// P14.T50.d ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
+/// `run`'s result with the formation draws' rules `rules` on this thread, the trend the tests'
+/// oracle of the draws; the draws are set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_formation_draws<R>(rules: FormationDrawRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
