@@ -208,7 +208,7 @@ const RADIUS_BISECTIONS: u32 = 48;
 /// From it, [`FallRadiusRoot::FalsePosition`] finds `r_w` on ln `v_f` in ln r: a planetary bump
 /// after 25 (P14.T54.b.l's cost lever; perf-24's handoff, the envelope's decks). Below it
 /// [`FallRadiusRoot::in_force`] is [`FallRadiusRoot::Bisections`], and every deck is version 24's
-/// bit for bit. 26's bump deletes this hold and the tests' switch (`with_fall_radius`), keeps the
+/// and 25's bit for bit. 26's bump deletes this hold and the tests' switch (`with_fall_radius`), keeps the
 /// bisections as the tests' oracle of the false position, and deletes the tripwire
 /// (`the_fall_radius_root_is_held_only_until_the_26_bump`).
 pub(crate) const FALL_RADIUS_VERSION: GeneratorVersion = GeneratorVersion::new(26);

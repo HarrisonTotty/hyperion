@@ -1039,7 +1039,7 @@ pub(crate) enum Pulses<'a> {
     Unopened,
 }
 
-/// `extras`, version 24's, with P06.T24.b's class under `rules`: the one choke point of its hold
+/// `extras`, version 25's, with P06.T24.b's class under `rules`: the one choke point of its hold
 /// ([`PECULIAR_CLASSES_VERSION`](crate::stellar::classify::PECULIAR_CLASSES_VERSION)), which
 /// [`StarModel::class_extras_at`] and a paired star's summary both read.
 ///

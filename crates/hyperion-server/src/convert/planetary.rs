@@ -3783,7 +3783,7 @@ mod tests {
     /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
     /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
     ///
-    /// The values are the generator's under the rules in force, generator version 24's: from
+    /// The values are the generator's under the rules in force, generator version 25's: from
     /// P14.T54.b.l's bump the read densities (P14.T49.n) give the liquid refractory deck modes
     /// (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) their grain density and so their size, where
     /// at 23 they had none (their optics are still not modelled).

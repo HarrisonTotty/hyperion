@@ -245,7 +245,7 @@ fn the_stripping_is_held_only_until_the_26_bump() {
     );
 }
 
-/// Under the hold every context is version 24's to the bit: plan 02's radius at the epoch
+/// Under the hold every context is version 24's and 25's to the bit: plan 02's radius at the epoch
 /// position, even in the Kepler regime and for a feature member, no encounter environment, and an
 /// environment given to a synthetic host not applied.
 #[test]

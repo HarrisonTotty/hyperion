@@ -106,8 +106,8 @@ fn code_of(summary: &StarSummary) -> Option<f64> {
     }
 }
 
-/// P06.T23.a's licence fix is held until the 25 → 26 bump: the rules in force are version 24's,
-/// under which the stage reads the source's rows; 25's do too, and 26's read the fitted grids.
+/// P06.T23.a's licence fix is held until the 25 → 26 bump: the rules in force are version 25's,
+/// under which the stage reads the source's rows, as 24's did; 26's read the fitted grids.
 #[test]
 fn the_reduced_dwarf_sequence_is_held_only_until_the_26_bump() {
     assert!(

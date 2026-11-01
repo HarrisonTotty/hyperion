@@ -287,7 +287,7 @@ pub(crate) fn with_halvings<R>(run: impl FnOnce() -> R) -> R {
 ///
 /// A planetary bump after 25 (P14.T54.b.l's cost lever toward decision-24-cost D5). Below it
 /// [`PassStop::in_force`] is [`PassStop::Consecutive`], T51.b's test on two passes in a row, and
-/// every pass is version 24's bit for bit. 26's bump deletes this hold and the tests' switch
+/// every pass is version 24's and 25's bit for bit. 26's bump deletes this hold and the tests' switch
 /// (`with_pass_stop`), keeps [`PassStop::Consecutive`] as the tests' oracle, and deletes the
 /// tripwire (`the_own_residual_stop_is_held_only_until_the_26_bump`).
 pub(crate) const PASS_STOP_VERSION: GeneratorVersion = GeneratorVersion::new(26);

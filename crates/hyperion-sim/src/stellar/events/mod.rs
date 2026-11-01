@@ -78,7 +78,7 @@ use thermal_pulse::{ThermalPulse, ThermalPulseModel};
 ///
 /// It is P06.T28.g's one hold, carried as [`StellarRules::star_events`]. Below it a summary holds
 /// no events and no event light, and the wire sends no `active_events`, so every figure is
-/// version 24's bit for bit; [`events_in`], [`active_at`] and [`StarEvents`] are new functions,
+/// version 24's and 25's bit for bit; [`events_in`], [`active_at`] and [`StarEvents`] are new functions,
 /// which no version's output reads yet. 26's bump deletes this hold, [`StarEventRules`] with its
 /// `Held` arm, the field and its tripwire (`the_star_events_are_held_only_until_the_26_bump`).
 ///

@@ -57,7 +57,7 @@
 //! Everything here moves output, so it is held until generator version 26 (`STRIP_VERSION`).
 //! Under its held arm a context's sphere of influence is plan 02's radius at its epoch
 //! position, it has no encounter environment, and its strip radius is 0.4895 of that radius alone:
-//! version 24's, bit for bit.
+//! version 24's and 25's, bit for bit.
 //!
 //! # Determinism
 //!
