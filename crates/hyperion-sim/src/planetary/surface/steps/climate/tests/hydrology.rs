@@ -32,7 +32,7 @@ use super::{
 use crate::math;
 use crate::planetary::surface::grid::{CellGraph, parent_index};
 use crate::planetary::surface::inputs::{CoarseInputs, SeasonalOrbit, Spin};
-use crate::planetary::surface::steps::{Pass, Working};
+use crate::planetary::surface::steps::{InOrder, Pass, Spread, Working};
 use crate::planetary::surface::{quantise, reference, steps};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Kelvin, Metres, Pascals, Radians, Seconds};
@@ -527,9 +527,20 @@ fn run_world(
     grid: Grid,
     set: impl FnOnce(&Pass<'_>, &mut Working),
 ) -> Run {
+    run_world_on(&InOrder, inputs, level, grid, set)
+}
+
+/// [`run_world`] with the pass's independent tasks on `spread`.
+fn run_world_on(
+    spread: &dyn Spread,
+    inputs: CoarseInputs,
+    level: u8,
+    grid: Grid,
+    set: impl FnOnce(&Pass<'_>, &mut Working),
+) -> Run {
     let (field, climate) = grids(level);
     let (working, diagnostics) = {
-        let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+        let pass = Pass::new(reference::SEED, &inputs, &field, &climate).with_spread(spread);
         let mut working = Working::initial(&pass);
         set(&pass, &mut working);
         let diagnostics = match grid {
@@ -1681,6 +1692,42 @@ fn global_precipitation_equals_global_evaporation() {
             "month {m}"
         );
     }
+}
+
+/// A spread that runs each wave's tasks in reverse, its width at a time: the months' orographic
+/// solves in another order than the pass's own.
+#[derive(Debug)]
+struct Reversed(usize);
+
+impl Spread for Reversed {
+    fn width(&self) -> usize {
+        self.0
+    }
+
+    fn run(&self, tasks: Vec<Box<dyn FnOnce() + Send>>) {
+        for task in tasks.into_iter().rev() {
+            task();
+        }
+    }
+}
+
+/// The water cycle's months solved through a spread, in waves of five, each wave's in reverse,
+/// leave the working state and the diagnostics of the months solved one after another, to the bit:
+/// no month's solve reads another's (rendering plan R09; R09.T17's follow-up). On the reference
+/// Earth's synthetic sea at level 6, twelve months.
+#[test]
+fn the_water_cycle_s_months_solved_in_waves_out_of_order_are_its_months_in_order() {
+    let in_order = run_world(reference::earth_like(), 6, Grid::Own, synthetic_earth);
+    assert_eq!(in_order.water().months.len(), 12);
+    let spread = run_world_on(
+        &Reversed(5),
+        reference::earth_like(),
+        6,
+        Grid::Own,
+        synthetic_earth,
+    );
+    assert_eq!(spread.working, in_order.working);
+    assert_eq!(spread.diagnostics, in_order.diagnostics);
 }
 
 /// Frozen ground on the ruled Earth's inputs (decision-r09-t13e-revision §4.4 and §6.3's unit test

@@ -93,7 +93,11 @@
 //!
 //! Every loop runs in cell-index order (months outermost, then the field's or the climate layer's
 //! cells), every sum in that order, in `f64`, every transcendental through [`crate::math`], with no
-//! `HashMap` and no threads.
+//! `HashMap` and no threads. The months' orographic solves are tasks handed to the pass's spread
+//! ([`Pass::spread`]), a wave of months at a time, which may run them at once: no month's solve
+//! reads another month's, so the records are the months' in order to the bit.
+
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyperion_surface::field::{PaletteRole, Wind};
 
@@ -1608,227 +1612,297 @@ fn water_cycle(
             Columns::Zonal
         },
     );
-    let mut mesh: Option<Mesh> = None;
+    let mut mesh: Option<Arc<Mesh>> = None;
     let mut cycles = Vec::with_capacity(months);
     let mut winds_used = Vec::with_capacity(months);
-    let mut rates = vec![0.0; field.centres().len()];
-    let mut sea_rates = vec![0.0; rates.len()];
-    let mut convergence = vec![0.0; rates.len()];
-    let mut ground = vec![GroundState::Thawed; rates.len()];
-    // Each month's headings, field-cell winds, stream shares and record sums, allocated once and
-    // refilled.
+    let cells = field.centres().len();
+    // What each month's orographic solve reads of every month alike, shared with its task.
+    let (heights_m, shared_cover): (Arc<[f64]>, Arc<[Cover]>) =
+        (heights_m.into(), cover.clone().into());
+    let parameters = *parameters;
+    // Each month's headings and record sums, allocated once and refilled.
     let mut headings: Vec<wind::Heading> = Vec::with_capacity(working.climate.len());
-    let mut cell_winds: Vec<CellWind> = Vec::with_capacity(frames.len());
-    let mut stream_shares: Vec<f64> = Vec::with_capacity(frames.len());
     let mut sums: Vec<(f64, f64)> = Vec::with_capacity(working.climate.len());
-    for (m, budget) in budgets.into_iter().enumerate() {
-        let band_e = band_means(&band_evaporation[m], &band_area);
-        let sea = SeaBands::of(
-            &band_evaporation[m],
-            &band_area,
-            &sea_area,
-            &budget.evaporation_less_precipitation_kg_m2_s,
-        );
-        // 3. Each column's budget, blended with the zonal budget's eddies.
-        let column_budgets = per_column.then(|| {
-            ColumnBudgets::of(
-                (grid, &model, &circulation),
-                (&own.months_k[m], &air_k[m]),
-                (&budget, &air[m]),
-                &sea,
-                &blend,
-            )
-        });
-
-        // 4. The winds: each climate cell's ψ its columns' with the column budget, the zonal
-        // budget's without.
-        let month_wind = MonthWind::of(pass, &circulation, turning, &budget);
-        let mut codes = Vec::with_capacity(working.climate.len());
-        for ((state, &up), &(x, read)) in working
-            .climate
-            .iter_mut()
-            .zip(pass.climate_grid().centres())
-            .zip(&climate_reads)
-        {
-            let psi = match (&column_budgets, read) {
-                (Some(budgets), Some(read)) => {
-                    budgets.mass_flux_kg_m2_s_at(read, EdgeRead::at(grid, x))
-                }
-                _ => at_edges(grid, &budget.mass_flux_kg_m2_s, x),
-            };
-            let v = month_wind.v_m_s(psi, x, math::asin(x.abs()) / DEGREE_RAD);
-            let (u, _) = wind::drag_balance(v, wind::coriolis_per_s(rotation_s, up));
-            let velocity_m_s = wind::towards_pole(pole, up).map_or([0.0; 3], |north| {
-                let across = wind::cross(north, up);
-                [
-                    v * north[0] + u * across[0],
-                    v * north[1] + u * across[1],
-                    v * north[2] + u * across[2],
-                ]
+    // The months in waves as wide as the pass's spread: each wave's inputs in month order, its
+    // orographic solves through the spread, which may run them at once, then its water balances
+    // and records in month order. No month's solve reads another month's: each reads the month's
+    // own winds, sea, convergence, ground and stream shares, and the cells' heights and cover,
+    // which no month changes, so the months' results are their sequential run's to the bit.
+    let width = pass.spread().width().max(1);
+    let mut budgets = budgets.into_iter();
+    let mut first = 0;
+    while first < months {
+        let wave = first..(first + width).min(months);
+        first = wave.end;
+        let mut prepared = Vec::with_capacity(wave.len());
+        let mut tasks: Vec<Box<dyn FnOnce() + Send>> = Vec::with_capacity(wave.len());
+        for m in wave {
+            let budget = budgets.next().expect("one budget a month");
+            let mut sea_rates = vec![0.0; cells];
+            let mut convergence = vec![0.0; cells];
+            let mut ground = vec![GroundState::Thawed; cells];
+            let mut cell_winds: Vec<CellWind> = Vec::with_capacity(frames.len());
+            let band_e = band_means(&band_evaporation[m], &band_area);
+            let sea = SeaBands::of(
+                &band_evaporation[m],
+                &band_area,
+                &sea_area,
+                &budget.evaporation_less_precipitation_kg_m2_s,
+            );
+            // 3. Each column's budget, blended with the zonal budget's eddies.
+            let column_budgets = per_column.then(|| {
+                ColumnBudgets::of(
+                    (grid, &model, &circulation),
+                    (&own.months_k[m], &air_k[m]),
+                    (&budget, &air[m]),
+                    &sea,
+                    &blend,
+                )
             });
-            let (sample, code) = wind::recorded(velocity_m_s, up);
-            state.month_wind[m] = sample;
-            codes.push(code);
-        }
 
-        // 5. The sea's rate, the land's source and ground, and the winds the orography reads: each
-        // field cell's wind is its climate cell's record read at its own centre
-        // (`wind::cell_wind`, with the cell's frame and the record's heading computed once),
-        // taken along the model's bands (`wind::along_bands`).
-        headings.clear();
-        headings.extend(
-            working
+            // 4. The winds: each climate cell's ψ its columns' with the column budget, the zonal
+            // budget's without.
+            let month_wind = MonthWind::of(pass, &circulation, turning, &budget);
+            let mut codes = Vec::with_capacity(working.climate.len());
+            for ((state, &up), &(x, read)) in working
                 .climate
-                .iter()
-                .map(|state| wind::Heading::of(&state.month_wind[m])),
-        );
-        cell_winds.clear();
-        cell_winds.extend(
-            (0_u32..)
-                .zip(&frames)
-                .zip(&easts)
-                .map(|((n, &frame), &east)| {
-                    wind::along_bands(
-                        wind::cell_wind_in(&headings[slot(parent_index(n))], frame),
-                        east,
-                    )
-                }),
-        );
-        let band_winds = BandWinds::of(&cell_winds, &easts);
-        let still = cell_winds.iter().all(|&w| w == CellWind::Calm);
-        let mut frozen_area = 0.0;
-        for (n, ((((rate, source), state), &c), &omega)) in (0_u32..).zip(
-            sea_rates
                 .iter_mut()
-                .zip(convergence.iter_mut())
-                .zip(ground.iter_mut())
-                .zip(&cover)
-                .zip(field.solid_angles_sr()),
-        ) {
-            match c {
-                Cover::Sea => {
-                    *rate = reads.sea_rate_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
-                    *source = 0.0;
-                    *state = GroundState::Thawed;
-                }
-                Cover::Land => {
-                    *rate = 0.0;
-                    *source = reads.convergence_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
-                    *state = ground_of(working, n, m, model.freezing);
-                    if *state == GroundState::Frozen {
-                        frozen_area += omega;
+                .zip(pass.climate_grid().centres())
+                .zip(&climate_reads)
+            {
+                let psi = match (&column_budgets, read) {
+                    (Some(budgets), Some(read)) => {
+                        budgets.mass_flux_kg_m2_s_at(read, EdgeRead::at(grid, x))
                     }
-                }
+                    _ => at_edges(grid, &budget.mass_flux_kg_m2_s, x),
+                };
+                let v = month_wind.v_m_s(psi, x, math::asin(x.abs()) / DEGREE_RAD);
+                let (u, _) = wind::drag_balance(v, wind::coriolis_per_s(rotation_s, up));
+                let velocity_m_s = wind::towards_pole(pole, up).map_or([0.0; 3], |north| {
+                    let across = wind::cross(north, up);
+                    [
+                        v * north[0] + u * across[0],
+                        v * north[1] + u * across[1],
+                        v * north[2] + u * across[2],
+                    ]
+                });
+                let (sample, code) = wind::recorded(velocity_m_s, up);
+                state.month_wind[m] = sample;
+                codes.push(code);
             }
-        }
-        let evaporated = liquid_evaporation[m];
-        let mut orographic = None;
-        let mut recycled_shares: Option<Vec<f64>> = None;
-        rates.fill(0.0);
-        if evaporated > 0.0 && land {
-            let mesh = mesh.get_or_insert_with(|| Mesh::of_graph(field, inputs.radius()));
-            reads.stream_shares(
-                &month_wind,
-                (&budget, column_budgets.as_ref()),
-                (&cell_winds, &easts),
-                grid,
-                &mut stream_shares,
-            );
-            let solved = lfpm::solve(
-                mesh,
-                &Month {
-                    heights_m: &heights_m,
-                    cover: &cover,
-                    ground: &ground,
-                    winds: &cell_winds,
-                    sea_rates_kg_m2_s: &sea_rates,
-                    convergence_kg_m2_s: &convergence,
-                    stream_shares: &stream_shares,
-                },
-                parameters,
-            );
-            rates.copy_from_slice(&solved.precipitation_kg_m2_s);
-            // The exit rains once, over each unit's land, before the balance.
-            reads.spread(&cover, mesh.areas_m2(), &solved.exit_kg_s, &mut rates);
-            recycled_shares = Some(solved.recycled_shares);
-            orographic = Some(solved.diagnostics);
-        }
 
-        // 6. The water balance.
-        let mut delivered = 0.0;
-        for (((&c, &rate), &sea_rate), (n, &omega)) in cover
-            .iter()
-            .zip(&rates)
-            .zip(&sea_rates)
-            .zip(field.solid_angles_sr().iter().enumerate())
-        {
-            delivered += omega
-                * match c {
-                    Cover::Sea => sea_rate,
+            // 5. The sea's rate, the land's source and ground, and the winds the orography reads:
+            // each field cell's wind is its climate cell's record read at its own centre
+            // (`wind::cell_wind`, with the cell's frame and the record's heading computed once),
+            // taken along the model's bands (`wind::along_bands`).
+            headings.clear();
+            headings.extend(
+                working
+                    .climate
+                    .iter()
+                    .map(|state| wind::Heading::of(&state.month_wind[m])),
+            );
+            cell_winds.extend(
+                (0_u32..)
+                    .zip(&frames)
+                    .zip(&easts)
+                    .map(|((n, &frame), &east)| {
+                        wind::along_bands(
+                            wind::cell_wind_in(&headings[slot(parent_index(n))], frame),
+                            east,
+                        )
+                    }),
+            );
+            let band_winds = BandWinds::of(&cell_winds, &easts);
+            let still = cell_winds.iter().all(|&w| w == CellWind::Calm);
+            let mut frozen_area = 0.0;
+            for (n, ((((rate, source), state), &c), &omega)) in (0_u32..).zip(
+                sea_rates
+                    .iter_mut()
+                    .zip(convergence.iter_mut())
+                    .zip(ground.iter_mut())
+                    .zip(&cover)
+                    .zip(field.solid_angles_sr()),
+            ) {
+                match c {
+                    Cover::Sea => {
+                        *rate = reads.sea_rate_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
+                        *source = 0.0;
+                        *state = GroundState::Thawed;
+                    }
                     Cover::Land => {
-                        let share = recycled_shares.as_ref().map_or(0.0, |shares| shares[n]);
-                        (1.0 - share) * rate
+                        *rate = 0.0;
+                        *source = reads.convergence_kg_m2_s(slot(n), &sea, column_budgets.as_ref());
+                        *state = ground_of(working, n, m, model.freezing);
+                        if *state == GroundState::Frozen {
+                            frozen_area += omega;
+                        }
                     }
-                };
-        }
-        let scale = if evaporated > 0.0 && delivered > 0.0 {
-            evaporated / delivered
-        } else {
-            0.0
-        };
-        let (mut fallen, mut recycled) = (0.0, 0.0);
-        for (((rate, &sea_rate), &c), (n, &omega)) in rates
-            .iter_mut()
-            .zip(&sea_rates)
-            .zip(&cover)
-            .zip(field.solid_angles_sr().iter().enumerate())
-        {
-            *rate = scale
-                * match c {
-                    Cover::Sea => sea_rate,
-                    Cover::Land => *rate,
-                };
-            assert!(
-                rate.is_finite(),
-                "a precipitation rate must be finite, got {rate}"
-            );
-            fallen += omega * *rate;
-            if c == Cover::Land {
-                let share = recycled_shares.as_ref().map_or(0.0, |shares| shares[n]);
-                recycled += omega * share * *rate;
+                }
             }
+            let evaporated = liquid_evaporation[m];
+            let sea_rates: Arc<[f64]> = sea_rates.into();
+            let solved = (evaporated > 0.0 && land).then(|| {
+                let mesh = Arc::clone(
+                    mesh.get_or_insert_with(|| Arc::new(Mesh::of_graph(field, inputs.radius()))),
+                );
+                let mut stream_shares: Vec<f64> = Vec::with_capacity(frames.len());
+                reads.stream_shares(
+                    &month_wind,
+                    (&budget, column_budgets.as_ref()),
+                    (&cell_winds, &easts),
+                    grid,
+                    &mut stream_shares,
+                );
+                let slot = Arc::new(Mutex::new(None));
+                let (heights_m, cover, sea_rates) = (
+                    Arc::clone(&heights_m),
+                    Arc::clone(&shared_cover),
+                    Arc::clone(&sea_rates),
+                );
+                let filled = Arc::clone(&slot);
+                tasks.push(Box::new(move || {
+                    let solved = lfpm::solve(
+                        &mesh,
+                        &Month {
+                            heights_m: &heights_m,
+                            cover: &cover,
+                            ground: &ground,
+                            winds: &cell_winds,
+                            sea_rates_kg_m2_s: &sea_rates,
+                            convergence_kg_m2_s: &convergence,
+                            stream_shares: &stream_shares,
+                        },
+                        &parameters,
+                    );
+                    *lock(&filled) = Some(solved);
+                }));
+                slot
+            });
+            prepared.push(Prepared {
+                m,
+                budget,
+                band_e,
+                sea,
+                column_budgets,
+                codes,
+                band_winds,
+                still,
+                frozen_area,
+                evaporated,
+                sea_rates,
+                solved,
+            });
         }
-
-        // 7. The records.
-        sums.clear();
-        sums.resize(working.climate.len(), (0.0, 0.0));
-        for ((n, &rate), &omega) in (0_u32..).zip(&rates).zip(field.solid_angles_sr()) {
-            let sum = &mut sums[slot(parent_index(n))];
-            sum.0 += omega * rate;
-            sum.1 += omega;
-        }
-        for (state, &(rained, area)) in working.climate.iter_mut().zip(&sums) {
-            state.month_precipitation_kg_m2_s[m] = if area > 0.0 { rained / area } else { 0.0 };
-        }
-        cycles.push(MonthCycle {
+        pass.spread().run(tasks);
+        for Prepared {
+            m,
             budget,
+            band_e,
             sea,
-            band_evaporation_kg_m2_s: band_e,
-            scale,
-            liquid_evaporation_kg_m2_s: evaporated / sphere,
-            recycled_kg_m2_s: recycled / sphere,
-            precipitation_kg_m2_s: fallen / sphere,
-            frozen_land_share: if land_area > 0.0 {
-                frozen_area / land_area
+            column_budgets,
+            codes,
+            band_winds,
+            still,
+            frozen_area,
+            evaporated,
+            sea_rates,
+            solved,
+        } in prepared
+        {
+            let mut orographic = None;
+            let mut recycled_shares: Option<Vec<f64>> = None;
+            let mut rates = vec![0.0; cells];
+            if let Some(slot) = solved {
+                let solved = lock(&slot)
+                    .take()
+                    .expect("the pass's spread runs every task it is given");
+                rates.copy_from_slice(&solved.precipitation_kg_m2_s);
+                // The exit rains once, over each unit's land, before the balance.
+                let mesh = mesh
+                    .as_ref()
+                    .expect("a month that solves has made the mesh");
+                reads.spread(&cover, mesh.areas_m2(), &solved.exit_kg_s, &mut rates);
+                recycled_shares = Some(solved.recycled_shares);
+                orographic = Some(solved.diagnostics);
+            }
+
+            // 6. The water balance.
+            let mut delivered = 0.0;
+            for (((&c, &rate), &sea_rate), (n, &omega)) in cover
+                .iter()
+                .zip(&rates)
+                .zip(sea_rates.iter())
+                .zip(field.solid_angles_sr().iter().enumerate())
+            {
+                delivered += omega
+                    * match c {
+                        Cover::Sea => sea_rate,
+                        Cover::Land => {
+                            let share = recycled_shares.as_ref().map_or(0.0, |shares| shares[n]);
+                            (1.0 - share) * rate
+                        }
+                    };
+            }
+            let scale = if evaporated > 0.0 && delivered > 0.0 {
+                evaporated / delivered
             } else {
                 0.0
-            },
-            band_winds,
-            calm: still,
-            orographic,
-            columns: column_budgets,
-        });
-        winds_used.push(codes);
+            };
+            let (mut fallen, mut recycled) = (0.0, 0.0);
+            for (((rate, &sea_rate), &c), (n, &omega)) in rates
+                .iter_mut()
+                .zip(sea_rates.iter())
+                .zip(&cover)
+                .zip(field.solid_angles_sr().iter().enumerate())
+            {
+                *rate = scale
+                    * match c {
+                        Cover::Sea => sea_rate,
+                        Cover::Land => *rate,
+                    };
+                assert!(
+                    rate.is_finite(),
+                    "a precipitation rate must be finite, got {rate}"
+                );
+                fallen += omega * *rate;
+                if c == Cover::Land {
+                    let share = recycled_shares.as_ref().map_or(0.0, |shares| shares[n]);
+                    recycled += omega * share * *rate;
+                }
+            }
+
+            // 7. The records.
+            sums.clear();
+            sums.resize(working.climate.len(), (0.0, 0.0));
+            for ((n, &rate), &omega) in (0_u32..).zip(&rates).zip(field.solid_angles_sr()) {
+                let sum = &mut sums[slot(parent_index(n))];
+                sum.0 += omega * rate;
+                sum.1 += omega;
+            }
+            for (state, &(rained, area)) in working.climate.iter_mut().zip(&sums) {
+                state.month_precipitation_kg_m2_s[m] = if area > 0.0 { rained / area } else { 0.0 };
+            }
+            cycles.push(MonthCycle {
+                budget,
+                sea,
+                band_evaporation_kg_m2_s: band_e,
+                scale,
+                liquid_evaporation_kg_m2_s: evaporated / sphere,
+                recycled_kg_m2_s: recycled / sphere,
+                precipitation_kg_m2_s: fallen / sphere,
+                frozen_land_share: if land_area > 0.0 {
+                    frozen_area / land_area
+                } else {
+                    0.0
+                },
+                band_winds,
+                calm: still,
+                orographic,
+                columns: column_budgets,
+            });
+            winds_used.push(codes);
+        }
     }
     for state in &mut working.climate {
         for m in months..12 {
@@ -1842,6 +1916,29 @@ fn water_cycle(
         months: cycles,
         winds: winds_used,
     }
+}
+
+/// One month of a wave of [`water_cycle`]: what its water balance and records read, made before
+/// the wave's orographic solves, and the slot its solve's task fills, `None` where it runs none.
+struct Prepared {
+    m: usize,
+    budget: Budget,
+    band_e: Vec<f64>,
+    sea: SeaBands,
+    column_budgets: Option<ColumnBudgets>,
+    codes: Vec<Wind>,
+    band_winds: BandWinds,
+    still: bool,
+    frozen_area: f64,
+    evaporated: f64,
+    sea_rates: Arc<[f64]>,
+    solved: Option<Arc<Mutex<Option<lfpm::Orographic>>>>,
+}
+
+/// Takes a slot's lock whether or not a task that held it panicked: its one critical section sets
+/// the slot whole.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The index into a vector of cell `cell`.

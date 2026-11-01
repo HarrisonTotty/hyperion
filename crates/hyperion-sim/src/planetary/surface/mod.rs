@@ -125,6 +125,7 @@ pub use quantise::{QuantiseFieldError, quantise};
 use hyperion_surface::field::{CoarseField, coarse_level};
 
 pub use crate::planetary::hooks::SurfaceSeed;
+pub use steps::{InOrder, Spread};
 use steps::{Pass, Working};
 
 /// The coarse field of the body of `inputs`, under its surface seed `seed` (Design notes 3–5 and
@@ -246,7 +247,18 @@ use steps::{Pass, Working};
 /// ```
 #[must_use]
 pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
-    pass_with(seed, inputs, steps::climate::run)
+    coarse_pass_spread(seed, inputs, &InOrder)
+}
+
+/// [`coarse_pass`] with its independent tasks run on `spread` ([`Spread`]): the climate step's
+/// months' orographic solves, which the server runs on its CPU pool. The same field, to the bit.
+#[must_use]
+pub fn coarse_pass_spread(
+    seed: SurfaceSeed,
+    inputs: &CoarseInputs,
+    spread: &dyn Spread,
+) -> CoarseField {
+    pass_with(seed, inputs, spread, steps::climate::run)
 }
 
 /// [`coarse_pass`], with each month's orographic solve of its climate step, in month order
@@ -263,7 +275,7 @@ pub(crate) fn coarse_pass_with_solves(
     inputs: &CoarseInputs,
 ) -> (CoarseField, Vec<Option<steps::climate::OrographicSolve>>) {
     let mut solves = Vec::new();
-    let field = pass_with(seed, inputs, |pass, working| {
+    let field = pass_with(seed, inputs, &InOrder, |pass, working| {
         solves = steps::climate::run_with_solves(pass, working);
     });
     (field, solves)
@@ -276,12 +288,13 @@ pub(crate) fn coarse_pass_with_solves(
 fn pass_with(
     seed: SurfaceSeed,
     inputs: &CoarseInputs,
+    spread: &dyn Spread,
     climate: impl FnOnce(&Pass<'_>, &mut Working),
 ) -> CoarseField {
     let level = coarse_level(inputs.radius());
     let grid = CellGraph::for_field(level);
     let climate_grid = CellGraph::for_climate(level);
-    let pass = Pass::new(seed, inputs, &grid, &climate_grid);
+    let pass = Pass::new(seed, inputs, &grid, &climate_grid).with_spread(spread);
     let mut working = Working::initial(&pass);
     steps::plates::run(&pass, &mut working);
     steps::relief::run(&pass, &mut working);

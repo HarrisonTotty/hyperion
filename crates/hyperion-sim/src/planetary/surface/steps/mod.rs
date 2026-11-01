@@ -73,6 +73,8 @@ pub mod erosion;
 pub mod plates;
 pub mod relief;
 
+use std::fmt;
+
 use hyperion_surface::field::{
     BoundaryKind, CoarseCrater, CoarseLevel, Crust, FlowDirection, SurfaceClass,
 };
@@ -83,15 +85,54 @@ use super::inputs::CoarseInputs;
 use crate::planetary::hooks::SurfaceSeed;
 use crate::units::{Kelvin, Metres, MetresPerSecond, Radians, Seconds, SquareMetres};
 
+/// Where a pass's independent tasks run: the months' orographic solves of the climate step's water
+/// cycle (rendering plan R09; R09.T17's follow-up, the cold field's cost).
+///
+/// The sim spawns no threads, so a pass hands its tasks to a spread, whose own threads may run
+/// them at once: the server's runs them on its CPU pool. Each task is a pure computation that
+/// writes its own result, reading nothing another task writes, so a spread changes when a task
+/// runs but no bit of what it computes. [`InOrder`], the pass's own, runs them one after another.
+pub trait Spread: fmt::Debug + Sync {
+    /// How many tasks it may run at once, at least 1: a pass hands it so many at a time, so that
+    /// only their inputs stand together.
+    fn width(&self) -> usize;
+
+    /// Runs each of `tasks` once, on any thread and in any order, and returns once every one has
+    /// run.
+    ///
+    /// # Panics
+    ///
+    /// With a task's panic, resumed on the calling thread, once every task has run or panicked.
+    fn run(&self, tasks: Vec<Box<dyn FnOnce() + Send>>);
+}
+
+/// The tasks one after another on the calling thread, in the order given: the spread of a pass
+/// given none ([`Pass::new`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct InOrder;
+
+impl Spread for InOrder {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn run(&self, tasks: Vec<Box<dyn FnOnce() + Send>>) {
+        for task in tasks {
+            task();
+        }
+    }
+}
+
 /// What every step reads and never changes: the body's surface seed, its inputs, its level and the
-/// grids of the field and of its climate layer.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// grids of the field and of its climate layer; and the spread its independent tasks run on.
+#[derive(Debug, Clone, Copy)]
 pub struct Pass<'a> {
     seed: SurfaceSeed,
     inputs: &'a CoarseInputs,
     level: CoarseLevel,
     grid: &'a CellGraph,
     climate_grid: &'a CellGraph,
+    spread: &'a dyn Spread,
 }
 
 impl<'a> Pass<'a> {
@@ -120,7 +161,20 @@ impl<'a> Pass<'a> {
             level,
             grid,
             climate_grid,
+            spread: &InOrder,
         }
+    }
+
+    /// This pass with its independent tasks run on `spread` ([`Spread`]): the same field.
+    #[must_use]
+    pub fn with_spread(self, spread: &'a dyn Spread) -> Self {
+        Self { spread, ..self }
+    }
+
+    /// The spread the pass's independent tasks run on.
+    #[must_use]
+    pub fn spread(&self) -> &'a dyn Spread {
+        self.spread
     }
 
     /// The surface seed, which opens the `surface.coarse.*` tags and nothing else (Design note 2).
