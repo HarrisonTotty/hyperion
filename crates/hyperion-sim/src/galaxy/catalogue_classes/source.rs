@@ -41,6 +41,12 @@
 //! Sums run in a fixed order: the classes in [`ALL_CLASSES`] order, then their cells in the walk's
 //! order.
 //!
+//! **The class-cell cache** (P09.T40). What a hit is made from in each cell, the places read first
+//! and the other classes' members ([`ClassCellSystems`]), is epoch state, so a caller may keep it
+//! between queries ([`CatalogueClassCellCache`]; [`CatalogueClassSource::with_cells`]). A warm
+//! query then draws only the candidates whose place its sphere can reach. Without a cache
+//! ([`NoClassCellCache`]) every cell's systems are made for the query and dropped.
+//!
 //! The range query registers the source from generator version 27, the hold's
 //! (`CLASS_SOURCE_VERSION`; [`CatalogueClassSource::registered_in`]); below it a query takes the
 //! grid and the features' members as before, bit for bit.
@@ -48,18 +54,21 @@
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
 use super::grid::{ClassLookup, ClassProcess, ClassVisitor, ProductionClasses};
 use super::{
-    ALL_CLASSES, CatalogueCellKey, ClassId, cells_in_sphere, occupied_cells, resolve_entry,
+    ALL_CLASSES, CatalogueCellKey, CatalogueSystem, ClassId, cells_in_sphere, occupied_cells,
+    resolve_entry,
 };
 use crate::GeneratorVersion;
-use crate::coords::ROOT_HALF_WIDTH_LY;
+use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::query::{
     LayerCounts, LayerSet, PAD_SPEED, QuerySphere, SystemHit, SystemSource, pad_for,
 };
-use crate::id::Layer;
+use crate::id::{CatalogueSystemId, Layer, SystemIdKind};
 use crate::time::UniverseTime;
 use crate::units::LightYears;
 
@@ -154,6 +163,209 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
     pub const fn with_lookup(lookup: L) -> Self {
         Self { lookup }
     }
+
+    /// The same source, reading each class cell's systems through `cells` (P09.T40): what a server
+    /// registers, over the cache it shares between queries. Its census and hits are this source's,
+    /// bit for bit, whatever the cache holds.
+    #[must_use]
+    pub const fn with_cells(self, cells: &dyn CatalogueClassCellCache) -> CachedClassSource<'_, L> {
+        CachedClassSource {
+            source: self,
+            cells,
+        }
+    }
+
+    /// Appends the hits in `layers` inside `sphere` at its time, each class cell's systems read
+    /// through `cells`.
+    fn hits(
+        &self,
+        galaxy: &Galaxy,
+        sphere: &QuerySphere,
+        layers: LayerSet,
+        cells: &dyn CatalogueClassCellCache,
+        out: &mut Vec<SystemHit>,
+    ) {
+        if layers.is_empty() {
+            return;
+        }
+        for class in ALL_CLASSES {
+            let visit = Hits {
+                galaxy,
+                sphere,
+                layers,
+                cells,
+                out: &mut *out,
+            };
+            // As in the census: a class without a process has no hosts to find.
+            let _ = self.lookup.visit_class(galaxy, class, visit);
+        }
+    }
+}
+
+/// A [`CatalogueClassSource`] whose hits read each class cell's systems through a
+/// [`CatalogueClassCellCache`] ([`CatalogueClassSource::with_cells`]; P09.T40).
+#[derive(Clone, Copy)]
+pub struct CachedClassSource<'a, L = ProductionClasses> {
+    source: CatalogueClassSource<L>,
+    cells: &'a dyn CatalogueClassCellCache,
+}
+
+impl<L: std::fmt::Debug> std::fmt::Debug for CachedClassSource<'_, L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedClassSource")
+            .field("source", &self.source)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<L: ClassLookup> SystemSource for CachedClassSource<'_, L> {
+    fn expected_in_sphere(&self, galaxy: &Galaxy, sphere: &QuerySphere) -> LayerCounts {
+        self.source.expected_in_sphere(galaxy, sphere)
+    }
+
+    fn systems_in_sphere(
+        &self,
+        galaxy: &Galaxy,
+        sphere: &QuerySphere,
+        layers: LayerSet,
+        out: &mut Vec<SystemHit>,
+    ) {
+        self.source.hits(galaxy, sphere, layers, self.cells, out);
+    }
+
+    /// Nothing, as [`CatalogueClassSource`].
+    fn suppresses(&self, _galaxy: &Galaxy, _record: &SystemRecord, _t: UniverseTime) -> bool {
+        false
+    }
+}
+
+/// What the range query keeps of one class cell between queries (P09.T40): its candidate count,
+/// each place a class reads first (the grid's rule 11) with its candidate's index, and every
+/// member of every entry of a class that reads none, in index and member order.
+///
+/// It is epoch state alone, a pure function of the galaxy and the cell, so a cache that lends it
+/// changes no hit. A place is a few bytes and costs a stream's first three words, where a
+/// candidate built costs its whole draw, so a placed class keeps its places and builds only the
+/// candidates a query's sphere can reach.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassCellSystems {
+    candidates: u32,
+    places: Vec<(u32, GalacticPosition)>,
+    members: Vec<CatalogueSystem>,
+}
+
+impl ClassCellSystems {
+    /// The cell's candidate count.
+    #[must_use]
+    pub const fn candidates(&self) -> u32 {
+        self.candidates
+    }
+
+    /// The places read first, each with its candidate's index, in index order.
+    #[must_use]
+    pub fn places(&self) -> &[(u32, GalacticPosition)] {
+        &self.places
+    }
+
+    /// The members of the entries of the candidates that read no place, in index and member
+    /// order.
+    #[must_use]
+    pub fn members(&self) -> &[CatalogueSystem] {
+        &self.members
+    }
+
+    /// The bytes it owns on the heap, by its buffers' capacities: what a byte-bounded cache charges
+    /// it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.places.capacity() * size_of::<(u32, GalacticPosition)>()
+            + self.members.capacity() * size_of::<CatalogueSystem>()
+    }
+
+    /// The systems of cell `key` of `process`'s class (module documentation, "Hits").
+    #[must_use]
+    fn of<P: ClassProcess>(galaxy: &Galaxy, process: &P, key: CatalogueCellKey) -> Self {
+        let candidates = occupied_cells(galaxy, process, [key])
+            .first()
+            .map_or(0, |&(_, count)| count);
+        let (mut places, mut members) = (Vec::new(), Vec::new());
+        for index in 0..candidates {
+            let id = key
+                .candidate_id(index, 0)
+                .expect("a cell's count is held under 2^24, so its candidates have IDs");
+            match process.epoch_place(galaxy, &key, id) {
+                Some(place) => places.push((index, place)),
+                None => members.extend(entry_systems(galaxy, process, id)),
+            }
+        }
+        places.shrink_to_fit();
+        members.shrink_to_fit();
+        Self {
+            candidates,
+            places,
+            members,
+        }
+    }
+}
+
+/// Where a caller keeps class cells' systems between range queries (P09.T40).
+///
+/// It takes `&self`, so an implementation that keeps them uses interior mutability. It must lend
+/// for a cell exactly what `make` returns, which is a pure function of the galaxy and the cell.
+/// **An implementation that keeps them between calls keys them by galaxy as well as by cell**, as
+/// plan 03's `CellCache` and the features' `FeatureCellCache` document: the trait does not check
+/// the galaxy.
+pub trait CatalogueClassCellCache {
+    /// The systems of class cell `key` in `galaxy`: what `make` returns, called now or for an
+    /// earlier lookup of the same cell.
+    fn systems(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems>;
+}
+
+/// The cache that keeps nothing: every lookup makes its cell's systems.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NoClassCellCache;
+
+impl CatalogueClassCellCache for NoClassCellCache {
+    fn systems(
+        &self,
+        _galaxy: &Galaxy,
+        _key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        Arc::new(make())
+    }
+}
+
+/// The systems of the members of candidate `id`'s entry, in member order, or none if its class does
+/// not keep it.
+///
+/// # Panics
+///
+/// Never: an entry's further members resolve as the entry does.
+fn entry_systems<P: ClassProcess>(
+    galaxy: &Galaxy,
+    process: &P,
+    id: CatalogueSystemId,
+) -> Vec<CatalogueSystem> {
+    let Ok(first) = resolve_entry(galaxy, process, id) else {
+        return Vec::new();
+    };
+    let mut systems = vec![process.system(galaxy, &first)];
+    for member in 1..first.entry().members() {
+        let id = first
+            .entry()
+            .member_id(member)
+            .expect("a member under its entry's count");
+        let member = resolve_entry(galaxy, process, id)
+            .expect("an entry's further members resolve as the entry does");
+        systems.push(process.system(galaxy, &member));
+    }
+    systems
 }
 
 impl<L: ClassLookup> SystemSource for CatalogueClassSource<L> {
@@ -179,19 +391,7 @@ impl<L: ClassLookup> SystemSource for CatalogueClassSource<L> {
         layers: LayerSet,
         out: &mut Vec<SystemHit>,
     ) {
-        if layers.is_empty() {
-            return;
-        }
-        for class in ALL_CLASSES {
-            let visit = Hits {
-                galaxy,
-                sphere,
-                layers,
-                out: &mut *out,
-            };
-            // As in the census: a class without a process has no hosts to find.
-            let _ = self.lookup.visit_class(galaxy, class, visit);
-        }
+        self.hits(galaxy, sphere, layers, &NoClassCellCache, out);
     }
 
     /// Nothing: the grid keeps no twin of a class host (module documentation).
@@ -330,11 +530,12 @@ fn cell_index(ly: f64, edge: f64) -> i32 {
 }
 
 /// [`CatalogueClassSource::systems_in_sphere`]'s visit of one class: its members in `layers`
-/// inside the sphere at its time, appended to `out`.
+/// inside the sphere at its time, appended to `out`, its cells' systems read through `cells`.
 struct Hits<'a> {
     galaxy: &'a Galaxy,
     sphere: &'a QuerySphere,
     layers: LayerSet,
+    cells: &'a dyn CatalogueClassCellCache,
     out: &'a mut Vec<SystemHit>,
 }
 
@@ -346,6 +547,7 @@ impl ClassVisitor for Hits<'_> {
             galaxy,
             sphere,
             layers,
+            cells,
             out,
         } = self;
         let class = process.class();
@@ -355,51 +557,28 @@ impl ClassVisitor for Hits<'_> {
             return;
         }
         let reach = place_reach(sphere);
-        for (key, count) in occupied_cells(galaxy, process, cells_in_sphere(class, sphere)) {
-            for index in 0..count {
+        for key in cells_in_sphere(class, sphere) {
+            let systems = cells.systems(galaxy, key, &mut || {
+                ClassCellSystems::of(galaxy, process, key)
+            });
+            for &(index, place) in systems.places() {
+                if LightYears::from(sphere.centre().distance_to(&place)).value() > reach.value() {
+                    continue;
+                }
                 let id = key
                     .candidate_id(index, 0)
                     .expect("a cell's count is held under 2^24, so its candidates have IDs");
-                let place = process.epoch_place(galaxy, &key, id);
-                if place.is_some_and(|place| {
-                    LightYears::from(sphere.centre().distance_to(&place)).value() > reach.value()
-                }) {
-                    continue;
-                }
-                let Ok(first) = resolve_entry(galaxy, process, id) else {
-                    continue;
-                };
-                let system = process.system(galaxy, &first);
-                debug_assert!(
-                    place.is_none_or(|place| *system.record().epoch_position() == place),
-                    "the {class} candidate {id:?}'s place read first is its entry's (rule 11)"
-                );
-                push_hit(
-                    system.record(),
-                    system.position_at(sphere.time()),
-                    sphere,
-                    layers,
-                    out,
-                );
-                if sphere.time() < system.motion().at() {
-                    continue;
-                }
-                for member in 1..first.entry().members() {
-                    let id = first
-                        .entry()
-                        .member_id(member)
-                        .expect("a member under its entry's count");
-                    let member = resolve_entry(galaxy, process, id)
-                        .expect("an entry's further members resolve as the entry does");
-                    let system = process.system(galaxy, &member);
-                    push_hit(
-                        system.record(),
-                        system.position_at(sphere.time()),
-                        sphere,
-                        layers,
-                        out,
+                for system in entry_systems(galaxy, process, id) {
+                    debug_assert_eq!(
+                        *system.record().epoch_position(),
+                        place,
+                        "the {class} candidate {id:?}'s place read first is its entry's (rule 11)"
                     );
+                    push_hit(&system, sphere, layers, out);
                 }
+            }
+            for system in systems.members() {
+                push_hit(system, sphere, layers, out);
             }
         }
     }
@@ -419,23 +598,31 @@ fn place_reach(sphere: &QuerySphere) -> LightYears {
     LightYears::new(sphere.radius().value() + drift * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY)
 }
 
-/// Appends `record`'s hit to `out` if it is in `layers`, exists at the sphere's time and lies, at
-/// `position`, inside its unpadded radius: [`hit_at`](crate::galaxy::query::hit_at)'s test, with
-/// the position its class's motion gives.
+/// Appends `system`'s hit to `out` if it is in `layers`, exists at the sphere's time and lies, at
+/// its class's position then, inside the unpadded radius: [`hit_at`](crate::galaxy::query::hit_at)'s
+/// test. A further member of an entry is listed from its own break only, before which a Type Ia's
+/// survivor is its progenitor's companion, at member 0's place (P09.T34.a's lean).
 fn push_hit(
-    record: &SystemRecord,
-    position: crate::coords::GalacticPosition,
+    system: &CatalogueSystem,
     sphere: &QuerySphere,
     layers: LayerSet,
     out: &mut Vec<SystemHit>,
 ) {
+    let record = system.record();
     if !layers.contains(record.layer()) {
+        return;
+    }
+    let SystemIdKind::Catalogue(id) = record.id().kind() else {
+        unreachable!("a catalogue system's record carries its 111 ID");
+    };
+    if id.member() > 0 && sphere.time() < system.motion().at() {
         return;
     }
     match record.existence_at(sphere.time()) {
         Existence::NoSystemYet => return,
         Existence::Exists => {}
     }
+    let position = system.position_at(sphere.time());
     let distance = LightYears::from(sphere.centre().distance_to(&position));
     if distance.value() <= sphere.radius().value() {
         out.push(SystemHit::new(*record, position, distance));

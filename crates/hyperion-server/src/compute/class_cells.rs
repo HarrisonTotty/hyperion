@@ -1,0 +1,231 @@
+//! The catalogue classes' cells as the range query reads them, shared between queries (plan 09,
+//! P09.T40).
+//!
+//! A class host is found in the class cells within the class's 4,096 ly reach of a query's sphere:
+//! some 2,900 512 ly cells a class about a 50 ly sphere. What a hit is made from in each cell is
+//! the sim's [`ClassCellSystems`], epoch state, a pure function of the galaxy and the cell. So
+//! [`SharedClassCellCache`] keeps it, a [`SharedByteLru`] over `(GalaxyKey, CatalogueCellKey)`
+//! charged each cell's heap bytes, and a query near another reads its cells warm. A cell is made by
+//! the job whose query first reads it; a cell evicted is made again, and changes no answer.
+
+use std::sync::Arc;
+
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCellCache, ClassCellSystems,
+};
+
+use super::GalaxyKey;
+use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
+
+impl HeapBytes for ClassCellSystems {
+    /// The sim's own count of what the cell's systems own on the heap
+    /// ([`ClassCellSystems::heap_bytes`]).
+    fn heap_bytes(&self) -> usize {
+        Self::heap_bytes(self)
+    }
+}
+
+/// The catalogue classes' cells of every galaxy the server holds, in one byte budget (P09.T40).
+#[derive(Debug)]
+pub struct SharedClassCellCache {
+    cells: SharedByteLru<(GalaxyKey, CatalogueCellKey), ClassCellSystems>,
+}
+
+impl SharedClassCellCache {
+    /// An empty cache that holds at most `budget_bytes` of charged cells.
+    ///
+    /// A budget of zero caches nothing: every cell is made, lent and dropped.
+    #[must_use]
+    pub fn new(budget_bytes: usize) -> Self {
+        Self {
+            cells: SharedByteLru::new(budget_bytes),
+        }
+    }
+
+    /// The sim's [`CatalogueClassCellCache`] over this cache, for the galaxy `galaxy` names.
+    #[must_use]
+    pub fn handle(&self, galaxy: GalaxyKey) -> ClassCellHandle<'_> {
+        ClassCellHandle {
+            cache: self,
+            galaxy,
+        }
+    }
+
+    /// The cells held, the bytes they are charged, and the hits, misses, evictions and refusals so
+    /// far.
+    #[must_use]
+    pub fn counters(&self) -> LruCounters {
+        self.cells.counters()
+    }
+}
+
+/// One galaxy's view of the [`SharedClassCellCache`]: the sim's [`CatalogueClassCellCache`], over
+/// the cache every request shares.
+#[derive(Debug, Clone, Copy)]
+pub struct ClassCellHandle<'a> {
+    cache: &'a SharedClassCellCache,
+    galaxy: GalaxyKey,
+}
+
+impl CatalogueClassCellCache for ClassCellHandle<'_> {
+    /// Lends the cell's systems the cache holds, or those `make` returns, then held.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of this handle's key, since its cells would then be lent
+    /// under another galaxy's key.
+    fn systems(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        assert_eq!(
+            galaxy.seed().get(),
+            self.galaxy.seed(),
+            "a class cell cache handle lends the cells of one galaxy, and this is another's"
+        );
+        let entry_key = (self.galaxy, key);
+        if let Some(systems) = self.cache.cells.get(&entry_key) {
+            return systems;
+        }
+        let systems = Arc::new(make());
+        // A cell larger than the whole budget is handed back and still lent; one another job stored
+        // meanwhile is the same cell, and either is lent right.
+        let _ = self.cache.cells.insert(entry_key, Arc::clone(&systems));
+        systems
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use hyperion_sim::GeneratorVersion;
+    use hyperion_sim::Seed;
+    use hyperion_sim::coords::GalacticPosition;
+    use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
+    use hyperion_sim::galaxy::imf::MassFunctionKind;
+    use hyperion_sim::galaxy::params::GalaxyParams;
+    use hyperion_sim::galaxy::query::{LayerSet, QuerySphere, SystemHit, SystemSource};
+    use hyperion_sim::id::{Layer, SystemIdKind};
+    use hyperion_sim::time::UniverseTime;
+    use hyperion_sim::units::LightYears;
+
+    use super::*;
+    use crate::convert::origins::SEED;
+
+    /// The server tests' galaxy under generator version 27's rules, every hold at 27 in force.
+    fn galaxy_27() -> &'static Galaxy {
+        static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+        GALAXY.get_or_init(|| {
+            let seed = Seed::new(SEED);
+            Galaxy::from_params_at_version(
+                seed,
+                GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+                GeneratorVersion::new(27),
+            )
+            .expect("a drawn galaxy builds")
+        })
+    }
+
+    fn key() -> GalaxyKey {
+        GalaxyKey::new(SEED, GeneratorVersion::new(27))
+    }
+
+    /// The classes' hits in `sphere`, their cells read through `cells`.
+    fn hits(cells: &dyn CatalogueClassCellCache, sphere: &QuerySphere) -> Vec<SystemHit> {
+        let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+            .into_iter()
+            .collect();
+        let mut out = Vec::new();
+        CatalogueClassSource::new()
+            .with_cells(cells)
+            .systems_in_sphere(galaxy_27(), sphere, stellar, &mut out);
+        out
+    }
+
+    /// Eviction never changes the classes' hits: queries in the outer disc and about the first
+    /// class host they find give the same hits through no cache, a cache too small for one cell,
+    /// one that evicts all the time and one that keeps every cell, cold and warm; and a warm query
+    /// makes no cell.
+    #[test]
+    fn eviction_never_changes_the_classes_hits() {
+        let outer = GalacticPosition::from_light_years([0.0, 48_000.0, 0.0]).expect("in the cube");
+        let wide = QuerySphere::new(
+            outer,
+            LightYears::new(300.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        let found = hits(&NoClassCellCache, &wide);
+        let host = found
+            .iter()
+            .find(|hit| matches!(hit.id().kind(), SystemIdKind::Catalogue(_)))
+            .expect("a class host within 300 ly of the outer point");
+        let near = QuerySphere::new(
+            *host.position(),
+            LightYears::new(1.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        let spheres = [wide, near];
+        let expected: Vec<_> = spheres.iter().map(|s| hits(&NoClassCellCache, s)).collect();
+        assert!(expected[1].iter().any(|hit| hit.id() == host.id()));
+        for budget in [0, 2_000, 64 << 20] {
+            let cache = SharedClassCellCache::new(budget);
+            for pass in ["cold", "warm"] {
+                for (sphere, expected) in spheres.iter().zip(&expected) {
+                    assert_eq!(
+                        &hits(&cache.handle(key()), sphere),
+                        expected,
+                        "{budget} {pass}"
+                    );
+                }
+            }
+        }
+        let roomy = SharedClassCellCache::new(64 << 20);
+        drop(hits(&roomy.handle(key()), &near));
+        let before = roomy.counters();
+        drop(hits(&roomy.handle(key()), &near));
+        let after = roomy.counters();
+        assert_eq!(
+            after.misses(),
+            before.misses(),
+            "a warm query makes no cell"
+        );
+        assert!(after.hits() > before.hits());
+        let classes: BTreeSet<_> = expected
+            .iter()
+            .flatten()
+            .filter_map(|hit| match hit.id().kind() {
+                SystemIdKind::Catalogue(id) => Some(id.class()),
+                _ => None,
+            })
+            .collect();
+        assert!(!classes.is_empty());
+    }
+
+    /// A handle refuses another galaxy's cells.
+    #[test]
+    #[should_panic(expected = "a class cell cache handle lends the cells of one galaxy")]
+    fn a_handle_refuses_another_galaxy() {
+        let cache = SharedClassCellCache::new(1 << 20);
+        let other = GalaxyKey::new(SEED + 1, GeneratorVersion::new(27));
+        let key = CatalogueCellKey::new(
+            hyperion_sim::galaxy::catalogue_classes::ClassId::CORE_COLLAPSE,
+            [0, 50, 0],
+        )
+        .expect("a cell");
+        drop(
+            cache
+                .handle(other)
+                .systems(galaxy_27(), key, &mut || -> ClassCellSystems {
+                    unreachable!("never made")
+                }),
+        );
+    }
+}

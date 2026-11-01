@@ -307,6 +307,7 @@ pub(crate) async fn systems(
         Arc::clone(&state.cells),
         Arc::clone(&state.feature_cells),
         Arc::clone(&state.cluster_models),
+        Arc::clone(&state.class_cells),
     );
     let answered = served_range_query(&state.pool, &caches, &served, &token, queried).await?;
     let (request, query, result) = match answered? {

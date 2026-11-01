@@ -37,5 +37,8 @@ pub use self::grid::{
 };
 pub use self::ids::{BuildCatalogueCellKeyError, CatalogueCellKey};
 pub use self::registry::{ALL_CLASSES, ClassId, FEATURE_LEVEL_LIST_ORDER};
-pub use self::source::CatalogueClassSource;
+pub use self::source::{
+    CachedClassSource, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
+    NoClassCellCache,
+};
 pub use self::system::{CatalogueMotion, CatalogueSystem, system_of, system_of_record};

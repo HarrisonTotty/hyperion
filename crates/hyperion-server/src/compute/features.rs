@@ -615,6 +615,7 @@ mod tests {
 
     use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::galaxy::ages::SubDisc;
+    use hyperion_sim::galaxy::catalogue_classes::NoClassCellCache;
     use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
     use hyperion_sim::galaxy::features::members::NoInteriorCache;
     use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
@@ -812,9 +813,13 @@ mod tests {
         let query = RangeQuery::builder(*feature.position(), LightYears::new(2.0))
             .build()
             .expect("a query");
-        beside_the_grid(galaxy(), FeatureMembers::Served, &source, |sources| {
-            range_query(galaxy(), &mut NoCache::new(), sources, &query)
-        })
+        beside_the_grid(
+            galaxy(),
+            FeatureMembers::Served,
+            &source,
+            &NoClassCellCache,
+            |sources| range_query(galaxy(), &mut NoCache::new(), sources, &query),
+        )
     }
 
     /// The census, bit for bit, and the hits of queries about a cluster do not depend on the order
@@ -835,9 +840,14 @@ mod tests {
         hyperion_testkit::order::assert_order_independent(&queries, |query| {
             let (cells, interiors) = (cells.handle(key()), interiors.handle(key()));
             let source = FeatureMemberSource::new(&cells, &interiors);
-            let result = beside_the_grid(galaxy(), FeatureMembers::Served, &source, |sources| {
-                range_query(galaxy(), &mut NoCache::new(), sources, query)
-            });
+            let classes = NoClassCellCache;
+            let result = beside_the_grid(
+                galaxy(),
+                FeatureMembers::Served,
+                &source,
+                &classes,
+                |sources| range_query(galaxy(), &mut NoCache::new(), sources, query),
+            );
             let census: Vec<u64> = result
                 .census()
                 .expected()

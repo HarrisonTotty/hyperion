@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::order::assert_order_independent;
@@ -740,4 +740,94 @@ fn the_place_read_first_changes_no_hit() {
         hits(&CatalogueClassSource::new(), &sphere),
         hits(&unplaced, &sphere)
     );
+}
+
+/// A class-cell cache that keeps every cell's systems it makes, for one galaxy.
+#[derive(Debug, Default)]
+struct KeepClassCells(RefCell<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+
+impl CatalogueClassCellCache for KeepClassCells {
+    fn systems(
+        &self,
+        _galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        let mut kept = self.0.borrow_mut();
+        Arc::clone(kept.entry(key).or_insert_with(|| Arc::new(make())))
+    }
+}
+
+/// The systems of class cell `key` made afresh.
+struct Made<'a> {
+    galaxy: &'a Galaxy,
+    key: CatalogueCellKey,
+}
+
+impl ClassVisitor for Made<'_> {
+    type Output = ClassCellSystems;
+    fn visit<P: ClassProcess>(self, process: &P) -> ClassCellSystems {
+        ClassCellSystems::of(self.galaxy, process, self.key)
+    }
+}
+
+/// The class-cell cache changes no answer (P09.T40): the census and the hits of queries in the
+/// outer disc, at three times and of four radii, and about a placed host and a core collapse, are
+/// the same through one cache that keeps every cell, whatever the order the queries come in, as
+/// through none; and each cell it holds is the one made afresh.
+#[test]
+fn a_kept_class_cell_changes_no_answer_whatever_was_asked_before() {
+    let galaxy = at_27();
+    let sphere = |centre: GalacticPosition, radius: f64, t: UniverseTime| {
+        QuerySphere::new(centre, LightYears::new(radius), t, LightYears::ZERO).expect("a sphere")
+    };
+    let ly = |p: [f64; 3]| GalacticPosition::from_light_years(p).expect("in the cube");
+    let core = first_hosts(galaxy, ClassId::CORE_COLLAPSE, 1)[0].system;
+    let placed = first_hosts(galaxy, ClassId::ACCRETING_WHITE_DWARF, 1)[0].system;
+    let spheres = [
+        sphere(ly([0.0, 48_000.0, 0.0]), 50.0, UniverseTime::EPOCH),
+        sphere(ly([0.0, 48_000.0, 0.0]), 1.0, at(400)),
+        sphere(ly([1_500.0, 47_000.0, 80.0]), 20.0, at(-900)),
+        sphere(core.position_at(at(300)), 2.0, at(300)),
+        sphere(
+            placed.position_at(UniverseTime::EPOCH),
+            1.0,
+            UniverseTime::EPOCH,
+        ),
+    ];
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let answer = |source: &dyn SystemSource, sphere: &QuerySphere| {
+        let mut hits = Vec::new();
+        source.systems_in_sphere(galaxy, sphere, stellar, &mut hits);
+        let counts = source
+            .expected_in_sphere(galaxy, sphere)
+            .to_array()
+            .map(bits);
+        (counts, hits)
+    };
+    let uncached: Vec<_> = spheres
+        .iter()
+        .map(|sphere| answer(&CatalogueClassSource::new(), sphere))
+        .collect();
+    assert!(uncached.iter().filter(|(_, hits)| !hits.is_empty()).count() >= 2);
+    let kept = KeepClassCells::default();
+    assert_order_independent(&spheres, |sphere| {
+        let found = answer(&CatalogueClassSource::new().with_cells(&kept), sphere);
+        let position = spheres
+            .iter()
+            .position(|s| s == sphere)
+            .expect("one of the spheres");
+        assert_eq!(found, uncached[position]);
+        found
+    });
+    let held = kept.0.borrow();
+    assert!(held.len() > 1_000, "{}", held.len());
+    for (&key, systems) in held.iter().step_by(97) {
+        let made = ProductionClasses
+            .visit_class(galaxy, key.class(), Made { galaxy, key })
+            .expect("a registered class");
+        assert_eq!(**systems, made, "{key:?}");
+    }
 }

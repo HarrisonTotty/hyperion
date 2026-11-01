@@ -28,6 +28,7 @@
 mod bodies;
 mod cancel;
 mod cells;
+mod class_cells;
 mod density_map;
 mod error;
 mod extinction_map;
@@ -49,6 +50,7 @@ mod tube_tables;
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
+pub use class_cells::{ClassCellHandle, SharedClassCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
     ParseCodeDepthError, ParseMapResolutionError, PerLy2, QuantisedMap, RawDensityMap, RawMap,

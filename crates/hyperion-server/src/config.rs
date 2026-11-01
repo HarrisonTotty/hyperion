@@ -151,6 +151,15 @@ pub const DEFAULT_FEATURE_CACHE_MIB: usize = 16;
 /// 27 kB on average (measured 2026-10-30: the 477 interiors of the features within 3,000 ly of the
 /// Sun-like point, 13 MB), so this holds some 2,400.
 pub const DEFAULT_CLUSTER_MODEL_CACHE_MIB: usize = 64;
+/// The catalogue class cell cache's budget, in MiB (plan 09, P09.T40): each class cell's places
+/// read first and other classes' members ([`ClassCellSystems`]), charged their buffers. A cold
+/// Sun-like 50 ly query under 27's rules reads 14,560 class cells, 5.5 MB (measured 2026-11-01 on
+/// the server's tests' galaxy, pod), so this holds some five such neighbourhoods' cells, and a
+/// query within the classes' 4,096 ly reach of another shares most of them. It has no command-line
+/// option yet (lean, 2026-11-01).
+///
+/// [`ClassCellSystems`]: hyperion_sim::galaxy::catalogue_classes::ClassCellSystems
+pub const DEFAULT_CLASS_CELL_CACHE_MIB: usize = 32;
 /// The sky's cell cache's budget when `--sky-cache` is not given, in MiB: 0, which turns the cache
 /// off (rendering plan R06, R06.T8.o and Design note 12; decided 2026-10-10,
 /// `decision-r06-t8n.md`).

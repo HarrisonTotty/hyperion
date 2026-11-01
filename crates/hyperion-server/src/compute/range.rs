@@ -43,7 +43,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
+use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassCellCache, CatalogueClassSource};
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::placement::CellKey;
@@ -54,7 +54,8 @@ use hyperion_sim::id::FeatureCell;
 
 use super::{
     CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, KeptInteriors, Priority,
-    SharedCellCache, SharedClusterModelCache, SharedFeatureCellCache, SubmitJobError,
+    SharedCellCache, SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache,
+    SubmitJobError,
 };
 use crate::FeatureMembers;
 
@@ -85,20 +86,24 @@ pub struct RangeCaches {
     cells: Arc<SharedCellCache>,
     features: Arc<SharedFeatureCellCache>,
     interiors: Arc<SharedClusterModelCache>,
+    classes: Arc<SharedClassCellCache>,
 }
 
 impl RangeCaches {
-    /// The caches a query reads, as the server holds them.
+    /// The caches a query reads, as the server holds them: the grid's cells, the feature cells,
+    /// the features' interiors and the catalogue classes' cells (P09.T40).
     #[must_use]
     pub fn new(
         cells: Arc<SharedCellCache>,
         features: Arc<SharedFeatureCellCache>,
         interiors: Arc<SharedClusterModelCache>,
+        classes: Arc<SharedClassCellCache>,
     ) -> Self {
         Self {
             cells,
             features,
             interiors,
+            classes,
         }
     }
 }
@@ -271,9 +276,14 @@ fn with_sources<R>(
         caches.interiors.kept(served.key),
     );
     let source = FeatureMemberSource::new(&features, &interiors);
-    beside_the_grid(&served.galaxy, served.members, &source, |sources| {
-        f(sources, &interiors)
-    })
+    let classes = caches.classes.handle(served.key);
+    beside_the_grid(
+        &served.galaxy,
+        served.members,
+        &source,
+        &classes,
+        |sources| f(sources, &interiors),
+    )
 }
 
 /// `f` of the sources a range query in `galaxy` takes beside the grid as `members` says: held,
@@ -281,16 +291,18 @@ fn with_sources<R>(
 /// features' `members`, and from generator version 27 the catalogue classes' hosts beside them
 /// ([`CatalogueClassSource::registered_in`], P09.T37.a; below it there are none).
 ///
-/// The classes' source keeps nothing and has no cells to read ahead: a cold query generates every
-/// class cell about it on the job that asks the sources for their hits (P09.T40's class-cell
-/// cache is its lever).
+/// The classes' source reads its class cells through `class_cells` (P09.T40): a cold query makes
+/// each cell it reads on the job that asks the sources for their hits, and a warm one finds them
+/// held.
 pub(crate) fn beside_the_grid<R>(
     galaxy: &Galaxy,
     members: FeatureMembers,
     features: &dyn SystemSource,
+    class_cells: &dyn CatalogueClassCellCache,
     f: impl FnOnce(&[&dyn SystemSource]) -> R,
 ) -> R {
-    let classes = CatalogueClassSource::registered_in(galaxy);
+    let classes =
+        CatalogueClassSource::registered_in(galaxy).map(|classes| classes.with_cells(class_cells));
     match (members, &classes) {
         (FeatureMembers::Held, _) => f(&[]),
         (FeatureMembers::Served, None) => f(&[features]),
@@ -530,6 +542,7 @@ mod tests {
     use std::time::Duration;
 
     use hyperion_sim::coords::GalacticPosition;
+    use hyperion_sim::galaxy::catalogue_classes::NoClassCellCache;
     use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
     use hyperion_sim::galaxy::features::members::NoInteriorCache;
     use hyperion_sim::galaxy::placement::NoCache;
@@ -568,6 +581,7 @@ mod tests {
             Arc::new(SharedCellCache::new(bytes)),
             Arc::new(SharedFeatureCellCache::new(bytes)),
             Arc::new(SharedClusterModelCache::new(bytes)),
+            Arc::new(SharedClassCellCache::new(bytes)),
         )
     }
 
@@ -583,7 +597,7 @@ mod tests {
     /// `f` of the sources beside the grid as `members` says, through no cache.
     fn with_sources<R>(members: FeatureMembers, f: impl FnOnce(&[&dyn SystemSource]) -> R) -> R {
         let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
-        beside_the_grid(galaxy(), members, &source, f)
+        beside_the_grid(galaxy(), members, &source, &NoClassCellCache, f)
     }
 
     /// `query`'s result as the sim's range query gives it through no cache, with the feature
@@ -747,6 +761,7 @@ mod tests {
             Arc::new(SharedCellCache::new(64 << 20)),
             Arc::clone(&warm.features),
             Arc::clone(&warm.interiors),
+            Arc::clone(&warm.classes),
         );
         assert_eq!(served_on(&pool, &grid_cold, &served).await, expected);
         let counters = grid_cold.cells.counters();

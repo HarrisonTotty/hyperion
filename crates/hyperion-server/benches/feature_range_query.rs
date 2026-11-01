@@ -16,10 +16,11 @@
 //! parallel cells; and served so (`served_range_query`), its cold cells generated across the
 //! workers ahead of its walk.
 //!
-//! `classes_at_27` is the Sun-like 50 ly query cold under generator version 27's rules, where the
-//! catalogue classes' hosts are registered beside the members (P09.T37.a): with every source, and
-//! each class's source alone, its census and its hits, for each class's share. The classes' source
-//! keeps nothing, so it is cold whatever the caches hold.
+//! `classes_at_27` is the Sun-like query of 50 ly and of 1 ly under generator version 27's rules,
+//! where the catalogue classes' hosts are registered beside the members (P09.T37.a), cold and warm
+//! with every source, the classes' cells read through the server's class cell cache (P09.T40); and
+//! at 50 ly each class's source alone, its census and its hits through no cache, for each class's
+//! share.
 
 use std::hint::black_box;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -30,10 +31,11 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hyperion_server::FeatureMembers;
 use hyperion_server::compute::{
     CancelToken, CpuPool, GalaxyKey, Priority, RangeCaches, ServedQuery, SharedCellCache,
-    SharedClusterModelCache, SharedFeatureCellCache, served_range_query,
+    SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache, served_range_query,
 };
 use hyperion_server::config::{
-    DEFAULT_CELL_CACHE_MIB, DEFAULT_CLUSTER_MODEL_CACHE_MIB, DEFAULT_FEATURE_CACHE_MIB,
+    DEFAULT_CELL_CACHE_MIB, DEFAULT_CLASS_CELL_CACHE_MIB, DEFAULT_CLUSTER_MODEL_CACHE_MIB,
+    DEFAULT_FEATURE_CACHE_MIB,
 };
 use hyperion_server::limits::{
     BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY, MAX_CENSUS_LIMIT, MAX_QUERY_CELLS,
@@ -69,6 +71,7 @@ struct Caches {
     cells: Arc<SharedCellCache>,
     features: Arc<SharedFeatureCellCache>,
     interiors: Arc<SharedClusterModelCache>,
+    classes: Arc<SharedClassCellCache>,
 }
 
 impl Caches {
@@ -78,6 +81,9 @@ impl Caches {
             features: Arc::new(SharedFeatureCellCache::new(DEFAULT_FEATURE_CACHE_MIB * MIB)),
             interiors: Arc::new(SharedClusterModelCache::new(
                 DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB,
+            )),
+            classes: Arc::new(SharedClassCellCache::new(
+                DEFAULT_CLASS_CELL_CACHE_MIB * MIB,
             )),
         }
     }
@@ -89,7 +95,9 @@ impl Caches {
         let mut cells = self.cells.handle(key);
         let (features, interiors) = (self.features.handle(key), self.interiors.kept(key));
         let members = FeatureMemberSource::new(&features, &interiors);
-        let classes = CatalogueClassSource::registered_in(galaxy);
+        let class_cells = self.classes.handle(key);
+        let classes = CatalogueClassSource::registered_in(galaxy)
+            .map(|classes| classes.with_cells(&class_cells));
         let mut sources: Vec<&dyn SystemSource> = vec![&members];
         sources.extend(classes.as_ref().map(|classes| classes as &dyn SystemSource));
         range_query(galaxy, &mut cells, &sources, query)
@@ -165,6 +173,9 @@ fn range_caches() -> RangeCaches {
         Arc::new(SharedFeatureCellCache::new(DEFAULT_FEATURE_CACHE_MIB * MIB)),
         Arc::new(SharedClusterModelCache::new(
             DEFAULT_CLUSTER_MODEL_CACHE_MIB * MIB,
+        )),
+        Arc::new(SharedClassCellCache::new(
+            DEFAULT_CLASS_CELL_CACHE_MIB * MIB,
         )),
     )
 }
@@ -288,7 +299,35 @@ fn classes_at_27(c: &mut Criterion) {
         .expect("a drawn galaxy builds")
         .with_full_potential();
     let key = GalaxyKey::new(SEED, version);
-    let query = query_at(sun_like(), 50.0);
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let mut group = c.benchmark_group("classes_at_27");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(20));
+    for radius in [50.0, 1.0] {
+        let query = query_at(sun_like(), radius);
+        group.bench_function(format!("Sun-like {radius} ly, every source (cold)"), |b| {
+            b.iter_batched_ref(
+                Caches::new,
+                |caches| caches.query(&galaxy, key, black_box(&query)),
+                BatchSize::PerIteration,
+            );
+        });
+        let warm = Caches::new();
+        drop(warm.query(&galaxy, key, &query));
+        group.bench_function(format!("Sun-like {radius} ly, every source (warm)"), |b| {
+            b.iter(|| warm.query(&galaxy, key, black_box(&query)));
+        });
+        if radius > 1.0 {
+            let held = warm.classes.counters();
+            println!(
+                "classes_at_27: the class cells of the Sun-like {radius} ly query: {} cells, {} bytes",
+                held.entries(),
+                held.bytes()
+            );
+        }
+    }
     let sphere = QuerySphere::new(
         sun_like(),
         LightYears::new(50.0),
@@ -296,22 +335,9 @@ fn classes_at_27(c: &mut Criterion) {
         LightYears::ZERO,
     )
     .expect("a sphere");
-    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
-        .into_iter()
-        .collect();
-    let mut group = c.benchmark_group("classes_at_27");
-    group.sample_size(10);
-    group.measurement_time(Duration::from_secs(60));
-    group.bench_function("Sun-like 50 ly, every source (cold)", |b| {
-        b.iter_batched_ref(
-            Caches::new,
-            |caches| caches.query(&galaxy, key, black_box(&query)),
-            BatchSize::PerIteration,
-        );
-    });
     for class in ALL_CLASSES {
         let source = CatalogueClassSource::with_lookup(Only(class));
-        group.bench_function(format!("Sun-like 50 ly, {class} alone"), |b| {
+        group.bench_function(format!("Sun-like 50 ly, {class} alone (cold)"), |b| {
             b.iter(|| {
                 let counts = source.expected_in_sphere(&galaxy, black_box(&sphere));
                 let mut hits = Vec::new();
