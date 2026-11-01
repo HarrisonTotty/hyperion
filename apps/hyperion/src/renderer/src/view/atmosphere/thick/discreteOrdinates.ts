@@ -2001,6 +2001,9 @@ export function modeParticulars(layerCount: number, span: number, width: number)
  * Writes one source's right-hand side of a {@link LayerStack}'s problem as column `column` of
  * `columns` in `out` (row-major, as {@link solveLayerStackColumns} takes it):
  * {@link layerStackRightHandSide}'s of the same particular solutions, to the bit.
+ *
+ * @throws RangeError for particular solutions not 2n a layer, a ground source not n long, a column
+ *   outside [0, `columns`), or an `out` not 2n L × `columns` long.
  */
 export function layerStackRightHandSideInto(
   stack: LayerStack,
@@ -2013,6 +2016,20 @@ export function layerStackRightHandSideInto(
   const { hemisphereStreams: n, layerCount, reflection } = stack;
   const span = 2 * n;
   const { top, bottom } = particulars;
+  if (top.length !== span * layerCount || bottom.length !== span * layerCount) {
+    throw new RangeError(
+      `a particular solution a layer, ${span} entries each, ${layerCount} layers`,
+    );
+  }
+  if (groundSource !== undefined && groundSource.length !== n) {
+    throw new RangeError(`the ground's source has ${n} entries, not ${groundSource.length}`);
+  }
+  if (
+    !(Number.isInteger(column) && column >= 0 && column < columns) ||
+    out.length !== span * layerCount * columns
+  ) {
+    throw new RangeError(`no column ${column} of ${columns} in ${out.length} entries`);
+  }
   for (let i = 0; i < n; i += 1) {
     out[i * columns + column] = -at(top, n + i);
   }

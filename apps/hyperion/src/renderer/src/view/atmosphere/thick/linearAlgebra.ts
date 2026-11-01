@@ -449,10 +449,11 @@ export function shiftedSolveScratch(n: number): ShiftedSolveScratch {
 
 /**
  * Solves (A − s 1) x = b in place on A's real Schur form, then refines x once against A itself
- * (Golub and Van Loan 2013, §3.5.3: r = b − (A − s 1) x, and x + (A − s 1)⁻¹ r on the same form):
- * the form's own backward error, which {@link realEigen}'s relaxed deflation can leave near 10⁻¹³
- * of ‖A‖, is taken out, and the residual is about elimination's (R08.T14.e's records). 6n² a
- * right-hand side.
+ * (Golub and Van Loan 2013, §3.5.3, iterative improvement: r = b − (A − s 1) x, and
+ * x + (A − s 1)⁻¹ r on the same form): the form's own backward error, which {@link realEigen}'s
+ * relaxed deflation leaves (residuals up to 3 × 10⁻¹³ of b's largest entry, measured on the vector
+ * mode's layers at 16 streams), is taken out, and the residual is elimination's, about 10⁻¹⁵ there
+ * (plan R08's records of R08.T14.e). 6n² a right-hand side.
  *
  * @param a - A, n × n row-major, whose form `schur` is.
  * @throws RangeError if `a` is not n × n, or `b` or the scratch does not hold n entries.

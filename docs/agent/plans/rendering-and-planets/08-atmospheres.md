@@ -24350,3 +24350,31 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     beside it). The rest is the full-screen pass itself: the frame without the giant's composite
     took 0.67 s. The next lever is the composite over the march's area alone after a cheap copy;
     the engine has no scissor and no texture copy, so it needs a copy material.
+- **The thick bake's levers, as built** (R08.T14.b, 2026-11-01; lane `perf-thick-bake`; timings
+  in its outbox). Every table of the bench fixtures is unchanged to the bit.
+  - `linearAlgebra.ts`: `factorBand` eliminates over its entries not 0 and records them (`BandLu`'s
+    `lowerRows`, `lowerStart`, `upperColumns`, `upperStart`); `solveBand` and the new
+    `solveBandColumns` (right-hand sides row-major) take them alone.
+  - `discreteOrdinates.ts`: a mode's beams solved together (`solveLayerStackColumns`,
+    `layerStackRightHandSideInto`, `ModeParticulars`, `modeParticulars`); the problem's
+    `fieldInterfaces` and `userDown` (`SolveFields`, `solveFieldsOf`), NaN where not made;
+    `solveDiscreteOrdinateModes(problem, fromMode)`.
+  - `bake.ts`: a band's solves make the table's interfaces alone (`bakeBinSolve` every one), as
+    `onSolve`'s solution says; `mixedLayers`, `deltaMLayersOf`, `LayerTermOptics`, `MixedLayers` and
+    `DeltaMLayers` exported, the deck's mixer folded into them.
+  - Left: the spherical beam's chords cached per band (bit for bit, about 2% of a bake); the
+    deck's 16 layers (8.2 → 6.3 s a Venus-class band), which moves figures.
+  - The re-ask (owner-view-body's finding) is not one: the inspection run's "no PENDING" check
+    passes before the body's first ask, on the frames before the first photorealistic plan.
+- **The correction's levers, as built** (R08.T14.e, 2026-11-01; lane `perf-thick-bake`).
+  - `polarisation.ts`: the scalar solver's batched beams; `PolarisedProblem`'s `userComponents` (the
+    correction asks I alone), `fieldInterfaces`, `userDown` and `particular` (`ParticularMethod`:
+    `"schur"` by default, `"elimination"` the oracle).
+  - `linearAlgebra.ts`: `realSchurForm`, `schurEigensystem`, `solveShiftedSchur` and
+    `refinedShiftedSolve` (`ShiftedSolveScratch`). The form alone left residuals up to 3 × 10⁻¹³ of
+    b at 16 streams; one refinement step takes them to elimination's, about 10⁻¹⁵.
+  - The f32 tables move in one Titan-class value and two Venus-class, one f32 unit each.
+- **The deck's levers, as built** (R08.T15.a, 2026-11-01; lane `perf-thick-bake`).
+  - `deckReflectance(…, streams, known?)` takes a known reflectance's modes at the cosines it holds:
+    the bake's deck takes its coupling's modes 0–2 and solves 3–7 alone.
+  - `deckColumnSolve(…, fields?)`: the table below asks its altitudes' fields alone.

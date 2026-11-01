@@ -1257,8 +1257,8 @@ export interface DeltaMLayers {
 }
 
 /**
- * Mixed layers with one term of a bin's gases added and delta-M taken at `streams` ({@link
- * deltaMLayer}), layer by layer.
+ * Mixed layers with one term of a bin's gases added, then delta-M by {@link deltaMLayer} at
+ * `streams`, layer by layer.
  *
  * @param absorptionDepth - The term's gases' depth per layer of the whole column, in the reference
  *   frame: the run's layers are its entries from `offset` on, each times the band's `factor`.

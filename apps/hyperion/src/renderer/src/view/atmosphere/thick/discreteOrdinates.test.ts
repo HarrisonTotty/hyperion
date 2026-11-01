@@ -15,6 +15,8 @@ import {
   homogeneousSolution,
   intensityAtAzimuth,
   layerStackRightHandSide,
+  layerStackRightHandSideInto,
+  modeParticulars,
   normalizedAssociatedLegendre,
   planeParallelBeam,
   solveDiscreteOrdinateModes,
@@ -1298,6 +1300,21 @@ describe("the helpers' refusals", () => {
       [[two], [two], new Float64Array(2)],
     ] as const) {
       expect(() => layerStackRightHandSide(stack, top, bottom, ground)).toThrow(RangeError);
+    }
+    // The flat form, a source among `columns` (R08.T14.b): the same sizes, and its column's.
+    const parts = modeParticulars(1, 2, 0);
+    expect(() => {
+      layerStackRightHandSideInto(stack, parts, undefined, new Float64Array(4), 1, 2);
+    }).not.toThrow();
+    for (const [particulars, ground, out, column] of [
+      [modeParticulars(2, 2, 0), undefined, new Float64Array(4), 0],
+      [parts, new Float64Array(2), new Float64Array(4), 0],
+      [parts, undefined, new Float64Array(3), 0],
+      [parts, undefined, new Float64Array(4), 2],
+    ] as const) {
+      expect(() => {
+        layerStackRightHandSideInto(stack, particulars, ground, out, column, 2);
+      }).toThrow(RangeError);
     }
   });
 
