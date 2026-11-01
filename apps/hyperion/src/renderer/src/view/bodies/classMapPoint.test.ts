@@ -35,7 +35,10 @@ import type { Face } from "../terrain/patchKey";
 import type { BodyFigure } from "../terrain/planet";
 import { classRowLaw, PHASE_LAW, type PhaseLawCode } from "../terrain/terrainMaterial";
 import {
+  CLASS_MAP_POINT_BAND,
+  CLASS_MAP_POINT_NEAR_SLICES,
   CLASS_MAP_POINT_SLICE_MS,
+  type ClassMapPointScope,
   cancelClassMapPoint,
   classMapPointCacheAngleRad,
   classMapPointNormalSamples,
@@ -1664,5 +1667,91 @@ describe("the point's phase integral on a Mars-like world (R10.T10.e)", () => {
   it("stood at q_V 0.665 on the Moon's row before, R10.T10.f's record's closed form", () => {
     const map = marsLikeMap(true);
     expect(closedForm(map, marsLikeLaws(map, "before"))).toBeCloseTo(0.665, 2);
+  });
+});
+
+describe("the class-mapped point near the switch only (R10.T14.f's deferred levers)", () => {
+  afterEach(() => {
+    // Each test cancels or drains what it queues, so that none steps another's.
+    const { builds, refreshes } = classMapPointWork();
+    if (builds !== 0 || refreshes !== 0) {
+      throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
+    }
+  });
+
+  /** The band's edge, px: m × 3 px of the frame's own. */
+  const BAND_PX = CLASS_MAP_POINT_BAND * POINT_BELOW_PX;
+
+  /** A frame of each view drawing the Iapetus `diameterPx` across under `surface`, as a disc. */
+  function drawnInEveryView(surface: ClassMapDiscSurface, diameterPx: number): void {
+    for (const [, observer, across] of VIEWS) {
+      const { body, hosts } = iapetusAt(surface, observer, across, 60 * RAD, diameterPx);
+      planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    }
+  }
+
+  it("steps no slice of a map whose body every view draws above m × 3 px", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(surface.texels, null, null);
+    drawnInEveryView(surface, 1.5 * BAND_PX);
+    const clock = tickingClock();
+    const more = stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, "near");
+    const state = classMapPointState(surface);
+    cancelClassMapPoint(surface.texels);
+    expect([more, clock.readings(), state]).toEqual([false, 0, "queued"]);
+  });
+
+  it("steps the slices of a map whose body a view draws as a disc within m × 3 px", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(surface.texels, null, null);
+    drawnInEveryView(surface, 0.5 * BAND_PX);
+    const clock = tickingClock();
+    const more = stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, "near");
+    cancelClassMapPoint(surface.texels);
+    expect([more, clock.readings() > 1]).toEqual([true, true]);
+  });
+
+  it(`keeps a frame's note of a body near the switch for ${String(CLASS_MAP_POINT_NEAR_SLICES)} slices, as a 30 Hz instrument draws at every second`, () => {
+    const surface = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(surface.texels, null, null);
+    leadingPointOf(surface);
+    const stepped = Array.from({ length: CLASS_MAP_POINT_NEAR_SLICES + 1 }, () => {
+      const clock = tickingClock();
+      stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, "near");
+      return clock.readings() > 0;
+    });
+    cancelClassMapPoint(surface.texels);
+    expect(stepped).toEqual([
+      ...Array.from({ length: CLASS_MAP_POINT_NEAR_SLICES }, () => true),
+      false,
+    ]);
+  });
+
+  /**
+   * The points a replaced map draws, frame by frame, from its stand-in's until its own are found,
+   * each frame's slice in `scope` on a ticking clock.
+   */
+  function standInSequence(scope: ClassMapPointScope): Rgb[] {
+    const first = surfaceOf(iapetusMap());
+    leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    const clock = tickingClock();
+    const drawn: Rgb[] = [];
+    for (let frame = 0; frame < 10_000; frame += 1) {
+      drawn.push(leadingPointOf(second));
+      if (!stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now, scope)) {
+        break;
+      }
+    }
+    drawn.push(leadingPointOf(second));
+    cancelClassMapPoint(second.texels);
+    return drawn;
+  }
+
+  it("draws a replaced map's stand-in, its provisional ratios and its own in the same order, frame for frame, near the switch only as before", () => {
+    const all = standInSequence("all");
+    const near = standInSequence("near");
+    expect([near.length > 2, near]).toEqual([true, all]);
   });
 });

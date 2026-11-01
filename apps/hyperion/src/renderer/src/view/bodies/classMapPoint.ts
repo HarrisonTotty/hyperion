@@ -72,6 +72,11 @@
  *   frame they are made. A light's first evaluation with none held so near, the body's first frame
  *   as a point under a map made before, is found at once, so that the point meets the disc it
  *   switches with from that frame.
+ * - **Near the switch only** (R10.T14.f's deferred levers). The terrain session's slices step a
+ *   map's work only while some view's frame draws its body under {@link CLASS_MAP_POINT_BAND} × 3 px
+ *   of its own pixels ({@link nearClassMapPointSwitch}): the frame notes it, as a point it draws or
+ *   a disc ({@link noteClassMapPointNear}), and the note holds for {@link CLASS_MAP_POINT_NEAR_SLICES} slices, so that a
+ *   body drawn larger in every view costs no slice; the queues and their order are as before.
  */
 import { dot, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
@@ -91,6 +96,7 @@ import {
   discSurfaceLaws,
 } from "./discSurface";
 import { bodyReflection } from "./oblate";
+import { POINT_BELOW_PX } from "./regime";
 
 /**
  * The elements along a face's side the integral takes at the least: two a side of each of R10's
@@ -204,6 +210,37 @@ function rectangleSolidAngle(u0: number, u1: number, v0: number, v1: number): nu
  * evaluation: some tens of microseconds each.
  */
 export const CLASS_MAP_POINT_SLICE_MS = 2;
+
+/**
+ * The band about the 3 px switch within which a class-mapped body's point work is stepped, as a
+ * multiple m of {@link POINT_BELOW_PX} (R10.T14.f's deferred lever; lean, 2026-11-01): 4, 12 px.
+ *
+ * @remarks
+ * A level-8 map is made in at most 815 slices (R10.T14.f's bench), 13.6 s at a 60 Hz primary and
+ * 27.2 s at 30 Hz. The fastest any script recedes from a body it draws near the band is `FRAME
+ * CHANGE TEST`'s moon, d ln D ÷ dt = 0.049 s⁻¹ (`scenes/frameChange.ts`'s second leg), which takes
+ * ln(12 ÷ 2.7) ÷ 0.049 = 30 s from 12 px to the switch's 2.7 px; at 60 Hz any recession up to
+ * 0.11 s⁻¹ is met. The hand-over looks recede at 0.050 s⁻¹ at most and never near the band, and
+ * the `ATMOSPHERE TEST` tour's faster legs (up to about 12 s⁻¹ there) recede from bodies behind the
+ * camera, which no frame draws. A body that recedes faster reaches the switch with its stand-in's
+ * point, as before R10.T14.f's slices were made: no stall.
+ */
+export const CLASS_MAP_POINT_BAND = 4;
+
+/**
+ * Whether a body drawn `diameterPx` across, in its frame's own pixels (R07's 3 px switch's), is
+ * within {@link CLASS_MAP_POINT_BAND} of the switch, so that its point's work is stepped.
+ */
+export function nearClassMapPointSwitch(diameterPx: number): boolean {
+  return diameterPx < CLASS_MAP_POINT_BAND * POINT_BELOW_PX;
+}
+
+/**
+ * The slices a frame's note of a map near the switch holds for: a 30 Hz instrument draws at every
+ * second primary frame, each of which runs a slice, so that a body near the switch in it alone is
+ * stepped at each.
+ */
+export const CLASS_MAP_POINT_NEAR_SLICES = 4;
 
 /** The normals, or the elements' shares, a step of a build makes before it yields. */
 const STEP_WORK = 16;
@@ -556,6 +593,27 @@ const PROVISIONAL = new WeakMap<ClassMapTexels, ReadonlyArray<HeldRatio>>();
 
 /** The maps whose build threw: their points stay their stand-ins', and they are not queued again. */
 const FAILED = new WeakSet<ClassMapTexels>();
+
+/** The slices run so far, the clock of {@link NEAR}'s notes. */
+let SLICES_RUN = 0;
+
+/**
+ * Each map's latest note that a frame drew its body near the switch (R10.T14.f), as
+ * {@link SLICES_RUN} then: its work is stepped by the near scope's next
+ * {@link CLASS_MAP_POINT_NEAR_SLICES} slices.
+ */
+const NEAR = new WeakMap<ClassMapTexels, number>();
+
+/** Notes that a frame drew the body of `texels` near the switch. */
+function noteNear(texels: ClassMapTexels): void {
+  NEAR.set(texels, SLICES_RUN);
+}
+
+/** Whether a frame drew the body of `texels` near the switch within the notes' slices. */
+function nearNow(texels: ClassMapTexels): boolean {
+  const noted = NEAR.get(texels);
+  return noted !== undefined && SLICES_RUN - noted <= CLASS_MAP_POINT_NEAR_SLICES;
+}
 
 /** Queues `texels`' elements under `normals` unless they are made, queued or failed. */
 function queueBuild(texels: ClassMapTexels, normals: NormalMapTexels | null): void {
@@ -1199,10 +1257,12 @@ function noteUniform(texels: ClassMapTexels, at: LightGeometry): void {
 /**
  * What a frame's point under `surface` is drawn by (R10.T14.f): the surface itself once its
  * elements are made; until then its stand-in where it has one whose are, its build queued if it is
- * not; `null` for the uniform point, noted as the map's provisional ratio.
+ * not; `null` for the uniform point, noted as the map's provisional ratio. The map is noted near the
+ * switch.
  */
 function drawnPointOf(surface: ClassMapDiscSurface, at: LightGeometry): DrawnPoint | null {
   const forTexels = surface.texels;
+  noteNear(forTexels);
   const elements = surfaceElements(surface);
   if (elements !== null) {
     return { surface, elements, forTexels };
@@ -1273,6 +1333,15 @@ export function classMapPointReflection(
   return [uniform[0] * ratio[0], uniform[1] * ratio[1], uniform[2] * ratio[2]];
 }
 
+/**
+ * Notes that a frame drew a body as a disc near the switch under `surface`
+ * ({@link nearClassMapPointSwitch}), so that the terrain session's slices step its map's work
+ * (R10.T14.f's deferred lever); a frame's point notes its own.
+ */
+export function noteClassMapPointNear(surface: ClassMapDiscSurface): void {
+  noteNear(surface.texels);
+}
+
 /** Whether a refresh failed already, said once. */
 const SAID = { refresh: false };
 
@@ -1283,8 +1352,16 @@ const SAID = { refresh: false };
  */
 let JUST_MADE: ClassMapTexels[] = [];
 
+/** Removes `item` from `queue`, where it is. */
+function removeFrom<T>(queue: T[], item: T): void {
+  const at = queue.indexOf(item);
+  if (at >= 0) {
+    queue.splice(at, 1);
+  }
+}
+
 /**
- * One step of the oldest build, or its end: its elements held, its stand-in let go (its held
+ * One step of a build, or its end: its elements held, its stand-in let go (its held
  * ratios kept as the map's provisional ones) and the stand-in's refreshes dropped; or its drop as
  * it throws, said once a map, its point left to its stand-in.
  */
@@ -1293,7 +1370,7 @@ function stepBuild(build: QueuedBuild): void {
   try {
     done = build.steps.next().done === true;
   } catch (error: unknown) {
-    QUEUE.shift();
+    removeFrom(QUEUE, build);
     FAILED.add(build.texels);
     console.error("the elements of a class-mapped point could not be made:", error);
     return;
@@ -1301,7 +1378,7 @@ function stepBuild(build: QueuedBuild): void {
   if (!done) {
     return;
   }
-  QUEUE.shift();
+  removeFrom(QUEUE, build);
   const standIn = STAND_INS.get(build.texels);
   if (standIn !== undefined) {
     STAND_INS.delete(build.texels);
@@ -1324,7 +1401,7 @@ function settleProvisional(texels: ClassMapTexels): void {
 }
 
 /**
- * One step of the oldest refresh: its ratio held as it ends, and its map's provisional ratios let go
+ * One step of a refresh: its ratio held as it ends, and its map's provisional ratios let go
  * once none of its own refreshes remains queued; or its drop as it throws, said once.
  */
 function stepRefresh(refresh: QueuedRefresh): void {
@@ -1332,7 +1409,7 @@ function stepRefresh(refresh: QueuedRefresh): void {
   try {
     step = refresh.steps.next();
   } catch (error: unknown) {
-    REFRESHES.shift();
+    removeFrom(REFRESHES, refresh);
     settleProvisional(refresh.forTexels);
     if (!SAID.refresh) {
       SAID.refresh = true;
@@ -1341,7 +1418,7 @@ function stepRefresh(refresh: QueuedRefresh): void {
     return;
   }
   if (step.done === true) {
-    REFRESHES.shift();
+    removeFrom(REFRESHES, refresh);
     const { surface, forTexels, lightKey, towardsLight, towardsObserver, cOverA } = refresh;
     holdRefreshed(surface, {
       lightKey,
@@ -1357,36 +1434,52 @@ function stepRefresh(refresh: QueuedRefresh): void {
 }
 
 /**
+ * Which queued work a slice steps (R10.T14.f): all of it, oldest first, or, the terrain session's,
+ * only the work of maps a frame drew near the switch lately ({@link nearClassMapPointSwitch}),
+ * oldest first among them.
+ */
+export type ClassMapPointScope = "all" | "near";
+
+/**
  * A frame's slice of the class-mapped points' work (R10.T14.f), once a frame from the terrain
  * session's step: at most `budgetMs`, and a step past it.
  *
  * @remarks
  * The oldest build's and the oldest refresh's steps in turn (the one that has work where the other
- * has none), until `budgetMs` has passed since the slice began, read on `now` before each step. A
+ * has none), of those `scope` takes, until `budgetMs` has passed since the slice began, read on
+ * `now` before each step; with none it takes, the slice reads no clock and steps nothing. A
  * finished build's elements are held for its map and its stand-in let go; a finished refresh's
  * ratio is held for its surface. A step that throws drops its work. First, the provisional ratios
  * of the maps the last slice made are let go where no frame since drew their points.
  *
  * @param budgetMs - The slice's length, ms.
  * @param now - A monotonic clock, ms.
- * @returns Whether work remains queued.
+ * @param scope - The work it steps: `all`, or `near`, the maps a frame drew near the switch within
+ *   the last {@link CLASS_MAP_POINT_NEAR_SLICES} slices.
+ * @returns Whether work it would step remains queued.
  */
 export function stepClassMapPoints(
   budgetMs: number = CLASS_MAP_POINT_SLICE_MS,
   now: () => number = () => globalThis.performance.now(),
+  scope: ClassMapPointScope = "all",
 ): boolean {
+  SLICES_RUN += 1;
   for (const texels of JUST_MADE) {
     settleProvisional(texels);
   }
   JUST_MADE = [];
-  if (QUEUE.length === 0 && REFRESHES.length === 0) {
+  const taken = (texels: ClassMapTexels): boolean => scope === "all" || nearNow(texels);
+  const nextBuild = (): QueuedBuild | undefined => QUEUE.find((build) => taken(build.texels));
+  const nextRefresh = (): QueuedRefresh | undefined =>
+    REFRESHES.find((refresh) => taken(refresh.forTexels));
+  if (nextBuild() === undefined && nextRefresh() === undefined) {
     return false;
   }
   const startMs = now();
   let refreshTurn = true;
   for (;;) {
-    const build = QUEUE[0];
-    const refresh = REFRESHES[0];
+    const build = nextBuild();
+    const refresh = nextRefresh();
     if (build === undefined && refresh === undefined) {
       return false;
     }

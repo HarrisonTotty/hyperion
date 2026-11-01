@@ -148,7 +148,11 @@ import {
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
 } from "./discShading";
-import { classMapPointReflection } from "./classMapPoint";
+import {
+  classMapPointReflection,
+  nearClassMapPointSwitch,
+  noteClassMapPointNear,
+} from "./classMapPoint";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
@@ -503,6 +507,24 @@ export function pointFlux(
 }
 
 /**
+ * Notes a body drawn as a disc near the 3 px switch under a class map (plan R10, R10.T14.f's
+ * deferred lever; `nearClassMapPointSwitch`), so that the frames' slices step its map's build and
+ * refreshes. Nothing for a body without a class map, a known rotation, or the band.
+ */
+function notePointNear(body: LitBodyInput, camera: ProjectionCamera, viewport: Viewport): void {
+  const { surface, rotation } = body;
+  if (
+    surface?.kind === "class-map" &&
+    rotation !== undefined &&
+    nearClassMapPointSwitch(
+      angularDiameterPx(body.centreM, body.figure.equatorialRadiusM, camera, viewport),
+    )
+  ) {
+    noteClassMapPointNear(surface);
+  }
+}
+
+/**
  * What a point body reflects of a light from its direction towards the camera, uneclipsed: its
  * class map integrated (`classMapPointReflection`, R10.T10.f) where its surface is one and its
  * rotation is known, and otherwise its photometry's law over its figure (`bodyReflection`). The
@@ -818,6 +840,10 @@ export function planLitBodies(
     sources.set(body.id, lit);
     closeRun();
     const regime = regimes.get(body.id);
+    // A disc near the 3 px switch has its point's work stepped in the slices (R10.T14.f).
+    if (regime !== "terrain") {
+      notePointNear(body, camera, viewport);
+    }
     if (drawnAsMesh(regime)) {
       // Only a body handed over has terrain over its figure to give the surveyed ground to.
       const role: MeshBodyRole =

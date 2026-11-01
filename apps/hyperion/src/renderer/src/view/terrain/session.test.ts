@@ -39,7 +39,13 @@ import {
 } from "../../test/terrainSessionFixtures";
 import { aBody, FIXTURE_PLANET_CENTRE_M, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { lawFor } from "../appearance/phase";
-import { classMapPointState, classMapPointWork } from "../bodies/classMapPoint";
+import {
+  classMapPointReflection,
+  classMapPointState,
+  classMapPointWork,
+} from "../bodies/classMapPoint";
+import { IDENTITY_ROTATION } from "../coords/rotation";
+import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { AllocationEvent } from "../engine/memory";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
@@ -210,6 +216,23 @@ afterEach(() => {
     throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
   }
 });
+
+/** A frame drawing the Moon as a point under `surface`: what notes its map near the switch. */
+function drawMoonPoint(surface: ClassMapDiscSurface): void {
+  const figure = { equatorialRadiusM: 1.7374e6, polarRadiusM: 1.7374e6, pole: null };
+  classMapPointReflection(figure, surface, IDENTITY_ROTATION, vec3(1, 0, 0), vec3(0, 0, 1));
+}
+
+/** Stubs the slices' clock: 1/16 ms at each reading, so that each step's slice is 32 readings. */
+function tickingPerformance(): void {
+  let readings = 0;
+  vi.stubGlobal("performance", {
+    now: () => {
+      readings += 1;
+      return readings / 16;
+    },
+  });
+}
 
 describe("a view's field candidates (R10.T16.a)", () => {
   it("marks the body whose frame the camera is in as its local body", () => {
@@ -527,16 +550,8 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     h.session.dispose();
   });
 
-  it("makes a class map's point elements in its steps, a slice a step (R10.T14.f)", async () => {
-    // The slices' clock moves 1/16 ms at each reading, so that each step's slice is 32 readings.
-    let readings = 0;
-    vi.stubGlobal("performance", {
-      now: () => {
-        readings += 1;
-        return readings / 16;
-      },
-    });
-    const h = await harness();
+  /** The Moon's class map as the session's store hands it out, asked and answered. */
+  async function answeredMoonMap(h: Harness): Promise<ClassMapDiscSurface> {
     await holdMoon(h);
     h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
     await settle();
@@ -550,14 +565,33 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     if (surface === null) {
       throw new Error("the session holds no map of the Moon");
     }
+    return surface;
+  }
+
+  it("makes a class map's point elements in its steps, a slice a step, while a frame draws its body near the switch (R10.T14.f)", async () => {
+    tickingPerformance();
+    const h = await harness();
+    const surface = await answeredMoonMap(h);
     const states = [classMapPointState(surface)];
     let steps = 0;
     while (classMapPointState(surface) === "queued" && steps < 10_000) {
+      drawMoonPoint(surface);
       h.session.step();
       steps += 1;
     }
     states.push(classMapPointState(surface));
     expect([states, steps > 1]).toEqual([["queued", "made"], true]);
+    h.session.dispose();
+  });
+
+  it("steps no slice of a map whose body no frame draws near the switch (R10.T14.f)", async () => {
+    tickingPerformance();
+    const h = await harness();
+    const surface = await answeredMoonMap(h);
+    for (let step = 0; step < 100; step += 1) {
+      h.session.step();
+    }
+    expect(classMapPointState(surface)).toBe("queued");
     h.session.dispose();
   });
 
