@@ -150,11 +150,12 @@ function airAt(air: Extract<DiscAir, { kind: "across" }>, offset: number): LineA
  * the disc whose lines clear the ground: by the first such air's nodes along its vertical, at
  * which its lines lie, and `CHORD_RULE`'s along each chord across it, each point's light the
  * power-2 law's and its transmittance every body's product, each other changing air's read along
- * its own vertical, a point whose line meets its ground left out. The light is over that part's,
- * which the frame's bodies' share of the disc already counts; the excess is averaged over the
- * whole disc, whose light and area `DISC_AIR_RULE` and `CHORD_RULE` give without the air, and is
- * over the same part's share of its light. The ground the air's lines meet is the datum, and the
- * share's the body's sphere: near a horizon the two differ by the figure's flattening.
+ * its own vertical, a point whose line meets a ground dark. The light is over the whole disc's,
+ * less the part the frame's occluders hide already, where a body's ground is theirs (`groundBy`
+ * `"occluders"`), whose share of the disc the glare takes beside it; the part below the first air's
+ * span is taken as theirs alone where its ground is (unsampled, it is dark either way). The excess
+ * is averaged over the whole disc, whose light and area `DISC_AIR_RULE` and `CHORD_RULE` give
+ * without the air, over the same measure's share of its light.
  */
 export function discLightThroughAir(
   host: HostDiscDto,
@@ -187,7 +188,9 @@ export function discLightThroughAir(
     alongX: dot(air.vertical, horizontal),
     alongY: dot(air.vertical, first.vertical),
   }));
-  const clear: [number, number, number] = [0, 0, 0];
+  // The light of the span the rule samples, and of its part the occluders do not hide.
+  const sampled: [number, number, number] = [0, 0, 0];
+  const unshared: [number, number, number] = [0, 0, 0];
   const dimmed: [number, number, number] = [0, 0, 0];
   const excess: [number, number, number] = [0, 0, 0];
   first.offsets.forEach((y, j) => {
@@ -198,27 +201,38 @@ export function discLightThroughAir(
       const luminance = discLuminanceRgb(host, Math.sqrt(Math.max(0, 1 - x * x - y * y)));
       const transmittance: [number, number, number] = [uniform[0], uniform[1], uniform[2]];
       let clears = true;
+      let shared = false;
       for (const { air, alongX, alongY } of reads) {
         const line = airAt(air, x * alongX + y * alongY);
         transmittance[0] *= line.transmittance[0];
         transmittance[1] *= line.transmittance[1];
         transmittance[2] *= line.transmittance[2];
         clears &&= line.clear;
-      }
-      if (!clears) {
-        return;
+        shared ||= !line.clear && air.groundBy === "occluders";
       }
       for (const c of [0, 1, 2] as const) {
-        clear[c] += weight * luminance[c];
-        dimmed[c] += weight * luminance[c] * transmittance[c];
-        excess[c] += weight * Math.max(0, luminance[c] * transmittance[c] - levelCdM2);
+        sampled[c] += weight * luminance[c];
+        if (!shared) {
+          unshared[c] += weight * luminance[c];
+        }
+        if (clears) {
+          dimmed[c] += weight * luminance[c] * transmittance[c];
+          excess[c] += weight * Math.max(0, luminance[c] * transmittance[c] - levelCdM2);
+        }
       }
     });
   });
   const { light: whole, area } = wholeDisc(host);
-  const light = (c: 0 | 1 | 2): number => (clear[c] > 0 ? dimmed[c] / clear[c] : 0);
-  const above = (c: 0 | 1 | 2): number =>
-    clear[c] > 0 && area > 0 ? (excess[c] / area) * (whole[c] / clear[c]) : 0;
+  const measure = (c: 0 | 1 | 2): number =>
+    first.groundBy === "lines" ? unshared[c] + Math.max(0, whole[c] - sampled[c]) : unshared[c];
+  const light = (c: 0 | 1 | 2): number => {
+    const m = measure(c);
+    return m > 0 ? dimmed[c] / m : 0;
+  };
+  const above = (c: 0 | 1 | 2): number => {
+    const m = measure(c);
+    return m > 0 && area > 0 ? (excess[c] / area) * (whole[c] / m) : 0;
+  };
   return { light: [light(0), light(1), light(2)], excess: [above(0), above(1), above(2)] };
 }
 

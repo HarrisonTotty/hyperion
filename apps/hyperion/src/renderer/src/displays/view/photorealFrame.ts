@@ -23,7 +23,7 @@ import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 
 import { rotateToBody } from "../../view/coords/rotation";
 import { relativeToCamera } from "../../view/coords/relative";
-import type { Vec3 } from "../../geometry/vec3";
+import { dot, norm, type Vec3 } from "../../geometry/vec3";
 import {
   type AppearanceLabel,
   PROVISIONAL_LABELS,
@@ -42,6 +42,7 @@ import {
   placeLights,
   sceneHostDiscs,
 } from "../../view/lighting/hostLights";
+import type { Occluder } from "../../view/lighting/annuli";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
 import type {
   FrameAtmosphere,
@@ -56,7 +57,12 @@ import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
 import { type GlareAirOf, type HostDiscLayer, hostPlacements, NO_AIR } from "../../view/sky/disc";
-import { type GlareAir, glareDiscAir } from "../../view/post/glareAir";
+import {
+  type GlareAir,
+  GLARE_NEAR_BODY_RAD,
+  glareDiscAir,
+  type GroundBy,
+} from "../../view/post/glareAir";
 import {
   exposedSpriteRecord,
   type SpriteRecord,
@@ -173,12 +179,49 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
   return [...new Set(labels)];
 }
 
+/** Whether `body` looks at least {@link GLARE_NEAR_BODY_RAD} in angular radius from the camera. */
+function nearBody(body: LitBodyInput): boolean {
+  const distanceM = norm(body.centreM);
+  return (
+    !(distanceM > 0) || body.figure.equatorialRadiusM / distanceM >= Math.sin(GLARE_NEAR_BODY_RAD)
+  );
+}
+
+/**
+ * The bodies that hide a host star's disc from its glare as spheres (fix-view-light; science check,
+ * 2026-11-02): every lit body but a near one whose air the frame draws (`withAir`), whose air's
+ * lines take its ground on its datum ({@link frameGlareAir}); a near one on the sphere of the
+ * datum's radius towards the camera, so that a camera above an oblate ground stands outside it and
+ * its horizon is the ground's there, and a far one on its mean radius, √(ac).
+ */
+export function glareOccluders(
+  bodies: ReadonlyArray<LitBodyInput>,
+  withAir: ReadonlySet<BodyIdHex>,
+): Occluder[] {
+  return bodies.flatMap((body): Occluder[] => {
+    const near = nearBody(body);
+    if (near && withAir.has(body.id)) {
+      return [];
+    }
+    const { equatorialRadiusM: a, polarRadiusM: c, pole } = body.figure;
+    const distanceM = norm(body.centreM);
+    let radiusM = Math.sqrt(a * c);
+    if (near && pole !== null && distanceM > 0) {
+      // The datum's radius along the camera's direction from the body's centre.
+      const s = -dot(body.centreM, pole) / distanceM;
+      radiusM = 1 / Math.sqrt((1 - s * s) / (a * a) + (s * s) / (c * c));
+    }
+    return [{ centreM: body.centreM, radiusM }];
+  });
+}
+
 /**
  * The air between the camera and each host star across its disc, through every body's atmosphere
  * the frame draws (fix-view-light, the setting Sun's halo): each one's (`glareDiscAir`) on its
  * tables' figure, read through the star's light slot, its place in that body's brightest-first
  * order of its lights (`lightsAt`, as `skySources` slots them), and slot 0's for a star outside
- * them, as the composite reads it; none where the frame draws no air.
+ * them, as the composite reads it; none where the frame draws no air. A near body's ground is its
+ * lines' (`"lines"`), which {@link glareOccluders} leaves out, and a far one's its sphere's.
  */
 export function frameGlareAir(
   atmospheres: ReadonlyArray<FrameAtmosphere>,
@@ -201,19 +244,21 @@ export function frameGlareAir(
       cameraM: each.camera.positionM,
       toBodyFixed: each.toBodyFixed,
     };
-    return [{ air, curves: each.tables.curves, order }];
+    const groundBy: GroundBy = nearBody(body) ? "lines" : "occluders";
+    return [{ air, curves: each.tables.curves, order, groundBy }];
   });
   if (airs.length === 0) {
     return NO_AIR;
   }
   return (star, direction, angularRadiusRad, distanceM) =>
-    airs.map(({ air, curves, order }) =>
+    airs.map(({ air, curves, order, groundBy }) =>
       glareDiscAir(
         air,
         curves[Math.max(0, order.indexOf(star))] ?? [],
         direction,
         angularRadiusRad,
         distanceM,
+        groundBy,
       ),
     );
 }
@@ -372,10 +417,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     inputs.groundFields,
   );
   // A disc's glare is of the light that reaches the camera past the frame's bodies.
-  const occluders = litBodies.map((body) => ({
-    centreM: body.centreM,
-    radiusM: Math.sqrt(body.figure.equatorialRadiusM * body.figure.polarRadiusM),
-  }));
+  const occluders = glareOccluders(litBodies, new Set(atmospheres.map((each) => each.id)));
   return {
     camera,
     viewport,

@@ -54,6 +54,21 @@ export const DISC_AIR_NODES = 16;
  */
 export const DISC_AIR_UNIFORM_TAU = 0.05;
 
+/**
+ * The angular radius from the camera at and above which a body whose air the frame draws hides a
+ * star's disc by its own lines' ground test rather than by the frame's occluder sphere: 5°, at which
+ * its limb's sagitta across the Sun's disc is 3% of the disc's radius (science check, 2026-11-02:
+ * the sphere of radius √(ac) and the datum disagree near an oblate ground).
+ */
+export const GLARE_NEAR_BODY_RAD = (5 * Math.PI) / 180;
+
+/**
+ * How a body's ground is taken from a star's disc: by its air's lines alone, a near body the frame's
+ * occluders leave out (`"lines"`), or by the frame's occluder sphere for it, whose share of the disc
+ * counts it, the lines that meet its ground left out of the light's measure (`"occluders"`).
+ */
+export type GroundBy = "lines" | "occluders";
+
 /** {@link DISC_AIR_NODES}' Gauss–Legendre rule on [−1, 1]. */
 export const DISC_AIR_RULE = gaussLegendre(DISC_AIR_NODES);
 
@@ -103,6 +118,8 @@ export type DiscAir =
       readonly weights: ReadonlyArray<number>;
       /** The air along each line, in `offsets`' order. */
       readonly lines: ReadonlyArray<LineAir>;
+      /** How the body's ground is taken from the disc. */
+      readonly groundBy: GroundBy;
     };
 
 /**
@@ -268,6 +285,7 @@ export function glareDiscAir(
   axis: Vec3,
   angularRadiusRad: number,
   distanceM: number,
+  groundBy: GroundBy,
 ): DiscAir {
   const centre = glareLineAir(air, curves, axis, distanceM);
   const d = normalise(rotate(air.toBodyFixed, axis));
@@ -311,5 +329,5 @@ export function glareDiscAir(
   const half = (1 - from) / 2;
   const offsets = [...DISC_AIR_RULE.x].map((x) => from + half * (x + 1));
   const weights = [...DISC_AIR_RULE.w].map((w) => half * w);
-  return { kind: "across", vertical, offsets, weights, lines: offsets.map(through) };
+  return { kind: "across", vertical, offsets, weights, lines: offsets.map(through), groundBy };
 }

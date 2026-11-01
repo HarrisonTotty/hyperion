@@ -42,6 +42,7 @@ import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
 import {
   frameGlareAir,
+  glareOccluders,
   litBodiesOf,
   litLabelsOf,
   photorealFrame,
@@ -473,6 +474,7 @@ describe("the air between the camera and a star (fix-view-light)", () => {
       LOW_SUN,
       SUN_RADIUS_RAD,
       AU_M,
+      "lines",
     );
   }
 
@@ -481,6 +483,28 @@ describe("the air between the camera and a star (fix-view-light)", () => {
     { disc: aHostDisc({ star: 7 }), centreM: vec3(0, 1.2 * AU_M, 0) },
     { disc: aHostDisc({ star: 3 }), centreM: vec3(0, AU_M, 0) },
   ];
+
+  it("hides a disc by a near body's air's lines, not by its sphere, and by a far body's sphere", () => {
+    const lit = aLitBody();
+    const oblate = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_356_752, pole: vec3(0, 0, 1) };
+    const body = (id: string, centreM: ReturnType<typeof vec3>): LitBodyInput => ({
+      id,
+      centreM,
+      figure: oblate,
+      photometry: lit.photometry,
+      lighting: undefined,
+    });
+    // 2 m over the pole, with air and without; and one 100 radii off.
+    const above = vec3(0, 0, -(6_356_752 + 2));
+    const occluders = glareOccluders(
+      [body("air", above), body("airless", above), body("far", vec3(6.4e8, 0, 0))],
+      new Set(["air", "far"]),
+    );
+    expect(occluders).toEqual([
+      { centreM: above, radiusM: expect.closeTo(6_356_752, 3) },
+      { centreM: vec3(6.4e8, 0, 0), radiusM: Math.sqrt(6_378_137 * 6_356_752) },
+    ]);
+  });
 
   it("takes no air where the frame draws none", () => {
     expect(frameGlareAir([], [], LIGHTS)).toBe(NO_AIR);

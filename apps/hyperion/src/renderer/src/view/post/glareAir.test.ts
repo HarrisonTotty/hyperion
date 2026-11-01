@@ -13,7 +13,7 @@ import {
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { discLightThroughAir, discLuminanceRgb } from "../sky/discFlux";
-import { type GlareAir, glareDiscAir, glareLineAir } from "./glareAir";
+import { type GlareAir, glareDiscAir, glareLineAir, type GroundBy } from "./glareAir";
 
 /** A spherical Earth for the rebuilt reference atmosphere, R05's mean radius. */
 const EARTH_RADIUS_M = 6_371_008.8;
@@ -61,16 +61,18 @@ function along(air: GlareAir, direction: Vec3, distanceM = AU_M): Rgb {
 }
 
 /**
- * The Sun's dimmed light over its light above the ground, by brute force: a 48 × 48 grid over the
- * disc, every point's own line, the camera on +x looking towards +y at `elevationDeg`.
+ * The Sun's dimmed light by brute force, a 48 × 48 grid over the disc, every point's own line, the
+ * camera on +x looking towards +y at `elevationDeg`: over its light above the ground, the frame's
+ * occluders counting the ground, or over its whole light, its lines counting it.
  */
-function bruteForceLight(air: GlareAir, elevationDeg: number): Rgb {
+function bruteForceLight(air: GlareAir, elevationDeg: number, groundBy: GroundBy): Rgb {
   const host = aHostDisc();
   const e = (elevationDeg * Math.PI) / 180;
   const axis = elevated(elevationDeg);
   const vertical = vec3(Math.cos(e), -Math.sin(e), 0);
   const horizontal = vec3(0, 0, 1);
   const clear: [number, number, number] = [0, 0, 0];
+  const whole: [number, number, number] = [0, 0, 0];
   const dimmed: [number, number, number] = [0, 0, 0];
   const n = 48;
   for (let j = 0; j < n; j += 1) {
@@ -91,6 +93,9 @@ function bruteForceLight(air: GlareAir, elevationDeg: number): Rgb {
         ),
       );
       const line = glareLineAir(air, CURVES, d, AU_M);
+      for (const c of [0, 1, 2] as const) {
+        whole[c] += luminance[c];
+      }
       if (line.clear) {
         for (const c of [0, 1, 2] as const) {
           clear[c] += luminance[c];
@@ -99,7 +104,8 @@ function bruteForceLight(air: GlareAir, elevationDeg: number): Rgb {
       }
     }
   }
-  return [dimmed[0] / clear[0], dimmed[1] / clear[1], dimmed[2] / clear[2]];
+  const measure = groundBy === "lines" ? whole : clear;
+  return [dimmed[0] / measure[0], dimmed[1] / measure[1], dimmed[2] / measure[2]];
 }
 
 describe("glareLineAir (fix-view-light)", () => {
@@ -185,19 +191,30 @@ describe("glareLineAir (fix-view-light)", () => {
 
 describe("glareDiscAir (fix-view-light)", () => {
   it("takes a high Sun's air along its centre's line", () => {
-    expect(glareDiscAir(earthAir(2), CURVES, elevated(30), SUN_RADIUS_RAD, AU_M)).toEqual({
+    expect(glareDiscAir(earthAir(2), CURVES, elevated(30), SUN_RADIUS_RAD, AU_M, "lines")).toEqual({
       kind: "uniform",
       transmittance: along(earthAir(2), elevated(30)),
     });
   });
 
-  it.each([5, 1, 0, -0.1])(
-    "holds the light of a Sun %d° above the horizon to a brute-force integral over its disc within 1%",
-    (elevationDeg) => {
+  it.each(
+    [5, 1, 0, -0.1].flatMap((elevationDeg) =>
+      (["lines", "occluders"] as const).map((groundBy) => ({ elevationDeg, groundBy })),
+    ),
+  )(
+    "holds the light of a Sun $elevationDeg° above the horizon, its ground by $groundBy, to a brute-force integral over its disc within 1%",
+    ({ elevationDeg, groundBy }) => {
       const air = earthAir(2);
-      const disc = glareDiscAir(air, CURVES, elevated(elevationDeg), SUN_RADIUS_RAD, AU_M);
+      const disc = glareDiscAir(
+        air,
+        CURVES,
+        elevated(elevationDeg),
+        SUN_RADIUS_RAD,
+        AU_M,
+        groundBy,
+      );
       const { light } = discLightThroughAir(aHostDisc(), [disc], elevated(elevationDeg), 1e30);
-      const expected = bruteForceLight(air, elevationDeg);
+      const expected = bruteForceLight(air, elevationDeg, groundBy);
       for (const c of [0, 1, 2] as const) {
         expect(Math.abs(light[c] / expected[c] - 1)).toBeLessThan(0.01);
       }
@@ -206,7 +223,7 @@ describe("glareDiscAir (fix-view-light)", () => {
 
   it("takes a Sun on the horizon across its disc, its light above its centre's line's", () => {
     const air = earthAir(2);
-    const disc = glareDiscAir(air, CURVES, elevated(0), SUN_RADIUS_RAD, AU_M);
+    const disc = glareDiscAir(air, CURVES, elevated(0), SUN_RADIUS_RAD, AU_M, "occluders");
     expect(disc.kind).toBe("across");
     const { light } = discLightThroughAir(aHostDisc(), [disc], elevated(0), 1e30);
     const centre = along(air, elevated(0));
@@ -214,7 +231,7 @@ describe("glareDiscAir (fix-view-light)", () => {
   });
 
   it("leaves no light once the whole disc is below the horizon", () => {
-    const disc = glareDiscAir(earthAir(2), CURVES, elevated(-0.4), SUN_RADIUS_RAD, AU_M);
+    const disc = glareDiscAir(earthAir(2), CURVES, elevated(-0.4), SUN_RADIUS_RAD, AU_M, "lines");
     expect(discLightThroughAir(aHostDisc(), [disc], elevated(-0.4), 0)).toEqual({
       light: [0, 0, 0],
       excess: [0, 0, 0],

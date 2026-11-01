@@ -300,6 +300,7 @@ describe("the host discs", () => {
           offsets: [...DISC_AIR_RULE.x],
           weights: [...DISC_AIR_RULE.w],
           lines: [...DISC_AIR_RULE.x].map(() => ({ transmittance, clear: true })),
+          groundBy: "lines",
         },
       ],
       vec3(0, 0, -1),
