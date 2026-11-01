@@ -55,9 +55,10 @@ export const ATMOSPHERE_CHECK_SCHEMA = "hyperion.views-check.atmosphere-results"
  * The schema's version; bumped with any change to the file's shape: 2 with each capture's `kind`
  * (a fixture's or the night's, the night's with no designation, range or phase) and its
  * `exposureSettleMs`; 3 with the flight's `stages`; 4 with each capture's drawn `style` and the
- * faults' `verdict` and `reasons` (R08.T10.g).
+ * faults' `verdict` and `reasons` (R08.T10.g); 5 with each capture's `primaryScale` and
+ * `airSetting` (fix-retina-frame).
  */
-export const ATMOSPHERE_CHECK_VERSION = 4;
+export const ATMOSPHERE_CHECK_VERSION = 5;
 
 /**
  * The run, as the main process describes it at its start: the terrain run's description, without
@@ -359,7 +360,7 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
         ? "—"
         : capture.faults.map((each) => `${each.kind}: ${each.line}`).join("; ");
     const [designation, range, phase] = placeCells(capture);
-    return `| ${cell(capture.label)} | ${designation} | ${cell(capture.camera ?? "—")} | ${capture.style ?? "—"} | ${range} | ${phase} | ${cell(capture.exposure ?? "—")} | ${(capture.exposureSettleMs / 1000).toFixed(1)} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
+    return `| ${cell(capture.label)} | ${designation} | ${cell(capture.camera ?? "—")} | ${capture.style ?? "—"} | ${range} | ${phase} | ${cell(capture.exposure ?? "—")} | ${(capture.exposureSettleMs / 1000).toFixed(1)} | ${String(frames.draws)} | ${msText(frames.intervalMedianMs, 1)} / ${msText(frames.intervalP95Ms, 1)} | ${msText(frames.gpuMedianMs, 2)} / ${msText(frames.gpuP95Ms, 2)} | ${capture.primaryScale === null ? "—" : capture.primaryScale.toFixed(2)} · ${capture.airSetting} | ${cell(capture.statements.length === 0 ? "—" : capture.statements.join(" · "))} | ${cell(faults)} |`;
   });
   const errors = findings.consoleErrors;
   const reasons = failureReasons(results);
@@ -376,8 +377,8 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     "",
     "## Captures (provisional times)",
     "",
-    "| Capture | Designation | Camera | Style | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Statements | Fault lines |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Capture | Designation | Camera | Style | Range | Phase | Exposure | AUTO settled (s) | Draws | Frame interval median / p95 (ms) | GPU median / p95 (ms) | Scale · air | Statements | Fault lines |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",
     "## Stages (as reckoned)",

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AtmosphereCheckRecord, ViewsCheckApi } from "../../../../../preload/api";
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
+import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import { STYLE_TOGGLE_KEY } from "../../../view/photoreal/style";
 import {
@@ -492,6 +493,11 @@ class FakeView {
   readonly flightKeys: string[] = [];
   /** Called as a flight key is pressed. */
   onHold: () => void = () => undefined;
+  /**
+   * Whether its frame-rate floor stands stepped: its plate states `IMAGE: DETAIL LIMITED` and its
+   * scene target's scale reads 0.67 after 1.
+   */
+  limited = false;
   /** Until when, ms of the test's clock, a body's record is building: `ATMOSPHERE: PENDING`. */
   buildingUntilMs: number | null = null;
   readonly #clock: () => number;
@@ -636,9 +642,11 @@ class FakeView {
     if (this.#media().kind === "loading") {
       return [ATMOSPHERE_STATEMENTS.atmospherePending];
     }
-    return this.buildingUntilMs !== null && this.#clock() < this.buildingUntilMs
-      ? [ATMOSPHERE_STATEMENTS.atmospherePending, ...PLATE_STATEMENTS]
-      : PLATE_STATEMENTS;
+    const statements =
+      this.buildingUntilMs !== null && this.#clock() < this.buildingUntilMs
+        ? [ATMOSPHERE_STATEMENTS.atmospherePending, ...PLATE_STATEMENTS]
+        : PLATE_STATEMENTS;
+    return this.limited ? [...statements, IMAGE_DETAIL_LIMITED] : statements;
   }
 
   #plateText(): string {
@@ -831,7 +839,7 @@ function fakeRun(
               gpuMs: [],
               submitMs: [],
               passLabels: [],
-              scales: [],
+              scales: view.limited ? [1, 0.67] : [],
             },
           ],
           frameIntervalsMs: [],
@@ -851,6 +859,7 @@ function fakeRun(
       },
     },
     document,
+    setting: "high",
     timing: ATMOSPHERE_CHECK_TIMING.smoke,
     nowMs: clock,
     sleep: (ms) => {
@@ -938,6 +947,24 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
     expect(record.captures.map((each) => [each.statements, each.faults])).toEqual([
       [PLATE_STATEMENTS, PLATE_FAULTS],
       [PLATE_STATEMENTS, PLATE_FAULTS],
+    ]);
+  });
+
+  it("records each capture's primary scale and air: none recorded, and the setting's", async () => {
+    const { record } = await smoke();
+    expect(record.captures.map((each) => [each.primaryScale, each.airSetting])).toEqual([
+      [null, "high"],
+      [null, "high"],
+    ]);
+  });
+
+  it("records a stepped capture's last scale and the low setting's air (fix-retina-frame)", async () => {
+    const run = fakeRun();
+    run.view.limited = true;
+    const record = await runAtmosphereCheck(run.deps);
+    expect(record.captures.map((each) => [each.primaryScale, each.airSetting])).toEqual([
+      [0.67, "low"],
+      [0.67, "low"],
     ]);
   });
 

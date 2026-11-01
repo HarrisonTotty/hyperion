@@ -46,6 +46,8 @@ export function fixtureCapture(
     frames: frames(fromMs, atMs),
     statements: ["PHOTOREALISTIC", `TARGET ${designation}`],
     faults: [],
+    primaryScale: 1,
+    airSetting: "high",
   };
 }
 
@@ -61,6 +63,8 @@ export const MOONLIT_NIGHT: AtmosphereNightCapture = {
   frames: frames(5_000, 20_000),
   statements: ["PHOTOREALISTIC", "NIGHT SIDE"],
   faults: [],
+  primaryScale: 1,
+  airSetting: "high",
 };
 
 /** The climb's stage, and the first fixture's three: the full tour's first legs as flown. */

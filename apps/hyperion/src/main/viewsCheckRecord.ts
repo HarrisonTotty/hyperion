@@ -179,6 +179,7 @@ function phase(value: unknown): ViewsCheckPhaseRecord | null {
   const primaryIntervalsMs = numbers(value["primaryIntervalsMs"]);
   const mainThreadMs = numbers(value["mainThreadMs"]);
   const frameGpuMs = numbers(value["frameGpuMs"]);
+  const statements = strings(value["statements"]);
   const { startMs, endMs, untimedFrames, droppedResolves, unattributedGpuMs } = value;
   if (
     name === null ||
@@ -187,6 +188,7 @@ function phase(value: unknown): ViewsCheckPhaseRecord | null {
     primaryIntervalsMs === null ||
     mainThreadMs === null ||
     frameGpuMs === null ||
+    statements === null ||
     !isFiniteNumber(startMs) ||
     !isFiniteNumber(endMs) ||
     endMs < startMs ||
@@ -208,6 +210,7 @@ function phase(value: unknown): ViewsCheckPhaseRecord | null {
     untimedFrames,
     droppedResolves,
     unattributedGpuMs,
+    statements,
   };
 }
 
@@ -1088,14 +1091,15 @@ function atmosphereFrames(value: unknown): AtmosphereCheckFrames | null {
 
 /**
  * What every capture of the atmosphere run records, whichever its kind (R08.T10.b), its style a
- * style or `null` (R08.T10.g).
+ * style or `null` (R08.T10.g), its primary's scale above 0 or `null`, and its air's setting
+ * (fix-retina-frame).
  */
 function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null {
   const frames = atmosphereFrames(value["frames"]);
   const statements = strings(value["statements"]);
   const faults = strings(value["faults"]);
   const drawn = styleOrNull(value["style"]);
-  const { label, camera, exposure, exposureSettleMs, atMs } = value;
+  const { label, camera, exposure, exposureSettleMs, atMs, primaryScale, airSetting } = value;
   if (
     !isCaptureLabel(label) ||
     !isTextOrNull(camera) ||
@@ -1105,7 +1109,9 @@ function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null 
     !isFiniteNumber(atMs) ||
     frames === null ||
     statements === null ||
-    faults === null
+    faults === null ||
+    !(primaryScale === null || (isFiniteNumber(primaryScale) && primaryScale > 0)) ||
+    (airSetting !== "high" && airSetting !== "low")
   ) {
     return null;
   }
@@ -1119,6 +1125,8 @@ function atmosphereCaptureTaken(value: Rec): AtmosphereCheckCaptureTaken | null 
     frames,
     statements,
     faults,
+    primaryScale,
+    airSetting,
   };
 }
 

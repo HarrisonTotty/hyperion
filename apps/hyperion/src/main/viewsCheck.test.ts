@@ -342,6 +342,7 @@ describe("the views check's session", () => {
           untimedFrames: 0,
           droppedResolves: 0,
           unattributedGpuMs: 0,
+          statements: [],
         },
       ],
     });
@@ -427,6 +428,7 @@ function primaryPhase(style: "photorealistic" | "wireframe"): ViewsCheckRecord["
     untimedFrames: 0,
     droppedResolves: 0,
     unattributedGpuMs: 0,
+    statements: [],
   };
 }
 

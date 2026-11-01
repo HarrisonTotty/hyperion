@@ -66,8 +66,17 @@ import { join } from "node:path";
 /** The file's schema name. */
 export const VIEWS_CHECK_SCHEMA = "hyperion.views-check.results";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const VIEWS_CHECK_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape: 2 with each phase's
+ * `imageLimited` (fix-retina-frame).
+ */
+export const VIEWS_CHECK_VERSION = 2;
+
+/**
+ * The primary label block's statement while its image stands below its setting's resolution or air
+ * (the renderer's `viewBudget.ts` `IMAGE_DETAIL_LIMITED`, the guide's row).
+ */
+const IMAGE_DETAIL_LIMITED = "IMAGE: DETAIL LIMITED";
 
 /** The reason every figure read against T or from presentation is missing in a hidden run. */
 export const NO_WINDOW_REASON = "no window shown";
@@ -250,6 +259,8 @@ export interface PhaseFigures {
   readonly untimedFrames: number;
   readonly droppedResolves: number;
   readonly unattributedGpuMs: number;
+  /** Whether the primary stated `IMAGE: DETAIL LIMITED` as the window ended (fix-retina-frame). */
+  readonly imageLimited: boolean;
   /**
    * The GPU process's main thread per primary draw, R05's slices of it per primary draw, and its
    * copy slices per primary draw.
@@ -500,6 +511,7 @@ function phaseFigures(
     untimedFrames: record.untimedFrames,
     droppedResolves: record.droppedResolves,
     unattributedGpuMs: record.unattributedGpuMs,
+    imageLimited: record.statements.includes(IMAGE_DETAIL_LIMITED),
     gpuProcess,
     // A phase that did not hold its configuration measured something else.
     criteria: { rows, overall: held ? overallOf(rows) : "not-measured" },
@@ -517,6 +529,24 @@ function gpuProcessPerFrame(phase: PhaseFigures | undefined): Measured<number> {
         : measured(phase.gpuProcess.value.busyMsPerFrame);
 }
 
+/**
+ * Why a pair's two phases did not draw their primary alike, or `null` where they did: its scene
+ * target's scale held one value over both phases, the same in each (a wireframe primary has none),
+ * and neither stated `IMAGE: DETAIL LIMITED` as its window ended (fix-retina-frame;
+ * research-frame-leans §3). A photorealistic primary's scale below its max states that line, and
+ * so does its frame-rate floor's stepped air, so a pair held so drew at the scale's max and the
+ * setting's air in both phases; otherwise its difference would count the primary's own change, as
+ * the controller holding the primary to its budget with instruments open would on a slow GPU.
+ */
+function unpairedReason(alone: PhaseFigures, opened: PhaseFigures): string | null {
+  if (alone.imageLimited || opened.imageLimited) {
+    return `the primary stated ${IMAGE_DETAIL_LIMITED} within the pair`;
+  }
+  const [a, b] = [alone.views[0]?.scale ?? null, opened.views[0]?.scale ?? null];
+  const held = a === null ? b === null : b !== null && a.min === a.max && b.min === b.max;
+  return held && a?.max === b?.max ? null : "the primary's scale moved within the pair";
+}
+
 function overheadPair(
   phases: ReadonlyArray<PhaseFigures>,
   without: ViewsCheckPhaseName,
@@ -527,14 +557,19 @@ function overheadPair(
   const extraCanvases = Math.max(0, (opened?.views.length ?? 1) - (alone?.views.length ?? 1));
   const a = gpuProcessPerFrame(alone);
   const b = gpuProcessPerFrame(opened);
+  // A phase that did not run is missing by its own reason first.
+  const unpaired =
+    alone === undefined || opened === undefined ? null : unpairedReason(alone, opened);
   const perCanvasMs: Measured<number> =
     a.value === null
       ? missing(a.reason)
       : b.value === null
         ? missing(b.reason)
-        : extraCanvases === 0
-          ? missing("no canvas was added")
-          : measured((b.value - a.value) / extraCanvases);
+        : unpaired !== null
+          ? missing(unpaired)
+          : extraCanvases === 0
+            ? missing("no canvas was added")
+            : measured((b.value - a.value) / extraCanvases);
   return {
     without,
     with: withInstruments,

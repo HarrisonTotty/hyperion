@@ -42,7 +42,7 @@ function phaseRecord(
       gpuMs: [i === 0 ? 2 : 0.05],
       submitMs: [0.1],
       passLabels: style === "photorealistic" ? ["bloom", "tonemap"] : ["view:wireframe"],
-      scales: style === "photorealistic" && i === 0 ? [1, 0.8] : [],
+      scales: style === "photorealistic" && i === 0 ? [1] : [],
     })),
     frameIntervalsMs: Array.from({ length: 99 }, () => T_MS),
     primaryIntervalsMs: Array.from({ length: 99 }, () => T_MS),
@@ -51,6 +51,7 @@ function phaseRecord(
     untimedFrames: 0,
     droppedResolves: 0,
     unattributedGpuMs: 0,
+    statements: [],
   };
 }
 
@@ -361,6 +362,62 @@ describe("the views check's results", () => {
     expect(buildViewsCheckResults(input({ record })).findings.frameTime.verdict).toBe(
       "not-measured",
     );
+  });
+
+  describe("reads no overhead where the primary did not draw alike in the pair (fix-retina-frame)", () => {
+    /** The photorealistic pair, its cockpit's phase's primary `primary`. */
+    function cockpitPair(
+      primary: Partial<ViewsCheckPhaseRecord>,
+      scales: ReadonlyArray<number> = [1],
+    ): ReturnType<typeof buildViewsCheckResults>["findings"]["perCanvasOverhead"] {
+      const record: ViewsCheckRecord = {
+        ...RECORD,
+        phases: RECORD.phases.map((phase) =>
+          phase.name === "photoreal-two-wireframe"
+            ? {
+                ...phase,
+                ...primary,
+                views: phase.views.map((view, i) => (i === 0 ? { ...view, scales } : view)),
+              }
+            : phase,
+        ),
+      };
+      return buildViewsCheckResults(input({ record })).findings.perCanvasOverhead;
+    }
+
+    it.each([
+      ["moved within a phase", [1, 0.8]],
+      ["held below the other phase's", [0.5]],
+    ])("where its scale %s", (_case, scales) => {
+      const overhead = cockpitPair({}, scales);
+      expect([overhead.pairs[0]?.perCanvasMs.reason, overhead.measuredMs.value]).toEqual([
+        "the primary's scale moved within the pair",
+        overhead.pairs[1]?.perCanvasMs.value,
+      ]);
+    });
+
+    it("where it stated IMAGE: DETAIL LIMITED as a window ended, its scale held", () => {
+      const overhead = cockpitPair({
+        statements: ["ATMOSPHERE: APPROXIMATE", "IMAGE: DETAIL LIMITED"],
+      });
+      expect(overhead.pairs[0]?.perCanvasMs.reason).toBe(
+        "the primary stated IMAGE: DETAIL LIMITED within the pair",
+      );
+    });
+
+    it("and records each phase's statement", () => {
+      const record: ViewsCheckRecord = {
+        ...RECORD,
+        phases: RECORD.phases.map((phase) =>
+          phase.name === "photoreal-alone"
+            ? { ...phase, statements: ["IMAGE: DETAIL LIMITED"] }
+            : phase,
+        ),
+      };
+      expect(
+        buildViewsCheckResults(input({ record })).phases.map((phase) => phase.imageLimited),
+      ).toEqual([true, false, false, false, false]);
+    });
   });
 
   it("reads no overhead from a phase that did not hold its configuration", () => {

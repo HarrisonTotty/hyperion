@@ -98,10 +98,16 @@ describe("the views probe", () => {
       primary.render(frame("tonemap"));
     });
     timed.deliver((name) => (name === "instrument-1" ? 0.5 : 1));
-    const record = probe.phase("photoreal-two-wireframe", 0, 200, [
-      { name: "view", style: "photorealistic" },
-      { name: "instrument-1", style: "wireframe" },
-    ]);
+    const record = probe.phase(
+      "photoreal-two-wireframe",
+      0,
+      200,
+      [
+        { name: "view", style: "photorealistic" },
+        { name: "instrument-1", style: "wireframe" },
+      ],
+      [],
+    );
     expect(record.frameGpuMs).toEqual([2.5, 1]);
     expect(record.frameIntervalsMs).toEqual([16]);
     expect(record.primaryIntervalsMs).toEqual([16]);
@@ -232,7 +238,13 @@ describe("the views probe", () => {
     inFrame(page, 100, () => {
       primary.render(frame("view:wireframe"));
     });
-    const record = probe.phase("wireframe-alone", 0, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record).toMatchObject({ droppedResolves: 1, untimedFrames: 1, frameGpuMs: [] });
     expect(probe.timer()).toBe("absent");
   });
@@ -248,7 +260,13 @@ describe("the views probe", () => {
       },
       3,
     );
-    const record = probe.phase("wireframe-alone", 0, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record.mainThreadMs).toEqual([3]);
   });
 
@@ -275,7 +293,13 @@ describe("the views probe", () => {
       primary.render(frame("view:wireframe"));
     });
     timed.deliver(() => 1);
-    const record = probe.phase("wireframe-alone", 80, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      80,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record.frameGpuMs).toEqual([2]);
     expect(record.unattributedGpuMs).toBeCloseTo(0.2);
   });
@@ -295,9 +319,13 @@ describe("the views probe", () => {
     });
     page.nowMs = 120;
     target.resize({ widthPx: 800, heightPx: 640 });
-    const record = probe.phase("photoreal-two-wireframe", 100, 200, [
-      { name: "view", style: "photorealistic" },
-    ]);
+    const record = probe.phase(
+      "photoreal-two-wireframe",
+      100,
+      200,
+      [{ name: "view", style: "photorealistic" }],
+      [],
+    );
     expect(record.views[0]?.scales).toEqual([1, 0.8]);
     expect(probe.canvasOf("view")).toEqual({ widthPx: 1000, heightPx: 800 });
     expect(probe.canvasOf("instrument-2")).toEqual({ widthPx: 0, heightPx: 0 });
@@ -381,10 +409,14 @@ describe("the views probe", () => {
     expect(probe.frameTimes(0, 200)).toEqual([100, 116, 133]);
     expect(probe.drawTimes("view", 0, 200)).toEqual([100, 133]);
     expect(probe.drawTimes("view", 110, 200)).toEqual([133]);
-    const { name, ...window } = probe.phase("wireframe-alone", 0, 200, [
-      { name: "view", style: "wireframe" },
-    ]);
-    expect(name).toBe("wireframe-alone");
+    const { name, statements, ...window } = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      ["IMAGE: DETAIL LIMITED"],
+    );
+    expect([name, statements]).toEqual(["wireframe-alone", ["IMAGE: DETAIL LIMITED"]]);
     expect(probe.window(0, 200, [{ name: "view", style: "wireframe" }])).toEqual(window);
   });
 

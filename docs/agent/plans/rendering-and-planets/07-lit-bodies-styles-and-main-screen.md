@@ -10077,3 +10077,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   larger than a point (`LitBodyDraws`, through `ViewsProbe.watch`; its `views` dependency now
   includes `watch`). The windows' `statements` already held the plate's. Pending: the owner's Mac
   low orbit window, re-run.
+- **T20's overhead pair, judged honestly (R07.T20; lane fix-retina-frame).**
+  `ViewsCheckPhaseRecord.statements` holds the primary's statements as each window ends
+  (`ViewsCheckDeps.primaryStatements`; `ViewsProbe.phase` takes them as its fifth argument). The
+  results, now version 2, add `PhaseFigures.imageLimited`. A pair's `perCanvasMs` is `missing(…)`
+  unless both phases' primary scale held one value, the same in each, and neither stated
+  `IMAGE: DETAIL LIMITED`. The atmosphere run's captures record `primaryScale` and `airSetting`
+  (results version 5; `AtmosphereCheckDeps.setting`).

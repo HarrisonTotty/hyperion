@@ -106,8 +106,11 @@ export interface SubmissionWatcher {
   madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
 }
 
-/** A window's figures: a phase's record without its name ({@link ViewsProbe.window}). */
-export type WindowFigures = Omit<ViewsCheckPhaseRecord, "name">;
+/**
+ * A window's figures: a phase's record without its name and its label block's statements
+ * ({@link ViewsProbe.window}).
+ */
+export type WindowFigures = Omit<ViewsCheckPhaseRecord, "name" | "statements">;
 
 /** An allocation event, timed. */
 export interface TimedAllocation {
@@ -349,7 +352,8 @@ export class ViewsProbe implements EngineProbe {
 
   /**
    * The figures of the animation frames stamped from `startMs` up to `endMs`, for the phase
-   * `name` whose views were `shown`.
+   * `name` whose views were `shown`, with what the primary's label block said as it ended
+   * (`statements`).
    *
    * @remarks
    * A frame's GPU time counts once every resolve made in it has reported; a resolve still
@@ -361,8 +365,9 @@ export class ViewsProbe implements EngineProbe {
     startMs: number,
     endMs: number,
     shown: ReadonlyArray<ShownView>,
+    statements: ReadonlyArray<string>,
   ): ViewsCheckPhaseRecord {
-    return { name, ...this.window(startMs, endMs, shown) };
+    return { name, ...this.window(startMs, endMs, shown), statements };
   }
 
   /**

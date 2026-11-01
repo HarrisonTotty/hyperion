@@ -72,7 +72,9 @@ import type {
 } from "../../../../../preload/api";
 import { add, norm, normalise, scale, sub, type Vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
+import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
+import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import {
   ATMOSPHERE_FIXTURES,
   ATMOSPHERE_MOON_CENTRE_M,
@@ -616,6 +618,8 @@ export interface AtmosphereCheckDeps {
   /** Stops the run: before its next step, wait or call it throws `STOPPED` (`viewsCheckRun.ts`). */
   readonly signal: AbortSignal;
   readonly devicePixelRatio: number;
+  /** The launch's setting, whose sizes a capture's air takes unless the floor stepped it. */
+  readonly setting: QualitySetting;
 }
 
 /** A key's press and release, dispatched on `target` as a keyboard would. */
@@ -804,6 +808,9 @@ export async function runAtmosphereCheck(
       frames: captureFrames(window),
       statements: said.statements,
       faults: said.faults,
+      // Its primary's scale and air, so that a stepped capture is never taken for the setting's.
+      primaryScale: window.views[0]?.scales.at(-1) ?? null,
+      airSetting: said.statements.includes(IMAGE_DETAIL_LIMITED) ? "low" : deps.setting,
     };
     captures.push(
       place === null ? { kind: "night", ...taken } : { kind: "fixture", ...place, ...taken },

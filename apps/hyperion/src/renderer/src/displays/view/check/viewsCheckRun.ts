@@ -142,6 +142,11 @@ export interface ViewsCheckDeps {
   >;
   /** The page, whose `VIEW` is shown. */
   readonly document: Document;
+  /**
+   * The primary label block's statements as they stand (`primaryPlate`'s), each phase's as its
+   * window ends.
+   */
+  readonly primaryStatements: () => ReadonlyArray<string>;
   readonly timing: ViewsCheckTiming;
   /** The page's clock, `performance.now()`, on which the probe stamps frames. */
   readonly nowMs: () => number;
@@ -616,11 +621,15 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
     const startMs = deps.nowMs();
     await wait(timing.measureMs);
     const window = { startMs, endMs: deps.nowMs() };
+    // As the window ends: `IMAGE: DETAIL LIMITED` among them unpairs its overhead pair.
+    const statements = deps.primaryStatements();
     deps.markWindow(window);
     // The trace stops at the window's end; the pass timer's last reads arrive after it.
     await api.endPhase(plan.name, window);
     await wait(timing.graceMs);
-    phases.push(probe.phase(plan.name, window.startMs, window.endMs, driver.shownViews()));
+    phases.push(
+      probe.phase(plan.name, window.startMs, window.endMs, driver.shownViews(), statements),
+    );
     if (plan.name === COCKPIT_PHASE) {
       resized.push(await resizePrimary());
     }

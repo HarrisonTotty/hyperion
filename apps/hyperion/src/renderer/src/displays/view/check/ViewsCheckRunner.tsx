@@ -10,6 +10,7 @@ import type { SystemTarget } from "../../system/systemTarget";
 import { pageAtmosphereFixtures } from "../../../view/scenes/atmosphereScene";
 import {
   ATMOSPHERE_CHECK_TIMING,
+  primaryPlate,
   recordAtmosphereCheck,
   runAtmosphereCheck,
 } from "./atmosphereCheckRun";
@@ -143,6 +144,7 @@ export function ViewsCheckRunner({
               ...shared,
               api,
               probe,
+              primaryStatements: () => primaryPlate(document)?.statements ?? [],
               timing: viewsCheckTimingOf(
                 api.launch.smoke ? VIEWS_CHECK_TIMING.smoke : VIEWS_CHECK_TIMING.full,
                 launchMode,
@@ -160,6 +162,7 @@ export function ViewsCheckRunner({
               api,
               views: probe,
               fixtures: pageAtmosphereFixtures(),
+              setting: api.launch.setting,
               // Through the probe's frame clock, which stamps VIEW's own callbacks the same.
               frame: () =>
                 new Promise<number>((resolve) => {

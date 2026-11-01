@@ -145,6 +145,8 @@ async function driven(
     },
     probe,
     document,
+    // A statement naming when it was read, by which each phase's is seen read as its window ended.
+    primaryStatements: () => [`SAID AT ${String(nowMs())}`],
     timing: TIMING,
     nowMs,
     markWindow: (window) => {
@@ -277,6 +279,13 @@ describe("the views check's script", () => {
   it("hands each window on as it marked it", async () => {
     const { windows } = await runToEnd("high");
     expect(windows.handed).toEqual(windows.marked);
+  });
+
+  it("records the primary's statements as each window ends (fix-retina-frame)", async () => {
+    const { record } = await completed();
+    expect(record.phases.map((phase) => phase.statements)).toEqual(
+      record.phases.map((phase) => [`SAID AT ${String(phase.endMs)}`]),
+    );
   });
 
   it("records the client's per-canvas overhead constant", async () => {

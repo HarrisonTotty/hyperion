@@ -1160,6 +1160,11 @@ export interface ViewsCheckPhaseRecord {
   readonly droppedResolves: number;
   /** The GPU time of resolves no view's or target's `render` made (uploads, mipmaps), ms. */
   readonly unattributedGpuMs: number;
+  /**
+   * The primary label block's statements as the window ended, in order: `IMAGE: DETAIL LIMITED`
+   * among them where its image stood below its setting's (fix-retina-frame).
+   */
+  readonly statements: ReadonlyArray<string>;
 }
 
 /** A view's canvas, by the view's name. */
@@ -1856,6 +1861,17 @@ export interface AtmosphereCheckCaptureTaken {
   readonly statements: ReadonlyArray<string>;
   /** The primary label block's fault lines as it was taken: graphics, terrain, then atmosphere. */
   readonly faults: ReadonlyArray<string>;
+  /**
+   * The primary's scene target's scale against its canvas as it was taken, the last the views
+   * probe recorded over its frames (`ViewsCheckViewRecord.scales`), or `null` where it recorded
+   * none (fix-retina-frame).
+   */
+  readonly primaryScale: number | null;
+  /**
+   * The setting whose sizes its air was drawn at: the low setting's where its label block stated
+   * `IMAGE: DETAIL LIMITED`, the frame-rate floor having stepped its air, else the launch's.
+   */
+  readonly airSetting: QualitySettingName;
 }
 
 /** A capture of an air fixture, seen from the free camera at a few radii. */
