@@ -48,8 +48,8 @@
 //!    P14.T24.i's follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of
 //!    step 2 read too, their vapour held at their ice's own temperature (P14.T53.c). Under 100 Pa
 //!    of its partial pressures the body is airless at that base, or `Tenuous` there where its
-//!    column reaches the tenuous floor, its gases listed (P14.T53.c); from generator version 26
-//!    (behind its hold, [`LineSwitchRules`]), where its last step read the bulk climate, its
+//!    column reaches the tenuous floor, its gases listed (P14.T53.c); from generator version 26,
+//!    where its last step read the bulk climate, its
 //!    inventory is held once more over that airless span first ([`Solver::one_switch`],
 //!    P14.T53.i).
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
@@ -89,7 +89,6 @@ use crate::units::{
     EarthFluxes, Kelvin, Kilograms, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
@@ -1641,7 +1640,7 @@ impl<'b> Solver<'_, 'b> {
     }
 
     /// The solve `solved` as its record publishes it under P14.T53.i's rule, from generator version
-    /// 26 (behind its hold, [`LineSwitchRules`]).
+    /// 26 ([`LineSwitchRules`]: in the tests its held arm, their oracle).
     ///
     /// Where its total lies under [`AIRLESS_PRESSURE`] while its greenhouse's last step read the
     /// bulk climate, its inventory is held once more over the airless span its record publishes,
@@ -2210,22 +2209,12 @@ pub(crate) fn with_melt_oxygen<R>(rules: MeltOxygenRules, run: impl FnOnce() -> 
     run()
 }
 
-/// The generator version from which a solve whose total lies under [`AIRLESS_PRESSURE`] after a
-/// last step that read the bulk climate is held once more over the airless span its record
-/// publishes (P14.T53.i, P14.T53.c's seam at the line): 26, the planetary bump after 25's.
-///
-/// It is P14.T53.i's one hold. Below it [`LineSwitchRules::in_force`] is [`LineSwitchRules::Held`]:
-/// such a solve publishes its last step's partial pressures, and every figure is version 24's and
-/// 25's bit for bit. 26's bump deletes this hold, [`LineSwitchRules`] with its `Held` arm, the
-/// tests' switch and its tripwire (`the_line_switch_is_held_only_until_the_26_bump`).
-pub(crate) const LINE_SWITCH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T53.i's one reading of the 100 Pa line is in force (its hold,
-/// [`LINE_SWITCH_VERSION`]).
+/// Whether P14.T53.i's one reading of the 100 Pa line is in force: from generator version 26, and
+/// in the tests its held arm, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum LineSwitchRules {
     /// Version 25's and before: a solve under the line publishes its last step's partial
-    /// pressures, whichever climate that step read.
+    /// pressures, whichever climate that step read; the tests' oracle ([`with_line_switch`]).
     Held,
     /// Version 26's: one more hold over the airless span the record publishes, where the last
     /// step read the bulk climate ([`Solver::one_switch`]).
@@ -2233,33 +2222,27 @@ pub(crate) enum LineSwitchRules {
 }
 
 impl LineSwitchRules {
-    /// The rules this generator version gives: the one switch from [`LINE_SWITCH_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_line_switch`]).
+    /// The rules in force: the one switch; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_line_switch`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = LINE_SWITCH_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= LINE_SWITCH_VERSION {
-            Self::OneSwitch
-        } else {
-            Self::Held
-        }
+        Self::OneSwitch
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The line's rules a test sets on its thread, `None` for the version's.
+    /// The line's rules a test sets on its thread, `None` for the one switch.
     static LINE_SWITCH_RULES: core::cell::Cell<Option<LineSwitchRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the line's rules `rules` on this thread, for the tests to reach P14.T53.i
-/// ahead of the bump; the version's rules are set back after, a panic in `run` included. 26's bump
-/// deletes it with the hold.
+/// `run`'s result with the line's rules `rules` on this thread, the held arm the tests' oracle; the
+/// one switch is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_line_switch<R>(rules: LineSwitchRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.

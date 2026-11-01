@@ -431,9 +431,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   `RoguePlanetRules::Bodies` through `with_rogue_planets`.
 /// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
-/// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
-///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
-///   more over the airless span its record publishes.
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
 ///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
@@ -444,7 +441,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{LineSwitchRules, with_line_switch};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
@@ -452,7 +448,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
-    let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
