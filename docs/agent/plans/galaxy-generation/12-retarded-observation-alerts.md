@@ -715,6 +715,11 @@ position by a dashed line (dashes already mean prediction), and the rule that th
 finds `LIGHT AGE`, `kyr`, `W/m²` and `OBSERVED FROM` in the guide, and the edits are one commit for
 the owner to read, as plan 05 does for its own.
 
+- _Built_ 2026-11-01: the guide already held the Observed state, `LIGHT AGE`, `kyr`, `W/m²`, the
+  direction, the sensor detection, the bearing ray, the tick and the mode rule. This commit drafts
+  the alert census's words (`COMPLETE`, `OVER LIMIT`, `PENDING`, `NOT WALKED`) and `NO CENSUS`, for
+  the owner.
+
 ### P12.T11 Client: mode and observed readout
 
 `SegmentMark` in plan 05's `spatial/marks.ts`, `drawList.ts` and `paint.ts` (solid or dashed,
