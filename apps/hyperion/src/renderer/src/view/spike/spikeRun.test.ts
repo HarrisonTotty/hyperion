@@ -25,6 +25,7 @@ import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile"
 import { SEGMENT_MEASURE_PREFIX } from "./metrics";
 import { contactRule, TEST_PLANET_FIGURE } from "./spikeScene";
 import { viewStrokesAt } from "../wireframe/drawList";
+import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { stretchKeys } from "./demandRecord";
 import {
   DescentRefused,
@@ -393,6 +394,8 @@ interface BodyMade extends Made {
   readonly lit: { readonly pass: TerrainPass; readonly pool: BakingPool };
   readonly wire: { readonly pass: TerrainPass; readonly pool: BakingPool };
   readonly selected: Selection[];
+  /** Each view's last frame's materials, by the view's name on the engine. */
+  readonly drawn: ReadonlyMap<string, ReadonlyArray<string>>;
 }
 
 async function bodyMade(style: RenderStyle): Promise<BodyMade> {
@@ -412,11 +415,16 @@ async function bodyMade(style: RenderStyle): Promise<BodyMade> {
   const wire = passOf();
   const session = new LoggingSession(lit.pass, wire.pass);
   const make = engine.createView.bind(engine);
+  const drawn = new Map<string, ReadonlyArray<string>>();
   engine.createView = (element, name) => {
     const view = make(element, name);
     const render = view.render.bind(view);
     view.render = (frame) => {
       session.log.push(`draw ${name}`);
+      drawn.set(
+        name,
+        frame.draws.map((draw) => draw.material.name),
+      );
       render(frame);
     };
     return view;
@@ -440,7 +448,7 @@ async function bodyMade(style: RenderStyle): Promise<BodyMade> {
       onSelect: (_input, selection) => selected.push(selection),
     },
   );
-  return { run, engine, pools: [], samples, patches, session, lit, wire, selected };
+  return { run, engine, pools: [], samples, patches, session, lit, wire, selected, drawn };
 }
 
 /** A frame's inputs with the main view's stage laid out at its size. */
@@ -475,6 +483,26 @@ describe("the spike's run over a generated world (R10.T14.c)", () => {
     expect(report?.regimes.size).toBe(0);
     run.dispose();
   });
+
+  it.each(["wireframe", "photorealistic"] as const)(
+    "draws no hull of its own craft in the %s main view, where both instruments still draw it (the owner's request)",
+    async (style) => {
+      const { run, drawn } = await bodyMade(style);
+      run.frame(bodyInput(0));
+      const hulls = (view: string): number =>
+        (drawn.get(view) ?? []).filter(
+          (name) =>
+            name === WIREFRAME_MATERIALS.occluderHull.name ||
+            name === WIREFRAME_MATERIALS.hullSilhouette.name,
+        ).length;
+      expect([
+        hulls(SPIKE_VIEW_NAMES.main),
+        hulls(SPIKE_VIEW_NAMES.orbit) > 0,
+        hulls(SPIKE_VIEW_NAMES.craft) > 0,
+      ]).toEqual([0, true, true]);
+      run.dispose();
+    },
+  );
 
   it("reports the style asked and the style it last drew in", async () => {
     const { run, session } = await bodyMade("photorealistic");

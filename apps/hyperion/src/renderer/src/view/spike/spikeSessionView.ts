@@ -69,6 +69,11 @@ export interface SpikeSessionViewOptions {
    * camera is and whose terrain fault it shows, or `null` for none.
    */
   readonly readoutBody: BodyIdHex | null;
+  /**
+   * Whether it draws the own ship's hull (`ViewFrameInputs.ownHull`): drawn where absent; hidden
+   * for the main view, whose camera stands at the craft's own pose inside its hull.
+   */
+  readonly ownHull?: "drawn" | "hidden";
 }
 
 /** What one frame of a session view is drawn from. */
@@ -174,7 +179,8 @@ export class SpikeSessionView {
   /**
    * The drawer's inputs for `frame` over `session`, as `VIEW`'s primary builds them: in its run's
    * camera's style at the setting, unscaled, with no stars, no sky and no meter, the session's class
-   * maps and reliefs, and its own terrain of the session's passes.
+   * maps and reliefs, its own terrain of the session's passes, and its own ship's hull as its
+   * options have it.
    */
   inputs(session: SpikeViewSession, frame: SpikeSessionFrame): ViewFrameInputs {
     return {
@@ -198,6 +204,7 @@ export class SpikeSessionView {
         nowMs: frame.nowMs,
         intervals: frame.intervals,
       },
+      ...(this.#options.ownHull === undefined ? {} : { ownHull: this.#options.ownHull }),
     };
   }
 

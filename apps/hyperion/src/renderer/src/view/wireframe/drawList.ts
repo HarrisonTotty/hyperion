@@ -539,6 +539,13 @@ export interface DrawOptions extends ViewStrokes {
    * outline, as the list was before R10.T16.g.
    */
   readonly datumInside?: boolean;
+  /**
+   * Whether the own ship's hull is drawn (`ViewScene.ownShip`'s): `hidden` for a view whose camera
+   * stands at the ship's own pose, inside its hull, whose edges would cut across the picture, as
+   * the descent spike's main view does (the owner's request, 2026-11-01); drawn where absent. Its
+   * predicted path and marks are drawn either way.
+   */
+  readonly ownHull?: "drawn" | "hidden";
 }
 
 /** A star as the sprite path takes it: its direction from the camera and its light per channel. */
@@ -872,6 +879,9 @@ export function buildWireframeDrawList(
   const sightHulls: HullOnView[] = [];
   const sight = options.lineOfSight ?? null;
   for (const craft of scene.craft) {
+    if (options.ownHull === "hidden" && craft.id === scene.ownShip) {
+      continue;
+    }
     const originM = fromCamera(craft.pose.position);
     if (!sphereInFrustum(originM, craft.hull.lengthM, projection, viewport)) {
       continue;

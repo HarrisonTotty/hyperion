@@ -129,6 +129,14 @@ function scene(): ViewScene {
   return aMarkedViewScene();
 }
 
+/** A list's hulls' and predicted paths' batches, and its occluder meshes, by their IDs. */
+function hullAndPathIds(list: WireframeDrawList): ReadonlyArray<ReadonlyArray<string>> {
+  return [
+    list.lines.filter((line) => line.id.startsWith("hull:") || line.dash !== null).map((l) => l.id),
+    list.occluderMeshes.map((mesh) => mesh.id),
+  ];
+}
+
 function build(options: Partial<DrawOptions> = {}, input: ViewScene = scene()): WireframeDrawList {
   return buildWireframeDrawList(input, CAMERA, VIEWPORT, TOKENS, { ...OPTIONS, ...options });
 }
@@ -336,6 +344,15 @@ describe("buildWireframeDrawList", () => {
   it("dashes a craft's predicted path, and nothing else", () => {
     const dashed = build().lines.filter((line) => line.dash !== null);
     expect(dashed.map((line) => line.id)).toEqual(["predicted:other"]);
+  });
+
+  it("draws no hull of the own ship where the view hides it, its predicted path still dashed (the owner's request)", () => {
+    const own = { ...scene(), ownShip: "other" };
+    const ids = hullAndPathIds;
+    expect([ids(build({}, own)), ids(build({ ownHull: "hidden" }, own))]).toEqual([
+      [["hull:other", "predicted:other"], ["other"]],
+      [["predicted:other"], []],
+    ]);
   });
 
   it("draws hull edges uncased in the wireframe", () => {

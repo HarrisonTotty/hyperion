@@ -864,6 +864,9 @@ export class SpikeRun {
       name: SPIKE_VIEW_NAMES.main,
       streamPriority: "primary",
       readoutBody: body.world.body,
+      // The camera stands at the craft's own pose, inside its hull, whose edges would cross the
+      // picture (the owner's request, 2026-11-01); the instruments still draw and mark it.
+      ownHull: "hidden",
     });
     return {
       kind: "body",

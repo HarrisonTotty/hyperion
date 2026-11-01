@@ -78,6 +78,11 @@ import { runPose, sceneStarsStandIn, type ViewRun } from "./viewRun";
 /** What one frame of a view draws from. */
 export interface ViewFrameInputs {
   readonly run: ViewRun;
+  /**
+   * Whether its list draws the own ship's hull (`DrawOptions.ownHull`): drawn where absent; hidden
+   * for the descent spike's main view, whose camera stands inside it.
+   */
+  readonly ownHull?: "drawn" | "hidden";
   /** The view's stage, as laid out, or `null` before it is. */
   readonly size: ElementSize | null;
   /** The colour tokens, read from the canvas, or `null` while it is not connected. */
@@ -448,6 +453,7 @@ export class ViewFrameDrawer {
           inputs.lineOfSightPoint === undefined
             ? null
             : { ...inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
+        ...(inputs.ownHull === undefined ? {} : { ownHull: inputs.ownHull }),
       },
     );
     this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;
