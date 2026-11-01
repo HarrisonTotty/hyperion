@@ -54,7 +54,7 @@
 //!
 //! # The hold
 //!
-//! Everything here moves output, so it is held until generator version 26 (`STRIP_VERSION`).
+//! Everything here moves output; it is on the record from generator version 26.
 //! Under its held arm a context's sphere of influence is plan 02's radius at its epoch
 //! position, it has no encounter environment, and its strip radius is 0.4895 of that radius alone:
 //! version 24's and 25's, bit for bit.
@@ -86,55 +86,44 @@ use crate::planetary::context::{
 use crate::planetary::params::{ENCOUNTER_REMOVAL_FACTOR, SATELLITE_STABILITY_FRACTION};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Metres, PerCubicLightYear, SolarMasses, Years};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
-/// The generator version from which P14.T29's stripping is on the record: 26, the planetary bump
-/// after 25's, in plan 14's train.
-///
-/// It is P14.T29's one hold. Below it [`StripRules::in_force`] is [`StripRules::Held`]: every
-/// context's sphere of influence is plan 02's radius at its epoch position, no context has an
-/// encounter environment, and every generated value is version 24's and 25's bit for bit. 26's
-/// bump deletes this hold, [`StripRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_stripping_is_held_only_until_the_26_bump`), and adds the galaxy README's relaxation 14
-/// ("no pericentre stripping within about 10 ly of the centre") to the relaxations removed.
-pub(crate) const STRIP_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T29's stripping is in force (its hold, [`STRIP_VERSION`]).
+/// Whether P14.T29's stripping is in force: from generator version 26, and in the tests its held
+/// arm, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum StripRules {
-    /// Version 25's and before: plan 02's radius at the epoch position, and no encounter cut.
+    /// Version 25's and before: plan 02's radius at the epoch position, and no encounter cut, the
+    /// tests' oracle ([`with_stripping`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tests' oracle of the stripping")
+    )]
     Held,
     /// Version 26's: plan 09's sphere of influence and a feature member's encounter cut.
     Stripped,
 }
 
 impl StripRules {
-    /// The rules this generator version gives: the stripping from [`STRIP_VERSION`], none below
-    /// it; in the tests, the rules a test's switch sets on its thread ([`with_stripping`]).
+    /// The rules in force: the stripping; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_stripping`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = STRIP_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= STRIP_VERSION {
-            Self::Stripped
-        } else {
-            Self::Held
-        }
+        Self::Stripped
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The stripping's rules a test sets on its thread, `None` for the version's.
+    /// The stripping's rules a test sets on its thread, `None` for the stripping.
     static STRIP_RULES: core::cell::Cell<Option<StripRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the stripping's rules `rules` on this thread, for the tests to reach
-/// P14.T29 ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
+/// `run`'s result with the stripping's rules `rules` on this thread, the held arm the tests'
+/// oracle; the stripping is set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_stripping<R>(rules: StripRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -152,8 +141,8 @@ pub(crate) fn with_stripping<R>(rules: StripRules, run: impl FnOnce() -> R) -> R
 /// [`SATELLITE_STABILITY_FRACTION`] of its sphere of influence and, for a context with an
 /// encounter environment, its [`encounter_radius`] (module documentation).
 ///
-/// Under the hold (`STRIP_VERSION`) it is the first alone: an encounter environment a synthetic
-/// host was given is carried but not applied.
+/// Under the tests' held arm it is the first alone: an encounter environment a synthetic host was
+/// given is carried but not applied.
 #[must_use]
 pub(crate) fn strip_radius(ctx: &SystemContext) -> Metres {
     let tidal = ctx.tidal_radius() * SATELLITE_STABILITY_FRACTION;

@@ -442,8 +442,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///   solved without the deck;
 /// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
-/// - the tidal and encounter stripping, `STRIP_VERSION` (P14.T29), at `StripRules::Stripped`
-///   through `with_stripping`: plan 09's sphere of influence and a feature member's encounter cut.
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
@@ -463,7 +461,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     };
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
-    use crate::planetary::hosts::strip::{StripRules, with_stripping};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
@@ -473,7 +470,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
-    let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
