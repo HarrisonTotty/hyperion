@@ -21,12 +21,30 @@
 //!   motion plus its own (P09.T10), against the unpadded radius. Members not yet born at that time
 //!   (a young nursery's, drawn with ages from −H) are dropped.
 //!
+//! - **The lists** (P09.T37). Under P09.T36's hold (`FEATURE_CLASSES_VERSION`) a feature's
+//!   feature-level list holds its recent classes, the recently dead and the luminous blue
+//!   variables its band-E cells give up, and an association, which has no nested grid, holds them
+//!   nowhere else. Each feature whose reach touches the sphere adds to the census each recent
+//!   class's expected candidates times the share of its profile in the shell about the feature's
+//!   centre that holds the sphere ([`FeatureLevelList::add_recent_expected_within`]), in the layer
+//!   its primaries are of. An entry moves on one straight line, through its epoch position at the
+//!   feature's bulk velocity, on which its site lies at its death (P09.T36), before its death and
+//!   after it. `member_speed_bound` does not cover the lists, so a list has a pad of its own: its
+//!   entries lie within the feature's reach of its centre at the epoch and move at the bulk speed,
+//!   below [`UNBOUND_PAD_SPEED`], so the features looked up for the hits hold every list that can
+//!   reach the sphere. Each candidate's line is tested against the sphere before its class's test,
+//!   a lifetime and a star, is asked, and a kept entry is a hit as a member is
+//!   ([`SystemOrigin::FeatureMember`](crate::galaxy::placement::SystemOrigin::FeatureMember)), its
+//!   ID resolved by [`resolve_member`](super::resolve_member). Below the hold's version no list
+//!   is read, bit for bit.
+//!
 //! The census and the hits are two calls of the query, so a caller that passes a keeping
 //! [`FeatureInteriorCache`] ([`KeepInteriors`] for one query) builds each interior once; with
 //! [`NoInteriorCache`] every call builds its own.
 //!
-//! Sums run in a fixed order: features in the catalogue's cell and index order, then cells in the
-//! grid's level and cell order, so the census is a function of the galaxy and the sphere alone.
+//! Sums run in a fixed order: features in the catalogue's cell and index order, each feature's list
+//! before its cells, then cells in the grid's level and cell order, so the census is a function of
+//! the galaxy and the sphere alone.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -49,7 +67,9 @@ use super::super::{FeatureId, FeatureProcess};
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
+use super::level_list::FeatureLevelList;
 use super::placement::FeatureInterior;
+use super::recent::{RecentClass, lists_recent_classes};
 use super::{MemberRecord, local_offset};
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
@@ -301,24 +321,28 @@ impl<'a> FeatureMemberSource<'a> {
         }
     }
 
-    /// The interiors of the features whose nested grids may meet the sphere of `radius` about
-    /// `centre`, in the catalogue's order: of the features whose reach touches it, those whose
-    /// grid's reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that
-    /// misses the sphere has no cell touching it, so its feature adds nothing to the census or the
-    /// hits, and its interior is not built.
-    fn interiors_near(
+    /// The features whose reach touches the sphere of `radius` about `centre`, in the catalogue's
+    /// order, each with its interior where its nested grid may meet the sphere: those whose grid's
+    /// reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that misses the
+    /// sphere has no cell touching it, so its feature adds nothing from its cells to the census or
+    /// the hits, and its interior is not built. Where `lists` is false (P09.T36's held arm) only
+    /// the features with an interior are given, since nothing else of theirs is read.
+    fn near(
         &self,
         galaxy: &Galaxy,
         centre: &GalacticPosition,
         radius: LightYears,
-    ) -> impl Iterator<Item = Arc<FeatureInterior>> {
-        FeatureCatalogue::near(galaxy, centre, radius, self.features)
-            .filter(move |f| {
-                self.interiors
-                    .grid_reach(galaxy, f)
-                    .is_some_and(|reach| grid_may_touch(f, centre, reach, radius))
-            })
-            .filter_map(|f| self.interiors.interior(galaxy, &f))
+        lists: bool,
+    ) -> impl Iterator<Item = (FeatureRecord, Option<Arc<FeatureInterior>>)> {
+        FeatureCatalogue::near(galaxy, centre, radius, self.features).filter_map(move |f| {
+            let interior = self
+                .interiors
+                .grid_reach(galaxy, &f)
+                .is_some_and(|reach| grid_may_touch(&f, centre, reach, radius))
+                .then(|| self.interiors.interior(galaxy, &f))
+                .flatten();
+            (lists || interior.is_some()).then_some((f, interior))
+        })
     }
 
     /// Each member of `band` that may lie between `inner` and `outer` of `centre` at some time of
@@ -355,7 +379,11 @@ impl<'a> FeatureMemberSource<'a> {
         };
         let lookup = outer + pad_for(farthest, UNBOUND_PAD_SPEED);
         let mut members = Vec::new();
-        for interior in self.interiors_near(galaxy, centre, lookup) {
+        // Only the features with an interior have members in cells: no lists gives just those.
+        let interiors = self
+            .near(galaxy, centre, lookup, false)
+            .filter_map(|(_, interior)| interior);
+        for interior in interiors {
             let local = local_offset(interior.feature().position(), centre);
             let near = [local.x, local.y, local.z];
             let bound = interior.member_speed_bound();
@@ -447,8 +475,19 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn expected_in_sphere(&self, galaxy: &Galaxy, sphere: &QuerySphere) -> LayerCounts {
         let mut counts = LayerCounts::ZERO;
         let radius = sphere.radius();
+        let lists = lists_recent_classes(galaxy);
         let mut cells = Vec::new();
-        for interior in self.interiors_near(galaxy, sphere.centre(), radius) {
+        for (feature, interior) in self.near(galaxy, sphere.centre(), radius, lists) {
+            if lists {
+                FeatureLevelList::of(galaxy, &feature).add_recent_expected_within(
+                    sphere.centre(),
+                    radius,
+                    &mut counts,
+                );
+            }
+            let Some(interior) = interior else {
+                continue;
+            };
             let local = local_offset(interior.feature().position(), sphere.centre());
             cells.clear();
             cells.extend(interior.grid().cells_touching(&local, radius));
@@ -479,8 +518,15 @@ impl SystemSource for FeatureMemberSource<'_> {
         // builds), so a member that can reach the sphere by `t` lies in a feature whose reach
         // touches it padded so.
         let padded = lookup_radius(sphere);
+        let lists = lists_recent_classes(galaxy);
         let mut members = Vec::new();
-        for interior in self.interiors_near(galaxy, sphere.centre(), padded) {
+        for (feature, interior) in self.near(galaxy, sphere.centre(), padded, lists) {
+            if lists {
+                recent_hits(galaxy, &feature, sphere, layers, out);
+            }
+            let Some(interior) = interior else {
+                continue;
+            };
             let local = local_offset(interior.feature().position(), sphere.centre());
             let mut memo = interior.bound_memo();
             let bound = interior.member_speed_bound();
@@ -618,13 +664,86 @@ pub(crate) fn drifted_at(
     t: UniverseTime,
     elapsed: Seconds,
 ) -> GalacticPosition {
+    drifted_from(record.epoch_position(), velocity, t, elapsed)
+}
+
+/// Where a member at `epoch_position` at the epoch is at `t`, drifting at `velocity` for `elapsed`
+/// since the epoch: [`drifted_at`]'s position, bit for bit, from the position alone (P09.T37: a
+/// list's candidate is tested on its line before its record is drawn).
+///
+/// # Panics
+///
+/// As [`drifted_at`].
+#[must_use]
+fn drifted_from(
+    epoch_position: &GalacticPosition,
+    velocity: GalacticVelocity,
+    t: UniverseTime,
+    elapsed: Seconds,
+) -> GalacticPosition {
     if t == UniverseTime::EPOCH {
-        return *record.epoch_position();
+        return *epoch_position;
     }
-    record
-        .epoch_position()
+    epoch_position
         .translated(velocity.displacement_over(elapsed))
         .expect("a member moving under 3,000 km/s over the clock window stays addressable")
+}
+
+/// The hits in `sphere` among `layers` of `feature`'s recent entries (module documentation, "The
+/// lists"), appended to `out` in index order.
+///
+/// # Panics
+///
+/// In debug builds, if the feature's bulk speed is not below [`UNBOUND_PAD_SPEED`], which the
+/// features' lookup assumes, or an entry's member is not on its candidate's line.
+fn recent_hits(
+    galaxy: &Galaxy,
+    feature: &FeatureRecord,
+    sphere: &QuerySphere,
+    layers: LayerSet,
+    out: &mut Vec<SystemHit>,
+) {
+    let list = FeatureLevelList::of(galaxy, feature);
+    let Some(stars) = list.recent_stars() else {
+        return;
+    };
+    let velocity = stars.velocity();
+    let speed = KilometresPerSecond::from(velocity.speed());
+    debug_assert!(
+        speed.value() < UNBOUND_PAD_SPEED.value(),
+        "{:?}: a feature's bulk speed {speed:?} is below the features' lookup pad",
+        feature.id()
+    );
+    // The list's pad: its entries lie within the reach of the feature's centre at the epoch.
+    let within = member_reach(sphere.radius() + feature.reach(), sphere.time(), speed);
+    if LightYears::from(sphere.centre().distance_to(feature.position())).value() > within.value() {
+        return;
+    }
+    let elapsed = Seconds::new(sphere.time().since_epoch().as_seconds_f64());
+    for entry in list.entries() {
+        let Some(class) = RecentClass::of(entry.class()) else {
+            continue;
+        };
+        if !layers.contains(class.layer()) {
+            continue;
+        }
+        let at = drifted_from(entry.position(), velocity, sphere.time(), elapsed);
+        if LightYears::from(sphere.centre().distance_to(&at)).value() > sphere.radius().value() {
+            continue;
+        }
+        let Some(recent) = list.recent_entry(galaxy, entry.index()) else {
+            continue;
+        };
+        let member = recent.member();
+        debug_assert!(
+            member.record().epoch_position() == entry.position() && member.velocity() == velocity,
+            "{:?}: an entry's member moves on its candidate's line",
+            member.record().id()
+        );
+        if layers.contains(member.record().layer()) {
+            out.extend(hit_at(member.record(), velocity, sphere, elapsed));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1514,7 +1514,9 @@ _T37.a, the grid's classes, built behind its hold (lane `p09-t37`, 2026-11-01, a
 source and the two centre tests, built behind P10.T10.b's hold (lane `p10-list-registration`,
 2026-11-01, at 24, no output moved): see Risks, "P09.T37.b, as built". The bench's cold query,
 cut bit for bit (lane `perf-range-27`, 2026-11-01, no output moved): see Risks, "P09.T37's
-bench"; its 5 ms target is missed, a finding._
+bench"; its 5 ms target is missed, a finding. The features' and the
+centre's recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under P09.T36's and
+P10.T10.b's holds, no output moved at 24–25): see Risks, "P09.T37, the recent dead placed"._
 
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
@@ -5831,3 +5833,21 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `GLOBAL_LIST_CACHE_BYTES`, and `ListedTubes` lends them.
   - _One bound a cell._ `ClassCellSystems::of` keeps each entry under the cell's one bound
     (`grid::entry_systems_in`) instead of resolving each member's ID.
+- **P09.T37, the recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under
+  `feature_classes` (26) and `list_source` (27); no output moved at 24–25).**
+  - _Features._ `FeatureMemberSource` reads each near feature's list under
+    `recent::lists_recent_classes` (a hold `match` for the 26 bump); census
+    `FeatureLevelList::add_recent_expected_within`, by `RecentClass::layer` (E; D for a Type Ia).
+  - _Centre._ `CentreMemberSource` (in `GlobalListSource`) builds the list lazily:
+    `CentreRecent::{place, places, add_expected_within}`, `CentrePlace::kept`, `TracerProfiles`.
+  - _Pads._ An entry moves straight at its velocity: a feature's list is read within its reach
+    plus the bulk speed (debug-asserted below `UNBOUND_PAD_SPEED`), the centre's within `REACH`
+    plus light's travel over |t|; each line is tested before the class's test.
+  - _Fix (deviation)._ `centre::recent::position` drew radii below the tracer's DF inner cut
+    (10⁻³ ly; 0.1 ly, young disc): every centre entry within 0.08 ly at up to 17,000 km/s. Now
+    inside `REACH`: 25 kept of 565 (were 17), `CENTRE_ENTRIES_DIGEST` re-pinned; centre binaries move.
+  - _Lean (2026-11-01)._ A listed death's remnant stays on its progenitor's line, no natal kick,
+    as `Drift::of_member` reads it; the class's core collapse takes its kick (P09.T33.a).
+  - _Tests (slow):_ `verification::recent_in_range`'s `…_under_every_26_hold` and `…_27_hold`;
+    if `feature_classes` moves to 27, the 26 test checks that no feature lists an entry.
+  - _Finding._ Plan 11's listed binaries (P11.T8.f, 27) on the same lists have no source either.

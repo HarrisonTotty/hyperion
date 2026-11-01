@@ -19,11 +19,15 @@ mod complementarity;
 mod recent_in_range;
 mod shells;
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::global_list::{GlobalList, StreamNumber, TubeLookup, TubeTable};
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::CellKey;
+use crate::galaxy::placement::{CellCache, CellKey, SystemRecord, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::math;
@@ -38,6 +42,63 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
     Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
         .expect("the Milky Way fixture builds")
         .with_full_potential()
+}
+
+/// A lookup of `galaxy`'s global list that builds each tube table the first time a query reaches
+/// its stream and keeps it, for the global list's source as the server registers it from 27.
+struct Tubes<'a> {
+    galaxy: &'a Galaxy,
+    list: GlobalList,
+    built: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+}
+
+impl<'a> Tubes<'a> {
+    /// The lookup of `galaxy`'s list, built now ([`GlobalList::build`]).
+    fn new(galaxy: &'a Galaxy) -> Self {
+        Self {
+            galaxy,
+            list: GlobalList::build(galaxy),
+            built: Mutex::default(),
+        }
+    }
+}
+
+impl TubeLookup for Tubes<'_> {
+    fn global_list(&self) -> &GlobalList {
+        &self.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        let spec = self.list.stream(stream).expect("a stream of the list");
+        let mut tubes = self
+            .built
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(tubes.entry(stream).or_insert_with(|| {
+            Arc::new(TubeTable::build(self.galaxy, spec).expect("the full potential"))
+        }))
+    }
+}
+
+/// A grid cache that keeps every cell it is asked for, for one galaxy: the layer-E cell about the
+/// centre takes over a minute to generate under every 27 hold (pod, 16 vCPU), and every query
+/// there reads it.
+#[derive(Debug, Default)]
+struct KeepCells(BTreeMap<CellKey, Vec<SystemRecord>>);
+
+impl CellCache for KeepCells {
+    fn with_cell<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> R {
+        f(self.0.entry(key).or_insert_with(|| {
+            let mut systems = Vec::new();
+            generate_cell(galaxy, key, &mut systems);
+            systems
+        }))
+    }
 }
 
 /// `count` layer-E cells along each of `galaxy`'s arm ridges, in the plane, at each radius of

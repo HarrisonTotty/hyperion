@@ -22,9 +22,22 @@
 //!   claim, [`claimed_at_centre`].
 //!
 //! An entry picks its component by the components' expected candidates, draws its radius from its
-//! tracer's profile, its direction isotropically and its velocity from its tracer's distribution
-//! function, as a cell's member does, without the marks (lean, 2026-10-31); its site is its epoch
-//! position moved straight along that velocity to its death.
+//! tracer's profile inside the centre's reach, where the cells' members end, its direction
+//! isotropically and its velocity from its tracer's distribution function, as a cell's member
+//! does, without the marks (lean, 2026-10-31); its site is its epoch position moved straight along
+//! that velocity to its death.
+//!
+//! # In the range query
+//!
+//! From P09.T37 the centre's source places the entries ([`CentreMemberSource`]): an entry moves on
+//! its one straight line, through its epoch position at its velocity, before its death and after
+//! it, as its member's record and its site say. Each candidate's place, its draws up to its
+//! velocity ([`CentrePlace`]), is cheap, so the source tests a candidate's line against its sphere
+//! first and asks the class's test, a lifetime and a star, only of a candidate the sphere holds.
+//! The census adds each class's expected candidates times the share of its component's tracer
+//! profile inside the reach that the sphere's shell about the black hole holds, which errs high.
+//!
+//! [`CentreMemberSource`]: super::CentreMemberSource
 //!
 //! # The cells' half
 //!
@@ -49,6 +62,7 @@ use crate::galaxy::features::members::recent::{
 use crate::galaxy::features::members::{FeatureLevelList, ListClass, ListIndex, MemberZero};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::query::LayerCounts;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
 use crate::galaxy::{Galaxy, Population};
@@ -61,11 +75,12 @@ use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{SolarMasses, Years};
 
-use super::CentreModel;
 use super::binaries::CentreBinaries;
 use super::classes::{AgeComponent, CentreClass, CentreClassKind, age_components};
 use super::events::victims::victim_count;
 use super::members::{CentreMemberRecord, centre_composition};
+use super::profile::{REACH, TracerProfile};
+use super::{CentreModel, CentreTracer};
 use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// The oldest age of a young class: a component whose oldest star is at most this old is young,
@@ -177,7 +192,7 @@ impl CentreRecent {
     }
 
     /// The entry at list index `index`, of class `class`, if its class's test keeps it (module
-    /// documentation).
+    /// documentation): its [`place`](Self::place), then its class's test ([`CentrePlace::kept`]).
     #[must_use]
     pub(crate) fn entry(
         &self,
@@ -186,6 +201,23 @@ impl CentreRecent {
         class: RecentClass,
         index: u16,
     ) -> Option<CentreRecentEntry> {
+        let profiles = TracerProfiles::of(model);
+        self.place(galaxy, model, &profiles, class, index)?
+            .kept(galaxy)
+    }
+
+    /// The candidate at list index `index`, of class `class`, placed (module documentation, "In
+    /// the range query"), its tracers' profiles `profiles`: or `None` for an index of no class's
+    /// entry, or a candidate whose draws refuse it (its component or its velocity).
+    #[must_use]
+    pub(crate) fn place(
+        &self,
+        galaxy: &Galaxy,
+        model: &CentreModel,
+        profiles: &TracerProfiles,
+        class: RecentClass,
+        index: u16,
+    ) -> Option<CentrePlace> {
         let parts = &self.classes.iter().find(|(c, _)| *c == class)?.1;
         // `IndexTooLarge` is the one error, and an index past the centre's names no entry.
         let id = CentreMemberId::new(MemberSlot::FeatureLevel { index }).ok()?;
@@ -198,21 +230,148 @@ impl CentreRecent {
         let part = &parts[stream.mark().pick_weighted(&weights, total)?];
         let component = age_components()[usize::from(part.component)];
         let drawn = match &part.candidates {
-            Some(candidates) => Some(candidates.draw(galaxy.mass_function(), &mut stream)?),
+            Some(candidates) => {
+                let (mass, age, _) = candidates.draw(galaxy.mass_function(), &mut stream)?;
+                Some((mass, age))
+            }
             None => None,
         };
         let class_of = centre_class(model, part.component)?;
-        let at = position(model, &component, key, seed);
+        let at = position_on(profiles.of_tracer(component.tracer), key, seed);
         let mut velocity = Stream::open(seed, tags::CENTRE_VELOCITY, key);
         let velocity_km_s = model.distribution(class_of.tracer).draw_velocity(
             model.profile(),
             at,
             &mut velocity,
         )?;
-        let position = galactic(at);
+        Some(CentrePlace {
+            class,
+            system,
+            component,
+            class_of,
+            drawn,
+            position: galactic(at),
+            velocity_km_s,
+        })
+    }
+
+    /// The census's share of the centre's recent classes in the ball of `radius` ly about a point
+    /// `distance` ly from the black hole, added to `counts` by the layer each class's primaries are
+    /// of ([`RecentClass::layer`]; module documentation, "In the range query"): each part's
+    /// expected candidates times the share of its component's tracer profile inside the reach that
+    /// lies between `distance − radius` and `distance + radius` from the black hole, a shell that
+    /// holds the ball. Parts in list order.
+    pub(crate) fn add_expected_within(
+        &self,
+        profiles: &TracerProfiles,
+        (distance, radius): (f64, f64),
+        counts: &mut LayerCounts,
+    ) {
+        let reach = REACH.value();
+        for (class, parts) in &self.classes {
+            let layer = class.layer();
+            for part in parts {
+                let profile =
+                    profiles.of_tracer(age_components()[usize::from(part.component)].tracer);
+                let whole = profile.fraction_within(reach);
+                let (inner, outer) = ((distance - radius).max(0.0), (distance + radius).min(reach));
+                if outer <= inner {
+                    continue;
+                }
+                let share =
+                    (profile.fraction_within(outer) - profile.fraction_within(inner)) / whole;
+                counts.set(layer, counts.get(layer) + part.expected * share.max(0.0));
+            }
+        }
+    }
+
+    /// The places of every candidate of its classes on its list in `galaxy`, in index order (module
+    /// documentation, "In the range query").
+    #[must_use]
+    pub(crate) fn places(&self, galaxy: &Galaxy, model: &CentreModel) -> Vec<CentrePlace> {
+        let profiles = TracerProfiles::of(model);
+        self.list(galaxy)
+            .entries()
+            .filter_map(|entry| {
+                let class = RecentClass::of(entry.class())?;
+                self.place(galaxy, model, &profiles, class, entry.index())
+            })
+            .collect()
+    }
+}
+
+/// The centre's four tracers' profiles, each built once: what a list's candidates are placed on.
+#[derive(Debug, Clone)]
+pub(crate) struct TracerProfiles([TracerProfile; 4]);
+
+impl TracerProfiles {
+    /// The profiles of `model`'s tracers.
+    #[must_use]
+    pub(crate) fn of(model: &CentreModel) -> Self {
+        Self(CentreTracer::ALL.map(|tracer| tracer.profile(model.profile().stars())))
+    }
+
+    /// The profile of `tracer`.
+    #[must_use]
+    pub(crate) fn of_tracer(&self, tracer: CentreTracer) -> &TracerProfile {
+        let index = CentreTracer::ALL
+            .iter()
+            .position(|&t| t == tracer)
+            .expect("one of the four tracers");
+        &self.0[index]
+    }
+}
+
+/// A candidate of the centre's list placed, before its class's test (module documentation, "In
+/// the range query"): its class, its draws up to its velocity, its epoch position and its velocity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CentrePlace {
+    class: RecentClass,
+    system: SystemId,
+    component: AgeComponent,
+    class_of: CentreClass,
+    /// Its primary's initial mass and age, for a core collapse's or a variable's candidate.
+    drawn: Option<(SolarMasses, Years)>,
+    position: GalacticPosition,
+    velocity_km_s: [f64; 3],
+}
+
+impl CentrePlace {
+    /// Its class.
+    #[must_use]
+    pub(crate) const fn class(&self) -> RecentClass {
+        self.class
+    }
+
+    /// Its position at the epoch.
+    #[must_use]
+    pub(crate) const fn position(&self) -> &GalacticPosition {
+        &self.position
+    }
+
+    /// Its velocity, galactic, as its member's ([`CentreMemberRecord::velocity`]).
+    #[must_use]
+    pub(crate) fn velocity(&self) -> GalacticVelocity {
+        GalacticVelocity::new(self.velocity_km_s.map(|c| c * 1e3))
+    }
+
+    /// The entry it is, if its class's test keeps it (module documentation).
+    #[must_use]
+    pub(crate) fn kept(&self, galaxy: &Galaxy) -> Option<CentreRecentEntry> {
+        let CentrePlace {
+            class,
+            system,
+            component,
+            class_of,
+            drawn,
+            position,
+            velocity_km_s,
+        } = *self;
+        let seed = galaxy.seed();
+        let key = ObjectKey::from(system);
         match class {
             RecentClass::CoreCollapse | RecentClass::LuminousBlueVariable => {
-                let (mass, age, _) = drawn?;
+                let (mass, age) = drawn?;
                 let record = record(system, position, mass, age);
                 let member = CentreMemberRecord::from_parts(
                     record,
@@ -395,7 +554,8 @@ pub(crate) struct CentreRecentEntry {
     not(test),
     expect(
         dead_code,
-        reason = "P09.T37's merge reads the centre's entries; until then its tests alone do"
+        reason = "the range query reads an entry's member alone (P09.T37); its tests read its class, \
+                  site and window"
     )
 )]
 impl CentreRecentEntry {
@@ -526,7 +686,7 @@ pub(super) fn centre_class(model: &CentreModel, component: u8) -> Option<CentreC
 }
 
 /// An entry's local position, ly about the black hole: its radius at a uniform's quantile of its
-/// component's tracer's profile, by bisection, and an isotropic direction, on `member.position`.
+/// component's tracer's profile inside the centre's reach ([`position_on`]), on `member.position`.
 #[must_use]
 pub(super) fn position(
     model: &CentreModel,
@@ -534,12 +694,23 @@ pub(super) fn position(
     key: ObjectKey,
     seed: crate::Seed,
 ) -> [f64; 3] {
-    let profile = component.tracer.profile(model.profile().stars());
+    position_on(
+        &component.tracer.profile(model.profile().stars()),
+        key,
+        seed,
+    )
+}
+
+/// An entry's local position on `profile`, ly about the black hole: its radius at a uniform's
+/// quantile of the profile inside the centre's reach, [`REACH`], where the cells' members end, by
+/// bisection, and an isotropic direction, on `member.position`.
+#[must_use]
+pub(super) fn position_on(profile: &TracerProfile, key: ObjectKey, seed: crate::Seed) -> [f64; 3] {
     let mut stream = Stream::open(seed, tags::MEMBER_POSITION, key);
     let u = stream.uniform();
-    let cut = profile.cut_radius().value();
-    let whole = profile.fraction_within(cut);
-    let (mut lo, mut hi) = (0.0_f64, cut);
+    let reach = REACH.value();
+    let whole = profile.fraction_within(reach);
+    let (mut lo, mut hi) = (0.0_f64, reach);
     for _ in 0..64 {
         let mid = f64::midpoint(lo, hi);
         if profile.fraction_within(mid) < u * whole {

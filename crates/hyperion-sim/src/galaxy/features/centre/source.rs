@@ -21,6 +21,14 @@
 //!   its disruption not yet passed, is propagated on its own parabola and tested there, unless its
 //!   reach ([`TidalDisruptionVictim::reach_at`](super::events::victims::TidalDisruptionVictim::reach_at),
 //!   below) misses the sphere.
+//! - **The recent entries** (P09.T37). After the victims, under P09.T36's hold
+//!   (`FEATURE_CLASSES_VERSION`), the list holds the recently dead and the luminous blue variables
+//!   that the band-E cells give up. The census adds each class's expected candidates times the
+//!   share of its tracer's profile in the shell about the black hole that holds the sphere, in the
+//!   layer its primaries are of. Each candidate is placed first, its draws up to its velocity, and
+//!   only one whose straight line lies inside the sphere at its time is asked its class's test, a
+//!   lifetime and a star. The list and the places are built once a source, when a sphere first
+//!   needs them. Below the hold's version no list is read.
 //!
 //! # Which cells
 //!
@@ -53,6 +61,10 @@
 //!   cell is scanned in full whenever the sphere comes within that reach of the black hole, and
 //!   none of them otherwise.
 //!
+//! - **The recent entries' bound.** The centre's list's recent classes (P09.T36.b) lie inside the
+//!   centre's reach at the epoch and move on straight lines below light's speed (module
+//!   documentation of [`recent`](super::recent)), so a sphere farther from the black hole than
+//!   the reach plus light's travel over |t| holds none, and the list is not read.
 //! - **The victims' bound.** A victim moves at most at the escape speed from the black hole alone,
 //!   `√(2 G M• ÷ r)`, under every cell's bound above, so before its disruption it lies within its
 //!   pericentre plus the radial plunge about `G M•` over the span to it: a reach of its own, which
@@ -71,27 +83,30 @@
 //! plan 09's P09.T40.a. The census reads no cache, so it is the same whatever is cached. The
 //! centre's model is the galaxy's own ([`Galaxy::centre`]).
 //!
-//! The source is not registered with the range query: plan 09's P09.T37 merges it, and until then
-//! nothing generated reads it.
+//! The source is never registered with the range query alone: from generator version 27 the global
+//! list's source holds and asks it (P09.T37.b, `GlobalListSource`).
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
+use crate::galaxy::features::members::recent::{lists_recent_classes, moved};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{CentreMotion, EpochState, Regime, SpeedBound, StateAt, Trajectory};
 use crate::galaxy::placement::{Existence, SystemRecord};
-use crate::galaxy::query::{LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource};
+use crate::galaxy::query::{LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, pad_for};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::time::UniverseTime;
-use crate::units::consts::METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND;
-use crate::units::{GravitationalParameter, LightYears, Seconds};
+use crate::units::consts::{METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND, SPEED_OF_LIGHT};
+use crate::units::{GravitationalParameter, KilometresPerSecond, LightYears, Seconds};
 
 use super::super::nested::{NestedCell, NestedLevel, box_distance};
 use super::events::victims::{CentreVictims, TidalDisruptionVictim};
 use super::members::CentrePlacement;
+use super::profile::REACH;
+use super::recent::{CentrePlace, CentreRecent, TracerProfiles};
 use super::{BuildCentreError, CentreProfile, CentreTracer};
 
 /// The bands from the coarsest down, the order the query walks its layers.
@@ -367,6 +382,18 @@ pub struct CentreMemberSource<'a> {
     floor_km2_s2: f64,
     /// The feature-level members after the black hole: the tidal disruptions' victims.
     victims: CentreVictims,
+    /// The list's recent classes after them, built when a sphere first needs them: `None` where
+    /// the galaxy lists none (module documentation, "The recent entries").
+    recent: OnceLock<Option<RecentList>>,
+}
+
+/// The centre's list's recent classes as the source reads them (P09.T37): the classes, their
+/// tracers' profiles, and every candidate's place, made when a sphere's hits first need them.
+#[derive(Debug, Clone)]
+struct RecentList {
+    recent: CentreRecent,
+    profiles: TracerProfiles,
+    places: OnceLock<Vec<CentrePlace>>,
 }
 
 impl std::fmt::Debug for CentreMemberSource<'_> {
@@ -407,7 +434,82 @@ impl<'a> CentreMemberSource<'a> {
             orbits,
             floor_km2_s2,
             victims,
+            recent: OnceLock::new(),
         })
+    }
+
+    /// The list's recent classes, built on first use: `None` where the galaxy lists none.
+    fn recent(&self) -> Option<&RecentList> {
+        self.recent
+            .get_or_init(|| {
+                if !lists_recent_classes(self.galaxy) {
+                    return None;
+                }
+                let model = self.placement.model();
+                let recent = CentreRecent::new(self.galaxy, model, self.victims.count());
+                (!recent.expected().is_empty()).then(|| RecentList {
+                    recent,
+                    profiles: TracerProfiles::of(model),
+                    places: OnceLock::new(),
+                })
+            })
+            .as_ref()
+    }
+
+    /// The hits in `sphere` among `layers` of the list's recent entries, `from_black_hole` ly from
+    /// the black hole, appended to `out` in index order (module documentation, "The recent
+    /// entries").
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if a candidate moves at light's speed or faster, which the bound assumes.
+    fn recent_hits(
+        &self,
+        sphere: &QuerySphere,
+        layers: LayerSet,
+        from_black_hole: f64,
+        out: &mut Vec<SystemHit>,
+    ) {
+        let t = sphere.time();
+        let light =
+            KilometresPerSecond::new(SPEED_OF_LIGHT / METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND);
+        if from_black_hole - sphere.radius().value() > (REACH + pad_for(t, light)).value() {
+            return;
+        }
+        let Some(list) = self.recent() else {
+            return;
+        };
+        let places = list.places.get_or_init(|| {
+            let places = list.recent.places(self.galaxy, self.placement.model());
+            debug_assert!(
+                places
+                    .iter()
+                    .all(|p| p.velocity().speed().value() < SPEED_OF_LIGHT),
+                "the centre's recent entries move below light's speed"
+            );
+            places
+        });
+        for place in places {
+            if !layers.contains(place.class().layer()) {
+                continue;
+            }
+            let at = if t == UniverseTime::EPOCH {
+                *place.position()
+            } else {
+                moved(place.position(), place.velocity(), t)
+            };
+            let distance = LightYears::from(sphere.centre().distance_to(&at));
+            if distance.value() > sphere.radius().value() {
+                continue;
+            }
+            let Some(entry) = place.kept(self.galaxy) else {
+                continue;
+            };
+            let record = entry.member().record();
+            if record.existence_at(t) == Existence::Exists && layers.contains(record.layer()) {
+                out.push(SystemHit::new(*record, at, distance));
+            }
+        }
     }
 
     /// The centre's placement, whose members it returns.
@@ -641,6 +743,17 @@ impl SystemSource for CentreMemberSource<'_> {
                 counts.set(layer, counts.get(layer) + 1.0);
             }
         }
+        let from_black_hole =
+            LightYears::from(sphere.centre().distance_to(&GalacticPosition::ORIGIN)).value();
+        if from_black_hole - sphere.radius().value() <= REACH.value()
+            && let Some(list) = self.recent()
+        {
+            list.recent.add_expected_within(
+                &list.profiles,
+                (from_black_hole, sphere.radius().value()),
+                &mut counts,
+            );
+        }
         counts
     }
 
@@ -667,6 +780,7 @@ impl SystemSource for CentreMemberSource<'_> {
                 out.extend(victim_hit(victim, sphere, from_black_hole));
             }
         }
+        self.recent_hits(sphere, layers, from_black_hole, out);
         self.cells_reaching(sphere, |cell| {
             for band in BANDS_COARSEST_FIRST {
                 if !layers.contains(band.layer()) {

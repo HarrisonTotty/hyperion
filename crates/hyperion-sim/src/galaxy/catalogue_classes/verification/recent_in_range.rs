@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
-use super::milky_way;
+use super::{KeepCells, Tubes, milky_way};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::ages::SubDisc;
@@ -32,17 +32,18 @@ use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::members::resolve_centre_member_with;
 use crate::galaxy::features::centre::recent::CentreRecent;
 use crate::galaxy::features::ids::{FeatureKind, FeatureProcess};
+use crate::galaxy::features::members::level_list::registered_classes;
 use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass, moved};
 use crate::galaxy::features::members::{
     FeatureLevelList, FeatureMemberSource, KeepInteriors, resolve_member,
 };
-use crate::galaxy::global_list::{
-    GlobalList, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
+use crate::galaxy::global_list::GlobalListSource;
+use crate::galaxy::placement::{Existence, SystemRecord};
+use crate::galaxy::query::{
+    LayerCounts, MassFloor, QuerySphere, RangePlan, RangeQuery, SystemSource, range_query,
 };
-use crate::galaxy::placement::{Existence, NoCache, SystemRecord};
-use crate::galaxy::query::{MassFloor, RangePlan, RangeQuery, SystemSource, range_query};
 use crate::galaxy::rules::GalaxyRules;
-use crate::id::{MemberSlot, SystemId, SystemIdKind};
+use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::planetary::testing::{with_every_26_hold_with_its_retargets, with_every_27_hold};
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, LightYears, Years};
@@ -68,30 +69,6 @@ const MANY_ENTRIES: usize = 3;
 
 /// The old open clusters walked for one with entries.
 const OLD_CLUSTERS_WALKED: usize = 2_000;
-
-/// A lookup that builds each tube table the first time a query reaches its stream and keeps it.
-struct Tubes<'a> {
-    galaxy: &'a Galaxy,
-    list: GlobalList,
-    built: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
-}
-
-impl TubeLookup for Tubes<'_> {
-    fn global_list(&self) -> &GlobalList {
-        &self.list
-    }
-
-    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
-        let spec = self.list.stream(stream).expect("a stream of the list");
-        let mut tubes = self
-            .built
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Arc::clone(tubes.entry(stream).or_insert_with(|| {
-            Arc::new(TubeTable::build(self.galaxy, spec).expect("the full potential"))
-        }))
-    }
-}
 
 /// A class-cell cache that keeps every cell's systems it makes, for one galaxy: the spheres about
 /// the centre share their class cells, whose cold systems cost seconds.
@@ -214,11 +191,7 @@ fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource]) -> R) 
     let classes =
         CatalogueClassSource::registered_in(galaxy).map(|classes| classes.with_cells(&cells));
     let orbits = KeepCentreOrbits::new(galaxy);
-    let tubes = Tubes {
-        galaxy,
-        list: GlobalList::build(galaxy),
-        built: Mutex::default(),
-    };
+    let tubes = Tubes::new(galaxy);
     let listed = GlobalListSource::is_registered_in(galaxy).then(|| {
         GlobalListSource::new(galaxy, &tubes, &orbits).expect("the Milky Way's centre builds")
     });
@@ -246,15 +219,15 @@ fn query(centre: &GalacticPosition, radius: LightYears, t: UniverseTime) -> Rang
 /// What one sphere found wrong: each entry inside returned other than once, each outside returned,
 /// and each hit of a recent slot that names no such entry, as text.
 fn check_sphere(
-    galaxy: &Galaxy,
+    (galaxy, cells): (&Galaxy, &mut KeepCells),
     sources: &[&dyn SystemSource],
     listed: &BTreeMap<SystemId, Listed>,
     (centre, radius, t): (&GalacticPosition, LightYears, UniverseTime),
 ) -> (usize, Vec<String>) {
     let q = query(centre, radius, t);
-    let result = range_query(galaxy, &mut NoCache::new(), sources, &q);
+    let result = range_query(galaxy, cells, sources, &q);
     assert!(
-        result.census().layers().contains(crate::id::Layer::D),
+        result.census().layers().contains(Layer::D),
         "{radius:?} at {t:?}: the census admits layers D and E"
     );
     let mut seen: BTreeMap<SystemId, usize> = BTreeMap::new();
@@ -385,6 +358,7 @@ fn features_in_range(
 ) -> (usize, Vec<String>) {
     assert!(asked.len() >= 3, "the nurseries of each kind list entries");
     let (mut inside, mut faults) = (0, Vec::new());
+    let mut cells = KeepCells::default();
     for feature in asked {
         let own = feature_entries(galaxy, feature);
         eprintln!(
@@ -393,11 +367,35 @@ fn features_in_range(
             feature.kind_at(Years::ZERO),
             own.len()
         );
+        // The census holds the whole list of a feature inside the sphere.
+        let whole = QuerySphere::new(
+            *feature.position(),
+            LightYears::new(feature.reach().value() + 1.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a positive radius");
+        let census = sources[0].expected_in_sphere(galaxy, &whole);
+        let mut listed = LayerCounts::ZERO;
+        for class in registered_classes(galaxy, feature) {
+            if let Some(recent) = RecentClass::of(class.class()) {
+                let layer = recent.layer();
+                listed.set(layer, listed.get(layer) + class.expected());
+            }
+        }
+        for layer in [Layer::D, Layer::E] {
+            assert!(
+                census.get(layer) >= listed.get(layer),
+                "{:?}, {layer:?}: the census {census:?} holds the list's {listed:?}",
+                feature.id()
+            );
+        }
         for years in TIMES_YR {
             let t = UniverseTime::from_julian_years(years).expect("in the clock window");
             for (centre, radius) in spheres_about(feature.position(), &own, t) {
                 let listed = entries_near(galaxy, &centre, radius);
-                let (n, mut found) = check_sphere(galaxy, sources, &listed, (&centre, radius, t));
+                let (n, mut found) =
+                    check_sphere((galaxy, &mut cells), sources, &listed, (&centre, radius, t));
                 inside += n;
                 faults.append(&mut found);
             }
@@ -418,7 +416,7 @@ fn admitting_radius(
     let mut radius = start;
     for _ in 0..24 {
         let plan = RangePlan::new(galaxy, sources, &query(centre, LightYears::new(radius), t));
-        if plan.census().layers().contains(crate::id::Layer::D) {
+        if plan.census().layers().contains(Layer::D) {
             return LightYears::new(radius);
         }
         radius *= 0.5;
@@ -454,6 +452,7 @@ fn centre_in_range(galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> (usize, Ve
         );
     }
     let (mut inside, mut faults) = (0, Vec::new());
+    let mut cells = KeepCells::default();
     for years in TIMES_YR {
         let t = UniverseTime::from_julian_years(years).expect("in the clock window");
         let mut spheres = vec![GalacticPosition::ORIGIN];
@@ -465,7 +464,8 @@ fn centre_in_range(galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> (usize, Ve
         spheres.extend(listed.values().take(about).map(|entry| entry.at(t)));
         for centre in spheres {
             let radius = admitting_radius(galaxy, sources, &centre, 1.0, t);
-            let (n, mut found) = check_sphere(galaxy, sources, &listed, (&centre, radius, t));
+            let (n, mut found) =
+                check_sphere((galaxy, &mut cells), sources, &listed, (&centre, radius, t));
             inside += n;
             faults.append(&mut found);
         }

@@ -49,10 +49,12 @@ use crate::galaxy::catalogue_classes::binary::feature::{
     FeatureBinaries, ListedBinary, is_listed_binary,
 };
 use crate::galaxy::catalogue_classes::{ClassId, FEATURE_LEVEL_LIST_ORDER};
+use crate::galaxy::query::LayerCounts;
 use crate::id::{CentreMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::system::SystemStars;
+use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord};
@@ -498,6 +500,42 @@ impl FeatureLevelList {
         self.entries()
             .filter(|entry| is_listed_binary(entry.class()))
             .filter_map(move |entry| self.binary_entry(galaxy, entry.index()))
+    }
+
+    /// The stars of a catalogue feature whose list registers its recent classes (P09.T36), which
+    /// draw their entries: `None` for any other list, the galactic centre's among them.
+    #[must_use]
+    pub(crate) fn recent_stars(&self) -> Option<&FeatureStars> {
+        self.stars.as_deref()
+    }
+
+    /// The census's share of a catalogue feature's recent classes in the ball of `radius` about
+    /// `centre` at the epoch, added to `counts` by the layer each class's primaries are of
+    /// ([`RecentClass::layer`]; P09.T37): each class's expected candidates times the share of its
+    /// profile between `d − radius` and `d + radius` from the feature's centre, `d` the ball's
+    /// distance from it, a shell that holds the ball, so the count errs high, as
+    /// [`SystemSource`](crate::galaxy::query::SystemSource)'s contract allows. Nothing for a list
+    /// that registers no recent class. Classes in list order.
+    pub(crate) fn add_recent_expected_within(
+        &self,
+        centre: &GalacticPosition,
+        radius: LightYears,
+        counts: &mut LayerCounts,
+    ) {
+        if self.stars.is_none() {
+            return;
+        }
+        let distance = LightYears::from(self.centre.distance_to(centre)).value();
+        let radius = radius.value();
+        for class in &self.classes {
+            let Some(recent) = RecentClass::of(class.class) else {
+                continue;
+            };
+            let share = class.profile.cumulative(distance + radius)
+                - class.profile.cumulative(distance - radius);
+            let layer = recent.layer();
+            counts.set(layer, counts.get(layer) + class.expected * share.max(0.0));
+        }
     }
 
     /// The entry at `index` of a recent class (P09.T36), its member, site and shell, or `None` for

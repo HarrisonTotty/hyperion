@@ -80,7 +80,7 @@ use crate::galaxy::features::kinds::open_cluster::disruption_survival;
 use crate::galaxy::imf::{MassBand, MassFunction};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::snr::{ShellEnvironment, ShellWindow, SiteGas};
-use crate::id::{FeatureMemberId, MemberSlot, SystemId};
+use crate::id::{FeatureMemberId, Layer, MemberSlot, SystemId};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
@@ -101,7 +101,8 @@ use super::level_list::ListClass;
 /// feature's list and the cells claim nothing. The tests reach the new arm through a galaxy built
 /// under every 27 hold (`GalaxyRules::every_27_hold`). The bump to 27 deletes this hold,
 /// [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the `match`es
-/// in [`FeatureStars::listing`], [`FeatureStars::claiming`] and the centre's list, and the tripwire
+/// in [`FeatureStars::listing`], [`FeatureStars::claiming`], [`lists_recent_classes`] (the range
+/// query's, P09.T37) and the centre's list, and the tripwire
 /// (`the_feature_classes_are_held_only_until_the_27_bump`).
 pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
@@ -112,6 +113,16 @@ pub(crate) enum FeatureClassesRules {
     Unlisted,
     /// Version 26's: the classes of the module documentation, and the cells' claim.
     Listed,
+}
+
+/// Whether catalogue features in `galaxy` list their recent classes, and the range query places
+/// them (P09.T37): the hold's new arm.
+#[must_use]
+pub(crate) const fn lists_recent_classes(galaxy: &Galaxy) -> bool {
+    match galaxy.rules().feature_classes {
+        FeatureClassesRules::Unlisted => false,
+        FeatureClassesRules::Listed => true,
+    }
 }
 
 /// Masses of the core collapses' envelope search over band E: 512 nodes, log-spaced.
@@ -141,6 +152,18 @@ impl RecentClass {
             Self::CoreCollapse => ClassId::CORE_COLLAPSE,
             Self::TypeIa => ClassId::TYPE_IA,
             Self::LuminousBlueVariable => ClassId::LUMINOUS_BLUE_VARIABLE,
+        }
+    }
+
+    /// The layer its entries' primaries are of (P09.T37): band E's for a core collapse and a
+    /// variable, layer D's for a Type Ia, whose primary is of 2.5–8 M☉
+    /// ([`type_ia::PRIMARY_MIN`](crate::galaxy::catalogue_classes::type_ia::PRIMARY_MIN) and
+    /// [`PRIMARY_MAX`](crate::galaxy::catalogue_classes::type_ia::PRIMARY_MAX)).
+    #[must_use]
+    pub const fn layer(self) -> Layer {
+        match self {
+            Self::CoreCollapse | Self::LuminousBlueVariable => Layer::E,
+            Self::TypeIa => Layer::D,
         }
     }
 
