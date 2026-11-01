@@ -12,11 +12,11 @@ mod common;
 use common::TestServer;
 use common::alerts::{
     DAY, FAR_LY, SEED, after, arrival, beside, contacts_until, contacts_until_answered, light_at,
-    move_to, opened, peak, pinned, subscribe, v_sensor,
+    move_to, opened, opened_with, peak, pinned, subscribe, subscribe_to, v_sensor,
 };
 use hyperion_protocol::{
-    ClassCensusStatusDto, ContactDto, NotificationBody, RequestBody, ResponseBody,
-    UnsubscribeRequest,
+    CatalogueClassWire, ClassCensusStatusDto, ContactDto, NotificationBody, RequestBody,
+    ResponseBody, UnsubscribeRequest,
 };
 use hyperion_server::compute::BulkGate;
 use hyperion_server::knowledge::PersistedKnowledge;
@@ -211,6 +211,62 @@ async fn alerts_scans_walk_a_galaxy_wide_class_to_complete() {
     );
     let hosts = settled.expected_hosts.unwrap_or_default();
     assert!((1e5..1e7).contains(&hosts), "{settled:?}");
+    client.close().await;
+    server.stop().await;
+}
+
+/// A class walked in the background past the subscription's host limit yields nothing (Design note
+/// 7): subscribed 0.2 ly from the pinned supernova through a V sensor that reaches 16,000 ly, its
+/// core collapses too many cells to count interactively, at a host limit of ten, the walk reads
+/// `over_limit` with the candidates it drew, and the supernova's arrival and peak bring no contact.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alerts_scans_yield_nothing_of_a_background_class_over_its_host_limit() {
+    let galaxy = Galaxy::new(Seed::new(SEED));
+    let supernova = pinned(&galaxy);
+    let far = beside(&supernova, FAR_LY);
+    let probe = 1e-6;
+    let ratio = class_reach(ClassId::CORE_COLLAPSE, &v_sensor(probe, probe)).value() / 16_000.0;
+    let detect = probe * ratio * ratio;
+    let server = TestServer::start().await;
+    let mut client = server.connected().await;
+    let universe = client
+        .create_universe("Alerts: over the limit", SEED)
+        .await
+        .id;
+    let start = after(arrival(&supernova, &far), -DAY);
+    let classes = [CatalogueClassWire::CoreCollapse];
+    let request = subscribe_to(
+        &universe,
+        &far,
+        start,
+        (detect, detect * 10.0),
+        &classes,
+        Some(10),
+    );
+    let (subscription, contacts, census) = opened_with(&mut client, request).await;
+    assert_eq!((contacts.len(), census.len()), (0, 1));
+    let settled = loop {
+        let (_, NotificationBody::Alerts(notification)) = client.next_notification().await else {
+            panic!("an alerts notification");
+        };
+        assert_eq!(notification.contacts, [], "nothing over the limit is told");
+        if let [line] = notification.census[..]
+            && line.status != ClassCensusStatusDto::Pending
+        {
+            break line;
+        }
+    };
+    assert_eq!(
+        settled.status,
+        ClassCensusStatusDto::OverLimit,
+        "{settled:?}"
+    );
+    assert!(
+        settled.expected_hosts.is_some_and(|hosts| hosts > 10.0),
+        "{settled:?}"
+    );
+    let id = move_to(&mut client, subscription, &far, after(start, 60 * DAY)).await;
+    assert_eq!(contacts_until_answered(&mut client, id).await, []);
     client.close().await;
     server.stop().await;
 }

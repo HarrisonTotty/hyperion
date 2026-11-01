@@ -310,7 +310,7 @@ impl Topic {
         };
         let settled = match found.drawn() {
             None => ClassCensusStatusDto::Unwalked,
-            Some(drawn) if drawn > self.subscription.host_limit().get() => {
+            Some(drawn) if drawn > u64::from(self.subscription.host_limit().get()) => {
                 ClassCensusStatusDto::OverLimit
             }
             Some(_) => ClassCensusStatusDto::Complete,
@@ -327,7 +327,7 @@ impl Topic {
         if self.background.get(&class) == Some(&number) {
             self.background.remove(&class);
             if let Some(dto) = self.census.get_mut(&class) {
-                let hosts = found.drawn().map(f64::from);
+                let hosts = found.drawn().map(hosts_drawn);
                 census_changed = (dto.status, dto.expected_hosts) != (settled, hosts);
                 dto.status = settled;
                 dto.expected_hosts = hosts;
@@ -518,6 +518,17 @@ impl Crew {
             .map(drop)
             .map_err(|error| acknowledge_refusal(&error))
     }
+}
+
+/// A background walk's drawn candidates as the census counts its hosts.
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a count of candidates, under 2^48 (2^24 a cell over the cube's 2^24 cells), is exact \
+              in f64"
+)]
+fn hosts_drawn(drawn: u64) -> f64 {
+    drawn as f64
 }
 
 /// Whether a merge took its scan: a stale one is refused by a schedule that restarted since, and

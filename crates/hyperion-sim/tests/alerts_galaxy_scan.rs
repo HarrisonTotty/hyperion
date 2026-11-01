@@ -90,6 +90,18 @@ fn sorted(mut detections: Vec<Detection>) -> Vec<Detection> {
     detections
 }
 
+/// Where two lists of detections first differ: the index and the two there, or the lengths when
+/// one is the other's start; `None` when they are equal. Lists of tens of thousands are compared
+/// without printing them whole.
+fn first_difference(
+    cut: &[Detection],
+    built: &[Detection],
+) -> Option<(usize, Option<Detection>, Option<Detection>)> {
+    (0..cut.len().max(built.len()))
+        .find(|&at| cut.get(at) != built.get(at))
+        .map(|at| (at, cut.get(at).cloned(), built.get(at).cloned()))
+}
+
 /// The cut walk of `class` over `sphere`: each x-slab's occupied cells, each walked by `walk`.
 fn cut_walk(
     galaxy: &Galaxy,
@@ -297,8 +309,7 @@ fn alerts_galaxy_scan_finds_a_magnetar_nearby_as_the_walk_as_built() {
     let query = query(at, ClassId::CORE_COLLAPSE, x, 0, 100);
     let (built, cut) = magnetars_both(galaxy, &query);
     assert!(!cut.is_empty(), "the magnetar bursts");
-    assert_eq!(cut.len(), built.len());
-    assert!(cut == built, "the cut walk is the walk as built");
+    assert_eq!(first_difference(&cut, &built), None);
 }
 
 /// The whole cube's core collapses through a V limit of 10⁻¹² W m⁻² over the first 1,000 years from
@@ -356,8 +367,7 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_magnetars_as_the_walk_as_built() {
         100,
     );
     let (built, cut) = magnetars_both(galaxy, &query);
-    assert_eq!(cut.len(), built.len());
-    assert!(cut == built, "the cut walk is the walk as built");
+    assert_eq!(first_difference(&cut, &built), None);
     let mut hosts: Vec<_> = cut.iter().map(Detection::host).collect();
     hosts.sort_unstable();
     hosts.dedup();

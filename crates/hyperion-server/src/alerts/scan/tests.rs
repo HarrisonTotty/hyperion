@@ -4,13 +4,17 @@
 
 use std::collections::BTreeSet;
 
-use hyperion_sim::alerts::{ClassSet, LocalEventsCache, LongestRise, SensorHorizon, TransientKind};
+use hyperion_sim::alerts::{
+    AlertBand, BandLimits, ClassSet, LocalEventsCache, LongestRise, SensorHorizon, TransientKind,
+};
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use hyperion_sim::galaxy::catalogue_classes::{ClassId, cells_in_sphere, occupied_cells};
+use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::time::{Span, UniverseTime};
+use hyperion_sim::units::WattsPerSquareMetre;
 
 use super::*;
 use crate::alerts::testing::{
@@ -168,13 +172,17 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
         "a few dozen slabs: {:?}",
         plan.jobs()
     );
-    let drawn: u32 = occupied_cells(
+    let sphere = plan
+        .sphere
+        .as_ref()
+        .expect("a sensor that sees the class has a sphere");
+    let drawn: u64 = occupied_cells(
         galaxy(),
         &CoreCollapseProcess::new(galaxy()),
-        cells_in_sphere(class, &plan.sphere),
+        cells_in_sphere(class, sphere),
     )
     .iter()
-    .map(|&(_, count)| count)
+    .map(|&(_, count)| u64::from(count))
     .sum();
     assert_eq!(whole.drawn(), Some(drawn));
     for per_job in [1, 3] {
@@ -231,4 +239,73 @@ fn a_whole_galaxy_plan_is_the_cubes_slabs_and_no_list_of_its_keys() {
         );
     }
     assert!(background_plan(galaxy(), &spec, ClassId::LUMINOUS_BLUE_VARIABLE, 1).is_none());
+}
+
+/// A class the sensor cannot see, the core collapses through a radio sensor, in which no supernova
+/// template gives light: its plan has no job, and its walk draws nothing.
+#[test]
+fn a_class_the_sensor_cannot_see_plans_no_job_and_draws_nothing() {
+    let radio = SensorHorizon::new([(
+        AlertBand::Photometric(Band::Radio),
+        BandLimits::new(
+            WattsPerSquareMetre::new(1e-20),
+            WattsPerSquareMetre::new(1e-18),
+        )
+        .unwrap(),
+    )])
+    .unwrap();
+    let (subscription, first) = core_collapses(sun(), UniverseTime::EPOCH, radio);
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let plan = background_plan(galaxy(), &spec, ClassId::CORE_COLLAPSE, SLABS_PER_JOB).unwrap();
+    assert_eq!(plan.jobs(), []);
+    assert_eq!(ScanResult::of_jobs([]).drawn(), Some(0));
+}
+
+/// A merger class, whose candidates read no time first, walked in jobs of one slab gives its
+/// interactive walk's tracks: the stellar mergers through a V sensor reaching some 700 ly of the
+/// core collapses' reach, from the Sun-like point over the first scan's year.
+#[tokio::test]
+async fn a_merger_class_in_slab_jobs_gives_its_interactive_walks_tracks() {
+    let (server, _data_dir) = server(|config| config).await;
+    let state = server.state();
+    let class = ClassId::STELLAR_MERGER;
+    let (subscription, first) = Subscription::new(
+        Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
+        reaching(700.0),
+        ClassSet::of(class),
+        hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
+    );
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let plan = background_plan(galaxy(), &spec, class, 1).unwrap();
+    assert_ne!(plan.jobs(), []);
+    let token = CancelToken::new();
+    let jobs: Vec<_> = plan
+        .jobs()
+        .iter()
+        .cloned()
+        .map(|slabs| walk_slabs(state, galaxy(), &spec, &plan, slabs, &token).unwrap())
+        .collect();
+    let walked = ScanResult::of_jobs(jobs);
+    assert!(
+        walked.drawn().is_some_and(|drawn| drawn > 0),
+        "{:?}",
+        walked.drawn()
+    );
+    let interactive = walk_interactive(state, galaxy(), &spec, &mut LocalEventsCache::default());
+    let interactive: Vec<_> = interactive
+        .tracks()
+        .iter()
+        .filter(|track| track.detection().class() == Some(class))
+        .cloned()
+        .collect();
+    let events = |tracks: &[Tracked]| {
+        let mut events: Vec<_> = tracks
+            .iter()
+            .map(|track| track.detection().event())
+            .collect();
+        events.sort_unstable();
+        events
+    };
+    assert_eq!(events(walked.tracks()), events(&interactive));
+    server.shutdown().await.unwrap();
 }

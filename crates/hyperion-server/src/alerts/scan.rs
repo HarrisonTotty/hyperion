@@ -222,7 +222,7 @@ pub(crate) struct ScanResult {
     census: Vec<ClassCensus>,
     /// The candidates a background walk's cells drew, or `None` for an interactive walk or a
     /// class no background walk reads.
-    drawn: Option<u32>,
+    drawn: Option<u64>,
 }
 
 impl ScanResult {
@@ -230,10 +230,11 @@ impl ScanResult {
     #[must_use]
     pub(crate) fn of_jobs(jobs: impl IntoIterator<Item = SlabsWalked>) -> Self {
         let mut tracks = Vec::new();
-        let mut drawn: u32 = 0;
+        let mut drawn: u64 = 0;
         for job in jobs {
             tracks.extend(job.tracks);
-            drawn = drawn.saturating_add(job.drawn);
+            // Each count is under 2^24 a cell, of under 2^24 cells.
+            drawn += job.drawn;
         }
         Self {
             tracks,
@@ -256,7 +257,7 @@ impl ScanResult {
     /// count of hosts (lean, 2026-11-01): `None` for an interactive walk, or a class no
     /// background walk reads.
     #[must_use]
-    pub(crate) const fn drawn(&self) -> Option<u32> {
+    pub(crate) const fn drawn(&self) -> Option<u64> {
         self.drawn
     }
 
@@ -436,7 +437,8 @@ impl BackgroundProcess {
 #[derive(Debug, Clone)]
 pub(crate) struct BackgroundPlan {
     process: Arc<BackgroundProcess>,
-    sphere: QuerySphere,
+    /// `None` for a class the sensor cannot see, which has no job.
+    sphere: Option<QuerySphere>,
     jobs: Vec<Range<i32>>,
 }
 
@@ -450,7 +452,7 @@ impl BackgroundPlan {
 
 /// The plan of `class`'s background walk for `spec` in `galaxy`, its slabs `slabs_per_job` to a
 /// job, more where they would make over [`MAX_BACKGROUND_JOBS`] jobs; `None` for a class no
-/// background walk reads in cells. A class the sensor cannot see has no slabs.
+/// background walk reads in cells. A class the sensor cannot see has no slabs and no job.
 ///
 /// The sphere is the class's reach ([`class_reach`]), within which every kind of the class has its
 /// own; the plan sweeps it slab by slab, so no list of its cells is held, 2²⁴ of them over the cube.
@@ -463,15 +465,19 @@ pub(crate) fn background_plan(
 ) -> Option<BackgroundPlan> {
     let process = Arc::new(BackgroundProcess::of(galaxy, class)?);
     let query = spec.class_query(class);
-    let sphere = QuerySphere::new(
-        *query.observer_position(),
-        class_reach(class, query.sensor()),
-        query.window().start(),
-        LightYears::ZERO,
-    )
-    .expect("a reach is a length within the cube's diagonal");
+    let reach = class_reach(class, query.sensor());
+    let observer = *query.observer_position();
+    let start = query.window().start();
+    // A class the sensor cannot see has no sphere: no slab and no job, nothing drawn.
+    let Ok(sphere) = QuerySphere::new(observer, reach, start, LightYears::ZERO) else {
+        return Some(BackgroundPlan {
+            process,
+            sphere: None,
+            jobs: Vec::new(),
+        });
+    };
     let slabs = class_slabs(class, &sphere);
-    let count = usize::try_from(slabs.end - slabs.start).unwrap_or(0);
+    let count = slabs.len();
     // No more slabs a job than the sphere has, which are some hundreds.
     let per_job = slabs_per_job
         .max(count.div_ceil(MAX_BACKGROUND_JOBS))
@@ -484,7 +490,7 @@ pub(crate) fn background_plan(
         .collect();
     Some(BackgroundPlan {
         process,
-        sphere,
+        sphere: Some(sphere),
         jobs,
     })
 }
@@ -494,7 +500,7 @@ pub(crate) fn background_plan(
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct SlabsWalked {
     tracks: Vec<Tracked>,
-    drawn: u32,
+    drawn: u64,
 }
 
 /// Whether `kind`'s events of `key`'s cell can reach `query`'s sensor: its box within the kind's
@@ -540,7 +546,7 @@ pub(crate) fn walk_slabs(
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
     let mut ctx = AlertContext::new(&mut noise, gas.source());
     let mut detections = Vec::new();
-    let mut drawn: u32 = 0;
+    let mut drawn: u64 = 0;
     let process = plan.process.as_ref();
     let class = match process {
         BackgroundProcess::CoreCollapse(_) => ClassId::CORE_COLLAPSE,
@@ -549,11 +555,14 @@ pub(crate) fn walk_slabs(
         BackgroundProcess::NeutronStarMergers(_) => ClassId::NEUTRON_STAR_MERGER,
     };
     let query = spec.class_query(class);
+    let Some(sphere) = plan.sphere.as_ref() else {
+        return Some(SlabsWalked::default());
+    };
     for x in slabs {
         if token.is_cancelled() {
             return None;
         }
-        let cells = cells_in_slab(class, &plan.sphere, x);
+        let cells = cells_in_slab(class, sphere, x);
         let occupied = match process {
             BackgroundProcess::CoreCollapse(p) => occupied_cells(galaxy, p, cells),
             BackgroundProcess::TypeIa(p) => occupied_cells(galaxy, p, cells),
@@ -564,7 +573,7 @@ pub(crate) fn walk_slabs(
             if token.is_cancelled() {
                 return None;
             }
-            drawn = drawn.saturating_add(count);
+            drawn += u64::from(count);
             let out = &mut detections;
             match process {
                 BackgroundProcess::CoreCollapse(p) => {

@@ -91,7 +91,8 @@ fn between(from: UniverseTime, to: UniverseTime) -> impl Fn(UniverseTime) -> boo
 ///
 /// # Panics
 ///
-/// Never: the window is on the clock, and a cut's bounds lie within millennia of it.
+/// Never: the window is on the clock, and a cut's bounds lie under a million years from it, far
+/// inside the i64 seconds' range of a time.
 pub(crate) fn one_shot(
     query: &AlertQuery,
     key: &CatalogueCellKey,
@@ -101,16 +102,16 @@ pub(crate) fn one_shot(
     let back = years(SUPERNOVA_LIGHT_YEARS)
         .checked_add(light.far)
         .and_then(|span| span.checked_add(DAY))
-        .expect("centuries and a light time are a span");
+        .expect("centuries and a light time across the cube are a span");
     let from = window
         .start()
         .checked_sub(back)
-        .expect("a cut's start lies within millennia of the clock");
+        .expect("a clock time less under a million years is far inside the i64 seconds' range");
     let to = window
         .end()
         .checked_add(DAY)
         .and_then(|t| t.checked_sub(light.near))
-        .expect("a cut's end lies within millennia of the clock");
+        .expect("a clock time and under a million years is far inside the i64 seconds' range");
     between(from, to)
 }
 
@@ -133,17 +134,17 @@ pub(crate) fn magnetars(
         .and_then(|span| span.checked_add(MAX_BURST_DURATION))
         .and_then(|span| span.checked_add(MAX_BURST_DURATION))
         .and_then(|span| span.checked_add(Span::from_seconds(3 * 86_400)))
-        .expect("millennia and a light time are a span");
+        .expect("under a million years and a light time across the cube are a span");
     let from = window
         .start()
         .checked_sub(back)
-        .expect("a cut's start lies within millennia of the clock");
+        .expect("a clock time less under a million years is far inside the i64 seconds' range");
     let to = window
         .end()
         .checked_add(reach)
         .and_then(|t| t.checked_add(Span::from_seconds(2 * 86_400)))
         .and_then(|t| t.checked_sub(light.near))
-        .expect("a cut's end lies within millennia of the clock");
+        .expect("a clock time and under a million years is far inside the i64 seconds' range");
     between(from, to)
 }
 

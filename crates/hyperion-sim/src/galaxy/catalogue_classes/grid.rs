@@ -596,6 +596,7 @@ pub fn entries_when<P: ClassProcess>(
 /// # Panics
 ///
 /// As [`CatalogueClassCell::generate`], for a cell of another class or a bound out of range.
+#[must_use]
 pub fn occupied_cells<P: ClassProcess>(
     galaxy: &Galaxy,
     process: &P,

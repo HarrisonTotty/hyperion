@@ -57,19 +57,38 @@ fn query(band: AlertBand, detect: f64, years: i64) -> AlertQuery {
         .expect("a query of the clock window")
 }
 
-/// The whole cube's `kind` detections for `query`, walked on `pool` in jobs of
-/// [`SLABS_PER_JOB`] slabs of `kind`'s sphere: the process built once and lent to every job.
+/// What a walk of the core collapses lists.
+#[derive(Debug, Clone, Copy)]
+enum Walk {
+    /// Their supernovae.
+    Supernovae,
+    /// Their magnetars.
+    Magnetars,
+}
+
+impl Walk {
+    /// The kind the walk lists, whose reach its sphere is.
+    const fn kind(self) -> TransientKind {
+        match self {
+            Self::Supernovae => TransientKind::CoreCollapse,
+            Self::Magnetars => TransientKind::MagnetarBurst,
+        }
+    }
+}
+
+/// The whole cube's detections of `what` for `query`, walked on `pool` in jobs of
+/// [`SLABS_PER_JOB`] slabs of its kind's sphere: the process built once and lent to every job.
 fn walk(
     runtime: &tokio::runtime::Runtime,
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     query: &AlertQuery,
-    kind: TransientKind,
+    what: Walk,
 ) -> Vec<Detection> {
     let process = Arc::new(CoreCollapseProcess::new(galaxy));
     let sphere = QuerySphere::new(
         *query.observer_position(),
-        kind_reach(kind, query.sensor()),
+        kind_reach(what.kind(), query.sensor()),
         query.window().start(),
         LightYears::ZERO,
     )
@@ -91,8 +110,8 @@ fn walk(
                     for x in range {
                         let cells = cells_in_slab(ClassId::CORE_COLLAPSE, &sphere, x);
                         for (cell, _) in occupied_cells(&galaxy, process.as_ref(), cells) {
-                            match kind {
-                                TransientKind::MagnetarBurst => magnetar_scan_cell(
+                            match what {
+                                Walk::Magnetars => magnetar_scan_cell(
                                     &galaxy,
                                     &mut ctx,
                                     &query,
@@ -100,7 +119,7 @@ fn walk(
                                     cell,
                                     &mut out,
                                 ),
-                                _ => one_shot_scan_cell(
+                                Walk::Supernovae => one_shot_scan_cell(
                                     &galaxy,
                                     &mut ctx,
                                     &query,
@@ -145,25 +164,13 @@ fn galaxy_scan(c: &mut Criterion) {
     let supernovae = query(AlertBand::Photometric(Band::V), 1e-12, 1_000);
     let magnetars = query(AlertBand::XRay, 1e-14, 100);
     // Research's counts: 4 onsets, and 27,059 magnetar detections from 71 hosts.
-    let seen = walk(
-        &runtime,
-        &pool,
-        &galaxy,
-        &supernovae,
-        TransientKind::CoreCollapse,
-    );
+    let seen = walk(&runtime, &pool, &galaxy, &supernovae, Walk::Supernovae);
     let onsets = seen
         .iter()
         .filter(|detection| detection.phase() == DetectionPhase::Onset)
         .count();
     assert_eq!(onsets, 4, "{seen:?}");
-    let bursts = walk(
-        &runtime,
-        &pool,
-        &galaxy,
-        &magnetars,
-        TransientKind::MagnetarBurst,
-    );
+    let bursts = walk(&runtime, &pool, &galaxy, &magnetars, Walk::Magnetars);
     assert_eq!(bursts.len(), 27_059);
     let mut group = c.benchmark_group("oneshot_scan_galaxy");
     group.sample_size(10);
@@ -174,15 +181,7 @@ fn galaxy_scan(c: &mut Criterion) {
             workers.get()
         ),
         |b| {
-            b.iter(|| {
-                walk(
-                    &runtime,
-                    &pool,
-                    &galaxy,
-                    &supernovae,
-                    TransientKind::CoreCollapse,
-                )
-            });
+            b.iter(|| walk(&runtime, &pool, &galaxy, &supernovae, Walk::Supernovae));
         },
     );
     group.bench_function(
@@ -191,15 +190,7 @@ fn galaxy_scan(c: &mut Criterion) {
             workers.get()
         ),
         |b| {
-            b.iter(|| {
-                walk(
-                    &runtime,
-                    &pool,
-                    &galaxy,
-                    &magnetars,
-                    TransientKind::MagnetarBurst,
-                )
-            });
+            b.iter(|| walk(&runtime, &pool, &galaxy, &magnetars, Walk::Magnetars));
         },
     );
     group.finish();
