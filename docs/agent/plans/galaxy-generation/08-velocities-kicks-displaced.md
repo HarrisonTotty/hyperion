@@ -2304,3 +2304,47 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - _The 27-held redesign (research-leans-19 §3), estimated._ The fitted fate table answers 187 of
     the query's 229 fates, in 0.5 µs each. With exact calls only where it doesn't, about 50 builds
     remain, about 20 ms, so the grid's cold query would fall from about 101 ms to about 30 ms.
+- **P08.T12 at 27, as built (lane `fates-27`, 2026-11-01, at `GENERATOR_VERSION` 24, behind
+  `PLACEMENT_FATES_VERSION` = 27; no output moves at 24–26).**
+  - _Hold._ `placement::marks::{PLACEMENT_FATES_VERSION, PlacementFateRules::{Exact, Fitted}}` and
+    `GalaxyRules::placement_fates`, in `every_27_hold`. The tripwire is
+    `the_placement_fates_are_held_only_until_the_27_bump`.
+  - _Arm._ The progenitor fate of a retained record, a displaced remnant or a C/O hypervelocity
+    survivor is read from `FittedFates::fate_fitted` (`table_fate`). Its route decides the redraw.
+    The time since death is drawn after the upper end of the carve-out's bracket, d ÷ (1 − m),
+    where m = max(3 × bound, 3 × 10⁻³). Such a record carries no lifetime, so the carve-out's
+    exact step computes one where it needs it. The exact fate is still taken in four cases: where
+    the table doesn't answer; for a white dwarf's route whose stripped mark is set in its window;
+    for an iron core whose corners at 3 × its bounds disagree on leaving a remnant; and from the
+    Humphreys–Davidson-free mass up.
+  - _Lean (2026-11-01): the HD-free masses._ Every 27 hold takes `HdLimitRules::Enforced`, which
+    the table wasn't fitted for, so gated by `fitted_tables_hold` the table would answer nothing.
+    The two arms' tracks are the same bit for bit below 31.7 M☉ at the least `z_fit`, rising to
+    60.3 at the most. `HD_FREE_MASSES` is a step function of [Fe/H] at about 0.9 of those masses.
+    Above them, the arms' death ages part by up to 3%, and at the least Z, 104 of 3,900 kick
+    verdicts differ.
+  - _Lean: the stripped mark._ The track reads it only for a star that would otherwise leave a
+    white dwarf (`Builder::by_companion_mark`). In the sweep it moved none of 9,875 iron-core or
+    electron-capture fates.
+  - _Accuracy (`placement::fates_hold`, against the held arm)._ In a Sun-like block of 3³ layer-E
+    cells, the table reads 540 of 722 dead records' fates; about the nearest globular's core, 80
+    of 91. Every route it reads is the track's. Every record is dead by its exact lifetime, and a
+    death moves at most 1.9% of the lifetime earlier. KS tests: initial masses D = 0, since every
+    redraw is the same; times since death D = 0.0014 (Sun-like) and 0.011 (core), p = 1. The slow
+    test takes 5³ cells through the stellar stage: 3,092 remnants, masses D = 0, deaths D = 0.0003.
+  - _Cost (pod, release, one thread)._ Under every 27 hold, the grid's cold Sun-like 50 ly query
+    takes 33.3 ms (it was 96.7) and the 1 ly query 16.0 ms (it was 47.9). Of 237 exact builds, 70
+    remain: 31 where the table refuses, near 8–8.7 M☉; 21 above the HD-free mass; 10 stripped;
+    and 8 living lifetimes. The served query with every source (bench `classes_at_27`) takes
+    396.6 ms cold (was 525.1) and 5.04 ms warm. Without the classes it takes 78.5 ms cold (was
+    205.7). The core collapses alone take 281 ms of it.
+  - _Goldens that move at 27._ Blessed under every 27 hold with each arm, five sim goldens differ,
+    in the ages of layer-E dead records alone: `placement/carve_out`, `placement/cells`,
+    `placement/digests`, `placement/young_field` and `stellar/system_metallicity`. No fast test
+    pinned under every 27 hold moves. Golden tests that fail under every 27 hold in both arms,
+    before they write, weren't compared (`planetary_golden`, `stellar_kick`, `galaxy_handle`,
+    `alerts_recurrent_binaries`, the server's `system_summary`). This was measured on 3b38b7c7,
+    before P09.T34.b's survivor fix, and not again after the rebase.
+  - _Rebase onto a96b75cc._ A C/O survivor's `dead_age` gives the table-read case's `None`, and
+    `check_survivor` takes that `None` as the table's read under the fitted arm. The figures above
+    are unchanged on the rebased tree.
