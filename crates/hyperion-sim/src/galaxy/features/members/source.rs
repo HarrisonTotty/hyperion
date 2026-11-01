@@ -26,8 +26,9 @@
 //!   variables its band-E cells give up, and an association, which has no nested grid, holds them
 //!   nowhere else. Each feature whose reach touches the sphere adds to the census each recent
 //!   class's expected candidates times the share of its profile in the shell about the feature's
-//!   centre that holds the sphere ([`FeatureLevelList::add_recent_expected_within`]), in the layer
-//!   its primaries are of. An entry moves on one straight line, through its epoch position at the
+//!   centre that holds the sphere (`FeatureLevelList::add_recent_expected_within`), in the layer
+//!   its primaries are of. The list holds the recent classes alone, as the interior cache lends it
+//!   ([`FeatureInteriorCache::recent_list`]), so a query's census and hits build it once. An entry moves on one straight line, through its epoch position at the
 //!   feature's bulk velocity, on which its site lies at its death (P09.T36), before its death and
 //!   after it. `member_speed_bound` does not cover the lists, so a list has a pad of its own: its
 //!   entries lie within the feature's reach of its centre at the epoch and move at the bulk speed,
@@ -69,7 +70,7 @@ use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
 use super::level_list::FeatureLevelList;
 use super::placement::FeatureInterior;
-use super::recent::{RecentClass, lists_recent_classes};
+use super::recent::{FeatureClassesRules, RecentClass};
 use super::{MemberRecord, local_offset};
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
@@ -88,6 +89,17 @@ pub trait FeatureInteriorCache {
     /// lends none.
     fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
         FeatureInterior::grid_reach_bound(galaxy, feature)
+    }
+
+    /// The list of `feature`'s recent classes in `galaxy` (P09.T37), which an implementation may
+    /// keep: exactly what `FeatureLevelList::recent_of` builds, `None` for a feature that registers
+    /// none. A range query's census and its hits both read it.
+    fn recent_list(
+        &self,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<Arc<FeatureLevelList>> {
+        FeatureLevelList::recent_of(galaxy, feature).map(Arc::new)
     }
 }
 
@@ -115,6 +127,7 @@ pub struct KeepInteriors<'a> {
     galaxy: &'a Galaxy,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
     reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
+    lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
 }
 
 impl<'a> KeepInteriors<'a> {
@@ -125,6 +138,7 @@ impl<'a> KeepInteriors<'a> {
             galaxy,
             kept: Mutex::new(BTreeMap::new()),
             reaches: Mutex::new(BTreeMap::new()),
+            lists: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -170,6 +184,21 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(feature.id())
             .or_insert_with(|| FeatureInterior::grid_reach_bound(galaxy, feature))
+    }
+
+    /// The list it keeps, or the list built and kept.
+    fn recent_list(
+        &self,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<Arc<FeatureLevelList>> {
+        self.check(galaxy);
+        self.lists
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| FeatureLevelList::recent_of(galaxy, feature).map(Arc::new))
+            .clone()
     }
 }
 
@@ -325,14 +354,14 @@ impl<'a> FeatureMemberSource<'a> {
     /// order, each with its interior where its nested grid may meet the sphere: those whose grid's
     /// reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that misses the
     /// sphere has no cell touching it, so its feature adds nothing from its cells to the census or
-    /// the hits, and its interior is not built. Where `lists` is false (P09.T36's held arm) only
-    /// the features with an interior are given, since nothing else of theirs is read.
+    /// the hits, and its interior is not built. Under P09.T36's held arm, `lists`, only the
+    /// features with an interior are given, since nothing else of theirs is read.
     fn near(
         &self,
         galaxy: &Galaxy,
         centre: &GalacticPosition,
         radius: LightYears,
-        lists: bool,
+        lists: FeatureClassesRules,
     ) -> impl Iterator<Item = (FeatureRecord, Option<Arc<FeatureInterior>>)> {
         FeatureCatalogue::near(galaxy, centre, radius, self.features).filter_map(move |f| {
             let interior = self
@@ -341,7 +370,11 @@ impl<'a> FeatureMemberSource<'a> {
                 .is_some_and(|reach| grid_may_touch(&f, centre, reach, radius))
                 .then(|| self.interiors.interior(galaxy, &f))
                 .flatten();
-            (lists || interior.is_some()).then_some((f, interior))
+            let given = match lists {
+                FeatureClassesRules::Unlisted => interior.is_some(),
+                FeatureClassesRules::Listed => true,
+            };
+            given.then_some((f, interior))
         })
     }
 
@@ -379,9 +412,9 @@ impl<'a> FeatureMemberSource<'a> {
         };
         let lookup = outer + pad_for(farthest, UNBOUND_PAD_SPEED);
         let mut members = Vec::new();
-        // Only the features with an interior have members in cells: no lists gives just those.
+        // Only the features with an interior have members in cells: `Unlisted` gives just those.
         let interiors = self
-            .near(galaxy, centre, lookup, false)
+            .near(galaxy, centre, lookup, FeatureClassesRules::Unlisted)
             .filter_map(|(_, interior)| interior);
         for interior in interiors {
             let local = local_offset(interior.feature().position(), centre);
@@ -475,15 +508,13 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn expected_in_sphere(&self, galaxy: &Galaxy, sphere: &QuerySphere) -> LayerCounts {
         let mut counts = LayerCounts::ZERO;
         let radius = sphere.radius();
-        let lists = lists_recent_classes(galaxy);
+        let lists = galaxy.rules().feature_classes;
         let mut cells = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), radius, lists) {
-            if lists {
-                FeatureLevelList::of(galaxy, &feature).add_recent_expected_within(
-                    sphere.centre(),
-                    radius,
-                    &mut counts,
-                );
+            if lists == FeatureClassesRules::Listed
+                && let Some(list) = self.interiors.recent_list(galaxy, &feature)
+            {
+                list.add_recent_expected_within(sphere.centre(), radius, &mut counts);
             }
             let Some(interior) = interior else {
                 continue;
@@ -518,11 +549,13 @@ impl SystemSource for FeatureMemberSource<'_> {
         // builds), so a member that can reach the sphere by `t` lies in a feature whose reach
         // touches it padded so.
         let padded = lookup_radius(sphere);
-        let lists = lists_recent_classes(galaxy);
+        let lists = galaxy.rules().feature_classes;
         let mut members = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), padded, lists) {
-            if lists {
-                recent_hits(galaxy, &feature, sphere, layers, out);
+            if lists == FeatureClassesRules::Listed
+                && let Some(list) = self.interiors.recent_list(galaxy, &feature)
+            {
+                recent_hits(galaxy, (&feature, &list), sphere, layers, out);
             }
             let Some(interior) = interior else {
                 continue;
@@ -689,8 +722,8 @@ fn drifted_from(
         .expect("a member moving under 3,000 km/s over the clock window stays addressable")
 }
 
-/// The hits in `sphere` among `layers` of `feature`'s recent entries (module documentation, "The
-/// lists"), appended to `out` in index order.
+/// The hits in `sphere` among `layers` of `feature`'s recent entries, its `list` (module
+/// documentation, "The lists"), appended to `out` in index order.
 ///
 /// # Panics
 ///
@@ -698,12 +731,11 @@ fn drifted_from(
 /// features' lookup assumes, or an entry's member is not on its candidate's line.
 fn recent_hits(
     galaxy: &Galaxy,
-    feature: &FeatureRecord,
+    (feature, list): (&FeatureRecord, &FeatureLevelList),
     sphere: &QuerySphere,
     layers: LayerSet,
     out: &mut Vec<SystemHit>,
 ) {
-    let list = FeatureLevelList::of(galaxy, feature);
     let Some(stars) = list.recent_stars() else {
         return;
     };

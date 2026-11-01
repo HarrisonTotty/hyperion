@@ -12,12 +12,19 @@
 //! centre's source. Below 27 no source places the centre (`LIST_SOURCE_VERSION`), so the centre's
 //! entries are asked under every 27 hold alone.
 //!
+//! Each entry returned is also placed by its ID, as the server places a range row's system (plan
+//! 10's P10.T10.b): a feature's on its member's line, to the rounding plan 03's drift and the
+//! line's differ by, and a centre entry on its `CentrePath`, bit for bit, both at its velocity.
+//!
 //! Each sphere's entries are found by brute force: every feature whose reach comes within 100 ly of
 //! the sphere, far beyond any feature's motion over the clock window, and its whole list.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
+
+use hyperion_testkit::float::bits;
+use hyperion_testkit::order::assert_order_independent;
 
 use super::{KeepCells, Tubes, milky_way};
 use crate::coords::{GalacticPosition, GalacticVelocity};
@@ -27,10 +34,10 @@ use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
 };
 use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
-use crate::galaxy::features::centre::KeepCentreOrbits;
 use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::members::resolve_centre_member_with;
 use crate::galaxy::features::centre::recent::CentreRecent;
+use crate::galaxy::features::centre::{CentreMemberSource, CentrePath, KeepCentreOrbits};
 use crate::galaxy::features::ids::{FeatureKind, FeatureProcess};
 use crate::galaxy::features::members::level_list::registered_classes;
 use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass, moved};
@@ -38,12 +45,14 @@ use crate::galaxy::features::members::{
     FeatureLevelList, FeatureMemberSource, KeepInteriors, resolve_member,
 };
 use crate::galaxy::global_list::GlobalListSource;
+use crate::galaxy::motion::StateAt;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::query::{
-    LayerCounts, MassFloor, QuerySphere, RangePlan, RangeQuery, SystemSource, range_query,
+    LayerCounts, LayerSet, MassFloor, QuerySphere, RangePlan, RangeQuery, SystemSource, range_query,
 };
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
+use crate::observe::{Drift, Trajectory};
 use crate::planetary::testing::{with_every_26_hold_with_its_retargets, with_every_27_hold};
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, LightYears, Years};
@@ -179,12 +188,59 @@ fn is_recent_slot(galaxy: &Galaxy, id: SystemId) -> bool {
                 .entry(index)
                 .is_some_and(|entry| RecentClass::of(entry.class()).is_some())
         }
-        _ => false,
+        SystemIdKind::Grid(_)
+        | SystemIdKind::Stream(_)
+        | SystemIdKind::DwarfCore(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => false,
     }
 }
 
-/// The sources the server registers in `galaxy` beside the grid, handed to `run`.
-fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource]) -> R) -> R {
+/// What a placement by ID reads, as the server's `convert::system_motion` reads it: the features'
+/// interiors and the centre's orbits, the ones the sources read.
+#[derive(Clone, Copy)]
+struct Reads<'a> {
+    interiors: &'a KeepInteriors<'a>,
+    orbits: &'a KeepCentreOrbits<'a>,
+}
+
+/// Where the system `record` is at `t` placed by its ID, as the server places a range row's
+/// system (plan 10's P10.T10.b): a feature's member on its line (`Drift::of_record_in`), a centre
+/// member on its path (`CentrePath`), with its velocity there; `None` for a system it does not
+/// place then.
+fn placed_by_id(
+    galaxy: &Galaxy,
+    reads: Reads<'_>,
+    record: &SystemRecord,
+    t: UniverseTime,
+) -> Option<(GalacticPosition, GalacticVelocity)> {
+    match record.id().kind() {
+        SystemIdKind::FeatureMember(_) => {
+            let line = Drift::of_record_in(galaxy, reads.interiors, record).ok()?;
+            Some((line.position_at(t), line.velocity()))
+        }
+        SystemIdKind::Centre(id) => {
+            match CentrePath::of(galaxy, reads.orbits, id).ok()?.state_at(t) {
+                StateAt::Exists(state) => Some((*state.position(), state.velocity())),
+                StateAt::NoSuchSystem => None,
+            }
+        }
+        SystemIdKind::Grid(_)
+        | SystemIdKind::Stream(_)
+        | SystemIdKind::DwarfCore(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => None,
+    }
+}
+
+/// How far a feature member's placement by ID may lie from its range row, m: plan 03 rounds its
+/// row's drift and `Drift`'s line differently, by up to a few metres (the server's
+/// `SystemLine::at`).
+const LINE_ROUNDING_M: f64 = 10.0;
+
+/// The sources the server registers in `galaxy` beside the grid, handed to `run` with what a
+/// placement by ID reads.
+fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource], Reads<'_>) -> R) -> R {
     let interiors = KeepInteriors::new(galaxy);
     let features = FeatureMemberSource::new(&NoFeatureCache, &interiors);
     let cells = KeepClassCells::default();
@@ -202,7 +258,11 @@ fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource]) -> R) 
     if let Some(classes) = &classes {
         sources.push(classes);
     }
-    run(&sources)
+    let reads = Reads {
+        interiors: &interiors,
+        orbits: &orbits,
+    };
+    run(&sources, reads)
 }
 
 /// A query of the sphere of `radius` about `centre` at `t`, down to layer D, where every recent
@@ -217,9 +277,10 @@ fn query(centre: &GalacticPosition, radius: LightYears, t: UniverseTime) -> Rang
 }
 
 /// What one sphere found wrong: each entry inside returned other than once, each outside returned,
-/// and each hit of a recent slot that names no such entry, as text.
+/// each hit of a recent slot that names no such entry, and each returned entry that its placement
+/// by ID ([`placed_by_id`]) puts elsewhere or moving otherwise, as text.
 fn check_sphere(
-    (galaxy, cells): (&Galaxy, &mut KeepCells),
+    (galaxy, cells, reads): (&Galaxy, &mut KeepCells, Reads<'_>),
     sources: &[&dyn SystemSource],
     listed: &BTreeMap<SystemId, Listed>,
     (centre, radius, t): (&GalacticPosition, LightYears, UniverseTime),
@@ -241,6 +302,22 @@ fn check_sphere(
                     hit.id(),
                     hit.position(),
                     hit.record()
+                ));
+            }
+            let placed = placed_by_id(galaxy, reads, hit.record(), t);
+            let agrees = placed.is_some_and(|(position, velocity)| {
+                let off = hit.position().distance_to(&position).value();
+                velocity == entry.velocity
+                    && match hit.id().kind() {
+                        SystemIdKind::Centre(_) => position == *hit.position(),
+                        _ => off <= LINE_ROUNDING_M,
+                    }
+            });
+            if !agrees {
+                faults.push(format!(
+                    "{:?}: returned at {:?}, placed by its ID at {placed:?}",
+                    hit.id(),
+                    hit.position()
                 ));
             }
         } else if is_recent_slot(galaxy, hit.id()) {
@@ -352,7 +429,7 @@ fn spheres_about(
 /// The features' half of the test in `galaxy`, about the features `asked`: the entries inside the
 /// spheres, and the faults.
 fn features_in_range(
-    galaxy: &Galaxy,
+    (galaxy, reads): (&Galaxy, Reads<'_>),
     sources: &[&dyn SystemSource],
     asked: &[FeatureRecord],
 ) -> (usize, Vec<String>) {
@@ -394,8 +471,12 @@ fn features_in_range(
             let t = UniverseTime::from_julian_years(years).expect("in the clock window");
             for (centre, radius) in spheres_about(feature.position(), &own, t) {
                 let listed = entries_near(galaxy, &centre, radius);
-                let (n, mut found) =
-                    check_sphere((galaxy, &mut cells), sources, &listed, (&centre, radius, t));
+                let (n, mut found) = check_sphere(
+                    (galaxy, &mut cells, reads),
+                    sources,
+                    &listed,
+                    (&centre, radius, t),
+                );
                 inside += n;
                 faults.append(&mut found);
             }
@@ -426,7 +507,10 @@ fn admitting_radius(
 
 /// The centre's half of the test in `galaxy`: about the black hole and each entry at the epoch,
 /// and about the black hole and the first [`ENTRY_SPHERES`] entries at the clock window's ends.
-fn centre_in_range(galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> (usize, Vec<String>) {
+fn centre_in_range(
+    (galaxy, reads): (&Galaxy, Reads<'_>),
+    sources: &[&dyn SystemSource],
+) -> (usize, Vec<String>) {
     let listed = centre_entries(galaxy);
     eprintln!("the centre: {} recent entries", listed.len());
     assert!(
@@ -464,13 +548,65 @@ fn centre_in_range(galaxy: &Galaxy, sources: &[&dyn SystemSource]) -> (usize, Ve
         spheres.extend(listed.values().take(about).map(|entry| entry.at(t)));
         for centre in spheres {
             let radius = admitting_radius(galaxy, sources, &centre, 1.0, t);
-            let (n, mut found) =
-                check_sphere((galaxy, &mut cells), sources, &listed, (&centre, radius, t));
+            let (n, mut found) = check_sphere(
+                (galaxy, &mut cells, reads),
+                sources,
+                &listed,
+                (&centre, radius, t),
+            );
             inside += n;
             faults.append(&mut found);
         }
     }
     (inside, faults)
+}
+
+/// The centre's source answers the same whatever it has built (its list and its places are built
+/// when a sphere first needs them): the census and the hits of spheres about the black hole and
+/// about three entries, at the epoch and at +H, in every order through one source, warmed, and
+/// through a source made afresh for each, cold.
+fn the_centre_s_source_is_order_independent(
+    (galaxy, reads): (&Galaxy, Reads<'_>),
+    listed: &BTreeMap<SystemId, Listed>,
+) {
+    let mut keys = Vec::new();
+    for years in [0, 1_000] {
+        let t = UniverseTime::from_julian_years(years).expect("in the clock window");
+        keys.push((GalacticPosition::ORIGIN, LightYears::new(0.05), t));
+        keys.extend(
+            listed
+                .values()
+                .take(3)
+                .map(|entry| (entry.at(t), LightYears::new(ABOUT_AN_ENTRY_LY), t)),
+        );
+    }
+    let stellar = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .fold(LayerSet::EMPTY, LayerSet::with);
+    let ask = |source: &CentreMemberSource<'_>,
+               &(centre, radius, t): &(GalacticPosition, LightYears, UniverseTime)| {
+        let sphere =
+            QuerySphere::new(centre, radius, t, LightYears::ZERO).expect("a positive radius");
+        let mut hits = Vec::new();
+        source.systems_in_sphere(galaxy, &sphere, stellar, &mut hits);
+        let census = source
+            .expected_in_sphere(galaxy, &sphere)
+            .to_array()
+            .map(bits);
+        (census, hits)
+    };
+    let warmed = CentreMemberSource::new(galaxy, reads.orbits).expect("the centre builds");
+    assert_order_independent(&keys, |key| ask(&warmed, key));
+    assert_order_independent(&keys, |key| {
+        ask(
+            &CentreMemberSource::new(galaxy, reads.orbits).expect("the centre builds"),
+            key,
+        )
+    });
+    for key in &keys {
+        let cold = CentreMemberSource::new(galaxy, reads.orbits).expect("the centre builds");
+        assert_eq!(ask(&cold, key), ask(&warmed, key), "{key:?}");
+    }
 }
 
 /// Prints the entries inside the spheres and the faults, the first twenty shown.
@@ -505,9 +641,9 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
             assert_eq!(asked, Vec::new(), "no feature lists a recent class");
             return;
         }
-        with_served(&galaxy, |sources| {
+        with_served(&galaxy, |sources, reads| {
             assert_eq!(sources.len(), 1, "at 26 the features' members alone");
-            let (inside, faults) = features_in_range(&galaxy, sources, &asked);
+            let (inside, faults) = features_in_range((&galaxy, reads), sources, &asked);
             assert_no_faults("the features under every 26 hold", inside, &faults);
         });
         let interiors = KeepInteriors::new(&galaxy);
@@ -526,21 +662,23 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
 }
 
 /// Every 27 hold: the features' recent entries and the centre's, through every source the server
-/// registers (module documentation).
+/// registers (module documentation), each placed by its ID where it was returned; and the
+/// centre's source answers the same whatever it has built.
 #[test]
 #[ignore = "slow: range queries about four features' lists and the centre's at three times under \
             every 27 hold"]
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_27_hold() {
     with_every_27_hold(|| {
         let galaxy = milky_way(GalaxyRules::every_27_hold());
-        with_served(&galaxy, |sources| {
+        with_served(&galaxy, |sources, reads| {
             assert_eq!(
                 sources.len(),
                 3,
                 "at 27 the members, the list and the classes"
             );
-            let features = features_in_range(&galaxy, sources, &features_asked(&galaxy));
-            let centre = centre_in_range(&galaxy, sources);
+            let features = features_in_range((&galaxy, reads), sources, &features_asked(&galaxy));
+            let centre = centre_in_range((&galaxy, reads), sources);
+            the_centre_s_source_is_order_independent((&galaxy, reads), &centre_entries(&galaxy));
             report("the centre under every 27 hold", centre.0, &centre.1);
             assert_no_faults("the features under every 27 hold", features.0, &features.1);
             assert_no_faults("the centre under every 27 hold", centre.0, &centre.1);

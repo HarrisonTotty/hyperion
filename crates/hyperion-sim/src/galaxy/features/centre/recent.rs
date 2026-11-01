@@ -73,7 +73,7 @@ use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{SolarMasses, Years};
+use crate::units::{LightYears, SolarMasses, Years};
 
 use super::binaries::CentreBinaries;
 use super::classes::{AgeComponent, CentreClass, CentreClassKind, age_components};
@@ -255,8 +255,8 @@ impl CentreRecent {
         })
     }
 
-    /// The census's share of the centre's recent classes in the ball of `radius` ly about a point
-    /// `distance` ly from the black hole, added to `counts` by the layer each class's primaries are
+    /// The census's share of the centre's recent classes in the ball of `radius` about a point
+    /// `distance` from the black hole, added to `counts` by the layer each class's primaries are
     /// of ([`RecentClass::layer`]; module documentation, "In the range query"): each part's
     /// expected candidates times the share of its component's tracer profile inside the reach that
     /// lies between `distance − radius` and `distance + radius` from the black hole, a shell that
@@ -264,9 +264,10 @@ impl CentreRecent {
     pub(crate) fn add_expected_within(
         &self,
         profiles: &TracerProfiles,
-        (distance, radius): (f64, f64),
+        (distance, radius): (LightYears, LightYears),
         counts: &mut LayerCounts,
     ) {
+        let (distance, radius) = (distance.value(), radius.value());
         let reach = REACH.value();
         for (class, parts) in &self.classes {
             let layer = class.layer();

@@ -161,3 +161,52 @@ fn the_centre_s_binary_entries_resolve_and_are_their_classes() {
         "{kept:?} of {sampled_fast}"
     );
 }
+
+/// The digest (`f64_digest`) of the centre's first [`PINNED_BINARIES`] kept binary entries in index
+/// order ([`the_centre_s_binary_entries_are_pinned`]): each one's ID (high, low 32 bits), class,
+/// initial mass, age, position and velocity. Blessed natively on x86-64 after P09.T37 drew the
+/// centre's list over its reach; the wasip1 suite compares it.
+const CENTRE_BINARIES_DIGEST: u64 = 0x04e3_32a8_fa9a_23b7;
+
+/// The centre's binary entries the pin reads.
+const PINNED_BINARIES: usize = 40;
+
+/// The centre's binary entries' bits under every 27 hold, pinned before the 27 bump: their places
+/// are drawn as the recent classes' are (`centre::recent::position`), so a change to either moves
+/// this.
+#[test]
+fn the_centre_s_binary_entries_are_pinned() {
+    use hyperion_testkit::golden::f64_digest;
+    let galaxy = listed();
+    let model = galaxy.centre().unwrap();
+    let (recent, list) = list_of(galaxy);
+    let mut values = Vec::new();
+    let kept = list
+        .entries()
+        .filter(|e| crate::galaxy::catalogue_classes::binary::feature::is_listed_binary(e.class()))
+        .filter_map(|e| recent.binaries().entry(galaxy, model, e.class(), e.index()))
+        .take(PINNED_BINARIES);
+    for (entry, member) in kept {
+        let raw = member.record().id().raw();
+        values.push(f64::from(u32::try_from(raw >> 32).unwrap()));
+        values.push(f64::from(u32::try_from(raw & 0xffff_ffff).unwrap()));
+        let class = LISTED_CLASSES
+            .iter()
+            .position(|&c| c == entry.class())
+            .unwrap();
+        values.push(f64::from(u32::try_from(class).unwrap()));
+        values.push(member.record().primary_initial_mass().value());
+        values.push(member.record().age_at_epoch().value());
+        let at = member.local_position();
+        values.extend([at.x, at.y, at.z]);
+        values.extend(member.velocity_km_s());
+    }
+    assert_eq!(
+        values.len(),
+        PINNED_BINARIES * 11,
+        "{PINNED_BINARIES} kept entries"
+    );
+    let digest = f64_digest(&values);
+    eprintln!("{} values, digest {digest:#018x}", values.len());
+    assert_eq!(digest, CENTRE_BINARIES_DIGEST, "{digest:#018x}");
+}

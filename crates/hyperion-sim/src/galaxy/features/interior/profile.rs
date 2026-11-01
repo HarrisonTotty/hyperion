@@ -253,6 +253,16 @@ impl ClassProfile {
         })
     }
 
+    /// The same profile with its cumulative distribution tabulated now, if no reading has made it
+    /// yet, so that its clones share the table rather than each making its own (P09.T37: a
+    /// feature's list gives each of its classes its profile, and a range query reads some thousand
+    /// lists near the inner disc). The table is the same whenever it is made ([`Tabulated`]).
+    #[must_use]
+    pub(crate) fn tabulated(self) -> Self {
+        let _ = self.cdf();
+        self
+    }
+
     /// The shape.
     #[must_use]
     pub const fn shape(&self) -> ProfileShape {

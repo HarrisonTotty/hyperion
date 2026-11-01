@@ -276,6 +276,31 @@ impl FeatureLevelList {
         }
     }
 
+    /// The list of `feature`'s recent classes alone (P09.T36), without plan 11's binary classes
+    /// after them, or `None` for a feature that registers none: what the range query reads
+    /// (P09.T37). Its recent entries are [`of`](Self::of)'s, index for index, since the recent
+    /// classes come first in the list order and the counts are clamped in that order, so the
+    /// classes after them move none of theirs.
+    #[must_use]
+    pub(crate) fn recent_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+        let stars = FeatureStars::listing(galaxy, feature)?;
+        let classes = stars.list_classes(galaxy);
+        if classes.is_empty() {
+            return None;
+        }
+        Some(Self {
+            stars: Some(Box::new(stars)),
+            ..Self::with_classes(
+                galaxy,
+                feature.id().object_word(),
+                feature.position(),
+                MemberZero::Absent,
+                ListIndex::Feature,
+                classes,
+            )
+        })
+    }
+
     /// The list keyed by the feature word `word` about `centre`, with or without member zero,
     /// numbered by `index`, and `classes` (module documentation).
     ///

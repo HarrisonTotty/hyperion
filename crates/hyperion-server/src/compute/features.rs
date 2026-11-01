@@ -43,8 +43,8 @@ use hyperion_sim::galaxy::features::catalogue::{
 };
 use hyperion_sim::galaxy::features::cluster::ClusterModel;
 use hyperion_sim::galaxy::features::interior::counts::{ClassCounts, class_counts};
-use hyperion_sim::galaxy::features::members::FeatureInterior;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
+use hyperion_sim::galaxy::features::members::{FeatureInterior, FeatureLevelList};
 use hyperion_sim::galaxy::features::{FeatureId, FeatureProcess};
 use hyperion_sim::id::FeatureCell;
 use hyperion_sim::units::LightYears;
@@ -255,6 +255,7 @@ impl SharedClusterModelCache {
             shared: self.handle(galaxy),
             kept: Mutex::new(BTreeMap::new()),
             reaches: Mutex::new(BTreeMap::new()),
+            lists: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -388,6 +389,9 @@ pub struct KeptInteriors<'a> {
     shared: ClusterModelHandle<'a>,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
     reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
+    /// The lists of the features' recent classes the job reads (P09.T37), built once a job: its
+    /// census and its hits read the same, some thousand of them near the inner disc.
+    lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
 }
 
 impl FeatureInteriorCache for KeptInteriors<'_> {
@@ -424,6 +428,20 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
             .unwrap_or_else(PoisonError::into_inner)
             .entry(feature.id())
             .or_insert_with(|| self.shared.grid_reach(galaxy, feature))
+    }
+
+    /// Lends the list of `feature`'s recent classes: the job's own, built once.
+    fn recent_list(
+        &self,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<Arc<FeatureLevelList>> {
+        self.lists
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| self.shared.recent_list(galaxy, feature))
+            .clone()
     }
 }
 

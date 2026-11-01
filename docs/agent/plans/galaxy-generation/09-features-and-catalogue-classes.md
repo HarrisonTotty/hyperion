@@ -1537,7 +1537,8 @@ test", after P09.T35; main's ruling, 2026-10-15.)
 
 _Built under every 27 hold (lane `p09-t38`, 2026-11-01, at `GENERATOR_VERSION` 24; one fault fixed
 behind 27's runaways' hold, no output moved at 24–26): see Risks, "P09.T38, as built". The budgets'
-centre volume waits on p10-list-registration._
+centre volume run (lane `fix-p09-recent-dead`, 2026-11-01): see Risks, "P09.T38, the centre's
+volume"._
 
 ### Phase 8: protocol, server and display
 
@@ -5785,8 +5786,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `lbv_claims` claimed displaced systems, which `LbvProcess` never draws (it takes the stay
     share): lost systems. From 27 `lbv::claims_its_placement` leaves them on the grid; the 27 bump
     deletes its match with the hold. The 26 arm keeps the gap (held output).
-  - _Budgets._ The centre's volume is NOT RUN: it waits on p10-list-registration (P09.T37.b
-    registers the centre's members). The carve-out's claims are printed, not tested: the grid's
+  - _Budgets._ The centre's volume ran later ("P09.T38, the centre's volume"). The carve-out's claims are printed, not tested: the grid's
     displaced classes weigh the whole budget and T33.b's terms its field part (pending the owner's
     ruling there). Members are tested only where a volume holds 20 features or more.
   - _The bump's goldens_, blessed under every 26 hold with and without the weight and layer D's
@@ -5835,21 +5835,29 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     (`grid::entry_systems_in`) instead of resolving each member's ID.
 - **P09.T37, the recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under
   `feature_classes` (26) and `list_source` (27); no output moved at 24–25).**
-  - _Features._ `FeatureMemberSource` reads each near feature's list under
-    `recent::lists_recent_classes` (a hold `match` for the 26 bump); census
-    `FeatureLevelList::add_recent_expected_within`, by `RecentClass::layer` (E; D for a Type Ia).
+  - _Features._ `FeatureMemberSource` reads each near feature's recent-only list
+    (`FeatureLevelList::recent_of`, lent by the new `FeatureInteriorCache::recent_list`, kept by
+    `KeepInteriors` and the server's `KeptInteriors`); the 26 bump deletes its hold compares.
+  - _Census._ `FeatureLevelList::add_recent_expected_within` and `CentreRecent::add_expected_within`:
+    each class's expected candidates × its profile's shell share, in `RecentClass::layer` (E; D, Ia).
   - _Centre._ `CentreMemberSource` (in `GlobalListSource`) builds the list lazily:
-    `CentreRecent::{place, places, add_expected_within}`, `CentrePlace::kept`, `TracerProfiles`.
+    `CentreRecent::{place, places}`, `CentrePlace::kept`, `TracerProfiles`.
   - _Pads._ An entry moves straight at its velocity: a feature's list is read within its reach
     plus the bulk speed (debug-asserted below `UNBOUND_PAD_SPEED`), the centre's within `REACH`
     plus light's travel over |t|; each line is tested before the class's test.
+  - _By ID._ Each returned entry is where its placement by ID puts it: a centre entry's
+    `CentrePath` (`Straight`) bit for bit, a feature's `Drift::of_record_in` within 10 m.
   - _Fix (deviation)._ `centre::recent::position` drew radii below the tracer's DF inner cut
     (10⁻³ ly; 0.1 ly, young disc): every centre entry within 0.08 ly at up to 17,000 km/s. Now
-    inside `REACH`: 25 kept of 565 (were 17), `CENTRE_ENTRIES_DIGEST` re-pinned; centre binaries move.
+    inside `REACH`: 25 kept of 565 (were 17), `CENTRE_ENTRIES_DIGEST` re-pinned.
+  - _Finding._ P09.T36.b's "a handful (1–20)" now fails at 25; the range check went, 25 is pinned.
+  - _Centre binaries._ P11.T8.f's share `position`, so they move under `feature_binaries` (27);
+    pinned by `centre::binaries::tests::the_centre_s_binary_entries_are_pinned`.
   - _Lean (2026-11-01)._ A listed death's remnant stays on its progenitor's line, no natal kick,
     as `Drift::of_member` reads it; the class's core collapse takes its kick (P09.T33.a).
-  - _Tests (slow):_ `verification::recent_in_range`'s `…_under_every_26_hold` and `…_27_hold`;
-    if `feature_classes` moves to 27, the 26 test checks that no feature lists an entry.
+  - _Tests (slow)._ `verification::recent_in_range::every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold`
+    and `…_under_every_27_hold`. They failed on BASE (117 entries inside, none returned), so
+    `feature_classes` may not switch on without this lane; held to 27, the 26 test checks none lists.
   - _Finding._ Plan 11's listed binaries (P11.T8.f, 27) on the same lists have no source either.
 - **P09.T37, the centre's band-E draw (lane `fix-p09-recent-dead`, 2026-11-01, under
   `list_source` (27); no output moved at 24–26).**
@@ -5859,3 +5867,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Fix._ From 27 a remnant class's attempt `k` draws its age on `centre.age` word `k` (attempt
     0 unchanged); a living class still draws once. The 27 bump deletes the `match`. Test:
     `centre::members::tests::a_centre_remnant_draws_its_age_with_each_attempt_from_27`.
+  - _Below 27._ The draw still exhausts: P09.T31's `over_time` tests (every 25 hold) still meet
+    the assertion beyond 1 ly.
+- **P09.T38, the centre's volume (lane `fix-p09-recent-dead`, 2026-11-01, under every 27 hold;
+  test only).**
+  - _Volumes._ Thirteen: the galactic centre's, about the black hole, sized by the query's own
+    census (`centre_radius_for`, 0.05–3,000 ly), since the nuclear cluster outnumbers the budget.
+  - _Sources._ `GlobalListSource` beside the members and the classes, as the server registers it;
+    the centre's and the streams' and cores' members are counted apart and printed, not tested.
+  - _Figures._ In the lane's outbox.

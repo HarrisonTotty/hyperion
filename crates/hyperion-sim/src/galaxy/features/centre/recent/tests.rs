@@ -300,3 +300,53 @@ fn complementary_at_the_centre(off: &Galaxy, on: &Galaxy) {
         );
     }
 }
+
+/// P09.T37's fix: the centre's candidates are placed over its reach on their tracers' profiles,
+/// not below the distribution function's inner cut (10⁻³ ly, 0.1 ly for the young disc), where
+/// every one lay before; each place is the one `position` draws on a profile built afresh, bit for
+/// bit, and every kept entry is its place's.
+#[test]
+fn the_centre_s_candidates_are_placed_over_its_reach() {
+    let on = listed();
+    let model = on.centre().unwrap();
+    let recent = CentreRecent::new(on, model, victim_count(on).unwrap());
+    let places = recent.places(on, model);
+    let mut radii: Vec<f64> = places
+        .iter()
+        .map(|p| LightYears::from(GalacticPosition::ORIGIN.distance_to(p.position())).value())
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    let median = radii[radii.len() / 2];
+    eprintln!(
+        "{} places from {:.4} to {:.1} ly, median {median:.2} ly",
+        radii.len(),
+        radii[0],
+        radii[radii.len() - 1]
+    );
+    assert!(
+        radii.iter().all(|&r| r <= REACH.value()),
+        "inside the reach"
+    );
+    assert!(
+        median > 1.0,
+        "the median place at {median} ly, past the old cut"
+    );
+    for place in places.iter().take(16) {
+        let key = ObjectKey::from(place.system);
+        let fresh = galactic(position(model, &place.component, key, on.seed()));
+        assert_eq!(&fresh, place.position(), "{:?}", place.system);
+    }
+    for place in &places {
+        let crate::id::SystemIdKind::Centre(id) = place.system.kind() else {
+            unreachable!("a centre ID");
+        };
+        let MemberSlot::FeatureLevel { index } = id.slot() else {
+            unreachable!("a list entry");
+        };
+        assert_eq!(
+            place.kept(on),
+            recent.entry(on, model, place.class(), index),
+            "{index}"
+        );
+    }
+}

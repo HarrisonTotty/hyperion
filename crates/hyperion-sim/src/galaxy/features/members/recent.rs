@@ -53,6 +53,8 @@
 //! no tag. The velocity is the feature's bulk motion, as [`MemberRecord`]'s is less its internal
 //! part, and a list is defined, as the cells are, only in a galaxy with its kinematic tables.
 
+use std::sync::OnceLock;
+
 use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
@@ -101,8 +103,8 @@ use super::level_list::ListClass;
 /// feature's list and the cells claim nothing. The tests reach the new arm through a galaxy built
 /// under every 27 hold (`GalaxyRules::every_27_hold`). The bump to 27 deletes this hold,
 /// [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the `match`es
-/// in [`FeatureStars::listing`], [`FeatureStars::claiming`], [`lists_recent_classes`] (the range
-/// query's, P09.T37) and the centre's list, and the tripwire
+/// in [`FeatureStars::listing`], [`FeatureStars::claiming`], the features' source's (P09.T37) and
+/// the centre's list, and the tripwire
 /// (`the_feature_classes_are_held_only_until_the_27_bump`).
 pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
@@ -113,16 +115,6 @@ pub(crate) enum FeatureClassesRules {
     Unlisted,
     /// Version 26's: the classes of the module documentation, and the cells' claim.
     Listed,
-}
-
-/// Whether catalogue features in `galaxy` list their recent classes, and the range query places
-/// them (P09.T37): the hold's new arm.
-#[must_use]
-pub(crate) const fn lists_recent_classes(galaxy: &Galaxy) -> bool {
-    match galaxy.rules().feature_classes {
-        FeatureClassesRules::Unlisted => false,
-        FeatureClassesRules::Listed => true,
-    }
 }
 
 /// Masses of the core collapses' envelope search over band E: 512 nodes, log-spaced.
@@ -480,9 +472,15 @@ impl FeatureStars {
     /// its profile.
     #[must_use]
     pub(crate) fn list_classes(&self, galaxy: &Galaxy) -> Vec<ListClass> {
-        self.classes(galaxy)
+        let classes = self.classes(galaxy);
+        // One table for every class, made once (`ClassProfile::tabulated`).
+        let profile = match classes.as_slice() {
+            [] | [_] => self.profile.clone(),
+            [_, _, ..] => self.profile.clone().tabulated(),
+        };
+        classes
             .into_iter()
-            .map(|(class, expected)| ListClass::new(class.class(), expected, self.profile.clone()))
+            .map(|(class, expected)| ListClass::new(class.class(), expected, profile.clone()))
             .collect()
     }
 
@@ -735,6 +733,44 @@ pub(crate) struct Candidates {
     share: f64,
 }
 
+/// One node of the core collapses' envelope ([`envelope_nodes`]): its masses, M☉, and its
+/// lifetimes' least and greatest, years.
+type EnvelopeNode = ((f64, f64), (f64, f64));
+
+/// The core collapses' envelope nodes over band E ([`Candidates::core_collapse`]): each node's
+/// masses, and the least and greatest lifetime at its ends' brackets
+/// ([`LifetimeBracket::shared`]), widened by its neighbours', for every node whose ends both have
+/// one. They depend on the shared bracket alone, so they are made once, on first use (P09.T37: a
+/// range query near the inner disc reads some thousand features' lists).
+fn envelope_nodes() -> &'static [EnvelopeNode] {
+    static NODES: OnceLock<Vec<EnvelopeNode>> = OnceLock::new();
+    NODES.get_or_init(|| {
+        let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
+        let step = crate::math::ln(hi / lo) / f64::from(ENVELOPE_NODES);
+        let mass = |k: u32| (lo * crate::math::exp(step * f64::from(k))).clamp(lo, hi);
+        let bracket = LifetimeBracket::shared();
+        let bounds = |k: u32| bracket.bracket(SolarMasses::new(mass(k)));
+        (0..ENVELOPE_NODES)
+            .filter_map(|k| {
+                let (a, b) = (bounds(k)?, bounds(k + 1)?);
+                // The node's lifetimes, at its ends' brackets, widened by its neighbours'.
+                let neighbours = [
+                    k.checked_sub(1).and_then(bounds),
+                    bounds((k + 2).min(ENVELOPE_NODES)),
+                ];
+                let (least, most) = neighbours
+                    .into_iter()
+                    .flatten()
+                    .chain([a, b])
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, m), (x, y)| {
+                        (l.min(x.value()), m.max(y.value()))
+                    });
+                Some(((mass(k), mass(k + 1)), (least, most)))
+            })
+            .collect()
+    })
+}
+
 /// One part of a class's [`Candidates`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CandidatePart {
@@ -760,28 +796,10 @@ impl Candidates {
             interval.start().since_epoch().as_julian_years_f64(),
             interval.end().since_epoch().as_julian_years_f64(),
         );
-        let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
-        let step = crate::math::ln(hi / lo) / f64::from(ENVELOPE_NODES);
-        let mass = |k: u32| (lo * crate::math::exp(step * f64::from(k))).clamp(lo, hi);
-        let bracket = LifetimeBracket::shared();
-        let bounds = |k: u32| bracket.bracket(SolarMasses::new(mass(k)));
-        let parts = (0..ENVELOPE_NODES).filter_map(|k| {
-            let (a, b) = (bounds(k)?, bounds(k + 1)?);
-            // The node's lifetimes, at its ends' brackets, widened by its neighbours'.
-            let neighbours = [
-                k.checked_sub(1).and_then(bounds),
-                bounds((k + 2).min(ENVELOPE_NODES)),
-            ];
-            let (least, most) = neighbours
-                .into_iter()
-                .flatten()
-                .chain([a, b])
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, m), (x, y)| {
-                    (l.min(x.value()), m.max(y.value()))
-                });
-            // Ages at which a death of those lifetimes falls in (start, end].
-            Some(((mass(k), mass(k + 1)), (least - end, most - start)))
-        });
+        // Ages at which a death of a node's lifetimes falls in (start, end].
+        let parts = envelope_nodes()
+            .iter()
+            .map(|&(masses, (least, most))| (masses, (least - end, most - start)));
         Self::of(imf, ages, parts)
     }
 

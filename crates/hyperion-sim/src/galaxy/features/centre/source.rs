@@ -91,7 +91,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-use crate::galaxy::features::members::recent::{lists_recent_classes, moved};
+use crate::galaxy::features::members::recent::moved;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{CentreMotion, EpochState, Regime, SpeedBound, StateAt, Trajectory};
 use crate::galaxy::placement::{Existence, SystemRecord};
@@ -442,9 +442,6 @@ impl<'a> CentreMemberSource<'a> {
     fn recent(&self) -> Option<&RecentList> {
         self.recent
             .get_or_init(|| {
-                if !lists_recent_classes(self.galaxy) {
-                    return None;
-                }
                 let model = self.placement.model();
                 let recent = CentreRecent::new(self.galaxy, model, self.victims.count());
                 (!recent.expected().is_empty()).then(|| RecentList {
@@ -456,9 +453,9 @@ impl<'a> CentreMemberSource<'a> {
             .as_ref()
     }
 
-    /// The hits in `sphere` among `layers` of the list's recent entries, `from_black_hole` ly from
-    /// the black hole, appended to `out` in index order (module documentation, "The recent
-    /// entries").
+    /// The hits in `sphere` among `layers` of the list's recent entries, the sphere's centre
+    /// `from_black_hole` from the black hole, appended to `out` in index order (module
+    /// documentation, "The recent entries").
     ///
     /// # Panics
     ///
@@ -467,13 +464,13 @@ impl<'a> CentreMemberSource<'a> {
         &self,
         sphere: &QuerySphere,
         layers: LayerSet,
-        from_black_hole: f64,
+        from_black_hole: LightYears,
         out: &mut Vec<SystemHit>,
     ) {
         let t = sphere.time();
         let light =
             KilometresPerSecond::new(SPEED_OF_LIGHT / METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND);
-        if from_black_hole - sphere.radius().value() > (REACH + pad_for(t, light)).value() {
+        if from_black_hole.value() - sphere.radius().value() > (REACH + pad_for(t, light)).value() {
             return;
         }
         let Some(list) = self.recent() else {
@@ -744,13 +741,13 @@ impl SystemSource for CentreMemberSource<'_> {
             }
         }
         let from_black_hole =
-            LightYears::from(sphere.centre().distance_to(&GalacticPosition::ORIGIN)).value();
-        if from_black_hole - sphere.radius().value() <= REACH.value()
+            LightYears::from(sphere.centre().distance_to(&GalacticPosition::ORIGIN));
+        if from_black_hole.value() - sphere.radius().value() <= REACH.value()
             && let Some(list) = self.recent()
         {
             list.recent.add_expected_within(
                 &list.profiles,
-                (from_black_hole, sphere.radius().value()),
+                (from_black_hole, sphere.radius()),
                 &mut counts,
             );
         }
@@ -780,7 +777,7 @@ impl SystemSource for CentreMemberSource<'_> {
                 out.extend(victim_hit(victim, sphere, from_black_hole));
             }
         }
-        self.recent_hits(sphere, layers, from_black_hole, out);
+        self.recent_hits(sphere, layers, LightYears::new(from_black_hole), out);
         self.cells_reaching(sphere, |cell| {
             for band in BANDS_COARSEST_FIRST {
                 if !layers.contains(band.layer()) {
