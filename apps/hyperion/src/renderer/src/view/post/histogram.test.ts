@@ -421,6 +421,22 @@ describe("HistogramReader", () => {
     expect(seen[0]?.preExposure).toBe(0.5);
   });
 
+  it("drops the reads in flight at a cut, delivering the next one measured (fix-view-light)", async () => {
+    const engine = new ReadbackEngine();
+    const seen: Histogram[] = [];
+    const reader = new HistogramReader(engine, KERNEL, "view", (h) => seen.push(h));
+    reader.measure(REQUEST);
+    reader.measure(REQUEST);
+    reader.dropInFlight();
+    reader.measure(REQUEST);
+    engine.settle(0, 1);
+    engine.settle(0, 2);
+    await flush();
+    engine.settle(0, 3);
+    await flush();
+    expect(seen.map((h) => h.bins[1])).toEqual([3]);
+  });
+
   it("frees a slot whose read fails, warning only while live", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const engine = new ReadbackEngine();

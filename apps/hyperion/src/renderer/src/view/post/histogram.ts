@@ -391,6 +391,14 @@ export class HistogramReader {
   }
 
   /**
+   * Drops the reads now in flight: none of them is delivered, so that the next histogram delivered
+   * is of an image measured after the call (a cut's, `AutoExposure.cut`).
+   */
+  dropInFlight(): void {
+    this.#delivered = this.#issued;
+  }
+
+  /**
    * Stops delivering and releases the ring's buffers; reads in flight settle unseen (each read
    * copies into its own staging buffer, and the device destroys a released buffer only once its
    * work is done).

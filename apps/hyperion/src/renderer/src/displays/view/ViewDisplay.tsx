@@ -860,6 +860,8 @@ function ViewStage({
   const heldRef = useRef(new Set<string>());
   // The turn the drags on the canvas have asked for since the loop's last frame (R07.T19.f).
   const turnRef = useRef<ViewTurn>(NO_TURN);
+  // Whether a camera command has cut the view since the loop's last frame, for its exposure.
+  const cutRef = useRef(false);
   // The marks' labels by their target's key, which the loop moves with their marks every frame.
   const labelsRef = useRef(new Map<string, HTMLElement>());
   const inputsRef = useRef<LoopInputs>({
@@ -1191,6 +1193,14 @@ function ViewStage({
         started.kept.startExposure === "metered" &&
         yieldsToMeter(inputsRef.current.exposure),
     });
+    // A new scene, the stage's: the exposure snaps to its first reading (fix-view-light).
+    auto.cut();
+    // A cut within the scene: the exposure snaps to the first histogram of a frame drawn after it,
+    // those of frames drawn before it dropped.
+    const cutExposure = (): void => {
+      auto.cut();
+      drawer?.dropHistograms();
+    };
     // What the loop last read of the display's control, and what it last gave the display: an
     // operator's command is a control it reads that it did not give.
     let seenExposure = inputsRef.current.exposure;
@@ -1276,6 +1286,11 @@ function ViewStage({
       if (!framedRef.current && inputs.size !== null && inputs.size.heightPx > 0) {
         framedRef.current = true;
         runRef.current = framedRun(runRef.current, inputs.size.widthPx / inputs.size.heightPx);
+        cutExposure();
+      }
+      if (cutRef.current) {
+        cutRef.current = false;
+        cutExposure();
       }
       const run = stepRun(runRef.current, {
         // The server's scene where the ship sees it at this frame's time (R03's `frameAt`).
@@ -1321,6 +1336,10 @@ function ViewStage({
       }
       terrainAnnunciation = null;
       if (run.scene.system !== arrivalSystem) {
+        // A jump to another system is a new scene, whose exposure snaps to it.
+        if (arrivalSystem !== null) {
+          cutExposure();
+        }
         arrivalSystem = run.scene.system;
         arrival = {};
       }
@@ -1517,6 +1536,14 @@ function ViewStage({
       }
       runRef.current = result.run;
       setPublished((previous) => ({ ...previous, run: result.run }));
+      // A preset's or a target's change that is not eased cuts the image, and its exposure snaps
+      // to it (fix-view-light).
+      if (
+        (action.kind === "preset" || action.kind === "target") &&
+        result.run.camera.move === null
+      ) {
+        cutRef.current = true;
+      }
       if (action.kind === "target") {
         setSelection(result.run.camera.target);
       }

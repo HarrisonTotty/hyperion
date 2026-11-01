@@ -1343,6 +1343,20 @@ describe("the photorealistic renderer's histogram", () => {
     renderer.dispose();
   });
 
+  it("is dropped at a cut, arrived or in flight, and the next frame's handed over (fix-view-light)", async () => {
+    const { renderer } = await ready();
+    renderer.render(new RecordingView(), frameWith([]));
+    await settled();
+    renderer.render(new RecordingView(), frameWith([]));
+    renderer.dropHistograms();
+    await settled();
+    const dropped = renderer.takeHistogram();
+    renderer.render(new RecordingView(), { ...frameWith([]), exposureScale: 2e-4 });
+    await settled();
+    expect([dropped, renderer.takeHistogram()?.preExposure]).toEqual([undefined, 2e-4]);
+    renderer.dispose();
+  });
+
   it("is dropped by a device restore", async () => {
     const { engine, renderer } = await ready();
     renderer.render(new RecordingView(), frameWith([]));

@@ -7,6 +7,7 @@ import {
   ev100FromTriple,
   exposureLevelReading as exposureLevel,
   exposureScale,
+  enable,
   inhibit,
   MAN_EV100_MIN,
   programTriple,
@@ -28,6 +29,8 @@ import {
   meterStatus,
   METER_STEP_MAX_S,
   METER_TIMEOUT_S,
+  readingRange,
+  SMOOTHING_SPEED_EV_PER_S,
   smoothEv,
 } from "./autoExposure";
 import { METER_CLASS, type MeterMode } from "./meter";
@@ -674,9 +677,11 @@ describe("meteringFor (R07.T16.b)", () => {
 });
 
 describe("smoothEv", () => {
-  it("brightens linearly at 3 EV/s and darkens at 1 EV/s outside the band", () => {
-    expect(smoothEv(0, 10, 0.5)).toBeCloseTo(1.5, 12);
-    expect(smoothEv(10, 0, 0.5)).toBeCloseTo(9.5, 12);
+  // Restated from Unreal's 3 EV/s brightening and 1 EV/s darkening (fix-view-light).
+  it("brightens and darkens linearly at a camera's 24 EV/s outside the band", () => {
+    expect(SMOOTHING_SPEED_EV_PER_S).toBe(24);
+    expect(smoothEv(0, 10, 0.25)).toBeCloseTo(6, 12);
+    expect(smoothEv(10, 0, 0.25)).toBeCloseTo(4, 12);
   });
 
   it("approaches exponentially inside the band and never overshoots", () => {
@@ -684,5 +689,224 @@ describe("smoothEv", () => {
     expect(one).toBeGreaterThan(0);
     expect(one).toBeLessThan(1);
     expect(smoothEv(0, 1, 100)).toBeCloseTo(1, 9);
+  });
+});
+
+describe("readingRange (fix-view-light)", () => {
+  it("is a bound above with over 0.5% of the counts in the top bin, below with all in bin 0", () => {
+    expect(
+      readingRange(
+        histogram([
+          [120, 1000],
+          [255, 5],
+        ]),
+      ),
+    ).toBe("inside");
+    expect(
+      readingRange(
+        histogram([
+          [120, 1000],
+          [255, 6],
+        ]),
+      ),
+    ).toBe("above");
+    expect(readingRange(histogram([[0, 1000]]))).toBe("below");
+    expect(
+      readingRange(
+        histogram([
+          [0, 1000],
+          [1, 1],
+        ]),
+      ),
+    ).toBe("inside");
+    expect(readingRange(histogram([]))).toBe("inside");
+  });
+});
+
+/** A sunlit body's frame: a fifth of it lit at 6,000 cd/m² over black sky, L̄ 1,200 cd/m². */
+const SUNLIT: ReadonlyArray<readonly [number, number]> = Array.from({ length: 500 }, (_, i) =>
+  i % 5 === 0 ? [6000, METER_CLASS.litBody] : [0, METER_CLASS.other],
+);
+
+/** `scene`'s histogram as a frame drawn at `ev100` takes it, pre-exposed at that exposure. */
+function drawnAt(scene: ReadonlyArray<readonly [number, number]>, ev100: number): Histogram {
+  const preExposure = exposureScale(ev100);
+  return frameHistogram(
+    scene.map(([cdM2, meterClass]): readonly [number, number] => [cdM2 * preExposure, meterClass]),
+    "average",
+    preExposure,
+  );
+}
+
+/** The EV100 `scene` meters at once settled. */
+function settledEv(scene: ReadonlyArray<readonly [number, number]>): number {
+  const exposure = controller();
+  let ev = 0;
+  for (let frame = 0; frame < 600; frame += 1) {
+    ev = exposure.step(drawnAt(scene, ev), 1 / 60).ev100;
+  }
+  return ev;
+}
+
+/**
+ * Runs `exposure` at 60 Hz over `scene`, each frame's histogram delivered `latency` frames after it
+ * is drawn at the exposure the frame's step gave, as the reader's ring does.
+ *
+ * @returns The applied EV100 after each histogram delivered, in order.
+ */
+function afterEachHistogram(
+  exposure: AutoExposure,
+  scene: ReadonlyArray<readonly [number, number]>,
+  latency: number,
+  histograms: number,
+): number[] {
+  const inFlight: Histogram[] = [];
+  const after: number[] = [];
+  while (after.length < histograms) {
+    const arrived = inFlight.length >= latency ? inFlight.shift() : undefined;
+    const reading = exposure.step(arrived, 1 / 60);
+    if (arrived !== undefined) {
+      after.push(reading.ev100);
+    }
+    inFlight.push(drawnAt(scene, reading.ev100));
+  }
+  return after;
+}
+
+describe("a cut (fix-view-light)", () => {
+  const settled = settledEv(SUNLIT);
+
+  it("meters the sunlit body at EV100 13.2", () => {
+    expect(Math.abs(settled - 13.23)).toBeLessThan(0.1);
+  });
+
+  it("snaps a new scene from AUTO at −10 by its second histogram, the first a bound", () => {
+    // At −10 the top of the range is 2¹⁶ × 1.2 × 2⁻¹⁰ = 76.8 cd/m², so the lit texels clip: the
+    // first reading is a bound, the second lies inside the range.
+    for (const latency of [1, 2]) {
+      const exposure = controller({ kind: "auto", ev100: -10 });
+      const after = afterEachHistogram(exposure, SUNLIT, latency, latency + 1);
+      expect(after[0] ?? 0).toBeGreaterThan(-10);
+      expect(Math.abs((after[latency] ?? 0) - settled)).toBeLessThan(0.25);
+    }
+  });
+
+  it("snaps at the first metered frame from MAN −1, ENABLE taking the reading", () => {
+    const exposure = controller(DEFAULT_MAN);
+    exposure.step(drawnAt(SUNLIT, -1), 1 / 60);
+    expect(exposure.apply(enable(exposure.control, exposure.meteredEv100))).toBe(true);
+    const ev = exposure.step(drawnAt(SUNLIT, -1), 1 / 60).ev100;
+    expect(Math.abs(ev - settled)).toBeLessThan(0.25);
+  });
+
+  it("snaps from −14 with the top bin clipped by the third histogram", () => {
+    const exposure = controller({ kind: "auto", ev100: -14 });
+    exposure.step(undefined, 1 / 60);
+    const clipped = drawnAt(SUNLIT, -14);
+    expect(readingRange(clipped)).toBe("above");
+    const after = afterEachHistogram(exposure, SUNLIT, 2, 3);
+    expect(Math.abs((after[2] ?? 0) - settled)).toBeLessThan(0.25);
+  });
+
+  it("keeps a bound from a reading taken before the last snap from undoing it", () => {
+    const exposure = controller({ kind: "auto", ev100: -14 });
+    const first = exposure.step(drawnAt(SUNLIT, -14), 1 / 60).ev100;
+    // A second reading of the frame drawn at −14, which arrives after the snap.
+    expect(exposure.step(drawnAt(SUNLIT, -14), 1 / 60).ev100).toBe(first);
+    const landed = exposure.step(drawnAt(SUNLIT, first), 1 / 60).ev100;
+    expect(Math.abs(landed - settled)).toBeLessThan(0.25);
+  });
+
+  it("snaps on a camera's cut within a scene, and smooths without one", () => {
+    const dark = histogram([[60, 100]]);
+    const bright = histogram([[160, 100]]);
+    const smoothed = controller();
+    const cut = controller();
+    run(smoothed, dark, 60, 2);
+    run(cut, dark, 60, 2);
+    cut.cut();
+    const atOnce = meteredEvOf(bright);
+    expect(cut.step(bright, 1 / 60).ev100).toBe(atOnce);
+    expect(smoothed.step(bright, 1 / 60).ev100).toBeLessThan(atOnce - 9);
+  });
+
+  it("snaps when the image comes to be drawn again, the style turning photorealistic", () => {
+    const exposure = controller();
+    run(exposure, histogram([[60, 100]]), 60, 2);
+    exposure.noteImage(false);
+    exposure.step(undefined, 1 / 60);
+    exposure.noteImage(true);
+    const bright = histogram([[160, 100]]);
+    expect(exposure.step(bright, 1 / 60).ev100).toBe(meteredEvOf(bright));
+  });
+
+  it("leaves MAN and the operator's inhibit where they stand", () => {
+    const manual = controller(DEFAULT_MAN);
+    manual.cut();
+    expect(manual.step(histogram([[160, 100]]), 1 / 60).control).toEqual(DEFAULT_MAN);
+    const held = controller({ kind: "auto", ev100: 3 });
+    expect(held.apply(inhibit(held.control))).toBe(true);
+    held.cut();
+    expect(held.step(histogram([[160, 100]]), 1 / 60).ev100).toBe(3);
+  });
+});
+
+/** The EV100 `h` meters at. */
+function meteredEvOf(h: Histogram): number {
+  return ev100FromAverageLuminance(meteredLuminance(h));
+}
+
+/** The seconds a controller settled at `fromBin`'s EV takes to come within 0.1 EV of `toBin`'s. */
+function settleS(fromBin: number, toBin: number): { readonly seconds: number; monotone: boolean } {
+  const exposure = controller();
+  const from = histogram([[fromBin, 100]]);
+  const to = histogram([[toBin, 100]]);
+  run(exposure, from, 60, 1);
+  const target = meteredEvOf(to);
+  let ev = exposure.reading().ev100;
+  let monotone = true;
+  for (let frame = 1; frame <= 600; frame += 1) {
+    const next = exposure.step(to, 1 / 60).ev100;
+    monotone &&= Math.sign(target - next) === Math.sign(target - ev) || next === target;
+    monotone &&= Math.abs(target - next) <= Math.abs(target - ev);
+    ev = next;
+    if (Math.abs(target - ev) <= 0.1) {
+      return { seconds: frame / 60, monotone };
+    }
+  }
+  return { seconds: Number.POSITIVE_INFINITY, monotone };
+}
+
+describe("settling within a scene, with no cut (fix-view-light)", () => {
+  // 8.5 bins a stop: 85 bins is 10 EV, 25.5 about 3.
+  it.each([
+    { from: 100, to: 185 },
+    { from: 185, to: 100 },
+  ])(
+    "comes within 0.1 EV of a 10 EV step in 0.45–0.6 s, monotonically ($from → $to)",
+    ({ from, to }) => {
+      const { seconds, monotone } = settleS(from, to);
+      expect(seconds).toBeGreaterThanOrEqual(0.45);
+      expect(seconds).toBeLessThanOrEqual(0.6);
+      expect(monotone).toBe(true);
+    },
+  );
+
+  it.each([
+    { from: 100, to: 126 },
+    { from: 126, to: 100 },
+  ])("comes within 0.1 EV of a 3 EV step in at most 0.3 s ($from → $to)", ({ from, to }) => {
+    expect(settleS(from, to).seconds).toBeLessThanOrEqual(0.3);
+  });
+
+  it("takes the same time either way, within one 60 Hz frame", () => {
+    for (const [low, high] of [
+      [100, 185],
+      [100, 126],
+    ] as const) {
+      expect(Math.abs(settleS(low, high).seconds - settleS(high, low).seconds)).toBeLessThanOrEqual(
+        1 / 60 + 1e-9,
+      );
+    }
   });
 });

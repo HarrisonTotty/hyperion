@@ -906,6 +906,15 @@ export class PhotorealRenderer {
   }
 
   /**
+   * Drops the histogram arrived and those in flight, of images drawn before a cut, so that the
+   * next one {@link PhotorealRenderer.takeHistogram} gives is of a frame drawn after it.
+   */
+  dropHistograms(): void {
+    this.#histogram = undefined;
+    this.#resources?.histograms.dropInFlight();
+  }
+
+  /**
    * Draws each body's composite over the scene target, the farthest first, each into the next air
    * target over the one before (plan R08, R08.T10.b), and lets go of the atmospheres of the bodies
    * it draws none for.

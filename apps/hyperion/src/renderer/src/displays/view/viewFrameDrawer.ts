@@ -397,6 +397,11 @@ export class ViewFrameDrawer {
     return this.#photoreal.takeHistogram();
   }
 
+  /** Drops the histograms of frames drawn before a cut (`PhotorealRenderer.dropHistograms`). */
+  dropHistograms(): void {
+    this.#photoreal.dropHistograms();
+  }
+
   /** Draws one frame, or nothing (`null`) while the stage is not laid out. */
   draw(inputs: ViewFrameInputs): ViewFrameDrawn | null {
     const { run, size, tokens } = inputs;
