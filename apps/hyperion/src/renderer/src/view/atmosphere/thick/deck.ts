@@ -157,6 +157,7 @@ import {
 } from "./bake";
 import type { BinConversion } from "./binConversion";
 import {
+  type DiscreteOrdinatesProblem,
   type DiscreteOrdinatesSolution,
   type GroundCosines,
   type GroundReflectance,
@@ -714,6 +715,10 @@ export function deckReflectance(
     userCosines: outgoingCosines,
     maxMode,
     streams,
+    // ρ is the upward user field at the top alone (R08.T14.b's lever): no node field past the
+    // floor's, which its reflection reads, and no downward user field.
+    fieldInterfaces: [],
+    userDown: false,
   });
   const columns = incidentCosines.length;
   const modes = Array.from({ length: maxMode + 1 }, (_, m) => {
@@ -1339,6 +1344,8 @@ export interface DeckColumnSolve {
  * the horizontal (the table below takes those alone, as R08.T15.b.1 built it) and its view cosines,
  * at the bake's modes.
  *
+ * @param fields - The fields the solve makes (`discreteOrdinates.ts`'s `fieldInterfaces` and
+ *   `userDown`): every one when absent; the table below asks its altitudes' alone.
  * @throws RangeError as the solver refuses a layer.
  */
 export function deckColumnSolve(
@@ -1346,6 +1353,7 @@ export function deckColumnSolve(
   band: ThickBakeBand,
   bin: number,
   term: BinTerm,
+  fields: Pick<DiscreteOrdinatesProblem, "fieldInterfaces" | "userDown"> = {},
 ): DeckColumnSolve {
   const { upper, deck, whole, floorAlbedo } = prepared;
   const { grid } = upper;
@@ -1389,6 +1397,7 @@ export function deckColumnSolve(
     maxMode: THICK_BAKE_MODES - 1,
     streams: THICK_BAKE_STREAMS,
     beamPaths: scaledBeams,
+    ...fields,
   });
   return { solution, scaledBeams, kernelBeams };
 }
@@ -1478,6 +1487,11 @@ function belowDeckBins(
   const v2 = 2 * views;
   const modes = THICK_BAKE_MODES;
   const size = altitudes * suns * v2 * modes;
+  // The node fields at the table's altitudes alone, all `recordOf` reads of them.
+  const fieldInterfaces = Array.from(
+    { length: altitudes },
+    (_, a) => ground - a * grid.altitudeStride,
+  );
   const recordOf = (solve: DeckColumnSolve): BelowRecord => {
     const out = {
       radiance: new Float64Array(size),
@@ -1528,7 +1542,7 @@ function belowDeckBins(
       for (const term of bin.terms) {
         let record = byTerm.get(term);
         if (record === undefined) {
-          record = recordOf(deckColumnSolve(prepared, band, b, term));
+          record = recordOf(deckColumnSolve(prepared, band, b, term, { fieldInterfaces }));
           byTerm.set(term, record);
         }
         const w = term.weight;

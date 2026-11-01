@@ -161,6 +161,8 @@ import {
   RESONANCE_HALF_WIDTH,
   solveDiscreteOrdinates,
   solveLayerStackColumns,
+  type SolveFields,
+  solveFieldsOf,
   type StreamDirection,
 } from "./discreteOrdinates";
 import { EXP_SUM_OPTIONS, type ExpSumOptions } from "./expSum";
@@ -595,6 +597,13 @@ export interface PolarisedProblem {
    * `userUp` and `userDown`; the nodes always carry every component.
    */
   readonly userComponents?: number;
+  /**
+   * The interfaces whose node intensities, and so fluxes, are made, and whether the downward user
+   * intensities are (`discreteOrdinates.ts`'s `DiscreteOrdinatesProblem` options of the names): the
+   * others hold NaN; all of them when absent.
+   */
+  readonly fieldInterfaces?: ArrayLike<number>;
+  readonly userDown?: boolean;
 }
 
 /** One mode's Stokes intensities for one beam, at every interface. */
@@ -1684,6 +1693,8 @@ interface VectorModeContext {
   readonly ground: GroundModeTerms | undefined;
   /** The components kept at the user cosines, from I: at most `components`. */
   readonly userComponents: number;
+  /** The fields the solve makes. */
+  readonly fields: SolveFields;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
@@ -1754,6 +1765,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
   if (!(Number.isInteger(userComponents) && userComponents >= 1 && userComponents <= 4)) {
     throw new RangeError(`the user cosines carry 1 to 4 components, not ${userComponents}`);
   }
+  const fields = solveFieldsOf(problem, layerCount);
   const perBeam: StokesModeIntensities[][] = beams.map(() => []);
   const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   const eigen: ModeEigenRecord[] = [];
@@ -1772,6 +1784,7 @@ export function solvePolarised(problem: PolarisedProblem): PolarisedSolution {
       problem.groundAlbedo,
       ground,
       Math.min(userComponents, components),
+      fields,
     );
     const complexLayers = context.layerModes.flatMap((lm, p) => (lm.complexPairs > 0 ? [p] : []));
     eigen.push({
@@ -1858,6 +1871,7 @@ function vectorModeContext(
   groundAlbedo: number,
   ground: GroundModeTerms | undefined,
   userComponents: number,
+  fields: SolveFields,
 ): VectorModeContext {
   const lmax = quadrature.streams - 1;
   const count = quadrature.nodes.length;
@@ -1907,6 +1921,7 @@ function vectorModeContext(
     groundAlbedo,
     ground,
     userComponents,
+    fields,
   };
 }
 
@@ -2059,6 +2074,7 @@ function vectorBeamParticularsInto(
   out: ModeParticulars,
 ): void {
   const { components, quadrature, layerModes, functions, userCosines, userComponents } = context;
+  const { userDown } = context.fields;
   const { beam, slantFactor } = solve;
   const n = quadrature.nodes.length * components;
   const span = 2 * n;
@@ -2079,7 +2095,10 @@ function vectorBeamParticularsInto(
       for (let u = 0; u < users; u += 1) {
         const inverse = 1 / at(userCosines, u);
         alongs[row + u] = phi(lambda + inverse, depth);
-        againsts[row + u] = psi(lambda, inverse, depth);
+        // ψ is the downward particular's alone, which a solve without the downward field skips.
+        if (userDown) {
+          againsts[row + u] = psi(lambda, inverse, depth);
+        }
       }
       // A shifted solve's are its own: the next solve at the beam's slant makes the layer's anew.
       made[p] = own ? 1 : 0;
@@ -2107,7 +2126,9 @@ function vectorBeamParticularsInto(
       for (let c = 0; c < userComponents; c += 1) {
         const x = u * components + c;
         out.userUp[p * width + x] = at(sourceUp, x) * along;
-        out.userDown[p * width + x] = at(sourceDown, x) * against;
+        if (userDown) {
+          out.userDown[p * width + x] = at(sourceDown, x) * against;
+        }
       }
     }
   });
@@ -2161,7 +2182,7 @@ function vectorModeField(
   coefficients: Float64Array,
 ): StokesModeIntensities {
   const { m, components, quadrature, layerModes, faces, transfers, userCosines } = context;
-  const { groundAlbedo, ground, userComponents } = context;
+  const { groundAlbedo, ground, userComponents, fields } = context;
   const count = quadrature.nodes.length;
   const n = count * components;
   const span = 2 * n;
@@ -2171,6 +2192,11 @@ function vectorModeField(
   const quadratureUp = new Float64Array((layerCount + 1) * n);
   const quadratureDown = new Float64Array((layerCount + 1) * n);
   for (let k = 0; k <= layerCount; k += 1) {
+    if (fields.interfaces[k] !== 1) {
+      quadratureUp.fill(Number.NaN, k * n, (k + 1) * n);
+      quadratureDown.fill(Number.NaN, k * n, (k + 1) * n);
+      continue;
+    }
     const p = Math.min(k, layerCount - 1);
     const face = faces[p];
     if (face === undefined) {
@@ -2205,7 +2231,10 @@ function vectorModeField(
       }
     }
   }
-  for (let p = 0; p < layerCount; p += 1) {
+  if (!fields.userDown) {
+    userDown.fill(Number.NaN);
+  }
+  for (let p = 0; p < layerCount && fields.userDown; p += 1) {
     const transfer = transfers[p];
     if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);
@@ -2840,6 +2869,8 @@ function solvePoint(
     maxMode,
     streams,
     beamPaths: scaledBeams,
+    // The node fields at the table's altitudes alone, all `addPointSources` reads of them.
+    fieldInterfaces: Array.from(layering.altitudesM, (_, a) => layers - a * grid.altitudeStride),
   };
   return {
     scalar: solveDiscreteOrdinates({ ...common, layers: scalarLayers }),

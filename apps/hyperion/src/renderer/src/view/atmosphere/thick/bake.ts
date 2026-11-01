@@ -1263,6 +1263,8 @@ export interface BakeBandOptions {
   /**
    * Called with each solve once it is made, once a bin and term of the band, before the next: so
    * that a caller reads its fields (the deck, its radiance at the ground) without a second solve.
+   * Its node intensities and fluxes are made at the table's altitudes' interfaces alone, the
+   * ground's among them (NaN at the others); its user intensities at every interface.
    */
   readonly onSolve?: (bin: number, term: BinTerm, solve: BinSolve) => void;
   /**
@@ -1296,7 +1298,21 @@ export function bakeBinSolve(
     term,
     sourceLegendre(prepared),
     ground,
+    THICK_BAKE_MODES,
+    "every",
   );
+}
+
+/**
+ * The interfaces of a bake's solve whose node fields are made: the table's altitudes alone, all the
+ * band's sources read (R08.T14.b's lever), or every one, as {@link bakeBinSolve} gives a test.
+ */
+type SolveInterfaces = "table" | "every";
+
+/** The table's interfaces, k = L − a × stride, one an altitude: the solves' fields the bake reads. */
+function tableInterfaces(prepared: PreparedBake): number[] {
+  const { layers, altitudeStride } = prepared.grid;
+  return Array.from(prepared.altitudesM, (_, a) => layers - a * altitudeStride);
 }
 
 function sourceLegendre(prepared: PreparedBake): SourceLegendre {
@@ -1317,8 +1333,9 @@ function solveOf(
   base: BandBin,
   term: BinTerm,
   legendre: SourceLegendre,
-  ground?: BakeGround,
-  solveModes: number = THICK_BAKE_MODES,
+  ground: BakeGround | undefined,
+  solveModes: number,
+  interfaces: SolveInterfaces,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -1368,6 +1385,7 @@ function solveOf(
     ...(planck === undefined
       ? {}
       : { thermal: { interfacePlanck: planck, groundPlanck: planck[layers] ?? Number.NaN } }),
+    ...(interfaces === "table" ? { fieldInterfaces: tableInterfaces(prepared) } : {}),
   });
   const points = prepared.pointOptics[bin] ?? [];
   const altitudes = prepared.altitudesM.length;
@@ -1682,7 +1700,17 @@ export function bakeBins(
       for (const term of lightBin.terms) {
         let solve = solved.get(term);
         if (solve === undefined) {
-          solve = solveOf(prepared, geometry, b, base, term, legendre, options?.ground, solveModes);
+          solve = solveOf(
+            prepared,
+            geometry,
+            b,
+            base,
+            term,
+            legendre,
+            options?.ground,
+            solveModes,
+            "table",
+          );
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);
         }

@@ -434,6 +434,44 @@ describe("layering (d) and one factorisation (e)", () => {
   });
 });
 
+describe("the fields a solve makes (R08.T14.b)", () => {
+  const base: DiscreteOrdinatesProblem = {
+    layers: slab(2, 0.9, henyeyGreenstein(0.6), 4),
+    groundAlbedo: 0.3,
+    beamCosines: [0.2, 0.7],
+    userCosines: [0.25, 0.8],
+    maxMode: 2,
+  };
+
+  it("makes the node fields at the interfaces asked and the ground's, to the whole solve's bits, NaN elsewhere", () => {
+    const whole = solveDiscreteOrdinates(base);
+    const some = solveDiscreteOrdinates({ ...base, fieldInterfaces: [0, 2], userDown: false });
+    whole.beams.forEach((beam, b) => {
+      const kept = beamAt(some, b);
+      beam.modes.forEach((mode, m) => {
+        const keptMode = kept.modes[m];
+        for (const key of ["quadratureUp", "quadratureDown"] as const) {
+          mode[key].forEach((value, i) => {
+            const k = Math.floor(i / 8);
+            const keptValue = entry(keptMode?.[key] ?? new Float64Array(), i);
+            expect(
+              [0, 2, 4].includes(k) ? Object.is(keptValue, value) : Number.isNaN(keptValue),
+            ).toBe(true);
+          });
+        }
+        expect(keptMode?.userUp).toEqual(mode.userUp);
+        expect(keptMode?.userDown.every(Number.isNaN)).toBe(true);
+      });
+    });
+  });
+
+  it("refuses an interface the solve does not have", () => {
+    for (const k of [-1, 5, 1.5]) {
+      expect(() => solveDiscreteOrdinates({ ...base, fieldInterfaces: [k] })).toThrow(RangeError);
+    }
+  });
+});
+
 /** Every typed array of `value`, by key, as its bytes: two equal are equal to the bit. */
 function bytesOf(value: object): Record<string, Uint8Array> {
   const out: Record<string, Uint8Array> = {};

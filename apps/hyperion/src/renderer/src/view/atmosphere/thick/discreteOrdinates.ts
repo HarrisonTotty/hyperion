@@ -423,6 +423,45 @@ export interface DiscreteOrdinatesProblem {
    * beside the beams on mode 0's factorisation; none when absent.
    */
   readonly thermal?: ThermalEmission;
+  /**
+   * The interfaces, k = 0 at the top to L at the ground, whose node intensities, and so fluxes, are
+   * made (R08.T14.b's lever: a table reads some alone); every interface when absent. The others hold
+   * NaN. The ground's node intensities are made whatever, since its user intensities read them.
+   */
+  readonly fieldInterfaces?: ArrayLike<number>;
+  /** Whether the downward user intensities are made (NaN where not); true when absent. */
+  readonly userDown?: boolean;
+}
+
+/** Which fields of a solve are made ({@link DiscreteOrdinatesProblem.fieldInterfaces}). */
+export interface SolveFields {
+  /** Per interface k = 0 … L, 1 where its node intensities are made. */
+  readonly interfaces: Uint8Array;
+  readonly userDown: boolean;
+}
+
+/**
+ * The fields a problem asks for (`fieldInterfaces`, `userDown`), for a solve of `layerCount` layers.
+ *
+ * @throws RangeError for an interface that is not a whole number in [0, L].
+ */
+export function solveFieldsOf(
+  problem: Pick<DiscreteOrdinatesProblem, "fieldInterfaces" | "userDown">,
+  layerCount: number,
+): SolveFields {
+  const interfaces = new Uint8Array(layerCount + 1);
+  if (problem.fieldInterfaces === undefined) {
+    interfaces.fill(1);
+  } else {
+    for (const k of Array.from(problem.fieldInterfaces)) {
+      if (!(Number.isInteger(k) && k >= 0 && k <= layerCount)) {
+        throw new RangeError(`no interface ${k} among a solve's 0 … ${layerCount}`);
+      }
+      interfaces[k] = 1;
+    }
+    interfaces[layerCount] = 1;
+  }
+  return { interfaces, userDown: problem.userDown ?? true };
 }
 
 /**
@@ -1400,6 +1439,8 @@ interface ModeContext {
   readonly groundAlbedo: number;
   /** A ground other than Lambertian at this mode, or `undefined` for the albedo's or none. */
   readonly ground: GroundModeTerms | undefined;
+  /** The fields the solve makes. */
+  readonly fields: SolveFields;
 }
 
 /** A beam as validated: μ₀, its path, and its transmission at the ground. */
@@ -1473,6 +1514,7 @@ export function solveDiscreteOrdinates(
 
   const planck =
     problem.thermal === undefined ? undefined : checkedThermal(problem.thermal, layers);
+  const fields = solveFieldsOf(problem, layerCount);
   const perBeam: ModeIntensities[][] = beams.map(() => []);
   const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   let thermal: ThermalSolution | undefined;
@@ -1481,7 +1523,15 @@ export function solveDiscreteOrdinates(
       groundReflectance === undefined
         ? undefined
         : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
-    const context = modeContext(m, quadrature, layers, userCosines, problem.groundAlbedo, ground);
+    const context = modeContext(
+      m,
+      quadrature,
+      layers,
+      userCosines,
+      problem.groundAlbedo,
+      ground,
+      fields,
+    );
     solveBeamModes(context, beams, exponentials).forEach((mode, b) => {
       perBeam[b]?.push(mode);
     });
@@ -1569,6 +1619,7 @@ function modeContext(
   userCosines: Float64Array,
   groundAlbedo: number,
   ground: GroundModeTerms | undefined,
+  fields: SolveFields,
 ): ModeContext {
   const lmax = quadrature.streams - 1;
   const n = quadrature.nodes.length;
@@ -1606,6 +1657,7 @@ function modeContext(
     userCosines,
     groundAlbedo,
     ground,
+    fields,
   };
 }
 
@@ -1756,6 +1808,7 @@ function beamParticularsInto(
   out: ModeParticulars,
 ): void {
   const { m, quadrature, layerModes, userLegendre, userCosines } = context;
+  const { userDown } = context.fields;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
@@ -1775,7 +1828,10 @@ function beamParticularsInto(
       for (let u = 0; u < users; u += 1) {
         const inverse = 1 / at(userCosines, u);
         along[row + u] = phi(lambda + inverse, depth);
-        against[row + u] = psi(lambda, inverse, depth);
+        // ψ is the downward particular's alone, which a solve without the downward field skips.
+        if (userDown) {
+          against[row + u] = psi(lambda, inverse, depth);
+        }
       }
       // A shifted solve's are its own: the next solve at the beam's slant makes the layer's anew.
       made[p] = own ? 1 : 0;
@@ -1810,7 +1866,9 @@ function beamParticularsInto(
     for (let u = 0; u < users; u += 1) {
       const inverse = 1 / at(userCosines, u);
       out.userUp[row + u] = transmission * at(sourceUp, u) * inverse * at(along, row + u);
-      out.userDown[row + u] = transmission * at(sourceDown, u) * inverse * at(against, row + u);
+      if (userDown) {
+        out.userDown[row + u] = transmission * at(sourceDown, u) * inverse * at(against, row + u);
+      }
     }
   });
 }
@@ -1956,7 +2014,7 @@ function modeField(
   coefficients: Float64Array,
   groundUserUp: GroundUserUp,
 ): ModeIntensities {
-  const { m, quadrature, layerModes, faces, transfers, userCosines } = context;
+  const { m, quadrature, layerModes, faces, transfers, userCosines, fields } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
@@ -1964,6 +2022,11 @@ function modeField(
   const quadratureUp = new Float64Array((layerCount + 1) * n);
   const quadratureDown = new Float64Array((layerCount + 1) * n);
   for (let k = 0; k <= layerCount; k += 1) {
+    if (fields.interfaces[k] !== 1) {
+      quadratureUp.fill(Number.NaN, k * n, (k + 1) * n);
+      quadratureDown.fill(Number.NaN, k * n, (k + 1) * n);
+      continue;
+    }
     const p = Math.min(k, layerCount - 1);
     const face = faceAt(faces, p);
     const values = k < layerCount ? face.top : face.bottom;
@@ -1984,7 +2047,10 @@ function modeField(
 
   const userUp = new Float64Array((layerCount + 1) * users);
   const userDown = new Float64Array((layerCount + 1) * users);
-  for (let p = 0; p < layerCount; p += 1) {
+  if (!fields.userDown) {
+    userDown.fill(Number.NaN);
+  }
+  for (let p = 0; p < layerCount && fields.userDown; p += 1) {
     const transfer = transfers[p];
     if (transfer === undefined) {
       throw new Error(`layer ${p} has no user-angle transfer`);

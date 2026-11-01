@@ -1064,6 +1064,37 @@ describe("layering, one factorisation and V", () => {
     });
   });
 
+  it("makes the node fields at the interfaces asked and the ground's, to the whole solve's bits, NaN elsewhere (R08.T14.e)", () => {
+    const common = {
+      layers: [
+        { opticalDepth: 0.4, singleScatteringAlbedo: 1, moments: rayleigh(0.03) },
+        { opticalDepth: 1.2, singleScatteringAlbedo: 0.9, moments: sphere },
+      ],
+      groundAlbedo: 0.1,
+      beamCosines: [0.3, 0.9],
+      userCosines: [0.4],
+      maxMode: 2,
+      streams: 8,
+    };
+    const whole = solvePolarised(common);
+    const some = solvePolarised({ ...common, fieldInterfaces: [0], userDown: false });
+    whole.beams.forEach((beam, b) => {
+      beam.modes.forEach((mode, m) => {
+        const kept = beamOf(some, b).modes[m];
+        const perInterface = mode.quadratureUp.length / 3;
+        for (const key of ["quadratureUp", "quadratureDown"] as const) {
+          mode[key].forEach((value, i) => {
+            const k = Math.floor(i / perInterface);
+            const keptValue = entry(kept?.[key] ?? [], i);
+            expect(k === 1 ? Number.isNaN(keptValue) : Object.is(keptValue, value)).toBe(true);
+          });
+        }
+        expect(kept?.userUp).toEqual(mode.userUp);
+        expect(kept?.userDown.every(Number.isNaN)).toBe(true);
+      });
+    });
+  });
+
   it("gives a fixed column every field to the bits it gave before the correction's levers (R08.T14.e)", async () => {
     // Air at ω 1, a sphere's cloud whose b₂ takes the nonsymmetric path past m = 0, a depolariser,
     // one that absorbs alone, a beam at the depolariser's eigenvalue's reciprocal, one below the
