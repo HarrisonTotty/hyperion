@@ -12,10 +12,12 @@ function renderLegend(
   floorLog10PerLy2: number,
   ceilingLog10PerLy2: number,
   population: MapPopulation = "all",
+  statesCount = true,
 ): void {
   render(
     <DensityLegend
       population={population}
+      statesCount={statesCount}
       ramp={RAMP}
       floorLog10PerLy2={floorLog10PerLy2}
       ceilingLog10PerLy2={ceilingLog10PerLy2}
@@ -143,6 +145,17 @@ describe("DensityLegend", () => {
     expect(screen.getByText(/^DISPLACED · INIT MASS ABOVE 8/u)).toContainElement(
       screen.getByRole("img", { name: "solar masses" }),
     );
+    expect(
+      screen.getByRole("img", {
+        name: /, displaced remnants of stars of initial mass above 8 solar masses$/u,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the REMNANTS line to the page's other view, its bar's name stating it still", () => {
+    renderLegend(-6, -1, "layer_e_remnants", false);
+
+    expect(screen.queryByText(/DISPLACED/u)).not.toBeInTheDocument();
     expect(
       screen.getByRole("img", {
         name: /, displaced remnants of stars of initial mass above 8 solar masses$/u,

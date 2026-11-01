@@ -50,6 +50,7 @@ import { buildRamp, type DecodedCodes, parseHexColour, rasterise } from "../../l
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import { DensityLegend } from "./DensityLegend";
+import { RemnantsCount } from "./RemnantsCount";
 import { ExtinctionLegend } from "./ExtinctionLegend";
 import { MapFeatureOverlay } from "./MapFeatureOverlay";
 import { StreamTrackOverlay } from "./StreamTrackOverlay";
@@ -762,6 +763,11 @@ interface GalaxyMapViewProps {
   readonly universe: UniverseIdHex;
   readonly view: MapView;
   readonly population: MapPopulation;
+  /**
+   * Whether this view's legend states what the `REMNANTS` map counts, which the page states once,
+   * in the view whose words have the room (`remnantsLegendView`, plan 08, P08.T15.b).
+   */
+  readonly statesPopulation: boolean;
   /** The quantity the raster shows. */
   readonly quantity: MapQuantity;
   /** Whether the density is dimmed by the dust; read only under `COLUMN DENSITY`. */
@@ -839,6 +845,7 @@ function MapViewBody({
   universe,
   view,
   population,
+  statesPopulation,
   quantity,
   dustOverlay: overlayAsked,
   pictureWidthPx,
@@ -1218,6 +1225,7 @@ function MapViewBody({
             {picture.density === null ? null : (
               <DensityLegend
                 population={population}
+                statesCount={statesPopulation}
                 ramp={ramp}
                 floorLog10PerLy2={picture.density.floorLog10}
                 ceilingLog10PerLy2={picture.density.ceilingLog10}
@@ -1232,6 +1240,18 @@ function MapViewBody({
             )}
           </div>
         )}
+        {/*
+         * The view that states what the REMNANTS map counts says so while it has no density legend
+         * to say it in, pending or failed, so that the other view's picture is never read alone.
+         */}
+        {statesPopulation &&
+        population === "layer_e_remnants" &&
+        needsDensity(question) &&
+        (picture?.density ?? null) === null ? (
+          <p className="map-view__counted">
+            <RemnantsCount />
+          </p>
+        ) : null}
         {featureControls}
       </div>
       <div className="map-view__area">{content}</div>

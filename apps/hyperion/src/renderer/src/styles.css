@@ -326,6 +326,14 @@ body {
   letter-spacing: 0.15em;
 }
 
+/* The same line where the view has no legend to hold it, pending or failed. */
+.map-view__counted {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
 /* A display with a fixed layout of its own fills the work area as one cell. */
 .console__work--galaxy {
   grid-template-columns: minmax(0, 1fr);
@@ -883,6 +891,15 @@ body {
 }
 
 /*
+ * A select's hovered state, which a styled select otherwise lacks: its outline in --text-muted
+ * (6.04:1 on --surface-2), since its resting surface is already the hovered control's. Lean of
+ * P08.T15.b, for QUERY RADIUS and POPULATION alike; the look is the owner's to confirm.
+ */
+select.form-field__input:not([aria-disabled="true"]):hover {
+  border-color: var(--text-muted);
+}
+
+/*
  * Disabled: the outline keeps its 3:1, and the field reads as inert by its surface and text. A field
  * held back with `aria-disabled`, which keeps its focus and is described by the visible reason,
  * reads the same way, since the guide has every control show disabled distinctly.
@@ -1223,6 +1240,19 @@ body {
 
 .galaxy-map__population {
   margin-bottom: 0.25rem;
+}
+
+/* The three choices' select and its label on one line, as QUERY RADIUS stands (plan 08). */
+.galaxy-map__population-field {
+  display: flex;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+/* As wide as its longest choice, so that a choice moves nothing; spaced as the radio labels are. */
+.galaxy-map__population-select {
+  width: auto;
+  letter-spacing: 0.1em;
 }
 
 /* The quantity the maps show, and beside it the dust overlay's toggle, held back under EXTINCTION. */

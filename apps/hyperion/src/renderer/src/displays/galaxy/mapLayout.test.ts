@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { COMPACT_BELOW_REM } from "./chartLayout";
-import { mapLayout, mapPictureWidth, mapRows, overlayHasRoom } from "./mapLayout";
+import {
+  mapLayout,
+  mapPictureWidth,
+  mapRows,
+  overlayHasRoom,
+  remnantsLegendView,
+} from "./mapLayout";
 
 /** A page of `widthPx` by `heightPx` at a root font size of `remPx`. */
 function page(widthPx: number, heightPx: number, remPx = 16) {
@@ -98,18 +104,21 @@ describe("mapRows", () => {
     });
   });
 
-  it("gives a narrow stacked page that offers REMNANTS the population's second line and the legend's (plan 08, P08.T15.b)", () => {
-    // 458 px of words, the 2 rem line and the legend's 1.4375 rem, 513 px, under the tabs' 2.5 rem
-    // clearance; the edge-on words, 154 px and the legend's line, 177 px, beside a 163 px picture.
+  it("gives a narrow stacked page's edge-on row the REMNANTS legend's line where it offers it (plan 08, P08.T15.b)", () => {
+    // The edge-on words, 154 px and the line's 1.4375 rem, 177 px, beside a 163 px picture; the
+    // face-on words' 458 px do not move.
     expect(mapRows(MEASURED["1280 × 1024"].plain, "stacked", "with_remnants")).toEqual({
-      faceOnPx: 553,
+      faceOnPx: 498,
       edgeOnPx: 177,
     });
   });
 
-  it("narrows a compact page's pictures for the REMNANTS legend's line in each view's words", () => {
-    // 1280 × 720: the rows' 392 px less the edge-on words' 8.5 rem and the line's 1.4375 rem.
-    expect(mapPictureWidth(MEASURED["1280 × 720"].plain, "compact", "with_remnants")).toBe(232);
+  it("keeps a compact page's pictures where it offers REMNANTS, the face-on words holding its line", () => {
+    for (const name of ["1280 × 720", "1536 × 864 (1920 × 1080 at 125%)"] as const) {
+      expect(mapPictureWidth(MEASURED[name].plain, "compact", "with_remnants")).toBe(
+        mapPictureWidth(MEASURED[name].plain, "compact", "plain"),
+      );
+    }
   });
 
   it("keeps the rows of a stacked page whose picture is taller than the words when it offers REMNANTS", () => {
@@ -170,14 +179,15 @@ describe("overlayHasRoom", () => {
     expect(overlayHasRoom(page(1_006, 880), "stacked", "plain")).toBe(true);
   });
 
-  it("has no room at 1920 × 1080 on a page that offers REMNANTS, whose second line takes it (plan 08, P08.T15.b)", () => {
+  it("keeps the overlay's room at 1920 × 1080 on a page that offers REMNANTS (decision-gg-port-d0 §3.2.4)", () => {
     const { plain, banner } = MEASURED["1920 × 1080"];
-    // The words under the overlay, 35.375 rem, are taller than the 554 px picture.
-    expect(overlayHasRoom(plain, "stacked", "with_remnants")).toBe(false);
-    expect(overlayHasRoom(banner, "stacked", "with_remnants")).toBe(false);
+    // The face-on words do not grow, and the edge-on words under the overlay, 16.75 rem with the
+    // legend's two lines, fit half the 554 px picture.
+    expect(overlayHasRoom(plain, "stacked", "with_remnants")).toBe(true);
+    expect(overlayHasRoom(banner, "stacked", "with_remnants")).toBe(true);
   });
 
-  it("finds a compact page's room unchanged when it offers REMNANTS, its choices on one line", () => {
+  it("finds a compact page's room unchanged when it offers REMNANTS", () => {
     for (const name of ["1280 × 720", "1536 × 864 (1920 × 1080 at 125%)"] as const) {
       expect(overlayHasRoom(MEASURED[name].plain, "compact", "with_remnants")).toBe(
         overlayHasRoom(MEASURED[name].plain, "compact", "plain"),
@@ -187,5 +197,13 @@ describe("overlayHasRoom", () => {
 
   it("has no room before the page has room for any picture", () => {
     expect(overlayHasRoom(page(400, 100), "compact", "plain")).toBe(false);
+  });
+});
+
+describe("remnantsLegendView", () => {
+  it("states the REMNANTS map's count in the edge-on legend stacked and the face-on compact", () => {
+    // Where each layout's words have room for its line (plan 08, P08.T15.b).
+    expect(remnantsLegendView("stacked")).toBe("edge_on");
+    expect(remnantsLegendView("compact")).toBe("face_on");
   });
 });

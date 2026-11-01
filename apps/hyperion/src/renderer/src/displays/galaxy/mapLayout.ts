@@ -1,3 +1,5 @@
+import type { MapView } from "@hyperion/protocol";
+
 import type { ElementSize } from "../../lib/useElementSize";
 import { COMPACT_BELOW_REM } from "./chartLayout";
 
@@ -74,22 +76,26 @@ const FEATURES_ROW_REM = 2.25;
 export type PopulationChoices = "plain" | "with_remnants";
 
 /**
- * The stacked controls' second line of `POPULATION` choices, where the page offers `REMNANTS`: it
- * wraps under `ALL` and `YOUNG THIN DISC` in the 24 rem column, one 2 rem target lower. Measured in
- * a hidden run at 1280 × 1024 and 1920 × 1080 (2026-11-01): the controls 32 px taller, 304 px and
- * 279 px, and the face-on words under the overlay at 1920 × 1080 573 px beside a 552 px canvas,
- * so that the overlay has no room there. Compact, the three choices stand on one line.
- */
-const POPULATION_WRAP_REM = 2;
-
-/**
- * The `REMNANTS` map's legend line, `DISPLACED · INIT MASS ABOVE 8 M☉`, in each view's words
- * (`DensityLegend`): 23 px beside one legend, a line and its margins, and 42 px under the overlay,
- * where the pair's narrower column wraps it to two lines. Measured in a hidden run of a build
- * that offered `REMNANTS` at version 24 (2026-11-01), at 1280 × 720, 1536 × 864, 1280 × 1024,
- * 1920 × 1080 and, under the overlay, 2560 × 1440.
+ * The `REMNANTS` map's legend line, `DISPLACED · INIT MASS ABOVE 8 M☉` (`DensityLegend`): 23 px
+ * beside one legend, a line and its margins, and 42 px under the overlay, where the pair's
+ * narrower column wraps it to two lines. Measured in a hidden run of a build that offered
+ * `REMNANTS` at version 24 (2026-11-01), at 1280 × 720, 1536 × 864, 1280 × 1024, 1920 × 1080 and,
+ * under the overlay, 2560 × 1440. The page states it once, in the view whose words have the room
+ * ({@link remnantsLegendView}); the three choices themselves are a select one line tall, as the
+ * radio buttons are, so no other figure moves.
  */
 const REMNANTS_LEGEND_REM = { plain: 1.4375, overlay: 2.625 } as const;
+
+/**
+ * The view whose legend states what the `REMNANTS` map counts, for the page as a whole (plan 08,
+ * P08.T15.b): the one whose words have the room for its line. Stacked, the face-on words stand
+ * under the page's controls and fill the 1920 × 1080 picture's height under the overlay, while the
+ * edge-on words leave some 3 rem of their row; compact, the edge-on row's words set the pictures'
+ * width at 1280 × 720, while the face-on words leave some 4 rem of theirs.
+ */
+export function remnantsLegendView(layout: MapLayout): MapView {
+  return layout === "stacked" ? "edge_on" : "face_on";
+}
 
 /** The tallest words of `layout`'s views on a page that offers `choices`. */
 function wordsRem(layout: MapLayout, choices: PopulationChoices): LayoutWordsRem {
@@ -97,16 +103,16 @@ function wordsRem(layout: MapLayout, choices: PopulationChoices): LayoutWordsRem
   if (choices === "plain") {
     return words;
   }
-  const wrap = layout === "stacked" ? POPULATION_WRAP_REM : 0;
-  const plain = REMNANTS_LEGEND_REM.plain;
-  const overlay = REMNANTS_LEGEND_REM.overlay;
-  return {
-    plain: { faceOn: words.plain.faceOn + wrap + plain, edgeOn: words.plain.edgeOn + plain },
-    overlay: {
-      faceOn: words.overlay.faceOn + wrap + overlay,
-      edgeOn: words.overlay.edgeOn + overlay,
-    },
-  };
+  const { plain, overlay } = REMNANTS_LEGEND_REM;
+  return remnantsLegendView(layout) === "edge_on"
+    ? {
+        plain: { ...words.plain, edgeOn: words.plain.edgeOn + plain },
+        overlay: { ...words.overlay, edgeOn: words.overlay.edgeOn + overlay },
+      }
+    : {
+        plain: { ...words.plain, faceOn: words.plain.faceOn + plain },
+        overlay: { ...words.overlay, faceOn: words.overlay.faceOn + overlay },
+      };
 }
 
 /**
@@ -129,8 +135,8 @@ function wordsRem(layout: MapLayout, choices: PopulationChoices): LayoutWordsRem
  * the page's line for the views' wait. Each face-on figure then gains {@link FEATURES_ROW_REM},
  * the feature overlay's toggles under the legends (plan 09, P09.T41.b), estimated from their one
  * line of 2 rem targets and the words' 0.25 rem gap, not yet measured in a hidden run. Where the
- * page offers `REMNANTS` ({@link PopulationChoices}), every figure gains its legend's line,
- * {@link REMNANTS_LEGEND_REM}, and the stacked face-on figures {@link POPULATION_WRAP_REM} too.
+ * page offers `REMNANTS` ({@link PopulationChoices}), the figures of the view that states it gain
+ * its legend's line, {@link REMNANTS_LEGEND_REM}.
  */
 const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // 150 px face-on and 128 px edge-on plain, 222 px and 200 px under the overlay, at 1280 × 720 and
@@ -240,9 +246,8 @@ export function mapRows(size: ElementSize, layout: MapLayout, choices: Populatio
  * the face-on picture's height and of half of it. The rule reads the page's size and the choices it
  * offers, never what it shows, so the overlay never changes the layout, and nothing moves when it
  * is put on. At 1280 × 720 the overlay's words alone are taller than the page, and it has no room;
- * at 1920 × 1080 it has, but on a page that offers `REMNANTS`, whose second line of choices takes
- * the room. Where it has none, the page holds the toggle back with its reason, as the `VIEW`
- * display holds back a slot it has no room for.
+ * at 1920 × 1080 it has, on a page that offers `REMNANTS` too. Where it has none, the page holds
+ * the toggle back with its reason, as the `VIEW` display holds back a slot it has no room for.
  */
 export function overlayHasRoom(
   size: ElementSize,

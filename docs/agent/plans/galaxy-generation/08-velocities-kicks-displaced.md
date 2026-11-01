@@ -2238,17 +2238,19 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     (floor and ceiling 0, every code 0), since the wire's map has no `not_modelled`; the client
     draws it as `NO SYSTEMS IN MAP`.
   - Lean (2026-11-01): the selector offers `REMNANTS` only for a universe at generator version 26
-    or later (`DISPLACED_REMNANTS_FROM`). In the stacked 24 rem column it wraps to a second line,
-    which would overrun the face-on words at 1280 × 1024 and take the `DUST OVERLAY`'s room at
-    1920 × 1080 (a hidden run), for an empty map.
-  - Pending main's ruling, before the 26 bump: `mapPictureWidth`, `mapRows` and `overlayHasRoom`
-    take `PopulationChoices`, which budgets the wrapped line and the legend's
-    (`REMNANTS_LEGEND_REM`). So a 26 universe holds the `DUST OVERLAY` back at 1920 × 1080, and
-    its compact pictures at 1280 × 720 are 232 px, not 256. That goes against
-    decision-gg-port-d0 §3.2.2 (the page's size alone) and §3.2.4 (the design size keeps the
-    overlay), and two tests pin it until the ruling.
-  - The `REMNANTS` map's legend states `DISPLACED · INIT MASS ABOVE 8 M☉` (`DensityLegend`), and
-    the guide's existing `REMNANTS` row now names the displaced remnants (lean, 2026-11-01: it said
+    or later (`DISPLACED_REMNANTS_FROM`), since below it the map is always empty.
+  - Fixed (main's direction, 2026-11-01; decision-gg-port-d0 §3.2.4): a page that offers three
+    choices draws them as a select, one line tall as the radio buttons are, and states the legend's
+    line in one view: the edge-on stacked, the face-on compact (`remnantsLegendView`). So a 26
+    universe keeps the `DUST OVERLAY` at 1920 × 1080 and its 256 px pictures at 1280 × 720; only
+    that view's words budget the line (`REMNANTS_LEGEND_REM`). That view states the line while it
+    has no legend, pending or refused (`RemnantsCount`). `Q` and `D` act over the select, whose
+    choices start with no letter of theirs.
+  - Lean (2026-11-01; the owner's to confirm): a styled select's hovered state, its outline in
+    `--text-muted`, for `QUERY RADIUS` and `POPULATION` alike.
+  - The `REMNANTS` map's legend states `DISPLACED · INIT MASS ABOVE 8 M☉` (`DensityLegend`; its
+    bar's name in both views), and the guide's existing `REMNANTS` row now names the displaced
+    remnants (lean, 2026-11-01: it said
     "the remnants of stars born above 8 M☉", but `LayerERemnants` counts no retained remnant).
     `DISPLACED_REMNANTS_FROM` copies the sim's hold, which the server does not state: it moves
     with `DISPLACED_VERSION` if the hold does.

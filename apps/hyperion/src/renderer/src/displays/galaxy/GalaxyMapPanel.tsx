@@ -36,6 +36,7 @@ import {
   mapPictureWidth,
   mapRows,
   overlayHasRoom,
+  remnantsLegendView,
 } from "./mapLayout";
 import { StaleWaits, staleWaitText } from "./staleWaits";
 import { streamTrackStatus } from "./streamTrackStatus";
@@ -76,9 +77,8 @@ const DISPLACED_REMNANTS_FROM = 26;
 
 /**
  * The choices the page offers for `open`: `REMNANTS` only where its galaxy holds the displaced
- * remnants (lean, 2026-11-01). Below {@link DISPLACED_REMNANTS_FROM} the server's remnants map is
- * always empty, and the third choice's second line in the stacked column would take the
- * `DUST OVERLAY`'s room at 1920 × 1080 for nothing.
+ * remnants (lean, 2026-11-01), since below {@link DISPLACED_REMNANTS_FROM} the server's remnants
+ * map is always empty.
  */
 function populationChoices(open: UniverseInfo | null): PopulationChoices {
   return open !== null && open.generator_version >= DISPLACED_REMNANTS_FROM
@@ -190,7 +190,10 @@ function toggled<K>(kinds: ReadonlySet<K>, kind: K): ReadonlySet<K> {
  * column beside its picture, so that the pictures take the page's height. `ALL` counts every
  * system; `YOUNG THIN DISC` the population where the arms show; and, for a universe whose galaxy
  * holds them, from generator version 26, `REMNANTS`, layer E's displaced remnants, which kicks
- * carried out of their populations (plan 08, P08.T15.b). The page owns the population;
+ * carried out of their populations (plan 08, P08.T15.b). Three choices are a select, one line
+ * tall as two radio buttons are, so that the `DUST OVERLAY` keeps its room at 1920 × 1080; `Q` and
+ * `D` act over it as over the radio buttons, and the `REMNANTS` map's line stands in the one view
+ * whose words have its room ({@link remnantsLegendView}). The page owns the population;
  * changing it asks for both maps again. It needs the server, so while the link is down it is held
  * back, described by the link's reason, and the maps on show stay, marked stale (plan 05's T11
  * ruling (8); decision-gg-port-a2 §3). The link's reason stands in the page's one line for the
@@ -316,7 +319,11 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       const modified = event.ctrlKey || event.altKey || event.metaKey || event.shiftKey;
-      if (event.repeat || modified || isTextEntry(event.target)) {
+      // The population's select takes no letter of the page's keys (its choices start A, Y and
+      // R), so `Q` and `D` act over it as over the radio buttons below 26.
+      const ownSelect =
+        event.target instanceof HTMLSelectElement && event.target.id === populationName;
+      if (event.repeat || modified || (isTextEntry(event.target) && !ownSelect)) {
         return;
       }
       const key = event.key.toUpperCase();
@@ -336,7 +343,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [inhibited, overlayOffered, keysLive]);
+  }, [inhibited, overlayOffered, keysLive, populationName]);
   const devicePixelRatio = size?.devicePixelRatio ?? 1;
   const remPx = size?.remPx ?? 16;
   const rows = size === null ? null : mapRows(size, layout, choices);
@@ -391,30 +398,62 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
                 />
               </div>
             )}
-            <fieldset className="form-choice galaxy-map__population">
-              <legend className="form-field__label">POPULATION</legend>
-              <div className="form-choice__options">
-                {offered.map((value) => (
-                  <label key={value} className="form-choice__option">
-                    <input
-                      type="radio"
-                      name={populationName}
-                      value={value}
-                      checked={population === value}
-                      // Held back rather than disabled, so that it keeps focus and can say why.
-                      aria-disabled={inhibited ? "true" : undefined}
-                      aria-describedby={inhibited ? waitId : undefined}
-                      onChange={() => {
-                        if (!inhibited) {
-                          setPopulation(value);
-                        }
-                      }}
-                    />
-                    {POPULATION_LABEL[value]}
-                  </label>
-                ))}
+            {choices === "with_remnants" ? (
+              // Three choices are a select, as `QUERY RADIUS` is: three radio buttons beside the
+              // legend take two lines of the stacked 24 rem column, and the second would cost the
+              // `DUST OVERLAY` its room at 1920 × 1080 (decision-gg-port-d0 §3.2.4). Two stay radio
+              // buttons, both in view on one line, so that a page below 26 is as it was built.
+              <div className="form-field galaxy-map__population galaxy-map__population-field">
+                <label className="form-field__label" htmlFor={populationName}>
+                  POPULATION
+                </label>
+                <select
+                  id={populationName}
+                  className="form-field__input galaxy-map__population-select"
+                  value={population}
+                  // Held back rather than disabled, so that it keeps focus and can say why.
+                  aria-disabled={inhibited ? "true" : undefined}
+                  aria-describedby={inhibited ? waitId : undefined}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (!inhibited && isMapPopulation(value)) {
+                      setPopulation(value);
+                    }
+                  }}
+                >
+                  {offered.map((value) => (
+                    <option key={value} value={value}>
+                      {POPULATION_LABEL[value]}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </fieldset>
+            ) : (
+              <fieldset className="form-choice galaxy-map__population">
+                <legend className="form-field__label">POPULATION</legend>
+                <div className="form-choice__options">
+                  {offered.map((value) => (
+                    <label key={value} className="form-choice__option">
+                      <input
+                        type="radio"
+                        name={populationName}
+                        value={value}
+                        checked={population === value}
+                        // Held back rather than disabled, so that it keeps focus and can say why.
+                        aria-disabled={inhibited ? "true" : undefined}
+                        aria-describedby={inhibited ? waitId : undefined}
+                        onChange={() => {
+                          if (!inhibited) {
+                            setPopulation(value);
+                          }
+                        }}
+                      />
+                      {POPULATION_LABEL[value]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             <div className="galaxy-map__quantity">
               <fieldset className="form-choice" aria-keyshortcuts={QUANTITY_KEY}>
                 <legend className="form-field__label">
@@ -490,6 +529,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             universe={open.id}
             view="face_on"
             population={population}
+            statesPopulation={remnantsLegendView(layout) === "face_on"}
             quantity={quantity}
             dustOverlay={overlayShown}
             pictureWidthPx={pictureWidthPx}
@@ -539,6 +579,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             universe={open.id}
             view="edge_on"
             population={population}
+            statesPopulation={remnantsLegendView(layout) === "edge_on"}
             quantity={quantity}
             dustOverlay={overlayShown}
             pictureWidthPx={pictureWidthPx}

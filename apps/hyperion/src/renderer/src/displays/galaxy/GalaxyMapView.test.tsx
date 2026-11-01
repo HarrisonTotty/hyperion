@@ -74,6 +74,7 @@ function viewOf(
           universe={UNIVERSE_ID}
           view={view}
           population={population}
+          statesPopulation={false}
           quantity={quantity}
           dustOverlay={dustOverlay}
           pictureWidthPx={pictureWidthPx}
