@@ -741,11 +741,12 @@ stripped_share`, the provisional constant it named before plan 11 existed. It is
   0.18, 0.125, 0.08, 0.07, 0.08 (the mean of the research's two stripped mixes) and the black holes'
   first bin holds 0.78–0.88.
 
-- **The kick loop keeps attempt 0's companion-stripped mark** (ruling 93.2 of 2026-09-22). The
-  mark (`star.stripped`) changes the track in the wide electron-capture window (plan 06, design
-  note 11 as amended by ruling 93.1), so a later attempt reusing the one built track must not
-  redraw it: every attempt reads the mark of attempt 0, and redraws only `star.remnant.*` and
-  `star.kick.*`.
+- **Ruling 93.2, amended.** The kick loop redraws the companion-stripped mark with
+  `star.remnant.*` and `star.kick.*`, and every reader of the mark (the remnant stage, P11.T2.a's
+  hierarchy, the brief) reads the kept attempt's. The exception is a star whose built track read
+  the mark (`Builder::by_companion_mark`, where the single-star and companion-stripped
+  electron-capture windows disagree). There the kept mark is the track's, `mark_attempt()`'s,
+  since it decides the track's death. (Ruling 93.2, amended 2026-11-01.)
 
 **Files.** `galaxy/displaced/{binarity,kick_bins}.rs`. **Acceptance.** Tests pass.
 
@@ -784,7 +785,12 @@ source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The 
   the bins are 0.184, 0.059, 0.155, 0.195, 0.149, 0.106, 0.072, 0.081 (bins 1 and 5 still miss).
   The test holds the measured values to 0.005, the plan's figures beside them, and bins 3–7 to the
   plan's window. The black holes' first bin is 0.785 (0.78–0.88).
-- **Ruling 93.2** is recorded above; the kick loop that honours it is P08.T12.c's.
+- **Ruling 93.2, amended.** The kick loop redraws the companion-stripped mark with
+  `star.remnant.*` and `star.kick.*`, and every reader of the mark (the remnant stage, P11.T2.a's
+  hierarchy, the brief) reads the kept attempt's. The exception is a star whose built track read
+  the mark (`Builder::by_companion_mark`, where the single-star and companion-stripped
+  electron-capture windows disagree). There the kept mark is the track's, `mark_attempt()`'s,
+  since it decides the track's death. (Ruling 93.2, amended 2026-11-01.) The kick loop that honours it is P08.T12.c's.
 - **The direct-draw test is one chi-square test a mass, as built (lane `perf-native-tests`,
   2026-10-11, at `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2, the kick
   bins' ruling and its addendum on the merge floor, correctness fixes).** A 3σ check of each of the
@@ -2160,11 +2166,13 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     `draw_hierarchy_of_primary`, so no second track). A retained record's range brief and census
     bound now build its primary's track. Test:
     `every_reader_of_a_constrained_primary_sees_the_kept_attempt`.
-  - Open (a question for the owner): the loop redraws `star.stripped`, against ruling 93.2 (T8's
-    records), since holding it put 196 of the fast sample's 1,995 remnants at the cap (8.0–10.7
-    M☉ in fast bins, which the class table weighs over the stripped mix), against none. Inside
-    the stripped window the kept verdict differs from the record's own for 296 of 786 displaced
-    remnants and 81 of 173 retained records, and moves the track of none of them.
+  - Ruling 93.2, amended 2026-11-01 (research, on this lane's question): the loop redraws
+    `star.stripped`, since holding it put 196 of the fast sample's 1,995 remnants at the cap
+    (8.0–10.7 M☉ in fast bins, which the class table weighs over the stripped mix), against none.
+    The guard: where the built track read the mark (`Track::companion_mark_read`, from the build's
+    `Outcome`), every attempt keeps the track's (`StarDraws::with_stripped`). `Track`'s `Debug` is
+    written by hand to leave that field out, since the binary engine's pinned timelines hash a
+    track's print. Test (slow): `every_kept_stripped_mark_builds_the_track_built`.
   - Tests: `placement/marks_hold.rs`. The 10⁷ kick-loop test (native only) and the living-share
     chi-square are slow, run by name. The kick loop's cap is reached by 2,081 of 9,996,081
     remnants (2,184 before the tip's 26 stellar holds), against none: that is pinned and logged as
