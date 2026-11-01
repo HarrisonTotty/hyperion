@@ -36,8 +36,10 @@
 
 use std::sync::Arc;
 
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+use crate::stellar::remnant::structure::{CHANDRASEKHAR_MASS, white_dwarf_radius};
+use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
@@ -1241,7 +1243,59 @@ impl Engine {
             } else {
                 Phase::CarbonOxygenWhiteDwarf
             };
-            self.white_dwarf(phase, core.max(1e-3).min(m))
+            let mass = core.max(1e-3).min(m);
+            self.held_product(target, phase, mass)
+                .unwrap_or_else(|| self.white_dwarf(phase, mass))
+        })
+    }
+
+    /// A merger's product in the primary's place to be placed as `target` that no star of that
+    /// kind can hold, whose white dwarf of `phase` and `mass` M☉ [`Engine::new_star`] makes of its
+    /// core, held at its core's last living state instead while the primary's pin is pending,
+    /// under [`PinnedWhiteDwarfRules::Held`] (P11.T4's fix, at 27): design note 16's "if the pair
+    /// has merged, the product collapses", at its pin. `None` otherwise, and below the hold.
+    ///
+    /// The held state is the bare core as `Track::remains_at` holds a stripped AGB star's: a star
+    /// of `target`'s phase whose mass is all core, at the luminosity and radius of the white dwarf
+    /// it would be, at formation (HPT section 6.3's limit of a giant as its envelope goes, µ = 0).
+    /// The product has no track whose structure it could take, so this state is a lean
+    /// (2026-11-01, recorded in plan 11).
+    ///
+    /// [`PinnedWhiteDwarfRules::Held`]: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Held
+    #[must_use]
+    fn held_product(&self, target: NewStar, phase: Phase, mass: f64) -> Option<Member> {
+        if !(self.ctx.rules().pinned_white_dwarfs.holds() && self.pin_pending()) {
+            return None;
+        }
+        let kind = WhiteDwarfCore::of(phase)?;
+        let recipe = RemnantRecipe::default();
+        let m = SolarMasses::new(mass);
+        let radius = white_dwarf_radius(recipe, m);
+        let state = StarState::new(StarStateParts {
+            phase: match target {
+                NewStar::GiantBranch => Phase::FirstGiantBranch,
+                NewStar::CoreHeliumBurning { .. } => Phase::CoreHeliumBurning,
+                NewStar::EarlyAgb => Phase::EarlyAgb,
+                NewStar::PulsingAgb => Phase::ThermallyPulsingAgb,
+                NewStar::HeliumGiant => Phase::HeliumGiantBranch,
+            },
+            age: Years::new(self.age),
+            mass: m,
+            core_mass: m,
+            luminosity: white_dwarf::formation_luminosity(
+                recipe,
+                kind,
+                m,
+                self.ctx.composition().z_fit(),
+            ),
+            radius,
+            mass_loss_rate: SolarMassesPerYear::ZERO,
+            phase_fraction: 0.0,
+        });
+        // sse's degenerate core radius, 5 R_WD, held to the radius.
+        Some(Member::Frozen {
+            state,
+            core_radius: radius,
         })
     }
 

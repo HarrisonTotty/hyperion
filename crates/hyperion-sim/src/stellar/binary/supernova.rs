@@ -164,7 +164,9 @@ impl Engine {
     /// structure's. A structure with no envelope (M ≤ Mc) is stripped first through
     /// [`Engine::stripped_member_at`] at the same age: a helium star lives on with the pin still
     /// waiting, and a bare core with no life left (at or above the Chandrasekhar mass, ruling
-    /// 129.4c, or a helium star past its own end, P11.T4.k) is held at its last living state.
+    /// 129.4c, or a helium star past its own end, P11.T4.k) is held at its last living state, as
+    /// is, from 27, the core of a white dwarf (P11.T4's fix, `PinnedWhiteDwarfRules::Held`); below
+    /// 27 that core is born the white dwarf.
     fn hold(&mut self, track: &std::sync::Arc<sse::Track>, offset: f64) {
         let living = last_living(self.age - offset);
         let carried = match &self.members[0] {

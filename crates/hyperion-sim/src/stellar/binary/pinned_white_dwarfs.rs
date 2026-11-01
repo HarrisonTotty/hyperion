@@ -1,5 +1,5 @@
-//! The hold on a pinned primary that its binary strips to a white dwarf's core before its pin
-//! (plan 11, P11.T4's fix, at [`PINNED_WHITE_DWARFS_VERSION`]).
+//! The hold on a pinned primary that its binary would make a white dwarf before its pin (plan 11,
+//! P11.T4's fix, at [`PINNED_WHITE_DWARFS_VERSION`]).
 //!
 //! Design note 16 makes plan 06 own a massive primary's death: it collapses at plan 06's death age
 //! with plan 06's remnant and kick, and if the binary would end it sooner it is held at its last
@@ -17,14 +17,20 @@
 //! 55 white dwarfs at it, and 8 whose neutron star came from a later merger or accretion-induced
 //! collapse, at 45–128 Myr.
 //!
-//! From 27 ([`PinnedWhiteDwarfRules::Held`]) no strip leaves a pinned primary whose pin is pending
-//! a white dwarf. A strip that would (`Engine::stripped_member_at`, through which `Engine::hold`
-//! strips a bare core too) holds the primary as a bare core that collapses is held: frozen at the
-//! core's last living state, the track's structure there at the core's mass, with that structure's
-//! core radius (`Remains::WhiteDwarf`'s `core` and `core_radius`). A bare core of the thermally
-//! pulsing AGB or of the post-AGB crossing is held at its white dwarf's luminosity and radius at
-//! formation (HPT section 6.3's limit, `Track::bare_agb_core`), since there the AGB's own closed
-//! forms keep a giant's radius to the loss of its envelope.
+//! From 27 ([`PinnedWhiteDwarfRules::Held`]) no exit leaves a pinned primary whose pin is pending
+//! a white dwarf:
+//!
+//! - a strip that would (`Engine::stripped_member_at`, through which `Engine::hold` strips a bare
+//!   core too) holds the primary as a bare core that collapses is held: frozen at the core's last
+//!   living state, the track's structure there at the core's mass, with that structure's core
+//!   radius (`Remains::WhiteDwarf`'s `core` and `core_radius`). A bare core of the thermally
+//!   pulsing AGB or of the post-AGB crossing is held at its white dwarf's luminosity and radius at
+//!   formation (HPT section 6.3's limit, `Track::bare_agb_core`), since there the AGB's own closed
+//!   forms keep a giant's radius to the loss of its envelope;
+//! - a merger whose product in the primary's place no star of its kind can hold, which
+//!   `Engine::new_star` makes the white dwarf of its core, holds the product the same way, frozen
+//!   at that core's mass with its white dwarf's luminosity and radius at formation
+//!   (`Engine::held_product`; a lean of 2026-11-01, recorded in plan 11).
 //!
 //! The pin then collapses the held star from its mass with plan 06's remnant and kick
 //! (`Engine::pinned_collapse`, `held_to`). A companion, a primary with no pin, and a primary whose
@@ -33,14 +39,15 @@
 use crate::GeneratorVersion;
 
 /// The generator version whose stellar rules hold a pinned primary that its binary would make a
-/// white dwarf before its pin until the pin (P11.T4's fix): `Engine::stripped_member_at` takes
-/// [`PinnedWhiteDwarfRules::Held`].
+/// white dwarf before its pin until the pin (P11.T4's fix): `Engine::stripped_member_at` and
+/// `Engine::held_product` take [`PinnedWhiteDwarfRules::Held`].
 ///
 /// Below it every pair takes the held arm, [`PinnedWhiteDwarfRules::Born`], the code of version 24
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this module with
-/// [`PinnedWhiteDwarfRules`], the stellar rules' `pinned_white_dwarfs` field, its reader's call of
-/// [`PinnedWhiteDwarfRules::holds`] (`stripped_member_at`'s white-dwarf arm), and the tripwire
+/// [`PinnedWhiteDwarfRules`], the stellar rules' `pinned_white_dwarfs` field, its two readers'
+/// calls of [`PinnedWhiteDwarfRules::holds`] (`stripped_member_at`'s white-dwarf arm and
+/// `Engine::held_product`, with `new_star`'s fallback to the white dwarf), and the tripwire
 /// (`the_pinned_white_dwarfs_are_held_only_until_the_27_bump`).
 pub(crate) const PINNED_WHITE_DWARFS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
@@ -57,7 +64,8 @@ pub(crate) enum PinnedWhiteDwarfRules {
 impl PinnedWhiteDwarfRules {
     /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is held
     /// until its pin under these rules: the hold's one `match`, which the strip
-    /// (`Engine::stripped_member_at`) goes through.
+    /// (`Engine::stripped_member_at`) and the merger's product (`Engine::held_product`) both go
+    /// through.
     #[must_use]
     pub(crate) const fn holds(self) -> bool {
         match self {

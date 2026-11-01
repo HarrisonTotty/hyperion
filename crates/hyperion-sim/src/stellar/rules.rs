@@ -84,7 +84,8 @@
 //!   [`PINNED_WHITE_DWARFS_VERSION`] (plan 11, P11.T4's fix): whether a pinned primary, its pin
 //!   pending, that its binary would make a white dwarf is born one below it or held at its core's
 //!   last living state until its pin from it, read through the engine's input's rules at one
-//!   `match`, [`PinnedWhiteDwarfRules::holds`], by the strip (`Engine::stripped_member_at`)
+//!   `match`, [`PinnedWhiteDwarfRules::holds`], by the strip (`Engine::stripped_member_at`) and a
+//!   merger's product that no star can hold (`Engine::held_product`)
 //!   (`stellar/rules/pinned_white_dwarfs_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
