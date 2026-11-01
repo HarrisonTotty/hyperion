@@ -509,11 +509,13 @@ fn the_ocean_worlds_take_the_ocean_branch_at_their_measured_elements() {
 /// root is a few tenths of a GW against Howett et al.'s (2011, JGR 116, E03003) 15.8 GW from its
 /// south polar terrain, as the literature finds for a conductive shell (Roberts and Nimmo 2008);
 /// its stiff shell's gain X is far from 1, so it is cold. The missing heat is a porous rock core's
-/// (Choblet et al. 2017), P14.T56.e's (plan 14's Risks, P14.T56.d's membrane, as ruled).
+/// (Choblet et al. 2017), P14.T56.e's (plan 14's Risks, P14.T56.d's membrane, as ruled): the held
+/// arm's test, on the rigid mantle ([`PorousCoreRules::Held`]), which
+/// [`under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean`] answers.
 #[test]
 fn enceladus_s_shell_cannot_keep_its_ocean() {
     let enceladus = moon("Enceladus");
-    let tides = enceladus.tides();
+    let tides = with_porous_core(PorousCoreRules::Held, || enceladus.tides());
     let watts = enceladus.hot_root().value() * enceladus.area();
     let gain = enceladus.gain();
     eprintln!(
@@ -1179,6 +1181,20 @@ fn the_ocean_branch_reads_has_ocean_at_its_whole_heat_flow() {
 /// more than once, a stiff shell's tidal heat peaking at an intermediate depth, are counted.
 #[test]
 fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
+    largest_root_census("held");
+}
+
+/// [`the_branch_takes_its_largest_stable_root_over_ten_thousand_moons`] under every 27 hold
+/// (P14.T56.e), where a porous core's heat adds to the shell's: the branch still takes the largest
+/// stable root, and the moons whose core is porous are counted.
+#[test]
+fn under_every_27_hold_the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
+    with_every_27_hold(|| largest_root_census("under every 27 hold"));
+}
+
+/// The largest-root census of 10⁴ random moons under the rules in force, labelled `label`
+/// ([`the_branch_takes_its_largest_stable_root_over_ten_thousand_moons`]).
+fn largest_root_census(label: &str) {
     let mut state = 0x0051_0060_b000_0003_u64;
     let mut uniform = || {
         state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -1188,7 +1204,7 @@ fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
         z ^= z >> 31;
         f64::from(u32::try_from(z >> 32).unwrap()) / 4_294_967_296.0
     };
-    let (mut oceans, mut multiple, mut missed) = (0_u32, 0_u32, Vec::new());
+    let (mut oceans, mut multiple, mut porous, mut missed) = (0_u32, 0_u32, 0_u32, Vec::new());
     for index in 0..10_000 {
         let base = moon(
             [
@@ -1215,6 +1231,7 @@ fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
         let Some(branch) = ShellBranch::of(&inputs, &solutes, density, gravity) else {
             continue;
         };
+        porous += u32::from(branch.core.is_some());
         let (lo, hi) = (branch.water.deepest().value(), branch.water.top().value());
         let states: Vec<BranchState> = (0..=256)
             .map(|k| {
@@ -1242,8 +1259,8 @@ fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
         }
     }
     eprintln!(
-        "10⁴ moons: {oceans} on the ocean branch, {multiple} whose excess changes sign more than \
-         once on the grid"
+        "10⁴ moons, {label}: {oceans} on the ocean branch, {multiple} whose excess changes sign \
+         more than once on the grid, {porous} branches over a porous core"
     );
     assert!(oceans > 1_000, "{oceans}");
     assert_eq!(
@@ -1290,4 +1307,309 @@ fn the_measured_moons_tides_on_their_shell_are_pinned() {
         }
     }
     golden!("planetary/moon_tides_on_their_shell", w.as_str());
+}
+
+// P14.T56.e: the porous core, behind its hold at 27 (`POROUS_CORE_VERSION`; the lane's science
+// draft, decision-p14-t56d-membrane §2.4).
+
+use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+
+impl Measured {
+    /// The rock under its water, as its ocean branch's column spreads it.
+    fn core(&self) -> OceanCore {
+        let column = crate::planetary::hooks::ocean::WaterColumn::of_water(
+            self.radius(),
+            self.mass(),
+            self.water,
+        );
+        OceanCore::under(self.radius(), self.mass(), column.base()).unwrap()
+    }
+}
+
+/// P14.T56.e is held until the 26 → 27 bump: the rules in force are the rigid mantle's, the
+/// tests' switch and 27's helper reach the porous core, and 26's helper does not.
+#[test]
+fn the_porous_core_is_held_only_until_the_27_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < POROUS_CORE_VERSION,
+        "the 26 → 27 bump frees an ocean-branch moon's porous core (P14.T56.e): delete \
+         `POROUS_CORE_VERSION`, `PorousCoreRules` with its `Held` arm and its match in \
+         `ShellBranch::of`, the tests' `with_porous_core`, its switch in `with_every_27_hold` (and \
+         the helper, if no other 27 hold is left), and this test; restate \
+         `enceladus_s_shell_cannot_keep_its_ocean` on a compacted core, drop the `Held` halves of \
+         the 27 tests, and re-bless the movers plan 14's record of P14.T56.e lists"
+    );
+    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
+    assert_eq!(
+        with_porous_core(PorousCoreRules::Porous, PorousCoreRules::in_force),
+        PorousCoreRules::Porous
+    );
+    assert_eq!(
+        with_every_27_hold(PorousCoreRules::in_force),
+        PorousCoreRules::Porous
+    );
+    assert_eq!(
+        with_every_26_hold(PorousCoreRules::in_force),
+        PorousCoreRules::Held
+    );
+    assert_eq!(
+        with_every_27_hold(|| with_porous_core(PorousCoreRules::Held, PorousCoreRules::in_force)),
+        PorousCoreRules::Held
+    );
+    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
+}
+
+/// P14.T56.e's calibration (decision-p14-t56d-membrane §2.4): under every 27 hold Enceladus's
+/// porous core, at 21 MPa, keeps its ocean, on the ocean branch at 10–40 GW, against the 15.8 ±
+/// 3.1 GW its south polar terrain radiates (Howett et al. 2011, JGR 116, E03003), a part of the
+/// 25–40 GW its shell conducts in all (Hemingway and Mittal 2019, Icarus 332, 111), in fresh water
+/// and in its own brine. Most of the heat is its core's, and its brine's shell is 15–30 km, about
+/// the 18–22 km of Čadek et al. (2016, GRL 43, 5653) and the 19–24 km of Hemingway and Mittal
+/// (2019), a check and not a fit, where the rigid mantle's keeps no ocean.
+#[test]
+fn under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean() {
+    let enceladus = moon("Enceladus");
+    let core = enceladus.core();
+    let pressure = core.effective_pressure().value();
+    assert_eq!(core.compaction(), CoreCompaction::Porous, "{pressure} Pa");
+    assert!((15e6..30e6).contains(&pressure), "{pressure} Pa");
+    for ammonia in [None, Some(false), Some(true)] {
+        let (tides, ocean) = with_every_27_hold(|| match ammonia {
+            None => (enceladus.tides(), None),
+            Some(ammonia) => {
+                let (tides, ocean) = enceladus.solved(ammonia);
+                (tides, Some(ocean))
+            }
+        });
+        let watts = tides.heat_flow().value() * enceladus.area();
+        let shell = match ocean {
+            Some(Subsurface::Ocean(ocean)) => Some(ocean.shell_thickness().value()),
+            _ => None,
+        };
+        let tidal = enceladus.forcing().value() * tides.loss() * enceladus.area();
+        eprintln!(
+            "Enceladus ({ammonia:?}) under every 27 hold: {:?}, {:.2} GW ({:.2} of it tidal) under \
+             {shell:?} m of shell, k2 {:.4}, Q {:.2}; its core at {:.1} MPa, ρ {:.0} kg m⁻³, r {:.1} \
+             km",
+            tides.branch(),
+            watts / 1e9,
+            tidal / 1e9,
+            tides.k2(),
+            tides.q(),
+            pressure / 1e6,
+            core.density.value(),
+            core.radius.value() / 1e3
+        );
+        assert_eq!(tides.branch(), TidalBranch::Ocean, "{ammonia:?}");
+        assert!((10e9..40e9).contains(&watts), "{ammonia:?}: {watts} W");
+        assert!(tidal > 0.9 * watts, "{ammonia:?}: {tidal} of {watts} W");
+        if let Some(shell) = shell {
+            assert!((15e3..30e3).contains(&shell), "{ammonia:?}: {shell} m");
+        }
+        assert_eq!(shell.is_some(), ammonia.is_some(), "{ammonia:?}");
+    }
+}
+
+/// P14.T56.e: Ganymede's, Titan's, Callisto's and Europa's cores are compacted, at 3–15 GPa, so
+/// under every 27 hold their tides and their branch's ocean are the rigid mantle's to the bit; so
+/// are the dry moons' and Triton's, on no ocean.
+#[test]
+fn under_every_27_hold_the_compacted_cores_leave_the_large_moons_tides_unchanged() {
+    for name in ["Ganymede", "Titan", "Callisto", "Europa"] {
+        let body = moon(name);
+        let core = body.core();
+        let pressure = core.effective_pressure().value();
+        eprintln!("{name}'s core: {:.2} GPa", pressure / 1e9);
+        assert_eq!(core.compaction(), CoreCompaction::Compacted, "{name}");
+        assert!(pressure > 2e9, "{name}: {pressure} Pa");
+    }
+    for moon in MOONS.iter().chain(core::iter::once(&TRITON)) {
+        if matches!(
+            moon.name,
+            "Enceladus" | "Dione" | "Mimas" | "Rhea" | "Iapetus"
+        ) {
+            continue;
+        }
+        let ammonia = !matches!(moon.name, "Europa" | "Ganymede" | "Io" | "Moon");
+        let held = with_every_27_hold(|| {
+            with_porous_core(PorousCoreRules::Held, || {
+                (moon.tides(), moon.solved(ammonia))
+            })
+        });
+        let porous = with_every_27_hold(|| (moon.tides(), moon.solved(ammonia)));
+        for (a, b) in [(held.0, porous.0), (held.1.0, porous.1.0)] {
+            assert_eq!(a.branch(), b.branch(), "{}", moon.name);
+            for (x, y) in [
+                (a.k2(), b.k2()),
+                (a.q(), b.q()),
+                (a.loss(), b.loss()),
+                (a.heat_flow().value(), b.heat_flow().value()),
+            ] {
+                assert_same_bits(x, y);
+            }
+        }
+        assert_eq!(held.1.1, porous.1.1, "{}", moon.name);
+    }
+}
+
+/// P14.T56.e: Dione's and Mimas's porous cores, and Rhea's and Iapetus's, under every 27 hold,
+/// recorded and not asserted (the brief): their branch, heat and shell against the inferred
+/// oceans, Dione's 65 ± 30 km under 99 ± 23 km of shell (Beuthe, Rivoldini and Trinh 2016, GRL 43,
+/// 10088) and Mimas's 20–30 km down (Lainey et al. 2024, Nature 626, 280). Each tide is finite.
+#[test]
+fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
+    for name in ["Dione", "Mimas", "Rhea", "Iapetus"] {
+        let body = moon(name);
+        let core = body.core();
+        let (tides, ocean) = with_every_27_hold(|| body.solved(true));
+        let held = with_porous_core(PorousCoreRules::Held, || body.solved(true)).0;
+        let shell = match ocean {
+            Subsurface::Ocean(ocean) => Some(ocean.shell_thickness().value() / 1e3),
+            _ => None,
+        };
+        eprintln!(
+            "{name} under every 27 hold: its core {:?} at {:.1} MPa (ρ {:.0} kg m⁻³, r {:.1} km); \
+             {:?} at {:.3} mW m⁻² ({:.3} GW) under {shell:?} km of shell, k2 {:.4}; held {:?} at \
+             {:.3} mW m⁻²",
+            core.compaction(),
+            core.effective_pressure().value() / 1e6,
+            core.density.value(),
+            core.radius.value() / 1e3,
+            tides.branch(),
+            1e3 * tides.heat_flow().value(),
+            tides.heat_flow().value() * body.area() / 1e9,
+            tides.k2(),
+            held.branch(),
+            1e3 * held.heat_flow().value()
+        );
+        assert!(
+            tides.k2().is_finite() && tides.k2() > 0.0,
+            "{name}: {tides:?}"
+        );
+        assert!(tides.heat_flow().value().is_finite(), "{name}: {tides:?}");
+    }
+}
+
+/// The membrane over a deformable core (P14.T56.e) keeps Beuthe's (2015) relations, for complex Λ
+/// over |Λ| 10⁻³–10³ and its argument 0–π ÷ 2, cores of |s| 10⁻⁶–0.5 dissipating or not, and ρ̄
+/// 1,100–3,500 kg m⁻³: with h₂ (his eq. 42's) (1 + Λ)h₂ = 1 + k₂ (his eq. 34) to 10⁻¹²; at s = 0 it is
+/// the rigid mantle's [`membrane_love_number`] (his eq. 43) to 10⁻¹²; its loss is the core's and
+/// the shell's, −Im k₂ = −Im s |1 + ξh₂|² + ξ|h₂|² Im Λ (the shell's his eq. 101), to 10⁻¹²; and a
+/// stiff shell leaves the core's tide, k₂ → s.
+#[test]
+fn the_membrane_over_a_deformable_core_keeps_beuthe_s_relations() {
+    let xi = |rho: f64| 0.6 * WATER_DENSITY.value() / rho;
+    let mut checked = 0;
+    for rho in [1_100.0, 1_610.0, 2_000.0, 3_500.0] {
+        let density = KilogramsPerCubicMetre::new(rho);
+        for decade in -3..=3 {
+            for argument in [0.0, 0.3, 1.0, core::f64::consts::FRAC_PI_2] {
+                let size = crate::math::powi(10.0, decade);
+                let lambda = MembraneStiffness {
+                    real: size * crate::math::cos(argument),
+                    imaginary: size * crate::math::sin(argument),
+                };
+                let rigid =
+                    deformable_membrane_love_number(density, ComplexLoveNumber::default(), lambda);
+                let shell = membrane_love_number(ocean_love_number(density), lambda);
+                assert!((rigid.real - shell.real).abs() <= 1e-12 * shell.modulus());
+                assert!((rigid.imaginary - shell.imaginary).abs() <= 1e-12 * shell.modulus());
+                for (re, im) in [(1e-6, 0.0), (0.04, -0.017), (0.2, -0.2), (0.5, -0.01)] {
+                    let s = ComplexLoveNumber {
+                        real: re,
+                        imaginary: im,
+                    };
+                    let (h, k) = deformable_membrane(density, s, lambda);
+                    let one = Complex::real(1.0);
+                    let l = Complex {
+                        re: lambda.real,
+                        im: lambda.imaginary,
+                    };
+                    let kh = (one + l) * h - one - k;
+                    assert!(
+                        kh.norm().sqrt() <= 1e-12 * (1.0 + k.norm().sqrt()),
+                        "{kh:?}"
+                    );
+                    let core = -im * (one + h.scaled(xi(rho))).norm();
+                    let membrane = xi(rho) * h.norm() * lambda.imaginary;
+                    let split = -k.im - (core + membrane);
+                    assert!(split.abs() <= 1e-12 * k.norm().sqrt(), "{split} of {k:?}");
+                    assert!(core >= 0.0 && membrane >= 0.0);
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 448);
+    // A stiff shell leaves the core's tide.
+    let s = ComplexLoveNumber {
+        real: 0.036,
+        imaginary: -0.017,
+    };
+    let stiff = MembraneStiffness {
+        real: 1e9,
+        imaginary: 0.0,
+    };
+    let k = deformable_membrane_love_number(KilogramsPerCubicMetre::new(1_610.0), s, stiff);
+    assert!((k.real - s.real).abs() < 1e-9 && (k.imaginary - s.imaginary).abs() < 1e-9);
+}
+
+/// The core term's limits (P14.T56.e): with no ocean over it (`ρ_w` → 0, so ρ̄ R³ = `ρ_c` `r_c`³)
+/// it is Kelvin's homogeneous elastic sphere's k₂, (3 ÷ 2) ÷ (1 + 19μ ÷ 2`ρ_c` `g_c` `r_c`), seen from R,
+/// times y⁵, here at the water's density taken as a vanishing share of the core's; it vanishes as
+/// the core stiffens, and its loss is negative for no core that does not dissipate. The porous
+/// rigidity is Choblet et al.'s 10⁷ Pa with a dissipation function of 0.8.
+#[test]
+fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
+    // A core 10⁶ times denser than water, under an ocean of no weight to speak of: the water's
+    // share of ρ̄ is 10⁻⁶ of the core's.
+    let rho_c = 1e9;
+    let (r_c, big_r) = (2e5, 3e5);
+    let y: f64 = r_c / big_r;
+    let cube = crate::math::powi(y, 3);
+    let rho_bar = rho_c * cube + WATER_DENSITY.value() * (1.0 - cube);
+    let g = 4.0 / 3.0 * core::f64::consts::PI * GRAVITATIONAL_CONSTANT * rho_bar * big_r;
+    let g_c = 4.0 / 3.0 * core::f64::consts::PI * GRAVITATIONAL_CONSTANT * rho_c * r_c;
+    let core = OceanCore {
+        radius: Metres::new(r_c),
+        density: KilogramsPerCubicMetre::new(rho_c),
+    };
+    for mu in [1e17, 1e18, 1e19] {
+        let s = core_love_number(
+            core,
+            ComplexRigidity {
+                real: Pascals::new(mu),
+                imaginary: Pascals::new(0.0),
+            },
+            KilogramsPerCubicMetre::new(rho_bar),
+            MetresPerSecondSquared::new(g),
+            Metres::new(big_r),
+        );
+        let kelvin = 1.5 / (1.0 + 19.0 * mu / (2.0 * rho_c * g_c * r_c)) * crate::math::powi(y, 5);
+        assert!(
+            (s.real / kelvin - 1.0).abs() < 1e-5,
+            "{s:?} against {kelvin}"
+        );
+        assert_same_bits(s.imaginary, 0.0);
+    }
+    let enceladus = moon("Enceladus");
+    let s = |rigidity: ComplexRigidity| {
+        core_love_number(
+            enceladus.core(),
+            rigidity,
+            enceladus.density(),
+            enceladus.gravity(),
+            enceladus.radius(),
+        )
+    };
+    let porous = s(ComplexRigidity::POROUS_CORE);
+    let rock = s(ComplexRigidity {
+        real: ROCK_RIGIDITY,
+        imaginary: Pascals::new(0.0),
+    });
+    eprintln!("Enceladus's core term: porous {porous:?}, solid rock {rock:?}");
+    assert!(porous.loss() > 0.0 && rock.loss().abs() < f64::MIN_POSITIVE);
+    assert!(rock.real < 1e-3 * porous.real);
+    assert_same_bits(ComplexRigidity::POROUS_CORE.real.value(), 1e7);
+    assert_same_bits(ComplexRigidity::POROUS_CORE.imaginary.value(), 8e6);
 }

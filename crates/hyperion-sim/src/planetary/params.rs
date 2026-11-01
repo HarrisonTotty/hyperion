@@ -538,3 +538,46 @@ pub const ICE_MELTING_VISCOSITY_PA_S: f64 = 1.0e14;
 /// Kohlstedt 2001, JGR 106, 11017, not read at first hand). Tobie, Choblet and Sotin's (2003)
 /// 50 kJ mol⁻¹ belongs to a linearised law with `T_m` = 270 K, not to this one.
 pub const ICE_CREEP_ACTIVATION_ENERGY_J_PER_MOL: f64 = 5.94e4;
+
+/// The effective shear modulus of a porous, water-saturated, unconsolidated rock core under an
+/// ocean, Re μ̃: 1.0 × 10⁷ Pa (P14.T56.e, behind its hold at 27; ruled with the lane's science
+/// draft, lean of 2026-11-01), for the core term of an ocean-branch moon's Love number
+/// ([`core_love_number`](crate::planetary::moons::tides::core_love_number)).
+///
+/// The low end of Choblet et al.'s (2017, Nature Astronomy 1, 841) 10⁷–10⁸ Pa for a core of
+/// 20–30% porosity, some 10³ below solid rock's (Beuthe 2019, Icarus 332, 66; as
+/// decision-p14-t56d-membrane §8's science check read both), with its loss
+/// ([`POROUS_CORE_DISSIPATION`]) at the high end of theirs: the corner of their ranges at which
+/// this homogeneous core gives Enceladus the 25–40 GW that its shell conducts in all (Hemingway
+/// and Mittal 2019, Icarus 332, 111), its south polar terrain's 15.8 ± 3.1 GW (Howett et al. 2011,
+/// JGR 116, E03003) a part of it. Across their ranges this core gives Enceladus 2–27 GW at the
+/// planar root, against their 10–30. The modulus does not depend on the tide's frequency: they fit
+/// none, and the laboratory data behind it are taken at higher frequencies and lower pressures
+/// than a core's.
+pub const POROUS_CORE_RIGIDITY: Pascals = Pascals::new(1.0e7);
+
+/// The dissipation function Q⁻¹ = Im μ̃ ÷ Re μ̃ of a porous rock core under an ocean: 0.8
+/// (P14.T56.e, behind its hold at 27; lean of 2026-11-01), so that its complex shear modulus is
+/// [`POROUS_CORE_RIGIDITY`] × (1 + 0.8i).
+///
+/// The high end of Choblet et al.'s (2017, Nature Astronomy 1, 841) 0.2–0.8 (as
+/// decision-p14-t56d-membrane §8's science check read it), read as the specific dissipation
+/// function of a linear solid, Q⁻¹ = Im μ ÷ Re μ (Knopoff 1964, Rev. Geophys. 2, 625; O'Connell
+/// and Budiansky 1978, GRL 5, 5; recalled, not read in the pod). It is calibrated with the
+/// modulus on Enceladus's heat (see [`POROUS_CORE_RIGIDITY`]).
+pub const POROUS_CORE_DISSIPATION: f64 = 0.8;
+
+/// The effective pressure at the centre of a water-saturated rock core above which it is
+/// compacted, and its tide that of rigid rock: 1.0 × 10⁸ Pa (P14.T56.e, behind its hold at 27;
+/// lean of 2026-11-01), read against the grains' share of the core's weight, its lithostatic
+/// pressure less its pore water's
+/// ([`effective_pressure`](crate::planetary::moons::tides::OceanCore::effective_pressure)), since
+/// the ocean's own weight, carried by the pore water, compacts no grain (Terzaghi's principle).
+///
+/// Porous sandstones of 15–35% porosity begin to lose it by grain crushing and pore collapse under
+/// effective pressures of about 75–400 MPa (Zhang, Wong and Davis 1990, JGR 95, 341; recalled, not
+/// read in the pod), so a core of 20–30% porosity, Choblet et al.'s (2017), keeps it below some
+/// 10² MPa. Enceladus's core, at 21 MPa, stays porous, as the literature has it (Choblet et al.
+/// 2017); Titan's, Ganymede's, Callisto's and Europa's, at 3–15 GPa, are compacted, as the plan's
+/// rule requires; Dione's and Rhea's, at 78–93 MPa, lie just under it.
+pub const CORE_COMPACTION_PRESSURE: Pascals = Pascals::new(1.0e8);

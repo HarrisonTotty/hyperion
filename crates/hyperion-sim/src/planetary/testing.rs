@@ -587,6 +587,9 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   network carries, P and Cl solved.
 /// - a body's resources by their ratios to its rock's α elements, `RESOURCE_RATIOS_VERSION`
 ///   (P14.T26's ratios), at `ResourceRatiosRules::Ratios` through `with_resource_ratios`.
+/// - an ocean-branch moon's porous rock core, `POROUS_CORE_VERSION` (P14.T56.e), at
+///   `PorousCoreRules::Porous` through `with_porous_core`: a core under its compaction pressure
+///   dissipates, and its moon's membrane floats on it.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -602,9 +605,11 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
+    use crate::planetary::moons::tides::{PorousCoreRules, with_porous_core};
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
+    let run = move || with_porous_core(PorousCoreRules::Porous, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 

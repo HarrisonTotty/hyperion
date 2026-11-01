@@ -51,9 +51,22 @@
 //! lag holds no ice to float on an ocean (decision-p14-t56g §1), so its branch falls to the heated
 //! or the cold one, as an icy moon's that fails the test does. The full thermal-orbital
 //! equilibrium, a Maxwell or Andrade body whose viscosity balances tidal heat against convective
-//! loss, would give Im k₂ continuously in place of the branches: P14.T55.j. A porous rock core's
-//! dissipation, which Enceladus needs, is P14.T56.e's: a conductive shell alone keeps no Enceladus
-//! ocean, as the literature finds (decision-p14-t56d-membrane §2.4).
+//! loss, would give Im k₂ continuously in place of the branches: P14.T55.j.
+//!
+//! # The porous core (P14.T56.e, from generator version 27)
+//!
+//! A conductive shell alone keeps no Enceladus ocean, as the literature finds
+//! (decision-p14-t56d-membrane §2.4): its heat is a porous, water-saturated, unconsolidated rock
+//! core's (Choblet et al. 2017, Nature Astronomy 1, 841). From 27 (`POROUS_CORE_VERSION`) the
+//! ocean branch's rock, under the solve's column ([`OceanCore`]), is porous where its effective
+//! pressure leaves it so ([`CORE_COMPACTION_PRESSURE`]), with a complex rigidity of
+//! [`ComplexRigidity::POROUS_CORE`], and the shell's membrane floats on it
+//! ([`deformable_membrane_love_number`], over the core term [`core_love_number`]); a compacted
+//! core, Titan's, Ganymede's, Callisto's and Europa's, stays the rigid mantle, its figures
+//! unchanged to the bit. The rival, dissipation at the shell's base (Hemingway and Mittal 2019,
+//! Icarus 332, 111), is not built: it is tuned to the shell's thickness, not read from a rheology.
+//! Only an ocean frees the core to deform: under a shell frozen to it, ice some 350 times stiffer
+//! holds it, so the heated and cold branches read no core.
 //!
 //! Every function here is pure and deterministic: the shell's modulus is a fixed midpoint sum
 //! ([`SHELL_QUADRATURE_NODES`]) and the root is refined by a fixed count of bisections
@@ -70,9 +83,10 @@ use crate::planetary::moons::regular::{
     tidal_heating,
 };
 use crate::planetary::params::{
-    COLD_ICE_TIDAL_Q, COLD_ROCK_TIDAL_Q, HEATED_ROCK_RIGIDITY,
+    COLD_ICE_TIDAL_Q, COLD_ROCK_TIDAL_Q, CORE_COMPACTION_PRESSURE, HEATED_ROCK_RIGIDITY,
     ICE_CREEP_ACTIVATION_ENERGY_J_PER_MOL, ICE_MELTING_VISCOSITY_PA_S, ICE_POISSON_RATIO,
-    ICE_RIGIDITY, ICY_WATER_FRACTION, ROCK_RIGIDITY, SURFACE_MELT_HEAT_FLOW,
+    ICE_RIGIDITY, ICY_WATER_FRACTION, POROUS_CORE_DISSIPATION, POROUS_CORE_RIGIDITY, ROCK_RIGIDITY,
+    SURFACE_MELT_HEAT_FLOW,
 };
 use crate::substance::phase::MOLAR_GAS_CONSTANT;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -80,6 +94,7 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The fluid Love number `k_f` of a body of moment of inertia C ÷ M a², the Darwin–Radau relation
 /// inverted: P14.T56.a's, re-exported so that a moon's tides and its parent's J₂ read one
@@ -223,6 +238,374 @@ pub fn membrane_love_number(ocean: f64, lambda: MembraneStiffness) -> ComplexLov
         // 0 − x, so that a shell of no loss gives +0, not −0.
         imaginary: 0.0 - ocean * im / norm,
     }
+}
+
+/// The generator version from which an ocean-branch moon's rock core may be porous and dissipate
+/// (P14.T56.e; decision-p14-t56d-membrane §2.4, decision-pre-23-review item 4): 27. It does not
+/// ride 26: it landed after 26's membership.
+///
+/// It is P14.T56.e's one hold. Below it [`PorousCoreRules::in_force`] is [`PorousCoreRules::Held`]:
+/// every ocean-branch moon's shell floats on a rigid mantle ([`membrane_love_number`]), as P14.T56.d
+/// built it, and every figure is version 24's, 25's and 26's bit for bit. 27's bump deletes this
+/// hold, [`PorousCoreRules`] with its `Held` arm, the tests' switch and its tripwire
+/// (`the_porous_core_is_held_only_until_the_27_bump`).
+pub(crate) const POROUS_CORE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether an ocean-branch moon's rock core may be porous (its hold, [`POROUS_CORE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PorousCoreRules {
+    /// Version 26's and before: every ocean-branch moon's mantle is rigid (P14.T56.d).
+    Held,
+    /// Version 27's: a core below [`CORE_COMPACTION_PRESSURE`] is porous, its complex rigidity
+    /// [`ComplexRigidity::POROUS_CORE`], and its moon's membrane floats on it
+    /// ([`deformable_membrane_love_number`]); a compacted core stays rigid.
+    Porous,
+}
+
+impl PorousCoreRules {
+    /// The rules this generator version gives: the porous core from [`POROUS_CORE_VERSION`], the
+    /// rigid mantle below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_porous_core`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = POROUS_CORE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= POROUS_CORE_VERSION {
+            Self::Porous
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The porous core's rules a test sets on its thread, `None` for the version's.
+    static POROUS_CORE_RULES: core::cell::Cell<Option<PorousCoreRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the porous core's rules `rules` on this thread, for the tests to reach
+/// P14.T56.e ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_porous_core<R>(rules: PorousCoreRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<PorousCoreRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            POROUS_CORE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(POROUS_CORE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// A complex shear modulus μ̃ = `real` + i `imaginary`, Pa, whose imaginary part dissipates (the
+/// [module](self) documentation's convention, as the shell's [`ShellModulus`]).
+///
+/// The fields are plain values, so they are public.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct ComplexRigidity {
+    /// Re μ̃.
+    pub real: Pascals,
+    /// Im μ̃, not negative for a material that dissipates.
+    pub imaginary: Pascals,
+}
+
+impl ComplexRigidity {
+    /// A porous, water-saturated, unconsolidated rock core's (P14.T56.e): [`POROUS_CORE_RIGIDITY`]
+    /// × (1 + i [`POROUS_CORE_DISSIPATION`]), whatever the tide's frequency.
+    pub const POROUS_CORE: Self = Self {
+        real: POROUS_CORE_RIGIDITY,
+        imaginary: Pascals::new(POROUS_CORE_RIGIDITY.value() * POROUS_CORE_DISSIPATION),
+    };
+}
+
+/// Whether a rock core under an ocean keeps its pores (P14.T56.e; [`OceanCore::compaction`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CoreCompaction {
+    /// Porous and unconsolidated: its effective pressure lies below [`CORE_COMPACTION_PRESSURE`].
+    Porous,
+    /// Compacted: its tide is rigid rock's, as P14.T56.d's mantle.
+    Compacted,
+}
+
+/// The rock under a moon's global ocean, as its tide reads it (P14.T56.e): a homogeneous,
+/// incompressible sphere, under water at [`WATER_DENSITY`] from its surface to the moon's, the
+/// ice shell's water included, as the solve's column spreads it
+/// (P14.T51.g.b's `WaterColumn`).
+///
+/// The fields are plain values whose invariant, a core denser than water, [`under`](Self::under)
+/// checks, so they are public.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct OceanCore {
+    /// Its radius `r_c`, the water's base.
+    pub radius: Metres,
+    /// Its mean density `ρ_c`, above [`WATER_DENSITY`].
+    pub density: KilogramsPerCubicMetre,
+}
+
+impl OceanCore {
+    /// The rock under the water of a body of radius `radius` and mass `mass` whose water's base is
+    /// at the radius `base`: the mass M − (4π ÷ 3) `ρ_w` (R³ − `r_w`³) within `r_w`, the body's rock
+    /// (1 − x) M for a water fraction x. `None` where it is not denser than water, or a radius or
+    /// mass is not positive and finite.
+    #[must_use]
+    pub fn under(radius: Metres, mass: Kilograms, base: Metres) -> Option<Self> {
+        let (big_r, r_c) = (radius.value(), base.value());
+        let sphere = |r: f64| 4.0 / 3.0 * core::f64::consts::PI * math::powi(r, 3);
+        let rock = mass.value() - WATER_DENSITY.value() * (sphere(big_r) - sphere(r_c));
+        let density = rock / sphere(r_c);
+        (density.is_finite() && density > WATER_DENSITY.value() && r_c > 0.0).then(|| Self {
+            radius: base,
+            density: KilogramsPerCubicMetre::new(density),
+        })
+    }
+
+    /// The effective pressure at its centre, Pa: its weight's lithostatic pressure less its pore
+    /// water's, P′ = (2π ÷ 3) G `ρ_c` (`ρ_c` − `ρ_w`) `r_c`², the stress its grains carry, which
+    /// compacts them (Terzaghi's principle). The ocean over it weighs on its pore water as on its
+    /// grains, so it adds nothing. Enceladus's core is at 21 MPa, Titan's at 7 GPa.
+    #[must_use]
+    pub fn effective_pressure(&self) -> Pascals {
+        let (rho, r) = (self.density.value(), self.radius.value());
+        Pascals::new(
+            2.0 * core::f64::consts::PI / 3.0
+                * GRAVITATIONAL_CONSTANT
+                * rho
+                * (rho - WATER_DENSITY.value())
+                * r
+                * r,
+        )
+    }
+
+    /// Whether it keeps its pores: [`CoreCompaction::Porous`] below [`CORE_COMPACTION_PRESSURE`]
+    /// ([`effective_pressure`](Self::effective_pressure)), [`CoreCompaction::Compacted`] from it.
+    #[must_use]
+    pub fn compaction(&self) -> CoreCompaction {
+        if self.effective_pressure().value() < CORE_COMPACTION_PRESSURE.value() {
+            CoreCompaction::Porous
+        } else {
+            CoreCompaction::Compacted
+        }
+    }
+}
+
+/// A complex number, for the core's Love numbers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Complex {
+    re: f64,
+    im: f64,
+}
+
+impl Complex {
+    const fn real(re: f64) -> Self {
+        Self { re, im: 0.0 }
+    }
+
+    fn scaled(self, x: f64) -> Self {
+        Self {
+            re: self.re * x,
+            im: self.im * x,
+        }
+    }
+
+    fn norm(self) -> f64 {
+        self.re * self.re + self.im * self.im
+    }
+}
+
+impl core::ops::Add for Complex {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self {
+            re: self.re + other.re,
+            im: self.im + other.im,
+        }
+    }
+}
+
+impl core::ops::Sub for Complex {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        Self {
+            re: self.re - other.re,
+            im: self.im - other.im,
+        }
+    }
+}
+
+impl core::ops::Mul for Complex {
+    type Output = Self;
+    fn mul(self, other: Self) -> Self {
+        Self {
+            re: self.re * other.re - self.im * other.im,
+            im: self.re * other.im + self.im * other.re,
+        }
+    }
+}
+
+impl core::ops::Div for Complex {
+    type Output = Self;
+    fn div(self, other: Self) -> Self {
+        let norm = other.norm();
+        Self {
+            re: (self.re * other.re + self.im * other.im) / norm,
+            im: (self.im * other.re - self.re * other.im) / norm,
+        }
+    }
+}
+
+impl From<ComplexLoveNumber> for Complex {
+    fn from(k: ComplexLoveNumber) -> Self {
+        Self {
+            re: k.real,
+            im: k.imaginary,
+        }
+    }
+}
+
+impl From<Complex> for ComplexLoveNumber {
+    fn from(z: Complex) -> Self {
+        Self {
+            real: z.re,
+            imaginary: z.im,
+        }
+    }
+}
+
+/// The core term s of an ocean world over the deformable rock core `core` of complex rigidity
+/// `rigidity`, its mean density `density`, surface gravity `gravity` and radius `radius`
+/// (P14.T56.e): its k₂ at the surface were that surface held still, the core's own tide under its
+/// ocean, with the ocean's load on the core. Dimensionless; its imaginary part is negative for a
+/// core that dissipates, as a Love number's (the [module](self) documentation's convention).
+///
+/// The core is a homogeneous, incompressible sphere of radius `r_c` = y R, density `ρ_c` and
+/// rigidity μ̃, under water at [`WATER_DENSITY`] to the surface. Its interface's displacement
+/// answers its effective load (`ρ_c` − `ρ_w`)(Φ′ − `g_c` u) at Kelvin's homogeneous elastic sphere's
+/// 5 `r_c` ÷ 19μ̃ per unit of pressure (Love 1911; [`elastic_love_number`]'s 19μ ÷ 2ρgR), where Φ′
+/// is the perturbing potential there, the tide's and the two displaced surfaces', and the
+/// incompressible core has no density change within. Solved with the ocean's surface held:
+///
+/// s = 3 Δρ² y⁷ ÷ (19 μ̃ ρ̄ ÷ (g R) + Δρ y² (2`ρ_c` + 3`ρ_w`)), with Δρ = `ρ_c` − `ρ_w`.
+///
+/// It is 0 for a rigid core (μ̃ → ∞) and for one of the ocean's density; with no ocean over it
+/// (`ρ_w` → 0) it is Kelvin's (3 ÷ 2) ÷ (1 + 19μ̃ ÷ 2`ρ_c` `g_c` `r_c`) times y⁵, the core's own k₂ seen
+/// from R; a fluid core gives the two-layer fluid body's.
+///
+/// # Examples
+///
+/// Enceladus's porous core (P14.T56.e): its rock, 0.6 of its mass at 2,712 kg m⁻³, under 73 km of
+/// water, dissipates where a rigid one would not:
+///
+/// ```
+/// use hyperion_sim::planetary::moons::tides::{ComplexRigidity, OceanCore, core_love_number};
+/// use hyperion_sim::units::{KilogramsPerCubicMetre, Metres, MetresPerSecondSquared};
+///
+/// let core = OceanCore {
+///     radius: Metres::new(1.787e5),
+///     density: KilogramsPerCubicMetre::new(2_712.0),
+/// };
+/// let s = core_love_number(
+///     core,
+///     ComplexRigidity::POROUS_CORE,
+///     KilogramsPerCubicMetre::new(1_610.0),
+///     MetresPerSecondSquared::new(0.1135),
+///     Metres::new(2.521e5),
+/// );
+/// assert!((0.03..0.04).contains(&s.real) && (0.015..0.02).contains(&s.loss()), "{s:?}");
+/// ```
+#[must_use]
+pub fn core_love_number(
+    core: OceanCore,
+    rigidity: ComplexRigidity,
+    density: KilogramsPerCubicMetre,
+    gravity: MetresPerSecondSquared,
+    radius: Metres,
+) -> ComplexLoveNumber {
+    let (rho_c, rho_w) = (core.density.value(), WATER_DENSITY.value());
+    let contrast = rho_c - rho_w;
+    let y = core.radius.value() / radius.value();
+    let stiffness = 19.0 * density.value() / (gravity.value() * radius.value());
+    let below = Complex {
+        re: stiffness * rigidity.real.value(),
+        im: stiffness * rigidity.imaginary.value(),
+    } + Complex::real(contrast * y * y * (2.0 * rho_c + 3.0 * rho_w));
+    (Complex::real(3.0 * contrast * contrast * math::powi(y, 7)) / below).into()
+}
+
+/// The complex Love number of a thin shell over a global ocean on a deformable core (P14.T56.e):
+/// Beuthe's (2015, Icarus 248, 109) membrane over his fluid-crust Love numbers, which here read
+/// the core term `core` (s, [`core_love_number`]) of a moon of mean density `density`, under the
+/// shell's membrane stiffness `lambda` (Λ, [`ShellStiffness::at`]).
+///
+/// With ξ = 3`ρ_w` ÷ 5ρ̄ ([`WATER_DENSITY`]), the fluid-crust Love numbers, the shell replaced by
+/// water, are h° = (1 + s) ÷ (1 − ξ(1 + s)) and k° = h° − 1, and the membrane gives
+///
+/// h₂ = h° ÷ (1 + (1 + ξh°)Λ), k₂ = (1 + Λ) h₂ − 1 = (k° + s(1 + ξh°)Λ) ÷ (1 + (1 + ξh°)Λ),
+///
+/// the second form free of cancellation. It is derived for this task: the shell's restoring
+/// pressure `ρ_w` g Λ u, which carries no mass, on the ocean's surface over the core
+/// (decision-p14-t56d-membrane §2.4's call for his eqs. 57–59; the paper was not reached in the
+/// pod). It keeps his k₂–h₂ relation, (1 + Λ)h₂ = 1 + k₂ (his eq. 34), and at s = 0, a rigid
+/// mantle, it is [`membrane_love_number`] (his eq. 43), since there 1 + ξh° = h°. Its loss
+/// splits into the core's and the shell's, −Im k₂ = −Im s |1 + ξh₂|² + ξ|h₂|² Im Λ, the shell's
+/// his eq. 101, so that each is positive. A stiff shell (|Λ| → ∞) holds the surface still and
+/// leaves the core's tide, k₂ → s.
+///
+/// # Examples
+///
+/// A rigid core gives the rigid mantle's membrane, and a porous one dissipates under Enceladus's
+/// stiff shell, Λ ≈ 22, where the shell alone hardly does:
+///
+/// ```
+/// use hyperion_sim::planetary::moons::tides::{
+///     ComplexLoveNumber, MembraneStiffness, deformable_membrane_love_number, membrane_love_number,
+///     ocean_love_number,
+/// };
+/// use hyperion_sim::units::KilogramsPerCubicMetre;
+///
+/// let density = KilogramsPerCubicMetre::new(1_610.0);
+/// let lambda = MembraneStiffness { real: 21.6, imaginary: 0.36 };
+/// let rigid = deformable_membrane_love_number(density, ComplexLoveNumber::default(), lambda);
+/// let shell = membrane_love_number(ocean_love_number(density), lambda);
+/// assert!((rigid.loss() / shell.loss() - 1.0).abs() < 1e-12);
+/// let porous = ComplexLoveNumber { real: 0.036, imaginary: -0.017 };
+/// let k2 = deformable_membrane_love_number(density, porous, lambda);
+/// assert!(k2.loss() > 20.0 * shell.loss());
+/// ```
+#[must_use]
+pub fn deformable_membrane_love_number(
+    density: KilogramsPerCubicMetre,
+    core: ComplexLoveNumber,
+    lambda: MembraneStiffness,
+) -> ComplexLoveNumber {
+    deformable_membrane(density, core, lambda).1.into()
+}
+
+/// [`deformable_membrane_love_number`]'s h₂ and k₂.
+#[must_use]
+fn deformable_membrane(
+    density: KilogramsPerCubicMetre,
+    core: ComplexLoveNumber,
+    lambda: MembraneStiffness,
+) -> (Complex, Complex) {
+    let xi = 0.6 * WATER_DENSITY.value() / density.value();
+    let s = Complex::from(core);
+    let one = Complex::real(1.0);
+    let raised = one + s;
+    let free = one - raised.scaled(xi);
+    let (h0, k0) = (raised / free, (s + raised.scaled(xi)) / free);
+    let held = (one + h0.scaled(xi))
+        * Complex {
+            re: lambda.real,
+            im: lambda.imaginary,
+        };
+    let below = one + held;
+    (h0 / below, (k0 + s * held) / below)
 }
 
 /// The midpoint nodes in ln T over which [`shell_modulus`] averages a shell's Maxwell rigidity:
@@ -693,10 +1076,23 @@ pub(crate) struct ShellBranch {
     membrane_per_m: f64,
     /// `k_oc`.
     ocean: f64,
+    /// Its porous core's tide, from 27 (P14.T56.e): `None` for a rigid mantle.
+    core: Option<PorousCore>,
     /// `F_nt`.
     non_tidal: WattsPerSquareMetre,
     /// Φ.
     forcing: WattsPerSquareMetre,
+}
+
+/// A porous core's tide under its moon's ocean ([`ShellBranch`]'s, P14.T56.e): the core term s
+/// ([`core_love_number`]) and the moon's mean density, which [`deformable_membrane_love_number`]
+/// reads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PorousCore {
+    /// s.
+    term: ComplexLoveNumber,
+    /// ρ̄.
+    density: KilogramsPerCubicMetre,
 }
 
 /// One state of a moon's ocean branch, at a base's pure-water melting point T*
@@ -714,7 +1110,9 @@ pub(crate) struct BranchState {
 impl ShellBranch {
     /// The branch of the moon `inputs` describe, of mean density `density` and surface gravity
     /// `gravity`, dissolving `solutes`: `None` without water, with an ocean limit that is not
-    /// positive, or under a surface at or above water's triple point.
+    /// positive, or under a surface at or above water's triple point. From 27 (P14.T56.e) the rock
+    /// under its water ([`OceanCore::under`] the column's base) is porous where it is not compacted
+    /// ([`OceanCore::compaction`]), and its membrane then floats on it.
     #[must_use]
     pub(crate) fn of(
         inputs: &TideInputs,
@@ -742,11 +1140,29 @@ impl ShellBranch {
         let membrane = 8.0 * (1.0 + ICE_POISSON_RATIO) / (5.0 + ICE_POISSON_RATIO)
             * ICE_RIGIDITY.value()
             / (WATER_DENSITY.value() * gravity.value() * r * r);
+        let core = match PorousCoreRules::in_force() {
+            PorousCoreRules::Held => None,
+            PorousCoreRules::Porous => {
+                OceanCore::under(inputs.radius, inputs.mass, water.column().base())
+                    .filter(|core| core.compaction() == CoreCompaction::Porous)
+                    .map(|core| PorousCore {
+                        term: core_love_number(
+                            core,
+                            ComplexRigidity::POROUS_CORE,
+                            density,
+                            gravity,
+                            inputs.radius,
+                        ),
+                        density,
+                    })
+            }
+        };
         Some(Self {
             water,
             profile,
             membrane_per_m: membrane,
             ocean,
+            core,
             non_tidal: inputs.non_tidal_heat_flow,
             forcing: inputs.forcing,
         })
@@ -757,7 +1173,9 @@ impl ShellBranch {
     /// the base's temperature, Λ = scale × μ̄ ÷ `μ_ice` × d, and what the shell conducts beyond the
     /// moon's heat. The membrane is Beuthe 2015's thin shell, his §1's "less than 5 to 10%" of the
     /// radius, and the depth mean weights each node by k dT, a flat shell's dz = k dT ÷ q, which
-    /// over-weights a thick spherical shell's base by (R ÷ `r_b`)² (recorded).
+    /// over-weights a thick spherical shell's base by (R ÷ `r_b`)² (recorded). Over a porous core
+    /// (P14.T56.e) the membrane floats on it ([`deformable_membrane_love_number`]), and its loss
+    /// is the core's and the shell's.
     ///
     /// # Panics
     ///
@@ -768,13 +1186,14 @@ impl ShellBranch {
         let base = self.water.base_at(melting_point_k);
         let modulus = self.profile.to(base.temperature);
         let d = base.shell(self.water.column().radius()).value();
-        let love = membrane_love_number(
-            self.ocean,
-            MembraneStiffness {
-                real: self.membrane_per_m * modulus.storage * d,
-                imaginary: self.membrane_per_m * modulus.loss * d,
-            },
-        );
+        let lambda = MembraneStiffness {
+            real: self.membrane_per_m * modulus.storage * d,
+            imaginary: self.membrane_per_m * modulus.loss * d,
+        };
+        let love = match self.core {
+            None => membrane_love_number(self.ocean, lambda),
+            Some(core) => deformable_membrane_love_number(core.density, core.term, lambda),
+        };
         let excess =
             base.heat_flow.value() - self.non_tidal.value() - self.forcing.value() * love.loss();
         BranchState {
