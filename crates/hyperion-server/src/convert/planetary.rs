@@ -1702,6 +1702,8 @@ fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
 fn hooks(hooks: &Hooks) -> BodyHooksDto {
     BodyHooksDto {
         detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(hooks.detail_seed().get())),
+        habitability: None,
+        resources: None,
     }
 }
 

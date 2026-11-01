@@ -503,7 +503,9 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
 - `MassLayer`, `Population`, `LayerStatus`, `Unit`, `ErrorCode`, `SystemOriginWire`,
   `CatalogueClassWire` and `MemberClassWire` will grow, and so will plan 14's `PopulationDto`
-  (its disc arms from generator version 26, P14.T28.a and T28.d). TypeScript switches over them are
+  (its disc arms from generator version 26, P14.T28.a and T28.d) and `HabitabilityLimitDto`
+  (P14.T25's limits, named before any build sent one; a client reads one it does not know as
+  Missing). TypeScript switches over them are
   exhaustive with no `default`, so a new value is a compile error where it matters. The
   `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b). `SystemOriginWire`,
   `CatalogueClassWire` and `MemberClassWire` are plan 09's (P09.T39), named here before any build

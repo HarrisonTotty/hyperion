@@ -218,22 +218,190 @@ pub struct BulkPropertiesDto {
 }
 
 /// A body's hooks section, what the generators of surfaces, life and civilisations read (the
-/// simulation's `record::Hooks`): its detail seed, and with P14.T23–T26 its bulk composition,
-/// habitability and resources.
+/// simulation's `record::Hooks` and its server-only hooks): its detail seed, its habitability
+/// (P14.T25) and its resource abundances (P14.T26). Its bulk composition (P14.T23) is not on the
+/// wire.
 ///
 /// The section is `ok` for a planet, moon or dwarf planet present at the record's time, carrying
 /// its detail seed (the rendering plans' R09.T1.b), and `not_applicable` for a ring, a belt, the
 /// cometary halo and a body not present. The body's surface seed (P14.T23) is never sent: a client
 /// holding it could synthesise a surface the ship has not seen, so the server keeps it, and the
 /// client gets the detail seed instead (plan 14 as amended by the rendering plans' R04.T3.a; R04,
-/// Design note 17). The detail seed keeps a section of its own, so that the other hooks join it,
-/// each with its own state, as the tasks that compute them land.
+/// Design note 17). Each hook keeps a section of its own, with its own state, so that the others
+/// join it as the tasks that compute them land.
+///
+/// `habitability` and `resources` are optional on the wire only so that an older server's hooks,
+/// which lack them, still read: the server always sends both, and a client reads either absent as
+/// `not_modelled`. Adding them, as optional fields, left
+/// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) at 3 (galaxy plan 04's Design note 15).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyHooksDto {
     /// The seed of the client's local terrain synthesis, word 0 of the body's
     /// `body.surface.detail` stream (R09.T1.b); `ok` in every hooks section the server sends.
     pub detail_seed: SectionDto<DetailSeedHex>,
+    /// Its habitability at the record's time (P14.T25): `ok` for a present body whose surface
+    /// section the generator computes, or that has none beneath a gas envelope, and `not_modelled`
+    /// for one whose surface it does not, a rogue planet's among them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub habitability: Option<SectionDto<HabitabilityDto>>,
+    /// Its resource abundances (P14.T26): `not_modelled` below generator version 27, which sets
+    /// their ratios; from it, `ok` for a present body whose bulk composition and accessible outer
+    /// layers the generator computes, and `not_modelled` for one whose it does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resources: Option<SectionDto<ResourceAbundancesDto>>,
+}
+
+/// A body's habitability at the record's time (plan 14, P14.T25; the simulation's
+/// `HabitabilityAssessment`): a class of whether liquid water stands on or under its surface, and
+/// every limit that bears on it. It says nothing about life.
+///
+/// `{"class": "marginal", "limits": ["frozen_surface"]}`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HabitabilityDto {
+    /// Its class.
+    pub class: HabitabilityClassDto,
+    /// Every limit that applies, each once, in the order [`HabitabilityLimitDto`] lists them; empty
+    /// for a body with none, which is data. A body takes every limit that applies, whatever its
+    /// class, so a `temperate` body may be tidally locked about an active host.
+    pub limits: Vec<HabitabilityLimitDto>,
+}
+
+/// A body's habitability class (the simulation's `HabitabilityClass`), in its order: from a surface
+/// where no liquid water stands, through one with an ocean beneath it, to one with liquid water on
+/// it.
+///
+/// It is not the surface's state: a body whose surface state is `temperate` may be of any class
+/// here (Mars is `marginal`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HabitabilityClassDto {
+    /// No liquid water on its surface now, nor an ocean beneath it: an airless, molten or runaway
+    /// surface, one outside the optimistic zone, or a body with no surface (Venus, the Moon, a gas
+    /// giant).
+    Hostile,
+    /// A subsurface ocean under a surface that is not `marginal` or `temperate` (Europa).
+    SubsurfaceOcean,
+    /// A solid surface under an air inside the optimistic zone that is not `temperate` (Mars).
+    Marginal,
+    /// A rocky body of 0.1–5 M⊕ inside the conservative zone with liquid water at its surface
+    /// (Earth).
+    Temperate,
+}
+
+/// A limit on a body's habitability (the simulation's `HabitabilityLimit`): plan 14's closed list,
+/// and the four after it that P14.T25 added.
+///
+/// It grows (galaxy plan 04's growing enums, named so before any build sent a value of it): a later
+/// generator version may add a limit, as P14.T25 added its four, with no bump, and a client that
+/// does not know it reads it as Missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HabitabilityLimitDto {
+    /// Its orbit-mean distance lies outside the optimistic zone, recent Venus to early Mars, or its
+    /// zone's stars have not formed.
+    OutsideOptimisticZone,
+    /// Its orbit-mean distance lies outside the conservative zone, the moist to the maximum
+    /// greenhouse, or its zone's stars have not formed.
+    OutsideConservativeZone,
+    /// No air: its surface state is `airless` or `tenuous`.
+    NoAtmosphere,
+    /// Its surface pressure is below water's triple point, 611.657 Pa, where no liquid water stands
+    /// at any temperature.
+    BelowTriplePoint,
+    /// Its surface state is `runaway_greenhouse`, or it lies under a steam envelope.
+    RunawayGreenhouse,
+    /// Its surface state is `snowball`.
+    Snowball,
+    /// It has no surface section: a hydrogen and helium envelope, or a supercritical one that hides
+    /// a solid surface.
+    GasEnvelope,
+    /// It is locked 1:1 to its seasonal host, which stands still in its sky; a moon never is.
+    TidallyLocked,
+    /// Its orbit-mean distance lies inside the optimistic zone, but its pericentre or apocentre
+    /// does not.
+    HighEccentricity,
+    /// Its hosts' X-ray and ultraviolet flux at it is of the `active` radiation class or above.
+    ActiveHost,
+    /// One of its zone's stars is a protostar or still contracting to its main sequence.
+    YoungHost,
+    /// One of its zone's stars leaves its main sequence within 1 Gyr, or has left it and still
+    /// burns.
+    LeavingMainSequence,
+    /// A star of its zone lies outside the habitable zone's fit, 2,600–7,200 K.
+    ExtrapolatedZone,
+    /// Its surface state is `magma_ocean` (P14.T25's addition).
+    MoltenSurface,
+    /// Its surface holds no water, liquid or ice, or its water follows a past runaway greenhouse
+    /// (P14.T25's addition).
+    DrySurface,
+    /// Its mass lies outside 0.1–5 M⊕, which `temperate` requires (P14.T25's addition).
+    MassOutsideTemperateRange,
+    /// No liquid water stands at its surface at a mean temperature under water's melting point,
+    /// 273.15 K, short of a snowball's ice: a cold desert, such as Mars (P14.T25's addition).
+    FrozenSurface,
+}
+
+/// A body's resource abundances (plan 14, P14.T26; the simulation's `ResourceAbundances`): the mass
+/// fraction of its accessible outer layers, kg per kg, of each resource of the plan's closed list,
+/// and of the four radioactive isotopes that make up `radioactives`.
+///
+/// The layers are what an operation at the surface or in orbit reaches: an undifferentiated body's
+/// bulk, a differentiated body's silicate crust, a frozen ocean's ice shell, or a gas envelope's
+/// gas at 1 bar. Their depth is open, so every fraction is per unit mass of the layer. The fields
+/// are the resources in the simulation's order (`Resource::ALL`), each named by its key
+/// (`Resource::key`). Each lies in `[0, 1]`, and the eleven sum to at most 1, to the rounding of the
+/// server's arithmetic; 0 is the model's value, not a stand-in for one it does not compute.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ResourceAbundancesDto {
+    /// The iron group, V, Cr, Mn, Fe, Co and Ni, as elements.
+    pub iron_group: f64,
+    /// The light lithophile metals, Li, Be, Na, Mg, Al, K (less its ⁴⁰K), Ca and Ti, as elements.
+    pub light_lithophiles: f64,
+    /// The rare earths, Sc, Y and the lanthanides, as elements.
+    pub rare_earths: f64,
+    /// The platinum group, Ru, Rh, Pd, Os, Ir and Pt, as elements.
+    pub platinum_group: f64,
+    /// The radioactives, ²³⁸U, ²³⁵U, ²³²Th and ⁴⁰K, as isotopes: `radioisotopes`' sum, to rounding.
+    pub radioactives: f64,
+    /// The silicates: a rock's mass less the metals the other resources count, its silicon, its
+    /// oxygen and the elements the list omits.
+    pub silicates: f64,
+    /// Water, frozen or liquid, less its deuterium.
+    pub water_ice: f64,
+    /// The other ices, CO₂, NH₃ and CH₄.
+    pub other_ices: f64,
+    /// The hydrocarbons: a rock's organic matter, by its carbon, or a gas's hydrocarbons of two or
+    /// more carbon atoms.
+    pub hydrocarbons: f64,
+    /// Helium-3, as the isotope.
+    pub helium_3: f64,
+    /// Deuterium, as the isotope.
+    pub deuterium: f64,
+    /// The four radioactive isotopes, each decayed to the body's age.
+    pub radioisotopes: RadioisotopesDto,
+}
+
+/// The mass fractions, kg per kg of a body's accessible outer layers, each in `[0, 1]`, of the four
+/// long-lived radioactive isotopes whose decay heats its rock (the simulation's
+/// `RadiogenicIsotope`), in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RadioisotopesDto {
+    /// ²³⁸U.
+    pub uranium_238: f64,
+    /// ²³⁵U.
+    pub uranium_235: f64,
+    /// ²³²Th.
+    pub thorium_232: f64,
+    /// ⁴⁰K.
+    pub potassium_40: f64,
 }
 
 /// The spin–orbit state a body's tides lock it into (plan 14's `SpinOrbitResonance`).
@@ -563,9 +731,9 @@ pub struct BodyRecordDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub envelope: Option<SectionDto<BodyEnvelopeDto>>,
-    /// Its hooks (`full`): `ok`, with its detail seed, for a planet, moon or dwarf planet present
-    /// at the record's time, and `not_applicable` for a ring, a belt, the halo and a body not
-    /// present.
+    /// Its hooks (`full`): `ok`, with its detail seed, its habitability and its resource
+    /// abundances, for a planet, moon or dwarf planet present at the record's time, and
+    /// `not_applicable` for a ring, a belt, the halo and a body not present.
     pub hooks: SectionDto<BodyHooksDto>,
 }
 
@@ -1351,36 +1519,193 @@ pub(crate) mod tests {
         assert_wire_form(&jupiter, expected);
     }
 
+    /// A Mars's habitability: a cold desert inside the optimistic zone.
+    fn mars_habitability() -> HabitabilityDto {
+        HabitabilityDto {
+            class: HabitabilityClassDto::Marginal,
+            limits: vec![HabitabilityLimitDto::FrozenSurface],
+        }
+    }
+
+    fn mars_habitability_json() -> Value {
+        json!({ "class": "marginal", "limits": ["frozen_surface"] })
+    }
+
+    /// A differentiated rocky body's resources, about the bulk silicate Earth's: its metals, its
+    /// silicates and a little water.
+    fn crust_resources() -> ResourceAbundancesDto {
+        ResourceAbundancesDto {
+            iron_group: 0.0684,
+            light_lithophiles: 0.281,
+            rare_earths: 1.52e-5,
+            platinum_group: 2.35e-8,
+            radioactives: 1.28e-7,
+            silicates: 0.648,
+            water_ice: 2.5e-4,
+            other_ices: 0.0,
+            hydrocarbons: 0.0,
+            helium_3: 0.0,
+            deuterium: 7.8e-8,
+            radioisotopes: RadioisotopesDto {
+                uranium_238: 2.01e-8,
+                uranium_235: 1.46e-10,
+                thorium_232: 7.95e-8,
+                potassium_40: 2.82e-8,
+            },
+        }
+    }
+
+    fn crust_resources_json() -> Value {
+        json!({
+            "iron_group": 0.0684,
+            "light_lithophiles": 0.281,
+            "rare_earths": 1.52e-5,
+            "platinum_group": 2.35e-8,
+            "radioactives": 1.28e-7,
+            "silicates": 0.648,
+            "water_ice": 2.5e-4,
+            "other_ices": 0.0,
+            "hydrocarbons": 0.0,
+            "helium_3": 0.0,
+            "deuterium": 7.8e-8,
+            "radioisotopes": {
+                "uranium_238": 2.01e-8,
+                "uranium_235": 1.46e-10,
+                "thorium_232": 7.95e-8,
+                "potassium_40": 2.82e-8,
+            },
+        })
+    }
+
     #[test]
     fn body_hooks_wire_form() {
         assert_wire_form(
             &BodyHooksDto {
                 detail_seed: SectionDto::NotModelled,
+                habitability: Some(SectionDto::NotModelled),
+                resources: Some(SectionDto::NotModelled),
             },
-            json!({ "detail_seed": { "state": "not_modelled" } }),
+            json!({
+                "detail_seed": { "state": "not_modelled" },
+                "habitability": { "state": "not_modelled" },
+                "resources": { "state": "not_modelled" },
+            }),
         );
         assert_wire_form(
             &BodyHooksDto {
                 detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(0x0123_4567_89ab_cdef)),
+                habitability: Some(SectionDto::Ok(mars_habitability())),
+                resources: Some(SectionDto::Ok(crust_resources())),
+            },
+            json!({
+                "detail_seed": { "state": "ok", "value": "0123456789abcdef" },
+                "habitability": { "state": "ok", "value": mars_habitability_json() },
+                "resources": { "state": "ok", "value": crust_resources_json() },
+            }),
+        );
+    }
+
+    /// P14.T25 and T26: a server older than the two hooks sends neither key, which reads as their
+    /// absence, and a hooks section without them writes neither, so that the field is optional.
+    #[test]
+    fn an_older_server_s_hooks_read_without_habitability_or_resources() {
+        assert_wire_form(
+            &BodyHooksDto {
+                detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(0x0123_4567_89ab_cdef)),
+                habitability: None,
+                resources: None,
             },
             json!({ "detail_seed": { "state": "ok", "value": "0123456789abcdef" } }),
         );
     }
 
     /// R09.T1.b: an `ok` hooks section, as the server sends a present body's, carries the detail
-    /// seed and no other key (the comparison is of whole JSON values), so no other seed travels in
-    /// it.
+    /// seed, the habitability and the resources and no other key (the comparison is of whole JSON
+    /// values), so no other seed travels in it.
     #[test]
-    fn an_ok_hooks_section_carries_the_detail_seed_alone() {
+    fn an_ok_hooks_section_carries_no_seed_but_the_detail_seed() {
         assert_wire_form(
             &SectionDto::Ok(BodyHooksDto {
                 detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(0x0919_0001_b000_0001)),
+                habitability: Some(SectionDto::Ok(mars_habitability())),
+                resources: Some(SectionDto::NotModelled),
             }),
             json!({
                 "state": "ok",
-                "value": { "detail_seed": { "state": "ok", "value": "09190001b0000001" } },
+                "value": {
+                    "detail_seed": { "state": "ok", "value": "09190001b0000001" },
+                    "habitability": { "state": "ok", "value": mars_habitability_json() },
+                    "resources": { "state": "not_modelled" },
+                },
             }),
         );
+    }
+
+    #[test]
+    fn habitability_wire_form() {
+        assert_wire_form(&mars_habitability(), mars_habitability_json());
+        assert_wire_form(
+            &HabitabilityDto {
+                class: HabitabilityClassDto::Temperate,
+                limits: Vec::new(),
+            },
+            json!({ "class": "temperate", "limits": [] }),
+        );
+    }
+
+    #[test]
+    fn habitability_class_wire_strings() {
+        assert_wire_strings(&[
+            (HabitabilityClassDto::Hostile, "hostile"),
+            (HabitabilityClassDto::SubsurfaceOcean, "subsurface_ocean"),
+            (HabitabilityClassDto::Marginal, "marginal"),
+            (HabitabilityClassDto::Temperate, "temperate"),
+        ]);
+    }
+
+    #[test]
+    fn habitability_limit_wire_strings() {
+        assert_wire_strings(&[
+            (
+                HabitabilityLimitDto::OutsideOptimisticZone,
+                "outside_optimistic_zone",
+            ),
+            (
+                HabitabilityLimitDto::OutsideConservativeZone,
+                "outside_conservative_zone",
+            ),
+            (HabitabilityLimitDto::NoAtmosphere, "no_atmosphere"),
+            (HabitabilityLimitDto::BelowTriplePoint, "below_triple_point"),
+            (
+                HabitabilityLimitDto::RunawayGreenhouse,
+                "runaway_greenhouse",
+            ),
+            (HabitabilityLimitDto::Snowball, "snowball"),
+            (HabitabilityLimitDto::GasEnvelope, "gas_envelope"),
+            (HabitabilityLimitDto::TidallyLocked, "tidally_locked"),
+            (HabitabilityLimitDto::HighEccentricity, "high_eccentricity"),
+            (HabitabilityLimitDto::ActiveHost, "active_host"),
+            (HabitabilityLimitDto::YoungHost, "young_host"),
+            (
+                HabitabilityLimitDto::LeavingMainSequence,
+                "leaving_main_sequence",
+            ),
+            (HabitabilityLimitDto::ExtrapolatedZone, "extrapolated_zone"),
+            (HabitabilityLimitDto::MoltenSurface, "molten_surface"),
+            (HabitabilityLimitDto::DrySurface, "dry_surface"),
+            (
+                HabitabilityLimitDto::MassOutsideTemperateRange,
+                "mass_outside_temperate_range",
+            ),
+            (HabitabilityLimitDto::FrozenSurface, "frozen_surface"),
+        ]);
+    }
+
+    /// P14.T26: the eleven resources, each under its `Resource::key`, and the four radioactive
+    /// isotopes.
+    #[test]
+    fn resource_abundances_wire_form() {
+        assert_wire_form(&crust_resources(), crust_resources_json());
     }
 
     #[test]

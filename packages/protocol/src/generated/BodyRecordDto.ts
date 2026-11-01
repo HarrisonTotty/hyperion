@@ -116,8 +116,8 @@ surface: SectionDto<BodySurfaceDto>,
  */
 envelope?: SectionDto<BodyEnvelopeDto>, 
 /**
- * Its hooks (`full`): `ok`, with its detail seed, for a planet, moon or dwarf planet present
- * at the record's time, and `not_applicable` for a ring, a belt, the halo and a body not
- * present.
+ * Its hooks (`full`): `ok`, with its detail seed, its habitability and its resource
+ * abundances, for a planet, moon or dwarf planet present at the record's time, and
+ * `not_applicable` for a ring, a belt, the halo and a body not present.
  */
 hooks: SectionDto<BodyHooksDto>, };

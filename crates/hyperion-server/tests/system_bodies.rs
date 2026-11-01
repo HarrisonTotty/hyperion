@@ -1314,6 +1314,8 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             hooks_seen += 1;
             SectionDto::Ok(BodyHooksDto {
                 detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(seed.get())),
+                habitability: None,
+                resources: None,
             })
         } else {
             SectionDto::NotApplicable

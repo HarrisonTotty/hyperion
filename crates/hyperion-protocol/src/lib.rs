@@ -103,13 +103,14 @@ pub use planetary::{
     ClimateForcingDto, ClimateRegimeDto, CometEventDto, CometTrackPointDto, CometaryHaloDto,
     CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
     CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto, DetailLevelDto,
-    DiscGapDto, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto, HabitableZoneDto,
-    MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, MoonOriginDto,
-    NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto, ProtoplanetaryDiscDto,
-    RadiationClassDto, RedoxClassDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
-    SectionDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto, StormBandDto,
-    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
+    DiscGapDto, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto, HabitabilityClassDto,
+    HabitabilityDto, HabitabilityLimitDto, HabitableZoneDto, MagneticFieldClassDto,
+    MassFractionsDto, MixingRatioNodeDto, MoonOriginDto, NotFormedCondensateDto,
+    NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto,
+    PlanetClassDto, PopulationDto, ProfileNodeDto, ProtoplanetaryDiscDto, RadiationClassDto,
+    RadioisotopesDto, RedoxClassDto, ResourceAbundancesDto, RingDto, RingGapDto, RingKindDto,
+    RingMaterialDto, SectionDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto,
+    StormBandDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
     SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
     SystemPlaneDto, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto,
     WetEpochDto, ZoneDto,
@@ -180,8 +181,9 @@ pub use universe::{
 /// (`decision-p14-t35e-wire.md`; galaxy plan 04's Design note 15).
 ///
 /// An enum that galaxy plan 04's reserved list names as growing (`MassLayer`, `Population`,
-/// `LayerStatus`, `Unit`, `ErrorCode`, and plan 09's `SystemOriginWire`, `CatalogueClassWire` and
-/// `MemberClassWire`) takes a new string without a bump, as `MassLayer` took
+/// `LayerStatus`, `Unit`, `ErrorCode`, plan 09's `SystemOriginWire`, `CatalogueClassWire` and
+/// `MemberClassWire`, and plan 14's `PopulationDto` and `HabitabilityLimitDto`) takes a new string
+/// without a bump, as `MassLayer` took
 /// `brown_dwarf` and `rogue_planet` and `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
 /// parameters (galaxy plan 07, P07.T10.b): every string a build already sends keeps its bytes and
 /// its meaning, and a client that does not know the new one misreads nothing (one built before

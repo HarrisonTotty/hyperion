@@ -30,6 +30,11 @@ import type { CometTrackPointDto } from "./generated/CometTrackPointDto";
 import type { EventIdHex } from "./generated/EventIdHex";
 import type { StormBandDto } from "./generated/StormBandDto";
 import type { BodyHooksDto } from "./generated/BodyHooksDto";
+import type { HabitabilityClassDto } from "./generated/HabitabilityClassDto";
+import type { HabitabilityDto } from "./generated/HabitabilityDto";
+import type { HabitabilityLimitDto } from "./generated/HabitabilityLimitDto";
+import type { RadioisotopesDto } from "./generated/RadioisotopesDto";
+import type { ResourceAbundancesDto } from "./generated/ResourceAbundancesDto";
 import type { BodyIdHex } from "./generated/BodyIdHex";
 import type { BodyKindDto } from "./generated/BodyKindDto";
 import type { BodyOrbitDto } from "./generated/BodyOrbitDto";
@@ -376,6 +381,11 @@ export type {
   EventIdHex,
   StormBandDto,
   BodyHooksDto,
+  HabitabilityClassDto,
+  HabitabilityDto,
+  HabitabilityLimitDto,
+  RadioisotopesDto,
+  ResourceAbundancesDto,
   BodyIdHex,
   BodyKindDto,
   BodyOrbitDto,

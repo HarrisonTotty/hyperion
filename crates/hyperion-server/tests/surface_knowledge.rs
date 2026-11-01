@@ -946,10 +946,11 @@ impl Session {
         let ResponseBody::BodyDetail(answer) = ask(&mut client, &secret, detail).await else {
             panic!("body_detail answers with the body's record");
         };
-        // The hooks section, the place a seed would travel, carries the detail seed alone, from
-        // which the client synthesises (R09.T1.b).
+        // The hooks section, the place a seed would travel, carries the detail seed, from which
+        // the client synthesises (R09.T1.b), and `ask` has checked that no other seed travels.
         let SectionDto::Ok(BodyHooksDto {
             detail_seed: SectionDto::Ok(sent),
+            ..
         }) = &answer.record.hooks
         else {
             panic!(
