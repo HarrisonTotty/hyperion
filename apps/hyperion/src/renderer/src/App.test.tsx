@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { App } from "./App";
+import { MAXIMIZE_KEY } from "./displays/view/displayKeys";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
 import {
@@ -454,6 +455,21 @@ describe("App", () => {
 
     await user.keyboard("{F4}");
     expect(screen.getByRole("heading", { level: 1, name: "View" })).toBeInTheDocument();
+  });
+
+  it("keeps VIEW's MAXIMIZE VIEW its own while another display is shown (the owner's request, 2026-11-01)", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.keyboard("{F4}");
+    await user.click(screen.getByRole("button", { name: `${MAXIMIZE_KEY} MAXIMIZE VIEW` }));
+    await user.keyboard("{F3}");
+    // Its key on SYSTEM is not VIEW's.
+    await user.keyboard(MAXIMIZE_KEY);
+    await user.keyboard("{F4}");
+    expect(screen.getByRole("button", { name: `${MAXIMIZE_KEY} MAXIMIZE VIEW` })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   describe("the TRAINING banner, which follows what VIEW draws", () => {

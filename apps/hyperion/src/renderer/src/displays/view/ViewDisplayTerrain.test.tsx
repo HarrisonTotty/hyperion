@@ -1700,7 +1700,7 @@ describe("the primary's survey line from the own ship in a served system (R10.T1
 /** The `GRID` row of the `Style` panel of `designator`. */
 function gridRow(designator: string): HTMLElement {
   return within(screen.getByRole("region", { name: `Style ${designator}` })).getByRole("group", {
-    name: "GRID",
+    name: "5 GRID",
   });
 }
 

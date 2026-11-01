@@ -226,7 +226,7 @@ describe("StyleControl's BASELINE row (R10.T12.a; decision-r10-t12a-scope §3.1)
 
 /** The `GRID` row's buttons: each one's name and whether it is pressed. */
 function gridButtons(): ReadonlyArray<readonly [string, string | null]> {
-  return within(screen.getByRole("group", { name: "GRID" }))
+  return within(screen.getByRole("group", { name: "5 GRID" }))
     .getAllByRole("button")
     .map((button) => [button.textContent, button.getAttribute("aria-pressed")] as const);
 }
@@ -261,7 +261,7 @@ describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
         grid={{ on: true, onGrid: () => undefined }}
       />,
     );
-    expect(screen.queryByRole("group", { name: "GRID" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "5 GRID" })).toBeNull();
   });
 
   it("is left out of the WIREFRAME, which draws its grid whatever it is", () => {
@@ -274,7 +274,7 @@ describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
         grid={{ on: false, onGrid: () => undefined }}
       />,
     );
-    expect(screen.queryByRole("group", { name: "GRID" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "5 GRID" })).toBeNull();
   });
 
   it("calls back with OFF at once when OFF is pressed", async () => {
@@ -290,7 +290,7 @@ describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
       />,
     );
     await user.click(
-      within(screen.getByRole("group", { name: "GRID" })).getByRole("button", { name: "OFF" }),
+      within(screen.getByRole("group", { name: "5 GRID" })).getByRole("button", { name: "OFF" }),
     );
     expect(onGrid).toHaveBeenCalledWith(false);
   });
@@ -306,7 +306,7 @@ describe("StyleControl's GRID row (the owner's request, 2026-10-31)", () => {
         baseline={{ chosen: 2, onBaseline: () => undefined }}
       />,
     );
-    const grid = screen.getByRole("group", { name: "GRID" });
+    const grid = screen.getByRole("group", { name: "5 GRID" });
     const baseline = screen.getByRole("group", { name: "BASELINE" });
     expect(grid.compareDocumentPosition(baseline) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });

@@ -55,6 +55,7 @@ import {
   lookReading,
   photorealStatements,
   PHOTOREAL_PREPARING,
+  POSITIONS_FROM_SHIP,
   frameBody,
   frameName,
   freeRateReading,
@@ -63,6 +64,7 @@ import {
   type LabelStatement,
   labelStatements,
   markRows,
+  maximizedStatements,
   rangesFromCamera,
   ROTATION_NOT_MODELLED,
   ROTATION_NOT_RESOLVED,
@@ -960,6 +962,44 @@ describe("an instrument's photorealistic statements (decision-r07-t19-layout, it
 
   it("shows its note and its reasons where the primary shows neither", () => {
     expect(instrumentPhotorealStatements([albedo, note, water], [albedo])).toEqual([note, water]);
+  });
+});
+
+describe("the primary's statements while MAXIMIZE VIEW is on (the owner's request, 2026-11-01)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const thick: LabelStatement = {
+    text: "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
+    standing: "sentence",
+  };
+  const water: LabelStatement = {
+    text: "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    standing: "sentence",
+  };
+  const albedo = "BODY PHOTOMETRY: NOT YET MODELLED";
+  const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
+  const refused: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /3", standing: "refused" };
+
+  it("folds every note to one line that counts them", () => {
+    expect(maximizedStatements([POSITIONS_FROM_SHIP, albedo])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  });
+
+  it("counts a note and the reasons straight after it as one", () => {
+    expect(maximizedStatements([albedo, note, water, thick])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  });
+
+  it("folds a server's refusal with the notes", () => {
+    expect(maximizedStatements([albedo, refused])).toEqual(["STATEMENTS: 2 FOLDED"]);
+  });
+
+  it("keeps a request's failure standing after the line", () => {
+    expect(maximizedStatements([albedo, failed, note, water])).toEqual([
+      "STATEMENTS: 2 FOLDED",
+      failed,
+    ]);
+  });
+
+  it("states no line where there is nothing to fold", () => {
+    expect([maximizedStatements([]), maximizedStatements([failed])]).toEqual([[], [failed]]);
   });
 });
 

@@ -891,6 +891,11 @@ function isSentence(statement: LabelStatement): boolean {
   return typeof statement !== "string" && statement.standing === "sentence";
 }
 
+/** Whether a statement is a request's own failure, a {@link StatusStatement} at `fault`. */
+function isFault(statement: LabelStatement): boolean {
+  return typeof statement !== "string" && statement.standing === "fault";
+}
+
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
 export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 
@@ -1024,6 +1029,27 @@ export function instrumentPhotorealStatements(
     (statement, i) =>
       statement === PHOTOREAL_PREPARING || fresh(statement) || (i === note && reasonStands),
   );
+}
+
+/**
+ * The `PRIMARY` view's statements as its upper plate states them while `MAXIMIZE VIEW` is on (the
+ * owner's request, 2026-11-01): folded to one line, `STATEMENTS: 3 FOLDED`, counting each note with
+ * the reasons straight after it as one, before each request's own failure, which stands as it is;
+ * none where there is nothing to fold.
+ *
+ * @remarks
+ * A request's failure (`ATMOSPHERE REJECTED`'s `fault`, in `--status-caution`) is never folded, as
+ * no fault line is. A server's refusal of a request, in `--text`, folds with the notes.
+ */
+export function maximizedStatements(
+  statements: ReadonlyArray<LabelStatement>,
+): ReadonlyArray<LabelStatement> {
+  const folded = statements.filter((statement) => !isFault(statement));
+  const standing = statements.filter(isFault);
+  // A note's reasons are the sentences straight after it (`atmosphereNotes`' order); a sentence
+  // with no note before it is a group of its own.
+  const groups = folded.filter((statement, i) => i === 0 || !isSentence(statement)).length;
+  return groups === 0 ? standing : [`STATEMENTS: ${String(groups)} FOLDED`, ...standing];
 }
 
 /**

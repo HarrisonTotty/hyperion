@@ -4272,6 +4272,15 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 /*
+ * MAXIMIZE VIEW at the bar's end, in one place whether it is on or off, since the bar stays when
+ * the panels go (the owner's request, 2026-11-01).
+ */
+.view-display__maximize {
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+/*
  * The stage beside its side column (R07.T19.b; decision-r07-t19-layout, item 1): in the full
  * layout two columns, 26rem and 20rem; in the compact one a single 26rem column.
  */
@@ -4390,6 +4399,18 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 /* The compact layout: both columns' panels in one, in the same order. */
 .view--compact .view__column {
   display: contents;
+}
+
+/*
+ * MAXIMIZE VIEW on (the owner's request, 2026-11-01): the side columns hidden, their panels kept,
+ * and the stage the display's whole width, with no gap left for them.
+ */
+.view--maximized {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.view--maximized > .view__side {
+  display: none;
 }
 
 /* The descent spike fills the window and never scrolls: its lists scroll within themselves. */

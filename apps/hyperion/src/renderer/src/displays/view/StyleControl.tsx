@@ -6,6 +6,7 @@ import type { RenderStyle } from "../../view/camera/state";
 import { RENDER_STYLES, STYLE_TOGGLE_KEY, styleName } from "../../view/photoreal/style";
 import { SLOPE_BASELINES_M } from "../../view/terrain/readouts";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import { GRID_KEY } from "./displayKeys";
 import type { StyleRefusals } from "./styleRefusals";
 
 /**
@@ -75,12 +76,19 @@ const GRID_SETTINGS: ReadonlyArray<{ readonly on: boolean; readonly label: strin
 /**
  * The `GRID` row (the owner's request, 2026-10-31): its legend on the left of `ON` and `OFF` in
  * the panel's row form, the chosen one pressed and underlined as a preset is; a display control,
- * acting at once, with no key.
+ * acting at once. Its legend shows its key, `5 GRID`, which gives the other setting, as the
+ * style's `4 STYLE` does, so that the grid is set from the keyboard while `MAXIMIZE VIEW` hides the
+ * panel (the owner's request, 2026-11-01).
  */
 function GridRow({ grid }: GridRowProps) {
   return (
-    <fieldset className="preset-buttons view-style__baseline view-style__grid">
-      <legend className="field__label view-style__baseline-label">GRID</legend>
+    <fieldset
+      className="preset-buttons view-style__baseline view-style__grid"
+      aria-keyshortcuts={GRID_KEY}
+    >
+      <legend className="field__label view-style__baseline-label">
+        <span className="control__key">{GRID_KEY}</span> GRID
+      </legend>
       {GRID_SETTINGS.map((setting) => (
         <button
           key={setting.label}

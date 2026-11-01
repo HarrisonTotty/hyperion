@@ -3,6 +3,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
+  type RefObject,
   useCallback,
   useEffect,
   useId,
@@ -93,6 +94,7 @@ import {
   styleRefusals,
   withPermission,
 } from "./styleRefusals";
+import { MAXIMIZE_KEY, MAXIMIZED_KEYS, viewDisplayKey } from "./displayKeys";
 import { InstrumentControls } from "./InstrumentControls";
 import { InstrumentsPanel, type InstrumentsPanelSlot } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
@@ -220,6 +222,7 @@ import {
   labelStatements,
   type MarkRow,
   markRows,
+  maximizedStatements,
   PRESET_NAMES,
   rangesFromCamera,
   runPose,
@@ -411,6 +414,14 @@ interface ViewStageProps {
    */
   readonly placePage: PlacePage;
   readonly onPlacePage: (page: PlacePage) => void;
+  /**
+   * Whether `MAXIMIZE VIEW` is on (the owner's request, 2026-11-01), held above the stage as the
+   * exposure is, so that a new scene keeps it: the side columns are hidden, their panels kept as
+   * they stand, and the primary's statements folded to one line.
+   */
+  readonly maximized: boolean;
+  /** `MAXIMIZE VIEW`'s button, which takes the focus from a panel it hides where no canvas stands. */
+  readonly maximizeRef: RefObject<HTMLButtonElement | null>;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
@@ -477,6 +488,8 @@ interface KeyTargets {
   }>;
   /** The `CONTROLS` view, which a key pressed off a canvas acts on. */
   readonly controlsView: ViewId;
+  /** Gives a view's `GRID` its other setting, where its row stands (`GRID_KEY`). */
+  readonly toggleGrid: (view: ViewId) => void;
 }
 
 /** A view's budget, which `viewBudgets` gives every view listed. */
@@ -759,6 +772,8 @@ function ViewStage({
   onSlopeBaselineChange,
   placePage,
   onPlacePage,
+  maximized,
+  maximizeRef,
   stars,
   countLine,
   universe,
@@ -1481,6 +1496,25 @@ function ViewStage({
     }
     commandInstrument(each.slot.slot, action, each.availability);
   };
+  // A view's GRID, which its key sets where the view's row stands, its style PHOTOREALISTIC and
+  // offered (`StyleControl`'s rule), and nowhere else (the owner's request, 2026-11-01).
+  const toggleGrid = (view: ViewId): void => {
+    const each = instrumentViews.find(
+      ({ slot, standing }) => slot.id === view && standing === "stands",
+    );
+    if (each === undefined) {
+      if (shown.run.camera.style === "photorealistic" && refusals.photorealistic === null) {
+        setGrid((on) => !on);
+      }
+      return;
+    }
+    if (
+      each.slot.shown?.run.camera.style === "photorealistic" &&
+      each.refusals.photorealistic === null
+    ) {
+      instruments.setGrid(each.slot.slot, !each.slot.grid);
+    }
+  };
   // The keys' listener reads the latest views and commands through a ref, current after every
   // commit, so that it is added once.
   const keysRef = useRef<KeyTargets>({
@@ -1488,6 +1522,7 @@ function ViewStage({
     primaryCanvas: canvas,
     canvases: [],
     controlsView,
+    toggleGrid,
   });
   useLayoutEffect(() => {
     keysRef.current = {
@@ -1495,15 +1530,18 @@ function ViewStage({
       primaryCanvas: canvas,
       canvases: instruments.slots.map((slot) => ({ id: slot.id, canvas: slot.canvas })),
       controlsView,
+      toggleGrid,
     };
   });
 
-  // The view's single keys act from anywhere on the display but a text field (keys.ts): on the
-  // focused canvas's view, which becomes the CONTROLS view first, and else on the CONTROLS view.
+  // The view's single keys act from anywhere on the display but a text field (keys.ts), the GRID
+  // row's among them (displayKeys.ts): on the focused canvas's view, which becomes the CONTROLS view
+  // first, and else on the CONTROLS view.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       const action = viewKeyAction(event);
-      if (action === null) {
+      const gridKey = viewDisplayKey(event) === "grid";
+      if (action === null && !gridKey) {
         return;
       }
       event.preventDefault();
@@ -1516,7 +1554,12 @@ function ViewStage({
       if (onCanvas !== null) {
         setOperated(onCanvas);
       }
-      keys.commandView(onCanvas ?? keys.controlsView, action);
+      const view = onCanvas ?? keys.controlsView;
+      if (action === null) {
+        keys.toggleGrid(view);
+      } else {
+        keys.commandView(view, action);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -1650,6 +1693,9 @@ function ViewStage({
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
+  // The upper plate's statements: folded to one line while MAXIMIZE VIEW is on, so that the picture
+  // is clear (the owner's request, 2026-11-01).
+  const blockStatements = maximized ? maximizedStatements(primaryStatements) : primaryStatements;
   const primaryLines = withPlaceLines(
     withMeterLine(
       withQualityLine(
@@ -1736,7 +1782,8 @@ function ViewStage({
             faults: operatedView.faults,
           },
     chosen: placePage,
-    folded: folded("camera"),
+    // A page MAXIMIZE VIEW hides states nothing, as one folded does.
+    folded: folded("camera") || maximized,
   });
   const { pagedSlot, pointHas: pageHasPoint, pointRangeM: pageRangeM } = groundPage;
   useLayoutEffect(() => {
@@ -1833,6 +1880,16 @@ function ViewStage({
       inhibitButtonRef.current?.focus();
     }
   }, [compact, focusedFold, opened, meterStands, foldButtonsRef]);
+  // The focus in a panel that MAXIMIZE VIEW hides goes to the PRIMARY view's canvas, on which the
+  // keys act, or where none stands to MAXIMIZE VIEW's button, never to the page (the owner's
+  // request, 2026-11-01).
+  const sideRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (maximized && active !== null && sideRef.current?.contains(active) === true) {
+      (canvas ?? maximizeRef.current)?.focus();
+    }
+  }, [maximized, canvas, maximizeRef]);
 
   // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
   // panel heads the second column and stands in every engine state, so that nothing under it moves
@@ -1898,7 +1955,10 @@ function ViewStage({
   };
 
   return (
-    <div className={`view view--${layout}`} ref={viewBoxRef}>
+    <div
+      className={maximized ? `view view--${layout} view--maximized` : `view view--${layout}`}
+      ref={viewBoxRef}
+    >
       <div className="view__main" onFocus={onMainFocus}>
         {engineLine === null ? (
           <>
@@ -1937,7 +1997,7 @@ function ViewStage({
                 ref={upperRef}
                 id={`${legendId}-label`}
                 lines={primaryLines}
-                statements={primaryStatements}
+                statements={blockStatements}
                 countLine={primaryCount}
                 faults={faults}
                 scroll={{ from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }}
@@ -2012,7 +2072,7 @@ function ViewStage({
                   ref={sizersRef}
                   upper={{
                     lines: primaryLines,
-                    statements: primaryStatements,
+                    statements: blockStatements,
                     countLine: primaryCount,
                     faults,
                   }}
@@ -2030,8 +2090,15 @@ function ViewStage({
             <StatusLine text={engineLine.text} standing={engineLine.standing} />
           </div>
         )}
+        {maximized ? <p className="view__keys">{MAXIMIZED_KEYS}</p> : null}
       </div>
-      <div className="view__side" onFocus={onSideFocus} onBlur={onSideBlur}>
+      <div
+        className="view__side"
+        ref={sideRef}
+        hidden={maximized}
+        onFocus={onSideFocus}
+        onBlur={onSideBlur}
+      >
         <div className="view__column view__column--a">
           <InstrumentsPanel
             id={foldIds.instruments}
@@ -2319,6 +2386,24 @@ function ViewPanels({
   // The camera panel's place's page while CONTROLS names an instrument (R10.T12.d; draft D2):
   // CAMERA as the display mounts, the choice kept while it stays mounted, through every scene.
   const [placePage, setPlacePage] = useState<PlacePage>("camera");
+  // MAXIMIZE VIEW (the owner's request, 2026-11-01): off as the display mounts, VIEW's own, and kept
+  // while it stays mounted, through every scene and while another display is shown.
+  const [maximized, setMaximized] = useState(false);
+  const maximizeRef = useRef<HTMLButtonElement | null>(null);
+  // Its key acts from anywhere on the display but a text field, as the view's single keys do.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (viewDisplayKey(event) !== "maximize") {
+        return;
+      }
+      event.preventDefault();
+      setMaximized((on) => !on);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
   const universe = useUniverse().open?.id ?? null;
   const standing = serverSceneStanding(scene);
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
@@ -2478,6 +2563,18 @@ function ViewPanels({
             ))}
           </div>
         )}
+        <button
+          ref={maximizeRef}
+          type="button"
+          className="control view-display__maximize"
+          aria-pressed={maximized}
+          aria-keyshortcuts={MAXIMIZE_KEY}
+          onClick={() => {
+            setMaximized((on) => !on);
+          }}
+        >
+          <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
+        </button>
       </div>
       <ViewStage
         // Each opening of the body inspection is a new scene, its camera framed afresh.
@@ -2500,6 +2597,8 @@ function ViewPanels({
         onSlopeBaselineChange={setSlopeBaselineM}
         placePage={placePage}
         onPlacePage={setPlacePage}
+        maximized={maximized}
+        maximizeRef={maximizeRef}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}
@@ -2545,8 +2644,9 @@ function ViewPanels({
  * `EASED CAMERA MOVES` setting and never under `prefers-reduced-motion`, which also removes the
  * free camera's ramp and damping (Design note 18).
  *
- * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `]` and `[` the
- * next and previous target, `+` and `-` the field of view; on the focused canvas the flight keys
+ * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `4` the style, `5`
+ * the `GRID` while its row stands, `6` `MAXIMIZE VIEW`, `]` and `[` the next and previous target,
+ * `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown, and the platform's primary modifier with the
  * up and down arrows, R07.T19.f). A drag on a canvas turns its camera, the free camera itself, or
  * a seat's or chase camera's look offset, which the arrows also turn there (R07.T19.f). A click
@@ -2554,6 +2654,15 @@ function ViewPanels({
  * universe's range queries about the scene's system (R02.T16), with their count line, asked only
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.
+ *
+ * `MAXIMIZE VIEW`, its button at the scene bar's end and its key `6`, is an interim layout until
+ * the panels are designed again (the owner's request, 2026-11-01). On, the stage takes the
+ * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
+ * restores them as they were; the scene bar and the header strip stay; the primary's statements
+ * fold to one line (`maximizedStatements`); the instruments open stand in their slots over the
+ * stage, which they are part of; and a line under the key legend names the key that shows the
+ * panels again. Every key acts as before. The setting is the display's own and is kept through
+ * every scene and while another display is shown.
  *
  * The `PRIMARY` view fills the stage, and the instrument views `INSTRUMENT 1` and `INSTRUMENT 2`
  * open in fixed slots over its right edge (plan R07, T19; decision-r07-t19), each with its own
