@@ -737,6 +737,49 @@ fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
     });
 }
 
+/// [P14.T26's ratios] Under every 27 hold a halo twin, \[Fe/H\] −1 and \[α/Fe\] +0.3, drawn at
+/// the median rank of the rocky population about its host, keeps iron in its silicate crust: its
+/// core share is 0.136, the population's 0.24 moved by its host's iron, its mantle holds 8.1 wt%
+/// `FeO`, and its iron group is that iron's, 6.3% of the crust, as well as the V–Ni traces'.
+/// Drawn from the population alone (the core share's hold), its mantle clamped to no `FeO` and
+/// its iron group was V–Ni alone.
+#[test]
+fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
+    use crate::planetary::derive::rocky::{
+        CoreShareRules, CoreShareShift, core_mass_fraction_at, with_core_share,
+    };
+    use crate::planetary::testing::with_every_27_hold;
+    let (fe_h, alpha) = (Dex::new(-1.0), Dex::new(0.3));
+    // Its core share at the median rank, its crust's iron group and that group less its V–Ni.
+    let twin = || {
+        let shift = CoreShareShift::of_host(solar_magnesium_to_silicon(), alpha);
+        let core = core_mass_fraction_at(0.5, shift);
+        let fractions = crate::planetary::derive::MassFractions::solid(core, 1.0 - core, 0.0);
+        let bulk = BulkComposition::new(fractions, earth().1, fe_h, Some(alpha));
+        let crust = abundances(
+            &bulk,
+            SnowLineSide::Inside,
+            OuterLayer::SilicateCrust,
+            NOW,
+            &ResourceDraws::MEDIAN,
+        );
+        let group = crust.fraction(Resource::IronGroup);
+        let traces = BULK_SILICATE_EARTH_IRON_TRACES * math::exp10(-alpha.value());
+        (core, group, group - traces)
+    };
+    with_every_27_hold(|| {
+        let (core, group, iron) = twin();
+        assert!((0.13..0.14).contains(&core), "{core}");
+        let feo = mantle_iron_oxide_mass_fraction(core, solar_magnesium_to_silicon(), alpha);
+        assert!((0.075..0.09).contains(&feo), "{feo}");
+        assert!(iron > 0.05 && iron < group, "{iron} of {group}");
+        assert!((iron - feo / iron_oxide_per_iron()).abs() < 1e-15, "{iron}");
+        let (held_core, held_group, held_iron) = with_core_share(CoreShareRules::Population, twin);
+        assert!((held_core - 0.24).abs() < 1e-12, "{held_core}");
+        assert!(held_iron.abs() < 1e-15, "{held_iron} of {held_group}");
+    });
+}
+
 /// [P14.T26's ratios] Under every 27 hold a silicate crust's iron is its own mantle's `FeO`'s:
 /// about a solar host, a Mars's core share (0.204) gives its crust 12.3 wt% Fe, near twice an
 /// Earth's (0.325) 6.26, the bulk silicate Earth's (McDonough and Sun 1995), its iron group less
