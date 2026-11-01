@@ -245,6 +245,12 @@ threads-required = 8
 filter = "package(hyperion-sim) & test(=galaxy::global_list::statistics::the_test_streams_members_keep_to_their_tubes_over_a_millennium)"
 threads-required = 3
 
+# P09.T31's centre profile test follows its six shells on six threads of their own
+# (`centre::over_time::SHELLS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::features::centre::over_time::the_centre_keeps_its_profile_and_flattening_over_a_millennium)"
+threads-required = 6
+
 # P11.T17.c's verdicts against the engine check their pairs on eight threads of their own.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"

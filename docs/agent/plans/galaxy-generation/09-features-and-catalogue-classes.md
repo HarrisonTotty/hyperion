@@ -1306,6 +1306,9 @@ Slow tests. Members sampled in six radial shells from 0.01 to 100 ly keep the pr
 eccentricities thermal (mean 0.6–0.72); the brightest-band members inside 0.04 ly include S2-like
 orbits (periods of 10–20 yr occur); mean spacing about 0.05 ly at 3 ly.
 
+_Built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24, test-only): see Risks,
+"P09.T31 as built"._
+
 ### Phase 7: catalogue classes and the merge
 
 #### P09.T32 The catalogue-class grid
@@ -5719,3 +5722,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     raised pad, with the fixed donor and launch: at least `galaxy_map`,
     `placement/displaced_prepin`, `query/range`, the sky's `census_near_sun` and `eye_cut`, and
     the server's `density_map_face_on_128`, `systems_in_range` and `systems_in_range_briefs`.
+- **P09.T31 as built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24;
+  test-only, no output moved).**
+  - _Tests._ `galaxy::features::centre::over_time`'s four, slow, by name, on the centre's fixture
+    under every 25 hold: the profile and flattening (six threads, `.config/nextest.toml`), the
+    eccentricities, the S2-like orbits and the spacing. The figures are in the lane's outbox.
+  - _Bands._ Beyond 1 ly the shells sample band D: a band-E neutron-star class (component 3) exhausts
+    its draw's attempts there, the debug assertion P09.T36.b met at 24 (a finding).
+  - _Pinned as measured (findings)._ The spacing at 3 ly, 0.0443 ly; the eccentricities' mean is in
+    0.6–0.72 but not thermal by Kolmogorov–Smirnov, which the test prints and does not assert.
