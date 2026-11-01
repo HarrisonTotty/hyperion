@@ -5,15 +5,15 @@
 //! inputs-sha256: 25b77310b661620a3d6e4f86b0adbd84933ceb51978477c1d8aa6969132f85b1
 //! manifest: crates/hyperion-fit/manifests/streams.toml
 //! data: `stream_census@318585d10e3d`
-//! sim-fingerprint: 38cfc4f32d4e6708f8d7eec9a67edd0fde731911e43206a203e7dec42b164fce
-//! since-generator-version: 25
+//! sim-fingerprint: 0b1a9749e70831bd75e3c6881266e0ae1d81a399befa8672edfbd5ef313e7c09
+//! since-generator-version: 26
 //! source: the known streams of galstreams v1.2.1 (Mateu 2023, MNRAS 520, 5225;
 //!   github.com/cmateu/galstreams), each marked globular-like or not by its progenitor or its
 //!   width (`data/stream_census`), against plan 10's spray and tubes at the Milky Way's values
-//! acceptance: k 2.049 (one sigma 1.863–2.234; 0.5–4.5) against 118 ± 10.9 globular-like known
+//! acceptance: k 2.054 (one sigma 1.868–2.240; 0.5–4.5) against 118 ± 10.9 globular-like known
 //!   streams inside the cut (141 in the census: 14 dwarf, 2 disc, 2 wide, 2 duplicate); globular
-//!   tubes 0.634% of the halo at k (0.3–1%); without the density condition 1.103, at half and
-//!   twice the contrast 1.687 and 2.576; per galaxy 1.829–2.247 over 8; 8 galaxies, 1959 tubes
+//!   tubes 0.634% of the halo at k (0.3–1%); without the density condition 1.104, at half and
+//!   twice the contrast 1.688 and 2.574; per galaxy 1.829–2.251 over 8; 8 galaxies, 1959 tubes
 //!   built, 0 failed
 //!
 //! Two items: the brainstorm's 1.5, which plan 10's P10.T3.b entered by hand and P15.T11.a
@@ -31,7 +31,7 @@
 pub const ORPHAN_STREAMS_PER_GLOBULAR: f64 = 1.5;
 
 /// Globular-cluster streams per globular cluster from generator version 27 (P15.T11.b): 2.05, one
-/// sigma 1.86–2.23.
+/// sigma 1.87–2.24.
 ///
 /// The untruncated system's, living clusters' tubes and orphans together, fitted on a grid of
 /// 0.50–4.50 so that plan 10's generator at the Milky Way's values (8 galaxies under version 27's
@@ -40,5 +40,5 @@ pub const ORPHAN_STREAMS_PER_GLOBULAR: f64 = 1.5;
 /// from the plane), shows the 118 globular-like known streams the census finds within the same
 /// distance and latitude (galstreams v1.2.1, Mateu 2023, MNRAS 520, 5225; `data/stream_census`),
 /// with their Poisson error. The cut moves it: 1.10 without the density condition, 1.69 at 5 times
-/// the halo and 2.58 at 20.
-pub const ORPHAN_STREAMS_PER_GLOBULAR_27: f64 = 2.048_842_063_164_735_7;
+/// the halo and 2.57 at 20.
+pub const ORPHAN_STREAMS_PER_GLOBULAR_27: f64 = 2.054_113_715_866_966;
