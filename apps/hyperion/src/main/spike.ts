@@ -107,13 +107,21 @@ export function launchSwitches(
 }
 
 /**
- * The renderer's two waits of a generated world's measurement before it flies (plan R10,
- * R10.T14.c; `bodyDescent.ts`' constants of the same names, which this project cannot import): the
- * field's hold, at most `FIELD_HOLD_TIMEOUT_MS`, or `SERVED_FIELD_HOLD_TIMEOUT_MS` over a served
- * world (R10.T15.b), then each site's bakes, at most `MEASURE_TIMEOUT_MS` an attempt.
+ * The renderer's hold of a generated world's field before its measurement, at most, ms (plan R10,
+ * R10.T14.c; `bodyDescent.ts`' constant of the same name, which this project cannot import).
  */
 export const FIELD_HOLD_TIMEOUT_MS = 120_000;
+
+/**
+ * The renderer's hold of a served world's field, at most, ms (R10.T15.b; `bodyDescent.ts`'
+ * constant of the same name): the server computes the body's coarse field before its first answer.
+ */
 export const SERVED_FIELD_HOLD_TIMEOUT_MS = 600_000;
+
+/**
+ * The renderer's wait for one site's bakes in a generated world's measurement, at most, ms, an
+ * attempt (R10.T14.c; `bodyDescent.ts`' constant of the same name).
+ */
 export const MEASURE_TIMEOUT_MS = 600_000;
 
 /** The room past those waits for the site's reading and the session's own start, ms. */

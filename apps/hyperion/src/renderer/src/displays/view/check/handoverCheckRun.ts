@@ -122,7 +122,11 @@ export interface HandoverCheckTiming {
   readonly settleMs: number;
   /** The most read-backs in flight at once. */
   readonly readBacksInFlight: number;
-  /** How long a look may run past its script's length before it is given up, ms. */
+  /**
+   * How long a look may run past its script's length before it is given up, ms; or, where it
+   * counts from the script's last step ({@link HandoverCheckTiming.overrunFrom}), how long its
+   * script may stand still.
+   */
   readonly overrunMs: number;
   /**
    * What the overrun counts from: `"start"`, the look's start plus its script's length, on the wall

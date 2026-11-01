@@ -52,13 +52,12 @@ const DESKTOP_ENV = {
   DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
 };
 
-/** Each test's own directory, removed after it. */
-let scratch: string | null = null;
+/** Each run's own directory, all removed after the test. */
+const scratch: string[] = [];
 
 afterEach(() => {
-  if (scratch !== null) {
-    rmSync(scratch, { recursive: true, force: true });
-    scratch = null;
+  for (const dir of scratch.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -91,7 +90,7 @@ function stub(path: string, body: ReadonlyArray<string>): void {
 /** Runs the script with `args` as {@link ScriptSetting} says. */
 function runScript(args: ReadonlyArray<string>, given: ScriptSetting = {}): ScriptRun {
   const dir = mkdtempSync(join(tmpdir(), "hyperion-descent-spike-script-"));
-  scratch = dir;
+  scratch.push(dir);
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const runs = join(dir, "runs");
@@ -99,6 +98,8 @@ function runScript(args: ReadonlyArray<string>, given: ScriptSetting = {}): Scri
   const envLog = join(dir, "env.log");
   // The server the script starts: a process that waits to be killed with its group.
   stub(join(bin, "cargo"), ["exec sleep 60"]);
+  // No NVIDIA driver, whatever the machine has.
+  stub(join(bin, "nvidia-smi"), ["exit 1"]);
   if (given.uname !== undefined) {
     stub(join(bin, "uname"), [`echo ${given.uname}`]);
   }

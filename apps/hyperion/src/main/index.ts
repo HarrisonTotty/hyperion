@@ -327,7 +327,7 @@ function startSpikeSession(
           }),
         }
       : {}),
-    outDir: resolve(process.cwd(), spikeResultsDir(launch.out, graphics.launchMode)),
+    outDir: launch.out ?? resolve(process.cwd(), spikeResultsDir(null, graphics.launchMode)),
     exit: (code) => {
       app.exit(code);
     },
@@ -516,9 +516,11 @@ function startViewsCheckSession(
  * launch's graphics switches on the command line.
  *
  * @remarks
- * With the software switch (plan R01, R01.T16) there is no relaunch, no switch of the client's and
- * no timing toggle: the check runs on the command line's own SwiftShader and headless switches,
- * and a relaunch's `--ozone-platform=x11` would win over headless Ozone.
+ * With the software switch (plan R01, R01.T16) there is no relaunch, no graphics switch of the
+ * client's and no timing toggle: the views check or the descent spike runs on the command line's
+ * own SwiftShader and headless switches, and a relaunch's `--ozone-platform=x11` would win over
+ * headless Ozone. A software spike with `--dawn-safety off` still takes the spike's Dawn toggles
+ * (`launchSwitches`).
  *
  * @returns The launch's graphics set-up, or `undefined` once a relaunch has been asked for and this
  * process is exiting.

@@ -1,8 +1,8 @@
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
  * forced Vulkan path on Linux, the declared safe mode, which has no WebGPU, or the check-only
- * software mode, a views check's on Linux on the command line's own SwiftShader switches, which
- * draws both styles on a fallback adapter (plan R01, R01.T16).
+ * software mode, a views check's or a descent spike's on Linux on the command line's own SwiftShader
+ * switches, which draws both styles on a fallback adapter (plan R01, R01.T16).
  */
 export type GraphicsLaunchMode = "default" | "vulkan" | "safe" | "software";
 
@@ -63,7 +63,10 @@ export interface SpikeLaunch {
   readonly seed: string;
   /** A 10 s run that writes no results file and exits with a status. */
   readonly smoke: boolean;
-  /** Where the results file goes, or `null` for `docs/measurements/descent-spike/`. */
+  /**
+   * Where the results file goes, or `null` for `docs/measurements/descent-spike/`, or for
+   * `target/descent-spike/results/` in the software mode (`spikeResultsDir`).
+   */
   readonly out: string | null;
   /** The height-worker count, or `null` for Design note 11's default. */
   readonly workers: number | null;
