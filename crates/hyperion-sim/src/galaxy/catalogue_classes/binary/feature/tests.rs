@@ -523,3 +523,40 @@ fn the_lists_hold_their_expected_hosts() {
     }
     eprint!("{report}");
 }
+
+/// PROBE (removed before commit): how often a close pair near a 12 Gyr turn-off leaves a star
+/// above it.
+#[test]
+#[ignore = "probe"]
+fn probe_blue_stragglers() {
+    use crate::stellar::sse::turn_off_mass;
+    let galaxy = crate::stellar::binary::carve::testing::galaxy();
+    let composition = Composition::from_fe_h(Dex::new(-0.72), HeliumExcess::ZERO);
+    let age = 1.2e10;
+    let m_to = turn_off_mass(Years::new(age), &composition).value();
+    for au in [0.03, 0.1, 0.3, 1.0] {
+        let (mut n, mut above) = (0, 0);
+        for i in 0..600_u32 {
+            let mass = m_to * (0.7 + 0.3 * f64::from(i % 61) / 61.0);
+            let record = crate::stellar::binary::carve::testing::record(&galaxy, i, mass, age);
+            let stars = SystemStars::generate_with(
+                &galaxy,
+                &record,
+                &composition,
+                crate::stellar::multiplicity::MultiplicityContext::ForcedMultiple {
+                    max_separation: Some(crate::units::Metres::new(au * 1.495_978_707e11)),
+                },
+            );
+            n += 1;
+            let Some(state) = stars.state_at(crate::time::UniverseTime::EPOCH) else {
+                continue;
+            };
+            if state.stars().iter().any(|s| {
+                s.phase() == crate::stellar::Phase::MainSequence && s.mass().value() > m_to * 1.02
+            }) {
+                above += 1;
+            }
+        }
+        eprintln!("m_to {m_to:.3}: {au} au: {above} of {n} above the turn-off");
+    }
+}

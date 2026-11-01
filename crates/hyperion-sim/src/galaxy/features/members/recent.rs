@@ -67,7 +67,7 @@ use crate::galaxy::features::catalogue::{FeatureMarks, FeatureRecord, bulk_veloc
 use crate::galaxy::features::cluster::PLUMMER_HALF_MASS_RATIO;
 use crate::galaxy::features::ids::PackedFeature;
 use crate::galaxy::features::interior::{
-    ClassKind, ClassProfile, Generation, MemberAbundances, MemberClass, Multiplicity, ProfileShape,
+    ClassKind, ClassProfile, Generation, MemberClass, Multiplicity, ProfileShape,
 };
 use crate::galaxy::features::kinds::nursery::{NurseryMarks, NurseryStage, Superbubble};
 use crate::galaxy::features::kinds::open_cluster::disruption_survival;
@@ -495,9 +495,9 @@ impl FeatureStars {
     /// Its member record of `record`, of a single star of band E drawn from `range`.
     #[must_use]
     fn member(&self, record: SystemRecord, range: (SolarMasses, SolarMasses)) -> MemberRecord {
-        MemberRecord {
+        MemberRecord::of_single(
             record,
-            class: MemberClass {
+            MemberClass {
                 kind: ClassKind::Living,
                 band: MassBand::E,
                 generation: Generation::First,
@@ -505,11 +505,9 @@ impl FeatureStars {
                 initial_mass_range: range,
                 mean_mass: record.primary_initial_mass(),
             },
-            composition: self.composition,
-            abundances: MemberAbundances::NONE,
-            velocity: self.velocity,
-            listed: None,
-        }
+            self.composition,
+            self.velocity,
+        )
     }
 
     /// The candidate at entry `index` of the list, of class `class` (a core collapse or a luminous

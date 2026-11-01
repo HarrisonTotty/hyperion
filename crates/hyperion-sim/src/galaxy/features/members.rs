@@ -25,6 +25,13 @@
 //! - **Age and metallicity** are the cluster's, a nursery's members younger by up to its age
 //!   spread (`member.abundance`'s word 2); a second-population member draws its enrichment
 //!   (word 0) and a spread cluster's member its iron offset (words 3–4).
+//! - **Multiplicity** (P11.T8.f, from generator version 27): a binary class's members draw their
+//!   companions inside the cluster's hard–soft boundary at their radius
+//!   ([`hard_soft_separation`]), single classes none, and the members plan 09 marks as recycled
+//!   objects (P09.T9.e) on `member.recycled` draw theirs conditionally on the mark
+//!   ([`draw_member_marked`], [`RecycledMark`]): a millisecond pulsar's or a blue straggler's.
+//!   The X-ray binaries' mark is borne by the X-ray binary class on the cluster's list, whose
+//!   count in a globular is the same encounter-rate law.
 //! - **Velocity**: the cluster's bulk motion plus an isotropic normal of `σ(r) g(m) ÷ g(m_TO)`,
 //!   Bianchini et al. 2016's partial equipartition with `m_eq` = 1.5 M☉ (ruling 126.7), on
 //!   `member.velocity`, cut at the local escape speed of the cluster's Plummer sphere as plan 08
@@ -33,25 +40,33 @@
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::catalogue_classes::ClassId;
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, FeatureMemberId, SystemId};
 use crate::math;
 use crate::rng::{ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
+use crate::stellar::Phase;
+use crate::stellar::binary::{Component, pulsar_at};
 use crate::stellar::draws::StarDraws;
-use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::multiplicity::{
+    MARKED_ATTEMPTS, MultiplicityContext, RedrawAttempt, StarIndex,
+};
 use crate::stellar::remnant::{KickMode, RemnantKind};
 use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::turn_off_mass;
 use crate::stellar::system::{RemnantFate, SystemStars};
-use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{Dex, KilometresPerSecond, LightYears, Metres, SolarMasses, Years};
+use crate::units::consts::{METRES_PER_AU, METRES_PER_LIGHT_YEAR};
+use crate::units::{
+    Dex, GravitationalParameter, KilometresPerSecond, LightYears, Metres, SolarMasses, Years,
+};
 
 use super::catalogue::FeatureRecord;
 use super::cluster::ClusterModel;
 use super::ids::PackedFeature;
 use super::interior::abundances::{IRON_SPREAD_SHARE, IRON_SPREAD_SIGMA};
-use super::interior::counts::{depleted_slope, depletion};
+use super::interior::counts::{BINARY_MASS_FACTOR, depleted_slope, depletion};
 use super::interior::retention::PAIR_SYSTEMIC_SIGMA;
 use super::interior::{ClassKind, Generation, MemberAbundances, MemberClass, Multiplicity};
 use remnants::remnant_attempt_fits;
@@ -100,6 +115,33 @@ pub struct MemberRecord {
     /// For an entry of one of plan 11's binary classes on its feature's list (P11.T8.f), its
     /// class, whose entry holds its stars.
     listed: Option<ClassId>,
+    /// For a member whose mark its companions bear out, the redraw attempt its conditional draw
+    /// kept (P11.T8.f).
+    marked_attempt: Option<RedrawAttempt>,
+    /// The widest semi-major axis its orbits may have, its cluster's hard–soft boundary, for a
+    /// binary member from generator version 27 (P11.T8.f).
+    max_separation: Option<Metres>,
+    /// Its recycled-object mark (P09.T9.e's marks, drawn from version 27; P11.T8.f).
+    recycled: RecycledMark,
+}
+
+/// A feature member's recycled-object mark (plan 09, P09.T9.e; drawn by plan 11, P11.T8.f): the
+/// recycled objects are marks inside their members' classes, with expected counts from the
+/// encounter rate, and the binary stage draws a marked member's companions conditionally on it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RecycledMark {
+    /// No mark: the member's stars are its class's draw.
+    #[default]
+    Unmarked,
+    /// A millisecond pulsar among a cluster's neutron stars: its stars are the first of its
+    /// companions' marked redraw attempts whose pair has recycled its neutron star, a radio pulsar
+    /// at the epoch, and holds no carved class.
+    MillisecondPulsar,
+    /// A blue straggler among the binaries at a cluster's turn-off: its stars are the first of its
+    /// companions' marked redraw attempts, inside [`BLUE_STRAGGLER_SEPARATION`], whose pair has
+    /// left a main-sequence star above the turn-off at the epoch, a merger's product or a star its
+    /// companion fed, and holds no carved class.
+    BlueStraggler,
 }
 
 impl MemberRecord {
@@ -150,7 +192,45 @@ impl MemberRecord {
             abundances: MemberAbundances::NONE,
             velocity,
             listed: Some(listed),
+            marked_attempt: None,
+            max_separation: None,
+            recycled: RecycledMark::Unmarked,
         }
+    }
+
+    /// A single star of `class` with `record`, `composition` and `velocity`, no light-element
+    /// offsets and no mark: an entry of plan 09's recent classes on a feature's list (P09.T36).
+    #[must_use]
+    pub(crate) const fn of_single(
+        record: SystemRecord,
+        class: MemberClass,
+        composition: Composition,
+        velocity: GalacticVelocity,
+    ) -> Self {
+        Self {
+            record,
+            class,
+            composition,
+            abundances: MemberAbundances::NONE,
+            velocity,
+            listed: None,
+            marked_attempt: None,
+            max_separation: None,
+            recycled: RecycledMark::Unmarked,
+        }
+    }
+
+    /// Its recycled-object mark.
+    #[must_use]
+    pub const fn recycled(&self) -> RecycledMark {
+        self.recycled
+    }
+
+    /// The widest semi-major axis its orbits may have: its cluster's hard–soft boundary for a
+    /// binary or marked member from generator version 27, `None` otherwise.
+    #[must_use]
+    pub const fn max_separation(&self) -> Option<Metres> {
+        self.max_separation
     }
 
     /// The binary class of an entry of its feature's list that holds plan 11's carved binaries
@@ -171,14 +251,19 @@ impl MemberRecord {
         }
     }
 
-    /// The multiplicity context its stars are drawn under: forced multiple for a binary class and
-    /// single otherwise.
+    /// The multiplicity context its stars are drawn under: forced multiple for a binary class or
+    /// a member marked a millisecond pulsar, its orbits inside its cluster's hard–soft boundary
+    /// from generator version 27, and single otherwise.
     #[must_use]
     pub const fn multiplicity_context(&self) -> MultiplicityContext {
-        match self.class.multiplicity {
-            Multiplicity::Single => MultiplicityContext::ForcedSingle,
-            Multiplicity::Binary => MultiplicityContext::ForcedMultiple {
-                max_separation: None,
+        match (self.class.multiplicity, self.recycled) {
+            (Multiplicity::Single, RecycledMark::Unmarked) => MultiplicityContext::ForcedSingle,
+            (Multiplicity::Binary, _)
+            | (
+                Multiplicity::Single,
+                RecycledMark::MillisecondPulsar | RecycledMark::BlueStraggler,
+            ) => MultiplicityContext::ForcedMultiple {
+                max_separation: self.max_separation,
             },
         }
     }
@@ -197,6 +282,15 @@ impl MemberRecord {
             return level_list::listed_binary_stars(galaxy, self.record.id())
                 .expect("a listed binary member's entry is on its feature's list in its galaxy");
         }
+        if let Some(attempt) = self.marked_attempt {
+            return SystemStars::generate_at(
+                galaxy,
+                &self.record,
+                &self.composition,
+                self.multiplicity_context(),
+                attempt,
+            );
+        }
         SystemStars::generate_with(
             galaxy,
             &self.record,
@@ -208,7 +302,7 @@ impl MemberRecord {
 
 /// The member of `class` at `position` with the ID `id` of `feature`, whose model is `model` and
 /// bulk velocity `bulk`, or `None` if its conditional draw exhausts [`MAX_ATTEMPTS`] (module
-/// documentation).
+/// documentation), with no recycled-object mark ([`draw_member_marked`]).
 ///
 /// # Panics
 ///
@@ -223,39 +317,85 @@ pub fn draw_member(
     id: FeatureMemberId,
     bulk: GalacticVelocity,
 ) -> Option<MemberRecord> {
+    draw_member_marked(
+        galaxy,
+        feature,
+        model,
+        (class, RecycledShares::NONE),
+        position,
+        id,
+        bulk,
+    )
+}
+
+/// The shares of a cluster's members that bear each recycled-object mark (P09.T9.e; P11.T8.f):
+/// its millisecond pulsars over its expected neutron stars, and its blue stragglers over its
+/// expected binaries at the turn-off, the living binaries of the band the turn-off cuts.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RecycledShares {
+    /// The share of a neutron-star class marked millisecond pulsars, in [0, 1].
+    pub pulsars: f64,
+    /// The share of a binary class at the turn-off marked blue stragglers, in [0, 1].
+    pub blue_stragglers: f64,
+}
+
+impl RecycledShares {
+    /// No mark.
+    pub const NONE: Self = Self {
+        pulsars: 0.0,
+        blue_stragglers: 0.0,
+    };
+
+    /// The mark a member of `class` may bear and the share of its class that bears it.
+    #[must_use]
+    fn of(&self, class: &MemberClass) -> (RecycledMark, f64) {
+        match class.kind {
+            ClassKind::NeutronStar => (RecycledMark::MillisecondPulsar, self.pulsars),
+            ClassKind::Living if is_at_the_turn_off(class) => {
+                (RecycledMark::BlueStraggler, self.blue_stragglers)
+            }
+            ClassKind::Living | ClassKind::WhiteDwarf | ClassKind::BlackHole | ClassKind::Tail => {
+                (RecycledMark::Unmarked, 0.0)
+            }
+        }
+    }
+}
+
+/// Whether `class` is of the living binaries at the turn-off: binary, living, its primaries' range
+/// cut by the turn-off below its band's top.
+#[must_use]
+pub(crate) fn is_at_the_turn_off(class: &MemberClass) -> bool {
+    class.kind == ClassKind::Living
+        && class.multiplicity == Multiplicity::Binary
+        && class.initial_mass_range.1.value() < class.band.hi()
+}
+
+/// [`draw_member`] with a member of `class` marked by `shares` (P11.T8.f), from generator version
+/// 27: one mark on `member.recycled` against them ([`RecycledShares`]), and for a marked member a
+/// conditional draw of its companions, its primary drawn as an unmarked member's: the first of its
+/// marked redraw attempts ([`RedrawAttempt`] 8–255, on words no other draw reads) whose stars bear
+/// its mark out ([`RecycledMark`]); a member none of whose attempts does is unmarked. A binary or
+/// marked member takes its cluster's hard–soft boundary at its radius as its widest separation
+/// ([`hard_soft_separation`]), a blue straggler at most [`BLUE_STRAGGLER_SEPARATION`].
+///
+/// # Panics
+///
+/// In debug builds, if the draw exhausts its attempts.
+#[must_use]
+pub fn draw_member_marked(
+    galaxy: &Galaxy,
+    feature: &FeatureRecord,
+    model: &ClusterModel,
+    (class, shares): (&MemberClass, RecycledShares),
+    position: &GalacticPosition,
+    id: FeatureMemberId,
+    bulk: GalacticVelocity,
+) -> Option<MemberRecord> {
     let system = SystemId::from(id);
     let key = ObjectKey::from(system);
     let seed = galaxy.seed();
     // Age, metallicity and the second population's enrichment.
-    let mut abundance = Stream::open(seed, tags::MEMBER_ABUNDANCE, key);
-    let enrichment = abundance.uniform_open_low();
-    let _reserved = abundance.next_u64();
-    let spread_u = abundance.uniform();
-    let iron_normal = abundance.standard_normal();
-    let spread = model
-        .marks()
-        .iron_spread()
-        .is_below(Threshold::from_probability(IRON_SPREAD_SHARE));
-    let iron = Dex::new(if spread {
-        IRON_SPREAD_SIGMA * iron_normal
-    } else {
-        0.0
-    });
-    let enriched = match class.generation {
-        Generation::First => 0.0,
-        Generation::Second => enrichment,
-    };
-    let abundances = MemberAbundances::of(
-        enriched,
-        model.initial_mass(),
-        model.parameters().fe_h,
-        iron,
-    );
-    let composition = Composition::from_fe_h(
-        Dex::new(model.parameters().fe_h.value() + iron.value()),
-        abundances.helium_excess,
-    );
-    let age = Years::new(model.age().value() - model.parameters().age_spread.value() * spread_u);
+    let (abundances, composition, age) = member_abundances(galaxy, model, class.generation, key);
     // The initial mass, conditional on the class.
     let (lo, hi) = (
         class.initial_mass_range.0.value(),
@@ -264,6 +404,9 @@ pub fn draw_member(
     let alpha = depleted_slope(model);
     let v_eff = model.escape_speed_effective().value();
     let imf = galaxy.mass_function();
+    // The recycled-object mark and the hard–soft boundary, from version 27.
+    let (marked, max_separation) =
+        mark_and_boundary(galaxy, (feature, model), (class, shares), position, key);
     let mut mass_stream = Stream::open(seed, tags::MEMBER_MASS, key);
     let mut chosen = None;
     for attempt in 0..MAX_ATTEMPTS {
@@ -318,6 +461,8 @@ pub fn draw_member(
         age,
     );
     let velocity = member_velocity(galaxy, feature, model, class, position, key, bulk);
+    let ctx = MultiplicityContext::ForcedMultiple { max_separation };
+    let marked_attempt = bearing_attempt(galaxy, &record, &composition, ctx, marked);
     Some(MemberRecord {
         record,
         class: *class,
@@ -325,6 +470,197 @@ pub fn draw_member(
         abundances,
         velocity,
         listed: None,
+        marked_attempt,
+        max_separation,
+        recycled: if marked_attempt.is_some() {
+            marked
+        } else {
+            RecycledMark::Unmarked
+        },
+    })
+}
+
+/// A member's light-element offsets, composition and age at the epoch, of `generation`, in the
+/// cluster of `model`, drawn on `member.abundance` keyed by `key` (module documentation).
+#[must_use]
+fn member_abundances(
+    galaxy: &Galaxy,
+    model: &ClusterModel,
+    generation: Generation,
+    key: ObjectKey,
+) -> (MemberAbundances, Composition, Years) {
+    let mut abundance = Stream::open(galaxy.seed(), tags::MEMBER_ABUNDANCE, key);
+    let enrichment = abundance.uniform_open_low();
+    let _reserved = abundance.next_u64();
+    let spread_u = abundance.uniform();
+    let iron_normal = abundance.standard_normal();
+    let spread = model
+        .marks()
+        .iron_spread()
+        .is_below(Threshold::from_probability(IRON_SPREAD_SHARE));
+    let iron = Dex::new(if spread {
+        IRON_SPREAD_SIGMA * iron_normal
+    } else {
+        0.0
+    });
+    let enriched = match generation {
+        Generation::First => 0.0,
+        Generation::Second => enrichment,
+    };
+    let abundances = MemberAbundances::of(
+        enriched,
+        model.initial_mass(),
+        model.parameters().fe_h,
+        iron,
+    );
+    let composition = Composition::from_fe_h(
+        Dex::new(model.parameters().fe_h.value() + iron.value()),
+        abundances.helium_excess,
+    );
+    let age = Years::new(model.age().value() - model.parameters().age_spread.value() * spread_u);
+    (abundances, composition, age)
+}
+
+/// A member's recycled-object mark, drawn on `member.recycled` keyed by `key` against its class's
+/// share in `shares`, and its widest separation: its cluster's hard–soft boundary at `position`
+/// for a pair of its class's system mass, held to [`BLUE_STRAGGLER_SEPARATION`] for a straggler,
+/// for a binary or marked member. Under the held arm, no mark and no separation.
+#[must_use]
+fn mark_and_boundary(
+    galaxy: &Galaxy,
+    (feature, model): (&FeatureRecord, &ClusterModel),
+    (class, shares): (&MemberClass, RecycledShares),
+    position: &GalacticPosition,
+    key: ObjectKey,
+) -> (RecycledMark, Option<Metres>) {
+    if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
+        return (RecycledMark::Unmarked, None);
+    }
+    let (mark, share) = shares.of(class);
+    let marked = if share > 0.0
+        && Stream::open(galaxy.seed(), tags::MEMBER_RECYCLED, key)
+            .mark()
+            .is_below(Threshold::from_probability(share))
+    {
+        mark
+    } else {
+        RecycledMark::Unmarked
+    };
+    let separation = (class.multiplicity == Multiplicity::Binary
+        || marked != RecycledMark::Unmarked)
+        .then(|| {
+            let local = local_offset(feature.position(), position);
+            let radius = (local.x * local.x + local.y * local.y + local.z * local.z).sqrt();
+            let system_mass = match class.multiplicity {
+                Multiplicity::Binary => class.mean_mass.value(),
+                Multiplicity::Single => class.mean_mass.value() * BINARY_MASS_FACTOR,
+            };
+            let boundary = hard_soft_separation(
+                model,
+                LightYears::new(radius),
+                SolarMasses::new(system_mass),
+            );
+            match marked {
+                RecycledMark::BlueStraggler => {
+                    Metres::new(boundary.value().min(BLUE_STRAGGLER_SEPARATION.value()))
+                }
+                RecycledMark::Unmarked | RecycledMark::MillisecondPulsar => boundary,
+            }
+        });
+    (marked, separation)
+}
+
+/// The conditional draw of a member marked `marked` with `record` and `composition`, under `ctx`:
+/// the first of its marked redraw attempts whose stars bear its mark out, or `None` for an
+/// unmarked member or a mark none bears out.
+#[must_use]
+fn bearing_attempt(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+    marked: RecycledMark,
+) -> Option<RedrawAttempt> {
+    let bears = |stars: &SystemStars| match marked {
+        RecycledMark::Unmarked => false,
+        RecycledMark::MillisecondPulsar => recycles(galaxy, record, stars),
+        RecycledMark::BlueStraggler => {
+            straggles(stars, turn_off_mass(record.age_at_epoch(), composition))
+        }
+    };
+    if marked == RecycledMark::Unmarked {
+        return None;
+    }
+    (0..MARKED_ATTEMPTS)
+        .filter_map(RedrawAttempt::marked)
+        .find(|&n| {
+            bears(&SystemStars::generate_at(
+                galaxy,
+                record,
+                composition,
+                ctx,
+                n,
+            ))
+        })
+}
+
+/// The widest separation a member marked a blue straggler draws its companions at, m: 0.03 au,
+/// ours, about six solar radii, where a pair of stars near a globular's turn-off is close enough to
+/// come into contact and merge by the epoch. Inside it the binary engine leaves a star above the
+/// turn-off in about one draw in sixty, and inside 1 au in one in 150 (measured for P11.T8.f, 600
+/// pairs near a 12 Gyr turn-off at \[Fe/H\] = −0.72).
+pub const BLUE_STRAGGLER_SEPARATION: Metres = Metres::new(0.03 * METRES_PER_AU);
+
+/// Whether `stars` hold a main-sequence star more massive than `turn_off` at the epoch, a blue
+/// straggler, and no carved pair: what a member marked one keeps an attempt by (P11.T8.f).
+#[must_use]
+fn straggles(stars: &SystemStars, turn_off: SolarMasses) -> bool {
+    stars.carved_pair().is_none()
+        && stars
+            .state_at(crate::time::UniverseTime::EPOCH)
+            .is_some_and(|state| {
+                state
+                    .stars()
+                    .iter()
+                    .any(|s| s.phase() == Phase::MainSequence && s.mass() > turn_off)
+            })
+}
+
+/// The separation of `model`'s hard–soft boundary for a pair of system mass `mass` at `radius`
+/// from its centre (plan 11, P11.T2.b; supplied by P11.T8.f): where the pair's orbital speed
+/// `√(G M ÷ a)` equals the cluster's dispersion there, `a = G M ÷ σ(r)²`, with plan 09's
+/// [`ClusterModel::sigma`]. A wider pair is soft: encounters with the cluster's stars, as fast as
+/// its own orbit, unbind it rather than harden it (Heggie 1975, MNRAS 173, 729, whose boundary
+/// sets the pair's binding energy against the field stars' mean kinetic energy; this is that
+/// boundary for a pair of the field stars' mass, as the plan words it).
+///
+/// # Panics
+///
+/// Never: a cluster's dispersion is positive and finite at every radius.
+#[must_use]
+pub fn hard_soft_separation(model: &ClusterModel, radius: LightYears, mass: SolarMasses) -> Metres {
+    let sigma = model.sigma(radius).value() * 1.0e3;
+    Metres::new(GravitationalParameter::from_solar_masses(mass).value() / (sigma * sigma))
+}
+
+/// Whether `stars`, those of `record`, have recycled its primary, a neutron star, into a radio
+/// pulsar at the epoch in a pair the binary engine ran, and hold no carved pair: what a member
+/// marked a millisecond pulsar keeps an attempt by (P11.T8.f).
+#[must_use]
+fn recycles(galaxy: &Galaxy, record: &SystemRecord, stars: &SystemStars) -> bool {
+    if stars.carved_pair().is_some() {
+        return false;
+    }
+    let draws = crate::stellar::system::primary_draws(galaxy, record);
+    stars.pairs().iter().any(|pair| {
+        pair.stars()[0] == StarIndex::PRIMARY
+            && pulsar_at(
+                pair.timeline(),
+                Component::Primary,
+                &draws,
+                record.age_at_epoch(),
+            )
+            .is_some_and(|pulsar| pulsar.recycled() && pulsar.state().is_radio_alive())
     })
 }
 
@@ -512,6 +848,8 @@ pub fn cluster_tidal_radius(model: &ClusterModel, local: &PointLy, m: SolarMasse
     Metres::new(cluster_ly * METRES_PER_LIGHT_YEAR)
 }
 
+#[cfg(test)]
+mod binary_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

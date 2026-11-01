@@ -43,6 +43,10 @@ use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, Solar
 /// interacting range, after this many.
 pub const MAX_REDRAWS: u8 = 8;
 
+/// The redraw attempts of a feature member's conditional draw on its recycled-object mark (plan
+/// 11, P11.T8.f): attempts 8 to 255, after the grid's, whose words no other draw reads.
+pub(crate) const MARKED_ATTEMPTS: u8 = u8::MAX - MAX_REDRAWS + 1;
+
 /// The words of each stream that one redraw attempt owns: attempt n reads words 64n to 64n + 63.
 ///
 /// Design note 9 sets it. It equals plan 06's block for a star's draws,
@@ -159,7 +163,19 @@ impl RedrawAttempt {
         if n < MAX_REDRAWS { Some(Self(n)) } else { None }
     }
 
-    /// The attempt's number, 0 to [`MAX_REDRAWS`] − 1.
+    /// Attempt `k` of a marked feature member's conditional draw (P11.T8.f): attempt
+    /// [`MAX_REDRAWS`] + `k`, or `None` unless `k` < [`MARKED_ATTEMPTS`].
+    #[must_use]
+    pub(crate) const fn marked(k: u8) -> Option<Self> {
+        if k < MARKED_ATTEMPTS {
+            Some(Self(MAX_REDRAWS + k))
+        } else {
+            None
+        }
+    }
+
+    /// The attempt's number, 0 to [`MAX_REDRAWS`] − 1, or for a marked feature member's
+    /// conditional draw up to 255.
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
@@ -194,9 +210,10 @@ pub enum MultiplicityContext {
     /// At least one companion, the count drawn from the model given that there is one.
     ///
     /// With `max_separation`, no orbit's semi-major axis exceeds it: plan 09's cluster members,
-    /// truncated at the cluster's hard–soft boundary, which P11.T8.f supplies. No caller passes
-    /// this context before then. If every companion is dropped by the stability test the system
-    /// comes out single; [`SystemHierarchy::dropped_companions`] says so.
+    /// truncated at the cluster's hard–soft boundary, which P11.T8.f supplies from generator
+    /// version 27 (`members::hard_soft_separation`). If every companion is dropped by the
+    /// stability test the system comes out single; [`SystemHierarchy::dropped_companions`] says
+    /// so.
     ForcedMultiple {
         /// The widest semi-major axis any orbit of the system may have, m.
         max_separation: Option<Metres>,

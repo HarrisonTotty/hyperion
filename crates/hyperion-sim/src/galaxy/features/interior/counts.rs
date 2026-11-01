@@ -36,9 +36,12 @@
 //! - **Black holes (T9.c)** are [`ClusterModel::black_hole_count`], unscaled, a compact Plummer
 //!   class of scale `(0.1 + 0.2 f ÷ f_max) r_h`, `f_max` = 0.06 (ours: the plan's 0.1–0.3 `r_h`,
 //!   "correlated with f").
-//! - **Binaries (T9.e)** are the living stars' and neutron stars' share `b` by kind and population
-//!   (scratch: 5% of a globular's first population, 1% of its second, 30% in open clusters),
-//!   profiled by their system mass, 1.5 times the primary's (ours).
+//! - **Binaries (T9.e)** are the living stars' and neutron stars' share `b` by kind and population,
+//!   profiled by their system mass, 1.5 times the primary's (ours): 5% of a globular's first
+//!   population and 1% of its second ([`BINARY_FRACTIONS`]), and in an open cluster, from
+//!   generator version 27, plan 11's multiple fraction at the band's mean living mass restricted
+//!   to pairs inside the cluster's hard–soft boundary at its half-mass radius
+//!   ([`open_cluster_binary_fraction`], P11.T8.f), 30% before it.
 //! - **Runaways (T9.f)**: a cluster under 100 Myr has lost `f_ej(M)` of its band-E stars to close
 //!   encounters, 15% rising log-linearly to 38% at 10^3.5 M☉ and falling back to 15% at 10^4.5,
 //!   and 3% of band D. The peak at 10^3.5 M☉ is Oh, Kroupa and Pflamm-Altenburg's (2015, ApJ 805,
@@ -68,11 +71,15 @@
 //!
 //! A core-collapsed cluster's classes all take its cusp.
 
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
+use crate::galaxy::features::members::hard_soft_separation;
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::quad::gl_log_panels;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
-use crate::units::{LightYears, SolarMasses, Years};
+use crate::stellar::multiplicity::MultiplicityModel;
+use crate::units::consts::SECONDS_PER_DAY;
+use crate::units::{GravitationalParameter, LightYears, SolarMasses, Years};
 
 use super::super::cluster::{ClusterKind, ClusterModel};
 use super::profile::ProfileShape;
@@ -96,9 +103,37 @@ pub const NEUTRON_STAR_MASS: f64 = 1.35;
 /// A binary's system mass over its primary's (ours).
 pub const BINARY_MASS_FACTOR: f64 = 1.5;
 
-/// The binary fractions (scratch; plan 11 replaces the numbers): a globular's first population,
-/// its second, an open cluster.
+/// The binary fractions: a globular's first population, its second, and an open cluster's before
+/// generator version 27, from which plan 11's model gives an open cluster's
+/// ([`open_cluster_binary_fraction`], P11.T8.f).
+///
+/// A globular's are kept by plan 11 (P11.T8.f): Lucatello et al.'s (2015, A&A 584, A52) radial
+/// velocity binaries among ten globulars' red giants, 4.9% ± 1.3% of the first population and 1.2%
+/// ± 0.4% of the second, rounded; and of the order of Milone et al.'s (2012, A&A 540, A16)
+/// photometric main-sequence binaries of the ACS survey's 59 globulars, whose fraction is a few
+/// per cent in the massive clusters and above ten only in some of the least massive, falling with
+/// the cluster's luminosity (both recalled, not read at source: the pod that checked them reaches
+/// no literature).
 pub const BINARY_FRACTIONS: (f64, f64, f64) = (0.05, 0.01, 0.30);
+
+/// The binary fraction of an open cluster's living stars of mean mass `mass` (plan 11, P11.T8.f):
+/// plan 11's multiple fraction there ([`MultiplicityModel::multiple_fraction`]) times the share of
+/// its period law below the period of a pair of `mass` times [`BINARY_MASS_FACTOR`] at the
+/// cluster's hard–soft boundary at its half-mass radius ([`hard_soft_separation`]): the pairs that
+/// encounters harden rather than unbind (Heggie 1975).
+#[must_use]
+pub fn open_cluster_binary_fraction(model: &ClusterModel, mass: SolarMasses) -> f64 {
+    let multiplicity = MultiplicityModel::default_v1();
+    let system = SolarMasses::new(mass.value() * BINARY_MASS_FACTOR);
+    let separation = hard_soft_separation(model, model.half_mass_radius(), system);
+    let mu = GravitationalParameter::from_solar_masses(system).value();
+    let a = separation.value();
+    let period_days = std::f64::consts::TAU * (a * a * a / mu).sqrt() / SECONDS_PER_DAY;
+    multiplicity.multiple_fraction(mass)
+        * multiplicity
+            .period_distribution(mass)
+            .cdf(math::log10(period_days))
+}
 
 /// The second population's core over the cluster's (scratch).
 pub const SECOND_POPULATION_CORE_FACTOR: f64 = 0.7;
@@ -473,7 +508,11 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             ProfileShape::cored(c, mass / m_to, model.half_mass_radius().value())
         }
     };
-    let binary_fraction = |generation: Generation| match (model.kind(), generation) {
+    let modelled = galaxy.rules().feature_binaries == FeatureBinariesRules::Listed;
+    let binary_fraction = |generation: Generation, mean: f64| match (model.kind(), generation) {
+        (ClusterKind::Open, _) if modelled && mean > 0.0 => {
+            open_cluster_binary_fraction(model, SolarMasses::new(mean))
+        }
         (ClusterKind::Open, _) => BINARY_FRACTIONS.2,
         (ClusterKind::Globular, Generation::First) => BINARY_FRACTIONS.0,
         (ClusterKind::Globular, Generation::Second) => BINARY_FRACTIONS.1,
@@ -500,6 +539,14 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
         };
         let live_hi = hi.min(m_to);
         let (n_live, m_live) = moments(f, lo, live_hi, |m| depletion(m, alpha));
+        // The mass a band's binary fraction is read at: its living stars' mean, or for a band with
+        // none, its primaries' at birth.
+        let fraction_mass = if n_live > 0.0 {
+            m_live / n_live
+        } else {
+            let (n, m) = moments(f, lo, hi, |_| 1.0);
+            if n > 0.0 { m / n } else { 0.0 }
+        };
         let (n_canon, m_canon) = moments(f, lo, live_hi, |_| 1.0);
         let wd_lo = lo.max(m_to);
         let wd_hi = hi.min(WHITE_DWARF_PROGENITOR_MAX);
@@ -517,7 +564,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             if share <= 0.0 {
                 continue;
             }
-            let b = binary_fraction(generation);
+            let b = binary_fraction(generation, fraction_mass);
             born[band.index()] += n_canon * share * runaway;
             born_mass[band.index()] +=
                 m_canon * share * runaway * (1.0 - b + b * BINARY_MASS_FACTOR);

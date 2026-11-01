@@ -41,12 +41,16 @@ use crate::units::{KilometresPerSecond, LightYears};
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
 use super::super::cluster::{ClusterModel, ClusterParameters};
 use super::super::interior::counts::TailReach;
-use super::super::interior::{BoundMemo, CellProposal, LocalCell, MemberClassTable};
+use super::super::interior::{BoundMemo, CellProposal, ClassKind, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
 use super::recent::{FeatureStars, claimed_by};
 use super::source::FeatureInteriorCache;
-use super::{INTERNAL_SPEED_SIGMAS, MemberRecord, draw_member, equipartition_factor};
+use super::{
+    INTERNAL_SPEED_SIGMAS, MemberRecord, RecycledShares, draw_member_marked, equipartition_factor,
+    is_at_the_turn_off,
+};
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// A feature's interior: what placing its members needs, built once per feature and kept by the
 /// caller (P09.T21).
@@ -60,6 +64,9 @@ pub struct FeatureInterior {
     speed_bound: KilometresPerSecond,
     /// The feature's stars, where its band-E cells give its list the members it claims (P09.T36.a).
     claims: Option<Box<FeatureStars>>,
+    /// The shares of its neutron stars marked millisecond pulsars, from generator version 27
+    /// (P11.T8.f).
+    recycled: RecycledShares,
 }
 
 impl FeatureInterior {
@@ -97,6 +104,7 @@ impl FeatureInterior {
             UNBOUND_PAD_SPEED.value()
         );
         let claims = FeatureStars::claiming(galaxy, feature).map(Box::new);
+        let recycled = recycled_shares(galaxy, &model, &table);
         Some(Self {
             feature: *feature,
             model,
@@ -105,6 +113,7 @@ impl FeatureInterior {
             bulk,
             speed_bound,
             claims,
+            recycled,
         })
     }
 
@@ -340,11 +349,11 @@ impl FeatureInterior {
         let mark = Stream::open(galaxy.seed(), tags::MEMBER_ACCEPT, key).mark();
         let class = self.table.pick(band, &p, mark, bound)?;
         let at = self.galactic(&p);
-        draw_member(
+        draw_member_marked(
             galaxy,
             &self.feature,
             &self.model,
-            &class,
+            (&class, self.recycled),
             &at,
             id,
             self.bulk,
@@ -471,6 +480,40 @@ fn member_speed_bound(
     let tail = INTERNAL_SPEED_SIGMAS * model.sigma(model.tidal_radius()).value() * factor;
     let bulk = KilometresPerSecond::from(bulk.speed()).value();
     KilometresPerSecond::new((bulk + core.max(tail)) * (1.0 + SPEED_BOUND_MARGIN))
+}
+
+/// The shares of a cluster's classes marked recycled objects, from generator version 27 (P09.T9.e's
+/// marks; P11.T8.f): its millisecond pulsars, `table`'s encounter-rate law capped at its neutron
+/// stars ([`MemberClassTable::millisecond_pulsars`]), over its expected neutron stars, and its
+/// blue stragglers ([`ClusterModel::blue_stragglers`]) over its expected binaries at the turn-off;
+/// none under the held arm, and none of a kind a cluster holds no member of.
+#[must_use]
+pub(crate) fn recycled_shares(
+    galaxy: &Galaxy,
+    model: &ClusterModel,
+    table: &MemberClassTable,
+) -> RecycledShares {
+    if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
+        return RecycledShares::NONE;
+    }
+    let neutron_stars = table.expected_of(ClassKind::NeutronStar);
+    let at_turn_off: f64 = MassBand::ALL
+        .iter()
+        .flat_map(|&band| table.classes(band))
+        .filter(|(class, _)| is_at_the_turn_off(class))
+        .map(|(_, expected)| expected)
+        .sum();
+    let share = |n: f64, of: f64| {
+        if of > 0.0 {
+            (n / of).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
+    RecycledShares {
+        pulsars: share(table.millisecond_pulsars(model), neutron_stars),
+        blue_stragglers: share(model.blue_stragglers(), at_turn_off),
+    }
 }
 
 /// The count of a cell whose candidate 0 is `first` and whose mean is `mean`.

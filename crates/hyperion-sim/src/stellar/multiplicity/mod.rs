@@ -51,6 +51,7 @@ pub use dist::{
     PeriodDistribution,
 };
 pub use fates::{COMPANION_LAW_LN_RATIO_STEP, CompanionLaw, MultiplicityFates};
+pub(crate) use hierarchy::MARKED_ATTEMPTS;
 #[cfg(test)]
 pub(crate) use hierarchy::hand_built;
 pub use hierarchy::{

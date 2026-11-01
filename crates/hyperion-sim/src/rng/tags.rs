@@ -1276,6 +1276,16 @@ domain_tags! {
     /// attempt n, keyed by the star the pair's orbit brings in, below η of the candidate's delay
     /// bin and channel (`stellar::binary::ia::IaExplosionMark`).
     BINARY_IA_MARK: Body = "binary.ia_mark";
+
+    // Plan 11, P11.T8.f: a feature member's recycled-object mark, a `System` tag opened with
+    // `ObjectKey::from(SystemId)` of the member's ID, as plan 09's `member.*` tags are. Appended
+    // after P11.T6's `binary.ia_mark`, because the macro's order fixes `ALL`.
+
+    /// A feature member's recycled-object mark (P11.T8.f): word 0, a mark against its class's
+    /// share of the recycled objects it may be, P09.T9.e's expected millisecond pulsars over a
+    /// cluster's neutron stars or its blue stragglers over its binaries at the turn-off
+    /// (`members::RecycledShares`); the other words are reserved.
+    MEMBER_RECYCLED: System = "member.recycled";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1784,6 +1794,14 @@ mod tests {
             assert!(tag.name().starts_with("class.nsm."));
             assert!(ALL.contains(&tag));
         }
+    }
+
+    /// P11.T8.f: a feature member's recycled-object mark, under plan 09's prefix `member.`.
+    #[test]
+    fn plan_11_registers_the_recycled_mark_under_member() {
+        assert_eq!(MEMBER_RECYCLED.scope(), crate::rng::TagScope::System);
+        assert_eq!(MEMBER_RECYCLED.name(), "member.recycled");
+        assert!(ALL.contains(&MEMBER_RECYCLED));
     }
 
     /// P11.T8.b: the X-ray binaries' candidates' tags, under plan 09's prefix `class.`, with their

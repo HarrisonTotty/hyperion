@@ -1912,6 +1912,25 @@ impl SystemStars {
         }
     }
 
+    /// The system of `record` at `composition` under `ctx` at redraw attempt `attempt` alone, with
+    /// no redraw after it: a marked feature member's, whose conditional draw chose the attempt
+    /// (P11.T8.f).
+    ///
+    /// # Panics
+    ///
+    /// As [`generate_with`](Self::generate_with).
+    #[must_use]
+    pub(crate) fn generate_at(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: &Composition,
+        ctx: MultiplicityContext,
+        attempt: RedrawAttempt,
+    ) -> Self {
+        let (primary, _) = primary_model(galaxy, record, *composition);
+        Self::at_attempt(galaxy, record, &primary, ctx, attempt)
+    }
+
     /// The system at redraw attempt `attempt`: `primary`, the hierarchy
     /// [`draw_hierarchy_of_composition`] draws then at the primary's composition, each companion's
     /// model on its own body's draws of that attempt, and each pair of two stars run through the

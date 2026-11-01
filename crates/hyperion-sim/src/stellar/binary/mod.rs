@@ -78,6 +78,7 @@ pub use light::{PairLight, RUN_HORIZON_PAST_WINDOW_YEARS, pair_light_bound};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
 pub use reach::{ReachBound, largest_radius_bound};
+pub(crate) use recycling::pulsar_at;
 pub use recycling::{MILLISECOND_PULSAR_MAX_PERIOD, PulsarAt, is_millisecond_pulsar};
 pub use timeline::{
     BinaryInput, BinaryState, BinaryTimeline, BuildBinaryInputError, Component, IaPoolChannel,
