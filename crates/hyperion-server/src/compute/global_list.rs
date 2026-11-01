@@ -14,12 +14,16 @@
 //!   by their steps, the longest first, to the share with the fewest. The legs are stepped in
 //!   those shares ([`radii_over_ly`]), and once the centre is built a last job finishes the list
 //!   ([`ListPlan::finish`]).
-//! - **A tube** ([`tube_table_on`]). Its tracers are sprayed in shares of 250 indices dealt out in
-//!   turn ([`Spray::tracers_at`]), so that each share holds early releases, which have the most
-//!   steps to take, and late ones alike. Each job makes its own [`Spray`] (the progenitor's two
-//!   passes, some 0.15 % of the spray), and a last job reduces them ([`TubeTable::from_tracers`]).
-//!   Shares of runs of 250 indices took stream 0 of the Milky Way fixture 0.47 s on eight workers,
-//!   the first run holding some 1.9 times the mean's steps (pod, 16 vCPU, 2026-10-31).
+//! - **A tube** ([`tube_table_on`]). One job makes the stream's [`SprayPlan`], the progenitor's two
+//!   passes, and its tracers are then sprayed from it in shares of 250 indices dealt out in turn
+//!   ([`Spray::with_plan`], [`Spray::tracers_at`]), so that each share holds early releases, which
+//!   have the most steps to take, and late ones alike; a last job reduces them
+//!   ([`TubeTable::from_tracers`]). Shares of runs of 250 indices took stream 0 of the Milky Way
+//!   fixture 0.47 s on eight workers, the first run holding some 1.9 times the mean's steps (pod,
+//!   16 vCPU, 2026-10-31). The plans of the fixture's 261 tables take 1.1 CPU-s in all, against
+//!   the sprays' 475; when each of eight shares made its own, a table held eight copies of its
+//!   progenitor's track, up to 3.6 MB each (P10.T10.b's warm-up, the release profile, pod, 16 vCPU,
+//!   2026-11-01).
 //!
 //! **Bit for bit.** Each unit is a pure function of the galaxy and its index: an orphan of `k`,
 //! every one of its draws keyed by `k`; a leg's radii and a tracer whatever they are stepped
@@ -40,7 +44,8 @@
 //! tables are kept in the [`TubeTableCache`]: each built when the open's warm-up reaches it, at
 //! bulk priority, or for the first `stream_track` that asks, at interactive priority, or inside
 //! the job that resolves one of its members ([`ListedTubes`]). A list and a table are pure
-//! functions of their galaxy, so eviction never changes an answer.
+//! functions of their galaxy, so eviction never changes an answer, and neither does the order in
+//! which the warm-up's tables, several in flight at once, finish and are kept.
 //!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
@@ -51,9 +56,11 @@ use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
 
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use hyperion_sim::galaxy::global_list::orbit::BuildLeapfrogError;
 use hyperion_sim::galaxy::global_list::spray::{
-    Leg, Spray, SprayForce, SprayParams, Tracer, radii_over_ly,
+    Leg, Spray, SprayForce, SprayParams, SprayPlan, Tracer, radii_over_ly,
 };
 use hyperion_sim::galaxy::global_list::tube::BuildTubeTableError;
 use hyperion_sim::galaxy::global_list::{
@@ -457,12 +464,13 @@ pub async fn tube_table_on(
 /// The tracers of `spec`'s stream in `galaxy`, the galaxy `key` names, at `params`, in index order,
 /// sprayed on `pool`'s workers at `priority` in shares of at most `shares`' tracers a share, or as
 /// many as keep the shares to the workers' count, the indices dealt out in turn and gathered by
-/// index: [`Spray::tracers`]'s, bit for bit.
+/// index, every share from the one [`SprayPlan`] a job made first: [`Spray::tracers`]'s, bit for
+/// bit.
 ///
 /// # Errors
 ///
-/// [`BuildTubeOnPoolError::Table`] with [`BuildTubeTableError::Spray`] as [`Spray::new`]'s error,
-/// and [`BuildTubeOnPoolError::Compute`] as [`global_list_on`]'s.
+/// [`BuildTubeOnPoolError::Table`] with [`BuildTubeTableError::Spray`] as [`SprayPlan::new`]'s
+/// error, and [`BuildTubeOnPoolError::Compute`] as [`global_list_on`]'s.
 ///
 /// # Panics
 ///
@@ -488,23 +496,34 @@ pub(crate) async fn tracers_on(
     )
     .unwrap_or(NonZeroUsize::MIN);
     let dealt = dealt(u64::from(count), share_count);
+    let planned = {
+        let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
+        queue(pool, priority, token, move |_: &CancelToken| {
+            SprayPlan::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params).map(Arc::new)
+        })
+        .await?
+    };
+    let plan = reply(planned).await??;
     let mut spraying = Vec::with_capacity(dealt.len());
     for share in dealt {
         let indices: Vec<u32> = share
             .into_iter()
             .map(|i| u32::try_from(i).expect("an index below the tracers' u32 count"))
             .collect();
-        let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
+        let (galaxy, force, plan) = (Arc::clone(galaxy), Arc::clone(&force), Arc::clone(&plan));
         let job = move |_: &CancelToken| {
-            Spray::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params)
-                .map(|spray| indices.iter().copied().zip(spray.tracers_at(&indices)))
-                .map(Iterator::collect::<Vec<_>>)
+            let spray = Spray::with_plan(&force, galaxy.potential(), &plan);
+            indices
+                .iter()
+                .copied()
+                .zip(spray.tracers_at(&indices))
+                .collect::<Vec<_>>()
         };
         spraying.push(queue(pool, priority, token, job).await?);
     }
     let mut tracers = vec![None; usize::try_from(count).expect("a u32 fits a usize")];
     for receiver in spraying {
-        for (i, tracer) in reply(receiver).await?? {
+        for (i, tracer) in reply(receiver).await? {
             tracers[usize::try_from(i).expect("a u32 fits a usize")] = Some(tracer);
         }
     }
@@ -705,8 +724,8 @@ impl GlobalListService {
     }
 
     /// Starts the warm-up of the galaxy `key` names and returns at once: its list, then each of its
-    /// streams' tables in number order, at bulk priority, waited on by a task the service owns
-    /// (P10.T10.b). An open repeated meanwhile joins the warm-up in flight.
+    /// streams' tables started in number order, a few at once, at bulk priority, waited on by a
+    /// task the service owns (P10.T10.b). An open repeated meanwhile joins the warm-up in flight.
     ///
     /// The server calls it when a client opens a universe, unless its configuration turns it off
     /// ([`GlobalListWarmUp`](crate::GlobalListWarmUp)). The galaxy's tables held already are marked
@@ -874,6 +893,12 @@ impl Lists {
     }
 
     /// The warm-up of the galaxy `key` names ([`GlobalListService::prefetch`]).
+    ///
+    /// Up to [`tables_in_flight`] tables are built at once, started in number order, so that the
+    /// pool's workers take the next table's shares as the last's run out (module documentation,
+    /// "Kept"). Each table in flight is charged as the next would be, and none is started beside
+    /// another before one table's charge is known, so the warm-up stops where a build one table at
+    /// a time stops, and evicts none of its galaxy's tables.
     async fn warm(&self, key: GalaxyKey) -> Result<WarmedTubes, ComputeError> {
         let list = self.get(key).await?;
         let galaxy = self.galaxies.get(key).await?;
@@ -894,15 +919,36 @@ impl Lists {
             held: 0,
             streams: streams.len(),
         };
-        for spec in streams {
-            let number = spec.number();
-            if self.tubes.contains(&(key, number)) {
-                continue;
+        let room = tables_in_flight(self.pool.workers());
+        let galaxy = &galaxy;
+        let mut next = streams.iter();
+        let mut full = false;
+        let mut building = FuturesUnordered::new();
+        loop {
+            // One table alone until a table's charge is known, which the budget's test needs.
+            let at_once = if next_charge == 0 { 1 } else { room };
+            while !full && building.len() < at_once {
+                let Some(spec) = next.next() else {
+                    break;
+                };
+                let number = spec.number();
+                if self.tubes.contains(&(key, number)) {
+                    continue;
+                }
+                let reserved = next_charge.saturating_mul(building.len() + 1);
+                if held_bytes.saturating_add(reserved) > budget {
+                    full = true;
+                    break;
+                }
+                building.push(async move {
+                    let built = self.tube((galaxy, key), spec, Priority::Bulk).await;
+                    (number, built)
+                });
             }
-            if held_bytes.saturating_add(next_charge) > budget {
+            let Some((number, built)) = building.next().await else {
                 break;
-            }
-            match self.tube((&galaxy, key), spec, Priority::Bulk).await {
+            };
+            match built {
                 Ok(table) => {
                     warmed.built += 1;
                     next_charge = ByteLru::<TubeKey, TubeTable>::charge(&table);
@@ -925,6 +971,24 @@ impl Lists {
             .count();
         Ok(warmed)
     }
+}
+
+/// How many tables a warm-up builds at once on a pool of `workers`: enough that every worker
+/// holds a share of one with the shares of [`TRACERS_PER_SHARE`] tracers, and one more, whose
+/// plan and shares wait in the queue for the workers the others free: two on eight workers,
+/// three on fifteen. A table has eight shares, so one at a time left seven of fifteen workers
+/// idle: the Milky Way fixture's 261 tables took 63.7 s on fifteen, against 32.8 s three at a
+/// time, and 60.0 s and 59.2 s on eight (P10.T10.b, the slow-test profile, pod, 16 vCPU,
+/// 2026-11-01).
+#[must_use]
+fn tables_in_flight(workers: NonZeroUsize) -> usize {
+    let shares = SprayParams::default()
+        .tracers()
+        .div_ceil(TRACERS_PER_SHARE.get());
+    let shares = usize::try_from(shares)
+        .unwrap_or(usize::MAX)
+        .clamp(1, workers.get());
+    workers.get().div_ceil(shares) + 1
 }
 
 #[cfg(test)]
@@ -1257,6 +1321,48 @@ mod tests {
         pool.shutdown().await.unwrap();
     }
 
+    /// P10.T10.b: two tables at once on four workers, three on fifteen or sixteen: enough that
+    /// every worker holds a share of a table, and one more.
+    #[test]
+    fn a_warm_up_builds_enough_tables_at_once_to_fill_the_pool() {
+        let at = |n| tables_in_flight(workers(n));
+        assert_eq!([1, 4, 8, 9, 15, 16, 64].map(at), [2, 2, 2, 3, 3, 3, 9]);
+    }
+
+    /// P10.T10.b: a warm-up with tables in flight builds the tables one at a time builds, bit for
+    /// bit, starts them in number order, and stops where one at a time stops: here, with room for
+    /// three on four workers, two in flight, after the third, with nothing evicted.
+    #[tokio::test]
+    async fn a_warm_up_with_tables_in_flight_builds_the_tables_one_at_a_time_builds() {
+        let charge = a_table_s_charge().await;
+        let three = Arc::new(TubeTableCache::new(3 * charge + charge / 2));
+        let (service, pool) = service_on(4, &three);
+        assert_eq!(tables_in_flight(pool.workers()), 2);
+        let warmed = within(service.lists.warm(key()))
+            .await
+            .expect("the warm-up's jobs run");
+        assert_eq!((warmed.built(), warmed.held()), (3, 3));
+        assert_eq!(service.tube_counters().evictions(), 0);
+        let (galaxy, list) = listed(&service).await;
+        let streams = &list.list().debris().streams()[..4];
+        let held: Vec<bool> = streams
+            .iter()
+            .map(|spec| service.is_ready(key(), spec.number()))
+            .collect();
+        assert_eq!(held, [true, true, true, false]);
+        let roomy = Arc::new(TubeTableCache::new(64 << 20));
+        let (alone, alone_pool) = service_on(4, &roomy);
+        for spec in &streams[..3] {
+            let one = within(alone.tube((&galaxy, key()), spec, Priority::Bulk))
+                .await
+                .expect("the tube builds");
+            let warm = three.get(&(key(), spec.number())).expect("held");
+            assert_eq!(bits(&warm), bits(&one), "stream {}", spec.number().get());
+        }
+        alone_pool.shutdown().await.unwrap();
+        pool.shutdown().await.unwrap();
+    }
+
     /// P10.T10.b: a warm-up started as an open starts it runs on its own task and readies the
     /// tables that fit, here one; one stopped as the server shuts down leaves no flight behind.
     #[tokio::test]
@@ -1403,15 +1509,28 @@ mod tests {
         assert_eq!(*stars, member.stars(galaxy));
     }
 
+    /// FNV-1a 64 over `bytes`, continuing from `hash`: the digests the warm-up's test pins.
+    fn fnv1a(hash: u64, bytes: &[u8]) -> u64 {
+        bytes.iter().fold(hash, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    /// FNV-1a 64's offset basis.
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
     /// P10.T10.b's warm-up at Milky Way values and its range test, until the registration lands.
     ///
     /// The warm-up builds every stream's table of a galaxy at the Milky Way fixture's values and
-    /// keeps it, so every track is `ready`, and prints what it cost. Then the sim's range query,
-    /// with the list's source passed in over the server's lookup, finds a stream's member at its
-    /// own place, of the `stream` origin on the wire, with the stream's other members near it; each
-    /// resolves through the list to its own record, and its stars are its member record's. Below
-    /// version 26 the source visits every stream (option A's hold), so the query reads every table,
-    /// which the warm-up has kept.
+    /// keeps it, so every track is `ready`, and prints what it cost. Every table is the one the
+    /// warm-up built one table at a time, each share of its tracers making its own plan (at
+    /// `dbc732f`, `GENERATOR_VERSION` 24): the digest of the 261 tables' bits pins them. Then the
+    /// sim's range query, with the list's source passed in over the server's lookup, finds a
+    /// stream's member at its own place, of the `stream` origin on the wire, with the stream's
+    /// other members near it; each resolves through the list to its own record, and its stars are
+    /// its member record's. The query's answer and a wider one's are pinned by their digests, as
+    /// they were then. Below version 26 the source visits every stream (option A's hold), so the
+    /// query reads every table, which the warm-up has kept.
     #[tokio::test]
     #[ignore = "slow: warms every tube table of a Milky Way galaxy, some 10 CPU-minutes"]
     async fn the_warm_up_readies_every_track_and_a_range_query_finds_a_stream_s_members() {
@@ -1443,6 +1562,20 @@ mod tests {
                 .iter()
                 .all(|spec| service.is_ready(key(), spec.number()))
         );
+        let tables = streams.iter().fold(FNV_OFFSET, |hash, spec| {
+            let table = tubes
+                .get(&(key(), spec.number()))
+                .expect("every table is held");
+            fnv1a(
+                hash,
+                &fnv1a(FNV_OFFSET, bits(&table).as_bytes()).to_le_bytes(),
+            )
+        });
+        assert_eq!(
+            (streams.len(), format!("{tables:016x}")),
+            (261, "7e4cf90f5b9aca5d".to_owned()),
+            "the tables' bits"
+        );
         let probe = SystemId::from(
             hyperion_sim::id::StreamMemberId::new(0, hyperion_sim::id::Layer::A, 0, [0, 0], 0)
                 .expect("a stream member ID"),
@@ -1466,6 +1599,32 @@ mod tests {
         assert!(
             members.iter().any(|hit| hit.record() == wanted.record()),
             "stream {}'s member at its own place",
+            number.get()
+        );
+        // The answers' bits, and those of a sphere of 50 ly about the member, which holds the
+        // field's systems too.
+        let wide = RangeQuery::builder(*wanted.record().epoch_position(), LightYears::new(50.0))
+            .build()
+            .expect("a query about a member in the cube");
+        let wide = range_query(&galaxy, &mut NoCache::new(), &[&source], &wide);
+        let answers = [&result, &wide].map(|answer| {
+            let systems = answer.systems();
+            let listed = systems
+                .iter()
+                .filter(|hit| {
+                    matches!(hit.record().origin(), SystemOrigin::GlobalListMember { .. })
+                })
+                .count();
+            let digest = fnv1a(FNV_OFFSET, format!("{systems:?}").as_bytes());
+            (systems.len(), listed, format!("{digest:016x}"))
+        });
+        assert_eq!(
+            answers,
+            [
+                (1, 1, "d0ff0af90d09c807".to_owned()),
+                (2, 1, "5a38bac18da11661".to_owned())
+            ],
+            "the range queries' answers about stream {}'s member",
             number.get()
         );
         let systems = SharedSystemCache::new(64 << 20);

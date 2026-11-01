@@ -137,11 +137,13 @@
 //!
 //! Each tracer is integrated alone from its release to the epoch, so [`Spray::tracer`] is a pure
 //! function of its index: a caller's pool (plan 04's) runs tracers in parallel and gathers them by
-//! index (ruling 146.3). [`Spray::tracers`] runs them all on one thread, side by side in lanes, as
-//! the global list's shell orbits are run, and gives them in index order, each with
+//! index (ruling 146.3), every share spraying from the one [`SprayPlan`] it lends them
+//! ([`Spray::with_plan`]). [`Spray::tracers`] runs them all on one thread, side by side in lanes,
+//! as the global list's shell orbits are run, and gives them in index order, each with
 //! [`Spray::tracer`]'s bits. The kick–drift–kick steps are the leapfrog's, with `+ − × ÷`, `sqrt`
 //! and [`math`] only (P10.T2.c's source check reads this file too).
 
+use std::borrow::Cow;
 use std::num::NonZeroU32;
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
@@ -742,6 +744,20 @@ struct Boundary {
 pub struct Spray<'a> {
     force: &'a SprayForce,
     tables: &'a PotentialTables,
+    /// Its own, or one lent by the pool that made it once for every share of the tracers.
+    plan: Cow<'a, SprayPlan>,
+}
+
+/// What a [`Spray`] holds of its stream: the progenitor's orbit over the stripping time, its
+/// release schedule and its offsets' stream, all but the tables it reads.
+///
+/// [`Spray::new`] makes its own. A caller's pool that sprays a stream's tracers in shares on its
+/// workers makes one with [`SprayPlan::new`] and lends it to each share's
+/// [`Spray::with_plan`] (P10.T10.b), so that the progenitor's two passes, some 0.2 % of the spray
+/// each, are integrated once a stream rather than once a share, and the progenitor's track, 80
+/// bytes a step, is held once.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SprayPlan {
     schedule: ReleaseSchedule,
     stripping_time: Years,
     /// The progenitor at boundaries 0 to the step count.
@@ -756,11 +772,11 @@ pub struct Spray<'a> {
     cut: [f64; 2],
 }
 
-impl<'a> Spray<'a> {
-    /// The spray of `spec`'s stream in the galaxy of `seed`, whose (R, |z|) tables are `tables`
+impl SprayPlan {
+    /// The plan of `spec`'s stream in the galaxy of `seed`, whose (R, |z|) tables are `tables`
     /// and their spray table `force`, with `params`' releases per arm: the progenitor integrated
     /// backwards over the stripping time and forwards again, and the release schedule (module
-    /// documentation). The tracers are integrated when asked for.
+    /// documentation).
     ///
     /// # Errors
     ///
@@ -773,8 +789,8 @@ impl<'a> Spray<'a> {
     /// which a specification's orbit, bound between positive radii, always gives.
     pub fn new(
         seed: Seed,
-        force: &'a SprayForce,
-        tables: &'a PotentialTables,
+        force: &SprayForce,
+        tables: &PotentialTables,
         spec: &StreamSpec,
         params: &SprayParams,
     ) -> Result<Self, BuildLeapfrogError> {
@@ -828,8 +844,6 @@ impl<'a> Spray<'a> {
         let widening = cut_widening();
         let below = 0.5 * math::erfc(OFFSET_CUT * core::f64::consts::FRAC_1_SQRT_2);
         Ok(Self {
-            force,
-            tables,
             schedule,
             stripping_time: spec.stripping_time(),
             track,
@@ -849,6 +863,94 @@ impl<'a> Spray<'a> {
     pub fn schedule(&self) -> &ReleaseSchedule {
         &self.schedule
     }
+}
+
+impl<'a> Spray<'a> {
+    /// The spray of `spec`'s stream in the galaxy of `seed`, whose (R, |z|) tables are `tables`
+    /// and their spray table `force`, with `params`' releases per arm: its own [`SprayPlan`], the
+    /// progenitor integrated backwards over the stripping time and forwards again, and the release
+    /// schedule (module documentation). The tracers are integrated when asked for.
+    ///
+    /// # Errors
+    ///
+    /// As [`SprayPlan::new`].
+    ///
+    /// # Panics
+    ///
+    /// As [`SprayPlan::new`].
+    pub fn new(
+        seed: Seed,
+        force: &'a SprayForce,
+        tables: &'a PotentialTables,
+        spec: &StreamSpec,
+        params: &SprayParams,
+    ) -> Result<Self, BuildLeapfrogError> {
+        let plan = SprayPlan::new(seed, force, tables, spec, params)?;
+        Ok(Self {
+            force,
+            tables,
+            plan: Cow::Owned(plan),
+        })
+    }
+
+    /// The spray of `plan`, which [`SprayPlan::new`] made with these `force` and `tables`: the
+    /// spray [`Spray::new`] gives with the same arguments, its tracers bit for bit, without the
+    /// progenitor's passes (P10.T10.b).
+    ///
+    /// With a plan made from other tables, the tracers are neither galaxy's.
+    ///
+    /// # Examples
+    ///
+    /// A pool's shares of one stream's tracers, each spraying from the one plan (not run: the
+    /// debris needs the full potential):
+    ///
+    /// ```no_run
+    /// use std::num::NonZeroU32;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::Debris;
+    /// use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams, SprayPlan};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let debris = Debris::generate(&galaxy);
+    /// let stream = &debris.streams()[0];
+    /// let (seed, tables) = (galaxy.seed(), galaxy.potential());
+    /// let force = SprayForce::new(tables)?;
+    /// let params = SprayParams::new(NonZeroU32::new(100).expect("not zero"));
+    /// let plan = SprayPlan::new(seed, &force, tables, stream, &params)?;
+    /// let shares: Vec<Vec<u32>> = (0..4).map(|j| (j..200).step_by(4).collect()).collect();
+    /// let mut gathered = vec![None; 200];
+    /// for share in &shares {
+    ///     let spray = Spray::with_plan(&force, tables, &plan);
+    ///     for (&i, tracer) in share.iter().zip(spray.tracers_at(share)) {
+    ///         gathered[usize::try_from(i)?] = Some(tracer);
+    ///     }
+    /// }
+    /// let gathered: Vec<_> = gathered.into_iter().flatten().collect();
+    /// assert_eq!(gathered, Spray::new(seed, &force, tables, stream, &params)?.tracers());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn with_plan(
+        force: &'a SprayForce,
+        tables: &'a PotentialTables,
+        plan: &'a SprayPlan,
+    ) -> Self {
+        Self {
+            force,
+            tables,
+            plan: Cow::Borrowed(plan),
+        }
+    }
+
+    /// The release schedule.
+    #[must_use]
+    pub fn schedule(&self) -> &ReleaseSchedule {
+        &self.plan.schedule
+    }
 
     /// The tracers of both arms: two per release.
     ///
@@ -857,7 +959,7 @@ impl<'a> Spray<'a> {
     /// Never: [`SprayParams::new`] holds the releases an arm to 2³¹ − 1.
     #[must_use]
     pub fn tracer_count(&self) -> u32 {
-        u32::try_from(2 * self.schedule.releases().len()).expect(
+        u32::try_from(2 * self.plan.schedule.releases().len()).expect(
             "a schedule holds SprayParams' releases an arm, at most 2³¹ − 1, so twice is a u32",
         )
     }
@@ -866,7 +968,7 @@ impl<'a> Spray<'a> {
     /// distribution keeps (module documentation, "The release").
     #[must_use]
     pub fn in_plane_spread(&self) -> f64 {
-        self.in_plane_spread
+        self.plan.in_plane_spread
     }
 
     /// The progenitor's position and velocity at step boundary `step` of its forward integration,
@@ -874,7 +976,7 @@ impl<'a> Spray<'a> {
     /// by the leapfrog's rounding over the two passes.
     #[must_use]
     pub fn progenitor(&self, step: u32) -> Option<(GalacticDisplacement, GalacticVelocity)> {
-        let b = self.track.get(usize::try_from(step).ok()?)?;
+        let b = self.plan.track.get(usize::try_from(step).ok()?)?;
         Some((
             GalacticDisplacement::new(b.position_m),
             GalacticVelocity::new(b.velocity_m_s),
@@ -1015,7 +1117,7 @@ impl<'a> Spray<'a> {
             "tracer {index} of a spray of {}",
             self.tracer_count()
         );
-        self.schedule.releases()[usize::try_from(index / 2)
+        self.plan.schedule.releases()[usize::try_from(index / 2)
             .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more")]
     }
 
@@ -1030,7 +1132,7 @@ impl<'a> Spray<'a> {
         };
         let start = usize::try_from(release.step())
             .expect("a u32 fits a usize on every target the sim builds for, of 32 bits or more");
-        let from = self.track[start];
+        let from = self.plan.track[start];
         let body = self.release(&from, release.bound_mass(), arm, index);
         // Both bodies at the same instant, before the integration's error (module documentation,
         // "The arms").
@@ -1045,8 +1147,13 @@ impl<'a> Spray<'a> {
             walker: Walker {
                 acceleration_m_s2: self.acceleration(body.0),
                 body,
-                step_s: self.schedule.step().step().value(),
-                left: self.schedule.step().count().saturating_sub(release.step()),
+                step_s: self.plan.schedule.step().step().value(),
+                left: self
+                    .plan
+                    .schedule
+                    .step()
+                    .count()
+                    .saturating_sub(release.step()),
             },
             angle_rad: 0.0,
         }
@@ -1059,8 +1166,9 @@ impl<'a> Spray<'a> {
     /// If the energy offset at release or the integration left a value that is not finite.
     #[must_use]
     fn finish(&self, lane: &TracerLane) -> Tracer {
-        let steps = self.schedule.step().count();
+        let steps = self.plan.schedule.step().count();
         let last = self
+            .plan
             .track
             .last()
             .expect("the track holds its first boundary");
@@ -1082,7 +1190,7 @@ impl<'a> Spray<'a> {
             arm: lane.arm,
             release_step: release.step(),
             released: Years::new(
-                self.stripping_time.value()
+                self.plan.stripping_time.value()
                     * (1.0 - f64::from(release.step()) / f64::from(steps.max(1))),
             ),
             weight: release.weight(),
@@ -1096,11 +1204,11 @@ impl<'a> Spray<'a> {
     /// The release offsets `[k_r, k_vφ, k_z, k_vz]` of tracer `index`, from its four words.
     #[must_use]
     fn offsets(&self, index: u32) -> [f64; 4] {
-        let mut words = self.offsets.clone();
+        let mut words = self.plan.offsets.clone();
         words.seek(OFFSET_WORDS * u64::from(index));
-        let [below, between] = self.cut;
+        let [below, between] = self.plan.cut;
         let mut draw = || math::normal_quantile(below + words.uniform() * between);
-        let [in_plane, out_of_plane] = self.widened;
+        let [in_plane, out_of_plane] = self.plan.widened;
         // k_r, k_vφ, k_z and k_vz, in that order.
         let radial = RADIAL_OFFSET + in_plane * draw();
         let tangential = TANGENTIAL_OFFSET + in_plane * draw();

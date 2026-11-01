@@ -2324,3 +2324,13 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     system readout, since the overlay takes no pointer (lean, 2026-11-01).
   - _For the registration member._ The readout's rows and `ORIGIN` `STREAM <n>` appear once a range
     row carries the `stream` origin, which needs `convert::placed_by`'s arm.
+- **P10.T10.b's warm-up, perf (lane `perf-stream-warmup`, 2026-11-01, at `GENERATOR_VERSION` 24).**
+  No output moved: the slow warm-up test pins the 261 Milky Way tables' digest and two range
+  answers at their base values.
+  - _Items._ Sim `spray::SprayPlan` (`new`, `schedule`) and `Spray::with_plan`; `Spray::new` makes
+    its own plan. `tracers_on` makes one plan a table and lends it to every share; `Lists::warm`
+    keeps `tables_in_flight(workers)` tables building (2 on 8 workers, 3 on 15), started in number
+    order, one alone until a charge is known.
+  - _Not met._ The one to two CPU-minutes: the warm-up still costs some 8 CPU-minutes, all of it
+    the spray's step, 98.7 % of it the orphans' (a finding). Held at 27 if wanted: ruling 146.3's `τ_p ÷ 32` and
+    500 tracers an arm, each about halving it.

@@ -68,5 +68,9 @@ harness = false
 name = "sky"
 harness = false
 
+[[bench]]
+name = "stream_warmup"
+harness = false
+
 [lints]
 workspace = true

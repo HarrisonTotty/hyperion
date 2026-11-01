@@ -266,6 +266,7 @@ fn the_widening_restores_a_cut_gaussian_s_variance() {
 fn a_spray_and_its_table_are_shared_between_threads() {
     fn shared<T: Sync + Send>() {}
     shared::<Spray<'static>>();
+    shared::<SprayPlan>();
     shared::<SprayForce>();
 }
 
@@ -531,7 +532,8 @@ mod milky_way {
 
     /// Split at every tracer boundary, or dealt out in turn among three shares, each test stream's
     /// spray of six tracers an arm, its parts stepped apart ([`Spray::tracers_in`],
-    /// [`Spray::tracers_at`]) and gathered by index, is its whole spray, bit for bit; and so,
+    /// [`Spray::tracers_at`]) and gathered by index, is its whole spray, bit for bit, whether each
+    /// part makes its own plan or is lent one ([`Spray::with_plan`]); and so,
     /// split at every leg boundary, are shell orbits' radii ([`radii_over_ly`]): what a caller's
     /// pool may do with either (P10.T5.b).
     fn a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s() {
@@ -562,6 +564,26 @@ mod milky_way {
             }
             let dealt: Vec<_> = dealt.into_iter().flatten().collect();
             assert_eq!(dealt, whole, "{name}: dealt out in turn");
+            // So again, each share spraying from one plan lent to it, as a pool's are (P10.T10.b).
+            let f = fixture();
+            let params = SprayParams::new(NonZeroU32::new(6).expect("not zero"));
+            let plan = SprayPlan::new(SEED, &f.force, &f.tables, &spec, &params)
+                .expect("a finite stripping time");
+            assert_eq!(
+                Spray::with_plan(&f.force, &f.tables, &plan),
+                sprayed,
+                "{name}"
+            );
+            let mut lent = vec![None; whole.len()];
+            for share in 0..3 {
+                let indices: Vec<u32> = (share..count).step_by(3).collect();
+                let spray = Spray::with_plan(&f.force, &f.tables, &plan);
+                for (&i, t) in indices.iter().zip(spray.tracers_at(&indices)) {
+                    lent[usize::try_from(i).expect("a few tracers")] = Some(bits(&t));
+                }
+            }
+            let lent: Vec<_> = lent.into_iter().flatten().collect();
+            assert_eq!(lent, whole, "{name}: from a lent plan");
         }
         let force = &fixture().force;
         let legs: Vec<Leg> = test_streams()
