@@ -205,6 +205,13 @@ export interface PhotorealFrame {
   readonly presentedPx: Viewport;
   readonly role: ViewRole;
   readonly setting: QualitySetting;
+  /**
+   * The setting whose sizes the frame's air is drawn at (`TABLE_SIZES`' sky view, aerial
+   * perspective and ray march): the low setting's while the view's frame-rate floor has stepped it
+   * down (`BudgetedScale.airStepped`; the owner's report, 2026-11-01); {@link setting} where
+   * absent.
+   */
+  readonly atmosphereSetting?: QualitySetting | undefined;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
   /** R06's draws at infinity, in order: the band, then the baked cube. */
@@ -1007,7 +1014,11 @@ export class PhotorealRenderer {
       let composite: DrawItem;
       let area: TexelRect | null;
       try {
-        const atmosphere = this.#atmosphereOf(resources, air, frame.setting);
+        const atmosphere = this.#atmosphereOf(
+          resources,
+          air,
+          frame.atmosphereSetting ?? frame.setting,
+        );
         const suns: ReadonlyArray<SunState> = skySources(
           sources.stars,
           sources.planetshine,

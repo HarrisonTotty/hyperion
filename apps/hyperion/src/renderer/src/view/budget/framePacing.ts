@@ -157,13 +157,45 @@ function sameBounds(a: ScaleBounds, b: ScaleBounds): boolean {
 }
 
 /**
+ * How a frame-rate floor's air comes back to its setting's sizes (the owner's report, 2026-11-01):
+ * once its scale is back at its max, its frames' GPU time must stay under this share of the floor's
+ * budget (without a timer, its intervals under {@link CALM_INTERVAL_SHARE} of its period) for
+ * {@link CALM_FRAMES} frames in a row, so that the air drawn at the low setting's sizes, whose
+ * frames are cheaper, returns only where its own may fit.
+ */
+export const CALM_SHARE = 0.5;
+
+/**
+ * Without a timer, the share of the floor's period under which a frame's interval is calm: frames
+ * drawn at a 60 Hz display's every vsync, 16.7 ms against the floor's 33.3, are; at its 30 Hz not.
+ */
+export const CALM_INTERVAL_SHARE = 0.6;
+
+/** The frames in a row a floor's air waits through under {@link CALM_SHARE} before it returns. */
+export const CALM_FRAMES = 60;
+
+/**
  * The primary view's internal scale from its budget: the budget's `renderScale`, or, while its
  * `control` is set, the scale of a {@link ResolutionController} made from it when it first
  * appears, retargeted when its target changes and dropped when it returns to `null`.
+ *
+ * @remarks
+ * Under its frame-rate floor (`ScaleControl.kind` `floor`; the owner's report, 2026-11-01) it also
+ * holds whether the view's air is stepped to the low setting's sizes ({@link
+ * BudgetedScale.airStepped}): from the frame its scale first drops below its max, until its scale
+ * is back at its max and its frames have stayed calm, under {@link CALM_SHARE} of the budget, for
+ * {@link CALM_FRAMES} frames in a row.
  */
 export class BudgetedScale {
   #controller: ResolutionController | null = null;
   #bounds: ScaleBounds | null = null;
+  #airStepped = false;
+  #calm = 0;
+
+  /** Whether the frame-rate floor has stepped the view's air to the low setting's sizes. */
+  get airStepped(): boolean {
+    return this.#airStepped;
+  }
 
   /** The controller while the budget controls the scale, else `null`. */
   get controller(): ResolutionController | null {
@@ -187,6 +219,7 @@ export class BudgetedScale {
     if (control === null) {
       this.#controller = null;
       this.#bounds = null;
+      this.#airStepped = false;
       return budget.renderScale;
     }
     if (
@@ -199,6 +232,42 @@ export class BudgetedScale {
     } else {
       this.#controller.retarget(control.target);
     }
-    return this.#controller.update(gpuFramesMs, intervalMs);
+    const scale = this.#controller.update(gpuFramesMs, intervalMs);
+    this.#stepAir(control, scale, gpuFramesMs, intervalMs);
+    return scale;
+  }
+
+  /** Steps the floor's air down as its scale drops, and back once its frames have stayed calm. */
+  #stepAir(
+    control: NonNullable<ViewBudget["control"]>,
+    scale: number,
+    gpuFramesMs: ReadonlyArray<number> | undefined,
+    intervalMs: number,
+  ): void {
+    if (control.kind !== "floor") {
+      this.#airStepped = false;
+      return;
+    }
+    if (scale < control.bounds[1]) {
+      this.#airStepped = true;
+      this.#calm = 0;
+      return;
+    }
+    if (!this.#airStepped) {
+      return;
+    }
+    const measured =
+      gpuFramesMs === undefined
+        ? intervalMs > 0
+          ? [intervalMs <= CALM_INTERVAL_SHARE * control.target.periodMs]
+          : []
+        : gpuFramesMs.map((ms) => ms <= CALM_SHARE * control.target.gpuBudgetMs);
+    for (const calm of measured) {
+      this.#calm = calm ? this.#calm + 1 : 0;
+    }
+    if (this.#calm >= CALM_FRAMES) {
+      this.#airStepped = false;
+      this.#calm = 0;
+    }
   }
 }

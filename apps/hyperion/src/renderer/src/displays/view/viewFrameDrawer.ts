@@ -105,6 +105,12 @@ export interface ViewFrameInputs {
    */
   readonly setting: QualitySetting;
   /**
+   * The setting whose sizes its photorealistic frame's air is drawn at: the low setting's while
+   * its frame-rate floor has stepped it down (`BudgetedScale.airStepped`; the owner's report,
+   * 2026-11-01); {@link setting} where absent.
+   */
+  readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
    * Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`), of the render
    * resolution (`renderViewport`).
    */
@@ -629,6 +635,7 @@ export class ViewFrameDrawer {
           // The hand-over's pixel, which the internal scale must not move (R10.T10.g).
           presentedPx: viewport,
           setting: inputs.setting,
+          atmosphereSetting: inputs.atmosphereSetting,
           exposureScale: exposed,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,

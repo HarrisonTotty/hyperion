@@ -192,6 +192,7 @@ describe("viewBudgets", () => {
     const alone = budgetOf(viewBudgets([primary("photorealistic")], "high", 1080), COCKPIT);
     expect(alone.renderScale).toBe(1);
     expect(alone.control).toEqual({
+      kind: "floor",
       bounds: [LOW_LOOK_ROWS_PX / 1080, 1],
       target: { periodMs: 1000 / FLOOR_RATE_HZ, gpuBudgetMs: frameGpuBudgetMs(30, 0) },
     });

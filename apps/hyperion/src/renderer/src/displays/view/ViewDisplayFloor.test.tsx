@@ -10,6 +10,7 @@ import {
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
 import { IMAGE_DETAIL_LIMITED } from "../../view/budget/viewBudget";
+import { type PhotorealFrame, PhotorealRenderer } from "../../view/photoreal/renderer";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -70,9 +71,16 @@ describe("VIEW's frame-rate floor (the owner's report, 2026-11-01)", () => {
   });
 
   it("steps its image down to the low setting's 720 rows once its frames run long, and says so", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
     const view = await photoreal(["timestamp-query"]);
+    const lastAir = (): PhotorealFrame["atmosphereSetting"] =>
+      render.mock.calls.at(-1)?.[1].atmosphereSetting;
+    draw(view, 50, 17, 0.2);
+    expect(lastAir()).toBe("high");
     draw(view, 200, 17, 10);
     expect(sceneTarget(view)).toEqual({ widthPx: 1280, heightPx: 720 });
+    // Its air drawn at the low setting's sizes as its first step, the march at half resolution.
+    expect(lastAir()).toBe("low");
     expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
   });
 });

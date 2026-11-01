@@ -1417,6 +1417,9 @@ function ViewStage({
           selection: inputs.selection,
           style: primaryBudget.style,
           setting: paced.setting,
+          // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
+          // (the owner's report, 2026-11-01).
+          atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           availability: inputs.availability,
@@ -1463,7 +1466,8 @@ function ViewStage({
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           imageDrawn = drawn.drawnStyle === "photorealistic";
-          imageLimited = imageDrawn && renderScale < primaryBudget.renderScale;
+          imageLimited =
+            imageDrawn && (renderScale < primaryBudget.renderScale || primaryScale.airStepped);
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
