@@ -2785,7 +2785,8 @@ function ViewPanels({
   // nothing again (Design note 19).
   const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
   // A kept scene of served bodies, the body inspection's, is the server's to its terrain session
-  // and its atmosphere cache, which ask its bodies' records of the server.
+  // and its atmosphere cache, which ask its bodies' records of the server; its session's fields are
+  // training's, gated by the server's scratch log, never the live scene's.
   const served = server === null ? (keptStart.served ?? null) : null;
   // What the chosen scene loads for itself, started here and not as it is made, in render
   // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
@@ -2825,6 +2826,7 @@ function ViewPanels({
             link,
             onSurface: scene.onSurface,
             requests: share.terrain,
+            scope: served === null ? "live" : "training",
           },
     ),
     createWorker: heightWorkers,

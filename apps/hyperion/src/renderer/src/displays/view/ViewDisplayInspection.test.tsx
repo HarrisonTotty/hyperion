@@ -229,8 +229,46 @@ describe("VIEW's body inspection (the owner's request)", () => {
     expect(await fieldHeldBeforeSurvey(RECORDED)).toEqual([null, 1]);
   });
 
+  it("asks its body's field marked for training, of the server's scratch log", async () => {
+    const view = await inspecting();
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+
+    const asks = view.socket
+      .requestsOfKind("surface_field")
+      .filter((request) => request.body.body === FIXTURE_EARTH)
+      .map((request) => request.body.scope);
+    expect(asks.length).toBeGreaterThan(0);
+    expect(new Set(asks)).toEqual(new Set(["training"]));
+  });
+
   it("asks nothing more of its body's field where its survey is refused", async () => {
     expect(await fieldHeldBeforeSurvey(REFUSED)).toEqual([null]);
+  });
+
+  it("states its positions as seen from its body on its plate, in SHIP's place", async () => {
+    await inspecting();
+
+    const plate = primaryLabelBlock().textContent;
+    expect(plate).toContain(`POSITIONS AS SEEN FROM ${DESIGNATION} /768`);
+    expect(plate).not.toContain("POSITIONS AS SEEN FROM SHIP");
+  });
+
+  it("states its positions as seen from its body on an instrument's slot too", async () => {
+    const view = await inspecting();
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "OPEN",
+      }),
+    );
+    view.advance(300);
+
+    const slot = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    expect([
+      within(slot).getByText(`POSITIONS AS SEEN FROM ${DESIGNATION} /768`).textContent,
+      within(slot).queryByText("POSITIONS AS SEEN FROM SHIP"),
+    ]).toEqual([`POSITIONS AS SEEN FROM ${DESIGNATION} /768`, null]);
   });
 
   it("states SURVEY PASS: PENDING on its plate while its survey is out", async () => {

@@ -37,6 +37,7 @@ describe("a whole body's survey", () => {
         level: 8,
         survey: { source: "orbital", resolutionM: 50 },
         time,
+        scope: "live",
       }),
     ).toEqual({
       kind: "survey_pass",
@@ -48,5 +49,19 @@ describe("a whole body's survey", () => {
       resolution_m: 50,
       cells: [{ start: 0, end: 393_216 }],
     });
+  });
+
+  it("marks a training pass on the wire, and writes a live one as R09's form", () => {
+    const pass = {
+      universe: "00000000000000aa",
+      body: "61ffd967fe000023.0100",
+      level: 5,
+      survey: { source: "orbital", resolutionM: 50 },
+      time: { seconds: 0, nanos: 0 },
+    } as const;
+    expect([
+      wholeBodySurveyPass({ ...pass, scope: "training" }).scope,
+      "scope" in wholeBodySurveyPass({ ...pass, scope: "live" }),
+    ]).toEqual(["training", false]);
   });
 });

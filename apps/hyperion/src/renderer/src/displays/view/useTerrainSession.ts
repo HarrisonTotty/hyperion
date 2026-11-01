@@ -11,8 +11,13 @@
  * client or a change of source. The link's state reaches it as it changes, and the scene topic's
  * surface events (`useScene`'s `onSurface`, a fixture's own) as they come, neither rendering
  * anything.
+ *
+ * A training scene of served bodies, the body inspection's, has a session of its own, its fields
+ * gated by the server's scratch log of training passes (`scope` `training`; the owner's delegated
+ * call, 2026-11-01), so that what training surveyed never reaches the live scene's fields. The
+ * scene topic tells the live log's revisions alone, so a training session takes none of them.
  */
-import type { UniverseIdHex } from "@hyperion/protocol";
+import type { SurveyScopeDto, UniverseIdHex } from "@hyperion/protocol";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import type { ServerLink } from "../../lib/serverLink";
@@ -74,6 +79,11 @@ export type TerrainStage =
        * every other request to the link's; the link's where absent.
        */
       readonly requests?: TerrainRequests;
+      /**
+       * Whose survey passes gate its fields: the universe's, `live`, where absent; `training` for
+       * a kept scene of served bodies, the body inspection's.
+       */
+      readonly scope?: SurveyScopeDto;
     };
 
 /** Where a session's fields come from: the server's scene of a universe, or a kept fixture. */
@@ -84,6 +94,8 @@ export type TerrainSessionSource =
       readonly requests: TerrainRequests;
       readonly linkUp: boolean;
       readonly onSurface: SurfaceEvents;
+      /** Whose survey passes gate its fields (`TerrainSessionOptions.scope`). */
+      readonly scope: SurveyScopeDto;
     }
   | { readonly kind: "fixture"; readonly fixture: TerrainFixture };
 
@@ -105,6 +117,7 @@ export function terrainSessionSource(stage: TerrainStage): TerrainSessionSource 
               requests: stage.requests ?? stage.link.requests,
               linkUp: stage.link.status === "connected",
               onSurface: stage.onSurface,
+              scope: stage.scope ?? "live",
             };
       break;
     case "kept":
@@ -206,9 +219,9 @@ function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
 
 /**
  * `VIEW`'s terrain session for its stage's source, or `null` with none (no source, or no engine
- * ready): made in an effect, kept while the engine, the source's universe and request client (or
- * fixture), the worker factory and count and the setting stay, and disposed when any changes or the
- * caller unmounts.
+ * ready): made in an effect, kept while the engine, the source's universe, request client and
+ * scope (or fixture), the worker factory and count and the setting stay, and disposed when any
+ * changes or the caller unmounts.
  */
 export function useTerrainSession(input: TerrainSessionInput): TerrainSession | null {
   const {
@@ -224,7 +237,9 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
   const requests = source?.kind === "server" ? source.requests : null;
-  const onSurface = source?.kind === "server" ? source.onSurface : null;
+  const scope = source?.kind === "server" ? source.scope : "live";
+  // The scene topic's revisions are the universe's log's, none of a training session's fields.
+  const onSurface = source?.kind === "server" && scope === "live" ? source.onSurface : null;
   const fixture = source?.kind === "fixture" ? source.fixture : null;
   const linkUp = source?.kind === "server" ? source.linkUp : true;
   const [holder] = useState(() => new SessionHolder());
@@ -252,6 +267,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
         universe,
         requests,
         linkUp: linkUpRef.current,
+        scope,
         createWorker,
         setting,
         lookaheadClockMs,
@@ -291,6 +307,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
     engine,
     universe,
     requests,
+    scope,
     fixture,
     createWorker,
     workers,

@@ -257,7 +257,7 @@ describe("the SYSTEM display", () => {
     expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
   });
 
-  it("surveys the body it opens in VIEW whole through the server's survey pass (the owner's request)", async () => {
+  it("surveys the body it opens in VIEW whole through the server's survey pass, marked for training (the owner's request)", async () => {
     const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
@@ -285,6 +285,7 @@ describe("the SYSTEM display", () => {
         source: "orbital",
         resolution_m: 50,
         cells: [{ start: 0, end: 393_216 }],
+        scope: "training",
       },
     ]);
   });

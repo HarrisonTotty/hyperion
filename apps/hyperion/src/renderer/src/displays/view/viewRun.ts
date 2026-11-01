@@ -456,7 +456,12 @@ export const PRESET_NAMES: Readonly<Record<CameraPreset, string>> = {
 
 /** A body's frame's name: `BODY <designation>`. */
 function bodyFrameName(body: BodyIdHex, scene: ViewScene): string {
-  return `BODY ${scene.bodies.find((b) => b.id === body)?.designation ?? body}`;
+  return `BODY ${bodyDesignationIn(body, scene)}`;
+}
+
+/** A body's designation as the view labels it, or its ID where the scene draws no such body. */
+function bodyDesignationIn(body: BodyIdHex, scene: ViewScene): string {
+  return scene.bodies.find((b) => b.id === body)?.designation ?? body;
 }
 
 /** The name of the frame a position is in; a body-fixed position is in its body's frame. */
@@ -714,8 +719,8 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * level, and the star source;
  * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
  * second a second, its rate, `SCENE CLOCK 100 s/s` ({@link sceneClockReading}, R07.T16.k), so
- * that a `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the
- * hull, `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
+ * that a `TIME` that runs fast says so. Where its positions are seen from
+ * ({@link positionsStatement}), `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
  * rotation (decision-r07-rotation-note), and `ROTATION: NOT RESOLVED` while the granted detail
  * level withholds one's (rotation-not-resolved) are statements ({@link labelStatements}).
  *
@@ -798,8 +803,26 @@ export function contourIntervalLine(intervalM: number): LabelLine {
   };
 }
 
+/** The head of the statement of where a view's positions are seen from (the guide's Views). */
+const POSITIONS_SEEN_FROM = "POSITIONS AS SEEN FROM";
+
 /** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
-export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
+export const POSITIONS_FROM_SHIP = `${POSITIONS_SEEN_FROM} SHIP`;
+
+/**
+ * The statement of where the view's positions are seen from, while that is not its camera, or
+ * `null`: {@link POSITIONS_FROM_SHIP} while the camera is off the hull; and in the body inspection,
+ * a kept scene of served bodies seen from one body's centre ({@link ViewScene.served}), that body
+ * by its designation as the view labels it, `POSITIONS AS SEEN FROM GPF 001B3Z C-17 /1024`, in its
+ * place, on the same line and set the same way (the owner's delegated call, 2026-11-01).
+ */
+export function positionsStatement(run: ViewRun): string | null {
+  const { scene, camera } = run;
+  if (scene.served !== undefined) {
+    return `${POSITIONS_SEEN_FROM} ${bodyDesignationIn(scene.served.seenFrom, scene)}`;
+  }
+  return camera.preset !== "seat" && scene.ownShip !== null ? POSITIONS_FROM_SHIP : null;
+}
 
 /**
  * The statement the `PRIMARY` view's block carries while the `EASED CAMERA MOVES` setting is on
@@ -839,8 +862,9 @@ export function labelStatements(
   terrain: TerrainAnnunciation | null = null,
 ): ReadonlyArray<string> {
   const statements: string[] = [];
-  if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
-    statements.push(POSITIONS_FROM_SHIP);
+  const positions = positionsStatement(run);
+  if (positions !== null) {
+    statements.push(positions);
   }
   // The bodies whose graticule turns with their rotation: a star's is a reference grid, and a body
   // with no radius is its symbol at any range.

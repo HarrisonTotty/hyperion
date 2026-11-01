@@ -290,6 +290,11 @@ export interface ServedSceneSource {
   readonly place: SystemPlace;
   /** Each body's granted detail level, by which its record is asked. */
   readonly grants: ReadonlyMap<BodyIdHex, DetailLevelDto>;
+  /**
+   * The body from whose centre its positions are seen, at its light-time: the inspected body, which
+   * the label block names (`POSITIONS AS SEEN FROM <designation>`).
+   */
+  readonly seenFrom: BodyIdHex;
 }
 
 /**

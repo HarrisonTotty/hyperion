@@ -28,7 +28,7 @@ import {
   withGridLine,
   labelStatements,
   photorealStatements,
-  POSITIONS_FROM_SHIP,
+  positionsStatement,
   PRESET_NAMES,
   targetKey,
   withSceneStarsLine,
@@ -144,7 +144,8 @@ function instrumentLines(
  * (decision-r06-t11f-stars-line); and its faults, the graphics' (decision-r07-t19, item 2b) and then
  * the terrain's (R10.T16.b), each on a fault line of its own. Its
  * statements run the slot's width under its label block and canvas, while they hold:
- * `POSITIONS AS SEEN FROM SHIP`, its own terrain's `TERRAIN: STREAMING` or
+ * where its positions are seen from (`POSITIONS AS SEEN FROM SHIP`, or the inspected body's
+ * `POSITIONS AS SEEN FROM <designation>`), its own terrain's `TERRAIN: STREAMING` or
  * `TERRAIN: DETAIL LIMITED` (R10.T16.c),
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
@@ -191,7 +192,7 @@ export function InstrumentView({
       : [
           // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c).
           ...labelStatements(run, terrainStatementOf(shown?.terrain ?? null, faults)).filter(
-            (statement) => statement === POSITIONS_FROM_SHIP || statement === shown?.terrain,
+            (statement) => statement === positionsStatement(run) || statement === shown?.terrain,
           ),
           // Drawn at its own budget's style, not the primary's.
           ...instrumentPhotorealStatements(

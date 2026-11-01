@@ -30,9 +30,10 @@
  * it then records one R09 `survey_pass` over the target body: every cell of its coarse field, one
  * run at the level the server finds from the body's figure ({@link figureLevel} of `body_detail`'s),
  * at the placement's time, so that a served world can be surveyed by hand once the serve
- * gate opens and `VIEW` has its surveyed ground to draw. Only `VIEW`'s body inspection sends the
- * same pass besides it ({@link wholeBodySurveyPass}; the owner's request, 2026-11-01): the sensors
- * plan replaces both.
+ * gate opens and `VIEW` has its surveyed ground to draw. The pass is live, kept in the universe's
+ * survey log. Only `VIEW`'s body inspection sends the same pass besides it, marked for training
+ * and so never in that log ({@link wholeBodySurveyPass}; the owner's request, 2026-11-01): the
+ * sensors plan replaces both.
  *
  * With `--json` it prints the placement as one line of JSON ({@link Placement}) in place of its
  * report, for a script that runs it before a check (plan R10, R10.T15.b: the descent spike's served
@@ -514,7 +515,9 @@ async function surveyBody(
   time: UniverseTime,
 ): Promise<SurveyRecorded> {
   const level = await fieldLevel(ask, universe, body, time);
-  const { revision } = await ask(wholeBodySurveyPass({ universe, body, level, survey, time }));
+  const { revision } = await ask(
+    wholeBodySurveyPass({ universe, body, level, survey, time, scope: "live" }),
+  );
   return { ...survey, level, revision };
 }
 

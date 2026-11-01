@@ -3,6 +3,7 @@ import {
   RequestClient,
   type RequestKind,
   type ResponseFor,
+  type SurveyScopeDto,
   type UniverseIdHex,
 } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
@@ -126,6 +127,7 @@ type Choice =
       readonly kind: "server";
       readonly universe: UniverseIdHex | null;
       readonly onSurface: SurfaceEvents;
+      readonly scope?: SurveyScopeDto;
     }
   | { readonly kind: "kept"; readonly option: SceneOption };
 
@@ -224,7 +226,22 @@ describe("the terrain session's source (R10.T16.a)", () => {
       requests: link.requests,
       linkUp: false,
       onSurface,
+      scope: "live",
     });
+  });
+
+  it("is a training scene's own, gated by the server's scratch log (the owner's delegated call)", () => {
+    const { result } = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
+    const { onSurface } = new SurfaceFeed();
+    expect(
+      terrainSessionSource({
+        kind: "server",
+        universe: UNIVERSE,
+        link: result.current,
+        onSurface,
+        scope: "training",
+      }),
+    ).toMatchObject({ kind: "server", universe: UNIVERSE, scope: "training" });
   });
 
   it("is none for the server's scene with no universe open", () => {
@@ -469,6 +486,47 @@ describe("useTerrainSession (R10.T16.a)", () => {
     expect([socket.requestsOfKind("surface_field").length, latestFieldAsk(socket).have]).toEqual([
       2, 1,
     ]);
+  });
+
+  it("asks a training session's fields marked for training, and the live scene's anew unmarked", async () => {
+    const engine = await countingRenderEngine();
+    const feed = new SurfaceFeed();
+    const { result, rerender } = renderSession({
+      choice: { kind: "server", universe: UNIVERSE, onSurface: feed.onSurface, scope: "training" },
+      engine,
+    });
+    const training = sessionOf(result.current);
+    await holdMoon(training, FakeWebSocket.latest());
+    rerender({ choice: { kind: "server", universe: UNIVERSE, onSurface: feed.onSurface }, engine });
+    const live = sessionOf(result.current);
+    live.noteView(PRIMARY, viewAt(5e6));
+    live.step();
+    expect([
+      live === training,
+      FakeWebSocket.latest()
+        .requestsOfKind("surface_field")
+        .map(({ body }) => [body.have_revision, body.scope ?? "absent"]),
+    ]).toEqual([
+      false,
+      [
+        [null, "training"],
+        [null, "absent"],
+      ],
+    ]);
+  });
+
+  it("takes none of its scene topic's revisions into a training session", async () => {
+    const engine = await countingRenderEngine();
+    const feed = new SurfaceFeed();
+    const { result } = renderSession({
+      choice: { kind: "server", universe: UNIVERSE, onSurface: feed.onSurface, scope: "training" },
+      engine,
+    });
+    const session = sessionOf(result.current);
+    const socket = FakeWebSocket.latest();
+    await holdMoon(session, socket);
+    feed.tell({ kind: "revisions", revisions: [{ body: SESSION_MOON, revision: 2 }] });
+    expect([feed.listening, socket.requestsOfKind("surface_field").length]).toEqual([0, 1]);
   });
 
   it("takes a fixture's surface events into its session", async () => {

@@ -243,6 +243,7 @@ export function inspectionScene(inspection: BodyInspection): KeptScene {
     universe: inspection.universe,
     place,
     grants: grantLevels(inspection.bodies),
+    seenFrom: body,
   };
   const record = inspection.bodies.bodies.find((each) => each.id === body);
   const first = drawnAt(system, place, body, time, time);

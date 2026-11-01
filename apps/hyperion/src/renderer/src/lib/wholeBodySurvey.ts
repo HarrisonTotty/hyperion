@@ -7,14 +7,17 @@
  *
  * @remarks
  * The pass covers one run of every cell at the level the server finds from the body's figure
- * ({@link figureLevel}), at one instant. The server records it in the universe's survey log, which
- * keeps it, and raises the body's coverage revision, which its answer gives. The module is pure
- * and imports types alone, so that the tool's project builds it too (`tsconfig.node.json`).
+ * ({@link figureLevel}), at one instant. The server records a live pass, `--survey`'s, in the
+ * universe's survey log, which keeps it, and one marked for training, the inspection's, in its
+ * scratch log of training alone (the owner's delegated call, 2026-11-01); either way it raises the
+ * body's coverage revision there, which its answer gives. The module is pure and imports types
+ * alone, so that the tool's project builds it too (`tsconfig.node.json`).
  */
 
 import type {
   BodyIdHex,
   RequestOf,
+  SurveyScopeDto,
   SurveySourceDto,
   UniverseIdHex,
   UniverseTime,
@@ -106,9 +109,17 @@ export interface WholeBodySurvey {
   readonly survey: SurveyAsked;
   /** The instant of the pass, its start and its end, within the universe's clock window. */
   readonly time: UniverseTime;
+  /**
+   * Where the server keeps it: the universe's survey log, `live`, for `--survey`; the scratch log
+   * of training, `training`, for the body inspection, so that it never reaches the live game.
+   */
+  readonly scope: SurveyScopeDto;
 }
 
-/** The `survey_pass` that records `survey` over every cell of the body's coarse field at `time`. */
+/**
+ * The `survey_pass` that records `survey` over every cell of the body's coarse field at `time`,
+ * marked `training` on the wire for a training pass alone, so that a live one is R09's form.
+ */
 export function wholeBodySurveyPass(pass: WholeBodySurvey): RequestOf<"survey_pass"> {
   return {
     kind: "survey_pass",
@@ -119,5 +130,6 @@ export function wholeBodySurveyPass(pass: WholeBodySurvey): RequestOf<"survey_pa
     source: pass.survey.source,
     resolution_m: pass.survey.resolutionM,
     cells: [{ start: 0, end: coarseCellCount(pass.level) }],
+    ...(pass.scope === "training" ? { scope: "training" } : {}),
   };
 }

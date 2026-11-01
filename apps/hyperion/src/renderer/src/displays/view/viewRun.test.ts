@@ -450,6 +450,13 @@ describe("the label block", () => {
     expect([offHull(seat), offHull(chase)]).toEqual([false, true]);
   });
 
+  it("says the body inspection's positions are seen from its body, in SHIP's place", () => {
+    const statements = labelStatements(startRun(earthInspection()));
+    expect(
+      statements.filter((statement) => statement.startsWith("POSITIONS AS SEEN FROM")),
+    ).toEqual(["POSITIONS AS SEEN FROM H7K 4C0RFZ D-7 /768"]);
+  });
+
   it("says ROTATION: NOT YET MODELLED while a planet or moon with a radius has no rotation", () => {
     expect(labelStatements(startRun(unrotated(frameChangeScene())))).toEqual([
       "ROTATION: NOT YET MODELLED",

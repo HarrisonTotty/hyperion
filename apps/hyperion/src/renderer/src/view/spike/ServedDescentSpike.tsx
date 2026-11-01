@@ -193,7 +193,14 @@ function ServedSpikeFlight({ universe, body, spike }: ServedSpikeFlightProps) {
         : {
             kind: "served",
             world: flown,
-            source: { kind: "server", universe, requests, linkUp, onSurface: relay.onSurface },
+            source: {
+              kind: "server",
+              universe,
+              requests,
+              linkUp,
+              onSurface: relay.onSurface,
+              scope: "live",
+            },
             link: link.status,
           },
     [flown, universe, requests, linkUp, relay, link.status],

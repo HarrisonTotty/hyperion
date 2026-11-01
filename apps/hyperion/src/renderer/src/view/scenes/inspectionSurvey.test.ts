@@ -61,7 +61,7 @@ function earthInspection(answer: ReturnType<typeof sliceBodies>): BodyInspection
 }
 
 describe("the body inspection's survey (the owner's request)", () => {
-  it("surveys the whole body in one pass, orbital at 50 m, at the inspection's time", async () => {
+  it("surveys the whole body in one pass marked for training, orbital at 50 m, at the inspection's time", async () => {
     const { client, socket } = linked();
     const surveyed = surveyInspected(client, earthInspection(sliceBodies()));
     socket.serverAnswers("survey_pass", () => ({ kind: "survey_pass", revision: 3 }));
@@ -83,6 +83,7 @@ describe("the body inspection's survey (the owner's request)", () => {
         source: INSPECTION_SURVEY.source,
         resolution_m: 50,
         cells: [{ start: 0, end: 393_216 }],
+        scope: "training",
       },
     ]);
   });

@@ -97,6 +97,7 @@ import {
   type RequestOf,
   type SurfaceHeaderDto,
   type SurfaceRevisionDto,
+  type SurveyScopeDto,
   type UniverseIdHex,
   type UniverseTime,
 } from "@hyperion/protocol";
@@ -214,6 +215,11 @@ export interface TerrainSessionOptions {
   readonly setting: QualitySetting;
   /** Whether the link is up as it starts; {@link TerrainSession.setLinkUp} follows it. */
   readonly linkUp: boolean;
+  /**
+   * Whose survey passes gate its fields (`CoarseFieldStoreOptions.scope`): the universe's, `live`,
+   * where absent; `training` for a training scene's session, `VIEW`'s body inspection's.
+   */
+  readonly scope?: SurveyScopeDto;
   /**
    * Starts one height worker: the module worker `height.worker.ts` in the app, a fake in a test
    * (`HeightWorkerPoolOptions.createWorker`).
@@ -889,6 +895,7 @@ export class TerrainSession {
       requests: options.requests,
       pool: fields,
       linkUp: options.linkUp,
+      ...(options.scope === undefined ? {} : { scope: options.scope }),
     });
     this.#classMaps = new ClassMapStore(this.#textures, pool);
     this.#reliefs = storeReliefSource(this.#store);

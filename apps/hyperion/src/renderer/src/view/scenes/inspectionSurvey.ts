@@ -9,8 +9,10 @@
  * The server serves a body's field only where its survey log covers it (R09's gate on
  * `surface_field`), so without the pass the inspected ground stays the reference spheroid and its
  * line of sight not surveyed. The level is found from the figure of the body's record that the
- * `SYSTEM` display holds, as the server finds it from the same record's. The server records the pass
- * in the universe's survey log, as it records `--survey`'s: the wire marks no pass as training.
+ * `SYSTEM` display holds, as the server finds it from the same record's. The pass is marked for
+ * training on the wire (the owner's delegated call, 2026-11-01): the server keeps it in its scratch
+ * log of training, never in the universe's, and gates only the inspection's own field asks by it,
+ * so that the live `SERVER` scene still reads the body as the ship has surveyed it.
  */
 
 import type { BodyIdHex, RequestClient } from "@hyperion/protocol";
@@ -30,7 +32,7 @@ export type InspectionSurvey =
       readonly body: BodyIdHex;
       /** The level of the body's coarse field the pass covered, its every cell. */
       readonly level: number;
-      /** The body's coverage revision with the pass folded in. */
+      /** The body's coverage revision in the server's scratch log, with the pass folded in. */
       readonly revision: number;
     }
   /** No pass sent: the body has no solid surface to survey, a giant's (`surfaceless`). */
@@ -69,7 +71,14 @@ export async function surveyInspected(
   }
   const level = figureLevel(figure.value);
   const outcome = await requests.request(
-    wholeBodySurveyPass({ universe, body, level, survey: INSPECTION_SURVEY, time }),
+    wholeBodySurveyPass({
+      universe,
+      body,
+      level,
+      survey: INSPECTION_SURVEY,
+      time,
+      scope: "training",
+    }),
   ).outcome;
   return outcome.ok
     ? { kind: "recorded", body, level, revision: outcome.response.revision }

@@ -49,6 +49,7 @@ import {
   type ResponseFor,
   type SurfaceHeaderDto,
   type SurfaceRevisionDto,
+  type SurveyScopeDto,
   type UniverseIdHex,
 } from "@hyperion/protocol";
 
@@ -452,6 +453,13 @@ export interface CoarseFieldStoreOptions {
   readonly pool: FieldPool;
   /** Whether the link is up as the store starts; {@link CoarseFieldStore.setLinkUp} follows it. */
   readonly linkUp: boolean;
+  /**
+   * Whose survey passes gate the fields it asks, `surface_field`'s `scope`: the universe's survey
+   * log, `live`, where absent; `training` for a training scene's store, the server's scratch log of
+   * the passes marked for training alone, whose revisions are its own (the owner's delegated call,
+   * 2026-11-01).
+   */
+  readonly scope?: SurveyScopeDto;
 }
 
 /**
@@ -612,6 +620,7 @@ function isBusy(failure: RequestFailure): boolean {
  */
 export class CoarseFieldStore {
   readonly #universe: UniverseIdHex;
+  readonly #scope: SurveyScopeDto;
   readonly #requests: Pick<RequestClient, "requestBulk">;
   readonly #pool: FieldPool;
   readonly #entries = new Map<BodyIdHex, Entry>();
@@ -622,6 +631,7 @@ export class CoarseFieldStore {
 
   constructor(opts: CoarseFieldStoreOptions) {
     this.#universe = opts.universe;
+    this.#scope = opts.scope ?? "live";
     this.#requests = opts.requests;
     this.#pool = opts.pool;
     this.#linkUp = opts.linkUp;
@@ -884,6 +894,8 @@ export class CoarseFieldStore {
         universe: this.#universe,
         body,
         have_revision: have,
+        // Written only for training, so that a live ask is R09's form.
+        ...(this.#scope === "training" ? { scope: "training" } : {}),
       },
       (response) => (response.state === "ready" ? response.bulk : null),
       { onChunk },
