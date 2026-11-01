@@ -1008,12 +1008,48 @@ const RED_NOVA_ANCHOR_SOLAR_LUMINOSITIES: f64 = 3.0e4;
 /// A114; Stępień 2011 has 1.52 + 0.16 M☉).
 const RED_NOVA_ANCHOR_MASS: SolarMasses = SolarMasses::new(1.5);
 
-/// The index of a luminous red nova's luminosity in its merger's mass: 2.5.
+/// The index of a luminous red nova's luminosity in its merger's mass up to
+/// [`RED_NOVA_BREAK_MASS`]: 2.5.
 ///
 /// It is the middle of the M²–M³ that Kochanek, Adams and Belczynski (2014, MNRAS 443, 1319) find
 /// from V1309 Sco to V838 Mon, which it meets within a factor of two (2 × 10⁶ L☉ at 8 M☉, against
-/// Tylenda 2005's 10⁶ L☉).
+/// Tylenda 2005's 10⁶ L☉). Against the eight red novae of `MacLeod`, De and Loeb's (2022, ApJ 937,
+/// 96; the citation recalled) compilation, each one's luminosity over the time in which it
+/// radiates 90% of its light against its progenitor's mass (their reproduction materials'
+/// `lrn.txt`, read at source), from V4332 Sgr at 1 M☉ to NGC 4490-OT2011 and `SNhunt248` at 30 M☉,
+/// a power law fits M^2.43 with a scatter of 0.24 dex; this law runs 0.29 dex above them on
+/// average, at most a factor of 4.1 (M101 OT2015-1), and within 10% of V1309 Sco, M31-LRN-2015 and
+/// NGC 4490-OT2011. The progenitor's mass stands for the merger's, its companion unknown (lean):
+/// with the companion of a third that their own models take, the law sits 0.60 dex above them.
 const RED_NOVA_INDEX: f64 = 2.5;
+
+/// The heaviest merger to which [`RED_NOVA_INDEX`] holds, M☉: 30, the heaviest progenitors of the
+/// red novae seen, NGC 4490-OT2011's and `SNhunt248`'s (`MacLeod`, De and Loeb 2022's compilation, as
+/// [`RED_NOVA_INDEX`]). The class's mergers reach 300 M☉, where the steep law would be some 1,500
+/// times the merger's Eddington luminosity ([`eddington_luminosity`] at a hydrogen share of 0.7).
+const RED_NOVA_BREAK_MASS: f64 = 30.0;
+
+/// The index of a luminous red nova's luminosity in its merger's mass above
+/// [`RED_NOVA_BREAK_MASS`]: ⅔ (lean, 2026-11-01), past the heaviest red nova seen, so an
+/// extrapolation.
+///
+/// Matsumoto and Metzger's (2022, ApJ 938, 5; recalled) plateau grows as `M_ej`^⅔ `v_ej` where
+/// recombination powers it, 4.8 × 10³⁸ erg s⁻¹ (`f_ad` ÷ 0.3) (`ρ_i` ÷ 10⁻¹¹ g cm⁻³)^⅓ (`M_ej` ÷
+/// M☉)^⅔ (`v_ej` ÷ 300 km s⁻¹), and as `M_pre` `v_ej`³ `M_ej`^⅔ where the ejecta's shock does (as
+/// Karambelkar et al.'s `binaryc_postprocess` implements both, read at source): M^⅔ to M^(5⁄3),
+/// the ejecta a fixed share of the merger and their speed fixed. Recombination is far short of the
+/// bright red novae, 1.2 × 10⁴⁰ erg s⁻¹ for all of 30 M☉ ejected at 800 km s⁻¹, an eighteenth of
+/// NGC 4490-OT2011's, so they are shock-powered, and ⅔, the range's low end, is taken for the energy
+/// budget. A 300 M☉ merger then peaks at 2.5 × 10⁸ L☉, `M_bol` −16.2, 1.7 times AT 2017jfs, the
+/// brightest red nova seen (some 5.5 × 10⁴¹ erg s⁻¹; Pastorello et al. 2019, A&A 625, L8;
+/// recalled), and radiates 1.8 × 10⁴⁹ erg, some 2% of the orbital energy of two 150 M☉ stars in
+/// contact, where NGC 4490-OT2011 radiated 6% of its own; M^(5⁄3) would radiate ten times as much,
+/// and the steep law 70 times, more than the orbit holds. The speed is held fixed, a
+/// simplification: main-sequence radii grow as about M^0.6 there and the escape speed as M^0.2
+/// (recalled), which would raise the index to 0.88 and the top 1.6 times. Ejecta far over their
+/// Eddington luminosity are usual (the top is 21 times its, NGC 4490-OT2011 50 times its
+/// progenitor's), so Eddington's bounds nothing here.
+const RED_NOVA_HEAVY_INDEX: f64 = 2.0 / 3.0;
 
 /// A luminous red nova's plateau at 1 M☉, days: 100, the bottom of the task's 100–200 days.
 const RED_NOVA_PLATEAU_DAYS: f64 = 100.0;
@@ -1040,10 +1076,11 @@ const RED_NOVA_E_FOLD_S: f64 = 15.0 * SECONDS_PER_DAY;
 /// total.
 ///
 /// It plateaus for 100 (M ÷ M☉)^½ days, held to 100–200 (ours, after Popov 1993), at V1309 Sco's
-/// 3 × 10⁴ L☉ scaled as M^2.5 (Tylenda et al. 2011; Kochanek, Adams and Belczynski 2014), after a
-/// 10-day rise and before a 15-day e-folding fade (ours), at [`RED_NOVA_KELVIN`]. Holding the peak
-/// through the plateau radiates several times what V1309 Sco and V838 Mon did (a finding of
-/// P11.T9.a).
+/// 3 × 10⁴ L☉ scaled as M^2.5 to 30 M☉, the heaviest progenitors seen, and as M^⅔ above (Tylenda
+/// et al. 2011; Kochanek, Adams and Belczynski 2014; `MacLeod`, De and Loeb 2022; Matsumoto and
+/// Metzger 2022: `RED_NOVA_INDEX`, `RED_NOVA_HEAVY_INDEX`), after a 10-day rise and before a
+/// 15-day e-folding fade (ours), at [`RED_NOVA_KELVIN`]. Holding the peak through the plateau
+/// radiates several times what V1309 Sco and V838 Mon did (a finding of P11.T9.a).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LuminousRedNovaCurve {
     merger_mass: SolarMasses,
@@ -1061,7 +1098,14 @@ impl LuminousRedNovaCurve {
         let m = mass_within(merger_mass, 0.0, MAX_MERGED_MASS)?;
         let plateau_days = (RED_NOVA_PLATEAU_DAYS * math::powf(m, RED_NOVA_PLATEAU_INDEX))
             .clamp(RED_NOVA_PLATEAU_DAYS, RED_NOVA_MAX_PLATEAU_DAYS);
-        let scale = math::powf(m / RED_NOVA_ANCHOR_MASS.value(), RED_NOVA_INDEX);
+        let scale = if m <= RED_NOVA_BREAK_MASS {
+            math::powf(m / RED_NOVA_ANCHOR_MASS.value(), RED_NOVA_INDEX)
+        } else {
+            math::powf(
+                RED_NOVA_BREAK_MASS / RED_NOVA_ANCHOR_MASS.value(),
+                RED_NOVA_INDEX,
+            ) * math::powf(m / RED_NOVA_BREAK_MASS, RED_NOVA_HEAVY_INDEX)
+        };
         Ok(Self {
             merger_mass,
             shape: Shape {
@@ -1912,6 +1956,62 @@ mod tests {
         assert!((14.0..=120.0).contains(&days), "Be/X: {days} d");
         let erg = bex.radiated_joules() / ERG;
         assert!((1e43..=1e45).contains(&erg), "Be/X: {erg:e} erg");
+    }
+
+    /// The red novae's luminosity against the eight of `MacLeod`, De and Loeb's (2022) compilation,
+    /// each one's luminosity over the time it radiates 90% of its light (erg s⁻¹) at its
+    /// progenitor's mass (their `lrn.txt`, read at source): within a factor of 4.1 of each, 0.29 dex
+    /// above them on average, as measured (P11.T9.a's fix of 2026-11-01). Up to 30 M☉ the law is
+    /// P11.T9.a's, bit for bit; above it the light grows as M^⅔, continuous at the break, and a 300
+    /// M☉ merger peaks at 2.5 × 10⁸ L☉, 21 times its Eddington luminosity, where the steep law gave
+    /// 1,464 times.
+    #[test]
+    fn the_red_novae_follow_the_ones_seen_and_flatten_above_the_heaviest() {
+        const SEEN: [(&str, f64, f64); 8] = [
+            ("V4332 Sgr", 1.0, 1.3e37),
+            ("V838 Mon", 8.0, 3.6e39),
+            ("V1309 Sco", 1.4, 8.9e37),
+            ("NGC 4490-OT2011", 30.0, 2.2e41),
+            ("M31-LRN-2015", 4.25, 1.5e39),
+            ("M101 OT2015-1", 18.0, 1.4e40),
+            ("SNhunt248", 30.0, 6.2e40),
+            ("AT 2018bwo", 14.0, 1.3e40),
+        ];
+        let peak = |m: f64| {
+            LuminousRedNovaCurve::of(solar(m))
+                .map(|c| BinaryLightCurve::from(c).peak_luminosity().value())
+                .unwrap()
+        };
+        let mut sum = 0.0;
+        for (name, mass, erg_s) in SEEN {
+            let dex = math::log10(peak(mass) / (erg_s * 1e-7));
+            assert!(dex.abs() < math::log10(4.1), "{name}: {dex} dex");
+            sum += dex;
+        }
+        let mean = sum / 8.0;
+        assert!((mean - 0.29).abs() < 0.01, "{mean} dex");
+        // P11.T9.a's law to the break, bit for bit, and continuous across it.
+        for m in [0.5, 1.5, 8.0, 29.999, 30.0] {
+            let steep = RED_NOVA_ANCHOR_SOLAR_LUMINOSITIES
+                * SOLAR_LUMINOSITY_W
+                * math::powf(m / RED_NOVA_ANCHOR_MASS.value(), RED_NOVA_INDEX);
+            assert_same_bits(peak(m), steep);
+        }
+        let above = peak(RED_NOVA_BREAK_MASS * (1.0 + 1e-12));
+        assert!((above / peak(RED_NOVA_BREAK_MASS) - 1.0).abs() < 1e-11);
+        let index = math::log10(peak(300.0) / peak(100.0)) / math::log10(3.0);
+        assert!((index - RED_NOVA_HEAVY_INDEX).abs() < 1e-12, "{index}");
+        let top = peak(300.0);
+        let eddington = eddington_luminosity(solar(300.0), 0.7).value();
+        assert!(
+            (top / SOLAR_LUMINOSITY_W / 2.49e8 - 1.0).abs() < 2e-3,
+            "{top:e} W"
+        );
+        assert!(
+            (top / eddington - 21.5).abs() < 0.1,
+            "{} Eddington",
+            top / eddington
+        );
     }
 
     /// The mergers' peaks and the light they radiate against their sources' ranges. A miss is a

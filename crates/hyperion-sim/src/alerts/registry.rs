@@ -23,7 +23,7 @@
 //!
 //! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
 //! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]), and the mergers' is
-//! 5.1990 × 10³⁵ W for a luminous red nova and 4.6816 × 10³³ W for a kilonova
+//! 7.6311 × 10³³ W for a luminous red nova and 4.6816 × 10³³ W for a kilonova
 //! ([`LUMINOUS_RED_NOVA_BAND_PEAKS`], [`KILONOVA_BAND_PEAKS`]; P12.T5.b). The other five rows wait on
 //! plan 11's sources, P11.T9 (below): `Nova`, `XrayTransient`, `XrayBurst` and `BeXOutburst`
 //! (recurrent) and `DwarfNova` (local). X-ray bursts are seen across the Galaxy, so they are walked
@@ -575,33 +575,33 @@ pub const TYPE_IA_BAND_PEAKS: [Watts; BAND_COUNT] = [
 /// 11's curve (P11.T9.a) at its peak through its 4,500 K colour ([`binary_peak`](super::binary_peak))
 /// for the heaviest merger the stellar mergers draw, two of the tracks' 150 M☉ stars on their main
 /// sequences, which is the top of the curve's range ([`LuminousRedNovaCurve::of`]), rounded up at
-/// the fifth figure (P12.T5.b). The curve's peak grows as the merger's mass to the 2.5, so the
-/// bound is 1.70 × 10¹⁰ L☉ bolometric, 6.4963 × 10³⁶ W, far above the brightest red novae seen (a
-/// finding).
+/// the fifth figure (P12.T5.b). The curve's peak grows as the merger's mass to the 2.5 up to the
+/// heaviest progenitors seen, 30 M☉, and to the ⅔ above (P11.T9.a's fix of 2026-11-01), so the
+/// bound is 2.49 × 10⁸ L☉ bolometric, 9.5353 × 10³⁴ W, 21 times the merger's Eddington luminosity.
 ///
 /// | Band  | Bound (W)       |
 /// | ----- | --------------- |
-/// | U     | 1.5668 × 10³⁵   |
-/// | B     | 3.9150 × 10³⁵   |
-/// | V     | 5.1990 × 10³⁵   |
-/// | R     | 1.0350 × 10³⁶   |
-/// | I     | 9.2710 × 10³⁵   |
-/// | J     | 7.5469 × 10³⁵   |
-/// | H     | 4.2180 × 10³⁵   |
-/// | K     | 2.5810 × 10³⁵   |
-/// | N     | 1.4620 × 10³⁴   |
+/// | U     | 2.2998 × 10³³   |
+/// | B     | 5.7464 × 10³³   |
+/// | V     | 7.6311 × 10³³   |
+/// | R     | 1.5192 × 10³⁴   |
+/// | I     | 1.3608 × 10³⁴   |
+/// | J     | 1.1078 × 10³⁴   |
+/// | H     | 6.1912 × 10³³   |
+/// | K     | 3.7884 × 10³³   |
+/// | N     | 2.1459 × 10³²   |
 /// | radio | none            |
 /// | X     | none            |
 pub const LUMINOUS_RED_NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
-    Watts::new(1.5668e35),
-    Watts::new(3.9150e35),
-    Watts::new(5.1990e35),
-    Watts::new(1.0350e36),
-    Watts::new(9.2710e35),
-    Watts::new(7.5469e35),
-    Watts::new(4.2180e35),
-    Watts::new(2.5810e35),
-    Watts::new(1.4620e34),
+    Watts::new(2.2998e33),
+    Watts::new(5.7464e33),
+    Watts::new(7.6311e33),
+    Watts::new(1.5192e34),
+    Watts::new(1.3608e34),
+    Watts::new(1.1078e34),
+    Watts::new(6.1912e33),
+    Watts::new(3.7884e33),
+    Watts::new(2.1459e32),
     Watts::ZERO,
     Watts::ZERO,
 ];

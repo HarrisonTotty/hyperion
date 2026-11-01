@@ -2983,10 +2983,12 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _The trait._ `OneShotClass::event(&self, galaxy, entry) -> Option<OneShotEvent>`, and a
     provided `cell_events(galaxy, key)`, which the merger classes take from their scan marks.
     Implemented for `StellarMergers` and `NeutronStarMergers`.
-  - _The rows._ `LuminousRedNova` at 300 M☉, the class's heaviest: V 5.1990 × 10³⁵ W, D 280 d, rise
-    10 d. `Kilonova` at 0.05 M☉, the class's most, not the curve's 1 M☉ (lean, 2026-10-31): V
-    4.6816 × 10³³ W, D 35 d, rise 1 d. `LightCurveSource::BinaryCurve`.
-    Five rows stay pending on P11.T9.
+  - _The rows._ `LuminousRedNova` at 300 M☉, the class's heaviest: V 7.6311 × 10³³ W (P11.T9.a's
+    curve as fixed on 2026-11-01), D 280 d, rise 10 d. `Kilonova` at 0.05 M☉, the class's most,
+    not the curve's 1 M☉ (lean, 2026-10-31): V 4.6816 × 10³³ W, D 35 d, rise 1 d.
+    `LightCurveSource::BinaryCurve`. Five rows stay pending on P11.T9.
+  - _For T5.d's census and T8.b._ `class_reach(STELLAR_MERGER)` is the cube's diagonal only for a
+    V limit under 1.3 × 10⁻¹⁰ W m⁻², and 2,605 ly at 10⁻⁶ W m⁻².
   - _Rebased onto P12.T5.d (2026-11-01)._ The Type Ia's `OneShotClass` is T5.d's, on the new
     signature; `one_shot_scan_cell` reads `cell_events`. `ProductionAlertClasses` walks
     `STELLAR_MERGER` and `NEUTRON_STAR_MERGER` with `one_shot_detections`; neither is `Unwalked`.

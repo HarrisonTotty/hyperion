@@ -7041,3 +7041,9 @@ galaxy_sweeps`.
   the cap raised (test-only `evolve::evolve_with_segment_cap`). At the bump: refit
   `binary_pair_light_c`, `_d` and `sky_binary_light_d` `--since 25`, then run the slow
   `the_pair_light_tables_bound_evolved_pairs` and `the_pair_verdicts_hold_against_the_engine`.
+- **P11.T9.a's red novae above 30 M☉ (fix, lane `p12-t5b-classes`, 2026-11-01, at 24, no bump or
+  hold: nothing generated reads the curve, and no pinned value moves).** `LuminousRedNovaCurve`
+  keeps V1309 Sco's 3 × 10⁴ L☉ × (M ÷ 1.5)^2.5 to 30 M☉, bit for bit, the heaviest progenitors in
+  MacLeod, De and Loeb's (2022) compilation of eight red novae, which it meets within 4.1× (0.29
+  dex high on average). Above, M^⅔ (lean, Matsumoto and Metzger 2022): 300 M☉ peaks at 2.5 × 10⁸
+  L☉, 21× its Eddington luminosity, not 1,464×. The plateau's length is unchanged.
