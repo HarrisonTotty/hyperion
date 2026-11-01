@@ -3229,7 +3229,7 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     its `reduce.py`: 118 globular-like streams inside the cut). Its galaxies are built under 27's
     rules (`FIT_VERSION`, `Galaxy::from_params_at_version`), and its fingerprint probes their living
     tubes and first orphan. The table holds `ORPHAN_STREAMS_PER_GLOBULAR` (1.5, held) and
-    `ORPHAN_STREAMS_PER_GLOBULAR_27` (2.057, one sigma 1.87–2.24), `@generated`.
+    `ORPHAN_STREAMS_PER_GLOBULAR_27` (2.049, one sigma 1.86–2.23, refit at 25), `@generated`.
   - New doors in the sim, reading nothing generated: `DebrisPlan::orphan_beyond_count` (testing,
     hidden) and `HaloProfile::density_without_cut`.
   - The cut's mass is that of the stretches that pass all three conditions, and its halo the

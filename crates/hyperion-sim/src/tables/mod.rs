@@ -424,7 +424,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "streams",
         revision: 1,
-        since_generator_version: 24,
+        since_generator_version: 25,
         provisional: false,
     },
     TableInfo {

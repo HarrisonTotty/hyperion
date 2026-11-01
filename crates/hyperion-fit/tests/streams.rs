@@ -59,7 +59,7 @@ fn the_27_multiplier_is_the_fit_s() {
 }
 
 /// P15.T11.b's fitted multiplier, as its production run gave it.
-const FITTED: f64 = 2.056_773_494_688_921;
+const FITTED: f64 = 2.048_842_063_164_735_7;
 
 /// The smoke run goes end to end through the command line on one thread and on three, into a
 /// temporary directory, and writes the same table both times, in the header grammar, declaring
