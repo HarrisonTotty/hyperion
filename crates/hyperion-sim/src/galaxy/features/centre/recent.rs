@@ -1,6 +1,7 @@
 //! The galactic centre's recently dead and its luminous blue variables (plan 09, P09.T36.b), on
 //! its feature-level list after the tidal disruptions' victims, from index N + 1, under P09.T36's
-//! hold (`FEATURE_CLASSES_VERSION`).
+//! hold (`FEATURE_CLASSES_VERSION`), and plan 11's binary classes after them, under P11.T8.f's
+//! (`centre::binaries`).
 //!
 //! # The classes
 //!
@@ -61,9 +62,11 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{SolarMasses, Years};
 
 use super::CentreModel;
+use super::binaries::CentreBinaries;
 use super::classes::{AgeComponent, CentreClass, CentreClassKind, age_components};
 use super::events::victims::victim_count;
 use super::members::{CentreMemberRecord, centre_composition};
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// The oldest age of a young class: a component whose oldest star is at most this old is young,
 /// 150 Myr, the constant component's (`age_components`); the rest are old.
@@ -83,6 +86,8 @@ struct Part {
 pub(crate) struct CentreRecent {
     /// Each class's parts, in list order, those of a class expecting none left out.
     classes: Vec<(RecentClass, Vec<Part>)>,
+    /// Plan 11's binary classes after them (P11.T8.f): none under P11.T8.f's hold.
+    binaries: CentreBinaries,
     /// The index of the classes' first entry, past the victims'.
     first: NonZeroU16,
 }
@@ -105,7 +110,11 @@ impl CentreRecent {
             .checked_add(1)
             .and_then(NonZeroU16::new)
             .expect("the victims leave the centre's list an index past them");
-        Self { classes, first }
+        Self {
+            classes,
+            binaries: CentreBinaries::new(galaxy, model),
+            first,
+        }
     }
 
     /// The parts of each class in `galaxy`, at its window caps.
@@ -130,8 +139,16 @@ impl CentreRecent {
             .collect()
     }
 
-    /// The centre's list of its recent classes, from index `victims + 1`: its counts, and its
-    /// entries' indices (the positions are each entry's own, [`entry`](Self::entry)).
+    /// The centre's hosts of plan 11's binary classes (P11.T8.f).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn binaries(&self) -> &CentreBinaries {
+        &self.binaries
+    }
+
+    /// The centre's list of its recent classes, and plan 11's binary classes after them (P11.T8.f),
+    /// from index `victims + 1`: its counts, and its entries' indices (the positions are each
+    /// entry's own, [`entry`](Self::entry), [`CentreBinaries::entry`]).
     ///
     /// # Panics
     ///
@@ -142,11 +159,12 @@ impl CentreRecent {
     pub(crate) fn list(&self, galaxy: &Galaxy) -> FeatureLevelList {
         // The positions are each entry's own draw, so the list's profile is never read.
         let placeholder = ClassProfile::new(ProfileShape::Plummer { scale: 1.0 }, 128.0, 1.0);
-        let classes = self
+        let mut classes: Vec<ListClass> = self
             .expected()
             .into_iter()
             .map(|(class, expected)| ListClass::new(class.class(), expected, placeholder.clone()))
             .collect();
+        classes.extend(self.binaries.list_classes());
         FeatureLevelList::with_classes_from(
             galaxy,
             SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE).raw(),
@@ -335,14 +353,17 @@ pub(crate) fn forecast_candidates(
 }
 
 /// The member at the centre's list index `index` past its victims, if a recent class's test keeps
-/// it: none under the hold's held arm, for an index before the classes' or past them.
+/// it, or plan 11's binary class's draws and test (P11.T8.f): none under both holds' held arms,
+/// for an index before the classes' or past them.
 #[must_use]
 pub(crate) fn recent_member(
     galaxy: &Galaxy,
     model: &CentreModel,
     index: u16,
 ) -> Option<CentreMemberRecord> {
-    if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted {
+    if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted
+        && galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted
+    {
         return None;
     }
     // The disruptions' model refuses only a black hole no galaxy the builder allows has, whose
@@ -350,10 +371,15 @@ pub(crate) fn recent_member(
     let victims = victim_count(galaxy).ok()?;
     let recent = CentreRecent::new(galaxy, model, victims);
     let entry = recent.list(galaxy).entry(index)?;
-    let class = RecentClass::of(entry.class())?;
-    recent
-        .entry(galaxy, model, class, index)
-        .map(|entry| entry.member)
+    match RecentClass::of(entry.class()) {
+        Some(class) => recent
+            .entry(galaxy, model, class, index)
+            .map(|entry| entry.member),
+        None => recent
+            .binaries
+            .entry(galaxy, model, entry.class(), index)
+            .map(|(_, member)| member),
+    }
 }
 
 /// One recent entry of the centre's list: its class, its member, and for a death its site and the
@@ -487,7 +513,7 @@ fn is_young(component: &AgeComponent) -> bool {
 /// The band-E class of the centre's component `component`, a living star's where it has one, or
 /// `None` if it has no band-E class.
 #[must_use]
-fn centre_class(model: &CentreModel, component: u8) -> Option<CentreClass> {
+pub(super) fn centre_class(model: &CentreModel, component: u8) -> Option<CentreClass> {
     let classes = model.classes().classes();
     let band_e = classes
         .iter()
@@ -502,7 +528,7 @@ fn centre_class(model: &CentreModel, component: u8) -> Option<CentreClass> {
 /// An entry's local position, ly about the black hole: its radius at a uniform's quantile of its
 /// component's tracer's profile, by bisection, and an isotropic direction, on `member.position`.
 #[must_use]
-fn position(
+pub(super) fn position(
     model: &CentreModel,
     component: &AgeComponent,
     key: ObjectKey,
@@ -536,7 +562,7 @@ fn position(
 ///
 /// Never for a point within the centre's reach, some hundreds of light-years.
 #[must_use]
-fn galactic(p: [f64; 3]) -> GalacticPosition {
+pub(super) fn galactic(p: [f64; 3]) -> GalacticPosition {
     GalacticPosition::ORIGIN
         .translated(GalacticDisplacement::new(
             p.map(|c| c * METRES_PER_LIGHT_YEAR),

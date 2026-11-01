@@ -494,6 +494,10 @@ impl From<ComputeError> for RequestError {
                 ErrorCode::Internal,
                 format!("this universe cannot be generated: {cause}"),
             ),
+            ComputeError::UnplayableCentre(cause) => request_error(
+                ErrorCode::Internal,
+                format!("this universe cannot be generated: {cause}"),
+            ),
         }
     }
 }

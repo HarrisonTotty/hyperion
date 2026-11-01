@@ -22,6 +22,7 @@
 //! its own ID as their subject (P09.T30.a), each disruption's victim, the first class of the
 //! centre's feature-level list, and the black hole's luminosity (P09.T30.b).
 
+pub(crate) mod binaries;
 pub mod classes;
 pub mod df;
 pub mod events;

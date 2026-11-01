@@ -51,16 +51,19 @@
 //!   600 at Milky Way values and 1,531 at Chabrier's cap, of whom the classes' test keeps a
 //!   handful.
 //! - **Catalogue features** are not walked. A nursery's or an open cluster's initial mass is at
-//!   most [`NURSERY_MASS_MAX`], 10⁵ M☉, about 11 candidates at these rates. A globular's count is
-//!   P09.T9.e's encounter law under T8.f, which this module cannot forecast; T8.f brings it in.
-//!   [`FeatureLevelList::with_classes`] asserts the bound, at their 13-bit index, on every list it
-//!   builds.
+//!   most [`NURSERY_MASS_MAX`], 10⁵ M☉, about 11 candidates at these rates. A globular's X-ray
+//!   binaries are P09.T9.e's encounter law (P11.T8.f), five at 47 Tucanae's rate, and its other
+//!   classes its present mass's: some hundreds at ω Centauri's 4 × 10⁶ M☉, far under its 13-bit
+//!   index. [`FeatureLevelList::with_classes`] asserts the bound on every list it builds.
 //!
-//! # Not yet called
+//! # Where it is called
 //!
-//! The plan has the check called beside plan 03's [`check_index_headroom`], which the server calls
-//! when it builds a galaxy for play. Nothing calls this one yet: no list holds these classes until
-//! T8.f, which lists them at the 16-bit limit and wires the check there.
+//! The server calls it beside plan 03's [`check_index_headroom`] when it builds a galaxy for play
+//! (P11.T8.f), and refuses a galaxy that fails either. From generator version 27 the centre's list
+//! holds the five classes (`centre::binaries`), each expecting its hosts, the formed mass times
+//! the nuclear disc's rate, which is at most this forecast's: so a centre the check passes builds
+//! its list. At the Milky Way fixture the check costs some 65 ms against the galaxy's 270 ms
+//! build (slow-test profile, pod of 16 vCPU, 2026-11-01).
 //!
 //! # As measured
 //!
@@ -362,7 +365,8 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
 /// index, 65,536 (module documentation).
 ///
 /// It reads the galaxy's mass model and mass function, and builds the centre's classes but no
-/// distribution function. Nothing calls it yet (module documentation, "Not yet called").
+/// distribution function. The server calls it when it builds a galaxy for play (module
+/// documentation, "Where it is called").
 ///
 /// # Errors
 ///

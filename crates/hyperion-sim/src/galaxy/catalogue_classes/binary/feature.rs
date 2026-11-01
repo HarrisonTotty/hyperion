@@ -361,7 +361,7 @@ pub(crate) fn features_share(galaxy: &Galaxy, row: &ClassShareRow, component: &C
 }
 
 /// The binary classes of [`FEATURE_LEVEL_LIST_ORDER`], plan 11's five, in its order.
-const LISTED_CLASSES: [ClassId; 5] = [
+pub(crate) const LISTED_CLASSES: [ClassId; 5] = [
     ClassId::ACCRETING_WHITE_DWARF,
     ClassId::ACCRETING_WHITE_DWARF_SLOW,
     ClassId::XRAY_BINARY,

@@ -19,6 +19,7 @@ use std::time::Instant;
 use hyperion_protocol::SeedHex;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::check_feature_list_headroom;
 use hyperion_sim::galaxy::placement::check_index_headroom;
 
 use super::{
@@ -192,8 +193,9 @@ impl GalaxyCache {
     /// [`ComputeError::Submit`] if the pool's interactive queue is full or the pool is shutting
     /// down, and [`ComputeError::Job`] if the build was cancelled, the pool stopped before it ran, or
     /// it panicked, which would be a bug in [`Galaxy::new`]. A galaxy that is built and then fails
-    /// [`check_index_headroom`] is [`ComputeError::UnplayableGalaxy`] and is not held: nothing may be
-    /// generated in it, so no request naming that universe can be served.
+    /// [`check_index_headroom`] is [`ComputeError::UnplayableGalaxy`], and one that fails
+    /// [`check_feature_list_headroom`] is [`ComputeError::UnplayableCentre`], and neither is held:
+    /// nothing may be generated in it, so no request naming that universe can be served.
     ///
     /// # Panics
     ///
@@ -250,8 +252,12 @@ async fn build_on_pool(
         let galaxy = build(Seed::new(key.seed()));
         // Checked once, here, because this is where a galaxy is built for play: a galaxy whose
         // densest cell could draw more candidates than its layer's IDs can number is not played at
-        // all, and placement panics rather than generate a short cell (plan 03, design note 6).
-        let headroom = check_index_headroom(&galaxy);
+        // all, and placement panics rather than generate a short cell (plan 03, design note 6); nor
+        // is one whose centre's feature-level list could not number plan 11's carved classes,
+        // whose list asserts its bound (P11.T8.e–f).
+        let headroom = check_index_headroom(&galaxy)
+            .map_err(ComputeError::from)
+            .and_then(|()| check_feature_list_headroom(&galaxy).map_err(ComputeError::from));
         tracing::info!(
             seed = %SeedHex::from_u64(key.seed()),
             generator_version = %key.generator_version(),

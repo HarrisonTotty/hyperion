@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::fmt;
 
+use hyperion_sim::galaxy::features::members::ExceedFeatureListError;
 use hyperion_sim::galaxy::placement::ExceedIndexCapacityError;
 
 use super::{JobError, SubmitJobError};
@@ -23,6 +24,9 @@ pub enum ComputeError {
     /// The galaxy was built, and a layer of it is too dense for its system IDs, so nothing may be
     /// generated in it (plan 03, design note 6).
     UnplayableGalaxy(ExceedIndexCapacityError),
+    /// The galaxy was built, and its centre's feature-level list cannot number the entries plan
+    /// 11's carved classes put there, so nothing may be generated in it (plan 11, P11.T8.e–f).
+    UnplayableCentre(ExceedFeatureListError),
 }
 
 impl fmt::Display for ComputeError {
@@ -30,7 +34,9 @@ impl fmt::Display for ComputeError {
         match self {
             Self::Submit(_) => f.write_str("the computation could not be queued"),
             Self::Job(_) => f.write_str("the computation did not finish"),
-            Self::UnplayableGalaxy(_) => f.write_str("the galaxy cannot be generated"),
+            Self::UnplayableGalaxy(_) | Self::UnplayableCentre(_) => {
+                f.write_str("the galaxy cannot be generated")
+            }
         }
     }
 }
@@ -41,6 +47,7 @@ impl Error for ComputeError {
             Self::Submit(source) => Some(source),
             Self::Job(source) => Some(source),
             Self::UnplayableGalaxy(source) => Some(source),
+            Self::UnplayableCentre(source) => Some(source),
         }
     }
 }
@@ -48,6 +55,12 @@ impl Error for ComputeError {
 impl From<ExceedIndexCapacityError> for ComputeError {
     fn from(error: ExceedIndexCapacityError) -> Self {
         Self::UnplayableGalaxy(error)
+    }
+}
+
+impl From<ExceedFeatureListError> for ComputeError {
+    fn from(error: ExceedFeatureListError) -> Self {
+        Self::UnplayableCentre(error)
     }
 }
 
@@ -87,6 +100,16 @@ mod tests {
             capacity: 65_536,
         });
         assert_eq!(too_dense.to_string(), "the galaxy cannot be generated");
+        let too_full = ComputeError::from(ExceedFeatureListError::CentreListTooFull {
+            candidates: 70_000.0,
+        });
+        assert_eq!(too_full.to_string(), "the galaxy cannot be generated");
+        assert!(
+            too_full
+                .source()
+                .is_some_and(|source| source.to_string().contains("70000 entries")),
+            "{too_full:?}"
+        );
         assert!(
             too_dense
                 .source()
