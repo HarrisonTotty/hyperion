@@ -2199,8 +2199,9 @@ fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_sate
             assert_eq!(index, other);
             bodies += 1;
             let at = format!("{set} {} {index:04x}", ctx.id());
-            let gas_envelope = matches!(a.envelope(), Section::Ok(_))
-                && matches!(a.bulk(), Section::Ok(bulk) if !bulk.class().has_solid_surface());
+            // A gas envelope by its bulk's class, whether its record models its envelope or not.
+            let gas_envelope =
+                matches!(a.bulk(), Section::Ok(bulk) if !bulk.class().has_solid_surface());
             let moved = moved_index.contains(index);
             if gas_envelope {
                 let (Section::Ok(bulk_a), Section::Ok(bulk_b)) = (a.bulk(), b.bulk()) else {
@@ -2212,9 +2213,14 @@ fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_sate
                     panic!("{at}: an envelope with no photometry");
                 };
                 if moved {
+                    let modelled = if matches!(a.envelope(), Section::Ok(_)) {
+                        ""
+                    } else {
+                        " (envelope not modelled)"
+                    };
                     envelopes.push((
                         at,
-                        format!("{:?}", bulk_a.class()),
+                        format!("{:?}{modelled}", bulk_a.class()),
                         bulk_a.equilibrium_temperature().value(),
                         bulk_b.equilibrium_temperature().value(),
                         photometry_a.bond_albedo().value(),
@@ -2291,6 +2297,11 @@ fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_sate
     by_shift.sort_by(|a, b| (b.3 - b.2).abs().total_cmp(&(a.3 - a.2).abs()));
     for (at, class, t_a, t_b, a, b) in by_shift.iter().take(20) {
         eprintln!("census mover {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");
+    }
+    for (at, class, t_a, t_b, a, b) in envelopes.iter().filter(|e| e.5 < 0.02) {
+        eprintln!(
+            "census darkest {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.4}"
+        );
     }
     for (at, class, t_a, t_b, a, b) in envelopes.iter().filter(|e| e.2 >= 950.0) {
         eprintln!("census hot {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");

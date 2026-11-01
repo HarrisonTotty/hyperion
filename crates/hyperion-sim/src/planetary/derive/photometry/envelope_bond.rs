@@ -66,7 +66,7 @@ use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::derive::photometry::area_mix::{HostShade, OPTICS_BANDS, band_weighted};
 use crate::substance::optics::SPECTRAL_BIN_EDGES_NM;
 use crate::substance::rayleigh::gas_cross_section;
-use crate::substance::{Element, MOLAR_GAS_CONSTANT};
+use crate::substance::{CondensedPhase, Element, MOLAR_GAS_CONSTANT};
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::{GENERATOR_VERSION, GeneratorVersion};
 
@@ -457,11 +457,10 @@ pub(crate) fn column_bond(column: &EnvelopeColumn, shade: &HostShade) -> f64 {
 /// own table (`H2O_ice`), every other row's one table serves both phases (the client's rule: a
 /// liquid with no file of its own reads its solid's as spheres). `None` for a row with no table.
 #[must_use]
-pub(crate) fn particle_table(key: &str, solid: bool) -> Option<usize> {
-    let key = if key == "H2O" && solid {
-        "H2O_ice"
-    } else {
-        key
+pub(crate) fn particle_table(key: &str, phase: CondensedPhase) -> Option<usize> {
+    let key = match (key, phase) {
+        ("H2O", CondensedPhase::Solid) => "H2O_ice",
+        (key, CondensedPhase::Solid | CondensedPhase::Liquid) => key,
     };
     opacity::PARTICLE_KEYS.iter().position(|k| *k == key)
 }
@@ -649,8 +648,8 @@ pub(crate) fn assemble(
 /// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe, as the
 /// rules in force give it: T51.b's class table ([`giant_bond`]) to 26, and from
 /// [`ENVELOPE_BOND_VERSION`] its own column's ([`column::snapshot_bond`]), the class table's where
-/// the closed form gives no column (no internal heat to join an adiabat, or abundances refused;
-/// labelled).
+/// the closed form gives no column (no internal heat to join an adiabat, an envelope not
+/// hydrogen-dominated, abundances refused; labelled).
 ///
 /// [`giant_bond`]: super::area_mix::giant_bond
 #[must_use]

@@ -33746,7 +33746,11 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       measured giants (findings): the GRS chromophore column, no cold-giant tropospheric haze, the
       ice giants' CH₄ deck high.
     - _27's movers:_ `under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_satellites`
-      (slow): gas envelopes' albedo, `T_eq` and envelope, and their satellites.
+      (slow): gas envelopes' albedo, `T_eq` and envelope, and their satellites. Over 442 systems,
+      354 gas envelopes move (no satellite does); the temperate ones (`T_eq` 300–450 K) split
+      between a water-cloud branch (about 0.7) and a clear one (0.03–0.15); a soot-shrouded warm
+      sub-Neptune takes 0 (the closure's γ₂ < 0, clipped) and the golden hot Jupiter 0.228
+      (findings).
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
   - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's

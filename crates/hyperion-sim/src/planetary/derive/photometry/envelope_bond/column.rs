@@ -1,6 +1,6 @@
 //! The snapshot path's closed form of a gas envelope's column (P14.T24.h.b part 5): what the
-//! passes read of an envelope, at microseconds, where P14.T52.d's own derivation costs tens of
-//! milliseconds.
+//! passes read of an envelope, at about a tenth of a millisecond, where P14.T52.d's own derivation
+//! costs tens of milliseconds.
 //!
 //! - **The body**: its gravity G M ÷ R², its `T_eq` the pass's, and P14.T24.d's internal
 //!   temperature ([`envelope_internal_temperature`]) of the internal heat its heated temperature
@@ -64,7 +64,7 @@ use crate::planetary::hooks::structure::envelope::{
 use crate::substance::aloft::{LawAloft, SaturationLaw, Vapour, law_aloft};
 use crate::substance::formation::Reaction;
 use crate::substance::{
-    CondensedPhase, Element, MOLAR_GAS_CONSTANT, SubstanceId, ids, mixture_heat_capacity_over_r_at,
+    Element, MOLAR_GAS_CONSTANT, SubstanceId, ids, mixture_heat_capacity_over_r_at,
 };
 use crate::units::consts::{GRAVITATIONAL_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
@@ -232,6 +232,7 @@ const HEAT_CAPACITY_NODES_K: [f64; 14] = [
 /// alone, each evaluated when first read, linear in ln T between them and held beyond them (a
 /// stated approximation of the closed form's adiabat: each node costs a statistical sum, some
 /// 3 µs).
+#[derive(Debug)]
 struct HeatCapacity<'a> {
     mixture: &'a [(SubstanceId, f64)],
     nodes: [Option<f64>; 14],
@@ -716,18 +717,15 @@ pub(crate) fn snapshot_bond(inputs: &AtmosphereInputs, shade: &HostShade) -> Opt
     (bond.is_finite() && (0.0..=1.0).contains(&bond)).then_some(bond)
 }
 
-/// A mode as the column's assembly reads it.
-fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
+/// A mode as the column's assembly reads it: `None` for one with no τ(550).
+pub(crate) fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
     let tau = mode.optical_depth().ok()?.value();
     let profile = mode.profile();
-    let solid = matches!(mode.phase(), CondensedPhase::Solid);
-    let optics =
-        particle_table(mode.material().substance().key().as_str(), solid).and_then(|table| {
-            match mode.size() {
-                Ok(ParticleSize::Distribution(d)) => Some((table, d.effective_radius().value())),
-                Ok(ParticleSize::Aggregate(_)) | Err(_) => None,
-            }
-        });
+    let key = mode.material().substance().key();
+    let optics = particle_table(key.as_str(), mode.phase()).and_then(|table| match mode.size() {
+        Ok(ParticleSize::Distribution(d)) => Some((table, d.effective_radius().value())),
+        Ok(ParticleSize::Aggregate(_)) | Err(_) => None,
+    });
     Some(ColumnMode {
         tau,
         base: profile.base().value(),

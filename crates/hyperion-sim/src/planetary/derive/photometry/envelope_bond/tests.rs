@@ -7,33 +7,9 @@ use super::*;
 use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
-use crate::planetary::hooks::aerosols::{AerosolMode, ParticleSize};
 use crate::substance::aloft::law_aloft;
-use crate::substance::{CondensedPhase, by_key};
+use crate::substance::by_key;
 use crate::units::{Kelvin, Pascals};
-
-/// τ(550) of `mode` above the level `level` (Pa), by its profile's (p ÷ `p_b`)^f, 0 above its top
-/// and all of it below its base; `None` where it has no τ.
-fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
-    let tau = mode.optical_depth().ok()?.value();
-    let profile = mode.profile();
-    let solid = matches!(mode.phase(), CondensedPhase::Solid);
-    let optics =
-        particle_table(mode.material().substance().key().as_str(), solid).and_then(|table| {
-            match mode.size() {
-                Ok(ParticleSize::Distribution(d)) => Some((table, d.effective_radius().value())),
-                _ => None,
-            }
-        });
-    Some(ColumnMode {
-        tau,
-        base: profile.base().value(),
-        top: profile.top().value(),
-        exponent: profile.exponent(),
-        coverage: mode.coverage(),
-        optics,
-    })
-}
 
 /// The record's atmosphere `atmosphere` under `gravity` (m s⁻²) as the engine reads it (the tests'
 /// reference): its 1-bar gas throughout but CH₄ above its deck's base, held to its saturation, and
@@ -57,7 +33,11 @@ pub(crate) fn record_column(atmosphere: &EnvelopeAtmosphere, gravity: f64) -> En
         sodium: share("Na"),
         potassium: share("K"),
     };
-    let modes: Vec<ColumnMode> = atmosphere.modes().iter().filter_map(column_mode).collect();
+    let modes: Vec<ColumnMode> = atmosphere
+        .modes()
+        .iter()
+        .filter_map(column::column_mode)
+        .collect();
     let methane_base = atmosphere
         .decks()
         .iter()
