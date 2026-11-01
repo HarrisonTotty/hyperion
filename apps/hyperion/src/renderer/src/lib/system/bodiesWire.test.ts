@@ -12,6 +12,7 @@ import type {
   BodySurfaceDto,
   CondensateDeckDto,
   OrbitDriftDto,
+  ResourceAbundancesDto,
   ResponseFor,
   SectionDto,
   SubsurfaceOceanDto,
@@ -569,7 +570,7 @@ describe("toBodyDetail", () => {
             waterIce: 2.5e-4,
             otherIces: 0,
             hydrocarbons: 0,
-            helium3: 0,
+            helium3: { kind: "not_modelled" },
             deuterium: 7.8e-8,
             radioisotopes: {
               uranium238: 2.01e-8,
@@ -607,8 +608,33 @@ describe("toBodyDetail", () => {
     });
   });
 
+  it("reads a gas layer's helium-3 as its value, and one the server leaves off as not modelled", () => {
+    const read = (resources: ResourceAbundancesDto) => {
+      const result = toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: { state: "ok", value: resources },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      );
+      return result.kind === "ok" &&
+        result.detail.record.hooks.state === "ok" &&
+        result.detail.record.hooks.value.resources.state === "ok"
+        ? result.detail.record.hooks.value.resources.value.helium3
+        : result;
+    };
+
+    expect([read({ ...crustResources(), helium_3: 2.9e-5 }), read(crustResources())]).toEqual([
+      { kind: "value", value: 2.9e-5 },
+      { kind: "not_modelled" },
+    ]);
+  });
+
   it.each([
     ["below 0", { iron_group: -1e-9 }],
+    ["a helium-3 above 1", { helium_3: 1.5 }],
     ["above 1", { silicates: 1.5 }],
     ["not finite", { deuterium: Number.NaN }],
   ])("refuses resources with a fraction %s", (_, fraction) => {

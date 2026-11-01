@@ -618,7 +618,11 @@ export interface ResourceAbundances {
   /** CO2, NH3 and CH4. */
   readonly otherIces: number;
   readonly hydrocarbons: number;
-  readonly helium3: number;
+  /**
+   * Helium-3: `not_modelled` where the generator does not compute it, on a solid layer, whose
+   * implanted helium it leaves out, which the readout shows Missing, never as none.
+   */
+  readonly helium3: Pending<number>;
   readonly deuterium: number;
   readonly radioisotopes: Radioisotopes;
 }

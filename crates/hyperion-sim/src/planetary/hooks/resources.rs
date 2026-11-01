@@ -96,7 +96,7 @@
 //!   silicate, the bulk silicate Earth, whose uranium is 20.3 ppb against the continental crust's
 //!   part per million.
 //! - An airless surface's implanted helium-3 (the life brainstorm's request 18): zero on
-//!   every solid layer.
+//!   every solid layer, where [`ResourceAbundances::modelled_fraction`] gives none.
 //! - The ice giants' deuterium enrichment by their ices: every envelope's hydrogen is protosolar.
 //! - Life's organic matter, the abiotic organics of a body whose rock melted, an ordinary
 //!   chondrite's carbon, and a Titan's hydrocarbons, which its photochemistry makes at the surface.
@@ -532,6 +532,17 @@ impl ResourceDraws {
 pub struct ResourceAbundances {
     fractions: [f64; RESOURCES],
     radioactive: [f64; 4],
+    phase: LayerPhase,
+}
+
+/// Whether a body's accessible outer layers are solid or a gas envelope's gas, which decides what
+/// the model leaves out of them (the [module](self)'s "Not modelled").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum LayerPhase {
+    /// An undifferentiated body's bulk, a silicate crust or an ice shell.
+    Solid,
+    /// A gas envelope's gas at 1 bar.
+    Gas,
 }
 
 impl ResourceAbundances {
@@ -592,19 +603,47 @@ impl ResourceAbundances {
     /// ```
     #[must_use]
     pub fn derive(inputs: &ResourceInputs<'_>, draws: &ResourceDraws) -> Self {
-        let mean = match inputs.layer {
-            OuterLayer::Bulk => solid_mean(inputs, Solid::Bulk),
-            OuterLayer::SilicateCrust => solid_mean(inputs, Solid::SilicateCrust),
-            OuterLayer::IceShell => solid_mean(inputs, Solid::IceShell),
-            OuterLayer::Gas(composition) => gas_mean(composition),
+        let (mean, phase) = match inputs.layer {
+            OuterLayer::Bulk => (solid_mean(inputs, Solid::Bulk), LayerPhase::Solid),
+            OuterLayer::SilicateCrust => {
+                (solid_mean(inputs, Solid::SilicateCrust), LayerPhase::Solid)
+            }
+            OuterLayer::IceShell => (solid_mean(inputs, Solid::IceShell), LayerPhase::Solid),
+            OuterLayer::Gas(composition) => (gas_mean(composition), LayerPhase::Gas),
         };
-        mean.closed(draws)
+        mean.closed(draws, phase)
     }
 
     /// The fraction of `resource`, kg per kg of the layer, 0 to 1.
     #[must_use]
     pub const fn fraction(&self, resource: Resource) -> f64 {
         self.fractions[resource.index()]
+    }
+
+    /// The fraction of `resource` as [`fraction`](Self::fraction) gives it where the model
+    /// computes it, and `None` where the layer's 0 stands for a source the model leaves out (the
+    /// [module](self)'s "Not modelled"). So far that is helium-3 on a solid layer, whose implanted
+    /// helium the model does not compute (the life brainstorm's request 18). A reader that shows
+    /// the fraction shows that one as unknown, never as none.
+    #[must_use]
+    pub const fn modelled_fraction(&self, resource: Resource) -> Option<f64> {
+        match (resource, self.phase) {
+            (Resource::Helium3, LayerPhase::Solid) => None,
+            (Resource::Helium3, LayerPhase::Gas)
+            | (
+                Resource::IronGroup
+                | Resource::LightLithophiles
+                | Resource::RareEarths
+                | Resource::PlatinumGroup
+                | Resource::Radioactives
+                | Resource::Silicates
+                | Resource::WaterIce
+                | Resource::OtherIces
+                | Resource::Hydrocarbons
+                | Resource::Deuterium,
+                LayerPhase::Solid | LayerPhase::Gas,
+            ) => Some(self.fraction(resource)),
+        }
     }
 
     /// Every resource with its fraction, in [`Resource::ALL`]'s order.
@@ -654,9 +693,9 @@ impl Mean {
     /// The mean with each resource's odds against the rest of the layer times its multiple, x = m
     /// w ÷ (1 + m (w − 1)), each isotope of the radioactives as its group; then, where the
     /// fractions sum to more than 1, each over their sum (the [module](self)'s "The draws"). At w
-    /// = 1 each is m to the bit, its denominator 1 exactly.
+    /// = 1 each is m to the bit, its denominator 1 exactly. The abundances are of a layer of `phase`.
     #[must_use]
-    fn closed(&self, draws: &ResourceDraws) -> ResourceAbundances {
+    fn closed(&self, draws: &ResourceDraws, phase: LayerPhase) -> ResourceAbundances {
         let mut fractions = [0.0; RESOURCES];
         let mut denominators = [1.0; RESOURCES];
         for (resource, (x, denominator)) in Resource::ALL
@@ -675,6 +714,7 @@ impl Mean {
         ResourceAbundances {
             fractions: fractions.map(|x| x / closure),
             radioactive: self.radioactive.map(|m| m * w / denominator / closure),
+            phase,
         }
     }
 }

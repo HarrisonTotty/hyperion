@@ -1803,7 +1803,10 @@ fn resource_abundances(abundances: &ResourceAbundances) -> ResourceAbundancesDto
         water_ice: of(Resource::WaterIce),
         other_ices: of(Resource::OtherIces),
         hydrocarbons: of(Resource::Hydrocarbons),
-        helium_3: of(Resource::Helium3),
+        // A solid layer's helium-3 is not computed (its implanted helium), and is left off.
+        helium_3: abundances
+            .modelled_fraction(Resource::Helium3)
+            .map_or(Modelled::NotModelled, Modelled::Value),
         deuterium: of(Resource::Deuterium),
         radioisotopes: RadioisotopesDto {
             uranium_238: isotope(RadiogenicIsotope::Uranium238),
@@ -3815,10 +3818,11 @@ mod tests {
     }
 
     /// P14.T26, for the gate's opening: a computed abundance converts to each resource's and each
-    /// isotope's fraction, the sim's to the bit, on every golden body whose resources it computes.
+    /// isotope's fraction, the sim's to the bit, on every golden body whose resources it computes,
+    /// and a resource the sim does not compute, a solid layer's helium-3, is left off the wire.
     #[test]
     fn resource_abundances_convert_to_the_bit() {
-        let mut checked = 0;
+        let (mut checked, mut solid_helium) = (0, 0);
         for &raw in &GOLDEN_SYSTEMS[..6] {
             let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
             let ctx =
@@ -3836,14 +3840,17 @@ mod tests {
                 };
                 let dto = resource_abundances(sim);
                 let wire = serde_json::to_value(dto).expect("abundances serialise");
-                for (resource, fraction) in sim.iter() {
+                for resource in Resource::ALL {
+                    let sent = wire.get(resource.key()).map(serde_json::Value::as_f64);
                     assert_eq!(
-                        wire[resource.key()].as_f64().map(f64::to_bits),
-                        Some(fraction.to_bits()),
+                        sent.map(|value| value.map(f64::to_bits)),
+                        sim.modelled_fraction(resource)
+                            .map(|fraction| Some(fraction.to_bits())),
                         "{index:?}: {}",
                         resource.key()
                     );
                 }
+                solid_helium += usize::from(dto.helium_3.is_not_modelled());
                 let isotopes = [
                     (dto.radioisotopes.uranium_238, RadiogenicIsotope::Uranium238),
                     (dto.radioisotopes.uranium_235, RadiogenicIsotope::Uranium235),
@@ -3863,7 +3870,10 @@ mod tests {
                 checked += 1;
             }
         }
-        assert!(checked > 20, "{checked} bodies' resources checked");
+        assert!(
+            checked > 20 && solid_helium > 0,
+            "{checked} bodies' resources checked, {solid_helium} solid layers' helium-3 left off"
+        );
     }
 
     /// P14.T25–T26: a rogue planet's present bodies, whose derivation has no star, carry their

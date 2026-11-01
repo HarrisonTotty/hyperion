@@ -1784,8 +1784,9 @@ function massFraction(value: number): boolean {
 }
 
 /**
- * Resource abundances, each fraction checked to lie from 0 to 1 (P14.T26). Their sum, at most 1 to
- * the server's rounding, is not checked, since the wire states no rounding to hold it to.
+ * Resource abundances, each fraction checked to lie from 0 to 1 (P14.T26), a helium-3 the server
+ * leaves off, as a solid layer's, not modelled. Their sum, at most 1 to the server's rounding, is
+ * not checked, since the wire states no rounding to hold it to.
  */
 function toResources(resources: ResourceAbundancesDto): ResourceAbundances {
   const { radioisotopes } = resources;
@@ -1800,7 +1801,7 @@ function toResources(resources: ResourceAbundancesDto): ResourceAbundances {
       resources.water_ice,
       resources.other_ices,
       resources.hydrocarbons,
-      resources.helium_3,
+      resources.helium_3 ?? 0,
       resources.deuterium,
       radioisotopes.uranium_238,
       radioisotopes.uranium_235,
@@ -1819,7 +1820,7 @@ function toResources(resources: ResourceAbundancesDto): ResourceAbundances {
     waterIce: resources.water_ice,
     otherIces: resources.other_ices,
     hydrocarbons: resources.hydrocarbons,
-    helium3: resources.helium_3,
+    helium3: pending(absentIfNull(resources.helium_3), (helium3) => helium3),
     deuterium: resources.deuterium,
     radioisotopes: {
       uranium238: radioisotopes.uranium_238,

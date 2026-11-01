@@ -11,11 +11,10 @@ import type { RadioisotopesDto } from "./RadioisotopesDto";
  * gas at 1 bar. Their depth is open, so every fraction is per unit mass of the layer. The fields
  * are the resources in the simulation's order (`Resource::ALL`), each named by its key
  * (`Resource::key`). Each lies in `[0, 1]`, and the eleven sum to at most 1, to the rounding of the
- * server's arithmetic. A 0 is the model's value, and that includes the sources the model leaves
- * out: a solid layer's implanted helium-3 and the abiotic organics of a body whose rock melted
- * are 0 until the generator computes them. The sim does not say which layer it read, so the wire
- * cannot mark them yet; no server sends this type before generator version 27, so its shape may
- * still change until then.
+ * server's arithmetic. A value the generator does not compute is absent, as a solid layer's
+ * helium-3 is, and the client shows it Missing. A 0 is the model's value, and the abiotic organics
+ * of a body whose rock melted are 0 until the generator computes them. No server sends this type
+ * before generator version 27, so its shape may still change until then.
  */
 export type ResourceAbundancesDto = { 
 /**
@@ -57,9 +56,10 @@ other_ices: number,
  */
 hydrocarbons: number, 
 /**
- * Helium-3, as the isotope.
+ * Helium-3, as the isotope: absent where the generator does not compute it, on a solid layer,
+ * whose implanted helium it leaves out (the life brainstorm's request 18), and never `null`.
  */
-helium_3: number, 
+helium_3?: number | null, 
 /**
  * Deuterium, as the isotope.
  */

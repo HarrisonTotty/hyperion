@@ -33959,3 +33959,8 @@ FRACTION OF OUTER LAYERS`, `IRON GROUP`, `LIGHT LITHOPHILES`, `RARE EARTHS`, `PL
     `planetary/moon_tides_on_their_shell`, `planetary/systems/hierarchical_triple` (.1101, .1102),
     `planetary/habitability`, `planetary/system_events` and `planetary/surface_conditions_published`
     (01fffb2c9fff0000.0601, which 25's and 26's holds return). Measure again under every 27 hold.
+  - _He-3 Missing (fix, 2026-11-01):_ `ResourceAbundances::modelled_fraction` gives `None` for
+    helium-3 on a solid layer (private `LayerPhase`). `ResourceAbundancesDto.helium_3` is a
+    `Modelled<f64>`, absent there, which the `He-3` row reads as `—`.
+  - _Left for 27:_ a melted rock's hydrocarbons are still 0 (`NONE`) where the model leaves its
+    abiotic organics out. Nothing sends the type before 27, so its shape can still change.

@@ -216,32 +216,36 @@ const SYMBOL_LABELS: ReadonlySet<string> = new Set(["He-3", "H-2"]);
  * server before generator version 27 sends them, `RESOURCES` reads its state once in their place.
  *
  * @remarks
- * Water is `H2O`, in any phase, as the guide names a substance; `OTHER ICES` are CO2, NH3 and CH4,
+ * A solid layer's `He-3`, which the generator does not compute, reads Missing, the em dash, never
+ * `NONE`. Water is `H2O`, in any phase, as the guide names a substance; `OTHER ICES` are CO2, NH3 and CH4,
  * planetary science's ices whatever their phase; the isotopes take their mass numbers after a
  * hyphen, `He-3` and `H-2`, as the guide writes every isotope.
  */
 function resourcesRows(resources: Section<ResourceAbundances>): ReactNode {
   return sectionRows("RESOURCES", resources, (abundances) => {
-    const rows: ReadonlyArray<readonly [string, number]> = [
-      ["IRON GROUP", abundances.ironGroup],
-      ["LIGHT LITHOPHILES", abundances.lightLithophiles],
-      ["RARE EARTHS", abundances.rareEarths],
-      ["PLATINUM GROUP", abundances.platinumGroup],
-      ["RADIOACTIVES", abundances.radioactives],
+    const rows: ReadonlyArray<readonly [string, Shown]> = [
+      ["IRON GROUP", massFractionShown(abundances.ironGroup)],
+      ["LIGHT LITHOPHILES", massFractionShown(abundances.lightLithophiles)],
+      ["RARE EARTHS", massFractionShown(abundances.rareEarths)],
+      ["PLATINUM GROUP", massFractionShown(abundances.platinumGroup)],
+      ["RADIOACTIVES", massFractionShown(abundances.radioactives)],
     ];
-    const after: ReadonlyArray<readonly [string, number]> = [
-      ["SILICATES", abundances.silicates],
-      ["H2O", abundances.waterIce],
-      ["OTHER ICES", abundances.otherIces],
-      ["HYDROCARBONS", abundances.hydrocarbons],
-      ["He-3", abundances.helium3],
-      ["H-2", abundances.deuterium],
+    // A helium-3 the generator does not compute, a solid layer's, is Missing, never NONE.
+    const helium3 =
+      abundances.helium3.kind === "value" ? massFractionShown(abundances.helium3.value) : MISSING;
+    const after: ReadonlyArray<readonly [string, Shown]> = [
+      ["SILICATES", massFractionShown(abundances.silicates)],
+      ["H2O", massFractionShown(abundances.waterIce)],
+      ["OTHER ICES", massFractionShown(abundances.otherIces)],
+      ["HYDROCARBONS", massFractionShown(abundances.hydrocarbons)],
+      ["He-3", helium3],
+      ["H-2", massFractionShown(abundances.deuterium)],
     ];
-    const row = ([label, fraction]: readonly [string, number]) => (
+    const row = ([label, shown]: readonly [string, Shown]) => (
       <ReadoutRow
         key={label}
         label={SYMBOL_LABELS.has(label) ? <span className="readout__symbol">{label}</span> : label}
-        shown={massFractionShown(fraction)}
+        shown={shown}
       />
     );
     return (

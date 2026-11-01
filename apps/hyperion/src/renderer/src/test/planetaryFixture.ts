@@ -146,8 +146,8 @@ export const MARS_HABITABILITY: HabitabilityDto = { class: "marginal", limits: [
 
 /**
  * A differentiated rocky body's resources, about the bulk silicate Earth's (P14.T26, illustrative
- * values, the protocol's pinned wire form's): its metals and silicates, a little water, and no
- * other ices, hydrocarbons or helium-3.
+ * values, the protocol's pinned wire form's): its metals and silicates, a little water, no other
+ * ices or hydrocarbons, and no `helium_3`, which the server leaves off a solid layer's.
  */
 export function crustResources(): ResourceAbundancesDto {
   return {
@@ -160,7 +160,6 @@ export function crustResources(): ResourceAbundancesDto {
     water_ice: 2.5e-4,
     other_ices: 0,
     hydrocarbons: 0,
-    helium_3: 0,
     deuterium: 7.8e-8,
     radioisotopes: {
       uranium_238: 2.01e-8,

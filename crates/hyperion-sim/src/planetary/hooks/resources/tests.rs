@@ -427,6 +427,53 @@ fn a_giant_s_gas_holds_its_helium_3_and_deuterium() {
     assert_eq!(none.total(), 0.0);
 }
 
+/// Helium-3 is modelled in a gas layer alone: every solid layer's 0 stands for the implanted
+/// helium the model leaves out, so its modelled fraction is none, while a giant's gas gives its
+/// fraction. Every other resource's modelled fraction is its fraction, on every layer.
+#[test]
+fn helium_3_is_modelled_only_in_a_gas_layer() {
+    let gas = jupiter_gas();
+    let bulk = bulk_of(earth(), 0.0, 0.0);
+    let of = |layer| {
+        abundances(
+            &bulk,
+            SnowLineSide::Inside,
+            layer,
+            NOW,
+            &ResourceDraws::MEDIAN,
+        )
+    };
+    for layer in [
+        OuterLayer::Bulk,
+        OuterLayer::SilicateCrust,
+        OuterLayer::IceShell,
+    ] {
+        let solid = of(layer);
+        assert_eq!(solid.fraction(Resource::Helium3), 0.0, "{layer:?}");
+        assert_eq!(
+            solid.modelled_fraction(Resource::Helium3),
+            None,
+            "{layer:?}"
+        );
+        for (resource, fraction) in solid.iter().filter(|&(r, _)| r != Resource::Helium3) {
+            assert_eq!(
+                solid.modelled_fraction(resource),
+                Some(fraction),
+                "{layer:?} {resource:?}"
+            );
+        }
+    }
+    let scoop = of(OuterLayer::Gas(&gas));
+    for (resource, fraction) in scoop.iter() {
+        assert_eq!(
+            scoop.modelled_fraction(resource),
+            Some(fraction),
+            "{resource:?}"
+        );
+    }
+    assert!(scoop.fraction(Resource::Helium3) > 0.0);
+}
+
 /// The median ranks give every multiple 1, and so the mean's fractions and isotopes, to rounding,
 /// over every layer, both sides of the snow line and the halo's to the metal-rich disc's hosts.
 #[test]

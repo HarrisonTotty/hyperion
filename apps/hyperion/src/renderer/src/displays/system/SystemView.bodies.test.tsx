@@ -1869,9 +1869,19 @@ describe("SystemView's body readout", () => {
         ["H2O", "250 ppm"],
         ["OTHER ICES", "NONE"],
         ["HYDROCARBONS", "NONE"],
-        ["He-3", "NONE"],
+        ["He-3", "—"],
         ["H-2", "78.0 ppb"],
       ]);
+    });
+
+    it("reads a gas layer's helium-3, which the server sends, as its mass fraction", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: { state: "ok", value: EARTH_HABITABILITY },
+        resources: { state: "ok", value: { ...crustResources(), helium_3: 2.9e-5 } },
+      });
+
+      expect(reading("He-3")).toBe("29.0 ppm");
     });
 
     it("reads an ice shell's water below the whole as ABOVE 99.9 %, never the whole", async () => {

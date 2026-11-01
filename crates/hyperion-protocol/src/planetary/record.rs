@@ -34,6 +34,7 @@ pub use surface::{
     TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 
+use crate::modelled::Modelled;
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};
 use crate::primitives::{BodyIdHex, DetailSeedHex, UniverseIdHex, UniverseTime};
 
@@ -356,11 +357,10 @@ pub enum HabitabilityLimitDto {
 /// gas at 1 bar. Their depth is open, so every fraction is per unit mass of the layer. The fields
 /// are the resources in the simulation's order (`Resource::ALL`), each named by its key
 /// (`Resource::key`). Each lies in `[0, 1]`, and the eleven sum to at most 1, to the rounding of the
-/// server's arithmetic. A 0 is the model's value, and that includes the sources the model leaves
-/// out: a solid layer's implanted helium-3 and the abiotic organics of a body whose rock melted
-/// are 0 until the generator computes them. The sim does not say which layer it read, so the wire
-/// cannot mark them yet; no server sends this type before generator version 27, so its shape may
-/// still change until then.
+/// server's arithmetic. A value the generator does not compute is absent, as a solid layer's
+/// helium-3 is, and the client shows it Missing. A 0 is the model's value, and the abiotic organics
+/// of a body whose rock melted are 0 until the generator computes them. No server sends this type
+/// before generator version 27, so its shape may still change until then.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ResourceAbundancesDto {
@@ -384,8 +384,11 @@ pub struct ResourceAbundancesDto {
     /// The hydrocarbons: a rock's organic matter, by its carbon, or a gas's hydrocarbons of two or
     /// more carbon atoms.
     pub hydrocarbons: f64,
-    /// Helium-3, as the isotope.
-    pub helium_3: f64,
+    /// Helium-3, as the isotope: absent where the generator does not compute it, on a solid layer,
+    /// whose implanted helium it leaves out (the life brainstorm's request 18), and never `null`.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub helium_3: Modelled<f64>,
     /// Deuterium, as the isotope.
     pub deuterium: f64,
     /// The four radioactive isotopes, each decayed to the body's age.
@@ -1536,7 +1539,7 @@ pub(crate) mod tests {
     }
 
     /// A differentiated rocky body's resources, about the bulk silicate Earth's: its metals, its
-    /// silicates and a little water.
+    /// silicates and a little water, and its helium-3 not modelled, as a solid layer's is.
     fn crust_resources() -> ResourceAbundancesDto {
         ResourceAbundancesDto {
             iron_group: 0.0684,
@@ -1548,7 +1551,7 @@ pub(crate) mod tests {
             water_ice: 2.5e-4,
             other_ices: 0.0,
             hydrocarbons: 0.0,
-            helium_3: 0.0,
+            helium_3: Modelled::NotModelled,
             deuterium: 7.8e-8,
             radioisotopes: RadioisotopesDto {
                 uranium_238: 2.01e-8,
@@ -1570,7 +1573,6 @@ pub(crate) mod tests {
             "water_ice": 2.5e-4,
             "other_ices": 0.0,
             "hydrocarbons": 0.0,
-            "helium_3": 0.0,
             "deuterium": 7.8e-8,
             "radioisotopes": {
                 "uranium_238": 2.01e-8,
@@ -1706,10 +1708,54 @@ pub(crate) mod tests {
     }
 
     /// P14.T26: the eleven resources, each under its `Resource::key`, and the four radioactive
-    /// isotopes.
+    /// isotopes; a solid layer's helium-3, which the generator does not compute, is absent.
     #[test]
     fn resource_abundances_wire_form() {
         assert_wire_form(&crust_resources(), crust_resources_json());
+    }
+
+    /// P14.T26: a gas envelope's helium-3, which the generator computes, is sent with its value.
+    #[test]
+    fn a_gas_layer_s_helium_3_is_sent() {
+        let gas = ResourceAbundancesDto {
+            iron_group: 0.0,
+            light_lithophiles: 0.0,
+            rare_earths: 0.0,
+            platinum_group: 0.0,
+            radioactives: 0.0,
+            silicates: 0.0,
+            other_ices: 0.0146,
+            helium_3: Modelled::Value(2.9e-5),
+            deuterium: 2.9e-5,
+            radioisotopes: RadioisotopesDto {
+                uranium_238: 0.0,
+                uranium_235: 0.0,
+                thorium_232: 0.0,
+                potassium_40: 0.0,
+            },
+            ..crust_resources()
+        };
+        let mut wire = crust_resources_json();
+        for key in [
+            "iron_group",
+            "light_lithophiles",
+            "rare_earths",
+            "platinum_group",
+        ] {
+            wire[key] = json!(0.0);
+        }
+        wire["radioactives"] = json!(0.0);
+        wire["silicates"] = json!(0.0);
+        wire["other_ices"] = json!(0.0146);
+        wire["helium_3"] = json!(2.9e-5);
+        wire["deuterium"] = json!(2.9e-5);
+        wire["radioisotopes"] = json!({
+            "uranium_238": 0.0,
+            "uranium_235": 0.0,
+            "thorium_232": 0.0,
+            "potassium_40": 0.0,
+        });
+        assert_wire_form(&gas, wire);
     }
 
     #[test]
