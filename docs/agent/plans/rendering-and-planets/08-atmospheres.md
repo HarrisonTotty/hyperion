@@ -24338,3 +24338,15 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     deck once routed, while the table holds it.
   - _Pending, the owner's RTX run_: the frame at 10⁹ m against R08.T11's 15.67 ms. The crossing
     by hand waits for the gate: no product path draws the table while it is closed.
+- **The composite's early return, as built** (2026-11-01; lane `r08-t16a2`, chained; main's
+  performance item after T16.b.2; measurements in the lane's outbox).
+  - _Where the frame went_: with `TEST JUPITER` a few pixels across at 1–2 × 10¹⁰ m, each SwiftShader
+    frame took 4.2–4.5 s against 0.48–0.52 s with its air left out. The march was 0.3–0.4 s of it,
+    the composite's full-screen pass 3.5 s.
+  - _The return_ (`shaders/composite.wgsl`): a pixel outside the march's area, the camera above the
+    air's top (`exact.w` 1), with no composite-drawn disc on it, returns the full path's own sum
+    before the view and the body are read. Bit for bit: part 8's area-against-whole-frame check (R08.T11.d).
+  - _After_: 2.47–2.87 s at the same places, equal to a composite that returns at once (2.70–2.85 s
+    beside it). The rest is the full-screen pass itself: the frame without the giant's composite
+    took 0.67 s. The next lever is the composite over the march's area alone after a cheap copy;
+    the engine has no scissor and no texture copy, so it needs a copy material.

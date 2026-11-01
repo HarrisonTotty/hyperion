@@ -1202,7 +1202,9 @@ describe("starlight and the scene through the air (R08.T7)", () => {
     const fragmentReturns = [...fragment.matchAll(/return vec4f\(([^;]*)\);/gu)].map(
       (m) => m[1] ?? "",
     );
-    expect(fragmentReturns).toHaveLength(3);
+    // The early return outside the march's area from above the top (R08.T16.a.2's giant), the
+    // sky's, the volume's and the march's.
+    expect(fragmentReturns).toHaveLength(4);
     for (const value of fragmentReturns) {
       expect(value).toMatch(/, meterClass$/u);
     }

@@ -385,10 +385,42 @@ fn marchedAt(pixel : vec2u, depth : f32, here : bool) -> vec4f {
   return vec4f(0.0, 0.0, 0.0, 1.0);
 }
 
+// Whether the composite draws source `direction`'s disc, `disc` its light, along `dir`: the full
+// path's `withinDisc` and its light's test, read from the draw's own members.
+fn discAlong(dir : vec3f, direction : vec4f, disc : vec4f) -> bool {
+  let sinRadius = direction.w;
+  return sinRadius > 0.0 && dot(dir, direction.xyz) > 0.0 &&
+    length(cross(dir, direction.xyz)) <= sinRadius && dot(disc.rgb, vec3f(1.0)) > 0.0;
+}
+
+// Whether any of the frame's `count` sources has its disc drawn along `dir`.
+fn anyDiscAlong(dir : vec3f, count : u32) -> bool {
+  return (count > 0u && discAlong(dir, draw.sourceDirection0, draw.sourceDisc0)) ||
+    (count > 1u && discAlong(dir, draw.sourceDirection1, draw.sourceDisc1)) ||
+    (count > 2u && discAlong(dir, draw.sourceDirection2, draw.sourceDisc2)) ||
+    (count > 3u && discAlong(dir, draw.sourceDirection3, draw.sourceDisc3)) ||
+    (count > 4u && discAlong(dir, draw.sourceDirection4, draw.sourceDisc4)) ||
+    (count > 5u && discAlong(dir, draw.sourceDirection5, draw.sourceDisc5));
+}
+
 @fragment
 fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
-  let v = viewOf();
   let pixel = vec2u(position.xy);
+  // From above the air's top, outside the march's area, a pixel reads no air (R08.T11.d), and with
+  // no disc drawn on it keeps the scene's light: the full path's own sum, colour × 1 + 0 × factor,
+  // formed here before the view and the body are read (R08.T16.a.2's giant a few pixels across).
+  if (draw.camera.w * draw.curvature.z >= draw.shell.x && draw.exact.w >= 1.0 && !marchedHere(pixel)) {
+    let uv = position.xy / draw.output.xy;
+    let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    let dir = normalize(draw.forward.xyz + ndc.x * draw.right.xyz + ndc.y * draw.upRay.xyz);
+    if (!anyDiscAlong(dir, min(u32(draw.sky.x), MAX_SKY_SOURCES))) {
+      let scene = textureLoad(sceneColour, pixel, 0);
+      let meterClass = scene.a;
+      let luminance = scene.rgb * vec3f(1.0) + vec3f(0.0) * draw.sky.w;
+      return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
+    }
+  }
+  let v = viewOf();
   let uv = position.xy / v.output.xy;
   let depth = textureLoad(sceneDepth, pixel, 0);
   let scene = textureLoad(sceneColour, pixel, 0);
