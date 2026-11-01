@@ -3278,6 +3278,17 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     take the science check's wording at that refit (lean, 2026-11-01; hashed now). _For
     P11.T8.f:_ the young thin disc's accreting rates are 1/19
     (fast) and 1/440 (slow) of the old thin disc's.
+  - _Rows by donor kind (P11.T5's fix, lane `fix-p11-t5-awd-helium`, 2026-11-01)._
+    `binary_classes::donor_rows::awd_share_rows` scales each donor kind of both accreting classes
+    to its own figure (`OBSERVED_DONOR_KINDS`), each kind's fast and slow split the engine's:
+    cataclysmic variables to Pala et al. 2020's 4.8 × 10⁻⁶ pc⁻³ and AM CVn stars to Carter et al.
+    2013's 5 × 10⁻⁷ pc⁻³ at the Sun-like point, symbiotic stars to Magrini, Corradi and Munari
+    2003's 4 × 10⁵ in the Galaxy (the top of 3 × 10³–4 × 10⁵: for the owner's ruling). Every figure
+    is recalled; the science check reached no source. Landed unrun: the refit at 27 switches
+    `fit_awd` to it and puts its `donor_kinds` in the samplers' picks. _Finding:_ the marks every
+    kind shares (the recurrence, the white dwarf's mass, the initial masses, the age) are fitted to
+    members in the engine's ratio of kinds; under these rows the refit should weight them by kind.
+    On the smoke census the AM CVn stars' scale is 1/16 of the CVs'.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

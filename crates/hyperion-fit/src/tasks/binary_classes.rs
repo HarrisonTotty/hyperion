@@ -27,6 +27,10 @@
 //! their shape). Each layer's share is the galaxy's hosts with a primary in it: every population's
 //! rate in the layer times its systems there.
 //!
+//! P11.T5's fix adds the accreting white dwarfs' rows by donor kind, each kind scaled to its own
+//! observed count and its split between the classes the engine's ([`donor_rows`]). No task calls
+//! it yet: the refit at 27 switches `fit_awd` to it.
+//!
 //! # A sampler
 //!
 //! Each mark of a class's sampler is fitted to its members' values (`marks`): a median that
@@ -34,6 +38,7 @@
 //! where they number at least the manifest's `min_members`, to both classes' members pooled where
 //! they do not, and keeps the scratch table's law where neither does.
 
+pub mod donor_rows;
 mod marks;
 pub mod xrb;
 

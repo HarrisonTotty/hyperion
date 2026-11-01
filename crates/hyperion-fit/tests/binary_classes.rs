@@ -8,17 +8,31 @@
 //! `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine` and
 //! `tables_hold::the_x_ray_binary_sampler_against_the_engine`.
 //!
+//! The accreting white dwarfs' rows by donor kind (P11.T5's fix, `donor_rows`), which the refit at
+//! 27 runs, meet their cited figures on the smoke manifest's censuses, read through the galaxy's
+//! own components as the class reads a row.
+//!
 //! `toolchain.rs` already checks every committed table's declared items and runs `fit-check`
 //! without reruns, so neither is repeated here for the committed file.
 
 mod common;
 
 use std::fs;
+use std::num::NonZeroUsize;
 
 use clap::Parser as _;
 use hyperion_fit::cli::{Cli, run};
 use hyperion_fit::emit::{HeaderKind, TableText};
+use hyperion_fit::manifest::Manifest;
 use hyperion_fit::task::find;
+use hyperion_fit::tasks::binary_classes::donor_rows::{
+    KindTarget, OBSERVED_DONOR_KINDS, SUN_LY, awd_share_rows,
+};
+use hyperion_fit::tasks::binary_classes::{AwdParams, run_censuses};
+use hyperion_sim::Seed;
+use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::{Galaxy, PointLy};
 
 /// Task `task`'s smoke run on `threads` threads into `dir`: the file it wrote.
 fn smoke(task: &str, threads: &str, dir: &std::path::Path) -> String {
@@ -75,4 +89,51 @@ fn the_binary_awd_smoke_run_is_the_same_on_any_thread_count() {
 fn the_binary_xrb_smoke_run_writes_its_block() {
     let dir = tempfile::tempdir().unwrap();
     assert_smoke_block(&smoke("binary_xrb", "4", dir.path()), "binary_xrb");
+}
+
+/// On the smoke manifest's censuses each donor kind's rows give its cited figure to 1%, read as
+/// the class reads a row: each component's hosts a system its population's hosts per solar mass
+/// formed × the mass formed × its born fraction, times its density at the Sun-like point or its
+/// systems in the galaxy. The smoke census finds members of all three kinds.
+#[test]
+fn the_donor_kinds_rows_meet_their_cited_figures() {
+    let manifest = Manifest::from_bytes(
+        "manifests/binary_awd.smoke.toml".as_ref(),
+        include_bytes!("../manifests/binary_awd.smoke.toml").to_vec(),
+    )
+    .unwrap();
+    let params = AwdParams::of(&manifest).unwrap();
+    let galaxy = Galaxy::from_params(
+        Seed::new(params.census.seed),
+        GalaxyParams::milky_way_like(),
+    )
+    .unwrap();
+    let censuses = run_censuses(&galaxy, &params.census, NonZeroUsize::MIN).unwrap();
+    let rows = awd_share_rows(&galaxy, &censuses, &OBSERVED_DONOR_KINDS);
+    assert!(rows.scales.iter().all(Option::is_some), "{:?}", rows.scales);
+    let [x, y, z] = SUN_LY;
+    let sun = PointLy::new(x, y, z);
+    let formed = galaxy.mean_formed_mass().value();
+    let pc3 = LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC;
+    for (k, target) in OBSERVED_DONOR_KINDS.iter().enumerate() {
+        let (mut density, mut hosts) = (0.0, 0.0);
+        for row in &rows.by_kind[k] {
+            for c in galaxy.fields().components() {
+                let per_system = row.hosts_per_formed_mass[c.population().index()]
+                    * formed
+                    * c.ages().born_fraction();
+                density += per_system * c.density(&sun) * pc3;
+                hosts += per_system * c.count_with_unborn();
+            }
+        }
+        let (got, wanted) = match *target {
+            KindTarget::DensityPerCubicParsec(n) => (density, n),
+            KindTarget::GalacticCount(n) => (hosts, n),
+        };
+        println!("kind {k}: {got:.4e} against {wanted:.4e}, {hosts:.4e} hosts");
+        assert!(
+            (got / wanted - 1.0).abs() < 0.01,
+            "kind {k}: {got} against {wanted}"
+        );
+    }
 }
