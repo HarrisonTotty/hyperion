@@ -9855,3 +9855,21 @@ CensusCost)`.
     `--test sky` (28 tests) and the slow test above passed by name. Reviews: Rust (no must-fix;
     three should-fixes and two considers applied), determinism (no must-fix or should-fix; its
     three considers applied) and plan conformance (the record and the bench, done here).
+- **R06.T13.g: the bake a tile at a time (the owner's priority, 2026-11-01).** A face over
+  `BAKE_TILE_PX` (1,024) is baked in tiles (`bakeTiling`): high's 3,072² in nine of 1,024², a
+  tile's levels 0–2 in a scratch tile, the face's levels from 3 (384²) whole. The cube is the
+  whole-face bake's bit for bit: SHA-256 of every face and level against the tree before, both
+  settings, SwiftShader; test-render's tiled-against-whole check. Contracts changed:
+  `writePackedCubeLevelFromBuffer` takes an optional `region` of one face; the splat's header is
+  (face, size, tile side, tile); the mip and pack kernels' uniform is two `vec4u`; the solid angles
+  are the face's lower triangle (`texelSolidAnglesLowerF32`, `lowerTriangleIndex`,
+  `bakeOmega.wgsl`), exact by the transpose symmetry the tests check at 1,024² and 3,072².
+  - The first bake's peak by the engine's tally (pod, SwiftShader; 300,000 stars on 3,072², 100,000
+    on 1,024²): `sky-scratch` 286.4 → 57.8 MB on high (face levels 201.3 → 3.1, tile levels 22.0,
+    solid angles 37.7 → 18.9, staging 37.7 → 4.2, points 9.6), 34.0 → 31.9 MB on low (solid angles
+    4.2 → 2.1); with the 302.0 MB cube, 588.4 → 360.0 MB live on high. Written: 47.4 → 28.5 MB on
+    high, 7.4 → 5.3 MB on low.
+  - The frame profile at low (orbit window; each run's bake fell in its window on one of two
+    runs): before, "Written: 1540, 10.92 MiB; made: 88, 69.07 MiB; released: 20, 30.54 MiB", the
+    view's solid angles 4,194,304 B of it; after, "Written: 1679, 7.57 MiB; made: 6, 59.67 MiB;
+    released: 6, 59.67 MiB", 2,099,200 B. High's profile: pending the owner's Mac.

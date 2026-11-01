@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { texelSolidAnglesSr } from "./cube";
+import { lowerTriangleIndex, texelSolidAnglesLowerF32, texelSolidAnglesSr } from "./cube";
 import {
   cubeLevels,
   divideBySolidAngle,
@@ -10,6 +10,7 @@ import {
   peakScaleExponent,
   scaleByPowerOfTwo,
 } from "./mips";
+import { HIGH_SKY, LOW_SKY } from "./setting";
 
 /** Σ L Ω over a face's red channel, in `f64`. */
 function redFlux(face: Float32Array, sizePx: number): number {
@@ -55,6 +56,33 @@ describe("the texels' solid angles (the owner's report)", () => {
   it("are the four-corner formula's bit for bit, each corner's area found once", () => {
     for (const size of [1, 2, 3, 64, 257]) {
       expect(texelSolidAnglesSr(size)).toEqual(fourCornerAnglesSr(size));
+    }
+  });
+
+  it("hold the full table's f32 values below the diagonal, row after row", () => {
+    for (const size of [1, 2, 3, 64, 257]) {
+      const full = Float32Array.from(texelSolidAnglesSr(size));
+      const below = Array.from({ length: size }, (_, row) =>
+        Array.from(full.subarray(row * size, row * size + row + 1)),
+      ).flat();
+      expect(Array.from(texelSolidAnglesLowerF32(size))).toEqual(below);
+    }
+  });
+
+  it("give every texel of the settings' faces its f32 value from the lower triangle (the owner's priority)", () => {
+    for (const size of [HIGH_SKY.faceSizePx, LOW_SKY.faceSizePx]) {
+      const full = Float32Array.from(texelSolidAnglesSr(size));
+      const lower = texelSolidAnglesLowerF32(size);
+      let differing = 0;
+      for (let row = 0; row < size; row += 1) {
+        for (let column = 0; column < size; column += 1) {
+          if (lower[lowerTriangleIndex(column, row)] !== full[row * size + column]) {
+            differing += 1;
+          }
+        }
+      }
+      expect(lower).toHaveLength((size * (size + 1)) / 2);
+      expect(differing).toBe(0);
     }
   });
 });

@@ -326,8 +326,9 @@ export class ProbedEngine implements RenderEngine {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
-    this.#inner.writePackedCubeLevelFromBuffer(cube, level, packed, face);
+    this.#inner.writePackedCubeLevelFromBuffer(cube, level, packed, face, region);
   }
 
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {

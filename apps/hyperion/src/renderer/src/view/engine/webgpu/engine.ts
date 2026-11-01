@@ -687,10 +687,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     this.#assertLive();
     this.#submit(`${cube.name} level ${level}`, (encoder) => {
-      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face);
+      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face, region);
     });
     // The cube carries the buffer's writer, so a presentation-only result stays refused; one face
     // of six is a part of it.

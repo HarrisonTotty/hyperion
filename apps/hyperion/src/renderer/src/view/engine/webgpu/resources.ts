@@ -22,7 +22,7 @@ import {
   textureBytes,
   type TextureSpec,
 } from "../memory";
-import type { BufferHandle, TextureHandle } from "../types";
+import type { BufferHandle, TexelRect, TextureHandle } from "../types";
 import { paddedBytesPerRow } from "./readback";
 
 /** A buffer the registry made. */
@@ -266,9 +266,11 @@ export class ResourceRegistry {
    * @remarks
    * The buffer holds six faces, face after face, each row padded to 256 bytes
    * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires; or, given `face`, that one
-   * face alone (R06.T13.g).
+   * face alone (R06.T13.g); or, given a `region` of it too, those texels alone, each row padded
+   * to 256 bytes (R06's tiled bake).
    *
-   * @throws Error for a face outside 0–5, a buffer too small or without `COPY_SRC`.
+   * @throws Error for a face outside 0–5, a region without a face or outside the level, a buffer
+   *   too small or without `COPY_SRC`.
    */
   encodePackedCubeLevelFromBuffer(
     encoder: Pick<GPUCommandEncoder, "copyBufferToTexture">,
@@ -276,6 +278,7 @@ export class ResourceRegistry {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     const faceTexels = this.#cubeLevelSize(cube, level);
     const { texture } = this.textureOf(cube);
@@ -283,10 +286,28 @@ export class ResourceRegistry {
     if (face !== undefined && !(Number.isInteger(face) && face >= 0 && face < 6)) {
       throw new Error(`${cube.name} has no face ${face}`);
     }
+    if (region !== undefined && face === undefined) {
+      throw new Error(`a region of ${cube.name} is written on one face`);
+    }
+    const { x, y, width, height } = region ?? {
+      x: 0,
+      y: 0,
+      width: faceTexels,
+      height: faceTexels,
+    };
+    if (
+      !(Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0) ||
+      !(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1) ||
+      x + width > faceTexels ||
+      y + height > faceTexels
+    ) {
+      throw new Error(
+        `the region is outside level ${level} of ${cube.name}, ${faceTexels} × ${faceTexels}`,
+      );
+    }
     const faces = face === undefined ? 6 : 1;
-    const bytesPerRow = paddedBytesPerRow(faceTexels, 4);
-    const needed =
-      bytesPerRow * faceTexels * (faces - 1) + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
+    const bytesPerRow = paddedBytesPerRow(width, 4);
+    const needed = bytesPerRow * height * (faces - 1) + bytesPerRow * (height - 1) + width * 4;
     if (spec.bytes < needed) {
       throw new Error(`${packed.name} holds ${spec.bytes} bytes; level ${level} needs ${needed}`);
     }
@@ -294,9 +315,9 @@ export class ResourceRegistry {
       throw new Error(`${packed.name} was not made with COPY_SRC`);
     }
     encoder.copyBufferToTexture(
-      { buffer, bytesPerRow, rowsPerImage: faceTexels },
-      { texture, mipLevel: level, origin: [0, 0, face ?? 0] },
-      [faceTexels, faceTexels, faces],
+      { buffer, bytesPerRow, rowsPerImage: height },
+      { texture, mipLevel: level, origin: [x, y, face ?? 0] },
+      [width, height, faces],
     );
   }
 

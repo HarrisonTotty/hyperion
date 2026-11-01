@@ -128,3 +128,52 @@ export function texelSolidAnglesSr(sizePx: number): Float64Array {
   }
   return angles;
 }
+
+/**
+ * Where texel (column, row) of a face is in {@link texelSolidAnglesLowerF32}'s triangle: its row
+ * r(r + 1)/2 + c with r the larger of the two and c the smaller, so that a texel above the diagonal
+ * reads its mirror's.
+ */
+export function lowerTriangleIndex(column: number, row: number): number {
+  const r = Math.max(column, row);
+  return (r * (r + 1)) / 2 + Math.min(column, row);
+}
+
+/**
+ * One face's texel solid angles as the GPU bake reads them, `f32`, sr: the lower triangle of rows
+ * (column ≤ row), row after row, half the face's table (plan R06, T13.g; the owner's priority,
+ * 2026-11-01).
+ *
+ * @remarks
+ * Each is {@link texelSolidAnglesSr}'s value narrowed to `f32`, the same corners summed in the
+ * same order, with no table of `f64` between (a 3,072² face's is 75 MB). A face's solid angles are
+ * symmetric across its diagonal: A(a, b) = A(b, a) exactly, since ab and a² + b² commute, and a
+ * texel's mirror sums the same four areas with its middle two swapped. That order can move an
+ * `f64` sum by an ulp, but at the settings' face sizes no texel's `f32` value moves (the tests
+ * compare every texel), so the triangle read at {@link lowerTriangleIndex} gives every texel the
+ * full table's `f32` value. A face is not symmetric left to right at 3,072² (12,116 texels differ
+ * from their mirrors), so no smaller part of the face serves.
+ */
+export function texelSolidAnglesLowerF32(sizePx: number): Float32Array {
+  const edges = Array.from({ length: sizePx + 1 }, (_, i) => (2 * i) / sizePx - 1);
+  const angles = new Float32Array((sizePx * (sizePx + 1)) / 2);
+  // A row's texels need the corners to the column after its diagonal, and the next row's one
+  // further, so each row's corners stop there: half the arctangents of the whole face's.
+  const cornersOf = (y: number, count: number): number[] =>
+    edges.slice(0, Math.min(count, sizePx + 1)).map((x) => cornerArea(x, y));
+  let above = cornersOf(edges[0] ?? 0, 2);
+  let at = 0;
+  for (let row = 0; row < sizePx; row += 1) {
+    const below = cornersOf(edges[row + 1] ?? 0, row + 3);
+    for (let column = 0; column <= row; column += 1) {
+      angles[at] =
+        (above[column] ?? 0) -
+        (below[column] ?? 0) -
+        (above[column + 1] ?? 0) +
+        (below[column + 1] ?? 0);
+      at += 1;
+    }
+    above = below;
+  }
+  return angles;
+}

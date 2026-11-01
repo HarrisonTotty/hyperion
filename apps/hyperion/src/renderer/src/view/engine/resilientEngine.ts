@@ -378,12 +378,14 @@ export class ResilientEngine implements RenderEngine {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     this.#current("writePackedCubeLevelFromBuffer").writePackedCubeLevelFromBuffer(
       cube,
       level,
       packed,
       face,
+      region,
     );
   }
 

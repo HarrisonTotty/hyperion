@@ -662,12 +662,17 @@ export interface RenderEngine {
    *
    * @param face - One face, 0–5, which the buffer then holds alone (R06.T13.g, so that the bake's
    *   staging is one face of one level); all six, face after face, when absent.
+   * @param region - Texels of that face's level, which the buffer then holds alone, its rows
+   *   padded to its width (R06's tiled bake, the owner's priority of 2026-11-01); the whole level
+   *   when absent.
+   * @throws Error for a region without a face, or outside the level.
    */
   writePackedCubeLevelFromBuffer(
     cube: TextureHandle,
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void;
   /**
    * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat).
