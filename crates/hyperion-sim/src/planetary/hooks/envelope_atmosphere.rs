@@ -231,7 +231,9 @@
 //!   the deck's onset, as P14.T52.b's record leaves it (no taper: none is sourced). From 27 the
 //!   chromophore takes the disc's typical column, and the same cloud carries **its haze**
 //!   ([`ammonia_haze`], P14.T24.h.b part 6): small NH₃-ice particles to the tropopause, the NH₃
-//!   deck's second mode, which leads the hazes' modes and is not counted in their τ.
+//!   deck's second mode, which leads the hazes' modes and is not counted in their τ. A CH₄ deck's
+//!   modes become **its methane layer's** (`methane_layer_mode`, part 7): Irwin et al.'s
+//!   Aerosol-2, haze cores of the ice giants' haze's material, at the deck's τ.
 //!
 //! Each haze is a mode of its own material ([`AerosolMode`], its deck its material, the whole sky
 //! covered), its sizes its rule's (already volume-to-area radii), its τ(550) P14.T49.e's mass
@@ -307,7 +309,7 @@ use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::equilibrium::{GasEquilibrium, Network, SolveEquilibriumError};
 use crate::planetary::chem::photochem::{
     EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, ammonia_haze, chromophore,
-    ice_giant_haze, soot, sulphur_dioxide, sulphur_haze,
+    ice_giant_haze, methane_layer_particles, soot, sulphur_dioxide, sulphur_haze,
 };
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
@@ -325,8 +327,8 @@ use crate::planetary::hooks::structure::envelope::{
 use crate::stellar::substellar::MIN_AGE;
 use crate::substance::aloft::{SaturationLaw, Vapour, law_aloft};
 use crate::substance::{
-    Element, MOLAR_GAS_CONSTANT, SubstanceId, by_key, formation, mean_molar_mass_g_per_mol,
-    mixture_heat_capacity_over_r_at,
+    CondensedPhase, Element, MOLAR_GAS_CONSTANT, SubstanceId, by_key, formation,
+    mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at,
 };
 use crate::units::consts::{BOLTZMANN_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
@@ -1178,7 +1180,7 @@ impl EnvelopeAtmosphere {
         };
         let dayside = dayside_level(inputs, &profile);
         let as_trimmed = |_: Pascals, _: Kelvin, gas: Vec<(SubstanceId, f64)>| Ok(gas);
-        Self::assembled(
+        let mut atmosphere = Self::assembled(
             profile,
             deep,
             upper,
@@ -1187,7 +1189,17 @@ impl EnvelopeAtmosphere {
             dayside,
             hazes,
             as_trimmed,
-        )
+        )?;
+        // From 27 a CH₄ deck's particles are its methane layer's (P14.T24.h.b part 7).
+        if EnvelopeBondRules::in_force() == EnvelopeBondRules::Own {
+            let methane = by_key("CH4");
+            for mode in &mut atmosphere.modes {
+                if Some(mode.deck()) == methane {
+                    *mode = methane_layer_mode(mode)?;
+                }
+            }
+        }
+        Ok(atmosphere)
     }
 
     /// The atmosphere's parts from its profile, its gas at 1 bar and at 10 mbar (`deep` and
@@ -1849,6 +1861,35 @@ fn haze_mode(
     profile: &EnvelopeProfile,
 ) -> Result<AerosolMode, BuildModeError> {
     haze_mode_at(haze, weight, |p| profile.temperature_at(p))
+}
+
+/// The mode of a CH₄ deck `mode` as its methane layer's particles draw it from generator version 27
+/// (P14.T24.h.b part 7, `ENVELOPE_BOND_VERSION`'s hold): Irwin et al.'s (2022) Aerosol-2, haze cores
+/// of the ice giants' haze's material at [`METHANE_LAYER_PARTICLES`], still the deck's mode, with
+/// its τ(550), profile, coverage and temperature (labelled: the τ is the condensation loop's, for
+/// its own ice; a mode with no τ or temperature is kept as it is).
+///
+/// # Errors
+///
+/// [`BuildModeError`] where the new mode cannot be built.
+///
+/// [`METHANE_LAYER_PARTICLES`]: crate::planetary::chem::photochem::METHANE_LAYER_PARTICLES
+pub(crate) fn methane_layer_mode(mode: &AerosolMode) -> Result<AerosolMode, BuildModeError> {
+    let (Ok(depth), Some(temperature)) = (mode.optical_depth(), mode.temperature()) else {
+        return Ok(*mode);
+    };
+    let material = by_key("ice_giant_haze").expect("the ice giants' haze is a registry row");
+    AerosolMode::of_rule(
+        material,
+        CondensedPhase::Solid,
+        ShapeClass::of(material, CondensedPhase::Solid),
+        mode.deck(),
+        methane_layer_particles(),
+        depth.value(),
+        mode.profile(),
+        mode.coverage(),
+        temperature,
+    )
 }
 
 /// [`haze_mode`] on a profile given as its temperature by pressure, `temperature_at`, for P14.T24.h.b

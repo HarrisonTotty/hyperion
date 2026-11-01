@@ -2423,3 +2423,57 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
         );
     }
 }
+
+/// P14.T24.h.b part 7: under every 27 hold the table's ice giants' CH₄ decks are their methane
+/// layers, Irwin et al.'s (2022) Aerosol-2: each mode of the CH₄ deck is of the ice giants' haze's
+/// material at 0.5 µm, still names the deck, and keeps the deck's τ in the deck's sum; at 26 the
+/// deck is its CH₄ ice, and Jupiter and Saturn, with no CH₄ deck, carry no such mode.
+#[test]
+fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
+    use crate::planetary::hooks::aerosols::ParticleSize;
+    use crate::planetary::testing::{with_every_26_hold, with_every_27_hold};
+    let methane = by_key("CH4").expect("a row");
+    let haze = by_key("ice_giant_haze").expect("a row");
+    for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
+        let (_, held) = with_every_26_hold(|| table_envelope(name));
+        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let of_deck = |atmosphere: &crate::planetary::hooks::EnvelopeAtmosphere| {
+            atmosphere
+                .modes()
+                .iter()
+                .filter(|m| m.deck() == methane)
+                .copied()
+                .collect::<Vec<AerosolMode>>()
+        };
+        let (held, own_modes) = (of_deck(held.atmosphere()), of_deck(own.atmosphere()));
+        if matches!(name, "Jupiter" | "Saturn") {
+            assert!(held.is_empty() && own_modes.is_empty(), "{name}");
+            continue;
+        }
+        assert!(!held.is_empty() && !own_modes.is_empty(), "{name}");
+        assert!(held.iter().all(|m| m.material() == methane), "{name} at 26");
+        for mode in &own_modes {
+            assert_eq!(mode.material(), haze, "{name}");
+            match mode.size() {
+                Ok(ParticleSize::Distribution(d)) => {
+                    assert!(
+                        (d.effective_radius().value() - 5e-7).abs() < 1e-18,
+                        "{name}"
+                    );
+                }
+                other => panic!("{name}: {other:?}"),
+            }
+        }
+        let sum: f64 = own_modes
+            .iter()
+            .filter_map(|m| m.optical_depth().ok())
+            .map(|d| d.value())
+            .sum();
+        let deck_tau = own.atmosphere().deck_optical_depth(methane).expect("a τ");
+        assert!(
+            (sum - deck_tau).abs() < 1e-12 && deck_tau > 0.0,
+            "{name}: {deck_tau}"
+        );
+        eprintln!("{name} at 27: its methane layer's τ {deck_tau:.3}");
+    }
+}

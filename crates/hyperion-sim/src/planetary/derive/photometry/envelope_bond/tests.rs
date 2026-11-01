@@ -171,12 +171,12 @@ pub(crate) fn hot_jupiter_inputs() -> AtmosphereInputs {
 /// each from memory as plan 14 cites it, with the albedo the closed form gives each under every
 /// 27 hold, pinned: part 6's chromophore and ammonia haze bring Jupiter within its measurement
 /// (from part 5's 0.2859) and Saturn to 0.4017 (from 0.1899), within Wang et al.'s (2024) 0.41 ±
-/// 0.02; the ice giants' miss is their CH₄ deck's (findings).
+/// 0.02, and part 7's methane layer Uranus and Neptune within theirs (from 0.4829 and 0.5255).
 const GIANTS: [(&str, (f64, f64), f64); 4] = [
     ("Jupiter", (0.503, 0.012), JUPITER),
     ("Saturn", (0.342, 0.030), 0.4017),
-    ("Uranus", (0.300, 0.049), 0.4829),
-    ("Neptune", (0.290, 0.067), 0.5255),
+    ("Uranus", (0.300, 0.049), 0.2995),
+    ("Neptune", (0.290, 0.067), 0.3101),
 ];
 
 /// Jupiter's own Bond albedo under every 27 hold, pinned: 0.5003, the ammonia haze's fit
@@ -195,10 +195,11 @@ fn the_envelope_bond_is_held_only_until_the_27_bump() {
     use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < ENVELOPE_BOND_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b parts 5 and 6 on the record: delete \
+        "the 26 → 27 bump puts P14.T24.h.b parts 5 to 7 on the record: delete \
          `ENVELOPE_BOND_VERSION`, `EnvelopeBondRules` with its `ClassTable` arm and the guards in \
-         `gas_envelope_bond`, `photochem`'s chromophore column, P14.T52.d's photochemistry, the \
-         closed form's hazes and `GreyProfile::in_force` (κ₁ then 2.92e-3 in `ADOPTED`), the \
+         `gas_envelope_bond`, `photochem`'s chromophore column, P14.T52.d's photochemistry and \
+         assembly, the closed form's decks and hazes and `GreyProfile::in_force` (κ₁ then \
+         2.92e-3 in `ADOPTED`), the \
          tests' `with_envelope_bond`, its switch in `with_every_27_hold`, the `ClassTable` arms \
          of these tests, and this test"
     );
@@ -338,7 +339,8 @@ const AVOGADRO_PER_MOL: f64 = MOLAR_GAS_CONSTANT / BOLTZMANN_CONSTANT;
 /// The table's giants under every 27 hold take their own columns' albedos, each pinned and stated
 /// against its measurement (a miss is a finding, the outbox's), and the hot fixture its own, near
 /// 0.1. Every one lies in (0, 1); Jupiter's within its measured 0.503 ± 0.012 (Li et al. 2018),
-/// at an effective temperature in P14.T50.b's 123–128 K about its measured 125.57 K.
+/// at an effective temperature in P14.T50.b's 123–128 K about its measured 125.57 K, and the ice
+/// giants' within their measurements, Uranus's at a `T_eq` in 56–62 K about its measured 59.1 K.
 #[test]
 fn the_giants_own_albedos_are_pinned_against_their_measurements() {
     use crate::planetary::derive::solar::{found, solar_system};
@@ -363,6 +365,12 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
     assert!((jupiter.albedo().value() - 0.503).abs() <= 0.012);
     let t_eff = jupiter.effective_temperature().expect("a giant's").value();
     assert!((123.0..=128.0).contains(&t_eff), "{t_eff} K");
+    for (name, (measured, error), _) in &GIANTS[2..] {
+        let albedo = found(&own, name).albedo().value();
+        assert!((albedo - measured).abs() <= *error, "{name}: {albedo}");
+    }
+    let uranus = found(&own, "Uranus").equilibrium_temperature().value();
+    assert!((56.0..=62.0).contains(&uranus), "{uranus} K");
     let hot = with_every_27_hold(|| column::snapshot_bond(&hot_jupiter_inputs(), &sun()))
         .expect("the fixture's column");
     eprintln!("the hot fixture: own Bond albedo {hot:.4}");

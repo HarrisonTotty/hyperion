@@ -604,7 +604,8 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
 ///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
 ///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
-///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo.
+///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo, and part 7's CH₄ deck
+///   drawn as its methane layer.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a

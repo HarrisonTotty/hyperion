@@ -1403,7 +1403,8 @@ fn every_table_envelope_s_internal_temperature_is_finite_and_positive() {
 /// ([`laws_aloft`]), and none of the hazes' four materials has one (S₈ is listed as not modelled
 /// aloft, a photochemical haze rather than a deep vapour's deck; soot, the ice giants' haze and the
 /// chromophore have no vapour). On the table's Jupiter and Neptune the modes are the decks' first,
-/// each naming a listed deck, then the hazes'.
+/// each naming a listed deck, then the hazes'; a haze's material lies among the decks' modes only
+/// as a CH₄ deck's methane layer from 27 (P14.T24.h.b part 7), which names its deck.
 #[test]
 fn no_haze_material_condenses_as_a_deck() {
     let hazes = ["S8", "soot", "ice_giant_haze", "chromophore"].map(row);
@@ -1425,8 +1426,11 @@ fn no_haze_material_condenses_as_a_deck() {
             .unwrap_or(atmosphere.modes().len());
         for (k, mode) in atmosphere.modes().iter().enumerate() {
             assert_eq!(k < split, decks.contains(&mode.deck()), "{name} mode {k}");
+            // From 27 a CH₄ deck's mode is its methane layer's, of the ice giants' haze (part 7).
+            let methane_layer =
+                mode.deck() == row("CH4") && mode.material() == row("ice_giant_haze");
             assert_eq!(
-                k >= split,
+                k >= split || methane_layer,
                 hazes.contains(&mode.material()),
                 "{name} mode {k}"
             );

@@ -51,7 +51,9 @@
 //! - **The ice giants' haze** (P. G. J. Irwin et al., "Hazy blue worlds: a holistic aerosol model
 //!   for Uranus and Neptune, including dark spots", JGR Planets 127, e2022JE007189, 2022,
 //!   arXiv:2201.04516): their Aerosol-3, "an extended layer of photochemically-produced haze" from
-//!   the methane layer up, of small particles and small optical depth (their Table 2).
+//!   the methane layer up, of small particles and small optical depth (their Table 2). From 27
+//!   (P14.T24.h.b part 7) their Aerosol-2, the methane layer itself, sets the CH₄ deck's particles
+//!   ([`METHANE_LAYER_PARTICLES`]): haze cores of the same material onto which methane condenses.
 //! - **The chromophore** (J. A. Braude et al., "Colour and tropospheric cloud structure of Jupiter
 //!   from MUSE/VLT: retrieving a universal chromophore", Icarus 338, 113589, 2020,
 //!   arXiv:1912.00918v1): "We retrieved this chromophore to be located no deeper than 0.2 ± 0.1
@@ -789,6 +791,22 @@ pub const ICE_GIANT_HAZE_DEPTH: (f64, Micrometres) = (0.035, Micrometres::new(0.
 /// The ice giants' haze's particles: Irwin et al.'s fixed r = 0.05 µm and variance 0.05, a gamma
 /// distribution.
 pub const ICE_GIANT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
+
+/// The particles of an ice giant's methane layer from generator version 27 (P14.T24.h.b part 7,
+/// `ENVELOPE_BOND_VERSION`'s hold): Irwin et al.'s (2022) Aerosol-2, the layer at the methane
+/// condensation level that they read as photochemical haze onto which methane condenses (recalled,
+/// with their Table 2's radius of 0.3–0.8 µm for Uranus's layer as decision-bump-plan-after-22's
+/// G2 reads it): a radius of 0.5 µm and their variance 0.05, a gamma distribution, of the ice giants'
+/// haze's material. That material's index is their Aerosol-3's, which the client's file holds and
+/// which stands in for Aerosol-2's own (labelled).
+pub const METHANE_LAYER_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.5), 0.05);
+
+/// The size distribution of [`METHANE_LAYER_PARTICLES`].
+#[must_use]
+pub fn methane_layer_particles() -> SizeDistribution {
+    let (radius, variance) = METHANE_LAYER_PARTICLES;
+    gamma(radius, variance)
+}
 
 /// The haze above an ice giant's methane layer, whose base (the methane's condensation level,
 /// P14.T52.c's deck) lies at `methane_layer`, or `None` where that layer is no deeper than the

@@ -57,7 +57,8 @@ use crate::planetary::hooks::aerosols::{
     SEDIMENTATION_SPEED_AT_UNIT_SUPPLY, SEDIMENTATION_SUPPLY_EXPONENT,
 };
 use crate::planetary::hooks::envelope_atmosphere::{
-    DAYSIDE_LEVEL, DaysideDecksRules, DeckKind, HOT_DAYSIDE_TEMPERATURE, haze_mode_at, soot_weight,
+    DAYSIDE_LEVEL, DaysideDecksRules, DeckKind, HOT_DAYSIDE_TEMPERATURE, haze_mode_at,
+    methane_layer_mode, soot_weight,
 };
 use crate::planetary::hooks::envelope_internal_temperature;
 use crate::planetary::hooks::structure::envelope::{
@@ -941,6 +942,14 @@ fn decks(
             Base::At(base) => base,
         };
         let mode = deck_mode((id, &vapour), base, (shape, gas), &column, dayside);
+        // From 27 a CH₄ deck's particles are its methane layer's (part 7), as on the record.
+        let mode = if id == Species::Methane.substance()
+            && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
+        {
+            mode.and_then(|mode| methane_layer_mode(&mode).ok())
+        } else {
+            mode
+        };
         // Taken from the gas: the limiting vapour above the base, the others by their counts.
         if let Some(second) = others {
             gas.take(
