@@ -1178,7 +1178,9 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
 }
 
 /// Count (xvii) under P14.T53.g (decision-p14-t53a-thick-co2 §11.2), over the guard's samples,
-/// each derived under `with_every_26_hold` and again with the melt's hold set back: under the new
+/// each derived under `with_every_26_hold` with P14.T24.h.b's holds set back
+/// (`with_scattering_held`, whose albedos move which bodies melt: 195 molten bodies with them at
+/// generator version 25, against 216) and again with the melt's hold set back: under the new
 /// arm no molten body differs from its published air's surface by more than 1% but those whose air
 /// lies under the solidus, each of which publishes the solidus; both counts are printed. No sample
 /// changes its state between the arms, so every counted body is `MagmaOcean` under both, and every
@@ -1191,10 +1193,12 @@ fn under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air() {
     guard_walk(&mut |sample| {
         let id = format!("{} at {:+} yr", sample.id(), sample.years);
         let derived = with_every_26_hold(|| {
-            (
-                sample.derive(),
-                with_melt_oxygen(MeltOxygenRules::Held, || sample.derive()),
-            )
+            with_scattering_held(|| {
+                (
+                    sample.derive(),
+                    with_melt_oxygen(MeltOxygenRules::Held, || sample.derive()),
+                )
+            })
         });
         let ((after, hottest), (before, _)) = match derived {
             (Some(after), Some(before)) => (after, before),
