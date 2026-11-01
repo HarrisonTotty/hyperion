@@ -174,6 +174,14 @@ class SessionHolder {
   }
 }
 
+/**
+ * The clock a session's passes look ahead of their views' motion by, monotonic milliseconds (plan
+ * R10, R10.T14.b; `TerrainSessionOptions.lookaheadClockMs`).
+ */
+function lookaheadClockMs(): number {
+  return globalThis.performance.now();
+}
+
 /** Takes one surface event into `session`. */
 function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
   switch (event.kind) {
@@ -225,6 +233,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
         linkUp: linkUpRef.current,
         createWorker,
         setting,
+        lookaheadClockMs,
         ...counted,
       });
       holder.set(made);
@@ -244,6 +253,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       linkUp: true,
       createWorker,
       setting,
+      lookaheadClockMs,
       ...counted,
     });
     const unsubscribe = link.onSurface((event) => {

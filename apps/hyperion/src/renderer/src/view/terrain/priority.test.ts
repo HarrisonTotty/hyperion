@@ -8,7 +8,14 @@ import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
 import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import { compareRequests, fillsHole, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import {
+  compareRequests,
+  fillsHole,
+  joinDemand,
+  LOOKAHEAD_DEMAND_WEIGHT,
+  PRIMARY_VIEW_WEIGHT,
+  SECONDARY_VIEW_WEIGHT,
+} from "./priority";
 import {
   type HeightRangeLookup,
   type PatchRequest,
@@ -89,6 +96,32 @@ describe("the request order", () => {
     const b = { key: KEY(2), priority: 1, forced: false };
     // "0/5/10/0" sorts before "0/5/2/0".
     expect([b, a].toSorted(compareRequests)).toEqual([a, b]);
+  });
+});
+
+describe("the lookahead's demand, joined (R10.T14.b)", () => {
+  it("asks each patch once, at the larger priority, forced from either, by the request order", () => {
+    const own = [
+      { key: KEY(0), priority: 4, forced: false },
+      { key: KEY(1), priority: 1, forced: false },
+    ];
+    const ahead = [
+      { key: KEY(1), priority: 3, forced: false },
+      { key: KEY(2), priority: 2, forced: true },
+      { key: KEY(0), priority: 2, forced: false },
+    ];
+    expect(joinDemand(own, ahead)).toEqual([
+      { key: KEY(2), priority: 2, forced: true },
+      { key: KEY(0), priority: 4, forced: false },
+      { key: KEY(1), priority: 3, forced: false },
+    ]);
+  });
+
+  it("adds nothing at the view's own pose: the lookahead's views ask at half their weight", () => {
+    const own = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT)]);
+    const ahead = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT * LOOKAHEAD_DEMAND_WEIGHT)]);
+    expect(LOOKAHEAD_DEMAND_WEIGHT).toBe(0.5);
+    expect(joinDemand(own, ahead)).toEqual(own);
   });
 });
 

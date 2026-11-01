@@ -159,6 +159,7 @@ interface Harness {
 async function harness(
   setting: QualitySetting = "high",
   horizonMap?: HorizonLayerSetting,
+  lookaheadClockMs?: () => number,
 ): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
@@ -180,6 +181,7 @@ async function harness(
     },
     workers: 2,
     ...(horizonMap === undefined ? {} : { horizonMap }),
+    ...(lookaheadClockMs === undefined ? {} : { lookaheadClockMs }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -470,6 +472,18 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     await answerField(h);
     h.session.step();
     expect(h.session.passBodies.size).toBe(0);
+  });
+
+  it("steps its passes on its lookahead clock where it has one (R10.T14.b)", async () => {
+    const clock = vi.fn<() => number>(() => 0);
+    const h = await harness("high", undefined, clock);
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    expect(clock).not.toHaveBeenCalled();
+    await answerField(h);
+    h.session.step();
+    expect(h.session.passBodies.size).toBe(1);
+    expect(clock).toHaveBeenCalled();
   });
 
   it("bakes through a lane of its one pool, of the body's lit settings", async () => {

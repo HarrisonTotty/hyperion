@@ -231,6 +231,12 @@ export interface TerrainSessionOptions {
    * gives the map's share of the workers' bake time. The wireframe's bakes skip it either way.
    */
   readonly horizonMap?: HorizonLayerSetting;
+  /**
+   * The clock its passes look ahead of their views' motion by, monotonic milliseconds (plan R10,
+   * R10.T14.b; `TerrainPassOptions.lookaheadClockMs`): `performance.now()` in the app, a test's
+   * fake clock; absent, its passes look ahead of nothing.
+   */
+  readonly lookaheadClockMs?: () => number;
 }
 
 /**
@@ -818,6 +824,7 @@ export class TerrainSession {
   readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #horizonMap: HorizonLayerSetting;
+  readonly #lookaheadClockMs: (() => number) | null;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -836,6 +843,7 @@ export class TerrainSession {
     const workers =
       options.workers ?? defaultHeightWorkers(globalThis.navigator.hardwareConcurrency);
     this.#horizonMap = options.horizonMap ?? "baked";
+    this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -1695,6 +1703,8 @@ export class TerrainSession {
         // Each view's selection opened by its motion, so that no strip at its leading edge is
         // left unselected while its mask discards the reference surface there (S6).
         frustumMargin: "motion",
+        // Its bakes asked ahead of each view's motion too (R10.T14.b).
+        ...(this.#lookaheadClockMs === null ? {} : { lookaheadClockMs: this.#lookaheadClockMs }),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

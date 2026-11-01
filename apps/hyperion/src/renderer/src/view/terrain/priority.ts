@@ -8,6 +8,10 @@
  * secondary, so that a second streaming camera shares the workers at lower priority. Patches in a
  * grounded body's forced region outrank everything.
  *
+ * A pass's lookahead (`lookahead.ts`; R10.T14.b, the seamless-lookahead lane) selects again ahead of
+ * each fast view's motion, its views at {@link LOOKAHEAD_DEMAND_WEIGHT} of their weights, and its
+ * demand joins the pass's ({@link joinDemand}).
+ *
  * Each terrain pass bakes through its own lane of one pool, which shares its workers by the passes'
  * holes (plan R10, R10.T14.b; lean, 2026-11-01): a pass with a hole in its drawn set, a request
  * that {@link fillsHole}, takes the next free worker ahead of another pass's refinements, until it
@@ -23,6 +27,13 @@ export const PRIMARY_VIEW_WEIGHT = 1;
 
 /** The streaming weight of a secondary view: 0.25 (Design note 24). */
 export const SECONDARY_VIEW_WEIGHT = 0.25;
+
+/**
+ * The streaming weight of a pass's lookahead, as a fraction of each view's own: 0.5, so that a
+ * patch a view will need ranks below one of equal error it needs now (`lookahead.ts`; R10.T14.b,
+ * the seamless-lookahead lane; a hand value).
+ */
+export const LOOKAHEAD_DEMAND_WEIGHT = 0.5;
 
 /**
  * Orders requests for the pool: forced first, then the higher priority, then by `patchKeyString`,
@@ -55,4 +66,35 @@ export function compareRequests(a: PatchRequest, b: PatchRequest): number {
  */
 export function fillsHole(request: PatchRequest): boolean {
   return !request.forced && request.key.level === 0;
+}
+
+/**
+ * A selection's demand joined by its lookahead's (`lookahead.ts`): each patch once, at the larger
+ * of its priorities, forced where either asks it forced, ordered by {@link compareRequests}.
+ *
+ * @remarks
+ * The lookahead's views carry {@link LOOKAHEAD_DEMAND_WEIGHT} of their weights, so its priorities
+ * are already at that weight: the join is the largest over the views, as one selection over every
+ * view gives it (Design note 24).
+ */
+export function joinDemand(
+  own: ReadonlyArray<PatchRequest>,
+  ahead: ReadonlyArray<PatchRequest>,
+): PatchRequest[] {
+  const joined = new Map<string, PatchRequest>();
+  for (const request of [...own, ...ahead]) {
+    const keyString = patchKeyString(request.key);
+    const was = joined.get(keyString);
+    joined.set(
+      keyString,
+      was === undefined
+        ? request
+        : {
+            key: was.key,
+            priority: Math.max(was.priority, request.priority),
+            forced: was.forced || request.forced,
+          },
+    );
+  }
+  return [...joined.values()].toSorted(compareRequests);
 }

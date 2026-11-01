@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
@@ -24,6 +24,9 @@ import {
   rootKey,
 } from "./patchKey";
 import type { GroundContact } from "./grounded";
+import { lookaheadInput } from "./lookahead";
+import { joinDemand } from "./priority";
+import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 import {
   levelBoundM,
   levelHeightRangeM,
@@ -864,6 +867,73 @@ function boundsOfSplit(c: BudgetCase, key: PatchKey): PatchBounds {
 function underBudget(c: BudgetCase): Selection {
   return selectPatches({ ...c.free, maxPatches: c.budget });
 }
+
+describe("the lookahead's selection (R10.T14.b)", () => {
+  // Baked to level 14, about 0.6 km wide, so that the level below is asked for a move of 1.5 km.
+  const heightRanges = bakedToDepth(14);
+  const inputAt = (positionM: Vec3): SelectionInput => ({
+    planet: PLANET,
+    views: [view(positionM, lookingDown(positionM, 1.2))],
+    setting: "high",
+    grounded: [],
+    heightRanges,
+    maxPatches: 2_000,
+  });
+  const up = normalise(LOW);
+  const east = normalise(vec3(-up.y, up.x, 0));
+  // Along the ground at 1.5 km a second, from 1.5 km up: about eleven times m ÷ (1 + m) of it.
+  const motion = { velocityMps: scale(east, 1_500), nearestM: 1_500 };
+
+  it("is selection's own pure function at the pose v × L on, at half the view's weight", () => {
+    const own = inputAt(LOW);
+    const ahead = lookaheadInput(own, [motion], 1);
+    if (ahead === null) {
+      throw new Error("a camera at 1.5 km/s selects ahead");
+    }
+    const ownView = own.views[0];
+    if (ownView === undefined) {
+      throw new Error("the input has its view");
+    }
+    const byHand = selectPatches({
+      ...own,
+      views: [
+        {
+          ...ownView,
+          camera: {
+            positionM: add(LOW, scale(motion.velocityMps, 1)),
+            orientation: ownView.camera.orientation,
+          },
+          weight: 0.5,
+        },
+      ],
+    });
+    const selected = selectPatches(ahead);
+    expect(selected).toEqual(byHand);
+    expect(selectPatches(ahead)).toEqual(selected);
+    // Ahead of the camera it asks for what its own pose does not.
+    const asked = new Set(selectPatches(own).demand.map((r) => patchKeyString(r.key)));
+    expect(selected.demand.some((r) => !asked.has(patchKeyString(r.key)))).toBe(true);
+  });
+
+  it("asks nothing more of a still camera, of one too slow, or of one with no motion yet", () => {
+    const own = inputAt(LOW);
+    const still = { velocityMps: vec3(0, 0, 0), nearestM: 1_500 };
+    const slow = {
+      velocityMps: scale(east, 0.99 * RESELECT_MOVE_FRACTION * 1_500),
+      nearestM: 1_500,
+    };
+    expect(lookaheadInput(own, [still], 2)).toBeNull();
+    expect(lookaheadInput(own, [slow], 2)).toBeNull();
+    expect(lookaheadInput(own, [null], 2)).toBeNull();
+    // At the camera's own pose its demand, at half the weight, joins nothing to the selection's.
+    const here = lookaheadInput(own, [motion], 0);
+    if (here === null) {
+      throw new Error("a fast camera selects ahead");
+    }
+    const demand = selectPatches(own).demand;
+    expect(joinDemand(demand, selectPatches(here).demand)).toEqual(demand);
+  });
+});
 
 describe("the budget's limit excess", () => {
   const primary = view(LOW, lookingDown(LOW, 1.2));

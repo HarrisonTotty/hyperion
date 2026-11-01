@@ -97,7 +97,7 @@ import {
   TERRAIN_SETTINGS,
   type TerrainSettings,
 } from "../quality/qualitySetting";
-import { norm, type Vec3 } from "../../geometry/vec3";
+import { norm, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   TERRAIN_NOT_AVAILABLE,
   type TerrainAnnunciation,
@@ -145,6 +145,16 @@ import {
   type SurveyLookup,
   type ViewSelectionInput,
 } from "./select";
+import {
+  LOOKAHEAD_COST_STEPS,
+  LOOKAHEAD_SAMPLES,
+  LOOKAHEAD_SLOW_EVERY,
+  lookaheadInput,
+  lookaheadSeconds,
+  slowSelection,
+  type ViewMotion,
+} from "./lookahead";
+import { joinDemand } from "./priority";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import { TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
@@ -560,6 +570,15 @@ export interface TerrainPassOptions {
    * frame the cascades are fitted, for their caster reach (R10.T9.a's Δh); absent, or `null`, 0.
    */
   readonly reliefM?: () => number | null;
+  /**
+   * The clock the pass looks ahead of its views' motion by, monotonic milliseconds (plan R10,
+   * R10.T14.b; `lookahead.ts`): at each selection it selects again for each view moving fast, at its
+   * pose L ahead, and asks for that selection's demand at half the view's weight, never drawing it.
+   * It times each step's views' velocities and each bake's demand → resident time, L's samples.
+   * Absent, the pass looks ahead of nothing and asks for its selection's demand alone, as R05's
+   * spike's `frame` does, bit for bit; the terrain session's passes take the session's.
+   */
+  readonly lookaheadClockMs?: () => number;
 }
 
 /**
@@ -911,6 +930,11 @@ interface SelectedView {
 /** The inputs of the last selection, to decide whether to select again, and what it gave. */
 interface Selected {
   readonly selection: Selection;
+  /**
+   * The demand the pass asks for: the selection's, joined by its lookahead's where it looked ahead
+   * (`priority.ts`' `joinDemand`), the cache's demand pins with it.
+   */
+  readonly demand: ReadonlyArray<PatchRequest>;
   readonly drawSet: DrawSet;
   /** The contacts that reach a drawn patch, body-fixed. */
   readonly nearContacts: ReadonlyArray<GroundContact>;
@@ -926,6 +950,14 @@ interface Selected {
 function rotationMat4(rotation: Rotation3, out: Float32Array): void {
   const [r0, r1, r2] = rotation.rows;
   out.set([r0.x, r1.x, r2.x, 0, r0.y, r1.y, r2.y, 0, r0.z, r1.z, r2.z, 0, 0, 0, 0, 1]);
+}
+
+/** Appends `value` to `latest`, dropping the oldest beyond `most`. */
+function pushLatest(latest: number[], value: number, most: number): void {
+  latest.push(value);
+  if (latest.length > most) {
+    latest.shift();
+  }
 }
 
 function distance(a: Vec3, b: Vec3): number {
@@ -1063,6 +1095,22 @@ export class TerrainPass {
   /** The observers ({@link TerrainPass.observe}), replaced whole on each change. */
   #observers = NO_OBSERVERS;
   readonly #frustumMargin: TerrainFrustumMargin;
+  /** The lookahead's clock ({@link TerrainPassOptions.lookaheadClockMs}), or `null` for none. */
+  readonly #lookaheadClockMs: (() => number) | null;
+  /** The time of the last step on the lookahead's clock, ms; `null` before the first. */
+  #steppedAtMs: number | null = null;
+  /** When each key of the demand asked now was first asked, on the lookahead's clock, ms. */
+  readonly #askedAtMs = new Map<string, number>();
+  /** The latest {@link LOOKAHEAD_SAMPLES} demand → resident times, s, oldest first. */
+  readonly #roundTripsS: number[] = [];
+  /** The selection time of each of the latest {@link LOOKAHEAD_COST_STEPS} steps, ms, oldest first. */
+  readonly #stepCostsMs: number[] = [];
+  /** The selection time of the step under way, ms. */
+  #stepCostMs = 0;
+  /** Selections since the lookahead last selected, for its cadence while selection is slow. */
+  #sinceAhead = LOOKAHEAD_SLOW_EVERY;
+  /** The lookahead's last demand, or `null` where its views did not move fast. */
+  #aheadDemand: ReadonlyArray<PatchRequest> | null = null;
   readonly #offRestored: () => void;
   readonly #shading: TerrainShading;
   /** The session's materials, which it draws with and never releases; `null` to compile its own. */
@@ -1124,6 +1172,7 @@ export class TerrainPass {
     this.#onResident = options.onResident ?? null;
     this.#onSelect = options.onSelect ?? null;
     this.#frustumMargin = options.frustumMargin ?? "none";
+    this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
@@ -1212,6 +1261,16 @@ export class TerrainPass {
     return selected === null || this.#faulted
       ? null
       : { selection: selected.selection, drawSet: selected.drawSet };
+  }
+
+  /**
+   * The lookahead's L, s (plan R10, R10.T14.b; `lookahead.ts`' `lookaheadSeconds`): the median of
+   * the pass's latest {@link LOOKAHEAD_SAMPLES} demand → resident times, each from the step that
+   * first asked for a patch to its bake's landing, within [0.25, 2] s; 0.25 s before any has landed,
+   * and always for a pass with no lookahead clock, which times none.
+   */
+  get lookaheadS(): number {
+    return lookaheadSeconds(this.#roundTripsS);
   }
 
   /**
@@ -1535,13 +1594,20 @@ export class TerrainPass {
       return this.#faultedStep();
     }
     const views = stepViews.map((view) => this.#selectionView(view));
+    const clock = this.#lookaheadClockMs;
+    const nowMs = clock === null ? 0 : clock();
+    this.#stepCostMs = 0;
     let reselected = false;
     if (this.#due(views, input)) {
-      this.#select(this.#withMargins(views), input);
+      this.#select(this.#withMargins(views), input, nowMs);
       reselected = true;
     }
     for (const view of views) {
       this.#stepped.set(view.id, view.camera);
+    }
+    if (clock !== null) {
+      this.#steppedAtMs = nowMs;
+      pushLatest(this.#stepCostsMs, this.#stepCostMs, LOOKAHEAD_COST_STEPS);
     }
     const selected = this.#selected;
     if (selected === null) {
@@ -1549,12 +1615,15 @@ export class TerrainPass {
     }
     const { selection, drawSet } = selected;
     if (reselected || this.#demandDirty) {
-      const demand = selection.demand.filter((r) => !device.cache.has(patchKeyString(r.key)));
+      const demand = selected.demand.filter((r) => !device.cache.has(patchKeyString(r.key)));
       // The rebakes ask again for resident patches, which the selection's demand leaves out.
       const asked = [...demand, ...device.rebakes.values()];
       device.asked.clear();
       for (const request of asked) {
         device.asked.set(patchKeyString(request.key), request);
+      }
+      if (clock !== null) {
+        this.#noteAsked(demand, device.asked, nowMs);
       }
       device.pool.reprioritise(asked);
       this.#demandDirty = false;
@@ -1972,6 +2041,9 @@ export class TerrainPass {
     this.#rangesVersion += 1;
     this.#selected = null;
     this.#demandDirty = true;
+    // The new device's cache holds nothing yet: its demand is timed afresh.
+    this.#askedAtMs.clear();
+    this.#aheadDemand = null;
     void this.ready().catch((error: unknown) => {
       console.error("the terrain material failed after a restore", error);
     });
@@ -2056,6 +2128,15 @@ export class TerrainPass {
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
     this.#landed(device, keyString);
+    const askedAtMs = this.#askedAtMs.get(keyString);
+    if (askedAtMs !== undefined && this.#lookaheadClockMs !== null) {
+      this.#askedAtMs.delete(keyString);
+      pushLatest(
+        this.#roundTripsS,
+        (this.#lookaheadClockMs() - askedAtMs) / 1000,
+        LOOKAHEAD_SAMPLES,
+      );
+    }
     this.#rangesVersion += 1;
     this.#demandDirty = true;
     this.#onResident?.(bake.key);
@@ -2270,6 +2351,7 @@ export class TerrainPass {
   #select(
     views: ReadonlyArray<PassSelectionView>,
     input: Pick<TerrainStepInput, "grounded">,
+    nowMs: number,
   ): void {
     const planet = this.#planet;
     const selectionInput: SelectionInput = {
@@ -2299,10 +2381,16 @@ export class TerrainPass {
       skirtMarginM: WORKER_SKIRT_MARGIN_M,
       ...(this.#survey === null ? {} : { survey: this.#survey }),
     };
-    const startMs = this.#measureSelection ? performance.now() : 0;
+    // The lookahead's cadence reads the selection's cost too.
+    const timed = this.#measureSelection || this.#lookaheadClockMs !== null;
+    const startMs = timed ? performance.now() : 0;
     const selection = selectPatches(selectionInput);
-    if (this.#measureSelection) {
-      performance.measure(SELECT_MEASURE, { start: startMs, end: performance.now() });
+    if (timed) {
+      const endMs = performance.now();
+      if (this.#measureSelection) {
+        performance.measure(SELECT_MEASURE, { start: startMs, end: endMs });
+      }
+      this.#stepCostMs += endMs - startMs;
     }
     this.#onSelect?.(selectionInput, selection);
     const observers = this.#observers;
@@ -2347,11 +2435,16 @@ export class TerrainPass {
         nearestM: Number.isFinite(nearestM) ? Math.max(nearestM, patchM) : nearestM,
       };
     });
+    const demand = this.#withLookahead(selectionInput, selection, selectedViews, nowMs);
     const device = this.#device;
     // The same object every selection, rewritten in place; unseen forced patches are pinned by
-    // `retain` but not drawn.
+    // `retain` but not drawn. The lookahead's patches are pinned as demanded alone: as they land,
+    // until the next retain finds them neither selected nor beneath the selection.
     const drawSet = device.resolver.resolve(selection);
-    device.cache.retain(selection, drawSet);
+    device.cache.retain(
+      demand === selection.demand ? selection : { ...selection, demand },
+      drawSet,
+    );
     // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
     // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
     // fine side at 1 (decision-r10-t16-leans §9).
@@ -2373,6 +2466,7 @@ export class TerrainPass {
     });
     this.#selected = {
       selection,
+      demand,
       drawSet,
       nearContacts,
       views: selectedViews,
@@ -2380,6 +2474,83 @@ export class TerrainPass {
       rangesVersion: this.#rangesVersion,
       surveyVersion: this.#survey?.version ?? 0,
     };
+  }
+
+  /**
+   * `selection`'s demand joined by its lookahead's (`lookahead.ts`; plan R10, R10.T14.b), or its
+   * own: with no lookahead clock, at the pass's first step, and where no view moves fast. The
+   * lookahead selects by `selectPatches` over `input` with each fast view at its pose L ahead, at
+   * half its weight; while a step's selection time over the latest steps is above 2 ms at p95, at
+   * most every fourth selection, the last lookahead's demand asked in between.
+   */
+  #withLookahead(
+    input: SelectionInput,
+    selection: Selection,
+    views: ReadonlyArray<SelectedView>,
+    nowMs: number,
+  ): ReadonlyArray<PatchRequest> {
+    const steppedAtMs = this.#steppedAtMs;
+    if (this.#lookaheadClockMs === null || steppedAtMs === null || !(nowMs > steppedAtMs)) {
+      this.#aheadDemand = null;
+      return selection.demand;
+    }
+    const perS = 1 / ((nowMs - steppedAtMs) / 1000);
+    const motions = views.map((view, n): ViewMotion | null => {
+      const was = this.#stepped.get(view.id);
+      if (was === undefined) {
+        return null;
+      }
+      const moved = sub(view.cameraBodyFixedM, was.positionM);
+      return {
+        velocityMps: vec3(moved.x * perS, moved.y * perS, moved.z * perS),
+        // The move rule's distance: with no coarse patch in view, its own nearest surveyed ground.
+        nearestM: Number.isFinite(view.nearestM)
+          ? view.nearestM
+          : (selection.nearestSurveyByViewM[n] ?? selection.nearestSurveyM),
+      };
+    });
+    const aheadS = this.lookaheadS;
+    const aheadInput = lookaheadInput(input, motions, aheadS);
+    this.#sinceAhead += 1;
+    if (aheadInput === null) {
+      this.#aheadDemand = null;
+      return selection.demand;
+    }
+    if (
+      this.#aheadDemand === null ||
+      this.#sinceAhead >= LOOKAHEAD_SLOW_EVERY ||
+      !slowSelection(this.#stepCostsMs)
+    ) {
+      const startMs = performance.now();
+      this.#aheadDemand = selectPatches(aheadInput).demand;
+      this.#stepCostMs += performance.now() - startMs;
+      this.#sinceAhead = 0;
+    }
+    return joinDemand(selection.demand, this.#aheadDemand);
+  }
+
+  /**
+   * Notes when each key of `demand`, the patches asked for now that are not resident, was first
+   * asked, for L's samples; a key no longer asked (`asked`, the rebakes with them) is forgotten,
+   * and timed afresh if asked again.
+   */
+  #noteAsked(
+    demand: ReadonlyArray<PatchRequest>,
+    asked: ReadonlyMap<string, PatchRequest>,
+    nowMs: number,
+  ): void {
+    const askedAtMs = this.#askedAtMs;
+    for (const keyString of askedAtMs.keys()) {
+      if (!asked.has(keyString)) {
+        askedAtMs.delete(keyString);
+      }
+    }
+    for (const request of demand) {
+      const keyString = patchKeyString(request.key);
+      if (!askedAtMs.has(keyString)) {
+        askedAtMs.set(keyString, nowMs);
+      }
+    }
   }
 
   /**

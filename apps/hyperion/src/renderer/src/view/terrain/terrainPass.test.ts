@@ -7,7 +7,7 @@ import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
-import type { Vec3 } from "../../geometry/vec3";
+import { scale, sub, type Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
@@ -19,7 +19,20 @@ import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
 import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
-import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
+import {
+  LOOKAHEAD_SAMPLES,
+  LOOKAHEAD_SLOW_EVERY,
+  lookaheadInput,
+  lookaheadSeconds,
+} from "./lookahead";
+import {
+  type Edge,
+  EDGES,
+  edgeNeighbour,
+  parentKey,
+  type PatchKey,
+  patchKeyString,
+} from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import {
   type PatchRequest,
@@ -27,6 +40,7 @@ import {
   type Selection,
   type SelectionInput,
   selectionErrorM,
+  selectPatches,
 } from "./select";
 import {
   RESELECT_MOVE_FRACTION,
@@ -201,7 +215,10 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 async function passOn(
   setting: "high" | "low",
   extra: Partial<
-    Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain" | "source">
+    Pick<
+      TerrainPassOptions,
+      "measureSelection" | "onResident" | "onSelect" | "terrain" | "source" | "lookaheadClockMs"
+    >
   > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
@@ -1617,5 +1634,223 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
     const lit = bindingStages(terrainLitMaterialSpec("face-differences").vertexWgsl);
     expect([...(lit.get(16) ?? [])]).toEqual(["fragment"]);
     expect([...(lit.get(17) ?? [])].toSorted()).toEqual(["fragment", "vertex"]);
+  });
+});
+
+/** `requests` by key string. */
+function requestsByKey(requests: ReadonlyArray<PatchRequest>): Map<string, PatchRequest> {
+  return new Map(requests.map((r) => [patchKeyString(r.key), r]));
+}
+
+describe("the terrain pass's lookahead (R10.T14.b)", () => {
+  /** The low setting's pass on a clock the test sets, with each selection's input and result. */
+  async function lookingAhead(): Promise<
+    Awaited<ReturnType<typeof passOn>> & {
+      readonly clock: { ms: number };
+      readonly inputs: SelectionInput[];
+      readonly selections: Selection[];
+    }
+  > {
+    const clock = { ms: 0 };
+    const inputs: SelectionInput[] = [];
+    const selections: Selection[] = [];
+    const made = await passOn("low", {
+      lookaheadClockMs: () => clock.ms,
+      onSelect: (input, selection) => {
+        inputs.push(input);
+        selections.push(selection);
+      },
+    });
+    return { ...made, clock, inputs, selections };
+  }
+
+  /** {@link northPole}'s camera moved `xM` along +x: along the ground, at the pole. */
+  function movedAlong(heightM: number, xM: number): TerrainView {
+    const view = northPole(heightM);
+    return { ...view, cameraM: { ...view.cameraM, x: xM } };
+  }
+
+  /**
+   * Streams the pass in at 1.5 km over the pole on a still clock, then moves the camera 200 m along
+   * the ground in 0.1 s, 2 km/s, which selects again: the lookahead's selection input there, with
+   * the pass's own selection of the step.
+   */
+  async function movedFast(): Promise<
+    Awaited<ReturnType<typeof lookingAhead>> & {
+      readonly ahead: SelectionInput;
+      readonly own: Selection;
+    }
+  > {
+    const made = await lookingAhead();
+    const { pass, pool, clock, inputs, selections } = made;
+    streamed(pass, pool, northPole(1_500));
+    clock.ms = 100;
+    const frame = pass.frame(inputAt(movedAlong(1_500, 200), 16 * 100));
+    const input = inputs.at(-1);
+    const own = selections.at(-1);
+    if (!frame.reselected || input === undefined || own === undefined) {
+      throw new Error("a move of 200 m at 1.5 km selects again");
+    }
+    const before = northPole(1_500).cameraM;
+    const after = movedAlong(1_500, 200).cameraM;
+    // The pass's L before any bake took time to land: 0.25 s.
+    const ahead = lookaheadInput(
+      input,
+      [{ velocityMps: scale(sub(after, before), 1 / 0.1), nearestM: 1_500 }],
+      pass.lookaheadS,
+    );
+    if (ahead === null) {
+      throw new Error("a camera at 2 km/s at 1.5 km selects ahead");
+    }
+    return { ...made, ahead, own };
+  }
+
+  it("asks for a moving camera's lookahead patches at half its weight", async () => {
+    const { pass, pool, ahead, own } = await movedFast();
+    expect(pass.lookaheadS).toBe(0.25);
+    const asked = requestsByKey(pool().demand);
+    const owned = requestsByKey(own.demand);
+    const atWeightOne = requestsByKey(
+      selectPatches({ ...ahead, views: ahead.views.map((view) => ({ ...view, weight: 1 })) })
+        .demand,
+    );
+    const lookahead = selectPatches(ahead).demand;
+    // Each at the larger of the two priorities; one only the lookahead asks for at half weight 1's.
+    const expected = lookahead.map((request): readonly [string, number] => {
+      const keyString = patchKeyString(request.key);
+      const mine = owned.get(keyString);
+      return [
+        keyString,
+        mine === undefined
+          ? (atWeightOne.get(keyString)?.priority ?? NaN) * 0.5
+          : Math.max(mine.priority, request.priority),
+      ];
+    });
+    expect(expected.map(([keyString]) => asked.get(keyString)?.priority)).toEqual(
+      expected.map(([, priority]) => priority),
+    );
+    expect(lookahead.filter((r) => !owned.has(patchKeyString(r.key))).length).toBeGreaterThan(0);
+    // The selection's own demand is asked too.
+    for (const keyString of owned.keys()) {
+      expect(asked.has(keyString)).toBe(true);
+    }
+  });
+
+  it("never draws the lookahead's patches, and pins them as demanded alone", async () => {
+    const { pass, pool, clock, ahead, own } = await movedFast();
+    const owned = requestsByKey(own.demand);
+    const onlyAhead = selectPatches(ahead)
+      .demand.map((r) => r.key)
+      .filter((key) => !owned.has(patchKeyString(key)));
+    expect(onlyAhead.length).toBeGreaterThan(0);
+    for (const key of onlyAhead) {
+      pool().deliver(pass, key);
+    }
+    // Until the next selection they are pinned as demanded: as many patches no view selects as
+    // the cache has slots, shallower, which would go after them unpinned, evict none of them.
+    const slots = pass.layout.slots.slotCount;
+    for (let n = 0; n < slots; n += 1) {
+      pool().deliver(pass, { face: 5, level: 8, i: n % 256, j: Math.floor(n / 256) });
+    }
+    expect(onlyAhead.filter((key) => pass.resident(patchKeyString(key)) === undefined)).toEqual([]);
+    clock.ms = 200;
+    // Still now: the arrivals select again, and the cache's pins are the selection's alone.
+    const frame = pass.frame(inputAt(movedAlong(1_500, 200), 16 * 200));
+    expect(frame.reselected).toBe(true);
+    const chain = new Set<string>();
+    for (const selected of frame.selection.patches.values()) {
+      for (let key: PatchKey | null = selected.key; key !== null; key = parentKey(key)) {
+        chain.add(patchKeyString(key));
+      }
+    }
+    const drawn = new Set(
+      frame.drawSet.patches.slice(0, frame.drawSet.count).map((p) => p.keyString),
+    );
+    for (const key of onlyAhead) {
+      const keyString = patchKeyString(key);
+      expect([chain.has(keyString), drawn.has(keyString)]).toEqual([false, false]);
+    }
+  });
+
+  it("takes L from the median of its latest bakes' demand → resident times, within 0.25–2 s", async () => {
+    const { pass, pool, clock } = await lookingAhead();
+    const view = northPole(1_500);
+    const askedAt = new Map<string, number>();
+    const trips: number[] = [];
+    const step = (ms: number): void => {
+      clock.ms = ms;
+      pass.frame(inputAt(view, ms));
+      const asked = new Set(pool().demand.map((r) => patchKeyString(r.key)));
+      for (const keyString of askedAt.keys()) {
+        if (!asked.has(keyString)) {
+          askedAt.delete(keyString);
+        }
+      }
+      for (const keyString of asked) {
+        if (!askedAt.has(keyString)) {
+          askedAt.set(keyString, ms);
+        }
+      }
+    };
+    const deliver = (ms: number): void => {
+      clock.ms = ms;
+      for (const request of pool().demand) {
+        const keyString = patchKeyString(request.key);
+        trips.push((ms - (askedAt.get(keyString) ?? ms)) / 1000);
+        askedAt.delete(keyString);
+        pool().deliver(pass, request.key);
+      }
+    };
+    const expected = (): number => lookaheadSeconds(trips.slice(-LOOKAHEAD_SAMPLES));
+    expect(pass.lookaheadS).toBe(0.25);
+    // The roots in 0.1 s: below the clamp.
+    step(0);
+    deliver(100);
+    expect([pass.lookaheadS, expected()]).toEqual([0.25, 0.25]);
+    // Their children in 1.2 s, which outnumber them.
+    step(100);
+    deliver(1_300);
+    expect(pass.lookaheadS).toBe(expected());
+    expect(pass.lookaheadS).toBeCloseTo(1.2, 12);
+    // Then 8 s a bake, until they are most of the latest 64: above the clamp.
+    for (let n = 0; trips.length < 2 * LOOKAHEAD_SAMPLES && n < 20; n += 1) {
+      const ms = 1_300 + 8_000 * n;
+      step(ms);
+      deliver(ms + 8_000);
+      expect(pass.lookaheadS).toBe(expected());
+    }
+    expect(pass.lookaheadS).toBe(2);
+  });
+
+  it("selects ahead at most every fourth selection while selection takes over 2 ms at p95", async () => {
+    const { pass, pool, clock, selections } = await lookingAhead();
+    streamed(pass, pool, northPole(1_500));
+    // Each reading of the performance clock 3 ms after the last: every selection takes 3 ms.
+    let nowMs = 0;
+    const spy = vi.spyOn(performance, "now").mockImplementation(() => (nowMs += 3));
+    const readings: number[] = [];
+    for (let n = 1; n <= 12; n += 1) {
+      clock.ms = 100 * n;
+      const before = spy.mock.calls.length;
+      const selected = selections.length;
+      const frame = pass.frame(inputAt(movedAlong(1_500, 200 * n), 16 * n));
+      expect([frame.reselected, selections.length]).toEqual([true, selected + 1]);
+      readings.push(spy.mock.calls.length - before);
+    }
+    // Two readings for the selection's own, two more where the lookahead selects too.
+    const aheadAt = readings.flatMap((count, n) => (count === 4 ? [n] : []));
+    expect(readings.every((count) => count === 2 || count === 4)).toBe(true);
+    expect(aheadAt).toEqual([0, 4, 8]);
+    expect(LOOKAHEAD_SLOW_EVERY).toBe(4);
+  });
+
+  it("looks ahead of nothing without a clock, as the spike's frame selects", async () => {
+    const { pass, pool } = await passOn("low");
+    streamed(pass, pool, northPole(1_500));
+    const frame = pass.frame(inputAt(movedAlong(1_500, 400), 16 * 100));
+    expect(frame.reselected).toBe(true);
+    expect(pool().demand).toEqual(
+      frame.selection.demand.filter((r) => pass.resident(patchKeyString(r.key)) === undefined),
+    );
   });
 });
