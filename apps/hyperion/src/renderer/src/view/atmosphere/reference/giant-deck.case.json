@@ -150,7 +150,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 53248
     },
     {
       "name": "ground-s0-v60-a0",
@@ -168,7 +168,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 65536
     },
     {
       "name": "ground-s0-v75-a0",
@@ -186,7 +186,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 80896
     },
     {
       "name": "ground-s0-v85-a0",
@@ -204,7 +204,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 99328
     },
     {
       "name": "ground-s30-v0-a0",
@@ -222,7 +222,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 54272
     },
     {
       "name": "ground-s30-v30-a45",
@@ -240,7 +240,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 56320
     },
     {
       "name": "ground-s30-v30-a90",
@@ -258,7 +258,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 56320
     },
     {
       "name": "ground-s30-v30-a135",
@@ -276,7 +276,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 60416
     },
     {
       "name": "ground-s30-v30-a180",
@@ -294,7 +294,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 59392
     },
     {
       "name": "ground-s30-v60-a0",
@@ -312,7 +312,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 62464
     },
     {
       "name": "ground-s30-v60-a45",
@@ -330,7 +330,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 65536
     },
     {
       "name": "ground-s30-v60-a90",
@@ -348,7 +348,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 70656
     },
     {
       "name": "ground-s30-v60-a135",
@@ -366,7 +366,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 71680
     },
     {
       "name": "ground-s30-v60-a180",
@@ -384,7 +384,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 71680
     },
     {
       "name": "ground-s30-v75-a0",
@@ -402,7 +402,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 77824
     },
     {
       "name": "ground-s30-v75-a45",
@@ -420,7 +420,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 81920
     },
     {
       "name": "ground-s30-v75-a90",
@@ -438,7 +438,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 83968
     },
     {
       "name": "ground-s30-v75-a135",
@@ -456,7 +456,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 83968
     },
     {
       "name": "ground-s30-v75-a180",
@@ -474,7 +474,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 84992
     },
     {
       "name": "ground-s30-v85-a0",
@@ -492,7 +492,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 96256
     },
     {
       "name": "ground-s30-v85-a45",
@@ -510,7 +510,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 97280
     },
     {
       "name": "ground-s30-v85-a90",
@@ -528,7 +528,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 100352
     },
     {
       "name": "ground-s30-v85-a135",
@@ -546,7 +546,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 102400
     },
     {
       "name": "ground-s30-v85-a180",
@@ -564,7 +564,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 103424
     },
     {
       "name": "ground-s60-v0-a0",
@@ -582,7 +582,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 81920
     },
     {
       "name": "ground-s60-v30-a0",
@@ -600,7 +600,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 77824
     },
     {
       "name": "ground-s60-v30-a45",
@@ -618,7 +618,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 81920
     },
     {
       "name": "ground-s60-v30-a90",
@@ -636,7 +636,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 86016
     },
     {
       "name": "ground-s60-v30-a135",
@@ -654,7 +654,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 84992
     },
     {
       "name": "ground-s60-v30-a180",
@@ -672,7 +672,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 88064
     },
     {
       "name": "ground-s60-v60-a45",
@@ -690,7 +690,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 94208
     },
     {
       "name": "ground-s60-v60-a90",
@@ -708,7 +708,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 104448
     },
     {
       "name": "ground-s60-v60-a135",
@@ -726,7 +726,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 99328
     },
     {
       "name": "ground-s60-v60-a180",
@@ -744,7 +744,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 106496
     },
     {
       "name": "ground-s60-v75-a0",
@@ -762,7 +762,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 108544
     },
     {
       "name": "ground-s60-v75-a45",
@@ -780,7 +780,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 116736
     },
     {
       "name": "ground-s60-v75-a90",
@@ -798,7 +798,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 125952
     },
     {
       "name": "ground-s60-v75-a135",
@@ -816,7 +816,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 120832
     },
     {
       "name": "ground-s60-v75-a180",
@@ -834,7 +834,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 119808
     },
     {
       "name": "ground-s60-v85-a0",
@@ -852,7 +852,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 131072
     },
     {
       "name": "ground-s60-v85-a45",
@@ -870,7 +870,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 147456
     },
     {
       "name": "ground-s60-v85-a90",
@@ -888,7 +888,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 150528
     },
     {
       "name": "ground-s60-v85-a135",
@@ -906,7 +906,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 166912
     },
     {
       "name": "ground-s60-v85-a180",
@@ -924,7 +924,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 161792
     },
     {
       "name": "ground-s80-v0-a0",
@@ -942,7 +942,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 171008
     },
     {
       "name": "ground-s80-v30-a0",
@@ -960,7 +960,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 189440
     },
     {
       "name": "ground-s80-v30-a45",
@@ -978,7 +978,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 187392
     },
     {
       "name": "ground-s80-v30-a90",
@@ -996,7 +996,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 176128
     },
     {
       "name": "ground-s80-v30-a135",
@@ -1014,7 +1014,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 183296
     },
     {
       "name": "ground-s80-v30-a180",
@@ -1032,7 +1032,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 190464
     },
     {
       "name": "ground-s80-v60-a0",
@@ -1050,7 +1050,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 208896
     },
     {
       "name": "ground-s80-v60-a45",
@@ -1068,7 +1068,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 216064
     },
     {
       "name": "ground-s80-v60-a90",
@@ -1086,7 +1086,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 230400
     },
     {
       "name": "ground-s80-v60-a135",
@@ -1104,7 +1104,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 237568
     },
     {
       "name": "ground-s80-v60-a180",
@@ -1122,7 +1122,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 223232
     },
     {
       "name": "ground-s80-v75-a0",
@@ -1140,7 +1140,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 249856
     },
     {
       "name": "ground-s80-v75-a45",
@@ -1158,7 +1158,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 257024
     },
     {
       "name": "ground-s80-v75-a90",
@@ -1176,7 +1176,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 285696
     },
     {
       "name": "ground-s80-v75-a135",
@@ -1194,7 +1194,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 286720
     },
     {
       "name": "ground-s80-v75-a180",
@@ -1212,7 +1212,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 296960
     },
     {
       "name": "ground-s80-v85-a0",
@@ -1230,7 +1230,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 311296
     },
     {
       "name": "ground-s80-v85-a45",
@@ -1248,7 +1248,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 335872
     },
     {
       "name": "ground-s80-v85-a90",
@@ -1266,7 +1266,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 359424
     },
     {
       "name": "ground-s80-v85-a135",
@@ -1284,7 +1284,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 360448
     },
     {
       "name": "ground-s80-v85-a180",
@@ -1302,7 +1302,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 370688
     },
     {
       "name": "ground-s90-v0-a0",
@@ -1320,7 +1320,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 492544
     },
     {
       "name": "ground-s90-v30-a0",
@@ -1338,7 +1338,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 493568
     },
     {
       "name": "ground-s90-v30-a45",
@@ -1356,7 +1356,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 457728
     },
     {
       "name": "ground-s90-v30-a90",
@@ -1374,7 +1374,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 492544
     },
     {
       "name": "ground-s90-v30-a135",
@@ -1392,7 +1392,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 525312
     },
     {
       "name": "ground-s90-v30-a180",
@@ -1410,7 +1410,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 525312
     },
     {
       "name": "ground-s90-v60-a0",
@@ -1428,7 +1428,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 474112
     },
     {
       "name": "ground-s90-v60-a45",
@@ -1446,7 +1446,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 560128
     },
     {
       "name": "ground-s90-v60-a90",
@@ -1464,7 +1464,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 612352
     },
     {
       "name": "ground-s90-v60-a135",
@@ -1482,7 +1482,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 599040
     },
     {
       "name": "ground-s90-v60-a180",
@@ -1500,7 +1500,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 623616
     },
     {
       "name": "ground-s90-v75-a0",
@@ -1518,7 +1518,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 599040
     },
     {
       "name": "ground-s90-v75-a45",
@@ -1536,7 +1536,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 608256
     },
     {
       "name": "ground-s90-v75-a90",
@@ -1554,7 +1554,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 688128
     },
     {
       "name": "ground-s90-v75-a135",
@@ -1572,7 +1572,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 699392
     },
     {
       "name": "ground-s90-v75-a180",
@@ -1590,7 +1590,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 694272
     },
     {
       "name": "ground-s90-v85-a0",
@@ -1608,7 +1608,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 740352
     },
     {
       "name": "ground-s90-v85-a45",
@@ -1626,7 +1626,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 750592
     },
     {
       "name": "ground-s90-v85-a90",
@@ -1644,7 +1644,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 859136
     },
     {
       "name": "ground-s90-v85-a135",
@@ -1662,7 +1662,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 816128
     },
     {
       "name": "ground-s90-v85-a180",
@@ -1680,7 +1680,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 14336
+      "samples": 871424
     },
     {
       "name": "ground-s95-v0-a0",
@@ -1698,7 +1698,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 12288
+      "samples": 552960
     },
     {
       "name": "ground-s95-v30-a0",
@@ -1716,7 +1716,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 540672
     },
     {
       "name": "ground-s95-v30-a45",
@@ -1734,7 +1734,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 506880
     },
     {
       "name": "ground-s95-v30-a90",
@@ -1752,7 +1752,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 12288
+      "samples": 573440
     },
     {
       "name": "ground-s95-v30-a135",
@@ -1770,7 +1770,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 520192
     },
     {
       "name": "ground-s95-v30-a180",
@@ -1788,7 +1788,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 581632
     },
     {
       "name": "ground-s95-v60-a0",
@@ -1806,7 +1806,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 12288
+      "samples": 593920
     },
     {
       "name": "ground-s95-v60-a45",
@@ -1824,7 +1824,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 619520
     },
     {
       "name": "ground-s95-v60-a90",
@@ -1842,7 +1842,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 12288
+      "samples": 638976
     },
     {
       "name": "ground-s95-v60-a135",
@@ -1860,7 +1860,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 575488
     },
     {
       "name": "ground-s95-v60-a180",
@@ -1878,7 +1878,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 718848
     },
     {
       "name": "ground-s95-v75-a0",
@@ -1896,7 +1896,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 687104
     },
     {
       "name": "ground-s95-v75-a45",
@@ -1914,7 +1914,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 714752
     },
     {
       "name": "ground-s95-v75-a90",
@@ -1932,7 +1932,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 759808
     },
     {
       "name": "ground-s95-v75-a135",
@@ -1950,7 +1950,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 775168
     },
     {
       "name": "ground-s95-v75-a180",
@@ -1968,7 +1968,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 848896
     },
     {
       "name": "ground-s95-v85-a0",
@@ -1986,7 +1986,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 900096
     },
     {
       "name": "ground-s95-v85-a45",
@@ -2004,7 +2004,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 856064
     },
     {
       "name": "ground-s95-v85-a90",
@@ -2022,7 +2022,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 677888
     },
     {
       "name": "ground-s95-v85-a135",
@@ -2040,7 +2040,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 832512
     },
     {
       "name": "ground-s95-v85-a180",
@@ -2058,7 +2058,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 827392
     },
     {
       "name": "disc-p0",
@@ -2076,7 +2076,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 56320
     },
     {
       "name": "disc-p30",
@@ -2094,7 +2094,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 59392
     },
     {
       "name": "disc-p60",
@@ -2112,7 +2112,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 91136
     },
     {
       "name": "disc-p75",
@@ -2130,7 +2130,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 149504
     },
     {
       "name": "disc-p85",
@@ -2148,7 +2148,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 247808
     },
     {
       "name": "limb-0.1H",
@@ -2166,7 +2166,7 @@
           "azimuthDeg": 83.98335082796933
         }
       ],
-      "samples": 1024
+      "samples": 51200
     },
     {
       "name": "limb-0.3H",
@@ -2184,7 +2184,7 @@
           "azimuthDeg": 84.00421449915046
         }
       ],
-      "samples": 1024
+      "samples": 57344
     },
     {
       "name": "limb-1H",
@@ -2202,7 +2202,7 @@
           "azimuthDeg": 84.0778532213132
         }
       ],
-      "samples": 1024
+      "samples": 50176
     },
     {
       "name": "limb-3H",
@@ -2220,7 +2220,7 @@
           "azimuthDeg": 84.29381346012494
         }
       ],
-      "samples": 1024
+      "samples": 57344
     },
     {
       "name": "limb-10H",
@@ -2238,7 +2238,7 @@
           "azimuthDeg": 85.12896063727588
         }
       ],
-      "samples": 1024
+      "samples": 98304
     },
     {
       "name": "aerial-1km",
@@ -2257,7 +2257,7 @@
         }
       ],
       "maxDistanceM": 1000,
-      "samples": 1024
+      "samples": 249856
     },
     {
       "name": "aerial-10km",
@@ -2276,7 +2276,7 @@
         }
       ],
       "maxDistanceM": 10000,
-      "samples": 1024
+      "samples": 240640
     },
     {
       "name": "aerial-32km",
@@ -2295,7 +2295,7 @@
         }
       ],
       "maxDistanceM": 32000,
-      "samples": 1024
+      "samples": 244736
     }
   ],
   "aggregates": [
@@ -2308,7 +2308,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 47104
     },
     {
       "name": "flux-s30",
@@ -2319,7 +2319,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 50176
     },
     {
       "name": "flux-s60",
@@ -2330,7 +2330,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 70656
     },
     {
       "name": "flux-s80",
@@ -2341,7 +2341,7 @@
           "azimuthDeg": 0
         }
       ],
-      "samples": 1024
+      "samples": 153600
     }
   ]
 }
