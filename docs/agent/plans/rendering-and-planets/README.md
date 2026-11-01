@@ -119,12 +119,15 @@ project had no discrete GPU; both are corrected here and in the plans.
   generation, an i7-8665U with its Intel UHD Graphics 620 (Whiskey Lake-U GT2, Gen9.5) and 16 GB of
   LPDDR3 shared by the CPU and the GPU, on Mesa's ANV (R12 Design note 11 and "What exists today").
   The owner tests it by hand, later.
-- **The owner's Mac** (added 2026-11-01 for [R14](14-virtualized-geometry.md); by hand): an Apple
-  Silicon M-class Mac, Metal through WebGPU in Electron. Its chip and GPU cores, unified memory,
-  macOS, display and device-pixel ratio and Electron version are recorded here before R14.T1's
-  first owner run, and each Mac record names this entry. The owner's report (2026-11-01): a planet
-  with terrain and atmosphere at 1 fps or lower; the target 30 fps on high and 60 on low at
-  1920 × 1080 (`diag-frame-cost`, R14), a miss being a finding. Its memory ceiling is the discrete
+- **The owner's Mac** (added 2026-11-01 for [R14](14-virtualized-geometry.md); by hand; checked
+  2026-11-01): a fanless MacBook Air (Mac17,3) with an Apple M5, 10 CPU cores (4 performance, 6
+  efficiency) and an 8-core GPU, Metal 4 through WebGPU in Electron 45.1.0 (Chromium 156); 16 GB of
+  unified memory; macOS 26.7.1; the built-in Liquid Retina display, 2560 × 1664 at a device-pixel
+  ratio of 2. Each Mac record names this entry. The owner's report (2026-11-01): a planet with
+  terrain and atmosphere at 1 fps or lower. The target: 30 fps on high under the frame-rate floor
+  and low at its paced 30 fps, at 1920 × 1080 (`diag-frame-cost`, R14; research-frame-leans §2), a
+  miss being a finding. The first hidden profile at a device-pixel ratio of 1 (owner-test,
+  2026-11-01): high 20 fps from orbit and 12 close in at the floor's lowest step, low 30. Its memory ceiling is the discrete
   target's until measured (a lean). No machine runs Windows (D3D12): it is held to builds and lints.
 
 By-hand GPU checks (the three canvases, the soaks, the adapter, the benchmarks, the discrete
