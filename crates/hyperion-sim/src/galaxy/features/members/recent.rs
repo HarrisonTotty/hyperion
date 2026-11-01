@@ -14,7 +14,8 @@
 //!   initial mass and age lie in the envelope (`Candidates`) of those a lifetime bracket
 //!   ([`LifetimeBracket::shared`]) can put a death of in the interval. A candidate draws its mass
 //!   in the envelope by the galaxy's mass function and its age uniformly, and the one shared test
-//!   decides it: plan 08's [`death_in_interval`] on its own marks, then [`DeathMarks::of`] and
+//!   decides it: plan 08's [`death_in_interval`] on its own marks under its galaxy's stellar rules,
+//!   as its stars are (`death_in_interval_under`), then [`DeathMarks::of`] and
 //!   [`claims`] in the feature's surroundings, the nursery's superbubble at the death
 //!   ([`ShellEnvironment::Bubble`], the window ended at the wall) where the site lies in one, the
 //!   field's otherwise.
@@ -58,8 +59,10 @@ use crate::galaxy::catalogue_classes::supernova::{
     BubbleInterior, DeathMarks, SupernovaInterval, Surroundings, claimed_window, claims,
 };
 use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
+#[cfg(doc)]
+use crate::galaxy::displaced::death_in_interval;
 use crate::galaxy::displaced::marks::LifetimeBracket;
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::features::catalogue::{FeatureMarks, FeatureRecord, bulk_velocity};
 use crate::galaxy::features::cluster::PLUMMER_HALF_MASS_RATIO;
 use crate::galaxy::features::ids::PackedFeature;
@@ -90,11 +93,10 @@ use super::level_list::ListClass;
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
 /// [`FeatureClassesRules::Unlisted`], the code of version 25 verbatim: no class is registered on a
 /// feature's list and the cells claim nothing. The tests reach the new arm through a galaxy built
-/// under every 26 hold but the Humphreys–Davidson limit
-/// (`GalaxyRules::every_26_hold_but_the_hd_limit`; plan 09's record). The bump to 26 deletes this
-/// hold, [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the
-/// `match`es in [`FeatureStars::listing`], [`FeatureStars::claiming`] and the centre's list, and
-/// the tripwire (`the_feature_classes_are_held_only_until_the_26_bump`).
+/// under every 26 hold (`GalaxyRules::every_26_hold`). The bump to 26 deletes this hold,
+/// [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the `match`es
+/// in [`FeatureStars::listing`], [`FeatureStars::claiming`] and the centre's list, and the tripwire
+/// (`the_feature_classes_are_held_only_until_the_26_bump`).
 pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
 
 /// Whether catalogue features list their recently dead (the hold of [`FEATURE_CLASSES_VERSION`]).
@@ -584,12 +586,13 @@ impl FeatureStars {
         composition: &Composition,
         velocity: GalacticVelocity,
     ) -> Option<(ShellWindow, ExplosionSite)> {
-        let death = death_in_interval(
+        let death = death_in_interval_under(
             record.primary_initial_mass(),
             composition,
             primary_eta(galaxy, record),
             record.age_at_epoch(),
             || primary_draws(galaxy, record),
+            galaxy.rules().stellar,
         )?;
         let site = ExplosionSite::new(moved(record.epoch_position(), velocity, death), death);
         let stars = SystemStars::generate_with(

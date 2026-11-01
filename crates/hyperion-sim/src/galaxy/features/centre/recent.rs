@@ -40,7 +40,7 @@ use crate::galaxy::catalogue_classes::supernova::{
     DeathMarks, SupernovaInterval, Surroundings, claimed_window,
 };
 use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::features::interior::{ClassProfile, ProfileShape};
 use crate::galaxy::features::members::recent::{
     Candidates, FeatureClassesRules, RecentClass, moved, uniform_ages,
@@ -431,12 +431,13 @@ fn claim_at_centre(
             MultiplicityContext::ForcedSingle,
         )
     };
-    if let Some(death) = death_in_interval(
+    if let Some(death) = death_in_interval_under(
         record.primary_initial_mass(),
         composition,
         primary_eta(galaxy, record),
         record.age_at_epoch(),
         || primary_draws(galaxy, record),
+        galaxy.rules().stellar,
     ) {
         let site = ExplosionSite::new(moved(record.epoch_position(), velocity, death), death);
         if let Some(window) = DeathMarks::of(galaxy, &stars(), &site, velocity)

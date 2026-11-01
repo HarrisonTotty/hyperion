@@ -34,9 +34,9 @@ use crate::time::UniverseTime;
 /// The seed of the tests' Milky Way.
 const SEED: u64 = 0x0935_0000_0000_0001;
 
-/// Every 26 hold but the Humphreys–Davidson limit (`GalaxyRules::every_26_hold_but_the_hd_limit`).
+/// Every 26 hold, the Humphreys–Davidson limit's included (`GalaxyRules::every_26_hold`).
 fn rules_26() -> GalaxyRules {
-    GalaxyRules::every_26_hold_but_the_hd_limit()
+    GalaxyRules::every_26_hold()
 }
 
 /// The Milky Way at [`SEED`] under `rules`, with its kinematic tables, which a list needs.
@@ -697,13 +697,13 @@ fn centre_tally(galaxy: &Galaxy) -> Tally {
 
 /// P09.T36.a's census of the sampled Milky Way under every 26 hold, each side's deaths counted
 /// in the source horizon, (−(L + H), +H], where every side is seen at its rate whatever its
-/// windows: the features' core collapses against the field's class and the centre's, 0.839 of
-/// them (3,570 of 4,256), in the plan's 0.7–0.9 (ruling 118.2); and the features' shells at the
+/// windows: the features' core collapses against the field's class and the centre's, 0.838 of
+/// them (3,618 of 4,320), in the plan's 0.7–0.9 (ruling 118.2); and the features' shells at the
 /// epoch, core collapses and Type Ia, against every distinct shell of the field's two classes, the
-/// features' and the centre's, 0.442 of 8,617, against the plan's 0.15–0.35: pinned to 10⁻³ as
-/// measured and logged, not tuned (a finding: 3,597 of the features' 7,569 core-collapse entries
-/// are still shells at the epoch, each ended at its bubble's wall, against 1,718 of the field's
-/// 2,433).
+/// features' and the centre's, 0.446 of 8,735, against the plan's 0.15–0.35: pinned to 10⁻³ as
+/// measured and logged, not tuned (a finding: 3,686 of the features' 7,726 core-collapse entries
+/// are still shells at the epoch, each ended at its bubble's wall, against 1,747 of the field's
+/// 2,470).
 #[test]
 #[ignore = "slow: every catalogue feature's list and two classes' cells of the Milky Way"]
 fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
@@ -731,7 +731,7 @@ fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
     );
     assert!((0.7..=0.9).contains(&in_features), "{in_features}");
     assert!(
-        (features_shells / 0.4418 - 1.0).abs() < 1e-3,
+        (features_shells / 0.4460 - 1.0).abs() < 1e-3,
         "{features_shells}"
     );
 }

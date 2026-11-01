@@ -23,11 +23,11 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
     Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules).unwrap()
 }
 
-/// The Milky Way under every 26 hold but the Humphreys–Davidson limit
-/// (`GalaxyRules::every_26_hold_but_the_hd_limit`): the classes listed and the cells' claim.
+/// The Milky Way under every 26 hold (`GalaxyRules::every_26_hold`): the classes listed and the
+/// cells' claim.
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold_but_the_hd_limit()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold()))
 }
 
 /// The same galaxy under the held arm of P09.T36's hold.
@@ -36,7 +36,7 @@ fn held() -> &'static Galaxy {
     GALAXY.get_or_init(|| {
         milky_way(GalaxyRules {
             feature_classes: FeatureClassesRules::Unlisted,
-            ..GalaxyRules::every_26_hold_but_the_hd_limit()
+            ..GalaxyRules::every_26_hold()
         })
     })
 }
@@ -52,12 +52,12 @@ fn young(component: u8) -> bool {
 }
 
 /// A handful at the centre at Milky Way values (P09.T36.b): its list's classes start past its
-/// victims, at N + 1 (30), in Design note 16's order, and the classes' tests keep 18 of its 565
-/// candidates, in 1–20 (pinned as measured: 18 core collapses, none of the 11.3 Type Ia expected,
-/// of whose candidates about 13% keep a window, and none of the 23.6 variables'); each kept entry
-/// resolves to its member bit for bit,
-/// with a site and a window for a death; a rejected candidate and every index past the victims
-/// under the held arm resolve to "no such system", and the victims stay.
+/// victims, at N + 1 (30), in Design note 16's order, and the classes' tests keep 17 of its 565
+/// candidates, in 1–20 (pinned as measured under every 26 hold: 17 core collapses, none of the
+/// 11.3 Type Ia expected, of whose candidates about 13% keep a window, and none of the 23.6
+/// variables'); each kept entry resolves to its member bit for bit, with a site and a window for a
+/// death; a rejected candidate and every index past the victims under the held arm resolve to "no
+/// such system", and the victims stay.
 #[test]
 fn the_centre_lists_a_handful_past_its_victims() {
     let (off, on) = (held(), listed());
@@ -100,7 +100,7 @@ fn the_centre_lists_a_handful_past_its_victims() {
         recent.expected()
     );
     assert!((1..=20).contains(&total), "{total}");
-    assert_eq!(total, 18);
+    assert_eq!(total, 17);
     let model_off = off.centre().unwrap();
     assert_eq!(
         CentreRecent::new(off, model_off, victims).expected(),
@@ -121,10 +121,9 @@ fn the_centre_lists_a_handful_past_its_victims() {
 
 /// The digest (`f64_digest`) of the centre's kept entries ([`the_centre_s_entries_are_pinned`]):
 /// each one's ID (high, low 32 bits), class, initial mass, age, local position, velocity, death
-/// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it. Re-pinned
-/// at generator version 25 (it was `0x7cab_4603_6e07_3ab0` at 24): the train's potential, kicks
-/// and centre move the entries.
-const CENTRE_ENTRIES_DIGEST: u64 = 0xa284_4a2c_2170_ca98;
+/// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it. Pinned at
+/// generator version 25 under every 26 hold (P09.T36's tests).
+const CENTRE_ENTRIES_DIGEST: u64 = 0xa3c7_dc59_2d18_529d;
 
 /// The centre's entries' bits, pinned before the bump, each the member its ID resolves to in any
 /// order.

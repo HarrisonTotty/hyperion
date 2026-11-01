@@ -5421,24 +5421,22 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     The centre's cells are not walked: at 24 a neutron-star class of the young burst exhausts its
     attempts (`draw_centre_member`'s debug assertion; a finding), so its test draws 10⁴ mark sets
     as the list does.
-  - _Counts (seed `0x0935_0000_0000_0001`, Milky Way; deaths in (−(L + H), +H] on every side)._
-    Features: 0.839 of the core collapses (3,570 of 4,256), in 0.7–0.9. 0.442 of the 8,617
-    distinct shells, against 0.15–0.35: a finding, pinned. Globulars: 0.139 Type Ia expected, in
-    0.1–0.5, listed with no window over the horizon. Centre: 29 victims, then 565 candidates (534
-    core collapses, 11.3 Type Ia, 23.6 variables), 18 kept. The new arm's entries are pinned by
-    digest (`ENTRIES_DIGEST`, `CENTRE_ENTRIES_DIGEST`).
+  - _Counts (seed `0x0935_0000_0000_0001`, Milky Way, under the full `every_26_hold()`; deaths in
+    (−(L + H), +H] on every side)._ Features: 0.838 of the core collapses (3,618 of 4,320), in
+    0.7–0.9. 0.446 of the 8,735 distinct shells, against 0.15–0.35: a finding, pinned. Globulars:
+    0.139 Type Ia expected, in 0.1–0.5, listed with no window over the horizon. Centre: 29
+    victims, then 565 candidates (534 core collapses, 11.3 Type Ia, 23.6 variables), 17 kept. The
+    new arm's entries are pinned by digest (`ENTRIES_DIGEST`, `CENTRE_ENTRIES_DIGEST`).
   - _Leans (2026-10-31)._ No new tag: the entries read `member.mass`, `member.position`,
     `centre.velocity` and `class.type_ia.*`, keyed by their list IDs. The centre carves band E
     only: it draws no binary a Type Ia could come from, until plan 11 draws the centre's binaries.
     A single age is widened to 10³ yr for the delay draw. `CentreListForecast::recent` counts the
     classes at their bound under both arms (a check with no caller yet; the cap still leaves
     44,537.4 indices, the 10³ seeds' worst 44,498.7).
-  - _Blocker._ `every_26_hold()`'s Humphreys–Davidson limit (P06.T42.b) moves massive tracks but
-    not `death_in_interval`'s tables, so `DeathMarks::of`'s debug assertion fires: T35's four
-    `carve_out_hold` claim tests and T2.c's `the_young_field_s_ages_follow_one_less_phi` fail on
-    the tip. T36's tests run under `GalaxyRules::every_26_hold_but_the_hd_limit()` until the 26
-    refit (P06.T42.b's tripwire) puts the fate tables and `LifetimeBracket` under the limit. The
-    bump re-measures every pinned figure under `every_26_hold()`.
+  - _The HD limit (2026-11-01)._ Both lists ask the predicate under their galaxy's stellar rules
+    (`death_in_interval_under`, 4ad2009), as their stars are, and T36's tests run under the full
+    `every_26_hold()`; `every_26_hold_but_the_hd_limit` is gone. The limit moved the centre's
+    kept from 18 to 17 and the census from 0.839 and 0.442; the figures above are its.
   - _Bump._ 26 deletes `FEATURE_CLASSES_VERSION`, `FeatureClassesRules`' `Unlisted` arm, the field,
     the `match`es in `FeatureStars::listing`, `FeatureStars::claiming`, `CentreRecent::new`,
     `recent_member` and `centre_cells_claim`, and the tripwire

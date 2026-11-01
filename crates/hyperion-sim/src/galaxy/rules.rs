@@ -126,23 +126,6 @@ impl GalaxyRules {
     pub(crate) const fn every_26_hold() -> Self {
         Self::of_version(GeneratorVersion::new(26))
     }
-
-    /// Every 26 hold but the stellar rules' Humphreys–Davidson limit (P06.T42.b), which moves a
-    /// massive star's track while plan 08's interval predicate and the fitted tables it reads keep
-    /// the version's rules until the bump refits them, so that the one shared test and the star's
-    /// own death part: the recently dead's figures under every other 26 hold (P09.T36's tests).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn every_26_hold_but_the_hd_limit() -> Self {
-        let every = Self::every_26_hold();
-        Self {
-            stellar: StellarRules {
-                hd_limit: StellarRules::of_version(crate::GENERATOR_VERSION).hd_limit,
-                ..every.stellar
-            },
-            ..every
-        }
-    }
 }
 
 #[cfg(test)]
