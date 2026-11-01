@@ -85,6 +85,18 @@ describe("useInterimStars", () => {
     ]);
   });
 
+  it("keeps one merged field across renders while its answers stand (the owner's report)", async () => {
+    const { socket, result, rerender } = renderStars();
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) => oneStar(body, 4.8));
+    });
+    const field = result.current.field;
+    rerender({ ...INPUT });
+    rerender({ ...INPUT });
+    expect([field?.stars.length, result.current.field]).toEqual([1, field]);
+    expect(result.current.field).toBe(field);
+  });
+
   it("asks nothing while the system's position is not known", () => {
     const { socket, result } = renderStars({ ...INPUT, centre: null });
     expect([socket.requestsOfKind("systems_in_range").length, result.current]).toEqual([

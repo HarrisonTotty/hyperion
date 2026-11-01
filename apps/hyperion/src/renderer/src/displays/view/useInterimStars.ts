@@ -5,7 +5,7 @@ import type {
   UniverseIdHex,
   UniverseTime,
 } from "@hyperion/protocol";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import {
@@ -56,6 +56,11 @@ function arrivalAt(input: InterimStarsInput): Arrival {
   };
 }
 
+/** A query's answer once it has one, or `null`. */
+function answerOf(state: RequestState<"systems_in_range">): SystemsInRange | null {
+  return state.kind === "ok" ? state.response : null;
+}
+
 /**
  * The interim star field (plan R02, R02.T16.a): the four `systems_in_range` queries of Design note
  * 19 about the scene's system, with the briefs, at the server's limit of 20,000, merged by ID.
@@ -89,12 +94,11 @@ export function useInterimStars(input: InterimStarsInput): InterimStars {
         }),
   );
   // Four queries, always four, so that the hooks are called in the same order every render.
-  const states: ReadonlyArray<RequestState<"systems_in_range">> = [
-    useServerRequest<"systems_in_range">(bodies[0] ?? null),
-    useServerRequest<"systems_in_range">(bodies[1] ?? null),
-    useServerRequest<"systems_in_range">(bodies[2] ?? null),
-    useServerRequest<"systems_in_range">(bodies[3] ?? null),
-  ];
+  const stateE = useServerRequest<"systems_in_range">(bodies[0] ?? null);
+  const stateD = useServerRequest<"systems_in_range">(bodies[1] ?? null);
+  const stateC = useServerRequest<"systems_in_range">(bodies[2] ?? null);
+  const stateA = useServerRequest<"systems_in_range">(bodies[3] ?? null);
+  const states: ReadonlyArray<RequestState<"systems_in_range">> = [stateE, stateD, stateC, stateA];
 
   // A floor left out over the limit asks once more, adjusted during render as an answer arrives.
   const retryAt = states.map((state, index) => {
@@ -115,12 +119,26 @@ export function useInterimStars(input: InterimStarsInput): InterimStars {
     });
   }
 
-  const answers: SystemsInRange[] = states.flatMap((state) =>
-    state.kind === "ok" ? [state.response] : [],
-  );
-  if (answers.length === 0 || centre === null) {
+  // The merge of up to four answers of 20,000 rows each is made again only when an answer, the
+  // centre or the system changes, not at each of the display's renders (the owner's report,
+  // 2026-11-01: about 3 ms a render on the pod's CPU, at the readouts' 4 Hz and between).
+  const answerE = answerOf(stateE);
+  const answerD = answerOf(stateD);
+  const answerC = answerOf(stateC);
+  const answerA = answerOf(stateA);
+  // The arrival held in state: a render that has just changed it is thrown away and made again
+  // with it, so its own field is never shown.
+  const { centre: heldCentre, system: heldSystem } = arrival;
+  const field = useMemo(() => {
+    const answers = [answerE, answerD, answerC, answerA].flatMap((answer) =>
+      answer === null ? [] : [answer],
+    );
+    return answers.length === 0 || heldCentre === null
+      ? null
+      : interimField(answers, heldCentre, heldSystem);
+  }, [answerE, answerD, answerC, answerA, heldCentre, heldSystem]);
+  if (field === null) {
     return { field: null, countLine: null };
   }
-  const field = interimField(answers, centre, current.system);
   return { field, countLine: interimCountLine(field, current.radiiLy) };
 }
