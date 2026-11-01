@@ -308,7 +308,9 @@ fn drawing_the_lists_runs_no_engine() {
 }
 
 /// The scan marks of 10⁶ listed hosts, an old open cluster's accreting white dwarfs, are drawn
-/// with no call into the binary engine.
+/// with no call into the binary engine. Under every 27 hold the fast side's scan refuses a host
+/// fed helium (P11.T5's fix, `AwdProcess::has_no_nova`), about the fitted fast donor kinds' 4.2%;
+/// the rest it keeps but a few tenths of a per cent.
 #[test]
 #[ignore = "slow: 10⁶ listed hosts' scan marks"]
 fn a_million_listed_hosts_scan_marks_run_no_engine() {
@@ -327,21 +329,27 @@ fn a_million_listed_hosts_scan_marks_run_no_engine() {
     let before = engine_calls();
     let mut hosts = 0_u32;
     let mut kept = 0_u32;
+    let mut fed_helium = 0_u32;
     'hosts: for feature_ref in refs {
         for index in 1..=8_191_u16 {
             let id = FeatureMemberId::new(feature_ref, MemberSlot::FeatureLevel { index }).unwrap();
             let host =
                 BinaryHost::listed(SystemId::from(id), *feature.position(), *binaries.host());
-            kept += u32::from(awd_marks_at(galaxy, &process, host).is_some());
+            if awd_marks_at(galaxy, &process, host).is_some() {
+                kept += 1;
+            } else {
+                fed_helium += u32::from(process.has_no_nova(galaxy, host.key()));
+            }
             hosts += 1;
             if hosts == 1_000_000 {
                 break 'hosts;
             }
         }
     }
+    println!("{kept} of {hosts} listed fast hosts kept, {fed_helium} refused as fed helium");
     assert_eq!(hosts, 1_000_000);
     assert_eq!(engine_calls(), before);
-    assert!(kept > 990_000, "{kept}");
+    assert!(kept + fed_helium > 990_000, "{kept} + {fed_helium}");
 }
 
 /// Budgets: for each class and population, the catalogue's expected hosts and the features' share
