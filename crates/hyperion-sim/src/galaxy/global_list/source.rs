@@ -48,6 +48,9 @@
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
+#[cfg(doc)]
+use crate::galaxy::features::interior::MemberClassTable;
+
 use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
@@ -132,8 +135,8 @@ impl GlobalListModels {
     /// The models of `list`, `galaxy`'s global list: every dwarf core's
     /// ([`DwarfCoreModel::from_spec`]), and no stream's shares until a query reaches it.
     ///
-    /// Each core's model costs a millisecond or so (the 25 or so of a Milky Way galaxy, 3.8 ms in
-    /// all), so a server builds it off its runtime.
+    /// The cores' models of the server tests' galaxy take 3.8 ms together (measured 2026-11-01,
+    /// pod, 16 vCPU), so a server builds them off its runtime.
     ///
     /// # Panics
     ///
@@ -159,8 +162,7 @@ impl GlobalListModels {
     }
 
     /// The bytes it owns on the heap, by its buffers' capacities and each core's class table's
-    /// ([`MemberClassTable::heap_bytes`](crate::galaxy::features::interior::MemberClassTable::heap_bytes)):
-    /// what a byte-bounded cache charges it.
+    /// ([`MemberClassTable::heap_bytes`]): what a byte-bounded cache charges it.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.cores.capacity() * size_of::<Option<DwarfCoreModel>>()

@@ -16,7 +16,9 @@
 //!    With its feature cells held, that is the plan with the sources, as a warm query plans once;
 //!    otherwise it is the plan without them, which holds every cell and layer the plan with them
 //!    walks ([`RangePlan::with_sources`]), since the sources' counts need the cells being
-//!    generated. If none is worth generating ahead, it walks there and then.
+//!    generated. If none is worth generating ahead, it walks there and then, without listing the
+//!    class cells: a query whose feature cells are held and whose grid is warm was asked before,
+//!    with its class cells.
 //! 2. Otherwise the cells it found lacking, every kind at once, are shared out among jobs, about
 //!    three for each worker: the sources' jobs read the feature cells and make the class cells
 //!    into the shared caches, and the grid's generate theirs into the cell cache and walk each as
@@ -76,12 +78,6 @@ const AHEAD_FEATURE_CELLS: usize = 2;
 /// a grid cell near the Sun takes (1,732 in 7.6 ms, lane measurements of 2026-10-30), where a
 /// round of jobs costs some tens of microseconds; fewer would cost more than they save.
 const AHEAD_GRID_CELLS: usize = 64;
-
-/// The fewest class cells worth making ahead of a query: 16, some 0.2 ms at the 12 µs a class cell
-/// about the Sun-like point takes on average under every 27 hold (8,720 in 105 ms, measured
-/// 2026-11-01, pod, 16 vCPU), several rounds of jobs. A core collapse's cell with candidates in the
-/// disc can take a millisecond.
-const AHEAD_CLASS_CELLS: usize = 16;
 
 /// The grid's cell jobs for each worker: two, smaller than a feature cell's, to fill the workers
 /// the feature cells leave idle. Two to six took the Sun-like 50 ly query the same time cold, 4.6
@@ -518,16 +514,18 @@ where
             Planned::WithoutSources => RangePlan::new(galaxy, &[], query),
         };
         let grid = lacking_grid_cells(&caches.cells, key, &plan);
-        let classes = lacking_class_cells(caches, served, &plan);
         // Nothing worth generating ahead is lacking only where the plan was made with the
-        // sources, and so is the walk's.
+        // sources, and so is the walk's. Such a query, its feature cells held and its grid warm,
+        // was asked before, and its class cells with it, so they are not listed: some 8,700 about
+        // the Sun-like point, 0.28 ms of a warm query's 4.5 (measured 2026-11-01, pod, 16 vCPU).
+        // Any its hits lack, evicted since, they make.
         if let Planned::WithSources = planned
             && grid.len() < AHEAD_GRID_CELLS
-            && classes.len() < AHEAD_CLASS_CELLS
         {
             let result = plan.run(galaxy, &mut caches.cells.handle(key), sources);
             return Asked::Answered(answer(galaxy, result, reads));
         }
+        let classes = lacking_class_cells(caches, served, &plan);
         // A feature cell read through more processes costs more, a whole one near the Sun some
         // 0.65 ms against 0.1 ms through the clusters alone, so they are dealt out from the
         // fullest.

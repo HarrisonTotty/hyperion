@@ -17,8 +17,9 @@
 //! - **Hits.** The class's cells whose entries can lie in the sphere at any time
 //!   ([`cells_in_sphere`], padded by the class's reach of 4,096 ly, which bounds every member's
 //!   travel over its entry's lifetime, so no layer's walk pad applies: a Type Ia's survivor, which
-//!   outruns layer D's, is found as its record asks) that draw any candidate ([`occupied_cells`](super::occupied_cells)),
-//!   each candidate kept as the cell keeps it, and each member a system ([`ClassProcess::system`])
+//!   outruns layer D's, is found as its record asks) that draw any candidate
+//!   ([`occupied_cells`](super::occupied_cells)), each candidate kept as the cell keeps it, and
+//!   each member a system ([`ClassProcess::system`])
 //!   tested at the sphere's time. A class that reads its candidates' place first
 //!   ([`ClassProcess::epoch_place`], the grid's rule 11) has only those built whose place lies
 //!   within the sphere padded at plan 03's [`PAD_SPEED`] (P09.T40): its members move from there
@@ -214,9 +215,9 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
     /// documentation, "Hits"), about the sphere the range query asks its sources about.
     ///
     /// They are what a server makes ahead of the query on several threads
-    /// ([`CachedClassSource::read_ahead`]; P09.T37's bench). A census that admits fewer layers reads
-    /// only some of them, so the layers of a plan made without the sources, which hold the plan's
-    /// with them (`RangePlan::with_sources`), give every cell the query reads.
+    /// ([`CachedClassSource::read_ahead`]; P09.T37's bench). A census that admits fewer layers
+    /// reads only some of them, so the layers of a plan made without the sources, which hold the
+    /// plan's with them (`RangePlan::with_sources`), give every cell the query reads.
     ///
     /// # Examples
     ///
@@ -370,8 +371,7 @@ impl ClassCellSystems {
 
     /// The systems of cell `key` of `process`'s class (module documentation, "Hits"): one bound
     /// for the cell, as [`occupied_cells`](super::occupied_cells) takes it, and each entry kept
-    /// under it
-    /// ([`entry_systems_in`]), as its members' resolves would keep it.
+    /// under it ([`entry_systems_in`]), as its members' resolves would keep it.
     #[must_use]
     fn of<P: ClassProcess>(galaxy: &Galaxy, process: &P, key: CatalogueCellKey) -> Self {
         assert_eq!(

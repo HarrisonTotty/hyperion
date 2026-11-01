@@ -14,6 +14,8 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
+#[cfg(doc)]
+use hyperion_sim::galaxy::catalogue_classes::CachedClassSource;
 use hyperion_sim::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
 };
@@ -84,9 +86,9 @@ impl SharedClassCellCache {
     }
 
     /// Makes the systems of each of `cells` of `galaxy`, the galaxy `key` names, as a query's hits
-    /// make them ([`CachedClassSource::read_ahead`](hyperion_sim::galaxy::catalogue_classes::CachedClassSource::read_ahead)),
-    /// and stores them [`MADE_CHUNK_CELLS`] at a time, each chunk under one hold of the cache's
-    /// lock: how a served query's jobs make its class cells ahead of its hits, several at once
+    /// make them ([`CachedClassSource::read_ahead`]), and stores them [`MADE_CHUNK_CELLS`] at a
+    /// time, each chunk under one hold of the cache's lock: how a served query's jobs make its
+    /// class cells ahead of its hits, several at once
     /// ([`served_range_query`](super::served_range_query)). A cell held already is made again and
     /// replaced by its equal; one larger than the whole budget is dropped.
     ///
