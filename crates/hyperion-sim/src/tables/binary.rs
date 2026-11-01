@@ -168,7 +168,7 @@ pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
     ],
 };
 
-/// The delay bins of [`IaYieldTable`]: those of [`DELAY_EDGES`], plan 15's.
+/// The number of delay bins of [`IaYieldTable`]: those of [`DELAY_EDGES`], plan 15's.
 pub const IA_DELAY_BINS: usize = DELAY_EDGES.len() - 1;
 
 /// The Type Ia explosion mark's yield (plan 11's Provides; P11.T6): η, the share of the binary
@@ -215,15 +215,24 @@ impl IaYieldTable {
     }
 
     /// η of a candidate pooled `delay` after its stars formed, by `channel`: its bin of
-    /// [`DELAY_EDGES`], a delay outside the edges in the end bin on its side.
+    /// [`DELAY_EDGES`] ([`ia_delay_bin`]), a delay outside the edges in the end bin on its side.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `delay` is negative or NaN, which no pooled candidate's is.
     #[must_use]
     pub fn eta(&self, delay: Years, channel: IaPoolChannel) -> f64 {
+        debug_assert!(
+            delay.value() >= 0.0,
+            "a pooled candidate's delay, {delay:?}"
+        );
         self.eta_in(ia_delay_bin(delay), channel)
     }
 }
 
-/// The bin of [`DELAY_EDGES`] holding `delay`, the ends held: the first bin below 40 Myr, which no
-/// white dwarf reaches, and the last beyond the Hubble time.
+/// The bin of [`DELAY_EDGES`] holding `delay`, a lower edge in its own bin and the ends held: the
+/// first bin for a delay below the first edge, 42.55 Myr, which no white dwarf reaches, and for a
+/// NaN delay; the last at and beyond the last edge, the Hubble time.
 #[must_use]
 pub fn ia_delay_bin(delay: Years) -> usize {
     DELAY_EDGES
@@ -2087,6 +2096,15 @@ mod tests {
         assert_eq!(ia_delay_bin(Years::new(1.0e6)), 0);
         assert_eq!(ia_delay_bin(Years::new(1.0e11)), IA_DELAY_BINS - 1);
         assert_eq!(ia_delay_bin(Years::new(f64::NAN)), 0);
+    }
+
+    /// P11.T6: a yield outside [0, 1] is refused.
+    #[test]
+    #[should_panic(expected = "a yield is a share, in [0, 1]")]
+    fn a_yield_that_is_not_a_share_is_refused() {
+        let mut eta = [[0.5; 2]; IA_DELAY_BINS];
+        eta[3][1] = 1.5;
+        let _refused = IaYieldTable::new(eta);
     }
 
     /// The Milky Way fixture's formed mass: its components' born systems, in their fixed order,

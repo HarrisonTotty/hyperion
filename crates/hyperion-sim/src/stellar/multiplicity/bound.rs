@@ -46,10 +46,11 @@ use crate::units::Metres;
 /// attempt n + 1 can be kept only if attempt n holds such a pair ([`AttemptBound::may_carve`]).
 /// The bound lists attempt 0, then attempt n + 1 for as long as attempt n may carve, through the
 /// last attempt, 7. If that one may carve too, it lists the single star that the generator keeps
-/// after its last attempt, the primary ([`HierarchyBound::fallback`]). A record that the grid does not redraw (a feature
-/// member, or a brown dwarf or rogue planet, which is single) lists attempt 0 alone. So it lists
-/// every attempt the generator can keep, and may list some it does not, never fewer; within an
-/// attempt the stability test's tries are the draw's own, so it lists the try the draw keeps.
+/// after its last attempt, the primary ([`HierarchyBound::fallback`]). A record that the grid does
+/// not redraw (a feature member, or a brown dwarf or rogue planet, which is single) lists attempt 0
+/// alone. So it lists every attempt the generator can keep, and may list some it does not, never
+/// fewer; within an attempt the stability test's tries are the draw's own, so it lists the try the
+/// draw keeps.
 ///
 /// For a grid record with its own [`draw_metallicity`](crate::stellar::system::draw_metallicity)
 /// it is exactly what `SystemStars::generate` draws. A feature member's system is its cluster's

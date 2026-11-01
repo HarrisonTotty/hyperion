@@ -1894,7 +1894,9 @@ impl SystemStars {
             let drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
             if !carves || (drawn.carved_pair().is_none() && drawn.exploded_pair().is_none()) {
                 // The carve-out takes no recent Type Ia from the grid, so a kept grid system has
-                // none at or before +H (plan 09, P09.T35's requirement of plan 11's P11.T6).
+                // none at or before +H (plan 09, P09.T35's requirement of plan 11's P11.T6). The
+                // hook is the redraw's own test, so the branch's condition holds it; it guards the
+                // requirement against an edit of either.
                 debug_assert!(
                     !carves || !crate::galaxy::displaced::site::keeps_a_recent_type_ia(&drawn),
                     "a grid system keeps a Type Ia at or before +H, which plan 11's binaries \
@@ -1922,6 +1924,12 @@ impl SystemStars {
         ctx: MultiplicityContext,
         attempt: RedrawAttempt,
     ) -> Self {
+        // `exploded_pair` reads P11.T6's arm from the primary's rules, so they are the pairs'.
+        debug_assert_eq!(
+            primary.rules(),
+            galaxy.rules().stellar,
+            "the primary is built under the galaxy's stellar rules"
+        );
         let (hierarchy, stars) = models_at(galaxy, record, primary, ctx, attempt);
         let pairs = run_pairs(&hierarchy, &stars, galaxy.rules().stellar);
         Self {
@@ -2022,6 +2030,10 @@ impl SystemStars {
     /// A grid system redraws an attempt for which it is `Some`, as for a carved pair
     /// ([`carved_pair`](Self::carved_pair)), so that no grid system keeps a Type Ia by +H: plan
     /// 09's class holds every one (design notes 8 and 9; P09.T35's requirement).
+    ///
+    /// # Panics
+    ///
+    /// Never: each pair the engine ran is a pair node of the hierarchy, which has a key.
     #[must_use]
     pub fn exploded_pair(&self) -> Option<(NodeIndex, PooledIaEvent)> {
         match self.primary().rules().ia_explosion {
@@ -2029,7 +2041,10 @@ impl SystemStars {
             IaExplosionRules::Marked => self.pairs.iter().find_map(|pair| {
                 // The mark is read only for a pair with a candidate: most pairs have none.
                 pair.timeline.pooled_ia()?;
-                let key = self.hierarchy.pair_key(pair.node)?;
+                let key = self
+                    .hierarchy
+                    .pair_key(pair.node)
+                    .expect("a run pair's node is a pair of the hierarchy, which has a key");
                 let mark = IaExplosionMark::of(self.seed, key, self.attempt);
                 marked_explosion(&pair.timeline, mark, &IA_YIELD).map(|event| (pair.node, event))
             }),

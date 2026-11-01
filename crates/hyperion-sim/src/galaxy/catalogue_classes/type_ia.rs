@@ -981,6 +981,10 @@ fn lifetime_span(delays: &DelayTimeDistribution, mass: f64) -> Span {
 
 /// Peters's (1964) circular separation, m, of white dwarfs of `m1` and `m2` M☉ that merge in
 /// `seconds`: `a⁴ = (256 ⁄ 5) G³ m₁ m₂ (m₁ + m₂) t ÷ c⁵`.
+///
+/// Kept apart from [`crate::orbit::peters_separation_for`], the binary engine's, which differs from
+/// it in the last bit or two for about a third of inputs: sharing the one would move the entry's
+/// pinned separations (P11.T6), so the swap waits for a bump.
 fn peters_separation(m1: f64, m2: f64, seconds: f64) -> f64 {
     let g3 = GM_SUN * GM_SUN * GM_SUN;
     let c5 = SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT;

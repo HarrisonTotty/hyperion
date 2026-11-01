@@ -3,14 +3,16 @@
 //!
 //! The engine pools a binary's first event that could be a Type Ia supernova
 //! ([`PooledIaEvent`]: two white dwarfs merging, or an accreting white dwarf reaching ignition,
-//! sub-Chandrasekhar cases included) and carries on as if it had not exploded. The formulae make
-//! several times too many such events (Claeys et al. 2014, A&A 563, A83), so the rate is not
-//! theirs: an independent mark thins the pool to the observed one (the brainstorm's "Supernova
-//! remnants: one route, not two"). A pooled event explodes when its pair's integer draw on
-//! `binary.ia_mark` ([`tags::BINARY_IA_MARK`]), at word 64n of redraw attempt n and keyed by the
-//! star the pair's orbit brings in (`SystemHierarchy::pair_key`), falls under η of the event's
-//! delay bin and channel ([`IaYieldTable`]; the scratch [`IA_YIELD`](crate::tables::binary::IA_YIELD)
-//! until P15.T9.b fits it). An unexploded pooled event stays what the engine made it: a massive
+//! sub-Chandrasekhar cases included) and carries on as if it had not exploded. The binary formulae
+//! do not set the rate, which they are known to underpredict several times over (Claeys et al.
+//! 2014, A&A 563, A83): an independent mark thins the pool to the observed rate, the observed
+//! merger rate being five to seven times the Type Ia rate (Maoz, Hallakoun and Badenes 2018, MNRAS
+//! 476, 2584; the brainstorm's "Supernova remnants: one route, not two"). A pooled event explodes
+//! when its pair's integer draw on `binary.ia_mark` ([`tags::BINARY_IA_MARK`]), at word 64n of
+//! redraw attempt n and keyed by the star the pair's orbit brings in
+//! ([`SystemHierarchy::pair_key`](crate::stellar::multiplicity::SystemHierarchy::pair_key)), falls
+//! under η of the event's delay bin and channel ([`IaYieldTable`]; the scratch
+//! [`IA_YIELD`](crate::tables::binary::IA_YIELD) until P15.T9.b fits it). An unexploded pooled event stays what the engine made it: a massive
 //! white dwarf, an R Coronae Borealis star, a hot subdwarf.
 //!
 //! The mark is a pure function of the seed, the pair's key and the attempt, and nothing else reads
@@ -39,13 +41,14 @@ pub(crate) enum IaExplosionRules {
     /// the engine made it.
     Pooled,
     /// Version 27's: a pooled candidate the mark explodes at or before +H is a Type Ia, plan 09's
-    /// class holds it, and the grid redraws its binary (`SystemStars::exploded_pair`).
+    /// class holds it, and the grid redraws its binary
+    /// ([`SystemStars::exploded_pair`](crate::stellar::system::SystemStars::exploded_pair)).
     Marked,
 }
 
 /// A pair's Type Ia explosion mark at one redraw attempt (plan 11's Provides): the integer draw
 /// that decides whether the pair's pooled Type Ia candidate explodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct IaExplosionMark {
     mark: Mark,
 }
@@ -75,7 +78,7 @@ impl IaExplosionMark {
 /// The pooled Type Ia candidate of `timeline` that explodes under `mark` and `table`, if it has
 /// one. Its age is the explosion's, at or before the age the timeline was run to.
 #[must_use]
-pub fn marked_explosion(
+pub(crate) fn marked_explosion(
     timeline: &BinaryTimeline,
     mark: IaExplosionMark,
     table: &IaYieldTable,
@@ -90,7 +93,7 @@ mod tests {
     use std::sync::Arc;
 
     use hyperion_testkit::order::assert_order_independent;
-    use hyperion_testkit::stats::assert_poisson_count;
+    use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
 
     use super::super::evolve::{Engine, LiveOrbit};
     use super::super::star::{Member, Path};
@@ -163,17 +166,18 @@ mod tests {
                     .count();
                 let count = u64::try_from(count).expect("a count");
                 let eta = IA_YIELD.eta_in(bin, channel);
+                // α over the 48 cells together, so that each cell is tested at α ÷ 48.
                 assert_poisson_count(
                     &format!("bin {bin} {channel:?}"),
                     count,
                     eta * f64::from(per_bin),
-                    1e-4,
+                    ALPHA / 48.0,
                 );
                 total += per_bin;
                 exploded += count;
             }
         }
-        assert_poisson_count("every bin", exploded, f64::from(total) / 6.0, 1e-3);
+        assert_poisson_count("every bin", exploded, f64::from(total) / 6.0, ALPHA);
         let event = PooledIaEvent::new(Years::new(1.0e9), IaPoolChannel::Merger, masses);
         let never = IaYieldTable::new([[0.0; 2]; IA_DELAY_BINS]);
         let always = IaYieldTable::new([[1.0; 2]; IA_DELAY_BINS]);
@@ -182,6 +186,66 @@ mod tests {
             assert!(!mark.explodes(&event, &never));
             assert!(mark.explodes(&event, &always));
         }
+    }
+
+    /// P11.T6: η is read from the candidate's own delay bin and channel. Under a table that is 1 in
+    /// one bin for one channel and 0 elsewhere, a candidate explodes only in that bin and channel.
+    #[test]
+    fn eta_is_read_from_the_candidate_s_own_bin_and_channel() {
+        let index = |channel| match channel {
+            IaPoolChannel::Merger => 0,
+            IaPoolChannel::Accretion => 1,
+        };
+        let channels = [IaPoolChannel::Merger, IaPoolChannel::Accretion];
+        let masses = [SolarMasses::new(0.8), SolarMasses::new(0.7)];
+        let mark = IaExplosionMark::of(Seed::new(SEED), key(0), RedrawAttempt::FIRST);
+        for bin in [0, 7, IA_DELAY_BINS - 1] {
+            for channel in channels {
+                let mut eta = [[0.0; 2]; IA_DELAY_BINS];
+                eta[bin][index(channel)] = 1.0;
+                let table = IaYieldTable::new(eta);
+                for (b, w) in DELAY_EDGES.windows(2).enumerate() {
+                    for c in channels {
+                        let delay = Years::new(f64::midpoint(w[0], w[1]));
+                        let event = PooledIaEvent::new(delay, c, masses);
+                        assert_eq!(
+                            mark.explodes(&event, &table),
+                            b == bin && c == channel,
+                            "η 1 in bin {bin} {channel:?}, a candidate in bin {b} {c:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// P11.T6: eight pairs' explosion marks at every attempt are pinned bit for bit, with whether
+    /// each explodes a candidate under the scratch yield: the tag, the key and the word are output
+    /// from version 27.
+    #[test]
+    fn the_explosion_marks_are_pinned() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        let seed = Seed::new(SEED);
+        let masses = [SolarMasses::new(0.8), SolarMasses::new(0.7)];
+        let event = PooledIaEvent::new(Years::new(1.0e9), IaPoolChannel::Merger, masses);
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        for k in 0..8 {
+            for attempt in RedrawAttempt::all() {
+                let mark = IaExplosionMark::of(seed, key(k), attempt);
+                w.u64_hex(
+                    &format!(
+                        "pair {k} attempt {}: explodes {}",
+                        attempt.get(),
+                        mark.explodes(&event, &IA_YIELD)
+                    ),
+                    mark.mark.get(),
+                );
+            }
+        }
+        golden!("stellar/ia_marks", w.as_str());
     }
 
     /// A white dwarf of `mass` M☉ as the engine holds one formed at `birth` years: helium below

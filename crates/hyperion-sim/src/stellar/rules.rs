@@ -88,7 +88,7 @@
 //! - [`ia_explosion`](StellarRules::ia_explosion), at [`IA_EXPLOSION_VERSION`] (plan 11, P11.T6):
 //!   whether the binary engine's pooled Type Ia candidates take their explosion mark. From it the
 //!   grid redraws a binary whose candidate the mark explodes at or before +H, in one test,
-//!   `SystemStars::exploded_pair`, which the system stage's redraw and P09.T35's hook read
+//!   [`SystemStars::exploded_pair`], which the system stage's redraw and P09.T35's hook read
 //!   (`stellar/rules/ia_hold.rs`).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
@@ -98,6 +98,7 @@
 //! [`TrackOptions`]: crate::stellar::sse::TrackOptions
 //! [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
 //! [`V_MAGNITUDE_VERSION`]: crate::stellar::photometry::V_MAGNITUDE_VERSION
+//! [`SystemStars::exploded_pair`]: crate::stellar::system::SystemStars::exploded_pair
 //! [`absolute_magnitude_v_under`]: crate::stellar::photometry::absolute_magnitude_v_under
 
 use crate::GeneratorVersion;
