@@ -583,7 +583,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `MINOR_OXIDES_VERSION` (P14.T51.k), at `MinorOxidesRules::Chondritic` through
 ///   `with_minor_oxides`: the mantle `FeO` and the secondary crust that read it.
 ///
-/// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
+/// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it. A later hold at 27 adds its switch
 /// here; 26's bump, which deletes [`with_every_26_hold`], leaves this helper its 27 switches alone,
 /// and 27's bump deletes it with its holds.
