@@ -545,8 +545,8 @@ impl HeapBytes for HeldGlobalList {
 /// [`Priority::Bulk`] if no one has yet, the galaxy taken from the [`GalaxyCache`], which builds
 /// every galaxy with the kinematic tables the list needs. [`GlobalListService::tube`] hands back a
 /// stream's table, building it with [`tube_table_on`] at the priority asked if the cache lacks it,
-/// and [`GlobalListService::prefetch`] starts a galaxy's list and then every one of its tables at
-/// bulk priority, for an open. Callers that ask for one list, one table or one warm-up at once
+/// and its crate's `prefetch` starts a galaxy's list and then every one of its tables at bulk
+/// priority, for an open. Callers that ask for one list, one table or one warm-up at once
 /// share one build through a [`SingleFlight`], and if every one of them gives up, its jobs still
 /// queued are skipped. Every build keeps its galaxy's spray table in the service's
 /// [`SharedSprayForces`].
