@@ -24450,3 +24450,29 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _The modes after both levers:_ m < 8 clears s30's two red views (23 misses); m = 3 alone trades
     them for s30's a135 (24). Not built: a second texel and its read for two views while the horizon
     holds 21.
+- **The composite over the air's area, as built** (2026-11-01; lane `r08-t16a2`, chained; main's
+  next lever after the early return; measurements in the lane's outbox).
+  - _The engine_ (`engine/types.ts`, `webgpu/drawing.ts`, `webgpu/target.ts`): a target's frame may
+    name another texture of its size and format, `colourFrom`, copied into its colour before the
+    draws, whose pass then loads it, and a `scissor`. Target colours take `COPY_DST`. A view refuses
+    the copy; a target refuses a copy of its own colour or a scissor outside it.
+  - _The rectangle_ (`hillaire.ts`'s `compositeAreaOf`, `marchArea.ts`'s `marchAreaPixels`): from
+    the composite's own `Draw`, `null` unless the camera is above the top in `f32` by 10⁻⁶ of it,
+    `exact.w` is 1 and no source's disc is drawn by the composite; else the march area's pixels at
+    its scale (half resolution's four candidates included) and two more each side. Lean: the whole
+    frame takes the full-screen pass as before, with no copy.
+  - _The renderer_ (`photoreal/renderer.ts`): such a composite is drawn under the scissor over a
+    copy of the colour it reads. The other air target's stale colour outside the rectangle is never
+    read.
+  - _Bit for bit_: part 8's group "R08.T16.a.2 the composite over the air's area" draws R08.T11.d's
+    four frames over a patterned scene both ways and reads them back the same, on both variants.
+    The copy keeps the scene's bits where the full-screen pass wrote `min(x × 1 + 0, 65,504)`. These
+    agree wherever the scene's light is finite and not −0 (lean: a sprite brighter than the half
+    float, +∞ in the scene outside the area, now reaches the later passes as in an airless frame,
+    where the full-screen pass clamped it).
+  - _After_ (SwiftShader, `TEST JUPITER` at a range, pairs side by side): a few pixels across,
+    5.27 → 0.83–0.87 s at 10¹⁰ m and 3.95 → 1.02–1.03 s at 3 × 10⁹ m, against 0.55 and 0.63 s
+    with its air left out. The target, within 20% of the airless frame, is not met. The rest is the
+    ray march: a build without its dispatch took 0.53 and 0.60 s, and one without the composite
+    0.75 and 0.87 s beside it. Its far-limb footprint marches up to ten rays a limb texel. The next
+    lever for a giant beyond 10⁹ m is its disc table (R08.T16.b.2), once its gate opens.
