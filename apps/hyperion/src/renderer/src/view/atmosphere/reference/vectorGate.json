@@ -1,6 +1,6 @@
 {
-  "description": "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
-  "format": 4,
+  "description": "R08.T14.f's vector gates: R08.T13.c1's case gate re-run against the four committed references' vector radiance I with the polarisation correction, each case through the path classifyRegime gives it under a clear sky (routed, the bake at m <= 2 from R08.T14.d.1), beside the route with the bake cut to m = 0 alone and to m <= 1 (routedByModes, R08.T14.d.1), the analytic path with the correction (diagnostic), the uncorrected twin against the vector I, and c1's own record, the uncorrected twin against the scalar I (caseGate.json); R08.T13's surface irradiance against the vector flux aggregate, uncorrected; the ground's irradiance under every aggregate's sun on both paths, its sky's irradiance built over the thick table as the kernels' is (groundIrradiance, R08.T14.d.4); each case's tables; and giant-deck through its deck (R08.T15.a.2): its route over the geometries above the split, the deck's multiple-scattering part cut to m < 3 and m < 6, its sky-lit radiance at the deck's modes, its floor white, the case split as an envelope over its black floor and its white, each variant's tallies and twin ÷ reference by image, the bake's plane albedo against the aggregates and the deck's share of each orbit image (deck); and the Venus-class cases through their deck against their references' scalar radiance, the uncorrected twin above the split and the table below the deck beneath it, with the ground's flux against the scalar flux and R08.T12.b's flux sanity (deck.venusClass, R08.T15.b.2). Verdicts recorded, never gated. Written by vectorGate.test.ts; do not edit by hand.",
+  "format": 5,
   "cases": {
     "earth": {
       "regime": "thickScattering",
@@ -3793,6 +3793,528 @@
         ["case/radiance/giant-deck/limb-10H", 258.0697, 489.5378, 1167.112],
         ["case/surfaceShare/giant-deck/limb-10H", 0, 0, 0]
       ]
+    },
+    "venusClass": {
+      "ruling": "main, 2026-11-01: the Venus-class cases are gated by their references' scalar radiance in every view, their twin the uncorrected twin; their vector I is kept in the files, never gated; thick/polarisationBake.test.ts's guard holds the polarisation the scalar reading neglects to 1% of I",
+      "cases": {
+        "venus-92bar": {
+          "radiance": "scalar",
+          "route": "the deck's cloudDeck split (classifyRegime under its cover), the uncorrected twin: above the split the upper medium over the deck (R08.T15.a.2), below it the table below the deck (R08.T15.b.2)",
+          "cover": {
+            "cloudFraction": 1,
+            "decks": [
+              {
+                "opticalDepth550": 34.155,
+                "baseAltitudeM": 45061.883670380135,
+                "topAltitudeM": 63277.594822679996
+              }
+            ],
+            "envelope": false
+          },
+          "split": {
+            "altitudeM": 63277.594822679996,
+            "floor": "ground"
+          },
+          "floorAltitudeM": 0,
+          "aboveTheSplit": ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", "limb-0.1H", "limb-0.3H", "limb-1H", "limb-3H", "limb-10H"],
+          "belowTheSplit": ["ground-s0-v30-a0", "ground-s0-v60-a0", "ground-s0-v75-a0", "ground-s0-v85-a0", "ground-s30-v0-a0", "ground-s30-v30-a45", "ground-s30-v30-a90", "ground-s30-v30-a135", "ground-s30-v30-a180", "ground-s30-v60-a0", "ground-s30-v60-a45", "ground-s30-v60-a90", "ground-s30-v60-a135", "ground-s30-v60-a180", "ground-s30-v75-a0", "ground-s30-v75-a45", "ground-s30-v75-a90", "ground-s30-v75-a135", "ground-s30-v75-a180", "ground-s30-v85-a0", "ground-s30-v85-a45", "ground-s30-v85-a90", "ground-s30-v85-a135", "ground-s30-v85-a180", "ground-s60-v0-a0", "ground-s60-v30-a0", "ground-s60-v30-a45", "ground-s60-v30-a90", "ground-s60-v30-a135", "ground-s60-v30-a180", "ground-s60-v60-a45", "ground-s60-v60-a90", "ground-s60-v60-a135", "ground-s60-v60-a180", "ground-s60-v75-a0", "ground-s60-v75-a45", "ground-s60-v75-a90", "ground-s60-v75-a135", "ground-s60-v75-a180", "ground-s60-v85-a0", "ground-s60-v85-a45", "ground-s60-v85-a90", "ground-s60-v85-a135", "ground-s60-v85-a180", "ground-s80-v0-a0", "ground-s80-v30-a0", "ground-s80-v30-a45", "ground-s80-v30-a90", "ground-s80-v30-a135", "ground-s80-v30-a180", "ground-s80-v60-a0", "ground-s80-v60-a45", "ground-s80-v60-a90", "ground-s80-v60-a135", "ground-s80-v60-a180", "ground-s80-v75-a0", "ground-s80-v75-a45", "ground-s80-v75-a90", "ground-s80-v75-a135", "ground-s80-v75-a180", "ground-s80-v85-a0", "ground-s80-v85-a45", "ground-s80-v85-a90", "ground-s80-v85-a135", "ground-s80-v85-a180", "ground-s90-v0-a0", "ground-s90-v30-a0", "ground-s90-v30-a45", "ground-s90-v30-a90", "ground-s90-v30-a135", "ground-s90-v30-a180", "ground-s90-v60-a0", "ground-s90-v60-a45", "ground-s90-v60-a90", "ground-s90-v60-a135", "ground-s90-v60-a180", "ground-s90-v75-a0", "ground-s90-v75-a45", "ground-s90-v75-a90", "ground-s90-v75-a135", "ground-s90-v75-a180", "ground-s90-v85-a0", "ground-s90-v85-a45", "ground-s90-v85-a90", "ground-s90-v85-a135", "ground-s90-v85-a180", "ground-s95-v0-a0", "ground-s95-v30-a0", "ground-s95-v30-a45", "ground-s95-v30-a90", "ground-s95-v30-a135", "ground-s95-v30-a180", "ground-s95-v60-a0", "ground-s95-v60-a45", "ground-s95-v60-a90", "ground-s95-v60-a135", "ground-s95-v60-a180", "ground-s95-v75-a0", "ground-s95-v75-a45", "ground-s95-v75-a90", "ground-s95-v75-a135", "ground-s95-v75-a180", "ground-s95-v85-a0", "ground-s95-v85-a45", "ground-s95-v85-a90", "ground-s95-v85-a135", "ground-s95-v85-a180", "aerial-1km", "aerial-10km", "aerial-32km"],
+          "routed": {
+            "all": {
+              "comparisons": 360,
+              "passes": 70,
+              "misses": 0,
+              "refusals": 290,
+              "worstRatio": 3.292223e-12,
+              "worstAt": "ground-s90-v85-a180/b",
+              "missed": []
+            },
+            "images": [
+              ["ground-s0", 12, 0, 0, 12, null, null, null],
+              ["ground-s30", 60, 0, 0, 60, null, null, null],
+              ["ground-s60", 60, 0, 0, 60, null, null, null],
+              ["ground-s80", 63, 0, 0, 63, null, null, null],
+              ["ground-s90", 63, 1, 0, 62, 3.292223e-12, "ground-s90-v85-a180", "b"],
+              ["ground-s95", 63, 63, 0, 0, null, null, null],
+              ["disc-p0", 3, 0, 0, 3, null, null, null],
+              ["disc-p30", 3, 0, 0, 3, null, null, null],
+              ["disc-p60", 3, 0, 0, 3, null, null, null],
+              ["disc-p75", 3, 0, 0, 3, null, null, null],
+              ["disc-p85", 3, 0, 0, 3, null, null, null],
+              ["limb", 15, 6, 0, 9, 0, "limb-3H", "r"],
+              ["aerial", 9, 0, 0, 9, null, null, null]
+            ]
+          },
+          "routedRatios": [
+            ["ground-s0", 0.7911022, "ground-s0-v85-a0/g", 1.506667, "ground-s0-v85-a0/b"],
+            ["ground-s30", 0.7477971, "ground-s30-v75-a45/b", 2.218418, "ground-s30-v85-a45/b"],
+            ["ground-s60", 0.6367781, "ground-s60-v30-a90/b", 2.450164, "ground-s60-v85-a135/b"],
+            ["ground-s80", 0.4008249, "ground-s80-v85-a45/b", 4.052227, "ground-s80-v75-a0/r"],
+            ["ground-s90", 1.364819e-15, "ground-s90-v85-a135/b", 6.031543e-10, "ground-s90-v85-a90/g"],
+            ["disc-p0", 0.9496651, "disc-p0/r", 1.034853, "disc-p0/g"],
+            ["disc-p30", 1.037196, "disc-p30/r", 1.065974, "disc-p30/b"],
+            ["disc-p60", 0.9459611, "disc-p60/r", 1.140192, "disc-p60/b"],
+            ["disc-p75", 1.048112, "disc-p75/g", 1.08024, "disc-p75/b"],
+            ["disc-p85", 0.8716962, "disc-p85/g", 1.037374, "disc-p85/b"],
+            ["limb", 0.9327879, "limb-0.3H/g", 1.120083, "limb-1H/b"],
+            ["aerial", 0.5073491, "aerial-10km/g", 0.9445227, "aerial-1km/b"]
+          ],
+          "geometries": [
+            ["ground-s0-v30-a0", "ground-s0", "ground", 0, 5607.636, 3498.887, 1339.429, 0, 0, 0, 5226.394, 3687.939, 1194.49, 664.2837, 561.5415, 259.4712, 261.3197, 184.3969, 59.7245, "refused", "refused", "refused", 0.1306315, 0.07778113, 0.1320497],
+            ["ground-s0-v60-a0", "ground-s0", "ground", 0, 4390.454, 2739.662, 1049.012, 0, 0, 0, 3851.262, 3058.429, 1247.183, 570.3822, 486.1038, 315.0315, 192.5631, 152.9214, 62.35913, "refused", "refused", "refused", 0.2179354, 0.1519865, 0.1498471],
+            ["ground-s0-v75-a0", "ground-s0", "ground", 0, 3557.339, 2220, 850.2423, 0, 0, 0, 3852.149, 2236.294, 952.4845, 506.7145, 403.8707, 236.232, 192.6075, 111.8147, 47.62423, "refused", "refused", "refused", 0.1328294, 0.009433102, 0.1030095],
+            ["ground-s0-v85-a0", "ground-s0", "ground", 0, 2913.527, 1818.418, 696.6429, 0, 0, 0, 2738.214, 2298.588, 462.3734, 412.9174, 437.8227, 147.3675, 136.9107, 114.9294, 23.11867, "refused", "refused", "refused", 0.09801796, 0.2572957, 0.3824255],
+            ["ground-s30-v0-a0", "ground-s30", "ground", 0, 4753.246, 2963.908, 1122.781, 0, 0, 0, 5807.251, 2711.63, 833.2637, 706.5354, 371.794, 186.7706, 290.3625, 135.5815, 41.66318, "refused", "refused", "refused", 0.338201, 0.1554628, 0.3670604],
+            ["ground-s30-v30-a45", "ground-s30", "ground", 0, 4561.711, 2844.511, 1077.584, 0, 0, 0, 3506.139, 3126.62, 1135.081, 454.1628, 452.8076, 269.3624, 175.3069, 156.331, 56.75404, "refused", "refused", "refused", 0.5299168, 0.14338, 0.05069358],
+            ["ground-s30-v30-a90", "ground-s30", "ground", 0, 4561.711, 2844.511, 1077.584, 0, 0, 0, 4235.937, 3179.123, 948.7051, 563.3156, 498.1972, 192.6347, 211.7969, 158.9562, 47.43526, "refused", "refused", "refused", 0.1321565, 0.1555074, 0.1575586],
+            ["ground-s30-v30-a135", "ground-s30", "ground", 0, 4561.711, 2844.511, 1077.584, 0, 0, 0, 4415.601, 2235.74, 831.783, 628.3239, 337.6518, 196.5521, 220.78, 111.787, 41.58915, "refused", "refused", "refused", 0.05344053, 0.4162841, 0.2969337],
+            ["ground-s30-v30-a180", "ground-s30", "ground", 0, 4561.711, 2844.511, 1077.584, 0, 0, 0, 5230.144, 2600.058, 843.7117, 598.9542, 435.2654, 205.6099, 261.5072, 130.0029, 42.18559, "refused", "refused", "refused", 0.2515437, 0.1306492, 0.2704898],
+            ["ground-s30-v60-a0", "ground-s30", "ground", 0, 3571.556, 2227.279, 843.941, 0, 0, 0, 3357.438, 2275.819, 752.1531, 480.2753, 558.2228, 206.0169, 167.8719, 113.791, 37.60766, "refused", "refused", "refused", 0.1024991, 0.02068471, 0.1065226],
+            ["ground-s30-v60-a45", "ground-s30", "ground", 0, 3571.556, 2227.279, 843.941, 0, 0, 0, 3744.172, 2200.437, 762.7834, 502.8703, 442.8566, 179.2519, 187.2086, 110.0219, 38.13917, "refused", "refused", "refused", 0.07850874, 0.01426667, 0.1074726],
+            ["ground-s30-v60-a90", "ground-s30", "ground", 0, 3571.556, 2227.279, 843.941, 0, 0, 0, 3778.312, 2112.853, 766.5566, 510.4598, 354.3814, 188.8138, 188.9156, 105.6427, 38.32783, "refused", "refused", "refused", 0.09268419, 0.07512345, 0.09751267],
+            ["ground-s30-v60-a135", "ground-s30", "ground", 0, 3571.556, 2227.279, 843.941, 0, 0, 0, 3325.717, 1967.758, 671.366, 417.8149, 378.471, 167.7656, 166.2859, 98.38791, 33.5683, "refused", "refused", "refused", 0.1337865, 0.1609659, 0.2449155],
+            ["ground-s30-v60-a180", "ground-s30", "ground", 0, 3571.556, 2227.279, 843.941, 0, 0, 0, 3628.412, 1537.397, 772.3651, 523.8196, 275.822, 180.3649, 181.4206, 76.86984, 38.61825, "refused", "refused", "refused", 0.02497283, 0.5845676, 0.09416919],
+            ["ground-s30-v75-a0", "ground-s30", "ground", 0, 2893.831, 1804.806, 684.0289, 0, 0, 0, 2143.653, 2113.126, 582.8531, 357.3594, 418.3405, 171.894, 107.1826, 105.6563, 29.14266, "refused", "refused", "refused", 0.4882002, 0.173309, 0.1411653],
+            ["ground-s30-v75-a45", "ground-s30", "ground", 0, 2893.831, 1804.806, 684.0289, 0, 0, 0, 3476.457, 2043.422, 914.7253, 507.5936, 363.4025, 211.5688, 173.8229, 102.1711, 45.73626, "refused", "refused", "refused", 0.2643257, 0.1533737, 0.2586248],
+            ["ground-s30-v75-a90", "ground-s30", "ground", 0, 2893.831, 1804.806, 684.0289, 0, 0, 0, 2486.911, 2054.889, 556.1858, 451.8458, 388.3527, 159.4662, 124.3456, 102.7445, 27.80929, "refused", "refused", "refused", 0.2106507, 0.1510024, 0.1920505],
+            ["ground-s30-v75-a135", "ground-s30", "ground", 0, 2893.831, 1804.806, 684.0289, 0, 0, 0, 3088.855, 2185.549, 448.1706, 516.7657, 418.2268, 126.6423, 154.4428, 109.2774, 22.40853, "refused", "refused", "refused", 0.0877892, 0.2136383, 0.4458755],
+            ["ground-s30-v75-a180", "ground-s30", "ground", 0, 2893.831, 1804.806, 684.0289, 0, 0, 0, 3107.443, 2328.296, 564.7657, 499.5474, 430.4388, 191.8051, 155.3722, 116.4148, 28.23828, "refused", "refused", "refused", 0.09919019, 0.2847886, 0.1499302],
+            ["ground-s30-v85-a0", "ground-s30", "ground", 0, 2370.102, 1478.33, 560.4568, 0, 0, 0, 1705.082, 1209.008, 551.2222, 333.0487, 275.5713, 169.75, 85.2541, 60.45039, 27.56111, "refused", "refused", "refused", 0.4691669, 0.2316281, 0.01306977],
+            ["ground-s30-v85-a45", "ground-s30", "ground", 0, 2370.102, 1478.33, 560.4568, 0, 0, 0, 2357.223, 1201.562, 252.638, 429.6969, 254.2553, 85.68773, 117.8612, 60.0781, 12.6319, "refused", "refused", "refused", 0.007012017, 0.2569568, 0.8661613],
+            ["ground-s30-v85-a90", "ground-s30", "ground", 0, 2370.102, 1478.33, 560.4568, 0, 0, 0, 2275.934, 1554.024, 513.4387, 431.6751, 332.2086, 128.2666, 113.7967, 77.70118, 25.67194, "refused", "refused", "refused", 0.05116466, 0.05381567, 0.08727434],
+            ["ground-s30-v85-a135", "ground-s30", "ground", 0, 2370.102, 1478.33, 560.4568, 0, 0, 0, 2698.24, 1393.519, 689.2229, 451.4211, 278.9274, 176.5168, 134.912, 69.67597, 34.46114, "refused", "refused", "refused", 0.1690913, 0.07154683, 0.173884],
+            ["ground-s30-v85-a180", "ground-s30", "ground", 0, 2370.102, 1478.33, 560.4568, 0, 0, 0, 1899.896, 1544.66, 353.8379, 383.4371, 296.4232, 103.9679, 94.99482, 77.23301, 17.69189, "refused", "refused", "refused", 0.2886923, 0.05252101, 0.4765598],
+            ["ground-s60-v0-a0", "ground-s60", "ground", 0, 2035.244, 1266.761, 466.5345, 0, 0, 0, 2741.028, 1652.669, 571.3364, 413.6922, 265.0256, 153.6142, 137.0514, 82.63343, 28.56682, "refused", "refused", "refused", 0.3938922, 0.3377049, 0.162983],
+            ["ground-s60-v30-a0", "ground-s60", "ground", 0, 1953.233, 1215.731, 447.7543, 0, 0, 0, 1867.982, 1344.558, 442.0986, 294.6448, 269.2608, 116.0733, 93.39908, 67.22791, 22.10493, "refused", "refused", "refused", 0.06702265, 0.1125845, 0.01162766],
+            ["ground-s60-v30-a45", "ground-s60", "ground", 0, 1953.233, 1215.731, 447.7543, 0, 0, 0, 2010.221, 839.4461, 528.6939, 295.203, 152.4623, 149.36, 100.5111, 41.9723, 26.43469, "refused", "refused", "refused", 0.04447603, 0.5772823, 0.129737],
+            ["ground-s60-v30-a90", "ground-s60", "ground", 0, 1953.233, 1215.731, 447.7543, 0, 0, 0, 2341.021, 1314.926, 703.1559, 338.3372, 228.2858, 160.9197, 117.051, 65.74632, 35.15779, "refused", "refused", "refused", 0.2637293, 0.1013347, 0.3762341],
+            ["ground-s60-v30-a135", "ground-s60", "ground", 0, 1953.233, 1215.731, 447.7543, 0, 0, 0, 1604.657, 1491.471, 494.8686, 245.0863, 283.5336, 138.5429, 80.23283, 74.57355, 24.74343, "refused", "refused", "refused", 0.3286665, 0.2281279, 0.08138384],
+            ["ground-s60-v30-a180", "ground-s60", "ground", 0, 1953.233, 1215.731, 447.7543, 0, 0, 0, 2215.752, 1034.889, 414.0743, 345.469, 199.4242, 126.8672, 110.7876, 51.74443, 20.70372, "refused", "refused", "refused", 0.1758729, 0.2128957, 0.06376696],
+            ["ground-s60-v60-a45", "ground-s60", "ground", 0, 1529.269, 951.9291, 350.6723, 0, 0, 0, 1414.565, 754.4153, 216.8809, 278.9263, 187.6306, 74.08997, 70.72825, 37.72076, 10.84405, "refused", "refused", "refused", 0.09667968, 0.2505748, 0.4355132],
+            ["ground-s60-v60-a90", "ground-s60", "ground", 0, 1529.269, 951.9291, 350.6723, 0, 0, 0, 1676.005, 1102.448, 414.4005, 268.0737, 219.1081, 136.9836, 83.80026, 55.12238, 20.72002, "refused", "refused", "refused", 0.1269241, 0.1615777, 0.1120684],
+            ["ground-s60-v60-a135", "ground-s60", "ground", 0, 1529.269, 951.9291, 350.6723, 0, 0, 0, 1473.615, 864.9903, 368.1945, 227.3347, 200.7226, 116.3145, 73.68073, 43.24951, 18.40972, "refused", "refused", "refused", 0.05661571, 0.1027476, 0.03622777],
+            ["ground-s60-v60-a180", "ground-s60", "ground", 0, 1529.269, 951.9291, 350.6723, 0, 0, 0, 1636.123, 1031.559, 205.7135, 318.3261, 244.3011, 69.56452, 81.80613, 51.57796, 10.28567, "refused", "refused", "refused", 0.07885226, 0.07740223, 0.5023807],
+            ["ground-s60-v75-a0", "ground-s60", "ground", 0, 1239.081, 771.3661, 284.2264, 0, 0, 0, 1547.259, 782.073, 387.8145, 302.7866, 174.3117, 122.6488, 77.36295, 39.10365, 19.39072, "refused", "refused", "refused", 0.239174, 0.01454055, 0.2031196],
+            ["ground-s60-v75-a45", "ground-s60", "ground", 0, 1239.081, 771.3661, 284.2264, 0, 0, 0, 1333.908, 640.8473, 429.8851, 295.6591, 149.2105, 138.5179, 66.69539, 32.04236, 21.49425, "refused", "refused", "refused", 0.07590203, 0.2075402, 0.2530703],
+            ["ground-s60-v75-a90", "ground-s60", "ground", 0, 1239.081, 771.3661, 284.2264, 0, 0, 0, 864.8327, 850.1056, 354.5433, 168.7323, 214.8279, 132.7875, 43.24163, 42.50528, 17.72716, "refused", "refused", "refused", 0.5211133, 0.08731208, 0.1281105],
+            ["ground-s60-v75-a135", "ground-s60", "ground", 0, 1239.081, 771.3661, 284.2264, 0, 0, 0, 1328.212, 711.5175, 214.1186, 265.8874, 181.8739, 72.59976, 66.41061, 35.57587, 10.70593, "refused", "refused", "refused", 0.07888003, 0.07843122, 0.232835],
+            ["ground-s60-v75-a180", "ground-s60", "ground", 0, 1239.081, 771.3661, 284.2264, 0, 0, 0, 1265.921, 731.1249, 321.6331, 252.0453, 193.5055, 111.9295, 63.29605, 36.55624, 16.08166, "refused", "refused", "refused", 0.02504956, 0.04964509, 0.08065282],
+            ["ground-s60-v85-a0", "ground-s60", "ground", 0, 1014.83, 631.8318, 232.8802, 0, 0, 0, 1208.661, 719.1588, 149.5435, 250.7688, 167.0256, 58.38999, 60.43303, 35.95794, 7.477176, "refused", "refused", "refused", 0.1822559, 0.1240334, 0.3457421],
+            ["ground-s60-v85-a45", "ground-s60", "ground", 0, 1014.83, 631.8318, 232.8802, 0, 0, 0, 1246.737, 534.8569, 109.0783, 257.3543, 128.7103, 49.37422, 62.33685, 26.74284, 5.453914, "refused", "refused", "refused", 0.2124168, 0.1790579, 0.6100095],
+            ["ground-s60-v85-a90", "ground-s60", "ground", 0, 1014.83, 631.8318, 232.8802, 0, 0, 0, 902.6813, 521.5946, 181.5311, 198.8257, 125.0997, 92.40997, 45.13407, 26.07973, 9.076557, "refused", "refused", "refused", 0.1334409, 0.2093859, 0.1355871],
+            ["ground-s60-v85-a135", "ground-s60", "ground", 0, 1014.83, 631.8318, 232.8802, 0, 0, 0, 998.1766, 773.1291, 95.04677, 190.7282, 174.8274, 40.20444, 49.90883, 38.65646, 4.752339, "refused", "refused", "refused", 0.02048841, 0.1914686, 0.8324778],
+            ["ground-s60-v85-a180", "ground-s60", "ground", 0, 1014.83, 631.8318, 232.8802, 0, 0, 0, 866.7327, 714.0232, 263.9596, 153.0798, 167.2796, 85.49455, 43.33663, 35.70116, 13.19798, "refused", "refused", "refused", 0.2258767, 0.1166134, 0.0875041],
+            ["ground-s80-v0-a0", "ground-s80", "ground", 0, 467.4072, 290.3191, 105.7879, 0, 0, 0, 701.8278, 234.1452, 102.3789, 145.992, 69.08059, 44.5442, 35.09139, 11.70726, 5.118945, "refused", "refused", "refused", 0.3786722, 0.1950281, 0.01859841],
+            ["ground-s80-v30-a0", "ground-s80", "ground", 0, 448.5727, 278.624, 101.5295, 0, 0, 0, 405.5491, 221.0587, 44.80685, 92.31725, 63.30147, 22.43784, 20.27745, 11.05294, 2.240342, "refused", "refused", "refused", 0.1104455, 0.2178368, 0.6166062],
+            ["ground-s80-v30-a45", "ground-s80", "ground", 0, 448.5727, 278.624, 101.5295, 0, 0, 0, 447.79, 318.7298, 33.22301, 106.102, 106.5506, 13.67654, 22.3895, 15.93649, 1.66115, "refused", "refused", "refused", 0.001751884, 0.0907087, 1.211811],
+            ["ground-s80-v30-a90", "ground-s80", "ground", 0, 448.5727, 278.624, 101.5295, 0, 0, 0, 422.476, 400.0112, 204.8565, 128.0676, 153.3072, 72.35422, 21.1238, 20.00056, 10.24283, "refused", "refused", "refused", 0.04892564, 0.1916955, 0.3448146],
+            ["ground-s80-v30-a135", "ground-s80", "ground", 0, 448.5727, 278.624, 101.5295, 0, 0, 0, 779.5455, 278.6256, 73.20663, 224.7632, 91.75201, 37.74434, 38.97727, 13.93128, 3.660332, "refused", "refused", "refused", 0.3528382, 0.000004269193, 0.1831563],
+            ["ground-s80-v30-a180", "ground-s80", "ground", 0, 448.5727, 278.624, 101.5295, 0, 0, 0, 235.2652, 214.9054, 135.4074, 81.88623, 55.82243, 60.81023, 11.76326, 10.74527, 6.770372, "refused", "refused", "refused", 0.6286543, 0.2722612, 0.1355057],
+            ["ground-s80-v60-a0", "ground-s80", "ground", 0, 351.2065, 218.1653, 79.51593, 0, 0, 0, 238.8524, 342.1135, 72.17638, 65.91952, 101.929, 30.82356, 11.94262, 17.10567, 3.608819, "refused", "refused", "refused", 0.4076404, 0.2917653, 0.0578359],
+            ["ground-s80-v60-a45", "ground-s80", "ground", 0, 351.2065, 218.1653, 79.51593, 0, 0, 0, 360.5309, 254.7488, 25.56367, 90.01911, 67.3852, 11.08365, 18.02655, 12.73744, 1.278184, "refused", "refused", "refused", 0.02466101, 0.1296007, 1.182831],
+            ["ground-s80-v60-a90", "ground-s80", "ground", 0, 351.2065, 218.1653, 79.51593, 0, 0, 0, 304.2379, 193.7986, 57.60436, 76.953, 65.08359, 20.34906, 15.2119, 9.689931, 2.880218, "refused", "refused", "refused", 0.1454027, 0.09023886, 0.2599963],
+            ["ground-s80-v60-a135", "ground-s80", "ground", 0, 351.2065, 218.1653, 79.51593, 0, 0, 0, 400.5891, 265.5432, 50.10918, 106.0474, 115.4689, 27.04485, 20.02945, 13.27716, 2.505459, "refused", "refused", "refused", 0.1111672, 0.0997108, 0.2656799],
+            ["ground-s80-v60-a180", "ground-s80", "ground", 0, 351.2065, 218.1653, 79.51593, 0, 0, 0, 365.6667, 289.3328, 62.94607, 97.84456, 96.17897, 37.26544, 18.28333, 14.46664, 3.147304, "refused", "refused", "refused", 0.03529787, 0.1782832, 0.1088625],
+            ["ground-s80-v75-a0", "ground-s80", "ground", 0, 284.563, 176.7834, 64.44917, 0, 0, 0, 70.22385, 104.5197, 45.27802, 18.42407, 49.88306, 24.83776, 3.511193, 5.225984, 2.263901, "refused", "refused", "refused", 2.776145, 0.3529223, 0.1886647],
+            ["ground-s80-v75-a45", "ground-s80", "ground", 0, 284.563, 176.7834, 64.44917, 0, 0, 0, 231.9144, 64.31713, 98.03689, 67.97965, 34.74389, 55.5556, 11.59572, 3.215857, 4.901844, "refused", "refused", "refused", 0.1857, 0.7909498, 0.1478826],
+            ["ground-s80-v75-a90", "ground-s80", "ground", 0, 284.563, 176.7834, 64.44917, 0, 0, 0, 235.4635, 124.416, 29.54306, 89.99767, 54.6855, 15.27688, 11.77318, 6.220801, 1.477153, "refused", "refused", "refused", 0.1320717, 0.2327824, 0.5577421],
+            ["ground-s80-v75-a135", "ground-s80", "ground", 0, 284.563, 176.7834, 64.44917, 0, 0, 0, 165.9968, 150.5203, 45.73509, 52.56826, 54.26736, 17.77969, 8.299841, 7.526013, 2.286754, "refused", "refused", "refused", 0.542456, 0.1169354, 0.2549411],
+            ["ground-s80-v75-a180", "ground-s80", "ground", 0, 284.563, 176.7834, 64.44917, 0, 0, 0, 337.5858, 114.4549, 27.75027, 87.29139, 45.1607, 25.71432, 16.87929, 5.722746, 1.387514, "refused", "refused", "refused", 0.1448532, 0.3344421, 0.3520454],
+            ["ground-s80-v85-a0", "ground-s80", "ground", 0, 233.0624, 144.8047, 52.80631, 0, 0, 0, 176.7805, 185.8574, 45.04431, 61.50388, 74.47415, 26.63412, 8.839025, 9.292872, 2.252216, "refused", "refused", "refused", 0.2208393, 0.1336398, 0.07134932],
+            ["ground-s80-v85-a45", "ground-s80", "ground", 0, 233.0624, 144.8047, 52.80631, 0, 0, 0, 213.6079, 186.6694, 131.7441, 59.83372, 61.38801, 73.9944, 10.6804, 9.333469, 6.587205, "refused", "refused", "refused", 0.07781319, 0.1642489, 0.2608955],
+            ["ground-s80-v85-a90", "ground-s80", "ground", 0, 233.0624, 144.8047, 52.80631, 0, 0, 0, 284.3854, 296.4299, 71.01413, 95.75093, 146.0197, 38.67144, 14.21927, 14.8215, 3.550706, "refused", "refused", "refused", 0.1292045, 0.2531726, 0.1150672],
+            ["ground-s80-v85-a135", "ground-s80", "ground", 0, 233.0624, 144.8047, 52.80631, 0, 0, 0, 205.7394, 217.3044, 87.6268, 70.11578, 89.86451, 49.10676, 10.28697, 10.86522, 4.38134, "refused", "refused", "refused", 0.09397427, 0.1957741, 0.1734016],
+            ["ground-s80-v85-a180", "ground-s80", "ground", 0, 233.0624, 144.8047, 52.80631, 0, 0, 0, 202.8943, 146.3054, 100.6721, 63.09833, 50.20582, 60.2439, 10.14472, 7.315269, 5.033603, "refused", "refused", "refused", 0.1149093, 0.007210003, 0.1945689],
+            ["ground-s90-v0-a0", "ground-s90", "ground", 0, 1.723227e-13, 1.128847e-13, 4.704484e-14, 0, 0, 0, 24.07667, 5.020078, 1.814341, 13.74581, 4.7596, 1.798247, 1.203834, 0.2510039, 0.09071703, "refused", "refused", "refused", 0.428509, 0.2602505, 0.2490958],
+            ["ground-s90-v30-a0", "ground-s90", "ground", 0, 1.653788e-13, 1.083373e-13, 4.515102e-14, 0, 0, 0, 18.19021, 8.181663, 6.452537, 18.13749, 5.429443, 5.472779, 0.9095103, 0.4090831, 0.3226268, "refused", "refused", "refused", 0.2476223, 0.3697616, 0.290475],
+            ["ground-s90-v30-a45", "ground-s90", "ground", 0, 1.653788e-13, 1.083373e-13, 4.515102e-14, 0, 0, 0, 0.8483631, 1.891255, 0.03508631, 0.7981483, 1.370724, 0.03505125, 0.04241816, 0.09456275, 0.007132826, "refused", "refused", "refused", 0.2622442, 0.3390891, 0.2381351],
+            ["ground-s90-v30-a90", "ground-s90", "ground", 0, 1.653788e-13, 1.083373e-13, 4.515102e-14, 0, 0, 0, 0.7417381, 0.1027929, 23.77609, 0.5529227, 0.05649498, 14.81878, 0.03708691, 0.008818441, 1.188804, "refused", "refused", "refused", 0.3298406, 0.4377923, 0.3932277],
+            ["ground-s90-v30-a135", "ground-s90", "ground", 0, 1.653788e-13, 1.083373e-13, 4.515102e-14, 0, 0, 0, 1.738763, 22.27976, 5.579958, 1.555871, 21.16852, 5.579954, 0.08693813, 1.113988, 0.2789979, "refused", "refused", "refused", 0.2755382, 0.259707, 0.2469138],
+            ["ground-s90-v30-a180", "ground-s90", "ground", 0, 1.653788e-13, 1.083373e-13, 4.515102e-14, 0, 0, 0, 36.84614, 13.93033, 0.0006985548, 25.25893, 13.92823, 0.0006418108, 1.842307, 0.6965165, 0.007132826, "refused", "refused", "refused", 0.3581536, 0.2469504, 0.07201545],
+            ["ground-s90-v60-a0", "ground-s90", "ground", 0, 1.294819e-13, 8.482912e-14, 3.536114e-14, 0, 0, 0, 3.044258, 13.9813, 5.974514, 2.631342, 12.77835, 5.961505, 0.1522129, 0.6990648, 0.2987257, "refused", "refused", "refused", 0.2851075, 0.2698443, 0.2474457],
+            ["ground-s90-v60-a45", "ground-s90", "ground", 0, 1.294819e-13, 8.482912e-14, 3.536114e-14, 0, 0, 0, 4.897287, 22.41432, 4.709136, 4.806238, 15.18818, 4.69562, 0.2448644, 1.120716, 0.2354568, "refused", "refused", "refused", 0.2515323, 0.3622607, 0.2476155],
+            ["ground-s90-v60-a90", "ground-s90", "ground", 0, 1.294819e-13, 8.482912e-14, 3.536114e-14, 0, 0, 0, 3.404341, 15.49017, 0.05994936, 2.605834, 15.44008, 0.05994935, 0.1702171, 0.7745085, 0.007132826, "refused", "refused", "refused", 0.3213597, 0.2477047, 0.2427785],
+            ["ground-s90-v60-a135", "ground-s90", "ground", 0, 1.294819e-13, 8.482912e-14, 3.536114e-14, 0, 0, 0, 18.85178, 0.03254287, 7.32096, 12.08848, 0.01976758, 6.754852, 0.942589, 0.008818441, 0.366048, "refused", "refused", "refused", 0.3824162, 0.3702734, 0.2673302],
+            ["ground-s90-v60-a180", "ground-s90", "ground", 0, 1.294819e-13, 8.482912e-14, 3.536114e-14, 0, 0, 0, 17.37459, 29.3948, 13.14968, 12.06205, 20.82478, 13.14963, 0.8687294, 1.46974, 0.6574842, "refused", "refused", "refused", 0.3537392, 0.3467642, 0.2469146],
+            ["ground-s90-v75-a0", "ground-s90", "ground", 0, 1.049118e-13, 6.873863e-14, 2.866065e-14, 0, 0, 0, 0.5812903, 0.04193772, 0.00147157, 0.3016743, 0.04193228, 0.001471126, 0.02906452, 0.008818441, 0.007132826, "refused", "refused", "refused", 0.4703903, 0.2375435, 0.113047],
+            ["ground-s90-v75-a45", "ground-s90", "ground", 0, 1.049118e-13, 6.873863e-14, 2.866065e-14, 0, 0, 0, 2.65403, 4.565822, 6.647856, 1.935652, 3.952177, 4.138461, 0.1327015, 0.2282911, 0.3323928, "refused", "refused", "refused", 0.3370065, 0.2847055, 0.3936848],
+            ["ground-s90-v75-a90", "ground-s90", "ground", 0, 1.049118e-13, 6.873863e-14, 2.866065e-14, 0, 0, 0, 28.00266, 10.18334, 7.342181, 20.7451, 8.355693, 6.612369, 1.400133, 0.5091671, 0.367109, "refused", "refused", "refused", 0.3318615, 0.3001108, 0.2737925],
+            ["ground-s90-v75-a135", "ground-s90", "ground", 0, 1.049118e-13, 6.873863e-14, 2.866065e-14, 0, 0, 0, 30.37128, 25.08346, 1.13848, 17.58962, 14.86427, 1.029835, 1.518564, 1.254173, 0.056924, "refused", "refused", "refused", 0.422545, 0.4131599, 0.2726074],
+            ["ground-s90-v75-a180", "ground-s90", "ground", 0, 1.049118e-13, 6.873863e-14, 2.866065e-14, 0, 0, 0, 0.09535468, 10.70951, 9.191301, 0.09370186, 9.222948, 6.554722, 0.01105384, 0.5354753, 0.4595651, "refused", "refused", "refused", 0.2471217, 0.2861418, 0.3445215],
+            ["ground-s90-v85-a0", "ground-s90", "ground", 0, 8.592463e-14, 5.630431e-14, 2.348285e-14, 0, 0, 0, 18.51423, 0.1065011, 0.0001867219, 16.6247, 0.1065007, 0.0001867182, 0.9257113, 0.008818441, 0.007132826, "refused", "refused", "refused", 0.274592, 0.2449308, 0.02369658],
+            ["ground-s90-v85-a45", "ground-s90", "ground", 0, 8.592463e-14, 5.630431e-14, 2.348285e-14, 0, 0, 0, 0.7508667, 0.001620835, 0.8682888, 0.5343788, 0.001095371, 0.8682536, 0.03754334, 0.008818441, 0.04341444, "refused", "refused", "refused", 0.3452168, 0.1227913, 0.2469235],
+            ["ground-s90-v85-a90", "ground-s90", "ground", 0, 8.592463e-14, 5.630431e-14, 2.348285e-14, 0, 0, 0, 11.66894, 0.00009334976, 0.0007121248, 10.60861, 0.00007018888, 0.0007121185, 0.5834468, 0.008818441, 0.007132826, "refused", "refused", "refused", 0.2712579, 0.01025912, 0.07134591],
+            ["ground-s90-v85-a135", "ground-s90", "ground", 0, 8.592463e-14, 5.630431e-14, 2.348285e-14, 0, 0, 0, 0.4885405, 9.190789, 17.20583, 0.3298923, 6.497767, 17.1943, 0.02442703, 0.4595395, 0.8602917, "refused", "refused", "refused", 0.3634984, 0.3474698, 0.2470772],
+            ["ground-s90-v85-a180", "ground-s90", "ground", 0, 8.592463e-14, 5.630431e-14, 2.348285e-14, 0, 0, 0, 4.679367, 5.471895, 0, 4.505669, 3.855695, 0, 0.2339684, 0.2735948, 0.007132826, "refused", "refused", "pass", 0.2563103, 0.3486089, 3.292223e-12],
+            ["ground-s95-v0-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v30-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v30-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v30-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v30-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v30-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v60-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v60-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v60-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v60-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v60-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v75-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v75-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v75-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v75-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v75-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v85-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v85-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v85-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v85-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["ground-s95-v85-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "pass", "pass", "pass", null, null, null],
+            ["disc-p0", "disc-p0", "orbit", 1, 49595.53, 46873.12, 37002.55, 0, 0, 0, 52224.23, 45294.49, 36170.66, 1962.457, 1554.867, 1201.874, 2611.212, 2264.724, 1808.533, "refused", "refused", "refused", 0.251285, 0.1860677, 0.1257383],
+            ["disc-p30", "disc-p30", "orbit", 1, 39781.25, 37087.69, 28606.89, 0, 0, 0, 38354.6, 35448.29, 26836.38, 1456.513, 1391.679, 1007.827, 1917.73, 1772.415, 1341.819, "refused", "refused", "refused", 0.1842322, 0.2233775, 0.3295119],
+            ["disc-p60", "disc-p60", "orbit", 1, 19417.79, 17958.83, 13801.01, 0, 0, 0, 20527.05, 16845.2, 12104.11, 983.5675, 803.1313, 572.5442, 1026.353, 842.2601, 605.2056, "refused", "refused", "refused", 0.2236138, 0.2746452, 0.5860702],
+            ["disc-p75", "disc-p75", "orbit", 1, 8589.364, 7905.526, 6160.638, 0, 0, 0, 8013.88, 7542.635, 5703.026, 436.1254, 447.9038, 330.2571, 400.694, 377.1318, 285.1513, "refused", "refused", "refused", 0.2682665, 0.1673274, 0.2849072],
+            ["disc-p85", "disc-p85", "orbit", 1, 2286.345, 2114.456, 1732.104, 0, 0, 0, 2503.515, 2425.68, 1669.7, 205.3029, 228.529, 154.4739, 125.1757, 121.284, 83.48502, "refused", "refused", "refused", 0.2294722, 0.3005833, 0.08897252],
+            ["limb-0.1H", "limb", "orbit", 0.3958519, 17619.68, 16122.72, 13578.95, 0, 0, 0, 17881.73, 16708.06, 13092.36, 849.9105, 693.7902, 580.2237, 894.0866, 835.4029, 654.6181, "refused", "refused", "refused", 0.06103125, 0.1621183, 0.1635305],
+            ["limb-0.3H", "limb", "orbit", 0.2297744, 17331.69, 15871.6, 13440.91, 0, 0, 0, 17444.65, 17015.23, 12399.95, 779.461, 766.4497, 548.8296, 872.2323, 850.7613, 619.9974, "refused", "refused", "refused", 0.02830901, 0.2919973, 0.3697494],
+            ["limb-1H", "limb", "orbit", 0, 13622.4, 12828.19, 11752.96, 0, 0, 0, 13607.95, 11779.8, 10492.94, 729.8351, 622.4206, 510.714, 680.3974, 588.99, 524.6471, "refused", "refused", "refused", 0.004014803, 0.3405334, 0.4907562],
+            ["limb-3H", "limb", "orbit", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5.364519, 5.104568, 3.927709, "pass", "pass", "pass", 0, 0, 0],
+            ["limb-10H", "limb", "orbit", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5.364519, 5.104568, 3.927709, "pass", "pass", "pass", 0, 0, 0],
+            ["aerial-1km", "aerial", "aerial", 0.3421208, 270.1923, 246.282, 124.3568, 0.2240026, 0.1529183, 0.1114524, 464.3203, 316.8652, 131.661, 117.9832, 78.12625, 48.03196, 23.21602, 15.84326, 6.583049, "refused", "refused", "refused", 0.3920599, 0.2149644, 0.03675781],
+            ["aerial-10km", "aerial", "aerial", 0.4734476, 491.8688, 332.8701, 131.9758, 0.1361319, 0.1251701, 0.1161844, 576.814, 656.0967, 253.7923, 118.4467, 174.1213, 103.8321, 28.8407, 32.80483, 12.68961, "refused", "refused", "refused", 0.1690023, 0.4432072, 0.284606],
+            ["aerial-32km", "aerial", "aerial", 0.4734476, 493.7211, 332.8761, 131.9758, 0.1356212, 0.1251678, 0.1161844, 554.7969, 420.5976, 166.5902, 144.8116, 106.8656, 83.27291, 27.73984, 21.02988, 8.329512, "refused", "refused", "refused", 0.1006214, 0.1955918, 0.1013834]
+          ],
+          "groundIrradiance": {
+            "tolerance": {
+              "relative": 0.02,
+              "sigmaCap": 0.0025
+            },
+            "against": "the scalar downwelling flux, direct and diffuse (fluxReadingsOf, scalar)",
+            "aggregates": [
+              {
+                "aggregate": "flux-s0/downwelling",
+                "rows": [
+                  ["r", 15514.76, 18618.12, 2081.813, -0.1666849, "refused"],
+                  ["g", 9677.829, 9334.399, 1618.372, 0.03679188, "refused"],
+                  ["b", 3701.98, 2256.159, 508.6765, 0.6408332, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s30/downwelling",
+                "rows": [
+                  ["r", 12620.98, 11091.99, 1503.487, 0.1378468, "refused"],
+                  ["g", 7867.84, 9164.429, 1483.389, -0.1414806, "refused"],
+                  ["b", 2978.276, 3491.18, 900.0702, -0.1469141, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s60/downwelling",
+                "rows": [
+                  ["r", 5404.049, 7040.985, 1094.806, -0.2324868, "refused"],
+                  ["g", 3362.678, 4171.718, 787.4453, -0.1939345, "refused"],
+                  ["b", 1237.52, 1279.274, 420.4909, -0.03263872, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s80/downwelling",
+                "rows": [
+                  ["r", 1241.075, 1752.626, 397.3867, -0.2918769, "refused"],
+                  ["g", 770.6661, 794.9363, 250.3258, -0.03053102, "refused"],
+                  ["b", 280.6105, 219.2493, 85.81366, 0.2798696, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-lsfr/downwelling",
+                "rows": [
+                  ["r", 4058.273, 4120.387, 128.373, -0.01507486, "refused"],
+                  ["g", 2523.937, 2544.47, 102.65, -0.00806972, "refused"],
+                  ["b", 924.014, 770.6338, 50.26634, 0.1990312, "refused"]
+                ]
+              }
+            ]
+          },
+          "sanity": {
+            "aggregate": "flux-lsfr",
+            "channels": [0.06813965, 0.04681878, 0.01801303],
+            "fraction": 0.0492741,
+            "low": 0.02,
+            "high": 0.04,
+            "within": false
+          },
+          "tables": {
+            "bands": 1,
+            "slots": 1,
+            "deckBytes": 159744,
+            "aboveBytes": 388864,
+            "belowBytes": 436800,
+            "belowF32BelowLeastNormal": 84,
+            "deckSolves": 44,
+            "aboveSolves": 22
+          },
+          "downwelling": [
+            ["case/downwelling/venus-92bar/flux-s0", 15514.76, 9677.829, 3701.98],
+            ["case/downwelling/venus-92bar/flux-s30", 12620.98, 7867.84, 2978.276],
+            ["case/downwelling/venus-92bar/flux-s60", 5404.049, 3362.678, 1237.52],
+            ["case/downwelling/venus-92bar/flux-s80", 1241.075, 770.6661, 280.6105],
+            ["case/downwelling/venus-92bar/flux-lsfr", 4058.273, 2523.937, 924.014]
+          ]
+        },
+        "venus-58bar": {
+          "radiance": "scalar",
+          "route": "the deck's cloudDeck split (classifyRegime under its cover), the uncorrected twin: above the split the upper medium over the deck (R08.T15.a.2), below it the table below the deck (R08.T15.b.2)",
+          "cover": {
+            "cloudFraction": 1,
+            "decks": [
+              {
+                "opticalDepth550": 34.155,
+                "baseAltitudeM": 41783.40501929542,
+                "topAltitudeM": 61362.272064337674
+              }
+            ],
+            "envelope": false
+          },
+          "split": {
+            "altitudeM": 61362.272064337674,
+            "floor": "ground"
+          },
+          "floorAltitudeM": 0,
+          "aboveTheSplit": ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", "limb-0.1H", "limb-0.3H", "limb-1H", "limb-3H", "limb-10H"],
+          "belowTheSplit": ["ground-s0-v30-a0", "ground-s0-v60-a0", "ground-s0-v75-a0", "ground-s0-v85-a0", "ground-s30-v0-a0", "ground-s30-v30-a45", "ground-s30-v30-a90", "ground-s30-v30-a135", "ground-s30-v30-a180", "ground-s30-v60-a0", "ground-s30-v60-a45", "ground-s30-v60-a90", "ground-s30-v60-a135", "ground-s30-v60-a180", "ground-s30-v75-a0", "ground-s30-v75-a45", "ground-s30-v75-a90", "ground-s30-v75-a135", "ground-s30-v75-a180", "ground-s30-v85-a0", "ground-s30-v85-a45", "ground-s30-v85-a90", "ground-s30-v85-a135", "ground-s30-v85-a180", "ground-s60-v0-a0", "ground-s60-v30-a0", "ground-s60-v30-a45", "ground-s60-v30-a90", "ground-s60-v30-a135", "ground-s60-v30-a180", "ground-s60-v60-a45", "ground-s60-v60-a90", "ground-s60-v60-a135", "ground-s60-v60-a180", "ground-s60-v75-a0", "ground-s60-v75-a45", "ground-s60-v75-a90", "ground-s60-v75-a135", "ground-s60-v75-a180", "ground-s60-v85-a0", "ground-s60-v85-a45", "ground-s60-v85-a90", "ground-s60-v85-a135", "ground-s60-v85-a180", "ground-s80-v0-a0", "ground-s80-v30-a0", "ground-s80-v30-a45", "ground-s80-v30-a90", "ground-s80-v30-a135", "ground-s80-v30-a180", "ground-s80-v60-a0", "ground-s80-v60-a45", "ground-s80-v60-a90", "ground-s80-v60-a135", "ground-s80-v60-a180", "ground-s80-v75-a0", "ground-s80-v75-a45", "ground-s80-v75-a90", "ground-s80-v75-a135", "ground-s80-v75-a180", "ground-s80-v85-a0", "ground-s80-v85-a45", "ground-s80-v85-a90", "ground-s80-v85-a135", "ground-s80-v85-a180", "ground-s90-v0-a0", "ground-s90-v30-a0", "ground-s90-v30-a45", "ground-s90-v30-a90", "ground-s90-v30-a135", "ground-s90-v30-a180", "ground-s90-v60-a0", "ground-s90-v60-a45", "ground-s90-v60-a90", "ground-s90-v60-a135", "ground-s90-v60-a180", "ground-s90-v75-a0", "ground-s90-v75-a45", "ground-s90-v75-a90", "ground-s90-v75-a135", "ground-s90-v75-a180", "ground-s90-v85-a0", "ground-s90-v85-a45", "ground-s90-v85-a90", "ground-s90-v85-a135", "ground-s90-v85-a180", "ground-s95-v0-a0", "ground-s95-v30-a0", "ground-s95-v30-a45", "ground-s95-v30-a90", "ground-s95-v30-a135", "ground-s95-v30-a180", "ground-s95-v60-a0", "ground-s95-v60-a45", "ground-s95-v60-a90", "ground-s95-v60-a135", "ground-s95-v60-a180", "ground-s95-v75-a0", "ground-s95-v75-a45", "ground-s95-v75-a90", "ground-s95-v75-a135", "ground-s95-v75-a180", "ground-s95-v85-a0", "ground-s95-v85-a45", "ground-s95-v85-a90", "ground-s95-v85-a135", "ground-s95-v85-a180", "aerial-1km", "aerial-10km", "aerial-32km"],
+          "routed": {
+            "all": {
+              "comparisons": 360,
+              "passes": 69,
+              "misses": 0,
+              "refusals": 291,
+              "worstRatio": 0.000588224,
+              "worstAt": "ground-s90-v85-a180/b",
+              "missed": []
+            },
+            "images": [
+              ["ground-s0", 12, 0, 0, 12, null, null, null],
+              ["ground-s30", 60, 0, 0, 60, null, null, null],
+              ["ground-s60", 60, 0, 0, 60, null, null, null],
+              ["ground-s80", 63, 0, 0, 63, null, null, null],
+              ["ground-s90", 63, 1, 0, 62, 0.000588224, "ground-s90-v85-a180", "b"],
+              ["ground-s95", 63, 62, 0, 1, 0, "ground-s95-v0-a0", "r"],
+              ["disc-p0", 3, 0, 0, 3, null, null, null],
+              ["disc-p30", 3, 0, 0, 3, null, null, null],
+              ["disc-p60", 3, 0, 0, 3, null, null, null],
+              ["disc-p75", 3, 0, 0, 3, null, null, null],
+              ["disc-p85", 3, 0, 0, 3, null, null, null],
+              ["limb", 15, 6, 0, 9, 0, "limb-3H", "r"],
+              ["aerial", 9, 0, 0, 9, null, null, null]
+            ]
+          },
+          "routedRatios": [
+            ["ground-s0", 0.7582003, "ground-s0-v75-a0/g", 1.588569, "ground-s0-v30-a0/b"],
+            ["ground-s30", 0.7502732, "ground-s30-v0-a0/g", 1.955796, "ground-s30-v60-a90/b"],
+            ["ground-s60", 0.6670068, "ground-s60-v30-a0/b", 1.868671, "ground-s60-v60-a135/b"],
+            ["ground-s80", 0.561321, "ground-s80-v60-a180/b", 4.03869, "ground-s80-v30-a0/b"],
+            ["ground-s90", 2.753208e-15, "ground-s90-v60-a45/b", 0.06640786, "ground-s90-v85-a135/b"],
+            ["ground-s95", 0, "ground-s95-v75-a0/r", 0, ""],
+            ["disc-p0", 1.002966, "disc-p0/r", 1.079863, "disc-p0/b"],
+            ["disc-p30", 0.9825959, "disc-p30/r", 1.103065, "disc-p30/b"],
+            ["disc-p60", 1.023802, "disc-p60/r", 1.110481, "disc-p60/b"],
+            ["disc-p75", 1.038605, "disc-p75/b", 1.099932, "disc-p75/r"],
+            ["disc-p85", 0.925111, "disc-p85/r", 1.253631, "disc-p85/b"],
+            ["limb", 0.9572119, "limb-0.3H/g", 1.032156, "limb-1H/b"],
+            ["aerial", 0.3724958, "aerial-10km/b", 1.505174, "aerial-32km/b"]
+          ],
+          "geometries": [
+            ["ground-s0-v30-a0", "ground-s0", "ground", 0, 6841.493, 4607.932, 1968.382, 0, 0, 0, 8029.249, 4406.396, 1239.091, 922.061, 581.2681, 260.6258, 401.4624, 220.3198, 61.95453, "refused", "refused", "refused", 0.2904257, 0.07917664, 0.6603163],
+            ["ground-s0-v60-a0", "ground-s0", "ground", 0, 5356.325, 3607.847, 1541.35, 0, 0, 0, 4712.549, 3447.404, 1273.526, 580.5916, 512.5812, 257.9022, 235.6275, 172.3702, 63.67632, "refused", "refused", "refused", 0.2516721, 0.072184, 0.2445241],
+            ["ground-s0-v75-a0", "ground-s0", "ground", 0, 4339.783, 2923.321, 1249.09, 0, 0, 0, 4192.494, 3855.605, 1056.996, 592.1077, 540.2071, 235.7059, 209.6247, 192.7803, 52.84979, "refused", "refused", "refused", 0.05713179, 0.3961084, 0.192929],
+            ["ground-s0-v85-a0", "ground-s0", "ground", 0, 3554.223, 2394.335, 1023.252, 0, 0, 0, 3786.251, 2717.241, 1027.075, 536.7699, 428.0415, 308.2019, 189.3125, 135.8621, 51.35374, "refused", "refused", "refused", 0.09931028, 0.1747303, 0.002976872],
+            ["ground-s30-v0-a0", "ground-s30", "ground", 0, 5799.196, 3903.486, 1650.406, 0, 0, 0, 5196.869, 5202.753, 1562.896, 595.3017, 652.41, 332.9306, 259.8435, 260.1376, 78.14478, "refused", "refused", "refused", 0.2280634, 0.4527412, 0.06206997],
+            ["ground-s30-v30-a45", "ground-s30", "ground", 0, 5565.488, 3746.209, 1583.93, 0, 0, 0, 4892.643, 3259.669, 1871.291, 614.88, 530.3416, 322.8677, 244.6322, 162.9835, 93.56457, "refused", "refused", "refused", 0.2488192, 0.2129884, 0.2074759],
+            ["ground-s30-v30-a90", "ground-s30", "ground", 0, 5565.488, 3746.209, 1583.93, 0, 0, 0, 5163.526, 3264.071, 1019.727, 608.5164, 460.2998, 190.2139, 258.1763, 163.2036, 50.98636, "refused", "refused", "refused", 0.1493039, 0.2405394, 0.6949662],
+            ["ground-s30-v30-a135", "ground-s30", "ground", 0, 5565.488, 3746.209, 1583.93, 0, 0, 0, 5636.763, 4096.728, 1349.605, 576.3275, 541.6787, 234.826, 281.8382, 204.8364, 67.48027, "refused", "refused", "refused", 0.02754982, 0.1478016, 0.2327456],
+            ["ground-s30-v30-a180", "ground-s30", "ground", 0, 5565.488, 3746.209, 1583.93, 0, 0, 0, 6267.124, 4183.23, 1362.816, 632.537, 522.3318, 257.1915, 313.3562, 209.1615, 68.14078, "refused", "refused", "refused", 0.2467504, 0.1901343, 0.20158],
+            ["ground-s30-v60-a0", "ground-s30", "ground", 0, 4357.318, 2933.148, 1240.303, 0, 0, 0, 4477.087, 3338.818, 972.8737, 562.9084, 522.4369, 184.0016, 223.8543, 166.9409, 48.64369, "refused", "refused", "refused", 0.0483818, 0.1797633, 0.3408261],
+            ["ground-s30-v60-a45", "ground-s30", "ground", 0, 4357.318, 2933.148, 1240.303, 0, 0, 0, 5489.211, 2656.652, 1139.956, 733.4309, 461.2954, 229.6399, 274.4605, 132.8326, 56.99781, "refused", "refused", "refused", 0.3528142, 0.1397848, 0.102861],
+            ["ground-s30-v60-a90", "ground-s30", "ground", 0, 4357.318, 2933.148, 1240.303, 0, 0, 0, 4827.283, 3174.736, 634.1679, 609.6805, 464.6292, 148.332, 241.3641, 158.7368, 31.70839, "refused", "refused", "refused", 0.1753544, 0.119761, 0.9697595],
+            ["ground-s30-v60-a135", "ground-s30", "ground", 0, 4357.318, 2933.148, 1240.303, 0, 0, 0, 5302.351, 2997.344, 1342.093, 617.27, 414.574, 283.901, 265.1175, 149.8672, 67.10464, "refused", "refused", "refused", 0.3456345, 0.03550333, 0.0846338],
+            ["ground-s30-v60-a180", "ground-s30", "ground", 0, 4357.318, 2933.148, 1240.303, 0, 0, 0, 4588.653, 2832.884, 1174.443, 601.1685, 452.8659, 292.532, 229.4326, 141.6442, 58.72215, "refused", "refused", "refused", 0.08782279, 0.05133553, 0.05359489],
+            ["ground-s30-v75-a0", "ground-s30", "ground", 0, 3530.371, 2376.635, 1005.126, 0, 0, 0, 3024.156, 2465.689, 1008.339, 438.9953, 358.7297, 237.7618, 151.2078, 123.2845, 50.41697, "refused", "refused", "refused", 0.2654246, 0.05715204, 0.003208798],
+            ["ground-s30-v75-a45", "ground-s30", "ground", 0, 3530.371, 2376.635, 1005.126, 0, 0, 0, 3461.149, 2387.346, 1104.642, 569.0648, 393.409, 252.9733, 173.0575, 119.3673, 55.23208, "refused", "refused", "refused", 0.02826171, 0.006326365, 0.09325573],
+            ["ground-s30-v75-a90", "ground-s30", "ground", 0, 3530.371, 2376.635, 1005.126, 0, 0, 0, 2831.573, 2844.757, 1107.263, 410.7159, 448.734, 277.7775, 141.5787, 142.2379, 55.36315, "refused", "refused", "refused", 0.3916056, 0.2416521, 0.08756059],
+            ["ground-s30-v75-a135", "ground-s30", "ground", 0, 3530.371, 2376.635, 1005.126, 0, 0, 0, 3466.417, 2817.161, 846.1945, 501.4217, 420.2397, 203.2953, 173.3209, 140.8581, 42.30973, "refused", "refused", "refused", 0.02934992, 0.2418061, 0.1857781],
+            ["ground-s30-v75-a180", "ground-s30", "ground", 0, 3530.371, 2376.635, 1005.126, 0, 0, 0, 4380.947, 2261.716, 912.6273, 606.3825, 370.5009, 198.639, 219.0473, 113.0858, 45.63137, "refused", "refused", "refused", 0.3216301, 0.07204574, 0.1100929],
+            ["ground-s30-v85-a0", "ground-s30", "ground", 0, 2891.326, 1946.574, 823.3973, 0, 0, 0, 2677.327, 1680.797, 608.0839, 387.5985, 275.2927, 180.5811, 133.8663, 84.03984, 30.40419, "refused", "refused", "refused", 0.1270583, 0.2242447, 0.2860439],
+            ["ground-s30-v85-a45", "ground-s30", "ground", 0, 2891.326, 1946.574, 823.3973, 0, 0, 0, 2928.345, 2323.789, 507.8752, 412.9256, 417.8471, 134.4538, 146.4173, 116.1895, 25.39376, "refused", "refused", "refused", 0.0205877, 0.2110202, 0.5602222],
+            ["ground-s30-v85-a90", "ground-s30", "ground", 0, 2891.326, 1946.574, 823.3973, 0, 0, 0, 2879.915, 2219.526, 728.3097, 502.4817, 413.5035, 292.7354, 143.9957, 110.9763, 36.41548, "refused", "refused", "refused", 0.005297917, 0.1546476, 0.07875686],
+            ["ground-s30-v85-a135", "ground-s30", "ground", 0, 2891.326, 1946.574, 823.3973, 0, 0, 0, 2899.525, 2349.161, 848.0313, 479.2085, 398.496, 257.4818, 144.9763, 117.4581, 42.40157, "refused", "refused", "refused", 0.003976774, 0.2352328, 0.02297244],
+            ["ground-s30-v85-a180", "ground-s30", "ground", 0, 2891.326, 1946.574, 823.3973, 0, 0, 0, 2020.135, 2559.788, 525.3607, 308.0948, 423.6338, 159.2244, 101.0067, 127.9894, 26.26803, "refused", "refused", "refused", 0.6533677, 0.3364642, 0.4494151],
+            ["ground-s60-v0-a0", "ground-s60", "ground", 0, 2483.128, 1668.374, 686.128, 0, 0, 0, 3473.463, 1474.359, 713.9535, 411.7348, 251.5636, 185.9139, 173.6732, 73.71793, 35.69767, "refused", "refused", "refused", 0.5439571, 0.1796486, 0.03570332],
+            ["ground-s60-v30-a0", "ground-s60", "ground", 0, 2383.058, 1601.153, 658.4919, 0, 0, 0, 2431.173, 1165.946, 987.2341, 313.745, 230.4873, 250.0189, 121.5586, 58.29729, 49.3617, "refused", "refused", "refused", 0.03495328, 0.4439772, 0.3132556],
+            ["ground-s60-v30-a45", "ground-s60", "ground", 0, 2383.058, 1601.153, 658.4919, 0, 0, 0, 1914.271, 1129.405, 639.4723, 255.2244, 192.1539, 172.5349, 95.71353, 56.47026, 31.97362, "refused", "refused", "refused", 0.4198305, 0.571756, 0.02633876],
+            ["ground-s60-v30-a90", "ground-s60", "ground", 0, 2383.058, 1601.153, 658.4919, 0, 0, 0, 2597.915, 1406.06, 369.9661, 356.4715, 244.5975, 102.1228, 129.8958, 70.30299, 18.49831, "refused", "refused", "refused", 0.1381023, 0.1860347, 0.6757211],
+            ["ground-s60-v30-a135", "ground-s60", "ground", 0, 2383.058, 1601.153, 658.4919, 0, 0, 0, 2009.537, 1309.177, 726.6314, 327.4383, 220.3778, 185.5481, 100.4768, 65.45887, 36.33157, "refused", "refused", "refused", 0.2648656, 0.3083262, 0.08752401],
+            ["ground-s60-v30-a180", "ground-s60", "ground", 0, 2383.058, 1601.153, 658.4919, 0, 0, 0, 2770.952, 1747.581, 653.6556, 360.4805, 298.2267, 131.7303, 138.5476, 87.37904, 32.68278, "refused", "refused", "refused", 0.2454293, 0.1143712, 0.00864228],
+            ["ground-s60-v60-a45", "ground-s60", "ground", 0, 1865.738, 1253.646, 515.6356, 0, 0, 0, 1385.757, 1025.231, 658.101, 222.199, 204.561, 195.7942, 69.28783, 51.26156, 32.90505, "refused", "refused", "refused", 0.5009806, 0.262695, 0.1745725],
+            ["ground-s60-v60-a90", "ground-s60", "ground", 0, 1865.738, 1253.646, 515.6356, 0, 0, 0, 2031.739, 1329.554, 576.4736, 331.1873, 225.6756, 160.8339, 101.5869, 66.4777, 28.82368, "refused", "refused", "refused", 0.1163827, 0.0783219, 0.09051131],
+            ["ground-s60-v60-a135", "ground-s60", "ground", 0, 1865.738, 1253.646, 515.6356, 0, 0, 0, 2048.021, 1125.308, 275.9371, 355.8831, 217.5227, 104.4924, 102.401, 56.26538, 13.79686, "refused", "refused", "refused", 0.1194567, 0.138541, 0.5551576],
+            ["ground-s60-v60-a180", "ground-s60", "ground", 0, 1865.738, 1253.646, 515.6356, 0, 0, 0, 2359.31, 1307.501, 394.9843, 333.5383, 245.7808, 121.109, 117.9655, 65.37506, 19.74921, "refused", "refused", "refused", 0.3398978, 0.0513642, 0.2392996],
+            ["ground-s60-v75-a0", "ground-s60", "ground", 0, 1511.652, 1015.788, 417.8651, 0, 0, 0, 1301.207, 870.6094, 542.7919, 207.048, 171.0542, 132.73, 65.06034, 43.53047, 27.1396, "refused", "refused", "refused", 0.2355942, 0.1994904, 0.2238593],
+            ["ground-s60-v75-a45", "ground-s60", "ground", 0, 1511.652, 1015.788, 417.8651, 0, 0, 0, 1433.394, 1117.977, 323.0729, 299.9998, 224.0876, 99.48322, 71.66972, 55.89885, 16.15365, "refused", "refused", "refused", 0.06153932, 0.1073132, 0.2289188],
+            ["ground-s60-v75-a90", "ground-s60", "ground", 0, 1511.652, 1015.788, 417.8651, 0, 0, 0, 1353.868, 857.0647, 380.0691, 230.0732, 171.7231, 98.68383, 67.69339, 42.85323, 19.00346, "refused", "refused", "refused", 0.1597027, 0.217505, 0.09135222],
+            ["ground-s60-v75-a135", "ground-s60", "ground", 0, 1511.652, 1015.788, 417.8651, 0, 0, 0, 1443.275, 740.9459, 367.652, 237.5901, 142.3778, 127.8184, 72.16373, 37.04729, 18.3826, "refused", "refused", "refused", 0.06687117, 0.4531173, 0.09480323],
+            ["ground-s60-v75-a180", "ground-s60", "ground", 0, 1511.652, 1015.788, 417.8651, 0, 0, 0, 2005.626, 990.9275, 377.7572, 348.3867, 204.4891, 121.1145, 100.2813, 49.54637, 18.88786, "refused", "refused", "refused", 0.3306766, 0.0286576, 0.07968263],
+            ["ground-s60-v85-a0", "ground-s60", "ground", 0, 1238.022, 831.9778, 342.3144, 0, 0, 0, 895.4733, 707.9691, 309.1652, 197.705, 163.5758, 102.1235, 44.77366, 35.39846, 15.45826, "refused", "refused", "refused", 0.4099466, 0.1798005, 0.07819091],
+            ["ground-s60-v85-a45", "ground-s60", "ground", 0, 1238.022, 831.9778, 342.3144, 0, 0, 0, 973.1706, 830.4087, 270.5154, 220.6236, 198.1452, 85.68482, 48.65853, 41.52044, 13.52577, "refused", "refused", "refused", 0.2844339, 0.001881157, 0.2015325],
+            ["ground-s60-v85-a90", "ground-s60", "ground", 0, 1238.022, 831.9778, 342.3144, 0, 0, 0, 1183.389, 745.5691, 388.7471, 236.6766, 191.8498, 140.7698, 59.16946, 37.27846, 19.43736, "refused", "refused", "refused", 0.05431368, 0.1073829, 0.07971054],
+            ["ground-s60-v85-a135", "ground-s60", "ground", 0, 1238.022, 831.9778, 342.3144, 0, 0, 0, 1406.836, 1007.387, 363.0412, 274.7288, 276.2132, 119.9015, 70.34181, 50.36933, 18.15206, "refused", "refused", "refused", 0.1443774, 0.1518399, 0.04164023],
+            ["ground-s60-v85-a180", "ground-s60", "ground", 0, 1238.022, 831.9778, 342.3144, 0, 0, 0, 917.9074, 612.5301, 323.4294, 193.4233, 125.8891, 94.22389, 45.89537, 30.6265, 16.17147, "refused", "refused", "refused", 0.3905797, 0.4108102, 0.04804525],
+            ["ground-s80-v0-a0", "ground-s80", "ground", 0, 570.0882, 382.2349, 155.5585, 0, 0, 0, 609.7057, 545.0443, 143.9021, 139.1084, 113.2935, 45.66925, 30.48529, 27.25221, 7.195103, "refused", "refused", "refused", 0.06750089, 0.3388853, 0.06139097],
+            ["ground-s80-v30-a0", "ground-s80", "ground", 0, 547.1136, 366.834, 149.2929, 0, 0, 0, 487.0252, 444.1132, 36.96567, 98.18202, 113.235, 11.33882, 24.35126, 22.20566, 1.848284, "refused", "refused", "refused", 0.1440694, 0.1626432, 2.379634],
+            ["ground-s80-v30-a45", "ground-s80", "ground", 0, 547.1136, 366.834, 149.2929, 0, 0, 0, 464.1581, 293.009, 210.7968, 97.19832, 62.63757, 76.21235, 23.20791, 14.65045, 10.53984, "refused", "refused", "refused", 0.2013476, 0.2783742, 0.1950094],
+            ["ground-s80-v30-a90", "ground-s80", "ground", 0, 547.1136, 366.834, 149.2929, 0, 0, 0, 621.332, 268.294, 176.1279, 145.8038, 68.46001, 89.49538, 31.0666, 13.4147, 8.806396, "refused", "refused", "refused", 0.1208214, 0.3430404, 0.07316223],
+            ["ground-s80-v30-a135", "ground-s80", "ground", 0, 547.1136, 366.834, 149.2929, 0, 0, 0, 761.8123, 216.0546, 126.9703, 160.3476, 48.4729, 40.76483, 38.09062, 10.80273, 6.348514, "refused", "refused", "refused", 0.3159746, 0.7366075, 0.1317685],
+            ["ground-s80-v30-a180", "ground-s80", "ground", 0, 547.1136, 366.834, 149.2929, 0, 0, 0, 725.7256, 389.4662, 166.4292, 174.8292, 95.24403, 60.92394, 36.28628, 19.47331, 8.321458, "refused", "refused", "refused", 0.2428104, 0.05651703, 0.06799636],
+            ["ground-s80-v60-a0", "ground-s80", "ground", 0, 428.3448, 287.218, 116.9047, 0, 0, 0, 364.3436, 234.9253, 69.53063, 87.35213, 65.98667, 26.91922, 18.21718, 11.74627, 3.476532, "refused", "refused", "refused", 0.1740934, 0.1896773, 0.4262044],
+            ["ground-s80-v60-a45", "ground-s80", "ground", 0, 428.3448, 287.218, 116.9047, 0, 0, 0, 388.1685, 294.9716, 97.4892, 98.17362, 67.26397, 40.43134, 19.40842, 14.74858, 4.87446, "refused", "refused", "refused", 0.09749097, 0.02732023, 0.1165397],
+            ["ground-s80-v60-a90", "ground-s80", "ground", 0, 428.3448, 287.218, 116.9047, 0, 0, 0, 506.0387, 394.4322, 110.0407, 132.6054, 87.85048, 54.11461, 25.30194, 19.72161, 5.502037, "refused", "refused", "refused", 0.1398067, 0.2888908, 0.03092428],
+            ["ground-s80-v60-a135", "ground-s80", "ground", 0, 428.3448, 287.218, 116.9047, 0, 0, 0, 320.4584, 338.7962, 54.89791, 76.76759, 104.377, 30.54045, 16.02292, 16.93981, 2.744895, "refused", "refused", "refused", 0.3339171, 0.1187213, 0.4964248],
+            ["ground-s80-v60-a180", "ground-s80", "ground", 0, 428.3448, 287.218, 116.9047, 0, 0, 0, 267.4599, 138.5295, 208.2671, 83.15905, 45.36651, 83.49746, 13.37299, 6.926477, 10.41335, "refused", "refused", "refused", 0.464973, 0.7892482, 0.2652774],
+            ["ground-s80-v75-a0", "ground-s80", "ground", 0, 347.0521, 232.7234, 94.73821, 0, 0, 0, 292.6153, 214.068, 54.75429, 95.56905, 74.2223, 29.34402, 14.63077, 10.7034, 2.737714, "refused", "refused", "refused", 0.1371525, 0.06064968, 0.3328837],
+            ["ground-s80-v75-a45", "ground-s80", "ground", 0, 347.0521, 232.7234, 94.73821, 0, 0, 0, 251.9678, 196.6515, 93.23774, 60.58619, 65.58979, 46.4004, 12.59839, 9.832574, 4.661887, "refused", "refused", "refused", 0.3729629, 0.132524, 0.007886252],
+            ["ground-s80-v75-a90", "ground-s80", "ground", 0, 347.0521, 232.7234, 94.73821, 0, 0, 0, 395.0307, 313.217, 83.46265, 103.7266, 88.46627, 34.9986, 19.75153, 15.66085, 4.173133, "refused", "refused", "refused", 0.1103823, 0.2178295, 0.07821146],
+            ["ground-s80-v75-a135", "ground-s80", "ground", 0, 347.0521, 232.7234, 94.73821, 0, 0, 0, 421.1588, 77.62577, 120.0674, 134.4338, 21.58087, 50.11181, 21.05794, 3.881289, 6.00337, "refused", "refused", "refused", 0.1326192, 1.719395, 0.1226889],
+            ["ground-s80-v75-a180", "ground-s80", "ground", 0, 347.0521, 232.7234, 94.73821, 0, 0, 0, 449.2912, 285.3458, 81.43125, 130.6728, 96.22551, 34.77322, 22.46456, 14.26729, 4.071563, "refused", "refused", "refused", 0.187541, 0.1318297, 0.09294877],
+            ["ground-s80-v85-a0", "ground-s80", "ground", 0, 284.2309, 190.6113, 77.6094, 0, 0, 0, 378.7769, 330.156, 35.25953, 111.068, 93.10873, 15.89006, 18.93885, 16.5078, 1.762977, "refused", "refused", "refused", 0.2041101, 0.3587795, 0.6483127],
+            ["ground-s80-v85-a45", "ground-s80", "ground", 0, 284.2309, 190.6113, 77.6094, 0, 0, 0, 385.0723, 100.2322, 91.99799, 98.69269, 37.37076, 48.07142, 19.25362, 5.011612, 4.5999, "refused", "refused", "refused", 0.2435639, 0.5849979, 0.07308099],
+            ["ground-s80-v85-a90", "ground-s80", "ground", 0, 284.2309, 190.6113, 77.6094, 0, 0, 0, 288.8606, 212.874, 84.86234, 85.95104, 77.19195, 39.3489, 14.44303, 10.6437, 4.243117, "refused", "refused", "refused", 0.01292312, 0.06969921, 0.04487131],
+            ["ground-s80-v85-a135", "ground-s80", "ground", 0, 284.2309, 190.6113, 77.6094, 0, 0, 0, 252.2355, 273.3234, 83.73043, 110.5921, 84.91763, 61.23213, 12.61178, 13.66617, 4.186521, "refused", "refused", "refused", 0.07032261, 0.2340887, 0.02457109],
+            ["ground-s80-v85-a180", "ground-s80", "ground", 0, 284.2309, 190.6113, 77.6094, 0, 0, 0, 379.3091, 217.7235, 60.80621, 144.7193, 83.30147, 35.79689, 18.96546, 10.88617, 3.040311, "refused", "refused", "refused", 0.1590355, 0.07879341, 0.114911],
+            ["ground-s90-v0-a0", "ground-s90", "ground", 0, 2.073523e-13, 1.46991e-13, 6.841381e-14, 0, 0, 0, 1.936057, 3.931828, 0.6489089, 1.355061, 3.789978, 0.6485099, 0.09680286, 0.1965914, 0.03244545, "refused", "refused", "refused", 0.3509228, 0.2560366, 0.2470636],
+            ["ground-s90-v30-a0", "ground-s90", "ground", 0, 1.989959e-13, 1.410685e-13, 6.565817e-14, 0, 0, 0, 15.35807, 1.971638, 16.62764, 15.31686, 1.606848, 11.77427, 0.7679033, 0.09858191, 0.8313819, "refused", "refused", "refused", 0.2475696, 0.3021217, 0.3469261],
+            ["ground-s90-v30-a45", "ground-s90", "ground", 0, 1.989959e-13, 1.410685e-13, 6.565817e-14, 0, 0, 0, 9.765948, 4.29548, 17.79867, 8.554063, 3.822226, 12.5702, 0.4882974, 0.214774, 0.8899333, "refused", "refused", "refused", 0.2814025, 0.277062, 0.3478291],
+            ["ground-s90-v30-a90", "ground-s90", "ground", 0, 1.989959e-13, 1.410685e-13, 6.565817e-14, 0, 0, 0, 1.558772, 22.28878, 0.0002300043, 1.263061, 12.55617, 0.0002120501, 0.07793862, 1.114439, 0.005602235, "refused", "refused", "refused", 0.3038435, 0.4341482, 0.03565718],
+            ["ground-s90-v30-a135", "ground-s90", "ground", 0, 1.989959e-13, 1.410685e-13, 6.565817e-14, 0, 0, 0, 16.20442, 8.262664, 0.3154938, 14.07208, 5.064549, 0.220004, 0.8102212, 0.4131332, 0.01577469, "refused", "refused", "refused", 0.2837974, 0.3997161, 0.3521959],
+            ["ground-s90-v30-a180", "ground-s90", "ground", 0, 1.989959e-13, 1.410685e-13, 6.565817e-14, 0, 0, 0, 14.64873, 9.454517, 2.268255, 11.25158, 8.465917, 2.268255, 0.7324367, 0.4727259, 0.1134128, "refused", "refused", "refused", 0.3202697, 0.2753498, 0.2469136],
+            ["ground-s90-v60-a0", "ground-s90", "ground", 0, 1.557972e-13, 1.104516e-13, 5.141374e-14, 0, 0, 0, 19.30291, 32.47759, 0.000001281969, 11.67546, 31.10799, 0.000001281963, 0.9651454, 1.623879, 0.005602235, "refused", "refused", "refused", 0.4049533, 0.2576444, 0.0002286224],
+            ["ground-s90-v60-a45", "ground-s90", "ground", 0, 1.557972e-13, 1.104516e-13, 5.141374e-14, 0, 0, 0, 19.59205, 4.927613, 18.67412, 12.81185, 2.64905, 18.13403, 0.9796025, 0.2463807, 0.9337058, "refused", "refused", "refused", 0.3751326, 0.4544687, 0.254174],
+            ["ground-s90-v60-a90", "ground-s90", "ground", 0, 1.557972e-13, 1.104516e-13, 5.141374e-14, 0, 0, 0, 2.800116, 32.58729, 0.1513545, 1.812065, 21.81768, 0.1512849, 0.1400058, 1.629364, 0.007567724, "refused", "refused", "refused", 0.378995, 0.3665608, 0.2470258],
+            ["ground-s90-v60-a135", "ground-s90", "ground", 0, 1.557972e-13, 1.104516e-13, 5.141374e-14, 0, 0, 0, 11.42492, 0.000006256118, 11.5351, 9.292836, 0.000004731546, 10.62876, 0.5712462, 0.009776186, 0.5767551, "refused", "refused", "refused", 0.3027064, 0.0006386979, 0.2676867],
+            ["ground-s90-v60-a180", "ground-s90", "ground", 0, 1.557972e-13, 1.104516e-13, 5.141374e-14, 0, 0, 0, 2.724885, 8.58516, 5.773541, 2.630188, 8.576189, 4.312139, 0.1362442, 0.429258, 0.2886771, "refused", "refused", "refused", 0.2556897, 0.2471687, 0.3292162],
+            ["ground-s90-v75-a0", "ground-s90", "ground", 0, 1.262294e-13, 8.949538e-14, 4.166492e-14, 0, 0, 0, 9.919056, 14.47035, 0.0002298397, 5.939046, 10.84355, 0.0002298384, 0.4959528, 0.7235177, 0.005602235, "refused", "refused", "refused", 0.4089972, 0.3281429, 0.0352429],
+            ["ground-s90-v75-a45", "ground-s90", "ground", 0, 1.262294e-13, 8.949538e-14, 4.166492e-14, 0, 0, 0, 4.355792, 0.4661184, 0.2464154, 2.963319, 0.3702162, 0.2464153, 0.2177896, 0.02330592, 0.01232077, "refused", "refused", "refused", 0.3608457, 0.309884, 0.2469137],
+            ["ground-s90-v75-a90", "ground-s90", "ground", 0, 1.262294e-13, 8.949538e-14, 4.166492e-14, 0, 0, 0, 10.22653, 0.4267618, 3.573009, 5.774786, 0.2529502, 3.410124, 0.5113264, 0.02133809, 0.1786505, "refused", "refused", "refused", 0.4331353, 0.4130731, 0.258555],
+            ["ground-s90-v75-a135", "ground-s90", "ground", 0, 1.262294e-13, 8.949538e-14, 4.166492e-14, 0, 0, 0, 15.18513, 5.310759, 1.1599, 12.52146, 4.960509, 1.159884, 0.7592563, 0.265538, 0.05799498, "refused", "refused", "refused", 0.2986546, 0.2641173, 0.2469169],
+            ["ground-s90-v75-a180", "ground-s90", "ground", 0, 1.262294e-13, 8.949538e-14, 4.166492e-14, 0, 0, 0, 2.37716, 0.7764544, 2.430434e-8, 1.626415, 0.7761406, 2.115187e-8, 0.118858, 0.03882272, 0.005602235, "refused", "refused", "refused", 0.3588427, 0.2470122, 0.000004338257],
+            ["ground-s90-v85-a0", "ground-s90", "ground", 0, 1.0338e-13, 7.330085e-14, 3.413168e-14, 0, 0, 0, 1.675113, 10.28414, 0.1710855, 0.9394958, 10.13363, 0.170849, 0.08375564, 0.5142072, 0.008554277, "refused", "refused", "refused", 0.4360298, 0.2505351, 0.2472512],
+            ["ground-s90-v85-a45", "ground-s90", "ground", 0, 1.0338e-13, 7.330085e-14, 3.413168e-14, 0, 0, 0, 24.59624, 1.97025, 6.956779, 23.00141, 1.610498, 6.956704, 1.229812, 0.09851252, 0.3478389, "refused", "refused", "refused", 0.2638079, 0.3012384, 0.2469162],
+            ["ground-s90-v85-a90", "ground-s90", "ground", 0, 1.0338e-13, 7.330085e-14, 3.413168e-14, 0, 0, 0, 6.896741, 12.28923, 7.231555, 6.576596, 9.733849, 7.231555, 0.3448371, 0.6144613, 0.3615778, "refused", "refused", "refused", 0.2587777, 0.3107274, 0.2469136],
+            ["ground-s90-v85-a135", "ground-s90", "ground", 0, 1.0338e-13, 7.330085e-14, 3.413168e-14, 0, 0, 0, 11.18297, 0.1787117, 5.139705e-13, 11.13489, 0.1546857, 4.585035e-13, 0.5591483, 0.009776186, 0.005602235, "refused", "refused", "refused", 0.2479664, 0.2843377, 8.565131e-11],
+            ["ground-s90-v85-a180", "ground-s90", "ground", 0, 1.0338e-13, 7.330085e-14, 3.413168e-14, 0, 0, 0, 0.9101699, 4.943615, 0.000003301059, 0.8122768, 4.567355, 0.000002418151, 0.0455085, 0.2471807, 0.005602235, "refused", "refused", "pass", 0.2762598, 0.2669829, 0.000588224],
+            ["ground-s95-v0-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v30-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v30-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v30-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v30-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v30-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v60-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v60-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v60-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v60-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v60-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v75-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 4.647712, 0, 0, 4.647712, 0, 0, 0.2323856, 0, 0, "refused", "pass", "pass", 0.2469136, null, null],
+            ["ground-s95-v75-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v75-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v75-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v75-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v85-a0", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v85-a45", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v85-a90", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v85-a135", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["ground-s95-v85-a180", "ground-s95", "ground", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001394314, 0, 0, "pass", "pass", "pass", 0, null, null],
+            ["disc-p0", "disc-p0", "orbit", 1, 48437.1, 45848.33, 36548.67, 0, 0, 0, 48293.87, 45348.94, 33845.65, 1729.218, 1654.564, 1096.05, 2414.693, 2267.447, 1692.282, "refused", "refused", "refused", 0.01534946, 0.05620167, 0.4448338],
+            ["disc-p30", "disc-p30", "orbit", 1, 38853.61, 36267.57, 28247.89, 0, 0, 0, 39541.8, 35966.76, 25608.55, 1523.58, 1400.48, 987.4034, 1977.09, 1798.338, 1280.428, "refused", "refused", "refused", 0.08526216, 0.04064816, 0.5046498],
+            ["disc-p60", "disc-p60", "orbit", 1, 19020.79, 17608.59, 13651.87, 0, 0, 0, 18578.58, 16195.4, 12293.66, 827.4919, 800.8342, 574.5836, 928.9291, 809.7699, 614.6832, "refused", "refused", "refused", 0.1043216, 0.3521443, 0.4662537],
+            ["disc-p75", "disc-p75", "orbit", 1, 8434.35, 7768.962, 6102.747, 0, 0, 0, 7668.062, 7366.725, 5875.909, 444.2357, 398.465, 391.2081, 383.4031, 368.3362, 293.7955, "refused", "refused", "refused", 0.3547061, 0.2049933, 0.1220458],
+            ["disc-p85", "disc-p85", "orbit", 1, 2248.448, 2080.775, 1717.136, 0, 0, 0, 2430.463, 1775.063, 1369.73, 219.348, 158.5257, 119.4813, 121.5231, 88.75313, 68.48652, "refused", "refused", "refused", 0.1822123, 0.4229229, 0.6357947],
+            ["limb-0.1H", "limb", "orbit", 0.3421208, 17342.9, 15879.02, 13461.99, 0, 0, 0, 17612.35, 16431.94, 13162.3, 771.3431, 770.2279, 554.5377, 880.6174, 821.5968, 658.1148, "refused", "refused", "refused", 0.06793988, 0.1416821, 0.1041953],
+            ["limb-0.3H", "limb", "orbit", 0.1023323, 16922.04, 15515.17, 13270.64, 0, 0, 0, 16434.29, 16208.71, 13182.89, 730.9406, 722.5057, 567.3765, 821.7143, 810.4353, 659.1444, "refused", "refused", "refused", 0.1302247, 0.1874189, 0.02996316],
+            ["limb-1H", "limb", "orbit", 0, 6279.171, 6351.755, 6677.055, 0, 0, 0, 6411.213, 6239.206, 6469.034, 511.3698, 452.1197, 390.8186, 320.5607, 311.9603, 323.4517, "refused", "refused", "refused", 0.05580724, 0.05307794, 0.1102552],
+            ["limb-3H", "limb", "orbit", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5.283705, 4.929581, 3.954867, "pass", "pass", "pass", 0, 0, 0],
+            ["limb-10H", "limb", "orbit", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5.283705, 4.929581, 3.954867, "pass", "pass", "pass", 0, 0, 0],
+            ["aerial-1km", "aerial", "aerial", 0.3421208, 257.067, 258.6954, 164.2584, 0.3141803, 0.2097307, 0.1357797, 561.8708, 441.0362, 122.4822, 124.0644, 108.5958, 72.1334, 28.09354, 22.05181, 6.124112, "refused", "refused", "refused", 0.5812969, 0.399489, 0.1417786],
+            ["aerial-10km", "aerial", "aerial", 0.4734476, 568.4203, 423.3665, 191.7125, 0.1639876, 0.1479072, 0.1342664, 761.4489, 400.6223, 514.6702, 210.3794, 99.7785, 170.9402, 38.07244, 20.03112, 25.73351, "refused", "refused", "refused", 0.2194529, 0.0542632, 0.4551941],
+            ["aerial-32km", "aerial", "aerial", 0.4734476, 583.8929, 423.7457, 191.7125, 0.1596421, 0.1477749, 0.1342664, 725.8021, 718.9367, 127.369, 153.9135, 217.0878, 42.32226, 36.29011, 35.94683, 6.368449, "refused", "refused", "refused", 0.2176709, 0.3264311, 0.366301]
+          ],
+          "groundIrradiance": {
+            "tolerance": {
+              "relative": 0.02,
+              "sigmaCap": 0.0025
+            },
+            "against": "the scalar downwelling flux, direct and diffuse (fluxReadingsOf, scalar)",
+            "aggregates": [
+              {
+                "aggregate": "flux-s0/downwelling",
+                "rows": [
+                  ["r", 18930.53, 22616.62, 2392.772, -0.1629813, "refused"],
+                  ["g", 12748.1, 17418.3, 2327.3, -0.2681204, "refused"],
+                  ["b", 5443.064, 3763.879, 742.8657, 0.4461314, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s30/downwelling",
+                "rows": [
+                  ["r", 15399.8, 13427.99, 1709.778, 0.1468435, "refused"],
+                  ["g", 10364.09, 7433.472, 1142.336, 0.3942462, "refused"],
+                  ["b", 4379.956, 3029.054, 706.637, 0.4459813, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s60/downwelling",
+                "rows": [
+                  ["r", 6593.964, 7321.367, 1033.613, -0.0993535, "refused"],
+                  ["g", 4429.675, 5144.306, 994.2154, -0.1389169, "refused"],
+                  ["b", 1820.89, 1838.15, 495.1206, -0.009389609, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-s80/downwelling",
+                "rows": [
+                  ["r", 1513.873, 1866.419, 391.7825, -0.188889, "refused"],
+                  ["g", 1014.866, 1082.354, 291.7305, -0.06235331, "refused"],
+                  ["b", 412.8309, 443.9583, 150.2714, -0.07011334, "refused"]
+                ]
+              },
+              {
+                "aggregate": "flux-lsfr/downwelling",
+                "rows": [
+                  ["r", 4951.811, 5050.677, 146.4665, -0.01957484, "refused"],
+                  ["g", 3324.753, 3225.243, 113.7646, 0.03085346, "refused"],
+                  ["b", 1359.699, 1293.75, 64.62897, 0.05097507, "refused"]
+                ]
+              }
+            ]
+          },
+          "sanity": {
+            "aggregate": "flux-lsfr",
+            "channels": [0.08314242, 0.06167384, 0.02650642],
+            "fraction": 0.06370142,
+            "low": 0.02,
+            "high": 0.04,
+            "within": false
+          },
+          "tables": {
+            "bands": 1,
+            "slots": 1,
+            "deckBytes": 159744,
+            "aboveBytes": 388864,
+            "belowBytes": 436800,
+            "belowF32BelowLeastNormal": 80,
+            "deckSolves": 44,
+            "aboveSolves": 22
+          },
+          "downwelling": [
+            ["case/downwelling/venus-58bar/flux-s0", 18930.53, 12748.1, 5443.064],
+            ["case/downwelling/venus-58bar/flux-s30", 15399.8, 10364.09, 4379.956],
+            ["case/downwelling/venus-58bar/flux-s60", 6593.964, 4429.675, 1820.89],
+            ["case/downwelling/venus-58bar/flux-s80", 1513.873, 1014.866, 412.8309],
+            ["case/downwelling/venus-58bar/flux-lsfr", 4951.811, 3324.753, 1359.699]
+          ]
+        }
+      }
     }
   }
 }

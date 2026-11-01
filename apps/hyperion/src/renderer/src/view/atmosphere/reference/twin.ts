@@ -691,7 +691,8 @@ function withoutMultipleScattering(tables: OblatePlanetTwin): OblatePlanetTwin {
  * @throws RangeError as `oblatePlanetTwin`, for a medium the tables refuse, for the steps'
  *   options on a medium with layer edges over several slices or bands, or for a deck beside a thick
  *   bake or a correction of its own, of other bands than the twin's, or as `upperMediumOf` and the
- *   packings refuse it; and, at a read, for an observer below a deck's split.
+ *   packings refuse it; and, at a read, for an observer below the split of a deck with no table
+ *   below it (an envelope's), or below any deck's on a spheroid (R08.T15.b.2).
  */
 export function referenceTwin(
   medium: AtmosphereMedium,

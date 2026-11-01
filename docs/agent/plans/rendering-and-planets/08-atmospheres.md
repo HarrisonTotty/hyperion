@@ -1601,6 +1601,9 @@ Names are those the owning plans give; the owning plan is authoritative.
           diagnostic.
         - R08.T13's drift gate and sweep, and `THICK_MS_BOUNDARY`, stay scalar against scalar,
           since they measure Hillaire's scalar term.
+        - The Venus-class cases are gated scalar in every view, against their uncorrected twin
+          (main, 2026-11-01; R08.T15.b.2): their vector I does not converge, and a guard holds
+          the polarisation the scalar reading neglects to 1% of I.
       - **What a viewer sees** (R07's AUTO meter and AgX): the uncorrected sky's worst geometry is
         ΔE₀₀ 0.76 at Earth and 1.2–1.5 on a three-bar world. The correction is for physical
         accuracy: the corrected sky is inside the 5% target, and the uncorrected one is not.
@@ -6038,7 +6041,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     - T15.b.2, after R08.T12.b.2's Venus references and T15.a.2: the reads below the deck
       (`atmosphere_sky_irradiance`, the deck's direct transmittance); the Venus-class gate and
       R08.T12.b's flux sanity; and the routing of `cloudDeck` worlds, under
-      `decision-r08-t11-frame.md`'s blocker, as at R08.T14.d.
+      `decision-r08-t11-frame.md`'s blocker, as at R08.T14.d. _Built 2026-11-01, but `giant-deck`
+      below the split, which waits on its re-trace; the gates recorded, no deck routed, the
+      owner's runs pending_ (Risks, "Deviations in T15.b.2, as built").
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
@@ -24247,3 +24252,12 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `rowBytes`. `perPlanetRowOf`'s `deck: PerPlanetDeck` gives `deckBytes`. A Venus-class column
     with its J, deck and table below under one light is 1.15 MB.
   - _Smoke_: part 14 adds `checkBelowDeckFrameTwins` and `checkSurfaceLightingBelowDeck`.
+  - _The Venus-class gate_ (`vectorGate.json` format 5, `deck.venusClass`): `venus-92bar` and
+    `venus-58bar` split at their deck's top (cover τ(550) 34.155, fraction 1). They are gated
+    against the scalar I through the uncorrected twin. 92 bar: 70 pass, 0 miss, 290 refused of 360. 58 bar: 69, 0 and 291. Every aggregate is refused. R08.T12.b's sanity reads 0.049 and 0.064
+    against 2–4%. Recorded, not asserted.
+  - _Not built here:_ `giant-deck` below the split and its above-split re-record wait on its
+    re-trace (main's amendment). The route stays closed: no deck case passes.
+  - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line.
+    `TEST VENUS` draws `ATMOSPHERE: APPROXIMATE` by the thin method, as nothing routes. The tour
+    has no descent through its deck. Its looks and frame times are pending: the owner's RTX run.
