@@ -294,8 +294,8 @@ fn layer_d_gives_up_its_ancient_type_ia() {
 /// record's ID (high, low 32 bits), mass and age, and its class (0 for a core collapse, 1 for a
 /// luminous blue variable), in cell and index order. Blessed natively on x86-64; the wasip1 suite
 /// compares it. Re-pinned by name when plan 08's displaced classes joined every 26 hold
-/// (P08.T12), whose marks redraw layer E's records.
-const CLAIMED_DIGEST: u64 = 0xaffe_e469_e328_58fa;
+/// (P08.T12), whose marks redraw layer E's records; re-pinned at generator version 25.
+const CLAIMED_DIGEST: u64 = 0x7ecf_a8b2_0c35_a1ab;
 
 /// D2 under every 26 hold: in the sample's layer-E cells on the arm ridges, the classes claim
 /// some of the records the grid places without the carve-out, each the core collapses' or the
@@ -865,12 +865,14 @@ fn the_core_collapses_claim_is_the_one_shared_test_on_sampled_records() {
     assert!(claimed > 10 && kept > 0, "{claimed} {kept}");
 }
 
-/// Order independence under every 26 hold (sim-determinism, "Order independence"): the pre-pin's
-/// cells and some of the ridge's, generated in any order, and the records the classes claim from
-/// them, resolved in any order, give the same answers on a galaxy built fresh.
+/// Order independence under every 26 hold but plan 08's displaced classes, as
+/// [`the_pre_pin_s_cells_hold_claimed_deaths`] reads them (sim-determinism, "Order independence"):
+/// the pre-pin's cells and some of the ridge's, generated in any order, and the records the classes
+/// claim from them, resolved in any order, give the same answers on a galaxy built fresh. With the
+/// displaced classes too, at generator version 25, these cells hold no claimed record.
 #[test]
 fn the_claimed_cells_are_order_independent() {
-    let galaxy = milky_way(GalaxyRules::every_26_hold());
+    let galaxy = milky_way(field_only_rules());
     let mut keys: Vec<CellKey> = PRE_PIN_CELLS
         .iter()
         .map(|&cell| CellKey::new(Layer::E, cell).unwrap())
@@ -881,7 +883,11 @@ fn the_claimed_cells_are_order_independent() {
         generate_cell(&galaxy, key, &mut cell);
         cell
     });
-    let ids: Vec<_> = carved(unclaimed(), &galaxy, &keys)
+    let off = milky_way(GalaxyRules {
+        carve_out: CarveOutRules::Unclaimed,
+        ..field_only_rules()
+    });
+    let ids: Vec<_> = carved(&off, &galaxy, &keys)
         .iter()
         .map(|(record, _)| record.id())
         .collect();
@@ -891,8 +897,8 @@ fn the_claimed_cells_are_order_independent() {
 
 /// The digest of [`the_moving_galaxy_s_claims_are_pinned`]'s claimed records, as
 /// [`CLAIMED_DIGEST`]'s. Blessed natively on x86-64; the wasip1 suite compares it. Re-pinned by
-/// name with [`CLAIMED_DIGEST`] (P08.T12).
-const MOVING_CLAIMED_DIGEST: u64 = 0x8588_9f94_f2b6_7124;
+/// name with [`CLAIMED_DIGEST`] (P08.T12, and at generator version 25).
+const MOVING_CLAIMED_DIGEST: u64 = 0x7767_15f0_9688_fb78;
 
 /// The claims of a galaxy with its kinematic tables, as every production galaxy has them: each
 /// site is the epoch position moved along the record's drawn velocity to its death. The pre-pin's

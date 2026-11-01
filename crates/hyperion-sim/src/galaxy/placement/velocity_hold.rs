@@ -251,21 +251,22 @@ fn the_slowest_class_co_rotates_with_the_youngest_and_the_fastest_counter_rotate
         rotation(thin(fast, 6)),
     );
     println!("slowest {slowest:.4}, youngest {youngest:.4}, fastest {fastest:.4} v_c");
-    // On the provisional form table the slowest class rotates at 1.063 v_c against the youngest's
-    // 1.005, 0.058 apart where the plan, restated, asks 0.01: a finding, pinned as it stands to
-    // the sample's 5 standard errors (0.016 and 0.004 v_c) until P15.T6.c-f's production table,
-    // whose lane re-pins it by name.
+    // On the provisional form table at generator version 25 the slowest class rotates at 0.986 v_c
+    // against the youngest's 1.004, 0.018 apart where the plan, restated, asks 0.01 (at 24, 1.063
+    // and 1.005): a finding, pinned as it stands to the sample's 5 standard errors (0.016 and 0.004
+    // v_c) until P15.T6.c-f's production table, whose lane re-pins it by name.
     assert!((slowest - SLOWEST_ROTATION).abs() < 0.016, "{slowest}");
     assert!((youngest - YOUNGEST_ROTATION).abs() < 0.004, "{youngest}");
     assert!(fastest < 0.0, "{fastest}");
 }
 
 /// The slowest thin class's sampled mean rotation at 3 `R_d`, `v_c`, on the provisional form table
-/// (a 26-arm figure, re-pinned by name with `displaced_forms_26`).
-const SLOWEST_ROTATION: f64 = 1.0631;
+/// (a 26-arm figure, re-pinned by name with `displaced_forms_26`; re-pinned at generator version
+/// 25, whose form table moves it).
+const SLOWEST_ROTATION: f64 = 0.9860;
 
 /// The youngest class of its speed bin's, likewise.
-const YOUNGEST_ROTATION: f64 = 1.0049;
+const YOUNGEST_ROTATION: f64 = 1.0042;
 
 /// In the ballistic bins x − v s lies within 1 ly of the midplane, wherever the vertical
 /// component z ÷ s was not held to the kick's speed and the cut did not scale the draw, for
