@@ -152,14 +152,21 @@ async fn stream_track_answers_a_track_and_refuses_a_stream_the_list_lacks() {
         "one table built and kept, read once more"
     );
     assert_eq!((&answer.universe, answer.stream), (&universe, 0));
-    let TrackWire::Ready { trailing, leading } = answer.track else {
+    let TrackWire::Ready {
+        length_ly,
+        trailing,
+        leading,
+    } = answer.track.clone()
+    else {
         panic!("a track built for the request is ready");
     };
+    assert!(length_ly.is_some_and(|l| l > 0.0), "{length_ly:?}");
     for arm in [&trailing, &leading] {
         assert!((2..=128).contains(&arm.len()), "{} points", arm.len());
         for point in arm {
             assert!(point.normal_width_ly > 0.0 && point.binormal_width_ly > 0.0);
             assert!(point.speed_km_s > 0.0 && point.speed_km_s < 3_000.0);
+            assert!(point.dispersion_km_s.is_some_and(|d| d > 0.0), "{point:?}");
         }
     }
     // Past the list's streams, and past any stream's number.

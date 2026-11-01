@@ -6,6 +6,12 @@ import type { TrackPointWire } from "./TrackPointWire";
  */
 export type TrackWire = { "status": "ready", 
 /**
+ * The centre line's length, from the trailing arm's tip to the leading arm's through the
+ * segment between the arms' roots, in light-years, measured on every knot of the tube,
+ * not only those sent. Optional on the wire: a server before P10.T11 leaves the key out.
+ */
+length_ly?: number, 
+/**
  * The trailing arm, from its tip to its root at the progenitor: at most 128 points.
  */
 trailing: Array<TrackPointWire>, 

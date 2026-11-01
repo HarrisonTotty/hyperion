@@ -21,4 +21,9 @@ binormal_width_ly: number,
 /**
  * The tracers' mean speed there, galactic, in km/s.
  */
-speed_km_s: number, };
+speed_km_s: number, 
+/**
+ * Their rms velocity dispersion there along one axis, the root mean square of the frame's
+ * three, in km/s. Optional on the wire: a server before P10.T11 leaves the key out.
+ */
+dispersion_km_s?: number, };

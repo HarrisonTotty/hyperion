@@ -81,6 +81,16 @@ pub enum GlobalEntryWire {
         mass_msun: f64,
         /// The shell its members lie in.
         shell: ShellWire,
+        /// Its centre at the epoch, in the `GALACTIC` frame, where the galaxy map marks it.
+        /// Optional on the wire: a server before P10.T11 leaves the key out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        position: Option<GalacticPosition>,
+        /// The radius about its centre its members lie within, in light-years: positive.
+        /// Optional on the wire, as `position` is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        extent_ly: Option<f64>,
     },
 }
 
@@ -178,6 +188,12 @@ pub enum TrackWire {
     /// hardly drifted, an eccentric orphan near its apocentre, is a cloud rather than a tube, and
     /// its track is no stream's line (plan 10, "P10.T6.a's arms by energy, as built").
     Ready {
+        /// The centre line's length, from the trailing arm's tip to the leading arm's through the
+        /// segment between the arms' roots, in light-years, measured on every knot of the tube,
+        /// not only those sent. Optional on the wire: a server before P10.T11 leaves the key out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        length_ly: Option<f64>,
         /// The trailing arm, from its tip to its root at the progenitor: at most 128 points.
         trailing: Vec<TrackPointWire>,
         /// The leading arm, from its root at the progenitor to its tip: at most 128 points.
@@ -200,6 +216,11 @@ pub struct TrackPointWire {
     pub binormal_width_ly: f64,
     /// The tracers' mean speed there, galactic, in km/s.
     pub speed_km_s: f64,
+    /// Their rms velocity dispersion there along one axis, the root mean square of the frame's
+    /// three, in km/s. Optional on the wire: a server before P10.T11 leaves the key out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dispersion_km_s: Option<f64>,
 }
 
 #[cfg(test)]
@@ -246,6 +267,11 @@ pub(crate) mod tests {
                     inner_ly: 31_500.0,
                     outer_ly: 38_250.0,
                 },
+                position: Some(GalacticPosition {
+                    cell_ly: [-30_000, 12_000, 8_000],
+                    offset_m: [0.0, 0.0, 0.0],
+                }),
+                extent_ly: Some(3_375.0),
             },
         ]
     }
@@ -270,6 +296,8 @@ pub(crate) mod tests {
                 "number": 0,
                 "mass_msun": 2.0e3,
                 "shell": { "inner_ly": 31_500.0, "outer_ly": 38_250.0 },
+                "position": { "cell_ly": [-30_000, 12_000, 8_000], "offset_m": [0.0, 0.0, 0.0] },
+                "extent_ly": 3_375.0,
             },
         ])
     }
@@ -332,6 +360,7 @@ pub(crate) mod tests {
             normal_width_ly: 154.0,
             binormal_width_ly: 251.5,
             speed_km_s: 212.5,
+            dispersion_km_s: Some(0.75),
         }
     }
 
@@ -341,6 +370,7 @@ pub(crate) mod tests {
             "normal_width_ly": 154.0,
             "binormal_width_ly": 251.5,
             "speed_km_s": 212.5,
+            "dispersion_km_s": 0.75,
         })
     }
 
@@ -389,6 +419,7 @@ pub(crate) mod tests {
                 universe: universe(),
                 stream: 3,
                 track: TrackWire::Ready {
+                    length_ly: Some(136_515.0),
                     trailing: vec![point()],
                     leading: vec![point(), point()],
                 },
@@ -399,11 +430,54 @@ pub(crate) mod tests {
                 "stream": 3,
                 "track": {
                     "status": "ready",
+                    "length_ly": 136_515.0,
                     "trailing": [point_json()],
                     "leading": [point_json(), point_json()],
                 },
             }),
         );
+    }
+
+    /// P10.T11's fields are optional: a reply from a server before them, without the keys, reads
+    /// as none of them, and a reply without them is sent without the keys.
+    #[test]
+    fn the_track_s_and_the_core_s_later_fields_are_optional() {
+        let mut point = point_json();
+        point
+            .as_object_mut()
+            .expect("an object")
+            .remove("dispersion_km_s");
+        let old: TrackPointWire = serde_json::from_value(point.clone()).expect("a point");
+        assert_eq!(old.dispersion_km_s, None);
+        assert_eq!(serde_json::to_value(&old).expect("JSON"), point);
+        let core: GlobalEntryWire = serde_json::from_value(json!({
+            "kind": "dwarf_core",
+            "number": 1,
+            "mass_msun": 5.0e5,
+            "shell": { "inner_ly": 10.0, "outer_ly": 20.0 },
+        }))
+        .expect("a core");
+        assert!(matches!(
+            core,
+            GlobalEntryWire::DwarfCore {
+                position: None,
+                extent_ly: None,
+                ..
+            }
+        ));
+        let track: TrackWire = serde_json::from_value(json!({
+            "status": "ready",
+            "trailing": [],
+            "leading": [],
+        }))
+        .expect("a track");
+        assert!(matches!(
+            track,
+            TrackWire::Ready {
+                length_ly: None,
+                ..
+            }
+        ));
     }
 
     #[test]

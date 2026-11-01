@@ -23,14 +23,16 @@ use hyperion_protocol::{
     ProgenitorKindWire, RequestError, ShellWire, StreamTrackRequest, StreamTrackWire,
     TrackPointWire, TrackStatusWire, TrackWire,
 };
+use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::global_list::dwarf_core::DwarfCoreModel;
 use hyperion_sim::galaxy::global_list::spray::Arm;
 use hyperion_sim::galaxy::global_list::tube::{BuildTubeTableError, TubeKnot};
 use hyperion_sim::galaxy::global_list::{
     BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, StreamOrigin, TubeTable,
 };
 use hyperion_sim::galaxy::params::{Progenitor, ProgenitorKind};
-use hyperion_sim::units::KilometresPerSecond;
+use hyperion_sim::units::{KilometresPerSecond, MetresPerSecond};
 
 use super::features::feature_id_hex;
 use super::{galactic_position, gyr};
@@ -75,11 +77,25 @@ pub(crate) fn global_features(
                         },
                     }
                 }
-                GlobalEntryKind::DwarfCore(number) => GlobalEntryWire::DwarfCore {
-                    number: u16::from(number.get()),
-                    mass_msun,
-                    shell,
-                },
+                GlobalEntryKind::DwarfCore(number) => {
+                    let spec = list
+                        .debris()
+                        .cores()
+                        .iter()
+                        .find(|core| core.number() == number)
+                        .expect("a listed core is in the debris");
+                    GlobalEntryWire::DwarfCore {
+                        number: u16::from(number.get()),
+                        mass_msun,
+                        shell,
+                        // A listed core lies in the root cube (`Debris`' cores beyond it are not
+                        // listed), so its centre is addressable.
+                        position: GalacticPosition::ORIGIN
+                            .translated(spec.position())
+                            .map(|centre| galactic_position(&centre)),
+                        extent_ly: Some(DwarfCoreModel::from_spec(galaxy, spec).extent().value()),
+                    }
+                }
             }
         })
         .collect();
@@ -176,7 +192,11 @@ pub(crate) fn stream_track(tube: &TubeTable, request: StreamTrackRequest) -> Str
     StreamTrackWire {
         universe: request.universe,
         stream: request.stream,
-        track: TrackWire::Ready { trailing, leading },
+        track: TrackWire::Ready {
+            length_ly: Some(tube.length().value()),
+            trailing,
+            leading,
+        },
     }
 }
 
@@ -217,9 +237,18 @@ fn track_of(knots: &[TubeKnot]) -> Vec<TrackPointWire> {
                 normal_width_ly: normal.value(),
                 binormal_width_ly: binormal.value(),
                 speed_km_s: KilometresPerSecond::from(knot.velocity().speed()).value(),
+                dispersion_km_s: Some(dispersion(knot).value()),
             }
         })
         .collect()
+}
+
+/// A knot's rms velocity dispersion along one axis: the root mean square of its frame's three, as
+/// plan 10's P10.T12 measures a tube's (`global_list::statistics`' figures).
+#[must_use]
+fn dispersion(knot: &TubeKnot) -> KilometresPerSecond {
+    let [a, b, c] = knot.dispersions().map(MetresPerSecond::value);
+    KilometresPerSecond::from(MetresPerSecond::new(((a * a + b * b + c * c) / 3.0).sqrt()))
 }
 
 #[cfg(test)]
@@ -234,6 +263,34 @@ mod tests {
 
     fn universe() -> UniverseIdHex {
         UniverseIdHex::from_u64(42)
+    }
+
+    /// A core's centre is sent inside its shell, and its extent positive and at most the model's
+    /// 20,000 ly.
+    fn assert_core_placed(
+        shell: &ShellWire,
+        position: Option<&hyperion_protocol::GalacticPosition>,
+        extent_ly: Option<f64>,
+    ) {
+        let r = galactic_distance_ly(position.expect("a listed core's centre"));
+        assert!(
+            shell.inner_ly <= r && r <= shell.outer_ly,
+            "{r} ly in {shell:?}"
+        );
+        assert!(
+            extent_ly.is_some_and(|e| e > 0.0 && e <= 20_000.0),
+            "{extent_ly:?}"
+        );
+    }
+
+    /// The distance of a position on the wire from the galactic centre, in light-years.
+    fn galactic_distance_ly(position: &hyperion_protocol::GalacticPosition) -> f64 {
+        let ly = |i: usize| {
+            f64::from(position.cell_ly[i])
+                + position.offset_m[i] / hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR
+        };
+        let [x, y, z] = [ly(0), ly(1), ly(2)];
+        (x * x + y * y + z * z).sqrt()
     }
 
     /// The Milky Way fixture with its kinematic tables, and its list.
@@ -313,11 +370,14 @@ mod tests {
                         number: n,
                         mass_msun,
                         shell: s,
+                        position,
+                        extent_ly,
                     },
                 ) => {
                     assert_eq!(*n, u16::from(number.get()));
                     assert_eq!(mass_msun.to_bits(), entry.mass().value().to_bits());
                     assert_eq!(*s, shell);
+                    assert_core_placed(s, position.as_ref(), *extent_ly);
                 }
                 (kind, wire) => panic!("{kind:?} sent as {wire:?}"),
             }
@@ -369,9 +429,18 @@ mod tests {
         let tube = TubeTable::build(galaxy, list.stream(number).expect("listed")).expect("builds");
         let answer = stream_track(&tube, request);
         assert_eq!((answer.universe, answer.stream), (universe(), 0));
-        let TrackWire::Ready { trailing, leading } = answer.track else {
+        let TrackWire::Ready {
+            length_ly,
+            trailing,
+            leading,
+        } = answer.track
+        else {
             panic!("a built track is ready");
         };
+        assert_eq!(
+            length_ly.map(f64::to_bits),
+            Some(tube.length().value().to_bits())
+        );
         for (points, arm) in [(&trailing, Arm::Trailing), (&leading, Arm::Leading)] {
             let knots = tube.arm(arm).knots();
             assert_eq!(points.len(), TRACK_POINTS.min(knots.len()));
@@ -386,11 +455,9 @@ mod tests {
                     knot.widths()[0].value().to_bits()
                 );
             }
-            assert!(
-                points
-                    .iter()
-                    .all(|p| p.speed_km_s > 0.0 && p.binormal_width_ly > 0.0)
-            );
+            assert!(points.iter().all(|p| p.speed_km_s > 0.0
+                && p.binormal_width_ly > 0.0
+                && p.dispersion_km_s.is_some_and(|d| d > 0.0)));
         }
         let beyond = StreamTrackRequest {
             universe: universe(),
