@@ -5601,7 +5601,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     against none, the inner disc's (0, 12, 0) 4.3 against 3.2 ms, the centre's 479 against 162
     ms (43,811 candidates); the process's build 0.42 ms against 2 µs, which the production lookup
     pays each visit.
-  - _Pending the owner's ruling._ Where a feature's ejected members die: kept in their features'
+  - _Pending the owner's ruling (ruled by kind below, "The deaths by kind")._ Where a feature's
+    ejected members die: kept in their features'
     lists (as built, the brainstorm's "four in five" in features intact), or the features drop
     them by the same ejection marks and the terms take the whole budget, as the grid's displaced
     classes weigh it (physically the runaways' origin; features then hold about 0.39 of core
@@ -5637,6 +5638,53 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
       young disc's density over the ages band E dies at (some 50 Myr) would spare about two
       thirds of those lifetimes, but it moves every version's entries, so it needs a hold of its
       own.
+  - _The deaths by kind, and the bounds by mass (lane `fix-p09-t33b-ejected-deaths`, 2026-11-01,
+    in `runaway_deaths`' arm; nothing moves at 24–26)._ A feature's runaways die in the field and
+    its walkaways in it (lean, 2026-11-01; research-leans-21): a runaway travels some 584 pc
+    before it dies, past any bubble, a walkaway some 103 pc at most (Renzo et al. 2019, A&A 624,
+    A66, §5.1), and Higdon and Lingenfelter's (2005) 80–90% is where supernovae go off, not which
+    stars a feature holds.
+    - _The death lists._ A nursery's or an open cluster's `CORE_COLLAPSE` candidate whose ejection
+      marks, the field term's (`ejection_before_death`) on its own feature-level key, put a
+      runaway's ejection before its death is no entry (`core_collapse::feature_runaway`); a
+      walkaway's stays listed. A feature-level ID (prefix `0`) never meets a class candidate's
+      (`111`). The candidates' expected count is unchanged.
+    - _The terms (lean, 2026-11-01: the smaller reversible choice)._ A term per class and kind,
+      since speed bin 0 holds both: a runaway's at the component's whole band budget and its
+      ages, a walkaway's at the field's part and the field's ages, as built; each kind its own
+      share bounds. The alternative, thinning a walkaway by 1 − φ(a) against a whole-budget bound,
+      was not taken.
+    - _The living counts (P09.T9.f, `features::interior::counts`)._ Where the class follows the
+      runaways (`core_collapse::ejecting_table`, the one arm all three read), a cluster of an
+      ejecting source nets at each living mass of bands D and E `RunawayModel`'s share ejected by
+      its age, both kinds and both channels (`ClassTable::ejected_by`), in place of Oh et al.'s
+      `runaway_share(M)`, `RUNAWAY_BAND_D_SHARE` and the 100 Myr step. It reaches every cluster
+      with a model (`ClusterModel::from_record`): the nurseries' bound clusters and the old open
+      clusters, which now net their whole lifetime shares; an association has no members and a
+      globular's source ejects none.
+    - _The bounds by mass (main's rule E)._ The field term's and every term's death rate is
+      bounded on band E's 32 node intervals (`MassRates`): the ages' densest below the lifetime
+      bracket's longest there, widened by a quarter (`LIFETIME_MARGIN`), plus the interval; and a
+      term's share by its class's share as the kind there. A candidate draws its interval by its
+      share of the band × those bounds, its mass in it by the mass function (one word more on
+      `class.core_collapse.mass`), and thins against its interval's. The young disc's rate in
+      the envelope falls to 0.44 of its densest; the widened bracket holds 256 lifetimes at [Fe/H]
+      −1 to +0.6, the longest at 0.93 of the bracket's own.
+    - _Measured._ The features hold 0.706 of the 4,208 core collapses in the source horizon under
+      every 27 hold (research-leans-21 expected about 0.67), against 0.904 of 4,004 under every 26
+      hold. A feature's list drops 10,512 of 40,000 members' deaths against 10,438.5 (z = 0.85).
+      Galaxy-wide the class's candidates are 0.758 ejected against 0.759 (z = −0.37).
+    - _Cost (release, one thread, 32 vCPU pod; every 27 hold before and after the bounds, its held
+      arm)._ The Sun-like 50 ly query's core collapses cold 314 → 197 ms (144), warm 0.22 ms
+      (0.21); the inner disc's (0, 12, 0) 6.2 → 4.2 ms (2.9); the solar circle's 0.9 → under
+      0.05 ms; the centre's 360 → 361 ms (117). _Target missed (finding):_ the centre and the
+      inner disc keep 2.4× and 3× the held arm's candidates for the shared test, deaths the 27 arm
+      places, each about 1 ms (a lifetime and a star), and the nuclear disc's age density is flat,
+      so no bound spares the centre a lifetime.
+    - _Movers at 27._ `catalogue_classes/core_collapse` (the class's entries, `EJECTED_PIN`
+      re-pinned), the features' lists' core collapses (their runaways'), the clusters' living
+      counts in bands D and E and so every cluster's members, and the census brackets of
+      `core_collapses_over_seeds*`, restated at the bump.
 - **P09.T34.b, as built (lane `p09-t34b`, 2026-11-01, at 24; held for 27, no output moves).**
   - _The weight._ `displaced::survivors::Survivors` (new), through `ClassTable::survivors()` and
     `class_count(D, hv)`; `class_weight` stays 0. Rate × shareᵢ × (`HYPERVELOCITY_MEAN_EXIT_LY` ÷
