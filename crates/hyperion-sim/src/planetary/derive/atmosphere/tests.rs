@@ -2280,9 +2280,17 @@ fn derived(placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
 /// belt member as recorded and as placed, and a Pluto, every field of their derivations the same,
 /// the count and the outcome included (the table's three-pass bodies among them, so T57.a's fits
 /// do not move). From 24 Mars does not settle: its passes bracket its albedo at a residual of
-/// about 5 × 10⁻¹¹, not a jump, and it is the only one.
+/// about 5 × 10⁻¹¹, not a jump, and it is the only one. Both are derived under T51.b's stop on two
+/// passes in a row and the plain step, the oracles of P14.T54.b.l's own residual and Aitken's step,
+/// which the solve has taken since 26.
 #[test]
 fn a_body_that_settles_keeps_t51b_s_bits() {
+    use crate::planetary::derive::passes::{with_consecutive_stop, with_plain_step};
+    with_consecutive_stop(|| with_plain_step(a_body_that_settles_keeps_t51b_s_bits_on_this_thread));
+}
+
+/// [`a_body_that_settles_keeps_t51b_s_bits`]'s body, under the stop and step the thread sets.
+fn a_body_that_settles_keeps_t51b_s_bits_on_this_thread() {
     use crate::planetary::derive::pass_record::PassRecord;
     use crate::planetary::derive::{PassDriver, derive_body_driven};
 
