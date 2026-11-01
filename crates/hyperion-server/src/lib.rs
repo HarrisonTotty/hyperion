@@ -46,11 +46,12 @@ use crate::compute::{
     GlobalListService, SharedBodyCache, SharedBriefCache, SharedCellCache, SharedClusterModelCache,
     SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSprayForces,
     SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
+    TubeTableCache,
 };
 use crate::connections::Connections;
 use crate::limits::{
     BULK_QUEUE_CAPACITY, GALAXY_FEATURES_CACHE_BYTES, GLOBAL_LIST_CACHE_BYTES,
-    INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
+    INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES, TUBE_TABLE_CACHE_BYTES,
 };
 use crate::requests::{Handler, Handlers};
 use crate::scene::SceneService;
@@ -60,7 +61,8 @@ use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
 pub use config::{
-    FEATURE_MEMBERS_FROM, FeatureMembers, ServerArgs, ServerConfig, ServerConfigBuilder, SkyService,
+    FEATURE_MEMBERS_FROM, FeatureMembers, GlobalListWarmUp, ServerArgs, ServerConfig,
+    ServerConfigBuilder, SkyService,
 };
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
@@ -132,8 +134,10 @@ pub(crate) struct AppState {
     /// (P09.T40.b).
     pub(crate) galaxy_features: GalaxyFeaturesService,
     /// Plan 10's global list of every galaxy asked for, built once each in a bulk job and kept
-    /// (P10.T10.a).
+    /// (P10.T10.a), and its streams' tube tables, kept in their own byte budget (P10.T10.b).
     pub(crate) global_lists: GlobalListService,
+    /// Whether an open starts its galaxy's global list and warms its tube tables (P10.T10.b).
+    pub(crate) global_list_warm_up: GlobalListWarmUp,
     /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
     /// the features' gas: P09.T40.a's serve gate, held until
     /// [`FEATURE_MEMBERS_FROM`](config::FEATURE_MEMBERS_FROM).
@@ -239,27 +243,7 @@ impl Server {
             config.surface_cache_bytes(),
             config.surface_passes(),
         );
-        tracing::info!(
-            data_dir = %config.data_dir().display(),
-            workers = config.workers().get(),
-            cell_cache_mib = config.cell_cache_bytes() / (1 << 20),
-            map_cache_mib = config.map_cache_bytes() / (1 << 20),
-            system_cache_mib = config.system_cache_bytes() / (1 << 20),
-            body_cache_mib = config.body_cache_bytes() / (1 << 20),
-            brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
-            sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
-            sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
-            surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
-            surface_passes = config.surface_passes().get(),
-            sky_service = ?config.sky_service(),
-            extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
-            sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
-            alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
-            feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
-            cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
-            feature_members = ?config.feature_members(),
-            "server started"
-        );
+        log_start(&config);
         Ok(Self {
             state: Arc::new(AppState {
                 registry,
@@ -276,6 +260,7 @@ impl Server {
                 cluster_models,
                 galaxy_features: map_lists,
                 global_lists,
+                global_list_warm_up: config.global_list_warm_up(),
                 feature_members: config.feature_members(),
                 handler,
                 connections: Connections::new(),
@@ -313,13 +298,13 @@ impl Server {
 
     /// Tears the server down once serving has stopped.
     ///
-    /// Every WebSocket connection is closed with code 1001 (going away), and what it has in
-    /// flight is cancelled. axum's graceful shutdown does neither, nor does it wait for those
-    /// connections, so this does all three. A connection opened meanwhile is refused. Each
-    /// connection has [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client
-    /// that has stopped reading cannot hold this up. The sky tables' builds that opens started, and
-    /// the coarse passes that prefetches started, are given up. Then the CPU pool stops: queued
-    /// jobs are dropped and the workers finish the jobs in hand.
+    /// Every WebSocket connection is closed with code 1001 (going away), and what it has in flight
+    /// is cancelled. axum's graceful shutdown does neither, nor does it wait for those connections,
+    /// so this does all three. A connection opened meanwhile is refused. Each connection has
+    /// [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client that has stopped
+    /// reading cannot hold this up. The sky tables' builds and the global lists' warm-ups that
+    /// opens started, and the coarse passes that prefetches started, are given up. Then the CPU
+    /// pool stops: queued jobs are dropped and the workers finish the jobs in hand.
     ///
     /// # Errors
     ///
@@ -330,6 +315,8 @@ impl Server {
         self.state.sky_tables.stop_prefetching();
         // Nor do the coarse passes started by prefetches.
         self.state.surface.stop_prefetching();
+        // Nor do the global lists' warm-ups started at opens.
+        self.state.global_lists.stop_warming();
         self.state
             .pool
             .shutdown()
@@ -422,8 +409,9 @@ fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, 
 }
 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
-/// the galaxy map's feature lists (P09.T40.b) and plan 10's global lists (P10.T10.a), each list
-/// found on `pool` from the galaxies of `galaxies`.
+/// the galaxy map's feature lists (P09.T40.b), and plan 10's global lists (P10.T10.a) with their
+/// streams' tube tables (P10.T10.b), each list and table found on `pool` from the galaxies of
+/// `galaxies`.
 #[must_use]
 fn feature_caches(
     config: &ServerConfig,
@@ -448,10 +436,39 @@ fn feature_caches(
         GlobalListService::new(
             pool,
             galaxies,
-            Arc::new(SharedSprayForces::new(SPRAY_FORCE_CACHE_BYTES)),
+            (
+                Arc::new(SharedSprayForces::new(SPRAY_FORCE_CACHE_BYTES)),
+                Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES)),
+            ),
             GLOBAL_LIST_CACHE_BYTES,
         ),
     )
+}
+
+/// Logs the configuration a server starts with: where it keeps its data, its workers and every
+/// cache's budget.
+fn log_start(config: &ServerConfig) {
+    tracing::info!(
+        data_dir = %config.data_dir().display(),
+        workers = config.workers().get(),
+        cell_cache_mib = config.cell_cache_bytes() / (1 << 20),
+        map_cache_mib = config.map_cache_bytes() / (1 << 20),
+        system_cache_mib = config.system_cache_bytes() / (1 << 20),
+        body_cache_mib = config.body_cache_bytes() / (1 << 20),
+        brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
+        sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
+        sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
+        surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
+        surface_passes = config.surface_passes().get(),
+        sky_service = ?config.sky_service(),
+        extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
+        sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
+        alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
+        feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
+        cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
+        feature_members = ?config.feature_members(),
+        "server started"
+    );
 }
 
 /// The caches of the systems' stars and of the range briefs' models, in the budgets `config`
@@ -628,6 +645,7 @@ mod tests {
             (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
             (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
             (fresh.global_lists(), GLOBAL_LIST_CACHE_BYTES),
+            (fresh.tube_tables(), TUBE_TABLE_CACHE_BYTES),
         ] {
             assert_eq!(
                 (

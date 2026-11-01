@@ -77,6 +77,8 @@ pub(crate) use self::feature_answers::{
     FeatureRangeQuery, black_hole_state, black_hole_time, centre_not_built, detail_of,
     feature_detail_target, features_in_range, galaxy_features, galaxy_features_time,
 };
+#[cfg(test)]
+pub(crate) use self::features::system_origin;
 pub(crate) use self::global_answers::{
     global_features, stream_track, stream_track_number, tube_not_built,
 };
@@ -574,7 +576,7 @@ fn placed_by(
     Option<hyperion_protocol::MemberClassWire>,
 ) {
     let record = hit.record();
-    let origin = features::system_origin(record.origin());
+    let origin = features::system_origin(record);
     match record.origin() {
         SystemOrigin::Grid(_) => (epoch_velocity(galaxy, record), origin, None),
         SystemOrigin::FeatureMember { .. } => {

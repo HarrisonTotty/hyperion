@@ -55,7 +55,7 @@ pub use layers::{
 };
 pub(crate) use marks::ballistic_motion;
 pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
-pub use resolve::{resolve, resolve_with};
+pub use resolve::{resolve, resolve_list_member_with, resolve_with};
 
 use candidate::evaluate_candidate_from_bound;
 

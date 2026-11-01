@@ -777,6 +777,10 @@ fn resolve_with_refuses_a_stream_member_outside_its_shell_from_26() {
         let id = member.record().id();
         let own = One(list.clone(), Arc::clone(&tube));
         assert_eq!(resolve_with(&galaxy, id, &own), Ok(*member.record()));
+        assert_eq!(
+            crate::galaxy::placement::resolve_list_member_with(&galaxy, id, &own),
+            Ok(member)
+        );
         let mut emptied = list.clone();
         let index = emptied
             .entries

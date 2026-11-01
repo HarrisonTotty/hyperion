@@ -184,6 +184,13 @@ pub const GALAXY_FEATURES_CACHE_BYTES: usize = 1 << 20;
 /// largest.
 pub const GLOBAL_LIST_CACHE_BYTES: usize = 4 << 20;
 
+/// The byte budget of plan 10's tube tables, one per stream of every galaxy the server holds
+/// (P10.T10.b's `TubeTableCache`): some 90 kB a table, a Milky Way galaxy's 310 or so some 28 MB,
+/// so this holds two such galaxies' whole sets. The 1,500 streams of the largest galaxies, some 135
+/// MB, do not fit, and their warm-up stops once the cache evicts its own first table: a table
+/// evicted is built again, to the same bits, by the request that reads it.
+pub const TUBE_TABLE_CACHE_BYTES: usize = 64 << 20;
+
 /// The byte budget of the galaxies' spray tables, which the global lists' shell orbits and every
 /// tube's spray step in (P10.T5.b's `SharedSprayForces`): some 160 kB a galaxy, so this holds
 /// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.

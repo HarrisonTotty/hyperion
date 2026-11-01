@@ -36,6 +36,7 @@ pub struct ServerStats {
     cluster_models: LruCounters,
     galaxy_features: LruCounters,
     global_lists: LruCounters,
+    tube_tables: LruCounters,
 }
 
 impl ServerStats {
@@ -62,6 +63,7 @@ impl ServerStats {
             cluster_models: state.cluster_models.counters(),
             galaxy_features: state.galaxy_features.counters(),
             global_lists: state.global_lists.counters(),
+            tube_tables: state.global_lists.tube_counters(),
         }
     }
 
@@ -196,6 +198,13 @@ impl ServerStats {
     #[must_use]
     pub fn global_lists(&self) -> LruCounters {
         self.global_lists
+    }
+
+    /// The streams' tube tables' contents and use, including their byte budget: each built once,
+    /// by an open's warm-up or the first request that reads it, and kept (plan 10, P10.T10.b).
+    #[must_use]
+    pub fn tube_tables(&self) -> LruCounters {
+        self.tube_tables
     }
 }
 

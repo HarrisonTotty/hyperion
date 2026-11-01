@@ -14,9 +14,9 @@
 //!   pool's workers (as [`TubeTable::build`] builds it, P10.T5.b's `tube_table_on`) and sends each
 //!   arm's knots, thinned evenly to at most [`TRACK_POINTS`] with both ends kept.
 //!
-//! This server holds no tube table between requests, so every stream's track status is `pending`
-//! and `stream_track` always builds; P10.T10.b's cache and warm-up hold them, and its tracks are
-//! `ready` once warmed.
+//! A stream's track status is `ready` once the server holds its tube table, built by an open's
+//! warm-up or by a request that read it, and `pending` until then (P10.T10.b); `stream_track` sends
+//! the held table, or has one built and kept.
 
 use hyperion_protocol::{
     AccretedProgenitorWire, ErrorCode, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest,
@@ -39,12 +39,14 @@ use super::{galactic_position, gyr};
 /// 256 knots.
 pub(crate) const TRACK_POINTS: usize = 128;
 
-/// The galaxy's global list as `global_features` sends it, for `request`.
+/// The galaxy's global list as `global_features` sends it, for `request`, each stream's track
+/// `ready` where `ready` holds for its number, and `pending` elsewhere.
 #[must_use]
 pub(crate) fn global_features(
     galaxy: &Galaxy,
     list: &GlobalList,
     request: GlobalFeaturesRequest,
+    ready: impl Fn(StreamNumber) -> bool,
 ) -> GlobalFeatures {
     let entries = list
         .entries()
@@ -66,7 +68,11 @@ pub(crate) fn global_features(
                         mass_msun,
                         shell,
                         progenitor,
-                        track: TrackStatusWire::Pending,
+                        track: if ready(number) {
+                            TrackStatusWire::Ready
+                        } else {
+                            TrackStatusWire::Pending
+                        },
                     }
                 }
                 GlobalEntryKind::DwarfCore(number) => GlobalEntryWire::DwarfCore {
@@ -243,19 +249,22 @@ mod tests {
     }
 
     /// P10.T10.a: every entry is listed in the list's order with its kind, number, mass and
-    /// shell; a living globular's stream names its globular, and every stream is `pending`, since
-    /// this server holds no tube; and the progenitors are the last major merger, then the recent
-    /// ones, each naming the stream and the core it left.
+    /// shell; a living globular's stream names its globular, and a stream's track is `ready` where
+    /// its table is held, here every third stream's, and `pending` elsewhere (P10.T10.b); and the
+    /// progenitors are the last major merger, then the recent ones, each naming the stream and the
+    /// core it left.
     #[test]
     #[ignore = "slow: builds a Milky Way galaxy's kinematic tables and its global list"]
     fn global_features_lists_every_entry_and_the_accreted_progenitors() {
         let (galaxy, list) = fixture();
+        let held = |number: StreamNumber| number.get().is_multiple_of(3);
         let answer = global_features(
             galaxy,
             list,
             GlobalFeaturesRequest {
                 universe: universe(),
             },
+            held,
         );
         assert_eq!(answer.universe, universe());
         assert_eq!(answer.entries.len(), list.entries().len());
@@ -285,7 +294,12 @@ mod tests {
                 ) => {
                     assert_eq!(*n, number.get());
                     assert_eq!(mass_msun.to_bits(), entry.mass().value().to_bits());
-                    assert_eq!((*s, *track), (shell, TrackStatusWire::Pending));
+                    let status = if held(number) {
+                        TrackStatusWire::Ready
+                    } else {
+                        TrackStatusWire::Pending
+                    };
+                    assert_eq!((*s, *track), (shell, status));
                     let living = matches!(
                         list.stream(number).expect("listed").origin(),
                         StreamOrigin::LivingGlobular(_)

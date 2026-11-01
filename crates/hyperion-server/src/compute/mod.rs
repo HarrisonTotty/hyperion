@@ -44,6 +44,7 @@ pub(crate) mod sky;
 mod sky_cells;
 mod sky_tables;
 mod systems;
+mod tube_tables;
 
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
@@ -81,6 +82,7 @@ pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
 pub use sky_cells::SkyCellCounters;
 pub use sky_tables::SkyTablesCounters;
 pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
+pub use tube_tables::{ListedTubes, Listing, TubeKey, TubeTableCache};
 
 pub(crate) use pool::panic_message;
 pub(crate) use sky_cells::SharedSkyCellCache;

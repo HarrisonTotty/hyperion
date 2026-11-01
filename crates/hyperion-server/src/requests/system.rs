@@ -27,10 +27,11 @@ use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::{Drift, Observer, curvature_error, retarded, summary_observed_in};
 use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
 
+use super::global_list::listing_refused;
 use super::universe::openable_universe;
 use crate::AppState;
 use crate::compute::{
-    CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
+    CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Listing, Priority,
 };
 use crate::convert::{
     BodiesRequest, DetailRequest, EventsRequest, SummaryRequest, body_detail, body_events,
@@ -63,13 +64,17 @@ use crate::convert::{
 /// serve; `bad_request` naming `time` for a time outside the clock window; `unknown_system` naming
 /// `system` for an ID whose bits are not a system ID; `bad_request` naming `mode` for an observer
 /// that is not a canonical position inside the root cube; those of
-/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built;
-/// `queue_full` if the interactive queue has no room for the job; then, on the job,
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built, and for a
+/// stream's or a dwarf core's member those of
+/// [`GlobalListService::listing`](crate::compute::GlobalListService::listing) if its galaxy's list
+/// cannot be; `queue_full` if the interactive queue has no room for the job; then, on the job,
 /// `unknown_system` naming `system` for an ID that plan 03's `resolve` refuses in this universe's
-/// galaxy, or whose stars are not generated (a member of the galactic centre), in either mode;
-/// `internal` if the pool is shutting down or the job panics; and `cancelled` if the client gave up
-/// before it ran. A rogue planet is refused as [`starless`] refuses it: `unknown_system` naming
-/// `system`, in either mode, below generator version 26 (P14.T27.b).
+/// galaxy, or plan 10's `resolve_with` for a list member, or whose stars are not generated (a
+/// member of the galactic centre), in either mode; in observed mode, `bad_request` naming `mode`
+/// for a list member, whose motion the sim does not trace yet; `internal` if the pool is shutting
+/// down or the job panics; and `cancelled` if the client gave up before it ran. A rogue planet is
+/// refused as [`starless`] refuses it: `unknown_system` naming `system`, in either mode, below
+/// generator version 26 (P14.T27.b).
 pub(crate) async fn summary(
     state: Arc<AppState>,
     request: SystemSummaryRequest,
@@ -82,13 +87,19 @@ pub(crate) async fn summary(
     if wanted.system().layer() == Some(Layer::RoguePlanet) {
         return starless(&state, (key, galaxy), request, wanted, token).await;
     }
+    // A stream's or a dwarf core's member resolves through its galaxy's list (plan 10, P10.T10.b).
+    let listing = state
+        .global_lists
+        .listing(key, wanted.system())
+        .await
+        .map_err(|error| listing_refused(wanted.system(), error))?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
         // The cache's refusals come first, in either mode: a member of the galactic centre has no
         // stars generated.
         let stars = shared
             .systems
-            .get_or_generate(key, &galaxy, wanted.system())
+            .get_or_generate(key, &galaxy, wanted.system(), &listing)
             .map_err(|error| unknown_system(&request.system, error))?;
         let time = wanted.time();
         let answered = match wanted.mode() {
@@ -99,8 +110,9 @@ pub(crate) async fn summary(
                 );
                 // Lent so that a feature member's line does not build its interior again.
                 let interiors = shared.cluster_models.handle(key);
-                // Only a member of the galactic centre has no traced motion yet, and the cache has
-                // refused it above, so this refusal waits for a system that reaches it.
+                // A member of the galactic centre has no traced motion yet, and the cache has
+                // refused it above; a member of the global list has none either, and is refused
+                // here (plan 10, P10.T10.b).
                 let (summary, retardation) =
                     summary_observed_in(&galaxy, &interiors, stars.record(), &stars, &observer)
                         .map_err(untraced)?;
@@ -245,7 +257,7 @@ fn hosts_of(
     }
     let stars = state
         .systems
-        .get_or_generate(key, galaxy, ctx.id())
+        .get_or_generate(key, galaxy, ctx.id(), &Listing::Unlisted)
         .map_err(|error| unknown_system(&request.system, error))?;
     Ok(system_summary(hosts_request(request), &stars, time))
 }
@@ -358,7 +370,10 @@ pub(crate) async fn bodies_of(
     state
         .bodies
         .get_or_generate(key, id, move || {
-            match shared.systems.get_or_generate(key, &galaxy, id) {
+            match shared
+                .systems
+                .get_or_generate(key, &galaxy, id, &Listing::Unlisted)
+            {
                 Ok(stars) => SystemContext::for_stars(&galaxy, &stars),
                 Err(ResolveSystemError::LayerNotGenerated(Layer::RoguePlanet)) => {
                     SystemContext::for_system(&galaxy, id)

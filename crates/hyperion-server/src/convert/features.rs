@@ -13,7 +13,9 @@ use hyperion_protocol::{
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 use hyperion_sim::galaxy::features::FeatureId;
 use hyperion_sim::galaxy::features::interior::{ClassKind, Generation, MemberClass, Multiplicity};
-use hyperion_sim::galaxy::placement::SystemOrigin;
+use hyperion_sim::galaxy::global_list::StreamNumber;
+use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+use hyperion_sim::id::SystemIdKind;
 
 use super::mass_layer;
 
@@ -24,25 +26,44 @@ pub(crate) fn feature_id_hex(feature: FeatureId) -> FeatureIdHex {
     FeatureIdHex::from_u64(feature.object_word())
 }
 
-/// What placed a system, as a range row carries it once P09.T40.a's gate is open.
+/// What placed `record`'s system, as a range row carries it once P09.T40.a's gate is open.
 ///
 /// A grid system is `grid`, and a catalogue feature's member `feature_member` with its feature. A
 /// member of the galactic centre is `centre_member`: no source the server registers places one yet
-/// (P09.T29's `CentreMemberSource` waits on P09.T37), so no row carries it until one does.
+/// (P09.T29's `CentreMemberSource` waits on P09.T37), so no row carries it until one does. A member
+/// of the global list is `stream` with its stream's number or `dwarf_core` with its core's, which
+/// its ID carries (plan 10, P10.T10.b): no row carries either until `GlobalListSource` is
+/// registered (P10.T10.b's registration member, with P09.T37).
 ///
 /// # Panics
 ///
 /// For an origin the sim adds later, which [`SystemOrigin`]'s `#[non_exhaustive]` lets it add
 /// without this crate knowing: the task that registers its source gives it a wire variant here
-/// (P09.T33.a's `catalogue_system`, plan 10's `stream` and `dwarf_core`), since the enum grows.
+/// (P09.T33.a's `catalogue_system`), since the enum grows. And for a global-list member whose ID is
+/// neither a stream's nor a dwarf core's, which the sim never makes.
 #[must_use]
-pub(crate) fn system_origin(origin: SystemOrigin) -> SystemOriginWire {
-    match origin {
+pub(crate) fn system_origin(record: &SystemRecord) -> SystemOriginWire {
+    match record.origin() {
         SystemOrigin::Grid(_) => SystemOriginWire::Grid,
         SystemOrigin::FeatureMember { feature, .. } => SystemOriginWire::FeatureMember {
             feature: feature_id_hex(feature.feature()),
         },
         SystemOrigin::CentreMember { .. } => SystemOriginWire::CentreMember,
+        SystemOrigin::GlobalListMember { .. } => match record.id().kind() {
+            SystemIdKind::Stream(member) => SystemOriginWire::Stream {
+                stream: StreamNumber::from(member).get(),
+            },
+            SystemIdKind::DwarfCore(member) => SystemOriginWire::DwarfCore {
+                core: u16::from(member.number()),
+            },
+            other @ (SystemIdKind::Grid(_)
+            | SystemIdKind::FeatureMember(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Pinned(_)
+            | SystemIdKind::Catalogue(_)) => {
+                unreachable!("a global-list member's ID is a stream's or a core's: {other:?}")
+            }
+        },
         other => unreachable!(
             "no source the server registers places a system of origin {other:?}: the task that \
              registers one gives it a wire variant (plan 04's reserved list: the origin grows)"
@@ -123,7 +144,10 @@ mod tests {
     use hyperion_protocol::MassLayer;
     use hyperion_sim::galaxy::catalogue_classes::ALL_CLASSES;
     use hyperion_sim::galaxy::imf::MassBand;
-    use hyperion_sim::id::FeatureCell;
+    use hyperion_sim::id::{
+        CentreMemberId, DwarfCoreMemberId, FeatureCell, FeatureMemberId, Layer, MemberSlot,
+        StreamMemberId, SystemId,
+    };
     use hyperion_sim::units::SolarMasses;
 
     use super::*;
@@ -171,28 +195,63 @@ mod tests {
     }
 
     /// A grid system's origin is `grid`, whatever its component; a feature member's names its
-    /// feature by its object word; the centre's is `centre_member`.
+    /// feature by its object word; the centre's is `centre_member`; and a global-list member's is
+    /// `stream` or `dwarf_core`, with the number its ID carries (P10.T10.b).
     #[test]
     fn each_origin_is_the_wire_s() {
-        assert_eq!(
-            system_origin(crate::convert::origins::a_grid_system().origin()),
-            SystemOriginWire::Grid
-        );
+        let grid = crate::convert::origins::a_grid_system();
+        assert_eq!(system_origin(&grid), SystemOriginWire::Grid);
+        // A record of `origin` with `id`, at the grid system's place and primary.
+        let of = |id: SystemId, origin: SystemOrigin| {
+            SystemRecord::from_parts(
+                id,
+                *grid.epoch_position(),
+                origin,
+                grid.population(),
+                grid.primary_initial_mass(),
+                grid.age_at_epoch(),
+            )
+        };
         let feature =
             FeatureId::of(FeatureCell::new([1, -9, 3]).expect("a cell"), 212).expect("an ID");
-        let wire = system_origin(SystemOrigin::FeatureMember {
-            feature: feature.into(),
-            attempt: 3,
-        });
+        let slot = MemberSlot::InCell {
+            band: Layer::C,
+            level: 2,
+            cell: [3, 4, 5],
+            index: 6,
+        };
+        let member = FeatureMemberId::new(feature.feature_ref(), slot).expect("a member ID");
+        let wire = system_origin(&of(
+            SystemId::from(member),
+            SystemOrigin::FeatureMember {
+                feature: feature.into(),
+                attempt: 3,
+            },
+        ));
         assert_eq!(
             wire,
             SystemOriginWire::FeatureMember {
                 feature: FeatureIdHex::from_u64(feature.object_word()),
             }
         );
+        let centre = CentreMemberId::new(slot).expect("a centre member ID");
         assert_eq!(
-            system_origin(SystemOrigin::CentreMember { attempt: 0 }),
+            system_origin(&of(
+                SystemId::from(centre),
+                SystemOrigin::CentreMember { attempt: 0 }
+            )),
             SystemOriginWire::CentreMember
+        );
+        let listed = SystemOrigin::GlobalListMember { attempt: 1 };
+        let stream = StreamMemberId::new(141, Layer::B, 9, [3, 60], 7).expect("a stream member ID");
+        assert_eq!(
+            system_origin(&of(SystemId::from(stream), listed)),
+            SystemOriginWire::Stream { stream: 141 }
+        );
+        let core = DwarfCoreMemberId::new(2, slot).expect("a dwarf core member ID");
+        assert_eq!(
+            system_origin(&of(SystemId::from(core), listed)),
+            SystemOriginWire::DwarfCore { core: 2 }
         );
     }
 

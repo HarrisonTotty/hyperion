@@ -81,7 +81,7 @@ use crate::bulk::sky::{
 use crate::bulk::{Answer, BulkPayload};
 use crate::compute::sky::{BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand};
 use crate::compute::{
-    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority, SkyCaps,
+    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 
@@ -465,7 +465,10 @@ async fn discs(
         query.observer().time(),
     );
     compute::sky::bulk(&state.pool, token, move |_: &CancelToken| {
-        match shared.systems.get_or_generate(key, &galaxy, system) {
+        match shared
+            .systems
+            .get_or_generate(key, &galaxy, system, &Listing::Unlisted)
+        {
             Ok(stars) => host_discs(&galaxy, &stars, t)
                 .iter()
                 .map(host_disc)

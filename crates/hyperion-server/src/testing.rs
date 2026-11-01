@@ -31,7 +31,9 @@ use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture, to_frame
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService};
+use crate::{
+    AppState, GlobalListWarmUp, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService,
+};
 
 /// Upper bound on any single wait.
 ///
@@ -89,7 +91,8 @@ impl Harness {
     ///
     /// The harness's configuration has one CPU worker and the sky off ([`SkyService::Unsupported`],
     /// though the server's default serves it since rendering plan R13's R13.T2), so that an open in
-    /// a test of something else starts no sky tables on the worker; `configure` may turn it on.
+    /// a test of something else starts no sky tables on the worker; `configure` may turn it on. The
+    /// global list's warm-up is off for the same reason ([`GlobalListWarmUp::Off`]).
     pub(crate) async fn start_configured(
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
@@ -112,7 +115,8 @@ impl Harness {
             ServerConfig::builder()
                 .data_dir(data_dir.path())
                 .workers(std::num::NonZeroUsize::MIN)
-                .sky_service(SkyService::Unsupported),
+                .sky_service(SkyService::Unsupported)
+                .global_list_warm_up(GlobalListWarmUp::Off),
         )
         .build();
         let server = timeout(

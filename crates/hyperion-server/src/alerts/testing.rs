@@ -119,7 +119,8 @@ pub(crate) fn core_collapses(
 }
 
 /// A server whose state the walks read, its configuration `configure` makes of one with two
-/// workers and the sky off, over its own data directory, kept with it.
+/// workers, the sky off and the global list's warm-up off, over its own data directory, kept
+/// with it.
 pub(crate) async fn server(
     configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
 ) -> (Server, TempDir) {
@@ -128,7 +129,8 @@ pub(crate) async fn server(
         ServerConfig::builder()
             .data_dir(data_dir.path())
             .workers(NonZeroUsize::new(2).unwrap())
-            .sky_service(SkyService::Unsupported),
+            .sky_service(SkyService::Unsupported)
+            .global_list_warm_up(crate::GlobalListWarmUp::Off),
     )
     .build();
     (Server::start(config).await.unwrap(), data_dir)

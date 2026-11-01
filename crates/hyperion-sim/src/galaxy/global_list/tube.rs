@@ -1832,10 +1832,10 @@ fn index_f64(i: usize) -> f64 {
 /// What a caller's cache of tube tables implements: the galaxy's global list, and each stream's
 /// table on request (plan 10, "Provides").
 ///
-/// The server's `TubeTableCache` (P10.T10.b) builds a table on a miss inside the job that asked
-/// and evicts by bytes; eviction is safe, because a table is a pure function of the galaxy and
-/// the stream number and is rebuilt to the same bits. An implementation must hand out the list
-/// of the galaxy it is asked about, and the table of `stream` in it.
+/// The server's `ListedTubes`, one galaxy's view of its byte-bounded `TubeTableCache` (P10.T10.b),
+/// builds a table on a miss inside the job that asked; eviction is safe, because a table is a pure
+/// function of the galaxy and the stream number and is rebuilt to the same bits. An implementation
+/// must hand out the list of the galaxy it is asked about, and the table of `stream` in it.
 ///
 /// # Examples
 ///

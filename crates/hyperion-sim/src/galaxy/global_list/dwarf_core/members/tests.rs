@@ -602,7 +602,7 @@ impl crate::galaxy::global_list::TubeLookup for NoTubes {
 #[ignore = "slow: builds a galaxy's kinematic tables and its debris"]
 fn resolve_with_reaches_a_drawn_core_s_members() {
     use crate::galaxy::global_list::Debris;
-    use crate::galaxy::placement::{resolve, resolve_with};
+    use crate::galaxy::placement::{resolve, resolve_list_member_with, resolve_with};
     let galaxy = Galaxy::from_params(Seed::new(0x0a10_7b00), GalaxyParams::milky_way_like())
         .unwrap()
         .with_full_potential();
@@ -618,6 +618,7 @@ fn resolve_with_reaches_a_drawn_core_s_members() {
         for (member, _) in members.iter().take(2) {
             let id = member.record().id();
             assert_eq!(resolve_with(&galaxy, id, &lookup), Ok(*member.record()));
+            assert_eq!(resolve_list_member_with(&galaxy, id, &lookup), Ok(*member));
             assert_eq!(
                 resolve(&galaxy, id),
                 Err(ResolveSystemError::KindNotGenerated)

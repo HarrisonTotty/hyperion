@@ -11,7 +11,7 @@ use std::sync::Arc;
 use hyperion_protocol::{ObservedDto, RequestError, ResolveSystemRequest, ResponseBody};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
-use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin, resolve};
+use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin};
 use hyperion_sim::galaxy::query::{QueryMode, SystemHit};
 use hyperion_sim::observe::{
     Drift, Observer, StarsCache, TraceMotionError, curvature_error, observe_hit_in, retarded,
@@ -19,6 +19,7 @@ use hyperion_sim::observe::{
 use hyperion_sim::stellar::system::StellarBrief;
 use hyperion_sim::units::LightYears;
 
+use super::global_list::listing_refused;
 use super::universe::openable_universe;
 use crate::AppState;
 use crate::compute::{CancelToken, JobError, Priority, SystemStarsHandle};
@@ -33,8 +34,10 @@ use crate::convert::{
 /// retarded time are one interactive pool job: the reading may build the system's stars, a
 /// millisecond or two for each evolved star (ruling 46 of 2026-09-22), which the system cache then
 /// keeps for `system_summary` too. The ID goes through plan 03's `resolve` before use, as every ID
-/// from a client does (plan 04's "Extending the convention"). The row is the system as a range
-/// query finds it, at its present position; the answer is small and is serialised on the runtime.
+/// from a client does (plan 04's "Extending the convention"), or a stream's or a dwarf core's
+/// member's through plan 10's `resolve_with` and its galaxy's list (P10.T10.b). The row is the
+/// system as a range query finds it, at its present position; the answer is small and is serialised
+/// on the runtime.
 ///
 /// # Errors
 ///
@@ -43,11 +46,14 @@ use crate::convert::{
 /// `unknown_system` naming `system` for an ID whose bits are not a system ID, or that `resolve`
 /// refuses in this universe's galaxy, as `system_summary` answers it, and for a system whose motion
 /// the sim cannot trace yet, in either mode (a member of the galactic centre until plan 09's
-/// P09.T28, which `system_summary` refuses too, and a catalogue system, whose line breaks at its
-/// explosion, P09.T33.a); `bad_request` naming `mode` for an observer that is
-/// not a canonical position inside the root cube; those of [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot
-/// be built; `queue_full` if the interactive queue has no room for the job; `internal` if the pool
-/// is shutting down or the job panics; and `cancelled` if the client gave up before it ran.
+/// P09.T28, which `system_summary` refuses too, a catalogue system, whose line breaks at its
+/// explosion, P09.T33.a, and a member of the global list); `bad_request` naming `mode` for an
+/// observer that is not a canonical position inside the root cube; those of
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built, and of
+/// [`GlobalListService::listing`](crate::compute::GlobalListService::listing) if a list member's
+/// galaxy's list cannot be; `queue_full` if the interactive queue has no room for the job;
+/// `internal` if the pool is shutting down or the job panics; and `cancelled` if the client gave up
+/// before it ran.
 pub(crate) async fn resolve_system(
     state: Arc<AppState>,
     request: ResolveSystemRequest,
@@ -57,17 +63,25 @@ pub(crate) async fn resolve_system(
     let wanted = ResolveRequest::try_from(&request)?;
     let key = universe.key();
     let galaxy = state.galaxies.get(key).await?;
+    // A stream's or a dwarf core's member resolves through its galaxy's list (plan 10, P10.T10.b).
+    let listing = state
+        .global_lists
+        .listing(key, wanted.system())
+        .await
+        .map_err(|error| listing_refused(wanted.system(), error))?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
-        let record = resolve(&galaxy, wanted.system())
+        let record = listing
+            .resolve(&galaxy, wanted.system())
             .map_err(|error| unknown_system(&request.system, error))?;
         // Lent so that a feature member's lines here and below do not build its interior again.
         let interiors = shared.cluster_models.handle(key);
         let time = wanted.time();
         // A grid system is placed as the range query places it, bit for bit; a feature member moves
         // on its own line, which plan 08's draw is not. A centre member is refused at every time,
-        // as `system_summary` refuses it. A catalogue system, whose line breaks at its explosion, is
-        // refused at every time too.
+        // as `system_summary` refuses it. A catalogue system, whose line breaks at its explosion,
+        // is refused at every time too, and so is a member of the global list, whose line the sim
+        // does not trace yet.
         let (position, velocity) = system_motion(&galaxy, &interiors, &record, time)
             .map_err(|error| untraced_system(&request.system, error))?;
         // The system's own sphere: its hit is at its present position, no distance from the centre.

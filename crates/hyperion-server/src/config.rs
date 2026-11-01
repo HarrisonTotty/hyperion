@@ -355,6 +355,23 @@ pub enum SkyService {
     Served,
 }
 
+/// Whether opening a universe starts its galaxy's global list and its streams' tube tables on the
+/// pool (plan 10, P10.T10.b).
+///
+/// A Milky Way galaxy's list costs some 0.5 CPU-s and its tables some minutes, at bulk priority,
+/// so a test of something else that opens universes turns it off, as it turns the sky's tables
+/// off ([`SkyService`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum GlobalListWarmUp {
+    /// An open starts neither: a galaxy's list is built for its first request that reads it, and
+    /// a stream's table for the first that reads the stream's tube.
+    Off,
+    /// An open builds the galaxy's list, then each of its streams' tube tables in turn, both at
+    /// bulk priority, and answers without waiting for them: the default.
+    #[default]
+    AtOpen,
+}
+
 /// The generator version from which the server serves plan 09's feature members: 26, P09.T2.c's,
 /// the serve gate of P09.T40.a (main's ruling of 2026-10-30; plan 09's Risks, "P09.T39 as built").
 ///
@@ -546,6 +563,7 @@ pub struct ServerConfig {
     /// (`default_surface_passes`).
     surface_passes: Option<NonZeroUsize>,
     sky_service: SkyService,
+    global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
@@ -674,6 +692,12 @@ impl ServerConfig {
         self.sky_service
     }
 
+    /// Whether an open starts its galaxy's global list and tube tables (plan 10, P10.T10.b).
+    #[must_use]
+    pub fn global_list_warm_up(&self) -> GlobalListWarmUp {
+        self.global_list_warm_up
+    }
+
     /// Whether the server serves plan 09's feature members (P09.T40.a's serve gate,
     /// [`FEATURE_MEMBERS_FROM`]).
     #[must_use]
@@ -756,6 +780,7 @@ impl Default for ServerConfigBuilder {
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
                 surface_passes: None,
                 sky_service: SkyService::default(),
+                global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
@@ -912,6 +937,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn sky_service(mut self, service: SkyService) -> Self {
         self.config.sky_service = service;
+        self
+    }
+
+    /// Whether an open starts its galaxy's global list and tube tables;
+    /// [`GlobalListWarmUp::AtOpen`] by default.
+    #[must_use]
+    pub fn global_list_warm_up(mut self, warm_up: GlobalListWarmUp) -> Self {
+        self.config.global_list_warm_up = warm_up;
         self
     }
 

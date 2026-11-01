@@ -20,7 +20,9 @@ use crate::galaxy::catalogue_classes::system_of;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
-use crate::galaxy::global_list::members::{StreamBandShares, resolve_stream_member};
+use crate::galaxy::global_list::members::{
+    GlobalMemberRecord, StreamBandShares, resolve_stream_member,
+};
 use crate::galaxy::global_list::{
     Debris, StreamNumber, StreamShellRules, TubeLookup, in_stream_shell,
 };
@@ -153,13 +155,41 @@ pub fn resolve_with(
     lookup: &dyn TubeLookup,
 ) -> Result<SystemRecord, ResolveSystemError> {
     match id.kind() {
+        SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => {
+            resolve_list_member_with(galaxy, id, lookup).map(|member| *member.record())
+        }
+        SystemIdKind::Grid(_)
+        | SystemIdKind::FeatureMember(_)
+        | SystemIdKind::Centre(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
+    }
+}
+
+/// The member of `galaxy`'s global list that `id` names, a stream's or a dwarf core's, with what
+/// its stars and its motion need beside its record (plan 10, P10.T10.b).
+///
+/// [`resolve_with`] gives the member's record alone. A list member's stars are its member
+/// record's ([`GlobalMemberRecord::stars`]), at its class and composition, which the stellar stage
+/// of a bare record would not give it, so a caller that generates them resolves here.
+///
+/// # Errors
+///
+/// [`ResolveSystemError::KindNotGenerated`] if `id` is neither a stream member's nor a dwarf core
+/// member's ID, and otherwise as [`resolve_with`] for the member.
+pub fn resolve_list_member_with(
+    galaxy: &Galaxy,
+    id: SystemId,
+    lookup: &dyn TubeLookup,
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
+    match id.kind() {
         SystemIdKind::Stream(member) => resolve_listed_stream_member(galaxy, lookup, member),
         SystemIdKind::DwarfCore(member) => resolve_core_member(galaxy, member),
         SystemIdKind::Grid(_)
         | SystemIdKind::FeatureMember(_)
         | SystemIdKind::Centre(_)
         | SystemIdKind::Pinned(_)
-        | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
+        | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
     }
 }
 
@@ -169,7 +199,7 @@ fn resolve_listed_stream_member(
     galaxy: &Galaxy,
     lookup: &dyn TubeLookup,
     id: StreamMemberId,
-) -> Result<SystemRecord, ResolveSystemError> {
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
     if galaxy.kinematics().is_none() {
         return Err(ResolveSystemError::NoSuchSystem);
     }
@@ -181,7 +211,7 @@ fn resolve_listed_stream_member(
         .ok_or(ResolveSystemError::NoSuchSystem)?;
     let tube = lookup.tube(spec.number());
     let shares = StreamBandShares::of(galaxy, spec);
-    let record = *resolve_stream_member(galaxy, &tube, &shares, id)?.record();
+    let member = resolve_stream_member(galaxy, &tube, &shares, id)?;
     // From version 26 a member outside its stream's shell, which the list holds, is none
     // (P10.T9; `global_list`'s "Bounding shells").
     let admitted = match galaxy.rules().stream_shell {
@@ -189,10 +219,12 @@ fn resolve_listed_stream_member(
         StreamShellRules::Shell => lookup
             .global_list()
             .stream_entry(spec.number())
-            .is_some_and(|entry| in_stream_shell(galaxy, &entry.shell(), record.epoch_position())),
+            .is_some_and(|entry| {
+                in_stream_shell(galaxy, &entry.shell(), member.record().epoch_position())
+            }),
     };
     if admitted {
-        Ok(record)
+        Ok(member)
     } else {
         Err(ResolveSystemError::NoSuchSystem)
     }
@@ -202,7 +234,7 @@ fn resolve_listed_stream_member(
 fn resolve_core_member(
     galaxy: &Galaxy,
     id: DwarfCoreMemberId,
-) -> Result<SystemRecord, ResolveSystemError> {
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
     if galaxy.kinematics().is_none() {
         return Err(ResolveSystemError::NoSuchSystem);
     }
@@ -218,7 +250,7 @@ fn resolve_core_member(
     model
         .check_index_headroom()
         .map_err(|_| ResolveSystemError::NoSuchSystem)?;
-    resolve_dwarf_core_member(galaxy, &model, id).map(|member| *member.record())
+    resolve_dwarf_core_member(galaxy, &model, id)
 }
 
 /// The record of candidate `index` of `key`, if the cell has that candidate and the thinning kept
@@ -534,8 +566,8 @@ mod tests {
 
     /// Plan 10, P10.T1: every kind but a stream's and a dwarf core's is forwarded, so
     /// `resolve_with` answers as `resolve` does on grid IDs (systems, empty indices and thinned
-    /// candidates) and on the centre's black hole. Feature and centre members are the slow test
-    /// below.
+    /// candidates) and on the centre's black hole, and `resolve_list_member_with` finds no list
+    /// member in any of them. Feature and centre members are the slow test below.
     #[test]
     fn resolve_with_agrees_with_resolve_on_grid_and_centre_ids() {
         let lookup = NoTubes(GlobalList::default());
@@ -555,6 +587,11 @@ mod tests {
             assert_eq!(
                 resolve_with(&galaxy, id, &lookup),
                 resolve(&galaxy, id),
+                "{id:?}"
+            );
+            assert_eq!(
+                resolve_list_member_with(&galaxy, id, &lookup),
+                Err(ResolveSystemError::KindNotGenerated),
                 "{id:?}"
             );
         }

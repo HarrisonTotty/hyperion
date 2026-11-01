@@ -28,7 +28,9 @@ use hyperion_protocol::{
     ResponseBody, SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
-use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService};
+use hyperion_server::{
+    GlobalListWarmUp, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService,
+};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -163,7 +165,9 @@ impl TestServer {
     /// since rendering plan R13's R13.T2: served, every open would start its galaxy's sky tables on
     /// the pool (R06.T11.g), 31 CPU-s built serially and 47 on 15 workers (R06's Risks,
     /// "Deviations in T11.g, as built"), which a test of something else would share its workers
-    /// with. The sky's own tests turn it on.
+    /// with. The sky's own tests turn it on. It turns the global list's warm-up off
+    /// ([`GlobalListWarmUp::Off`]) for the same reason: an open would start its galaxy's list and
+    /// every tube table, some minutes of CPU (plan 10, P10.T10.b).
     ///
     /// Its pool has [`TEST_SERVER_WORKERS`] workers, not the server's default, which is sized from
     /// the machine; a test's own [`workers`](ServerConfigBuilder::workers) after it wins.
@@ -173,6 +177,7 @@ impl TestServer {
             .workers(TEST_SERVER_WORKERS)
             .entropy(SequenceEntropy::new(test_entropy()))
             .sky_service(SkyService::Unsupported)
+            .global_list_warm_up(GlobalListWarmUp::Off)
     }
 
     /// A server with `config`, listening on port 0 whatever its address says.

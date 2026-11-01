@@ -550,6 +550,7 @@ mod tests {
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
+    use crate::compute::Listing;
 
     /// A catalogue system's row (plan 09): a Type Ia's members have no brief, since their class
     /// does not model their stars (P09.T34.a), where a core collapse's has its stars'; and the
@@ -683,7 +684,7 @@ mod tests {
             for hit in hits {
                 if hit.record().kind() != SystemKind::RoguePlanet {
                     let _ = summarised
-                        .get_or_generate(key, &galaxy, hit.id())
+                        .get_or_generate(key, &galaxy, hit.id(), &Listing::Unlisted)
                         .expect("a system found resolves");
                 }
             }

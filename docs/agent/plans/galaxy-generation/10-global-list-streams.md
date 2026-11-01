@@ -725,7 +725,8 @@ centre's part waits on P09.T29's `CentreMemberSource`, which P09.T28.b.a must pr
 ### P10.T10 Protocol and server
 
 _T10.a built (lane `p10-t9`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24); see "P10.T10.a as built"
-in Risks. T10.b is not._
+in Risks. T10.b's additions built (lane `p10-t10b-t11`, 2026-11-01, at 24); see "P10.T10.b's additions
+as built". Its registration member is not._
 
 - **P10.T10.a Protocol.** New kinds of plan 04's `RequestBody` and `ResponseBody`, added to
   `REQUEST_KINDS`: `GlobalFeatures { universe }` → `GlobalEntryWire` list (kind, number, mass,
@@ -2289,3 +2290,22 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     shell, by the triangle inequality about each segment's chord (`dropped_of`).
   - _For the bump._ Nothing reads these tests' figures; a change to the spray, the tubes or the
     share re-pins them by name.
+- **P10.T10.b's additions as built (lane `p10-t10b-t11`, 2026-11-01, at `GENERATOR_VERSION` 24).**
+  No generated output moved. The registration member (with P09.T37) is left.
+  - _Items._ `compute::{TubeTableCache, ListedTubes, Listing, TubeKey}`;
+    `GlobalListService::{tube, is_ready, listing, tube_counters}` (`prefetch`, `stop_warming`
+    crate-only);
+    `TUBE_TABLE_CACHE_BYTES` (64 MiB); `GlobalListWarmUp { Off, AtOpen }` (off in test servers);
+    `ServerStats::tube_tables`; sim `placement::resolve_list_member_with`.
+  - _Deviation._ `TubeLookup` is implemented by `ListedTubes`, one galaxy's view of the cache, not
+    by `TubeTableCache`, since `global_list()` is one galaxy's. `listing` builds a stream member's
+    table on the pool before the job, so a table that cannot be built is refused, not a panic; a
+    miss inside a job is built serially. The warm-up stops before a table that would overflow the
+    budget, so an open again rebuilds none (some 1.8 CPU-s a table at Milky Way values).
+  - _For the registration._ Take the lookup from `GlobalListService::listing` before the job (the
+    list is async). Below 26 the source reads every table (option A's hold). `convert::placed_by`
+    still has no arm for `GlobalListMember`: a row needs the member's velocity and class.
+  - _Resolve sites (lean, 2026-11-01)._ `system_summary` and `resolve_system` go through
+    `resolve_with` (`convert.rs` has no production `resolve` left). Extinction's line ends and the
+    scene's frame stay on `resolve`, since both refuse a list member's motion whichever resolver
+    finds it; `system_bodies` and `body_detail` too, so a list member has no planets yet.

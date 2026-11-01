@@ -46,7 +46,7 @@ use hyperion_sim::units::Metres;
 
 use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
-use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
+use crate::compute::{GalaxyKey, GeneratedSystem, Listing, SharedCellCache, SharedSystemCache};
 use crate::convert::{
     BodiesRequest, ListedBody, scene_body, scene_system, starless_summary, system_motion,
     system_place, system_summary, wire_time,
@@ -157,7 +157,7 @@ impl SceneWorld<'_> {
         }
         let stars = self
             .stars
-            .get_or_generate(self.key, self.galaxy, record.id())
+            .get_or_generate(self.key, self.galaxy, record.id(), &Listing::Unlisted)
             .expect("a system frame_at named resolves");
         system_summary(request, &stars, t)
     }

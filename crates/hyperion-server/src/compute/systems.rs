@@ -33,22 +33,25 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueSystem, system_of};
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
+use hyperion_sim::galaxy::global_list::members::GlobalMemberRecord;
 use hyperion_sim::galaxy::placement::{
-    ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
+    ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve, resolve_list_member_with,
 };
 use hyperion_sim::id::{SystemId, SystemIdKind};
 use hyperion_sim::observe::{StarsCache, stars_of};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 
-use super::{GalaxyKey, SharedClusterModelCache};
+use super::{GalaxyKey, Listing, SharedClusterModelCache};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
-/// A system as resolved for its stars: a feature member and a catalogue class's system bring their
-/// own (plan 09, P09.T10 and P09.T33.a), every other record the stellar stage's of its own marks.
+/// A system as resolved for its stars: a feature member, a catalogue class's system and a member of
+/// the global list bring their own (plan 09, P09.T10 and P09.T33.a; plan 10, P10.T10.b), every
+/// other record the stellar stage's of its own marks.
 enum Resolved {
     Member(MemberRecord),
     Catalogue(CatalogueSystem),
+    Listed(GlobalMemberRecord),
     Placed(SystemRecord),
 }
 
@@ -95,7 +98,9 @@ impl SharedSystemCache {
     }
 
     /// The stars of the system `id` names in `galaxy`, the galaxy `key` names: the cache's, or
-    /// resolved and generated, then stored.
+    /// resolved and generated, then stored. A stream's or a dwarf core's member is resolved
+    /// through `listing`, its galaxy's list ([`Listing::Listed`]), and generated through its
+    /// member record, at its class and composition (plan 10, P10.T10.b).
     ///
     /// Generation is the whole of plan 06's and plan 11's system stage
     /// ([`SystemStars::generate`]), which builds a track for every star, so this belongs on a
@@ -107,7 +112,10 @@ impl SharedSystemCache {
     ///
     /// # Errors
     ///
-    /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
+    /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`,
+    ///   or of plan 10's [`resolve_list_member_with`] for a list member's ID.
+    /// - [`ResolveSystemError::KindNotGenerated`] for a list member's ID with
+    ///   [`Listing::Unlisted`], as [`resolve`] answers it.
     /// - [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre, whose system
     ///   stage is not generated yet (plan 09, P09.T27), and for a catalogue system whose class
     ///   models no stars; a core collapse's are its class's (P09.T33.a).
@@ -125,12 +133,23 @@ impl SharedSystemCache {
         key: GalaxyKey,
         galaxy: &Galaxy,
         id: SystemId,
+        listing: &Listing,
     ) -> Result<Arc<SystemStars>, ResolveSystemError> {
         assert_eq!(
             galaxy.seed().get(),
             key.seed(),
             "a system cache entry is of one galaxy, and this is another's"
         );
+        // Refused unlisted before the cache is read, so that a list member's stars kept for a
+        // listed caller are never lent to one that cannot resolve it: the answer depends on the
+        // listing alone, never on what is held.
+        if matches!(
+            id.kind(),
+            SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_)
+        ) && matches!(listing, Listing::Unlisted)
+        {
+            return Err(ResolveSystemError::KindNotGenerated);
+        }
         let entry_key = (key, id);
         if let Some(stars) = self.systems.get(&entry_key) {
             return Ok(stars);
@@ -144,15 +163,20 @@ impl SharedSystemCache {
                     .lend(key, |interiors| resolve_member(galaxy, interiors, member))?,
             ),
             SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
-            SystemIdKind::Grid(_)
-            | SystemIdKind::Centre(_)
-            | SystemIdKind::Stream(_)
-            | SystemIdKind::DwarfCore(_)
-            | SystemIdKind::Pinned(_) => Resolved::Placed(resolve(galaxy, id)?),
+            SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => match listing {
+                Listing::Listed(tubes) => {
+                    Resolved::Listed(resolve_list_member_with(galaxy, id, tubes)?)
+                }
+                Listing::Unlisted => unreachable!("an unlisted list member is refused above"),
+            },
+            SystemIdKind::Grid(_) | SystemIdKind::Centre(_) | SystemIdKind::Pinned(_) => {
+                Resolved::Placed(resolve(galaxy, id)?)
+            }
         };
         let record = match &resolved {
             Resolved::Member(member) => *member.record(),
             Resolved::Catalogue(system) => *system.record(),
+            Resolved::Listed(member) => *member.record(),
             Resolved::Placed(record) => *record,
         };
         // The galactic centre's members resolve since plan 09's P09.T27, but their stars take the
@@ -168,6 +192,7 @@ impl SharedSystemCache {
             Resolved::Catalogue(system) => system
                 .stars(galaxy)
                 .ok_or(ResolveSystemError::KindNotGenerated)?,
+            Resolved::Listed(member) => member.stars(galaxy),
             Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         });
         // A system larger than the whole budget is handed back and still answered from; nothing
@@ -423,10 +448,14 @@ mod tests {
     fn a_system_is_generated_once_and_then_lent() {
         let cache = SharedSystemCache::new(64 << 20);
         let id = systems(1)[0];
-        let first = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let first = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
         let expected = SystemStars::generate(galaxy(), &resolve(galaxy(), id).unwrap());
         assert_eq!(*first, expected);
-        let second = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let second = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
         assert!(
             Arc::ptr_eq(&first, &second),
             "the second lookup is the cache's"
@@ -467,7 +496,9 @@ mod tests {
             .next()
             .expect("the inner disc has recent deaths");
         let id = SystemId::from(entry.id());
-        let stars = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let stars = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
         let expected = system_of(galaxy(), entry.id())
             .unwrap()
             .stars(galaxy())
@@ -485,7 +516,12 @@ mod tests {
             .next()
             .expect("the disc has luminous-blue-variable hosts");
         let stars = cache
-            .get_or_generate(key(), galaxy(), SystemId::from(entry.id()))
+            .get_or_generate(
+                key(),
+                galaxy(),
+                SystemId::from(entry.id()),
+                &Listing::Unlisted,
+            )
             .unwrap();
         let expected = system_of(galaxy(), entry.id())
             .unwrap()
@@ -507,7 +543,7 @@ mod tests {
         for member in 0..entry.members() {
             let id = SystemId::from(entry.member_id(member).unwrap());
             assert_eq!(
-                cache.get_or_generate(key(), galaxy(), id),
+                cache.get_or_generate(key(), galaxy(), id, &Listing::Unlisted),
                 Err(ResolveSystemError::KindNotGenerated)
             );
             let record = resolve(galaxy(), id).unwrap();
@@ -522,7 +558,12 @@ mod tests {
             CatalogueSystemId::new(ClassId::TIDAL_DISRUPTION_VICTIM.value(), [0, 16, 0], 0, 0)
                 .unwrap();
         assert_eq!(
-            cache.get_or_generate(key(), galaxy(), SystemId::from(unplaced)),
+            cache.get_or_generate(
+                key(),
+                galaxy(),
+                SystemId::from(unplaced),
+                &Listing::Unlisted
+            ),
             Err(ResolveSystemError::NoSuchSystem)
         );
         assert_eq!(cache.counters().entries(), 2);
@@ -537,7 +578,7 @@ mod tests {
             .candidate_id(candidate_count(galaxy(), cell))
             .expect("a cell at the solar circle has room for another index");
         assert_eq!(
-            cache.get_or_generate(key(), galaxy(), beyond),
+            cache.get_or_generate(key(), galaxy(), beyond, &Listing::Unlisted),
             Err(ResolveSystemError::NoSuchSystem)
         );
         assert_eq!(cache.counters().entries(), 0);
@@ -563,7 +604,7 @@ mod tests {
                     records.first().copied()
                 })
                 .expect("the solar circle holds free-floating objects");
-            let answer = cache.get_or_generate(key(), galaxy(), found.id());
+            let answer = cache.get_or_generate(key(), galaxy(), found.id(), &Listing::Unlisted);
             if layer == Layer::BrownDwarf {
                 let stars = answer.expect("a brown dwarf takes the stellar stage");
                 assert_eq!(stars.star_count(), 1);
@@ -589,12 +630,20 @@ mod tests {
         let none = SharedSystemCache::new(0);
         for _ in 0..2 {
             for &id in &ids {
-                let expected = roomy.get_or_generate(key(), galaxy(), id).unwrap();
+                let expected = roomy
+                    .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                    .unwrap();
                 assert_eq!(
-                    tight.get_or_generate(key(), galaxy(), id).unwrap(),
+                    tight
+                        .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                        .unwrap(),
                     expected
                 );
-                assert_eq!(none.get_or_generate(key(), galaxy(), id).unwrap(), expected);
+                assert_eq!(
+                    none.get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                        .unwrap(),
+                    expected
+                );
             }
         }
         assert!(tight.counters().evictions() > 0 || tight.counters().refused() > 0);
@@ -610,6 +659,7 @@ mod tests {
             GalaxyKey::new(SEED + 1, GENERATOR_VERSION),
             galaxy(),
             systems(1)[0],
+            &Listing::Unlisted,
         );
     }
 
@@ -659,7 +709,9 @@ mod tests {
         let [first, second] = systems(2)[..] else {
             unreachable!("two systems asked for")
         };
-        let summarised = cache.get_or_generate(key(), galaxy(), first).unwrap();
+        let summarised = cache
+            .get_or_generate(key(), galaxy(), first, &Listing::Unlisted)
+            .unwrap();
         let record = resolve(galaxy(), first).unwrap();
         let mut handle = cache.handle(key());
         assert_eq!(handle.galaxy(), key());
@@ -670,7 +722,9 @@ mod tests {
         let other = resolve(galaxy(), second).unwrap();
         let built = handle.with_stars(galaxy(), &other, SystemStars::clone);
         assert_eq!(built, SystemStars::generate(galaxy(), &other));
-        let stored = cache.get_or_generate(key(), galaxy(), second).unwrap();
+        let stored = cache
+            .get_or_generate(key(), galaxy(), second, &Listing::Unlisted)
+            .unwrap();
         assert_eq!(*stored, built);
         assert_eq!((cache.counters().hits(), cache.counters().misses()), (2, 2));
     }
@@ -712,7 +766,7 @@ mod tests {
             let Some(member) = found else { continue };
             let record = member.record();
             let stars = systems
-                .get_or_generate(key, &galaxy, record.id())
+                .get_or_generate(key, &galaxy, record.id(), &Listing::Unlisted)
                 .expect("a member resolves");
             assert_eq!(*stars, member.stars(&galaxy));
             assert_eq!(stars.primary().composition(), member.composition());

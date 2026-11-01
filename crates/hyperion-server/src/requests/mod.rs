@@ -312,7 +312,7 @@ impl Handler for Handlers {
                 Box::pin(global_list::features(state, request, token).map(answered))
             }
             RequestBody::StreamTrack(request) => {
-                Box::pin(global_list::track(state, request, token).map(answered))
+                Box::pin(global_list::track(state, request).map(answered))
             }
         }
     }

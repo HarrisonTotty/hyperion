@@ -35,30 +35,39 @@
 //! No kind of unit is dealt into more shares than the pool has workers, so a build holds at most
 //! its workers' count and three more jobs in the queue at once.
 //!
-//! **Kept** ([`GlobalListService`], P10.T10.a). A galaxy's list is built once, on its first
-//! `global_features` or `stream_track`, and kept within a byte budget; a stream's tube is built for
-//! the `stream_track` that asks, at interactive priority, and not kept (P10.T10.b's cache will). A
-//! list is a pure function of its galaxy, so eviction never changes an answer.
+//! **Kept** ([`GlobalListService`], P10.T10.a and P10.T10.b). A galaxy's list is built once, when
+//! its universe is opened or on its first request, and kept within a byte budget. Its streams'
+//! tables are kept in the [`TubeTableCache`]: each built when the open's warm-up reaches it, at
+//! bulk priority, or for the first `stream_track` that asks, at interactive priority, or inside
+//! the job that resolves one of its members ([`ListedTubes`]). A list and a table are pure
+//! functions of their galaxy, so eviction never changes an answer.
 //!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
 
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
+
+use hyperion_protocol::SeedHex;
 
 use hyperion_sim::galaxy::global_list::orbit::BuildLeapfrogError;
 use hyperion_sim::galaxy::global_list::spray::{
     Leg, Spray, SprayForce, SprayParams, Tracer, radii_over_ly,
 };
 use hyperion_sim::galaxy::global_list::tube::BuildTubeTableError;
-use hyperion_sim::galaxy::global_list::{Debris, GlobalList, ListPlan, StreamSpec, TubeTable};
+use hyperion_sim::galaxy::global_list::{
+    Debris, GlobalList, ListPlan, StreamNumber, StreamSpec, TubeTable,
+};
 use hyperion_sim::galaxy::{Galaxy, Population};
+use hyperion_sim::id::{SystemId, SystemIdKind};
+use tokio::task::JoinSet;
 
 use super::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyCache, GalaxyKey, JobError,
-    JobReceiver, Priority, SingleFlight,
+    JobReceiver, ListedTubes, Listing, Priority, SingleFlight, TubeKey, TubeTableCache,
 };
-use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
+use crate::cache::{ByteLru, HeapBytes, LruCounters, SharedByteLru};
 
 /// The tracers of one share of a tube's spray: 250, eight shares of a stream's 2,000 on eight
 /// workers, about 0.25 s each (perf-spray's recorded design, 2026-10-30).
@@ -529,40 +538,90 @@ impl HeapBytes for HeldGlobalList {
 }
 
 /// The global list of every galaxy the server holds, built on the pool's workers and kept per
-/// galaxy, and the streams' tubes built for their requests (module documentation, "Kept").
+/// galaxy, and its streams' tube tables, kept in a [`TubeTableCache`] (module documentation,
+/// "Kept").
 ///
 /// [`GlobalListService::get`] hands back a galaxy's list, building it with [`global_list_on`] at
 /// [`Priority::Bulk`] if no one has yet, the galaxy taken from the [`GalaxyCache`], which builds
-/// every galaxy with the kinematic tables the list needs. Callers that ask for one galaxy at once
+/// every galaxy with the kinematic tables the list needs. [`GlobalListService::tube`] hands back a
+/// stream's table, building it with [`tube_table_on`] at the priority asked if the cache lacks it,
+/// and [`GlobalListService::prefetch`] starts a galaxy's list and then every one of its tables at
+/// bulk priority, for an open. Callers that ask for one list, one table or one warm-up at once
 /// share one build through a [`SingleFlight`], and if every one of them gives up, its jobs still
-/// queued are skipped. [`GlobalListService::tube`] builds a stream's tube with [`tube_table_on`].
-/// Both keep each galaxy's spray table in the service's [`SharedSprayForces`].
+/// queued are skipped. Every build keeps its galaxy's spray table in the service's
+/// [`SharedSprayForces`].
 pub struct GlobalListService {
+    lists: Arc<Lists>,
+    /// The tasks that wait on the warm-ups [`prefetch`](Self::prefetch) started.
+    warming: Mutex<JoinSet<()>>,
+}
+
+/// What a [`GlobalListService`] shares with the warm-ups it starts.
+struct Lists {
     pool: Arc<CpuPool>,
     galaxies: Arc<GalaxyCache>,
     forces: Arc<SharedSprayForces>,
     held: Arc<SharedByteLru<GalaxyKey, HeldGlobalList>>,
     flights: SingleFlight<GalaxyKey, HeldGlobalList, ComputeError>,
+    tubes: Arc<TubeTableCache>,
+    tube_flights: SingleFlight<TubeKey, TubeTable, BuildTubeOnPoolError>,
+    warm_ups: SingleFlight<GalaxyKey, WarmedTubes, ComputeError>,
+}
+
+/// What a galaxy's warm-up did: the tables it built, and how many of the galaxy's tables the
+/// cache held when it ended.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(crate) struct WarmedTubes {
+    built: usize,
+    held: usize,
+    streams: usize,
+}
+
+impl WarmedTubes {
+    /// The tables the warm-up built.
+    #[must_use]
+    pub(crate) const fn built(&self) -> usize {
+        self.built
+    }
+
+    /// The galaxy's tables the cache held when the warm-up ended.
+    #[must_use]
+    pub(crate) const fn held(&self) -> usize {
+        self.held
+    }
+
+    /// The galaxy's streams.
+    #[must_use]
+    pub(crate) const fn streams(&self) -> usize {
+        self.streams
+    }
 }
 
 impl GlobalListService {
     /// A service that builds its lists and tubes on `pool` from the galaxies of `galaxies`,
-    /// keeping at most `budget_bytes` of lists and their spray tables in `forces`.
+    /// keeping their spray tables in `forces`, at most `budget_bytes` of lists, and the streams'
+    /// tables in `tubes`.
     ///
     /// A budget of zero keeps no list.
     #[must_use]
     pub fn new(
         pool: Arc<CpuPool>,
         galaxies: Arc<GalaxyCache>,
-        forces: Arc<SharedSprayForces>,
+        (forces, tubes): (Arc<SharedSprayForces>, Arc<TubeTableCache>),
         budget_bytes: usize,
     ) -> Self {
         Self {
-            pool,
-            galaxies,
-            forces,
-            held: Arc::new(SharedByteLru::new(budget_bytes)),
-            flights: SingleFlight::new(),
+            lists: Arc::new(Lists {
+                pool,
+                galaxies,
+                forces,
+                held: Arc::new(SharedByteLru::new(budget_bytes)),
+                flights: SingleFlight::new(),
+                tubes,
+                tube_flights: SingleFlight::new(),
+                warm_ups: SingleFlight::new(),
+            }),
+            warming: Mutex::new(JoinSet::new()),
         }
     }
 
@@ -573,6 +632,164 @@ impl GlobalListService {
     /// [`ComputeError`] as [`GalaxyCache::get`] gives it for the galaxy, and as
     /// [`global_list_on`] gives it for the build.
     pub async fn get(&self, key: GalaxyKey) -> Result<Arc<HeldGlobalList>, ComputeError> {
+        self.lists.get(key).await
+    }
+
+    /// The tube table of `spec`'s stream in `galaxy`, the galaxy `key` names: the cache's, or its
+    /// tracers sprayed on the pool's workers at `priority` and kept. A build in flight for the
+    /// stream is joined, at the priority it was started at.
+    ///
+    /// # Errors
+    ///
+    /// As [`tube_table_on`].
+    ///
+    /// # Panics
+    ///
+    /// If `key` is not of `galaxy`'s seed.
+    pub async fn tube(
+        &self,
+        (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+        spec: &StreamSpec,
+        priority: Priority,
+    ) -> Result<Arc<TubeTable>, BuildTubeOnPoolError> {
+        self.lists.tube((galaxy, key), spec, priority).await
+    }
+
+    /// Whether the cache holds the table of stream `number` of the galaxy `key` names, uncounted:
+    /// its track's status, `ready` or `pending`.
+    #[must_use]
+    pub fn is_ready(&self, key: GalaxyKey, number: StreamNumber) -> bool {
+        self.lists.tubes.contains(&(key, number))
+    }
+
+    /// What resolving `id` in the galaxy `key` names reads of its global list: for a stream's or a
+    /// dwarf core's member, the galaxy's list and its tables ([`Listing::Listed`]), the list built
+    /// if it is not held; for any other system, nothing.
+    ///
+    /// For a stream's member, the table of the stream its ID names is built too, if the list has
+    /// that stream and the cache lacks its table, on the pool's workers at interactive priority as
+    /// [`tube`](Self::tube) builds it: so that the job that resolves the member reads it, and a
+    /// table that cannot be built is refused here rather than inside the job.
+    ///
+    /// # Errors
+    ///
+    /// For a list member's ID, [`BuildTubeOnPoolError::Compute`] as [`get`](Self::get) for the
+    /// list, and for a stream's member as [`tube`](Self::tube) for its table.
+    pub async fn listing(
+        &self,
+        key: GalaxyKey,
+        id: SystemId,
+    ) -> Result<Listing, BuildTubeOnPoolError> {
+        let stream = match id.kind() {
+            SystemIdKind::Stream(member) => Some(StreamNumber::from(member)),
+            SystemIdKind::DwarfCore(_) => None,
+            SystemIdKind::Grid(_)
+            | SystemIdKind::FeatureMember(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Pinned(_)
+            | SystemIdKind::Catalogue(_) => return Ok(Listing::Unlisted),
+        };
+        let list = self.lists.get(key).await?;
+        let galaxy = self.lists.galaxies.get(key).await?;
+        // A number the list has no stream for resolves to no system, reading no table.
+        if let Some(spec) = stream.and_then(|number| list.list().stream(number)) {
+            self.lists
+                .tube((&galaxy, key), spec, Priority::Interactive)
+                .await?;
+        }
+        Ok(Listing::Listed(ListedTubes::new(
+            (galaxy, key),
+            list,
+            Arc::clone(&self.lists.tubes),
+        )))
+    }
+
+    /// Starts the warm-up of the galaxy `key` names and returns at once: its list, then each of its
+    /// streams' tables in number order, at bulk priority, waited on by a task the service owns
+    /// (P10.T10.b). An open repeated meanwhile joins the warm-up in flight.
+    ///
+    /// The server calls it when a client opens a universe, unless its configuration turns it off
+    /// ([`GlobalListWarmUp`](crate::GlobalListWarmUp)). The galaxy's tables held already are marked
+    /// used and passed by, and a table that cannot be built is logged and passed by. The warm-up
+    /// stops before a table that would take the galaxy's tables past the cache's budget, since it
+    /// would then evict one of them only to be evicted in turn; so an open again finds the tables
+    /// it kept and builds none of them again. A warm-up that fails is logged, and the next open
+    /// starts another.
+    pub(crate) fn prefetch(&self, key: GalaxyKey) {
+        let lists = Arc::clone(&self.lists);
+        let flight =
+            self.lists.warm_ups.run(
+                key,
+                move || async move { lists.warm(key).await.map(Arc::new) },
+            );
+        let mut tasks = self.warming.lock().unwrap_or_else(PoisonError::into_inner);
+        // The finished tasks are reaped as new ones start, so the set holds only waiters on
+        // warm-ups still running.
+        while let Some(finished) = tasks.try_join_next() {
+            if let Err(error) = finished
+                && error.is_panic()
+            {
+                tracing::error!(%error, "a global list's warm-up started at an open panicked");
+            }
+        }
+        tasks.spawn(async move {
+            let started = Instant::now();
+            match flight.await {
+                Ok(warmed) => tracing::info!(
+                    seed = %SeedHex::from_u64(key.seed()),
+                    built = warmed.built(),
+                    held = warmed.held(),
+                    streams = warmed.streams(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "warmed a galaxy's tube tables"
+                ),
+                Err(error) => tracing::warn!(
+                    seed = %SeedHex::from_u64(key.seed()),
+                    %error,
+                    "a galaxy's global list and tube tables, started when its universe was \
+                     opened, were not built"
+                ),
+            }
+        });
+    }
+
+    /// Stops waiting on the warm-ups [`prefetch`](Self::prefetch) started: each is given up, and
+    /// its queued jobs are skipped, unless a request waits on the same list or table. For the
+    /// server's shutdown, before its pool stops, as the sky tables' prefetches are given up.
+    pub(crate) fn stop_warming(&self) {
+        self.warming
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .abort_all();
+    }
+
+    /// The lists held, the bytes they are charged, and the hits, misses, evictions and refusals
+    /// so far.
+    #[must_use]
+    pub fn counters(&self) -> LruCounters {
+        self.lists.held.counters()
+    }
+
+    /// The tube tables held, the bytes they are charged, and the hits, misses, evictions and
+    /// refusals so far.
+    #[must_use]
+    pub fn tube_counters(&self) -> LruCounters {
+        self.lists.tubes.counters()
+    }
+}
+
+impl std::fmt::Debug for GlobalListService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlobalListService")
+            .field("counters", &self.counters())
+            .field("tube_counters", &self.tube_counters())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Lists {
+    /// [`GlobalListService::get`].
+    async fn get(&self, key: GalaxyKey) -> Result<Arc<HeldGlobalList>, ComputeError> {
         if let Some(list) = self.held.get(&key) {
             return Ok(list);
         }
@@ -610,47 +827,103 @@ impl GlobalListService {
             .await
     }
 
-    /// The tube of `spec`'s stream in `galaxy`, the galaxy `key` names, its tracers sprayed on the
-    /// pool's workers at [`Priority::Interactive`] behind `token`, the request's: not kept.
-    ///
-    /// # Errors
-    ///
-    /// As [`tube_table_on`].
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not of `galaxy`'s seed.
-    pub async fn tube(
+    /// [`GlobalListService::tube`].
+    async fn tube(
         &self,
         (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
         spec: &StreamSpec,
-        token: &CancelToken,
-    ) -> Result<TubeTable, BuildTubeOnPoolError> {
-        let shares = Shares::for_workers(self.pool.workers());
-        tube_table_on(
-            &self.pool,
-            &self.forces,
-            (galaxy, key),
-            spec,
-            (Priority::Interactive, shares),
-            token,
-        )
-        .await
+        priority: Priority,
+    ) -> Result<Arc<TubeTable>, BuildTubeOnPoolError> {
+        let tube_key = (key, spec.number());
+        if let Some(table) = self.tubes.get(&tube_key) {
+            return Ok(table);
+        }
+        let (pool, forces, tubes, galaxy, spec) = (
+            Arc::clone(&self.pool),
+            Arc::clone(&self.forces),
+            Arc::clone(&self.tubes),
+            Arc::clone(galaxy),
+            spec.clone(),
+        );
+        self.tube_flights
+            .run(tube_key, move || async move {
+                // As for the lists: a flight that has just finished kept its table.
+                if let Some(table) = tubes.get(&tube_key) {
+                    return Ok(table);
+                }
+                let token = CancelToken::new();
+                // Cancels the jobs still queued once every waiter on this flight has gone.
+                let _cancel_on_drop = CancelOnDrop::new(token.clone());
+                let shares = Shares::for_workers(pool.workers());
+                let table = Arc::new(
+                    tube_table_on(
+                        &pool,
+                        &forces,
+                        (&galaxy, key),
+                        &spec,
+                        (priority, shares),
+                        &token,
+                    )
+                    .await?,
+                );
+                // A table larger than the whole budget is handed back and not stored.
+                drop(tubes.insert(tube_key, Arc::clone(&table)));
+                Ok(table)
+            })
+            .await
     }
 
-    /// The lists held, the bytes they are charged, and the hits, misses, evictions and refusals
-    /// so far.
-    #[must_use]
-    pub fn counters(&self) -> LruCounters {
-        self.held.counters()
-    }
-}
-
-impl std::fmt::Debug for GlobalListService {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GlobalListService")
-            .field("counters", &self.counters())
-            .finish_non_exhaustive()
+    /// The warm-up of the galaxy `key` names ([`GlobalListService::prefetch`]).
+    async fn warm(&self, key: GalaxyKey) -> Result<WarmedTubes, ComputeError> {
+        let list = self.get(key).await?;
+        let galaxy = self.galaxies.get(key).await?;
+        let streams = list.list().debris().streams();
+        let budget = self.tubes.counters().budget();
+        // The galaxy's tables held, marked used so that the tables this builds evict another
+        // galaxy's first; the bytes they are charged; and the next table's charge, taken as the
+        // largest held, or the last built.
+        let (mut held_bytes, mut next_charge) = streams
+            .iter()
+            .filter_map(|spec| self.tubes.get(&(key, spec.number())))
+            .map(|table| ByteLru::<TubeKey, TubeTable>::charge(&table))
+            .fold((0, 0), |(sum, most), charge| {
+                (usize::saturating_add(sum, charge), usize::max(most, charge))
+            });
+        let mut warmed = WarmedTubes {
+            built: 0,
+            held: 0,
+            streams: streams.len(),
+        };
+        for spec in streams {
+            let number = spec.number();
+            if self.tubes.contains(&(key, number)) {
+                continue;
+            }
+            if held_bytes.saturating_add(next_charge) > budget {
+                break;
+            }
+            match self.tube((&galaxy, key), spec, Priority::Bulk).await {
+                Ok(table) => {
+                    warmed.built += 1;
+                    next_charge = ByteLru::<TubeKey, TubeTable>::charge(&table);
+                    held_bytes = held_bytes.saturating_add(next_charge);
+                }
+                Err(BuildTubeOnPoolError::Compute(error)) => return Err(error),
+                Err(BuildTubeOnPoolError::Table(error)) => {
+                    tracing::warn!(
+                        seed = %SeedHex::from_u64(key.seed()),
+                        stream = number.get(),
+                        %error,
+                        "a stream's tube table was not built"
+                    );
+                }
+            }
+        }
+        warmed.held = streams
+            .iter()
+            .filter(|spec| self.tubes.contains(&(key, spec.number())))
+            .count();
+        Ok(warmed)
     }
 }
 
@@ -665,8 +938,23 @@ mod tests {
 
     use hyperion_sim::Seed;
 
+    use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
+    use hyperion_sim::galaxy::global_list::members::{
+        GlobalMemberRecord, StreamBandShares, resolve_stream_member, stream_cell_members,
+    };
+    use hyperion_sim::galaxy::global_list::tube::KNOTS_PER_ARM;
+    use hyperion_sim::galaxy::global_list::{GlobalListSource, TubeLookup};
+    use hyperion_sim::galaxy::imf::MassBand;
+    use hyperion_sim::galaxy::placement::{
+        NoCache, ResolveSystemError, SystemOrigin, SystemRecord,
+    };
+    use hyperion_sim::galaxy::query::{RangeQuery, range_query};
+    use hyperion_sim::units::LightYears;
+
     use super::*;
+    use crate::compute::SharedSystemCache;
     use crate::convert::origins::SEED;
+    use crate::limits::TUBE_TABLE_CACHE_BYTES;
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 
     fn key() -> GalaxyKey {
@@ -779,6 +1067,412 @@ mod tests {
             assert_eq!(tracers, expected, "{n} workers, {per} tracers a share");
             pool.shutdown().await.unwrap();
         }
+    }
+
+    /// A service on a pool of `n` workers whose tube tables are kept in `tubes`, and the pool.
+    fn service_on(n: usize, tubes: &Arc<TubeTableCache>) -> (GlobalListService, Arc<CpuPool>) {
+        let pool = Arc::new(pool(n));
+        let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
+        service_of(pool, galaxies, tubes)
+    }
+
+    /// As [`service_on`], its galaxies at the Milky Way fixture's values rather than drawn from
+    /// their seeds.
+    fn milky_way_service(
+        n: usize,
+        tubes: &Arc<TubeTableCache>,
+    ) -> (GlobalListService, Arc<CpuPool>) {
+        let pool = Arc::new(pool(n));
+        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), |seed| {
+            Galaxy::from_params(
+                seed,
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+            )
+            .expect("the Milky Way fixture's gas is mostly neutral")
+            .with_full_potential()
+        }));
+        service_of(pool, galaxies, tubes)
+    }
+
+    /// A service on `pool` over `galaxies`, its tables kept in `tubes`, and the pool.
+    fn service_of(
+        pool: Arc<CpuPool>,
+        galaxies: Arc<GalaxyCache>,
+        tubes: &Arc<TubeTableCache>,
+    ) -> (GlobalListService, Arc<CpuPool>) {
+        let service = GlobalListService::new(
+            Arc::clone(&pool),
+            galaxies,
+            (Arc::new(SharedSprayForces::new(1 << 20)), Arc::clone(tubes)),
+            4 << 20,
+        );
+        (service, pool)
+    }
+
+    /// The galaxy of [`key`] as `service` holds it, and its list.
+    async fn listed(service: &GlobalListService) -> (Arc<Galaxy>, Arc<HeldGlobalList>) {
+        let list = within(service.get(key())).await.expect("the list builds");
+        let galaxy = within(service.lists.galaxies.get(key()))
+            .await
+            .expect("the galaxy builds");
+        (galaxy, list)
+    }
+
+    /// The bits of `table`, as its debug form spells every float in it: two tables of equal
+    /// spelling are bit for bit the same, but for the payloads of NaNs, which a table holds none
+    /// of.
+    fn bits(table: &TubeTable) -> String {
+        format!("{table:?}")
+    }
+
+    /// P10.T10.b: a stream's track is `pending` until its table is built, then `ready`; the table
+    /// is kept, so the next read is the same table, a hit, and the lookup a job resolves through
+    /// reads it too.
+    #[tokio::test]
+    async fn a_pending_track_is_ready_once_its_table_is_built_and_kept() {
+        let tubes = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_on(4, &tubes);
+        let (galaxy, list) = listed(&service).await;
+        let spec = &list.list().debris().streams()[0];
+        let number = spec.number();
+        assert!(!service.is_ready(key(), number));
+        let built = within(service.tube((&galaxy, key()), spec, Priority::Interactive))
+            .await
+            .expect("the tube builds");
+        assert!(service.is_ready(key(), number));
+        let again = within(service.tube((&galaxy, key()), spec, Priority::Bulk))
+            .await
+            .expect("held");
+        assert!(Arc::ptr_eq(&built, &again), "the kept table");
+        let lookup = ListedTubes::new((Arc::clone(&galaxy), key()), list, Arc::clone(&tubes));
+        assert!(
+            Arc::ptr_eq(&lookup.tube(number), &built),
+            "the job's lookup reads it"
+        );
+        let counters = service.tube_counters();
+        assert_eq!((counters.entries(), counters.hits()), (1, 2));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// P10.T10.b: in a cache with room for one table, a second stream's table evicts the first,
+    /// whose track is `pending` again; built again inside a job, on one thread, it is the table the
+    /// pool built, bit for bit.
+    #[tokio::test]
+    async fn an_evicted_table_is_rebuilt_to_the_same_bits() {
+        let roomy = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_on(4, &roomy);
+        let (galaxy, list) = listed(&service).await;
+        let streams = list.list().debris().streams();
+        let (first, second) = (&streams[0], &streams[1]);
+        let built = within(service.tube((&galaxy, key()), first, Priority::Interactive))
+            .await
+            .expect("the tube builds");
+        let charge = crate::cache::ByteLru::<TubeKey, TubeTable>::charge(&built);
+        let one = Arc::new(TubeTableCache::new(charge + charge / 2));
+        let (small, small_pool) = service_on(4, &one);
+        let kept = within(small.tube((&galaxy, key()), first, Priority::Interactive))
+            .await
+            .expect("the tube builds");
+        assert_eq!(bits(&kept), bits(&built), "the pool's builds agree");
+        within(small.tube((&galaxy, key()), second, Priority::Interactive))
+            .await
+            .expect("the second tube builds");
+        assert!(!small.is_ready(key(), first.number()), "evicted");
+        assert!(small.is_ready(key(), second.number()));
+        assert_eq!(small.tube_counters().evictions(), 1);
+        let lookup = ListedTubes::new(
+            (Arc::clone(&galaxy), key()),
+            Arc::clone(&list),
+            Arc::clone(&one),
+        );
+        let rebuilt = lookup.tube(first.number());
+        assert_eq!(*rebuilt, *built);
+        assert_eq!(bits(&rebuilt), bits(&built));
+        assert!(small.is_ready(key(), first.number()), "kept again");
+        small_pool.shutdown().await.unwrap();
+        pool.shutdown().await.unwrap();
+    }
+
+    /// The charge of one of the server tests' galaxy's tables in a cache: its first stream's, built
+    /// on a service of its own.
+    async fn a_table_s_charge() -> usize {
+        let roomy = Arc::new(TubeTableCache::new(64 << 20));
+        let (sizing, sizing_pool) = service_on(4, &roomy);
+        let (galaxy, list) = listed(&sizing).await;
+        let first = within(sizing.tube(
+            (&galaxy, key()),
+            &list.list().debris().streams()[0],
+            Priority::Bulk,
+        ))
+        .await
+        .expect("the tube builds");
+        sizing_pool.shutdown().await.unwrap();
+        ByteLru::<TubeKey, TubeTable>::charge(&first)
+    }
+
+    /// The tasks that wait on `service`'s warm-ups, taken from it.
+    fn warming(service: &GlobalListService) -> JoinSet<()> {
+        std::mem::take(
+            &mut *service
+                .warming
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// P10.T10.b: a warm-up builds the galaxy's tables in number order, and stops before one that
+    /// would take them past the cache's budget, so that it evicts none of its own: here, with room
+    /// for two, after the second. A second warm-up finds the two held and builds nothing.
+    #[tokio::test]
+    async fn a_warm_up_builds_in_number_order_until_the_cache_is_full() {
+        let charge = a_table_s_charge().await;
+        let two = Arc::new(TubeTableCache::new(2 * charge + charge / 2));
+        let (service, pool) = service_on(4, &two);
+        let warmed = within(service.lists.warm(key()))
+            .await
+            .expect("the warm-up's jobs run");
+        let streams = service
+            .get(key())
+            .await
+            .expect("held")
+            .list()
+            .debris()
+            .streams()
+            .len();
+        assert_eq!(
+            (warmed.built(), warmed.held(), warmed.streams()),
+            (2, 2, streams)
+        );
+        let list = service.get(key()).await.expect("held");
+        let held: Vec<bool> = list.list().debris().streams()[..4]
+            .iter()
+            .map(|spec| service.is_ready(key(), spec.number()))
+            .collect();
+        assert_eq!(held, [true, true, false, false]);
+        let again = within(service.lists.warm(key()))
+            .await
+            .expect("the warm-up's jobs run");
+        assert_eq!((again.built(), again.held()), (0, 2));
+        assert_eq!(service.tube_counters().evictions(), 0);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// P10.T10.b: a warm-up started as an open starts it runs on its own task and readies the
+    /// tables that fit, here one; one stopped as the server shuts down leaves no flight behind.
+    #[tokio::test]
+    async fn a_prefetched_warm_up_readies_tables_and_is_given_up_when_stopped() {
+        let charge = a_table_s_charge().await;
+        let one = Arc::new(TubeTableCache::new(charge + charge / 2));
+        let (service, pool) = service_on(4, &one);
+        service.prefetch(key());
+        let mut tasks = warming(&service);
+        within(tasks.join_next())
+            .await
+            .expect("a task was started")
+            .expect("the warm-up's task ends");
+        let list = service.get(key()).await.expect("held");
+        let streams = list.list().debris().streams();
+        assert!(service.is_ready(key(), streams[0].number()));
+        assert!(!service.is_ready(key(), streams[1].number()));
+        // Given up at once: its flight goes with its task.
+        let roomy = Arc::new(TubeTableCache::new(64 << 20));
+        let (stopped, stopped_pool) = service_on(4, &roomy);
+        stopped.prefetch(key());
+        stopped.stop_warming();
+        let mut tasks = warming(&stopped);
+        let ended = within(tasks.join_next()).await.expect("a task was started");
+        assert!(ended.is_err_and(|error| error.is_cancelled()), "aborted");
+        assert!(stopped.lists.warm_ups.is_empty());
+        assert!(stopped.lists.tube_flights.is_empty());
+        stopped_pool.shutdown().await.unwrap();
+        pool.shutdown().await.unwrap();
+    }
+
+    /// P10.T10.b: a list member's stars kept for a listed caller are never lent to an unlisted one:
+    /// the refusal is the listing's, whatever the system cache holds. The listing builds the
+    /// member's stream's table before it is lent.
+    #[tokio::test]
+    async fn an_unlisted_list_member_is_refused_whatever_the_system_cache_holds() {
+        let tubes = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_on(4, &tubes);
+        let (galaxy, list) = listed(&service).await;
+        let first = &list.list().debris().streams()[..1];
+        let probe = SystemId::from(
+            hyperion_sim::id::StreamMemberId::new(
+                first[0].number().get(),
+                hyperion_sim::id::Layer::A,
+                0,
+                [0, 0],
+                0,
+            )
+            .expect("a stream member ID"),
+        );
+        let listing = within(service.listing(key(), probe)).await.expect("listed");
+        assert!(
+            service.is_ready(key(), first[0].number()),
+            "built for the job"
+        );
+        let (_, member) = a_resolving_member(&galaxy, first, &listing);
+        let id = member.record().id();
+        let systems = SharedSystemCache::new(64 << 20);
+        let stars = systems
+            .get_or_generate(key(), &galaxy, id, &listing)
+            .expect("a stream member's stars");
+        assert_eq!(*stars, member.stars(&galaxy));
+        assert_eq!(
+            systems.get_or_generate(key(), &galaxy, id, &Listing::Unlisted),
+            Err(ResolveSystemError::KindNotGenerated)
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A member of one of `streams` that resolves through `listing`, in a band-A cell near the
+    /// middle of its stream's tube, and its stream.
+    fn a_resolving_member(
+        galaxy: &Galaxy,
+        streams: &[StreamSpec],
+        listing: &Listing,
+    ) -> (StreamNumber, GlobalMemberRecord) {
+        let Listing::Listed(lookup) = listing else {
+            panic!("a stream member's ID is listed")
+        };
+        let mut cell_members = Vec::new();
+        streams
+            .iter()
+            .find_map(|spec| {
+                let tube = lookup.tube(spec.number());
+                let shares = StreamBandShares::of(galaxy, spec);
+                let middle = tube
+                    .knots()
+                    .nth(usize::try_from(KNOTS_PER_ARM).ok()?)?
+                    .centre();
+                tube.cells_touching(&middle, LightYears::new(200.0))
+                    .find_map(|cell| {
+                        stream_cell_members(
+                            galaxy,
+                            &tube,
+                            &shares,
+                            cell,
+                            MassBand::A,
+                            &mut cell_members,
+                        );
+                        cell_members
+                            .iter()
+                            .find(|m| listing.resolve(galaxy, m.record().id()) == Ok(*m.record()))
+                            .copied()
+                    })
+                    .map(|member| (spec.number(), member))
+            })
+            .expect("a stream member that resolves")
+    }
+
+    /// Checks a stream member `record` a range query found in `galaxy`, whose list is `list`: its
+    /// origin on the wire is its stream's, it resolves through `listing` to itself and not without
+    /// it, and its stars from `systems` are its member record's.
+    fn check_listed_hit(
+        (galaxy, list): (&Galaxy, &GlobalList),
+        listing: &Listing,
+        systems: &crate::compute::SharedSystemCache,
+        record: &SystemRecord,
+    ) {
+        let Listing::Listed(lookup) = listing else {
+            panic!("a stream member's ID is listed")
+        };
+        let SystemIdKind::Stream(id) = record.id().kind() else {
+            panic!("a stream member's ID")
+        };
+        let stream = StreamNumber::from(id);
+        assert_eq!(
+            crate::convert::system_origin(record),
+            hyperion_protocol::SystemOriginWire::Stream {
+                stream: stream.get()
+            }
+        );
+        assert_eq!(listing.resolve(galaxy, record.id()), Ok(*record));
+        assert_eq!(
+            Listing::Unlisted.resolve(galaxy, record.id()),
+            Err(ResolveSystemError::KindNotGenerated)
+        );
+        let spec = list.stream(stream).expect("listed");
+        let shares = StreamBandShares::of(galaxy, spec);
+        let member =
+            resolve_stream_member(galaxy, &lookup.tube(stream), &shares, id).expect("resolves");
+        let stars = systems
+            .get_or_generate(key(), galaxy, record.id(), listing)
+            .expect("a stream member's stars");
+        assert_eq!(*stars, member.stars(galaxy));
+    }
+
+    /// P10.T10.b's warm-up at Milky Way values and its range test, until the registration lands.
+    ///
+    /// The warm-up builds every stream's table of a galaxy at the Milky Way fixture's values and
+    /// keeps it, so every track is `ready`, and prints what it cost. Then the sim's range query,
+    /// with the list's source passed in over the server's lookup, finds a stream's member at its
+    /// own place, of the `stream` origin on the wire, with the stream's other members near it; each
+    /// resolves through the list to its own record, and its stars are its member record's. Below
+    /// version 26 the source visits every stream (option A's hold), so the query reads every table,
+    /// which the warm-up has kept.
+    #[tokio::test]
+    #[ignore = "slow: warms every tube table of a Milky Way galaxy, some 10 CPU-minutes"]
+    async fn the_warm_up_readies_every_track_and_a_range_query_finds_a_stream_s_members() {
+        let tubes = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
+        // Eight workers, as the slow profile reserves for it (`.config/nextest.toml`).
+        let n = 8;
+        let (service, pool) = milky_way_service(n, &tubes);
+        let (galaxy, list) = listed(&service).await;
+        let started = std::time::Instant::now();
+        let warmed = within(service.lists.warm(key()))
+            .await
+            .expect("the warm-up's jobs run");
+        let counters = service.tube_counters();
+        println!(
+            "warm-up on {n} workers: {} of {} tables built in {:.1} s, {} held, {} bytes",
+            warmed.built(),
+            warmed.streams(),
+            started.elapsed().as_secs_f64(),
+            counters.entries(),
+            counters.bytes()
+        );
+        assert_eq!(
+            (warmed.built(), warmed.held()),
+            (warmed.streams(), warmed.streams())
+        );
+        let streams = list.list().debris().streams();
+        assert!(
+            streams
+                .iter()
+                .all(|spec| service.is_ready(key(), spec.number()))
+        );
+        let probe = SystemId::from(
+            hyperion_sim::id::StreamMemberId::new(0, hyperion_sim::id::Layer::A, 0, [0, 0], 0)
+                .expect("a stream member ID"),
+        );
+        let listing = service.listing(key(), probe).await.expect("listed");
+        let Listing::Listed(lookup) = &listing else {
+            panic!("a stream member's ID is listed")
+        };
+        let (number, wanted) = a_resolving_member(&galaxy, streams, &listing);
+        let query = RangeQuery::builder(*wanted.record().epoch_position(), LightYears::new(5.0))
+            .build()
+            .expect("a query about a member in the cube");
+        let source =
+            GlobalListSource::new(&galaxy, lookup, &NoCentreOrbitCache).expect("the centre");
+        let result = range_query(&galaxy, &mut NoCache::new(), &[&source], &query);
+        let members: Vec<_> = result
+            .systems()
+            .iter()
+            .filter(|hit| matches!(hit.record().origin(), SystemOrigin::GlobalListMember { .. }))
+            .collect();
+        assert!(
+            members.iter().any(|hit| hit.record() == wanted.record()),
+            "stream {}'s member at its own place",
+            number.get()
+        );
+        let systems = SharedSystemCache::new(64 << 20);
+        for hit in members.iter().take(8) {
+            check_listed_hit((&galaxy, list.list()), &listing, &systems, hit.record());
+        }
+        pool.shutdown().await.unwrap();
     }
 
     /// On one worker, four and eight, `pal5_like`'s tube table made on the pool is
