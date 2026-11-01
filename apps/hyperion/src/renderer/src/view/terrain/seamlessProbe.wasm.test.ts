@@ -708,8 +708,14 @@ function coverOf(
   return null;
 }
 
-/** Whether `rel`, from `cam`'s camera, falls in its viewport, in front of it. */
-function onScreen(cam: Camera, rel: Vec3): boolean {
+/**
+ * Whether ground `rel` from `cam`'s camera, whose datum's normal is `up`, falls in its viewport, in
+ * front of it, and faces it: the camera above its tangent plane, as no ground past the horizon is.
+ */
+function onScreen(cam: Camera, rel: Vec3, up: Vec3): boolean {
+  if (rel.x * up.x + rel.y * up.y + rel.z * up.z >= 0) {
+    return false;
+  }
   const { widthPx, heightPx } = cam.view.viewport;
   const at = project(
     rel,
@@ -777,7 +783,7 @@ function frameChangeOf(
         const drawn = surfaces.at(inst, x, y, datum);
         const p = surfacePoint(figure, dir, drawn.h);
         const rel = sub(vec3(p[0], p[1], p[2]), cam.view.camera.positionM);
-        if (!onScreen(cam, rel)) {
+        if (!onScreen(cam, rel, datum)) {
           continue;
         }
         const cover = coverOf(before, ancestors, inst.area, x, y);
@@ -788,7 +794,8 @@ function frameChangeOf(
         } else {
           // Nothing drew this ground the frame before: the reference surface did, where seen.
           const q = surfacePoint(figure, dir, 0);
-          if (!onScreen(camBefore, sub(vec3(q[0], q[1], q[2]), camBefore.view.camera.positionM))) {
+          const back = sub(vec3(q[0], q[1], q[2]), camBefore.view.camera.positionM);
+          if (!onScreen(camBefore, back, datum)) {
             continue;
           }
           bare = true;
@@ -1344,6 +1351,35 @@ async function play(options: ProbeOptions): Promise<Played> {
   };
 }
 
+/** The pixels and degrees {@link popBinsOf} bins pops by, each bin's lower end. */
+const POP_BINS_PX = [1, 1.5, 2, 4, 8, 16] as const;
+const POP_BINS_DEG = [2, 4, 8, 16] as const;
+
+/** The bin of `bins` (their lower ends, rising) that `value` falls in, or −1 below them all. */
+function binOf(value: number, bins: ReadonlyArray<number>): number {
+  return bins.findLastIndex((low) => value > low);
+}
+
+/** `pops` by cause, counted by move and by turn in {@link POP_BINS_PX} and {@link POP_BINS_DEG}. */
+function popBinsOf(pops: ReadonlyArray<SeamPop>): Record<string, unknown> {
+  const out: Record<string, { px: number[]; deg: number[] }> = {};
+  for (const pop of pops) {
+    const bins = (out[pop.cause] ??= {
+      px: POP_BINS_PX.map(() => 0),
+      deg: POP_BINS_DEG.map(() => 0),
+    });
+    const px = binOf(pop.movePx, POP_BINS_PX);
+    const deg = binOf(pop.normalDeg, POP_BINS_DEG);
+    if (px >= 0) {
+      bins.px[px] = (bins.px[px] ?? 0) + 1;
+    }
+    if (deg >= 0) {
+      bins.deg[deg] = (bins.deg[deg] ?? 0) + 1;
+    }
+  }
+  return { px: POP_BINS_PX, deg: POP_BINS_DEG, byCause: out };
+}
+
 /** What a test leaves in its task's `meta.seamless`, for vitest's JSON reporter. */
 function report(played: Played, summary: SeamSummary): Record<string, unknown> {
   const { run } = played;
@@ -1360,6 +1396,7 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     bakesAnswered: run.bakesAnswered,
     summary,
     collapses: run.collapses,
+    popBins: popBinsOf(run.pops),
     // The largest pops of a frame's change, by move and by turn.
     popsByMove: run.pops.toSorted((a, b) => b.movePx - a.movePx).slice(0, 60),
     popsByTurn: run.pops.toSorted((a, b) => b.normalDeg - a.normalDeg).slice(0, 60),
