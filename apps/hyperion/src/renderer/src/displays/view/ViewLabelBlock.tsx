@@ -411,7 +411,9 @@ export function ViewLabelBlock({
   const lineOf = (line: LabelLine) => (
     <div className="field view-label__line view-label__line--whole" key={line.label}>
       <dt className="field__label">{line.label}</dt>
-      <dd>
+      <dd
+        style={line.widthCh === undefined ? undefined : { minWidth: `${String(line.widthCh)}ch` }}
+      >
         <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
           {readingParts(line.value, line.fields, { dotsLead: line.dotsLead === true })}
         </output>
@@ -447,7 +449,17 @@ export function ViewLabelBlock({
         aria-label={bodyScrolls ? `${viewName} label block` : undefined}
       >
         {from === undefined ? (
-          <dl className="view-label__lines">{rest.map(lineOf)}</dl>
+          summary === true ? (
+            // The summary's readings and its key line share one wrapping row, each reading a list
+            // of its own so that the row breaks only between them.
+            rest.map((line) => (
+              <dl className="view-label__lines" key={line.label}>
+                {lineOf(line)}
+              </dl>
+            ))
+          ) : (
+            <dl className="view-label__lines">{rest.map(lineOf)}</dl>
+          )
         ) : (
           <>
             <section

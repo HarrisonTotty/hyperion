@@ -98,6 +98,7 @@ import {
 } from "./styleRefusals";
 import {
   LABEL_BLOCK_FOLDS,
+  LABEL_BLOCK_KEY,
   LABEL_BLOCK_KEYS,
   MAXIMIZE_KEY,
   maximizedKeys,
@@ -122,6 +123,7 @@ import {
 } from "./viewNames";
 import {
   autoNotAvailable,
+  EXPOSURE_COMMAND_NAMES,
   type ExposureCommandName,
   exposureCommandRefusal,
   exposureCommandResult,
@@ -242,7 +244,7 @@ import {
   type MarkRow,
   markRows,
   PRESET_NAMES,
-  SUMMARY_LABELS,
+  summaryLines,
   summaryStatements,
   rangesFromCamera,
   runPose,
@@ -438,18 +440,16 @@ interface ViewStageProps {
   readonly placePage: PlacePage;
   readonly onPlacePage: (page: PlacePage) => void;
   /**
-   * Whether `MAXIMIZE VIEW` is on (the owner's request, 2026-11-01), held above the stage as the
-   * exposure is, so that a new scene keeps it: the side columns are hidden, their panels kept as
-   * they stand, and the primary's statements folded to one line.
+   * `MAXIMIZE VIEW` (the owner's request, 2026-11-01), held above the stage as the exposure is, so
+   * that a new scene keeps it: on, the side columns are hidden, their panels kept as they stand, and
+   * the primary's label block stands as its summary while `folded`, as once turned on, or whole,
+   * with its statements folded to one line, until its key `9` folds it again.
    */
-  readonly maximized: boolean;
-  /**
-   * Whether `MAXIMIZE VIEW` folds the primary's label block to its summary, as it does once on,
-   * until its key `9` shows the whole block (the owner's request, 2026-11-01).
-   */
-  readonly labelFolded: boolean;
+  readonly maximize: Maximize;
   /** Turns `MAXIMIZE VIEW` on, its label block folded, or off: its toggle's press. */
   readonly onMaximize: () => void;
+  /** Shows the label block whole under `MAXIMIZE VIEW`, or folds it again: its toggle's press. */
+  readonly onLabelBlock: () => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
@@ -808,9 +808,9 @@ function ViewStage({
   onSlopeBaselineChange,
   placePage,
   onPlacePage,
-  maximized,
-  labelFolded,
+  maximize,
   onMaximize,
+  onLabelBlock,
   stars,
   countLine,
   universe,
@@ -822,6 +822,7 @@ function ViewStage({
   sceneStatements,
 }: ViewStageProps) {
   const legendId = useId();
+  const maximized = maximize !== "off";
   const server = source.kind === "server" ? source.server : null;
   // A kept scene's terrain fixture follows the script the stage plays (R10.T16.d).
   const notePlayed = source.kind === "kept" ? (source.option.terrain?.notePlayed ?? null) : null;
@@ -1560,16 +1561,23 @@ function ViewStage({
     }
   };
   // The exposure's command by its key, which acts only as its button would: one held back stays held
-  // back, and while MAXIMIZE VIEW hides the button its reason stands on the view's foot, for as long
-  // as the exposure it was keyed under stands (the owner's request, 2026-11-01).
+  // back, its button stating why, and while the button is hidden (MAXIMIZE VIEW on, or its panel
+  // folded in the compact layout) its reason stands where the hidden panels' do for as long as the
+  // exposure stays at the level it was keyed at, forgotten as either changes (the owner's request,
+  // 2026-11-01).
   const [keyedRefusal, setKeyedRefusal] = useState<KeyedRefusal | null>(null);
+  const [refusalMaximized, setRefusalMaximized] = useState(maximized);
+  if (refusalMaximized !== maximized) {
+    setRefusalMaximized(maximized);
+    setKeyedRefusal(null);
+  }
   const keyExposure = (keyed: ExposureCommandName): void => {
     const result = exposureCommandResult(keyed, exposure, meteringFor(metering, meter));
     if (result.kind === "accepted") {
       setKeyedRefusal(null);
       onExposureChange(result.control);
     } else {
-      setKeyedRefusal({ command: keyed, exposure });
+      setKeyedRefusal({ command: keyed, level: exposureLevelReading(exposure) });
     }
   };
   // The keys' listener reads the latest views and commands through a ref, current after every
@@ -1788,10 +1796,8 @@ function ViewStage({
   // The upper plate as it stands: while MAXIMIZE VIEW folds it, its summary, the readings an
   // operator acts on and the key that shows the whole block, and nothing that scrolls (the owner's
   // request, 2026-11-01); its faults stand in either.
-  const summary = maximized && labelFolded;
-  const plateLines = summary
-    ? primaryLines.filter((line) => SUMMARY_LABELS.has(line.label))
-    : primaryLines;
+  const summary = maximize === "folded";
+  const plateLines = summary ? summaryLines(primaryLines) : primaryLines;
   // Its statements fold to one line while MAXIMIZE VIEW is on, after the label block key's.
   const plateStatements = maximized
     ? summaryStatements(primaryStatements, summary ? LABEL_BLOCK_KEYS : LABEL_BLOCK_FOLDS)
@@ -2010,6 +2016,33 @@ function ViewStage({
         </output>
       </p>
     );
+  // A command keyed and held back while its button is hidden: its name and its button's reason, the
+  // meter's own status after `NOT AVAILABLE:` as AUTO NOT AVAILABLE's stands after its own words.
+  const exposureFolded = folded("exposure");
+  const [refusalFolded, setRefusalFolded] = useState(exposureFolded);
+  if (refusalFolded !== exposureFolded) {
+    setRefusalFolded(exposureFolded);
+    setKeyedRefusal(null);
+  }
+  const keyedWhy =
+    (maximized || exposureFolded) &&
+    keyedRefusal !== null &&
+    keyedRefusal.level === exposureLevelReading(exposure)
+      ? exposureCommandRefusal(keyedRefusal.command, exposure, meterShown)
+      : null;
+  const keyedLine =
+    keyedWhy === null || keyedRefusal === null ? null : (
+      <p className="view-exposure__reason view-folds__standing">
+        <output>
+          <StatusText
+            text={`${EXPOSURE_COMMAND_NAMES[keyedRefusal.command]} ${
+              keyedWhy.startsWith(NOT_AVAILABLE) ? keyedWhy : `${NOT_AVAILABLE}: ${keyedWhy}`
+            }`}
+            renderPart={exposureNote}
+          />
+        </output>
+      </p>
+    );
   // The compact layout's row of disclosure buttons, and under it the standing lines of the panels
   // folded.
   const foldRow = compact ? (
@@ -2035,6 +2068,7 @@ function ViewStage({
       {folded("camera") ? cameraStanding : null}
       {folded("style") ? styleStanding : null}
       {folded("exposure") ? exposureStandingLine : null}
+      {folded("exposure") ? keyedLine : null}
     </>
   ) : null;
   // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
@@ -2051,16 +2085,14 @@ function ViewStage({
     controlsSelection === null
       ? null
       : (rows.find((row) => row.key === targetKey(controlsSelection))?.name ?? null);
-  // A command keyed and held back while its button is hidden: its name and its button's reason.
-  const keyedWhy =
-    maximized && keyedRefusal !== null && keyedRefusal.exposure === exposure
-      ? exposureCommandRefusal(keyedRefusal.command, exposure, meterShown)
-      : null;
-  const keyedReason =
-    keyedWhy === null || keyedRefusal === null
-      ? null
-      : `${EXPOSURE_COMMAND_NAMES[keyedRefusal.command]} ${keyedWhy}`;
-  const footDot = <span className="view__foot-dot">·</span>;
+  // The CONTROLS view's GRID row stands, and so its key acts, while its style is PHOTOREALISTIC.
+  const gridStands = gridRowStands(controlledRun.camera.style, controlledRefusals.photorealistic);
+  // The parts' dots lead them on sight; the parts are read without them.
+  const footDot = (
+    <span className="view__foot-dot" aria-hidden="true">
+      ·
+    </span>
+  );
   const standingPart = (line: ReactNode, key: string): ReactNode =>
     line === null ? null : (
       <div className="view__foot-item" key={key}>
@@ -2073,6 +2105,7 @@ function ViewStage({
       {maximizedKeys(
         controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
         selectedName,
+        gridStands,
       ).map((part) => (
         <p className="view__keys view__foot-item" key={part}>
           {footDot}
@@ -2090,14 +2123,7 @@ function ViewStage({
       {standingPart(cameraStanding, "camera")}
       {standingPart(styleStanding, "style")}
       {standingPart(exposureStandingLine, "exposure")}
-      {standingPart(
-        keyedReason === null ? null : (
-          <p className="view-exposure__reason view-folds__standing">
-            <StatusText text={keyedReason} renderPart={exposureNote} />
-          </p>
-        ),
-        "keyed",
-      )}
+      {standingPart(keyedLine, "keyed")}
     </>
   ) : null;
   const sideFolds: SideFolds = {
@@ -2263,6 +2289,19 @@ function ViewStage({
             {engineLine === null ? <KeyLegend id={legendId} modifier={modifier} /> : null}
             {maximizedPart}
           </div>
+          {maximized ? (
+            // The label block's key's control, for the pointer and touch, pressed while the whole
+            // block shows.
+            <button
+              type="button"
+              className="control view__maximize"
+              aria-pressed={maximize === "block"}
+              aria-keyshortcuts={LABEL_BLOCK_KEY}
+              onClick={onLabelBlock}
+            >
+              <span className="control__key">{LABEL_BLOCK_KEY}</span> LABEL BLOCK
+            </button>
+          ) : null}
           <button
             ref={maximizeRef}
             type="button"
@@ -2542,17 +2581,17 @@ function interimAt(
   return input;
 }
 
-/** An exposure command keyed and held back, and the exposure it was keyed under. */
+/** The head of a held-back reason, as the guide's `NOT AVAILABLE` form words it. */
+const NOT_AVAILABLE = "NOT AVAILABLE";
+
+/**
+ * An exposure command keyed and held back, and the exposure's automation level it was keyed at, as
+ * its reading states it (`exposureLevelReading`).
+ */
 interface KeyedRefusal {
   readonly command: ExposureCommandName;
-  readonly exposure: ExposureControl;
+  readonly level: string;
 }
-
-/** The exposure's commands by the names their buttons carry. */
-const EXPOSURE_COMMAND_NAMES: Readonly<Record<ExposureCommandName, string>> = {
-  enable: "ENABLE",
-  inhibit: "INHIBIT",
-};
 
 /**
  * `MAXIMIZE VIEW`'s setting (the owner's request, 2026-11-01): `off`; on with the primary's label
@@ -2613,7 +2652,6 @@ function ViewPanels({
   // while it stays mounted, through every scene and while another display is shown; on, with the
   // primary's label block folded to its summary, as each time it is turned on, or whole.
   const [maximize, setMaximize] = useState<Maximize>("off");
-  const maximized = maximize !== "off";
   // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
   // label block's only while it is on.
   useEffect(() => {
@@ -2854,10 +2892,12 @@ function ViewPanels({
         onSlopeBaselineChange={setSlopeBaselineM}
         placePage={placePage}
         onPlacePage={setPlacePage}
-        maximized={maximized}
-        labelFolded={maximize === "folded"}
+        maximize={maximize}
         onMaximize={() => {
           setMaximize(toggledMaximize);
+        }}
+        onLabelBlock={() => {
+          setMaximize(toggledLabelBlock);
         }}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
@@ -2922,14 +2962,16 @@ function ViewPanels({
  * the panels are designed again (the owner's request, 2026-11-01). On, the stage takes the
  * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
  * restores them as they were; the scene bar and the header strip stay; the primary's label block
- * folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera and its
- * exposure, then `9 SHOWS LABEL BLOCK` with its statements folded to one line after it
- * (`summaryStatements`), until its key `9` shows the whole block, `9 FOLDS LABEL BLOCK` with its
- * statements still folded, and folds it again; the instruments open stand in their slots over the
- * stage, which they are part of; and under the key legend a line names the key that shows the
- * panels again, the `CONTROLS` view where it is an instrument and that view's selection, and the
- * hidden panels' faults and statuses stand under it, as the compact layout's do under its row of
- * disclosure buttons. Every key acts as before, and the focus in a panel hidden goes to the
+ * folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera, its field of
+ * view and its exposure, each at its longest value's width (`summaryLines`), then
+ * `9 SHOWS LABEL BLOCK` with its statements folded to one line after it (`summaryStatements`),
+ * until its key `9`, or its `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows the whole block,
+ * `9 FOLDS LABEL BLOCK` with its statements still folded, and folds it again; the instruments open stand in their slots over the
+ * stage, which they are part of; and after the key legend, running on along its row where they fit,
+ * a line names the key that shows the panels again, every hidden control's key
+ * (`HIDDEN_CONTROL_KEYS`), the `CONTROLS` view where it is an instrument and that view's selection,
+ * and the hidden panels' faults and statuses stand after it, as the compact layout's do under its
+ * row of disclosure buttons, with the reason of an `ENABLE` or `INHIBIT` keyed and held back. Every key acts as before, and the focus in a panel hidden goes to the
  * `CONTROLS` view's canvas. The setting is the display's own and is kept through every scene and
  * while another display is shown.
  *

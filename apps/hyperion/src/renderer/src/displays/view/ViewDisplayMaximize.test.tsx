@@ -26,7 +26,7 @@ import { type KeyPress, VIEW_SINGLE_KEYS } from "../../view/camera/keys";
 import { STYLE_TOGGLE_KEY } from "../../view/photoreal/style";
 import {
   GRID_KEY,
-  HIDDEN_CONTROL_KEYS,
+  hiddenControlKeys,
   LABEL_BLOCK_FOLDS,
   LABEL_BLOCK_KEY,
   LABEL_BLOCK_KEYS,
@@ -107,21 +107,16 @@ function refusingMaterialsSource(): ViewEngineSource {
   };
 }
 
-/** The view's foot's lines: the key legend, and while MAXIMIZE VIEW is on what runs on after it. */
-function maximizedPart(): HTMLElement {
-  const part = document.querySelector<HTMLElement>(".view__foot-lines");
-  if (part === null) {
-    throw new Error("the view has no foot");
-  }
-  return part;
+/** The status lines reading `text` in no hidden part of the display: the panels' own are hidden. */
+function shownLines(text: string): ReadonlyArray<HTMLElement> {
+  return screen
+    .queryAllByText(statusLine(text))
+    .filter((line) => line.closest("[hidden]") === null);
 }
 
-/** MAXIMIZE VIEW's line after the key legend, its parts joined as they read, or `null` while off. */
-function maximizedLine(): string | null {
-  const parts = [...maximizedPart().querySelectorAll(".view__maximized-keys")].map(
-    (part) => part.textContent,
-  );
-  return parts.length === 0 ? null : parts.join(" · ");
+/** A part of MAXIMIZE VIEW's line after the key legend, by its text, or `null` where none reads so. */
+function linePart(text: string): HTMLElement | null {
+  return screen.queryByText(text);
 }
 
 /** The side column's panels in the full layout, each by its region's name. */
@@ -214,30 +209,42 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
 
   it("names the key that shows the panels after the key legend while on, and not while off", async () => {
     const view = await setup();
-    const off = maximizedLine();
+    const off = linePart(MAXIMIZED_KEYS);
     await pressMaximize(view);
-    expect([off, maximizedLine()?.startsWith(MAXIMIZED_KEYS)]).toEqual([null, true]);
+    expect([off, linePart(MAXIMIZED_KEYS)]).toEqual([null, expect.any(HTMLElement)]);
+  });
+
+  it("names 5 GRID among the hidden controls' keys only while its row stands", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    const wireframe = linePart(hiddenControlKeys(false)) !== null;
+    await view.user.keyboard("4");
+    await playFor(view, 4);
+    expect([wireframe, linePart(hiddenControlKeys(true))]).toEqual([true, expect.any(HTMLElement)]);
+  });
+
+  it("states a keyed ENABLE held back for want of a meter after NOT AVAILABLE", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    await view.user.keyboard("7");
+    view.advance(300);
+    expect(shownLines("ENABLE NOT AVAILABLE: NO IMAGE TO METER")).toHaveLength(1);
   });
 
   it("names every key of the controls it hides on its line", async () => {
     const view = await setup();
     await pressMaximize(view);
-    expect(maximizedLine()).toBe(`${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS}`);
+    expect(linePart(hiddenControlKeys(false))).toBeVisible();
   });
 
   it("runs its line on from the key legend's, in one row that wraps between parts", async () => {
     const view = await setup();
     await pressMaximize(view);
-    const legend = maximizedPart().querySelector(".view__keys");
-    if (legend === null) {
-      throw new Error("the view's foot has no key legend");
-    }
-    const after = legend.nextElementSibling;
+    const legend = screen.getByText(/^FOCUSED VIEW/u);
     expect([
-      legend.textContent.startsWith("FOCUSED VIEW"),
-      after !== null && after.querySelector(".view__maximized-keys") !== null,
+      screen.getByText(MAXIMIZED_KEYS).closest("p")?.parentElement === legend.parentElement,
       stylesheetRule(".view__foot-lines"),
-    ]).toEqual([true, true, expect.stringContaining("flex-wrap: wrap;")]);
+    ]).toEqual([true, expect.stringContaining("flex-wrap: wrap;")]);
   });
 
   it("stays on through a change of scene", async () => {
@@ -383,9 +390,9 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       view.advance(300);
       const name = selectedMark();
       await pressMaximize(view);
-      expect([name !== null, maximizedLine()]).toEqual([
+      expect([name !== null, linePart(`SELECTED ${String(name)}`)]).toEqual([
         true,
-        `${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS} · SELECTED ${String(name)}`,
+        expect.any(HTMLElement),
       ]);
     });
 
@@ -399,9 +406,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       );
       view.advance(300);
       await pressMaximize(view);
-      expect(maximizedLine()).toBe(
-        `${MAXIMIZED_KEYS} · ${HIDDEN_CONTROL_KEYS} · CONTROLS INSTRUMENT 1`,
-      );
+      expect(linePart("CONTROLS INSTRUMENT 1")).toBeVisible();
     });
 
     it("stands NO OWN SHIP where the scene has none", async () => {
@@ -409,11 +414,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
       view.advance(300);
       await pressMaximize(view);
-      expect(
-        within(maximizedPart()).getByText(statusLine(NO_OWN_SHIP), {
-          selector: ".view-folds__standing",
-        }),
-      ).toBeVisible();
+      expect(shownLines(NO_OWN_SHIP)).toHaveLength(1);
     });
 
     it("stands the style's fault", async () => {
@@ -424,11 +425,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       view.advance(100);
       await settle();
       view.advance(300);
-      expect(
-        within(maximizedPart()).getByText(statusLine(PHOTOREAL_NOT_CREATED), {
-          selector: ".view-folds__standing",
-        }),
-      ).toBeVisible();
+      expect(shownLines(PHOTOREAL_NOT_CREATED)).toHaveLength(1);
     });
   });
 
@@ -456,8 +453,13 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
 
 /** The labels of the primary's label block's lines, in order. */
 function primaryLabels(): ReadonlyArray<string | null> {
-  return [...primaryLabelBlock().querySelectorAll("dt")].map((term) => term.textContent);
+  return within(primaryLabelBlock())
+    .queryAllByRole("term")
+    .map((term) => term.textContent);
 }
+
+/** The summary's lines' labels, with the grid on. */
+const SUMMARY = ["STYLE", "CAMERA", "FOV", "EXPOSURE"];
 
 /** Presses the label block's key, as from the page. */
 async function pressLabelBlock(view: ViewDisplayHarness): Promise<void> {
@@ -466,10 +468,55 @@ async function pressLabelBlock(view: ViewDisplayHarness): Promise<void> {
 }
 
 describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
-  it("folds to its summary once on: its style, camera and exposure", async () => {
+  it("folds to its summary once on: its style, camera, field of view and exposure", async () => {
     const view = await setup();
     await pressMaximize(view);
-    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+    expect(primaryLabels()).toEqual(SUMMARY);
+  });
+
+  it("sets each of the summary's readings at its longest value's width, so that none moves another", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    expect(
+      within(primaryLabelBlock())
+        .getAllByRole("term")
+        .map((term) => [
+          term.textContent,
+          term.nextElementSibling instanceof HTMLElement
+            ? term.nextElementSibling.style.minWidth
+            : null,
+        ]),
+    ).toEqual([
+      ["STYLE", "14ch"],
+      ["CAMERA", "22ch"],
+      ["FOV", "4ch"],
+      ["EXPOSURE", "41ch"],
+    ]);
+  });
+
+  it("runs its readings and its key line along one row that wraps only between them", () => {
+    expect(stylesheetRule(".view-label--summary > .view-label__body")).toContain(
+      "flex-wrap: wrap;",
+    );
+  });
+
+  it("offers 9 LABEL BLOCK beside MAXIMIZE VIEW while on, pressed while the whole block shows", async () => {
+    const view = await setup();
+    const off = screen.queryByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` });
+    await pressMaximize(view);
+    const folded = screen
+      .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
+      .getAttribute("aria-pressed");
+    await view.user.click(screen.getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` }));
+    view.advance(300);
+    expect([
+      off,
+      folded,
+      screen
+        .getByRole("button", { name: `${LABEL_BLOCK_KEY} LABEL BLOCK` })
+        .getAttribute("aria-pressed"),
+      primaryLabels().length > SUMMARY.length,
+    ]).toEqual([null, "false", "true", true]);
   });
 
   it("names on its summary the key that shows the whole block", async () => {
@@ -493,7 +540,7 @@ describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 20
     await playFor(view, 4);
     await view.user.keyboard(GRID_KEY);
     view.advance(300);
-    expect(primaryLabels()).toEqual(["STYLE", "GRID", "CAMERA", "EXPOSURE"]);
+    expect(primaryLabels()).toEqual(["STYLE", "GRID", "CAMERA", "FOV", "EXPOSURE"]);
   });
 
   it("shows the whole block by its key, its statements still folded after the key that folds it", async () => {
@@ -512,7 +559,7 @@ describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 20
     await pressMaximize(view);
     await pressLabelBlock(view);
     await pressLabelBlock(view);
-    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+    expect(primaryLabels()).toEqual(SUMMARY);
   });
 
   it("folds it again each time MAXIMIZE VIEW is turned on", async () => {
@@ -521,7 +568,7 @@ describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 20
     await pressLabelBlock(view);
     await pressMaximize(view);
     await pressMaximize(view);
-    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+    expect(primaryLabels()).toEqual(SUMMARY);
   });
 
   it("restores the whole block exactly once off", async () => {
@@ -574,6 +621,23 @@ describe("VIEW's layouts with MAXIMIZE VIEW (the owner's request, 2026-11-01)", 
       before.length > 0 && panelsShown().join() === before.join(),
       screen.getByRole("button", { name: "2 CHASE" }).getAttribute("aria-pressed"),
     ]).toEqual([false, true, "true"]);
+  });
+
+  it("stands a keyed command's reason under the fold row while the exposure's panel is folded", async () => {
+    const view = await setup(COMPACT_VIEW_PX);
+    await view.user.keyboard("8");
+    view.advance(300);
+    expect(shownLines("INHIBIT NOT AVAILABLE: the exposure is MAN")).toHaveLength(1);
+  });
+
+  it("forgets a keyed command's reason under the fold row once its panel opens", async () => {
+    const view = await setup(COMPACT_VIEW_PX);
+    await view.user.keyboard("8");
+    view.advance(300);
+    await view.user.click(screen.getByRole("button", { name: "EXPOSURE" }));
+    await view.user.click(screen.getByRole("button", { name: "CAMERA" }));
+    view.advance(300);
+    expect(shownLines("INHIBIT NOT AVAILABLE: the exposure is MAN")).toHaveLength(0);
   });
 
   it("keeps the compact layout's open panel through on and off", async () => {
@@ -655,8 +719,9 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
       VIEW_SINGLE_KEYS["+"],
       VIEW_SINGLE_KEYS["-"],
       viewDisplayKey(press(GRID_KEY)),
-      viewDisplayKey(press(LABEL_BLOCK_KEY)),
-      HIDDEN_CONTROL_KEYS,
+      viewDisplayKey(press("7")),
+      viewDisplayKey(press("8")),
+      hiddenControlKeys(true),
     ]).toEqual([
       { kind: "preset", preset: "seat" },
       { kind: "preset", preset: "chase" },
@@ -667,8 +732,9 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
       { kind: "fov", step: -1 },
       { kind: "fov", step: 1 },
       "grid",
-      "label-block",
-      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, 7 ENABLE, 8 INHIBIT, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`,
+      "enable",
+      "inhibit",
+      `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, 7 ENABLE, 8 INHIBIT, [/] TARGET, +/- FOV`,
     ]);
   });
 

@@ -104,6 +104,12 @@ function refusalWords(reason: RefusalReason, metering: Metering): string {
 /** The exposure's congruent pair: `ENABLE` and `INHIBIT`, pressed or keyed. */
 export type ExposureCommandName = "enable" | "inhibit";
 
+/** The pair's names, as their buttons carry them and a keyed refusal names them. */
+export const EXPOSURE_COMMAND_NAMES: Readonly<Record<ExposureCommandName, string>> = {
+  enable: "ENABLE",
+  inhibit: "INHIBIT",
+};
+
 /**
  * What `command` does to the exposure as it stands, whether pressed or keyed (`ENABLE_KEY`,
  * `INHIBIT_KEY`): `ENABLE` takes the meter's value, and neither acts where its button is held back.
@@ -580,14 +586,14 @@ export function ExposurePanel({
       )}
       <div className="view-exposure__commands">
         <ExposureCommand
-          label="ENABLE"
+          label={EXPOSURE_COMMAND_NAMES.enable}
           commandKey={ENABLE_KEY}
           result={exposureCommandResult("enable", exposure, metering)}
           metering={metering}
           onChange={onChange}
         />
         <ExposureCommand
-          label="INHIBIT"
+          label={EXPOSURE_COMMAND_NAMES.inhibit}
           commandKey={INHIBIT_KEY}
           result={exposureCommandResult("inhibit", exposure, metering)}
           metering={metering}

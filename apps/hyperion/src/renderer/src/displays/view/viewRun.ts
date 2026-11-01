@@ -637,6 +637,12 @@ export interface LabelLine {
    * wireframe's `CONTOUR INTERVAL` (R10.T11).
    */
   readonly dotsLead?: true;
+  /**
+   * The least width of its reading, ch of B612 Mono, where it stands beside other readings on one
+   * line (the label block's summary): its longest value's, so that a change of the value never moves
+   * its neighbours (the guide's "Numbers"); absent on a line of its own.
+   */
+  readonly widthCh?: number;
 }
 
 /**
@@ -1055,10 +1061,27 @@ export function maximizedStatements(
 
 /**
  * The lines the `PRIMARY` view's label block keeps in its summary while `MAXIMIZE VIEW` folds it
- * (the owner's request, 2026-11-01): the readings an operator acts on, its style, `GRID OFF` while
- * the grid is off, its camera with its rate or look, and its exposure.
+ * (the owner's request, 2026-11-01), the readings an operator acts on, each with its longest value's
+ * width, ch: its style (`PHOTOREALISTIC`), `GRID OFF` while the grid is off, its camera with its
+ * rate or look (`CHASE · LOOK 359° -90°`), its field of view (`120°`), and its exposure
+ * (`EV100 -14.0 INHIBITED · NO IMAGE TO METER`). None of them is ever stale, so none needs room
+ * for an `S`.
  */
-export const SUMMARY_LABELS: ReadonlySet<string> = new Set(["STYLE", "GRID", "CAMERA", "EXPOSURE"]);
+const SUMMARY_WIDTHS_CH: ReadonlyMap<string, number> = new Map([
+  ["STYLE", 14],
+  ["GRID", 3],
+  ["CAMERA", 22],
+  ["FOV", 4],
+  ["EXPOSURE", 41],
+]);
+
+/** The label block's lines its summary keeps, in their order, each at its fixed width. */
+export function summaryLines(lines: ReadonlyArray<LabelLine>): ReadonlyArray<LabelLine> {
+  return lines.flatMap((line) => {
+    const widthCh = SUMMARY_WIDTHS_CH.get(line.label);
+    return widthCh === undefined ? [] : [{ ...line, widthCh }];
+  });
+}
 
 /**
  * The statements of the label block's summary while `MAXIMIZE VIEW` folds it: one line, `keyLine`,

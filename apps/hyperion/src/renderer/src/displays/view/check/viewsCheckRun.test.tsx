@@ -17,6 +17,7 @@ import { memoised } from "../../../test/memo";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import {
   runViewsCheck,
+  ViewControls,
   VIEWS_CHECK_PLAN,
   type ViewsCheckDeps,
   type ViewsCheckTiming,
@@ -314,5 +315,30 @@ describe("the views check's script", () => {
     cleanup();
     vi.unstubAllGlobals();
     expect(window.requestAnimationFrame).toBe(own);
+  });
+});
+
+/** A shown EXPOSURE panel whose buttons read their keys before their labels, as VIEW's do. */
+function keyedPanel(): Document {
+  const page = document.implementation.createHTMLDocument("VIEW");
+  const panel = page.createElement("section");
+  panel.className = "view-exposure";
+  panel.innerHTML =
+    '<button type="button"><span class="control__key">7</span> ENABLE</button>' +
+    '<button type="button"><span class="control__key">8</span> INHIBIT</button>';
+  page.body.append(panel);
+  return page;
+}
+
+describe("the views check's exposure commands (the owner's request, 2026-11-01)", () => {
+  it("finds each command by its label after its key", () => {
+    const controls = new ViewControls(keyedPanel());
+    expect(
+      ["ENABLE", "INHIBIT"].map((label) => controls.exposureButton(label)?.textContent),
+    ).toEqual(["7 ENABLE", "8 INHIBIT"]);
+  });
+
+  it("finds no command by a label it does not end with", () => {
+    expect(new ViewControls(keyedPanel()).exposureButton("ABLE")).toBeNull();
   });
 });

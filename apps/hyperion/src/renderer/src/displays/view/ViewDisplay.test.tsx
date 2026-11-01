@@ -1746,15 +1746,24 @@ describe("the exposure's keys, 7 ENABLE and 8 INHIBIT (the owner's request, 2026
     expect(exposureReadout()).toMatch(/MAN$/u);
   });
 
+  it("stands no keyed command's reason on the view's foot while its button is shown", async () => {
+    const view = await meteredMan();
+    await view.user.keyboard("8");
+    view.advance(300);
+    await view.user.keyboard("6");
+    view.advance(300);
+    expect(screen.queryByText(statusLine("INHIBIT NOT AVAILABLE: the exposure is MAN"))).toBeNull();
+  });
+
   it("stands a keyed command's reason on the view's foot while MAXIMIZE VIEW hides its button", async () => {
     const view = await meteredMan();
     await view.user.keyboard("6");
     view.advance(300);
     await view.user.keyboard("8");
     view.advance(300);
-    expect(document.querySelector(".view__foot-lines")?.textContent).toContain(
-      "INHIBIT NOT AVAILABLE: the exposure is MAN",
-    );
+    expect(
+      screen.getByText(statusLine("INHIBIT NOT AVAILABLE: the exposure is MAN")),
+    ).toBeVisible();
   });
 });
 

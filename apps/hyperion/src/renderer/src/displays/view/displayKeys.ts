@@ -23,10 +23,12 @@ export const MAXIMIZE_KEY = "6";
 export const LABEL_BLOCK_KEY = "9";
 
 /**
- * The exposure's congruent pair's keys, `7` `ENABLE` then `8` `INHIBIT`, adjacent and in the
- * guide's order: each acts as its button does, and never where its button is held back.
+ * `ENABLE`'s key, `7`, the first of the exposure's congruent pair, `8` `INHIBIT` after it in the
+ * guide's order: it acts as its button does, and never where its button is held back.
  */
 export const ENABLE_KEY = "7";
+
+/** `INHIBIT`'s key, `8`, after `7` `ENABLE`: it acts as its button does, and never where held back. */
 export const INHIBIT_KEY = "8";
 
 /**
@@ -81,28 +83,45 @@ export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
 /**
  * The keys of the controls `MAXIMIZE VIEW` hides, which they show on themselves, named as the key
  * legend names its keys, each key then what it does, so that every key is found by sight while the
- * controls are hidden: the camera's presets, the style, the `GRID` row, the exposure's pair, the
- * label block's key, the targets and the field of view.
+ * controls are hidden: the camera's presets, the style, the `GRID` row while it stands, the
+ * exposure's pair, the targets and the field of view.
+ *
+ * @param gridStands - Whether the `CONTROLS` view's `GRID` row stands (`gridRowStands`), and so its
+ *   key acts.
  */
-export const HIDDEN_CONTROL_KEYS = `1 SEAT, 2 CHASE, 3 FREE, ${STYLE_TOGGLE_KEY} STYLE, ${GRID_KEY} GRID, ${ENABLE_KEY} ENABLE, ${INHIBIT_KEY} INHIBIT, ${LABEL_BLOCK_KEY} LABEL BLOCK, [/] TARGET, +/- FOV`;
+export function hiddenControlKeys(gridStands: boolean): string {
+  return [
+    "1 SEAT",
+    "2 CHASE",
+    "3 FREE",
+    `${STYLE_TOGGLE_KEY} STYLE`,
+    ...(gridStands ? [`${GRID_KEY} GRID`] : []),
+    `${ENABLE_KEY} ENABLE`,
+    `${INHIBIT_KEY} INHIBIT`,
+    "[/] TARGET",
+    "+/- FOV",
+  ].join(", ");
+}
 
 /**
  * The parts of `MAXIMIZE VIEW`'s line after the key legend, in order: {@link MAXIMIZED_KEYS}; the
- * hidden controls' keys ({@link HIDDEN_CONTROL_KEYS}); then what the hidden panels would show of the
+ * hidden controls' keys ({@link hiddenControlKeys}); then what the hidden panels would show of the
  * view the keys act on, the `CONTROLS` view where it is an instrument, on which a key pressed off a
  * canvas acts (`CONTROLS INSTRUMENT 1`), and its selection's name (`SELECTED TEST PLANET`), which the
  * hidden list marks. Each stands after a middle dot that leads it, and the line wraps between them.
  *
  * @param controls - The `CONTROLS` view's name, or `null` while it is `PRIMARY`.
  * @param selected - The name of the `CONTROLS` view's selection, or `null` with none.
+ * @param gridStands - Whether the `CONTROLS` view's `GRID` row stands.
  */
 export function maximizedKeys(
   controls: string | null,
   selected: string | null,
+  gridStands: boolean,
 ): ReadonlyArray<string> {
   return [
     MAXIMIZED_KEYS,
-    HIDDEN_CONTROL_KEYS,
+    hiddenControlKeys(gridStands),
     ...(controls === null ? [] : [`CONTROLS ${controls}`]),
     ...(selected === null ? [] : [`SELECTED ${selected}`]),
   ];
