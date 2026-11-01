@@ -1011,7 +1011,7 @@ describe("a cut's hold (fix-view-light)", () => {
     expect(heldS).toBeCloseTo(CUT_HOLD_MAX_S, 9);
   });
 
-  it("ends the hold at a reading that weighs nothing, as under LIT with no lit side", () => {
+  it("keeps the hold through a reading that weighs nothing, as a framing's first may", () => {
     const exposure = new AutoExposure({
       source: SOURCE,
       program: VIEW_CAMERA,
@@ -1021,7 +1021,7 @@ describe("a cut's hold (fix-view-light)", () => {
     exposure.noteImage(true);
     exposure.cut();
     exposure.step(frameHistogram([[binCentreLuminance(120), METER_CLASS.other]], "lit"), 1 / 60);
-    expect(exposure.holds).toBe(false);
+    expect(exposure.holds).toBe(true);
   });
 
   it.each([

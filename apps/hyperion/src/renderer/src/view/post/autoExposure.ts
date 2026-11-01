@@ -451,7 +451,8 @@ export class AutoExposure {
    * the histogram's range: the frame is drawn into the scene target, which the histogram reads, but
    * not presented, so the view shows the image it last showed. A cut toward a brighter scene costs
    * the read-back's one to three frames, a clipped one up to {@link CUT_HOLD_MAX_S}, past which the
-   * frame is shown as it is, as it is at once when a reading weighs nothing (`NO LIT SIDE`). `MAN`
+   * frame is shown as it is: so too a cut whose readings weigh nothing (`NO LIT SIDE`), since a
+   * new framing's first reading may weigh nothing before its bodies are drawn. `MAN`
    * the operator has set and the operator's `INHIBIT` hold nothing; the display's default `MAN`
    * holds where the view opens at its meter.
    */
@@ -521,10 +522,6 @@ export class AutoExposure {
         : average === EMPTY_FRAME_CD_M2
           ? "inside"
           : readingRange(histogram);
-    if (histogram !== undefined && average === null) {
-      // A reading that weighs nothing ends a cut's hold: no reading of its scene is coming.
-      this.#holding = false;
-    }
     if (average === null) {
       // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
       // the meter holds its value until the timeout, then says why it has none.

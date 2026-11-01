@@ -60,8 +60,8 @@ const FOV_DEG = 60;
 /** No wireframe draw list: the stars are not under test. */
 const NO_LIST = emptyDrawList(viewStrokesAt(1));
 
-/** The controller's step, s: a quarter second, so that a settled exposure takes few frames. */
-const STEP_S = 0.25;
+/** The controller's step, s: a 60 Hz frame, so that a cut's hold counts its frames as the view's does. */
+const STEP_S = 1 / 60;
 
 /** The most frames a framing is drawn while its exposure settles. */
 const MAX_FRAMES = 12;
