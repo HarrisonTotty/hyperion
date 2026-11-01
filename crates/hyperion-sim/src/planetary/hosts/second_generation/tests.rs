@@ -5,7 +5,7 @@ use hyperion_testkit::float::assert_same_bits;
 use super::*;
 use crate::coords::{CellSize, GenCell};
 use crate::id::Layer;
-use crate::planetary::testing::{with_every_25_hold, with_every_26_hold};
+use crate::planetary::testing::with_every_26_hold;
 
 /// System `index` of a run of cells, a thousand to a cell.
 fn system(index: u32) -> SystemId {
@@ -32,10 +32,6 @@ fn the_second_generation_is_held_only_until_the_26_bump() {
     assert_eq!(
         with_every_26_hold(SecondGenerationRules::in_force),
         SecondGenerationRules::Planets
-    );
-    assert_eq!(
-        with_every_25_hold(SecondGenerationRules::in_force),
-        SecondGenerationRules::Held
     );
     assert_eq!(
         with_every_26_hold(|| {

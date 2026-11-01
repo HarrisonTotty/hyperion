@@ -26,9 +26,7 @@ use crate::planetary::satellites::{
     Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_inside,
 };
 use crate::planetary::system::{PlanetarySystem, RoguePlanet, generate, generate_planets};
-use crate::planetary::testing::{
-    SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
-};
+use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
 use crate::stellar::substellar::giant_cooling;
 use crate::stellar::system::draw_metallicity;
 use crate::time::{ClockWindow, UniverseTime};
@@ -152,10 +150,6 @@ fn the_rogue_planets_are_held_only_until_the_26_bump() {
     assert_eq!(
         with_every_26_hold(RoguePlanetRules::in_force),
         RoguePlanetRules::Bodies
-    );
-    assert_eq!(
-        with_every_25_hold(RoguePlanetRules::in_force),
-        RoguePlanetRules::Held
     );
     assert_eq!(
         with_every_26_hold(|| {

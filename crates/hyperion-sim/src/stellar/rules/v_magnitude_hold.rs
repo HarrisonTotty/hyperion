@@ -3,8 +3,8 @@
 //! stars the giants' bolometric correction only under the rules that turn A4's arm on, chosen at
 //! one choke point, `photometry::absolute_magnitude_v_under`. Each test turns this hold's arm on
 //! alone ([`a4_rules`]), so that the other 26 holds move nothing it holds equal, except the plan's
-//! figures: the generated white dwarfs' under every 25 hold and this arm ([`a4_alone`]), the
-//! others under `every_26_hold`.
+//! figures: the generated white dwarfs' under the version's rules and this arm alone, the others
+//! under `every_26_hold`.
 //!
 //! - **D3.** The version's rules keep A4's interim: no white dwarf has a V, and every living star
 //!   reads the dwarf table.
@@ -68,15 +68,6 @@ const fn a4_rules() -> StellarRules {
     }
 }
 
-/// Every 25 hold with this one's arm turned on: A4 alone against every 25 hold, the other 26 holds
-/// left held.
-const fn a4_alone() -> StellarRules {
-    StellarRules {
-        v_magnitude: VMagnitudeRules::A4,
-        ..StellarRules::every_25_hold()
-    }
-}
-
 /// Every 26 hold with this one's arm turned back off: what `every_26_hold` is without A4.
 const fn every_26_but_a4() -> StellarRules {
     StellarRules {
@@ -102,21 +93,6 @@ fn a4_galaxy() -> &'static Galaxy {
         held().clone().with_rules(GalaxyRules {
             stellar: a4_rules(),
             ..GalaxyRules::of_version(GENERATOR_VERSION)
-        })
-    })
-}
-
-/// [`held`]'s galaxy under every 25 hold and [`a4_alone`].
-///
-/// `Galaxy::with_rules` cannot turn on the galaxy's 26 holds that are read where a galaxy is built
-/// (the field share and the carve-out), and the test pins A4's effect alone, every other 26 hold
-/// held back.
-fn a4_alone_galaxy() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        held().clone().with_rules(GalaxyRules {
-            stellar: a4_alone(),
-            ..GalaxyRules::every_25_hold()
         })
     })
 }
@@ -192,10 +168,7 @@ fn the_a4_arm_turns_on_at_26() {
             "version {v}"
         );
     }
-    assert_eq!(
-        StellarRules::every_25_hold().v_magnitude,
-        VMagnitudeRules::Interim
-    );
+    assert_eq!(VERSION.v_magnitude, VMagnitudeRules::Interim);
     let at_26 = StellarRules::every_26_hold();
     assert_eq!(at_26.v_magnitude, VMagnitudeRules::A4);
     assert_eq!(
@@ -229,15 +202,16 @@ fn the_version_s_rules_keep_the_interim() {
     );
 }
 
-/// The plan's first figure, under every 25 hold and A4's arm: a generated white dwarf has a V,
-/// the Montreal grid's at its state, and is not dark; under the version's rules it has none.
+/// The plan's first figure, under the version's rules with A4's arm alone (`Galaxy::with_rules`
+/// cannot turn on the galaxy's 26 holds read where a galaxy is built, the field share and the
+/// carve-out): a generated white dwarf has a V, the Montreal grid's at its state, and is not dark;
+/// under the version's rules it has none.
 #[test]
 fn a_generated_white_dwarf_has_its_montreal_v() {
-    let rules = a4_alone();
+    let rules = a4_rules();
     let mut seen = 0;
     for record in records() {
-        let summary =
-            SystemStars::generate(a4_alone_galaxy(), record).summary_at(UniverseTime::EPOCH);
+        let summary = SystemStars::generate(a4_galaxy(), record).summary_at(UniverseTime::EPOCH);
         for star in summary.stars() {
             let state = star.state();
             if !is_white_dwarf(state.phase()) {

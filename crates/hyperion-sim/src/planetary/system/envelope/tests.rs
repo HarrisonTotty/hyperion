@@ -39,9 +39,7 @@ use crate::planetary::system::tests::{
     GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems_afresh, sample, thin_air_sets,
 };
 use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host, migration};
-use crate::planetary::testing::{
-    EnvelopeByHand, envelope_by_hand, with_every_25_hold, with_every_26_hold,
-};
+use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_26_hold};
 use crate::planetary::{SystemContext, generate};
 use crate::stellar::Composition;
 use crate::substance::CondensedPhase;
@@ -1096,26 +1094,22 @@ fn refused_as_held(mode: &AerosolMode) -> bool {
     )
 }
 
-/// The records of the golden systems, generated afresh, at the epoch under every 25 hold, by
-/// system.
+/// The records of the golden systems, generated afresh, at the epoch, by system.
 fn golden_records_at_25() -> Vec<(&'static str, Vec<BodyRecord>)> {
-    with_every_25_hold(|| {
-        golden_systems_afresh()
-            .into_iter()
-            .map(|(name, ctx, system)| {
-                let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
-                (name, snapshot.bodies().to_vec())
-            })
-            .collect()
-    })
+    golden_systems_afresh()
+        .into_iter()
+        .map(|(name, ctx, system)| {
+            let snapshot = system.snapshot_at(&ctx, UniverseTime::EPOCH);
+            (name, snapshot.bodies().to_vec())
+        })
+        .collect()
 }
 
-/// P14.T49.p over the golden systems at the epoch, every other 25 hold in force: each mode of a
-/// liquid of [`LIQUID_STAND_INS`]' rows, whose τ the hold refused to generator version 24 for want
-/// of a file or a density, takes a size and a τ, and the molten modes of `MgSiO3`, `Mg2SiO4` and
-/// `Fe` are among them.
+/// P14.T49.p over the golden systems at the epoch: each mode of a liquid of [`LIQUID_STAND_INS`]'
+/// rows, whose τ the hold refused to generator version 24 for want of a file or a density, takes a
+/// size and a τ, and the molten modes of `MgSiO3`, `Mg2SiO4` and `Fe` are among them.
 #[test]
-fn under_every_25_hold_the_molten_decks_take_a_tau() {
+fn the_molten_decks_take_a_tau() {
     let molten_rows = molten_liquids();
     let mut gained: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for (name, records) in &golden_records_at_25() {
@@ -1193,79 +1187,75 @@ struct DeepMode {
     molten: bool,
 }
 
-/// Count (x)'s deep decks over `sets` at the epoch, every 25 hold in force: each deck of a
-/// refractory, a sulphide or a salt based below its envelope's join, by `set id body deck`, with
-/// its τ above 1 bar, and its modes.
+/// Count (x)'s deep decks over `sets` at the epoch: each deck of a refractory, a sulphide or a salt
+/// based below its envelope's join, by `set id body deck`, with its τ above 1 bar, and its modes.
 fn deep_decks_at_25(
     sets: &[(&'static str, Seed, SystemContext)],
 ) -> std::collections::BTreeMap<String, (Option<f64>, Vec<DeepMode>)> {
     let molten_rows = molten_liquids();
     let mut decks = std::collections::BTreeMap::new();
-    with_every_25_hold(|| {
-        for (set, seed, ctx) in sets {
-            let system = generate(*seed, ctx);
-            walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
-                let Section::Ok(envelope) = visit.record.envelope() else {
-                    return;
-                };
-                let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
-                let atmosphere = envelope.atmosphere();
-                let join = atmosphere.profile().join_pressure().value();
-                for deck in atmosphere.decks() {
-                    let condensate = deck.condensate();
-                    let deep = matches!(
-                        DeckKind::of(condensate),
-                        Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
-                    ) && deck.base().value() > join;
-                    if !deep {
-                        continue;
-                    }
-                    let key = key_of(condensate);
-                    let modes = atmosphere
-                        .modes()
-                        .iter()
-                        .filter(|m| m.deck() == condensate)
-                        .map(|mode| DeepMode {
-                            at: at.clone(),
-                            key: key.clone(),
-                            top_bar: mode.profile().top().value() / 1e5,
-                            tau: mode
-                                .optical_depth()
-                                .map(|d| d.value())
-                                .map_err(|e| format!("{e:?}")),
-                            basis: mode
-                                .optical_depth()
-                                .ok()
-                                .map(|d| format!("{:?}", d.basis())),
-                            molten: mode.phase() == CondensedPhase::Liquid
-                                && molten_rows.contains(&mode.material()),
-                        })
-                        .collect();
-                    decks.insert(
-                        format!("{at} {key}"),
-                        (deck_tau_above(envelope, condensate, 1e5), modes),
-                    );
+    for (set, seed, ctx) in sets {
+        let system = generate(*seed, ctx);
+        walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+            let Section::Ok(envelope) = visit.record.envelope() else {
+                return;
+            };
+            let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
+            let atmosphere = envelope.atmosphere();
+            let join = atmosphere.profile().join_pressure().value();
+            for deck in atmosphere.decks() {
+                let condensate = deck.condensate();
+                let deep = matches!(
+                    DeckKind::of(condensate),
+                    Some(DeckKind::Refractory | DeckKind::SulphideOrSalt)
+                ) && deck.base().value() > join;
+                if !deep {
+                    continue;
                 }
-            });
-        }
-    });
+                let key = key_of(condensate);
+                let modes = atmosphere
+                    .modes()
+                    .iter()
+                    .filter(|m| m.deck() == condensate)
+                    .map(|mode| DeepMode {
+                        at: at.clone(),
+                        key: key.clone(),
+                        top_bar: mode.profile().top().value() / 1e5,
+                        tau: mode
+                            .optical_depth()
+                            .map(|d| d.value())
+                            .map_err(|e| format!("{e:?}")),
+                        basis: mode
+                            .optical_depth()
+                            .ok()
+                            .map(|d| format!("{:?}", d.basis())),
+                        molten: mode.phase() == CondensedPhase::Liquid
+                            && molten_rows.contains(&mode.material()),
+                    })
+                    .collect();
+                decks.insert(
+                    format!("{at} {key}"),
+                    (deck_tau_above(envelope, condensate, 1e5), modes),
+                );
+            }
+        });
+    }
     decks
 }
 
-/// Count (x) re-run for P14.T49.p (decision-galaxy-25-train §6), every 25 hold in force, over
-/// [`census_sets`] at the epoch, printed (`--nocapture`): the deep decks' molten liquids' modes,
-/// which the molten decks' hold left with no τ to generator version 24, topped above 10 bar, by
-/// row, with their τ, tops and bases and any without one; every deep deck's τ above 1 bar ("TO
-/// MAIN" at 1 or more); and the fixture's hot Jupiter's τ above its photosphere, by deck. The
-/// Kepler regime, on the record from generator version 25 (P09.T28.b.b), moves only the central
-/// 10 ly, which no census set reaches.
+/// Count (x) re-run for P14.T49.p (decision-galaxy-25-train §6) over [`census_sets`] at the epoch,
+/// printed (`--nocapture`): the deep decks' molten liquids' modes, which the molten decks' hold
+/// left with no τ to generator version 24, topped above 10 bar, by row, with their τ, tops and
+/// bases and any without one; every deep deck's τ above 1 bar ("TO MAIN" at 1 or more); and the
+/// fixture's hot Jupiter's τ above its photosphere, by deck. The Kepler regime, on the record from
+/// generator version 25 (P09.T28.b.b), moves only the central 10 ly, which no census set reaches.
 #[test]
 #[ignore = "slow: count (x) over 102 systems"]
 #[expect(
     clippy::too_many_lines,
     reason = "one census, each of the entry's lines printed in turn"
 )]
-fn under_every_25_hold_count_x_states_the_molten_decks() {
+fn count_x_states_the_molten_decks() {
     use std::fmt::Write as _;
     let sets = census_sets();
     let molten = deep_decks_at_25(&sets);
@@ -1339,7 +1329,7 @@ fn under_every_25_hold_count_x_states_the_molten_decks() {
         .collect();
     above_one.sort_by(|a, b| b.0.total_cmp(&a.0));
     let hot = fixture_hot_jupiter();
-    let (photosphere, fixture_molten) = with_every_25_hold(|| {
+    let (photosphere, fixture_molten) = {
         let envelope = envelope_by_hand(&hot).expect("the fixture's hot Jupiter");
         let photosphere = envelope
             .atmosphere()
@@ -1359,7 +1349,7 @@ fn under_every_25_hold_count_x_states_the_molten_decks() {
             })
             .collect();
         (photosphere, decks)
-    });
+    };
     let total = |decks: &[(String, Option<f64>)]| decks.iter().filter_map(|d| d.1).sum::<f64>();
     let mut deeper_taus: Vec<f64> = deeper.iter().filter_map(|m| m.tau.clone().ok()).collect();
     deeper_taus.sort_by(f64::total_cmp);
@@ -1406,10 +1396,10 @@ fn under_every_25_hold_count_x_states_the_molten_decks() {
 /// The molten decks' arm gives the same envelope twice (the sim-determinism skill's rule), over
 /// the fixture's hot Jupiter, whose Fe deck it moves.
 #[test]
-fn under_every_25_hold_the_molten_decks_envelope_is_the_same_twice() {
+fn the_molten_decks_envelope_is_the_same_twice() {
     let hot = fixture_hot_jupiter();
     let twice: Vec<Envelope> = (0..2)
-        .map(|_| with_every_25_hold(|| envelope_by_hand(&hot).expect("the fixture's hot Jupiter")))
+        .map(|_| envelope_by_hand(&hot).expect("the fixture's hot Jupiter"))
         .collect();
     assert_eq!(format!("{:?}", twice[0]), format!("{:?}", twice[1]));
     assert!(
@@ -1741,8 +1731,8 @@ fn dayside_tau_above(envelope: &Envelope, level: f64) -> f64 {
 
 /// The fixture's hot Jupiter under every 26 hold with the dayside decks' rules `rules`, derived
 /// inside the switches, and P14.T52.g's deck profile and P14.T54.b.l's fall radius, which also
-/// move an envelope's modes, set back to `Held` and the bisections: so that `Held` against every 25
-/// hold is the dayside's difference alone.
+/// move an envelope's modes, set back to `Held` and the bisections: so that `Held` against the
+/// version's rules is the dayside's difference alone.
 fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
     let hot = fixture_hot_jupiter();
     with_every_26_hold(|| {
@@ -1765,9 +1755,7 @@ fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
 fn under_every_26_hold_the_fixture_hot_jupiter_s_dayside_holds_no_deep_deck_above_one_bar() {
     let cleared = fixture_at_26(DaysideDecksRules::Cleared);
     let held = fixture_at_26(DaysideDecksRules::Held);
-    let at_25 = with_every_25_hold(|| {
-        envelope_by_hand(&fixture_hot_jupiter()).expect("the fixture's hot Jupiter")
-    });
+    let at_25 = envelope_by_hand(&fixture_hot_jupiter()).expect("the fixture's hot Jupiter");
     assert_eq!(format!("{held:?}"), format!("{at_25:?}"), "held, 25's");
     let one_bar = DAYSIDE_LEVEL.value();
     let photosphere = cleared

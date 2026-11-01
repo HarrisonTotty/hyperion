@@ -8,7 +8,7 @@
 //! version 25 P14.T53.b part 1 (c) re-solves under the deck a first solve whose state is
 //! `Temperate`, even where part 3 labels it a steam envelope, and the deck's albedo then cools a
 //! kept ocean's water below its critical temperature into a global sea under the acid deck: 29
-//! runaways with a sea in P14.T33.c's census of 10⁶ bodies under every 25 hold. From 26:
+//! runaways with a sea in P14.T33.c's census of 10⁶ bodies at 25. From 26:
 //!
 //! - (c) reads the published label
 //!   ([`Atmosphere::published_state`](super::Atmosphere::published_state)), so a first solve

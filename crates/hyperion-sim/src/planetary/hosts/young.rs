@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn the_protoplanetary_disc_is_held_only_until_the_26_bump() {
         use crate::planetary::system::generate;
-        use crate::planetary::testing::{synthetic_star, with_every_25_hold, with_every_26_hold};
+        use crate::planetary::testing::{synthetic_star, with_every_26_hold};
         use crate::units::{Dex, SolarMasses, Years};
         assert!(
             GENERATOR_VERSION < PROTOPLANETARY_DISC_VERSION,
@@ -413,10 +413,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(ProtoplanetaryDiscRules::in_force),
             ProtoplanetaryDiscRules::Disc
-        );
-        assert_eq!(
-            with_every_25_hold(ProtoplanetaryDiscRules::in_force),
-            ProtoplanetaryDiscRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| {

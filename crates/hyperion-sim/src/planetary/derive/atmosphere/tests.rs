@@ -6524,15 +6524,13 @@ fn under_every_24_hold_a_tenuous_record_lists_its_air_over_an_airless_climate() 
 // P14.T53.e: the state from the present climate (decision-p14-t54a-states §3.4).
 
 /// P14.T53.e's anchors among the planets (decision-p14-t54a-states §3.4): Earth is `Temperate`,
-/// Venus a `RunawayGreenhouse` and Mars `Temperate`, under the rules in force and under every 25
-/// hold, each the state its published pass's figures give by rules 5–7 (Venus's judged without
-/// its deck, which it keeps). None of the three flips, so none carries a state.
+/// Venus a `RunawayGreenhouse` and Mars `Temperate`, under the rules in force, each the state its
+/// published pass's figures give by rules 5–7 (Venus's judged without its deck, which it keeps).
+/// None of the three flips, so none carries a state.
 #[test]
-fn under_every_25_hold_earth_venus_and_mars_keep_their_states() {
+fn earth_venus_and_mars_keep_their_states() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::with_every_25_hold;
     let in_force = solar_system();
-    let at_25 = with_every_25_hold(solar_system);
     for (name, state) in [
         ("Earth", SurfaceState::Temperate),
         ("Venus", SurfaceState::RunawayGreenhouse),
@@ -6545,11 +6543,7 @@ fn under_every_25_hold_earth_venus_and_mars_keep_their_states() {
             None,
             "{name}'s figures agree with its class"
         );
-        assert_eq!(
-            found(&at_25, name).atmosphere().published_state(),
-            state,
-            "{name} under every 25 hold"
-        );
+        assert_eq!(body.atmosphere().published_state(), state, "{name}");
     }
 }
 
@@ -6641,13 +6635,11 @@ fn a_pass_publishes_the_state_its_previous_pass_carried() {
 
 // P14.T53.b part 3: the steam envelope and the partition's cap (decision-p14-t53b-part3).
 
-/// `run` under P14.T53.b part 3, in force from generator version 25, with every landed 25 hold in
-/// force, under T51.h's halvings, the oracle of P14.T51.l's secant steps, whose movers their own
-/// tests state.
+/// `run` under P14.T53.b part 3, in force from generator version 25, under T51.h's halvings, the
+/// oracle of P14.T51.l's secant steps, whose movers their own tests state.
 fn with_part_three<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::passes::with_halvings;
-    use crate::planetary::testing::with_every_25_hold;
-    with_every_25_hold(|| with_halvings(run))
+    with_halvings(run)
 }
 
 /// An Earth of the Sun inside the runaway limit now ([`earth_inputs`] at `equilibrium`, K) holding
@@ -6748,7 +6740,7 @@ fn the_line_switch_is_held_only_until_the_26_bump() {
 /// state is a steam envelope, its record's section the envelope's, and every figure its labelled
 /// runaway's solve's.
 #[test]
-fn under_every_25_hold_a_quarter_water_world_inside_the_runaway_limit_is_a_steam_envelope() {
+fn a_quarter_water_world_inside_the_runaway_limit_is_a_steam_envelope() {
     let inputs = wet_runaway_earth(0.25 * EARTH_MASS_KG, 0.3, 300.0);
     let (air, reservoir, surface) = with_part_three(|| {
         let air = atmosphere(&inputs);
@@ -6883,7 +6875,7 @@ fn under_every_26_hold_part_three_s_steam_worlds_take_their_envelope_s_model() {
 /// oceans as today, its escape's capacity some ten oceans over its history: it keeps no steam, and
 /// its published state is the runaway's.
 #[test]
-fn under_every_25_hold_an_earth_water_world_inside_the_runaway_limit_loses_its_oceans() {
+fn an_earth_water_world_inside_the_runaway_limit_loses_its_oceans() {
     let inputs = earth_inputs(300.0, Insolation::InsideRunaway);
     let air = with_part_three(|| atmosphere(&inputs));
     let lost = air.escape().unwrap().oxygen().water_lost().value();
@@ -6904,7 +6896,7 @@ fn under_every_25_hold_an_earth_water_world_inside_the_runaway_limit_loses_its_o
 /// over the water it kept, not its inventory's; one that keeps none keeps its water a runaway's,
 /// as part 1 has it.
 #[test]
-fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() {
+fn a_runaway_keeps_its_water_beyond_its_escape_s_capacity() {
     use crate::planetary::hooks::figures::cover;
     // Under a saturated flux of 0.01 W m⁻², below its critical flux, an Earth loses some 0.34 of
     // an ocean over its history (9 k Φ, Luger and Barnes 2015's eq. A9). The past-only runaways
@@ -6990,7 +6982,7 @@ fn under_every_25_hold_a_runaway_keeps_its_water_beyond_its_escape_s_capacity() 
 /// critical isochore's pressure of methane in its air at its surface temperature, its cap's
 /// h^(1 − d) of it, the rest a liquid-like reservoir that hides its surface (part 2's tags).
 #[test]
-fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_methane() {
+fn a_nitrogen_warmed_methane_world_holds_its_isochore_of_methane() {
     // 2.5 kbar of methane, carried as its carbon, and 50 bar of nitrogen on an Earth at 185 K
     // beyond the maximum greenhouse, formed beyond the snow line 100 Myr ago, before its methane's
     // escape through its nitrogen and its photolysis take it (P14.T53.a's route takes it all over
@@ -7064,7 +7056,7 @@ fn under_every_25_hold_a_nitrogen_warmed_methane_world_holds_its_isochore_of_met
 /// decision-p14-t53b-part3 §5, B2: with part 3 in force, the table's Venus, Earth, Mars and Titan
 /// each publish their own state, none a steam envelope.
 #[test]
-fn under_every_25_hold_venus_earth_mars_and_titan_publish_their_own_states() {
+fn venus_earth_mars_and_titan_publish_their_own_states() {
     let table = with_part_three(table);
     for name in ["Venus", "Earth", "Mars", "Titan"] {
         let body = found(&table, name);
@@ -7084,20 +7076,18 @@ fn under_every_25_hold_venus_earth_mars_and_titan_publish_their_own_states() {
 /// gravity, so a moon or member whose bulk's gravity would not hide its reservoir still has no
 /// surface section, and the record's surface refuses the state.
 #[test]
-fn under_every_25_hold_a_steam_envelope_has_no_surface_under_any_gravity() {
+fn a_steam_envelope_has_no_surface_under_any_gravity() {
     use crate::planetary::record::Surface;
     let inputs = wet_runaway_earth(0.25 * EARTH_MASS_KG, 0.3, 300.0);
     let air = with_part_three(|| atmosphere(&inputs));
     assert_eq!(air.published_state(), SurfaceState::SteamEnvelope);
-    crate::planetary::testing::with_every_25_hold(|| {
-        for g in [9.82, 1e3, 1e6] {
-            let g = MetresPerSecondSquared::new(g);
-            assert!(!has_surface_section(PlanetClass::Rocky, &air, g), "{g:?}");
-        }
-        // Under 10⁶ m s⁻² its reservoir would not hide its surface: the label alone refuses it.
-        let strong = MetresPerSecondSquared::new(1e6);
-        assert!(air.supercritical_reservoir(strong).is_none(), "{air:?}");
-    });
+    for g in [9.82, 1e3, 1e6] {
+        let g = MetresPerSecondSquared::new(g);
+        assert!(!has_surface_section(PlanetClass::Rocky, &air, g), "{g:?}");
+    }
+    // Under 10⁶ m s⁻² its reservoir would not hide its surface: the label alone refuses it.
+    let strong = MetresPerSecondSquared::new(1e6);
+    assert!(air.supercritical_reservoir(strong).is_none(), "{air:?}");
     assert!(Surface::refuses(SurfaceState::SteamEnvelope));
     assert!(Surface::refuses(SurfaceState::GasEnvelope));
     assert!(!Surface::refuses(SurfaceState::RunawayGreenhouse));

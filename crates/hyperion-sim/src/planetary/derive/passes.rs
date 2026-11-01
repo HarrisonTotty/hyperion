@@ -2432,11 +2432,6 @@ mod tests {
             PassStep::Aitken
         );
         assert_eq!(PassStep::in_force(), PassStep::Plain);
-        // Nothing moves at 25: 25's holds leave the plain step; 26's helper takes Aitken's.
-        assert_eq!(
-            crate::planetary::testing::with_every_25_hold(PassStep::in_force),
-            PassStep::Plain
-        );
         assert_eq!(
             crate::planetary::testing::with_every_26_hold(PassStep::in_force),
             PassStep::Aitken

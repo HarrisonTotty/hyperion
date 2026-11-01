@@ -1,7 +1,7 @@
 //! Tests of a system's events on the record (P14.T31.c): the merge's order, its partition
 //! and order independence, the IDs, each body's existence, the storms' clock and water deck, no
-//! mark on any record, and the golden systems' century of events, under every 25 hold; and the
-//! census decision-galaxy-25-train §5.2 asks for, run by name.
+//! mark on any record, and the golden systems' century of events; and the census
+//! decision-galaxy-25-train §5.2 asks for, run by name.
 
 use std::fmt::Write as _;
 
@@ -21,7 +21,6 @@ use crate::planetary::record::{BodyKind, SectionState};
 use crate::planetary::system::tests::{
     GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems, sample,
 };
-use crate::planetary::testing::with_every_25_hold;
 use crate::time::ClockWindow;
 use crate::units::Seconds;
 use crate::{GENERATOR_VERSION, Seed};
@@ -39,18 +38,16 @@ fn century() -> TimeWindow {
 /// One golden system at 25: its name, context, system and event models.
 type At25 = (&'static str, SystemContext, PlanetarySystem, SystemEvents);
 
-/// The golden systems generated afresh under every 25 hold, each with its event models.
+/// The golden systems generated afresh, each with its event models.
 fn golden_at_25() -> Vec<At25> {
-    with_every_25_hold(|| {
-        golden_contexts()
-            .into_iter()
-            .map(|(name, ctx)| {
-                let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
-                let models = system.event_models(&ctx);
-                (name, ctx, system, models)
-            })
-            .collect()
-    })
+    golden_contexts()
+        .into_iter()
+        .map(|(name, ctx)| {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
+            let models = system.event_models(&ctx);
+            (name, ctx, system, models)
+        })
+        .collect()
 }
 
 /// The golden system `name` of `systems`.
@@ -70,7 +67,7 @@ fn models_of(models: &SystemEvents, index: u16) -> &BodyModels {
 /// Test (c), the list: a system's events are its models' over the window, sorted strictly by time
 /// and then by ID, the same for the same seed generated twice; a reversed or empty window has none.
 #[test]
-fn under_every_25_hold_a_system_s_events_are_its_models_in_time_then_id_order() {
+fn a_system_s_events_are_its_models_in_time_then_id_order() {
     let systems = golden_at_25();
     let again = golden_at_25();
     let mut kinds = [0_usize; 5];
@@ -84,17 +81,15 @@ fn under_every_25_hold_a_system_s_events_are_its_models_in_time_then_id_order() 
         );
         assert!(events.iter().all(|event| century().contains(event.time())));
         assert_eq!(models, twin, "{name}: the same seed twice");
-        let asked = with_every_25_hold(|| {
-            assert_eq!(
-                system.events_between(ctx, year(1), year(-1)),
-                Vec::<BodyEvent>::new()
-            );
-            assert_eq!(
-                system.events_between(ctx, year(1), year(1)),
-                Vec::<BodyEvent>::new()
-            );
-            system.events_between(ctx, century().start(), century().end())
-        });
+        assert_eq!(
+            system.events_between(ctx, year(1), year(-1)),
+            Vec::<BodyEvent>::new()
+        );
+        assert_eq!(
+            system.events_between(ctx, year(1), year(1)),
+            Vec::<BodyEvent>::new()
+        );
+        let asked = system.events_between(ctx, century().start(), century().end());
         assert_eq!(asked, events, "{name}");
         for event in &events {
             let kind = match event {
@@ -118,7 +113,7 @@ fn under_every_25_hold_a_system_s_events_are_its_models_in_time_then_id_order() 
 /// whole, in halves and cut at uneven points, a nanosecond from a whole year among them (plan 06's
 /// `assert_partition_independent`).
 #[test]
-fn under_every_25_hold_the_events_come_back_whole_and_in_halves() {
+fn the_events_come_back_whole_and_in_halves() {
     let nanosecond = Span::new(0, 1).unwrap();
     let uneven = [
         year(-37).checked_add(nanosecond).unwrap(),
@@ -142,7 +137,7 @@ fn under_every_25_hold_the_events_come_back_whole_and_in_halves() {
 /// Test (c), the order of asking: a system's decades in any order give the same events, and so do
 /// the systems themselves, each generated and asked afresh (plan 01's `assert_order_independent`).
 #[test]
-fn under_every_25_hold_the_events_are_the_same_in_any_order_of_asking() {
+fn the_events_are_the_same_in_any_order_of_asking() {
     let systems = golden_at_25();
     let decades: Vec<TimeWindow> = (-5..5)
         .map(|k| TimeWindow::new(year(10 * k), year(10 * k + 10)).unwrap())
@@ -155,10 +150,8 @@ fn under_every_25_hold_the_events_are_the_same_in_any_order_of_asking() {
         .into_iter()
         .filter(|(name, _)| ["solar_like", "hot_jupiter", "eccentric_giant"].contains(name))
         .collect();
-    with_every_25_hold(|| {
-        assert_order_independent(&contexts, |(_, ctx)| {
-            generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx).events_between(ctx, year(-10), year(10))
-        });
+    assert_order_independent(&contexts, |(_, ctx)| {
+        generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx).events_between(ctx, year(-10), year(10))
     });
 }
 
@@ -166,7 +159,7 @@ fn under_every_25_hold_the_events_are_the_same_in_any_order_of_asking() {
 /// event alone; an ID of another system, of a kind the body has no model for or of a tag of no
 /// kind gives none.
 #[test]
-fn under_every_25_hold_event_ids_round_trip_through_their_text_and_regenerate() {
+fn event_ids_round_trip_through_their_text_and_regenerate() {
     let systems = golden_at_25();
     let mut checked = 0_usize;
     for (name, .., models) in &systems {
@@ -211,7 +204,7 @@ fn under_every_25_hold_event_ids_round_trip_through_their_text_and_regenerate() 
 /// No event leaves a mark (design note 15): every body's record at its events' times is the same
 /// whether asked before the events are listed or after.
 #[test]
-fn under_every_25_hold_no_event_changes_any_body_at_result() {
+fn no_event_changes_any_body_at_result() {
     let systems = golden_at_25();
     for name in ["solar_like", "eccentric_giant"] {
         let (_, ctx, system, models) = named(&systems, name);
@@ -235,10 +228,10 @@ fn under_every_25_hold_no_event_changes_any_body_at_result() {
                 .map(|&(index, t)| system.body_at(ctx, index, t).unwrap())
                 .collect()
         };
-        let before = with_every_25_hold(|| records(system));
-        let listed = with_every_25_hold(|| system.events_between(ctx, year(-50), year(50)));
+        let before = records(system);
+        let listed = system.events_between(ctx, year(-50), year(50));
         assert_eq!(listed, events);
-        let after = with_every_25_hold(|| records(system));
+        let after = records(system);
         assert_eq!(before, after, "{name}");
     }
 }
@@ -247,7 +240,7 @@ fn under_every_25_hold_no_event_changes_any_body_at_result() {
 /// present body's is, for the first events of each kind on every body (`position_at` reads the
 /// fate transform apart from the models' lifetimes).
 #[test]
-fn under_every_25_hold_each_event_falls_while_its_body_is_present() {
+fn each_event_falls_while_its_body_is_present() {
     let systems = golden_at_25();
     let mut checked = 0;
     for (name, ctx, system, models) in &systems {
@@ -433,7 +426,7 @@ fn a_moon_s_presence_is_its_record_s() {
 /// the widest span about its middle that holds no more, every event of it, as far either side,
 /// one grain wider holding more; the busiest golden system's century, at four bounds.
 #[test]
-fn under_every_25_hold_a_listing_holds_no_more_than_asked_about_the_window_s_middle() {
+fn a_listing_holds_no_more_than_asked_about_the_window_s_middle() {
     let systems = golden_at_25();
     let (.., models) = named(&systems, "close_binary");
     let all = models.between(century());
@@ -485,7 +478,7 @@ fn a_listing_of_the_clock_s_whole_window_is_the_window() {
 
 /// The models' charge is one entry a body with models, each holding nothing of its own on the heap.
 #[test]
-fn under_every_25_hold_the_models_charge_one_entry_a_body() {
+fn the_models_charge_one_entry_a_body() {
     let systems = golden_at_25();
     let (.., models) = named(&systems, "solar_like");
     assert_eq!(
@@ -554,11 +547,11 @@ fn a_lifetime_gives_the_fate_s_state() {
 /// perihelion passage; no other body has any. The cold giants keep them, the hot Jupiter and the
 /// warm ice giant lose them.
 #[test]
-fn under_every_25_hold_great_storms_take_a_water_deck_and_a_ten_year_clock() {
+fn great_storms_take_a_water_deck_and_a_ten_year_clock() {
     let systems = golden_at_25();
     let (mut kept, mut removed) = (Vec::new(), Vec::new());
     for (name, ctx, system, models) in &systems {
-        let snapshot = with_every_25_hold(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
         for body in &models.bodies {
             let record = snapshot.body(body.index).unwrap();
             let bulk = record.bulk().ok().unwrap();
@@ -610,12 +603,13 @@ fn under_every_25_hold_great_storms_take_a_water_deck_and_a_ten_year_clock() {
 /// The water deck is read off an `Ok` envelope alone: a cold giant's lists one, a hot Jupiter's
 /// none, and every other state of the section gives none.
 #[test]
-fn under_every_25_hold_a_water_deck_is_read_off_an_ok_envelope_alone() {
+fn a_water_deck_is_read_off_an_ok_envelope_alone() {
     let systems = golden_at_25();
     let envelope_of = |name: &str, index: u16| {
         let (_, ctx, system, _) = named(&systems, name);
         let index = BodyIndex::try_from(index).unwrap();
-        with_every_25_hold(|| system.body_at(ctx, index, UniverseTime::EPOCH))
+        system
+            .body_at(ctx, index, UniverseTime::EPOCH)
             .unwrap()
             .envelope()
             .clone()
@@ -674,11 +668,11 @@ fn an_orbit_s_clock_starts_at_its_last_perihelion_passage() {
 /// model is the record's: no eruptions without a surface, and impacts on every present planet,
 /// member and moon with figures, and every giant.
 #[test]
-fn under_every_25_hold_each_kind_reads_its_record() {
+fn each_kind_reads_its_record() {
     let systems = golden_at_25();
     let (mut dusty, mut moons) = (0, 0);
     for (name, ctx, system, models) in &systems {
-        let snapshot = with_every_25_hold(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
         for body in &models.bodies {
             let record = snapshot.body(body.index).unwrap();
             let label = format!("{name} {:04x}", body.index.get());
@@ -763,11 +757,11 @@ fn under_every_25_hold_each_kind_reads_its_record() {
 /// and takes the least year itself: `filler_c`'s 0400 on its own orbit with its period changed, the
 /// gate read before the model is built, so that no refusal reaches `kept`.
 #[test]
-fn under_every_25_hold_a_dusty_body_on_a_year_under_301_days_has_no_dust_storms() {
+fn a_dusty_body_on_a_year_under_301_days_has_no_dust_storms() {
     let systems = golden_at_25();
     let (_, ctx, system, models) = named(&systems, "filler_c");
     assert!(models_of(models, 0x0400).dust_storms.is_some());
-    let snapshot = with_every_25_hold(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+    let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
     let body = system
         .bodies
         .iter()
@@ -800,12 +794,12 @@ fn under_every_25_hold_a_dusty_body_on_a_year_under_301_days_has_no_dust_storms(
     assert_eq!(least.inputs().eccentricity, own.eccentricity());
 }
 
-/// The golden systems' events of the century about the epoch, under every 25 hold (P14.T31.c;
-/// decision-galaxy-25-train §5.2's "goldens over generated bodies"): for each system its count by
-/// kind and a digest of every event; for each body and kind its count, its digest and its first
-/// event; every storm and dust storm; and the first three comets.
+/// The golden systems' events of the century about the epoch (P14.T31.c; decision-galaxy-25-train
+/// §5.2's "goldens over generated bodies"): for each system its count by kind and a digest of every
+/// event; for each body and kind its count, its digest and its first event; every storm and dust
+/// storm; and the first three comets.
 #[test]
-fn under_every_25_hold_the_golden_systems_events_of_a_century_are_pinned() {
+fn the_golden_systems_events_of_a_century_are_pinned() {
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
     w.line(
@@ -965,92 +959,90 @@ fn digest<'a>(events: impl Iterator<Item = &'a BodyEvent>) -> u64 {
     hash
 }
 
-/// Decision-galaxy-25-train §5.2's census, under every 25 hold over the 400 systems nearest the
-/// solar-circle point: the giants present at the epoch that keep great storms and those the water
-/// deck's gate removes, by why and by their equilibrium temperatures; and the dusty bodies by
-/// their clock's period against the least year, 301 days, with the century's dust storms of those
-/// kept, every one of which lasts Mars's 109.9–158.0 days (P14.T31.c's fix).
+/// Decision-galaxy-25-train §5.2's census over the 400 systems nearest the solar-circle point: the
+/// giants present at the epoch that keep great storms and those the water deck's gate removes, by
+/// why and by their equilibrium temperatures; and the dusty bodies by their clock's period against
+/// the least year, 301 days, with the century's dust storms of those kept, every one of which lasts
+/// Mars's 109.9–158.0 days (P14.T31.c's fix).
 #[test]
 #[ignore = "a measurement for decision-galaxy-25-train §5.2, run by name"]
-fn under_every_25_hold_the_storm_census_is_stated() {
+fn the_storm_census_is_stated() {
     let year_s = 31_557_600.0;
     // (label, T_eq, P in years, envelope state, water deck)
     let mut giants: Vec<Giant> = Vec::new();
     let mut dusty: Vec<Dusty> = Vec::new();
-    with_every_25_hold(|| {
-        for ctx in sample() {
-            let system = generate(SEED, ctx);
-            let models = system.event_models(ctx);
-            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-            for body in &models.bodies {
-                let record = snapshot.body(body.index).unwrap();
-                let bulk = record.bulk().ok().unwrap();
-                let label = format!("{}.{:04x}", ctx.id(), body.index.get());
-                let period = record
-                    .orbit()
-                    .ok()
-                    .map_or(f64::NAN, |orbit| orbit.elements().period().value());
-                if has_great_storms(bulk.class()) {
-                    giants.push((
-                        label.clone(),
-                        bulk.equilibrium_temperature().value(),
-                        period / year_s,
-                        record.envelope().state(),
-                        has_water_deck(record.envelope()),
-                    ));
-                }
-                let tau = dust_optical_depth_of(record);
-                if !has_dust_storms(tau) {
-                    continue;
-                }
-                // A moon's seasons, and its year's gate, are its planet's.
-                let primary = match record.identity().kind() {
-                    BodyKind::Moon(_) => {
-                        let Some(OrbitHost::Body(planet)) = record.identity().parent() else {
-                            panic!("{label}: a moon's parent is a body");
-                        };
-                        snapshot.body(planet).unwrap()
-                    }
-                    BodyKind::Planet
-                    | BodyKind::DwarfPlanet
-                    | BodyKind::Ring
-                    | BodyKind::Belt(_)
-                    | BodyKind::CometaryHalo
-                    | BodyKind::ProtoplanetaryDisc
-                    | BodyKind::DebrisDisc
-                    | BodyKind::Unresolved => record,
-                };
-                let elements = primary.orbit().ok().unwrap().elements();
-                let (period, _) = clock_of(elements).unwrap();
-                assert_eq!(
-                    body.dust_storms.is_some(),
-                    year_holds_dust_storms(period),
-                    "{label}"
-                );
-                let mut listed = Vec::new();
-                if let Some(model) = &body.dust_storms {
-                    dust::dust_storms(model, century(), &mut listed);
-                }
-                dusty.push(Dusty {
-                    label,
-                    kind: format!("{:?} {:?}", record.identity().kind(), bulk.class()),
-                    spin: record.rotation().ok().map_or_else(
-                        || "no rotation".to_owned(),
-                        |frame| format!("{:?}", frame.state_at(UniverseTime::EPOCH)),
-                    ),
-                    t_eq: bulk.equilibrium_temperature().value(),
-                    period_days: period.as_seconds_f64() / 86_400.0,
-                    eccentricity: elements.eccentricity(),
-                    tau,
-                    kept: body.dust_storms.is_some(),
-                    durations: listed
-                        .iter()
-                        .map(|storm| storm.duration().as_seconds_f64() / 86_400.0)
-                        .collect(),
-                });
+    for ctx in sample() {
+        let system = generate(SEED, ctx);
+        let models = system.event_models(ctx);
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        for body in &models.bodies {
+            let record = snapshot.body(body.index).unwrap();
+            let bulk = record.bulk().ok().unwrap();
+            let label = format!("{}.{:04x}", ctx.id(), body.index.get());
+            let period = record
+                .orbit()
+                .ok()
+                .map_or(f64::NAN, |orbit| orbit.elements().period().value());
+            if has_great_storms(bulk.class()) {
+                giants.push((
+                    label.clone(),
+                    bulk.equilibrium_temperature().value(),
+                    period / year_s,
+                    record.envelope().state(),
+                    has_water_deck(record.envelope()),
+                ));
             }
+            let tau = dust_optical_depth_of(record);
+            if !has_dust_storms(tau) {
+                continue;
+            }
+            // A moon's seasons, and its year's gate, are its planet's.
+            let primary = match record.identity().kind() {
+                BodyKind::Moon(_) => {
+                    let Some(OrbitHost::Body(planet)) = record.identity().parent() else {
+                        panic!("{label}: a moon's parent is a body");
+                    };
+                    snapshot.body(planet).unwrap()
+                }
+                BodyKind::Planet
+                | BodyKind::DwarfPlanet
+                | BodyKind::Ring
+                | BodyKind::Belt(_)
+                | BodyKind::CometaryHalo
+                | BodyKind::ProtoplanetaryDisc
+                | BodyKind::DebrisDisc
+                | BodyKind::Unresolved => record,
+            };
+            let elements = primary.orbit().ok().unwrap().elements();
+            let (period, _) = clock_of(elements).unwrap();
+            assert_eq!(
+                body.dust_storms.is_some(),
+                year_holds_dust_storms(period),
+                "{label}"
+            );
+            let mut listed = Vec::new();
+            if let Some(model) = &body.dust_storms {
+                dust::dust_storms(model, century(), &mut listed);
+            }
+            dusty.push(Dusty {
+                label,
+                kind: format!("{:?} {:?}", record.identity().kind(), bulk.class()),
+                spin: record.rotation().ok().map_or_else(
+                    || "no rotation".to_owned(),
+                    |frame| format!("{:?}", frame.state_at(UniverseTime::EPOCH)),
+                ),
+                t_eq: bulk.equilibrium_temperature().value(),
+                period_days: period.as_seconds_f64() / 86_400.0,
+                eccentricity: elements.eccentricity(),
+                tau,
+                kept: body.dust_storms.is_some(),
+                durations: listed
+                    .iter()
+                    .map(|storm| storm.duration().as_seconds_f64() / 86_400.0)
+                    .collect(),
+            });
         }
-    });
+    }
     report_giants(&giants);
     report_dusty(&mut dusty);
 }

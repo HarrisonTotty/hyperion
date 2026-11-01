@@ -1,6 +1,6 @@
 //! P14.T53.c's exposed share through a lag over the record (decision-p14-t54a-ganymede §C3.1 and
 //! §C3.4; decision-bump-plan-after-22 V3.9, W3 (a)), in force from generator version 25: a census
-//! of the record under every 25 hold.
+//! of the record.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +9,6 @@ use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
 use super::*;
 use crate::planetary::chem::partition::CondensatePhase;
 use crate::planetary::hooks::crust::CrustLithology;
-use crate::planetary::testing::with_every_25_hold;
 use crate::substance::SubstanceId;
 use crate::units::Pascals;
 
@@ -68,15 +67,13 @@ fn water_share(ices: &[(SubstanceId, f64)]) -> f64 {
         .map_or(0.0, |&(_, share)| share)
 }
 
-/// What a census found ([`census`]): its records under every 25 hold and its count of ice bulks
-/// under a dark lid.
+/// What a census found ([`census`]): its records and its count of ice bulks under a dark lid.
 struct Census {
     records: Records,
     dark: u32,
 }
 
-/// The census of the systems `sets` (every planet, member and moon at the epoch) under every 25
-/// hold.
+/// The census of the systems `sets` (every planet, member and moon at the epoch).
 ///
 /// Under a dark lid (an ice bulk whose lid is not `H2O`, [`DarkLag::of`]), the record's water ice
 /// lies within its lag's exposed share of the surface, and the condensates list no `H2O` solid.
@@ -86,7 +83,7 @@ struct Census {
 /// its lid, its water ice, its cover and its state.
 fn census(sets: &[AuditSet]) -> Census {
     let water = Gas::Water.substance();
-    let records = with_every_25_hold(|| records(sets));
+    let records = records(sets);
     let (mut surfaces, mut dark) = (0_u32, 0_u32);
     let mut by_lag: BTreeMap<String, u32> = BTreeMap::new();
     let mut lines = Vec::new();
@@ -145,13 +142,13 @@ fn census(sets: &[AuditSet]) -> Census {
 
 /// The census ([`census`]) over the first [`SAMPLE_SYSTEMS`] sample systems and the 15 golden
 /// ones, which hold §C3.1's dark lids: more than 20 ice bulks under one; and the same records
-/// generated twice under every 25 hold.
+/// generated twice.
 #[test]
-fn under_every_25_hold_an_ice_bulk_shows_its_lag_s_exposed_share_of_water_ice() {
+fn an_ice_bulk_shows_its_lag_s_exposed_share_of_water_ice() {
     let sets = fast_sets();
     let census = census(&sets);
     assert!(census.dark > 20, "§C3.1's dark lids: {}", census.dark);
-    let again = with_every_25_hold(|| records(&sets));
+    let again = records(&sets);
     assert_eq!(
         format!("{:?}", census.records),
         format!("{again:?}"),
@@ -163,7 +160,7 @@ fn under_every_25_hold_an_ice_bulk_shows_its_lag_s_exposed_share_of_water_ice() 
 /// dark lids under the same bounds.
 #[test]
 #[ignore = "slow: 340 sample systems, run by name"]
-fn under_every_25_hold_the_rest_of_the_400_show_their_lag_s_exposed_share_of_water_ice() {
+fn the_rest_of_the_400_show_their_lag_s_exposed_share_of_water_ice() {
     let sets: Vec<AuditSet> = sample()[SAMPLE_SYSTEMS..]
         .iter()
         .map(|ctx| ("sample", SEED, ctx.clone()))
@@ -174,10 +171,9 @@ fn under_every_25_hold_the_rest_of_the_400_show_their_lag_s_exposed_share_of_wat
 
 /// The passes' rule 5 reads the exposed share (P14.T53.e's state from the published ice cover):
 /// neither of the two enveloped ice bulks ([`ENVELOPED`]) publishes a `Snowball`'s photometry
-/// template under every 25 hold. Each is printed with its states, its mean surface temperature and
-/// its pressure.
+/// template. Each is printed with its states, its mean surface temperature and its pressure.
 #[test]
-fn under_every_25_hold_two_enveloped_ice_bulks_are_no_snowballs_by_their_lag_s_share() {
+fn two_enveloped_ice_bulks_are_no_snowballs_by_their_lag_s_share() {
     use crate::planetary::derive::photometry::PhaseTemplate;
 
     let systems: Vec<u64> = ENVELOPED
@@ -214,7 +210,7 @@ fn under_every_25_hold_two_enveloped_ice_bulks_are_no_snowballs_by_their_lag_s_s
         });
         found
     };
-    let exposed = with_every_25_hold(walk);
+    let exposed = walk();
     assert_eq!(exposed.len(), ENVELOPED.len());
     for id in ENVELOPED {
         let (now, line) = &exposed[id];

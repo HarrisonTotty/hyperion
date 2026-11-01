@@ -1,6 +1,5 @@
 //! P14.T53.e's tests over the record: the state from the present climate, rules 5–7 of the
-//! published state (decision-p14-t54a-states §3.4), in force from generator version 25, under
-//! every 25 hold.
+//! published state (decision-p14-t54a-states §3.4), in force from generator version 25.
 
 use std::time::Instant;
 
@@ -14,7 +13,6 @@ use crate::planetary::derive::atmosphere::{
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::hooks::surface::Forcing;
-use crate::planetary::testing::with_every_25_hold;
 use crate::units::Pascals;
 
 /// The six `Snowball`s P14.T54.b.l's bless left above 273.15 K at 24 (bless-note-24 §3, T53.a
@@ -119,16 +117,15 @@ fn flipping_sets() -> Vec<AuditSet> {
 
 /// P14.T53.e on the record, its flips' fast test: the six `Snowball`s P14.T54.b.l's bless left
 /// above 273.15 K at 24 under the insolation class's state ([`HOT_SNOWBALLS`]) and a frozen
-/// `Temperate` of 24's ([`FROZEN_TEMPERATE`]), under every 25 hold.
+/// `Temperate` of 24's ([`FROZEN_TEMPERATE`]), under the rules in force.
 ///
 /// - None of the six is a `Snowball`: each takes its climate's state, where its surface is `Ok`
 ///   the state its figures give by rules 5–7 (or a jump of its passes); and the frozen world is a
 ///   `Snowball` by rule 5, ice over at least half its surface, its passes settled and carrying the
 ///   state they publish.
-/// - Generated twice under every 25 hold, every body publishes the same figures: the lagged passes
-///   are deterministic.
+/// - Generated twice, every body publishes the same figures: the lagged passes are deterministic.
 #[test]
-fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state() {
+fn the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state() {
     let sets = flipping_sets();
     assert_eq!(sets.len(), 7, "each body lies in a system of its own");
     let ids: Vec<&str> = HOT_SNOWBALLS
@@ -136,8 +133,8 @@ fn under_every_25_hold_the_hot_snowballs_and_a_frozen_temperate_take_their_clima
         .map(|(id, _)| *id)
         .chain([FROZEN_TEMPERATE])
         .collect();
-    let at_25 = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
-    let again = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
+    let at_25 = census_of(&sets, SecondStarts::None);
+    let again = census_of(&sets, SecondStarts::None);
     let lines = |bodies: &[CensusBody]| -> Vec<String> {
         bodies
             .iter()
@@ -319,11 +316,11 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 }
 
 /// P14.T53.e's census over the 400 sample systems and the 15 golden systems, a measurement for
-/// the 25 bless, run by name: under every 25 hold, every present planet, member and moon with a
-/// derivation at the epoch.
+/// the 25 bless, run by name: under the rules in force, every present planet, member and moon with
+/// a derivation at the epoch.
 ///
-/// - **No `Snowball` lies above 273.15 K** under every 25 hold, asserted, and the six that
-///   P14.T54.b.l's bless left there ([`HOT_SNOWBALLS`]) take their climate's state, each printed.
+/// - **No `Snowball` lies above 273.15 K**, asserted, and the six that P14.T54.b.l's bless left
+///   there ([`HOT_SNOWBALLS`]) take their climate's state, each printed.
 /// - **Every state agrees with its published figures by rules 5–7** where its record's surface is
 ///   `Ok` and its state is one of theirs, not a runaway under Venus's deck (judged without it), but
 ///   at a jump of its passes (decision-pre-23-review item 32's discrete jumps) and where its passes
@@ -338,14 +335,14 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 /// - **The cost:** every body's passes summed, and the walk's time, printed.
 #[test]
 #[ignore = "a measurement for the 25 bless, run by name"]
-fn under_every_25_hold_the_present_climate_sets_the_state_over_the_400() {
+fn the_present_climate_sets_the_state_over_the_400() {
     let sets = the_400_and_the_goldens();
     let start = Instant::now();
-    let at_25 = with_every_25_hold(|| census_of(&sets, SecondStarts::None));
+    let at_25 = census_of(&sets, SecondStarts::None);
     let walk_25 = start.elapsed();
-    let second = with_every_25_hold(|| census_of(&sets, SecondStarts::FromTheMelt));
+    let second = census_of(&sets, SecondStarts::FromTheMelt);
     eprintln!(
-        "the walk (pod): every 25 hold {walk_25:?}, {} passes",
+        "the walk (pod): at 25 {walk_25:?}, {} passes",
         passes_of(&at_25)
     );
     // The anchors.
@@ -405,7 +402,7 @@ fn under_every_25_hold_the_present_climate_sets_the_state_over_the_400() {
     let faults = report_agreement(&at_25);
     let jumps = at_25.iter().filter(|body| body.published.jump).count();
     eprintln!(
-        "jumps {jumps} under every 25 hold ({:.2}% of the bodies with a surface, item 32's cap 1%)",
+        "jumps {jumps} at 25 ({:.2}% of the bodies with a surface, item 32's cap 1%)",
         percent(jumps, with_surface)
     );
     report_second_starts(&second);

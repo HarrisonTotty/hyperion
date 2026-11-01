@@ -739,15 +739,12 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
         .collect();
     // With P14.T53.b part 3, from generator version 25, part 2's census body keeps its surface,
     // and none of these bodies is hidden (decision-p14-t53b-part3 §12 (0400)).
-    let (surfaces, hidden) = crate::planetary::testing::with_every_25_hold(|| {
-        let (mut surfaces, mut hidden) = (0_u32, 0_u32);
-        for body in &envelope_census(&sets) {
-            assert_envelope_tags(body);
-            surfaces += u32::from(body.surface == SectionState::Ok);
-            hidden += u32::from(body.hidden.is_some());
-        }
-        (surfaces, hidden)
-    });
+    let (mut surfaces, mut hidden) = (0_u32, 0_u32);
+    for body in &envelope_census(&sets) {
+        assert_envelope_tags(body);
+        surfaces += u32::from(body.surface == SectionState::Ok);
+        hidden += u32::from(body.hidden.is_some());
+    }
     eprintln!("{surfaces} surfaces, {hidden} hidden");
     assert!(surfaces > 20);
     assert_eq!(hidden, 0);
@@ -12921,13 +12918,13 @@ pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
     faults
 }
 
-/// decision-p14-t53b-part3 §12 (0400): with every 25 hold in force, P14.T53.b part 3's, the
-/// census's [`SUPERCRITICAL_METHANE_BODY`] keeps its surface. The partition's cap holds its
-/// nitrogen at its critical isochore, about 95 bar at 1.29 `T_c`, so that its air cools under
-/// methane's 190.564 K critical point and its methane condenses there, a liquid at the surface,
-/// as the guide's `LIQUID COVER` row reads it, 27 K under that point and 3.3 times under the line.
+/// decision-p14-t53b-part3 §12 (0400): with P14.T53.b part 3 in force, the census's
+/// [`SUPERCRITICAL_METHANE_BODY`] keeps its surface. The partition's cap holds its nitrogen at its
+/// critical isochore, about 95 bar at 1.29 `T_c`, so that its air cools under methane's 190.564 K
+/// critical point and its methane condenses there, a liquid at the surface, as the guide's
+/// `LIQUID COVER` row reads it, 27 K under that point and 3.3 times under the line.
 #[test]
-fn under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surface() {
+fn part_three_returns_the_census_s_methane_snowball_its_surface() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::derive::atmosphere::METHANE_RELATIVE_HUMIDITY;
     use crate::planetary::derive::passes::Convergence;
@@ -12941,85 +12938,83 @@ fn under_every_25_hold_part_three_returns_the_census_s_methane_snowball_its_surf
             .expect("a condensable's row has a phase diagram")
     };
     let mut seen = 0;
-    crate::planetary::testing::with_every_25_hold(|| {
-        let system = generate(SEED, ctx);
-        census_walk("sample", ctx, &system, &mut |case| {
-            if case.record.identity().id().to_string() != SUPERCRITICAL_METHANE_BODY {
-                return;
-            }
-            seen += 1;
-            let (record, air) = (case.record, case.derived.atmosphere());
-            let g = record.bulk().ok().expect("its bulk").surface_gravity();
-            let t_s = air.surface_temperature().value();
-            let p_s = air.surface_pressure().expect("an air").value();
-            eprintln!(
-                "{SUPERCRITICAL_METHANE_BODY}: {:?} at {t_s:.4} K under {:.4} bar, {:?}",
-                air.published_state(),
-                p_s / 1e5,
-                case.derived.convergence()
-            );
-            assert_eq!(air.published_state(), SurfaceState::Snowball);
-            assert_eq!(case.surface.state(), SurfaceState::Snowball);
-            assert_eq!(
-                (
-                    record.section_state(RecordSection::Surface),
-                    record.section_state(RecordSection::Envelope)
-                ),
-                (SectionState::Ok, SectionState::NotApplicable)
-            );
-            assert!(air.supercritical_reservoir(g).is_none());
-            assert_eq!(case.derived.convergence(), Convergence::Converged);
-            assert!((t_s - 163.414).abs() <= 0.001, "{t_s}");
-            assert!((p_s / 1e5 - 104.15).abs() <= 0.01, "{p_s}");
-            assert!(diagram(methane).critical_temperature().value() - t_s >= 10.0);
-            let (_, read) = (case.again)(PassDriver::Again(Under::Read));
-            let read = read.expect("its published pass reads its partition");
-            let partition = &read.partition;
-            let surface_pressure = partition.surface_pressure();
-            // Its methane: liquid at the surface, below its critical temperature and its melting
-            // pressure there, at its humidity's share of its saturation pressure.
-            let ch4 = partition.of(methane).expect("its methane");
-            let sea = partition.condensate(methane).expect("its methane's sea");
-            eprintln!("  CH4 {ch4:?}\n  {sea:?}");
-            assert_eq!(sea.phase(), CondensatePhase::Liquid);
-            let d = diagram(methane);
-            assert!(ch4.lies_at() < d.critical_temperature());
-            assert!(surface_pressure < d.melting_pressure(ch4.lies_at()).expect("a melting curve"));
-            let liquids = case.surface.condensates().surface_liquids();
-            assert!(
-                liquids.iter().any(|&(id, _)| id == sea.liquid()),
-                "{liquids:?}"
-            );
-            let held = METHANE_RELATIVE_HUMIDITY * d.saturation_pressure(ch4.lies_at()).value();
-            assert_same_bits(ch4.dominance(), 0.0);
-            assert!((ch4.partial_pressure().value() / held - 1.0).abs() < 1e-9);
-            let summed = ch4.airborne().value() + ch4.condensed().value();
-            assert!((summed / ch4.inventory().value() - 1.0).abs() < 1e-9);
-            // Its nitrogen: held at its critical isochore, a supercritical reservoir of under half
-            // the envelope's line, no liquid.
-            let n2 = partition.of(nitrogen).expect("its nitrogen");
-            let isochore = diagram(nitrogen)
-                .critical_isochore_pressure(n2.lies_at())
-                .expect("above its critical temperature")
-                .value();
-            eprintln!("  N2 {n2:?}");
-            assert!((n2.partial_pressure().value() / isochore - 1.0).abs() < 1e-9);
-            assert_eq!(
-                partition
-                    .condensate(nitrogen)
-                    .map(crate::planetary::chem::partition::Condensate::phase),
-                Some(CondensatePhase::Supercritical)
-            );
-            let column = air.supercritical_column().expect("its steps' column");
-            assert_the_steps_column_is_published(&column, n2, partition);
-            let reservoir = air.partitioned_reservoir(g).expect("its nitrogen's column");
-            assert_eq!(reservoir.gas(), Gas::Nitrogen);
-            assert!(
-                reservoir.share() < 0.5 * THIN_ENVELOPE_FRACTION,
-                "{reservoir:?}"
-            );
-            assert!(liquids.iter().all(|&(id, _)| id != nitrogen), "{liquids:?}");
-        });
+    let system = generate(SEED, ctx);
+    census_walk("sample", ctx, &system, &mut |case| {
+        if case.record.identity().id().to_string() != SUPERCRITICAL_METHANE_BODY {
+            return;
+        }
+        seen += 1;
+        let (record, air) = (case.record, case.derived.atmosphere());
+        let g = record.bulk().ok().expect("its bulk").surface_gravity();
+        let t_s = air.surface_temperature().value();
+        let p_s = air.surface_pressure().expect("an air").value();
+        eprintln!(
+            "{SUPERCRITICAL_METHANE_BODY}: {:?} at {t_s:.4} K under {:.4} bar, {:?}",
+            air.published_state(),
+            p_s / 1e5,
+            case.derived.convergence()
+        );
+        assert_eq!(air.published_state(), SurfaceState::Snowball);
+        assert_eq!(case.surface.state(), SurfaceState::Snowball);
+        assert_eq!(
+            (
+                record.section_state(RecordSection::Surface),
+                record.section_state(RecordSection::Envelope)
+            ),
+            (SectionState::Ok, SectionState::NotApplicable)
+        );
+        assert!(air.supercritical_reservoir(g).is_none());
+        assert_eq!(case.derived.convergence(), Convergence::Converged);
+        assert!((t_s - 163.414).abs() <= 0.001, "{t_s}");
+        assert!((p_s / 1e5 - 104.15).abs() <= 0.01, "{p_s}");
+        assert!(diagram(methane).critical_temperature().value() - t_s >= 10.0);
+        let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+        let read = read.expect("its published pass reads its partition");
+        let partition = &read.partition;
+        let surface_pressure = partition.surface_pressure();
+        // Its methane: liquid at the surface, below its critical temperature and its melting
+        // pressure there, at its humidity's share of its saturation pressure.
+        let ch4 = partition.of(methane).expect("its methane");
+        let sea = partition.condensate(methane).expect("its methane's sea");
+        eprintln!("  CH4 {ch4:?}\n  {sea:?}");
+        assert_eq!(sea.phase(), CondensatePhase::Liquid);
+        let d = diagram(methane);
+        assert!(ch4.lies_at() < d.critical_temperature());
+        assert!(surface_pressure < d.melting_pressure(ch4.lies_at()).expect("a melting curve"));
+        let liquids = case.surface.condensates().surface_liquids();
+        assert!(
+            liquids.iter().any(|&(id, _)| id == sea.liquid()),
+            "{liquids:?}"
+        );
+        let held = METHANE_RELATIVE_HUMIDITY * d.saturation_pressure(ch4.lies_at()).value();
+        assert_same_bits(ch4.dominance(), 0.0);
+        assert!((ch4.partial_pressure().value() / held - 1.0).abs() < 1e-9);
+        let summed = ch4.airborne().value() + ch4.condensed().value();
+        assert!((summed / ch4.inventory().value() - 1.0).abs() < 1e-9);
+        // Its nitrogen: held at its critical isochore, a supercritical reservoir of under half
+        // the envelope's line, no liquid.
+        let n2 = partition.of(nitrogen).expect("its nitrogen");
+        let isochore = diagram(nitrogen)
+            .critical_isochore_pressure(n2.lies_at())
+            .expect("above its critical temperature")
+            .value();
+        eprintln!("  N2 {n2:?}");
+        assert!((n2.partial_pressure().value() / isochore - 1.0).abs() < 1e-9);
+        assert_eq!(
+            partition
+                .condensate(nitrogen)
+                .map(crate::planetary::chem::partition::Condensate::phase),
+            Some(CondensatePhase::Supercritical)
+        );
+        let column = air.supercritical_column().expect("its steps' column");
+        assert_the_steps_column_is_published(&column, n2, partition);
+        let reservoir = air.partitioned_reservoir(g).expect("its nitrogen's column");
+        assert_eq!(reservoir.gas(), Gas::Nitrogen);
+        assert!(
+            reservoir.share() < 0.5 * THIN_ENVELOPE_FRACTION,
+            "{reservoir:?}"
+        );
+        assert!(liquids.iter().all(|&(id, _)| id != nitrogen), "{liquids:?}");
     });
     assert_eq!(
         seen, 1,
@@ -13356,8 +13351,7 @@ impl SteamBody {
     }
 }
 
-/// [`part_three_census`] with the later 25 holds set back, for a caller inside
-/// `with_every_25_hold`: part 3's landing with P14.T53.e's present state, P14.T53.c's exposed
+/// [`part_three_census`]: part 3's landing with P14.T53.e's present state, P14.T53.c's exposed
 /// share and R09.T7.g's ray-traced plains, on the record from generator version 25, under T51.h's
 /// halvings, the oracle of P14.T51.l's secant steps, whose movers are its own
 /// (`under_the_secant_root_the_passes_and_movers_are_stated`).
@@ -13502,10 +13496,10 @@ fn print_part_three_groups(on: &[SteamBody]) {
 
 /// P14.T53.b part 3's census and boarding test (decision-p14-t53b-part3 §8–§9), run by name over
 /// part 1's census set (the first 60 sample systems, the golden systems and the 27 systems of
-/// LOOK72's triaged bodies), each generated afresh with every landed 25 hold in force, part 3 in
-/// force from generator version 25: its groups, every steam envelope, the supercritical
-/// reservoirs under an `Ok` surface, the four Jeans-retaining ice-bulk planets' water, and the
-/// walk's passes. It asserts the boarding items it can see by body:
+/// LOOK72's triaged bodies), each generated afresh, part 3 in force from generator version 25: its
+/// groups, every steam envelope, the supercritical reservoirs under an `Ok` surface, the four
+/// Jeans-retaining ice-bulk planets' water, and the walk's passes. It asserts the boarding items it
+/// can see by body:
 ///
 /// - B1: no present runaway or steam envelope holds H₂O condensed, on its record or in its air;
 /// - B3: [`SUPERCRITICAL_METHANE_BODY`] keeps its surface section;
@@ -13513,14 +13507,12 @@ fn print_part_three_groups(on: &[SteamBody]) {
 /// - B5: every steam envelope's division a runaway's and its surface not `Ok`; that it is a label
 ///   alone holds by construction (`Atmosphere::state` never gives it, so no figure reads it).
 ///
-/// B2 is `under_every_25_hold_venus_earth_mars_and_titan_publish_their_own_states`'. It is the
-/// census of part 3 at 25 (decision-p14-t53b-part3 §8, as main relayed its riding 25 on
-/// 2026-10-27).
+/// B2 is `venus_earth_mars_and_titan_publish_their_own_states`'. It is the census of part 3 at 25
+/// (decision-p14-t53b-part3 §8, as main relayed its riding 25 on 2026-10-27).
 #[test]
 #[ignore = "a measurement and boarding test for P14.T53.b part 3's record, run by name"]
-fn under_every_25_hold_part_three_s_census_is_stated() {
+fn part_three_s_census_is_stated() {
     use crate::planetary::chem::partition::CondensatePhase;
-    use crate::planetary::testing::with_every_25_hold;
     let look72 = look72_triaged_contexts();
     let look72_seed = look72_galaxy().seed();
     let sets: Vec<(&str, Seed, &SystemContext)> = sample()
@@ -13534,7 +13526,7 @@ fn under_every_25_hold_part_three_s_census_is_stated() {
         )
         .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
         .collect();
-    let on = with_every_25_hold(|| part_three_s_own_25_census(&sets));
+    let on = part_three_s_own_25_census(&sets);
     let (mut failures, passes) = part_three_boarding(&on);
     print_part_three_groups(&on);
     check_part_three_rulings(&on, &mut failures);

@@ -482,10 +482,6 @@ fn the_stream_shell_is_held_only_until_the_26_bump() {
     );
     let built = Galaxy::from_params(SEED, GalaxyParams::milky_way_like()).expect("builds");
     assert_eq!(built.rules().stream_shell, StreamShellRules::Unbounded);
-    assert_eq!(
-        GalaxyRules::every_25_hold().stream_shell,
-        StreamShellRules::Unbounded
-    );
     assert_eq!(galaxy(true).rules().stream_shell, StreamShellRules::Shell);
 }
 

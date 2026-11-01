@@ -111,21 +111,11 @@ impl GalaxyRules {
         }
     }
 
-    /// Every galaxy hold at 25 in force, for a test that asserts a 25 figure.
-    ///
-    /// A later hold at 25 joins it with nothing to edit, and "every 25 hold but one" is
-    /// struct-update syntax over it.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_25_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(25))
-    }
-
-    /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: 25's
-    /// holds and those that turn on at 26 (the galaxy's `bound_share`, P09.T13, `stream_shell`,
-    /// P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, `carve_out`, P09.T35, and
-    /// `feature_classes`, P09.T36; the stellar rules' `dwarf_sequence`, P06.T23.a, `helium`,
-    /// P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d,
+    /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
+    /// version's rules with the holds that turn on at 26 (the galaxy's `bound_share`, P09.T13,
+    /// `stream_shell`, P10.T9, `member_remnants`, P09.T10, `field_share`, P09.T2.c, `carve_out`,
+    /// P09.T35, and `feature_classes`, P09.T36; the stellar rules' `dwarf_sequence`, P06.T23.a,
+    /// `helium`, P15.T7.b, `hd_limit`, P06.T42.b, `v_magnitude`, P06.T43.b, `stripping`, P11.T1.d,
     /// `peculiar_classes`, P06.T24.b, and `star_events`, P06.T28.g;
     /// [`StellarRules::every_26_hold`]).
     ///
@@ -165,8 +155,7 @@ mod tests {
     use crate::rng::Seed;
 
     /// D3: a galaxy built the usual way carries the version's rules, and equals one built under
-    /// them explicitly; one built under every 26 hold does not. No galaxy-side hold at 25 remains,
-    /// so one built under every 25 hold is the version's.
+    /// them explicitly; one built under every 26 hold does not.
     #[test]
     fn a_galaxy_carries_the_version_s_rules() {
         let seed = Seed::new(0x0928_bb00_0000_0001);
@@ -181,7 +170,6 @@ mod tests {
         .expect("the Milky Way fixture builds");
         assert_eq!(built, explicit);
         assert_eq!(format!("{built:?}"), format!("{explicit:?}"));
-        assert_eq!(GalaxyRules::every_25_hold(), built.rules());
         let at_26 = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
@@ -229,8 +217,8 @@ mod tests {
     #[test]
     fn each_hold_turns_on_at_its_version() {
         assert_eq!(
-            GalaxyRules::every_25_hold().stellar,
-            StellarRules::every_25_hold()
+            GalaxyRules::of_version(GENERATOR_VERSION).stellar,
+            StellarRules::of_version(GENERATOR_VERSION)
         );
         assert_eq!(
             GalaxyRules::every_26_hold().stellar,
@@ -253,7 +241,7 @@ mod tests {
         }
         assert_eq!(bound(26), BoundShareRules::OwnMu);
         assert_eq!(
-            GalaxyRules::every_25_hold().bound_share,
+            GalaxyRules::of_version(GENERATOR_VERSION).bound_share,
             BoundShareRules::Bm03
         );
         assert_eq!(
@@ -266,7 +254,7 @@ mod tests {
         }
         assert_eq!(shell(26), StreamShellRules::Shell);
         assert_eq!(
-            GalaxyRules::every_25_hold().stream_shell,
+            GalaxyRules::of_version(GENERATOR_VERSION).stream_shell,
             StreamShellRules::Unbounded
         );
         assert_eq!(
@@ -288,7 +276,7 @@ mod tests {
         }
         assert_eq!(field(26), FieldShareRules::Phi);
         assert_eq!(
-            GalaxyRules::every_25_hold().field_share,
+            GalaxyRules::of_version(GENERATOR_VERSION).field_share,
             FieldShareRules::None
         );
         assert_eq!(
@@ -301,7 +289,7 @@ mod tests {
         }
         assert_eq!(carve(26), CarveOutRules::Claimed);
         assert_eq!(
-            GalaxyRules::every_25_hold().carve_out,
+            GalaxyRules::of_version(GENERATOR_VERSION).carve_out,
             CarveOutRules::Unclaimed
         );
         assert_eq!(

@@ -70,7 +70,7 @@ fn the_stripping_helium_axis_is_held_only_until_the_26_bump() {
         );
     }
     assert_eq!(
-        StellarRules::every_25_hold().stripping,
+        StellarRules::of_version(GENERATOR_VERSION).stripping,
         StrippingRules::HeliumExact
     );
     assert_eq!(

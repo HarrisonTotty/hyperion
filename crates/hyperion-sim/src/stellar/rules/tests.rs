@@ -148,10 +148,13 @@ fn no_version_takes_the_second_table() {
         );
     }
     assert_eq!(
-        StellarRules::every_25_hold().kick_rank,
+        StellarRules::of_version(GENERATOR_VERSION).kick_rank,
         KickRankRules::Committed
     );
-    assert_ne!(StellarRules::probe(), StellarRules::every_25_hold());
+    assert_ne!(
+        StellarRules::probe(),
+        StellarRules::of_version(GENERATOR_VERSION)
+    );
 }
 
 /// D3: a default galaxy carries the version's stellar rules, under which the law is the default

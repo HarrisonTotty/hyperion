@@ -175,10 +175,6 @@ fn the_young_and_carbon_classes_are_held_only_until_the_26_bump() {
         PeculiarClassRules::Held
     );
     assert_eq!(
-        StellarRules::every_25_hold().peculiar_classes,
-        PeculiarClassRules::Held
-    );
-    assert_eq!(
         StellarRules::every_26_hold().peculiar_classes,
         PeculiarClassRules::Full
     );

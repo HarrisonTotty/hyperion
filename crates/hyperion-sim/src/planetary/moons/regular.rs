@@ -3446,14 +3446,13 @@ mod tests {
         }
     }
 
-    /// P14.T53.e's anchors among the moons (decision-p14-t54a-states §3.4): under every 25 hold, at
-    /// the rank that keeps each one's measured radius, Titan is a `Snowball` by rule 5, its ice
-    /// crust's water ice over its whole surface at 94 K; Europa, Ganymede and Callisto are
-    /// `Airless` and Triton `Tenuous` (P14.T53.c), each by rule 4, as at 24.
+    /// P14.T53.e's anchors among the moons (decision-p14-t54a-states §3.4): at the rank that keeps
+    /// each one's measured radius, Titan is a `Snowball` by rule 5, its ice crust's water ice over
+    /// its whole surface at 94 K; Europa, Ganymede and Callisto are `Airless` and Triton `Tenuous`
+    /// (P14.T53.c), each by rule 4, as at 24.
     #[test]
-    fn under_every_25_hold_the_table_s_moons_keep_their_states() {
+    fn the_table_s_moons_keep_their_states() {
         use crate::planetary::derive::atmosphere::SurfaceState;
-        use crate::planetary::testing::with_every_25_hold;
         let jupiter = table_giant("Jupiter", 5, None);
         let saturn = table_giant("Saturn", 6, None);
         let neptune = table_giant("Neptune", 8, None);
@@ -3474,17 +3473,16 @@ mod tests {
             } else {
                 (MoonVolatiles::SHARED, MoonBulk::Derived)
             };
-            let derive = || own_moon((kg, keep), &orbit, giant, &volatiles, bulk);
-            let (at_24, at_25) = (derive(), with_every_25_hold(derive));
-            assert_eq!(at_24.atmosphere().state(), state, "{name} at 24");
+            let derived = own_moon((kg, keep), &orbit, giant, &volatiles, bulk);
+            assert_eq!(derived.atmosphere().state(), state, "{name}");
             assert_eq!(
-                at_25.atmosphere().published_state(),
+                derived.atmosphere().published_state(),
                 state,
                 "{name}: {:?}",
-                at_25.atmosphere()
+                derived.atmosphere()
             );
             assert_eq!(
-                at_25.atmosphere().carried_state(),
+                derived.atmosphere().carried_state(),
                 None,
                 "{name} does not flip"
             );

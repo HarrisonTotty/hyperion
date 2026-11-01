@@ -139,9 +139,9 @@ impl CellCache for KeepCells {
 
 /// The digest (`f64_digest`) of the Kepler regime's positions in the D2 test: each Kepler-regime
 /// record's cell and offsets at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed natively
-/// on x86-64; the wasip1 suite compares it. Re-pinned by name when P09.T28.d.b's exact orbit
-/// joined every 25 hold (it was `0xdc2a_4657_d88c_161e` on the two-body law), and again in
-/// `MGE_BOXY`'s potential (P15.T3.c; it was `0xce83_b24f_e65c_7554`).
+/// on x86-64; the wasip1 suite compares it. Re-pinned by name for P09.T28.d.b's exact orbit (it was
+/// `0xdc2a_4657_d88c_161e` on the two-body law), and again in `MGE_BOXY`'s potential (P15.T3.c; it
+/// was `0xce83_b24f_e65c_7554`).
 const MOVED_POSITIONS_DIGEST: u64 = 0xcd72_f9db_7c8d_d35d;
 
 /// D2: the Kepler regime moves the fixture's grid records inside the influence radius onto their

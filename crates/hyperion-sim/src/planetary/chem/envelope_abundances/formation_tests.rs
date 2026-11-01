@@ -13,7 +13,7 @@ use crate::id::SystemId;
 use crate::planetary::chem::AbundanceDraws;
 use crate::planetary::derive::composition::giant_heavy_elements;
 use crate::planetary::derive::radius::CoreComposition;
-use crate::planetary::testing::{with_every_25_hold, with_every_26_hold};
+use crate::planetary::testing::with_every_26_hold;
 use crate::rng::tags::SELFTEST_STREAM;
 
 /// How many envelopes each statistical test draws.
@@ -443,8 +443,8 @@ fn the_same_seed_gives_the_same_draws_twice() {
     }
 }
 
-/// P14.T50.d is held until the 25 → 26 bump: the rules in force are the trend's, the tests' switch
-/// and 26's helper reach the draws, and 25's helper does not.
+/// P14.T50.d is held until the 25 → 26 bump: the rules in force are the trend's, and the tests'
+/// switch and 26's helper reach the draws.
 #[test]
 fn the_formation_draws_are_held_only_until_the_26_bump() {
     assert!(
@@ -462,10 +462,6 @@ fn the_formation_draws_are_held_only_until_the_26_bump() {
     assert_eq!(
         with_every_26_hold(FormationDrawRules::in_force),
         FormationDrawRules::Drawn
-    );
-    assert_eq!(
-        with_every_25_hold(FormationDrawRules::in_force),
-        FormationDrawRules::Trend
     );
     assert_eq!(
         with_every_26_hold(|| {

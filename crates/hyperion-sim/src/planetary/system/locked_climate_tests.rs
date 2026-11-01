@@ -1,5 +1,5 @@
 //! P14.T24.j's census over the record: a world locked 1:1's substellar deck, the deck alone
-//! against every 25 hold, over the 400 sample systems.
+//! against the version's rules, over the 400 sample systems.
 
 use std::time::Instant;
 
@@ -7,7 +7,6 @@ use super::audit_tests::{AuditCase, AuditSet, audit_walk};
 use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
 use crate::planetary::hooks::surface::deck::{self, LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::regime::Forcing;
-use crate::planetary::testing::with_every_25_hold;
 use crate::rng::Seed;
 use crate::substance::phase::ice_ih_melting_temperature;
 use crate::units::{Metres, Pascals};
@@ -20,12 +19,12 @@ const DOMAIN_SYSTEMS: [usize; 3] = [243, 363, 187];
 /// s59 and s102, whose published passes list no liquid water but whose earlier passes did.
 const MOVED_SYSTEMS: [usize; 5] = [59, 102, 187, 243, 363];
 
-/// `run`'s result under every 25 hold and the deck's rules (`LockedClimateRules::Deck`), every
-/// other hold at 26 left held: the deck alone against every 25 hold. The others move bodies outside
-/// the deck's domain, P14.T54.b.l's levers an aerosol's last bits (s59's .0200) and P14.T33.c's
-/// rules 34 bodies of the 400.
+/// `run`'s result under the version's rules and the deck's (`LockedClimateRules::Deck`), every
+/// other hold at 26 left held: the deck alone against the version's rules. The others move bodies
+/// outside the deck's domain, P14.T54.b.l's levers an aerosol's last bits (s59's .0200) and
+/// P14.T33.c's rules 34 bodies of the 400.
 fn deck_alone<R>(run: impl FnOnce() -> R) -> R {
-    with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
+    with_locked_climate(LockedClimateRules::Deck, run)
 }
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census of some 6,000 bodies keeps no
@@ -198,11 +197,11 @@ fn moved_between(a: &[CensusBody], b: &[CensusBody]) -> Vec<String> {
 }
 
 /// The systems the deck moves, generated twice under the deck alone, give the same bits twice, and
-/// against every 25 hold only their locked worlds in the deck's domain move: the pilot's three
-/// (s187, s243, s363) among them.
+/// against the version's rules only their locked worlds in the deck's domain move: the pilot's
+/// three (s187, s243, s363) among them.
 #[test]
 fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
-    let held = with_every_25_hold(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
+    let held = census_of(MOVED_SYSTEMS, Goldens::Skipped);
     let deck = deck_alone(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
     let again = deck_alone(|| census_of(MOVED_SYSTEMS, Goldens::Skipped));
     assert_eq!(
@@ -229,7 +228,8 @@ fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
 }
 
 /// P14.T24.j's census over the 400 sample systems and the 15 golden systems, run by name: every
-/// published body under the deck alone against every 25 hold, the deck's own hold the difference.
+/// published body under the deck alone against the version's rules, the deck's own hold the
+/// difference.
 ///
 /// - **Only the deck's domain moves**: a body's record and passes are 25's to the bit unless it is
 ///   a world locked 1:1 in the deck's domain (r `f_S` `f_p` > 0, [`deck::reads_open_water`]),
@@ -245,7 +245,7 @@ fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
 #[ignore = "a measurement for the 26 bless, run by name: the 400 sample systems, walked twice"]
 fn under_every_26_hold_only_the_locked_worlds_under_their_deck_move_over_the_400() {
     let start = Instant::now();
-    let held = with_every_25_hold(census);
+    let held = census();
     let walk_held = start.elapsed();
     let start = Instant::now();
     let deck = deck_alone(census);
@@ -258,7 +258,7 @@ fn under_every_26_hold_only_the_locked_worlds_under_their_deck_move_over_the_400
     );
     assert_eq!(held.len(), deck.len(), "one walk's bodies, both rules");
     eprintln!(
-        "the walks (pod): every 25 hold {walk_held:?}, the deck alone {walk_deck:?}, {} bodies",
+        "the walks (pod): at 25 {walk_held:?}, the deck alone {walk_deck:?}, {} bodies",
         deck.len()
     );
     let (mut locked, mut domain, mut moved) = (0_u32, 0_u32, 0_u32);

@@ -176,16 +176,6 @@ impl StellarRules {
         }
     }
 
-    /// Every stellar hold at 25 in force, for a test that asserts a 25 figure without a galaxy.
-    ///
-    /// It is the stellar part of `GalaxyRules::every_25_hold()`, so a later hold at 25 joins both
-    /// with nothing to edit.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_25_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(25))
-    }
-
     /// Every stellar hold at 26 in force, for a test that asserts a 26 figure without a galaxy.
     ///
     /// It is the stellar part of `GalaxyRules::every_26_hold()`, so a later hold at 26 joins both

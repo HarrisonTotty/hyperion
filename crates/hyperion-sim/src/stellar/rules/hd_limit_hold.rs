@@ -176,10 +176,7 @@ fn the_enforced_limit_turns_on_at_26() {
     for v in [26, 27, 64] {
         assert_eq!(at(v), HdLimitRules::Enforced, "version {v}");
     }
-    assert_eq!(
-        StellarRules::every_25_hold().hd_limit,
-        HdLimitRules::Belczynski
-    );
+    assert_eq!(version().hd_limit, HdLimitRules::Belczynski);
     let at_26 = StellarRules::every_26_hold();
     assert_eq!(at_26.hd_limit, HdLimitRules::Enforced);
     assert!(!at_26.hd_limit.fitted_tables_hold());

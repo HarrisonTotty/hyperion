@@ -1613,24 +1613,23 @@ fn near_critical_body(record: &BodyRecord) -> Option<String> {
     Some(out)
 }
 
-/// Count (xii)'s guard (P14.T52.f; research-r08-t16a §2), every 25 hold in force, at the epoch over
-/// the 400 sample systems, the golden systems and LOOK72's audited contexts (020e56ef20080000
-/// among them): no `Crossing` base of a row's own curve in a surface's air, count (xii)'s, lies at
-/// or above [`NEAR_CRITICAL_LIQUID_SHARE`] of its condensable's critical temperature, where its
-/// liquid would float in its gas. At 24 two CH₄ decks did, both on N₂ surface airs
+/// Count (xii)'s guard (P14.T52.f; research-r08-t16a §2), at the epoch over the 400 sample
+/// systems, the golden systems and LOOK72's audited contexts (020e56ef20080000 among them): no
+/// `Crossing` base of a row's own curve in a surface's air, count (xii)'s, lies at or above
+/// [`NEAR_CRITICAL_LIQUID_SHARE`] of its condensable's critical temperature, where its liquid would
+/// float in its gas. At 24 two CH₄ decks did, both on N₂ surface airs
 /// ([`NEAR_CRITICAL_AT_24`], at 0.9939 and 0.9966 `T_c`); P14.T53.b part 3's cap at each
 /// condensable's critical isochore cures both at 25, and this keeps it so. Printed: the decks
 /// examined, those two bodies' decks at 25, and an envelope's such bases, outside count (xii)
 /// ("TO MAIN"). The rule that would cure a recurrence, such a base labelled `Supercritical` as
 /// P14.T52.f's are, is held in reserve. One thread, so that it runs as written on wasm32-wasip1.
 #[test]
-#[ignore = "slow: count (xii)'s guard over the 400, the goldens and LOOK72 under every 25 hold"]
-fn under_every_25_hold_no_crossing_base_lies_near_its_critical_point() {
+#[ignore = "slow: count (xii)'s guard over the 400, the goldens and LOOK72"]
+fn no_crossing_base_lies_near_its_critical_point() {
     use crate::Seed;
     use crate::planetary::system::tests::{
         GOLDEN_SYSTEMS_SEED, golden_contexts, look72_audit_contexts, look72_galaxy,
     };
-    use crate::planetary::testing::with_every_25_hold;
     let (goldens, look72) = (golden_contexts(), look72_audit_contexts());
     let look72_seed = look72_galaxy().seed();
     let sets: Vec<(Seed, &SystemContext)> = sample()
@@ -1650,22 +1649,21 @@ fn under_every_25_hold_no_crossing_base_lies_near_its_critical_point() {
             "{named}'s system is walked"
         );
     }
-    let (found, named) = with_every_25_hold(|| {
-        let (mut found, mut named) = (NearCritical::default(), Vec::new());
-        for &(seed, ctx) in &sets {
-            let snapshot = generate(seed, ctx).snapshot_at(ctx, UniverseTime::EPOCH);
-            for record in snapshot.bodies() {
-                found.add(record);
-                let id = record.identity().id().to_string();
-                if NEAR_CRITICAL_AT_24.contains(&id.as_str()) {
-                    named.push(near_critical_body(record).unwrap_or_else(|| {
+    let (mut found, mut named) = (NearCritical::default(), Vec::new());
+    for &(seed, ctx) in &sets {
+        let snapshot = generate(seed, ctx).snapshot_at(ctx, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            found.add(record);
+            let id = record.identity().id().to_string();
+            if NEAR_CRITICAL_AT_24.contains(&id.as_str()) {
+                named.push(
+                    near_critical_body(record).unwrap_or_else(|| {
                         panic!("{id}: its surface's inventory is modelled at 25")
-                    }));
-                }
+                    }),
+                );
             }
         }
-        (found, named)
-    });
+    }
     eprintln!(
         "count (xii)'s guard over {} systems at 25: {} own-curve decks of surface airs examined, \
          {} crossing bases among them at or above {} T_c; the named bodies at 25:\n  {}\nTO MAIN, \

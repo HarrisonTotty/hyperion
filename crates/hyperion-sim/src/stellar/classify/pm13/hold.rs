@@ -132,10 +132,7 @@ fn the_reduced_dwarf_sequence_is_held_only_until_the_26_bump() {
             "version {v}"
         );
     }
-    assert_eq!(
-        StellarRules::every_25_hold().dwarf_sequence,
-        DwarfSequenceRules::Rows
-    );
+    assert_eq!(VERSION.dwarf_sequence, DwarfSequenceRules::Rows);
     // Other holds turn on at 26 too (the helium table's, the Humphreys–Davidson limit's), so the
     // field alone is this hold's.
     assert_eq!(

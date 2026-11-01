@@ -9,9 +9,6 @@
 //! - [`sample_contexts`] draws real systems from a galaxy of the Milky Way's parameters: the
 //!   systems nearest a Sun-like point that pass a [`SampleFilter`], for the statistical tests
 //!   (design note 20).
-//! - For this crate's tests alone, `with_every_25_hold` runs a closure with every landed hold at
-//!   generator version 25 in force together, so that a test of a 25 figure reads 25 as it will
-//!   ship (decision-t24i-airless-state D3.3).
 //! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
 //!   reads of one.
 //! - [`envelope_by_hand`] builds a record's envelope from inputs stated by hand
@@ -413,7 +410,7 @@ impl Error for SampleContextsError {
 /// threads, which a switch on the test's thread would not reach. A brown dwarf's and a rogue
 /// planet's systems are generated, and the frame search walks their layers
 /// ([`frame_at`](crate::galaxy::frame::frame_at)); every other 26 hold stays held, so every other
-/// system reads version 25's records. It is one-way and process-wide, so a binary that calls it
+/// system reads the version's records. It is one-way and process-wide, so a binary that calls it
 /// calls it at the start of every test, and holds no test that asks for the free-floating hosts at
 /// 25. Only a test binary calls this. 26's bump deletes it with the holds.
 #[cfg(feature = "testing")]
@@ -421,28 +418,10 @@ pub fn admit_free_floating_hosts_in_this_process() {
     super::hosts::substellar::admit_free_floating_in_this_process();
 }
 
-/// `run`'s result with every landed hold at generator version 25 in force on this thread, for a
-/// test that asserts a 25 figure: a hold that missed 24's membership, which P14.T54.b.i closed
-/// (decision-p14-t53b-part3 §8), rides 25 behind its own version and switch, so that every 24 test
-/// reads none of it. Each switch sets its rules back as it returns, a panic in `run` included, and
-/// a test may set one hold back inside it to compare 25 with and without it.
-///
-/// The holds, each with its switch:
-///
-///
-/// A system or a record is read under the rules in force when it is generated: one generated
-/// outside the helper (the tests' caches, `whole` and `golden_systems`, are version 24's) is not
-/// 25's, so a test generates afresh inside it. A later hold at 25 adds its switch here; 25's bump
-/// deletes this helper with its holds.
-#[cfg(test)]
-pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
-    run()
-}
-
 /// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
-/// test that asserts a 26 figure: every 25 hold ([`with_every_25_hold`]) and those at 26, each with
-/// its switch, which sets its rules back as it returns, a panic in `run` included. A test may set
-/// one hold back inside it to compare 26 with and without it.
+/// test that asserts a 26 figure: the holds at 26, each with its switch, which sets its rules back
+/// as it returns, a panic in `run` included. A test may set one hold back inside it to compare 26
+/// with and without it.
 ///
 /// The holds at 26:
 ///
@@ -507,9 +486,10 @@ pub(crate) fn with_every_25_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the zonal search's Z₀, `Z0_BRANCH_VERSION` (R09.T13.i), at `Z0BranchRules::Kept` through
 ///   `with_z0_branch`: Z₀'s drift stop, and the held run in its place where it drifted.
 ///
-/// As under [`with_every_25_hold`], a system or a record is read under the rules in force when
-/// it is generated, so a test generates afresh inside it. A later hold at 26 adds its switch
-/// here; 26's bump deletes this helper with its holds.
+/// A system or a record is read under the rules in force when it is generated: one generated
+/// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
+/// 26's, so a test generates afresh inside it. A later hold at 26 adds its switch here; 26's bump
+/// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::chem::condense::{
@@ -564,7 +544,7 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
     };
-    with_every_25_hold(|| with_locked_climate(LockedClimateRules::Deck, run))
+    with_locked_climate(LockedClimateRules::Deck, run)
 }
 
 #[cfg(test)]
@@ -737,8 +717,8 @@ mod tests {
         ));
     }
 
-    /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it, inside
-    /// 25's and where a test sets it back.
+    /// 26's deck profile's switch (P14.T52.g): in force inside 26's helper, held outside it and
+    /// where a test sets it back.
     #[test]
     fn the_deck_profile_hold_is_in_force_inside_26_s_helper_alone() {
         use crate::planetary::chem::condense::{DeckProfileRules, with_deck_profile};
@@ -746,10 +726,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(DeckProfileRules::in_force),
             DeckProfileRules::Saturation
-        );
-        assert_eq!(
-            with_every_25_hold(DeckProfileRules::in_force),
-            DeckProfileRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| {
@@ -760,8 +736,8 @@ mod tests {
         assert_eq!(DeckProfileRules::in_force(), DeckProfileRules::Held);
     }
 
-    /// 26's dayside decks' switch (P14.T52.h): in force inside 26's helper, held outside it, inside
-    /// 25's and where a test sets it back.
+    /// 26's dayside decks' switch (P14.T52.h): in force inside 26's helper, held outside it and
+    /// where a test sets it back.
     #[test]
     fn the_dayside_decks_hold_is_in_force_inside_26_s_helper_alone() {
         use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
@@ -769,10 +745,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(DaysideDecksRules::in_force),
             DaysideDecksRules::Cleared
-        );
-        assert_eq!(
-            with_every_25_hold(DaysideDecksRules::in_force),
-            DaysideDecksRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| {
@@ -783,8 +755,8 @@ mod tests {
         assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
     }
 
-    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, not inside
-    /// 25's, and held outside them and where a test sets it back.
+    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, and held
+    /// outside it and where a test sets it back.
     #[test]
     fn the_z0_branch_is_in_force_inside_26_s_helper_alone() {
         use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
@@ -792,10 +764,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(Z0BranchRules::in_force),
             Z0BranchRules::Kept
-        );
-        assert_eq!(
-            with_every_25_hold(Z0BranchRules::in_force),
-            Z0BranchRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| with_z0_branch(Z0BranchRules::Held, Z0BranchRules::in_force)),

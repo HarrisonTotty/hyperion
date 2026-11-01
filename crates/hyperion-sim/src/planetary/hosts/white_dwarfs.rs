@@ -291,7 +291,7 @@ mod tests {
     use super::*;
     use crate::coords::{CellSize, GenCell};
     use crate::id::Layer;
-    use crate::planetary::testing::{with_every_25_hold, with_every_26_hold};
+    use crate::planetary::testing::with_every_26_hold;
 
     fn system(index: u32) -> SystemId {
         let cell = GenCell::new(CellSize::Ly8, [3, -2, 1]).expect("a cell of the grid");
@@ -316,10 +316,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(WhiteDwarfDebrisRules::in_force),
             WhiteDwarfDebrisRules::Debris
-        );
-        assert_eq!(
-            with_every_25_hold(WhiteDwarfDebrisRules::in_force),
-            WhiteDwarfDebrisRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| {

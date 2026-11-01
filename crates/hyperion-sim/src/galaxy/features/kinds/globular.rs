@@ -893,10 +893,6 @@ mod tests {
             GalaxyRules::of_version(GENERATOR_VERSION).bound_share,
             BoundShareRules::Bm03
         );
-        assert_eq!(
-            GalaxyRules::every_25_hold().bound_share,
-            BoundShareRules::Bm03
-        );
         assert_eq!(own().rules().bound_share, BoundShareRules::OwnMu);
     }
 

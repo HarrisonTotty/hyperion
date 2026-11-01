@@ -19,6 +19,7 @@ use hyperion_testkit::order::assert_order_independent;
 
 use super::kepler_regime_hold::{apart, census_galaxies, census_radius, ly, records_within, years};
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::galaxy::Population;
 use crate::galaxy::features::centre::members::CentrePlacement;
 use crate::galaxy::features::centre::{CentreMemberSource, KeepCentreOrbits};
@@ -250,7 +251,7 @@ fn the_exact_orbit_meets_the_straight_line_at_the_influence_radius() {
     println!("at the edge the exact orbit and the straight line part by at most {worst} ly");
 }
 
-/// D4 under every 25 hold: a galaxy built under the rules is the same galaxy, with the same
+/// D4 under the version's rules: a galaxy built under them is the same galaxy, with the same
 /// positions to the bit, as the version's fixture given them after (`Galaxy::with_rules`), so that
 /// `with_full_potential` carries its rules; its centre's potential is the one
 /// [`CentrePotential::new`] builds; and positions, states and pads are the same in any order, on
@@ -262,13 +263,15 @@ fn the_exact_orbit_gives_the_same_seed_the_same_answers_twice_and_in_any_order()
     let again = Galaxy::from_params_with_rules(
         seed,
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_25_hold(),
+        GalaxyRules::of_version(GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds")
     .with_full_potential();
     // Before anything reads its memos.
     let cold = again.clone();
-    let given = galaxy().clone().with_rules(GalaxyRules::every_25_hold());
+    let given = galaxy()
+        .clone()
+        .with_rules(GalaxyRules::of_version(GENERATOR_VERSION));
     assert_eq!(again, given);
     let near = CellKey::containing(Layer::B, &ly(0.5, 0.5, 0.5)).expect("in the cube");
     let mut cell = Vec::new();

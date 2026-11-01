@@ -1,5 +1,5 @@
-//! The wrong classes P14.T33.c's census found under every 25 hold, stated by name under every 26
-//! hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
+//! The wrong classes P14.T33.c's census found under the version's rules, stated by name under every
+//! 26 hold (research-census-25): the 13 locked `Snowball`s above 273.15 K (`LOCKED_STATE_VERSION`),
 //! the three airless planets over a hot ice bulk (`PLANET_LAG_VERSION`), the 29 runaways over a
 //! sea (`SEA_DECK_VERSION`) and the two hot `Snowball`s a locked world's deck set off
 //! (`LOCKED_CLIMATE_VERSION`), each body generated afresh in its system, as the census walks it;
@@ -27,11 +27,9 @@ use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{BodyRecord, RecordSection, SectionState};
 use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
-use crate::planetary::testing::{
-    SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
-};
+use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
 
-/// The census's 13 `Snowball`s above 273.15 K under every 25 hold, every one locked 1:1.
+/// The census's 13 `Snowball`s above 273.15 K under the version's rules, every one locked 1:1.
 const EYEBALLS: [(usize, &str); 13] = [
     (1_140, "02006b2ca0020001.0600"),
     (7_520, "01ff5b2d60060000.0500"),
@@ -48,14 +46,14 @@ const EYEBALLS: [(usize, &str); 13] = [
     (60_281, "02015b2de00c0000.0500"),
 ];
 
-/// The census's three airless `Icy` planets at a T0 above 273.15 K under every 25 hold.
+/// The census's three airless `Icy` planets at a T0 above 273.15 K under the version's rules.
 const AIRLESS_ICE_PLANETS: [(usize, &str); 3] = [
     (39_278, "42006cc200c00007.0500"),
     (44_919, "4200acaa01000006.0400"),
     (58_711, "42012ca200400002.0400"),
 ];
 
-/// The census's 29 runaways with liquid water at their surface under every 25 hold.
+/// The census's 29 runaways with liquid water at their surface under the version's rules.
 const SEA_RUNAWAYS: [(usize, &str); 29] = [
     (522, "01ffeb2b60000000.0200"),
     (1_893, "02002b2d9ff90000.0200"),
@@ -96,8 +94,8 @@ const DECK_SNOWBALLS: [(usize, &str); 2] = [
     (17_936, "0200fb2d1ffb0000.0400"),
 ];
 
-/// The two N₂ envelopes the slow census found changing section inside the clock window under every
-/// 25 hold and under every 26 hold (research-leans-8 §1): `Snowball`s whose mean surface
+/// The two N₂ envelopes the slow census found changing section inside the clock window under the
+/// version's rules and under every 26 hold (research-leans-8 §1): `Snowball`s whose mean surface
 /// temperatures lie above N₂'s critical point and whose reservoirs the passes settle on it.
 const CRITICAL_N2_ENVELOPES: [(usize, &str); 2] = [
     (14_276, "01ff1b2e1fff0000.0700"),
@@ -168,9 +166,9 @@ fn last_rank(bodies: &[(usize, &str)]) -> usize {
 }
 
 /// Asserts that under every 26 hold each of `bodies`, of the census's locked `Snowball`s above
-/// 273.15 K under every 25 hold, is `Temperate` (an eyeball, its open substellar sea under a frozen
-/// night, or a two-state cycle's last pass labelled by its own figures), or a `Snowball` its own
-/// figures make, frozen over at or below 273.15 K; and gives their states.
+/// 273.15 K under the version's rules, is `Temperate` (an eyeball, its open substellar sea under a
+/// frozen night, or a two-state cycle's last pass labelled by its own figures), or a `Snowball` its
+/// own figures make, frozen over at or below 273.15 K; and gives their states.
 fn assert_eyeballs_temperate_or_frozen_over(bodies: &[(usize, &str)]) -> Vec<SurfaceState> {
     let sample = sample_through(last_rank(bodies));
     let read = |case: &AuditCase<'_>| {
@@ -278,8 +276,8 @@ fn assert_airless_ice_planets_take_the_rock_lag(bodies: &[(usize, &str)]) {
 }
 
 /// Asserts that each of `bodies`, of the census's runaways over a sea, is a `RunawayGreenhouse`
-/// with liquid water at its surface under every 25 hold and none under every 26 hold, where #522
-/// and #18655, whose first solve part 3 labels a steam envelope, publish `SteamEnvelope`.
+/// with liquid water at its surface under the version's rules and none under every 26 hold, where
+/// #522 and #18655, whose first solve part 3 labels a steam envelope, publish `SteamEnvelope`.
 fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
     let sample = sample_through(last_rank(bodies));
     let read = |case: &AuditCase<'_>| {
@@ -293,7 +291,7 @@ fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
     };
     let mut lines = Vec::new();
     for &body in bodies {
-        let at_25 = with_every_25_hold(|| read_body((&sample.0, &sample.1), body, &read))
+        let at_25 = read_body((&sample.0, &sample.1), body, &read)
             .expect("the census's body is in its system");
         let at_26 = with_every_26_hold(|| read_body((&sample.0, &sample.1), body, &read))
             .expect("the census's body is in its system");
@@ -323,8 +321,8 @@ fn assert_no_runaway_holds_a_sea(bodies: &[(usize, &str)]) {
 
 /// Under every 26 hold an eyeball of the census (#30403) settles under its deck at the open water's
 /// edge (P14.T24.j), a `Snowball` its own figures make below 273.15 K, and a two-state cycle of the
-/// census (#19541, open and ice-free) is `Temperate`; each a `Snowball` above 273.15 K under every
-/// 25 hold.
+/// census (#19541, open and ice-free) is `Temperate`; each a `Snowball` above 273.15 K under the
+/// version's rules.
 #[test]
 fn under_every_26_hold_a_census_eyeball_settles_at_the_edge_and_a_two_state_cycle_is_temperate() {
     assert_eq!(
@@ -438,25 +436,25 @@ fn under_every_26_hold_no_census_runaway_holds_a_sea() {
     assert_no_runaway_holds_a_sea(&SEA_RUNAWAYS);
 }
 
-/// Under every 25 hold and under every 26 hold the census's two critical N₂ envelopes
+/// Under the version's rules and under every 26 hold the census's two critical N₂ envelopes
 /// ([`CRITICAL_N2_ENVELOPES`]) hide their surfaces, their envelopes not modelled, at every one of
 /// the census's [`WATCH_TIMES`] times across the clock window: a reservoir counts by its solve's
 /// mean surface temperature, above N₂'s critical point, not by the temperature the passes settle
 /// it at, on that point (research-leans-8 §1).
 #[test]
-fn under_every_25_and_26_hold_the_census_s_critical_n2_envelopes_stay_hidden() {
+fn the_census_s_critical_n2_envelopes_stay_hidden() {
     let sample = sample_through(last_rank(&CRITICAL_N2_ENVELOPES));
     let across = |body| envelope_across_the_window((&sample.0, &sample.1), body);
     let times = usize::try_from(WATCH_TIMES).expect("the census's 41 times");
     for &body in &CRITICAL_N2_ENVELOPES {
         for (rules, sections) in [
-            (25, with_every_25_hold(|| across(body))),
-            (26, with_every_26_hold(|| across(body))),
+            ("the version's rules", across(body)),
+            ("every 26 hold", with_every_26_hold(|| across(body))),
         ] {
             assert_eq!(
                 sections,
                 vec![SectionState::NotModelled; times],
-                "#{} {} under every {rules} hold",
+                "#{} {} under {rules}",
                 body.0,
                 body.1
             );
@@ -465,17 +463,14 @@ fn under_every_25_and_26_hold_the_census_s_critical_n2_envelopes_stay_hidden() {
 }
 
 /// The Solar System table (Venus, Earth, Mars and Titan among its bodies) is derived the same, to
-/// the bit, under every 25 hold with the eyeball's rule and the dry deck each on and held (the
-/// planets' lag is a generated system's, which the table is not).
+/// the bit, under the version's rules with the eyeball's rule and the dry deck each on and held
+/// (the planets' lag is a generated system's, which the table is not).
 #[test]
 fn the_solar_system_table_is_unchanged_by_the_census_s_26_rules() {
-    let held = with_every_25_hold(historic_table);
+    let held = historic_table();
     assert_eq!(
-        with_every_25_hold(|| with_locked_state(LockedStateRules::Eyeball, historic_table)),
+        with_locked_state(LockedStateRules::Eyeball, historic_table),
         held
     );
-    assert_eq!(
-        with_every_25_hold(|| with_sea_deck(SeaDeckRules::Dry, historic_table)),
-        held
-    );
+    assert_eq!(with_sea_deck(SeaDeckRules::Dry, historic_table), held);
 }

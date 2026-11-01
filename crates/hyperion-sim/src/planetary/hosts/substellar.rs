@@ -564,9 +564,7 @@ mod tests {
     use crate::planetary::params::{HILL_STABLE_GAP, SPACING_GIANT_MASS};
     use crate::planetary::placement::{OrbitHost, mutual_hill_radius};
     use crate::planetary::system::{PlanetarySystem, generate, generate_planets};
-    use crate::planetary::testing::{
-        SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
-    };
+    use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
     use crate::stellar::multiplicity::SlotKind;
     use crate::stellar::system::SystemStars;
     use crate::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
@@ -652,10 +650,6 @@ mod tests {
         assert_eq!(
             with_every_26_hold(SubstellarHostRules::in_force),
             SubstellarHostRules::BrownDwarfs
-        );
-        assert_eq!(
-            with_every_25_hold(SubstellarHostRules::in_force),
-            SubstellarHostRules::Held
         );
         assert_eq!(
             with_every_26_hold(|| {

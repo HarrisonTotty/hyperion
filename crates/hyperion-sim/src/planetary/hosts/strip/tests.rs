@@ -17,7 +17,6 @@ use crate::galaxy::motion::{Regime, regime_of};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, STELLAR_LAYERS, generate_cell};
 use crate::galaxy::query::{QuerySphere, cells_in_sphere};
-use crate::galaxy::rules::GalaxyRules;
 use crate::id::{CentreMemberId, Layer, MemberSlot, SystemId};
 use crate::orbit::Eccentricity;
 use crate::planetary::record::BodyKind;
@@ -28,15 +27,14 @@ use crate::units::{AstronomicalUnits, GravitationalParameter, KilometresPerSecon
 
 const SEED: Seed = Seed::new(0x0e14_0029_0000_0001);
 
-/// The Milky Way fixture under every galaxy hold at 25 (the Kepler regime), with its kinematic
-/// tables, which feature members and grid velocities need. Built once per test binary.
+/// The Milky Way fixture under the version's rules (the Kepler regime among them), with its
+/// kinematic tables, which feature members and grid velocities need. Built once per test binary.
 fn kepler_galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
-        Galaxy::from_params_with_rules(
+        Galaxy::from_params(
             Seed::new(0x0e14_0029_0000_0002),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_25_hold(),
         )
         .expect("the Milky Way fixture builds")
         .with_full_potential()

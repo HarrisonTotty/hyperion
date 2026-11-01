@@ -315,7 +315,7 @@ impl Galaxy {
 
     /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
     /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), such as
-    /// `GalaxyRules::every_25_hold()`.
+    /// `GalaxyRules::every_26_hold()`.
     ///
     /// # Errors
     ///

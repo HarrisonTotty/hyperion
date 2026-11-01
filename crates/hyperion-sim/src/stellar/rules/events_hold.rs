@@ -132,10 +132,6 @@ fn the_star_events_are_held_only_until_the_26_bump() {
         StarEventRules::Held
     );
     assert_eq!(
-        StellarRules::every_25_hold().star_events,
-        StarEventRules::Held
-    );
-    assert_eq!(
         StellarRules::every_26_hold().star_events,
         StarEventRules::Composed
     );

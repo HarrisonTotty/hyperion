@@ -162,8 +162,8 @@ fn the_helium_table_is_held_only_until_the_26_bump() {
     assert_eq!(held().rules().stellar, version());
 }
 
-/// The fitted table turns on at 26: every 25 hold still reads the identity, every 26 hold the fit,
-/// and the kick-rank field keeps its committed table.
+/// The fitted table turns on at 26: the version's rules still read the identity, every 26 hold the
+/// fit, and the kick-rank field keeps its committed table.
 #[test]
 fn the_fitted_table_turns_on_at_26() {
     let at = |v| StellarRules::of_version(GeneratorVersion::new(v)).helium;
@@ -173,7 +173,7 @@ fn the_fitted_table_turns_on_at_26() {
     for v in [26, 27, 64] {
         assert_eq!(at(v), HeliumRules::Fitted, "version {v}");
     }
-    assert_eq!(StellarRules::every_25_hold().helium, HeliumRules::Identity);
+    assert_eq!(version().helium, HeliumRules::Identity);
     assert_eq!(StellarRules::every_26_hold().helium, HeliumRules::Fitted);
     assert_eq!(
         StellarRules::every_26_hold().kick_rank,

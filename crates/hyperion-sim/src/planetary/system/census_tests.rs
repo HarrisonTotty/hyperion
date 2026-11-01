@@ -1,6 +1,6 @@
 //! P14.T33.c, the composition census (decision-composition; plan 14's T33.c): the generated galaxy's
-//! composition measured over real systems, as generator version 24 builds their records, and as
-//! version 25 will under every hold at 25 ([`Rules`]).
+//! composition measured over real systems, as the generator version builds their records, and as
+//! version 26 will under every hold at 26 ([`Rules`]).
 //!
 //! The systems are `planetary::testing`'s volume-limited sample about the Sun-like point, the
 //! system tests' universe ([`SEED`]), nearest first, so that the first 400 are the sample of every
@@ -8,9 +8,9 @@
 //! ([`audit_walk_system`]): every planet, member and moon present at the epoch with a bulk section,
 //! its record as `snapshot_at` builds it and its derivation. The ordinary census reads
 //! [`ORDINARY_SYSTEMS`] systems, at least 10⁵ bodies, and the slow one [`SLOW_SYSTEMS`], at least
-//! 10⁶, each at version 24 and under every 25 hold: four slow tests, each on threads of its own
-//! (`.config/nextest.toml` reserves their slots). The counts do not depend on the threads: each
-//! share's systems are fixed, and the shares are merged in order.
+//! 10⁶, each under the version's rules and under every 26 hold: four slow tests, each on threads
+//! of its own (`.config/nextest.toml` reserves their slots). The counts do not depend on the
+//! threads: each share's systems are fixed, and the shares are merged in order.
 //!
 //! It prints, by host class ([`HostClass`]):
 //!
@@ -25,11 +25,11 @@
 //! two ends, or either side of its next recorded change inside the window, is not its section at
 //! the epoch's; and the lists earlier tasks recorded for it: the condensates whose density the
 //! registry has not read, the envelopes' modes with no τ, the cold-trapped condensates, the reached
-//! rows whose condensed optics are stand-ins, and the solid surfaces' ages by tectonic regime. None
-//! of those is asserted at 24: they are the census's findings, printed for review. Under every 25
-//! hold the findings a hold at 25 fixes are asserted absent ([`FIXED_UNDER_25`]), and under every
-//! 26 hold those a hold at 25 or 26 fixes ([`FIXED_UNDER_26`]), but the bodies [`LEFT_UNDER_26`]
-//! lists.
+//! rows whose condensed optics are stand-ins, and the solid surfaces' ages by tectonic regime. Of
+//! those, the census asserts only that no envelope changes section inside the clock window and
+//! that the findings the holds at 25 fixed are absent ([`FIXED_UNDER_25`]): the rest are its
+//! findings, printed for review. Under every 26 hold it also asserts absent those a hold at 26
+//! fixes ([`FIXED_UNDER_26`]), but the bodies [`LEFT_UNDER_26`] lists.
 //!
 //! The tests are native only: on WebAssembly, which has no threads, the shares would run one after
 //! another, thousands of systems on one thread, and the records' bit-for-bit agreement there is
@@ -57,9 +57,7 @@ use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
-use crate::planetary::testing::{
-    SampleFilter, sample_records, with_every_25_hold, with_every_26_hold,
-};
+use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
 use crate::substance::{self, CondensedOptics, SubstanceId};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -99,8 +97,8 @@ const DENSITY_RANGE: (KilogramsPerCubicMetre, KilogramsPerCubicMetre) = (
     KilogramsPerCubicMetre::new(30_000.0),
 );
 
-/// The registry rows no record of the census reaches, each with the reason; the ordinary census
-/// holds the list exact.
+/// The registry rows no record of the census reaches, each with the reason; a listed row a census
+/// reaches is printed.
 const UNREACHED: &[(&str, &str)] = &[
     (
         "FeH",
@@ -881,7 +879,7 @@ impl Census {
                     .map(|found| (kind, found.count, found.bodies.as_slice()))
             })
             .collect();
-        assert_eq!(shown, Vec::new(), "findings 25's holds fix");
+        assert_eq!(shown, Vec::new(), "findings 25's holds fixed");
     }
 
     /// Asserts that no body shows a finding of [`FIXED_UNDER_25`] or [`FIXED_UNDER_26`] but those
@@ -907,8 +905,8 @@ impl Census {
     }
 
     /// Asserts that every registry row is reached or listed in [`UNREACHED`], each listed key a
-    /// row; and for [`Listing::Exact`], also that no listed row is reached.
-    fn assert_reached(&self, listing: Listing) {
+    /// row; a listed row reached is printed (the report's "Listed but reached").
+    fn assert_reached(&self) {
         for (k, _) in UNREACHED {
             assert!(substance::by_key(k).is_some(), "{k} is not a registry row");
         }
@@ -922,23 +920,11 @@ impl Census {
             Vec::<String>::new(),
             "rows no record reaches, not listed with a reason"
         );
-        if listing == Listing::Exact {
-            let reached: Vec<&str> = UNREACHED
-                .iter()
-                .map(|(k, _)| *k)
-                .filter(|k| substance::by_key(k).is_some_and(|id| self.reached.contains_key(&id)))
-                .collect();
-            assert_eq!(
-                reached,
-                Vec::<&str>::new(),
-                "rows listed as never reached that a record reaches"
-            );
-        }
     }
 }
 
-/// The findings of the census at version 24 that a hold at 25 fixes, each held at none under
-/// every 25 hold ([`Census::assert_fixed_under_25`]): the audit's M6 on a rocky belt's hot
+/// The findings of the census at version 24 that a hold at 25 fixed, each held at none under the
+/// version's rules ([`Census::assert_fixed_under_25`]): the audit's M6 on a rocky belt's hot
 /// ice-bulk members, P14.T56.g's lag asked of them (`member_lag`).
 const FIXED_UNDER_25: [&str; 1] = ["the audit's M6 fails on members"];
 
@@ -1026,15 +1012,6 @@ fn rule_5_holds(surface: &Surface) -> bool {
     let locked = surface.climate_regime().forcing() == Forcing::Locked;
     surface.figures().ice_fraction() >= SNOWBALL_ICE_COVER
         && !(locked_state_in_force() && locked && lists_liquid_water(surface))
-}
-
-/// How a census holds [`UNREACHED`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Listing {
-    /// Every row never reached is listed, and no listed row is reached.
-    Exact,
-    /// Every row never reached is listed; a listed row reached is printed.
-    Covering,
 }
 
 /// The entries of `map`, each as `text` names it with its count, joined.
@@ -1324,13 +1301,10 @@ fn reach(record: &BodyRecord, mark: &mut dyn FnMut(SubstanceId)) {
 /// The rules a census generates its systems under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Rules {
-    /// Generator version 24's, as it ships.
-    At24,
-    /// Every hold of version 25 in force ([`with_every_25_hold`]), set on each share's own thread,
+    /// The generator version's, as it ships.
+    Version,
+    /// Every hold of version 26 in force ([`with_every_26_hold`]), set on each share's own thread,
     /// since the holds' switches are each thread's.
-    Every25Hold,
-    /// Every hold of version 26 in force ([`with_every_26_hold`]), those of 25 among them, set on
-    /// each share's own thread.
     Every26Hold,
 }
 
@@ -1351,8 +1325,7 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], first: usize, rules: Rul
         }
     };
     match rules {
-        Rules::At24 => walk(),
-        Rules::Every25Hold => with_every_25_hold(walk),
+        Rules::Version => walk(),
         Rules::Every26Hold => with_every_26_hold(walk),
     }
     census
@@ -1390,7 +1363,9 @@ fn run(title: &str, systems: usize, threads: usize, rules: Rules) -> Census {
 }
 
 /// The ordinary census (P14.T33.c), over [`ORDINARY_SYSTEMS`] systems: at least 10⁵ bodies, every
-/// registry row reached or listed with its reason, and the list exact.
+/// registry row reached or listed with its reason (a listed row it reaches is printed), none of the
+/// findings 25's holds fixed ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock
+/// window.
 #[test]
 #[ignore = "slow: 10⁵ bodies of 6,800 systems, on eight threads"]
 fn composition_census_reaches_every_row_or_lists_why() {
@@ -1398,54 +1373,28 @@ fn composition_census_reaches_every_row_or_lists_why() {
         "the ordinary census",
         ORDINARY_SYSTEMS,
         ORDINARY_THREADS,
-        Rules::At24,
+        Rules::Version,
     );
     assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Exact);
-}
-
-/// The ordinary census under every hold of version 25 ([`Rules::Every25Hold`]): at least 10⁵
-/// bodies, every registry row reached or listed with its reason, none of the findings 25's holds
-/// fix ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock window.
-#[test]
-#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 25 hold, on eight threads"]
-fn composition_census_under_every_25_hold_reaches_every_row_or_lists_why() {
-    let census = run(
-        "the ordinary census under every 25 hold",
-        ORDINARY_SYSTEMS,
-        ORDINARY_THREADS,
-        Rules::Every25Hold,
-    );
-    assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Covering);
+    census.assert_reached();
     census.assert_fixed_under_25();
     census.assert_no_envelope_changes();
 }
 
 /// The slow census (P14.T33.c), over [`SLOW_SYSTEMS`] systems: at least 10⁶ bodies, every registry
-/// row reached or listed with its reason; a listed row it reaches is printed.
+/// row reached or listed with its reason (a listed row it reaches is printed), none of the findings
+/// 25's holds fixed ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁶ bodies of 68,000 systems, on eight threads"]
 fn composition_census_over_a_million_bodies_reaches_every_row_or_lists_why() {
-    let census = run("the slow census", SLOW_SYSTEMS, SLOW_THREADS, Rules::At24);
-    assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Covering);
-}
-
-/// The slow census under every hold of version 25 ([`Rules::Every25Hold`]): at least 10⁶ bodies,
-/// every registry row reached or listed with its reason, none of the findings 25's holds fix
-/// ([`FIXED_UNDER_25`]) and no envelope changing section inside the clock window.
-#[test]
-#[ignore = "slow: 10⁶ bodies of 68,000 systems under every 25 hold, on eight threads"]
-fn composition_census_under_every_25_hold_over_a_million_bodies_reaches_every_row_or_lists_why() {
     let census = run(
-        "the slow census under every 25 hold",
+        "the slow census",
         SLOW_SYSTEMS,
         SLOW_THREADS,
-        Rules::Every25Hold,
+        Rules::Version,
     );
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Covering);
+    census.assert_reached();
     census.assert_fixed_under_25();
     census.assert_no_envelope_changes();
 }
@@ -1463,7 +1412,7 @@ fn composition_census_under_every_26_hold_reaches_every_row_or_lists_why() {
         Rules::Every26Hold,
     );
     assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Covering);
+    census.assert_reached();
     census.assert_fixed_under_26();
     census.assert_no_envelope_changes();
 }
@@ -1482,7 +1431,7 @@ fn composition_census_under_every_26_hold_over_a_million_bodies_reaches_every_ro
         Rules::Every26Hold,
     );
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);
-    census.assert_reached(Listing::Covering);
+    census.assert_reached();
     census.assert_fixed_under_26();
     census.assert_no_envelope_changes();
 }

@@ -2535,10 +2535,8 @@ mod tests {
     /// surface's tags, and [`BodyRecordBuilder::derived`] no envelope's. Its bulk's gravity is its
     /// derivation's, to the bit, so that the builder and the generator decide alike.
     #[test]
-    fn under_every_25_hold_the_census_s_methane_snowball_takes_no_envelope_s_tags_from_the_builder()
-    {
+    fn the_census_s_methane_snowball_takes_no_envelope_s_tags_from_the_builder() {
         use crate::planetary::system::tests::supercritical_methane_body;
-        use crate::planetary::testing::with_every_25_hold;
         let tags = |record: &BodyRecord| {
             (
                 record.section_state(RecordSection::Surface),
@@ -2546,13 +2544,13 @@ mod tests {
             )
         };
         let built = |derived: &DerivedBody| planet_record(4, derived, 0.1);
-        let (steam_record, steam) = with_every_25_hold(supercritical_methane_body);
+        let (steam_record, steam) = supercritical_methane_body();
         assert_eq!(
             tags(&steam_record),
             (SectionState::Ok, SectionState::NotApplicable)
         );
         assert_eq!(
-            with_every_25_hold(|| tags(&built(&steam))),
+            tags(&built(&steam)),
             (SectionState::NotModelled, SectionState::NotApplicable)
         );
         let bulk = steam_record.bulk().ok().expect("a present body's bulk");
