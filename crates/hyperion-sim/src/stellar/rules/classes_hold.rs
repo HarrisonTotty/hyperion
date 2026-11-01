@@ -308,7 +308,14 @@ fn the_full_arm_s_classes_are_the_same_in_any_order() {
 /// times across the clock window.
 #[test]
 fn with_its_events_composed_the_carbon_star_s_class_is_its_brief_s() {
-    let both = held().clone().with_rules(GalaxyRules::every_26_hold());
+    // Built under every 26 hold, since the field share and the carve-out are read when a galaxy is
+    // built.
+    let both = Galaxy::from_params_with_rules(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_26_hold(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
     assert_eq!(both.rules().stellar, StellarRules::every_26_hold());
     let record = carbon_star();
     let stars = SystemStars::generate(&both, record);
