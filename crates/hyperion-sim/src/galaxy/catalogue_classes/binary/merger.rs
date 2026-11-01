@@ -41,10 +41,23 @@
 //! a circular orbit, detached, as the engine's segment before that onset is
 //! ([`MergerPair::before`]); from T it is the star the engine's envelope leaves, bit for bit.
 //!
+//! # The dynamical main sequence, from 27
+//!
+//! From [`MERGER_CHANNELS_VERSION`] (P11.T8.c's missing channel, research-leans-16 §1.1: the
+//! engine's mergers of two main-sequence stars, 0.30 of its mergers, are nearly all a low-mass
+//! donor's dynamical transfer, detached just before, whose mass ratio no contact pair at the tidal
+//! limit has) the scan draws one of three channels, by `MERGER_SAMPLER`'s `EngineChannel` weights:
+//! the two above, or a **dynamical main-sequence** merger, a low-mass (BSE's k = 0) main-sequence
+//! donor at its lobe beside a lighter main-sequence companion, built at its lobe as an evolved
+//! donor is. The engine's onset of transfer finds the donor past its critical ratio and merges the
+//! pair dynamically (`Engine::merge_dynamically`); before T the pair is detached at the donor's
+//! lobe, from T the engine's merged star, bit for bit. An evolved donor's companion is drawn by
+//! its donor's kind's mark.
+//!
 //! # The test
 //!
 //! The candidate's [`BinaryTimeline::from_marks`] is the pair before T (the contact pair, or from
-//! 26 the evolved donor's detached pair) from zero age to T and the merged star from T, built from
+//! 26 a donor's detached pair at its lobe) from zero age to T and the merged star from T, built from
 //! its marks. It is an entry if and only if [`carved_class`] of that timeline is
 //! [`CarvedClass::StellarMerger`], the one test the grid applies to an evolved pair (design note
 //! 10); a merger in the horizon of a pair with a living star always is.
@@ -69,7 +82,7 @@ use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{ObjectKey, Stream, tags};
-use crate::stellar::binary::scan::{MergerScanMarks, evolved_product, merger_scan_marks};
+use crate::stellar::binary::scan::{MergerScanMarks, donor_product, merger_scan_marks};
 use crate::stellar::binary::{
     BinaryMarks, BinaryTimeline, CarvedClass, MarkedMerger, SegmentKind, carved_class,
 };
@@ -97,6 +110,32 @@ use crate::units::{
 /// remnant's matches on it, `MergerMark::MassRatio`, and the tripwire
 /// (`the_merger_class_is_held_only_until_the_26_bump`).
 pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+
+/// The generator version whose stellar merger class adds the engine's dynamical main-sequence
+/// mergers (P11.T8.c's missing channel, research-leans-16 §1.1): a third channel, a low-mass
+/// main-sequence donor at its lobe that the engine merges dynamically, by `MERGER_SAMPLER`'s
+/// `EngineChannel` weights; and an evolved donor's companion by its donor's kind's mark.
+///
+/// Below it the class's channels take the held arm, [`MergerChannelRules::ContactAndEvolved`],
+/// version 26's two verbatim (and under [`MergerClassRules::ContactOnly`], below 26, the channels
+/// are never read), so every generated value keeps its bits; the tests reach the new arm through
+/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`MergerChannelRules`] with
+/// its `ContactAndEvolved` arm, the galaxy rules' `merger_channels` field, the scan's match on it
+/// with `MergerPick::Channel` and `MergerChannel::HELD`, and the tripwire
+/// (`the_merger_channels_are_held_only_until_the_27_bump`).
+pub(crate) const MERGER_CHANNELS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Which channels the stellar merger class draws under [`MergerClassRules::Channels`] (the galaxy
+/// rules' `merger_channels` field, the hold of [`MERGER_CHANNELS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MergerChannelRules {
+    /// Version 26's: a contact pair or an evolved donor, by `MergerPick::Channel`, an evolved
+    /// donor's companion by `MergerMark::EvolvedMassRatio` whatever its kind.
+    ContactAndEvolved,
+    /// Version 27's: a contact pair, an evolved donor or a dynamical main-sequence donor, by
+    /// `MergerPick::EngineChannel`, an evolved donor's companion by its donor's kind's mark.
+    WithDynamical,
+}
 
 /// How the merger classes draw their entries (the galaxy rules' `merger_class` field, the hold of
 /// [`MERGER_CLASS_VERSION`]).
@@ -194,14 +233,14 @@ impl StellarMergers {
         let angles = (orientation, mean_anomaly);
         let draws = [0, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
         let rules = galaxy.rules().stellar;
-        let (pair, product) = match scan.evolved_separation() {
+        let (pair, product) = match scan.donor_separation() {
             None => (
                 MergerPair::contact(scan.stars(), angles),
                 main_sequence_product(scan.stars(), scan.composition(), &draws[0], rules),
             ),
             Some(separation) => (
-                MergerPair::evolved(scan.stars(), separation, angles),
-                evolved_product(&scan, &draws, rules).expect(
+                MergerPair::at_lobe(scan.stars(), separation, angles),
+                donor_product(&scan, &draws, rules).expect(
                     "the scan kept this pair because the engine's onset merges this same input",
                 ),
             ),
@@ -278,9 +317,9 @@ pub struct MergerCandidate {
 }
 
 /// A stellar merger's pair before T (P11.T8.c): two main-sequence stars in contact on a circular
-/// orbit, each filling its Roche lobe; or, from 26, an evolved donor filling its lobe on a
-/// circular orbit about its main-sequence companion, detached, as the engine's segment before a
-/// common envelope leaves it.
+/// orbit, each filling its Roche lobe; or, from 26, a donor filling its lobe on a circular orbit
+/// about its main-sequence companion, detached, as the engine's segment before the onset leaves
+/// it: an evolved donor, or from 27 a low-mass main-sequence donor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MergerPair {
     before: SegmentKind,
@@ -290,7 +329,7 @@ pub struct MergerPair {
 
 impl MergerPair {
     /// What the pair is before T: [`SegmentKind::Contact`] for a contact pair,
-    /// [`SegmentKind::Detached`] for an evolved donor.
+    /// [`SegmentKind::Detached`] for a donor at its lobe.
     #[must_use]
     pub const fn before(&self) -> SegmentKind {
         self.before
@@ -309,11 +348,11 @@ impl MergerPair {
         &self.orbit
     }
 
-    /// The evolved donor's pair of `stars` (their own states at T) on its circular orbit of
-    /// `separation`, the scan's, on which the donor fills its lobe, oriented and phased by
-    /// `angles`; each star at its own radius.
+    /// A donor's pair at its lobe of `stars` (their own states at T, the donor first) on its
+    /// circular orbit of `separation`, the scan's, on which the donor fills its lobe, oriented and
+    /// phased by `angles`; each star at its own radius.
     #[must_use]
-    fn evolved(
+    fn at_lobe(
         stars: &[StarState; 2],
         separation: Metres,
         (orientation, mean_anomaly): (Orientation, Radians),
@@ -326,7 +365,7 @@ impl MergerPair {
             orientation,
             mean_anomaly,
         )
-        .expect("a giant's radius about a star or two is an orbit");
+        .expect("a star's radius about a star or two is an orbit");
         Self {
             before: SegmentKind::Detached,
             stars: *stars,
@@ -538,5 +577,9 @@ impl ClassProcess for StellarMergers {
 
 #[cfg(test)]
 mod channels_hold;
+#[cfg(test)]
+mod engine_channels_hold;
+#[cfg(test)]
+mod reference;
 #[cfg(test)]
 mod tests;

@@ -35,10 +35,12 @@ use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::BinaryInput;
-use crate::stellar::binary::class_merger::{evolved_donor_merger, onset_segment_kinds};
+use crate::stellar::binary::class_merger::{donor_onset_merger, onset_segment_kinds};
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
 use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
+
+use super::reference::{decile_chi_square, members};
 
 /// The seed of the Milky Way fixture, P11.T8.c's tests'.
 const SEED: u64 = 0x0b17_08c0_0000_0001;
@@ -211,7 +213,7 @@ fn every_evolved_donor_merges_as_the_engine_merges_it() {
             t.value().max(entry.scan().age_at_epoch().value())
                 + CLOCK_WINDOW_H.as_julian_years_f64(),
         );
-        let rebuilt = evolved_donor_merger(&input, t, until).expect("the entry's pair merges");
+        let rebuilt = donor_onset_merger(&input, t, until).expect("the entry's pair merges");
         assert_eq!(&rebuilt, entry.product());
         let (kinds, after) = onset_segment_kinds(&input, t, until);
         assert_eq!(
@@ -317,52 +319,6 @@ fn the_channels_cells_do_not_depend_on_order() {
         let _ = crate::galaxy::placement::resolve(galaxy, SystemId::from(stray));
         CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
     });
-}
-
-/// `n` engine mergers of the stellar merger class in `galaxy`, drawn on 16 streams at once and
-/// joined in stream order, as `tests/common/binaries.rs` draws them.
-fn members(galaxy: &Galaxy, n: usize) -> Vec<crate::stellar::binary::testing::MergerMember> {
-    use crate::stellar::binary::testing::brute_force_merger_members_in;
-    let share = n.div_ceil(16);
-    let mut out = Vec::with_capacity(n + 16);
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..16_u64)
-            .map(|s| {
-                scope.spawn(move || {
-                    brute_force_merger_members_in(galaxy, CarvedClass::StellarMerger, share, s)
-                })
-            })
-            .collect();
-        for handle in handles {
-            out.extend(handle.join().expect("a member draw finishes"));
-        }
-    });
-    out.truncate(n);
-    out
-}
-
-/// The chi-square per degree of freedom of the weighted `observed` values in `expected`'s
-/// deciles, the weighted counts scaled to the members' effective number, and that number.
-fn decile_chi_square(expected: &[f64], observed: &[(f64, f64)]) -> (f64, f64) {
-    let mut sorted = expected.to_vec();
-    sorted.sort_by(f64::total_cmp);
-    let edges: Vec<f64> = (1..10).map(|k| sorted[k * sorted.len() / 10]).collect();
-    let mut weights = [0.0_f64; 10];
-    for &(v, w) in observed {
-        weights[edges.partition_point(|&e| e <= v)] += w;
-    }
-    let total: f64 = observed.iter().map(|(_, w)| w).sum();
-    let squares: f64 = observed.iter().map(|(_, w)| w * w).sum();
-    let effective = total * total / squares;
-    let each = effective / 10.0;
-    let statistic: f64 = weights
-        .iter()
-        .map(|w| {
-            let o = w / total * effective;
-            (o - each) * (o - each) / each
-        })
-        .sum();
-    (statistic / 9.0, effective)
 }
 
 /// The sampler against the engine under every 26 hold (P11.T8.c's fix): the pair's total mass,

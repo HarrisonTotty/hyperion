@@ -47,6 +47,10 @@
 //!   P15.T11.b): the orphans' count and the halo's discrete share take the fitted streams per
 //!   globular. It is read where a galaxy's debris is planned (`Debris::plan`, the orphans' draw
 //!   and the dwarfs' scale), and reaches none of the galaxy's memos.
+//! - [`merger_channels`](GalaxyRules::merger_channels), at [`MERGER_CHANNELS_VERSION`] (plan 11,
+//!   P11.T8.c's missing channel, at 27): the stellar merger class adds the engine's dynamical
+//!   main-sequence mergers and draws an evolved donor's companion by its donor's kind. It is read
+//!   where a merger's scan marks are drawn, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -56,7 +60,9 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
-use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
+use crate::galaxy::catalogue_classes::binary::{
+    MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION, MergerChannelRules, MergerClassRules,
+};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::kinds::globular::{BOUND_SHARE_VERSION, BoundShareRules};
@@ -93,6 +99,9 @@ pub(crate) struct GalaxyRules {
     /// The streams per globular the orphans and the discrete share read: the brainstorm's or
     /// P15.T11.b's fit.
     pub(crate) orphan_streams: OrphanStreamsRules,
+    /// Which channels the stellar merger class draws under its engine's channels: contact and
+    /// evolved donor, or with the dynamical main sequence (P11.T8.c's missing channel).
+    pub(crate) merger_channels: MergerChannelRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -148,6 +157,11 @@ impl GalaxyRules {
             } else {
                 OrphanStreamsRules::Brainstorm
             },
+            merger_channels: if version.get() >= MERGER_CHANNELS_VERSION.get() {
+                MergerChannelRules::WithDynamical
+            } else {
+                MergerChannelRules::ContactAndEvolved
+            },
             stellar: StellarRules::of_version(version),
         }
     }
@@ -168,8 +182,11 @@ impl GalaxyRules {
         Self::of_version(GeneratorVersion::new(26))
     }
 
-    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: 26's
-    /// holds and those that turn on at 27 (the galaxy's `orphan_streams`, P15.T11.b).
+    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: every 26
+    /// hold ([`GalaxyRules::every_26_hold`]) and the galaxy's at 27 (`orphan_streams`, P15.T11.b,
+    /// and `merger_channels`, P11.T8.c's missing channel). The planetary stage's holds at 27 are
+    /// switched on the thread instead (`planetary::testing::with_every_27_hold`), around a galaxy
+    /// built under these.
     ///
     /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
     /// struct-update syntax over it.

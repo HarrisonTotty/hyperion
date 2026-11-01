@@ -7107,3 +7107,31 @@ galaxy_sweeps`.
   gravitational waves is not taken off; its source was not read, and the values recalled
   (≥ 0.04 M☉c², GWTC-1) are lower bounds. _Movers:_ `catalogue_classes/neutron_star_mergers` (its
   remnant masses). _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`.
+- **P11.T8.c's missing channel, held at 27** (lane `p11-t8cd`, 2026-11-01; research-leans-16 §1.1;
+  at versions 24–26 nothing moves).
+  - _The hold._ `MERGER_CHANNELS_VERSION` = 27 (`binary/merger.rs`), `GalaxyRules::merger_channels`
+    (`MergerChannelRules::{ContactAndEvolved, WithDynamical}`), read only under the 26 arm's
+    channels; the held arm is version 26's draw verbatim (`MergerPick::Channel`,
+    `MergerChannel::HELD`). `GalaxyRules::every_27_hold` opens the galaxy's 27 arm; the planetary
+    27 holds stay on the thread (`with_every_27_hold`).
+  - _From 27_ the channel is one of three, `MergerPick::EngineChannel`, scratch 0.15 contact, 0.50
+    evolved donor, 0.35 dynamical main sequence (the rest split as the engine's evolved donors and
+    its main-sequence pairs, not fitted). A dynamical main-sequence merger is a low-mass (k = 0)
+    donor, the primary, by `DynamicalPrimaryMass` (0.1–0.7 M☉, median 0.6), beside a lighter
+    companion by `DynamicalMassRatio` (0.15–1, median 0.73), at the donor's lobe on a circular
+    orbit, the companion inside its own; the engine at T (`class_merger::donor_onset_merges`, the
+    helpers renamed from `evolved_donor_*`) finds it past 0.695 and merges it in
+    `merge_dynamically`, and the entry's star is the engine's. An evolved donor's companion takes
+    its kind's mark: `GapMassRatio` (0.05–0.25), `HeliumBurningMassRatio` (0.05–0.33),
+    `AgbMassRatio` (median 0.49), the giant branch keeping `EvolvedMassRatio`. The compact-companion
+    channel is left out (the engine's "others", 0.29, mostly a star beside a white dwarf).
+  - _Measured_ (48,000 engine members, an effective 1,259, 17 times P11.T8.c's 73; 10,000 entries
+    a side in the reference's own cells), χ²/dof of log total mass, mass ratio, log primary mass:
+    27, 215, 63, 310; the 26 arm, 183, 172, 291 (at an effective 73 it read 14.2, 12.1, 16.0).
+    The engine holds 13% of its primaries in layers D–E against the class's 1.3%, its giant-branch
+    donors are heavier (median 1.69 M☉) than the class's at the turn-off, and its evolved donors
+    are 8% gap, 78% giant branch, 14% AGB and no helium burning against the class's 31%, 47%, 0%
+    and 22%: a donor fills its lobe where its radius first reaches it, the class's kind follows
+    its time in each phase. For P15.T10.b's fit; not chased.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`; slow,
+    `engine_channels_hold`'s measurement (with `--ignored`).

@@ -50,7 +50,7 @@ use std::cell::Cell;
 mod merger;
 mod nsm;
 
-pub(crate) use merger::evolved_product;
+pub(crate) use merger::donor_product;
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
 #[cfg(test)]
 pub(crate) use nsm::remnant_mass_under;

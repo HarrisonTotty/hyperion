@@ -1,16 +1,18 @@
-//! The engine's merger of an evolved donor with its companion, as the stellar merger class's
-//! evolved donors read it (plan 11, P11.T8.c's channels, at 26): the onset of Roche-lobe overflow
-//! from a donor at its lobe, which the engine's own stability test sends to a common envelope
-//! (BSE sections 2.6.1 and 2.7.1–2.7.4, their table 2), run by the engine itself, so that the
-//! class and the engine agree bit for bit.
+//! The engine's merger of a donor at its lobe with its companion, as the stellar merger class's
+//! donors read it (plan 11, P11.T8.c's channels): the onset of Roche-lobe overflow from a donor at
+//! its lobe, run by the engine itself, so that the class and the engine agree bit for bit. For an
+//! evolved donor (at 26) the engine's own stability test sends it to a common envelope (BSE
+//! sections 2.6.1 and 2.7.1–2.7.4, their table 2); for a low-mass main-sequence donor past its
+//! critical ratio (at 27) to its dynamical merger (`Engine::merge_dynamically`, section 2.6.4).
 //!
 //! The pair is the engine's at the merger: each star on its own track at its initial mass, the
 //! donor the primary, on the input's circular orbit at the lobe. The engine is built at the
 //! merger's age and asked for one event, its `roche_onset`, which carries both stars, tests the
 //! transfer's stability and, for an unstable giant, resolves the common envelope through the
 //! helpers the engine's every common envelope calls (`envelope_outcome`, `coalesced_product`,
-//! `Engine::product_member`). A pair is the class's only if that leaves one star: stable
-//! transfer, cores that survive the envelope and an envelope that leaves nothing are none.
+//! `Engine::product_member`), or merges a low-mass main-sequence donor dynamically. A pair is the
+//! class's only if that leaves one star: stable transfer, cores that survive the envelope and an
+//! envelope that leaves nothing are none.
 
 use std::sync::Arc;
 
@@ -29,7 +31,7 @@ use super::timeline::{Context, SegmentKind};
 /// [`onset_merger`] runs it, with each star's track built to `until` (years); `None` unless the
 /// engine merges the pair there into one star.
 #[must_use]
-pub(crate) fn evolved_donor_merger(
+pub(crate) fn donor_onset_merger(
     input: &BinaryInput,
     age: Years,
     until: Years,
@@ -39,9 +41,9 @@ pub(crate) fn evolved_donor_merger(
 }
 
 /// Whether the onset of transfer from `input`'s primary at `age` merges the pair into one star:
-/// [`evolved_donor_merger`]'s test, by the same [`onset_merger`], without reading the star.
+/// [`donor_onset_merger`]'s test, by the same [`onset_merger`], without reading the star.
 #[must_use]
-pub(crate) fn evolved_donor_merges(input: &BinaryInput, age: Years, until: Years) -> bool {
+pub(crate) fn donor_onset_merges(input: &BinaryInput, age: Years, until: Years) -> bool {
     onset_merger(input, age, until).is_some()
 }
 
@@ -212,10 +214,10 @@ mod tests {
                 let (input, age) = pair_at_lobe(m1, m2, phase);
                 let input = input.with_rules(rules);
                 let (at, until) = (Years::new(age), Years::new(age + 2.0e3));
-                let star = evolved_donor_merger(&input, at, until);
+                let star = donor_onset_merger(&input, at, until);
                 let (kinds, after) = onset_segment_kinds(&input, at, until);
                 println!("{m1} + {m2}, {phase:?}: {kinds:?} then {after:?}");
-                assert_eq!(evolved_donor_merges(&input, at, until), star.is_some());
+                assert_eq!(donor_onset_merges(&input, at, until), star.is_some());
                 assert_eq!(star.is_some(), merges, "{m1} + {m2}, {phase:?}");
                 let enveloped = kinds.contains(&SegmentKind::CommonEnvelope);
                 if star.is_some() {

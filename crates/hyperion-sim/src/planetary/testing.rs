@@ -592,6 +592,10 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// switch too. A later hold at 27 adds its switch here; 26's bump, which deletes
 /// [`with_every_26_hold`], leaves this helper its 27 switches alone, and 27's bump deletes it with
 /// its holds.
+///
+/// The galaxy's own holds at 27 travel with its rules, not the thread: a test builds its galaxy
+/// under `GalaxyRules::every_27_hold()` (P15.T11.b's `orphan_streams`, P11.T8.c's
+/// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};

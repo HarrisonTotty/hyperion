@@ -30,6 +30,13 @@
 //! the stability test, then the common envelope; it keeps the candidate only if that merges the
 //! pair into one star.
 //!
+//! From `MERGER_CHANNELS_VERSION` (27) the channel is one of three (`MergerPick::EngineChannel`):
+//! the two above, or a **dynamical main-sequence** merger, a low-mass (BSE's k = 0) main-sequence
+//! donor, the primary, at its lobe beside a lighter main-sequence companion, past the critical
+//! ratio 0.695 at which the engine finds its transfer dynamical, built at its lobe as an evolved
+//! donor is and kept only if the engine's onset (its dynamical merger, `Engine::merge_dynamically`)
+//! merges the pair. An evolved donor's companion is then drawn by its donor's kind's mark.
+//!
 //! Under the version's rules a candidate is kept exactly when both stars are on their main
 //! sequences at the merger, which refuses only a star still contracting towards it in a young
 //! population (or, at a turn-off, a track's draws ending it a little earlier than the median's).
@@ -39,7 +46,9 @@
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
-use crate::galaxy::catalogue_classes::binary::{ClassHosts, MergerClassRules, StellarMergers};
+use crate::galaxy::catalogue_classes::binary::{
+    ClassHosts, MergerChannelRules, MergerClassRules, StellarMergers,
+};
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::{PointLy, Population};
@@ -49,7 +58,7 @@ use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius}
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{
-    evolved_donor_merger, evolved_donor_merges, unstable_companion_ratio,
+    donor_onset_merger, donor_onset_merges, unstable_companion_ratio,
 };
 use crate::stellar::draws::StarDraws;
 use crate::stellar::rules::StellarRules;
@@ -201,29 +210,45 @@ impl MergerScanMarks {
     }
 
     /// Each star's state at T on its own track, primary first: both on their main sequences in a
-    /// contact pair, the primary past its main sequence for an evolved donor.
+    /// contact pair and (from 27) a dynamical main-sequence merger, the primary past its main
+    /// sequence for an evolved donor.
     #[must_use]
     pub const fn stars(&self) -> &[StarState; 2] {
         &self.stars
     }
 
     /// The merger's channel: always a contact pair under the version's rules, the engine's
-    /// channels from 26 (`MergerClassRules`).
+    /// channels from 26 (`MergerClassRules`), with the dynamical main sequence from 27
+    /// (`MergerChannelRules`).
     #[must_use]
     pub const fn channel(&self) -> MergerChannel {
         match self.drawn {
             Drawn::Contact => MergerChannel::Contact,
             Drawn::EvolvedDonor { .. } => MergerChannel::EvolvedDonor,
+            Drawn::DynamicalMainSequence { .. } => MergerChannel::DynamicalMainSequence,
         }
     }
 
     /// For an evolved donor, the separation on which it fills its Roche lobe at T, on which its
-    /// common envelope merges the pair; `None` for a contact pair.
+    /// common envelope merges the pair; `None` for any other channel.
     #[must_use]
     pub const fn evolved_separation(&self) -> Option<Metres> {
         match self.drawn {
-            Drawn::Contact => None,
+            Drawn::Contact | Drawn::DynamicalMainSequence { .. } => None,
             Drawn::EvolvedDonor { separation } => Some(separation),
+        }
+    }
+
+    /// For a donor at its lobe, evolved or (from 27) a dynamical main-sequence donor, the
+    /// separation on which it fills its Roche lobe at T, on which the engine's onset merges the
+    /// pair; `None` for a contact pair.
+    #[must_use]
+    pub const fn donor_separation(&self) -> Option<Metres> {
+        match self.drawn {
+            Drawn::Contact => None,
+            Drawn::EvolvedDonor { separation } | Drawn::DynamicalMainSequence { separation } => {
+                Some(separation)
+            }
         }
     }
 }
@@ -317,10 +342,11 @@ pub fn merger_scan_marks(
         HeliumExcess::ZERO,
     );
     // 4–5. The pair and both stars at T: under the version's arm a contact pair, from 26 the
-    // channel first (`MergerClassRules`).
+    // channel first (`MergerClassRules`), one of three from 27 (`MergerChannelRules`).
     let mut stream = Stream::open(seed, tags::CLASS_MERGER_MASS, key);
     let draws = [0_u16, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
     let at = (age_at_epoch, merger_age);
+    let channels = galaxy.rules().merger_channels;
     let pair = match galaxy.rules().merger_class {
         MergerClassRules::ContactOnly => contact_pair(
             galaxy,
@@ -330,7 +356,15 @@ pub fn merger_scan_marks(
             &mut stream,
         )?,
         MergerClassRules::Channels => {
-            match MergerChannel::ALL[sampler.pick(MergerPick::Channel, &mut stream)] {
+            let channel = match channels {
+                MergerChannelRules::ContactAndEvolved => {
+                    MergerChannel::HELD[sampler.pick(MergerPick::Channel, &mut stream)]
+                }
+                MergerChannelRules::WithDynamical => {
+                    MergerChannel::ALL[sampler.pick(MergerPick::EngineChannel, &mut stream)]
+                }
+            };
+            match channel {
                 MergerChannel::Contact => contact_pair(
                     galaxy,
                     &composition,
@@ -339,7 +373,10 @@ pub fn merger_scan_marks(
                     &mut stream,
                 )?,
                 MergerChannel::EvolvedDonor => {
-                    evolved_pair(galaxy, &composition, &draws, at, &mut stream)?
+                    evolved_pair(galaxy, &composition, &draws, (at, channels), &mut stream)?
+                }
+                MergerChannel::DynamicalMainSequence => {
+                    dynamical_pair(galaxy, &composition, &draws, at, &mut stream)?
                 }
             }
         }
@@ -368,13 +405,19 @@ pub fn merger_scan_marks(
 }
 
 /// A merger's channel as the scan drew it (P11.T8.c's channels), with what the channel carries:
-/// for an evolved donor the separation on which it fills its Roche lobe at T.
+/// for a donor at its lobe the separation on which it fills its Roche lobe at T.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drawn {
     /// A contact pair of two main-sequence stars.
     Contact,
     /// An evolved donor, which the engine's onset of transfer merges with its companion.
     EvolvedDonor {
+        /// The pair's separation at T, m.
+        separation: Metres,
+    },
+    /// A low-mass main-sequence donor, which the engine's onset of transfer merges dynamically
+    /// with its companion (from 27).
+    DynamicalMainSequence {
         /// The pair's separation at T, m.
         separation: Metres,
     },
@@ -457,12 +500,14 @@ const LIVING_BRACKET_DEX: f64 = 0.15;
 const LIVING_BISECTIONS: u32 = 10;
 
 /// An evolved donor and its companion at the merger (`at`: the system's age at the epoch and at
-/// T), drawn on `stream` (the pair's words, after the channel's): the donor's layer among those
+/// T, and the channels' rules), drawn on `stream` (the pair's words, after the channel's): the
+/// donor's layer among those
 /// with stars past their main sequence and living at T, its mass in the galaxy's mass function
 /// between the turn-off then and the heaviest mass whose death, plan 06's fate of its own draws,
-/// comes after T ([`heaviest_living`]); then its state at T, and the companion's mass by the
-/// evolved mark inside the ratio the engine's stability test finds unstable for that donor
-/// (`class_merger::unstable_companion_ratio`), on its main sequence at T; the circular orbit on
+/// comes after T ([`heaviest_living`]); then its state at T, and the companion's mass by its
+/// donor's mark ([`companion_ratio_mark`]) inside the ratio the engine's stability test finds
+/// unstable for that donor (`class_merger::unstable_companion_ratio`), on its main sequence at T;
+/// the circular orbit on
 /// which the donor fills its Roche lobe (Eggleton 1983). `None` unless the donor is in one of
 /// [`EVOLVED_PHASES`] at T, the companion on its main sequence, and the engine's onset of
 /// transfer, its stability test and common envelope (`class_merger`), merges them into one star.
@@ -470,7 +515,7 @@ fn evolved_pair(
     galaxy: &Galaxy,
     composition: &Composition,
     draws: &[StarDraws; 2],
-    (age_at_epoch, merger_age): (Years, Years),
+    ((age_at_epoch, merger_age), channels): ((Years, Years), MergerChannelRules),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
@@ -517,11 +562,12 @@ fn evolved_pair(
     if ceiling <= floor {
         return None;
     }
+    let ratio = companion_ratio_mark(channels, donor.phase());
     let ranks = (
-        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, floor / m1),
-        sampler.rank_of(MergerMark::EvolvedMassRatio, 0.0, ceiling / m1),
+        sampler.rank_of(ratio, 0.0, floor / m1),
+        sampler.rank_of(ratio, 0.0, ceiling / m1),
     );
-    let q = sampler.draw_in_ranks(MergerMark::EvolvedMassRatio, 0.0, ranks, stream);
+    let q = sampler.draw_in_ranks(ratio, 0.0, ranks, stream);
     let m2 = (q * m1).clamp(floor, ceiling);
     let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
     let companion = main_sequence_at(masses[1], composition, &draws[1], rules, merger_age)?;
@@ -529,22 +575,110 @@ fn evolved_pair(
     let (md, mc) = (donor.mass().value(), companion.mass().value());
     let share = roche_lobe_radius(md / mc, Metres::new(1.0)).value();
     let separation = Metres::new(donor.radius().value() * SOLAR_RADIUS_M / share);
-    let input = evolved_input(
+    let input = lobe_input(
         (masses, &stars),
         separation,
         composition,
         draws,
         (age_at_epoch, rules),
     );
-    let until = evolved_until(age_at_epoch, merger_age);
-    evolved_donor_merges(&input, merger_age, until).then_some(DrawnPair {
+    let until = lobe_until(age_at_epoch, merger_age);
+    donor_onset_merges(&input, merger_age, until).then_some(DrawnPair {
         drawn: Drawn::EvolvedDonor { separation },
         masses,
         stars,
     })
 }
 
-/// The engine's input for an evolved donor's pair of initial `masses` and states at T `stars`, on
+/// The mark an evolved donor's companion's mass ratio is drawn from under the channels' `rules`:
+/// version 26's [`MergerMark::EvolvedMassRatio`] for every donor, or from 27 its donor's kind's,
+/// by the donor's phase at T (the giant branch's the evolved mark itself).
+#[must_use]
+const fn companion_ratio_mark(rules: MergerChannelRules, donor: Phase) -> MergerMark {
+    match rules {
+        MergerChannelRules::ContactAndEvolved => MergerMark::EvolvedMassRatio,
+        MergerChannelRules::WithDynamical => match donor {
+            Phase::HertzsprungGap => MergerMark::GapMassRatio,
+            Phase::CoreHeliumBurning => MergerMark::HeliumBurningMassRatio,
+            Phase::EarlyAgb | Phase::ThermallyPulsingAgb => MergerMark::AgbMassRatio,
+            // An evolved donor is in `EVOLVED_PHASES`; any other phase is refused before.
+            Phase::FirstGiantBranch
+            | Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => MergerMark::EvolvedMassRatio,
+        },
+    }
+}
+
+/// A dynamical main-sequence merger's pair at the merger (`at`: the system's age at the epoch and
+/// at T), drawn on `stream` (the pair's words, after the channel's; version 27's channel): the
+/// donor, the primary, of initial mass by [`MergerMark::DynamicalPrimaryMass`] (a low-mass, BSE's
+/// k = 0, main-sequence star, below the turn-off then), and its companion's mass by
+/// [`MergerMark::DynamicalMassRatio`], at least plan 06's least track mass; both on their main
+/// sequences at T, on the circular orbit on which the donor fills its Roche lobe (Eggleton 1983)
+/// and the companion lies inside its own. `None` unless they are, and the engine's onset of
+/// transfer from the donor (`class_merger`: its stability test, the donor past its critical ratio
+/// 0.695 as a lighter companion always leaves it, then `Engine::merge_dynamically`) merges them
+/// into one star.
+fn dynamical_pair(
+    galaxy: &Galaxy,
+    composition: &Composition,
+    draws: &[StarDraws; 2],
+    (age_at_epoch, merger_age): (Years, Years),
+    stream: &mut Stream,
+) -> Option<DrawnPair> {
+    let sampler = ClassSampler::new(&MERGER_SAMPLER);
+    let rules = galaxy.rules().stellar;
+    if merger_age.value().is_nan() || merger_age.value() <= 0.0 {
+        return None;
+    }
+    let floor = MIN_INITIAL_MASS.value();
+    let turn_off = turn_off_mass(merger_age, composition).value();
+    let top = sampler.rank_of(MergerMark::DynamicalPrimaryMass, 0.0, turn_off);
+    let m1 = sampler.draw_in_ranks(MergerMark::DynamicalPrimaryMass, 0.0, (0.0, top), stream);
+    let q_floor = sampler.rank_of(MergerMark::DynamicalMassRatio, 0.0, floor / m1);
+    let q = sampler.draw_in_ranks(MergerMark::DynamicalMassRatio, 0.0, (q_floor, 1.0), stream);
+    let m2 = (q * m1).clamp(floor, m1);
+    let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
+    let star = |k: usize| main_sequence_at(masses[k], composition, &draws[k], rules, merger_age);
+    let stars = [star(0)?, star(1)?];
+    let [donor, companion] = stars;
+    let (md, mc) = (donor.mass().value(), companion.mass().value());
+    let unit = Metres::new(1.0);
+    let share = roche_lobe_radius(md / mc, unit).value();
+    let separation = Metres::new(donor.radius().value() * SOLAR_RADIUS_M / share);
+    let companion_lobe = roche_lobe_radius(mc / md, separation).value();
+    if companion.radius().value() * SOLAR_RADIUS_M >= companion_lobe {
+        return None;
+    }
+    let input = lobe_input(
+        (masses, &stars),
+        separation,
+        composition,
+        draws,
+        (age_at_epoch, rules),
+    );
+    let until = lobe_until(age_at_epoch, merger_age);
+    donor_onset_merges(&input, merger_age, until).then_some(DrawnPair {
+        drawn: Drawn::DynamicalMainSequence { separation },
+        masses,
+        stars,
+    })
+}
+
+/// The engine's input for a donor's pair at its lobe, evolved or (from 27) a dynamical
+/// main-sequence donor, of initial `masses` and states at T `stars`, on
 /// the circular orbit of `separation` about their masses then, with zero angles, at `composition`
 /// with the stars' `draws`, the system `age_at_epoch` old at the epoch, under the stellar `rules`:
 /// the one input both the scan's test and the candidate's star read.
@@ -555,7 +689,7 @@ fn evolved_pair(
 /// separation is a positive separation about a positive mass, and the masses are tracks' at a
 /// finite age.
 #[must_use]
-fn evolved_input(
+fn lobe_input(
     (masses, stars): ([SolarMasses; 2], &[StarState; 2]),
     separation: Metres,
     composition: &Composition,
@@ -630,35 +764,34 @@ fn heaviest_living(
     SolarMasses::new(math::exp10(hi).min(MAX_INITIAL_MASS.value()))
 }
 
-/// The age the engine of an evolved donor's pair is run to: H past the later of T and the epoch, as
-/// `SystemStars` runs its pairs.
+/// The age the engine of a donor's pair at its lobe is run to: H past the later of T and the
+/// epoch, as `SystemStars` runs its pairs.
 #[must_use]
-fn evolved_until(age_at_epoch: Years, merger_age: Years) -> Years {
+fn lobe_until(age_at_epoch: Years, merger_age: Years) -> Years {
     Years::new(merger_age.value().max(age_at_epoch.value()) + CLOCK_WINDOW_H.as_julian_years_f64())
 }
 
-/// The star an evolved donor's merger leaves at T (P11.T8.c's channels), the engine's own for the
-/// pair of `scan`, the scan's own input rebuilt from its marks ([`evolved_input`]) with the stars'
-/// `draws` under the stellar `rules`; `None` for a contact pair, and for an evolved donor whose
-/// onset the engine does not merge, which the scan never keeps.
+/// The star a donor's merger at its lobe leaves at T (P11.T8.c's channels: an evolved donor, or
+/// from 27 a dynamical main-sequence donor), the engine's own for the pair of `scan`, the scan's
+/// own input rebuilt from its marks ([`lobe_input`]) with the stars' `draws` under the stellar
+/// `rules`; `None` for a contact pair, and for a donor whose onset the engine does not merge,
+/// which the scan never keeps.
 #[must_use]
-pub(crate) fn evolved_product(
+pub(crate) fn donor_product(
     scan: &MergerScanMarks,
     draws: &[StarDraws; 2],
     rules: StellarRules,
 ) -> Option<StarState> {
-    let Drawn::EvolvedDonor { separation } = scan.drawn else {
-        return None;
-    };
-    let input = evolved_input(
+    let separation = scan.donor_separation()?;
+    let input = lobe_input(
         (scan.masses, &scan.stars),
         separation,
         &scan.composition,
         draws,
         (scan.age_at_epoch, rules),
     );
-    let until = evolved_until(scan.age_at_epoch, scan.merger_age());
-    evolved_donor_merger(&input, scan.merger_age(), until)
+    let until = lobe_until(scan.age_at_epoch, scan.merger_age());
+    donor_onset_merger(&input, scan.merger_age(), until)
 }
 
 /// Appends to `out` the scan marks of every entry of the stellar merger class cell `key`, in index

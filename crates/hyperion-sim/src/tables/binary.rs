@@ -654,19 +654,39 @@ pub enum MergerMark {
     /// the masses living past their main sequence at the merger, unconditional.
     EvolvedPrimaryRank,
     /// The mass ratio of an evolved donor's companion over the donor, initial masses,
-    /// unconditional.
+    /// unconditional: version 26's for every evolved donor, from 27 a giant-branch donor's.
     EvolvedMassRatio,
+    /// The initial mass, M☉, of a dynamical main-sequence merger's donor, the primary, a low-mass
+    /// (BSE's k = 0) main-sequence star, unconditional: version 27's dynamical channel.
+    DynamicalPrimaryMass,
+    /// The mass ratio of a dynamical main-sequence merger's companion over its donor, initial
+    /// masses, unconditional: version 27's.
+    DynamicalMassRatio,
+    /// The mass ratio of a Hertzsprung-gap donor's companion over the donor, initial masses,
+    /// unconditional: version 27's.
+    GapMassRatio,
+    /// The mass ratio of a core-helium-burning donor's companion over the donor, initial masses,
+    /// unconditional: version 27's.
+    HeliumBurningMassRatio,
+    /// The mass ratio of an asymptotic-giant-branch donor's companion over the donor, initial
+    /// masses, unconditional: version 27's.
+    AgbMassRatio,
 }
 
 impl MergerMark {
     /// Every mark, in [`MERGER_SAMPLER`]'s order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 11] = [
         Self::AgeRank,
         Self::PrimaryRank,
         Self::MassRatio,
         Self::ContactMassRatio,
         Self::EvolvedPrimaryRank,
         Self::EvolvedMassRatio,
+        Self::DynamicalPrimaryMass,
+        Self::DynamicalMassRatio,
+        Self::GapMassRatio,
+        Self::HeliumBurningMassRatio,
+        Self::AgbMassRatio,
     ];
 
     /// The mark's place in [`MERGER_SAMPLER`]'s marks.
@@ -687,8 +707,10 @@ impl SamplerKey for MergerMark {
 pub enum MergerPick {
     /// The layer of the primary, A–E, in [`MassBand::ALL`]'s order.
     Layer,
-    /// The channel ([`MergerChannel`]): version 26's.
+    /// The channel among [`MergerChannel::HELD`]: version 26's.
     Channel,
+    /// The channel among [`MergerChannel::ALL`]: version 27's, with the dynamical main sequence.
+    EngineChannel,
 }
 
 impl SamplerKey for MergerPick {
@@ -696,12 +718,13 @@ impl SamplerKey for MergerPick {
         match self {
             Self::Layer => 0,
             Self::Channel => 1,
+            Self::EngineChannel => 2,
         }
     }
 }
 
-/// The channels of [`MERGER_SAMPLER`]'s second choice, in its order (P11.T8.c's fix, version 26):
-/// what a stellar merger is before its merger time.
+/// The channels of [`MERGER_SAMPLER`]'s channel choices (P11.T8.c's fix, versions 26 and 27): what
+/// a stellar merger is before its merger time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MergerChannel {
     /// A contact pair of two main-sequence stars, at the tidal limit (Rasio 1995).
@@ -709,11 +732,22 @@ pub enum MergerChannel {
     /// An evolved donor, from the Hertzsprung gap to the asymptotic giant branch, whose common
     /// envelope merges it with its main-sequence companion.
     EvolvedDonor,
+    /// A low-mass (BSE's k = 0) main-sequence donor at its Roche lobe past its critical mass ratio,
+    /// which the engine merges dynamically with its main-sequence companion (version 27's).
+    DynamicalMainSequence,
 }
 
 impl MergerChannel {
-    /// Every channel, in the choice's order.
-    pub const ALL: [Self; 2] = [Self::Contact, Self::EvolvedDonor];
+    /// Every channel, in [`MergerPick::EngineChannel`]'s order.
+    pub const ALL: [Self; 3] = [
+        Self::Contact,
+        Self::EvolvedDonor,
+        Self::DynamicalMainSequence,
+    ];
+
+    /// Version 26's channels, in [`MergerPick::Channel`]'s order. The bump to 27 deletes them with
+    /// that choice.
+    pub const HELD: [Self; 2] = [Self::Contact, Self::EvolvedDonor];
 }
 
 /// The ranks k ÷ 16 themselves: a residual that leaves a rank as it is drawn.
@@ -762,17 +796,37 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///   draws it below the ratio at which the engine finds the donor's transfer unstable.
 /// - **The evolved donor's mass** is a rank that leaves the galaxy's mass function over the masses
 ///   past their main sequence and living at the merger as it is.
+///
+/// Version 27's (P11.T8.c's missing channel; research-leans-16 §1.1) add a choice and five marks,
+/// scratch, shaped on the engine's own mergers under every 26 hold (48,000 members, an effective
+/// 1,259; `merger/engine_channels_hold.rs`'s slow test prints them) and not fitted:
+///
+/// - **The channel** among three: 0.15 contact, as at 26, the light curves' evidence; 0.50 evolved
+///   donor and 0.35 dynamical main sequence, the rest split about as the engine's evolved donors
+///   beside a main-sequence star (0.40 of its mergers) and its pairs of main-sequence stars (0.30,
+///   95% of them a low-mass donor detached before the merger).
+/// - **The dynamical donor's mass**: 0.1–0.7 M☉, median 0.6, mostly above 0.4 (the engine's
+///   weighted median 0.61, 5–95% 0.42–0.70): a star a little under BSE's 0.7 M☉ fills its lobe
+///   first.
+/// - **Its companion's mass ratio**: 0.15–1, median 0.73 (the engine's 0.71, 5–95% 0.49–0.95).
+/// - **An evolved donor's companion by the donor's kind**: a giant-branch donor's stays
+///   [`MergerMark::EvolvedMassRatio`] (the engine's median 0.59); a Hertzsprung-gap donor's
+///   0.05–0.25, median 0.16, inside the ratio 1 ÷ 4 at which its transfer is unstable (the engine's
+///   gap donors there lie about 0.11–0.25); a core-helium-burning donor's 0.05–0.33, flat to the
+///   ratio 1 ÷ 3, the engine merging almost none; an asymptotic-giant-branch donor's 0.05–1,
+///   median 0.49 (the engine's).
 pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(
     &MERGER_MARKS,
     &[
         SamplerPick::new("layer", &[0.1, 0.2, 0.5, 0.15, 0.05]),
         SamplerPick::new("channel", &[0.15, 0.85]),
+        SamplerPick::new("engine_channel", &[0.15, 0.50, 0.35]),
     ],
 );
 
 /// [`MERGER_SAMPLER`]'s marks, in [`MergerMark`]'s order.
 #[rustfmt::skip]
-const MERGER_MARKS: [SamplerMark; 6] = [
+const MERGER_MARKS: [SamplerMark; 11] = [
     SamplerMark {
         name: "age_rank",
         residual: IDENTITY_RANKS,
@@ -814,6 +868,51 @@ const MERGER_MARKS: [SamplerMark; 6] = [
         residual: [
             0.05, 0.11, 0.17, 0.25, 0.33, 0.41, 0.49, 0.55, 0.60,
             0.68, 0.76, 0.83, 0.89, 0.93, 0.96, 0.98, 1.0,
+        ],
+        median: None,
+        limits: (0.05, 1.0),
+    },
+    SamplerMark {
+        name: "dynamical_primary_mass",
+        residual: [
+            0.10, 0.40, 0.42, 0.44, 0.46, 0.49, 0.52, 0.56, 0.60,
+            0.61, 0.62, 0.63, 0.64, 0.66, 0.68, 0.69, 0.70,
+        ],
+        median: None,
+        limits: (0.1, 0.7),
+    },
+    SamplerMark {
+        name: "dynamical_mass_ratio",
+        residual: [
+            0.15, 0.45, 0.52, 0.58, 0.63, 0.66, 0.69, 0.71, 0.73,
+            0.76, 0.79, 0.82, 0.85, 0.88, 0.91, 0.94, 1.0,
+        ],
+        median: None,
+        limits: (0.15, 1.0),
+    },
+    SamplerMark {
+        name: "gap_mass_ratio",
+        residual: [
+            0.05, 0.08, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16,
+            0.17, 0.18, 0.19, 0.20, 0.21, 0.22, 0.235, 0.25,
+        ],
+        median: None,
+        limits: (0.05, 0.25),
+    },
+    SamplerMark {
+        name: "helium_burning_mass_ratio",
+        residual: [
+            0.05, 0.0675, 0.085, 0.1025, 0.12, 0.1375, 0.155, 0.1725, 0.19,
+            0.2075, 0.225, 0.2425, 0.26, 0.2775, 0.295, 0.3125, 0.33,
+        ],
+        median: None,
+        limits: (0.05, 0.33),
+    },
+    SamplerMark {
+        name: "agb_mass_ratio",
+        residual: [
+            0.05, 0.09, 0.12, 0.18, 0.27, 0.33, 0.39, 0.44, 0.49,
+            0.54, 0.59, 0.64, 0.69, 0.75, 0.82, 0.89, 1.0,
         ],
         median: None,
         limits: (0.05, 1.0),
@@ -1384,6 +1483,11 @@ mod tests {
             "contact_mass_ratio",
             "evolved_primary_rank",
             "evolved_mass_ratio",
+            "dynamical_primary_mass",
+            "dynamical_mass_ratio",
+            "gap_mass_ratio",
+            "helium_burning_mass_ratio",
+            "agb_mass_ratio",
         ];
         assert_eq!(MERGER_SAMPLER.marks().len(), MergerMark::ALL.len());
         for (mark, name) in MergerMark::ALL.into_iter().zip(names) {
@@ -1396,9 +1500,18 @@ mod tests {
                 "{name}"
             );
         }
-        let channels = MERGER_SAMPLER.pick(MergerPick::Channel).weights();
-        assert_eq!(channels.len(), MergerChannel::ALL.len());
-        assert!((channels.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        for (pick, kinds) in [
+            (MergerPick::Channel, MergerChannel::HELD.len()),
+            (MergerPick::EngineChannel, MergerChannel::ALL.len()),
+        ] {
+            let channels = MERGER_SAMPLER.pick(pick).weights();
+            assert_eq!(channels.len(), kinds, "{pick:?}");
+            assert!(
+                (channels.iter().sum::<f64>() - 1.0).abs() < 1e-12,
+                "{pick:?}"
+            );
+        }
+        assert_eq!(MergerChannel::ALL[..2], MergerChannel::HELD);
         let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
         let weights = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
         assert_eq!(weights.len(), MassBand::ALL.len());
