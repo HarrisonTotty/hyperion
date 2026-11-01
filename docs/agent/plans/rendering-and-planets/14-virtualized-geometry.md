@@ -18,13 +18,14 @@
 - **Brainstorm sections covered** (by heading, in
   [the rendering brainstorm](../../brainstorming/rendering-and-planets.md)): "Virtualized geometry",
   in full (added with this plan); of "The geometry: a quadtree on a cube sphere", the mesh-shader
-  row's verdict, which stands (no compute rasteriser); of "Level-of-detail consistency, and why
-  collision agrees", the collision rule as the cluster path keeps it; of "Two styles of one
+  row's verdict, amended (no mesh shaders and no compute rasteriser, but Nanite's cluster culling
+  and level of detail taken; the roadmap's Brainstorm corrections); of "Level-of-detail consistency,
+  and why collision agrees", the collision rule as the cluster path keeps it; of "Two styles of one
   renderer", both styles' terrain; of "Rings", the particles close to; of "Performance budget", the
-  terrain geometry, shadows, scatter and rings rows, the memory table, the ladder's terrain detail
-  and shadows rows and its three rules; of "Testing", "Level-of-detail selection", "The
-  grounded-body rule", "Culling", "Collision agrees with what is drawn", "The descent" and "The
-  performance runs".
+  terrain geometry, shadows, scatter, rings and station wireframe rows, the memory table, the
+  ladder's terrain detail and shadows rows and its three rules; of "Testing", "Level-of-detail
+  selection", "The grounded-body rule", "Culling", "Collision agrees with what is drawn", "The
+  descent" and "The performance runs".
 
 ## Goal
 
@@ -61,17 +62,19 @@ In scope:
   mesh pages and the producers that fill them.
 - **Its consumers**, in this order:
 
-  | Consumer                                                   | Today                                                     | Task  | LOD mode                                    | Producer and residency                                        | Collision                                                         |
-  | ---------------------------------------------------------- | --------------------------------------------------------- | ----- | ------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-  | Lit terrain: camera pass, cascades' casters, overlay depth | One instanced draw of the 10,752-triangle lit mesh a pass | T1–T3 | Strided template                            | The height workers' bakes in the patch cache's slots          | The forced region at stride 1, its hold as today (Design note 10) |
-  | Wireframe terrain (depth and contours at 4 px)             | The same, depth-only with contours                        | T4.c  | Strided template, stride 1 (Design note 13) | The wireframe's own cache (520 slots)                         | As the lit terrain's                                              |
-  | Mesh bodies' smooth figure and reference surface           | R05's patches at zero height (`smoothMesh.ts`)            | T4.a  | Strided template                            | None: constant zero-height pages                              | None                                                              |
-  | Hull occluder faces (wireframe; silhouette over the image) | A few triangles, pulled by `occluder.wgsl`                | T4.b  | DAG cut (one level)                         | Built at load                                                 | Never the render mesh                                             |
-  | Ships, stations, surface props (authored)                  | Not built: `TEST_HULL` outlines only                      | T5    | DAG cut                                     | Offline builder; pages fetched and decoded into the page pool | Authored hulls, never the render mesh                             |
-  | Rocks and debris (procedural)                              | Not built (R11.T3–T4 plan the rocks)                      | T5    | DAG cut                                     | Built from a seed in a worker; page pool                      | R11's analytic rocks (R11 Design note 6)                          |
-  | Scatter, ring particles (instanced)                        | Not built (R11.T6.a, R11.T9.d)                            | T5.d  | Instance cull, a few templates by size      | GPU-placed instances (R11's)                                  | None (presentation)                                               |
+  | Consumer                                                   | Today                                                                                        | Task  | LOD mode                                    | Producer and residency                                        | Collision                                                         |
+  | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----- | ------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
+  | Lit terrain: camera pass, cascades' casters, overlay depth | Instanced draws of the lit mesh a pass (10,752 triangles; interior patches 8,704 since T1.a) | T1–T3 | Strided template                            | The height workers' bakes in the patch cache's slots          | The forced region at stride 1, its hold as today (Design note 10) |
+  | Wireframe terrain (depth and contours at 4 px)             | The same, depth-only with contours                                                           | T4.c  | Strided template, stride 1 (Design note 13) | The wireframe's own cache (520 slots)                         | As the lit terrain's                                              |
+  | Mesh bodies' smooth figure and reference surface           | R05's patches at zero height (`smoothMesh.ts`)                                               | T4.a  | Strided template, stride 1 (T4.a)           | None: R05's `FaceDifferences` at h = 0, no page               | None                                                              |
+  | Hull occluder faces (wireframe; silhouette over the image) | A few triangles, pulled by `occluder.wgsl`                                                   | T4.b  | DAG cut (one level)                         | Built at load                                                 | Never the render mesh                                             |
+  | Ships, stations, surface props (authored)                  | Not built: `TEST_HULL` outlines only                                                         | T5    | DAG cut                                     | Offline builder; pages fetched and decoded into the page pool | Authored hulls, never the render mesh                             |
+  | Rocks and debris (procedural)                              | Not built (R11.T3–T4 plan the rocks)                                                         | T5    | DAG cut                                     | Built from a seed in a worker; page pool                      | R11's analytic rocks (R11 Design note 6)                          |
+  | Scatter, ring particles (instanced)                        | Not built (R11.T6.a, R11.T9.d)                                                               | T5.d  | Instance cull, a few templates by size      | GPU-placed instances (R11's)                                  | None (presentation)                                               |
+  | Meshes as wireframe occluders                              | Not built                                                                                    | T5.f  | DAG cut at the occluder tolerance           | The page pool                                                 | None                                                              |
 
 - **Shadows on the path**: the terrain's casters (T1), the cascades' reuse (T6), mesh casters.
+
 - **The ladder's entries** in `ViewSettings.geometry` on both settings, for R12 to hold, and the
   memory categories R12 itemises.
 - **Measurement**: per-pass clusters, triangles and GPU time in the terrain run's and the descent
@@ -91,7 +94,8 @@ Non-goals:
   brainstorm's table, the other two by the research, since longest-edge bisection and adaptive
   triangulation break the fixed diagonal that `finest_surface_height` interpolates on and add a
   second source of what is drawn beside selection. CBT stays an option for R11's oceans.
-- **Clouds and the ocean's surface**: R11's; neither is a consumer here (Risks).
+- **Clouds, the ocean's surface and the ring slab** (R11's; the slab analytic, R11.T9.c) and **the
+  disc impostors** (R07's): none is a consumer here (Risks).
 - **R05's spike shading** (the test planet's `spike` shading): it keeps today's path, so the gate's
   recorded runs stay comparable.
 - **Craft art, props, debris models**: no plan makes them yet. T5 builds the path they need and
@@ -236,7 +240,10 @@ export class ClusterBuckets {
     templates: ReadonlyArray<ClusterTemplate>,
     capacity: number,
   );
-  /** The lists, (instance, cluster) as two `u32` an entry, and the arguments, 20 B a bucket. */
+  /**
+   * The lists, two `u32` an entry: the instance (with its consumer from T2.c, Design note 9) and the
+   * cluster (its template in the top 3 bits); and the arguments, 20 B a bucket.
+   */
   readonly lists: BufferHandle;
   readonly args: BufferHandle; // STORAGE | INDIRECT
   /** Zeroes every bucket's instance count; encoded before the cull. */
@@ -268,7 +275,7 @@ export interface ClusterPassStats {
 export class ClusterStats {
   /** Off in an ordinary frame: only the measurement switch arms it (Design note 18). */
   constructor(engine: RenderEngine, armed: boolean);
-  /** Reduces the buckets' counts into a read-back ring by a `bit-exact` kernel. */
+  /** Reduces the buckets' counts into a read-back ring by a `bit-exact` kernel, never a copy. */
   sample(buckets: ClusterBuckets): void;
   latest(): ReadonlyArray<ClusterPassStats> | null;
 }
@@ -380,7 +387,8 @@ export interface ClusterResidency<K> {
   (the root workspace excludes `tools/*`), run as
   `cargo run --manifest-path tools/meshbuild/Cargo.toml -- <in> <out>`: clustering, grouping and
   simplifying with locked group borders into a DAG, writing pages. Pages are built from source
-  meshes by a `just` recipe into the client's bundled assets, never committed (the 500 kB rule).
+  meshes, once and on Linux, by `just mesh-pages` into the client's bundled assets, never committed
+  (the 500 kB rule; T5.a).
 
 ### Settings and memory (T1.b, extended by each task)
 
@@ -393,7 +401,10 @@ export interface GeometrySettings {
   readonly casterDepthCull: boolean;
   /** T1.d: the coarsest stride a caster may take at its cascade's texel; 1 keeps stride 1. */
   readonly casterStrideCap: Stride;
-  /** T1.e: the overlay's terrain depth. */
+  /**
+   * T1.e: the overlay's terrain depth; `scene-depth` reads the scene's where the sizes agree and
+   * draws the cluster path at stride 1 elsewhere (the lean).
+   */
   readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
   /** T2: a forward lit pass or the visibility buffer and its resolve. */
   readonly shading: "forward" | "visibility";
@@ -414,63 +425,77 @@ export interface GeometrySettings {
 
 ## Consumes
 
-Re-validated on `hold/after-25` at `1fcd6c03` (2026-11-01): every name below was found at the file
-and with the signature given. Paths are under `apps/hyperion/src/renderer/src/view/` unless given.
+Re-validated on `hold/after-25` at `1fcd6c03` (2026-11-01), and again by the plan's correctness
+review at `1ccd3b4f`, which corrected three paths: every name below was found at the file and with
+the signature given. The `TerrainPass` row adds R14.T1.a's names as landed, and the rows from
+`TIMING_FRAMES_IN_FLIGHT` on were added by the reviews' fold. Paths are under
+`apps/hyperion/src/renderer/src/view/` unless given.
 
-| Owner | Name                                                                                                                   | File                                                                                                                                   | As built                                                                                                                                                                                                                                                                                                                                          |
-| ----- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R01   | `RenderEngine.dispatch`, `createComputeAsync`, `createMaterialAsync`, `readBuffer`, `onPassTimes`                      | `engine/types.ts`                                                                                                                      | `dispatch(kernel, bindings, workgroups: [x, y, z] \| IndirectArgs, pass?)`, each dispatch submitted before anything else is encoded (`webgpu/engine.ts`); `readBuffer` throws `PresentationOnlyReadback` for a buffer a `presentation-only` kernel wrote                                                                                          |
-| R01   | `DrawItem.indirect`, `DrawItem.instanceCount`, `IndirectArgs`                                                          | `engine/types.ts`, `engine/webgpu/drawing.ts`                                                                                          | `indirect?: { buffer, offsetBytes }`, encoded as `drawIndexedIndirect` for an indexed mesh; a draw of `instanceCount` 0 without `indirect` is skipped                                                                                                                                                                                             |
-| R01   | `KernelPair`, `selectKernel`                                                                                           | `engine/kernels.ts`                                                                                                                    | `{ name, reference, subgroup: string \| null, readback: "bit-exact" \| "presentation-only" }`; the subgroup variant only where the device has `subgroups`                                                                                                                                                                                         |
-| R01   | `GpuCapabilities`, `WANTED_FEATURES`, `requiredLimits`, `MAX_REQUESTED_BUFFER_BYTES`                                   | `engine/platform.ts`                                                                                                                   | Features `subgroups`, `shader-f16`, `timestamp-query`, `float32-filterable`, `float32-blendable`, `rg11b10ufloat-renderable`, `depth-clip-control`; no `indirect-first-instance`, no `primitive-index`. Storage binding and buffer sizes raised to the adapter's, at most 1 GiB; `maxStorageBuffersPerShaderStage` never raised from 8            |
-| R01   | `StorageBufferSpec.stages`                                                                                             | `engine/types.ts`                                                                                                                      | A binding counts against the per-stage limit in each stage it is visible to                                                                                                                                                                                                                                                                       |
-| R01   | `MemoryCategory`, `BufferSpec`                                                                                         | `engine/memory.ts`                                                                                                                     | Nine categories, `height-cache` and `shadows` among them; `{ name, bytes, usage, category }`                                                                                                                                                                                                                                                      |
-| R01   | `PassTimer`, `PASSES_PER_FRAME`                                                                                        | `engine/webgpu/timing.ts`                                                                                                              | 64 timed passes a frame                                                                                                                                                                                                                                                                                                                           |
-| R01   | `ResilientEngine`, `watchDeviceLoss`, `WGSL_CATALOGUE`                                                                 | `engine/resilientEngine.ts`, `engine/webgpu/deviceLoss.ts`, `engine/catalogue.ts`                                                      | The rebuild after a loss; the catalogue test-render compiles and draws at every setting                                                                                                                                                                                                                                                           |
-| R01   | Depth compare                                                                                                          | `engine/webgpu/materials.ts`                                                                                                           | `greater-equal` (reversed-Z): the later of two equal depths wins                                                                                                                                                                                                                                                                                  |
-| R02   | `HullOutline`, `TEST_HULL`; `occluder.wgsl`                                                                            | `scene/hull.ts`, `shaders/occluder.wgsl`                                                                                               | `{ name, vertices, edges, faces, windows, eyePointM, lengthM }`; faces pulled from `corners` by `Draw.firstTriangle`, depth written from the fragment and pushed by `occluderSlopePx`                                                                                                                                                             |
-| R05   | `selectPatches`, `screenSpaceErrorPx`, `selectionErrorM`, `MAX_SELECTION_VIEWS`                                        | `terrain/select.ts`                                                                                                                    | `selectPatches(input: SelectionInput): Selection`; `screenSpaceErrorPx(boundM, distanceM, view)` = ε W ÷ (2 d tan(fov_h ÷ 2)); 31 views                                                                                                                                                                                                           |
-| R05   | `PatchCache`, `DrawSetResolver`, `DrawSet`, `ResidentPatch`, `CacheInsert`                                             | `terrain/cache.ts`                                                                                                                     | `insert(patch): { kind: "stored", slot, evicted } \| { kind: "refused" }`; `resolve(selection): DrawSet` (`count`, `patches`, `slots`, `views`); `{ key, generation, originM, heightRangeM, boundingRadiusM }`                                                                                                                                    |
-| R05   | `patchBounds`, `PatchBounds`, `CameraRelativeBounds`                                                                   | `terrain/bounds.ts`                                                                                                                    | `patchBounds(planet, key, heightRangeM?)`, the oriented box and sphere R05 Design note 8 tests                                                                                                                                                                                                                                                    |
-| R05   | `frustumOf`, `inFrustum`, `horizonCone`, `aboveHorizon`                                                                | `terrain/cull.ts`                                                                                                                      | `inFrustum(b: CameraRelativeBounds, f)`, `aboveHorizon(b, h)`: the CPU predicates the cull twins                                                                                                                                                                                                                                                  |
-| R05   | `vertexSpacing`                                                                                                        | `terrain/cube.ts`                                                                                                                      | `vertexSpacing(radiusM, level): { minM, meanM, maxM }`                                                                                                                                                                                                                                                                                            |
-| R05   | `INSTANCE_RECORD_BYTES`, `InstanceRecords`, `SLOT_RECORD_BYTES`                                                        | `terrain/gpu/uniforms.ts`                                                                                                              | 32 B (origin less camera, slot, morph band, parent slot, quadrant and holds); 112 B                                                                                                                                                                                                                                                               |
-| R05   | `litPatchMeshData`, `LIT_PATCH_INDICES`, `INDIRECT_ARGS_BYTES`, `terrainMeshSpec`, `TerrainResources`                  | `terrain/gpu/resources.ts`                                                                                                             | Lit mesh 5,135 vertices, 32,256 indices: grid 8,192 triangles, skirt feet 512 (one winding), heads 512, fins 1,536 (both windings), each edge quad's foot then head; 20 B arguments; `field(name)`, `slotRecords`, `viewBuffers(id)`, `casterBuffers(id)`, `writeCasters`                                                                         |
-| R05   | `QualitySetting`, `ViewSettings`, `TerrainSettings`, `SETTINGS`, `WIREFRAME_TERRAIN_TAU_PX`, `WIREFRAME_TERRAIN_SLOTS` | `quality/qualitySetting.ts`                                                                                                            | `"high" \| "low"`; high τ 1 px, 400,000,000 B cache (1,208 lit slots); low τ 2 px at 720 rows, 64 MiB (375); wireframe τ 4 px, 520 slots                                                                                                                                                                                                          |
-| R05   | `GroundContact`, `FORCED_REGION_RESIDENCY_S`, `inForcedRegion`                                                         | `terrain/grounded.ts`                                                                                                                  | 30 s, provisional                                                                                                                                                                                                                                                                                                                                 |
-| R05   | `finest_surface_height`; `PatchBake::height_range_m`                                                                   | `crates/hyperion-surface/src/patch/collision.rs`, `patch.rs`                                                                           | The collision interpolant on the mesh's own diagonal; the range covers both height channels, own and parent's                                                                                                                                                                                                                                     |
-| R05   | `defaultHeightWorkers`                                                                                                 | `terrain/workers/pool.ts`                                                                                                              | clamp(⌊hardwareConcurrency ÷ 4⌋, 1, 3)                                                                                                                                                                                                                                                                                                            |
-| R07   | `smoothMeshOf`, `SmoothMesh`, `SmoothPatch`, `MAX_SMOOTH_MESH_PATCHES`, `SMOOTH_MESH_TAU_PX`; `smoothMesh.wgsl`        | `bodies/smoothMesh.ts`                                                                                                                 | R05's patches at zero height, selected by `selectPatches` with no level table; 1,024 patches; 0.25 px                                                                                                                                                                                                                                             |
-| R07   | `ViewSettings.internalScaleBounds`                                                                                     | `quality/qualitySetting.ts`                                                                                                            | [0.5, 1] on both settings: the scene target resizes with it                                                                                                                                                                                                                                                                                       |
-| R08   | `AtmosphereScene`; the composite                                                                                       | `atmosphere/AtmosphereCache.ts`, `atmosphere/shaders/composite.wgsl`                                                                   | The composite reads the scene target's colour and reversed-Z depth and lays aerial perspective over every opaque pixel                                                                                                                                                                                                                            |
-| R08   | `aerialPerspectiveScope`, `HillaireAtmosphere.aerialPerspective`                                                       | `atmosphere/hillaire.ts`, `atmosphere/settings.ts`                                                                                     | `scene` (high): every opaque pass drawn into the scene before the composite; `terrain` (low): the terrain alone                                                                                                                                                                                                                                   |
-| R10   | `TerrainPass` (`#write`, `#drawCasters`, `#casterItems`, `#drawItem`, `maxPatches`, `symbologyDepthMaterial`)          | `terrain/terrainPass.ts`                                                                                                               | One instanced indirect lit draw a view; casters as four `instanceCount` draws of the lit mesh from per-cascade copies of the instance records; `maxPatches` half the slots                                                                                                                                                                        |
-| R10   | `castsInto`, `morphRangeM`, `effectiveTauPx`, `MORPH_START_FRACTION`                                                   | `terrain/terrainPass.ts`                                                                                                               | `castsInto(set, index, fromCameraBodyFixedM, radiusM): boolean`; `effectiveTauPx(tauPx, limitExcess, weight)` = τ max(1, excess ÷ w); 0.7                                                                                                                                                                                                         |
-| R10   | `CascadeSet`, `fitCascades`, `CASCADE_SIZE_PX`, `CASCADE_COUNT`                                                        | `terrain/shadows/cascades.ts`                                                                                                          | `{ rangeM, splitsM, weight, unclippedDepth, casterReachM, sunElevationRad, basis, cascades }`; 2,048; 4                                                                                                                                                                                                                                           |
-| R10   | `cascadeAt`, `CASCADE_FOOTPRINT_TEXELS`, `cascadeReceiverLit`                                                          | `terrain/shadows/cascadeShadow.ts`                                                                                                     | `cascadeAt(distanceAlongViewM, farM): CascadeIndex \| null`; the receiver's twin                                                                                                                                                                                                                                                                  |
-| R10   | `ShadowCasters`, `ShadowCasterProvider`, `TerrainShadows`                                                              | `terrain/shadows/terrainShadows.ts`                                                                                                    | `(set, index, view) => DrawItem[]`: the casters that are not terrain                                                                                                                                                                                                                                                                              |
-| R10   | `lit_place`, `survey_kept_at`; `LitVertexOut`; the lit fragment                                                        | `terrain/shaders/terrainSurvey.wgsl`, `terrainLit.wgsl`, `terrainLitShade.wgsl`                                                        | `lit_place(grid : vec3f, instance : u32) -> LitPlace`; 12 inter-stage locations (92 B a vertex with the position); the geometric normal from `dpdxFine` before the survey `discard`; tiles read by `textureLoad`, cascades by `textureSampleCompareLevel`                                                                                         |
-| R10   | `TerrainLayers.unsurveyedCells`                                                                                        | `terrain/workers/messages.ts`                                                                                                          | `Uint32Array`, empty on a wholly surveyed bake                                                                                                                                                                                                                                                                                                    |
-| R10   | `LiveFrameTerrain.symbologyDepth`; `TERRAIN_DEPTH_FRACTION`                                                            | `terrain/frameTerrain.ts`; `depth/groundPull.ts`, `terrain/shaders/terrainDepth.wgsl`                                                  | `symbologyDepth(): ReadonlyArray<DrawItem>`, the terrain redrawn as depth before the marks, each depth pushed by 2⁻¹⁶ of itself with no slope term (R10.T16.c); the survey edge pulls its own depth (`shaders/lineStroke.wgsl`'s `line_depth`); only the hull occluders keep `occluderSlopePx` (`photoreal/overlay.ts`, `terrain/terrainPass.ts`) |
-| R10   | `CoarseFineHolds`, `coarseFineMorph`                                                                                   | `terrain/coarseFineHolds.ts`                                                                                                           | k held at 0 or 1 on coarse–fine edges and corners, from the draw set                                                                                                                                                                                                                                                                              |
-| R10   | The terrain run; the smoke harness's terrain frame                                                                     | `src/renderer/src/displays/view/check/terrainCheckRun.ts`, `src/main/terrainCheckResults.ts`, `src/renderer/src/smoke/terrainFrame.ts` | `just views-check --terrain [--whole] [--hidden] [--software] [--setting high\|low]`; test-render's `R10.T16 the frame` group (part 7)                                                                                                                                                                                                            |
-| R10   | `levelBoundsCounts.ts`                                                                                                 | `terrain/levelBoundsCounts.ts`                                                                                                         | The count model the research's harness was built on                                                                                                                                                                                                                                                                                               |
-| R11   | `RockBakeHook`, `rockMesh.ts`, `couldTouch`; `pebbles.wgsl`, `scatterCull.ts`; `ringParticles.wgsl`, `instancedShare`  | planned (R11.T4, T6, T9.d), not built                                                                                                  | T5's consumers; names as R11 has them                                                                                                                                                                                                                                                                                                             |
-| R12   | `SettingSnapshot`, `MEMORY_ITEMS`, `MemoryItem`                                                                        | planned (R12.T1–T3), not built                                                                                                         | Read this plan's settings and categories (asks, Risks)                                                                                                                                                                                                                                                                                            |
+| Owner | Name                                                                                                                                                                                 | File                                                                                                                                   | As built                                                                                                                                                                                                                                                                                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R01   | `RenderEngine.dispatch`, `createComputeAsync`, `createMaterialAsync`, `readBuffer`, `onPassTimes`                                                                                    | `engine/types.ts`                                                                                                                      | `dispatch(kernel, bindings, workgroups: [x, y, z] \| IndirectArgs, pass?)`, each dispatch submitted before anything else is encoded (`webgpu/engine.ts`); `readBuffer` throws `PresentationOnlyReadback` for a buffer a `presentation-only` kernel wrote                                                                                          |
+| R01   | `DrawItem.indirect`, `DrawItem.instanceCount`, `IndirectArgs`                                                                                                                        | `engine/types.ts`, `engine/webgpu/drawing.ts`                                                                                          | `indirect?: { buffer, offsetBytes }`, encoded as `drawIndexedIndirect` for an indexed mesh; a draw of `instanceCount` 0 without `indirect` is skipped                                                                                                                                                                                             |
+| R01   | `KernelPair`, `selectKernel`                                                                                                                                                         | `engine/kernels.ts`                                                                                                                    | `{ name, reference, subgroup: string \| null, readback: "bit-exact" \| "presentation-only" }`; the subgroup variant only where the device has `subgroups`                                                                                                                                                                                         |
+| R01   | `GpuCapabilities`, `WANTED_FEATURES`, `requiredLimits`, `MAX_REQUESTED_BUFFER_BYTES`                                                                                                 | `engine/platform.ts`                                                                                                                   | Features `subgroups`, `shader-f16`, `timestamp-query`, `float32-filterable`, `float32-blendable`, `rg11b10ufloat-renderable`, `depth-clip-control`; no `indirect-first-instance`, no `primitive-index`. Storage binding and buffer sizes raised to the adapter's, at most 1 GiB; `maxStorageBuffersPerShaderStage` never raised from 8            |
+| R01   | `StorageBufferSpec.stages`                                                                                                                                                           | `engine/types.ts`                                                                                                                      | A binding counts against the per-stage limit in each stage it is visible to                                                                                                                                                                                                                                                                       |
+| R01   | `MemoryCategory`, `BufferSpec`                                                                                                                                                       | `engine/memory.ts`                                                                                                                     | Nine categories, `height-cache` and `shadows` among them; `{ name, bytes, usage, category }`                                                                                                                                                                                                                                                      |
+| R01   | `PassTimer`, `PASSES_PER_FRAME`                                                                                                                                                      | `engine/webgpu/timing.ts`                                                                                                              | 64 timed passes a frame                                                                                                                                                                                                                                                                                                                           |
+| R01   | `ResilientEngine`, `watchDeviceLoss`, `WGSL_CATALOGUE`                                                                                                                               | `engine/resilientEngine.ts`, `engine/webgpu/deviceLoss.ts`, `engine/catalogue.ts`                                                      | The rebuild after a loss; the catalogue test-render compiles and draws at every setting                                                                                                                                                                                                                                                           |
+| R01   | Depth compare                                                                                                                                                                        | `engine/webgpu/materials.ts`                                                                                                           | `greater-equal` (reversed-Z): the later of two equal depths wins                                                                                                                                                                                                                                                                                  |
+| R02   | `HullOutline`, `TEST_HULL`; `occluder.wgsl`                                                                                                                                          | `scene/hull.ts`, `shaders/occluder.wgsl`                                                                                               | `{ name, vertices, edges, faces, windows, eyePointM, lengthM }`; faces pulled from `corners` by `Draw.firstTriangle`, depth written from the fragment and pushed by `occluderSlopePx`                                                                                                                                                             |
+| R05   | `selectPatches`, `screenSpaceErrorPx`, `selectionErrorM`, `MAX_SELECTION_VIEWS`                                                                                                      | `terrain/select.ts`                                                                                                                    | `selectPatches(input: SelectionInput): Selection`; `screenSpaceErrorPx(boundM, distanceM, view)` = ε W ÷ (2 d tan(fov_h ÷ 2)); 31 views                                                                                                                                                                                                           |
+| R05   | `PatchCache`, `DrawSetResolver`, `DrawSet`, `ResidentPatch`, `CacheInsert`                                                                                                           | `terrain/cache.ts`                                                                                                                     | `insert(patch): { kind: "stored", slot, evicted } \| { kind: "refused" }`; `resolve(selection): DrawSet` (`count`, `patches`, `slots`, `views`); `{ key, generation, originM, heightRangeM, boundingRadiusM }`                                                                                                                                    |
+| R05   | `patchBounds`, `PatchBounds`, `CameraRelativeBounds`                                                                                                                                 | `terrain/bounds.ts`                                                                                                                    | `patchBounds(planet, key, heightRangeM?)`, the oriented box and sphere R05 Design note 8 tests                                                                                                                                                                                                                                                    |
+| R05   | `frustumOf`, `inFrustum`, `horizonCone`, `aboveHorizon`                                                                                                                              | `terrain/cull.ts`                                                                                                                      | `inFrustum(b: CameraRelativeBounds, f)`, `aboveHorizon(b, h)`: the CPU predicates the cull twins                                                                                                                                                                                                                                                  |
+| R05   | `vertexSpacing`                                                                                                                                                                      | `terrain/cube.ts`                                                                                                                      | `vertexSpacing(radiusM, level): { minM, meanM, maxM }`                                                                                                                                                                                                                                                                                            |
+| R05   | `INSTANCE_RECORD_BYTES`, `InstanceRecords`, `SLOT_RECORD_BYTES`                                                                                                                      | `terrain/gpu/uniforms.ts`                                                                                                              | 32 B (origin less camera, slot, morph band, parent slot, quadrant and holds); 112 B                                                                                                                                                                                                                                                               |
+| R05   | `litPatchMeshData`, `LIT_PATCH_INDICES`, `INDIRECT_ARGS_BYTES`, `terrainMeshSpec`, `TerrainResources`                                                                                | `terrain/gpu/resources.ts`                                                                                                             | Lit mesh 5,135 vertices, 32,256 indices: grid 8,192 triangles, skirt feet 512 (one winding), heads 512, fins 1,536 (both windings), each edge quad's foot then head; 20 B arguments; `field(name)`, `slotRecords`, `viewBuffers(id)`, `casterBuffers(id)`, `writeCasters`                                                                         |
+| R05   | `QualitySetting`, `ViewSettings`, `TerrainSettings`, `SETTINGS`, `WIREFRAME_TERRAIN_TAU_PX`, `WIREFRAME_TERRAIN_SLOTS`                                                               | `quality/qualitySetting.ts`                                                                                                            | `"high" \| "low"`; high τ 1 px, 400,000,000 B cache (1,208 lit slots); low τ 2 px at 720 rows, 64 MiB (375); wireframe τ 4 px, 520 slots                                                                                                                                                                                                          |
+| R05   | `GroundContact`, `FORCED_REGION_RESIDENCY_S`, `inForcedRegion`                                                                                                                       | `terrain/grounded.ts`                                                                                                                  | 30 s, provisional                                                                                                                                                                                                                                                                                                                                 |
+| R05   | `finest_surface_height`; `PatchBake::height_range_m`                                                                                                                                 | `crates/hyperion-surface/src/patch/collision.rs`, `patch.rs`                                                                           | The collision interpolant on the mesh's own diagonal; the range covers both height channels, own and parent's                                                                                                                                                                                                                                     |
+| R05   | `defaultHeightWorkers`                                                                                                                                                               | `terrain/workers/pool.ts`                                                                                                              | clamp(⌊hardwareConcurrency ÷ 4⌋, 1, 3)                                                                                                                                                                                                                                                                                                            |
+| R07   | `smoothMeshOf`, `SmoothMesh`, `SmoothPatch`, `MAX_SMOOTH_MESH_PATCHES`, `SMOOTH_MESH_TAU_PX`; `smoothMesh.wgsl`                                                                      | `bodies/smoothMesh.ts`                                                                                                                 | R05's patches at zero height, selected by `selectPatches` with no level table; 1,024 patches; 0.25 px                                                                                                                                                                                                                                             |
+| R07   | `ViewSettings.internalScaleBounds`                                                                                                                                                   | `quality/qualitySetting.ts`                                                                                                            | [0.5, 1] on both settings: the scene target resizes with it                                                                                                                                                                                                                                                                                       |
+| R08   | `AtmosphereScene`; the composite                                                                                                                                                     | `atmosphere/AtmosphereCache.ts`, `atmosphere/shaders/composite.wgsl`                                                                   | The composite reads the scene target's colour and reversed-Z depth and lays aerial perspective over every opaque pixel                                                                                                                                                                                                                            |
+| R08   | `aerialPerspectiveScope`, `HillaireAtmosphere.aerialPerspective`                                                                                                                     | `atmosphere/hillaire.ts`, `atmosphere/settings.ts`                                                                                     | `scene` (high): every opaque pass drawn into the scene before the composite, and the volume published to later passes; `terrain` (low): the composite still covers every opaque pixel, and nothing is published (`aerialPerspective` returns `null`)                                                                                              |
+| R10   | `TerrainPass` (`#write`, `#drawCasters`, `#casterItems`, `#drawItem`, `maxPatches`, `symbologyDepthMaterial`); since R14.T1.a `TerrainViewFrame.draws`, `TerrainLevers`, `setLevers` | `terrain/terrainPass.ts`                                                                                                               | Lit draws a view, interior patches first (R14.T1.a; read by `frameTerrain.ts`, `spike/spikeRun.ts` and the smoke); casters as four `instanceCount` draws of the lit mesh from per-cascade copies of the instance records; `maxPatches` half the slots; `InstanceRecords` sized by the slot count                                                  |
+| R10   | `castsInto`, `morphRangeM`, `effectiveTauPx`, `MORPH_START_FRACTION`                                                                                                                 | `terrain/terrainPass.ts`                                                                                                               | `castsInto(set, index, fromCameraBodyFixedM, radiusM): boolean`; `effectiveTauPx(tauPx, limitExcess, weight)` = τ max(1, excess ÷ w); 0.7                                                                                                                                                                                                         |
+| R10   | `CascadeSet`, `fitCascades`, `CASCADE_SIZE_PX`, `CASCADE_COUNT`                                                                                                                      | `terrain/shadows/cascades.ts`                                                                                                          | `{ rangeM, splitsM, weight, unclippedDepth, casterReachM, sunElevationRad, basis, cascades }`; 2,048; 4                                                                                                                                                                                                                                           |
+| R10   | `cascadeAt`, `CASCADE_FOOTPRINT_TEXELS`, `cascadeReceiverLit`                                                                                                                        | `terrain/shadows/cascadeShadow.ts`                                                                                                     | `cascadeAt(distanceAlongViewM, farM): CascadeIndex \| null`; the receiver's twin                                                                                                                                                                                                                                                                  |
+| R10   | `ShadowCasters`, `ShadowCasterProvider`, `TerrainShadows`                                                                                                                            | `terrain/shadows/terrainShadows.ts`                                                                                                    | `(set, index, view) => DrawItem[]`: the casters that are not terrain                                                                                                                                                                                                                                                                              |
+| R10   | `lit_place`, `survey_kept_at`; `LitVertexOut`; the lit fragment                                                                                                                      | `terrain/shaders/terrainSurvey.wgsl`, `terrainLit.wgsl`, `terrainLitShade.wgsl`                                                        | `lit_place(grid : vec3f, instance : u32) -> LitPlace`; 12 inter-stage locations (92 B a vertex with the position); the geometric normal from `dpdxFine` before the survey `discard`; tiles read by `textureLoad`, cascades by `textureSampleCompareLevel`                                                                                         |
+| R10   | `TerrainLayers.unsurveyedCells`                                                                                                                                                      | `terrain/workers/messages.ts`                                                                                                          | `Uint32Array`, empty on a wholly surveyed bake                                                                                                                                                                                                                                                                                                    |
+| R10   | `LiveFrameTerrain.symbologyDepth`; `TERRAIN_DEPTH_FRACTION`                                                                                                                          | `terrain/frameTerrain.ts`; `depth/groundPull.ts`, `terrain/shaders/terrainDepth.wgsl`                                                  | `symbologyDepth(): ReadonlyArray<DrawItem>`, the terrain redrawn as depth before the marks, each depth pushed by 2⁻¹⁶ of itself with no slope term (R10.T16.c); the survey edge pulls its own depth (`shaders/lineStroke.wgsl`'s `line_depth`); only the hull occluders keep `occluderSlopePx` (`photoreal/overlay.ts`, `terrain/terrainPass.ts`) |
+| R10   | `CoarseFineHolds`, `coarseFineMorph`                                                                                                                                                 | `terrain/coarseFineHolds.ts`                                                                                                           | k held at 0 or 1 on coarse–fine edges and corners, from the draw set                                                                                                                                                                                                                                                                              |
+| R10   | The terrain run; the smoke harness's terrain frame                                                                                                                                   | `src/renderer/src/displays/view/check/terrainCheckRun.ts`, `src/main/terrainCheckResults.ts`, `src/renderer/src/smoke/terrainFrame.ts` | `just views-check --terrain [--whole] [--hidden] [--software] [--setting high\|low]`; test-render's `R10.T16 the frame` group (part 7)                                                                                                                                                                                                            |
+| R10   | `levelBoundsCounts.ts`                                                                                                                                                               | `terrain/levelBoundsCounts.ts`                                                                                                         | The count model the research's harness was built on                                                                                                                                                                                                                                                                                               |
+| R11   | `RockBakeHook`, `rockMesh.ts`, `couldTouch`; `pebbles.wgsl`, `scatterCull.ts`; `ringParticles.wgsl`, `instancedShare`                                                                | planned (R11.T4, T6, T9.d), not built                                                                                                  | T5's consumers; names as R11 has them                                                                                                                                                                                                                                                                                                             |
+| R01   | `TIMING_FRAMES_IN_FLIGHT`; `WriterRecord.copied`; `ColourTargetFormat`, `RenderTargetSpec`, `DepthSelfSample`                                                                        | `engine/webgpu/timing.ts`; `engine/webgpu/readback.ts`; `engine/types.ts`                                                              | 135, sized on 15 resolves a photorealistic frame (decision-r07-t19); a copy carries its source's writer; `"rgba16float" \| "rg11b10ufloat" \| "rgba8unorm"`, one colour attachment and a `depth32float` of its own (T2.b grows them)                                                                                                              |
+| R05   | `chordSagittaM`; `SELECTION_MARGIN`; `PACKED_BOUNDS_LENGTH`; `MAX_LEVEL`                                                                                                             | `terrain/select.ts`; `terrain/selectionTolerance.ts`; `terrain/bounds.ts`; `terrain/patchKey.ts`                                       | A level's chord sagitta, m; 0.1; 18 numbers a packed box; 24                                                                                                                                                                                                                                                                                      |
+| R05   | `SlotUpload`                                                                                                                                                                         | `terrain/gpu/resources.ts`                                                                                                             | `{ slot, key, heights, offsets, normals, originHeightM, skirtDepthM, layers }`: heights own and morph target interleaved; offsets q₀ and q₁ on high's `baked-offsets` layout, else `null`                                                                                                                                                         |
+| R11   | `STILL_TILE_MAX_PX`                                                                                                                                                                  | `stills/stillPlan.ts`                                                                                                                  | 4,096 px high, 2,048 low: stills render tile by tile                                                                                                                                                                                                                                                                                              |
+| R14   | `bytesDigest` (R14.T1.a)                                                                                                                                                             | `src/renderer/src/smoke/harness.ts`                                                                                                    | The FNV-1a of a read-back's bytes: a frame's fingerprint in test-render's log                                                                                                                                                                                                                                                                     |
+| R12   | `SettingSnapshot`, `MEMORY_ITEMS`, `MemoryItem`                                                                                                                                      | planned (R12.T1–T3), not built                                                                                                         | Read this plan's settings and categories (asks, Risks)                                                                                                                                                                                                                                                                                            |
 
 The research's counting harness (`tools/triCount.ts`) and its JSON were not carried with its
-records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
+records; T1.b commits its successor on `levelBoundsCounts.ts` (Design note 18).
 
 ## Running beside this plan
 
-| Lane                               | Task IDs             | What it changes                                                                                                                                                                                                                                                                           | What this plan takes, and the order                                                                                                                                                                                                                                                    |
-| ---------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `geometry-clusters-1` (running)    | R14.T1.a–e           | This plan's T1, as written below                                                                                                                                                                                                                                                          | T1 is that brief, task for task; its records land here                                                                                                                                                                                                                                 |
-| `seamless-1-no-collapse` (running) | R10's records        | `PatchCache.insert` refuses rather than evict the selection's chain; perhaps a sub-patch stand-in (A's slot and a sub-rectangle); the seamless probe as a slow test; the 253 s flicker                                                                                                    | The refusal binds the page pool too (Design note 14). A sub-patch at a level offset of 1–3 is a set of A's whole clusters (16, 4 or 1 block), which T2.a draws exactly (Design note 19). Its probe is T3's acceptance harness                                                          |
-| `seamless-2-time-morph` (after 1)  | R10's records        | k = max(k_CDLOD, F(v, t)) from per-instance fades; the instance record may grow by a `vec4u`; the bands' τ′ slewed 2% a frame                                                                                                                                                             | The cluster path calls the same vertex function, so F comes with it; nothing reads 32 B for the record (`INSTANCE_RECORD_BYTES`). T3's stride changes take the same F (Design note 19). T2's resolve is the cheap home of a later dithered fade                                        |
-| `seamless-3-lookahead` (after 1)   | R10's records        | A look-ahead selection at weight 0.5; L, the demand-to-resident p50, as a getter                                                                                                                                                                                                          | T5's mesh requests read L for their prefetch                                                                                                                                                                                                                                           |
-| `perf-terrain-bakes` (running)     | R10.T6.a, R05.T18    | The bake's cost and the bakes a second (workers, SIMD, shared normals); the progressive bake on high (research-terrain-gpu-driven §6's worker lane: everything but the double normals first, drawn at once, the slot byte-identical in the end), added to its brief by main on 2026-11-01 | Streaming's acceptance. T3.b's error output is computed beside the bake after this lane lands, in the worker, from the bake's heights. An ask: on Apple Silicon the height workers' count by performance cores, not `navigator.hardwareConcurrency`, which counts the efficiency cores |
-| `diag-frame-cost` (running)        | (the owner's report) | The Mac's frame breakdown, its profile command, everything but the terrain's triangles                                                                                                                                                                                                    | Its per-pass split decides T2 or T3 next (Tasks). Its profile command is a by-hand run of every task here                                                                                                                                                                              |
+| Lane                                                            | Task IDs             | What it changes                                                                                                                                                                                                                                                                           | What this plan takes, and the order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `geometry-clusters-1` (running)                                 | R14.T1.a–e           | This plan's T1: T1.a landed (389371b, 13100d5b), T1.b–e in flight                                                                                                                                                                                                                         | T1 is that brief's five steps as this plan corrects them, and where the two differ this plan wins. Main told the lane on 2026-11-01: the skirt strips' counts and the L + 3 bounds (Design note 2); `@invariant` on every terrain vertex stage (landed as 13100d5b, Design note 5); the sphere-or-box record (Design note 4); T1.e's overlay acceptance, with no ratio target; `GeometrySettings` and the way back (Design note 17); seamless-1's stand-ins on the edge path (Design note 19). Its brief also differs on the counters (a `bit-exact` reduction, never a copy, Design note 5), on tie pixels (listed) and on records (inline in Risks), and its "the resolve takes the survey discard" is ruled out (Design note 9). Whatever the lane lands without is R14.T1.f |
+| `seamless-1-no-collapse` (running)                              | R10's records        | `PatchCache.insert` refuses rather than evict the selection's chain; perhaps a sub-patch stand-in (A's slot and a sub-rectangle); the seamless probe as a slow test; the 253 s flicker. seamless-2 is chained after it in its lane                                                        | The refusal binds the page pool too (Design note 14). A sub-patch instance draws on the edge path until T2.a, and from T2.a as a mask of A's blocks only at a level offset of 1–3 that it draws as A's own blocks (Design note 19). Its probe takes T3.c's strides from `cullTwin.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `seamless-2-time-morph` (after 1, in its lane)                  | R10's records        | k = max(k_CDLOD, F(v, t)) from per-instance fades; the instance record may grow by a `vec4u`; the bands' τ′ slewed 2% a frame                                                                                                                                                             | F comes through `lit_place`, which the cluster path calls; nothing reads 32 B for the record (`INSTANCE_RECORD_BYTES`); the forced flag's bit 18 is agreed with its spare bits (Design note 10). While a rebake fades, the cull keeps the union of the old and the new slots' bounds (Design note 4). T3.c's strides morph by distance, not by F, at the unslewed τ′ (Design note 3). T6.a follows it. T2's resolve is the cheap home of a later dithered fade                                                                                                                                                                                                                                                                                                                  |
+| `seamless-3-lookahead` (running beside 1; rebases when 1 lands) | R10's records        | A look-ahead selection at weight 0.5; L, the demand-to-resident p50, as a getter                                                                                                                                                                                                          | T5's mesh requests read L for their prefetch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `perf-terrain-bakes` (running)                                  | R10.T6.a, R05.T18    | The bake's cost and the bakes a second (workers, SIMD, shared normals); the progressive bake on high (research-terrain-gpu-driven §6's worker lane: everything but the double normals first, drawn at once, the slot byte-identical in the end), added to its brief by main on 2026-11-01 | Streaming's acceptance. T3.b's error output is computed beside the bake after this lane lands, in the worker, from the bake's heights. An ask: on Apple Silicon the height workers' count by performance cores, not `navigator.hardwareConcurrency`, which counts the efficiency cores                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `diag-frame-cost` (running)                                     | (the owner's report) | The Mac's frame breakdown, its profile command, everything but the terrain's triangles (main told it so on 2026-11-01); perhaps an automatic quality floor                                                                                                                                | Its per-pass split and the owner's Mac run decide T2.b–e against T3.c–d after T2.a (Tasks); its profile command is a by-hand run of every task here. If its floor lands, it steps `GeometrySettings` with the setting or leaves them at the setting's values; a change of the patch count at orbit is T3.e's ruling's                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+**Concurrent edits.** `geometry-clusters-1` and seamless-1 and seamless-2 all edit `terrainPass.ts`'
+`#write`, the instance record and the terrain shaders, and seamless-2 lands while T1 is in flight:
+whichever lands second rebases. The cluster path's vertex stage reads the instance through the WGSL
+`Instance` struct and `INSTANCE_RECORD_BYTES`, never a literal, and seamless-2's fade fields only
+through `lit_place`.
 
 ## Design notes
 
@@ -529,9 +554,12 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
 3. **The error metric and the two modes.** Object-space geometric error in metres, projected by the
    one function selection uses, `screenSpaceErrorPx` (ε W ÷ (2 d tan(fov_h ÷ 2))), with d the `f64`
    distance to the cluster's bounds as R05 Design note 7 takes it to a patch's, against a per-pass
-   tolerance: for a camera pass τ′ px, the view's selection tolerance (`effectiveTauPx`); for a
-   cascade its texel, 2 r ÷ 2,048 m, the finest detail the map resolves (T1.d). The overlay's depth
-   has no slope term to spend: since R10.T16.c's grazing fix its terrain depth is pushed only by
+   tolerance: for a camera pass τ′ px, the setting's τ × max(1, `limitExcess` ÷ w), unslewed
+   (`effectiveTauPx(τ, limitExcess, w)`) and evaluated each frame at the cluster's own distance,
+   which is neither selection's τ_sel = τ ÷ (1 + `SELECTION_MARGIN`) nor seamless-2's slewed band τ′
+   (today `effectiveTauPx` is called with the bands' `bandTauPx`); for a cascade its texel, 2 r ÷
+   2,048 m, the finest detail the map resolves (T1.d). The overlay's depth has no slope term to
+   spend: since R10.T16.c's grazing fix its terrain depth is pushed only by
    `TERRAIN_DEPTH_FRACTION`, 2⁻¹⁶ of the depth (about 0.15 m at 10 km, 4.4 m at 287 km), and the
    survey edge pulls its own depth, so the overlay's pass stays at stride 1 (T1.e). Two modes share
    one record:
@@ -555,7 +583,12 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
      vertex. A camera pass takes stride s only where the level's stated error plus e_s, projected at
      the cluster's own distance, is within τ′, so the drawn error stays within what selection
      guarantees; the gain comes from a patch's clusters beyond its nearest point and from smooth
-     ground, and T3.a measures it.
+     ground, and T3.a measures it. decision-r10-item30 measured the stated (hard) bound at 8–200
+     times the drawn error, and selection draws each leaf where its stated error is near τ′ at its
+     nearest point, so this rule leaves few strides outside a patch's far side. A rule on the
+     measured per-patch deviation instead would change R10 Design note 5's stated-bound rule, so
+     T3.a reports the gain under both, and T3.c builds the stated rule unless a ruling, with T3.e's,
+     adopts the measured one.
 
    - **DAG cut** (meshes): a cluster is drawn where its own error ≤ tolerance < its parent group's,
      both projected at their groups' LOD spheres; monotone errors and nested spheres make the cut a
@@ -583,6 +616,12 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
    - Casters (T1.b): `castsInto` at the cluster's sphere, and refused wherever the patch's is. Exact
      under `castsInto`'s premise that a terrain caster lies within the caster reach ℓ of any
      receiver it shadows.
+   - **A rebake's fade** (seamless-2): the old bake is held in a spare slot for T while the new one
+     draws with its heights mixed from the old by f(t), and the new slot's records bound only the
+     new bake's two channels. So while an instance fades from an old bake, its clusters are culled
+     at the union of the old and the new slots' records (or the cull keeps every cluster of a fading
+     instance), and the twins test a rebake mid-fade; otherwise every exact lever would miss for up
+     to 0.4 s a rebake.
    - **The twins' claim**: at a boundary an `f32` test and its `f64` twin differ, so no twin can
      refuse "exactly" what the CPU refuses. Each GPU test never refuses what its `f64` predicate
      keeps, and keeps nothing it refuses beyond its widening; that holds for the frustum, the
@@ -623,9 +662,11 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
      or three dispatches, integer throughout, so its subgroup variant is `bit-exact` with its
      reference.
    - The counters are integer sums, read through a `bit-exact` reduction into a ring
-     (`ClusterStats`), behind the measurement switch only. The reduction may read arguments that the
-     `presentation-only` cull wrote because integer `atomicAdd` counts do not depend on the order of
-     the adds; only the lists' order is irreproducible.
+     (`ClusterStats`), behind the measurement switch only, and never copied: a buffer copy keeps the
+     cull's `presentation-only` mark (R01's `WriterRecord.copied`, `engine/webgpu/readback.ts`),
+     which `readBuffer` refuses, and `RenderEngine` has no buffer copy anyway. The reduction may
+     read arguments that the `presentation-only` cull wrote because integer `atomicAdd` counts do
+     not depend on the order of the adds; only the lists' order is irreproducible.
    - **Tie pixels.** T1.a draws the interior patches before the edge patches, and buckets draw by
      template, so the order at a skirt-grid tie can change. Where captures differ only at such
      pixels, each task lists them with their largest difference; if they show, the fallback is one
@@ -684,9 +725,9 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
    - High's 21–32 M triangles and the lit pass's 92 B of varyings a vertex (about 285 MB a pass of
      post-transform data, an estimate) are the shape that hurts most there, and the survey `discard`
      on every patch keeps every terrain fragment out of hidden-surface removal.
-   - So T1.a draws the interior patches, with no discard, before the edge patches; T1 halves the
-     triangles; T2 leaves the raster pass only a position and a flat ID; every task's acceptance
-     includes the Mac's fps.
+   - So T1.a draws the interior patches, with no discard, before the edge patches; T1 cuts a quarter
+     to a half of the triangles (T1's table); T2 leaves the raster pass only a position and a flat
+     ID; every task's acceptance includes the Mac's fps.
    - The bodies pass is not yet opaque first: it draws the mesh bodies' figures, which may discard
      (`smoothMesh.wgsl`), before the terrain (`photoreal/renderer.ts`). T2.e orders it as interior
      terrain, then the mesh figures, then the edge patches (depth decides; ties listed).
@@ -807,12 +848,14 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
     - `golden_diff.py` says "No golden files changed" for every task.
 
 11. **The atmosphere's aerial perspective.** R08's composite reads the scene's colour and reversed-Z
-    depth and lays aerial perspective over every opaque pixel, so the visibility buffer writes the
-    same depth into the same target and the composite is unchanged. On high (`scene` scope) a mesh
-    consumer draws into the scene before the composite and takes aerial perspective with the
-    terrain; on low (`terrain` scope) it draws after the composite without it, which is the low
-    setting's "aerial perspective on terrain only". A translucent consumer, none yet, reads
-    `HillaireAtmosphere.aerialPerspective`'s published volume.
+    depth and lays aerial perspective over every opaque pixel, on both settings, with no terrain
+    mask (`atmosphere/shaders/composite.wgsl`), so the visibility buffer writes the same depth into
+    the same target and the composite is unchanged. A mesh consumer draws in R07's `bodies` slot,
+    before the composite, on both settings (R07's pass list is one order for both,
+    `photoreal/passes.ts`), and takes its aerial perspective as the mesh bodies do. The `terrain`
+    scope's "terrain only" on low is what the composite publishes to later passes: nothing
+    (`HillaireAtmosphere.aerialPerspective` returns `null`). A translucent consumer, none yet, reads
+    that published volume on high.
 
 12. **The shadows' casters.** The four cascades are the terrain's largest pass: 39–67% of high's
     triangles. T1 moves the terrain's casters onto the cull: refused per cluster where `castsInto`
@@ -925,8 +968,8 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
     | `clusterPath`     | on                                                        | on                                                    | Every consumer on the path; off is today's path      |
     | `casterDepthCull` | on                                                        | on (no cascades on low)                               | Exact                                                |
     | `casterStrideCap` | 8                                                         | 8 (no cascades on low)                                | Casters at their texel                               |
-    | `overlayDepth`    | T1.e's choice                                             | T1.e's choice                                         | No mark's visibility changes                         |
-    | `shading`         | `visibility` (after T2.e)                                 | `forward` until R12.T8.b's UHD 620 run (lean)         | One shading a pixel where it pays                    |
+    | `overlayDepth`    | T1.e's choice (lean `scene-depth`)                        | T1.e's choice (lean `scene-depth`)                    | No mark's visibility changes                         |
+    | `shading`         | `visibility` (after T2.e)                                 | `forward` until the owner's UHD 620 run (lean, T2.e)  | One shading a pixel where it pays                    |
     | `strides`         | `measured` (after T3.c)                                   | `measured`                                            | Drawn error within τ′; stride 1 in the forced region |
     | `occlusion`       | `hzb` (after T3.d)                                        | `hzb` (after T3.d; the UHD 620's run may turn it off) | Exact                                                |
     | `pageBytes`       | 128 MiB                                                   | 32 MiB                                                | Within the memory ceilings                           |
@@ -1021,7 +1064,8 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
     - **The time morph**: F enters through the vertex function both paths call. A stride change in
       T3.c is a transition of its own, a stateless distance morph (T3.c), so F stays the fade of a
       data change (a rebake, a level change), as seamless-2 builds it into `lit_place` (k =
-      max(k_CDLOD, F)), and the stride's morph moves the place `lit_place` returns.
+      max(k_CDLOD, F)), and the stride's morph moves the place `lit_place` returns. While a rebake
+      fades, the cull keeps the union of the old and the new slots' bounds (Design note 4).
     - **Fades on the visibility path**: a dithered cross-fade costs least there, as complementary
       dither masks in the ID raster (on the fading patches alone) and one shading in the resolve,
       not as a second lit draw; the hand-over's cross-fade (R10.T10.g's remedy 2) and new survey
@@ -1030,13 +1074,18 @@ records; T1.b rebuilds it on `levelBoundsCounts.ts` (Risks).
 ## Tasks
 
 Order: T1 first, the shared substrate and the largest exact cut (running as `geometry-clusters-1`).
-Then the owner's Mac and RTX runs before and after T1, with `diag-frame-cost`'s split, decide T2 or
-T3 next; the lean is T2 first on Apple, whose gains (overshading, varyings, hidden-surface removal)
-are certain where T3's wait on a histogram. T3.a's histogram runs straight after T1, since it is
-cheap and decides T3's gain. T3.b follows `perf-terrain-bakes`; T3.c follows seamless-2; T3.e
-follows seamless-1–3 and a ruling. T4 follows T1 (T4.b needs T2.a's stable list only for its colour
-silhouette). T6.a may run any time after T1.b; T6.c follows T4.b. T5 follows T4 and waits on content
-(R11's rocks and particles, craft art), with T5.a buildable on procedural test meshes beforehand.
+Then T2.a, the lit pass on the cluster path, forward: it provides the camera passes and the stable
+compaction that every colour pass needs (T3.c, T3.d, T4.a, T4.c), so it comes first whichever way
+the next choice goes. After T2.a, the owner's Mac and RTX runs, with `diag-frame-cost`'s split,
+decide between T2.b–e (the visibility buffer) and T3.c–d (strides and occlusion). That choice is the
+owner's to rule on those runs; the lean is T2.b–e first on Apple, whose gains (overshading,
+varyings, hidden-surface removal) are certain where T3's wait on a histogram. T3.a's histogram runs
+straight after T1, since it is cheap and decides T3's gain. T3.b follows `perf-terrain-bakes`; T3.c
+follows seamless-2; T3.e follows seamless-1–3 and a ruling, which takes T3.c's error rule with it.
+T4 follows T2.a, but T4.b needs only T1 for its depth-only wireframe draw (its colour silhouette
+waits on T2.a). T6.a follows T1.b and seamless-2 (or its test covers the fade fields); T6.c follows
+T4.b. T5 follows T4 and waits on content (R11's rocks and particles, craft art), with T5.a buildable
+on procedural test meshes beforehand. T7 follows the owner's sign-off.
 
 Client files are under `apps/hyperion/src/renderer/src/view/` unless a path says otherwise. Every
 task runs:
@@ -1079,12 +1128,13 @@ the research's figures.
 - _Provides:_ `view/clusters/`' record, templates, cull passes, cull kernel and twin, buckets and
   counters; `GeometrySettings` with `clusterPath`, `casterDepthCull`, `casterStrideCap` and
   `overlayDepth`; the `geometry-clusters` category; the interior/edge split and its classification;
-  the per-pass counters in the terrain run's and the descent spike's results; the rebuilt counting
-  harness.
+  the per-pass counters in the terrain run's and the descent spike's results; the counting harness
+  and the capture comparison; the `--geometry` override and the way back (Design note 17).
 - _Consumes:_ R01's `dispatch`, indirect draws, `KernelPair` and `MemoryCategory`; R05's
   `ResidentPatch`, `DrawSet`, `patchBounds`, the frustum and horizon predicates, `vertexSpacing` and
-  the lit mesh; R10's `#drawCasters`, `castsInto`, `CascadeSet`, the cascades' receiver twin,
-  `lit_place`, `survey_kept_at`, `TerrainLayers.unsurveyedCells` and `symbologyDepth`.
+  the lit mesh, `SlotUpload`; T1.a's `TerrainLevers`; R10's `#drawCasters`, `castsInto`,
+  `CascadeSet`, the cascades' receiver twin, `lit_place`, `survey_kept_at`,
+  `TerrainLayers.unsurveyedCells` and `symbologyDepth`.
 
 - **R14.T1.a Interior patches draw without fins, skirt heads or discard.** Exact; size M.
   - _Today:_ every lit patch draws the lit mesh's 10,752 triangles with the survey `discard`
@@ -1123,7 +1173,9 @@ the research's figures.
     `clusters/{record,templates,cullPass,clusterCull.wgsl,cullTwin,buckets,stats,clusterCounts}.ts`,
     `quality/qualitySetting.ts`, `engine/memory.ts`, `terrain/terrainPass.ts` (`#drawCasters`,
     `#casterItems`), `terrain/shaders/terrainShadow.wgsl`, `engine/catalogue.ts`, the terrain run's
-    results, `src/main/cli.ts`, `scripts/{viewsCheck,descentSpike}.sh`, `scripts/clusterCounts.mjs`,
+    results, `src/main/results.ts` (the descent spike's counters: `RESULTS_VERSION` 6 → 7, with
+    R05's recorded files still read by version) and its markdown, `src/main/cli.ts`,
+    `scripts/{viewsCheck,descentSpike}.sh`, `scripts/clusterCounts.mjs`,
     `src/renderer/src/smoke/page.ts`, tests.
   - _Tests:_ the templates (index counts by stride, 128 / 32 / 8 / 2 and 16 / 8 / 4 / 2; every edge
     vertex of a block at stride s shared with its neighbour at s; the lit mesh's winding; strips
@@ -1177,17 +1229,27 @@ the research's figures.
     (`strideCap` 1: the cull and the interior split only). No stride above 1 unless its error,
     projected at each cluster, stays within the push's depth (about 0.15 m at 10 km). `overlayDepth`
     records which.
+  - The scene's depth carries neither the terrain's 2⁻¹⁶ push nor the survey edge's pull, so the
+    first form keeps both in the marks' test. It also changes what the marks test against, every
+    opaque pass's depth, and agrees in size only on high at internal scale 1, never on low's 720
+    rows. **Lean** (the reviews' verdict): the scene's depth where the sizes agree, the cluster path
+    at stride 1 elsewhere.
   - _Files:_ `terrain/frameTerrain.ts`, `photoreal/renderer.ts`, `photoreal/overlay.ts`, tests.
   - _Tests:_ for each choice, every mark of R10.T16's frame group kept or hidden exactly as the base
     renders it, compared mark by mark from the overlay's draw list and the depth at the mark's
     pixel.
   - _Acceptance:_ no mark's visibility changes in R10.T16's frame group (smoke part 7) or the views
-    check's captures; overlay triangles counted, with no ratio target (the research's overlay at 4
-    px was 0.80–0.92 of the base's on high at 1–10 km and 1.0 on low, so 0.7 was never in reach).
+    check's captures, the hull, orbit and graticule marks at a limb among them; overlay triangles
+    counted, with no ratio target (the research's overlay at 4 px was 0.80–0.92 of the base's on
+    high at 1–10 km and 1.0 on low, so 0.7 was never in reach).
+- **R14.T1.f What T1's lane lands without.** Conditional; size S–M, after T1.e. Whatever of this
+  plan's T1 the lane's commits leave out, if any: `GeometrySettings` with each lever's field, the
+  `geometry-clusters` category and the catalogue entries; the way back made runnable (Design note
+  17); the counters through a `bit-exact` reduction; records inline. _Acceptance:_ T1.b's.
 
 T1's NOT RUN: the owner's RTX 3080 and Mac runs of `just views-check --terrain --whole --hidden`,
 both settings, and `diag-frame-cost`'s profile command, before and after: fps at 1920 × 1080 and GPU
-per pass. They decide T2's and T3's order.
+per pass. With the runs after T2.a, they decide T2.b–e against T3.c–d (Tasks' order).
 
 ### R14.T2 The visibility buffer
 
@@ -1203,7 +1265,8 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
   `terrain/terrainPass.ts`, `terrain/terrainMaterial.ts`, `terrain/materialSet.ts`,
   `terrain/shaders/terrainLit.wgsl` and `terrainLitShade.wgsl`, `engine/platform.ts`,
   `engine/types.ts`, `engine/memory.ts`, `engine/webgpu/{target,materials,drawing,resources}.ts`
-  (T2.b), `photoreal/renderer.ts` (the passes' order), `engine/catalogue.ts`, tests.
+  (T2.b), `photoreal/renderer.ts` (the passes' order), `photoreal/passes.ts` (R07's pass list: the
+  slots of the cull, the compaction, the ID raster and the resolve), `engine/catalogue.ts`, tests.
 
 - **R14.T2.a The lit pass on the cluster path, forward.** Exact; size M.
   - The stable compaction (`CLUSTER_COMPACT`, Design note 5) and a camera pass in the cull: the lit
@@ -1260,10 +1323,11 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     passes as before.
 - **R14.T2.e The Mac's order, and the switch.** Size S.
   - `shading: "visibility"` on high once the owner's Mac and RTX runs are recorded; low stays
-    `forward` until R12.T8.b's UHD 620 run (Design note 17). The bodies pass ordered as Apple asks
-    (Design note 7): the interior terrain, then the mesh figures (which may discard), then the edge
-    patches, accepted byte-identical (depth decides; ties listed). Each pass split by T2 counts its
-    attachments' loads and stores in the Mac run.
+    `forward` until the owner's UHD 620 run of `just views-check --terrain --hidden --setting low`,
+    or R12.T8.b if that comes first (Design note 17; R12.T8.b needs R12.T1–T5, none built). The
+    bodies pass ordered as Apple asks (Design note 7): the interior terrain, then the mesh figures
+    (which may discard), then the edge patches, accepted byte-identical (depth decides; ties
+    listed). Each pass split by T2 counts its attachments' loads and stores in the Mac run.
   - _Tests:_ on the pod, the frame's draw list orders the bodies pass opaque first, then
     may-discard.
   - _Acceptance (pending: the owner's runs):_ the Mac's fps on high at 1920 × 1080 at least T2.a's,
@@ -1271,22 +1335,26 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
 
 ### R14.T3 Measured-error LOD and occlusion
 
-Size L, client plus a presentation-only worker output, after T1 (and T2 where the order says).
+Size L, client plus a presentation-only worker output: T3.a after T1, the rest after T2.a (and after
+T2.b–e where the owner's ruling puts the visibility buffer first).
 
 - _Provides:_ `clusterErrors` and the measured records, strides in camera passes, `DepthPyramid`,
   `strides` and `occlusion`, the triangle budget's draft.
-- _Consumes:_ T1 and T2; `BakedPatch` and the worker's bake (after `perf-terrain-bakes`);
-  seamless-2's fade fields; `CoarseFineHolds`; the seamless probe; `selectPatches`' budget (T3.e).
+- _Consumes:_ T1 and T2.a's camera passes and compaction (T2.c–d's visibility path where it is
+  built); `BakedPatch` and the worker's bake (after `perf-terrain-bakes`); seamless-2's fade fields;
+  `CoarseFineHolds`; the seamless probe; `selectPatches`' budget (T3.e).
 - _Files (all of T3):_ `clusters/{errors.ts,hzb.ts,hzb.wgsl,clusterCull.wgsl}`,
   `terrain/workers/{heightBake,messages}.ts`, `terrain/coarseFineHolds.ts`,
   `terrain/terrainPass.ts`, `terrain/shaders/patchVertex.wgsl`, `terrain/frameTerrain.ts`,
-  `photoreal/renderer.ts` (T3.d's split of the bodies pass), tests; T3.e's draft in this plan.
+  `photoreal/renderer.ts` and `photoreal/passes.ts` (T3.d's split of the bodies pass, each part a
+  labelled submission), tests; T3.e's draft in this plan.
 
 - **R14.T3.a The error histogram.** Size S. Over TERRAIN TEST and a served world (`owner-test`'s
   build: this tree serves no generated surface until 25), the per-cluster e₂, e₄, e₈ against each
   cluster's τ′ at R05's descent poses: the share of lit triangles that a stride within τ′ removes,
-  by band and setting. It decides T3.c's gain before T3.b starts. _Acceptance:_ the table, both
-  settings and both worlds, in the lane's outbox, with the harness that made it.
+  by band and setting, under both rules of Design note 3 (the level's stated bound plus e_s, and the
+  measured per-patch deviation plus e_s). It decides T3.c's gain before T3.b starts. _Acceptance:_
+  the table, both settings and both worlds, in the lane's outbox, with the harness that made it.
 - **R14.T3.b The worker's error output.** Size M, after `perf-terrain-bakes`.
   - `clusterErrors` in the height worker after each bake, in `f64` from the drawn 3D offsets of both
     channels (Design note 3: on high the bake's `BakedOffsets`, on low its own `f64` positions): e_s
@@ -1301,7 +1369,9 @@ Size L, client plus a presentation-only worker output, after T1 (and T2 where th
   - _Acceptance:_ the bake's time grows by at most 2% (pod, its bench).
 - **R14.T3.c Strides in camera passes.** Size L, after seamless-2.
   - The cull picks the coarsest stride whose level's stated error plus e_s, projected at the
-    cluster's distance, is within τ′; stride 1 in the forced region. `strides: "measured"`.
+    cluster's distance, is within τ′ (Design note 3's τ′, unslewed); stride 1 in the forced region.
+    It builds the stated-bound rule unless the ruling T3.e drafts adopts the measured deviation's.
+    `strides: "measured"`.
   - **The stride's transition** is a distance morph of its own, CDLOD-style and stateless: each
     vertex that the stride-2s mesh drops moves toward the stride-2s interpolant on the shared
     diagonal by k_s, from its own distance over a band before the threshold where its cluster takes
@@ -1334,11 +1404,11 @@ Size L, client plus a presentation-only worker output, after T1 (and T2 where th
 - **R14.T3.d Two-pass occlusion.** Size M.
   - `DepthPyramid` and the two-pass cull of Design note 4 per view, in both the forward and the
     visibility paths. `occlusion: "hzb"`.
-    - Last frame's visibility is a bit per (slot, cluster), cleared when a slot is refilled, so
-      keyed by the slot's (patch key, generation), never by instance index, which changes on every
-      reselection. It is dropped (the first pass draws nothing, and the second tests everything
-      against a cleared pyramid) on a restore, a resize, a change of internal scale, a camera cut
-      (`present: false`, a view switch, the hand-over) and a view's first frame.
+  - Last frame's visibility is a bit per (slot, cluster), cleared when a slot is refilled, so keyed
+    by the slot's (patch key, generation), never by instance index, which changes on every
+    reselection. It is dropped (the first pass draws nothing, and the second tests everything
+    against a cleared pyramid) on a restore, a resize, a change of internal scale, a camera cut
+    (`present: false`, a view switch, the hand-over) and a view's first frame.
   - **The frame's order**: the bodies pass splits into labelled submissions, raster 1 (the mesh
     figures among it), the pyramid, cull 2, raster 2 loading depth (`colourLoad: "load"`); the
     cascades' submissions stay before both halves. Edge patches are tested against the pyramid by
@@ -1357,8 +1427,9 @@ Size L, client plus a presentation-only worker output, after T1 (and T2 where th
     growing the frame. This changes R05 Design note 10's and R10 Design note 15's rule and
     `TERRAIN: DETAIL LIMITED`'s trigger: the task drafts the change with its counts for a ruling
     (decision-r10-t14b-constants is the rule's current ruling) and builds it only once ruled, after
-    seamless-1–3. The draft counts the bake demand too: a larger cache drawn at the same cost asks
-    for more bakes, which are the streaming wall (`perf-terrain-bakes`).
+    seamless-1–3 and whatever `diag-frame-cost` does to the patch count at orbit; the same ruling
+    takes T3.c's error rule (Design note 3). The draft counts the bake demand too: a larger cache
+    drawn at the same cost asks for more bakes, which are the streaming wall (`perf-terrain-bakes`).
   - _Acceptance:_ as ruled; `TERRAIN: DETAIL LIMITED` raised exactly when the drawn error exceeds τ′
     anywhere seen. With strides chosen on the GPU the CPU cannot know that, so the cull counts the
     clusters it draws over τ′ into a `bit-exact` reduction read each frame, which raises it (or the
@@ -1366,24 +1437,28 @@ Size L, client plus a presentation-only worker output, after T1 (and T2 where th
 
 ### R14.T4 The first non-terrain consumers
 
-Size M, client only, after T1.
+Size M, client only, after T2.a, whose stable compaction every colour pass needs; T4.b's depth-only
+wireframe draw needs only T1.
 
 - _Provides:_ `ClusterConsumer`, `meshTemplate`, the DAG-cut draw and `ClusterLod`.
-- _Consumes:_ T1 (T2.a for a colour pass); R07's `smoothMeshOf` and `smoothMesh.wgsl`; R02's
-  `HullOutline` and `occluder.wgsl`; R10's `terrainWire.wgsl`.
+- _Consumes:_ T1 and T2.a; R07's `smoothMeshOf` and `smoothMesh.wgsl`; R02's `HullOutline` and
+  `occluder.wgsl`; R10's `terrainWire.wgsl`.
 - _Files (all of T4):_ `clusters/consumer.ts`, `bodies/smoothMesh.ts`, `shaders/smoothMesh.wgsl`,
   `wireframe/{hulls,drawList,submit}.ts`, `shaders/occluder.wgsl`, `terrain/terrainPass.ts`
   (`#writeWire`), `terrain/shaders/terrainWire.wgsl`, tests.
 
 - **R14.T4.a The smooth figure on the path.** Size M. `smoothMesh.ts`' patches through the cluster
   path's strided templates, selected as today (`selectPatches` with no level table,
-  `SMOOTH_MESH_TAU_PX`). Its places are R05's `FaceDifferences` at h = 0 and read no heights, so it
-  needs no page of its own. Its fragment may always discard (`disc_pixel`, wherever the body does
-  not cover the pixel wholly, and beneath surveyed terrain), so its clusters are flagged may-discard
-  and draw after the opaque ones (Design note 7). `ClusterConsumer` lands here. _Tests:_ the
-  figure's cluster places against `FaceDifferences`' at h = 0 (the twin); its triangles before and
-  after. _Acceptance:_ test-render's mesh-bodies frames (`src/renderer/src/smoke/meshBodies.ts`)
-  byte-identical; draws counted against today's (expected: one a stride-1 template bucket).
+  `SMOOTH_MESH_TAU_PX`), at stride 1: its level of detail is selection's, and a coarser stride pulls
+  the outline inward by its chord's sagitta, so any stride above 1 must keep that sagitta within
+  `smoothMeshTauPx`'s 0.25 px over sec²θ. Its places are R05's `FaceDifferences` at h = 0 and read
+  no heights, so it needs no page of its own. Its fragment may always discard (`disc_pixel`,
+  wherever the body does not cover the pixel wholly, and beneath surveyed terrain), so its clusters
+  are flagged may-discard and draw after the opaque ones (Design note 7). `ClusterConsumer` lands
+  here. _Tests:_ the figure's cluster places against `FaceDifferences`' at h = 0 (the twin); its
+  triangles before and after. _Acceptance:_ test-render's mesh-bodies frames
+  (`src/renderer/src/smoke/meshBodies.ts`) byte-identical; draws counted against today's (expected:
+  one a stride-1 template bucket).
 - **R14.T4.b The generic mesh template, with the hull occluders.** Size S–M. `meshTemplate()`, a
   128-triangle cluster drawn by index pulling, and the DAG-cut mode's draw on a one-level DAG: the
   hull occluder faces (`occluder.wgsl`'s `corners`) as one page, depth-only in the wireframe and as
@@ -1420,9 +1495,9 @@ Size L–XL, tool and client, after T4; each subtask waits on its content except
     fast-math flag, since Apple clang contracts multiply-adds into FMA on arm64 by default and GCC
     and MSVC differ again;
   - meshoptimizer's version is pinned, and its MIT notice sits beside the tool;
-    - the byte test runs on all three platforms before any page is bundled: natively on Linux, on
-      the owner's Mac by hand (pending), and on Windows when a machine exists (NOT RUN: no
-      hardware), since `just cross-clippy` builds against a stand-in compiler and runs no test;
+  - the byte test runs on all three platforms before any page is bundled: natively on Linux, on the
+    owner's Mac by hand (pending), and on Windows when a machine exists (NOT RUN: no hardware),
+    since `just cross-clippy` builds against a stand-in compiler and runs no test;
   - pages are built once, on Linux, by `just mesh-pages`, which packaging and test-render's prepare
     step run, never for each platform; a committed SHA-256 of each test mesh's pages is checked by
     the tool's own tests natively and on the owner's Mac by hand.
@@ -1580,8 +1655,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   set's order by the generic template is the fallback.
 - **The brief's skirt-strip triangle counts** (32 / 16 / 8 / 4) are twice the lit mesh's (16 / 8 / 4
   / 2: the feet are one winding); and its "oriented box split 8 × 8" is not conservative on the
-  quadratic warp, where a block's bounds are its descendant patch's (Design note 2). Both are told
-  to `geometry-clusters-1` with this plan.
+  quadratic warp, where a block's bounds are its descendant patch's (Design note 2). Both were told
+  to `geometry-clusters-1` on 2026-11-01.
 - **The resolve's bindings** exceed 8 a stage as the lit material stands (10); T2.d packs them. If
   the packing costs a layout change in `TerrainResources`, it is client-only and moves nothing
   generated.
@@ -1596,13 +1671,14 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   `INSTANCE_RECORD_BYTES`.
 - **The triangle budget** (T3.e) changes R05's and R10's rule and the annunciation's trigger: a
   ruling first.
-- **The low setting's visibility buffer** is unmeasured on the UHD 620 (R12.T8.b): low stays forward
-  until then (a lean). R12.T8.b needs R12.T1–T5's perf mode and scenes, none built, so low may stay
-  `forward` for long.
+- **The low setting's visibility buffer** is unmeasured on the UHD 620: low stays forward until the
+  owner's UHD 620 run or R12.T8.b (a lean). R12.T8.b needs R12.T1–T5's perf mode and scenes, none
+  built, so low may stay `forward` for long.
 - **Windows (D3D12)**: no machine runs it. Every task lists it NOT RUN, and it is held to builds and
   lints (`just cross-clippy`, T5.a's tool included).
-- **The Mac** has no target-hardware entry yet: the owner's runs need one before T1's first (Design
-  note 7). Its memory ceiling is the discrete target's until measured (lean).
+- **The Mac's** target-hardware entry is the roadmap's placeholder until the owner fills it, before
+  T1's first owner run (Design note 7). Its memory ceiling is the discrete target's until measured
+  (lean).
 - **A second window's device** duplicates every row of Design note 15.
 - **Mesh receivers and the horizon map**: a mesh in a valley at sunset takes the cascades near the
   camera but no terrain horizon beyond them (open: a horizon lookup at the mesh's ground point).
@@ -1617,15 +1693,37 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     texture binding), built by this plan as a change to R01's contract.
   - `perf-terrain-bakes` (R10.T6.a, R05.T18): streaming's acceptance; on Apple Silicon the height
     workers' count by performance cores.
-  - R12: hold `GeometrySettings` in R12.T0's inventory and `SettingSnapshot`, and itemise
-    `geometry-clusters` and `geometry-pages` in `MEMORY_ITEMS`.
-    - R11: R11.T4's rock meshes, R11.T6.a's pebbles and R11.T9.d's particles draw through T5's
-      consumers rather than paths of their own; its planned additions to terrain shading land within
-      the resolve's 8 storage bindings (Design note 9). (Its stills already tile at
-      `STILL_TILE_MAX_PX`, so the draft's ask of R11.T10 is dropped.)
+  - R12: depend on R14 as built (R12.T0 reconciles R01–R11 today); hold `GeometrySettings` in
+    R12.T0's inventory and `SettingSnapshot`; a `PASS_ROWS` row for each of R14's timed labels (the
+    cull, the compaction, the ID raster, the resolve, the pyramid, the stats reduction), since R12
+    Design note 4's test fails on a timed pass with no row; and `geometry-clusters` and
+    `geometry-pages` in `MEMORY_ITEMS` (R12.T3).
+  - R07: slots in `photorealisticPasses` (`photoreal/passes.ts`) for those passes, and T3.d's split
+    of the bodies pass (R07 Design note 18 owns the order).
+  - R11: R11.T4's rock meshes, R11.T6.a's pebbles and R11.T9.d's particles draw through T5's
+    consumers rather than paths of their own; its planned additions to terrain shading land within
+    the resolve's 8 storage bindings (Design note 9). (Its stills already tile at
+    `STILL_TILE_MAX_PX`, so the draft's ask of R11.T10 is dropped.)
   - The plan that builds craft (not written): hull art as meshes in T5.a's input format, beside the
     `HullOutline` the wireframe draws.
-  - R05 and R10: T3.e's budget rule, by a ruling.
+  - R05 and R10: T3.e's budget rule and T3.c's error rule, by one ruling.
+- **The draft's ten questions**, as the three reviews answered them (2026-11-01):
+  1. T2 or T3: T2.a first either way; then the owner rules on the Mac and RTX runs between T2.b–e
+     and T3.c–d (lean T2.b–e); T3.a runs straight after T1 (Tasks).
+  2. Low's visibility buffer: `forward` until the owner's UHD 620 run or R12.T8.b, whichever is
+     first; low still takes T3.c's strides and T3.d's occlusion (Design note 17).
+  3. T3.e's budget: drafted for one ruling, which takes T3.c's error rule and counts the bake
+     demand, after seamless-1–3 and `diag-frame-cost` (T3.e).
+  4. The builder: meshoptimizer bound for the tool only, under T5.a's three conditions; else a Rust
+     port.
+  5. The pool's sizes: 128 / 32 MiB stay leans; vertices and indices in separate bindings, no CPU
+     copy, pinned roots within 10% (Design notes 6, 14, 15).
+  6. T1.e: the lane's choice, with the lean of the scene's depth where the sizes agree and the
+     cluster path at stride 1 elsewhere, keeping the push and the pull (T1.e).
+  7. The milestone: RM8, with a done-when; R12 depends on R14 as built (the roadmap).
+  8. Records: inline in this section (below).
+  9. The brainstorm's mesh-shader row: amended, with a Brainstorm corrections row.
+  10. Stills above 4,096²: the ask dropped; R11 already tiles them (Design note 9).
 - **Choices this plan's review fold made**, one line each:
   - the record keeps a 32 B sphere, which the GPU tests conservatively (correctness S1); the 48 B
     box is T1.b's lane's fallback if the counts show the sphere keeping too much;
@@ -1637,9 +1735,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     the bytes;
   - the engine's ID target is a subtask of its own, T2.b (correctness B2's T2.0, completeness B1's
     T2.a′), so the visibility buffer is T2.b–e where the reviews say T2.b–d;
-    - the overlay's depth stays at stride 1 unless a stride's error fits the 2⁻¹⁶ push, and T1.e has
-      no ratio target (correctness S3 and conformance S1 agree; the draft's `occluderSlopePx` term
-      was retired by R10.T16.c);
+  - the overlay's depth stays at stride 1 unless a stride's error fits the 2⁻¹⁶ push, and T1.e has
+    no ratio target (correctness S3 and conformance S1 agree; the draft's `occluderSlopePx` term was
+    retired by R10.T16.c);
   - low's occlusion is `hzb` after T3.d on both settings (completeness Q2: low is not left on T1's
     path) over the draft's `none` until measured; the UHD 620's run may turn it off;
   - the counting harness and the capture comparison are node scripts run by hand, as
@@ -1648,9 +1746,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - meshes write no overlay depth (completeness C4 asked either way): the hulls' occluder faces hide
     marks behind craft as today, so `meshTolerancePx` has no overlay field;
   - the visibility buffer's several consumers resolve in one pass each (completeness S14), fixed by
-    T2.c before T5 needs it.
-- **Records** go at the end of this section until the plan is split (`plan_split.py`);
-  `geometry-clusters-1`'s brief asks for per-task record files, which the split makes.
+    T2.c before T5 needs it;
+  - T3.c's neighbours across a patch edge come from a second dispatch (correctness S7) rather than a
+    rule both sides compute alike (conformance S3): each cluster's e_s differs, and a neighbour
+    patch's records sit in another slot, which the instance does not name;
+  - the order is T1, then T2.a, then the owner's ruling on the Mac and RTX runs between T2.b–e and
+    T3.c–d (conformance B1, all three reviews' verdicts on the draft's question 1);
+  - the mesh-shader row of the brainstorm is amended and recorded in the roadmap's Brainstorm
+    corrections (conformance C5) rather than left as written (correctness): the new section takes
+    Nanite's cluster LOD and culling, which the row's words rejected;
+  - the draft's ask of R11.T10 (stills above 4,096²) is dropped (conformance C4): R11 already tiles
+    stills at `STILL_TILE_MAX_PX`.
+- **Records** go inline at the end of this section until `plan_split.py` splits the plan, as
+  LANE-RULES and the roadmap's Conventions put them for every plan but R09 and R10.
+  `geometry-clusters-1`'s brief asks for per-task record files; a `14-virtualized-geometry/records/`
+  directory would make `plan_task.py`'s `is_split()` read R14 as split, though no task has its
+  `Records:` line, so the lane writes its records here (an ask of main to the lane).
 - **R14.T1.a** (389371b, 13100d5b; recorded by the plan's fold from the commits, since the lane's
   tree had no plan): `TerrainViewFrame.draws` (interior first) replaces `draw`, read by
   `frameTerrain.ts` (the overlay's depth copies each draw), `spike/spikeRun.ts` and the smoke;

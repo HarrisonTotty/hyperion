@@ -961,7 +961,7 @@ before its merits are weighed.
 | CDLOD (Strugar 2009)                              | Its contribution is kept: continuous morphing between levels in the vertex shader. Its crack-free guarantee assumes one heightmap shared by every level, which band-limited levels are not, so height morphs too. |
 | Geometry clipmaps (Losasso and Hoppe 2004)        | Fixed memory and few draws, but camera-centred rather than body-centred, which is awkward when several bodies are in view. Rejected.                                                                              |
 | Hardware tessellation                             | Not available in WebGPU or WebGL2. Rejected by the platform.                                                                                                                                                      |
-| Mesh shaders, Nanite-style virtual geometry       | WebGPU has no mesh shaders; a Nanite-style compute rasteriser would run on it, but is the wrong tool: terrain's structure is known, and its height is cheap.                                                      |
+| Mesh shaders, Nanite-style virtual geometry       | No mesh shaders in WebGPU, and a compute rasteriser is the wrong tool for terrain, whose structure is known. Nanite's cluster culling and LOD are taken ([Virtualized geometry](#virtualized-geometry)).          |
 | ROAM                                              | Historical. CPU-bound triangle bintrees lost to GPU throughput two decades ago.                                                                                                                                   |
 
 Cube-sphere distortion is the known cost, and it is accepted because the compensation is what we
@@ -1031,8 +1031,8 @@ structure. What is taken from Nanite is what survives WebGPU through the hardwar
   every cull refuses only what cannot reach a pixel. Strides, culls and shading order are
   presentation, and no generated value depends on them.
 - **Streaming** is one pool of fixed slots with least-recently-used eviction that never evicts what
-  is drawn or forced, and never draws a hole: a missing piece is drawn by its resident coarser
-  ancestor.
+  is selected, its resident ancestors, or what is drawn or forced, and never draws a hole: a missing
+  piece is drawn by its resident coarser ancestor.
 - **The ladder** gains a geometry row: the cluster path on both settings; the visibility buffer on
   the high setting, and on the low one once the UHD 620 is measured; measured strides within τ on
   both. The memory table gains a mesh-page pool beside the height-texture cache (**lean:** 128 MiB
@@ -1040,9 +1040,10 @@ structure. What is taken from Nanite is what survives WebGPU through the hardwar
   identifiers and a depth pyramid.
 
 **Lean:** build it in the order its gains are certain: the exact cuts first (no fins or discard on
-wholly surveyed patches, casters culled by the depths their receivers sample), then the visibility
-buffer, then measured-error strides and occlusion, each accepted on its counts and on a frame
-measured on the owner's Mac and on the recommended specification.
+wholly surveyed patches, casters culled by the depths their receivers sample), then the lit pass on
+the cluster path, then the visibility buffer or measured-error strides and occlusion in the order the
+owner's runs decide. Each is accepted on its counts and on a frame measured on the owner's Mac (by
+hand, a miss being a finding) and on the recommended specification.
 [Plan R14](../plans/rendering-and-planets/14-virtualized-geometry.md) builds it.
 
 ### Where the height comes from: the central tension
