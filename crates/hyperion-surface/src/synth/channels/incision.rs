@@ -3035,87 +3035,21 @@ fn level_terms_to(
     // A world dry now's: its trunk's epoch valley alone ([`EpochValley`]), its course bent
     // ([`EPOCH_TRUNK_SINUOSITY`]) and, as the synthesis cuts it, graded to its receiver's
     // (R09.T6.h).
-    if cell.epoch_incision.is_epoch() {
-        if let Some(epoch) = epoch_valley(cell, body)
-            && epoch.depth().value() > 0.0
-        {
-            let density = MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY / mean_cell_width(r, level);
-            out.push(match valley {
-                TrunkValley::Epoch { receiver_m } => {
-                    epoch_trunk_term(level, density, &epoch, *receiver_m)
-                }
-                TrunkValley::FromTheCell | TrunkValley::Drawn { .. } => level_term(
-                    level,
-                    density,
-                    epoch.depth().value(),
-                    0.5 * epoch.floor_width().value(),
-                    epoch.wall().value(),
-                ),
-            });
-        }
-        return out;
-    }
-    let tributaries = tributary_steepness_of(cell);
-    let held_by = match valley {
-        // The trunk: one a coarse cell, its valley's depth all along it.
-        TrunkValley::FromTheCell => {
-            let cap = VALLEY_WALL_GRADIENT * wall / STEEPEST_WALL;
-            let (_, width, depth) = channel_size(
-                cell.catchment_runoff.metres_per_year(),
-                cell.drainage.area(),
-                body.gravity,
-            );
-            let valley = tributaries.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
-            let g = trunk_depth_m(valley, depth, cap);
-            if g > 0.0 {
-                let density = MEAN_TRUNK_LENGTH / mean_cell_width(r, level);
-                out.push(level_term(level, density, g, 0.5 * width, wall));
+    if let Some(epoch) = epoch_valley(cell, body)
+        && epoch.depth().value() > 0.0
+    {
+        let density = MEAN_TRUNK_LENGTH * EPOCH_TRUNK_SINUOSITY / mean_cell_width(r, level);
+        out.push(match valley {
+            TrunkValley::Epoch { receiver_m } => {
+                epoch_trunk_term(level, density, &epoch, *receiver_m)
             }
-            0.0
-        }
-        TrunkValley::Drawn {
-            halves, held_by_m, ..
-        } => {
-            if !halves.is_empty() {
-                out.push(trunk_term(level, halves, mean_cell_width(r, level), wall));
-            }
-            *held_by_m
-        }
-        TrunkValley::Epoch { .. } => unreachable!("a world dry now's cell returned above"),
-    };
-    let Some(steepness) = tributaries else {
-        return out;
-    };
-    let runoff = cell.runoff.metres_per_year();
-    let heads = main_stream_length(channel_head_area(steepness)).value();
-    for k in level + 1..=last.min(MAX_LEVEL) {
-        let cell_width = mean_cell_width(r, k);
-        let wall = VALLEY_WALL_SHARE * cell_width;
-        let cap = VALLEY_WALL_GRADIENT * wall / STEEPEST_WALL;
-        let length = MEAN_TRIBUTARY_LENGTH * cell_width;
-        let head = head_length(body.radius, k).value();
-        // Its bed's depth below the top at its middle: the relief from its heads down to it.
-        let middle = head + 0.5 * length;
-        let below = if middle > heads {
-            rise(steepness, heads, middle)
-        } else {
-            0.0
-        };
-        // The top it inherits stands as much lower as its trunk's valley is held (R09.T6.f).
-        let below = if held_by > 0.0 {
-            num::max(below - held_by, 0.0)
-        } else {
-            below
-        };
-        let area = super::hack_area(Metres::new(head + length));
-        let (_, width, depth) = channel_size(runoff, area, body.gravity);
-        let g = num::min(num::max(below, depth), cap);
-        let density = TRIBUTARY_SHARE * length / (cell_width * cell_width);
-        let term = level_term(k, density, g, 0.5 * width, wall);
-        out.push(LevelTerm {
-            variance: TRIBUTARY_VARIANCE_SHARE * term.variance,
-            slope2: TRIBUTARY_VARIANCE_SHARE * term.slope2,
-            ..term
+            TrunkValley::FromTheCell | TrunkValley::Drawn { .. } => level_term(
+                level,
+                density,
+                epoch.depth().value(),
+                0.5 * epoch.floor_width().value(),
+                epoch.wall().value(),
+            ),
         });
     }
     out
