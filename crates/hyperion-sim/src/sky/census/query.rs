@@ -13,8 +13,7 @@ use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
 use crate::galaxy::query::{
-    LayerPads, QuerySphere, SystemSource, cells_in_shell_slab, count_cells_in_sphere, pad_for,
-    sphere_slabs,
+    LayerPads, QuerySphere, cells_in_shell_slab, count_cells_in_sphere, pad_for, sphere_slabs,
 };
 use crate::id::{Layer, SystemId};
 use crate::math;
@@ -35,6 +34,7 @@ use super::super::limits::EyeVisibility;
 use super::super::luminosity::LuminosityTables;
 use super::cache::SkyCellCache;
 use super::cell::{CellOffsets, SkyStar};
+use super::features::SkySource;
 
 /// The largest count of stars a sky lists, 3 × 10⁵ (Design note 11): 7.2 MB of payload.
 pub const MAX_N_MAX: u32 = 300_000;
@@ -277,13 +277,20 @@ impl Completeness {
     /// radius.
     #[must_use]
     pub fn radius_for(&self, star: &SkyStar) -> LightYears {
-        let d = self.observer.displacement_to(star.apparent()).metres();
+        self.radius_at(star.layer(), star.apparent())
+    }
+
+    /// The radius `layer` is complete to towards the band texel of `apparent`, a star's apparent
+    /// position: [`radius_for`](Self::radius_for) of a star of `layer` there, before the star is
+    /// measured (R06.T16.a's members, kept within it).
+    #[must_use]
+    pub fn radius_at(&self, layer: Layer, apparent: &GalacticPosition) -> LightYears {
+        let d = self.observer.displacement_to(apparent).metres();
         match self.band_spec.texel_of(d) {
-            Some((face, row, column)) => self.complete_to.radius_toward(
-                star.layer(),
-                self.band_spec.texel_direction(face, row, column),
-            ),
-            None => self.complete_to.radius(star.layer()),
+            Some((face, row, column)) => self
+                .complete_to
+                .radius_toward(layer, self.band_spec.texel_direction(face, row, column)),
+            None => self.complete_to.radius(layer),
         }
     }
 }
@@ -582,7 +589,7 @@ impl ConeRegion {
     /// holds lies within α + 2ρ; the margin covers the rounding of the tests on both sides. A
     /// wider plan only opens more cells, whose stars the region keeps or leaves out as before.
     #[must_use]
-    fn meets_ball(&self, offset_ly: [f64; 3], radius_ly: f64) -> bool {
+    pub(super) fn meets_ball(&self, offset_ly: [f64; 3], radius_ly: f64) -> bool {
         let opening = self.cone.half_angle_radians()
             + 2.0 * self.spec.largest_texel_radius().value()
             + PLAN_MARGIN_RAD;
@@ -1119,9 +1126,14 @@ pub struct SkyContext<'a> {
     /// The cell cache, its entries blocks of cells keyed by magnitude (R06.T8.h;
     /// [`super::cache::NoSkyCellCache`] keeps none).
     pub cells: &'a dyn SkyCellCache,
-    /// The sources of systems beyond the grid (plan 09's feature members, once P09.T40 supplies
-    /// them; none until then).
-    pub sources: &'a [&'a dyn SystemSource],
+    /// The sources of systems beyond the grid that the census takes: plan 09's feature members
+    /// wherever the galaxy's field gives them up ([`takes_feature_members`]), and none otherwise
+    /// (R06.T16.a). Each of a census's jobs carries the same: a cell's tallies then say the
+    /// members are in, and [`census_members`] takes theirs shell by shell.
+    ///
+    /// [`takes_feature_members`]: super::takes_feature_members
+    /// [`census_members`]: super::census_members
+    pub sources: &'a [&'a dyn SkySource],
     /// The gas's modifiers for the sightlines (plan 09's feature gas, once supplied).
     pub modifiers: &'a dyn GasModifierSource,
 }
@@ -1242,16 +1254,46 @@ impl CensusPlan {
     ///
     /// If `shell` is not one of the plan's ([`shells`](Self::shells)).
     pub fn shell_slabs(&self, shell: Shell) -> impl Iterator<Item = CellSlab> + '_ {
-        let walk = self
-            .walks
+        self.slabs_of(self.walk_of(shell), usize::from(shell.index))
+    }
+
+    /// The distances between which `shell` completes its layer, ly: the edge of the shell before
+    /// it, or nought for its layer's first, and its own edge, or its cap's farthest radius for its
+    /// layer's last. A star a shell's census holds lies between them, nearer than the radius its
+    /// layer is complete to towards it ([`completeness`](Self::completeness)), so feature members
+    /// are taken shell by shell between them (R06.T16.a).
+    ///
+    /// # Panics
+    ///
+    /// If `shell` is not one of the plan's ([`shells`](Self::shells)).
+    #[must_use]
+    pub fn shell_span(&self, shell: Shell) -> (LightYears, LightYears) {
+        let walk = self.walk_of(shell);
+        let index = usize::from(shell.index);
+        let inner = index
+            .checked_sub(1)
+            .map_or(LightYears::ZERO, |before| walk.edges[before].1.radius());
+        let outer = walk
+            .edges
+            .get(index)
+            .map_or_else(|| walk.sphere.radius(), |(_, sphere)| sphere.radius());
+        (inner, outer)
+    }
+
+    /// The walk `shell` is a shell of.
+    ///
+    /// # Panics
+    ///
+    /// If `shell` is not one of the plan's ([`shells`](Self::shells)).
+    fn walk_of(&self, shell: Shell) -> &LayerWalk {
+        self.walks
             .iter()
             .find(|walk| {
                 walk.layer == shell.layer
                     && usize::from(shell.index) < walk.shell_count()
                     && walk.shell(usize::from(shell.index)) == shell
             })
-            .unwrap_or_else(|| panic!("{shell:?} is not a shell of the plan"));
-        self.slabs_of(walk, usize::from(shell.index))
+            .unwrap_or_else(|| panic!("{shell:?} is not a shell of the plan"))
     }
 
     /// The slabs of shell `index` of `walk`, one of the plan's.
@@ -1575,7 +1617,7 @@ fn opens(
 ///
 /// If `d` is not finite, which no cap is: a cap is the caps' own radius, under the root cube's
 /// diagonal, or a forced one, checked against it.
-fn light_time(d: f64) -> Span {
+pub(super) fn light_time(d: f64) -> Span {
     Span::from_seconds_f64(d * SECONDS_PER_JULIAN_YEAR)
         .expect("a cap under the root cube's diagonal is a representable span")
 }

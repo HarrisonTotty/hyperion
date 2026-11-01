@@ -70,6 +70,7 @@
 //! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_served/*eye_5.0` | none: the full cold census at the real boundary, recorded (T17) | 2.75 × 10⁴ CPU-s on the server's galaxy, 1.41 × 10⁴ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 |
+//! | `sky/census_near_sun_members/served_5.0` | the first shells' within the first sky's 150 CPU-s; the whole recorded beside the grid's (T17, R06.T16.a) | 1.33 CPU-s in the first shells, 31.3 in all (C 10.1, D 13.9, E 6.9), the longest job 0.35 s, on a pod of 16 vCPU (2026-11-01, `--features testing`) |
 //! | `sky/census_inner_disc_served/*eye_5.0` | none: the inner disc at the limit, recorded (T17), beside `decision-r13-guard-trip.md`'s 2–3 × 10⁵ | 2.42 × 10⁵ CPU-s on the server's galaxy, 1.70 × 10⁵ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 (2026-10-12) |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 1.26 CPU-s (rays 1.12, field 0.14), 0.22 s wall |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 30.2 CPU-s, 2.04 s wall, ten replies, 30.2 MB |
@@ -3205,6 +3206,199 @@ fn limit_map(c: &mut Criterion) {
     group.finish();
 }
 
+/// The feature members' bench (R06.T16.a), built with the sim's `testing` feature alone, whose
+/// door to a later version's galaxy it needs.
+#[cfg(feature = "testing")]
+mod members {
+    use std::cell::OnceCell;
+    use std::hint::black_box;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    use criterion::Criterion;
+    use hyperion_sim::galaxy::Galaxy;
+    use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+    use hyperion_sim::galaxy::features::members::source::{FeatureMemberSource, KeepInteriors};
+    use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+    use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    use hyperion_sim::galaxy::params::GalaxyParams;
+    use hyperion_sim::sky::caps::SYNTHETIC_CEILING_V;
+    use hyperion_sim::sky::census::{
+        CensusPlan, CensusTallies, MemberPart, NoSkyCellCache, Shell, SkyContext, SkyQuery,
+        SkySource, census_members, census_plan, takes_feature_members,
+    };
+    use hyperion_sim::{GeneratorVersion, Seed};
+
+    use super::{
+        NOISE_SLOTS, SEED, SUN_LY, Sky, ThreadCpu, build_sky, on_pool, served_query, workers,
+    };
+
+    /// A galaxy of the fixture's seed and parameters at the first generator version whose field gives
+    /// up φ, so that its census takes the features' members (R06.T16.a): 26 where P09.T2.c's hold
+    /// turns on there, 27 otherwise, the latest it can. A later version's galaxy is the sim's
+    /// `testing` feature's door ([`Galaxy::from_params_at_version`]), so the members' bench is built
+    /// with it alone.
+    fn phi_galaxy() -> Galaxy {
+        [26, 27]
+            .into_iter()
+            .map(|v| {
+                Galaxy::from_params_at_version(
+                    Seed::new(SEED),
+                    GalaxyParams::milky_way_like(),
+                    GeneratorVersion::new(v),
+                )
+                .expect("the Milky Way-like parameters are valid")
+            })
+            .find(takes_feature_members)
+            .expect("φ is held to 27 at the latest")
+            .with_full_potential()
+    }
+
+    /// [`sky`] for [`phi_galaxy`].
+    fn phi_sky() -> &'static Sky {
+        static SKY: OnceLock<Sky> = OnceLock::new();
+        SKY.get_or_init(|| build_sky(phi_galaxy()))
+    }
+
+    /// The feature members' cost in the census near the Sun (R06.T16.a, the cost item of its
+    /// re-validation): `census_near_sun_members/served_5.0`, the members of every shell of the sky the
+    /// server serves there, at the eye's cut with the real tier at RM3's ceiling, on the fixture where
+    /// its field gives up φ ([`phi_sky`]), each shell's members in one part a worker, as the server
+    /// takes them, its features' interiors built once for the census. Against T17's budget: the
+    /// first sky in at most 150 CPU-s, of which the members of every layer's first shell are part, and
+    /// the full census at the real boundary recorded beside the grid's 1.41 × 10⁴ CPU-s on the
+    /// fixture. It prints, per layer, the shells, the members generated and the stars kept, and the
+    /// CPU time, the jobs' wall time and, on Linux, their threads' CPU time
+    /// (`/proc/thread-self/schedstat`), of the first shells and of all. It is built with the sim's
+    /// `testing` feature alone: `cargo bench -p hyperion-sim --bench sky --features testing --
+    /// census_near_sun_members`.
+    pub(super) fn census_near_sun_members(c: &mut Criterion) {
+        let workers = workers();
+        let mut group = c.benchmark_group("sky");
+        group.sample_size(10);
+        let printed = AtomicBool::new(false);
+        let query: OnceCell<SkyQuery> = OnceCell::new();
+        let name = format!("census_near_sun_members/served_{SYNTHETIC_CEILING_V:.1}");
+        group.bench_function(&name, |b| {
+            let sky = phi_sky();
+            let query = query.get_or_init(|| served_query(sky, SUN_LY));
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let plan = census_plan(
+                        &sky.galaxy,
+                        &sky.tables,
+                        &sky.envelope,
+                        black_box(query),
+                        &mut NoiseCache::with_capacity(NOISE_SLOTS),
+                    );
+                    let parts = std::num::NonZeroU32::try_from(
+                        std::num::NonZeroUsize::new(workers).expect("at least one worker"),
+                    )
+                    .unwrap_or(std::num::NonZeroU32::MAX);
+                    let jobs: Vec<(Shell, MemberPart)> = plan
+                        .shells()
+                        .flat_map(|shell| MemberPart::all(parts).map(move |part| (shell, part)))
+                        .collect();
+                    let interiors = KeepInteriors::new(&sky.galaxy);
+                    let (done, wall) = on_pool(&jobs, workers, &|&(shell, part)| {
+                        let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+                        let sources: [&dyn SkySource; 1] = [&source];
+                        let mut ctx = SkyContext {
+                            tables: &sky.tables,
+                            envelope: &sky.envelope,
+                            offsets: &sky.offsets,
+                            noise: NoiseCache::with_capacity(NOISE_SLOTS),
+                            cells: &NoSkyCellCache,
+                            sources: &sources,
+                            modifiers: &NoModifiers,
+                        };
+                        let mut clock = ThreadCpu::open();
+                        let before = clock.as_mut().and_then(ThreadCpu::now);
+                        let started = Instant::now();
+                        let mut stars = Vec::new();
+                        let tallies = census_members(
+                            &sky.galaxy,
+                            &mut ctx,
+                            &plan,
+                            (shell, part),
+                            query,
+                            &mut stars,
+                        );
+                        let on_cpu = before
+                            .zip(clock.as_mut().and_then(ThreadCpu::now))
+                            .map(|(a, b)| b.saturating_sub(a));
+                        (tallies, started.elapsed(), on_cpu)
+                    });
+                    if !printed.swap(true, Ordering::Relaxed) {
+                        report_members(&name, &plan, &jobs, &done, wall);
+                    }
+                    cpu += wall;
+                }
+                cpu
+            });
+        });
+        group.finish();
+    }
+
+    /// A member job's tallies, its wall time and its thread's CPU time where the platform gives it.
+    type MemberJob = (CensusTallies, Duration, Option<Duration>);
+
+    /// Prints the members' census of `plan` near the Sun, job by job in `done`, against T17's budget.
+    fn report_members(
+        name: &str,
+        plan: &CensusPlan,
+        jobs: &[(Shell, MemberPart)],
+        done: &[(usize, MemberJob)],
+        wall: Duration,
+    ) {
+        let (mut first_wall, mut first_cpu, mut all_cpu) =
+            (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+        let mut longest = Duration::ZERO;
+        eprintln!("{name}: the feature members near the Sun at the served sky's caps");
+        for cap in plan.caps() {
+            let layer = cap.layer();
+            let (mut generated, mut accepted, mut ran, mut on_cpu) =
+                (0, 0, Duration::ZERO, Duration::ZERO);
+            let mut shells = 0;
+            for (k, (tallies, job_wall, job_cpu)) in done {
+                let (shell, part) = jobs[*k];
+                if shell.layer() != layer {
+                    continue;
+                }
+                shells += usize::from(part.index() == 0);
+                generated += tallies.layer(layer).generated();
+                accepted += tallies.layer(layer).accepted();
+                ran += *job_wall;
+                on_cpu += job_cpu.unwrap_or(*job_wall);
+                longest = longest.max(*job_wall);
+                if shell.index() == 0 {
+                    first_wall += *job_wall;
+                    first_cpu += job_cpu.unwrap_or(*job_wall);
+                }
+            }
+            all_cpu += on_cpu;
+            eprintln!(
+                "  {layer:?}: cap {:.0} ly, {shells} shells, {generated} members generated, \
+                 {accepted} stars kept, {:.2} s of jobs ({:.2} CPU-s)",
+                cap.radius().value(),
+                ran.as_secs_f64(),
+                on_cpu.as_secs_f64()
+            );
+        }
+        eprintln!(
+            "  the first shells: {:.2} s of jobs ({:.2} CPU-s) against the first sky's 150 CPU-s; \
+             all: {:.2} s of jobs ({:.2} CPU-s) beside the grid's 1.41e4 CPU-s; the longest job {:.2} s",
+            first_wall.as_secs_f64(),
+            first_cpu.as_secs_f64(),
+            wall.as_secs_f64(),
+            all_cpu.as_secs_f64(),
+            longest.as_secs_f64()
+        );
+    }
+}
+
 criterion_group!(
     sky_benches,
     luminosity_tables,
@@ -3222,4 +3416,9 @@ criterion_group!(
     band_near_sun,
     limit_map
 );
+#[cfg(feature = "testing")]
+criterion_group!(member_benches, members::census_near_sun_members);
+#[cfg(feature = "testing")]
+criterion_main!(sky_benches, member_benches);
+#[cfg(not(feature = "testing"))]
 criterion_main!(sky_benches);

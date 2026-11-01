@@ -48,8 +48,8 @@ use super::super::{FeatureId, FeatureProcess};
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
 use super::super::nested::box_distance;
-use super::local_offset;
 use super::placement::FeatureInterior;
+use super::{MemberRecord, local_offset};
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
 ///
@@ -319,6 +319,85 @@ impl<'a> FeatureMemberSource<'a> {
             })
             .filter_map(|f| self.interiors.interior(galaxy, &f))
     }
+
+    /// Each member of `band` that may lie between `inner` and `outer` of `centre` at some time of
+    /// `window`, born by its end, given to `each` in the source's order: features as the
+    /// catalogue lists them, then cells in the grid's order, then members in index order. It may
+    /// give a member beyond the shell, never leave one out. What the sky's census reads, a shell
+    /// at a time (rendering plan R06, R06.T16.a), in `parts` parts: the part `part` gives the
+    /// members of every `parts`-th cell it visits from the `part`-th, so that the parts give each
+    /// member once between them, whatever their number.
+    ///
+    /// Each feature is padded by its own members' speed bound
+    /// ([`FeatureInterior::member_speed_bound`], P09.T23.b), never by a layer's pad: a member
+    /// within the shell at some time of the window lies, at the epoch, within that pad of it over
+    /// the window's farthest time from the epoch. Only the candidates within `outer` so padded are
+    /// drawn, and a cell that lies wholly within `inner` less the pad is not visited.
+    pub(crate) fn members_in_shell_over(
+        &self,
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        ((band, inner, outer), (part, parts)): ((MassBand, LightYears, LightYears), (u32, u32)),
+        each: &mut dyn FnMut(&MemberRecord),
+    ) {
+        let (from, to) = window;
+        let farthest = if from.since_epoch().as_seconds_f64().abs()
+            > to.since_epoch().as_seconds_f64().abs()
+        {
+            from
+        } else {
+            to
+        };
+        let lookup = outer + pad_for(farthest, UNBOUND_PAD_SPEED);
+        let mut members = Vec::new();
+        // The cells visited so far, whose count says which part takes the next.
+        let mut visited = 0_u64;
+        for interior in self.interiors_near(galaxy, centre, lookup) {
+            let local = local_offset(interior.feature().position(), centre);
+            let near = [local.x, local.y, local.z];
+            let bound = interior.member_speed_bound();
+            let within = member_reach(outer, farthest, bound);
+            // The margins `member_reach` adds, taken off the inner edge too.
+            let inside = inner.value() - (within.value() - outer.value());
+            let mut memo = interior.bound_memo();
+            for cell in interior.grid().cells_touching(&local, within) {
+                if box_farthest(&interior.grid().local_cell(cell), near) < inside {
+                    continue;
+                }
+                let mine = visited % u64::from(parts) == u64::from(part);
+                visited += 1;
+                if !mine {
+                    continue;
+                }
+                interior.members_in_cell_near(
+                    galaxy,
+                    band,
+                    cell,
+                    &local,
+                    within,
+                    (&mut members, &mut memo),
+                );
+                for (member, _) in &members {
+                    use crate::galaxy::placement::Existence;
+                    if matches!(member.record().existence_at(to), Existence::Exists) {
+                        each(member);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The distance from the local point `p` to the farthest point of `cell`'s box, ly.
+#[must_use]
+fn box_farthest(cell: &LocalCell, p: [f64; 3]) -> f64 {
+    let mut sum = 0.0;
+    for (&lo, &c) in cell.min.iter().zip(&p) {
+        let d = (c - lo).abs().max((lo + cell.edge - c).abs());
+        sum += d * d;
+    }
+    sum.sqrt()
 }
 
 /// The bands from the coarsest down, the order the query walks its layers.

@@ -283,7 +283,8 @@ impl LayerTally {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CensusTallies {
     layers: [LayerTally; Layer::ALL.len()],
-    /// Plan 09's feature members are not in the census until P09.T40 (R06.T16.a).
+    /// Whether plan 09's feature members are left out: so unless every part's job carried the
+    /// census's sources ([`SkyContext::sources`], R06.T16.a).
     feature_members_absent: bool,
 }
 
@@ -321,13 +322,18 @@ impl CensusTallies {
         self.feature_members_absent |= other.feature_members_absent;
     }
 
-    /// These tallies with plan 09's feature members present: for the merge's tests, until T16.a
-    /// brings the members.
+    /// These tallies with plan 09's feature members present: for the merge's tests.
     #[cfg(test)]
     #[must_use]
     pub(super) const fn with_feature_members_present(mut self) -> Self {
-        self.feature_members_absent = false;
+        self.note_feature_members();
         self
+    }
+
+    /// Notes that plan 09's feature members are in the census: the tallies of a job whose context
+    /// carries the census's sources (R06.T16.a).
+    pub(super) const fn note_feature_members(&mut self) {
+        self.feature_members_absent = false;
     }
 
     /// Sets each layer's [`LayerTally::listed`] to the number of `listed` in it: the merge's.
@@ -529,9 +535,9 @@ impl CensusCost {
 
 /// A census's tallies and its cost, counted side by side.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-struct Counts {
-    tallies: CensusTallies,
-    cost: CensusCost,
+pub(super) struct Counts {
+    pub(super) tallies: CensusTallies,
+    pub(super) cost: CensusCost,
 }
 
 /// Whether a record's skips are taken: its flux bound before its system is generated, and each
@@ -631,13 +637,30 @@ pub fn star_offset_bound(galaxy: &Galaxy, record: &SystemRecord) -> LightYears {
 /// the cell's corner and the table's node.
 #[must_use]
 pub fn cell_offset_bound(galaxy: &Galaxy, key: CellKey) -> LightYears {
-    if always_single(key.layer()) {
+    layer_offset_bound(
+        galaxy,
+        key.layer(),
+        LightYears::new(farthest_from_centre_ly(key)),
+    )
+}
+
+/// [`star_offset_bound`] for every system of `layer` within `from_centre` of the galactic centre:
+/// [`cell_offset_bound`]'s for a cell whose farthest corner lies there, and zero for a layer whose
+/// systems are all single. A feature member's hierarchy keeps the same tidal cut about its own
+/// place, so it bounds a member's stars too, which [`census_members`](super::census_members)
+/// shifts its shells by (R06.T16.a).
+#[must_use]
+pub(super) fn layer_offset_bound(
+    galaxy: &Galaxy,
+    layer: Layer,
+    from_centre: LightYears,
+) -> LightYears {
+    if always_single(layer) {
         return LightYears::ZERO;
     }
-    let radius = galaxy.potential().tidal_radius_bound_within(
-        offset_mass(key.layer()),
-        LightYears::new(farthest_from_centre_ly(key)),
-    );
+    let radius = galaxy
+        .potential()
+        .tidal_radius_bound_within(offset_mass(layer), from_centre);
     LightYears::new(offset_bound_at(LightYears::from(radius).value()))
 }
 
@@ -1909,10 +1932,41 @@ fn record_stars(
     ) else {
         return;
     };
+    let stars = SystemStars::generate(galaxy, record);
+    system_stars(
+        galaxy,
+        ctx,
+        (record, &stars, &r),
+        query,
+        (bound, &|_, _| true),
+        counts,
+        out,
+    );
+}
+
+/// Whether a star at an apparent position, a distance (ly) from the observer, lies in a census's
+/// region: [`system_stars`]' test before it measures the star.
+pub(super) type Within<'a> = &'a dyn Fn(&GalacticPosition, f64) -> bool;
+
+/// The stars of `record`'s system, `stars`, seen at `r`, kept for `query`, appended to `out`, with
+/// their counts in `counts`: [`census_record`]'s once its system is generated, for a grid record
+/// and a feature member alike (R06.T16.a). Each star is kept only where `within` holds of its
+/// apparent position and its distance from the observer, ly, before anything else of it is
+/// measured: every star of a grid record, a member's within its shell and cap
+/// ([`census_members`](super::census_members)).
+pub(super) fn system_stars(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    (record, stars, r): (&SystemRecord, &SystemStars, &Retardation),
+    query: &SkyQuery,
+    (bound, within): (Bound, Within<'_>),
+    counts: &mut Counts,
+    out: &mut Vec<SkyStar>,
+) {
+    let layer = record.layer();
     let tally = &mut counts.tallies;
     let observer = query.observer();
     let emitted = r.emitted();
-    let stars = SystemStars::generate(galaxy, record);
     let Some(state) = stars.state_at(emitted) else {
         return;
     };
@@ -1946,6 +2000,9 @@ fn record_stars(
             continue;
         };
         let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
+        if !within(&apparent, d) {
+            continue;
+        }
         let unextinguished = unextinguished_v(m_v, d);
         // What a bound of the record's own realised stars could not skip, whatever the cone
         // (R06.T8.h's cost, `generated_listable`).
@@ -2068,6 +2125,9 @@ pub fn census_cell_with_cost(
 ) -> (CensusTallies, CensusCost) {
     let mut counts = Counts::default();
     counts.tallies.layer_mut(key.layer()).cells += 1;
+    if !ctx.sources.is_empty() {
+        counts.tallies.note_feature_members();
+    }
     debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
     let reach = CellReach::of(ctx.offsets, key, query);
     let floor = floor_at(galaxy, ctx.envelope, key, query, &reach);

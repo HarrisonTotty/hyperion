@@ -92,7 +92,9 @@ use crate::bulk::sky::{
     EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload, encode_sky_stars, encode_sky_texels,
 };
 use crate::bulk::{Answer, BulkPayload};
-use crate::compute::sky::{BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand};
+use crate::compute::sky::{
+    BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand, SkyMembers,
+};
 use crate::compute::{
     self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Listing, Priority, SkyCaps,
 };
@@ -279,6 +281,7 @@ async fn computed(
     let plan = Arc::new(plan);
     phase("plan", started);
     let inputs = CensusInputs {
+        members: SkyMembers::of(&galaxy, &state.feature_cells, &state.cluster_models),
         galaxy,
         key,
         tables,
