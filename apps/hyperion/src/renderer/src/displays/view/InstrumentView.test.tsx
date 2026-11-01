@@ -1,4 +1,5 @@
 import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { binaryFrame } from "../../test/binaryFrames";
@@ -1137,10 +1138,14 @@ describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () =
   const thick =
     "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT";
 
-  it("shows ATMOSPHERE: APPROXIMATE straight above a reason the primary lacks, though the primary shows the note", () => {
+  it("shows ATMOSPHERE: APPROXIMATE straight above a reason the primary lacks, though the primary shows the note", async () => {
+    const user = userEvent.setup();
     renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);
     const panel = instrumentPanel();
-    expect(panel.getByText(statusLine(note)).nextElementSibling).toBe(panel.getByText(thick));
+    await user.click(panel.getByRole("button", { name: "1 REASON" }));
+    expect(
+      panel.getByText(statusLine(note)).closest("p")?.nextElementSibling?.firstElementChild,
+    ).toBe(panel.getByText(thick));
   });
 
   it("drops a reason the primary shows already", () => {

@@ -4575,6 +4575,22 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   letter-spacing: 0;
 }
 
+/*
+ * A note whose reasons fold behind it, ATMOSPHERE: APPROXIMATE (the owner's request, 2026-11-01):
+ * the note, then on its line the display control that opens them, which takes the pointer that the
+ * plate over the canvas does not; the control's 2rem target sets the line's height.
+ */
+.view-label__statement--folds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.5rem;
+}
+
+.view-label__reasons {
+  pointer-events: auto;
+}
+
 /* The stars' count line: numbers, in B612 Mono with tabular figures. */
 .view-label__count {
   margin: 0.25rem 0 0;

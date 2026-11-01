@@ -83,7 +83,8 @@ describe("the view's label block", () => {
     ]).toEqual([["status-text__state"], ["status-text__state", "status-text__sentence"]]);
   });
 
-  it("sets a reason after ATMOSPHERE: APPROXIMATE whole as a sentence, its head untracked (R08.T10.d)", () => {
+  it("sets a reason after ATMOSPHERE: APPROXIMATE whole as a sentence, its head untracked (R08.T10.d)", async () => {
+    const user = userEvent.setup();
     const reason = "H2O–H2O pairs: their absorption estimated, not measured, for KX 4417 /3";
     render(
       <ViewLabelBlock
@@ -93,6 +94,7 @@ describe("the view's label block", () => {
         faults={[]}
       />,
     );
+    await user.click(screen.getByRole("button", { name: "1 REASON" }));
     const line = screen.getByText(reason);
     expect([
       partsOf("ATMOSPHERE: APPROXIMATE"),
@@ -103,6 +105,77 @@ describe("the view's label block", () => {
       "view-label__statement view-label__statement--sentence",
       null,
     ]);
+  });
+
+  describe("ATMOSPHERE: APPROXIMATE's reasons folded behind it (the owner's request)", () => {
+    const reasons = [
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
+      "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    ];
+
+    /** The block with the note and its two reasons. */
+    function renderFolded(): ReturnType<typeof userEvent.setup> {
+      const user = userEvent.setup();
+      render(
+        <ViewLabelBlock
+          lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+          statements={[
+            "ATMOSPHERE: APPROXIMATE",
+            ...reasons.map((text) => ({ text, standing: "sentence" as const })),
+          ]}
+          countLine={null}
+          faults={[]}
+        />,
+      );
+      return user;
+    }
+
+    function reasonsShown(): ReadonlyArray<boolean> {
+      return reasons.map((text) => screen.queryByText(text) !== null);
+    }
+
+    it("stands the note with its reasons' count, the reasons folded, as the view opens", () => {
+      renderFolded();
+
+      expect(screen.getByText(statusLine("ATMOSPHERE: APPROXIMATE"))).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "2 REASONS" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      expect(reasonsShown()).toEqual([false, false]);
+    });
+
+    it("opens them on a press, each on a line of its own, and folds them on another", async () => {
+      const user = renderFolded();
+      const control = screen.getByRole("button", { name: "2 REASONS" });
+
+      await user.click(control);
+      expect([control.getAttribute("aria-expanded"), reasonsShown()]).toEqual([
+        "true",
+        [true, true],
+      ]);
+      await user.click(control);
+      expect(reasonsShown()).toEqual([false, false]);
+    });
+
+    it("opens them from the keyboard", async () => {
+      const user = renderFolded();
+      screen.getByRole("button", { name: "2 REASONS" }).focus();
+
+      await user.keyboard("{Enter}");
+
+      expect(reasonsShown()).toEqual([true, true]);
+    });
+
+    it("shows them while the pointer rests on the control", async () => {
+      const user = renderFolded();
+      const control = screen.getByRole("button", { name: "2 REASONS" });
+
+      await user.hover(control);
+      expect(reasonsShown()).toEqual([true, true]);
+      await user.unhover(control);
+      expect(reasonsShown()).toEqual([false, false]);
+    });
   });
 
   describe("with a graphics fault and the terrain's (R10.T16.b)", () => {

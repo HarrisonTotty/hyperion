@@ -17,7 +17,7 @@ import { ViewCanvas } from "./ViewCanvas";
 import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
-import { LabelStatementLine } from "./LabelStatementLine";
+import { LabelStatements } from "./LabelStatements";
 import {
   CONTOUR_INTERVAL_LABEL,
   instrumentPhotorealStatements,
@@ -29,7 +29,6 @@ import {
   photorealStatements,
   POSITIONS_FROM_SHIP,
   PRESET_NAMES,
-  statementText,
   targetKey,
   withSceneStarsLine,
 } from "./viewRun";
@@ -285,9 +284,7 @@ export function InstrumentView({
       </div>
       {statements.length === 0 ? null : (
         <div className="view-instrument__statements" id={statementsId}>
-          {statements.map((statement) => (
-            <LabelStatementLine statement={statement} key={statementText(statement)} />
-          ))}
+          <LabelStatements statements={statements} />
         </div>
       )}
     </section>

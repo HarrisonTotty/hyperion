@@ -7,6 +7,7 @@
  */
 import type { ResponseBody } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
@@ -111,8 +112,12 @@ describe("the atmosphere on a live VIEW (R08.T10.b)", () => {
   });
 });
 
-/** The label block with the notes and three bodies' reasons, as `photorealStatements` sets them. */
-function renderPlate(): void {
+/**
+ * The label block with the notes and three bodies' reasons, as `photorealStatements` sets them,
+ * the reasons opened behind their note's control (the owner's request, 2026-11-01).
+ */
+async function renderPlate(): Promise<void> {
+  const user = userEvent.setup();
   const lines = atmosphereApproximateLines([
     { designation: "KX 4417 /3", reasons: ["H2O: its absorption estimated, not measured"] },
     { designation: "KX 4417 /5", reasons: [THICK_REASON] },
@@ -131,6 +136,7 @@ function renderPlate(): void {
       faults={[]}
     />,
   );
+  await user.click(screen.getByRole("button", { name: "2 REASONS" }));
 }
 
 describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)", () => {
@@ -140,8 +146,8 @@ describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)"
     "H2O: its absorption estimated, not measured, for KX 4417 /3",
   ];
 
-  it("sets each reason on a line of its own straight after the note, a steady statement in the case given", () => {
-    renderPlate();
+  it("sets each reason on a line of its own straight after the note, a steady statement in the case given", async () => {
+    await renderPlate();
     const shown = [
       ...notes.map((text) => screen.getByText(statusLine(text))),
       ...reasons.map((text) => screen.getByText(text)),
@@ -156,14 +162,14 @@ describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)"
     // In the order said, each the plate's steady statement in `--text`, neither an alert nor a status.
     expect([
       inOrder,
-      shown.every((line) => line.classList.contains("view-label__statement")),
+      shown.every((line) => line.closest(".view-label__statement") !== null),
       screen.queryByRole("alert"),
       screen.queryAllByRole("status").some((status) => shown.some((line) => status.contains(line))),
     ]).toEqual([true, true, null, false]);
   });
 
-  it("sets each reason whole as a sentence, nothing in it tracked (R08.T10.d)", () => {
-    renderPlate();
+  it("sets each reason whole as a sentence, nothing in it tracked (R08.T10.d)", async () => {
+    await renderPlate();
     expect(
       reasons.map((text) => {
         const line = screen.getByText(text);
@@ -175,8 +181,8 @@ describe("ATMOSPHERE: APPROXIMATE's reasons on the plate (R08.T10.c, R08.T10.d)"
     ).toEqual(reasons.map(() => [true, null]));
   });
 
-  it("tracks ATMOSPHERE: APPROXIMATE itself as a state", () => {
-    renderPlate();
+  it("tracks ATMOSPHERE: APPROXIMATE itself as a state", async () => {
+    await renderPlate();
     expect(
       screen
         .getByText(statusLine("ATMOSPHERE: APPROXIMATE"))

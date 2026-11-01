@@ -4,7 +4,7 @@ import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { formatListPosition } from "../../lib/format";
 import { type ItemsInView, useItemsInView } from "../../lib/itemsInView";
-import { LabelStatementLine } from "./LabelStatementLine";
+import { LabelStatements } from "./LabelStatements";
 import type { UpperRoom } from "./viewRoom";
 import {
   type LabelField,
@@ -326,7 +326,8 @@ export function readingParts(
  * after its state (the descent spike's `TEST PLANET: provisional, …`) tracks the state alone; the
  * rest are upper case whole and tracked whole, as before (P05.T13). A sentence statement,
  * `ATMOSPHERE: APPROXIMATE`'s reasons, is set whole with no letter spacing, nothing in it tracked
- * (`LabelStatementLine`; plan R08, R08.T10.d). The stars' count line is a
+ * (`LabelStatementLine`; plan R08, R08.T10.d), and folded behind its note's `4 REASONS` control
+ * until opened (`LabelStatements`; the owner's request, 2026-11-01). The stars' count line is a
  * reading of numbers, so an `output` in B612 Mono (the guide's "Typography"), not a statement.
  *
  * On the `PRIMARY` view's upper plate (`scrollsFrom`, plan R10, R10.T12.b;
@@ -447,9 +448,7 @@ export function ViewLabelBlock({
             {rest.length === 0 ? null : <dl className="view-label__lines">{rest.map(lineOf)}</dl>}
           </>
         )}
-        {statements.map((statement) => (
-          <LabelStatementLine statement={statement} key={statementText(statement)} />
-        ))}
+        <LabelStatements statements={statements} />
         {countLine === null ? null : (
           <p className="view-label__count">
             <output aria-live="off">{countLine}</output>
