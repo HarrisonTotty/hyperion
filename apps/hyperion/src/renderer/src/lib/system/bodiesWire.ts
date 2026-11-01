@@ -37,6 +37,8 @@ import {
   type CrustCompositionDto,
   type DetailSeedHex,
   type GasShareDto,
+  type HabitabilityDto,
+  type HabitabilityLimitDto,
   type HabitableZoneDto,
   isBodyId,
   type NotFormedCondensateDto,
@@ -46,6 +48,7 @@ import {
   type PopulationDto,
   type ProfileNodeDto,
   type RequestOf,
+  type ResourceAbundancesDto,
   type SectionDto,
   type SilicateVapourDto,
   type SizeDistributionDto,
@@ -90,6 +93,8 @@ import type {
   CraterScreening,
   CrustComposition,
   GasShare,
+  Habitability,
+  HabitabilityLimit,
   HabitableZone,
   HierarchyNode,
   JohnsonBands,
@@ -97,6 +102,7 @@ import type {
   OrbitHost,
   Population,
   ProfileNode,
+  ResourceAbundances,
   RotationLock,
   Section,
   SilicateVapour,
@@ -1738,6 +1744,92 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
   };
 }
 
+/** Every habitability limit this build knows, so that one it does not reads `unknown`. */
+const HABITABILITY_LIMITS: Readonly<Record<HabitabilityLimitDto, true>> = {
+  outside_optimistic_zone: true,
+  outside_conservative_zone: true,
+  no_atmosphere: true,
+  below_triple_point: true,
+  runaway_greenhouse: true,
+  snowball: true,
+  gas_envelope: true,
+  tidally_locked: true,
+  high_eccentricity: true,
+  active_host: true,
+  young_host: true,
+  leaving_main_sequence: true,
+  extrapolated_zone: true,
+  molten_surface: true,
+  dry_surface: true,
+  mass_outside_temperate_range: true,
+  frozen_surface: true,
+};
+
+// The limits grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toHabitabilityLimit(wire: HabitabilityLimitDto): HabitabilityLimit {
+  return Object.hasOwn(HABITABILITY_LIMITS, wire) ? wire : "unknown";
+}
+
+function toHabitability(habitability: HabitabilityDto): Habitability {
+  return {
+    habitabilityClass: habitability.class,
+    limits: habitability.limits.map(toHabitabilityLimit),
+  };
+}
+
+/** Whether a mass fraction is one: finite and from 0 to 1. */
+function massFraction(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Resource abundances, each fraction checked to lie from 0 to 1 (P14.T26). Their sum, at most 1 to
+ * the server's rounding, is not checked, since the wire states no rounding to hold it to.
+ */
+function toResources(resources: ResourceAbundancesDto): ResourceAbundances {
+  const { radioisotopes } = resources;
+  check(
+    [
+      resources.iron_group,
+      resources.light_lithophiles,
+      resources.rare_earths,
+      resources.platinum_group,
+      resources.radioactives,
+      resources.silicates,
+      resources.water_ice,
+      resources.other_ices,
+      resources.hydrocarbons,
+      resources.helium_3,
+      resources.deuterium,
+      radioisotopes.uranium_238,
+      radioisotopes.uranium_235,
+      radioisotopes.thorium_232,
+      radioisotopes.potassium_40,
+    ].every(massFraction),
+    "resources unusable",
+  );
+  return {
+    ironGroup: resources.iron_group,
+    lightLithophiles: resources.light_lithophiles,
+    rareEarths: resources.rare_earths,
+    platinumGroup: resources.platinum_group,
+    radioactives: resources.radioactives,
+    silicates: resources.silicates,
+    waterIce: resources.water_ice,
+    otherIces: resources.other_ices,
+    hydrocarbons: resources.hydrocarbons,
+    helium3: resources.helium_3,
+    deuterium: resources.deuterium,
+    radioisotopes: {
+      uranium238: radioisotopes.uranium_238,
+      uranium235: radioisotopes.uranium_235,
+      thorium232: radioisotopes.thorium_232,
+      potassium40: radioisotopes.potassium_40,
+    },
+  };
+}
+
 /** A whole record, checked and in the display's units. */
 function toRecord(record: BodyRecordDto, system: SystemIdHex, designation: string): BodyRecord {
   return {
@@ -1749,6 +1841,8 @@ function toRecord(record: BodyRecordDto, system: SystemIdHex, designation: strin
         check(DETAIL_SEED_FORM.test(seed), "detail seed malformed");
         return seed;
       }),
+      habitability: toOptionalSection(hooks.habitability, toHabitability),
+      resources: toOptionalSection(hooks.resources, toResources),
     })),
   };
 }

@@ -3173,7 +3173,8 @@ function of time. It says nothing about life.
   `SubsurfaceOcean`; the share of FGK hosts with a `Temperate` body is reported by the slow test and
   asserted only to lie in 0.01–0.3, since η⊕ is that uncertain.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::habitability`.
-- _Built_ 2026-11-01, server-only and off the record (`planetary/habitability`, new): Risks,
+- _Built_ 2026-11-01, server-only and off the record (`planetary/habitability`, new), and on the
+  wire at `full` (Risks, "P14.T25 and T26 on the wire, as built"): Risks,
   "Deviations in P14.T25, as built".
 
 #### P14.T26 Resource abundances
@@ -3193,6 +3194,8 @@ one log-normal draw per resource of 0.3 dex for what the model leaves out.
 - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::resources`.
 - _Built_ 2026-11-01, server-only, on no record: Risks, "Deviations in P14.T26, as built". Its
   abundances by ratio to the rock, held at 27: Risks, "Deviations in P14.T26's ratios, as built".
+- _Built_ 2026-11-01, server-only, on no record: Risks, "Deviations in P14.T26, as built"; on the
+  wire at `full`, `not_modelled` below 27 (Risks, "P14.T25 and T26 on the wire, as built").
 
 ### Phase F: special hosts
 
@@ -33908,3 +33911,27 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     `planetary/resources` by name. Measured under every 27 hold: 193 of its 358 `Ok` bodies move
     by the ratios (1,948 lines), and 20 bodies by the other holds (5 of them changing state). No
     other golden reads it.
+- **P14.T25 and T26 on the wire, as built (lane p14-hooks-wire, 2026-11-01).** No generated output
+  moves; `PROTOCOL_VERSION` stays 3.
+  - _Wire:_ `BodyHooksDto` gains `habitability: Option<SectionDto<HabitabilityDto>>` and
+    `resources: Option<SectionDto<ResourceAbundancesDto>>`, optional (read absent as
+    `not_modelled`, plan 04's Design note 15) rather than the brief's bare sections.
+    `HabitabilityDto { class: HabitabilityClassDto, limits: Vec<HabitabilityLimitDto> }`, the
+    limits in `HabitabilityLimit::ALL`'s order; `HabitabilityLimitDto` grows (plan 04's list).
+    `ResourceAbundancesDto` has one `f64` per `Resource::key` in `ALL`'s order and
+    `radioisotopes: RadioisotopesDto { uranium_238, uranium_235, thorium_232, potassium_40 }`.
+  - _Server:_ `body_detail` calls `hooks_at` only where the record's hooks are `ok` (granted
+    `full`). `RESOURCES_SERVED_FROM` = 27 in `convert/planetary.rs`, tripwire
+    `the_resources_gate_holds_until_its_version`: the bump to 27 deletes it, or raises it.
+  - _Rows (`GENERATOR INPUTS`, after `DETAIL SEED`):_ `HABITABILITY` reads the class and its limits
+    joined by `·` (`MARGINAL · FROZEN SURFACE`), an unknown limit `—`. Then `RESOURCES MASS
+FRACTION OF OUTER LAYERS`, `IRON GROUP`, `LIGHT LITHOPHILES`, `RARE EARTHS`, `PLATINUM GROUP`,
+    `RADIOACTIVES`, `RADIOISOTOPES` (`U-238 … · K-40 …`), `SILICATES`, `H2O`, `OTHER ICES`,
+    `HYDROCARBONS`, `He-3`, `H-2`. Each value is in `%`, `ppm` or `ppb` (`formatMassFraction`),
+    and 0 reads `NONE`. The guide's rows are drafts for the owner.
+  - _Leans (2026-11-01):_ `ppm`/`ppb` against the guide's `%` with E notation; water as `H2O`, not
+    `WATER ICE`; the class word `TEMPERATE`, which is also a surface state's.
+  - _Left for 27:_ a solid layer's helium-3 and a melted rock's hydrocarbons are 0 (`NONE`) where
+    the model leaves their sources out. The guide wants Missing, so before the gate opens the
+    sim should say which layer it read (`OuterLayer`) and the wire should make those values
+    optional. Nothing sends the type before 27, so its shape can still change.

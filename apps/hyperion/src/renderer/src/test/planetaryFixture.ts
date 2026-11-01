@@ -9,12 +9,16 @@
  * from those answers, and say what they change.
  */
 import {
+  type BodyHooksDto,
   type BodyRotationDto,
   type BodySummaryDto,
   decodeServerMessage,
+  type HabitabilityDto,
+  type HabitabilityLimitDto,
   type RequestKind,
   type ResponseBody,
   type ResponseFor,
+  type ResourceAbundancesDto,
 } from "@hyperion/protocol";
 
 import fixture from "../../../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
@@ -117,6 +121,61 @@ export function earthUnderASupercriticalEnvelope(): ResponseFor<"body_detail"> {
       envelope: { state: "not_modelled" },
     },
   };
+}
+
+/**
+ * The slice's Earth at the `full` level with its hooks `ok`, holding `hooks`, as a server since
+ * P14.T25–T26 sends them.
+ */
+export function earthWithHooks(hooks: BodyHooksDto): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  return { ...detail, record: { ...detail.record, hooks: { state: "ok", value: hooks } } };
+}
+
+/** The detail seed every fixture's hooks carry, as a server derives one (R09.T1.b). */
+export const FIXTURE_DETAIL_SEED = "0123456789abcdef";
+
+/** An Earth's habitability: `temperate`, with no limit (P14.T25). */
+export const EARTH_HABITABILITY: HabitabilityDto = { class: "temperate", limits: [] };
+
+/**
+ * A Mars's habitability: a cold desert inside the optimistic zone, `marginal` and limited by its
+ * frozen surface, as the sim's table Mars is (P14.T25).
+ */
+export const MARS_HABITABILITY: HabitabilityDto = { class: "marginal", limits: ["frozen_surface"] };
+
+/**
+ * A differentiated rocky body's resources, about the bulk silicate Earth's (P14.T26, illustrative
+ * values, the protocol's pinned wire form's): its metals and silicates, a little water, and no
+ * other ices, hydrocarbons or helium-3.
+ */
+export function crustResources(): ResourceAbundancesDto {
+  return {
+    iron_group: 0.0684,
+    light_lithophiles: 0.281,
+    rare_earths: 1.52e-5,
+    platinum_group: 2.35e-8,
+    radioactives: 1.28e-7,
+    silicates: 0.648,
+    water_ice: 2.5e-4,
+    other_ices: 0,
+    hydrocarbons: 0,
+    helium_3: 0,
+    deuterium: 7.8e-8,
+    radioisotopes: {
+      uranium_238: 2.01e-8,
+      uranium_235: 1.46e-10,
+      thorium_232: 7.95e-8,
+      potassium_40: 2.82e-8,
+    },
+  };
+}
+
+/** A habitability limit this build does not know, typed as the decoder types it. */
+export function anUnknownHabitabilityLimit(name = "tidal_heating"): HabitabilityLimitDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as HabitabilityLimitDto;
 }
 
 /** The slice's Earth at the `mass_and_orbit` level. */

@@ -15,6 +15,7 @@ import type {
   CrustLidDto,
   DestructionCauseDto,
   DetailLevelDto,
+  HabitabilityClassDto,
   MoonOriginDto,
   PlanetClassDto,
   RedoxClassDto,
@@ -24,7 +25,7 @@ import type {
 } from "@hyperion/protocol";
 
 import { substanceName } from "../substances";
-import type { BodyKind, BodyState, Section } from "./model";
+import type { BodyKind, BodyState, HabitabilityLimit, Section } from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
 export type SectionStandIn = Extract<Section<unknown>["state"], "not_resolved" | "not_modelled">;
@@ -249,6 +250,99 @@ export function redoxClassLabel(redox: RedoxClassDto): string {
       break;
     case "oxidised":
       label = "OXIDISED";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A body's habitability class (plan 14, P14.T25), in words: `HOSTILE`, `SUBSURFACE OCEAN`,
+ * `MARGINAL`, `TEMPERATE`.
+ */
+export function habitabilityClassLabel(habitabilityClass: HabitabilityClassDto): string {
+  let label: string;
+  switch (habitabilityClass) {
+    case "hostile":
+      label = "HOSTILE";
+      break;
+    case "subsurface_ocean":
+      label = "SUBSURFACE OCEAN";
+      break;
+    case "marginal":
+      label = "MARGINAL";
+      break;
+    case "temperate":
+      label = "TEMPERATE";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A limit on a body's habitability (plan 14, P14.T25), in words: `FROZEN SURFACE`,
+ * `BELOW H2O TRIPLE POINT`, `HOST LEAVING MAIN SEQUENCE`; `null` for a limit this build does not
+ * know, which its reading shows Missing.
+ *
+ * @remarks
+ * Water is named by its formula, as the guide names every substance; a host's limits begin with
+ * `HOST`, or end with it where the guide's word order reads better (`ACTIVE HOST`, `YOUNG HOST`).
+ */
+export function habitabilityLimitLabel(limit: HabitabilityLimit): string | null {
+  let label: string | null;
+  switch (limit) {
+    case "outside_optimistic_zone":
+      label = "OUTSIDE OPTIMISTIC ZONE";
+      break;
+    case "outside_conservative_zone":
+      label = "OUTSIDE CONSERVATIVE ZONE";
+      break;
+    case "no_atmosphere":
+      label = "NO ATMOSPHERE";
+      break;
+    case "below_triple_point":
+      label = "BELOW H2O TRIPLE POINT";
+      break;
+    case "runaway_greenhouse":
+      label = "RUNAWAY GREENHOUSE";
+      break;
+    case "snowball":
+      label = "SNOWBALL";
+      break;
+    case "gas_envelope":
+      label = "GAS ENVELOPE";
+      break;
+    case "tidally_locked":
+      label = "TIDALLY LOCKED";
+      break;
+    case "high_eccentricity":
+      label = "HIGH ECCENTRICITY";
+      break;
+    case "active_host":
+      label = "ACTIVE HOST";
+      break;
+    case "young_host":
+      label = "YOUNG HOST";
+      break;
+    case "leaving_main_sequence":
+      label = "HOST LEAVING MAIN SEQUENCE";
+      break;
+    case "extrapolated_zone":
+      label = "EXTRAPOLATED ZONE";
+      break;
+    case "molten_surface":
+      label = "MOLTEN SURFACE";
+      break;
+    case "dry_surface":
+      label = "DRY SURFACE";
+      break;
+    case "mass_outside_temperate_range":
+      label = "MASS OUTSIDE TEMPERATE RANGE";
+      break;
+    case "frozen_surface":
+      label = "FROZEN SURFACE";
+      break;
+    case "unknown":
+      label = null;
       break;
   }
   return label;

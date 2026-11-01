@@ -27,6 +27,8 @@ import type {
   DetailLevelDto,
   FigureDatumDto,
   FigureLawDto,
+  HabitabilityClassDto,
+  HabitabilityLimitDto,
   KickModeDto,
   MagneticFieldClassDto,
   MoonOriginDto,
@@ -562,6 +564,63 @@ export interface BodyHooks {
    * body's surface seed never reaches the client (R04, Design note 17).
    */
   readonly detailSeed: Section<string>;
+  /**
+   * Its habitability at the record's time (plan 14, P14.T25); `not_modelled` where an older server
+   * leaves the field out.
+   */
+  readonly habitability: Section<Habitability>;
+  /**
+   * Its resource abundances (plan 14, P14.T26), which the server holds back as `not_modelled`
+   * below generator version 27; `not_modelled` too where an older server leaves the field out.
+   */
+  readonly resources: Section<ResourceAbundances>;
+}
+
+/**
+ * A habitability limit as the display reads it: the wire's, or `unknown` for one this build does
+ * not know, since the list grows without a protocol bump (galaxy plan 04's growing enums).
+ */
+export type HabitabilityLimit = HabitabilityLimitDto | "unknown";
+
+/**
+ * A body's habitability (plan 14, P14.T25): whether liquid water stands on or under its surface,
+ * and every limit that bears on it. It says nothing about life.
+ */
+export interface Habitability {
+  readonly habitabilityClass: HabitabilityClassDto;
+  /** Every limit that applies, in the wire's order; empty for a body with none, which is data. */
+  readonly limits: ReadonlyArray<HabitabilityLimit>;
+}
+
+/** The four long-lived radioactive isotopes' mass fractions of a body's outer layers, 0 to 1. */
+export interface Radioisotopes {
+  readonly uranium238: number;
+  readonly uranium235: number;
+  readonly thorium232: number;
+  readonly potassium40: number;
+}
+
+/**
+ * A body's resource abundances (plan 14, P14.T26): the mass fraction, kg per kg, of its accessible
+ * outer layers (an undifferentiated body's bulk, a crust, an ice shell or a gas envelope's gas at
+ * 1 bar) of each resource of the plan's closed list, each 0 to 1, in the list's order.
+ */
+export interface ResourceAbundances {
+  readonly ironGroup: number;
+  readonly lightLithophiles: number;
+  readonly rareEarths: number;
+  readonly platinumGroup: number;
+  /** The four radioactive isotopes together, as {@link radioisotopes} sum to. */
+  readonly radioactives: number;
+  readonly silicates: number;
+  /** H2O, frozen or liquid, less its deuterium. */
+  readonly waterIce: number;
+  /** CO2, NH3 and CH4. */
+  readonly otherIces: number;
+  readonly hydrocarbons: number;
+  readonly helium3: number;
+  readonly deuterium: number;
+  readonly radioisotopes: Radioisotopes;
 }
 
 /**

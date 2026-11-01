@@ -7,6 +7,7 @@ import {
   formatBodyDistance,
   formatBodySpan,
   formatGravity,
+  formatMassFraction,
   formatMassMearth,
   formatNumber,
   formatPeriod,
@@ -15,6 +16,7 @@ import {
   formatSci,
   formatSignificant,
   formatTemperatureK,
+  type MassFractionUnit,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import {
@@ -26,6 +28,8 @@ import {
   destructionCauseLabel,
   detailLevelLabel,
   envelopeLabel,
+  habitabilityClassLabel,
+  habitabilityLimitLabel,
   moonOriginLabel,
   planetClassLabel,
   redoxClassLabel,
@@ -36,13 +40,16 @@ import {
 } from "../../lib/system/bodyWords";
 import type {
   BodyEnvelope,
+  BodyHooks,
   BodyRecord,
   BodySurface,
   BulkProperties,
   CrustComposition,
   GasShare,
+  Habitability,
   Modelled,
   Population,
+  ResourceAbundances,
   Section,
   SilicateVapour,
   SubstanceArea,
@@ -116,6 +123,150 @@ function detailSeedRow(seed: Section<string>): ReactNode {
       return null;
   }
   return <ReadoutRow label="DETAIL SEED" shown={reading} wide />;
+}
+
+/**
+ * A body's habitability as one reading: its class, then each of its limits, in words, joined by
+ * middle dots (`MARGINAL · FROZEN SURFACE`, plan 14, P14.T25). A limit this build does not know, as a
+ * newer server's may be, is a part that reads Missing, the em dash, as an unknown part of a
+ * system's origin does; the class alone reads for a body with none.
+ */
+function habitabilityReading(habitability: Habitability): string {
+  return [
+    habitabilityClassLabel(habitability.habitabilityClass),
+    ...habitability.limits.map((limit) => habitabilityLimitLabel(limit) ?? "—"),
+  ].join(PART_JOIN);
+}
+
+/**
+ * The `HABITABILITY` row: its reading; the section's name and state, once, where it is withheld or
+ * not modelled, as an older server's absent field reads; and no row where it does not apply.
+ */
+function habitabilityRow(habitability: Section<Habitability>): ReactNode {
+  return sectionRows("HABITABILITY", habitability, (assessed) => (
+    <ReadoutRow label="HABITABILITY" shown={value(habitabilityReading(assessed))} wide />
+  ));
+}
+
+/** A mass fraction's figure, and its unit, `null` for `NONE`. */
+interface MassFractionReading {
+  readonly figure: string;
+  readonly unit: MassFractionUnit | null;
+}
+
+/**
+ * A resource's mass fraction: three significant figures in `%`, `ppm` or `ppb` by
+ * {@link formatMassFraction}'s ladder, `ABOVE 99.9 %` for a fraction below the whole whose figure
+ * would round to it, as a share does, and `NONE` for 0, which is data.
+ */
+function massFractionReading(fraction: number): MassFractionReading {
+  if (fraction === 0) {
+    return { figure: "NONE", unit: null };
+  }
+  const formatted = formatMassFraction(fraction);
+  return {
+    figure:
+      formatted.unit === "%" ? sharePercentage(fraction, significantPercent) : formatted.value,
+    unit: formatted.unit,
+  };
+}
+
+/** A resource's mass fraction as its row reads it ({@link massFractionReading}). */
+function massFractionShown(fraction: number): Shown {
+  const { figure, unit } = massFractionReading(fraction);
+  return unit === null ? value(figure) : value(figure, unit);
+}
+
+/**
+ * The four radioactive isotopes as one reading, each its symbol and mass number and its fraction,
+ * joined by middle dots: `U-238 20.1 ppb · U-235 0.146 ppb · Th-232 79.5 ppb · K-40 28.2 ppb`; `NONE`
+ * where all four are 0. Each part keeps its figure and unit with no-break spaces, as a share does.
+ */
+function radioisotopesShown(resources: ResourceAbundances): Shown {
+  const { radioisotopes } = resources;
+  const isotopes: ReadonlyArray<readonly [string, number]> = [
+    ["U-238", radioisotopes.uranium238],
+    ["U-235", radioisotopes.uranium235],
+    ["Th-232", radioisotopes.thorium232],
+    ["K-40", radioisotopes.potassium40],
+  ];
+  if (isotopes.every(([, fraction]) => fraction === 0)) {
+    return value("NONE");
+  }
+  return value(
+    isotopes
+      .map(([name, fraction]) => {
+        const { figure, unit } = massFractionReading(fraction);
+        return [name, figure, ...(unit === null ? [] : [unit])].join(NO_BREAK_SPACE);
+      })
+      .join(PART_JOIN),
+  );
+}
+
+/**
+ * The resources' labels that are an isotope's symbol, which keep their case against the readout's
+ * upper-case labels, as `[Fe/H]` does: `He-3` is helium's, never `HE-3`.
+ */
+const SYMBOL_LABELS: ReadonlySet<string> = new Set(["He-3", "H-2"]);
+
+/**
+ * The rows of a body's resources (plan 14, P14.T26): `RESOURCES`, which names their quantity once,
+ * the mass fraction of the body's accessible outer layers; then each of the plan's eleven, in its
+ * order, with the four radioactive isotopes after `RADIOACTIVES`. Withheld or not modelled, as every
+ * server before generator version 27 sends them, `RESOURCES` reads its state once in their place.
+ *
+ * @remarks
+ * Water is `H2O`, in any phase, as the guide names a substance; `OTHER ICES` are CO2, NH3 and CH4,
+ * planetary science's ices whatever their phase; the isotopes take their mass numbers after a
+ * hyphen, `He-3` and `H-2`, as the guide writes every isotope.
+ */
+function resourcesRows(resources: Section<ResourceAbundances>): ReactNode {
+  return sectionRows("RESOURCES", resources, (abundances) => {
+    const rows: ReadonlyArray<readonly [string, number]> = [
+      ["IRON GROUP", abundances.ironGroup],
+      ["LIGHT LITHOPHILES", abundances.lightLithophiles],
+      ["RARE EARTHS", abundances.rareEarths],
+      ["PLATINUM GROUP", abundances.platinumGroup],
+      ["RADIOACTIVES", abundances.radioactives],
+    ];
+    const after: ReadonlyArray<readonly [string, number]> = [
+      ["SILICATES", abundances.silicates],
+      ["H2O", abundances.waterIce],
+      ["OTHER ICES", abundances.otherIces],
+      ["HYDROCARBONS", abundances.hydrocarbons],
+      ["He-3", abundances.helium3],
+      ["H-2", abundances.deuterium],
+    ];
+    const row = ([label, fraction]: readonly [string, number]) => (
+      <ReadoutRow
+        key={label}
+        label={SYMBOL_LABELS.has(label) ? <span className="readout__symbol">{label}</span> : label}
+        shown={massFractionShown(fraction)}
+      />
+    );
+    return (
+      <>
+        <ReadoutRow label="RESOURCES" shown={value("MASS FRACTION OF OUTER LAYERS")} wide />
+        {rows.map(row)}
+        <ReadoutRow label="RADIOISOTOPES" shown={radioisotopesShown(abundances)} wide />
+        {after.map(row)}
+      </>
+    );
+  });
+}
+
+/**
+ * The rows of a body's hooks: `DETAIL SEED`, `HABITABILITY` and the resources' rows, each from its
+ * own state.
+ */
+function hooksRows(hooks: BodyHooks): ReactNode {
+  return (
+    <>
+      {detailSeedRow(hooks.detailSeed)}
+      {habitabilityRow(hooks.habitability)}
+      {resourcesRows(hooks.resources)}
+    </>
+  );
 }
 
 /** A count of bodies, or `NONE` for an empty list, which is data. */
@@ -806,8 +957,9 @@ export interface BodyRecordReadingsProps {
  * `NONE` where the generator computes that it holds none, or its state where the generator does
  * not compute it, which on an airless moon follows the cold traps' state), a gas-envelope body's
  * envelope, or a solid body's supercritical envelope, in the surface's place, read as its
- * `ATMOSPHERE` (what it is and its gases), and its hooks, whose
- * detail seed is the one hook the wire carries, the em dash until the server derives it. A section
+ * `ATMOSPHERE` (what it is and its gases), and its hooks: its detail seed, the em dash until the
+ * server derives it, its habitability, its class and limits in words, and its resources, each
+ * resource's mass fraction of its outer layers (P14.T25–T26). A section
  * withheld or not modelled reads so, once, in place of its rows; one that does not apply is left
  * out. A server since P14.T35.e sends one of `surface` and `envelope` as not applicable for every
  * planet it resolves to the `surface` level, so the planet's air is read from the other; an older
@@ -903,7 +1055,7 @@ export function BodyRecordReadings({
         <>
           {sectionRows("SURFACE", whole.surface, surfaceRows)}
           {sectionRows("ATMOSPHERE", whole.envelope, envelopeRows)}
-          {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => detailSeedRow(hooks.detailSeed))}
+          {sectionRows("GENERATOR INPUTS", whole.hooks, hooksRows)}
         </>
       )}
     </>

@@ -1,6 +1,7 @@
 import type {
   CrustLidDto,
   DestructionCauseDto,
+  HabitabilityClassDto,
   RedoxClassDto,
   SurfaceStateDto,
 } from "@hyperion/protocol";
@@ -10,9 +11,12 @@ import {
   crustLidLabel,
   destructionCauseLabel,
   envelopeLabel,
+  habitabilityClassLabel,
+  habitabilityLimitLabel,
   redoxClassLabel,
   surfaceStateLabel,
 } from "./bodyWords";
+import type { HabitabilityLimit } from "./model";
 
 describe("envelopeLabel", () => {
   // An H₂/He envelope's null, the steam envelope's water, other condensables' formulas and a name
@@ -76,5 +80,43 @@ describe("redoxClassLabel", () => {
     ["oxidised", "OXIDISED"],
   ])("names %s as %s", (redox, word) => {
     expect(redoxClassLabel(redox)).toBe(word);
+  });
+});
+
+describe("habitabilityClassLabel", () => {
+  it.each<readonly [HabitabilityClassDto, string]>([
+    ["hostile", "HOSTILE"],
+    ["subsurface_ocean", "SUBSURFACE OCEAN"],
+    ["marginal", "MARGINAL"],
+    ["temperate", "TEMPERATE"],
+  ])("names %s as %s", (habitabilityClass, word) => {
+    expect(habitabilityClassLabel(habitabilityClass)).toBe(word);
+  });
+});
+
+describe("habitabilityLimitLabel", () => {
+  // Every limit the wire carries, the plan's thirteen and P14.T25's four, and one this build does
+  // not know, which reads Missing.
+  it.each<readonly [HabitabilityLimit, string | null]>([
+    ["outside_optimistic_zone", "OUTSIDE OPTIMISTIC ZONE"],
+    ["outside_conservative_zone", "OUTSIDE CONSERVATIVE ZONE"],
+    ["no_atmosphere", "NO ATMOSPHERE"],
+    ["below_triple_point", "BELOW H2O TRIPLE POINT"],
+    ["runaway_greenhouse", "RUNAWAY GREENHOUSE"],
+    ["snowball", "SNOWBALL"],
+    ["gas_envelope", "GAS ENVELOPE"],
+    ["tidally_locked", "TIDALLY LOCKED"],
+    ["high_eccentricity", "HIGH ECCENTRICITY"],
+    ["active_host", "ACTIVE HOST"],
+    ["young_host", "YOUNG HOST"],
+    ["leaving_main_sequence", "HOST LEAVING MAIN SEQUENCE"],
+    ["extrapolated_zone", "EXTRAPOLATED ZONE"],
+    ["molten_surface", "MOLTEN SURFACE"],
+    ["dry_surface", "DRY SURFACE"],
+    ["mass_outside_temperate_range", "MASS OUTSIDE TEMPERATE RANGE"],
+    ["frozen_surface", "FROZEN SURFACE"],
+    ["unknown", null],
+  ])("names %s as %s", (limit, word) => {
+    expect(habitabilityLimitLabel(limit)).toBe(word);
   });
 });

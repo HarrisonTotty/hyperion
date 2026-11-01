@@ -23,17 +23,21 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  anUnknownHabitabilityLimit,
+  crustResources,
   earthContact,
   earthDetail,
   earthDetailOfAnOlderServer,
   earthMassAndOrbit,
   earthUnderASupercriticalEnvelope,
+  earthWithHooks,
   FIXTURE_EARTH,
   FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
   hotJupiterDetail,
   jupiterDetail,
   lavaWorldDetail,
+  MARS_HABITABILITY,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
@@ -508,12 +512,16 @@ describe("toBodyDetail", () => {
     expect(contact.detail.record.orbit).toEqual({ state: "not_resolved" });
   });
 
-  it("reads a hooks section with its detail seed", () => {
+  it("reads a hooks section with its detail seed, an older server's, without the other hooks", () => {
     const result = earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" });
 
     expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
       state: "ok",
-      value: { detailSeed: { state: "ok", value: "0123456789abcdef" } },
+      value: {
+        detailSeed: { state: "ok", value: "0123456789abcdef" },
+        habitability: { state: "not_modelled" },
+        resources: { state: "not_modelled" },
+      },
     });
   });
 
@@ -522,8 +530,121 @@ describe("toBodyDetail", () => {
 
     expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
       state: "ok",
-      value: { detailSeed: { state: "not_modelled" } },
+      value: {
+        detailSeed: { state: "not_modelled" },
+        habitability: { state: "not_modelled" },
+        resources: { state: "not_modelled" },
+      },
     });
+  });
+
+  it("reads a hooks section's habitability and resources (P14.T25–T26)", () => {
+    const result = toBodyDetail(
+      earthWithHooks({
+        detail_seed: { state: "ok", value: "0123456789abcdef" },
+        habitability: { state: "ok", value: MARS_HABITABILITY },
+        resources: { state: "ok", value: crustResources() },
+      }),
+      FIXTURE_SYSTEM,
+      DESIGNATION,
+    );
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: {
+        detailSeed: { state: "ok", value: "0123456789abcdef" },
+        habitability: {
+          state: "ok",
+          value: { habitabilityClass: "marginal", limits: ["frozen_surface"] },
+        },
+        resources: {
+          state: "ok",
+          value: {
+            ironGroup: 0.0684,
+            lightLithophiles: 0.281,
+            rareEarths: 1.52e-5,
+            platinumGroup: 2.35e-8,
+            radioactives: 1.28e-7,
+            silicates: 0.648,
+            waterIce: 2.5e-4,
+            otherIces: 0,
+            hydrocarbons: 0,
+            helium3: 0,
+            deuterium: 7.8e-8,
+            radioisotopes: {
+              uranium238: 2.01e-8,
+              uranium235: 1.46e-10,
+              thorium232: 7.95e-8,
+              potassium40: 2.82e-8,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("reads a habitability limit this build does not know as unknown, and the rest as they are", () => {
+    const result = toBodyDetail(
+      earthWithHooks({
+        detail_seed: { state: "ok", value: "0123456789abcdef" },
+        habitability: {
+          state: "ok",
+          value: { class: "marginal", limits: [anUnknownHabitabilityLimit(), "frozen_surface"] },
+        },
+        resources: { state: "not_modelled" },
+      }),
+      FIXTURE_SYSTEM,
+      DESIGNATION,
+    );
+
+    expect(
+      result.kind === "ok" && result.detail.record.hooks.state === "ok"
+        ? result.detail.record.hooks.value.habitability
+        : result,
+    ).toEqual({
+      state: "ok",
+      value: { habitabilityClass: "marginal", limits: ["unknown", "frozen_surface"] },
+    });
+  });
+
+  it.each([
+    ["below 0", { iron_group: -1e-9 }],
+    ["above 1", { silicates: 1.5 }],
+    ["not finite", { deuterium: Number.NaN }],
+  ])("refuses resources with a fraction %s", (_, fraction) => {
+    const resources = { ...crustResources(), ...fraction };
+    expect(
+      toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: { state: "ok", value: resources },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      ),
+    ).toEqual({ kind: "fault", fault: "resources unusable" });
+  });
+
+  it("refuses resources with an isotope's fraction outside 0 to 1", () => {
+    const resources = crustResources();
+    expect(
+      toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: {
+            state: "ok",
+            value: {
+              ...resources,
+              radioisotopes: { ...resources.radioisotopes, potassium_40: -1 },
+            },
+          },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      ),
+    ).toEqual({ kind: "fault", fault: "resources unusable" });
   });
 
   it("refuses a detail seed that is not 16 lower-case hexadecimal digits", () => {

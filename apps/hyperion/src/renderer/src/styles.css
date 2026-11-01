@@ -3786,6 +3786,11 @@ body {
   text-transform: none;
 }
 
+/* A readout label that is an isotope's symbol keeps its case, as [Fe/H] does: `He-3`, never `HE-3`. */
+.readout dt .readout__symbol {
+  text-transform: none;
+}
+
 /*
  * The list and the readout share what the panel leaves, each from its own content's height, and
  * give way in proportion to it, each scrolling inside itself: neither falls below three rows'

@@ -25,6 +25,7 @@ import {
   formatNumber,
   formatOrbit,
   formatPeriod,
+  formatMassFraction,
   formatPressure,
   formatRadiusKm,
   formatRadiusRsun,
@@ -500,6 +501,32 @@ describe("formatPressure", () => {
 
   it("refuses a negative pressure", () => {
     expect(() => formatPressure(-1)).toThrow(RangeError);
+  });
+});
+
+describe("formatMassFraction", () => {
+  it.each([
+    [1, "100", "%"],
+    [0.281, "28.1", "%"],
+    [0.001, "0.100", "%"],
+    // Rounds to 0.100 %, which must be read in %; likewise at 1 ppm.
+    [9.9996e-4, "0.100", "%"],
+    [9.99e-4, "999", "ppm"],
+    [1.52e-5, "15.2", "ppm"],
+    [9.9996e-7, "1.00", "ppm"],
+    [9.99e-7, "999", "ppb"],
+    [2.35e-8, "23.5", "ppb"],
+    [1.46e-10, "0.146", "ppb"],
+  ])("formats %f as %s %s", (fraction, value, unit) => {
+    expect(formatMassFraction(fraction)).toEqual({ value, unit });
+  });
+
+  it("writes a fraction below 0.001 ppb in E notation", () => {
+    expect(formatMassFraction(4.2e-15)).toEqual({ value: "4.20E-6", unit: "ppb" });
+  });
+
+  it.each([-1e-9, 1.5])("refuses a fraction of %f, outside 0 to 1", (fraction) => {
+    expect(() => formatMassFraction(fraction)).toThrow(RangeError);
   });
 });
 

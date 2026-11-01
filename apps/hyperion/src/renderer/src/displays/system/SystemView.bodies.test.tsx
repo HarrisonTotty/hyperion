@@ -4,6 +4,7 @@
  */
 import type {
   BodyEnvelopeDto,
+  BodyHooksDto,
   BodySurfaceDto,
   CrustCompositionDto,
   GasShareDto,
@@ -21,15 +22,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
+  anUnknownHabitabilityLimit,
+  crustResources,
+  EARTH_HABITABILITY,
   earthDetail,
   earthDetailOfAnOlderServer,
   earthMassAndOrbit,
   earthUnderASupercriticalEnvelope,
+  earthWithHooks,
+  FIXTURE_DETAIL_SEED,
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
   jupiterDetail,
   lavaWorldDetail,
+  MARS_HABITABILITY,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
@@ -1732,6 +1739,152 @@ describe("SystemView's body readout", () => {
     await answerDetail(socket, earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" }));
 
     expect(reading("DETAIL SEED")).toBe("0123456789ABCDEF");
+  });
+
+  describe("hooks' HABITABILITY and RESOURCES (P14.T25–T26)", () => {
+    const seed = { state: "ok", value: FIXTURE_DETAIL_SEED } as const;
+
+    /** The fixture Earth's readout once its record answers with `hooks`. */
+    async function readHooks(hooks: BodyHooksDto): Promise<void> {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(socket, earthWithHooks(hooks));
+    }
+
+    /** The readout's rows in order from the one labelled `first` to its last. */
+    function rowsFrom(first: string): Array<readonly [string, string]> {
+      const rows = within(readout())
+        .queryAllByRole("term")
+        .map((term) => [term.textContent, term.nextElementSibling?.textContent ?? ""] as const);
+      return rows.slice(rows.findIndex(([label]) => label === first));
+    }
+
+    it.each([
+      ["an Earth's", EARTH_HABITABILITY, "TEMPERATE"],
+      ["a Mars's", MARS_HABITABILITY, "MARGINAL · FROZEN SURFACE"],
+    ])(
+      "reads %s HABITABILITY as its class and its limits in words",
+      async (_, habitability, words) => {
+        await readHooks({
+          detail_seed: seed,
+          habitability: { state: "ok", value: habitability },
+          resources: { state: "not_modelled" },
+        });
+
+        expect(reading("HABITABILITY")).toBe(words);
+      },
+    );
+
+    it("reads every limit in the wire's order after the class", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: {
+          state: "ok",
+          value: {
+            class: "hostile",
+            limits: ["outside_optimistic_zone", "below_triple_point", "leaving_main_sequence"],
+          },
+        },
+        resources: { state: "not_modelled" },
+      });
+
+      expect(reading("HABITABILITY")).toBe(
+        "HOSTILE · OUTSIDE OPTIMISTIC ZONE · BELOW H2O TRIPLE POINT · HOST LEAVING MAIN SEQUENCE",
+      );
+    });
+
+    it("reads a limit this build does not know as the em dash, and its other parts as they are", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: {
+          state: "ok",
+          value: { class: "marginal", limits: [anUnknownHabitabilityLimit(), "frozen_surface"] },
+        },
+        resources: { state: "not_modelled" },
+      });
+
+      expect(reading("HABITABILITY")).toBe("MARGINAL · — · FROZEN SURFACE");
+    });
+
+    it.each([
+      ["not_modelled", "NOT YET MODELLED"],
+      ["not_resolved", "NOT RESOLVED"],
+    ] as const)(
+      "reads a %s habitability and resources once each, in place of their rows",
+      async (state, words) => {
+        await readHooks({ detail_seed: seed, habitability: { state }, resources: { state } });
+
+        expect(rowsFrom("DETAIL SEED")).toEqual([
+          ["DETAIL SEED", "0123456789ABCDEF"],
+          ["HABITABILITY", words],
+          ["RESOURCES", words],
+        ]);
+      },
+    );
+
+    it("leaves the HABITABILITY and RESOURCES rows out where they do not apply", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: { state: "not_applicable" },
+        resources: { state: "not_applicable" },
+      });
+
+      expect(rowsFrom("DETAIL SEED")).toEqual([["DETAIL SEED", "0123456789ABCDEF"]]);
+    });
+
+    it("reads an older server's hooks, which lack both, as NOT YET MODELLED", async () => {
+      await readHooks({ detail_seed: seed });
+
+      expect(reading("HABITABILITY")).toBe("NOT YET MODELLED");
+      expect(reading("RESOURCES")).toBe("NOT YET MODELLED");
+    });
+
+    it("reads each resource's mass fraction in %, ppm or ppb, in the plan's order, NONE for none", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: { state: "ok", value: EARTH_HABITABILITY },
+        resources: { state: "ok", value: crustResources() },
+      });
+
+      const nbsp = "\u00A0";
+      expect(rowsFrom("RESOURCES")).toEqual([
+        ["RESOURCES", "MASS FRACTION OF OUTER LAYERS"],
+        ["IRON GROUP", "6.84 %"],
+        ["LIGHT LITHOPHILES", "28.1 %"],
+        ["RARE EARTHS", "15.2 ppm"],
+        ["PLATINUM GROUP", "23.5 ppb"],
+        ["RADIOACTIVES", "128 ppb"],
+        [
+          "RADIOISOTOPES",
+          [
+            `U-238${nbsp}20.1${nbsp}ppb`,
+            `U-235${nbsp}0.146${nbsp}ppb`,
+            `Th-232${nbsp}79.5${nbsp}ppb`,
+            `K-40${nbsp}28.2${nbsp}ppb`,
+          ].join(" · "),
+        ],
+        ["SILICATES", "64.8 %"],
+        ["H2O", "250 ppm"],
+        ["OTHER ICES", "NONE"],
+        ["HYDROCARBONS", "NONE"],
+        ["He-3", "NONE"],
+        ["H-2", "78.0 ppb"],
+      ]);
+    });
+
+    it("reads an ice shell's water below the whole as ABOVE 99.9 %, never the whole", async () => {
+      await readHooks({
+        detail_seed: seed,
+        habitability: { state: "ok", value: EARTH_HABITABILITY },
+        resources: {
+          state: "ok",
+          value: { ...crustResources(), silicates: 0, water_ice: 0.99996 },
+        },
+      });
+
+      expect(reading("H2O")).toBe("ABOVE\u00A099.9 %");
+    });
   });
 
   it("shows no surface row at all for a gas giant, whose surface does not apply", async () => {
