@@ -589,6 +589,19 @@ export const THICK_CASE_NAMES: ReadonlyArray<keyof ThickReferenceCases> = [
 /** The cases once built, for the module's life. */
 let built: ThickReferenceCases | undefined;
 
+/** `giant-deck` once built, for the module's life: the one {@link thickReferenceCases} holds. */
+let builtGiantDeck: ReferenceCase | undefined;
+
+/**
+ * `giant-deck` alone (the module's remarks), built on the first call without the Venus-class
+ * cases' Mie, and held: the case {@link thickReferenceCases} gives, for a reader of that case alone
+ * (R08.T16.a.2's envelope range, `thick/routing.test.ts`).
+ */
+export function giantDeckReferenceCase(): ReferenceCase {
+  builtGiantDeck ??= giantCase();
+  return builtGiantDeck;
+}
+
 /**
  * The thick cases (the module's remarks), built on the first call, about a minute of Mie, and held:
  * each a pure function of the committed optics, so that every caller reads one medium.
@@ -602,7 +615,7 @@ export function thickReferenceCases(): ThickReferenceCases {
       "venus-92bar": venusCase("venus-92bar", optics),
       "venus-58bar": venusCase("venus-58bar", optics),
       "titan-class": titanCase(),
-      "giant-deck": giantCase(),
+      "giant-deck": giantDeckReferenceCase(),
     };
   }
   return built;
