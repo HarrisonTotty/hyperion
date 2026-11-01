@@ -712,26 +712,26 @@ fn entry_bits<'a>(
 }
 
 /// The held arm's bound over the inner disc's cell (0, 12, 0) under every 26 hold, and the first
-/// two entries' marks of the sample cells, as measured (2026-11-01).
+/// two entries' marks of the sample cells, as measured (2026-11-01, at generator version 25).
 const HELD_PIN: (u64, [[u64; 7]; 2]) = (
-    0x3e6d_875c_4958_11ff,
+    0x3e6d_88cf_3a1e_9c26,
     [
         [
             0x402c_e0d9_4d04_2f86,
             0x416c_2c58_ff47_ac65,
             0x3fc0_fac1_1ea3_b3df,
-            0xc118_1c8e_ec6f_553a,
-            0xc109_0457_c966_d060,
-            0x410a_d0b2_37d0_2d19,
+            0xc118_1ffe_e434_2686,
+            0xc109_022d_2f31_d7d6,
+            0x410a_cd7b_3405_27cd,
             0x0000_0000_0000_0000,
         ],
         [
             0x402e_5e2e_c3cc_6733,
             0x416c_35b3_7288_343d,
             0x3f73_020e_10dd_be60,
-            0x40d2_f218_78ac_fec4,
-            0xc0f9_dd2d_5aaf_268b,
-            0xc0df_dbf6_e7c1_c7e3,
+            0x40d2_d699_8d94_4c58,
+            0xc0f9_d6af_97ff_2149,
+            0xc0df_e4e1_2af1_0f75,
             0x0000_0000_0000_0000,
         ],
     ],
@@ -739,7 +739,7 @@ const HELD_PIN: (u64, [[u64; 7]; 2]) = (
 
 /// Under every 26 hold the class's bound over a cell of the inner disc and the sample cells' first
 /// entries are pinned bit for bit: the held arm in a galaxy holding the displaced classes, which the class's
-/// golden, at 24, never builds. The bump to 27 deletes the pin with the hold.
+/// golden, at 25, never builds. The bump to 27 deletes the pin with the hold.
 #[test]
 fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
     let galaxy = Galaxy::from_params_with_rules(
@@ -764,34 +764,34 @@ fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
 }
 
 /// The new arm's first runaway and walkaway entries of the sample cells, as measured
-/// (2026-11-01).
+/// (2026-11-01, at generator version 25).
 const EJECTED_PIN: [[u64; 7]; 3] = [
     [
         0x4036_83f3_3563_62aa,
         0x4162_ae36_3d34_1ccb,
         0xbfc4_a14b_a4e8_3238,
-        0xc106_ed24_3a31_8c2a,
-        0x40fb_9f9a_e917_b1d2,
-        0x40d8_b616_9b10_a533,
-        0x4042_f379_0a57_0a9a,
+        0xc106_efe0_82f3_217d,
+        0x40fb_9555_944f_aa78,
+        0x40d8_a92f_475b_4eac,
+        0x4042_f340_854a_f29c,
+    ],
+    [
+        0x403a_b16f_7a33_7e88,
+        0x415e_fb7a_ea19_3f82,
+        0x3fd5_17ce_54cd_bf10,
+        0xc106_6fe6_f7b7_e313,
+        0x40d0_489f_98be_19fc,
+        0x40f8_c86f_d33e_6246,
+        0x4046_9c72_ecf6_74c4,
     ],
     [
         0x4025_9cca_6738_e99d,
         0x4177_f87d_f836_84fb,
         0xbfc6_f281_d95e_2dac,
-        0xc106_0d0b_a48c_2739,
-        0x40b7_7b5c_33b9_ab52,
-        0xc0c2_eefd_af27_d24e,
+        0xc106_1356_8a58_ee2b,
+        0x40b7_ad70_d644_562c,
+        0xc0c3_111e_03f8_6558,
         0x4025_44d7_6967_64f4,
-    ],
-    [
-        0x402c_e0d9_4d04_2f86,
-        0x416d_c60c_ba45_3461,
-        0xbfb2_4a48_a8ad_c89e,
-        0xc119_8402_92cc_4b8f,
-        0xc105_2ad0_542f_05be,
-        0x410f_e621_db25_404a,
-        0x4054_4f94_5041_2c1c,
     ],
 ];
 
