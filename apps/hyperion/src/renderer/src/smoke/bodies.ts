@@ -8,14 +8,16 @@
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
  * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11);
  * and a class map's disc under the field's normal map (plan R10, R10.T10.g), of sloped cells and of
- * the datum's own normals.
+ * the datum's own normals, and of sloped cells lit by planetshine alone, its source's disc cut by
+ * the datum's plane.
  */
 
-import { add, scale, vec3 } from "../geometry/vec3";
+import { add, scale, type Vec3, vec3 } from "../geometry/vec3";
 import { checkerNormalMap, datumNormalMap, type FieldCell } from "../test/normalMapFixtures";
 import type { ClassMapDiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { lawFor } from "../view/appearance/phase";
+import type { PhotometricLaw } from "../view/appearance/law";
 import { normalMapTexture } from "../view/bodies/discNormals";
 import {
   compositeDiscPixels,
@@ -55,6 +57,7 @@ import { WIREFRAME_MATERIALS, WIREFRAME_MESHES } from "../view/wireframe/submit"
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import { PhotorealRenderer } from "../view/photoreal/renderer";
 import { SKY_SPRITE_HDR_MATERIAL } from "../view/sky/spriteHdr";
+import type { CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import {
   type Checks,
@@ -67,6 +70,7 @@ import {
   NEAR_M,
   pause,
 } from "./harness";
+import { hdrCapture } from "./hdrCapture";
 
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
 
@@ -97,8 +101,15 @@ interface MappedSurface {
 interface DrawExtras {
   /** The pre-exposure, 1 ÷ (cd/m²). */
   readonly exposure?: number;
-  /** A neighbour on the body's anti-solar side, full from it: its radius and distance, m. */
-  readonly shine?: { readonly radiusM: number; readonly distanceM: number };
+  /**
+   * A neighbour that lights the body by planetshine: its radius and distance, m, and its unit
+   * direction from the body's centre, the anti-solar one, full from the body, where none is given.
+   */
+  readonly shine?: {
+    readonly radiusM: number;
+    readonly distanceM: number;
+    readonly direction?: Vec3;
+  };
   /**
    * The `disc cells` kernel, dispatched before the draws so that a small disc reads its pixels'
    * sums (R07.T8.d); absent, every disc sums its own cells in its draws.
@@ -178,10 +189,10 @@ async function drawDisc(
           },
         ];
   if (extras.shine !== undefined) {
-    const { radiusM, distanceM } = extras.shine;
+    const { radiusM, distanceM, direction = scale(towards, -1) } = extras.shine;
     others.push({
       id: "0200080020000000.0003",
-      centreM: add(centreM, scale(towards, -distanceM)),
+      centreM: add(centreM, scale(direction, distanceM)),
       figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
       photometry: PROVISIONAL_PHOTOMETRY,
       lighting: undefined,
@@ -675,22 +686,12 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
     // surveyed (i < 32), the column at the survey's edge (i = 31) half surveyed, its weights halved,
     // two classes in a pattern that varies texel to texel; read by the survey-masked bilinear
     // reconstruction on the GPU and in the rasteriser alike.
-    const level = packClassMap(64, 2, ({ i, j }) => {
-      if (i >= 32) {
-        return null;
-      }
-      const w = ((i + 2 * j) % 8) / 7;
-      const share = i === 31 ? 0.5 : 1;
-      return [w * share, (1 - w) * share];
-    });
+    const level = levelClassMap();
     const atLevel = classMapSurface(
       engine,
       "smoke class map at R10's level",
       level,
-      [
-        lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
-        lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
-      ],
+      levelClassLaws(),
       uniform,
     );
     made.push(atLevel);
@@ -760,6 +761,45 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
     renderer.dispose();
   }
 }
+
+/**
+ * R10.T10.d's map at R10's level: 64 texels a face, half of every face surveyed (i < 32), the
+ * column at the survey's edge (i = 31) half surveyed, two classes in a pattern that varies texel to
+ * texel.
+ */
+function levelClassMap(): ClassMapTexels {
+  return packClassMap(64, 2, ({ i, j }) => {
+    if (i >= 32) {
+      return null;
+    }
+    const w = ((i + 2 * j) % 8) / 7;
+    const share = i === 31 ? 0.5 : 1;
+    return [w * share, (1 - w) * share];
+  });
+}
+
+/** {@link levelClassMap}'s two classes' laws: a dark lunar class and a bright terrestrial one. */
+function levelClassLaws(): PhotometricLaw[] {
+  return [
+    lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+  ];
+}
+
+/**
+ * A neighbour seen as Jupiter is from Io, 5.9 of its radii away (Jupiter's equatorial radius
+ * 71,492 km, Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22, Table 4; Io's semi-major
+ * axis 421,700 km, JPL's mean elements of the Galilean satellites), to the camera's right: R10.T10.g
+ * record's case of planetshine on a slope, whose source's disc is about 9.8° in radius.
+ */
+const NEIGHBOUR_AS_FROM_IO = {
+  radiusM: 7.1492e7,
+  distanceM: 4.217e8,
+  direction: vec3(1, 0, 0),
+} as const;
+
+/** The pre-exposure of a disc lit by {@link NEIGHBOUR_AS_FROM_IO} alone. */
+const PLANETSHINE_EXPOSURE = 5e-3;
 
 /** Whether a level-7 cell lies in the R10.T10.d map's survey, half of every face (i < 64). */
 function inLevelSurvey(cell: FieldCell): boolean {
@@ -857,6 +897,82 @@ async function checkNormalMap(
     datumAgreement.worst <= 1 && datumAgreement.classes && Math.abs(fluxMoved) <= 1e-3,
     `${String(drawnDatum.expected.length)} pixels; worst error ${datumAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(datumAgreement.classes)}; flux against the disc without one ${fluxMoved.toExponential(2)}`,
   );
+  // Planetshine on the slopes, its source's disc cut by the datum's plane as a star's is (the
+  // record's deferred finding): the night side towards the camera, the Sun behind the body, lit by
+  // the neighbour alone from the right, so that planetshine's terminator crosses the disc.
+  const drawnShine = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    180,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: sloped, rotation: TILTED, texels: map },
+    { exposure: PLANETSHINE_EXPOSURE, shine: NEIGHBOUR_AS_FROM_IO },
+  );
+  const shineFinite = drawnShine.texels.every((value) => Number.isFinite(value));
+  const shineAgreement = texelAgreement(drawnShine);
+  const shone = drawnShine.expected.filter(
+    (p) => (drawnShine.texels[(p.yPx * viewport.widthPx + p.xPx) * 4 + 1] ?? 0) > 0,
+  );
+  checks.check(
+    "R10.T10.g a disc under a normal map of sloped cells lit by planetshine alone equals the CPU rasteriser's, every texel finite",
+    shineFinite &&
+      shineAgreement.worst <= 1 &&
+      shineAgreement.classes &&
+      shone.length > 0 &&
+      shone.length < drawnShine.expected.length,
+    `${String(drawnShine.expected.length)} pixels, ${String(shone.length)} lit by planetshine; every texel finite ${String(shineFinite)}; worst error ${shineAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(shineAgreement.classes)}${shineAgreement.mismatches.length > 0 ? `: ${shineAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+}
+
+/**
+ * R10.T10.g's capture of planetshine on slopes: {@link checkNormalMap}'s disc under the normal map
+ * of sloped cells, 160 px across, its night side towards the camera, lit by
+ * {@link NEIGHBOUR_AS_FROM_IO} alone from the right, so that planetshine's terminator runs down the
+ * disc's middle; each pixel 2 × 2.
+ */
+export async function capturePlanetshineSlopes(engine: RenderEngine): Promise<CapturedImage[]> {
+  const viewport = { widthPx: 192, heightPx: 192 };
+  const map = levelClassMap();
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  const sloped = classMapSurface(
+    engine,
+    "smoke capture's class map with sloped cells",
+    map,
+    levelClassLaws(),
+    PROVISIONAL_PHOTOMETRY.law,
+    normalMapTexture(
+      engine,
+      "smoke capture's normal map of sloped cells",
+      checkerNormalMap(7, 12 * RAD_PER_DEG, 0.9, inLevelSurvey),
+    ),
+  );
+  try {
+    const drawn = await drawDisc(
+      engine,
+      renderer,
+      viewport,
+      160,
+      180,
+      TILTED_OBLATE,
+      [0, 0],
+      CAMERA,
+      null,
+      { surface: sloped, rotation: TILTED, texels: map },
+      { exposure: PLANETSHINE_EXPOSURE, shine: NEIGHBOUR_AS_FROM_IO },
+    );
+    return [hdrCapture("r10-t10g-planetshine-slopes", drawn.texels, viewport, 1, 2)];
+  } finally {
+    engine.releaseTexture(sloped.weights);
+    if (sloped.normals !== null) {
+      engine.releaseTexture(sloped.normals.texture);
+    }
+    renderer.dispose();
+  }
 }
 
 /** The sprite materials whose row's z is the sprite's depth (decision-r07-t8a, item 2). */

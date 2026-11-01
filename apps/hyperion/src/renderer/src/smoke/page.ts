@@ -122,7 +122,13 @@ import { checkSurveyEdge } from "./surveyEdge";
 import { captureOccultation, checkMeshBodies } from "./meshBodies";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
-import { checkBodies, checkClassMap, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
+import {
+  capturePlanetshineSlopes,
+  checkBodies,
+  checkClassMap,
+  checkPhotorealFrame,
+  checkSpriteDepth,
+} from "./bodies";
 import { runChildWindow } from "./childWindow";
 import { checkTransfer } from "./transfer";
 import { runSoak } from "./soak";
@@ -694,6 +700,19 @@ async function run(
       images = [...images, ...frames];
       checks.check(
         "R02.T19 the datum captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
+  // R10.T10.g's planetshine on slopes, in part 7 with the terrain's groups, so that `--part=7`
+  // takes it without part 1's captures.
+  if (captures) {
+    await group(7, "R10.T10.g the terrain light's captures", async () => {
+      const frames = await capturePlanetshineSlopes(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R10.T10.g the terrain light's captures",
         frames.length > 0,
         `${String(frames.length)} frames`,
       );

@@ -685,7 +685,9 @@ fn shade_terrain(
   // Planetshine (R07's Design note 7), as R07's disc takes it: each lit neighbour a uniform sphere,
   // its direct term through R08's three-node rule over its disc and its sky term at its own
   // cosine, both at light slot 0, never shadowed; it lights the night side, which stays unlit for
-  // the meter.
+  // the meter. Its disc is cut by the datum's tangent plane as a star's is on the smooth figure
+  // (`element_horizon` at a horizon of 0, η = φ_ν − φ, the texel's own plane where it hides more),
+  // so that the body's curvature sets its terminator; the disc takes the same cut (R10.T10.g).
   let secondaries = min(u32(counts.z), MAX_TERRAIN_SECONDARIES);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = terrain_row(FIRST_TERRAIN_SECONDARY_ROW + j * TERRAIN_SECONDARY_ROWS_EACH);
@@ -698,7 +700,8 @@ fn shade_terrain(
     let near = place.w / distance;
     let sky = atmosphere_sky_irradiance(height, mu_datum, local.latitude, 0u) * sky_factor;
     out.radiance = out.radiance + source.xyz * (near * near) * misc.y * mean_a * sky;
-    let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, 0.0);
+    let cut = max(angle_between(nu, towards) - angle_between(normal, towards), 0.0);
+    let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, cut);
     if (irradiance <= 0.0) {
       continue;
     }

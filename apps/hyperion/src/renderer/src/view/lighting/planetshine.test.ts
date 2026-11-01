@@ -460,3 +460,130 @@ describe("planetshine at a lit point", () => {
     expect(planetshineIrradiance(vec3(30, 0, 0), 1, 30, normal)).toBe(0);
   });
 });
+
+/** Io's mean radius, m (NASA GSFC, Jovian Satellite Fact Sheet: 1,821.6 km). */
+const IO_RADIUS_M = 1.8216e6;
+
+/** Jupiter's equatorial radius at 1 bar, m (NASA GSFC, Jupiter Fact Sheet: 71,492 km). */
+const JUPITER_RADIUS_M = 7.1492e7;
+
+/**
+ * A facet of Io tilted `tiltDeg` towards Jupiter, Jupiter's centre `elevationDeg` above the datum's
+ * horizon: in Io radii, the point (1, 0, 0) on the datum, ν its normal, n′ the facet's, the cut
+ * φ_ν − φ′ as the disc and the terrain take it (R10.T10.g).
+ */
+function ioFacet(
+  tiltDeg: number,
+  elevationDeg: number,
+): {
+  readonly toSource: Vec3;
+  readonly sourceRadius: number;
+  readonly centreDistance: number;
+  readonly nu: Vec3;
+  readonly tilted: Vec3;
+  readonly cutRad: number;
+} {
+  const centreDistance = IO_ORBIT_M / IO_RADIUS_M;
+  const e = elevationDeg * RAD;
+  // From the point, Jupiter's centre at e above the horizon: (cos e, sin e) along (y, x) at the
+  // distance that puts it `centreDistance` from Io's centre.
+  const along = -Math.sin(e) + Math.sqrt(Math.sin(e) ** 2 - 1 + centreDistance ** 2);
+  const toSource = vec3(along * Math.sin(e), along * Math.cos(e), 0);
+  const nu = vec3(1, 0, 0);
+  const tilted = vec3(Math.cos(tiltDeg * RAD), Math.sin(tiltDeg * RAD), 0);
+  const angle = (n: Vec3): number =>
+    Math.acos((n.x * toSource.x + n.y * toSource.y) / norm(toSource));
+  return {
+    toSource,
+    sourceRadius: JUPITER_RADIUS_M / IO_RADIUS_M,
+    centreDistance,
+    nu,
+    tilted,
+    cutRad: Math.max(angle(nu) - angle(tilted), 0),
+  };
+}
+
+/**
+ * The irradiance on `tilted` from a uniform sphere's disc above both its own plane and the datum's
+ * plane of normal `nu`, over the sphere face-on, by brute force: the disc in polar coordinates
+ * about its centre, θ by the midpoint rule to ρ, each direction counted where it lies above both
+ * planes and weighed by its cosine on `tilted`.
+ */
+function cutBruteForce(toSource: Vec3, sourceRadius: number, nu: Vec3, tilted: Vec3): number {
+  const d = norm(toSource);
+  const centre = scale(toSource, 1 / d);
+  const rho = Math.asin(sourceRadius / d);
+  // Two unit vectors across the centre: z, and the centre's cross with it.
+  const across1 = vec3(0, 0, 1);
+  const across2 = vec3(centre.y, -centre.x, 0);
+  const radial = 400;
+  const azimuthal = 800;
+  let lit = 0;
+  let faceOn = 0;
+  for (let i = 0; i < radial; i += 1) {
+    const theta = ((i + 0.5) / radial) * rho;
+    const weight = Math.sin(theta) * Math.cos(theta);
+    faceOn += weight * azimuthal;
+    for (let k = 0; k < azimuthal; k += 1) {
+      const psi = ((k + 0.5) / azimuthal) * 2 * Math.PI;
+      const omega = add(
+        scale(centre, Math.cos(theta)),
+        add(
+          scale(across1, Math.sin(theta) * Math.cos(psi)),
+          scale(across2, Math.sin(theta) * Math.sin(psi)),
+        ),
+      );
+      const onTilted = omega.x * tilted.x + omega.y * tilted.y + omega.z * tilted.z;
+      const onDatum = omega.x * nu.x + omega.y * nu.y + omega.z * nu.z;
+      if (onTilted > 0 && onDatum > 0) {
+        lit += Math.sin(theta) * onTilted;
+      }
+    }
+  }
+  return lit / faceOn;
+}
+
+describe("planetshine on a slope, cut by the datum's plane (R10.T10.g)", () => {
+  it("takes 0.140 of face-on on Io on a facet tilted 12° towards Jupiter on the datum's horizon, not 0.208", () => {
+    const { toSource, sourceRadius, centreDistance, tilted, cutRad } = ioFacet(12, 0);
+    expect(cutRad / RAD).toBeCloseTo(12, 9);
+    const uncut = planetshineIrradiance(toSource, sourceRadius, centreDistance, tilted);
+    const cut = planetshineIrradiance(toSource, sourceRadius, centreDistance, tilted, cutRad);
+    expect([Math.abs(uncut - 0.208) < 5e-4, Math.abs(cut - 0.14) < 1e-3]).toEqual([true, true]);
+  });
+
+  // Exact at the record's case, whose facet tilts in the plane of ν and the source; elsewhere within
+  // the term's treatment of the light through the cut as from one direction (4 × 10⁻⁴ and 6 × 10⁻⁴
+  // of face-on at these two, 2026-11-01).
+  it("agrees with the light of the disc above both planes by brute force", () => {
+    for (const [tiltDeg, elevationDeg] of [
+      [12, 0],
+      [12, 5],
+      [20, -4],
+    ] as const) {
+      const facet = ioFacet(tiltDeg, elevationDeg);
+      const { toSource, sourceRadius, centreDistance } = facet;
+      const near = (centreDistance / norm(toSource)) ** 2;
+      const truth = cutBruteForce(toSource, sourceRadius, facet.nu, facet.tilted) * near;
+      const factor = planetshineIrradiance(
+        toSource,
+        sourceRadius,
+        centreDistance,
+        facet.tilted,
+        facet.cutRad,
+      );
+      expect(Math.abs(factor - truth)).toBeLessThan(2e-3);
+    }
+  });
+
+  it("leaves a facet whose datum horizon lies below the whole source as it was", () => {
+    // Jupiter's disc, 9.8° in radius from Io, wholly above the datum's horizon at 15°.
+    for (const tiltDeg of [5, 12, 30]) {
+      const { toSource, sourceRadius, centreDistance, tilted, cutRad } = ioFacet(tiltDeg, 15);
+      expect(cutRad).toBeGreaterThan(0);
+      const uncut = planetshineIrradiance(toSource, sourceRadius, centreDistance, tilted);
+      const cut = planetshineIrradiance(toSource, sourceRadius, centreDistance, tilted, cutRad);
+      expect(Math.abs(cut - uncut)).toBeLessThan(1e-12);
+    }
+  });
+});

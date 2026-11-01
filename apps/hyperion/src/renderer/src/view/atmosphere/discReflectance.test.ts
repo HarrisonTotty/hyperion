@@ -157,17 +157,17 @@ function digestOf(source: string): string {
  * beside them and leave each to the byte (the brief's cut; R08.T11.f's cost of a branch not taken).
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "a5a28799a09284f8"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "a5a28799a09284f8"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "123e93f990e998f9"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "58080e27ceb54f68"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "985196845268c6db"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "985196845268c6db"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "79ed1a28cd44f4de"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "9b82341112282393"],
   ...[
-    ["terrain-lit-baked-offsets", "ccf375ee96107a29"],
-    ["terrain-lit-face-differences", "a95582e93db72e7c"],
-    ["terrain-depth-baked-offsets", "7815d5cd63cc7d04"],
-    ["terrain-depth-face-differences", "6aa9d333d78dc9ad"],
-    ["terrain-shadow-baked-offsets", "bc5dc25267da523a"],
-    ["terrain-shadow-face-differences", "687974744a8a3c4b"],
+    ["terrain-lit-baked-offsets", "f487e4bca89ffe75"],
+    ["terrain-lit-face-differences", "6a46b98e19f5e058"],
+    ["terrain-depth-baked-offsets", "9b5244a341a08258"],
+    ["terrain-depth-face-differences", "f2d6d336328aaa1"],
+    ["terrain-shadow-baked-offsets", "b05a85b21dd697be"],
+    ["terrain-shadow-face-differences", "b38189e98df6c27f"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

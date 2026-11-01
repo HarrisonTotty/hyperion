@@ -14,9 +14,9 @@
 // them: the law's μ and μ₀ on n′, μ floored at half the datum's, so that a cell whose slope faces
 // away near the limb never draws black; each star's horizon term on n′ with the datum's tangent
 // plane as the local horizon, so that the body's curvature still sets the terminator; R08's
-// lookups on ν; the sky's light by (1 + n′ · ν) ÷ 2; planetshine on n′. The hit, the limb, the
-// eclipse, the ring and the phase are the datum's, which have no normal. With no normal map
-// n′ = ν, the floor and the cut are inactive and every value is as before.
+// lookups on ν; the sky's light by (1 + n′ · ν) ÷ 2; planetshine on n′, under the same cut. The
+// hit, the limb, the eclipse, the ring and the phase are the datum's, which have no normal. With
+// no normal map n′ = ν, the floor and the cut are inactive and every value is as before.
 //
 // A class map may carry its texels' maturity (plan R10, R10.T1.c's client half;
 // decision-r10-t1c-client-scope §2.3): each texel's unorm16 code in the layers past its weights',
@@ -658,7 +658,8 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   // carries it) times the sky's irradiance at its own μ₀, both at light slot 0, the brightest star's
   // curves, and the sky's added before the horizon's `continue`, as a star's. It lights the night
   // side, which stays unlit for the meter. As the terrain takes it (R10.T10.g): its direct term and
-  // the law's μ₀ on n′, with no cut at the datum's plane; the sky's and the air's on ν.
+  // the law's μ₀ on n′, the source's disc cut by the datum's tangent plane as a star's is, so that
+  // the body's curvature sets planetshine's terminator too; the sky's and the air's on ν.
   let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
@@ -671,7 +672,14 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     let near = place.w / distance;
     let sky = atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, 0u) * sky_tilt;
     out.radiance = out.radiance + source.xyz * (near * near) * misc.z * mean_a * sky;
-    let irradiance = planetshine_irradiance(to_source, source.w, place.w, tilted, 0.0);
+    // The cut η = φ_ν − φ′ at the datum's plane, n′'s own plane (η 0) where it hides more; 0 off
+    // the map, where n′ = ν.
+    var cut = 0.0;
+    if (shading.mapped) {
+      let phi_datum = preciseAtan2(length(cross(normal, towards)), mu0_datum);
+      cut = max(phi_datum - preciseAtan2(length(cross(tilted, towards)), mu0), 0.0);
+    }
+    let irradiance = planetshine_irradiance(to_source, source.w, place.w, tilted, cut);
     if (irradiance <= 0.0) {
       continue;
     }

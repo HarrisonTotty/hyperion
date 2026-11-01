@@ -1835,8 +1835,8 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   // Planetshine (Design note 7): it lights the night side, which stays unlit for the meter. Through
   // the air (R08.T9.b): its sky term at its illuminance at the point and its own μ₀, before the
   // horizon's `continue`, and its direct term by the three-node rule, both at light slot 0.
-  // On n′ as the terrain takes it (R10.T10.g): its direct term and the law's μ₀, with no cut at the
-  // datum's plane; the sky's and the air's on ν.
+  // On n′ as the terrain takes it (R10.T10.g): its direct term and the law's μ₀, its source's disc
+  // cut by the datum's tangent plane as a star's is; the sky's and the air's on ν.
   for (const { place, source } of body.secondaries) {
     const toSource = sub(place, q);
     const distance = norm(toSource);
@@ -1849,7 +1849,9 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
       radiance[c] +=
         source.illuminance[c] * near * near * record.exposureOverPi * meanA[c] * sky[c];
     }
-    const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, tilted);
+    // The cut η = φ_ν − φ′ at the datum's plane, 0 off the map, as the shader's.
+    const cut = shading.mapped ? Math.max(angleFrom(mu0Datum) - angleFrom(mu0), 0) : 0;
+    const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, tilted, cut);
     if (irradiance <= 0) {
       continue;
     }

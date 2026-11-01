@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { memoised } from "../../test/memo";
 import {
@@ -740,6 +740,44 @@ describe("a disc under the field's normal map (R10.T10.g)", () => {
       );
     });
     expect(ratios.map((ratio) => Math.abs(ratio - 1) < 1e-12)).toEqual(ratios.map(() => true));
+  });
+
+  it("cuts planetshine on a slope at the datum's plane: 0.140 of face-on at the record's Io case, not 0.208", () => {
+    // Jupiter seen from Io in Io radii (71,492 km and 421,800 km over 1,821.6 km; NASA GSFC's
+    // Jupiter and Jovian Satellite Fact Sheets), its centre on the point's datum horizon towards
+    // north; the point's slope turned 12° towards it; the star 30° below the horizon.
+    const q = pointAt(0.8);
+    const star = turned(q, EAST, (120 * Math.PI) / 180);
+    const distance = 4.218e8 / 1.8216e6;
+    const towardsNorth = normalise(sub(NORTH, scale(q, dot(NORTH, q))));
+    const centre = add(q, scale(towardsNorth, Math.sqrt(distance * distance - 1)));
+    const jupiter: DiscRecord["secondaries"][number] = {
+      direction: normalise(centre),
+      distance,
+      radius: 7.1492e7 / 1.8216e6,
+      illuminance: [0.02, 0.025, 0.03],
+    };
+    const toJupiter = sub(centre, q);
+    const sloped = slopeAt(q, turned(q, towardsNorth, (12 * Math.PI) / 180), LAMBERT, LAMBERT);
+    const held = heldAt(sloped, q);
+    const lit = shadeAt(recordOver(star, sloped, [jupiter]), q);
+    const plain = shadeAt(recordOver(star, mapped(null, LAMBERT, LAMBERT), [jupiter]), q);
+    const angle = (n: Vec3): number => Math.acos(dot(n, toJupiter) / norm(toJupiter));
+    const cut = planetshineIrradiance(
+      toJupiter,
+      jupiter.radius,
+      distance,
+      held,
+      angle(q) - angle(held),
+    );
+    const datum = planetshineIrradiance(toJupiter, jupiter.radius, distance, q);
+    const ratios = [0, 1, 2].map(
+      (c) => (lit.radiance[c] ?? 0) / (plain.radiance[c] ?? Number.NaN) / (cut / datum),
+    );
+    expect([
+      Math.abs(cut - 0.14) < 2e-3,
+      ratios.every((ratio) => Math.abs(ratio - 1) < 1e-12),
+    ]).toEqual([true, true]);
   });
 });
 

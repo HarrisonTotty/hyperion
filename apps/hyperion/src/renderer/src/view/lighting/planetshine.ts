@@ -379,7 +379,9 @@ export function planetshineSources(
  * @param sourceRadius - The source's radius.
  * @param centreDistance - The source's distance from the body's centre.
  * @param normal - The point's unit outward normal.
- * @param horizonRad - The local horizon's elevation towards the source; 0 on the smooth figure.
+ * @param horizonRad - The local horizon's elevation towards the source above the element's plane:
+ *   on a normal tilted from the datum's, the datum's tangent plane, φ_ν − φ (R10.T10.g), where
+ *   that hides more than the element's own plane; 0 on the smooth figure.
  */
 export function planetshineIrradiance(
   toSource: Vec3,
