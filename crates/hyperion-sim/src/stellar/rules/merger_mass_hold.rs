@@ -41,7 +41,7 @@ use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius}
 use crate::rng::Seed;
 use crate::stellar::binary::class_merger::secondary_dynamical_merger;
 use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_in};
-use crate::stellar::binary::{BinaryInput, CarvedClass};
+use crate::stellar::binary::{BinaryInput, BinaryTimeline, CarvedClass};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::sse::Track;
@@ -397,12 +397,27 @@ fn short_share(members: &[MergerMember]) -> (usize, usize) {
     (short, mergers.len())
 }
 
+/// Whether `timeline`'s pair coalesces through a common envelope straight out of contact:
+/// P11.T4.n's contact switch, whose primary leaves its main sequence at its pin's own end with the
+/// pair in contact, so that the pair coalesces as a giant's common envelope does and its product
+/// keeps the envelope left unbound (Hurley, Tout and Pols 2002, equation 77), not by the arm's
+/// rule. Its segments run contact, a common envelope of no length, merged.
+fn contact_switch(timeline: &BinaryTimeline) -> bool {
+    use crate::stellar::binary::SegmentKind;
+    timeline.segments().windows(3).any(|w| {
+        w[0].kind() == SegmentKind::Contact
+            && w[1].kind() == SegmentKind::CommonEnvelope
+            && w[2].kind() == SegmentKind::Merged
+    })
+}
+
 /// The least the merged star keeps of the pair's mass, over the main-sequence mergers of the same
-/// grid records `drawn` run again in `galaxy`, and how many there were: each record's first
-/// attempt, every pair that merges with two main-sequence stars just before.
-fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize) {
+/// grid records `drawn` run again in `galaxy`, how many there were, and how many contact switches
+/// were left out ([`contact_switch`]): each record's first attempt, every pair that merges with two
+/// main-sequence stars just before.
+fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize, usize) {
     let mut least = f64::INFINITY;
-    let mut n = 0;
+    let (mut n, mut switched) = (0, 0);
     for member in drawn {
         for pair in first_attempt(galaxy, member.record()).pairs() {
             let timeline = pair.timeline();
@@ -413,32 +428,39 @@ fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize) {
             if !pre.stars().iter().all(|s| s.phase() == Phase::MainSequence) {
                 continue;
             }
+            if contact_switch(timeline) {
+                switched += 1;
+                continue;
+            }
             let total: f64 = pre.stars().iter().map(|s| s.mass().value()).sum();
             let product = timeline.state_at(t).stars()[0].mass().value();
             least = least.min(product / total);
             n += 1;
         }
     }
-    (least, n)
+    (least, n, switched)
 }
 
-/// The most of the pair's mass a main-sequence merger may lose under the arm: 5 × 10⁻³ of it, the
+/// The most of the pair's mass a main-sequence merger may lose under the arm: 2 × 10⁻³ of it, the
 /// rule's own loss, which is none but the product's own main-sequence wind from its zero-age mass
 /// to the age the rule places it at (`Engine::main_sequence_star`; the merger's other routes, a
 /// contact that coalesces at the end of the main sequence or a collision, place it alike). As
-/// measured (2026-11-01) the least kept is 0.99893 at 24, of a 12.9 + 12.7 M☉ contact's 25.5 M☉,
-/// and 0.99558 at generator version 25, whose engine moves the product's wind: over 24's 2 × 10⁻³,
-/// a finding, so the bound is widened as it stands ([`LEAST_KEPT_UNDER_THE_ARM`]).
-const MERGER_MASS_TOLERANCE: f64 = 5e-3;
+/// measured (2026-11-01) the least kept is 0.99893 of a 12.9 + 12.7 M☉ contact's 25.5 M☉
+/// ([`LEAST_KEPT_UNDER_THE_ARM`]). P11.T4.n's contact switches are left out
+/// ([`contact_switch`]), which coalesce through a common envelope, not by the arm's rule: at
+/// generator version 25 four of the records' pairs, three of them keeping under 0.998 of the pair
+/// (the least 0.99558) and one all of it (research's review of round 7's bound, 2026-11-01).
+const MERGER_MASS_TOLERANCE: f64 = 2e-3;
 
 /// The least share of the pair's mass a main-sequence merger keeps over the 3,000 records, under
-/// the arm alone and under every 26 hold, as measured at generator version 25.
-const LEAST_KEPT_UNDER_THE_ARM: [f64; 2] = [0.995_581_522_905_1, 0.995_581_522_905_1];
+/// the arm alone and under every 26 hold, as measured, the contact switches left out.
+const LEAST_KEPT_UNDER_THE_ARM: [f64; 2] = [0.998_929_750_656_249_7, 0.998_929_750_656_249_7];
 
 /// Over the same 3,000 grid records whose engine mergers P11.T8.c's sampler test draws, every
 /// main-sequence merger keeps the pair's mass less the rule's loss (none but the product's own
 /// wind, [`MERGER_MASS_TOLERANCE`]), under the arm alone and under every 26 hold, each record run
-/// again; against 719 of 803 under 99% under the version's rules.
+/// again, P11.T4.n's contact switches left out ([`contact_switch`]); against 719 of 803 under 99%
+/// under the version's rules.
 #[test]
 #[ignore = "slow: thousands of grid pairs run through the binary engine, three times"]
 fn every_main_sequence_merger_keeps_the_pair_s_mass_under_the_arm() {
@@ -452,8 +474,11 @@ fn every_main_sequence_merger_keeps_the_pair_s_mass_under_the_arm() {
         .iter()
         .enumerate()
     {
-        let (least, n) = least_kept(galaxy, &drawn);
-        println!("{name}: {n} main-sequence mergers, the least keeps {least:e} of the pair");
+        let (least, n, switched) = least_kept(galaxy, &drawn);
+        println!(
+            "{name}: {n} main-sequence mergers, the least keeps {least:e} of the pair; \
+             {switched} contact switches left out"
+        );
         assert!(n > 700, "{name}: {n}");
         assert!(least >= 1.0 - MERGER_MASS_TOLERANCE, "{name}: {least}");
         measured[k] = least;
