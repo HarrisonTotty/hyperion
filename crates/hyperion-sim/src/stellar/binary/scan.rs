@@ -41,7 +41,7 @@
 //!
 //! # The engine counter
 //!
-//! [`engine_calls`] (test builds and the `testing` feature) counts this thread's runs of the
+//! `engine_calls` (test builds and the `testing` feature) counts this thread's runs of the
 //! binary engine, so that a test can show that a scan of 10⁶ hosts runs none.
 
 #[cfg(any(test, feature = "testing"))]
