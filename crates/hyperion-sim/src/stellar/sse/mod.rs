@@ -47,8 +47,8 @@ pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
 #[cfg(test)]
 pub(crate) use track::post_agb_ionising_years;
 pub(crate) use track::{
-    Fate, RemnantModel, Stage, bridged_origin, fate_of, fate_to_age, is_companion_stripped,
-    is_companion_stripped_under, remnant_of,
+    Fate, RemnantModel, Stage, bridged_origin, early_agb_cores, fate_of, fate_to_age,
+    is_companion_stripped, is_companion_stripped_under, main_sequence_end_mass, remnant_of,
 };
 // The helium-excess table's hold (P15.T7.b's swap), which the stellar rules carry.
 pub(crate) use track::{HELIUM_VERSION, HeliumRules};

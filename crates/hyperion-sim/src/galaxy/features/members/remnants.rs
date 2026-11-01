@@ -28,7 +28,11 @@
 //!   (its companion-stripped mark read against the share, a lookup at 26 with the stripping
 //!   table's helium axis) and above the cluster's capture window, where only a stripped star's
 //!   iron core takes the low mode, or the star is stripped and at or above the cluster's
-//!   carbon–oxygen core floor ([`co_core_floor`]), from which no iron core takes it.
+//!   carbon–oxygen core floor ([`co_core_floor`]), from which no iron core takes it. Below the
+//!   floor a stripped star's carbon–oxygen core lies between its early AGB's at its track mass and
+//!   at that less the cluster's main-sequence loss ([`main_sequence_loss`]), and the attempt is
+//!   kept or refused where its mode's and its remnant's marks decide the whole bracket alike
+//!   ([`low_mode_fit`]).
 //!
 //! Refusing an attempt that the star's track would keep moves the draw on to the next one, so the
 //! member is still the star its record builds; only a kept white dwarf leans on the ceiling. The
@@ -56,7 +60,8 @@ use crate::rng::Threshold;
 use crate::stellar::Composition;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::remnant::collapse::{
-    COMPANION_STRIPPED_WINDOW, ElectronCaptureWindows, SINGLE_STAR_WINDOW,
+    COMPANION_STRIPPED_WINDOW, CoreCollapse, ElectronCaptureWindows, RemnantDraws,
+    SINGLE_STAR_WINDOW, core_collapse,
 };
 use crate::stellar::remnant::{DeathKind, RemnantKind, StandardKickLaw};
 use crate::stellar::rules::StellarRules;
@@ -380,9 +385,22 @@ pub(crate) fn tabulated_fit(
                 return None;
             }
             let m0 = track_mass_of(SolarMasses::new(mass));
-            let stripped = binarity::is_stripped_under(draws().stripped(), m0, composition, rules);
+            let draws = draws();
+            let stripped = binarity::is_stripped_under(draws.stripped(), m0, composition, rules);
             // A stripped star keeps the low mode only below its carbon–oxygen core's floor.
-            (!stripped || mass >= model.co_core_floor(rules).value()).then_some(false)
+            if !stripped || mass >= model.co_core_floor(rules).value() {
+                return Some(false);
+            }
+            if mass >= CO_CORE_SEARCH_TOP {
+                return None;
+            }
+            low_mode_fit(
+                m0,
+                composition,
+                &draws,
+                model.main_sequence_loss(rules),
+                rules,
+            )
         }
         ClassKind::BlackHole | ClassKind::Living | ClassKind::Tail => None,
     }
@@ -447,6 +465,82 @@ pub(crate) fn co_core_floor(model: &ClusterModel, rules: StellarRules) -> SolarM
         }
     }
     SolarMasses::new(floor)
+}
+
+/// What a slow pair's companion-stripped neutron-star attempt below its cluster's carbon–oxygen
+/// core floor decides, with track mass `m0`, `composition` and `draws`, its main sequence losing
+/// at most `loss` (the cluster's [`main_sequence_loss`]), under the stellar `rules`: `Some` of
+/// whether it is kept, or `None` where its star's track decides.
+///
+/// Its early AGB reads the mass its main sequence ends with, between `m0` less `loss` and `m0`,
+/// and collapses its iron core with that mass's cores (`sse::early_agb_cores`), which grow with
+/// it; so its carbon–oxygen core lies between theirs at the two masses. It is kept only as a
+/// neutron star in the low mode: refused where its mode's mark or its remnant's sends even the
+/// lightest core elsewhere (the low mode's probability falls, and Mandel and Müller's black
+/// holes' rises, with the core), and kept where neither sends the heaviest.
+#[must_use]
+fn low_mode_fit(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    loss: SolarMasses,
+    rules: StellarRules,
+) -> Option<bool> {
+    let coeffs = ZCoeffs::new(composition.z_fit());
+    let law = StandardKickLaw::under(rules);
+    let params = law.params();
+    let remnant = RemnantDraws::of(draws);
+    // Whether a core of `co` within a helium core of `helium` takes the low mode, and leaves a
+    // neutron star.
+    let low = |co: SolarMasses| {
+        draws
+            .kick_mode()
+            .is_below(Threshold::from_probability(params.low_mode_probability(co)))
+    };
+    let neutron_star = |(co, helium): (SolarMasses, SolarMasses)| {
+        matches!(
+            core_collapse(co, helium, remnant),
+            CoreCollapse::NeutronStar { .. }
+        )
+    };
+    let lightest = sse::early_agb_cores(SolarMasses::new(m0.value() - loss.value()), &coeffs);
+    if !low(lightest.0) || !neutron_star(lightest) {
+        return Some(false);
+    }
+    let heaviest = sse::early_agb_cores(m0, &coeffs);
+    (low(heaviest.0) && neutron_star(heaviest)).then_some(true)
+}
+
+/// How far a cluster's main-sequence loss ([`main_sequence_loss`]) lies above the largest its
+/// corners lose: a factor, and an addition in M☉.
+const LOSS_MARGIN: (f64, f64) = (1.25, 0.005);
+
+/// The most mass, M☉, a member of `model` of a slow pair's stripped neutron-star attempt loses on
+/// its main sequence under the stellar `rules`, with a margin ([`LOSS_MARGIN`]): the largest loss
+/// at the cluster's carbon–oxygen core floor ([`co_core_floor`], held to [`CO_CORE_SEARCH_TOP`]),
+/// the heaviest such member, at the corners of its members' compositions and at Reimers η 0, 0.5
+/// and 0.92, since the main sequence's wind grows with the mass
+/// (`the_main_sequence_loses_most_at_the_floor`). It costs nine main sequences at most, some
+/// 0.8 ms.
+#[must_use]
+pub(crate) fn main_sequence_loss(model: &ClusterModel, rules: StellarRules) -> SolarMasses {
+    let options = TrackOptions::default().with_rules(rules);
+    let top = track_mass_of(SolarMasses::new(
+        model.co_core_floor(rules).value().min(CO_CORE_SEARCH_TOP),
+    ));
+    let mut loss = 0.0_f64;
+    for comp in corners(model) {
+        for eta in [-8.0, 0.0, 6.0] {
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                eta: StandardNormal::new(eta).expect("a finite draw"),
+                stripped: NEVER_STRIPPED,
+                ..StarDrawsParts::MEDIAN
+            });
+            let end = sse::main_sequence_end_mass(top, &comp, &draws, options);
+            loss = loss.max(top.value() - end.value());
+        }
+    }
+    SolarMasses::new(loss * LOSS_MARGIN.0 + LOSS_MARGIN.1)
 }
 
 /// A value of a cluster model's found when first asked under one set of stellar rules, with the
@@ -825,6 +919,48 @@ mod tests {
         }
     }
 
+    /// Between each fixture globular's capture window's top and its carbon–oxygen core floor, a
+    /// star's iron core collapses with the cores of its early AGB at the mass its main sequence
+    /// ends with, bit for bit, and its main sequence loses no more than the cluster's
+    /// [`main_sequence_loss`]: at the corners of its members' compositions and at Reimers η 0, 0.5
+    /// and 0.92, over twelve masses even in ln m, under 26's rules.
+    #[test]
+    fn the_main_sequence_loses_most_at_the_floor() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
+        for (_, model, _) in clusters(galaxy) {
+            let loss = model.main_sequence_loss(rules).value();
+            let bottom = model.remnant_table(rules).capture_window_top().value();
+            let top = model.co_core_floor(rules).value().min(CO_CORE_SEARCH_TOP);
+            assert!(0.0 < loss && loss < 0.5, "{loss} M☉");
+            for comp in corners(&model) {
+                let coeffs = ZCoeffs::new(comp.z_fit());
+                for eta in [-8.0, 0.0, 6.0] {
+                    let draws = StarDraws::from_parts(StarDrawsParts {
+                        eta: StandardNormal::new(eta).unwrap(),
+                        stripped: NEVER_STRIPPED,
+                        ..StarDrawsParts::MEDIAN
+                    });
+                    for i in 0..12 {
+                        let m = bottom * crate::math::powf(top / bottom, f64::from(i) / 11.0);
+                        let m0 = track_mass_of(SolarMasses::new(m));
+                        let end = sse::main_sequence_end_mass(m0, &comp, &draws, options);
+                        assert!(
+                            end <= m0 && m0.value() - end.value() <= loss,
+                            "{m} M☉, {comp:?}, η normal {eta}: {end:?} of {m0:?}"
+                        );
+                        let progenitor =
+                            sse::fate_of(m0, &comp, &draws, options).death.progenitor();
+                        let (co, helium) = sse::early_agb_cores(end, &coeffs);
+                        assert_same_bits(progenitor.co_core_mass().value(), co.value());
+                        assert_same_bits(progenitor.helium_core_mass().value(), helium.value());
+                    }
+                }
+            }
+        }
+    }
+
     /// The lightest neutron star's progenitor, of 8 M☉, dies within 60 Myr at the corners of the
     /// compositions a cluster has, so a cluster a gigayear old has no living one; a younger
     /// cluster's neutron-star attempts are left to the track.
@@ -991,6 +1127,100 @@ mod tests {
                 .zip(&refused)
                 .all(|(&n, &of)| 100 * n <= of),
             "{refused_kept:?} of {refused:?} refusals are kept by the track"
+        );
+        assert_eq!(
+            refused_kept[1], 0,
+            "{refused_kept:?} refusals kept by the track"
+        );
+    }
+
+    /// A slow pair's companion-stripped neutron star below the slowest fixture globular's
+    /// carbon–oxygen core floor is decided only as its track decides it, and most are: over 64
+    /// members' first four attempts at eight masses even in ln m from the capture window's top to
+    /// the floor, at no and the greatest helium excess, on a pair half the escape speed.
+    #[test]
+    fn a_slow_pair_s_stripped_neutron_star_is_decided_as_its_track_decides() {
+        let galaxy = galaxy();
+        let rules = galaxy.rules().stellar;
+        let [_, (feature, model, _)] = clusters(galaxy);
+        let v_eff = model.escape_speed_effective().value();
+        let (bottom, top) = (
+            model.remnant_table(rules).capture_window_top().value(),
+            model.co_core_floor(rules).value(),
+        );
+        let (mut kept, mut refused, mut left) = (0_u32, 0_u32, 0_u32);
+        for index in 0..64 {
+            let system = SystemId::from(
+                FeatureMemberId::new(
+                    feature.id().feature_ref(),
+                    MemberSlot::InCell {
+                        band: MassBand::C.layer(),
+                        level: 0,
+                        cell: [8, 8, 8],
+                        index,
+                    },
+                )
+                .unwrap(),
+            );
+            for enrichment in [0.0, 1.0] {
+                let abundances = MemberAbundances::of(
+                    enrichment,
+                    model.initial_mass(),
+                    model.parameters().fe_h,
+                    Dex::new(0.0),
+                );
+                let comp =
+                    Composition::from_fe_h(model.parameters().fe_h, abundances.helium_excess);
+                for attempt in 0..4 {
+                    let address = (galaxy.seed(), system, attempt);
+                    let draws = StarDraws::for_attempt(address.0, BodyId::new(system, 0), attempt);
+                    for i in 0..8 {
+                        let mass = bottom * crate::math::powf(top / bottom, f64::from(i) / 8.0);
+                        let m0 = track_mass_of(SolarMasses::new(mass));
+                        if !binarity::is_stripped_under(draws.stripped(), m0, &comp, rules) {
+                            continue;
+                        }
+                        let speeds = (v_eff, 0.5 * v_eff);
+                        let fit = tabulated_fit(
+                            (ClassKind::NeutronStar, mass),
+                            &comp,
+                            address,
+                            (model.age(), speeds),
+                            &model,
+                            rules,
+                        );
+                        let Some(fits) = fit else {
+                            left += 1;
+                            continue;
+                        };
+                        let track = remnant_fits(
+                            ClassKind::NeutronStar,
+                            mass,
+                            &comp,
+                            address,
+                            model.age(),
+                            speeds,
+                            rules,
+                        );
+                        assert_eq!(
+                            fits, track,
+                            "{mass} M☉, {comp:?}, attempt {attempt} of member {index}"
+                        );
+                        if fits {
+                            kept += 1;
+                        } else {
+                            refused += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "slow pairs' stripped neutron stars: {kept} kept, {refused} refused, {left} left"
+        );
+        assert!(
+            kept > 20 && refused > 20 && 10 * left < kept + refused,
+            "{kept}, {refused}, {left}"
         );
     }
 

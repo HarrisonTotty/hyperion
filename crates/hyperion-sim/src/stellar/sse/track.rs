@@ -1344,6 +1344,44 @@ pub(crate) fn fate_to_age(
     lifetime_build(m0, comp, draws, options, Some(age_max.value().max(0.0)))
 }
 
+/// The mass, M☉, with which the main sequence of the star of initial mass `m0`, `comp` and `draws`
+/// under `options` ends: the initial mass its giant branches and its early AGB read, which the
+/// main sequence's wind has lowered (HPT section 7.1), from a build of the main sequence alone by
+/// [`lifetime_build`]'s builder (P09.T10's member draws, whose clusters bound the main sequence's
+/// loss).
+#[must_use]
+pub(crate) fn main_sequence_end_mass(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+) -> SolarMasses {
+    let coeffs = ZCoeffs::new(comp.z_fit());
+    let m0 = checked_initial_mass(m0);
+    let eta = reimers_eta(draws.eta().value());
+    let built = Builder::new(
+        &coeffs,
+        comp,
+        options,
+        eta,
+        RemnantDraws::of(draws),
+        Resolution::GENERATOR,
+        build::Keep::Lifetime,
+    )
+    .with_companion_mark(m0, draws)
+    .zero_age_main_sequence_segment(m0.value());
+    SolarMasses::new(built.end_mass)
+}
+
+/// The carbon–oxygen and helium cores, M☉, with which the early AGB of a star whose main sequence
+/// ended with `m0` and whose metallicity has `coeffs` collapses an iron core at its end: its
+/// `Mc,SN`, held to its floor, and its `Mc,BAGB` (HPT equations 66 and 75; the early AGB's own).
+#[must_use]
+pub(crate) fn early_agb_cores(m0: SolarMasses, coeffs: &ZCoeffs) -> (SolarMasses, SolarMasses) {
+    let phase = super::agb::EarlyAgb::new(m0, coeffs);
+    (phase.mc_sn(), phase.mc_bagb())
+}
+
 /// [`Track::build`]'s build at the generator's resolution, keeping only the fate: `None` if it
 /// stops at the segment holding `age_max` before the star's death.
 #[must_use]

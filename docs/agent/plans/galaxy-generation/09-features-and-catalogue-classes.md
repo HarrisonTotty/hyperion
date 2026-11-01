@@ -5463,3 +5463,11 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   bound stays each cell's own. Sharing it across bands was not taken: in a core query a cell's
   bounding sphere ends short of the tidal radius, where the tails begin, so each band's tail bound
   is a dot product and a comparison.
+- **P09.T10 perf, a slow pair's stripped neutron stars below the CO floor (lane
+  `galaxy-centre-core`, 2026-11-01; bit for bit).** `ClusterModel::main_sequence_loss(rules)`
+  (`remnants::main_sequence_loss`, lazy in its own `RulesCell`): the largest main-sequence loss at
+  the CO floor over the corners and η 0, 0.5 and 0.92, ×1.25 + 0.005 M☉. `remnants::low_mode_fit`
+  brackets the attempt's CO and helium cores with `sse::early_agb_cores` at its track mass and at
+  that less the loss (the early AGB reads the main sequence's end mass,
+  `sse::main_sequence_end_mass`), and decides where the mode's and the remnant's marks agree over
+  the bracket.

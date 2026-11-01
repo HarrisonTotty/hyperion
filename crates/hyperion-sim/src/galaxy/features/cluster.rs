@@ -350,6 +350,8 @@ pub struct ClusterModel {
     remnant_table: RulesCell<RemnantTable>,
     /// [`ClusterModel::co_core_floor`], found when first asked.
     co_core_floor: RulesCell<SolarMasses>,
+    /// [`ClusterModel::main_sequence_loss`], found when first asked.
+    main_sequence_loss: RulesCell<SolarMasses>,
 }
 
 impl ClusterModel {
@@ -415,6 +417,7 @@ impl ClusterModel {
             black_hole_fraction,
             remnant_table: RulesCell::default(),
             co_core_floor: RulesCell::default(),
+            main_sequence_loss: RulesCell::default(),
         }
     }
 
@@ -715,6 +718,15 @@ impl ClusterModel {
     pub(crate) fn co_core_floor(&self, rules: StellarRules) -> SolarMasses {
         self.co_core_floor
             .get(rules, || remnants::co_core_floor(self, rules))
+    }
+
+    /// The most mass a slow pair's stripped neutron-star member loses on its main sequence, with a
+    /// margin, under the stellar `rules` ([`remnants::main_sequence_loss`]), M☉, found the first
+    /// time it is asked, about a millisecond, and kept with the model.
+    #[must_use]
+    pub(crate) fn main_sequence_loss(&self, rules: StellarRules) -> SolarMasses {
+        self.main_sequence_loss
+            .get(rules, || remnants::main_sequence_loss(self, rules))
     }
 }
 
