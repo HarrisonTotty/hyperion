@@ -1512,7 +1512,9 @@ registered.
 _T37.a, the grid's classes, built behind its hold (lane `p09-t37`, 2026-11-01, at
 `GENERATOR_VERSION` 24, no output moved): see Risks, "P09.T37.a, as built". T37.b, the centre's
 source and the two centre tests, built behind P10.T10.b's hold (lane `p10-list-registration`,
-2026-11-01, at 24, no output moved): see Risks, "P09.T37.b, as built"._
+2026-11-01, at 24, no output moved): see Risks, "P09.T37.b, as built". The bench's cold query,
+cut bit for bit (lane `perf-range-27`, 2026-11-01, no output moved): see Risks, "P09.T37's
+bench"; its 5 ms target is missed, a finding._
 
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
@@ -5816,3 +5818,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   by their IDs at their rows' positions (`CentrePath`; plan 10's "P10.T10.b's placement as
   built"). A centre recent entry is placed straight at its velocity until its source lands (lean,
   2026-11-01).
+- **P09.T37's bench, the cold query cut bit for bit (lane `perf-range-27`, 2026-11-01, at
+  `GENERATOR_VERSION` 24; no output moves at 24–27).**
+  - _Class cells ahead._ `CatalogueClassSource::cells_read(galaxy, query, layers)` lists the class
+    cells the hits read; `CachedClassSource::read_ahead(galaxy, cells)` makes them through a cache.
+    The served query's first job asks `SharedClassCellCache::lacking` (sampled, as the grid's), and
+    the sources' cell jobs make them (`SharedClassCellCache::read_ahead`), so the sources' job finds
+    every class cell held. No new cache or limit: P09.T40's class cell cache and budget.
+  - _The list's models._ `GlobalListModels` (the dwarf cores' models and the streams' band shares),
+    lent to every `GlobalListSource` by `TubeLookup::models` (default `None`: the source makes its
+    own). The server keeps them in `HeldGlobalList::new(galaxy, list)`, charged within
+    `GLOBAL_LIST_CACHE_BYTES`, and `ListedTubes` lends them.
+  - _One bound a cell._ `ClassCellSystems::of` keeps each entry under the cell's one bound
+    (`grid::entry_systems_in`) instead of resolving each member's ID.
