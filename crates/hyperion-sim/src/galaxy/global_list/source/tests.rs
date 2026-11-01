@@ -321,9 +321,31 @@ fn the_census_is_the_cells_sum_and_independent_of_the_cache() {
     assert!(census.get(Layer::A) > 1.0, "{census:?}");
 }
 
+/// A lookup that lends one set of the list's models to every source made over it, as a server
+/// keeps them for every query of a galaxy (P09.T37's bench).
+struct Lending<'a> {
+    lookup: &'a Lookup,
+    models: GlobalListModels,
+}
+
+impl TubeLookup for Lending<'_> {
+    fn global_list(&self) -> &GlobalList {
+        &self.lookup.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        self.lookup.tube(stream)
+    }
+
+    fn models(&self) -> Option<&GlobalListModels> {
+        Some(&self.models)
+    }
+}
+
 /// P10.T9: the hits and the census of each sphere are the same whatever was asked before them,
-/// through one source whose band shares fill as the queries reach their streams, and equal a
-/// fresh source's (the sim-determinism skill's order check).
+/// through one source whose band shares fill as the queries reach their streams, and through
+/// sources made for each query over models lent and filled across them (P09.T37's bench), and
+/// equal a fresh source's (the sim-determinism skill's order check).
 #[test]
 fn the_source_s_answers_are_order_independent() {
     use hyperion_testkit::order::assert_order_independent;
@@ -381,8 +403,29 @@ fn the_source_s_answers_are_order_independent() {
         answer(&cold, s)
     };
     assert_order_independent(&spheres, fresh);
+    let lending = Lending {
+        lookup,
+        models: GlobalListModels::new(galaxy, &lookup.list),
+    };
+    let lent = |s: &QuerySphere| {
+        let source =
+            GlobalListSource::new(galaxy, &lending, &NoCentreOrbitCache).expect("no centre");
+        answer(&source, s)
+    };
+    assert_order_independent(&spheres, lent);
+    let filled = lending
+        .models
+        .shares
+        .iter()
+        .filter(|shares| shares.get().is_some())
+        .count();
+    assert_eq!(
+        filled, 3,
+        "each stream's shares made once, by the first query to reach it"
+    );
     for (k, s) in spheres.iter().enumerate() {
         assert_eq!(answer(&warm, s), fresh(s), "sphere {k}");
+        assert_eq!(lent(s), fresh(s), "sphere {k}");
     }
     let counts: Vec<usize> = spheres
         .iter()

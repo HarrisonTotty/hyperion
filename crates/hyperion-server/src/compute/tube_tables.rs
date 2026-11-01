@@ -19,7 +19,9 @@
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::global_list::{GlobalList, StreamNumber, TubeLookup, TubeTable};
+use hyperion_sim::galaxy::global_list::{
+    GlobalList, GlobalListModels, StreamNumber, TubeLookup, TubeTable,
+};
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemRecord, resolve, resolve_with};
 use hyperion_sim::id::SystemId;
 
@@ -159,6 +161,12 @@ impl TubeLookup for ListedTubes {
         // A table larger than the whole budget is handed back and still read.
         drop(self.tables.insert(key, Arc::clone(&table)));
         table
+    }
+
+    /// The list's models the service keeps with it ([`HeldGlobalList::models`]), which every
+    /// query of the galaxy reads (P09.T37's bench).
+    fn models(&self) -> Option<&GlobalListModels> {
+        Some(self.list.models())
     }
 }
 

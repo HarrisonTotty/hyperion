@@ -30,8 +30,9 @@
 //! `list_at_27` is the Sun-like query of 50 ly and of 1 ly, and the query of 50 ly at the black
 //! hole, where nothing fits, at the epoch under 27's rules with every source, the global list's
 //! among them (P10.T10.b's registration and P09.T37.b), cold and warm: the list's tube tables
-//! built before, as the server builds them ahead of a query, and the centre's orbits read through
-//! the server's centre orbit cache; and at 50 ly the list's source alone through no orbit cache.
+//! built before, as the server builds them ahead of a query, its models kept with it, as the
+//! server keeps them with the list (`GlobalListModels`), and the centre's orbits read through the
+//! server's centre orbit cache; and at 50 ly the list's source alone through no orbit cache.
 
 use std::collections::BTreeMap;
 use std::hint::black_box;
@@ -65,7 +66,7 @@ use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
 use hyperion_sim::galaxy::features::members::FeatureInterior;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::global_list::{
-    GlobalList, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
+    GlobalList, GlobalListModels, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
 };
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
@@ -490,16 +491,22 @@ fn classes_at_27(c: &mut Criterion) {
     group.finish();
 }
 
-/// A lookup that keeps every tube table it builds, as the server's warm-up keeps a galaxy's.
+/// A lookup that keeps every tube table it builds, as the server's warm-up keeps a galaxy's, and
+/// the list's models, as the server keeps them with the list.
 struct KeepTubes<'a> {
     galaxy: &'a Galaxy,
     list: GlobalList,
     tubes: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+    models: GlobalListModels,
 }
 
 impl TubeLookup for KeepTubes<'_> {
     fn global_list(&self) -> &GlobalList {
         &self.list
+    }
+
+    fn models(&self) -> Option<&GlobalListModels> {
+        Some(&self.models)
     }
 
     fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
@@ -521,9 +528,11 @@ fn list_at_27(c: &mut Criterion) {
         .expect("a drawn galaxy builds")
         .with_full_potential();
     let key = GalaxyKey::new(SEED, version);
+    let list = GlobalList::build(&galaxy);
     let lookup = KeepTubes {
         galaxy: &galaxy,
-        list: GlobalList::build(&galaxy),
+        models: GlobalListModels::new(&galaxy, &list),
+        list,
         tubes: Mutex::default(),
     };
     // Not the black hole's 0.05 ly, whose complete census walks the grid's cells about the origin,

@@ -190,6 +190,7 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{KilometresPerSecond, LightYears, MetresPerSecond, Radians, SolarMasses};
 
 use super::orbit::{BuildLeapfrogError, cross, dot};
+use super::source::GlobalListModels;
 use super::spec::StreamSpec;
 use super::spray::{self, Arm, Tracer};
 use super::{GlobalList, StreamNumber};
@@ -1869,6 +1870,13 @@ pub trait TubeLookup {
     /// The tube table of `stream`, built if the cache does not hold it. `stream` is below the
     /// list's stream count; callers check that against [`global_list`](Self::global_list) first.
     fn tube(&self, stream: StreamNumber) -> Arc<TubeTable>;
+
+    /// The models of the list ([`GlobalListModels`]), if the caller keeps them for every query of
+    /// the galaxy, made for that galaxy and this list: `None`, the default, and each
+    /// [`GlobalListSource`](super::GlobalListSource) makes its own (P09.T37's bench).
+    fn models(&self) -> Option<&GlobalListModels> {
+        None
+    }
 }
 
 #[cfg(test)]

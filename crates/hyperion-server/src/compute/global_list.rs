@@ -64,7 +64,7 @@ use hyperion_sim::galaxy::global_list::spray::{
 };
 use hyperion_sim::galaxy::global_list::tube::BuildTubeTableError;
 use hyperion_sim::galaxy::global_list::{
-    Debris, GlobalList, ListPlan, StreamNumber, StreamSpec, TubeTable,
+    Debris, GlobalList, GlobalListModels, ListPlan, StreamNumber, StreamSpec, TubeTable,
 };
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{SystemId, SystemIdKind};
@@ -533,26 +533,47 @@ pub(crate) async fn tracers_on(
         .collect())
 }
 
-/// A galaxy's global list, as the [`GlobalListService`] keeps it.
+/// A galaxy's global list, as the [`GlobalListService`] keeps it, with the list's models
+/// ([`GlobalListModels`]), which every query of the galaxy reads through its [`ListedTubes`]
+/// (P09.T37's bench).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct HeldGlobalList(GlobalList);
+pub struct HeldGlobalList {
+    list: GlobalList,
+    models: GlobalListModels,
+}
 
 impl HeldGlobalList {
+    /// `list`, `galaxy`'s global list, with its models built ([`GlobalListModels::new`]): some
+    /// milliseconds, so the service builds it on the pool.
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, list: GlobalList) -> Self {
+        let models = GlobalListModels::new(galaxy, &list);
+        Self { list, models }
+    }
+
     /// The list.
     #[must_use]
     pub fn list(&self) -> &GlobalList {
-        &self.0
+        &self.list
+    }
+
+    /// The list's models.
+    #[must_use]
+    pub fn models(&self) -> &GlobalListModels {
+        &self.models
     }
 }
 
 impl HeapBytes for HeldGlobalList {
     /// The list's entries and its debris' specifications, by their counts: none of them owns
-    /// anything on the heap itself, and the vectors' capacities are the sim's to keep.
+    /// anything on the heap itself, and the vectors' capacities are the sim's to keep; and the
+    /// models' own count ([`GlobalListModels::heap_bytes`]).
     fn heap_bytes(&self) -> usize {
-        let list = &self.0;
+        let list = &self.list;
         size_of_val(list.entries())
             + size_of_val(list.debris().streams())
             + size_of_val(list.debris().cores())
+            + self.models.heap_bytes()
     }
 }
 
@@ -838,7 +859,15 @@ impl Lists {
                     &token,
                 )
                 .await?;
-                let list = Arc::new(HeldGlobalList(list));
+                // The cores' models, some milliseconds, on the pool as the list was.
+                let modelled = {
+                    let galaxy = Arc::clone(&galaxy);
+                    queue(&pool, Priority::Bulk, &token, move |_: &CancelToken| {
+                        HeldGlobalList::new(&galaxy, list)
+                    })
+                    .await?
+                };
+                let list = Arc::new(reply(modelled).await?);
                 // A list larger than the whole budget is handed back and not stored.
                 drop(held.insert(key, Arc::clone(&list)));
                 Ok(list)
@@ -1230,6 +1259,22 @@ mod tests {
         );
         let counters = service.tube_counters();
         assert_eq!((counters.entries(), counters.hits()), (1, 2));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// The service keeps a galaxy's list with its models (P09.T37's bench): its galaxy's and its
+    /// list's, charged with the list, and lent by every lookup over it, so that a query's source
+    /// builds none and each stream's band shares are made once for every query.
+    #[tokio::test]
+    async fn a_held_list_keeps_its_models_and_its_lookups_lend_them() {
+        let tubes = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_on(4, &tubes);
+        let (galaxy, list) = listed(&service).await;
+        assert_eq!(*list.models(), GlobalListModels::new(&galaxy, list.list()));
+        assert!(HeapBytes::heap_bytes(&*list) > list.models().heap_bytes());
+        let lookup = ListedTubes::new((Arc::clone(&galaxy), key()), Arc::clone(&list), tubes);
+        let lent = lookup.models().expect("the held list's models");
+        assert!(std::ptr::eq(lent, list.models()));
         pool.shutdown().await.unwrap();
     }
 

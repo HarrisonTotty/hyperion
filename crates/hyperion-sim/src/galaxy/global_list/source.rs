@@ -45,6 +45,7 @@
 //! field gives up what the list's members stand for in the train that first serves them
 //! (P10.T3.d.b).
 
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use crate::GeneratorVersion;
@@ -110,11 +111,81 @@ const BANDS_COARSEST_FIRST: [MassBand; 5] = [
     MassBand::A,
 ];
 
+/// What a global list's source reads of its galaxy that no query changes: each dwarf core's model,
+/// and each stream's band shares once a query first reaches it (P09.T37's bench).
+///
+/// Both are functions of the galaxy and its list alone (a dwarf stream's shares read its core's
+/// keyed metallicity stream), so which query makes a stream's shares first moves nothing, and a
+/// caller may keep one for every query of the galaxy, lent through its [`TubeLookup::models`]. Made
+/// for each source instead, the cores' models took 3.8 ms and the 121 streams' shares some 9.5 ms
+/// of every Sun-like 50 ly query under every 27 hold, warm or cold (measured 2026-11-01, pod, 16
+/// vCPU).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GlobalListModels {
+    /// Each dwarf core's model in number order, `None` for one that fails its headroom check.
+    cores: Vec<Option<DwarfCoreModel>>,
+    /// Each stream's band shares in number order, made when a query first reaches it.
+    shares: Vec<OnceLock<StreamBandShares>>,
+}
+
+impl GlobalListModels {
+    /// The models of `list`, `galaxy`'s global list: every dwarf core's
+    /// ([`DwarfCoreModel::from_spec`]), and no stream's shares until a query reaches it.
+    ///
+    /// Each core's model costs a millisecond or so (the 25 or so of a Milky Way galaxy, 3.8 ms in
+    /// all), so a server builds it off its runtime.
+    ///
+    /// # Panics
+    ///
+    /// As [`DwarfCoreModel::from_spec`], for a core no [`Debris`](super::Debris) plans.
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, list: &GlobalList) -> Self {
+        let cores = list
+            .debris()
+            .cores()
+            .iter()
+            .map(|spec| {
+                let model = DwarfCoreModel::from_spec(galaxy, spec);
+                model.check_index_headroom().is_ok().then_some(model)
+            })
+            .collect();
+        let shares = list
+            .debris()
+            .streams()
+            .iter()
+            .map(|_| OnceLock::new())
+            .collect();
+        Self { cores, shares }
+    }
+
+    /// The bytes it owns on the heap, by its buffers' capacities and each core's class table's
+    /// ([`MemberClassTable::heap_bytes`](crate::galaxy::features::interior::MemberClassTable::heap_bytes)):
+    /// what a byte-bounded cache charges it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.cores.capacity() * size_of::<Option<DwarfCoreModel>>()
+            + self
+                .cores
+                .iter()
+                .flatten()
+                .map(|model| model.table().heap_bytes())
+                .sum::<usize>()
+            + self.shares.capacity() * size_of::<OnceLock<StreamBandShares>>()
+    }
+
+    /// Whether these are the models of `list`'s debris, by its counts of cores and streams.
+    #[must_use]
+    fn fit(&self, list: &GlobalList) -> bool {
+        self.cores.len() == list.debris().cores().len()
+            && self.shares.len() == list.debris().streams().len()
+    }
+}
+
 /// The global list's members as a source of the range query (module documentation).
 ///
 /// It holds the galaxy it is made for, the caller's [`TubeLookup`], whose list must be that
-/// galaxy's, the centre's source and the cores' models, and each stream's band shares once a query
-/// first reaches it. A caller registers it with the range query in place of the
+/// galaxy's, the centre's source and the list's models ([`GlobalListModels`]): the lookup's if it
+/// lends them, otherwise its own. A caller registers it with the range query in place of the
 /// [`CentreMemberSource`] it holds.
 ///
 /// # Panics
@@ -178,12 +249,8 @@ pub struct GlobalListSource<'a> {
     lookup: &'a dyn TubeLookup,
     /// The centre's source, if the list holds the centre.
     centre: Option<CentreMemberSource<'a>>,
-    /// Each dwarf core's model in number order, `None` for one that fails its headroom check.
-    cores: Vec<Option<DwarfCoreModel>>,
-    /// Each stream's band shares in number order, made when a query first reaches it. Each is a
-    /// function of the galaxy and its stream alone (a dwarf's reads its core's keyed metallicity
-    /// stream), so which query makes it first moves nothing.
-    shares: Vec<OnceLock<StreamBandShares>>,
+    /// The cores' models and the streams' band shares: the lookup's, or the source's own.
+    models: Cow<'a, GlobalListModels>,
 }
 
 impl std::fmt::Debug for GlobalListSource<'_> {
@@ -195,8 +262,8 @@ impl std::fmt::Debug for GlobalListSource<'_> {
 impl<'a> GlobalListSource<'a> {
     /// The source of `galaxy`'s global list, `lookup`'s, whose tube tables it reads through
     /// `lookup` and the centre's cells through `orbits`: the centre's source if the list holds the
-    /// centre ([`CentreMemberSource::new`]) and every dwarf core's model
-    /// ([`DwarfCoreModel::from_spec`]).
+    /// centre ([`CentreMemberSource::new`]), and the list's models, the lookup's
+    /// ([`TubeLookup::models`]) or else its own ([`GlobalListModels::new`]).
     ///
     /// # Errors
     ///
@@ -205,7 +272,8 @@ impl<'a> GlobalListSource<'a> {
     ///
     /// # Panics
     ///
-    /// As [`CentreMemberSource::new`], which no galaxy the builder allows reaches.
+    /// As [`CentreMemberSource::new`], which no galaxy the builder allows reaches, and if the
+    /// lookup lends models of another list than its own, by their counts of cores and streams.
     pub fn new(
         galaxy: &'a Galaxy,
         lookup: &'a dyn TubeLookup,
@@ -217,27 +285,19 @@ impl<'a> GlobalListSource<'a> {
             .any(|kind| kind == GlobalEntryKind::Centre)
             .then(|| CentreMemberSource::new(galaxy, orbits))
             .transpose()?;
-        let cores = list
-            .debris()
-            .cores()
-            .iter()
-            .map(|spec| {
-                let model = DwarfCoreModel::from_spec(galaxy, spec);
-                model.check_index_headroom().is_ok().then_some(model)
-            })
-            .collect();
-        let shares = list
-            .debris()
-            .streams()
-            .iter()
-            .map(|_| OnceLock::new())
-            .collect();
+        let models = lookup.models().map_or_else(
+            || Cow::Owned(GlobalListModels::new(galaxy, list)),
+            Cow::Borrowed,
+        );
+        assert!(
+            models.fit(list),
+            "a lookup lends the models of its own global list"
+        );
         Ok(Self {
             galaxy,
             lookup,
             centre,
-            cores,
-            shares,
+            models,
         })
     }
 
@@ -298,6 +358,7 @@ impl<'a> GlobalListSource<'a> {
             }
             SystemIdKind::DwarfCore(member) => {
                 let core = self
+                    .models
                     .cores
                     .get(usize::from(member.number()))
                     .and_then(Option::as_ref)
@@ -334,7 +395,7 @@ impl<'a> GlobalListSource<'a> {
     #[must_use]
     fn shares(&self, number: StreamNumber) -> &StreamBandShares {
         let index = usize::from(number.get());
-        self.shares[index].get_or_init(|| {
+        self.models.shares[index].get_or_init(|| {
             let spec = self.list().stream(number).expect("a stream of the list");
             StreamBandShares::of(self.galaxy, spec)
         })
@@ -384,7 +445,8 @@ impl<'a> GlobalListSource<'a> {
     /// Core `number`'s model, if it is played.
     #[must_use]
     fn core(&self, number: super::DwarfCoreNumber) -> Option<&DwarfCoreModel> {
-        self.cores
+        self.models
+            .cores
             .get(usize::from(number.get()))
             .and_then(Option::as_ref)
     }
