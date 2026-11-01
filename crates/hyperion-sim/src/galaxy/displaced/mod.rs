@@ -47,8 +47,8 @@ pub mod survivors;
 
 pub use fields::{DisplacedClass, DisplacedFields, DisplacedForm};
 pub use scales::GalaxyScales;
-pub(crate) use site::death_in_interval_under;
 pub use site::{ExplosionSite, death_in_interval, explosion_site};
+pub(crate) use site::{death_in_interval_knowing, death_in_interval_under};
 
 use crate::GeneratorVersion;
 

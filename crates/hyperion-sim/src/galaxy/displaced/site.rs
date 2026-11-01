@@ -250,6 +250,34 @@ pub(crate) fn death_in_interval_under(
     )
 }
 
+/// [`death_in_interval_under`] of a primary whose lifetime under `rules` is known, `lifetime`:
+/// the exact tier takes it rather than computing it again, which costs some 0.4 ms for a layer-E
+/// star (plan 09, P09.T33.b's cost). It must be `lifetime_under` of the track mass, `composition`
+/// and the draws under `rules`, bit for bit, so that the verdict is
+/// [`death_in_interval_under`]'s.
+///
+/// # Panics
+///
+/// As [`death_in_interval`] does.
+#[must_use]
+pub(crate) fn death_in_interval_knowing(
+    m0: SolarMasses,
+    composition: &Composition,
+    eta: StandardNormal,
+    age_at_epoch: Years,
+    draws: impl FnOnce() -> StarDraws,
+    rules: StellarRules,
+    lifetime: Years,
+) -> Option<UniverseTime> {
+    decide(
+        m0,
+        age_at_epoch,
+        &given_marks(composition, eta, draws),
+        rules,
+        |_, _, _| lifetime,
+    )
+}
+
 /// Where and when the grid record `record`'s primary died or will die, if that falls in the
 /// interval (−(`W_cap` + L + H), +H], and `None` otherwise (plan 08, P08.T13).
 ///
@@ -1006,6 +1034,43 @@ mod tests {
             (verdicts.bracket, verdicts.table, verdicts.exact()),
             (0, 0, 2)
         );
+    }
+
+    /// Given the lifetime its exact tier would compute, the predicate gives its own verdict, on
+    /// each side of the interval and inside it, whichever tier decides: at solar composition, which
+    /// the brackets decide far from the interval, and with a helium excess, which the exact tier
+    /// decides at every age.
+    #[test]
+    fn a_known_lifetime_gives_the_predicate_s_own_verdict() {
+        let rules = StellarRules::of_version(GENERATOR_VERSION);
+        let (m0, draws) = (SolarMasses::new(20.0), StarDraws::median());
+        let rich = Composition::from_fe_h(Dex::new(0.0), HeliumExcess::new(0.05));
+        for composition in [Composition::SOLAR, rich] {
+            let life = lifetime_under(track_mass_of(m0), &composition, &draws, rules);
+            for offset in [-1e6, -1e3, 0.0, 1e3, 1e6, 1e9] {
+                let age = Years::new(life.value() + offset);
+                assert_eq!(
+                    death_in_interval_knowing(
+                        m0,
+                        &composition,
+                        draws.eta(),
+                        age,
+                        || draws.clone(),
+                        rules,
+                        life
+                    ),
+                    death_in_interval_under(
+                        m0,
+                        &composition,
+                        draws.eta(),
+                        age,
+                        || draws.clone(),
+                        rules
+                    ),
+                    "{composition:?}, {offset} years past its death"
+                );
+            }
+        }
     }
 
     /// The fate table is the version's tracks', so its tier decides only under the

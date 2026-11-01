@@ -34,6 +34,7 @@ use crate::Seed;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry, check_class_headroom};
 use crate::galaxy::displaced::PlacementClass;
+use crate::galaxy::displaced::death_in_interval_under;
 use crate::galaxy::displaced::explosion_site;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, generate_cell};
@@ -641,6 +642,7 @@ fn the_grid_s_runaways_and_the_class_agree_on_their_deaths_and_claims() {
                     mass: record.primary_initial_mass(),
                     composition,
                     draws,
+                    lifetime: life,
                     age_at_epoch: record.age_at_epoch(),
                     velocity: epoch_velocity(galaxy, &record),
                     ejection: None,

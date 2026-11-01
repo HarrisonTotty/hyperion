@@ -128,7 +128,7 @@ use crate::galaxy::displaced::runaway::{
 };
 use crate::galaxy::displaced::{
     AgeBin, BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, ExplosionSite,
-    SPEED_BINS, SPEED_EDGES, SpeedBin, death_in_interval_under,
+    SPEED_BINS, SPEED_EDGES, SpeedBin, death_in_interval_knowing,
 };
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
@@ -353,6 +353,9 @@ pub struct CoreCollapseCandidate {
     mass: SolarMasses,
     composition: Composition,
     draws: StarDraws,
+    /// The primary's lifetime under the galaxy's stellar rules, which the shared test's exact tier
+    /// reads rather than computing it again.
+    lifetime: Years,
     age_at_epoch: Years,
     velocity: GalacticVelocity,
     ejection: Option<Ejection>,
@@ -1005,13 +1008,13 @@ impl ClassProcess for CoreCollapseProcess {
         // 3. The primary's draws, at attempt 0 as its record reads them, and its lifetime, as plan
         //    08's predicate's exact tier computes it, under the galaxy's stellar rules.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let life = lifetime_under(
+        let lifetime = lifetime_under(
             track_mass_of(mass),
             &composition,
             &draws,
             galaxy.rules().stellar,
-        )
-        .value();
+        );
+        let life = lifetime.value();
         // 4. T across the field's interval, and the age at the epoch it implies.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
         let death = self.death_at(stream.uniform());
@@ -1033,6 +1036,7 @@ impl ClassProcess for CoreCollapseProcess {
             mass,
             composition,
             draws,
+            lifetime,
             age_at_epoch,
             velocity,
             ejection: None,
@@ -1077,8 +1081,11 @@ struct RecentDeath {
 
 impl RecentDeath {
     /// The death of `candidate`'s primary, if plan 08's interval predicate
-    /// ([`death_in_interval_under`]) puts it in the interval, under the galaxy's stellar rules as
-    /// its stars are, and it makes a shell ([`DeathMarks::of`]).
+    /// ([`death_in_interval_under`](crate::galaxy::displaced::death_in_interval_under)) puts it in
+    /// the interval, under the galaxy's stellar rules as its stars are, and it makes a shell
+    /// ([`DeathMarks::of`]). Its exact tier reads the lifetime the candidate computed
+    /// ([`death_in_interval_knowing`]), the same bits, so that a kept candidate pays for one
+    /// lifetime, not two.
     #[must_use]
     fn of(galaxy: &Galaxy, candidate: &CoreCollapseCandidate) -> Option<Self> {
         // The primary, on a record at the site: it reads no position, and the record the entry
@@ -1096,13 +1103,14 @@ impl RecentDeath {
         record: &SystemRecord,
     ) -> Option<Self> {
         let draws = &candidate.draws;
-        let death = death_in_interval_under(
+        let death = death_in_interval_knowing(
             candidate.mass,
             &candidate.composition,
             draws.eta(),
             candidate.age_at_epoch,
             || draws.clone(),
             galaxy.rules().stellar,
+            candidate.lifetime,
         )?;
         let stars = SystemStars::generate_with(
             galaxy,
@@ -1230,13 +1238,13 @@ impl CoreCollapseProcess {
         );
         // 3. The primary's draws and lifetime.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let life = lifetime_under(
+        let lifetime = lifetime_under(
             track_mass_of(mass),
             &composition,
             &draws,
             galaxy.rules().stellar,
-        )
-        .value();
+        );
+        let life = lifetime.value();
         // 4–5. T, the age, and the field's death rate there.
         let mut stream = Stream::open(seed, tags::CLASS_CORE_COLLAPSE_DEATH, key);
         let death = self.death_at(stream.uniform());
@@ -1270,6 +1278,7 @@ impl CoreCollapseProcess {
             mass,
             composition,
             draws,
+            lifetime,
             age_at_epoch,
             velocity,
             ejection: Some(Ejection {

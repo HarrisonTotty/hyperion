@@ -28,6 +28,7 @@ use crate::galaxy::catalogue_classes::supernova::{
 use crate::galaxy::catalogue_classes::{
     CatalogueClassCell, CatalogueEntry, check_class_headroom, resolve_entry, system_of,
 };
+use crate::galaxy::displaced::death_in_interval_under;
 use crate::galaxy::displaced::marks::LifetimeBracket;
 use crate::galaxy::field_share::FieldShare;
 use crate::galaxy::imf::MassFunctionKind;
