@@ -1822,3 +1822,103 @@ fn a_faint_heat_flow_raises_a_surface_by_its_linear_rise() {
     );
     assert!(cold.value() - 40.0 < 0.07, "{cold:?}");
 }
+
+/// A sweep's tides are its moon's to the bit ([`TideSweep`]): over 1,000 random moons, at forcings
+/// and surfaces out of order and repeated, its own surface and the warmer ones P14.T55.j's balance
+/// reads among them, every solve's branch, k₂, Q, loss, heat flow and ocean are
+/// [`MoonTides::with_ocean`]'s; under the rules in force and under every 27 hold (P14.T56.e's porous
+/// core).
+#[test]
+fn a_sweep_s_tides_are_its_moon_s_at_every_forcing_and_surface() {
+    let (ocean, warmer) = sweep_census();
+    let (porous_ocean, porous_warmer) = with_every_27_hold(sweep_census);
+    eprintln!(
+        "sweeps on the ocean branch: {ocean} solves, {warmer} under a warmer surface; under every \
+         27 hold {porous_ocean} and {porous_warmer}"
+    );
+    assert!(
+        warmer > 100 && porous_warmer > 100,
+        "{warmer}, {porous_warmer}"
+    );
+}
+
+/// The forcings' scales and the surfaces' rises, K, at which
+/// [`a_sweep_s_tides_are_its_moon_s_at_every_forcing_and_surface`] solves each moon: the sweep's
+/// own first and again, then out of order, repeated, and a surface past the triple point.
+const SWEEP_STEPS: [(f64, f64); 12] = [
+    (1.0, 0.0),
+    (0.3, 0.0),
+    (1.0, 0.0),
+    (1.0, 0.35),
+    (3.0, 7.0),
+    (0.3, 0.35),
+    (1.0, 0.35),
+    (3.0, 0.0),
+    (1.7, 7.0),
+    (0.31, 0.351),
+    (1.0, 250.0),
+    (0.3, 0.0),
+];
+
+/// [`a_sweep_s_tides_are_its_moon_s_at_every_forcing_and_surface`] under the rules in force: the
+/// solves on the ocean branch, and those of them under a warmer surface than the sweep's own.
+fn sweep_census() -> (u32, u32) {
+    let mut state = 0x0051_0055_a000_0001_u64;
+    let mut uniform = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        f64::from(u32::try_from(z >> 32).unwrap()) / 4_294_967_296.0
+    };
+    let (mut ocean, mut warmer) = (0_u32, 0_u32);
+    for index in 0..1_000 {
+        let base = moon(
+            [
+                "Europa",
+                "Ganymede",
+                "Callisto",
+                "Titan",
+                "Enceladus",
+                "Rhea",
+            ][index % 6],
+        );
+        let scale = |u: f64, lo: f64, hi: f64| lo * crate::math::powf(hi / lo, u);
+        let body = Measured {
+            gm: base.gm * scale(uniform(), 0.1, 10.0),
+            a_km: base.a_km * scale(uniform(), 0.5, 2.0),
+            e: scale(uniform(), 1e-4, 0.05),
+            surface: 30.0 + 200.0 * uniform(),
+            water: 0.02 + 0.5 * uniform(),
+            ..base
+        };
+        let inputs = body.inputs();
+        let solutes = body.solutes(uniform() < 0.5);
+        let mut sweep = TideSweep::new(&inputs, &solutes);
+        for (forcing, rise) in SWEEP_STEPS {
+            let at = TideInputs {
+                forcing: WattsPerSquareMetre::new(forcing * inputs.forcing.value()),
+                surface_temperature: Kelvin::new(inputs.surface_temperature.value() + rise),
+                ..inputs
+            };
+            let (swept, swept_ocean) = sweep.with_ocean(&at);
+            let (solved, solved_ocean) = MoonTides::with_ocean(&at, &solutes);
+            assert_eq!(swept.branch(), solved.branch(), "{index}: {at:?}");
+            assert_same_bits(swept.k2(), solved.k2());
+            assert_same_bits(swept.q(), solved.q());
+            assert_same_bits(swept.loss(), solved.loss());
+            assert_same_bits(swept.heat_flow().value(), solved.heat_flow().value());
+            assert_eq!(
+                format!("{swept_ocean:?}"),
+                format!("{solved_ocean:?}"),
+                "{index}: {at:?}"
+            );
+            if solved.branch() == TidalBranch::Ocean {
+                ocean += 1;
+                warmer += u32::from(rise > 0.0);
+            }
+        }
+    }
+    (ocean, warmer)
+}

@@ -387,7 +387,7 @@ pub fn generate_satellites(
     belt: Option<NearestBelt>,
 ) -> Satellites {
     match satellite_parent(seed, ctx, planet) {
-        Some((parent, rings, tides)) => satellites_of(
+        Some((parent, rings, mut tides)) => satellites_of(
             seed,
             planet.index(),
             &parent,
@@ -395,7 +395,7 @@ pub fn generate_satellites(
             belt,
             ctx.age_at_epoch(),
             SatelliteFrame::of(planet.laplace()),
-            tides.as_ref(),
+            tides.as_mut(),
         ),
         None => Satellites::none(planet.index()),
     }
@@ -404,7 +404,9 @@ pub fn generate_satellites(
 /// The satellites of `parent`, the body `parent_index`, whose rings (for a giant) read
 /// `ring_parent`, next to `belt`, in a system aged `age_at_epoch` at the epoch, in the planes
 /// `frame` gives, its regular moons' eccentricities damped by their tides `tides` where they are
-/// given (P14.T55.j.a, from 27): the four steps of the [module](self) documentation.
+/// given (P14.T55.j.a, from 27), which keep what the damping finds for a later find
+/// ([`DampingMemo`](crate::planetary::moons::regular::DampingMemo)): the four steps of the
+/// [module](self) documentation.
 #[must_use]
 #[expect(
     clippy::too_many_arguments,
@@ -418,7 +420,7 @@ pub(crate) fn satellites_of(
     belt: Option<NearestBelt>,
     age_at_epoch: Years,
     frame: SatelliteFrame<'_>,
-    tides: Option<&RegularTides>,
+    tides: Option<&mut RegularTides>,
 ) -> Satellites {
     satellites_inside(
         seed,
@@ -451,7 +453,7 @@ pub(crate) fn satellites_inside(
     parent: &MoonParent,
     ring_parent: Option<&RingParent>,
     (belt, age_at_epoch): (Option<NearestBelt>, Years),
-    (frame, tides): (SatelliteFrame<'_>, Option<&RegularTides>),
+    (frame, tides): (SatelliteFrame<'_>, Option<&mut RegularTides>),
     bound: Option<Metres>,
 ) -> Satellites {
     let frame = match frame {

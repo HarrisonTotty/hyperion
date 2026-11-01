@@ -187,12 +187,13 @@ use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, hydrostatic_j2};
 use crate::planetary::moons::eccentricity::EccentricityDampingRules;
 use crate::planetary::moons::regular::{
+    DampingMemo, ICY_MOON_ICE_FRACTION, RegularTides, hosts_regular_moons, moon_radius,
+    regular_ice_fraction,
+};
+use crate::planetary::moons::regular::{
     DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBeforePasses, MoonBulk, MoonInputs,
     MoonNursery, MoonPasses, MoonRecordOf, MoonShape, MoonSky, MoonTideAt, derive_moon_under,
     moon_before_passes,
-};
-use crate::planetary::moons::regular::{
-    ICY_MOON_ICE_FRACTION, RegularTides, hosts_regular_moons, moon_radius, regular_ice_fraction,
 };
 use crate::planetary::moons::{
     BeltAdjacency, CaptureKind, MoonParent, MoonParentParts, NearestBelt, ParentKind,
@@ -1184,7 +1185,7 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
             Part::Planet(_) => system.nearest_belt(parent.index()),
             Part::Moon(_) | Part::Ring(_) | Part::Member(_) => None,
         };
-        let site = SatelliteSite {
+        let mut site = SatelliteSite {
             index: parent.index(),
             parent: parent_at_epoch(seed, &then, zone, profile, parent),
             belt,
@@ -1227,7 +1228,7 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     for (body, rotation) in system.bodies.iter_mut().zip(rotations) {
         body.rotation = rotation;
     }
-    system.place_on_laplace_surfaces(seed, &then, &records, &sites);
+    system.place_on_laplace_surfaces(seed, &then, &records, &mut sites);
 
     // Step 9: the disc bodies, which read no stream and move no other body.
     system.discs = SystemDiscs::find(seed, ctx, &system);
@@ -1266,7 +1267,8 @@ struct SatelliteSite {
     /// The parent's index.
     index: BodyIndex,
     /// The parent as the moon generators and its rings read it ([`parent_at_epoch`]), if it can
-    /// be read, with its regular moons' tides from 27 (P14.T55.j.a).
+    /// be read, with its regular moons' tides from 27 (P14.T55.j.a), which keep what the first
+    /// find's damping found for the second's.
     parent: Option<(MoonParent, Option<RingParent>, Option<RegularTides>)>,
     /// The belt next to it, which a rocky planet's captures read.
     belt: Option<NearestBelt>,
@@ -1275,8 +1277,8 @@ struct SatelliteSite {
 impl SatelliteSite {
     /// The parent's satellites, in the planes `frame` gives ([`satellites_of`]).
     #[must_use]
-    fn find(&self, seed: Seed, ctx: &SystemContext, frame: SatelliteFrame<'_>) -> Satellites {
-        self.parent.as_ref().map_or_else(
+    fn find(&mut self, seed: Seed, ctx: &SystemContext, frame: SatelliteFrame<'_>) -> Satellites {
+        self.parent.as_mut().map_or_else(
             || Satellites::none(self.index),
             |(moon_parent, ring_parent, tides)| {
                 satellites_of(
@@ -1287,7 +1289,7 @@ impl SatelliteSite {
                     self.belt,
                     ctx.age_at_epoch(),
                     frame,
-                    tides.as_ref(),
+                    tides.as_mut(),
                 )
             },
         )
@@ -1497,6 +1499,7 @@ fn parent_at_epoch(
                         .0,
                         age,
                         t,
+                        memo: DampingMemo::default(),
                     })
                 })
                 .flatten();
@@ -3149,7 +3152,7 @@ impl PlanetarySystem {
         seed: Seed,
         epoch: &Epoch<'_>,
         records: &[Option<RecordThen>],
-        sites: &[SatelliteSite],
+        sites: &mut [SatelliteSite],
     ) {
         let ctx = epoch.ctx;
         debug_assert_eq!(

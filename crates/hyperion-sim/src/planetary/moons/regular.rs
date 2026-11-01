@@ -127,8 +127,8 @@ use crate::planetary::moons::eccentricity::{
 #[cfg(test)]
 use crate::planetary::moons::tides::radiating_flows;
 use crate::planetary::moons::tides::{
-    MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
-    with_radiating_surface,
+    MoonTides, SurfaceHeatRules, TidalBranch, TidalMaterial, TideInputs, TideSweep, mean_density,
+    tidal_forcing, with_radiating_surface,
 };
 use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh};
 use crate::planetary::placement::spacing::{
@@ -423,6 +423,49 @@ impl RegularMoon {
     #[must_use]
     pub(crate) fn unforced_eccentricity(&self) -> f64 {
         unforced(self.free_eccentricity, self.orbit.eccentricity().value())
+    }
+
+    /// Whether `other` is this moon to the bit: its ordinal, mass, resonance and drawn free
+    /// eccentricity, and its orbit's every element.
+    #[must_use]
+    fn same_bits(&self, other: &Self) -> bool {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        // Every field by name, so that one added to the moon must be compared here.
+        let Self {
+            ordinal,
+            mass,
+            orbit,
+            resonance,
+            free_eccentricity,
+        } = self;
+        let theirs = &other.orbit;
+        *ordinal == other.ordinal
+            && same(mass.value(), other.mass.value())
+            && *resonance == other.resonance
+            && same(*free_eccentricity, other.free_eccentricity)
+            && same(
+                orbit.semi_major_axis().value(),
+                theirs.semi_major_axis().value(),
+            )
+            && same(orbit.eccentricity().value(), theirs.eccentricity().value())
+            && same(orbit.inclination().value(), theirs.inclination().value())
+            && same(
+                orbit.ascending_node().value(),
+                theirs.ascending_node().value(),
+            )
+            && same(
+                orbit.argument_of_periapsis().value(),
+                theirs.argument_of_periapsis().value(),
+            )
+            && same(
+                orbit.mean_anomaly_at_epoch().value(),
+                theirs.mean_anomaly_at_epoch().value(),
+            )
+            && same(orbit.period().value(), theirs.period().value())
+            && same(
+                orbit.gravitational_parameter().value(),
+                theirs.gravitational_parameter().value(),
+            )
     }
 }
 
@@ -1748,8 +1791,8 @@ pub fn derive_moon(
 /// What a planet's regular moons' tides read of it at its moon generators' time (P14.T55.j.a):
 /// the nursery they formed in, the sky that lights them, and the system's age at the epoch with
 /// the time they are read at, at which their eccentricities are damped
-/// ([`damped_regular_moons`]).
-#[derive(Debug, Clone, PartialEq)]
+/// ([`damped_regular_moons`]), with what their damping has found so far ([`DampingMemo`]).
+#[derive(Debug, Clone)]
 pub(crate) struct RegularTides {
     /// Where they formed.
     pub(crate) nursery: MoonNursery,
@@ -1763,6 +1806,80 @@ pub(crate) struct RegularTides {
     pub(crate) age: Years,
     /// The time they are read at, the moon generators'.
     pub(crate) t: UniverseTime,
+    /// What their damping has found of them so far, empty where none has run.
+    pub(crate) memo: DampingMemo,
+}
+
+/// What [`damping`] has found of a planet's regular moons, which a later damping of the same moons
+/// reads again rather than solving afresh (P14.T55.j.a): a system finds its planets' satellites
+/// twice, in their parents' orbital planes and then on their Laplace surfaces (P14.T56.a), whose
+/// band only cuts outer moons, so the second find's regular moons are the first's, all of them or
+/// an inner run, and each takes the first's model, free eccentricity and pairs' scales.
+///
+/// Each moon is kept by its index, its orbit as found and whether a pair forces it, with what
+/// decided its eccentricity after the free rule; each pair by its inner moon's index and both
+/// moons as found, with its scale. Each is a pure function of those, of the parent and of its
+/// tides, whose memo this is, and of the ranks each damping gives the moon at that index, which
+/// every find gives alike; so what a damping reads here is what it would solve, to the bit.
+/// Solving each find afresh, the damping cost a system with regular moons 34.2 ms against 25.1 ms
+/// with it held, under every 27 hold but the surface heat's (pod, 16 vCPU, release, the 400 sample
+/// systems).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DampingMemo {
+    /// Each moon damped so far.
+    moons: Vec<MemoMoon>,
+    /// Each pair whose scale was solved so far.
+    pairs: Vec<MemoPair>,
+}
+
+/// One moon of a [`DampingMemo`].
+#[derive(Debug, Clone, Copy)]
+struct MemoMoon {
+    /// Its index among the moons damped.
+    index: usize,
+    /// The moon as the damping found it.
+    found: RegularMoon,
+    /// The moon after the free rule, its model, and whether a pair that holds forces it.
+    damped: DampedMoon,
+}
+
+/// One pair of a [`DampingMemo`].
+#[derive(Debug, Clone, Copy)]
+struct MemoPair {
+    /// Its inner moon's index among the moons damped.
+    inner: usize,
+    /// Its moons as the damping found them, inside out.
+    found: [RegularMoon; 2],
+    /// The scale of their forced eccentricities ([`forced_scale`]).
+    scale: f64,
+}
+
+impl DampingMemo {
+    /// The moon at index `index`, found as `found` and forced by a pair if `forced`, after the free
+    /// rule, if a damping has decided it.
+    #[must_use]
+    fn moon(&self, index: usize, found: &RegularMoon, forced: bool) -> Option<DampedMoon> {
+        self.moons
+            .iter()
+            .find(|kept| {
+                kept.index == index && kept.damped.forced == forced && kept.found.same_bits(found)
+            })
+            .map(|kept| kept.damped)
+    }
+
+    /// The scale of the pair whose inner moon is at index `inner`, its moons found as `found`, if
+    /// a damping has solved it.
+    #[must_use]
+    fn scale(&self, inner: usize, found: &[RegularMoon; 2]) -> Option<f64> {
+        self.pairs
+            .iter()
+            .find(|kept| {
+                kept.inner == inner
+                    && kept.found[0].same_bits(&found[0])
+                    && kept.found[1].same_bits(&found[1])
+            })
+            .map(|kept| kept.scale)
+    }
 }
 
 /// The ranks a regular moon is derived with: its radius rank and its volatile ranks
@@ -1818,11 +1935,15 @@ pub(crate) struct PairBudget {
 /// eccentricity's forcing. A moon with no ranks, or whose derivation is refused, keeps its
 /// eccentricity, and its pairs with it. Each moon's orbit keeps its axis, angles and mean anomaly
 /// to the bit ([`RegularMoon::with_eccentricity`]): no draw is made.
+///
+/// What an earlier damping of the same parent found is read again from `tides`' memo, and what
+/// this one finds is kept there ([`DampingMemo`]), so `ranks` gives a moon the same ranks at every
+/// damping of `tides`.
 #[must_use]
 pub(crate) fn damped_regular_moons(
     moons: &RegularMoons,
     parent: &MoonParent,
-    tides: &RegularTides,
+    tides: &mut RegularTides,
     ranks: impl Fn(usize, &RegularMoon) -> Option<MoonRanks>,
 ) -> RegularMoons {
     RegularMoons {
@@ -1842,7 +1963,7 @@ pub(crate) fn damped_regular_moons(
 pub(crate) fn damping(
     moons: &[RegularMoon],
     parent: &MoonParent,
-    tides: &RegularTides,
+    tides: &mut RegularTides,
     ranks: impl Fn(usize, &RegularMoon) -> Option<MoonRanks>,
 ) -> (Vec<DampedMoon>, Vec<PairBudget>) {
     let planet = Kilograms::from(parent.mass());
@@ -1876,32 +1997,20 @@ pub(crate) fn damping(
     let mut damped: Vec<DampedMoon> = moons
         .iter()
         .enumerate()
-        .map(|(i, moon)| {
+        .map(|(i, found)| {
             let forced = forced(i);
-            let unforced = moon.unforced_eccentricity();
-            let moon = if !forced && unforced.total_cmp(&e_of(moon)).is_ne() {
-                moon.with_eccentricity(unforced)
-            } else {
-                *moon
-            };
-            let model = ranks(i, &moon)
-                .and_then(|ranks| regular_tide_model(&moon, parent, tides, ranks).ok());
-            DampedMoon {
-                moon,
-                model,
-                forced,
-            }
+            tides.memo.moon(i, found, forced).unwrap_or_else(|| {
+                let damped =
+                    free_rule(found, forced, (parent, &*tides, age), |moon| ranks(i, moon));
+                tides.memo.moons.push(MemoMoon {
+                    index: i,
+                    found: *found,
+                    damped,
+                });
+                damped
+            })
         })
         .collect();
-    for at in &mut damped {
-        if let (false, Some(model)) = (at.forced, &at.model) {
-            let drawn = e_of(&at.moon);
-            let e = free_eccentricity(drawn, age, |e| model.damping_time(e));
-            if e.total_cmp(&drawn).is_ne() {
-                at.moon = at.moon.with_eccentricity(e);
-            }
-        }
-    }
     // Each pair's scale on its moons' forced eccentricities, all read before any is scaled.
     let mut least = vec![1.0_f64; damped.len()];
     for pair in &pairs {
@@ -1909,9 +2018,19 @@ pub(crate) fn damping(
         let (Some(a), Some(b)) = (inner.model, outer.model) else {
             continue;
         };
-        let (ea, eb) = (e_of(&inner.moon), e_of(&outer.moon));
-        let scale = forced_scale(pair.budget, |s| {
-            Watts::new(a.heat(s * ea).value() + b.heat(s * eb).value())
+        let found = [moons[pair.inner], moons[pair.inner + 1]];
+        let scale = tides.memo.scale(pair.inner, &found).unwrap_or_else(|| {
+            let (ea, eb) = (e_of(&inner.moon), e_of(&outer.moon));
+            let (mut a, mut b) = (a.sweep(), b.sweep());
+            let scale = forced_scale(pair.budget, |s| {
+                Watts::new(a.heat(s * ea).value() + b.heat(s * eb).value())
+            });
+            tides.memo.pairs.push(MemoPair {
+                inner: pair.inner,
+                found,
+                scale,
+            });
+            scale
         });
         for i in [pair.inner, pair.inner + 1] {
             if scale < least[i] {
@@ -1925,6 +2044,45 @@ pub(crate) fn damping(
         }
     }
     (damped, pairs)
+}
+
+/// The regular moon `found` of `parent` after [`damping`]'s free rule, forced by a pair that holds
+/// if `forced`, its model derived at the ranks `ranks` gives the moon it is derived as, in `tides`'
+/// nursery and sky, at the system's age `age`: a forced moon's eccentricity as found, and a free
+/// moon's its free one damped to the age ([`free_eccentricity`]) where it derives.
+#[must_use]
+fn free_rule(
+    found: &RegularMoon,
+    forced: bool,
+    (parent, tides, age): (&MoonParent, &RegularTides, Seconds),
+    ranks: impl FnOnce(&RegularMoon) -> Option<MoonRanks>,
+) -> DampedMoon {
+    let e_of = |moon: &RegularMoon| moon.orbit.eccentricity().value();
+    let unforced = found.unforced_eccentricity();
+    let moon = if !forced && unforced.total_cmp(&e_of(found)).is_ne() {
+        found.with_eccentricity(unforced)
+    } else {
+        *found
+    };
+    let model = ranks(&moon).and_then(|ranks| regular_tide_model(&moon, parent, tides, ranks).ok());
+    let moon = match (forced, &model) {
+        (false, Some(model)) => {
+            let drawn = e_of(&moon);
+            let mut sweep = model.sweep();
+            let e = free_eccentricity(drawn, age, |e| sweep.damping_time(e));
+            if e.total_cmp(&drawn).is_ne() {
+                moon.with_eccentricity(e)
+            } else {
+                moon
+            }
+        }
+        (true, _) | (false, None) => moon,
+    };
+    DampedMoon {
+        moon,
+        model,
+        forced,
+    }
 }
 
 /// The 2:1 pairs among `moons`, inside out, as their inner moons' indices: a moon at twice its
@@ -2281,10 +2439,11 @@ fn derive_moon_with_model(
         fe_h: sky.composition.fe_h(),
         age: age_now,
     };
+    let tides = PassTides::new(tide_of);
     let record = passes.record.map(|record| MoonPassRecord {
         record,
         shape,
-        tide: tide_of,
+        tides: &tides,
     });
     let record = record
         .as_ref()
@@ -2305,13 +2464,13 @@ fn derive_moon_with_model(
         body.equilibrium_temperature(),
         (body.fractions(), body.ocean_solutes()),
     );
-    let model = TideModel::of(&tide_of, &pass);
+    let (model, tide) = tides.at(&pass);
     let derived = DerivedMoon {
         body,
         ice_fraction: shape.ice_fraction,
         radius: shape.radius,
         density: shape.density,
-        tide: model.state(),
+        tide,
     };
     Ok((derived, model))
 }
@@ -2344,7 +2503,47 @@ pub(crate) fn moon_before_passes(
 struct MoonPassRecord<'a> {
     record: &'a dyn MoonRecordOf,
     shape: MoonShape,
-    tide: TideOf<'a>,
+    tides: &'a PassTides<'a>,
+}
+
+/// The tides one derivation of a moon raises in it at its passes ([`own_tides`]), each pass's
+/// solved once and read again at every pass that is it to the bit: a pass's context and its wet
+/// epoch read one pass's tide, and the derivation's published tide is its last pass's. It lives for
+/// one derivation, and each entry is what [`own_tides`] gives its pass, so a tide read from it is
+/// the one solved afresh, bit for bit. Over the 400 sample systems under every 27 hold, 35% of the
+/// tides solved were one already solved in the same derivation.
+struct PassTides<'a> {
+    /// What every pass's tide reads of the moon.
+    at: TideOf<'a>,
+    /// Each pass solved so far, with its model and its tides.
+    solved: core::cell::RefCell<Vec<(TideAt, TideModel, TideState)>>,
+}
+
+impl<'a> PassTides<'a> {
+    /// No pass solved yet of the moon `at` describes.
+    #[must_use]
+    const fn new(at: TideOf<'a>) -> Self {
+        Self {
+            at,
+            solved: core::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// The moon's tide model at the pass `pass` and its tides there ([`own_tides`]).
+    #[must_use]
+    fn at(&self, pass: &TideAt) -> (TideModel, TideState) {
+        let known = self
+            .solved
+            .borrow()
+            .iter()
+            .find(|(seen, ..)| seen.same_bits(pass))
+            .map(|&(_, model, state)| (model, state));
+        known.unwrap_or_else(|| {
+            let (model, state) = own_tides(&self.at, pass);
+            self.solved.borrow_mut().push((*pass, model, state));
+            (model, state)
+        })
+    }
 }
 
 impl PassRecordOf for MoonPassRecord<'_> {
@@ -2366,15 +2565,12 @@ impl PassRecordOf for MoonPassRecord<'_> {
         air: &Atmosphere,
         equilibrium: Kelvin,
     ) -> Option<WetEpoch> {
-        let tide = own_tides(
-            &self.tide,
-            &TideAt::of(
-                bulk.inventory_water,
-                air,
-                equilibrium,
-                (bulk.fractions, bulk.ocean_solutes),
-            ),
-        );
+        let (_, tide) = self.tides.at(&TideAt::of(
+            bulk.inventory_water,
+            air,
+            equilibrium,
+            (bulk.fractions, bulk.ocean_solutes),
+        ));
         let at = MoonTideAt {
             heat_flux: tide.heat_flux,
             subsurface: tide.subsurface,
@@ -2393,15 +2589,12 @@ impl PassRecordOf for MoonPassRecord<'_> {
     }
 
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {
-        let tide = own_tides(
-            &self.tide,
-            &TideAt::of(
-                bulk.inventory_water,
-                air,
-                equilibrium,
-                (bulk.fractions, bulk.ocean_solutes),
-            ),
-        );
+        let (_, tide) = self.tides.at(&TideAt::of(
+            bulk.inventory_water,
+            air,
+            equilibrium,
+            (bulk.fractions, bulk.ocean_solutes),
+        ));
         let at = MoonTideAt {
             heat_flux: tide.heat_flux,
             subsurface: tide.subsurface,
@@ -2474,6 +2667,33 @@ impl TideAt {
             solutes,
         }
     }
+
+    /// Whether `other` is this pass to the bit, as its tide reads it.
+    #[must_use]
+    fn same_bits(&self, other: &Self) -> bool {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        // Every field by name, so that one added to the pass must be compared here.
+        let Self {
+            inventory_water,
+            state,
+            equilibrium,
+            fractions,
+            solutes,
+        } = self;
+        let (theirs, solved) = (&other.fractions, &other.solutes);
+        same(inventory_water.value(), other.inventory_water.value())
+            && *state == other.state
+            && same(equilibrium.value(), other.equilibrium.value())
+            && same(fractions.iron(), theirs.iron())
+            && same(fractions.rock(), theirs.rock())
+            && same(fractions.water(), theirs.water())
+            && same(fractions.envelope(), theirs.envelope())
+            && same(
+                solutes.sodium_chloride.value(),
+                solved.sodium_chloride.value(),
+            )
+            && same(solutes.ammonia_per_water, solved.ammonia_per_water)
+    }
 }
 
 /// A moon's orbit as its eccentricity tide reads it ([`TideOf::elements`]).
@@ -2513,10 +2733,12 @@ impl TideOf<'_> {
 /// ([`non_tidal_heat_flow`]), with no tide and no ocean given, which the branch decides; the
 /// shell's top is at its equilibrium temperature, as its ocean flag reads it. Its ocean's layers
 /// are those its branch was decided on, at that bulk's mean density ([`mean_density`]), which is
-/// its derivation's to the bit for a regular moon.
+/// its derivation's to the bit for a regular moon. Returned beside them: the model they are its
+/// state of ([`TideModel`]).
 #[must_use]
-fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
-    TideModel::of(at, pass).state()
+fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> (TideModel, TideState) {
+    let model = TideModel::of(at, pass);
+    (model, model.state())
 }
 
 /// A moon's tides at a pass with its orbit's eccentricity free (P14.T55.j.a): what
@@ -2613,9 +2835,36 @@ impl TideModel {
         (tides, subsurface, heat)
     }
 
-    /// [`solve`](Self::solve), with the surface temperature its tides read.
+    /// [`solve`](Self::solve), with the surface temperature its tides read. Under P14.T55.j's
+    /// balance its solves read each base of its water once ([`TideSweep`]); held, its one solve is
+    /// [`MoonTides::with_ocean`]'s.
     #[must_use]
     fn solve_at_surface(&self, e: f64) -> (MoonTides, Subsurface, Kelvin, Watts) {
+        match SurfaceHeatRules::in_force() {
+            SurfaceHeatRules::Held => {
+                self.solve_at_surface_by(e, |inputs| MoonTides::with_ocean(inputs, &self.solutes))
+            }
+            SurfaceHeatRules::Radiated => {
+                let mut sweep = self
+                    .ocean_open
+                    .then(|| TideSweep::new(&self.inputs, &self.solutes));
+                self.solve_at_surface_by(e, |inputs| match &mut sweep {
+                    Some(sweep) => sweep.with_ocean(inputs),
+                    None => MoonTides::with_ocean(inputs, &self.solutes),
+                })
+            }
+        }
+    }
+
+    /// [`solve_at_surface`](Self::solve_at_surface) at the eccentricity `e`, its ocean branch's
+    /// tides, where its bulk may take that branch, read by `with_ocean` at each of its surface's
+    /// solves, as [`MoonTides::with_ocean`] reads them.
+    #[must_use]
+    fn solve_at_surface_by(
+        &self,
+        e: f64,
+        mut with_ocean: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
+    ) -> (MoonTides, Subsurface, Kelvin, Watts) {
         let TideElements {
             a,
             mean_motion_rad_per_s: n,
@@ -2632,7 +2881,7 @@ impl TideModel {
         // here.
         let (tides, subsurface, surface) = with_radiating_surface(&inputs, |inputs| {
             if self.ocean_open {
-                MoonTides::with_ocean(inputs, &self.solutes)
+                with_ocean(inputs)
             } else {
                 (MoonTides::without_an_ocean(inputs), Subsurface::NoOcean)
             }
@@ -2674,6 +2923,7 @@ impl TideModel {
     }
 
     /// Its tidal heat at the eccentricity `e` ([`solve`](Self::solve)).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn heat(&self, e: f64) -> Watts {
         self.solve(e).2
@@ -2684,6 +2934,17 @@ impl TideModel {
     #[must_use]
     pub(crate) fn tides_branch(&self, e: f64) -> TidalBranch {
         self.solve(e).0.branch()
+    }
+
+    /// Its tidal heat and damping time at the eccentricity `e`, every solve of its balance
+    /// [`MoonTides::with_ocean`]'s own, with no sweep: what a [`ModelSweep`] stands in for.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn unswept(&self, e: f64) -> (Watts, Seconds) {
+        let heat = self
+            .solve_at_surface_by(e, |inputs| MoonTides::with_ocean(inputs, &self.solutes))
+            .3;
+        (heat, self.damping_time_at(e, heat))
     }
 
     /// Its equilibrium temperature, which its tides read as its surface's below P14.T55.j's hold.
@@ -2739,15 +3000,60 @@ impl TideModel {
 
     /// The time on which it loses its eccentricity at `e` while it dissipates its own heat there
     /// ([`damping_time`]).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn damping_time(&self, e: f64) -> Seconds {
-        damping_time(
-            self.planet,
-            self.inputs.mass,
-            self.elements.a,
-            e,
-            self.heat(e),
-        )
+        self.damping_time_at(e, self.heat(e))
+    }
+
+    /// [`damping_time`](Self::damping_time) at the eccentricity `e`, at which it dissipates `heat`.
+    #[must_use]
+    fn damping_time_at(&self, e: f64, heat: Watts) -> Seconds {
+        damping_time(self.planet, self.inputs.mass, self.elements.a, e, heat)
+    }
+
+    /// Its heat and damping time at one eccentricity after another ([`TideSweep`]), as the
+    /// damping reads them ([`damping`]).
+    #[must_use]
+    pub(crate) fn sweep(&self) -> ModelSweep {
+        ModelSweep {
+            model: *self,
+            ocean: self
+                .ocean_open
+                .then(|| TideSweep::new(&self.inputs, &self.solutes)),
+        }
+    }
+}
+
+/// A moon's [`TideModel`] read at one eccentricity after another ([`TideModel::sweep`]): its
+/// [`heat`](TideModel::heat) and [`damping_time`](TideModel::damping_time) to the bit, each state
+/// of its ocean branch solved once ([`TideSweep`]).
+#[derive(Debug, Clone)]
+pub(crate) struct ModelSweep {
+    /// The model.
+    model: TideModel,
+    /// Its ocean branch's sweep, where its bulk may take that branch.
+    ocean: Option<TideSweep>,
+}
+
+impl ModelSweep {
+    /// Its tidal heat at the eccentricity `e` ([`TideModel::heat`]).
+    #[must_use]
+    pub(crate) fn heat(&mut self, e: f64) -> Watts {
+        let Self { model, ocean } = self;
+        model
+            .solve_at_surface_by(e, |inputs| match ocean {
+                Some(sweep) => sweep.with_ocean(inputs),
+                None => MoonTides::with_ocean(inputs, &model.solutes),
+            })
+            .3
+    }
+
+    /// Its damping time at the eccentricity `e` ([`TideModel::damping_time`]).
+    #[must_use]
+    pub(crate) fn damping_time(&mut self, e: f64) -> Seconds {
+        let heat = self.heat(e);
+        self.model.damping_time_at(e, heat)
     }
 }
 
@@ -5390,19 +5696,21 @@ mod tests {
                                 regular_moons(Seed::new(12), &p)
                             });
                         let system_moons = regular_moons(Seed::new(12), &p);
-                        let tides = RegularTides {
+                        let mut tides = RegularTides {
                             nursery: giant.nursery,
                             sky: giant.sky.clone(),
                             love_number: giant.love,
                             age,
                             t: UniverseTime::EPOCH,
+                            memo: DampingMemo::default(),
                         };
                         let base = u32::try_from(moons.len()).unwrap();
                         let rank = |k: usize| spread_rank(base + u32::try_from(k).unwrap());
                         let ranks = |k: usize, _: &RegularMoon| {
                             Some((rank(k), MoonVolatiles::SHARED.draws))
                         };
-                        let (damped, held_pairs) = damping(system_moons.moons(), &p, &tides, ranks);
+                        let (damped, held_pairs) =
+                            damping(system_moons.moons(), &p, &mut tides, ranks);
                         found[g] +=
                             u32::try_from(resonant_pairs(system_moons.moons()).len()).unwrap();
                         let start = moons.len();
@@ -6186,7 +6494,7 @@ mod tests {
             let (now, control, runaway) = (at(&case.air), at(&case.control), at(&case.runaway));
             assert_eq!(now.state, SurfaceState::RunawayGreenhouse);
             assert_eq!(control.state, case.published);
-            let tides = |pass: &TideAt| own_tides(&tide_of, pass);
+            let tides = |pass: &TideAt| own_tides(&tide_of, pass).1;
             let (now, control, runaway) = (tides(&now), tides(&control), tides(&runaway));
             eprintln!(
                 "an Earth-mass moon of Jupiter under a past-only runaway published {:?}: its tide's \
@@ -6209,5 +6517,67 @@ mod tests {
                 case.published
             );
         }
+    }
+
+    /// P14.T55.j.a's damping read again ([`DampingMemo`]) and its sweeps ([`ModelSweep`]) are its
+    /// fresh solves to the bit, under every 27 hold, its surfaces radiating their heat (P14.T55.j),
+    /// at 100 Myr and the Sun's age: a second damping of a giant's moons reads the first's, as a
+    /// system's second find of its satellites does, and so does a damping of each inner run of
+    /// them, as a Laplace band leaves, where a pair it cuts frees its inner moon; each moon's
+    /// sweep gives its model's heat and damping time at eccentricities out of order and repeated.
+    #[test]
+    fn the_damping_s_memo_and_sweeps_are_its_fresh_solves_to_the_bit() {
+        use crate::planetary::testing::with_every_27_hold;
+        let giants = census_giants();
+        let (mut systems, mut pairs, mut swept) = (0_u32, 0_u32, 0_u32);
+        with_every_27_hold(|| {
+            for age in [Years::new(1e8), SOLAR_AGE] {
+                for i in 0..12 {
+                    for giant in &giants {
+                        let slot = giant.parent.id().body_index().to_be_bytes()[0];
+                        let p = renamed(&giant.parent, i, slot);
+                        let found = regular_moons(Seed::new(12), &p);
+                        let moons = found.moons();
+                        let fresh = || RegularTides {
+                            nursery: giant.nursery,
+                            sky: giant.sky.clone(),
+                            love_number: giant.love,
+                            age,
+                            t: UniverseTime::EPOCH,
+                            memo: DampingMemo::default(),
+                        };
+                        let ranks = |k: usize, _: &RegularMoon| {
+                            Some((
+                                spread_rank(i * 16 + u32::try_from(k).unwrap()),
+                                MoonVolatiles::SHARED.draws,
+                            ))
+                        };
+                        let mut tides = fresh();
+                        let first = damping(moons, &p, &mut tides, ranks);
+                        let again = damping(moons, &p, &mut tides, ranks);
+                        assert_eq!(format!("{first:?}"), format!("{again:?}"), "{}", giant.name);
+                        for k in 1..moons.len() {
+                            let read = damping(&moons[..k], &p, &mut tides, ranks);
+                            let solved = damping(&moons[..k], &p, &mut fresh(), ranks);
+                            assert_eq!(format!("{read:?}"), format!("{solved:?}"), "{k}");
+                        }
+                        systems += 1;
+                        pairs += u32::try_from(first.1.len()).unwrap();
+                        for model in first.0.iter().filter_map(|at| at.model) {
+                            let e = model.elements.e;
+                            let mut sweep = model.sweep();
+                            for e in [e, 0.3 * e, e, 1e-3 * e, 3.0 * e, 0.31 * e, 0.3 * e] {
+                                let (heat, tau) = model.unswept(e);
+                                assert_same_bits(sweep.heat(e).value(), heat.value());
+                                assert_same_bits(sweep.damping_time(e).value(), tau.value());
+                            }
+                            swept += 1;
+                        }
+                    }
+                }
+            }
+        });
+        eprintln!("{systems} systems of regular moons, {pairs} pairs that hold, {swept} sweeps");
+        assert!(pairs > 0 && swept > 100, "{pairs} pairs, {swept} sweeps");
     }
 }

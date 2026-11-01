@@ -82,6 +82,8 @@
 //! ([`SHELL_QUADRATURE_NODES`]) and the root is refined by a fixed count of bisections
 //! ([`ROOT_STEPS`]).
 
+use std::collections::BTreeMap;
+
 use crate::math;
 use crate::planetary::derive::rotation::SpinTides;
 use crate::planetary::hooks::figures::Subsurface;
@@ -428,7 +430,7 @@ pub const SURFACE_HEAT_ITERATIONS: u32 = 11;
 #[must_use]
 pub(crate) fn with_radiating_surface(
     inputs: &TideInputs,
-    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+    solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
 ) -> (MoonTides, Subsurface, Kelvin) {
     radiating_after(
         inputs,
@@ -446,7 +448,7 @@ pub(crate) fn with_radiating_surface(
 #[must_use]
 pub(crate) fn radiating_flows(
     inputs: &TideInputs,
-    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+    mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
     iterations: u32,
 ) -> Vec<(f64, TidalBranch)> {
     let equilibrium = inputs.surface_temperature;
@@ -469,7 +471,7 @@ pub(crate) fn radiating_flows(
 #[must_use]
 pub(crate) fn radiating_after(
     inputs: &TideInputs,
-    solve: impl Fn(&TideInputs) -> (MoonTides, Subsurface),
+    mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
     iterations: u32,
 ) -> (MoonTides, Subsurface, Kelvin) {
     let equilibrium = inputs.surface_temperature;
@@ -1299,6 +1301,17 @@ pub(crate) struct BranchState {
     pub(crate) excess_w_per_m2: f64,
 }
 
+/// One state of a moon's ocean branch with no forcing read ([`ShellBranch::shell_at`]): its base
+/// and its membrane's Love number, which a [`BranchState`] holds beside its excess, the one term
+/// that reads Φ ([`ShellBranch::state_of`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ShellAt {
+    /// The shell's base.
+    base: ShellBase,
+    /// The membrane's complex Love number over the shell to it.
+    love: ComplexLoveNumber,
+}
+
 impl ShellBranch {
     /// The branch of the moon `inputs` describe, of mean density `density` and surface gravity
     /// `gravity`, dissolving `solutes`: `None` without water, with an ocean limit that is not
@@ -1375,7 +1388,25 @@ impl ShellBranch {
     /// branch reads it only on [T*₀, 273.16 K].
     #[must_use]
     pub(crate) fn state(&self, melting_point_k: f64) -> BranchState {
-        let base = self.water.base_at(melting_point_k);
+        self.state_of(self.shell_at(melting_point_k), self.forcing)
+    }
+
+    /// The branch's [`state`](Self::state) at the base whose pure-water melting point is
+    /// `melting_point_k`, K, but for its excess: the base and the membrane's k₂, which read no
+    /// forcing.
+    ///
+    /// # Panics
+    ///
+    /// As [`state`](Self::state).
+    #[must_use]
+    fn shell_at(&self, melting_point_k: f64) -> ShellAt {
+        self.shell_on(self.water.base_at(melting_point_k))
+    }
+
+    /// The branch's [`shell_at`](Self::shell_at) the base `base` of its water
+    /// ([`Hydrosphere::base_at`]): its membrane's k₂ over the shell to it.
+    #[must_use]
+    fn shell_on(&self, base: ShellBase) -> ShellAt {
         let modulus = self.profile.to(base.temperature);
         let d = base.shell(self.water.column().radius()).value();
         let lambda = MembraneStiffness {
@@ -1386,8 +1417,36 @@ impl ShellBranch {
             None => membrane_love_number(self.ocean, lambda),
             Some(core) => deformable_membrane_love_number(core.density, core.term, lambda),
         };
+        ShellAt { base, love }
+    }
+
+    /// The branch of the same moon as `inputs` read it, which are this branch's but for their
+    /// forcing and their surface temperature: [`of`](Self::of)'s at `inputs` to the bit, its water
+    /// under their surface ([`Hydrosphere::under_surface`]) and its profile from it, the rest
+    /// read no surface; `None` where that water is none.
+    #[must_use]
+    fn under(&self, inputs: &TideInputs) -> Option<Self> {
+        let water = self.water.under_surface(inputs.surface_temperature)?;
+        Some(Self {
+            water,
+            profile: ShellProfile::new(
+                inputs.surface_temperature,
+                inputs.mean_motion_rad_per_s,
+                water.top(),
+            ),
+            non_tidal: inputs.non_tidal_heat_flow,
+            forcing: inputs.forcing,
+            ..*self
+        })
+    }
+
+    /// The branch's state at the shell `shell` under the forcing `forcing`: what the shell conducts
+    /// beyond the heat the moon makes then, F(T*) − `F_nt` − Φ Im k₂.
+    #[must_use]
+    fn state_of(&self, shell: ShellAt, forcing: WattsPerSquareMetre) -> BranchState {
+        let ShellAt { base, love } = shell;
         let excess =
-            base.heat_flow.value() - self.non_tidal.value() - self.forcing.value() * love.loss();
+            base.heat_flow.value() - self.non_tidal.value() - forcing.value() * love.loss();
         BranchState {
             base,
             love,
@@ -1404,13 +1463,18 @@ impl ShellBranch {
     /// change sign more than once; the root in this cell is the one with the largest heat flow,
     /// and stable (the excess rises through it as the shell thins). `None` where every point
     /// conducts more than the moon makes: a cold moon. Both ends of the cell and of the scan,
-    /// `deepest_k` and `top_k`, are melting points, K.
+    /// `deepest_k` and `top_k`, are melting points, K, and `state` gives the branch's state at
+    /// each point.
     ///
     /// # Panics
     ///
     /// For ends outside [251.165 K, 273.16 K], as [`state`](Self::state).
     #[must_use]
-    pub(crate) fn largest_root_cell(&self, deepest_k: f64, top_k: f64) -> Option<(f64, f64)> {
+    fn largest_root_cell(
+        deepest_k: f64,
+        top_k: f64,
+        mut state: impl FnMut(f64) -> BranchState,
+    ) -> Option<(f64, f64)> {
         let (deepest, top) = (deepest_k, top_k);
         let span = top - deepest;
         let mut above = top;
@@ -1422,7 +1486,7 @@ impl ShellBranch {
                     / f64::from(ROOT_SCAN_POINTS);
                 top - span * math::exp10(-decades)
             };
-            if self.state(t).excess_w_per_m2 <= 0.0 {
+            if state(t).excess_w_per_m2 <= 0.0 {
                 return Some((t, above));
             }
             above = t;
@@ -1650,25 +1714,43 @@ impl MoonTides {
         gravity: MetresPerSecondSquared,
     ) -> Option<(Self, Subsurface)> {
         let branch = ShellBranch::of(inputs, solutes, density, gravity)?;
+        Self::at_its_root(&branch, inputs.surface_temperature, |t| branch.state(t))
+    }
+
+    /// [`on_its_shell`](Self::on_its_shell) on the branch `branch` under a shell whose top is at
+    /// `surface`, its state at each melting point, K, read by `state`.
+    #[must_use]
+    fn at_its_root(
+        branch: &ShellBranch,
+        surface: Kelvin,
+        mut state: impl FnMut(f64) -> BranchState,
+    ) -> Option<(Self, Subsurface)> {
         let (deepest, top) = (branch.water.deepest().value(), branch.water.top().value());
-        let top_state = branch.state(top);
+        let top_state = state(top);
         // A surface at or above its whole water's liquidus holds no shell, and a root above the
         // top would be a shell thinner than its triple pressure's depth: no ocean branch.
-        if top_state.base.temperature.value() <= inputs.surface_temperature.value()
-            || top_state.excess_w_per_m2 <= 0.0
+        if top_state.base.temperature.value() <= surface.value() || top_state.excess_w_per_m2 <= 0.0
         {
             return None;
         }
-        let (mut lo, mut hi) = branch.largest_root_cell(deepest, top)?;
+        let (mut lo, mut hi) = ShellBranch::largest_root_cell(deepest, top, &mut state)?;
+        // Each halving is a function of the bracket alone, so one that leaves it as it was, bit for
+        // bit, leaves every one after it so too, and the rest are not taken, as in the column's
+        // `radius_at`: a cell near the top closes to one ulp of T* before the 48th, and 13% of the
+        // halvings of the 400 sample systems under every 27 hold moved nothing.
         for _ in 0..SHELL_BASE_HALVINGS {
             let mid = f64::midpoint(lo, hi);
-            if branch.state(mid).excess_w_per_m2 > 0.0 {
-                hi = mid;
+            let (next_lo, next_hi) = if state(mid).excess_w_per_m2 > 0.0 {
+                (lo, mid)
             } else {
-                lo = mid;
+                (mid, hi)
+            };
+            if next_lo.total_cmp(&lo).is_eq() && next_hi.total_cmp(&hi).is_eq() {
+                break;
             }
+            (lo, hi) = (next_lo, next_hi);
         }
-        let root = branch.state(f64::midpoint(lo, hi));
+        let root = state(f64::midpoint(lo, hi));
         // The branch reads the ocean's presence test at its whole heat flow, `F_ocean`, as the
         // plan's T56.d branch does (it holds wherever the root lies above T*₀).
         if !branch.water.holds_an_ocean(root.base.heat_flow) {
@@ -1728,6 +1810,130 @@ impl MoonTides {
             love_number: self.k2,
             tidal_q: self.q,
         }
+    }
+}
+
+/// A moon's tides solved again and again, at one forcing and one surface temperature after
+/// another, all else held: [`MoonTides::with_ocean`] at each to the bit, each base of its water
+/// found once whatever the surface, and each state of its ocean branch under its own surface solved
+/// once whatever the forcing.
+///
+/// A base's every member but its heat flow reads no surface ([`Hydrosphere::conducting`]), and a
+/// state's every term but its excess no forcing ([`ShellBranch::state_of`]). Nearly all of a solve
+/// is its bases, about 1.7 µs each, some 56 to a solve on the ocean branch, and most are another
+/// solve's: P14.T55.j's balance solves a moon up to 12 times as its surface warms
+/// ([`with_radiating_surface`]), and P14.T55.j.a's damping reads its heat at some twenty to eighty
+/// eccentricities, each first at its own surface. Over the 400 sample systems under every 27 hold,
+/// 56% of the bases solved on the ocean branch were found already within their tide's balance,
+/// and the branch was built anew for each solve, at about 25 µs (pod, 16 vCPU, release).
+#[derive(Debug, Clone)]
+pub(crate) struct TideSweep {
+    /// What its tides read, at the forcing and surface it was built at, its own.
+    inputs: TideInputs,
+    /// What its ocean would dissolve.
+    solutes: OceanSolutes,
+    /// Its mean density and surface gravity ([`MoonTides::bulk`]).
+    density: KilogramsPerCubicMetre,
+    gravity: MetresPerSecondSquared,
+    /// Its ocean branch under its own surface ([`ShellBranch::of`]), `None` where it has none.
+    branch: Option<ShellBranch>,
+    /// Each base of its water found so far, under its own surface, by its melting point, K.
+    bases: BTreeMap<Exact, ShellBase>,
+    /// Each state of its ocean branch under its own surface solved so far, by its base's melting
+    /// point, K.
+    shells: BTreeMap<Exact, ShellAt>,
+}
+
+impl TideSweep {
+    /// The sweep of the moon `inputs` describe, whose ocean would dissolve `solutes`, at any
+    /// forcing and surface (`inputs`' own forcing is not read).
+    #[must_use]
+    pub(crate) fn new(inputs: &TideInputs, solutes: &OceanSolutes) -> Self {
+        let (density, gravity) = MoonTides::bulk(inputs);
+        Self {
+            inputs: *inputs,
+            solutes: *solutes,
+            density,
+            gravity,
+            branch: ShellBranch::of(inputs, solutes, density, gravity),
+            bases: BTreeMap::new(),
+            shells: BTreeMap::new(),
+        }
+    }
+
+    /// The tides of its moon as `inputs` read it, with the ocean their branch keeps: its
+    /// [`MoonTides::with_ocean`], bit for bit, for `inputs` that are its own but for their forcing
+    /// and their surface temperature.
+    #[must_use]
+    pub(crate) fn with_ocean(&mut self, inputs: &TideInputs) -> (MoonTides, Subsurface) {
+        let Self {
+            solutes,
+            density,
+            gravity,
+            branch,
+            bases,
+            shells,
+            ..
+        } = self;
+        let Some(own) = branch.as_ref() else {
+            return MoonTides::with_ocean(inputs, solutes);
+        };
+        let forcing = inputs.forcing;
+        let surface = inputs.surface_temperature;
+        let mut base = |t: f64| {
+            *bases
+                .entry(Exact(t))
+                .or_insert_with(|| own.water.base_at(t))
+        };
+        let own_surface = surface
+            .value()
+            .total_cmp(&self.inputs.surface_temperature.value())
+            .is_eq();
+        let tides = if own_surface {
+            MoonTides::at_its_root(own, surface, |t| {
+                let shell = *shells
+                    .entry(Exact(t))
+                    .or_insert_with(|| own.shell_on(base(t)));
+                own.state_of(shell, forcing)
+            })
+        } else {
+            own.under(inputs).and_then(|branch| {
+                MoonTides::at_its_root(&branch, surface, |t| {
+                    let shell = branch.shell_on(branch.water.conducting(&base(t)));
+                    branch.state_of(shell, forcing)
+                })
+            })
+        };
+        tides.unwrap_or_else(|| {
+            (
+                MoonTides::off_an_ocean(inputs, *density, *gravity),
+                Subsurface::NoOcean,
+            )
+        })
+    }
+}
+
+/// An `f64` ordered by [`f64::total_cmp`]: a memo's key, equal only to the same value bit for bit.
+#[derive(Debug, Clone, Copy)]
+struct Exact(f64);
+
+impl PartialEq for Exact {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0).is_eq()
+    }
+}
+
+impl Eq for Exact {}
+
+impl PartialOrd for Exact {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Exact {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
 

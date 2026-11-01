@@ -34097,3 +34097,14 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _For 27's bump:_ delete what `the_surface_heat_is_held_only_until_the_27_bump` lists; restate
     `under_every_27_hold_the_generated_moons_a_porous_core_moves_are_recorded` without its
     surface-heat switch (2 of its held-e ocean moons leave the branch).
+- **P14.T55.j.a's and P14.T55.j's costs (lane `perf-moon-damping`, 2026-11-01).** No value moves.
+  - _Signatures:_ `satellites_of` and `satellites_inside` take `Option<&mut RegularTides>`,
+    `damped_regular_moons` and `damping` `&mut RegularTides`, whose new `memo: DampingMemo` keeps
+    each moon's model and free e and each pair's scale for the Laplace find; `SatelliteSite::find`
+    takes `&mut self`. `own_tides` returns `(TideModel, TideState)`; `with_radiating_surface` and
+    `radiating_after` take `FnMut`; `ShellBranch::largest_root_cell` takes the state as a closure.
+  - _New items:_ `tides::TideSweep` (a moon's bases by T* across surfaces, its own-surface states
+    across forcings), `regular::ModelSweep`, `regular::PassTides`, `Hydrosphere::under_surface`
+    and `Hydrosphere::conducting`. The ocean branch's halvings stop once the bracket stops moving.
+  - _For 27's bump:_ `TideModel::solve_at_surface` loses its `SurfaceHeatRules::Held` arm with the
+    hold; every solve then takes the sweep.

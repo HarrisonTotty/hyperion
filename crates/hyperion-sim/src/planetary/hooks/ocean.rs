@@ -619,6 +619,39 @@ impl Hydrosphere {
         })
     }
 
+    /// The same water under a surface at `surface` instead: [`new`](Self::new)'s for the same
+    /// body, water and solutes at that surface, bit for bit, since only the shell's top reads it;
+    /// `None` where that surface is not finite or is at or above water's triple point.
+    #[must_use]
+    pub(crate) fn under_surface(&self, surface: Kelvin) -> Option<Self> {
+        let t_s = surface.value();
+        (t_s.is_finite() && t_s < self.top_k).then_some(Self {
+            surface_k: t_s,
+            ..*self
+        })
+    }
+
+    /// The base `base`, of this water under any surface ([`base_at`](Self::base_at)), as this
+    /// water's surface conducts to it: its heat flow F(T*), the one member that reads the surface,
+    /// at this water's, the rest as they were.
+    #[must_use]
+    pub(crate) fn conducting(&self, base: &ShellBase) -> ShellBase {
+        ShellBase {
+            heat_flow: self.conducted_to(base.temperature.value(), base.radius.value()),
+            ..*base
+        }
+    }
+
+    /// The heat flow at the surface whose conduction puts a base of temperature `temperature_k`,
+    /// K, at the radius `r_b`, m: F(T*) = ∫k dT × `r_b` ÷ (R (R − `r_b`)) ([`base_at`](Self::base_at)).
+    #[must_use]
+    fn conducted_to(&self, temperature_k: f64, r_b: f64) -> WattsPerSquareMetre {
+        let r = self.column.radius.value();
+        WattsPerSquareMetre::new(
+            conducted_w_per_m(self.surface_k, temperature_k) * r_b / (r * (r - r_b)),
+        )
+    }
+
     /// Its water column.
     #[must_use]
     pub(crate) const fn column(&self) -> &WaterColumn {
@@ -693,8 +726,7 @@ impl Hydrosphere {
         };
         let (sodium_chloride, ammonia) = (share(self.sodium_chloride_kg), share(self.ammonia_kg));
         let temperature = melting_point_k - self.liquidus.depression_k(sodium_chloride, ammonia);
-        let r = big_r.value();
-        let heat_flow = conducted_w_per_m(self.surface_k, temperature) * r_b / (r * (r - r_b));
+        let heat_flow = self.conducted_to(temperature, r_b);
         ShellBase {
             melting_point: t_star,
             radius,
@@ -705,7 +737,7 @@ impl Hydrosphere {
             sodium_chloride,
             ammonia,
             temperature: Kelvin::new(temperature),
-            heat_flow: WattsPerSquareMetre::new(heat_flow),
+            heat_flow,
         }
     }
 
