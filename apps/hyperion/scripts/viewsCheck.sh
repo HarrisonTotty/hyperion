@@ -7,7 +7,8 @@
 # summary. No server is needed.
 #
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
-#                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered] | --atmosphere
+#                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
+#                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
@@ -45,6 +46,13 @@
 # 1 Gyr surface, its young craters ringed by haloes of fresh regolith. The files are named
 # <date>-<machine>-<setting>-terrain-weathered and -handover-weathered, and the run block names
 # the fixture. --weathered without --terrain is refused by the client; the script passes it on.
+#
+# --terrain --whole serves the terrain run TEST MOON's whole body in TERRAIN TEST's place (plan R10,
+# R10.T14.c, the owner's request): the same field with every cell surveyed. The script first runs
+# the native tool, hyperion-surface's whole_terrain_test example (cargo, the testing feature), which
+# writes it to target/views-check/terrain/whole.golden, about 4.5 MB and never committed, then gives
+# the client `--whole <that file>`, which its main process reads. The files are named
+# <date>-<machine>-<setting>-terrain-whole. The client refuses it beside --weathered or --handover.
 #
 # --atmosphere runs the atmosphere run instead (plan R08, R08.T10.b), on the kept `ATMOSPHERE TEST`
 # scene: the primary photorealistic, its atmosphere media awaited, the moonlit night captured from
@@ -109,6 +117,7 @@ terrain=0
 served=0
 atmosphere=0
 inspection=0
+whole=0
 setting=""
 check_args=()
 while [[ $# -gt 0 ]]; do
@@ -120,6 +129,7 @@ while [[ $# -gt 0 ]]; do
         --handover) check_args+=("$1"); shift ;;
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
         --inspection) inspection=1; check_args+=("$1"); shift ;;
+        --whole) whole=1; shift ;;
         --universe) served=1; check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
@@ -136,6 +146,19 @@ done
 if [[ $software -eq 1 && "$(uname -s)" != Linux ]]; then
     echo "views check: --software runs on Linux only" >&2
     exit 2
+fi
+
+# The whole body's field, written by the native tool before any launch reads it; a test of this
+# script gives a stand-in for cargo.
+if [[ $whole -eq 1 ]]; then
+    whole_field="$repo/target/views-check/terrain/whole.golden"
+    echo "views check: writing the whole body's field, $whole_field"
+    if ! (cd "$repo" && "${HYPERION_VIEWS_CHECK_CARGO:-cargo}" run -q -p hyperion-surface --release \
+        --features testing --example whole_terrain_test -- "$whole_field"); then
+        echo "views check: the whole body's field was not written" >&2
+        exit 2
+    fi
+    check_args+=(--whole "$whole_field")
 fi
 
 # The settings to launch: the one given, or for the terrain or the atmosphere run with none, high

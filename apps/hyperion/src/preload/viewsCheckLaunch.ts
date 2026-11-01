@@ -39,6 +39,7 @@ const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = [
 const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
   "terrain-test",
   "terrain-test-weathered",
+  "terrain-test-whole",
 ];
 
 /**
@@ -47,13 +48,15 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
  * atmosphere run, plan R08, R08.T10.b, serve no field, so their launches name `TERRAIN TEST`'s, the
  * default); a served world (plan R10, R10.T15.b), its universe's and body's IDs, only on a
  * hand-over check of `TERRAIN TEST`'s own fixture, and always on the inspection run (the owner's
- * request, 2026-11-01), which serves no field either.
+ * request, 2026-11-01), which serves no field either; and the whole body's field (plan R10,
+ * R10.T14.c), its file's path, on a terrain run alone and exactly when its fixture is the whole
+ * body's.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out, served } = value;
+  const { setting, smoke, out, served, wholeField } = value;
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   if (
@@ -66,6 +69,15 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
       fixture !== "terrain-test")
   ) {
     return null;
+  }
+  if (fixture === "terrain-test-whole" || wholeField !== undefined) {
+    return fixture === "terrain-test-whole" &&
+      run === "terrain" &&
+      served === undefined &&
+      typeof wholeField === "string" &&
+      wholeField.length > 0
+      ? { setting, smoke, out, run, fixture, wholeField }
+      : null;
   }
   if (served === undefined) {
     return run === "inspection" ? null : { setting, smoke, out, run, fixture };

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { watchStrokeProperties } from "./lib/strokes";
+import { provideWholeTerrainField } from "./view/scenes/terrainScene";
 import "@fontsource/b612/400.css";
 import "@fontsource/b612/700.css";
 import "@fontsource/b612-mono/400.css";
@@ -24,6 +25,21 @@ watchStrokeProperties(document.documentElement);
 // (plan R08, R08.T6.d).
 const SpikeApp = lazy(async () => ({ default: (await import("./view/spike/SpikeApp")).SpikeApp }));
 const spike = window.hyperion.spike;
+
+// A `--terrain --whole` launch's field (plan R10, R10.T14.c), the native tool's file as the main
+// process reads it, is provided before VIEW makes `TERRAIN TEST`'s scene on it; a field that cannot
+// be had ends the run, naming why.
+const viewsCheck = window.hyperion.viewsCheck;
+if (viewsCheck?.launch.fixture === "terrain-test-whole") {
+  try {
+    provideWholeTerrainField(await viewsCheck.wholeField());
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error("views check: the whole body's field could not be had:", error);
+    await viewsCheck.end({ status: "fail", reason });
+  }
+}
+
 createRoot(container).render(
   <StrictMode>
     {spike === undefined ? (

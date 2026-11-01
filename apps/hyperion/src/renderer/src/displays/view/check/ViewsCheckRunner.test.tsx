@@ -33,6 +33,7 @@ function checkApi(): ViewsCheckApi & {
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
+    wholeField: () => Promise.reject(new Error("no whole-body field")),
     writeResults: vi.fn<ViewsCheckApi["writeResults"]>(() =>
       Promise.resolve({ json: "a", markdown: "b" }),
     ),

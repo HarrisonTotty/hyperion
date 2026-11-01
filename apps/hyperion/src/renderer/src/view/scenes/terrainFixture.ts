@@ -58,6 +58,14 @@ export interface TerrainTestFixtureOptions {
    * arriving when it forces a device loss (decision-r10-t16-contracts §6).
    */
   readonly chunkIntervalMs?: number;
+  /**
+   * How long a link waits before each chunk of an answer of the whole field (an ask holding no
+   * revision) and before its answer, ms: {@link TerrainTestFixtureOptions.chunkIntervalMs} where
+   * absent. The whole body's field (plan R10, R10.T14.c) sends its 400-odd blocks at it, so that
+   * its first answer takes seconds where the patch's three blocks a payload are paced for the
+   * views check's forced loss, while its deltas keep `chunkIntervalMs`.
+   */
+  readonly wholeAnswerIntervalMs?: number;
 }
 
 /** What a fixture's links were asked and have sent, over every link it opened. */
@@ -331,7 +339,8 @@ class FixtureLink implements TerrainFixtureLink {
     golden: TerrainGolden,
     revision: number,
   ): void {
-    const pace = this.#options.chunkIntervalMs ?? 0;
+    const delta = this.#options.chunkIntervalMs ?? 0;
+    const pace = payload.have === null ? (this.#options.wholeAnswerIntervalMs ?? delta) : delta;
     const count = blocks.length;
     const bytes = blocks.reduce((sum, block) => sum + block.length, 0);
     this.#toCome.set(id, count);

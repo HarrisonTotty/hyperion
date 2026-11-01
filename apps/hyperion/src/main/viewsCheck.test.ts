@@ -154,6 +154,7 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
     removeFile: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
     capturesDir: "/captures",
     capture: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
+    readText: (path) => Promise.resolve(`# generator_version = 24\nbody of ${path}\n`),
     ask: () => Promise.resolve("yes" as const),
     outDir: "/out",
     write: (_dir, results) => {
@@ -604,6 +605,44 @@ describe("the views check's session on a terrain launch (R10.T16.d)", () => {
     await expect(run.capture("../escape")).rejects.toThrow(/label/);
   });
 
+  describe("its whole-body field (R10.T14.c)", () => {
+    const whole = {
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "terrain",
+      fixture: "terrain-test-whole",
+      wholeField: "/repo/target/views-check/terrain/whole.golden",
+    } as const;
+
+    it("reads the file --whole names, a terrain golden", async () => {
+      const { session: run } = terrainSession({ launch: whole });
+      await expect(run.wholeField()).resolves.toBe(
+        "# generator_version = 24\nbody of /repo/target/views-check/terrain/whole.golden\n",
+      );
+    });
+
+    it("refuses a launch with no whole-body field", async () => {
+      const { session: run } = terrainSession();
+      await expect(run.wholeField()).rejects.toThrow("the launch serves no whole-body field");
+    });
+
+    it("names the file and the remedy where it cannot be read or is no terrain golden", async () => {
+      const missing = terrainSession({
+        launch: whole,
+        readText: () => Promise.reject(new Error("ENOENT")),
+      }).session;
+      await expect(missing.wholeField()).rejects.toThrow(
+        "the whole-body field /repo/target/views-check/terrain/whole.golden was not read (run `just views-check --terrain --whole`, whose tool writes it)",
+      );
+      const other = terrainSession({
+        launch: whole,
+        readText: () => Promise.resolve("{}"),
+      }).session;
+      await expect(other.wholeField()).rejects.toThrow("is not a terrain golden");
+    });
+  });
+
   it("judges the record it writes, with the GPU process's exits and the console's errors", async () => {
     const { session: run, terrainWritten } = terrainSession();
     run.gpuProcessGone();
@@ -984,6 +1023,10 @@ describe("the views check's handlers", () => {
           calls.push(`capture ${label}`);
           return Promise.resolve();
         },
+        wholeField: () => {
+          calls.push("whole field");
+          return Promise.resolve("# generator_version = 24\n");
+        },
         end: (code, reason) => {
           calls.push(`exit ${String(code)} ${String(reason)}`);
         },
@@ -1084,6 +1127,19 @@ describe("the views check's handlers", () => {
     const { call, calls } = handlers("several-views");
     await expect(call(channel, true, ...args)).rejects.toThrow(/not a phase of T20's run/);
     expect(calls).toEqual([]);
+  });
+
+  it("read the whole-body field on a terrain launch alone (R10.T14.c)", async () => {
+    const terrain = handlers("terrain");
+    await expect(terrain.call(VIEWS_CHECK_CHANNELS.wholeField, true)).resolves.toBe(
+      "# generator_version = 24\n",
+    );
+    expect(terrain.calls).toEqual(["whole field"]);
+    const other = handlers("handover");
+    await expect(other.call(VIEWS_CHECK_CHANNELS.wholeField, true)).rejects.toThrow(
+      /the whole body's field is the terrain run's/,
+    );
+    expect(other.calls).toEqual([]);
   });
 
   it("refuse T20's record on a terrain launch, which writes its own alone", async () => {

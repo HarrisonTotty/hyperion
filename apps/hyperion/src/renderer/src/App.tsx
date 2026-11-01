@@ -25,6 +25,7 @@ import { readServedHandoverWorld } from "./displays/view/check/servedHandover";
 import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
 import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
+import { wholeLookSceneOptions } from "./displays/view/check/wholeLooks";
 import type { ViewEngineSource } from "./displays/view/useViewEngine";
 import type { SceneOption } from "./displays/view/viewRun";
 import type { BodyInspection } from "./view/scenes/inspectionScene";
@@ -128,7 +129,14 @@ function checkProbesOf(
       run = { kind: "inspection", requests, served: launch.served ?? null };
       break;
     case "terrain":
-      run = { kind: "terrain", terrain: terrainProbe([]) };
+      // A `--whole` launch's looks at the whole body (plan R10, R10.T14.c), offered after the kept
+      // scenes; none on any other.
+      run = {
+        kind: "terrain",
+        terrain: terrainProbe(
+          launch.fixture === "terrain-test-whole" ? wholeLookSceneOptions() : [],
+        ),
+      };
       break;
     case "handover": {
       const world = served ?? terrainTestHandoverWorld(launch.fixture);

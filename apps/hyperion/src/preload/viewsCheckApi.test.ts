@@ -78,6 +78,20 @@ describe("the preload's views-check functions", () => {
     ]);
   });
 
+  it("ask the whole-body field on its own channel, and refuse an answer that is no text (R10.T14.c)", async () => {
+    const answers: unknown[] = ["# generator_version = 24\n", null];
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve(answers.shift()),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
+    await expect(api.wholeField()).resolves.toBe("# generator_version = 24\n");
+    await expect(api.wholeField()).rejects.toThrow("the main process read no whole-body field");
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.wholeField],
+      [VIEWS_CHECK_CHANNEL_NAMES.wholeField],
+    ]);
+  });
+
   it("send a hand-over check's record on its own channel (R10.T10.g)", async () => {
     const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
       Promise.resolve({ json: "a", markdown: "b" }),

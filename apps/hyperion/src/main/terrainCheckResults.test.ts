@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { TerrainCheckFault, TerrainCheckRecord, TerrainCheckViewRecord } from "../preload/api";
+import type {
+  TerrainCheckFault,
+  TerrainCheckRecord,
+  TerrainCheckViewRecord,
+  TerrainWholeRecord,
+} from "../preload/api";
 import { DESTROYED_AT_MS, LOSS_WINDOW, TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import { measured, type ResultsFiles } from "./results";
 import {
@@ -487,6 +492,126 @@ function verdict(
     gpuProcessExits,
   });
 }
+
+/** A whole-body run's readings that hold every check (R10.T14.c). */
+const WHOLE: TerrainWholeRecord = {
+  cells: 24_576,
+  heldCells: 24_576,
+  textSamples: 400,
+  notSurveyedSamples: 0,
+  surveyEdgeSamples: 0,
+  decodeMs: 3_100,
+  decodeLongestFrameGapMs: 140,
+  cacheBytes: 400_000_000,
+  selectionBudget: 604,
+  looks: (["orbit", "cube-corner", "antipode"] as const).map((name) => ({
+    kind: "read" as const,
+    name,
+    settled: true,
+    discPixels: 90_000,
+    skyPixels: 0,
+    outsidePixels: 40_000,
+    litOutsidePixels: 0,
+    finite: true,
+  })),
+};
+
+/** {@link TERRAIN_RECORD} as a whole-body run's, its readings `whole` and its mask whole. */
+function wholeInput(whole: TerrainWholeRecord = WHOLE): TerrainCheckInput {
+  return input({
+    run: { ...input().run, fixture: "terrain-test-whole" },
+    record: {
+      ...TERRAIN_RECORD,
+      loss: {
+        ...TERRAIN_RECORD.loss,
+        masks: { ...TERRAIN_RECORD.loss.masks, end: 24_576, expected: 24_576 },
+      },
+      whole,
+    },
+  });
+}
+
+describe("the whole-body run's results (R10.T14.c)", () => {
+  it("pass a run that held every cell, read no off-survey state and drew no sky in a disc", () => {
+    const results = buildTerrainCheckResults(wholeInput());
+    expect([results.findings.whole?.verdict, results.overall, terrainFailures(results)]).toEqual([
+      "pass",
+      "pass",
+      "",
+    ]);
+    expect([
+      results.findings.whole?.peakCacheBytes,
+      results.findings.whole?.mostPatchesDrawn,
+    ]).toEqual([20_000_000, 61]);
+  });
+
+  it.each([
+    [{ heldCells: 48 }, "the coverage held 48 of 24576 cells as the first phase ended"],
+    [{ notSurveyedSamples: 3 }, "NOT SURVEYED read in 3 of 400 samples"],
+    [{ surveyEdgeSamples: 2 }, "a SURVEY EDGE named in 2 of 400 samples"],
+    [{ textSamples: 0 }, "the page's text was never sampled"],
+    [{ selectionBudget: 50 }, "61 patches drawn at once, over the selection's budget of 50"],
+    [{ selectionBudget: null }, "no lit pass's selection budget was read"],
+  ] as const)("fail on %j", (change, reason) => {
+    const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, ...change }));
+    expect([results.findings.whole?.verdict, results.overall]).toEqual(["fail", "fail"]);
+    expect(results.findings.whole?.reasons).toContain(reason);
+  });
+
+  it.each([
+    [{ skyPixels: 12 }, "the orbit look drew 12 of its disc's 90000 pixels as the sky"],
+    [{ litOutsidePixels: 5 }, "the orbit look drew 5 of 40000 pixels lit beyond the limb"],
+    [{ settled: false }, "the orbit look's terrain did not settle"],
+    [{ finite: false }, "the orbit look read a texel that is not finite"],
+    [{ discPixels: 0 }, "the orbit look read no pixel of its disc"],
+  ] as const)("fail a look with %j", (change, reason) => {
+    const [orbit, ...rest] = WHOLE.looks;
+    if (orbit === undefined) {
+      throw new Error("the readings have an orbit look");
+    }
+    const results = buildTerrainCheckResults(
+      wholeInput({ ...WHOLE, looks: [{ ...orbit, ...change }, ...rest] }),
+    );
+    expect(results.findings.whole?.reasons).toContain(reason);
+  });
+
+  it("fail a look that was not read, naming why", () => {
+    const [, ...rest] = WHOLE.looks;
+    const failed = {
+      kind: "failed",
+      name: "orbit",
+      settled: false,
+      failure: "no scene target",
+    } as const;
+    const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, looks: [failed, ...rest] }));
+    expect(results.findings.whole?.reasons).toContain(
+      "the orbit look was not read: no scene target",
+    );
+  });
+
+  it("fail where the coverage mask did not end whole, a reference sphere past the terrain", () => {
+    const base = wholeInput();
+    const results = buildTerrainCheckResults({
+      ...base,
+      record: {
+        ...base.record,
+        loss: { ...base.record.loss, masks: { ...base.record.loss.masks, end: 24_000 } },
+      },
+    });
+    expect(results.findings.whole?.reasons).toContain(
+      "the coverage mask held 24000 of 24576 cells at the loss phase's end",
+    );
+  });
+
+  it("judge no whole body on any other run, and name the whole body's files and summary", () => {
+    expect(buildTerrainCheckResults(input()).findings.whole).toBeUndefined();
+    const results = buildTerrainCheckResults(wholeInput());
+    const markdown = terrainCheckMarkdown(results);
+    expect(markdown).toContain("TEST MOON's whole body, every cell surveyed");
+    expect(markdown).toContain("| The whole body held and drawn");
+    expect(results.run.fixture).toBe("terrain-test-whole");
+  });
+});
 
 describe("the terrain run's faults verdict", () => {
   it("fails with no loss: the forced loss is expected once", () => {

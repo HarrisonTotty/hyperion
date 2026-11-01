@@ -112,6 +112,8 @@ const SCENE_TARGET = /^[^: ]+:hdr$/u;
 export interface WatchedPass {
   readonly viewIds: ReadonlySet<string>;
   readonly lastStep: { readonly drawSet: { readonly count: number } } | null;
+  /** The selection budget, half the cache's slots (`TerrainPass.maxPatches`). */
+  readonly maxPatches: number;
   seesPatch(id: string): boolean;
 }
 

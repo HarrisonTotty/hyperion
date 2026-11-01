@@ -36,6 +36,9 @@ import type {
   TerrainCheckSessionRecord,
   TerrainCheckSpanRecord,
   TerrainCheckTeardownRecord,
+  TerrainWholeLookName,
+  TerrainWholeLookRecord,
+  TerrainWholeRecord,
   TerrainCheckViewRecord,
   ViewsCheckCanvas,
   ViewsCheckNamedCanvas,
@@ -597,6 +600,85 @@ function openingOf(value: unknown): TerrainCheckOpeningRecord | null {
     : null;
 }
 
+/** The whole-body run's looks' names (`TerrainWholeLookName`). */
+const WHOLE_LOOK_NAMES: ReadonlyArray<TerrainWholeLookName> = ["orbit", "cube-corner", "antipode"];
+
+/** `value` as one of the whole-body run's looks (R10.T14.c), or `null` if it is not one. */
+function wholeLook(value: unknown): TerrainWholeLookRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const name = WHOLE_LOOK_NAMES.find((each) => each === value["name"]) ?? null;
+  const { settled } = value;
+  if (name === null || typeof settled !== "boolean") {
+    return null;
+  }
+  if (value["kind"] === "failed") {
+    const { failure } = value;
+    return typeof failure === "string" ? { kind: "failed", name, settled, failure } : null;
+  }
+  const { discPixels, skyPixels, outsidePixels, litOutsidePixels, finite } = value;
+  return value["kind"] === "read" &&
+    isCount(discPixels) &&
+    isCount(skyPixels) &&
+    isCount(outsidePixels) &&
+    isCount(litOutsidePixels) &&
+    typeof finite === "boolean"
+    ? {
+        kind: "read",
+        name,
+        settled,
+        discPixels,
+        skyPixels,
+        outsidePixels,
+        litOutsidePixels,
+        finite,
+      }
+    : null;
+}
+
+/**
+ * `value` as the whole-body run's readings (R10.T14.c): absent (`undefined`) on any other run, or
+ * `null` if it is there and not one.
+ */
+function wholeOf(value: unknown): TerrainWholeRecord | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { cells, heldCells, textSamples, notSurveyedSamples, surveyEdgeSamples, cacheBytes } =
+    value;
+  const decodeMs = finiteOrNull(value["decodeMs"]);
+  const decodeLongestFrameGapMs = finiteOrNull(value["decodeLongestFrameGapMs"]);
+  const selectionBudget = value["selectionBudget"];
+  const looks = listOf(value["looks"], wholeLook);
+  return isCount(cells) &&
+    isCount(heldCells) &&
+    isCount(textSamples) &&
+    isCount(notSurveyedSamples) &&
+    isCount(surveyEdgeSamples) &&
+    isCount(cacheBytes) &&
+    decodeMs !== undefined &&
+    decodeLongestFrameGapMs !== undefined &&
+    (selectionBudget === null || isCount(selectionBudget)) &&
+    looks !== null
+    ? {
+        cells,
+        heldCells,
+        textSamples,
+        notSurveyedSamples,
+        surveyEdgeSamples,
+        decodeMs,
+        decodeLongestFrameGapMs,
+        cacheBytes,
+        selectionBudget,
+        looks,
+      }
+    : null;
+}
+
 /** `value` as the terrain run's record (R10.T16.d), or `null` if it is not one. */
 export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | null {
   if (!isRecord(value)) {
@@ -612,6 +694,7 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
   const restoresAtMs = numbers(value["restoresAtMs"]);
   const lost = loss(value["loss"]);
   const torn = teardown(value["teardown"]);
+  const whole = wholeOf(value["whole"]);
   const handover = value["handover"];
   const range =
     handover === null
@@ -635,7 +718,8 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     restoresAtMs === null ||
     lost === null ||
     torn === null ||
-    range === undefined
+    range === undefined ||
+    whole === null
   ) {
     return null;
   }
@@ -652,6 +736,7 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     loss: lost,
     teardown: torn,
     handover: range,
+    ...(whole === undefined ? {} : { whole }),
   };
 }
 

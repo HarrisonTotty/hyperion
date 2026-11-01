@@ -58,7 +58,12 @@
  * weathered's field (`terrain_test_weathered.golden`: the moon on a 1 Gyr surface, its young
  * craters ringed by haloes of fresh regolith) in `TERRAIN TEST`'s place (`ViewsCheckLaunch.fixture`),
  * and its results are named `…-terrain-weathered` or `…-handover-weathered`; `--weathered` is
- * refused without `--terrain`, as `--handover` is. With `--universe <ID>` and `--body <ID>` (plan
+ * refused without `--terrain`, as `--handover` is. With `--whole <FILE>` (plan R10, R10.T14.c's
+ * whole-body run, the owner's request) the terrain run is served `TEST MOON`'s whole body, every
+ * cell surveyed, from the file the native tool writes (`just views-check --terrain --whole` runs
+ * it first), which the main process reads (`ViewsCheckLaunch.wholeField`); its results are named
+ * `…-terrain-whole`. It is refused without `--terrain`, beside `--weathered`, and with
+ * `--handover`, since the whole body has no survey edge to hand over across. With `--universe <ID>` and `--body <ID>` (plan
  * R10, R10.T15.b) the hand-over check's looks are made on that body as the server serves it, in
  * `TERRAIN TEST`'s place: both or neither, on `--terrain --handover` alone, never with
  * `--weathered`. With `--atmosphere` instead (plan R08,
@@ -185,6 +190,14 @@ function parseDirectory(value: string): string {
   return value;
 }
 
+/** Checks a file argument: any path, which the main process reads when the run asks for it. */
+function parseFile(value: string): string {
+  if (value.length === 0) {
+    throw new InvalidArgumentError("expected a file");
+  }
+  return value;
+}
+
 /**
  * Canonicalises an `--address` value as a URL host.
  *
@@ -278,6 +291,12 @@ export function buildCommand(version: string): Command {
         "--weathered",
         "the terrain run, or its hand-over check, on TEST MOON weathered (plan R10): haloed young craters",
       ),
+    )
+    .addOption(
+      new Option(
+        "--whole <FILE>",
+        "the terrain run on TEST MOON's whole body (plan R10): every cell surveyed, from the native tool's file",
+      ).argParser(parseFile),
     )
     .addOption(
       new Option(
@@ -381,6 +400,17 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["weathered"] === true && options["terrain"] !== true) {
     command.error("error: --weathered is an option of --terrain, which was not given");
+  }
+  if (options["whole"] !== undefined && options["terrain"] !== true) {
+    command.error("error: --whole is an option of --terrain, which was not given");
+  }
+  if (options["whole"] !== undefined && options["weathered"] === true) {
+    command.error("error: --whole and --weathered are separate fields; give one");
+  }
+  if (options["whole"] !== undefined && options["handover"] === true) {
+    command.error(
+      "error: --whole is an option of the terrain run, not its hand-over check: the whole body has no survey edge to hand over across",
+    );
   }
   if (options["atmosphere"] === true && options["terrain"] === true) {
     command.error("error: --atmosphere and --terrain are separate runs; give one");
@@ -526,6 +556,7 @@ function kebab(name: string): string {
 /** The several-views check's options, each parsed and checked by commander, with their defaults. */
 function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCheckLaunch {
   const out = options["out"];
+  const whole = options["whole"];
   return {
     setting: settingOf(options),
     smoke: options["smoke"] === true,
@@ -542,7 +573,13 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
             : options["handover"] === true
               ? "handover"
               : "terrain",
-    fixture: options["weathered"] === true ? "terrain-test-weathered" : "terrain-test",
+    fixture:
+      options["weathered"] === true
+        ? "terrain-test-weathered"
+        : typeof whole === "string"
+          ? "terrain-test-whole"
+          : "terrain-test",
+    ...(typeof whole === "string" ? { wholeField: whole } : {}),
     // Both or neither, which `viewsCheckServedRefusal` holds the launch to.
     ...servedOf(options),
   };

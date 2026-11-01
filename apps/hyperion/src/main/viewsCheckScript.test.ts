@@ -234,6 +234,41 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     ]).toEqual([0, ["high", "low"], true]);
   });
 
+  it("writes the whole body's field with the native tool first, then gives each launch --whole (R10.T14.c)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperion-views-check-cargo-"));
+    try {
+      const toolLog = join(dir, "cargo.log");
+      const cargo = join(dir, "cargo");
+      writeFileSync(cargo, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${toolLog}"\n`);
+      chmodSync(cargo, 0o755);
+      const run = runScriptWith(["--hidden", "--terrain", "--whole", "--setting", "low"], {
+        env: { HYPERION_VIEWS_CHECK_CARGO: cargo },
+      });
+      const field = join(__dirname, "../../../../target/views-check/terrain/whole.golden");
+      expect([
+        run.status,
+        logLines(toolLog).map((words) => words.join(" ")),
+        run.launches.map((launch) => valueOf(launch, "--whole")),
+      ]).toEqual([
+        0,
+        [
+          `run -q -p hyperion-surface --release --features testing --example whole_terrain_test -- ${field}`,
+        ],
+        [field],
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("makes no launch, and exits 2, where the native tool fails to write the whole body's field", () => {
+    const run = runScriptWith(["--hidden", "--terrain", "--whole"], {
+      env: { HYPERION_VIEWS_CHECK_CARGO: "false" },
+    });
+    expect([run.status, run.launches.length]).toEqual([2, 0]);
+    expect(run.output).toContain("views check: writing the whole body's field");
+  });
+
   it("makes two launches of the atmosphere run, high then low, for --atmosphere (R08.T10.b)", () => {
     const run = runScript(["--hidden", "--smoke", "--atmosphere"]);
     expect([

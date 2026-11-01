@@ -73,6 +73,7 @@ function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["en
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
+    wholeField: () => Promise.reject(new Error("no whole-body field")),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
   };

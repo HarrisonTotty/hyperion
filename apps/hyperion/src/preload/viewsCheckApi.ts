@@ -31,6 +31,7 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   capture: "hyperion:views-check:capture",
+  wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -89,6 +90,13 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
         throw new Error("the main process wrote no atmosphere results file");
       }
       return paths;
+    },
+    wholeField: async () => {
+      const text = await invoke(VIEWS_CHECK_CHANNEL_NAMES.wholeField);
+      if (typeof text !== "string") {
+        throw new Error("the main process read no whole-body field");
+      }
+      return text;
     },
     capture: async (label: string) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.capture, label);

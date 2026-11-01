@@ -984,16 +984,26 @@ export interface ViewsCheckLaunch {
    * `--inspection` launch, whose body it names; absent on every other launch.
    */
   readonly served?: ServedWorldNames;
+  /**
+   * The whole body's field, the file `--whole` names (plan R10, R10.T14.c's whole-body run): the
+   * native tool's `whole.golden`, which the main process reads (`ViewsCheckApi.wholeField`).
+   * Present only on a `--terrain --whole` launch, whose `fixture` is `terrain-test-whole`.
+   */
+  readonly wholeField?: string;
 }
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s
- * own (`terrain-test`, `terrain_test.golden`), or `TEST MOON` weathered's (`terrain-test-weathered`,
+ * own (`terrain-test`, `terrain_test.golden`); `TEST MOON` weathered's (`terrain-test-weathered`,
  * `terrain_test_weathered.golden`, `--weathered`; plan R10, R10.T1.c's client half;
- * decision-r10-t1c-client-scope §3): the same moon on a 1 Gyr surface whose young craters' haloes
- * of fresh regolith the maturity draws, which no generated body carries before generator version 24.
+ * decision-r10-t1c-client-scope §3), the same moon on a 1 Gyr surface whose young craters' haloes
+ * of fresh regolith the maturity draws, which no generated body carries before generator version
+ * 24; or `TEST MOON`'s whole body (`terrain-test-whole`, `--whole`; plan R10, R10.T14.c's
+ * whole-body run, the owner's request), the same field with every cell surveyed, which the native
+ * tool writes uncommitted (`ViewsCheckLaunch.wholeField`).
  */
-export type ViewsCheckTerrainFixture = "terrain-test" | "terrain-test-weathered";
+export type ViewsCheckTerrainFixture =
+  "terrain-test" | "terrain-test-weathered" | "terrain-test-whole";
 
 /**
  * The run a views-check launch makes: T20's phases on `PHASE TEST` (`several-views`, plan R07,
@@ -1450,6 +1460,72 @@ export interface TerrainCheckRecord {
    * time at which the descent crosses it, s (`handoverRangeM`); `null` before its field's header.
    */
   readonly handover: { readonly rangeM: number; readonly scriptS: number } | null;
+  /**
+   * The whole-body run's own readings (plan R10, R10.T14.c; research-leans-20 §2), on a `--terrain
+   * --whole` launch alone ({@link TerrainWholeRecord}).
+   */
+  readonly whole?: TerrainWholeRecord;
+}
+
+/** The whole-body run's check-only looks at `TEST MOON`, each at full phase (`wholeLooks.ts`). */
+export type TerrainWholeLookName = "orbit" | "cube-corner" | "antipode";
+
+/**
+ * One of the whole-body run's looks: read back from the primary's photorealistic scene target
+ * (`read`), or not, with why (`failed`).
+ */
+export type TerrainWholeLookRecord =
+  | {
+      readonly kind: "read";
+      readonly name: TerrainWholeLookName;
+      /** Whether its terrain settled before the read-back: drawn, and no bake in flight a while. */
+      readonly settled: boolean;
+      /** The pixels well inside the disc, and of them those of the sky's black, where no ground drew. */
+      readonly discPixels: number;
+      readonly skyPixels: number;
+      /**
+       * The pixels well beyond the limb, the datum's spheroid and the field's relief past it, and of
+       * them those lit: ground drawn beyond the body's figure.
+       */
+      readonly outsidePixels: number;
+      readonly litOutsidePixels: number;
+      /** Whether every texel read was finite. */
+      readonly finite: boolean;
+    }
+  | {
+      readonly kind: "failed";
+      readonly name: TerrainWholeLookName;
+      readonly settled: boolean;
+      readonly failure: string;
+    };
+
+/** The whole-body run's own readings (plan R10, R10.T14.c; research-leans-20 §2). */
+export interface TerrainWholeRecord {
+  /** The field's level's cells, and those the session's coverage held as the first phase ended. */
+  readonly cells: number;
+  readonly heldCells: number;
+  /**
+   * The page's text sampled over the first phase: how often, and how often it read `NOT
+   * SURVEYED` or named a `SURVEY EDGE` among the targets.
+   */
+  readonly textSamples: number;
+  readonly notSurveyedSamples: number;
+  readonly surveyEdgeSamples: number;
+  /**
+   * From `TERRAIN TEST`'s first choice to its coverage held whole, ms, to a quarter second, and the
+   * page's longest time between animation frames over it; `null` where it was never held whole.
+   */
+  readonly decodeMs: number | null;
+  readonly decodeLongestFrameGapMs: number | null;
+  /**
+   * The setting's patch cache budget, bytes (`TerrainSettings.cacheBytes`, R10.T14.b), recorded
+   * beside the cache's peak; and the lit pass's selection budget, half its cache's slots
+   * (`TerrainPass.maxPatches`), as the first phase ended, which no draw may pass, or `null` with no
+   * pass then.
+   */
+  readonly cacheBytes: number;
+  readonly selectionBudget: number | null;
+  readonly looks: ReadonlyArray<TerrainWholeLookRecord>;
 }
 
 /**
@@ -1815,6 +1891,14 @@ export interface ViewsCheckApi {
    * captures fail ends with 1 whatever its end says.
    */
   writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * The whole body's field as the native tool wrote it (`ViewsCheckLaunch.wholeField`), its text in
+   * the terrain golden's format, read by the main process.
+   *
+   * @throws Error (a rejection) on any launch but a `--terrain --whole` one, where the file cannot
+   *   be read or is no terrain golden, each naming the remedy, or where the answer is no text.
+   */
+  wholeField(): Promise<string>;
   /**
    * Saves a picture of the page under the run's captures, named for the phase recording and
    * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment

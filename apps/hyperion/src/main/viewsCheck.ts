@@ -105,6 +105,7 @@ export const VIEWS_CHECK_CHANNELS = {
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   capture: "hyperion:views-check:capture",
+  wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -425,6 +426,8 @@ export interface ViewsCheckSessionDeps {
   readonly capturesRecordedAs?: string;
   /** Saves the page as a PNG at `path`. */
   readonly capture: (path: string) => Promise<void>;
+  /** Reads a text file whole, UTF-8: the whole body's field (`ViewsCheckLaunch.wholeField`). */
+  readonly readText: (path: string) => Promise<string>;
   /** Asks the person whether every view is the right way up; `null` when unanswered. */
   readonly ask: (() => Promise<"yes" | "no" | null>) | null;
   readonly outDir: string;
@@ -572,6 +575,31 @@ export class ViewsCheckSession {
       throw new Error(`${label} is not a capture's label`);
     }
     await this.#capture(`${this.#recording ?? "between"}-${label}`);
+  }
+
+  /**
+   * The whole body's field (plan R10, R10.T14.c's whole-body run): the text of the file `--whole`
+   * named (`ViewsCheckLaunch.wholeField`), which the native tool writes.
+   *
+   * @throws {@link ViewsCheckCallRefused} on a launch with no whole-body field, and Error where the
+   * file cannot be read or is not a terrain golden, naming it and the remedy.
+   */
+  async wholeField(): Promise<string> {
+    const path = this.#deps.launch.wholeField;
+    if (path === undefined) {
+      throw new ViewsCheckCallRefused("the launch serves no whole-body field: give --whole");
+    }
+    const remedy = "run `just views-check --terrain --whole`, whose tool writes it";
+    let text: string;
+    try {
+      text = await this.#deps.readText(path);
+    } catch (error: unknown) {
+      throw new Error(`the whole-body field ${path} was not read (${remedy})`, { cause: error });
+    }
+    if (!text.startsWith(GOLDEN_HEADER)) {
+      throw new Error(`the whole-body field ${path} is not a terrain golden (${remedy})`);
+    }
+    return text;
   }
 
   async #endTrace(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void> {
@@ -800,6 +828,9 @@ export class ViewsCheckSession {
   }
 }
 
+/** The first line's start of every terrain golden: the testkit's `GoldenWriter::header`. */
+const GOLDEN_HEADER = "# generator_version = ";
+
 /** Thrown back to the renderer for a call the main process refuses. */
 export class ViewsCheckCallRefused extends Error {}
 
@@ -822,6 +853,7 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
     | "writeHandoverResults"
     | "writeAtmosphereResults"
     | "capture"
+    | "wholeField"
     | "end"
   >;
   /**
@@ -987,6 +1019,14 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       );
     }
     await deps.session.capture(value);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.wholeField, async () => {
+    if (deps.run !== "terrain") {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.wholeField} refused: the whole body's field is the terrain run's`,
+      );
+    }
+    return deps.session.wholeField();
   });
   guarded(VIEWS_CHECK_CHANNELS.end, async ([value]) => {
     const end = readSpikeEnd(value);

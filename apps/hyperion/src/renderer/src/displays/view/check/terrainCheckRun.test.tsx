@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import terrainGoldenText from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test.golden?raw";
 
 import type {
   CheckPhaseName,
@@ -12,11 +14,24 @@ import type {
 import type { TextureHandle } from "../../../view/engine/types";
 import { STYLE_TOGGLE_KEY } from "../../../view/photoreal/style";
 import { PHASE_SCENE_NAME } from "../../../view/scenes/phaseScene";
-import { TERRAIN_SCENE_NAME } from "../../../view/scenes/terrainScene";
+import {
+  provideWholeTerrainField,
+  TERRAIN_SCENE_NAME,
+  terrainTestGolden,
+} from "../../../view/scenes/terrainScene";
 import { TERRAIN_COMPUTATION_FAILED } from "../../../view/terrain/annunciation";
 import { runTerrainCheck, type TerrainCheckDeps, type TerrainCheckTiming } from "./terrainCheckRun";
 import type { MaskReading, QuietSpan, TerrainMark, WatchedSession } from "./terrainProbe";
 import type { ShownView } from "./viewsProbe";
+import { WHOLE_LOOKS, wholeLookDistanceM } from "./wholeLooks";
+
+/** The whole-body run's looks' scenes, which the fake `VIEW` offers beside its own. */
+const LOOK_SCENES = WHOLE_LOOKS.map((look) => look.scene);
+
+beforeAll(() => {
+  // The patch's golden stands in for the native tool's file: the same moon, body, seed and header.
+  provideWholeTerrainField(terrainGoldenText);
+});
 
 /** Each test's listeners on the page, which outlive its elements, ended after it. */
 let listening = new AbortController();
@@ -40,6 +55,8 @@ const TIMING: TerrainCheckTiming = {
   waitMs: 5_000,
   pollMs: 100,
   captures: [{ label: "early", scriptS: 10 }],
+  wholeLookMs: 5_000,
+  wholeQuietMs: 500,
 };
 
 /** When the fake's terrain first draws, s of the script, and its delta's blocks, s. */
@@ -61,7 +78,12 @@ class FakeView {
 
   constructor(clock: () => number) {
     this.#clock = clock;
-    const scenes = this.#fieldset("Scene", ["SERVER", PHASE_SCENE_NAME, TERRAIN_SCENE_NAME]);
+    const scenes = this.#fieldset("Scene", [
+      "SERVER",
+      PHASE_SCENE_NAME,
+      TERRAIN_SCENE_NAME,
+      ...LOOK_SCENES,
+    ]);
     scenes.setAttribute("aria-label", "Scene");
     for (const slot of [1, 2]) {
       const name = `INSTRUMENT ${String(slot)}`;
@@ -193,6 +215,36 @@ interface Seen {
 /** How long the fake probe takes to make a phase's record, ms of the test's clock (R10.T14.d). */
 const RECORD_COST_MS = 600;
 
+/** The primary's scene target in the fake: 1126 × 906 px across 60°. */
+const TARGET = { widthPx: 1126, heightPx: 906 } as const;
+
+/**
+ * A look's frame over `rect` of the fake's scene target, rgba16float: the disc of `TEST MOON`'s
+ * equatorial radius at the look's distance lit, the sky about it black.
+ */
+function litDisc(
+  scene: string,
+  rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): ArrayBuffer {
+  const look = WHOLE_LOOKS.find((each) => each.scene === scene);
+  const halves = new Float16Array(4 * rect.width * rect.height);
+  if (look === undefined) {
+    return halves.buffer;
+  }
+  const radiusM = terrainTestGolden("terrain-test-whole").header.equatorial_radius_m;
+  const focalPx = TARGET.widthPx / 2 / Math.tan(Math.PI / 6);
+  const radiusPx = focalPx * Math.tan(Math.asin(radiusM / wholeLookDistanceM(look)));
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
+      const lit =
+        Math.hypot(rect.x + x + 0.5 - TARGET.widthPx / 2, rect.y + y + 0.5 - TARGET.heightPx / 2) <
+        radiusPx;
+      halves.set([lit ? 2 : 0, lit ? 2 : 0, lit ? 2 : 0, 1], 4 * (y * rect.width + x));
+    }
+  }
+  return halves.buffer;
+}
+
 /**
  * The terrain probe's members the run reads, over `view`: a session while `TERRAIN TEST` is
  * chosen, its script the chosen scene's time, its first payload's five blocks sent a second apart
@@ -219,7 +271,8 @@ function fakeProbe(
     compiled: Promise.resolve(3),
     compileStartedAtMs: 0,
   };
-  const terrain = (): boolean => view.scene === TERRAIN_SCENE_NAME;
+  const terrain = (): boolean =>
+    view.scene === TERRAIN_SCENE_NAME || LOOK_SCENES.includes(view.scene);
   const scriptS = (): number | null => (terrain() ? (clock() - view.chosenAtMs) / 1000 : null);
   /** The blocks the session's fixture link has sent: each choice of TERRAIN TEST makes one anew. */
   const sent = (): number => {
@@ -237,6 +290,7 @@ function fakeProbe(
     get session() {
       return terrain() ? session : null;
     },
+    readSceneTarget: (_owner, rect) => Promise.resolve(litDisc(view.scene, rect)),
     moon: "5e5e000000000000.0003",
     get scriptS() {
       return scriptS();
@@ -370,8 +424,8 @@ function fakeProbe(
   };
 }
 
-/** The run over a fake `VIEW` and probe on the test's clock, to its end. */
-async function run(): Promise<{
+/** The run over a fake `VIEW` and probe on the test's clock, to its end, on `fixture`'s field. */
+async function run(fixture: TerrainCheckDeps["fixture"] = "terrain-test"): Promise<{
   readonly record: Awaited<ReturnType<typeof runTerrainCheck>>;
   readonly calls: ReadonlyArray<string>;
   readonly seen: Seen;
@@ -401,7 +455,7 @@ async function run(): Promise<{
       },
     },
     views: {
-      canvasOf: () => ({ widthPx: 1126, heightPx: 906 }),
+      canvasOf: () => TARGET,
       timer: () => "full",
       // VIEW's three preparations, the last settling at OPENED_MS.
       preparations: () => ({
@@ -428,7 +482,7 @@ async function run(): Promise<{
     },
     terrain,
     setting: "high",
-    fixture: "terrain-test",
+    fixture,
     document,
     timing: TIMING,
     nowMs: clock,
@@ -442,6 +496,63 @@ async function run(): Promise<{
   });
   return { record, calls, seen, view };
 }
+
+describe("the whole-body run's script (R10.T14.c)", () => {
+  it("makes its three looks after the loss phase, before the teardown, each read and captured", async () => {
+    const { record, calls, view } = await run("terrain-test-whole");
+    const scenes = view.choices.map((choice) => choice.scene);
+    const lossEnd = calls.indexOf("end terrain-loss");
+    expect(lossEnd).toBeGreaterThan(0);
+    expect(scenes.slice(-4)).toEqual([...LOOK_SCENES, PHASE_SCENE_NAME]);
+    expect(calls.filter((call) => call.startsWith("capture whole"))).toEqual([
+      expect.stringMatching(/^capture whole-orbit at /),
+      expect.stringMatching(/^capture whole-cube-corner at /),
+      expect.stringMatching(/^capture whole-cube-corner-wireframe at /),
+      expect.stringMatching(/^capture whole-antipode at /),
+    ]);
+    expect(
+      record.whole?.looks.map((look) =>
+        look.kind === "read"
+          ? [look.name, look.settled, look.skyPixels, look.litOutsidePixels, look.finite]
+          : [look.name, look.failure],
+      ),
+    ).toEqual([
+      ["orbit", true, 0, 0, true],
+      ["cube-corner", true, 0, 0, true],
+      ["antipode", true, 0, 0, true],
+    ]);
+    expect(record.whole?.looks.every((look) => look.kind === "read" && look.discPixels > 0)).toBe(
+      true,
+    );
+    expect(view.scene).toBe(PHASE_SCENE_NAME);
+  });
+
+  it("samples the page's text over its first phase, and counts the field's cells and decode", async () => {
+    const note = document.createElement("p");
+    note.textContent = "GROUND AT LINE OF SIGHT NOT SURVEYED";
+    document.body.append(note);
+    const { record } = await run("terrain-test-whole");
+    const whole = record.whole;
+    if (whole === undefined) {
+      throw new Error("a whole-body run records its readings");
+    }
+    expect(whole.textSamples).toBeGreaterThan(0);
+    expect([whole.notSurveyedSamples, whole.surveyEdgeSamples]).toEqual([whole.textSamples, 0]);
+    expect([whole.cells, whole.heldCells, whole.cacheBytes, whole.selectionBudget]).toEqual([
+      24_576,
+      48,
+      400_000_000,
+      null,
+    ]);
+    expect(whole.decodeMs).toBeNull();
+  });
+
+  it("records no whole-body readings, and makes no look, on TERRAIN TEST's patch", async () => {
+    const { record, view } = await run();
+    expect(record.whole).toBeUndefined();
+    expect(view.choices.some((choice) => LOOK_SCENES.includes(choice.scene))).toBe(false);
+  });
+});
 
 describe("the terrain run's script (R10.T16.d)", () => {
   it("runs its setting's phases in order, its looks in the first, and ends on a kept scene with no terrain", async () => {

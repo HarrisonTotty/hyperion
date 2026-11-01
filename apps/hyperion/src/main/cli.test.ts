@@ -498,6 +498,37 @@ describe("the several-views check's options", () => {
     },
   );
 
+  it("takes --whole <FILE>, TEST MOON's whole body (R10.T14.c), beside --terrain", () => {
+    expect(
+      parse(["--views-check", "--terrain", "--whole", "/tmp/whole.golden"]).viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "terrain",
+      fixture: "terrain-test-whole",
+      wholeField: "/tmp/whole.golden",
+    });
+  });
+
+  it.each([
+    [
+      ["--views-check", "--whole", "f"],
+      "error: --whole is an option of --terrain, which was not given",
+    ],
+    [
+      ["--views-check", "--terrain", "--weathered", "--whole", "f"],
+      "error: --whole and --weathered are separate fields; give one",
+    ],
+    [
+      ["--views-check", "--terrain", "--handover", "--whole", "f"],
+      "error: --whole is an option of the terrain run, not its hand-over check: the whole body has no survey edge to hand over across",
+    ],
+  ] as const)("refuses --whole outside the plain terrain run: %j", (args, message) => {
+    const error = refusal(args);
+    expect([error.exitCode, error.message]).toEqual([1, message]);
+  });
+
   it.each([
     [["--views-check", "--weathered"]],
     [["--views-check", "--weathered", "--smoke"]],

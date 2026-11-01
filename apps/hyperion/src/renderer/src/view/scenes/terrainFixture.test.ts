@@ -11,8 +11,14 @@ import { TERRAIN_TEST_UNIVERSE, terrainTestGolden } from "./terrainScene";
 /** The delta's time in these tests, s of the script. */
 const DELTA_AT_S = 10;
 
-/** A fixture over the terrain golden, counting its reads of the golden. */
-function countingFixture(chunkIntervalMs = 0): {
+/**
+ * A fixture over the terrain golden, counting its reads of the golden, its whole answers paced at
+ * `wholeAnswerIntervalMs` where given.
+ */
+function countingFixture(
+  chunkIntervalMs = 0,
+  wholeAnswerIntervalMs?: number,
+): {
   readonly fixture: TerrainTestFixture;
   readonly reads: () => number;
 } {
@@ -27,6 +33,7 @@ function countingFixture(chunkIntervalMs = 0): {
       golden,
       deltaAtS: DELTA_AT_S,
       chunkIntervalMs,
+      ...(wholeAnswerIntervalMs === undefined ? {} : { wholeAnswerIntervalMs }),
     }),
     reads: () => reads,
   };
@@ -247,6 +254,22 @@ describe("TERRAIN TEST's fixture (R10.T16.d)", () => {
       blocksSent: blocks,
       blocksToCome: 0,
     });
+    link.close();
+  });
+
+  it("paces a whole answer's blocks at their own interval and a delta's at the chunks' (R10.T14.c)", async () => {
+    const { fixture } = countingFixture(1_000, 5);
+    const link = fixture.open();
+    const blocks = terrainTestGolden().payloads[0]?.blocksHex.length ?? 0;
+    ask(link, null);
+    await vi.advanceTimersByTimeAsync(5 * (blocks + 1));
+    expect(fixture.traffic()).toMatchObject({ blocksSent: blocks, blocksToCome: 0 });
+    fixture.notePlayed(DELTA_AT_S);
+    ask(link, 1);
+    await vi.advanceTimersByTimeAsync(5 * (blocks + 1));
+    expect(fixture.traffic().blocksSent).toBe(blocks);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fixture.traffic().blocksSent).toBe(blocks + 1);
     link.close();
   });
 

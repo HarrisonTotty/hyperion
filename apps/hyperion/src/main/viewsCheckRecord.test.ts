@@ -142,6 +142,48 @@ describe("the terrain run's record (R10.T16.d)", () => {
     expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
   });
 
+  describe("a whole-body run's readings (R10.T14.c)", () => {
+    const whole = {
+      cells: 24_576,
+      heldCells: 24_576,
+      textSamples: 24,
+      notSurveyedSamples: 0,
+      surveyEdgeSamples: 0,
+      decodeMs: 613,
+      decodeLongestFrameGapMs: null,
+      cacheBytes: 400_000_000,
+      selectionBudget: 604,
+      looks: [
+        {
+          kind: "read",
+          name: "orbit",
+          settled: true,
+          discPixels: 195_416,
+          skyPixels: 0,
+          outsidePixels: 60_100,
+          litOutsidePixels: 0,
+          finite: true,
+        },
+        { kind: "failed", name: "antipode", settled: false, failure: "no scene target" },
+      ],
+    } as const;
+
+    it("are read back with the record", () => {
+      const record = { ...TERRAIN_RECORD, whole };
+      expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+    });
+
+    it.each([
+      [{ ...whole, cells: -1 }],
+      [{ ...whole, selectionBudget: "604" }],
+      [{ ...whole, looks: [{ ...whole.looks[0], name: "corner" }] }],
+      [{ ...whole, looks: [{ ...whole.looks[0], kind: "seen" }] }],
+      [{ ...whole, looks: [{ ...whole.looks[1], failure: null }] }],
+    ])("refuse readings that do not check: %j", (bad) => {
+      expect(readTerrainCheckRecord(structuredClone({ ...TERRAIN_RECORD, whole: bad }))).toBeNull();
+    });
+  });
+
   it("is read back with no hand-over range and an undestroyed device", () => {
     const record = {
       ...TERRAIN_RECORD,

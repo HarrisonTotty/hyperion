@@ -119,6 +119,7 @@ function watchedSession(
     pass: () => ({
       viewIds: handing,
       lastStep: { drawSet: patches },
+      maxPatches: 604,
       seesPatch: (id) => handing.has(id) && !blind.has(id),
     }),
     wirePass: () => null,

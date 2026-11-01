@@ -288,11 +288,14 @@ function terrainLookBodies(
 
 /**
  * The hand-over world's name in the record on each fixture's field: `TERRAIN TEST`'s own, or
- * `TEST MOON` weathered's (plan R10, R10.T1.c's client half) under the scene's name.
+ * `TEST MOON` weathered's (plan R10, R10.T1.c's client half) or its whole body's (R10.T14.c) under
+ * the scene's name.
  */
 const HANDOVER_WORLD_NAMES: Readonly<Record<ViewsCheckTerrainFixture, string>> = {
   "terrain-test": "TERRAIN TEST",
   "terrain-test-weathered": "TERRAIN TEST WEATHERED",
+  // No hand-over check is made on it (the command line refuses `--whole --handover`).
+  "terrain-test-whole": "TERRAIN TEST WHOLE",
 };
 
 /**

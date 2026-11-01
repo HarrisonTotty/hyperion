@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -484,6 +484,7 @@ function startViewsCheckSession(
       const image = await window.webContents.capturePage();
       await writeFile(path, image.toPNG());
     },
+    readText: (path) => readFile(path, "utf8"),
     ask: hidden ? null : askRightWayUp,
     outDir: launch.out ?? resolve(repo, dirs.out),
     exit: (code) => {

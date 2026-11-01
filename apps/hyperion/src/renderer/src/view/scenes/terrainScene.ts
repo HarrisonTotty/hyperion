@@ -154,20 +154,54 @@ export const TERRAIN_TEST_SHIP = "test-ship";
  */
 export const LIMB_ONSET_NORMAL_ALBEDO = 0.6;
 
-/** Each fixture's golden: its text and its file's name, which the reader's refusals give. */
+/**
+ * The committed fixtures' goldens: their text and their files' names, which the reader's refusals
+ * give.
+ */
 const FIXTURE_GOLDENS: Readonly<
-  Record<ViewsCheckTerrainFixture, { readonly text: string; readonly file: string }>
+  Record<
+    Exclude<ViewsCheckTerrainFixture, "terrain-test-whole">,
+    { readonly text: string; readonly file: string }
+  >
 > = {
   "terrain-test": { text: terrainGoldenText, file: "terrain_test.golden" },
   "terrain-test-weathered": { text: weatheredGoldenText, file: "terrain_test_weathered.golden" },
 };
 
-/** Each fixture's golden as read, once a page. */
+/** The whole body's field's file as the reader's refusals name it (plan R10, R10.T14.c). */
+const WHOLE_FIELD_FILE = "whole.golden";
+
+/** Each fixture's golden as read, once a page; the whole body's once provided. */
 const parsed = new Map<ViewsCheckTerrainFixture, TerrainGolden>();
 
 /**
+ * Provides the whole body's field (plan R10, R10.T14.c's whole-body run): `text`, the native
+ * tool's file as the main process read it (`ViewsCheckApi.wholeField`), which a `--terrain
+ * --whole` launch hands the page before `VIEW` makes `TERRAIN TEST`'s scene on it.
+ *
+ * @throws Error where `text` is not a terrain golden, or not of `TERRAIN TEST`'s moon, its body,
+ *   seed and header.
+ */
+export function provideWholeTerrainField(text: string): void {
+  const golden = parseTerrainGolden(text, WHOLE_FIELD_FILE);
+  const patch = terrainTestGolden();
+  if (
+    golden.body !== patch.body ||
+    golden.seed !== patch.seed ||
+    JSON.stringify(golden.header) !== JSON.stringify(patch.header)
+  ) {
+    throw new Error(
+      `${WHOLE_FIELD_FILE} is not TERRAIN TEST's moon: its body, seed or header differ from terrain_test.golden's`,
+    );
+  }
+  parsed.set("terrain-test-whole", golden);
+}
+
+/**
  * A fixture's terrain golden as read, once a page: `TEST MOON`'s ID, seed, figure, palette and
- * field; `TERRAIN TEST`'s own unless `fixture` names `TEST MOON` weathered's.
+ * field; `TERRAIN TEST`'s own unless `fixture` names `TEST MOON` weathered's or the whole body's.
+ *
+ * @throws Error for the whole body's before it is provided ({@link provideWholeTerrainField}).
  */
 export function terrainTestGolden(
   fixture: ViewsCheckTerrainFixture = "terrain-test",
@@ -175,6 +209,11 @@ export function terrainTestGolden(
   const known = parsed.get(fixture);
   if (known !== undefined) {
     return known;
+  }
+  if (fixture === "terrain-test-whole") {
+    throw new Error(
+      `the whole body's field (${WHOLE_FIELD_FILE}) was not provided: a --terrain --whole launch reads it first`,
+    );
   }
   const { text, file } = FIXTURE_GOLDENS[fixture];
   const golden = parseTerrainGolden(text, file);
@@ -504,7 +543,8 @@ export function terrainScene(fixture: ViewsCheckTerrainFixture = "terrain-test")
  * terrain golden, its revision rising at {@link TERRAIN_TEST_SCRIPT}'s `deltaAtS`.
  *
  * @param chunkIntervalMs - How long its links wait before each chunk, ms: 0, each on the next task,
- *   by default (`TerrainTestFixtureOptions.chunkIntervalMs`).
+ *   by default (`TerrainTestFixtureOptions.chunkIntervalMs`); on the whole body's field at most
+ *   {@link WHOLE_FIELD_BLOCK_MS} for a whole answer's.
  */
 export function terrainSceneFixture(
   chunkIntervalMs = 0,
@@ -515,5 +555,16 @@ export function terrainSceneFixture(
     golden: () => terrainTestGolden(fixture),
     deltaAtS: TERRAIN_TEST_SCRIPT.deltaAtS,
     chunkIntervalMs,
+    ...(fixture === "terrain-test-whole"
+      ? { wholeAnswerIntervalMs: Math.min(chunkIntervalMs, WHOLE_FIELD_BLOCK_MS) }
+      : {}),
   });
 }
+
+/**
+ * The whole body's field's wait before each block of a whole answer, ms, where its fixture is
+ * paced (plan R10, R10.T14.c): its 400-odd blocks of 4 KiB then come over a few seconds, about
+ * 0.8 MB/s, a link's pace, where the patch's views-check pace of 1.5 s a block would take ten
+ * minutes.
+ */
+export const WHOLE_FIELD_BLOCK_MS = 5;

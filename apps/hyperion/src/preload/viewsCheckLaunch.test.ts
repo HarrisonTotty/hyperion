@@ -51,6 +51,33 @@ describe("the views check's launch switch", () => {
     expect(() => viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toThrow(/does not hold/);
   });
 
+  it("carries a terrain run's whole-body field and its file's path (R10.T14.c)", () => {
+    const launch: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "terrain",
+      fixture: "terrain-test-whole",
+      wholeField: "/repo/target/views-check/terrain/whole.golden",
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+  });
+
+  it.each([
+    [{ run: "terrain", fixture: "terrain-test-whole" }],
+    [{ run: "terrain", fixture: "terrain-test-whole", wholeField: "" }],
+    [{ run: "handover", fixture: "terrain-test-whole", wholeField: "/whole.golden" }],
+    [{ run: "terrain", fixture: "terrain-test", wholeField: "/whole.golden" }],
+    [
+      {
+        run: "terrain",
+        fixture: "terrain-test-whole",
+        wholeField: "/whole.golden",
+        served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      },
+    ],
+  ])("refuses the whole-body field but on a terrain run that names its file: %j", (change) => {
+    expect(readViewsCheckLaunch({ ...LAUNCH, ...change })).toBeNull();
+  });
+
   it("carries a hand-over check's served world, its universe and body (R10.T15.b)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

@@ -56,6 +56,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
+  TerrainWholeRecord,
   TerrainCheckOpeningRecord,
   TerrainCheckSessionFault,
   TerrainCheckSessionRecord,
@@ -194,7 +195,8 @@ export function fixtureRecord(fixture: ViewsCheckTerrainFixture): {
 
 /**
  * What a results file's name and summary add for its run block's recorded field: `-weathered`
- * and a line naming `TEST MOON` weathered for the weathered fixture, nothing for `TERRAIN TEST`'s.
+ * and a line naming `TEST MOON` weathered for the weathered fixture, `-whole` and a line naming
+ * the whole body for its (plan R10, R10.T14.c), nothing for `TERRAIN TEST`'s.
  */
 export function fixtureNaming(
   fixture: Exclude<ViewsCheckTerrainFixture, "terrain-test"> | undefined,
@@ -202,14 +204,29 @@ export function fixtureNaming(
   readonly stem: string;
   readonly lines: ReadonlyArray<string>;
 } {
-  return fixture === undefined
-    ? { stem: "", lines: [] }
-    : {
+  let naming: { readonly stem: string; readonly lines: ReadonlyArray<string> };
+  switch (fixture) {
+    case undefined:
+      naming = { stem: "", lines: [] };
+      break;
+    case "terrain-test-weathered":
+      naming = {
         stem: "-weathered",
         lines: [
           `- **Field:** \`${fixture}\`, TEST MOON weathered (\`terrain_test_weathered.golden\`), served in TERRAIN TEST's place`,
         ],
       };
+      break;
+    case "terrain-test-whole":
+      naming = {
+        stem: "-whole",
+        lines: [
+          `- **Field:** \`${fixture}\`, TEST MOON's whole body, every cell surveyed (the native tool's \`whole.golden\`), served in TERRAIN TEST's place`,
+        ],
+      };
+      break;
+  }
+  return naming;
 }
 
 /** Everything the results are built from. */
@@ -345,6 +362,8 @@ export interface TerrainCheckResults {
       readonly observedScriptS: number | null;
     };
     readonly consoleErrors: { readonly count: number; readonly first: ReadonlyArray<string> };
+    /** The whole-body run's finding, on a `--whole` run alone (plan R10, R10.T14.c). */
+    readonly whole?: TerrainWholeFinding;
   };
   /**
    * Each terrain session made over the run and its materials' compile, provisional; its longest
@@ -720,6 +739,112 @@ function teardownFinding(record: TerrainCheckRecord["teardown"]): TerrainFinding
   return finding(reasons);
 }
 
+/** The whole-body run's looks, as many as `wholeLooks.ts`' `WHOLE_LOOKS` (plan R10, R10.T14.c). */
+const WHOLE_LOOK_COUNT = 3;
+
+/** The whole-body run's finding (plan R10, R10.T14.c): its own readings, with their peaks. */
+export interface TerrainWholeFinding extends TerrainFinding {
+  readonly record: TerrainWholeRecord;
+  /** The patch cache's most bytes alive at once over the phases, and the most patches drawn at once. */
+  readonly peakCacheBytes: number;
+  readonly mostPatchesDrawn: number;
+  /** The most the height workers held of the field as a phase ended, bytes (recorded). */
+  readonly workerFieldBytes: number;
+}
+
+/**
+ * The whole-body run's finding (plan R10, R10.T14.c; research-leans-20 §2): every cell of the
+ * field held as the first phase ended and in the coverage mask at the loss phase's end, so that no
+ * reference sphere draws past the terrain; no off-survey state read and no survey edge named;
+ * every look read, settled, its disc drawn with no pixel of the sky's and nothing lit beyond its
+ * limb, every texel finite; and no draw of more patches than the lit pass's selection budget, half
+ * its cache's slots (R10.T14's sizes). The cache's GPU bytes are recorded beside its nominal
+ * budget, not judged: the setting fixes its allocation, the patch's and the whole body's alike.
+ */
+function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): TerrainWholeFinding {
+  const reasons: string[] = [];
+  const cells = String(whole.cells);
+  if (whole.heldCells !== whole.cells) {
+    reasons.push(
+      `the coverage held ${String(whole.heldCells)} of ${cells} cells as the first phase ended`,
+    );
+  }
+  if (record.loss.masks.end !== whole.cells) {
+    reasons.push(
+      `the coverage mask held ${String(record.loss.masks.end ?? "no")} of ${cells} cells at the loss phase's end`,
+    );
+  }
+  if (whole.textSamples === 0) {
+    reasons.push("the page's text was never sampled");
+  }
+  if (whole.notSurveyedSamples > 0) {
+    reasons.push(
+      `NOT SURVEYED read in ${String(whole.notSurveyedSamples)} of ${String(whole.textSamples)} samples`,
+    );
+  }
+  if (whole.surveyEdgeSamples > 0) {
+    reasons.push(
+      `a SURVEY EDGE named in ${String(whole.surveyEdgeSamples)} of ${String(whole.textSamples)} samples`,
+    );
+  }
+  if (whole.looks.length !== WHOLE_LOOK_COUNT) {
+    reasons.push(`${String(whole.looks.length)} looks of ${String(WHOLE_LOOK_COUNT)}`);
+  }
+  for (const look of whole.looks) {
+    if (look.kind === "failed") {
+      reasons.push(`the ${look.name} look was not read: ${look.failure}`);
+      continue;
+    }
+    if (!look.settled) {
+      reasons.push(`the ${look.name} look's terrain did not settle`);
+    }
+    if (look.discPixels === 0) {
+      reasons.push(`the ${look.name} look read no pixel of its disc`);
+    }
+    if (look.skyPixels > 0) {
+      reasons.push(
+        `the ${look.name} look drew ${String(look.skyPixels)} of its disc's ${String(look.discPixels)} pixels as the sky`,
+      );
+    }
+    if (look.litOutsidePixels > 0) {
+      reasons.push(
+        `the ${look.name} look drew ${String(look.litOutsidePixels)} of ${String(look.outsidePixels)} pixels lit beyond the limb`,
+      );
+    }
+    if (!look.finite) {
+      reasons.push(`the ${look.name} look read a texel that is not finite`);
+    }
+  }
+  const peakCacheBytes = Math.max(
+    0,
+    ...record.phases.flatMap(
+      (phase) =>
+        phase.memory?.peakBytes
+          .filter((each) => each.category === "height-cache")
+          .map((each) => each.bytes) ?? [],
+    ),
+  );
+  const mostPatchesDrawn = Math.max(0, ...record.phases.flatMap((phase) => phase.patchesDrawn));
+  if (whole.selectionBudget === null) {
+    reasons.push("no lit pass's selection budget was read");
+  } else if (mostPatchesDrawn > whole.selectionBudget) {
+    reasons.push(
+      `${String(mostPatchesDrawn)} patches drawn at once, over the selection's budget of ${String(whole.selectionBudget)}`,
+    );
+  }
+  const workerFieldBytes = Math.max(
+    0,
+    ...record.phases.map((phase) => phase.memory?.workerFieldBytes ?? 0),
+  );
+  return {
+    ...finding(reasons),
+    record: whole,
+    peakCacheBytes,
+    mostPatchesDrawn,
+    workerFieldBytes,
+  };
+}
+
 /** The results of a run, judged. */
 export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheckResults {
   const { run, record } = input;
@@ -752,6 +877,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
         null,
     },
     consoleErrors: { count: input.consoleErrors.length, first: input.consoleErrors.slice(0, 5) },
+    ...(record.whole === undefined ? {} : { whole: wholeFinding(record.whole, record) }),
   };
   const verdicts = [
     findings.phases,
@@ -763,6 +889,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
     findings.terrainFaults,
     findings.loss,
     findings.teardown,
+    ...(findings.whole === undefined ? [] : [findings.whole]),
   ].map((each) => each.verdict);
   const quiet = quietOf(run.platform, run.machine.loadAverage);
   const load = run.machine.loadAverage[0];
@@ -817,9 +944,27 @@ export function terrainFailures(results: TerrainCheckResults): string {
     findings.terrainFaults,
     findings.loss,
     findings.teardown,
+    ...(findings.whole === undefined ? [] : [findings.whole]),
   ]
     .flatMap((each) => each.reasons)
     .join("; ");
+}
+
+/** The whole-body run's row of the checks' table (plan R10, R10.T14.c). */
+function wholeRow(whole: TerrainWholeFinding): string {
+  const { record } = whole;
+  const looks = record.looks
+    .map((look) =>
+      look.kind === "read"
+        ? `${look.name}${look.settled ? "" : " (NOT settled)"} ${String(look.skyPixels)} of ${String(look.discPixels)} disc pixels sky, ${String(look.litOutsidePixels)} of ${String(look.outsidePixels)} lit beyond the limb`
+        : `${look.name} not read`,
+    )
+    .join("; ");
+  const decode =
+    record.decodeMs === null
+      ? "never held whole"
+      : `held whole ${record.decodeMs.toFixed(0)} ms after its first ask, the longest time between animation frames meanwhile ${record.decodeLongestFrameGapMs?.toFixed(0) ?? "—"} ms`;
+  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, within the selection's budget) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesDrawn)} patches drawn of the selection's ${String(record.selectionBudget ?? "—")}; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
 }
 
 /** A figure's text, or its reason in brackets. */
@@ -880,6 +1025,7 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
     `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
     `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,
+    ...(findings.whole === undefined ? [] : [wholeRow(findings.whole)]),
     "",
     `VIEW's opening (recorded, not judged): its views' ${String(results.opening.preparations)} preparations settled ${results.opening.preparedMs.toFixed(0)} ms after the run's start, the longest time between animation frames meanwhile ${results.opening.longestFrameGapMs === null ? "—" : `${results.opening.longestFrameGapMs.toFixed(0)} ms`}.`,
     "",

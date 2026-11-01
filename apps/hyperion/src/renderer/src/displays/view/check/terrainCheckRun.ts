@@ -28,6 +28,14 @@
  * Then `VIEW` is taken to `PHASE TEST`, which has no terrain, and the session's teardown is read:
  * no worker left, no GPU bytes of the terrain's.
  *
+ * On a `--whole` launch (plan R10, R10.T14.c; research-leans-20 §2), served `TEST MOON`'s whole body,
+ * the run records its own readings beside (`TerrainCheckRecord.whole`): the field's decode from
+ * `TERRAIN TEST`'s choice to its coverage held whole, the page's text sampled over the first phase
+ * for `NOT SURVEYED` and `SURVEY EDGE`, the cells held as the first phase ends and the lit pass's
+ * selection budget; and, after the loss phase, outside the judged span, the three check-only looks
+ * (`wholeLooks.ts`), each on a session of its own, its terrain settled and its primary's
+ * photorealistic frame read back over the disc, the cube corner captured in the wireframe too.
+ *
  * Each session's phases start once its materials have compiled, which it starts as it is made
  * (R10.T14.d): the run's first and the loss phase's fresh one. The compile's time and the longest
  * time between animation frames over it are recorded for each session made
@@ -44,6 +52,8 @@ import { norm } from "../../../geometry/vec3";
 import type {
   QualitySettingName,
   TerrainCheckLossRecord,
+  TerrainWholeLookRecord,
+  TerrainWholeRecord,
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
@@ -68,7 +78,9 @@ import {
   limbDistanceM,
   pixelAngleRad,
 } from "../../../view/terrain/handover";
+import { SETTINGS } from "../../../view/quality/qualitySetting";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
+import { bodyRect } from "./handoverReading";
 import {
   type QuietSpan,
   bakesInFlight,
@@ -81,6 +93,7 @@ import {
 } from "./terrainProbe";
 import { viewDriver, type ViewsCheckPhasePlan } from "./viewsCheckRun";
 import type { ViewsProbe } from "./viewsProbe";
+import { readWholeDisc, WHOLE_LOOKS, type WholeLook, wholeLookDistanceM } from "./wholeLooks";
 
 /** One phase of the terrain run: its name, the primary's style and each instrument's. */
 export interface TerrainCheckPhasePlan {
@@ -143,6 +156,12 @@ export interface TerrainCheckTiming {
   readonly pollMs: number;
   /** The first phase's looks. */
   readonly captures: ReadonlyArray<TerrainCapture>;
+  /**
+   * The whole-body run's looks (plan R10, R10.T14.c): how long each may take to draw its terrain and
+   * settle, ms, and how long no bake may be in flight for it to have settled.
+   */
+  readonly wholeLookMs: number;
+  readonly wholeQuietMs: number;
 }
 
 /** The script's time past the survey's western edge, s: the first phase's end, and a loop's. */
@@ -193,6 +212,8 @@ export const TERRAIN_CHECK_TIMING: {
     waitMs: 60_000,
     pollMs: 20,
     captures: FULL_CAPTURES,
+    wholeLookMs: 240_000,
+    wholeQuietMs: 5_000,
   },
   smoke: {
     settleMs: 1_000,
@@ -206,6 +227,8 @@ export const TERRAIN_CHECK_TIMING: {
     waitMs: 60_000,
     pollMs: 20,
     captures: [],
+    wholeLookMs: 240_000,
+    wholeQuietMs: 2_000,
   },
 };
 
@@ -215,6 +238,15 @@ export const TERRAIN_CHECK_TIMING: {
  * among (decision-r10-t16-contracts §6).
  */
 export const TERRAIN_CHECK_PACE_MS = 1_500;
+
+/** The primary's scene target, which a whole-body look's frame is read from. */
+const SCENE_TARGET = `${PRIMARY_VIEW_NAME}:hdr`;
+
+/** How often the whole-body run samples the page's text over its first phase, ms. */
+const WHOLE_TEXT_SAMPLE_MS = 250;
+
+/** Pixels about a whole-body look's disc that its read-back takes in. */
+const WHOLE_RECT_MARGIN_PX = 4;
 
 /** The terrain probe's options for a launch: the pace, and a read-back a second (two in a smoke). */
 export function terrainProbeOptions(smoke: boolean): TerrainProbeOptions {
@@ -247,6 +279,7 @@ export interface TerrainCheckDeps {
     | "compiled"
     | "sessions"
     | "scriptSAt"
+    | "readSceneTarget"
   >;
   readonly setting: QualitySettingName;
   /**
@@ -332,6 +365,9 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
   const phases: TerrainCheckPhaseRecord[] = [];
   /** The forced loss's restore, which the judged span leaves out as the loss phase does. */
   let restore: QuietSpan | null = null;
+  /** The cells the session's coverage held as the first phase ended, and the pass's selection budget. */
+  let heldCells = 0;
+  let selectionBudget: number | null = null;
   /**
    * The run's own computations on the page's main thread, each phase's record made at its end:
    * the judged span leaves out the gaps they make (R10.T14.d).
@@ -425,6 +461,35 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     );
   };
 
+  /**
+   * The whole-body run's readings up to its first phase's end (plan R10, R10.T14.c): the page's
+   * text sampled for an off-survey state, and the field's decode from `TERRAIN TEST`'s choice to
+   * its coverage held whole, to the sampling's 250 ms.
+   */
+  const wholeText = { samples: 0, notSurveyed: 0, surveyEdge: 0, lastMs: -Infinity };
+  const decode: { fromMs: number | null; toMs: number | null } = { fromMs: null, toMs: null };
+  const wholeCells = 6 * 4 ** terrainTestGolden(deps.fixture).header.level;
+  const whole = deps.fixture === "terrain-test-whole";
+  const sampleWhole = (): void => {
+    const now = deps.nowMs();
+    // The coverage's cells and the page's text are each a sweep, so at the sampling's pace alone.
+    if (now - wholeText.lastMs < WHOLE_TEXT_SAMPLE_MS) {
+      return;
+    }
+    wholeText.lastMs = now;
+    if (
+      decode.fromMs !== null &&
+      decode.toMs === null &&
+      terrain.coverageCells().size >= wholeCells
+    ) {
+      decode.toMs = now;
+    }
+    const text = deps.document.body.textContent;
+    wholeText.samples += 1;
+    wholeText.notSurveyed += text.includes("NOT SURVEYED") ? 1 : 0;
+    wholeText.surveyEdge += text.includes("SURVEY EDGE") ? 1 : 0;
+  };
+
   /** The first phase: the primary alone from the script's start. */
   const alone = async (plan: TerrainCheckPhasePlan): Promise<void> => {
     await driver.configure(plan);
@@ -444,6 +509,9 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     };
     const look = async (): Promise<void> => {
       stopped();
+      if (whole) {
+        sampleWhole();
+      }
       if (ended() || (first.terrainMs === null && script() > timing.terrainByS)) {
         return;
       }
@@ -462,6 +530,8 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     if (first.terrainMs !== null) {
       await capture("first-terrain");
     }
+    heldCells = terrain.coverageCells().size;
+    selectionBudget = terrain.session?.pass(terrain.moon)?.maxPatches ?? null;
     await finish(plan.name, start, null);
   };
 
@@ -612,6 +682,100 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     return look();
   };
 
+  /**
+   * One whole-body look (plan R10, R10.T14.c): its scene chosen, a fresh session's terrain drawn
+   * and settled, the primary's photorealistic frame read back over the disc and captured, and the
+   * cube corner captured in the wireframe too.
+   */
+  const wholeLook = async (look: WholeLook): Promise<TerrainWholeLookRecord> => {
+    const photoreal = { primary: "photorealistic", instruments: [null, null] } as const;
+    await driver.chooseScene(look.scene);
+    await sessionCompiled();
+    // After the choice, which makes the look's views afresh in their own styles.
+    await driver.configure(photoreal);
+    const chosenAtMs = deps.nowMs();
+    // The workers' counts run over every session, an earlier one's abandoned bakes among them, so
+    // the look's bakes in flight are counted from its own start.
+    const before = terrain.mark().workers;
+    const inFlight = (): number => {
+      const now = terrain.mark().workers;
+      return (
+        now.bakesPosted -
+        before.bakesPosted -
+        (now.baked - before.baked) -
+        (now.refused - before.refused)
+      );
+    };
+    const quiet: { sinceMs: number | null } = { sinceMs: null };
+    const settled = await watch(
+      () => {
+        const now = deps.nowMs();
+        const drawn = terrain.firstTerrainSince(PRIMARY_VIEW_NAME, chosenAtMs) !== null;
+        if (!drawn || inFlight() > 0) {
+          quiet.sinceMs = null;
+          return false;
+        }
+        quiet.sinceMs ??= now;
+        return now - quiet.sinceMs >= timing.wholeQuietMs;
+      },
+      () => deps.nowMs() > chosenAtMs + timing.wholeLookMs,
+    );
+    const golden = terrainTestGolden(deps.fixture);
+    const size = deps.views.canvasOf(SCENE_TARGET);
+    const frame = {
+      widthPx: size.widthPx,
+      heightPx: size.heightPx,
+      fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180,
+      distanceM: wholeLookDistanceM(look),
+      radiusM: golden.header.equatorial_radius_m,
+      reliefM: golden.header.realised_relief_m,
+    };
+    const rect = bodyRect(
+      frame.widthPx,
+      frame.heightPx,
+      frame.fovXRad,
+      frame.distanceM,
+      frame.radiusM + frame.reliefM,
+      WHOLE_RECT_MARGIN_PX,
+    );
+    let record: TerrainWholeLookRecord;
+    stopped();
+    try {
+      const bytes = await terrain.readSceneTarget(SCENE_TARGET, rect);
+      record = {
+        kind: "read",
+        name: look.name,
+        settled,
+        ...readWholeDisc(new Float16Array(bytes), rect, frame),
+      };
+    } catch (error: unknown) {
+      record = {
+        kind: "failed",
+        name: look.name,
+        settled,
+        failure: error instanceof Error ? error.message : String(error),
+      };
+    }
+    await capture(`whole-${look.name}`);
+    if (look.name === "cube-corner") {
+      await driver.configure({ primary: "wireframe", instruments: [null, null] });
+      await wait(timing.wholeQuietMs);
+      await capture(`whole-${look.name}-wireframe`);
+    }
+    return record;
+  };
+
+  /** The whole-body looks, each in turn. */
+  const wholeLooks = async (): Promise<TerrainWholeLookRecord[]> => {
+    const records: TerrainWholeLookRecord[] = [];
+    for (const look of WHOLE_LOOKS) {
+      // Each look chooses its own scene, a fresh session, on the one primary.
+      // oxlint-disable-next-line no-await-in-loop
+      records.push(await wholeLook(look));
+    }
+    return records;
+  };
+
   /** Runs `plans[index]` and each after it, each acting on the page the one before left. */
   const runFrom = async (index: number): Promise<TerrainCheckLossRecord | null> => {
     stopped();
@@ -635,6 +799,27 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     return (await runFrom(index + 1)) ?? loss;
   };
 
+  /** The whole-body run's record, its looks `looks`. */
+  const wholeRecord = (looks: ReadonlyArray<TerrainWholeLookRecord>): TerrainWholeRecord => ({
+    cells: wholeCells,
+    heldCells,
+    textSamples: wholeText.samples,
+    notSurveyedSamples: wholeText.notSurveyed,
+    surveyEdgeSamples: wholeText.surveyEdge,
+    decodeMs: decode.fromMs === null || decode.toMs === null ? null : decode.toMs - decode.fromMs,
+    decodeLongestFrameGapMs:
+      decode.fromMs === null || decode.toMs === null
+        ? null
+        : longestGapThrough(
+            deps.views.frameTimes(decode.fromMs, Infinity),
+            decode.fromMs,
+            decode.toMs,
+          ),
+    cacheBytes: SETTINGS[deps.setting].terrain.cacheBytes,
+    selectionBudget,
+    looks,
+  });
+
   // VIEW's opening: until the preparations its views made as they opened have settled (R10.T14.d),
   // so that no first draw of a prepared material races its preparation in what is judged.
   const openedFromMs = deps.nowMs();
@@ -648,15 +833,30 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
   await until("VIEW's preparations did not settle", () => deps.views.preparations().inFlight === 0);
   const openedAtMs = deps.nowMs();
   const preparations = deps.views.preparations().seen;
+  const chosenAtMs = deps.nowMs();
   await driver.chooseScene(TERRAIN_SCENE_NAME);
+  if (whole) {
+    // The field is asked as the session is made and decodes in its workers meanwhile: sampled
+    // from the choice through the compile.
+    decode.fromMs = chosenAtMs;
+    await watch(
+      () => {
+        sampleWhole();
+        return terrain.session !== null && terrain.compiled;
+      },
+      () => deps.nowMs() > chosenAtMs + timing.waitMs,
+    );
+  }
   await sessionCompiled();
   const loss = await runFrom(0);
   if (loss === null) {
     throw new Error(`views check: the ${deps.setting} plan has no loss phase`);
   }
-  // The judged span ends at the teardown's choice: VIEW on a kept scene with no terrain, the
+  // The judged span ends at the teardown's choice, or before the whole-body run's looks, which it
+  // makes on sessions of their own after the loss: VIEW on a kept scene with no terrain, the
   // session let go.
   const judgedToMs = deps.nowMs();
+  const looks = whole ? await wholeLooks() : [];
   await driver.chooseScene(PHASE_SCENE_NAME);
   await until("the terrain session was not let go", () => terrain.session === null);
   await wait(timing.settleMs);
@@ -685,6 +885,7 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
       deps.setting,
       deps.fixture,
     ),
+    ...(whole ? { whole: wholeRecord(looks) } : {}),
   };
 }
 
