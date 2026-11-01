@@ -11,8 +11,8 @@
 //!   candidates' Poisson mean there, before the thinning and the class's test, so it errs high, as
 //!   [`SystemSource`]'s contract allows, and needs no cell generated. It is counted in each layer
 //!   its members' primaries' initial masses can give them (layer E for a core collapse, D for a
-//!   Type Ia and A–D for its survivor, C and D for an accreting white dwarf), once for each member
-//!   that layer can hold.
+//!   Type Ia and A–D for its survivor, C and D for an accreting white dwarf, D and E for an X-ray
+//!   binary), once for each member that layer can hold.
 //! - **Hits.** The class's cells whose entries can lie in the sphere at any time
 //!   ([`cells_in_sphere`], padded by the class's reach of 4,096 ly, which bounds every member's
 //!   travel over its entry's lifetime, so no layer's walk pad applies: a Type Ia's survivor, which
@@ -211,9 +211,10 @@ const E: LayerSet = LayerSet::EMPTY.with(Layer::E);
 /// Each is its class's own statement: a core collapse's and a luminous blue variable's primary is
 /// of band E (P09.T33.a, P09.T43); a Type Ia's of layer D, "every primary is of layer D", and its
 /// survivor's its own star's, the donor's of A–D or a Type Iax's partly burnt dwarf's, D
-/// (P09.T34.a); an accreting white dwarf's C or D, an X-ray binary's and a neutron-star merger's
-/// E, the compact star's progenitor's, and a stellar merger's any (P11.T8). A test holds every
-/// generated member to its set.
+/// (P09.T34.a); an accreting white dwarf's C or D; an X-ray binary's the compact star's
+/// progenitor's, E, or from 27 D or E, since the fitted sampler (P15.T10.b) draws neutron stars'
+/// progenitors from 10^0.54 M☉, 3.5 M☉, and black holes' from 3.2 M☉; a neutron-star merger's E;
+/// and a stellar merger's any (P11.T8). A test holds every generated member to its set.
 #[must_use]
 fn member_layers(class: ClassId) -> Option<&'static [LayerSet]> {
     const D: LayerSet = LayerSet::EMPTY.with(Layer::D);
@@ -223,11 +224,12 @@ fn member_layers(class: ClassId) -> Option<&'static [LayerSet]> {
         .with(Layer::C)
         .with(Layer::D);
     const WHITE_DWARF: LayerSet = LayerSet::EMPTY.with(Layer::C).with(Layer::D);
+    const COMPACT_PROGENITOR: LayerSet = LayerSet::EMPTY.with(Layer::D).with(Layer::E);
     match class {
-        ClassId::CORE_COLLAPSE
-        | ClassId::LUMINOUS_BLUE_VARIABLE
-        | ClassId::XRAY_BINARY
-        | ClassId::NEUTRON_STAR_MERGER => Some(&[E]),
+        ClassId::CORE_COLLAPSE | ClassId::LUMINOUS_BLUE_VARIABLE | ClassId::NEUTRON_STAR_MERGER => {
+            Some(&[E])
+        }
+        ClassId::XRAY_BINARY => Some(&[COMPACT_PROGENITOR]),
         ClassId::TYPE_IA => Some(&[D, SURVIVOR]),
         ClassId::ACCRETING_WHITE_DWARF | ClassId::ACCRETING_WHITE_DWARF_SLOW => {
             Some(&[WHITE_DWARF])

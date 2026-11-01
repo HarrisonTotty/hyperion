@@ -324,8 +324,8 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
     for layer in Layer::ALL {
         assert_same_bits(all.get(layer), summed.get(layer));
     }
-    // The core collapses, the luminous blue variables, the X-ray binaries and the neutron-star
-    // mergers are of layer E alone; the accreting white dwarfs of C and D.
+    // The core collapses, the luminous blue variables and the neutron-star mergers are of layer E
+    // alone; the accreting white dwarfs of C and D, and the X-ray binaries of D and E.
     let only =
         |class| CatalogueClassSource::with_lookup(Only(class)).expected_in_sphere(galaxy, &solar);
     let core = only(ClassId::CORE_COLLAPSE);
