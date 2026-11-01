@@ -729,12 +729,13 @@ pub(crate) fn with_minor_oxides<R>(rules: MinorOxidesRules, run: impl FnOnce() -
 
 /// The solids' minor elements from version 27 ([`MINOR_OXIDES_VERSION`]), each with the oxygen
 /// atoms it carries: calcium as `CaO`, aluminium as `Al₂O₃` and sodium as `Na₂O`, the rock's, and
-/// nickel and sulphur as the elements, the core's ([`CORE_IRON_FRACTION`]'s "nickel and light
-/// elements").
+/// nickel and sulphur as the elements, counted by their mass alone: at these ratios they are more
+/// than a core's non-iron share (1 − [`CORE_IRON_FRACTION`]), so they are not placed in it.
 ///
 /// Each is at its protosolar ratio to magnesium and silicon, the element registry's (Lodders 2010,
-/// Table 6), standing in for the chondritic one: her solar-system abundances of the rock-forming
-/// elements rest on the CI chondrites' (not re-read here). At the Sun's ratios they are 1.9
+/// Table 6), standing in for the chondritic one: her recommended values are the CI chondrites' for
+/// Si and Ca and the mean of the CI chondrites' and the photosphere's for Na, Mg, Al, S, Fe and Ni,
+/// the two within 0.03 dex (her Table 3, read). At the Sun's ratios they are 1.9
 /// (`CaO`), 2.4 (`Al₂O₃`), 1.0 (`Na₂O`), 1.7 (Ni) and 7.7 (S) wt% of the solids, which lowers
 /// their iron from 31.4 to 26.8 wt%, against the about 28 that P14.T51.k (decision-pre-23-review
 /// §8) gives a chondrite-like Mars.
@@ -746,19 +747,21 @@ const MINOR_SOLIDS: [(Element, f64); 5] = [
     (Element::S, 0.0),
 ];
 
-/// The bulk iron mass fraction `w_Fe` of a body's solids, iron and rock, about a host of Mg/Si
-/// `host_magnesium_to_silicon` and \[α/Fe\] `alpha_fe`, by a stoichiometric mass balance: per
-/// silicon atom, r = Mg/Si magnesium as `MgO`, one silicon as `SiO₂` and n = F (1 + r) iron as Fe,
-/// F = Fe/(Mg + Si) the protosolar ratio (Lodders 2010) times 10^(−\[α/Fe\]), since no host
-/// Fe/(Mg + Si) is drawn (P14.T50.a): `w_Fe` = n `M_Fe` ÷ (r `M_MgO` + `M_SiO₂` + n `M_Fe`).
+/// The bulk iron mass fraction `w_Fe` of the solids, iron and rock, that a host of Mg/Si
+/// `host_magnesium_to_silicon` and \[α/Fe\] `alpha_fe` gives, by a stoichiometric mass balance:
+/// per silicon atom, r = Mg/Si magnesium as `MgO`, one silicon as `SiO₂` and n = F (1 + r) iron as
+/// Fe, F = Fe/(Mg + Si) the protosolar ratio (Lodders 2010) times 10^(−\[α/Fe\]), since no host
+/// Fe/(Mg + Si) is drawn (P14.T50.a): below version 27, `w_Fe` = n `M_Fe` ÷ (r `M_MgO` + `M_SiO₂` +
+/// n `M_Fe`).
 ///
 /// Below version 27 (P14.T51.k's hold, `MINOR_OXIDES_VERSION`) the solids are counted as these
 /// three alone, with every iron as metal, so that the bulk Earth's 32 wt% (31.4 at the Sun's
 /// ratios) is its iron's whether in its core or its mantle. From 27 they also carry their minor
 /// solids, `CaO`, `Al₂O₃` and `Na₂O` in the rock and Ni and S in the core, each element X at
 /// X/(Mg + Si) its protosolar ratio times (1 + r), times 10^(−\[α/Fe\]) unless it is an α element
-/// ([`ALPHA_ELEMENTS`]: Ca and S keep their ratio to Mg and Si, while Al, Na and Ni follow iron),
-/// as P14.T51.k gives it: 26.8 wt% at the Sun's ratios. It is the host's solids' iron: the core's
+/// ([`ALPHA_ELEMENTS`]: Ca and S keep their ratio to Mg and Si, while Al, Na and Ni follow iron;
+/// Al is the lane's choice, though a thick disc's \[Al/Fe\] rises with its α elements, Bensby,
+/// Feltzing and Oey 2014, not read here), as P14.T51.k gives it: 26.8 wt% at the Sun's ratios. It is the host's solids' iron: the core's
 /// share of the solids is not read here, and does not move. A body's own bulk iron follows its
 /// core from 27 ([`mantle_iron_oxide_mass_fraction`]).
 #[must_use]
@@ -841,6 +844,10 @@ fn oxide_weights() -> (f64, f64, f64) {
 /// 17.9. At the Sun's 26.8 wt%, d`w_Fe`/d`f_core` is 0.39 against the core's 0.85
 /// ([`CORE_IRON_FRACTION`]): about half of the core's spread between Mars and Earth is bulk iron,
 /// and the rest is iron that redox moved between mantle and core.
+///
+/// It is a two-point calibration, exact at its anchors. Outside core shares of 0.204–0.325, and
+/// away from the Sun's Mg/Si and \[α/Fe\] 0, it is extrapolated: a body of no core takes 24.6 wt%
+/// `FeO` at the Sun's ratios.
 pub const BULK_IRON_CORE_SLOPE: f64 = 1.460;
 
 /// The core share `f₀` at which a body's bulk iron is its host's, in [`BULK_IRON_CORE_SLOPE`]'s

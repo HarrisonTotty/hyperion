@@ -33802,4 +33802,5 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     in force on 24's rules): `planetary/surface_conditions_published` (02000b2ca0000000.0300 alone)
     and `planetary/systems/subgiant` (e181's buried secondary `basalt` → `basalt_fe`, in both
     sections). `crust.golden`, the other systems, the surface and photometry goldens, and the
-    server's do not move.
+    server's do not move. Measure them again under every 27 hold before the re-bless: 25's and
+    26's holds move the bodies near the edge.

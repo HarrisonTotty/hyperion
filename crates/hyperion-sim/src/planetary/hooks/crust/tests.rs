@@ -447,6 +447,10 @@ fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
         // An α-rich host's solids hold less iron, by both arms.
         let alpha_rich = bulk_iron_mass_fraction(solar, Dex::new(0.3));
         assert!(alpha_rich < bulk, "{alpha_rich}");
+        let held_alpha_rich = with_minor_oxides(MinorOxidesRules::Held, || {
+            bulk_iron_mass_fraction(solar, Dex::new(0.3))
+        });
+        assert!(held_alpha_rich < held, "{held_alpha_rich} against {held}");
         let surface = table_conditions("Earth");
         let crust = CrustComposition::derive(&earth(&surface)).unwrap();
         assert_eq!(key(crust.secondary()), "basalt");
@@ -519,15 +523,16 @@ fn under_27_the_mantle_s_feo_is_bounded_and_falls_with_the_core() {
 fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
     use crate::planetary::derive::solar::historic;
     use crate::planetary::testing::with_every_27_hold;
-    let fractions = historic("Mars").fractions();
-    let core = core_share(&fractions);
-    assert!((0.21..0.222).contains(&core), "{core}");
-    let surface = table_conditions("Mars");
-    let generated = CrustCompositionInputs {
-        fractions,
-        ..mars(&surface)
-    };
+    // Generated afresh under the rules in force, as `with_every_27_hold` asks.
     with_every_27_hold(|| {
+        let fractions = historic("Mars").fractions();
+        let core = core_share(&fractions);
+        assert!((0.21..0.222).contains(&core), "{core}");
+        let surface = table_conditions("Mars");
+        let generated = CrustCompositionInputs {
+            fractions,
+            ..mars(&surface)
+        };
         let feo =
             mantle_iron_oxide_mass_fraction(core, solar_magnesium_to_silicon(), Dex::new(0.0));
         assert!((0.137..=0.179).contains(&feo), "{feo}");
@@ -559,7 +564,16 @@ fn the_generated_venus_takes_basalt_under_27() {
     assert!((IRON_RICH_MANTLE_FEO..0.13).contains(&held), "{held}");
     let crust = CrustComposition::derive(&generated).unwrap();
     assert_eq!(key(crust.secondary()), "basalt_fe");
+    // Generated afresh under the rules in force, as `with_every_27_hold` asks.
     with_every_27_hold(|| {
+        let fractions = historic("Venus").fractions();
+        let core = core_share(&fractions);
+        assert!((0.285..0.292).contains(&core), "{core}");
+        let surface = table_conditions("Venus");
+        let generated = CrustCompositionInputs {
+            fractions,
+            ..venus(&surface)
+        };
         let feo = mantle_iron_oxide_mass_fraction(core, solar, Dex::new(0.0));
         assert!((0.06..IRON_RICH_MANTLE_FEO).contains(&feo), "{feo}");
         let crust = CrustComposition::derive(&generated).unwrap();
