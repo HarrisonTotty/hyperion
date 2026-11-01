@@ -587,9 +587,11 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   network carries, P and Cl solved.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
-/// it is generated, so a test generates afresh inside it. A later hold at 27 adds its switch
-/// here; 26's bump, which deletes [`with_every_26_hold`], leaves this helper its 27 switches alone,
-/// and 27's bump deletes it with its holds.
+/// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
+/// system's equilibrium network is first built, lazily, so a test reads its envelopes inside the
+/// switch too. A later hold at 27 adds its switch here; 26's bump, which deletes
+/// [`with_every_26_hold`], leaves this helper its 27 switches alone, and 27's bump deletes it with
+/// its holds.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};

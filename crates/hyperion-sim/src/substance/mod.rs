@@ -419,6 +419,7 @@ pub fn carriers_ahead() -> impl ExactSizeIterator<Item = SubstanceId> {
 }
 
 /// The row at `index`, which the registry holds.
+#[must_use]
 fn row_id(index: usize) -> SubstanceId {
     SubstanceId(u16::try_from(index).expect("the registry holds fewer than 65,536 rows"))
 }

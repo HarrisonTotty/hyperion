@@ -3325,7 +3325,7 @@ const MERCAPTO: Substance = Substance {
         },
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
-            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X²Πᵢ's ω_e (2,711.6) and ω_e x_e (59.9) cm⁻¹, both bracketed as uncertain, so the fundamental is 2,591.8 cm⁻¹; its ²Π₃/₂ ground and ²Π₁/₂ at |A₀| = 376.96 cm⁻¹ (Ramsay 1952, H&H's note 7), each g = 2; A²Σ⁺ at 31,038 cm⁻¹ lies above the cut. Its `c_p` meets CEA's within 0.54 per cent to 700 K and 0.88 per cent to 1,000 K",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid, checked against the copies Barklem and Collet 2016 (A&A 588, A96) archive with their inputs): X²Πᵢ's ω_e (2,711.6) and ω_e x_e (59.9) cm⁻¹, both in brackets as derived from SD's constants (H&H's note 8), so the fundamental is 2,591.8 cm⁻¹; its ²Π₃/₂ ground and ²Π₁/₂ at |A₀| = 376.96 cm⁻¹ (Ramsay 1952, H&H's note 7), each g = 2; A²Σ⁺ at 31,038 cm⁻¹ lies above the cut. Its `c_p` meets CEA's within 0.54 per cent to 700 K and 0.88 per cent to 1,000 K",
             basis: Basis::Fact,
         }],
     }),
@@ -3372,8 +3372,8 @@ const HYDROXYL: Substance = Substance {
 /// (Huber and Herzberg 1979, note 21: `A_v` = −139.21 − 0.275 v, Maillard, Chauville et al. 1976).
 const HYDROXYL_STATES: [Level; 2] = [level(0.0, 2.0), level(139.21, 2.0)];
 
-/// Row 117, the first ion of S, which takes the sulphur below 10⁻⁴ bar at 5,000 K and above
-/// (P14.T52.e).
+/// Row 117, the first ion of S, which holds 75% of the sulphur at 6,000 K and 10⁻⁴ bar, and most
+/// of it at 5,000 K below about 3 × 10⁻⁵ bar (P14.T52.e).
 const SULPHUR_ION: Substance = Substance {
     key: SubstanceKey::new_const("S+"),
     kind: SubstanceKind::Ion,
@@ -3411,8 +3411,8 @@ const SULPHUR_ION_LEVELS: [Level; 3] = [
     level(14_884.73, 6.0),
 ];
 
-/// Row 118, the first ion of C, which holds up to 6% of the carbon at 10 mbar or more, and most
-/// of it at 6,000 K and 10⁻⁴ bar (P14.T52.e).
+/// Row 118, the first ion of C, which holds up to 6% of the carbon at 10 mbar or more, 42% at
+/// 6,000 K and 10⁻⁴ bar and 88% at 10⁻⁶ bar (P14.T52.e).
 const CARBON_ION: Substance = Substance {
     key: SubstanceKey::new_const("C+"),
     kind: SubstanceKind::Ion,
@@ -3446,8 +3446,8 @@ const CARBON_ION: Substance = Substance {
 /// 157.74 µm line puts ²P°₃/₂ at 63.395 cm⁻¹, 0.04 per cent below, which moves no `c_p` digit.
 const CARBON_ION_LEVELS: [Level; 2] = [level(0.0, 2.0), level(63.42, 4.0)];
 
-/// Row 119, the proton H⁺, which gives most of the electrons above about 5,000 K at 10 mbar or
-/// less (P14.T52.e).
+/// Row 119, the proton H⁺, which gives most of the electrons above about 5,500 K at 10 mbar, and
+/// at lower temperatures at lower pressures (P14.T52.e).
 const PROTON: Substance = Substance {
     key: SubstanceKey::new_const("H+"),
     kind: SubstanceKind::Ion,
@@ -3662,7 +3662,8 @@ const PHOSPHINO: Substance = Substance {
 /// PH₂'s ground, `(energy, g)`: its ²B₁ alone below 15,000 cm⁻¹ (Burcat and Ruscic 2005).
 const PHOSPHINO_STATES: [Level; 1] = [level(0.0, 2.0)];
 
-/// Row 126, atomic chlorine, which holds the chlorine above about 3,000 K (P14.T52.e).
+/// Row 126, atomic chlorine, which holds the chlorine above about 3,000 K at 10 mbar and 4,000 K
+/// at 1 bar (P14.T52.e).
 const ATOMIC_CHLORINE: Substance = Substance {
     key: SubstanceKey::new_const("Cl"),
     kind: SubstanceKind::Atom,

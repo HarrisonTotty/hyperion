@@ -1,6 +1,6 @@
 //! The network under generator version 27's registry (P14.T52.e, `CARRIERS_VERSION`): its
-//! further carriers, SH, OH, S⁺, C⁺, H⁺, N⁺ and O⁺, each a major species, with the plan's tests and
-//! 26's network's tests rerun under it.
+//! further carriers, SH, OH, S⁺, C⁺, H⁺, N⁺, O⁺, P, P₂, PO, PH₂ and Cl, P and Cl solved, with the
+//! plan's tests and 26's network's tests rerun under it.
 //!
 //! The FastChem values are FastChem 4.0.3's, run by hand outside the repository as the asserted
 //! cases' ([`Case`]) were, as pyfastchem 4.0.3 from `PyPI` built under `CPython` 3.12, its data
@@ -83,6 +83,24 @@ fn under_27_phosphorus_and_chlorine_are_solved() {
         ));
     });
     assert_eq!(network().solved, MAJOR_ELEMENTS.len());
+}
+
+/// A gas row holding two atoms of a trace element is refused until the element is solved: 27's
+/// rows, P₂ among them, with 26's solved elements are refused at P₂, and with 27's they build.
+#[test]
+fn under_27_diphosphorus_is_refused_until_phosphorus_is_solved() {
+    with_every_27_hold(|| {
+        let rows: Vec<SubstanceId> = crate::substance::ids()
+            .filter(|&id| crate::substance::formation_range(id).is_some())
+            .collect();
+        assert_eq!(
+            Network::of_rows(&rows, MAJOR_ELEMENTS.len()).map(|_| ()),
+            Err(BuildNetworkError::TwoTraceAtoms {
+                key: row("P2").substance().key()
+            })
+        );
+        assert!(Network::of_rows(&rows, SOLVED).is_ok());
+    });
 }
 
 /// SH holds the sulphur in its field between Visscher, Lodders and Fegley's (2006, §3.1) eq. 7,
@@ -503,7 +521,9 @@ fn under_27_the_network_meets_26_s_tests() {
 /// lies within 0.25 of the solution's at 26's levels (0.12 at most, CH₄ and H₂O at 3,000 K, with
 /// OH and SH in the start beside the O and S atoms), but at 6,000 K and 10⁻⁴ bar, where C⁺ and S⁺
 /// hold 42% and 75% of their elements and the start's closed forms, which precede the
-/// electrons', take none: CH₄ 0.60 and H₂S 1.42 off there, within 1.5.
+/// electrons', take none: CH₄ 0.60 and H₂S 1.42 off there, within 1.5. PH₃'s and HCl's lie within
+/// 0.05 (0.045 at most, PH₃ at 6,000 K), within 0.25; the electrons' within 2.3 (2.30 at 5,750 K),
+/// within 2.5, where 26's network's start misses them by 1.3–6.1 at the same levels.
 #[test]
 fn under_27_the_start_takes_the_major_elements_atoms() {
     with_every_27_hold(|| {
@@ -534,9 +554,19 @@ fn under_27_the_start_takes_the_major_elements_atoms() {
             let state = State::new(&network, &gas, &log_k, bar);
             let start = state.start();
             let (solved, _) = state.refine(start, Stop::AtFixedPoint);
-            for k in [0, 1, 2, 3, 4, NUCLEI] {
+            for (k, within) in [
+                (0, bound),
+                (1, bound),
+                (2, bound),
+                (3, bound),
+                (4, bound),
+                (NUCLEI, bound),
+                (unknown_of(MAJOR_ELEMENTS.len()), 0.25),
+                (unknown_of(MAJOR_ELEMENTS.len() + 1), 0.25),
+                (CHARGE, 2.5),
+            ] {
                 assert!(
-                    (start[k] - solved[k]).abs() < bound,
+                    (start[k] - solved[k]).abs() < within,
                     "{t} K, {bar} bar: unknown {k} starts at {} against {}",
                     start[k],
                     solved[k]

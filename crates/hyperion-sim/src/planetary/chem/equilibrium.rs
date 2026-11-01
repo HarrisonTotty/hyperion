@@ -51,7 +51,8 @@
 //!
 //! The gas is ideal, at the total pressure given. The unknowns are the natural logarithms of the
 //! basis species' pressures and of the hydrogen nuclei's (N, the pressure the hydrogen would exert
-//! as atoms), in bar; the equations are each major element's balance against its abundance times
+//! as atoms), in bar (and from 27 of PH₃'s and HCl's, P and Cl solved); the equations are each
+//! solved element's balance against its abundance times
 //! N, the charge's balance and the total pressure, each a difference of logarithms (held against
 //! wanted), so that a balance carried by one species is linear in the unknowns.
 //!
@@ -201,10 +202,11 @@
 //!   miss for trace elements. From 27 the network carries P, P₂, PO and PH₂ and the Cl atom, P
 //!   and Cl solved: at 1,500 K and 10 mbar P₂ holds the phosphorus within 4% of FastChem's
 //!   (the tests' `carriers`); PS, PH and the chlorides stay uncarried.
-//! - **`SiS`** stays uncarried at 27 though the plan lists it: a gas-only artefact below the
-//!   silicate decks (`condensed` in [`NOT_CARRIED`]), it would take a fifth of the sulphur at
-//!   1,000–1,200 K and 1 bar (FastChem's gas-only run) and most of it at the held floor, where
-//!   P14.T52.c traps the silicon far below, so H₂S, the NH₄SH deck's sulphur, would be wrong.
+//! - **`SiS`** stays uncarried at 27 though the plan lists it: a gas-only artefact above (cooler
+//!   than) the silicate decks (`condensed` in [`NOT_CARRIED`]), it would take a fifth of the
+//!   sulphur at 1,000–1,200 K and 1 bar (FastChem's gas-only run) and most of it at the held
+//!   floor, where P14.T52.c traps the silicon far below, so H₂S, the NH₄SH deck's sulphur, would
+//!   be wrong.
 //! - **Titanium and vanadium**: TiO₂ and VO₂, not carried, hold 27–42% of the titanium and
 //!   53–68% of the vanadium at 1,500 K, and most of both below, under P14.T52.c's CaTiO₃ trap; TiO
 //!   and VO are overstated by up to about 2× at 1,500 K.
@@ -251,7 +253,7 @@ pub const MAJOR_ELEMENTS: [(Element, &str); 5] = [
 /// The elements the network solves from generator version 27 beside [`MAJOR_ELEMENTS`]
 /// (P14.T52.e, `CARRIERS_VERSION`), each with its basis species' key: phosphorus and chlorine,
 /// whose P₂ and chlorides hold two atoms of elements the closed form would otherwise share. Below
-/// 27 they are trace elements.
+/// 27 they are trace elements. Public as [`MAJOR_ELEMENTS`] is; 27's bump folds it into it.
 pub const SOLVED_FROM_27: [(Element, &str); 2] = [(Element::P, "PH3"), (Element::Cl, "HCl")];
 
 /// The most elements a network solves: [`MAJOR_ELEMENTS`] and [`SOLVED_FROM_27`].
@@ -262,7 +264,9 @@ const ELECTRON: &str = "e-";
 
 /// The number of unknowns: the solved elements' basis pressures, the electrons' and the hydrogen
 /// nuclei's. A network that solves only [`MAJOR_ELEMENTS`] (26's) leaves P's and Cl's inactive: a
-/// unit row and a zero column, which change none of the other unknowns' bits.
+/// unit row and a zero column, which change none of the other unknowns' bits. A step's zero
+/// component may change its sign (back substitution's extra −0.0 terms), which leaves y's bits as
+/// they are only because no unknown ever holds −0.0 ([`State::refine`]'s update).
 const UNKNOWNS: usize = SOLVED + 2;
 
 /// The place of the electrons' logarithm among the unknowns, and of the charge's equation.
@@ -271,6 +275,10 @@ const CHARGE: usize = 5;
 /// The place of the hydrogen nuclei's logarithm among the unknowns, and of the total pressure's
 /// equation.
 const NUCLEI: usize = 6;
+
+// The unknowns' layout, which `unknown_of` assumes: the major elements', the charge's, the
+// nuclei's, then P's and Cl's.
+const _: () = assert!(CHARGE == MAJOR_ELEMENTS.len() && NUCLEI == CHARGE + 1);
 
 /// The unknown of solved element `k`, in [`MAJOR_ELEMENTS`]' and then [`SOLVED_FROM_27`]'s order:
 /// the major elements' first, then, after the electrons' and the nuclei's, P's and Cl's, so that
@@ -868,7 +876,8 @@ pub const NOT_CARRIED: [NotCarried; 50] = [
 
 /// The species of [`NOT_CARRIED`]'s rule that P14.T52.e's rows carry from generator version 27
 /// (`CARRIERS_VERSION`), with the shares the run gave them uncarried: below 27 they are not carried,
-/// and [`not_carried`] lists them with the rest. Sorted as [`NOT_CARRIED`]; 27's bump deletes it.
+/// and [`not_carried`] lists them with the rest. Sorted as [`NOT_CARRIED`], and public as it is,
+/// for the composition audit; 27's bump deletes it.
 pub const CARRIED_FROM_27: [NotCarried; 12] = [
     NotCarried {
         formula: "C",
@@ -993,7 +1002,7 @@ pub const CARRIED_FROM_27: [NotCarried; 12] = [
 ];
 
 /// The species the network in force does not carry: [`NOT_CARRIED`], and below generator version
-/// 27 [`CARRIED_FROM_27`] too, each in its own order.
+/// 27 [`CARRIED_FROM_27`] too, each in its own order: the composition audit's list under either.
 pub fn not_carried() -> impl Iterator<Item = &'static NotCarried> {
     let held = CarriersRules::in_force() == CarriersRules::Held;
     NOT_CARRIED
@@ -1492,9 +1501,14 @@ impl Network {
     }
 
     /// The network of `rows`, each a gas row with a record, solving the first `solved` of
-    /// [`solved_element`]'s elements: [`registry`](Self::registry)'s, apart for the tests, which
-    /// build 27's rows with 26's solved elements.
+    /// [`solved_element`]'s elements, [`MAJOR_ELEMENTS`]' five or all of them:
+    /// [`registry`](Self::registry)'s, and the tests', which build 27's rows with 26's solved
+    /// elements to see P₂ refused.
     fn of_rows(rows: &[SubstanceId], solved: usize) -> Result<Self, BuildNetworkError> {
+        debug_assert!(
+            solved == MAJOR_ELEMENTS.len() || solved == SOLVED,
+            "{solved}"
+        );
         let place = |key: &'static str| -> Result<usize, BuildNetworkError> {
             by_key(key)
                 .and_then(|id| rows.iter().position(|&r| r == id))
@@ -1932,7 +1946,7 @@ impl<'a> State<'a> {
             .collect()
     }
 
-    /// The residuals at `y` (each major element's balance, the charge's, the total pressure's; zero
+    /// The residuals at `y` (each solved element's balance, the charge's, the total pressure's; zero
     /// for an inactive one) and their Jacobian in the unknowns, an inactive unknown's row the unit
     /// row.
     #[must_use]
@@ -2186,7 +2200,8 @@ impl<'a> State<'a> {
         probe[unknown_of(k)] = 0.0;
         let (mut linear, mut kappa) = (0.0, 0.0);
         for (i, s) in self.network.species.iter().enumerate() {
-            if !self.present[i] || s.charge != 0 {
+            // A trace species' exponent is relative to its own element's basis, not this one's.
+            if !self.present[i] || s.charge != 0 || s.trace.is_some() {
                 continue;
             }
             let ratio = bounded_exp(self.exponent(i, &probe));
