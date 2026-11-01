@@ -76,9 +76,15 @@ import {
 import type { MsSourceTable } from "./thick/bake";
 import type { DeckTables } from "./thick/deck";
 import {
+  BELOW_DECK_LAYER_BYTES,
+  BELOW_DECK_TABLE_FORMAT,
+  belowDeckTableBytes,
+  DECK_LAYER_BYTES,
   DECK_TABLE_FORMAT,
   deckAboveTables,
   deckTableBytes,
+  packBelowDeckTable,
+  type PackedBelowDeckTable,
   packDeckTable,
   type PackedDeckTable,
 } from "./thick/deckRead";
@@ -987,6 +993,22 @@ export interface PerPlanetRow {
    * `baseBytes`: the tables count the table they hold ({@link AtmosphereTables.thickBytes}).
    */
   readonly thickBytes: number;
+  /**
+   * What a routed cloud deck's tables take (R08.T15.b.2): `thick/deckRead.ts`'s deck table, 159,744 B
+   * a band and light slot, and over a surface its table below, 436,000 B more; 0 where the body takes
+   * no deck. Its J above the deck is {@link PerPlanetRow.thickBytes}'s. Not in `baseBytes`, as the
+   * thick table is not.
+   */
+  readonly deckBytes: number;
+}
+
+/**
+ * A routed cloud deck as a body's per-planet row counts it (R08.T15.b.2): its light slots, one a
+ * light, and whether it stands over a surface, with a table below it, or is an envelope's.
+ */
+export interface PerPlanetDeck {
+  readonly slots: number;
+  readonly overSurface: boolean;
 }
 
 /** A texture's bytes at `format`: its texels times the format's (`engine/memory.ts`'s rule). */
@@ -1008,6 +1030,7 @@ function bytesOf(format: GPUTextureFormat, ...extent: readonly number[]): number
  *
  * @param thickSlots - The light slots of the thick table the body's route gives it, one a light
  *   (R08.T14.d.4); 0, the default, where it takes none.
+ * @param deck - The cloud deck the body's route gives it (R08.T15.b.2), or `null`, the default.
  */
 export function perPlanetRowOf(
   medium: AtmosphereMedium,
@@ -1015,6 +1038,7 @@ export function perPlanetRowOf(
   plan: TablesPlan,
   columnTables: ColumnTables = "read",
   thickSlots = 0,
+  deck: PerPlanetDeck | null = null,
 ): PerPlanetRow {
   const slices = plan.kappa.length;
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
@@ -1069,6 +1093,12 @@ export function perPlanetRowOf(
     baseBytes,
     slotDepthBytes,
     thickBytes: plan.bands.length * thickSlots * THICK_LAYER_BYTES,
+    deckBytes:
+      deck === null
+        ? 0
+        : plan.bands.length *
+          deck.slots *
+          (DECK_LAYER_BYTES + (deck.overSurface ? BELOW_DECK_LAYER_BYTES : 0)),
   };
 }
 
@@ -1217,6 +1247,7 @@ const EMPTY_ROW: PerPlanetRow = {
   baseBytes: 0,
   slotDepthBytes: 0,
   thickBytes: 0,
+  deckBytes: 0,
 };
 
 /** The per-planet kernels, as built or as the kernel arm assembles them. */
@@ -2364,6 +2395,16 @@ export class AtmosphereTables {
    * {@link AtmosphereTables.setDeckTables}), packed and uploaded, or `null`.
    */
   #deck: { readonly packed: PackedDeckTable; texture: TextureHandle } | null = null;
+  /**
+   * The table below a deck over a surface (R08.T15.b.2; {@link AtmosphereTables.setDeckTables}),
+   * packed and uploaded, or `null`, as an envelope's deck has none.
+   */
+  #below: { readonly packed: PackedBelowDeckTable; texture: TextureHandle } | null = null;
+  /**
+   * The one-texel stub the lit passes bind in the table below's place where the tables hold none
+   * ({@link AtmosphereTables.belowDeckLighting}), made at its first ask.
+   */
+  #belowStub: TextureHandle | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -2425,10 +2466,13 @@ export class AtmosphereTables {
       const disc = this.#disc?.table ?? null;
       const temperature = this.#temperature;
       const deck = this.#deck?.packed ?? null;
+      const below = this.#below?.packed ?? null;
       this.#thick = null;
       this.#disc = null;
       this.#thermal = null;
       this.#deck = null;
+      this.#below = null;
+      this.#belowStub = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
       if (thick !== null) {
         this.#thick = { packed: thick, texture: this.#uploadThick(thick) };
@@ -2444,6 +2488,9 @@ export class AtmosphereTables {
       }
       if (deck !== null) {
         this.#deck = { packed: deck, texture: this.#uploadDeck(deck) };
+      }
+      if (below !== null) {
+        this.#below = { packed: below, texture: this.#uploadBelow(below) };
       }
     });
   }
@@ -2577,7 +2624,8 @@ export class AtmosphereTables {
       this.thickBytes +
       this.discBytes +
       this.thermalBytes +
-      this.deckBytes
+      this.deckBytes +
+      this.belowDeckBytes
     );
   }
 
@@ -2897,7 +2945,9 @@ export class AtmosphereTables {
    * tables hold summed into it; or takes both away (`null`), leaving the correction alone. The
    * tables' medium is the deck's upper medium, its ground the split, and their body's datum the
    * deck's level surface (`deckRead.ts`'s `upperMediumOf` and `deckDatumOf`): the caller builds
-   * them so. A rebuild for another medium takes the deck away too.
+   * them so. A deck over a surface brings its table below (R08.T15.b.2), which the kernels beneath
+   * the deck read in place of every other ({@link AtmosphereTables.belowDeckTable}). A rebuild for
+   * another medium takes the deck away too.
    *
    * @param bands - The deck's tables (`thick/deck.ts`'s `bakeDeck`), one a latitude band of the
    *   tables' plan, in its order, each at its band's s.
@@ -2913,10 +2963,81 @@ export class AtmosphereTables {
       return;
     }
     const packed = packDeckTable(bands);
+    const below = bands[0]?.below === null ? null : packBelowDeckTable(bands);
     this.#pack(deckAboveTables(bands), this.#correction);
     const texture = this.#uploadDeck(packed);
+    const belowTexture = below === null ? null : this.#uploadBelow(below);
     this.#releaseDeck();
     this.#deck = { packed, texture };
+    this.#below =
+      below === null || belowTexture === null ? null : { packed: below, texture: belowTexture };
+  }
+
+  /**
+   * The table below a deck over a surface, `rgba32float`, one layer a band and light slot
+   * (`thick/deckRead.ts`'s "Below the deck"; plan R08, R08.T15.b.2), which the sky-view,
+   * aerial-perspective and march kernels read beneath the deck, or `null`; a new handle after a
+   * restore.
+   */
+  get belowDeckTable(): TextureHandle | null {
+    return this.#below?.texture ?? null;
+  }
+
+  /** The table below the deck as packed, for its CPU twin (the smoke's), or `null` (R08.T15.b.2). */
+  get belowDeckPacked(): PackedBelowDeckTable | null {
+    return this.#below?.packed ?? null;
+  }
+
+  /**
+   * The table below the deck's bytes as allocated, B (R08.T15.b.2; `thick/deckRead.ts`'s
+   * `belowDeckTableBytes`): 436,000 a band and light slot; 0 without one.
+   */
+  get belowDeckBytes(): number {
+    return this.#below === null ? 0 : belowDeckTableBytes(this.#below.packed);
+  }
+
+  /**
+   * What the lit passes bind as the table below the deck (`surfaceLighting.wgsl`'s
+   * `atmosphere_below_deck`; R08.T15.b.2): the table, or where the tables hold none a one-texel
+   * `rgba32float` stub of zeros, which the lookups read as no deck.
+   *
+   * @throws `EngineUnavailable` when the stub has to be made while the engine has no device.
+   */
+  get belowDeckLighting(): TextureHandle {
+    const table = this.#below?.texture;
+    if (table !== undefined) {
+      return table;
+    }
+    this.#belowStub ??= this.#engine.createTexture({
+      name: "atmosphere: no table below a deck",
+      size: { width: 1, height: 1 },
+      dimension: "2d",
+      format: BELOW_DECK_TABLE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING,
+      category: "atmosphere-tables",
+    });
+    return this.#belowStub;
+  }
+
+  /** Makes and fills a texture for a packed table below a deck. */
+  #uploadBelow(packed: PackedBelowDeckTable): TextureHandle {
+    const texture = this.#engine.createTexture({
+      name: "atmosphere table below a deck",
+      size: [packed.widthTexels, packed.heightTexels, packed.layers],
+      dimension: "2d",
+      format: BELOW_DECK_TABLE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    });
+    this.#engine.writeTexture(
+      texture,
+      [0, 0, 0],
+      [packed.widthTexels, packed.heightTexels, packed.layers],
+      packed.texels,
+    );
+    return texture;
   }
 
   /**
@@ -2965,6 +3086,10 @@ export class AtmosphereTables {
     if (this.#deck !== null) {
       this.#engine.releaseTexture(this.#deck.texture);
       this.#deck = null;
+    }
+    if (this.#below !== null) {
+      this.#engine.releaseTexture(this.#below.texture);
+      this.#below = null;
     }
   }
 
@@ -3514,6 +3639,10 @@ export class AtmosphereTables {
     this.#releaseDisc();
     this.#releaseThermal();
     this.#releaseDeck();
+    if (this.#belowStub !== null) {
+      this.#engine.releaseTexture(this.#belowStub);
+      this.#belowStub = null;
+    }
     releaseResources(this.#engine, this.#resources);
   }
 

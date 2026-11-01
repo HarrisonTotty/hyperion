@@ -1521,6 +1521,7 @@ describe("the renderer", () => {
       lastAbsorberPressureColumn: air("last pressure column"),
       absorberCurves: air("curves"),
       irradiance: air("irradiance"),
+      belowDeck: air("below deck"),
     };
     const plain = planOf();
     const first = plain.discs[0];
@@ -1558,6 +1559,7 @@ describe("the renderer", () => {
       lastAbsorberPressureColumn: table,
       absorberCurves: table,
       irradiance: table,
+      belowDeck: table,
     };
     const regimes = new Map([[body.id, "disc" as const]]);
     const [withAir] = planLitBodies(

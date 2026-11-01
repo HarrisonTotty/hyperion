@@ -155,19 +155,22 @@ function digestOf(source: string): string {
 /**
  * The plain kernels' sources as they stood before R08.T18.a, by digest: the emissive forms are made
  * beside them and leave each to the byte (the brief's cut; R08.T11.f's cost of a branch not taken).
+ * Re-pinned by R08.T15.b.2, whose surface lighting reads the table below a cloud deck: with no deck
+ * its eighth table is a one-texel stub, `belowDeckHeld` false, and every lookup's arithmetic is as
+ * before, so that their pixels hold.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "6357d9c7fe7406dc"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "6357d9c7fe7406dc"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "79ed1a28cd44f4de"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "9b82341112282393"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f32909a9975726f9"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f32909a9975726f9"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "11347e79679e477d"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "6651e4c18ec800b4"],
   ...[
-    ["terrain-lit-baked-offsets", "f487e4bca89ffe75"],
-    ["terrain-lit-face-differences", "6a46b98e19f5e058"],
-    ["terrain-depth-baked-offsets", "9b5244a341a08258"],
-    ["terrain-depth-face-differences", "f2d6d336328aaa1"],
-    ["terrain-shadow-baked-offsets", "b05a85b21dd697be"],
-    ["terrain-shadow-face-differences", "b38189e98df6c27f"],
+    ["terrain-lit-baked-offsets", "a38cc5145f451b52"],
+    ["terrain-lit-face-differences", "54b9d289d2d68433"],
+    ["terrain-depth-baked-offsets", "1175bcca76b2bb71"],
+    ["terrain-depth-face-differences", "f083f1b92725b794"],
+    ["terrain-shadow-baked-offsets", "74765402e32d1005"],
+    ["terrain-shadow-face-differences", "849b5268de0a5428"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

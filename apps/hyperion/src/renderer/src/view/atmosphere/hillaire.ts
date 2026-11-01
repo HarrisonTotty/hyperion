@@ -91,7 +91,10 @@ import {
 } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
+import aerialPerspectiveBelowDeckWgsl from "./shaders/aerialPerspectiveBelowDeck.wgsl?raw";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
+import belowDeckWgsl from "./shaders/belowDeck.wgsl?raw";
+import belowDeckViewWgsl from "./shaders/belowDeckView.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
@@ -99,12 +102,14 @@ import marchFillWgsl from "./shaders/marchFill.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
+import rayMarchBelowDeckWgsl from "./shaders/rayMarchBelowDeck.wgsl?raw";
 import rayMarchCentreWgsl from "./shaders/rayMarchCentre.wgsl?raw";
 import rayMarchCurvesWgsl from "./shaders/rayMarchCurves.wgsl?raw";
 import rayMarchFootprintWgsl from "./shaders/rayMarchFootprint.wgsl?raw";
 import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
+import skyViewBelowDeckWgsl from "./shaders/skyViewBelowDeck.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
@@ -133,7 +138,8 @@ import {
   THICK_SUN_COSINES,
   THICK_TRAVEL_COSINES,
 } from "./thick/read";
-import { atan2, sin, tan } from "../../lib/pinnedMath";
+import { belowDeckOpticalDepthInto, belowDeckReadScratch, belowDeckSplitM } from "./thick/deckRead";
+import { atan2, log, sin, tan } from "../../lib/pinnedMath";
 
 /** A 3D table's size, texels. */
 export interface VolumeSize {
@@ -1253,6 +1259,38 @@ export function withDeckRead(pair: KernelPair): KernelPair {
   };
 }
 
+/**
+ * A kernel beneath a cloud deck (plan R08, R08.T15.b.2; `thick/deckRead.ts`, "Below the deck"):
+ * `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, `oblate.wgsl`, `belowDeck.wgsl` and
+ * `belowDeckView.wgsl`, then the kernel, which reads the table below the deck in place of every
+ * table of the upper medium and declares no medium. Each is a kernel of its own beside the thick
+ * read's, so that every other kernel keeps its bytes.
+ */
+function belowDeckKernel(name: string, wgsl: string): KernelPair {
+  return {
+    name,
+    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${belowDeckWgsl}\n${belowDeckViewWgsl}\n${wgsl}`,
+    subgroup: null,
+    readback: "presentation-only",
+  };
+}
+
+/** The sky view beneath a cloud deck ({@link belowDeckKernel}; `skyViewBelowDeck.wgsl`). */
+export const SKY_VIEW_BELOW_DECK_KERNEL = belowDeckKernel(
+  "atmosphere sky view beneath a deck",
+  skyViewBelowDeckWgsl,
+);
+/** The aerial perspective beneath a cloud deck (`aerialPerspectiveBelowDeck.wgsl`). */
+export const AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL = belowDeckKernel(
+  "atmosphere aerial perspective beneath a deck",
+  aerialPerspectiveBelowDeckWgsl,
+);
+/** The ray march beneath a cloud deck, over the air's area's tiles (`rayMarchBelowDeck.wgsl`). */
+export const RAY_MARCH_BELOW_DECK_KERNEL = belowDeckKernel(
+  "atmosphere ray march beneath a deck",
+  `${marchAreaWgsl}\n${rayMarchBelowDeckWgsl}`,
+);
+
 /** {@link SKY_VIEW_KERNEL} drawing the medium's own light ({@link withThermalSource}; R08.T18.b). */
 export const SKY_VIEW_THERMAL_KERNEL = withThermalSource(SKY_VIEW_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_KERNEL} drawing the medium's own light (R08.T18.b). */
@@ -1615,6 +1653,32 @@ interface ThickKernels {
   readonly deckRayMarch: () => ThickMarchKernels;
   /** The march by slot over a cloud deck ({@link RAY_MARCH_SLOTS_DECK_KERNEL}). */
   readonly deckRayMarchSlots: () => ThickMarchKernels;
+  /**
+   * The kernels beneath a cloud deck over a surface (R08.T15.b.2; {@link belowDeckKernel}), for a
+   * camera under the deck of tables that hold a table below it, made at its first frame.
+   */
+  readonly belowDeck: () => BelowDeckKernels;
+}
+
+/** The per-frame kernels beneath a cloud deck (R08.T15.b.2; {@link ThickKernels.belowDeck}). */
+interface BelowDeckKernels {
+  readonly skyView: ComputeHandle;
+  readonly aerial: ComputeHandle;
+  readonly rayMarch: ComputeHandle;
+}
+
+/** The kernels beneath a cloud deck, made synchronously on `engine` at their first ask. */
+function belowDeckKernelsOf(
+  engine: RenderEngine,
+  as: (pair: KernelPair) => KernelPair,
+): () => BelowDeckKernels {
+  let made: BelowDeckKernels | null = null;
+  return () =>
+    (made ??= {
+      skyView: engine.createCompute(as(SKY_VIEW_BELOW_DECK_KERNEL)),
+      aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL)),
+      rayMarch: engine.createCompute(as(RAY_MARCH_BELOW_DECK_KERNEL)),
+    });
 }
 
 /**
@@ -1650,6 +1714,7 @@ function thickKernelsOf(
           (deckShared ??= marchOf(RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_SPECIAL_KERNEL)),
         deckRayMarchSlots: () =>
           (deckSlots ??= marchOf(RAY_MARCH_SLOTS_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL)),
+        belowDeck: belowDeckKernelsOf(engine, as),
       };
     })());
 }
@@ -1708,6 +1773,8 @@ async function thickKernelsAhead(
     rayMarchSlots,
     deckRayMarch,
     deckRayMarchSlots,
+    // The kernels beneath a deck are made at their first frame, as the deck's marches are.
+    belowDeck: belowDeckKernelsOf(engine, (pair) => pair),
   };
   return () => kernels;
 }
@@ -2927,6 +2994,13 @@ export class HillaireAtmosphere {
     // A body whose tables hold a deck table marches by the kernels that read it at the ground
     // (R08.T15.a.2), beside the thick table that holds its J above the deck.
     const deckTable = tables.deckTable;
+    // A camera beneath a deck over a surface, under the tables' datum, the deck's, draws by the
+    // kernels that read the table below it in place of every other (R08.T15.b.2).
+    const belowDeckTable = tables.belowDeckTable;
+    const beneath =
+      belowDeckTable !== null && inputs.heightM < 0 ? kernels.thick().belowDeck() : null;
+    const belowSampled =
+      belowDeckTable === null ? null : { oblateBody: tables.oblateBody, belowDeckTable };
     const common = {
       buffers: { terms: tables.terms, ...(thermalSource === null ? {} : { thermalSource }) },
       sampled: {
@@ -2948,6 +3022,20 @@ export class HillaireAtmosphere {
     // view, the aerial perspective and the composite take them all.
     const marchUniforms = this.#marchBlock(viewUniforms, suns, scene, medium);
     const skyView = (): void => {
+      if (beneath !== null && belowSampled !== null) {
+        engine.dispatch(
+          beneath.skyView,
+          {
+            buffers: {},
+            sampled: belowSampled,
+            uniforms: { view: viewUniforms },
+            storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
+          },
+          groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
+          ATMOSPHERE_VIEW_PASS,
+        );
+        return;
+      }
       engine.dispatch(
         thermal?.skyView ?? thick?.skyView ?? kernels.skyView,
         {
@@ -2960,6 +3048,20 @@ export class HillaireAtmosphere {
       );
     };
     const aerial = (): void => {
+      if (beneath !== null && belowSampled !== null) {
+        engine.dispatch(
+          beneath.aerial,
+          {
+            buffers: {},
+            sampled: belowSampled,
+            uniforms: { view: viewUniforms },
+            storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
+          },
+          groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
+          ATMOSPHERE_VIEW_PASS,
+        );
+        return;
+      }
       engine.dispatch(
         thermal?.aerial ?? thick?.aerial ?? kernels.aerial,
         {
@@ -3018,7 +3120,20 @@ export class HillaireAtmosphere {
                   ? thick.deckRayMarch()
                   : thick.deckRayMarchSlots(),
           };
-    if (area.tilesAcross > 0 && area.tilesDown > 0) {
+    if (area.tilesAcross > 0 && area.tilesDown > 0 && beneath !== null && belowSampled !== null) {
+      // Beneath a deck, its march: the surfaces beyond the volume's reach (R08.T15.b.2).
+      engine.dispatch(
+        beneath.rayMarch,
+        {
+          buffers: {},
+          sampled: { ...belowSampled, sceneDepth: scene.depth },
+          uniforms: { view: viewUniforms, marchArea: areaUniform },
+          storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
+        },
+        [area.tilesAcross, area.tilesDown, 1],
+        ATMOSPHERE_VIEW_PASS,
+      );
+    } else if (area.tilesAcross > 0 && area.tilesDown > 0) {
       const bindings = {
         buffers: { ...common.buffers, marchTiles: this.#marchTiles(area) },
         sampled: {
@@ -3077,6 +3192,12 @@ export class HillaireAtmosphere {
             ATMOSPHERE_VIEW_PASS,
           );
         };
+    // What lies beyond the air from beneath a deck takes the camera's vertical depth (R08.T15.b.2;
+    // `composite.wgsl`'s belowDeckBehind): the composite's `shell.w`, 0 elsewhere.
+    const compositeShell = this.#uniforms["shell"];
+    if (compositeShell !== undefined) {
+      compositeShell[3] = beneath === null ? 0 : this.#belowDeckDepthGreen(inputs);
+    }
     if (deferUnread) {
       this.#area = area;
       this.#unread = {
@@ -3088,6 +3209,31 @@ export class HillaireAtmosphere {
       fill?.();
     }
     return { inputs, curvature };
+  }
+
+  /**
+   * The kernels' vertical optical depth from the top to the camera beneath a deck, its green channel
+   * (R08.T15.b.2; `thick/deckRead.ts`'s `belowDeckOpticalDepthInto`), at h* = split + s h, h the
+   * camera's height above the deck's datum, held to [0, split]; 0 with no table below.
+   */
+  #belowDeckDepthGreen(inputs: AtmosphereInputs): number {
+    const packed = this.#tables.belowDeckPacked;
+    if (packed === null) {
+      return 0;
+    }
+    const splitM = belowDeckSplitM(packed);
+    const s = inputs.gravityRatio;
+    const heightStarM = Math.min(Math.max(splitM + s * inputs.heightM, 0), splitM);
+    const depth: [number, number, number] = [0, 0, 0];
+    belowDeckOpticalDepthInto(
+      packed,
+      this.#tables.plan.bands.map((band) => log(band.gravityRatio)),
+      s,
+      heightStarM,
+      belowDeckReadScratch(),
+      depth,
+    );
+    return depth[1];
   }
 
   /**

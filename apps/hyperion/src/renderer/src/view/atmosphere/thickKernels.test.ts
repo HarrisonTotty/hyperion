@@ -20,12 +20,14 @@ import { kernelBindings } from "../engine/webgpu/compute";
 import { fnv1a64 } from "../terrain/workers/f32Digest";
 import { R05_EARTH_REFERENCE, referenceSunIlluminanceLx } from "./earth";
 import {
+  AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   type AtmosphereCamera,
   type AtmosphereScene,
   createAtmosphereFrameKernels,
   HillaireAtmosphere,
+  RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
@@ -41,6 +43,7 @@ import {
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  SKY_VIEW_BELOW_DECK_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   type SpheroidFigure,
@@ -447,6 +450,120 @@ describe("HillaireAtmosphere over a deck (R08.T15.a.2)", () => {
         boundNames(marched?.bindings ?? { buffers: {}, sampled: {}, uniforms: {}, storage: {} }),
       ).toEqual([...kernelBindings(march.reference).keys()].toSorted());
     }
+  });
+});
+
+/** The kernels beneath a deck (R08.T15.b.2), each with its name in the checks. */
+const BELOW_DECK_KERNELS: ReadonlyArray<readonly [string, KernelPair]> = [
+  ["the sky view", SKY_VIEW_BELOW_DECK_KERNEL],
+  ["the aerial perspective", AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL],
+  ["the ray march", RAY_MARCH_BELOW_DECK_KERNEL],
+];
+
+describe("the kernels beneath a deck (R08.T15.b.2)", () => {
+  it.each(BELOW_DECK_KERNELS)(
+    "reads %s's light from the table below the deck, declaring no medium and reaching every binding",
+    (_name, pair) => {
+      const bindings = kernelBindings(pair.reference);
+      expect([
+        bindings.get("belowDeckTable"),
+        bindings.has("medium"),
+        unreachedBindings(pair.reference),
+      ]).toEqual([
+        expect.objectContaining({ kind: "texture", viewDimension: "2d-array" }),
+        false,
+        [],
+      ]);
+    },
+  );
+
+  it("is catalogued beside the deck's marches", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(expect.arrayContaining(BELOW_DECK_KERNELS.map(([, pair]) => pair.name)));
+  });
+});
+
+describe("AtmosphereTables' table below a deck (R08.T15.b.2)", () => {
+  it("holds a deck over a surface's table below, counts its bytes, and gives it up with the deck", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_ABOVE_DECK, tableRadiusM(WGS84));
+    const before = tables.rowBytes;
+    const stub = tables.belowDeckLighting;
+    const over = patternedDeckTables(
+      tables.plan.bands,
+      kernelMedium(tables.medium),
+      2,
+      DECK_ALTITUDE_M,
+      true,
+    );
+    tables.setDeckTables(over);
+    expect([tables.belowDeckBytes, tables.rowBytes - before]).toEqual([
+      2 * 436_000,
+      2 * (436_000 + 159_744 + 388_864),
+    ]);
+    expect(tables.belowDeckLighting).toBe(tables.belowDeckTable);
+    expect(
+      engine.textureWritten.findLast((w) => w.texture === "atmosphere table below a deck"),
+    ).toBeDefined();
+    engine.loseDevice();
+    engine.restore();
+    expect([tables.belowDeckTable === null, tables.belowDeckBytes]).toEqual([false, 2 * 436_000]);
+    // An envelope's deck has none, and the lit passes bind the stub.
+    tables.setDeckTables(
+      patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 2, DECK_ALTITUDE_M),
+    );
+    expect([tables.belowDeckTable, tables.belowDeckBytes]).toEqual([null, 0]);
+    expect(tables.belowDeckLighting.name).toBe(stub.name);
+    tables.setDeckTables(over);
+    tables.setDeckTables(null);
+    expect([tables.belowDeckTable, tables.belowDeckBytes]).toEqual([null, 0]);
+    tables.dispose();
+  });
+});
+
+/** From 1 km under the tables' datum, the deck's, looking north along the horizon. */
+const BENEATH: AtmosphereCamera = {
+  ...NEAR,
+  positionM: { x: 6_378_137 - 1_000, y: 0, z: 0 },
+};
+
+describe("HillaireAtmosphere beneath a deck (R08.T15.b.2)", () => {
+  it("draws a camera under the deck by the kernels that read the table below, binding it, and one above it by the deck's", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = new AtmosphereTables(
+      engine,
+      EARTH_ABOVE_DECK,
+      tableRadiusM(WGS84),
+      [],
+      earthBody(),
+    );
+    tables.setDeckTables(
+      patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 1, DECK_ALTITUDE_M, true),
+    );
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    const drawn = (camera: AtmosphereCamera): ReadonlyArray<string> => {
+      engine.dispatched.length = 0;
+      view.drawFrame(camera, [NOON], SCENE);
+      return engine.dispatched
+        .filter((d) => d.kernel.startsWith("atmosphere ") && !d.kernel.includes("fill"))
+        .map((d) => d.kernel);
+    };
+    expect(drawn(BENEATH).toSorted()).toEqual(
+      BELOW_DECK_KERNELS.map(([, pair]) => pair.name).toSorted(),
+    );
+    for (const [, pair] of BELOW_DECK_KERNELS) {
+      const dispatch = engine.dispatched.find((d) => d.kernel === pair.name);
+      expect(
+        boundNames(dispatch?.bindings ?? { buffers: {}, sampled: {}, uniforms: {}, storage: {} }),
+      ).toEqual([...kernelBindings(pair.reference).keys()].toSorted());
+    }
+    expect(drawn(NEAR)).toEqual(
+      expect.arrayContaining([SKY_VIEW_THICK_KERNEL.name, AERIAL_PERSPECTIVE_THICK_KERNEL.name]),
+    );
+    expect(drawn(NEAR).some((name) => name.includes("beneath a deck"))).toBe(false);
   });
 });
 

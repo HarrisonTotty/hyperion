@@ -79,8 +79,8 @@
  *   is dark beneath).
  * - **The path to a target** ({@link belowDeckPathDepthInto}): I(h_obs, Ω) − T I(h_target, Ω), both
  *   read in the observer's frame (plane-parallel), T = e^(−Δτ) with Δτ the path's optical depth in
- *   the kernels' extinction (every forward delta out), from the vertical depth the info row holds,
- *   held at 0. It is the field's own transmission where delta-M's truncation is 0 (Rayleigh's and
+ *   the kernels' extinction (every forward delta out), d s times the mean of −dτ ÷ dh\* of the
+ *   vertical depth the info row holds between the two heights, held at 0. It is the field's own transmission where delta-M's truncation is 0 (Rayleigh's and
  *   every gas's, so everywhere beneath a cloud's base) and the kernels' beam's elsewhere, a stated
  *   approximation inside the deck.
  * - **The ground's light** ({@link belowDeckLightInto}): the sky's irradiance is `irradiance`, the
@@ -88,8 +88,8 @@
  *   beam's, so that μ₀ T plus the sky is the whole column's downward flux; a sight to space takes
  *   e^(−τ ÷ μ) of the vertical depth, its green channel's.
  *
- * The texture is `rgba32uint`, each word an `f32` value's bits, a 2D array of one layer a band and
- * light slot, {@link BELOW_DECK_TABLE_WIDTH} texels across: row a × 32 + s holds, for altitude a and
+ * The texture is `rgba32float`, a 2D array of one layer a band and light slot,
+ * {@link BELOW_DECK_TABLE_WIDTH} texels across: row a × 32 + s holds, for altitude a and
  * sun cosine (s + ½) ÷ 32, at texel v × 3 + m mode m's Iᵐ ÷ (sinᵐ θ_v sinᵐ θ₀) at travel cosine
  * (v + ½) ÷ 8 − 1, at texel 48 the irradiance and at 49 the beam, red, green and blue in the first
  * three words; the info row, 544, at texel a the kernels' vertical optical depth from the top,
@@ -522,8 +522,12 @@ export const BELOW_DECK_TABLE_WIDTH = BELOW_DECK_DIRECT_TEXEL + 1;
 export const BELOW_DECK_INFO_ROW = BELOW_DECK_ALTITUDES * BELOW_DECK_SUN_COSINES;
 /** The rows a layer: 545. */
 export const BELOW_DECK_TABLE_ROWS = BELOW_DECK_INFO_ROW + 1;
-/** The texture's format: four 32-bit words a texel, each an `f32` value's bits. */
-export const BELOW_DECK_TABLE_FORMAT = "rgba32uint";
+/**
+ * The texture's format: four `f32` values a texel, `rgba32float`, read by `textureLoad` (so that a
+ * lit pass binds one-texel `rgba32float` stub where a body has no deck, as it binds its other
+ * tables; `surfaceLighting.ts`'s `createAirlessTables`).
+ */
+export const BELOW_DECK_TABLE_FORMAT = "rgba32float";
 /** A layer's bytes as allocated, B: 50 × 545 texels × 16 B, 436,000. */
 export const BELOW_DECK_LAYER_BYTES = BELOW_DECK_TABLE_WIDTH * BELOW_DECK_TABLE_ROWS * 16;
 
@@ -545,7 +549,7 @@ export interface PackedBelowDeckTable {
   readonly slots: number;
   /** The latitude bands, in the body's order. */
   readonly bands: number;
-  /** Four words a texel, row-major in each layer, layer after layer. */
+  /** Four words a texel, each an `f32` value's bits, row-major in each layer, layer after layer. */
   readonly texels: Uint32Array;
 }
 
@@ -975,7 +979,8 @@ export function belowDeckLightInto(
         const lower = beams[da * 2]?.[c] ?? 0;
         const upper = beams[da * 2 + 1]?.[c] ?? 0;
         if (beyond) {
-          return pow(edge === 0 ? lower : upper, power);
+          const held = edge === 0 ? lower : upper;
+          return held > 0 ? pow(held, power) : held;
         }
         // A lower row that the f32 holds as 0 under a lit one: the lit row's plane-parallel power.
         // (A channel's beam is the bins' converted, whose factors may be negative, so a row may
@@ -1020,9 +1025,10 @@ export function belowDeckOpticalDepthInto(
 
 /**
  * The optical depth of a straight path beneath a deck, per channel, into `out` (the module's
- * remarks, "Below the deck"): d s |τ(h\*₁) − τ(h\*₂)| ÷ |h\*₁ − h\*₂| of the vertical depth τ
- * ({@link belowDeckOpticalDepthInto}), the plane-parallel path's own, and d s σ\*(h\*₁) where the
- * two heights lie within a millimetre, σ\* = −dτ ÷ dh\* of the altitudes' interval about h\*₁.
+ * remarks, "Below the deck"): d s σ̄\*, σ̄\* the mean of σ\* = −dτ ÷ dh\* of the vertical depth τ
+ * ({@link belowDeckOpticalDepthInto}) between h\*₁ and h\*₂, the plane-parallel path's own,
+ * summed interval by interval over the altitudes (so that no difference of two nearly equal depths
+ * is formed), and σ\* of the interval about h\*₁ where the two lie within a millimetre.
  *
  * @param distanceM - The path's length, m.
  */
@@ -1037,24 +1043,34 @@ export function belowDeckPathDepthInto(
   out: [number, number, number],
 ): void {
   const { texel, sum, other } = scratch;
-  const rise = toHeightStarM - fromHeightStarM;
-  if (Math.abs(rise) > 1e-3) {
-    belowDeckOpticalDepthInto(table, lnBands, s, fromHeightStarM, scratch, sum);
-    belowDeckOpticalDepthInto(table, lnBands, s, toHeightStarM, scratch, other);
-    for (let c = 0; c < 3; c += 1) {
-      out[c] = (distanceM * s * Math.abs((sum[c] ?? 0) - (other[c] ?? 0))) / Math.abs(rise);
-    }
-    return;
-  }
+  const lowM = Math.min(fromHeightStarM, toHeightStarM);
+  const highM = Math.max(fromHeightStarM, toHeightStarM);
+  const level = !(highM - lowM > 1e-3);
   out.fill(0);
   for (const [layer, w] of belowLayersAt(table, lnBands, s, 0)) {
-    const altitude = belowAltitudePlace(table, layer, fromHeightStarM);
-    belowTexelInto(table, layer, altitude.i0, BELOW_DECK_INFO_ROW, texel);
-    const lower = [texel[0] ?? 0, texel[1] ?? 0, texel[2] ?? 0, texel[3] ?? 0];
-    belowTexelInto(table, layer, altitude.i0 + 1, BELOW_DECK_INFO_ROW, texel);
-    const span = (texel[3] ?? Number.NaN) - (lower[3] ?? Number.NaN);
+    const altitudes = belowAltitudesOf(table, layer);
+    sum.fill(0);
+    const first = level ? belowAltitudePlace(table, layer, fromHeightStarM).i0 : 0;
+    const last = level ? first + 1 : BELOW_DECK_ALTITUDES - 1;
+    for (let a = first; a < last; a += 1) {
+      const h0 = altitudes[a] ?? Number.NaN;
+      const h1 = altitudes[a + 1] ?? Number.NaN;
+      const overlap = level ? 1 : Math.max(Math.min(highM, h1) - Math.max(lowM, h0), 0);
+      if (!(overlap > 0)) {
+        continue;
+      }
+      belowTexelInto(table, layer, a, BELOW_DECK_INFO_ROW, texel);
+      other[0] = texel[0] ?? 0;
+      other[1] = texel[1] ?? 0;
+      other[2] = texel[2] ?? 0;
+      belowTexelInto(table, layer, a + 1, BELOW_DECK_INFO_ROW, texel);
+      for (let c = 0; c < 3; c += 1) {
+        sum[c] = (sum[c] ?? 0) + (overlap * ((other[c] ?? 0) - (texel[c] ?? 0))) / (h1 - h0);
+      }
+    }
+    const span = level ? 1 : highM - lowM;
     for (let c = 0; c < 3; c += 1) {
-      out[c] = (out[c] ?? 0) + (w * distanceM * s * ((lower[c] ?? 0) - (texel[c] ?? 0))) / span;
+      out[c] = (out[c] ?? 0) + (w * distanceM * s * (sum[c] ?? 0)) / span;
     }
   }
 }

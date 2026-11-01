@@ -133,6 +133,10 @@ import {
   type ThickTableKind,
 } from "../view/atmosphere/thick/read";
 import {
+  belowDeckAerialPerspectiveTwin,
+  belowDeckMarchTexelTwin,
+  belowDeckSkyViewTexelsTwin,
+  belowDeckSurfaceLightingTwin,
   type FarLimbShells,
   farLimbFootprintTwin,
   farLimbShellsOf,
@@ -161,6 +165,7 @@ import {
   surfaceLightingTwin,
   tableSources,
   type TwinBand,
+  type TwinBelowDeck,
   type TwinRay,
   type TwinTable,
   type TwinTransmittance,
@@ -187,6 +192,7 @@ import {
 import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
 import type { TwinThermal } from "../view/atmosphere/tablesCpu";
 import {
+  belowDeckSplitM,
   deckCorrectionAbove,
   deckDatumOf,
   type PackedDeckTable,
@@ -2352,6 +2358,135 @@ export async function checkDeckFrameTwins(
   ]);
 }
 
+/**
+ * R08.T15.b.2's frames beneath a deck, each camera's height above the deck's datum, the kernels'
+ * (its true height the split's 3 km less): from 1 km up with the sun 20° up and a surface 60 km
+ * ahead (the march's, beyond the volume's reach), from 1 km with the sun 60° up and a surface 5 km
+ * ahead (the volume's), and from 50 m with the sun 1° up, under the table's first sun row.
+ */
+const BELOW_DECK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
+  { name: "1 km up, the sun 20° up", heightM: -2_000, suns: [sunAt(20)], surfaceM: 60_000 },
+  { name: "1 km up, the sun 60° up", heightM: -2_000, suns: [sunAt(60)], surfaceM: 5_000 },
+  { name: "50 m up, the sun 1° up", heightM: -2_950, suns: [sunAt(1)], surfaceM: null },
+];
+
+/**
+ * R08.T15.b.2: the sky-view, aerial-perspective and march kernels beneath a deck, reading the table
+ * below it, each held to its CPU twin (`tablesCpu.ts`'s `belowDeckSkyViewTexelsTwin`,
+ * `belowDeckAerialPerspectiveTwin` and `belowDeckMarchTexelTwin`) over the same packed table, to
+ * 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound, `decision-r08-t6b-floor.md`): R05's Earth's
+ * upper medium over a deck 3 km up on a sphere of the deck's datum (one band, s ≡ 1), the patterned
+ * table below (`test/thickTables.ts`), over {@link BELOW_DECK_TWIN_FRAMES}, on high; and the
+ * composite over each, finite and within `rgba16float`'s range.
+ */
+export async function checkBelowDeckFrameTwins(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const radiusM = 6_371_000 + EARTH_DECK_ALTITUDE_M;
+  const figure: SpheroidFigure = { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
+  const medium = upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M);
+  const sizes = twinSizes(TABLE_SIZES.high);
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    medium,
+    sizes,
+    figure,
+    NO_ABSORBER_CURVES,
+    null,
+  );
+  try {
+    const tables = atmosphere.tables;
+    withDeckTable(tables, 1, EARTH_DECK_ALTITUDE_M, true);
+    const packed = tables.belowDeckPacked;
+    if (packed === null) {
+      throw new Error("the deck's tables hold a table below it");
+    }
+    const below: TwinBelowDeck = {
+      table: packed,
+      lnBands: tables.plan.bands.map((band) => Math.log(band.gravityRatio)),
+      splitM: belowDeckSplitM(packed),
+      gravityRatio: 1,
+    };
+    const read = kernelMedium(medium);
+    await inOrder(checks, async (ordered) => {
+      for (const frame of BELOW_DECK_TWIN_FRAMES) {
+        const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
+        const view = frameViewOf(atmosphere, camera, frame.suns, figure);
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const composite = await compositeFrame(
+          engine,
+          atmosphere,
+          camera,
+          frame.suns,
+          frame.surfaceM,
+        );
+        // oxlint-disable-next-line no-await-in-loop
+        const gpu = await readFrameOutputs(engine, atmosphere);
+        void ordered.later((later) => {
+          const { skyView: skySize, aerialPerspective: volume } = sizes;
+          const texelAt = belowDeckSkyViewTexelsTwin(below, read, view, skySize);
+          const sky = new Float64Array(skySize.widthTexels * skySize.heightTexels * 4);
+          for (let y = 0; y < skySize.heightTexels; y += 1) {
+            for (let x = 0; x < skySize.widthTexels; x += 1) {
+              sky.set([...texelAt(x, y), 1], (y * skySize.widthTexels + x) * 4);
+            }
+          }
+          const reachM = sizes.aerialPerspectiveReachM;
+          const aerial = belowDeckAerialPerspectiveTwin(below, view, volume, reachM);
+          const w = Math.ceil(FRAME_SIZE.widthPx * sizes.rayMarchScale);
+          const h = Math.ceil(FRAME_SIZE.heightPx * sizes.rayMarchScale);
+          const depth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
+          const march = new Float64Array(w * h * 4);
+          for (let y = 0; y < h; y += 1) {
+            for (let x = 0; x < w; x += 1) {
+              march.set(
+                belowDeckMarchTexelTwin(below, view, w, h, reachM, x, y, depth),
+                (y * w + x) * 4,
+              );
+            }
+          }
+          const label = `R08.T15.b.2 R05's Earth beneath a deck, high, ${frame.name}`;
+          for (const [what, held] of [
+            [
+              "the sky view",
+              twinAgreement(
+                gpu.skyView,
+                {
+                  widthTexels: skySize.widthTexels,
+                  heightTexels: skySize.heightTexels,
+                  texels: sky,
+                },
+                false,
+              ),
+            ],
+            ["the aerial perspective", twinAgreement(gpu.aerial, aerial, true)],
+            [
+              "the ray march",
+              twinAgreement(gpu.rayMarch, { widthTexels: w, heightTexels: h, texels: march }, true),
+            ],
+          ] as const) {
+            later.check(
+              `${label}: ${what}, reading the table below, agrees with the CPU twin to 10⁻³`,
+              held.worst <= 1 && held.above > 0,
+              `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
+            );
+          }
+          later.check(
+            `${label}: the composite is finite and within rgba16float's range`,
+            withinHalfRange(composite),
+            withinHalfRange(composite) ? "every channel" : "a channel is not",
+          );
+          return Promise.resolve();
+        });
+      }
+    });
+  } finally {
+    atmosphere.dispose();
+  }
+}
+
 /** {@link checkThickFrameTwinsEarth}'s and {@link checkThickFrameTwinsSaturn}'s frames, in order. */
 async function checkThickTwinBodies(
   engine: RenderEngine,
@@ -3141,10 +3276,17 @@ export function withDeckTable(
   tables: AtmosphereTables,
   slots: number,
   deckAltitudeM: number,
+  below = false,
 ): void {
   const count = Math.max(1, slots);
   tables.setDeckTables(
-    patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), count, deckAltitudeM),
+    patternedDeckTables(
+      tables.plan.bands,
+      kernelMedium(tables.medium),
+      count,
+      deckAltitudeM,
+      below,
+    ),
   );
   // The correction over the deck, brought to the split as the deck's J is.
   const correction = patternedDeckCorrection(
@@ -6992,6 +7134,7 @@ async function checkSurfaceLighting(
   twins: TwinPool,
   surface: SurfaceBody,
   thick = false,
+  deckAltitudeM: number | null = null,
 ): Promise<void> {
   const read = kernelMedium(surface.medium);
   const tables = new AtmosphereTables(
@@ -7005,8 +7148,15 @@ async function checkSurfaceLighting(
     if (thick) {
       withThickTable(tables, surface.curves.length);
     }
+    if (deckAltitudeM !== null) {
+      withDeckTable(tables, surface.curves.length, deckAltitudeM, true);
+    }
     const packed = tables.thickPacked;
-    const label = packed === null ? "" : ", over the thick table";
+    const below = tables.belowDeckPacked;
+    let label = packed === null ? "" : ", over the thick table";
+    if (below !== null) {
+      label = ", over a deck with its table below, its heights above the body's own datum";
+    }
     await inOrder(checks, async (ordered) => {
       const plan = tables.plan;
       const perBand = tables.layersPerBand;
@@ -7070,17 +7220,28 @@ async function checkSurfaceLighting(
             asTwinTable(layerOf(irradiance, layers, b * perBand + slot), IRRADIANCE_SIZE),
           ),
         );
-        const lighting = surfaceLightingTwin(
+        const upper = surfaceLightingTwin(
           planet,
           irradianceTables,
           packedScaleHeightsM(surface.medium),
         );
+        // Over a deck with its table below (R08.T15.b.2), beneath its split the table below's.
+        const lighting =
+          below === null || deckAltitudeM === null
+            ? upper
+            : belowDeckSurfaceLightingTwin(
+                upper,
+                below,
+                plan.bands.map((band) => Math.log(band.gravityRatio)),
+                surface.body.gravity,
+                deckAltitudeM,
+              );
         const expected = expectedLighting(cases, lighting);
         for (const lookup of ["sun", "sky", "source"] as const) {
           const { gpu: probed, twin } = lookupTables(lookups, expected, cases, lookup);
           recordHeights(
             later,
-            "R08.T9.b",
+            below === null ? "R08.T9.b" : "R08.T15.b.2",
             `${surface.name}: surfaceLighting.wgsl's ${lookup} lookup at ${twin.widthTexels} points, over the GPU's tables${label}`,
             twinAgreement(probed, twin, false, { arm: "kernel" }),
             "kernel",
@@ -7112,6 +7273,34 @@ export async function checkSurfaceLightingThickEarth(
   twins: TwinPool,
 ): Promise<void> {
   await checkSurfaceLighting(engine, checks, twins, surfaceEarth(), true);
+}
+
+/**
+ * R08.T15.b.2 on R05's Earth over a deck 3 km up with its table below (`checkSurfaceLighting`): the
+ * tables its upper medium's on the deck's datum, and the lookups at heights above the body's own
+ * datum, beneath the split (0, 1 km, 2.9 km) reading the table below and above it (3.1 km, 30 km)
+ * the tables at h less the split over s, against `tablesCpu.ts`'s `belowDeckSurfaceLightingTwin`.
+ */
+export async function checkSurfaceLightingBelowDeck(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const body = earthBody();
+  await checkSurfaceLighting(
+    engine,
+    checks,
+    twins,
+    {
+      name: "R05's Earth over a deck",
+      body: { ...body, figure: deckDatumOf(body.figure, body.gravity, EARTH_DECK_ALTITUDE_M) },
+      medium: upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M),
+      curves: NO_ABSORBER_CURVES,
+      heightsM: [0, 1_000, 2_900, 3_100, 30_000],
+    },
+    false,
+    EARTH_DECK_ALTITUDE_M,
+  );
 }
 
 /** R08.T9.b on the Saturn-class figure ({@link surfaceSaturn}; `checkSurfaceLighting`). */

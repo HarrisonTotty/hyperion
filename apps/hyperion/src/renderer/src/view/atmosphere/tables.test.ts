@@ -13,6 +13,7 @@ import {
   saturnClassMedium,
   saturnScaleHeightM,
   SUN_TEFF_K,
+  venusClassMedium,
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
@@ -2577,6 +2578,28 @@ describe("the unread column tables at one texel (R08.T11.e)", () => {
       widening: "none",
       over: false,
     });
+  });
+});
+
+// R08.T15.b.2: a routed deck's tables, counted against Design note 11's 2 MB.
+describe("the 2 MB row with a routed deck's tables (R08.T15.b.2)", () => {
+  it("counts the deck's table, 159,744 B a band and light slot, and over a surface its table below, 436,000 B more", () => {
+    const { medium, radiusM } = venusClassMedium();
+    const plan = tablesPlanOf(null, radiusM);
+    const rows = [null, { slots: 2, overSurface: false }, { slots: 2, overSurface: true }].map(
+      (deck) => perPlanetRowOf(medium, NO_ABSORBER_CURVES, plan, "read", 0, deck).deckBytes,
+    );
+    expect(rows).toEqual([0, 2 * 159_744, 2 * (159_744 + 436_000)]);
+  });
+
+  it("holds a Venus-class column under 2 MB with its J above the deck, the deck and the table below, under one light", () => {
+    const { medium, radiusM } = venusClassMedium();
+    const row = perPlanetRowOf(medium, NO_ABSORBER_CURVES, tablesPlanOf(null, radiusM), "read", 1, {
+      slots: 1,
+      overSurface: true,
+    });
+    // Measured 2026-11-01: 1,149,880 B, the base 165,272 B.
+    expect(row.baseBytes + row.thickBytes + row.deckBytes).toBeLessThan(PER_PLANET_ROW_BYTES);
   });
 });
 

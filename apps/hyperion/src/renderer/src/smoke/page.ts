@@ -90,12 +90,14 @@ import {
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkThermalFrameTwins,
+  checkBelowDeckFrameTwins,
   checkDeckFrameTwins,
   checkThickFrameTwinsEarth,
   checkThickFrameTwinsSaturn,
   checkThickMarchSpecialised,
   checkSeveralSuns,
   checkSurfaceLightingEarth,
+  checkSurfaceLightingBelowDeck,
   checkSurfaceLightingSaturn,
   checkSurfaceLightingThickEarth,
   checkUnreadEarth,
@@ -618,6 +620,12 @@ async function run(
   // In part 14 after the deck's catalogue, whose marches it draws by.
   await group(14, "R08.T15.a.2 the deck's march against its twins", () =>
     checkDeckFrameTwins(engine, checks, twins),
+  );
+  await group(14, "R08.T15.b.2 the kernels beneath a deck against their twins", () =>
+    checkBelowDeckFrameTwins(engine, checks),
+  );
+  await group(14, "R08.T15.b.2 the surface's lighting beneath a deck", () =>
+    checkSurfaceLightingBelowDeck(engine, checks, twins),
   );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
   await group(11, "R08.T8.c the far limb's footprint", () =>

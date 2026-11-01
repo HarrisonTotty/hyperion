@@ -109,6 +109,9 @@
 @group(2) @binding(10) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
 @group(2) @binding(11) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(2) @binding(12) var atmosphere_irradiance : texture_2d_array<f32>;
+// The table below a cloud deck over a surface (R08.T15.b.2), or a one-texel stub, past the mesh's
+// coverage mask (13), the normal map (14) and the disc's table (15).
+@group(2) @binding(16) var atmosphere_below_deck : texture_2d_array<f32>;
 
 // The class map's normal map (plan R10, R10.T10.g; `discNormals.ts`): the class map's layout at the
 // field's level, N = 2ᴸ texels a face's side, 32 to 256, (N + 2) × (N + 2) texels a layer, one layer

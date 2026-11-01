@@ -1087,6 +1087,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "atmosphereAbsorberColumns",
       "atmosphereAbsorberCurves",
       "atmosphereAbsorberPressureColumns",
+      "atmosphereBelowDeck",
       "atmosphereBody",
       "atmosphereIrradiance",
       "atmosphereLastAbsorberPressureColumn",

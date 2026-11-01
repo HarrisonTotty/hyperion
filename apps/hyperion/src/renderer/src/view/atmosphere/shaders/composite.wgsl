@@ -98,7 +98,8 @@ struct Draw {
   sourceDisc5 : vec4f,
   // x: the atmosphere's height H above the ground, m, formed in f64; y: how many of the medium's
   // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z: the medium's line slots, the bitmask
-  // `common.wgsl`'s `pressureChannelOf` reads (R08.T4.d); w: unused.
+  // `common.wgsl`'s `pressureChannelOf` reads (R08.T4.d); w: from a camera beneath a cloud deck, the
+  // kernels' vertical optical depth to it in the green channel (R08.T15.b.2), and 0 elsewhere.
   shell : vec4f,
   // The ray march's area, its texels [x, z) x [y, w) of its target (R08.T11.d; `marchArea.ts`'s
   // marchAreaTexels): every texel the march wrote this frame.
@@ -302,6 +303,18 @@ fn transmittanceAcrossFromAbove(
   return mix(centre, mean, blend);
 }
 
+// What lies beyond the air along `dir` from a camera beneath a cloud deck (plan R08, R08.T15.b.2;
+// `tablesCpu.ts`'s belowDeckBehindTwin): e^(-tau / mu) in every channel, tau the kernels' vertical
+// optical depth from the top to the camera in the green channel (`draw.shell.w`, formed in f64), mu
+// the ray's cosine against the zenith, the plane-parallel beam's; 0 at and below the horizontal.
+fn belowDeckBehind(v : AtmosphereView, dir : vec3f) -> vec3f {
+  let mu = dot(dir, v.up.xyz);
+  if (!(mu > 0.0)) {
+    return vec3f(0.0);
+  }
+  return vec3f(exp(-draw.shell.w / mu));
+}
+
 // Whether a ray falls within a source's disc: |d x s| <= sin(rho) with d . s > 0, sin(rho) formed
 // in f64 (Design note 18), and no disc where it is 0.
 fn withinDisc(dir : vec3f, source : SkySource) -> bool {
@@ -445,7 +458,12 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
           inscattered = marched.rgb;
         }
       }
-      behind = transmittanceToSpace(v, body, dir, slotHere);
+      // Beneath a deck (`shell.w` above 0, R08.T15.b.2), through the deck's column.
+      if (draw.shell.w > 0.0) {
+        behind = belowDeckBehind(v, dir);
+      } else {
+        behind = transmittanceToSpace(v, body, dir, slotHere);
+      }
     }
     var luminance = colour * behind + inscattered * factor;
     // Each disc the composite draws, through its own light's transmittance, clamped after
@@ -459,6 +477,8 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
           if (here) {
             toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
           }
+        } else if (draw.shell.w > 0.0) {
+          toSpace = belowDeckBehind(v, dir);
         } else {
           toSpace = transmittanceToSpace(v, body, dir, skySlotOf(source));
         }

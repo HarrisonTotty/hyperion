@@ -24227,3 +24227,21 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     `belowDeckBehindTwin`, `belowDeckSurfaceLightingTwin`. `twin.ts` lifts the refusal below a
     deck's split; it still refuses one below an envelope's. Its `surfaceLighting` over such a deck
     takes heights above the case's own datum. The reads below stand on a sphere.
+  - _The kernels beneath a deck_ (`hillaire.ts`): `SKY_VIEW_BELOW_DECK_KERNEL`,
+    `AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL` and `RAY_MARCH_BELOW_DECK_KERNEL` (`belowDeckKernel`, no
+    medium; `shaders/belowDeck.wgsl`, `belowDeckView.wgsl`). They are drawn where the tables hold a
+    table below and the camera's height above the deck's datum is under 0, made at that first frame
+    (`ThickKernels.belowDeck`). Every thin and thick kernel keeps its digest. R01.T15's bound,
+    `VIEW_KERNELS`, goes 43 → 46. The march takes the surfaces beyond the volume's reach.
+  - _The composite_: `shell.w` holds the camera's green vertical depth beneath a deck (0 elsewhere).
+    What lies beyond the air takes e^(−τ ÷ μ), 0 below the horizontal (`belowDeckBehind`).
+  - _Surface lighting_: an eighth table, `atmosphere_below_deck` (`SurfaceLightingTables.belowDeck`,
+    `AtmosphereTables.belowDeckLighting`, a 1 × 1 `rgba32float` stub without one), at binding 16 on
+    the disc and mesh, 21 on the terrain and 12 in the probe (`surfaceLightingTextures(first,
+belowDeckBinding?)`). Over such a deck the lookups take heights above the body's own datum. With
+    no deck every lookup's arithmetic is as before. The lit passes' digests are re-pinned
+    (`discReflectance.test.ts`).
+  - _The row_: `AtmosphereTables.belowDeckTable`, `belowDeckPacked` and `belowDeckBytes`, in
+    `rowBytes`. `perPlanetRowOf`'s `deck: PerPlanetDeck` gives `deckBytes`. A Venus-class column
+    with its J, deck and table below under one light is 1.15 MB.
+  - _Smoke_: part 14 adds `checkBelowDeckFrameTwins` and `checkSurfaceLightingBelowDeck`.

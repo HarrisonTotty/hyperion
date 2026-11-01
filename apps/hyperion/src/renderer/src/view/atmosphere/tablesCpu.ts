@@ -3611,49 +3611,99 @@ export function belowDeckAerialPerspectiveTwin(
   reachM: number,
 ): TwinVolume {
   const { widthTexels: w, heightTexels: h, slices } = size;
+  const path = belowDeckPathTwin(below, view);
+  const texels = new Float64Array(w * h * slices * 4);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
+      const to = path(direction);
+      for (let slice = 0; slice < slices; slice += 1) {
+        texels.set(to(((slice + 1) * reachM) / slices), ((slice * h + y) * w + x) * 4);
+      }
+    }
+  }
+  return { widthTexels: w, heightTexels: h, slices, texels };
+}
+
+/**
+ * The path's light from a camera beneath a deck (`belowDeckView.wgsl`'s belowDeckPathTo): along a
+ * unit direction, to each distance t, I(h\*_camera, Ω) − T I(h\*_t, Ω) summed over the view's
+ * sources and held at 0, and T's mean over the channels, T = e^(−Δτ) of the path's depth
+ * ({@link belowDeckPathDepthInto}), h_t the height along the ray on the camera's own sphere
+ * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame.
+ */
+export function belowDeckPathTwin(
+  below: TwinBelowDeck,
+  view: TwinView,
+): (direction: Vec3) => (tM: number) => [number, number, number, number] {
   const bottom = view.cameraRadiusM;
   const heightM = view.heightM;
   const fromM = belowDeckHeightStarM(below, heightM);
   const n = view.normal;
   const scratch = belowDeckReadScratch();
   const one: TwinRgb = [0, 0, 0];
-  const atCamera: TwinRgb = [0, 0, 0];
   const atTarget: TwinRgb = [0, 0, 0];
   const depth: TwinRgb = [0, 0, 0];
-  const texels = new Float64Array(w * h * slices * 4);
   const r = bottom + heightM;
   const aboveGround = heightM * (2 * bottom + heightM);
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
-      const mu = direction.x * n.x + direction.y * n.y + direction.z * n.z;
-      belowSkyInto(below, fromM, n, direction, view.sources, scratch, one, atCamera);
-      for (let slice = 0; slice < slices; slice += 1) {
-        const t = ((slice + 1) * reachM) / slices;
-        const rT = Math.sqrt(Math.max(t * t + 2 * r * mu * t + r * r, 0));
-        const heightAlongM = (t * t + 2 * r * mu * t + aboveGround) / (rT + bottom);
-        const toM = belowDeckHeightStarM(below, heightAlongM);
-        belowSkyInto(below, toM, n, direction, view.sources, scratch, one, atTarget);
-        belowDeckPathDepthInto(
-          below.table,
-          below.lnBands,
-          below.gravityRatio,
-          fromM,
-          toM,
-          t,
-          scratch,
-          depth,
-        );
-        const transmitted: TwinRgb = [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
-        const at = ((slice * h + y) * w + x) * 4;
-        for (const c of CHANNELS) {
-          texels[at + c] = Math.max(atCamera[c] - transmitted[c] * atTarget[c], 0);
-        }
-        texels[at + 3] = (transmitted[0] + transmitted[1] + transmitted[2]) / 3;
-      }
-    }
+  return (direction) => {
+    const mu = direction.x * n.x + direction.y * n.y + direction.z * n.z;
+    const atCamera: TwinRgb = [0, 0, 0];
+    belowSkyInto(below, fromM, n, direction, view.sources, scratch, one, atCamera);
+    return (t) => {
+      const rT = Math.sqrt(Math.max(t * t + 2 * r * mu * t + r * r, 0));
+      const heightAlongM = (t * t + 2 * r * mu * t + aboveGround) / (rT + bottom);
+      const toM = belowDeckHeightStarM(below, heightAlongM);
+      belowSkyInto(below, toM, n, direction, view.sources, scratch, one, atTarget);
+      belowDeckPathDepthInto(
+        below.table,
+        below.lnBands,
+        below.gravityRatio,
+        fromM,
+        toM,
+        t,
+        scratch,
+        depth,
+      );
+      const transmitted: TwinRgb = [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
+      return [
+        Math.max(atCamera[0] - transmitted[0] * atTarget[0], 0),
+        Math.max(atCamera[1] - transmitted[1] * atTarget[1], 0),
+        Math.max(atCamera[2] - transmitted[2] * atTarget[2], 0),
+        (transmitted[0] + transmitted[1] + transmitted[2]) / 3,
+      ];
+    };
+  };
+}
+
+/**
+ * The ray march's texel beneath a deck (`rayMarchBelowDeck.wgsl`): at (`x`, `y`) of a target of
+ * `widthTexels` × `heightTexels`, a surface at `depth` (reversed-Z, 0 for the sky) beyond the
+ * aerial-perspective volume's `reachM` takes the path's light to it ({@link belowDeckPathTwin}),
+ * every other texel (0, 0, 0, 1).
+ */
+export function belowDeckMarchTexelTwin(
+  below: TwinBelowDeck,
+  view: TwinView,
+  widthTexels: number,
+  heightTexels: number,
+  reachM: number,
+  x: number,
+  y: number,
+  depth: number,
+): [number, number, number, number] {
+  const u = (x + 0.5) / widthTexels;
+  const v = (y + 0.5) / heightTexels;
+  if (!(depth > 0)) {
+    return [0, 0, 0, 1];
   }
-  return { widthTexels: w, heightTexels: h, slices, texels };
+  const ray = unnormalisedRay(view, u, v);
+  // `view.wgsl`'s distanceAtDepth: near ÷ depth over the cosine between the ray and the forward axis.
+  const tSurface = (view.nearM / depth) * Math.sqrt(ray.x * ray.x + ray.y * ray.y + ray.z * ray.z);
+  if (!(tSurface > reachM)) {
+    return [0, 0, 0, 1];
+  }
+  return belowDeckPathTwin(below, view)(unitRayTwin(view, u, v))(tSurface);
 }
 
 /**

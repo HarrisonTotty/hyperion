@@ -6,7 +6,7 @@
  * `surfaceLighting.wgsl` exports `atmosphere_sun_transmittance`, `atmosphere_sky_irradiance` and
  * `atmosphere_source_transmittance` to R07's disc shading (`view/shaders/bodyDisc.wgsl`), R10's
  * `terrainLit.wgsl` and R11's lit passes. A lit pass composes {@link SURFACE_LIGHTING_WGSL} into
- * its module and declares the seven tables at bindings of its own ({@link surfaceLightingTextures}
+ * its module and declares the eight tables at bindings of its own ({@link surfaceLightingTextures}
  * for a material's layout), binding a body's {@link SurfaceLightingTables}, or, for a body without
  * an atmosphere, {@link createAirlessTables}' one-texel tables of zeros, through which the lookups
  * read 1 and 0, as R07's stubs did. A compute kernel binds them by their WGSL names
@@ -18,16 +18,18 @@ import type { RenderEngine, TextureBindingSpec, TextureHandle } from "../engine/
 import type { Rgb } from "../photometry/toneCurve";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import belowDeckWgsl from "./shaders/belowDeck.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import surfaceLightingWgsl from "./shaders/surfaceLighting.wgsl?raw";
 import type { AtmosphereTables } from "./tables";
 
 /**
  * The WGSL a lit pass composes before its own to read the surface's lighting:
- * `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`. It
- * declares no binding; the pass declares the tables (`surfaceLighting.wgsl`'s head).
+ * `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl`, `belowDeck.wgsl` (R08.T15.b.2) and
+ * `surfaceLighting.wgsl`. It declares no binding; the pass declares the tables
+ * (`surfaceLighting.wgsl`'s head).
  */
-export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblateWgsl}\n${surfaceLightingWgsl}\n`;
+export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblateWgsl}\n${belowDeckWgsl}\n${surfaceLightingWgsl}\n`;
 
 /** A body's atmosphere tables as a lit pass binds them (`surfaceLighting.wgsl`'s head). */
 export interface SurfaceLightingTables {
@@ -42,6 +44,11 @@ export interface SurfaceLightingTables {
   readonly absorberCurves: TextureHandle;
   /** The sky's irradiance, one layer a latitude band and light slot. */
   readonly irradiance: TextureHandle;
+  /**
+   * The table below a cloud deck over a surface (plan R08, R08.T15.b.2; `AtmosphereTables`'
+   * `belowDeckLighting`), or a one-texel stub, which the lookups read as no deck.
+   */
+  readonly belowDeck: TextureHandle;
 }
 
 /**
@@ -60,6 +67,7 @@ export function surfaceLightingTablesOf(tables: AtmosphereTables): SurfaceLighti
     lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
     absorberCurves: tables.absorberCurves,
     irradiance: tables.irradiance(),
+    belowDeck: tables.belowDeckLighting,
   };
 }
 
@@ -93,6 +101,7 @@ const NAMES: Readonly<
     array: false,
   },
   irradiance: { draw: "atmosphereIrradiance", wgsl: "atmosphere_irradiance", array: true },
+  belowDeck: { draw: "atmosphereBelowDeck", wgsl: "atmosphere_below_deck", array: true },
 };
 
 /** The tables in the order their bindings take. */
@@ -104,27 +113,36 @@ const ORDER: ReadonlyArray<keyof SurfaceLightingTables> = [
   "lastAbsorberPressureColumn",
   "absorberCurves",
   "irradiance",
+  "belowDeck",
 ];
 
-/** How many bindings the tables take: seven. */
+/** How many bindings the tables take: eight, the table below a deck's since R08.T15.b.2. */
 export const SURFACE_LIGHTING_BINDINGS = ORDER.length;
 
 /**
  * The tables' entries in a material's layout from binding `first` on, in
  * `surfaceLighting.wgsl`'s order (the body's table, the four transmittance tables, the curves, the
- * irradiance), each read by `textureLoad`, so `unfilterable-float`, the arrays `2d-array`.
+ * irradiance), and the table below a deck (R08.T15.b.2) at `belowDeckBinding`, each read by
+ * `textureLoad`, so `unfilterable-float`, the arrays `2d-array`.
+ *
+ * @param belowDeckBinding - The table below a deck's binding: the next after the seven by default,
+ *   or a pass's own where that one is taken.
  */
-export function surfaceLightingTextures(first: number): ReadonlyArray<TextureBindingSpec> {
+export function surfaceLightingTextures(
+  first: number,
+  belowDeckBinding: number = first + SURFACE_LIGHTING_BINDINGS - 1,
+): ReadonlyArray<TextureBindingSpec> {
   return ORDER.map((key, i) => {
     const { draw, array } = NAMES[key];
+    const binding = key === "belowDeck" ? belowDeckBinding : first + i;
     return array
       ? {
           name: draw,
-          binding: first + i,
+          binding,
           sampleType: "unfilterable-float",
           viewDimension: "2d-array",
         }
-      : { name: draw, binding: first + i, sampleType: "unfilterable-float" };
+      : { name: draw, binding, sampleType: "unfilterable-float" };
   });
 }
 
@@ -170,6 +188,7 @@ export function createAirlessTables(
     lastAbsorberPressureColumn: texture,
     absorberCurves: texture,
     irradiance: texture,
+    belowDeck: texture,
   };
 }
 

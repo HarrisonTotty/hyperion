@@ -938,6 +938,13 @@ const ATMOSPHERE_FIRST_BINDING = 6;
 const SURFACE_NORMALS_BINDING = 14;
 
 /**
+ * The group 2 binding of the body's table below a cloud deck (`bodyDisc.wgsl`'s
+ * `atmosphere_below_deck`, R08.T15.b.2): past the mesh's coverage mask (13), the normal map (14)
+ * and the disc's table (15).
+ */
+const BELOW_DECK_BINDING = 16;
+
+/**
  * The disc's textures: the frame's phase table, its class map (any texture where uniform), its
  * body's atmosphere tables at bindings 6 to 12 (plan R08, R08.T9.b), the one-texel defaults for a
  * body without one, and its class map's normal map at binding 14 (plan R10, R10.T10.g), any
@@ -946,7 +953,7 @@ const SURFACE_NORMALS_BINDING = 14;
 const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
   { name: "classWeights", binding: 2, viewDimension: "2d-array" },
-  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING),
+  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING, BELOW_DECK_BINDING),
   { name: "surfaceNormals", binding: SURFACE_NORMALS_BINDING, viewDimension: "2d-array" },
 ];
 

@@ -11,9 +11,19 @@
 //     `texture_2d_array<f32>`, the transmittance tables, one layer a κ slice;
 //   - `atmosphere_absorber_curves : texture_2d<f32>`, the lights' curves of growth;
 //   - `atmosphere_irradiance : texture_2d_array<f32>`, the sky's irradiance, one layer a latitude
-//     band and light slot (`irradiance.wgsl`).
+//     band and light slot (`irradiance.wgsl`);
+//   - `atmosphere_below_deck : texture_2d_array<f32>`, the table below a cloud deck over a surface
+//     (plan R08, R08.T15.b.2; `belowDeck.wgsl`), or a one-texel stub where the body has none.
 // A body without an atmosphere binds one-texel tables of zeros, whose body table's a of 0 says so:
 // the sun's transmittance is then 1 and the sky's irradiance 0, as R07's stubs were.
+//
+// Beneath a cloud deck (R08.T15.b.2), where the bound table below a deck holds one, the lookups take
+// the caller's height above the body's own datum, which the tables' datum, the deck's level surface,
+// lies the split's h* over: a point whose h* = s h is under the split's reads the table below, the
+// sky's irradiance its downward flux the kernels' beam leaves out and a source's transmittance the
+// kernels' beam through the column (`belowDeck.wgsl`'s belowDeckLightAt), and a point above it the
+// tables at h less the split's h* over s. With no deck the split is 0 and every lookup is as before.
+// Composed after `belowDeck.wgsl` too.
 //
 // Every lookup takes the caller's geodetic height above the datum (R05 Design note 5: a baked or
 // interpolated height, never |P| − R), the source's direction cosine against the datum's normal,
@@ -100,6 +110,25 @@ fn atmosphereDirection(place : SurfacePlace, mu : f32, azimuthRad : f32) -> vec3
   return m * place.start.normal + horizontal * (azimuth.y * place.north + azimuth.x * place.east);
 }
 
+// The lit point beneath a cloud deck (R08.T15.b.2): its h* and s where the bound table below a deck
+// holds one and the point's h* = s h lies under the split's, else (-1, s).
+fn atmosphereBelowDeckPlace(body : OblateBody, altitude_m : f32, latitude_rad : f32) -> vec2f {
+  let latitude = atmosphereSinCos(clamp(latitude_rad, -TRIG_HALF_PI, TRIG_HALF_PI));
+  let s = gravityRatioAt(body, latitude.x * latitude.x);
+  let split = belowDeckSplitOf(atmosphere_below_deck);
+  let z = s * altitude_m;
+  if (split > 0.0 && z < split) {
+    return vec2f(max(z, 0.0), s);
+  }
+  return vec2f(-1.0, s);
+}
+
+// A lit point's height over the tables' datum: its height above the body's own less the split's h*
+// over s, the deck's level surface's height there (R08.T15.b.2); itself with no deck.
+fn atmosphereAboveDeck(altitude_m : f32, s : f32) -> f32 {
+  return altitude_m - belowDeckSplitOf(atmosphere_below_deck) / s;
+}
+
 // The light slot a lookup reads: `curve`, held to the body's light slots (its multiple-scattering
 // and irradiance layers a band; one for a medium with no absorber, which reads no curve).
 fn atmosphereSlot(body : OblateBody, curve : u32) -> u32 {
@@ -141,7 +170,13 @@ fn atmosphere_sun_transmittance(
   if (!atmosphereHasAir(body)) {
     return vec3f(1.0);
   }
-  let place = atmosphereSurfacePlace(body, altitude_m, latitude_rad);
+  let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
+  if (below.x >= 0.0) {
+    return belowDeckLightAt(
+      atmosphere_below_deck, body, atmosphere_body, below.y, below.x, mu_sun, curve
+    ).sun;
+  }
+  let place = atmosphereSurfacePlace(body, atmosphereAboveDeck(altitude_m, below.y), latitude_rad);
   return atmosphereTransmittanceAlong(
     body, place, atmosphereDirection(place, mu_sun, sun_azimuth_rad), curve
   );
@@ -163,9 +198,16 @@ fn atmosphere_sky_irradiance(
   if (!atmosphereHasAir(body)) {
     return vec3f(0.0);
   }
-  let latitude = atmosphereSinCos(clamp(latitude_rad, -TRIG_HALF_PI, TRIG_HALF_PI));
-  let s = gravityRatioAt(body, latitude.x * latitude.x);
-  let unit = vec2f(mu_sun * 0.5 + 0.5, sqrt(max(s * altitude_m, 0.0) / body.counts.w));
+  let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
+  if (below.x >= 0.0) {
+    return belowDeckLightAt(
+      atmosphere_below_deck, body, atmosphere_body, below.y, below.x, mu_sun, curve
+    ).sky;
+  }
+  let s = below.y;
+  let unit = vec2f(
+    mu_sun * 0.5 + 0.5, sqrt(max(s * atmosphereAboveDeck(altitude_m, s), 0.0) / body.counts.w)
+  );
   return bandTableAt(
     body, atmosphere_body, atmosphere_irradiance, clamp(unit, vec2f(0.0), vec2f(1.0)), s,
     atmosphereSlot(body, curve)
@@ -192,7 +234,8 @@ fn atmosphere_source_transmittance(
   if (!atmosphereHasAir(body)) {
     return vec3f(1.0);
   }
-  let place = atmosphereSurfacePlace(body, altitude_m, latitude_rad);
+  let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
+  let place = atmosphereSurfacePlace(body, atmosphereAboveDeck(altitude_m, below.y), latitude_rad);
   let centre = atmosphereDirection(place, mu_centre, azimuth_rad);
   let n = place.start.normal;
   // The disc's vertical diameter: the unit direction across the centre towards the zenith.
@@ -216,7 +259,14 @@ fn atmosphere_source_transmittance(
       continue;
     }
     let w = SOURCE_NODE_WEIGHTS[k] * mu;
-    sum += w * atmosphereTransmittanceAlong(body, place, nodes[k], curve);
+    // Beneath a deck each node's the table below's beam at its cosine (R08.T15.b.2).
+    if (below.x >= 0.0) {
+      sum += w * belowDeckLightAt(
+        atmosphere_below_deck, body, atmosphere_body, below.y, below.x, mu, curve
+      ).sun;
+    } else {
+      sum += w * atmosphereTransmittanceAlong(body, place, nodes[k], curve);
+    }
     total += w;
   }
   if (!(total > 0.0)) {

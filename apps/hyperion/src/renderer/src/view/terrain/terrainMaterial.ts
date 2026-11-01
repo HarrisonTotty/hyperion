@@ -132,6 +132,8 @@ export const TERRAIN_LIT_BINDINGS = {
   shadowCascades: 19,
   /** The comparison sampler that reads them, a `sampler_comparison` (R10.T9.b). */
   shadowCompare: 20,
+  /** The table below a cloud deck over a surface, R08's surface lighting's eighth (R08.T15.b.2). */
+  belowDeck: 21,
 } as const;
 
 /**
@@ -236,7 +238,7 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
     textures: [
       { name: "normals", binding: b.normals, viewDimension: "2d-array" },
       { name: "phaseFactorTable", binding: b.phaseFactorTable, sampleType: "unfilterable-float" },
-      ...surfaceLightingTextures(b.atmosphere),
+      ...surfaceLightingTextures(b.atmosphere, b.belowDeck),
       {
         name: SHADOW_CASCADES_TEXTURE,
         binding: b.shadowCascades,

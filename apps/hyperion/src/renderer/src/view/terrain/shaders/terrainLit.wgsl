@@ -120,6 +120,8 @@
 @group(2) @binding(13) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
 @group(2) @binding(14) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(2) @binding(15) var atmosphere_irradiance : texture_2d_array<f32>;
+// The table below a cloud deck over a surface (R08.T15.b.2), or a one-texel stub, past the shadows'.
+@group(2) @binding(21) var atmosphere_below_deck : texture_2d_array<f32>;
 
 // A palette's slots (`hyperion_surface`'s `MAX_CLASSES`), and the laws a texel shades with: law 0
 // and one per slot.

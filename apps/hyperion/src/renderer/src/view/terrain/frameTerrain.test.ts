@@ -291,6 +291,7 @@ describe("a body's terrain lights from its disc record (R10.T16.c; decision D5)"
       lastAbsorberPressureColumn: texture("last absorber pressure column"),
       absorberCurves: texture("absorber curves"),
       irradiance: texture("irradiance"),
+      belowDeck: texture("below deck"),
     };
     const { lighting } = terrainLightingOf({ ...record, atmosphere }, ROTATION, EXPOSURE);
     expect(lighting.atmosphere).toBe(atmosphere);

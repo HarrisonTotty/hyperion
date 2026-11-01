@@ -9,7 +9,7 @@
  * dispatches it and compares the read-back results with `brdf` (T4.c) and with
  * `sphereIrradianceFactor` and `annulusVisibleFraction` (T6.c), and with `planetshineIrradiance`
  * (T11). Since R08.T9.b the kernel composes R08's `surfaceLighting.wgsl` in place of the stubs it
- * replaced, with its tables at group 0 bindings 5 to 11: the hooks' case holds R11's ring-shadow
+ * replaced, with its tables at group 0 bindings 5 to 12: the hooks' case holds R11's ring-shadow
  * stub and R08's lookups against a body's lighting reader ({@link expectedLighting}), and the
  * `atmosphere` cases each of R08's three lookups, which `smoke/atmosphere.ts` holds against the
  * tables' twin (`tablesCpu.ts`'s `surfaceLightingTwin`) and `smoke/litBody.ts` against a body
@@ -364,7 +364,7 @@ export function expectedLighting(
  * The probe kernel: `body_brdf` at each BRDF case (r, g, b and 0 per result), and the lighting
  * terms, the hooks, planetshine's irradiance or an R08 lookup at each lighting case (up to three
  * values per result). It composes R08's surface lighting (`SURFACE_LIGHTING_WGSL`, R08.T9.b) and
- * declares its tables at group 0 bindings 5 to 11, by `surfaceLighting.wgsl`'s names.
+ * declares its tables at group 0 bindings 5 to 12, by `surfaceLighting.wgsl`'s names.
  */
 export const LIT_BODY_PROBE: KernelPair = {
   name: "R07 lit body twin",
@@ -407,6 +407,7 @@ struct LightingCase {
 @group(0) @binding(9) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
 @group(0) @binding(10) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(0) @binding(11) var atmosphere_irradiance : texture_2d_array<f32>;
+@group(0) @binding(12) var atmosphere_below_deck : texture_2d_array<f32>;
 
 fn run_lighting(index : u32) {
   let c = lighting_cases[index];
