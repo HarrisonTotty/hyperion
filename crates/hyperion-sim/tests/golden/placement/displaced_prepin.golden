@@ -1,8 +1,8 @@
-# generator_version = 24
+# generator_version = 25
 # galaxy mw, 0308d00000000000
 # sun.D: layer D cell (0, 406, 0), 64 ly
-sun.D.bound_per_ly3 = 0x3f0ffec69047aa42  # 6.10260340499669e-5
-sun.D.density_at_centre_per_ly3 = 0x3f0f99e6b3e31ea5  # 6.027446078032726e-5
+sun.D.bound_per_ly3 = 0x3f0ffec69047aa5e  # 6.102603404996709e-5
+sun.D.density_at_centre_per_ly3 = 0x3f0f99d99ea5ff1d  # 6.027408001596359e-5
 sun.D.candidates = 16
 sun.D.systems = 16
 sun.D.digest = 0x3fa5437f88555dcc
@@ -14,8 +14,8 @@ sun.D.share[4] = 0x3fa18459ff877c31  # 0.03421288723233607
 sun.D.share[5] = 0x3fa18459ff877c31  # 0.03421288723233607
 sun.D.share[6] = 0x3fa18459ff877c31  # 0.03421288723233607
 # sun.E: layer E cell (0, 203, 0), 128 ly
-sun.E.bound_per_ly3 = 0x3ef1b8afc9fa9e1b  # 1.6900474860163683e-5
-sun.E.density_at_centre_per_ly3 = 0x3ef13dcb9a6302fe  # 1.64426689017753e-5
+sun.E.bound_per_ly3 = 0x3ef1b8afc9fa9e2a  # 1.6900474860163734e-5
+sun.E.density_at_centre_per_ly3 = 0x3ef13dc07f499244  # 1.644250729028659e-5
 sun.E.candidates = 28
 sun.E.systems = 28
 sun.E.digest = 0x8ecdd63f78962ba5
@@ -26,6 +26,6 @@ sun.E.share[3] = 0x3f83602ef4e46645  # 0.009460799072758106
 sun.E.share[4] = 0x3f83602ef4e46645  # 0.009460799072758106
 sun.E.share[5] = 0x3f83602ef4e46645  # 0.009460799072758106
 sun.E.share[6] = 0x3f83602ef4e46645  # 0.009460799072758106
-sphere_50ly.D = 0x403fb7f35cfde823  # 31.718557178486787
-sphere_50ly.E = 0x40218ac6e1817d9e  # 8.771048590714425
+sphere_50ly.D = 0x403fb7ec858cc25a  # 31.718452784409557
+sphere_50ly.E = 0x40218ac318dcd353  # 8.771019722896801
 face_on.all_systems_per_ly2 = 0x40116f2409bd4e86  # 4.358535911731115
