@@ -550,7 +550,26 @@ where
     F: FnOnce(&CancelToken) -> T + Send + 'static,
     T: Send + 'static,
 {
-    received(pool.submit(Priority::Bulk, token.clone(), job).await?).await
+    queued(pool, Priority::Bulk, token, job).await
+}
+
+/// Runs `job` at `priority` under `token` and waits for it, waiting for a place in its queue
+/// first: [`bulk`] at any priority.
+///
+/// # Errors
+///
+/// As [`bulk`], and [`ComputeError::Submit`] never for a full queue, since it waits for a place.
+pub(crate) async fn queued<F, T>(
+    pool: &CpuPool,
+    priority: Priority,
+    token: &CancelToken,
+    job: F,
+) -> Result<T, ComputeError>
+where
+    F: FnOnce(&CancelToken) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    received(pool.submit(priority, token.clone(), job).await?).await
 }
 
 /// What a job sent back, or why it sent nothing.

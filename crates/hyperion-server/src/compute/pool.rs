@@ -1,17 +1,21 @@
-//! The CPU pool: plain worker threads fed by two bounded queues.
+//! The CPU pool: plain worker threads fed by three bounded queues.
 //!
 //! Generation is CPU work that must never run on the async runtime, and a running
 //! `spawn_blocking` task cannot be stopped, so it runs here (plan 04, design note 21). The pool is
-//! hand-written rather than rayon, whose queue is unbounded. There are two queues:
+//! hand-written rather than rayon, whose queue is unbounded. There are three queues:
 //!
 //! - [`Priority::Interactive`]: range queries, galaxy builds, parameter reads and the alert scans'
 //!   interactive walks. Workers always take interactive work first, and a submission that finds
 //!   the queue full fails at once with [`SubmitJobError::QueueFull`], so that a client hears
 //!   `queue_full` rather than waiting; an alert scan, which no request waits on, waits for a slot
 //!   instead (plan 12, P12.T8.b).
-//! - [`Priority::Bulk`]: density map bands, and the alert scans' background walks in chunks of
-//!   cells. A submission waits for a slot, so a map cannot delay a chart by more than the band a
-//!   worker is running.
+//! - [`Priority::Bulk`]: density map bands, the alert scans' background walks in chunks of cells,
+//!   and the coarse surface passes asked for. A submission waits for a slot, so a map cannot delay
+//!   a chart by more than the band a worker is running.
+//! - [`Priority::Background`]: work started before anyone asks, the surface prefetch's plans and
+//!   passes (rendering plan R09, R09.T17), taken only when neither other queue holds a job, so
+//!   that an asked pass queued after a prefetched one is taken first. It is as deep as the bulk
+//!   queue, and a submission waits for a slot.
 //!
 //! Each queue is bounded by a [`Semaphore`]. A job holds a permit while it waits, and the permit
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs
@@ -23,9 +27,9 @@
 //! leaves it (plan R04, design note 15). A failed probe at start stops the pool from starting; a
 //! failed probe after a job faults the pool, which then refuses all work.
 //!
-//! A test can hold the bulk jobs at a known point with a [`BulkGate`]
-//! ([`CpuPool::with_bulk_gate`]), so that it asserts the order the workers take jobs in rather than
-//! a margin of time.
+//! A test can hold the bulk and background jobs at a known point with a [`BulkGate`]
+//! ([`CpuPool::with_bulk_gate`]), so that it asserts the order the workers take jobs in rather
+//! than a margin of time.
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -49,6 +53,9 @@ pub enum Priority {
     Interactive,
     /// Background work that may wait: taken when no interactive work is queued.
     Bulk,
+    /// Work started before anyone asks for it: taken only when no interactive or bulk work is
+    /// queued.
+    Background,
 }
 
 impl Priority {
@@ -58,6 +65,7 @@ impl Priority {
         match self {
             Self::Interactive => "interactive",
             Self::Bulk => "bulk",
+            Self::Background => "background",
         }
     }
 }
@@ -206,6 +214,7 @@ pub type JobReceiver<T> = oneshot::Receiver<Result<T, JobError>>;
 pub struct PoolCounters {
     queued_interactive: usize,
     queued_bulk: usize,
+    queued_background: usize,
     running: usize,
     completed: u64,
     cancelled: u64,
@@ -223,6 +232,12 @@ impl PoolCounters {
     #[must_use]
     pub fn queued_bulk(&self) -> usize {
         self.queued_bulk
+    }
+
+    /// Background jobs waiting for a worker.
+    #[must_use]
+    pub fn queued_background(&self) -> usize {
+        self.queued_background
     }
 
     /// Jobs a worker is running now.
@@ -252,7 +267,7 @@ impl PoolCounters {
     }
 }
 
-/// A fixed set of worker threads fed by an interactive and a bulk queue.
+/// A fixed set of worker threads fed by an interactive, a bulk and a background queue.
 ///
 /// [`CpuPool::shutdown`] is the teardown: it drops queued jobs and joins the workers. Dropping the
 /// pool without it only tells the workers to stop; they finish the job in hand and exit on their
@@ -274,6 +289,7 @@ pub struct CpuPool {
     shared: Arc<Shared>,
     interactive: Arc<Semaphore>,
     bulk: Arc<Semaphore>,
+    background: Arc<Semaphore>,
     /// Shared with the blocking task that joins them, which holds the lock until every worker has
     /// exited.
     workers: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -282,8 +298,8 @@ pub struct CpuPool {
 }
 
 impl CpuPool {
-    /// Starts `workers` threads named `hyperion-cpu-N`, with room for `interactive_capacity` and
-    /// `bulk_capacity` queued jobs.
+    /// Starts `workers` threads named `hyperion-cpu-N`, with room for `interactive_capacity`
+    /// queued interactive jobs and `bulk_capacity` each of bulk and background ones.
     ///
     /// # Errors
     ///
@@ -326,8 +342,9 @@ impl CpuPool {
         Self::start(workers, interactive_capacity, bulk_capacity, probe, None)
     }
 
-    /// [`CpuPool::new`] with every bulk job, once a worker has taken it, waiting at `gate` before
-    /// it runs: for a test that holds the bulk work while it queues other work ([`BulkGate`]).
+    /// [`CpuPool::new`] with every bulk or background job, once a worker has taken it, waiting at
+    /// `gate` before it runs: for a test that holds the bulk work while it queues other work
+    /// ([`BulkGate`]).
     ///
     /// # Errors
     ///
@@ -406,6 +423,7 @@ impl CpuPool {
             shared,
             interactive: Arc::new(Semaphore::new(interactive_capacity.get())),
             bulk: Arc::new(Semaphore::new(bulk_capacity.get())),
+            background: Arc::new(Semaphore::new(bulk_capacity.get())),
             workers: Arc::new(Mutex::new(handles)),
             worker_count: workers,
         })
@@ -498,6 +516,7 @@ impl CpuPool {
     pub async fn shutdown(&self) -> Result<(), ShutDownPoolError> {
         self.interactive.close();
         self.bulk.close();
+        self.background.close();
         let dropped = self.shared.stop();
         let dropped_jobs = dropped.len();
         // Dropping a queued job sends its receiver `ShutDown`.
@@ -528,6 +547,7 @@ impl CpuPool {
         match priority {
             Priority::Interactive => &self.interactive,
             Priority::Bulk => &self.bulk,
+            Priority::Background => &self.background,
         }
     }
 
@@ -563,6 +583,7 @@ impl CpuPool {
                 match priority {
                     Priority::Interactive => state.interactive.push_back(queued),
                     Priority::Bulk => state.bulk.push_back(queued),
+                    Priority::Background => state.background.push_back(queued),
                 }
                 state.refresh_depths();
                 None
@@ -597,7 +618,8 @@ impl Drop for CpuPool {
 }
 
 /// A test's hold on a pool's bulk jobs ([`CpuPool::with_bulk_gate`]): while it is closed, each
-/// bulk job a worker takes waits before it runs until the test admits it, one at a time.
+/// bulk job a worker takes waits before it runs until the test admits it, one at a time. A
+/// background job counts as a bulk job here.
 ///
 /// It is open when made. A worker holding a job at the closed gate counts it as running, as it
 /// would be, so the pool's counters read as they do while the job runs. A pool that stops opens its
@@ -711,7 +733,7 @@ struct Shared {
     available: Condvar,
     /// Checks a worker's floating-point mode: [`probe_flush_to_zero`] except in tests.
     probe: fn() -> FlushProbe,
-    /// Where a taken bulk job waits before it runs: a test's, or none.
+    /// Where a taken bulk or background job waits before it runs: a test's, or none.
     gate: Option<BulkGate>,
 }
 
@@ -719,6 +741,7 @@ struct Shared {
 struct State {
     interactive: VecDeque<Queued>,
     bulk: VecDeque<Queued>,
+    background: VecDeque<Queued>,
     stopping: bool,
     /// A worker's probe failed after a job: no job runs and no submission is taken any more.
     faulted: bool,
@@ -729,6 +752,7 @@ impl State {
     fn refresh_depths(&mut self) {
         self.counters.queued_interactive = self.interactive.len();
         self.counters.queued_bulk = self.bulk.len();
+        self.counters.queued_background = self.background.len();
     }
 }
 
@@ -766,6 +790,7 @@ impl Shared {
         state.stopping = true;
         let mut dropped: Vec<_> = state.interactive.drain(..).collect();
         dropped.extend(state.bulk.drain(..));
+        dropped.extend(state.background.drain(..));
         state.refresh_depths();
         drop(state);
         self.available.notify_all();
@@ -773,8 +798,8 @@ impl Shared {
         dropped
     }
 
-    /// Waits for the next job, interactive first, or `None` once the pool is stopping, with
-    /// whether it may run or must be refused because the pool is faulted.
+    /// Waits for the next job, interactive first and background last, or `None` once the pool is
+    /// stopping, with whether it may run or must be refused because the pool is faulted.
     fn next(&self) -> Option<(Queued, Admission)> {
         let mut state = self.lock();
         loop {
@@ -784,7 +809,8 @@ impl Shared {
             let next = state
                 .interactive
                 .pop_front()
-                .or_else(|| state.bulk.pop_front());
+                .or_else(|| state.bulk.pop_front())
+                .or_else(|| state.background.pop_front());
             if let Some(queued) = next {
                 state.refresh_depths();
                 state.counters.running += 1;
@@ -983,7 +1009,7 @@ fn work(shared: &Shared) {
     {
         // The queue slot is free as soon as a worker holds the job.
         drop(permit);
-        if priority == Priority::Bulk
+        if priority != Priority::Interactive
             && let Some(gate) = &shared.gate
         {
             gate.pass();
@@ -1162,6 +1188,80 @@ mod tests {
             ["interactive 1", "interactive 2", "bulk 1", "bulk 2"]
         );
         pool.shutdown().await.unwrap();
+    }
+
+    /// Background work queued before bulk and interactive work runs after both, in its own order
+    /// (rendering plan R09, R09.T17: a prefetched pass never runs ahead of an asked one).
+    #[tokio::test]
+    async fn background_work_queued_first_runs_after_bulk_and_interactive_work() {
+        let pool = pool(1, 4, 4);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let held = hold(&pool).await;
+        let mut receivers = Vec::new();
+        for (priority, label) in [
+            (Priority::Background, "background 1"),
+            (Priority::Background, "background 2"),
+            (Priority::Bulk, "bulk"),
+        ] {
+            let job = record(&log, label);
+            receivers.push(
+                pool.submit(priority, CancelToken::new(), job)
+                    .await
+                    .unwrap(),
+            );
+        }
+        let job = record(&log, "interactive");
+        receivers.push(
+            pool.try_submit(Priority::Interactive, CancelToken::new(), job)
+                .unwrap(),
+        );
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                counters.queued_background(),
+                counters.queued_bulk(),
+                counters.queued_interactive()
+            ),
+            (2, 1, 1)
+        );
+        held.release().await;
+        for receiver in receivers {
+            assert_eq!(result(receiver).await, Ok(()));
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["interactive", "bulk", "background 1", "background 2"]
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A background job still queued at shutdown is dropped unrun, and its queue refuses more.
+    #[tokio::test]
+    async fn a_shutdown_drops_queued_background_work() {
+        let pool = Arc::new(pool(1, 4, 4));
+        let held = hold(&pool).await;
+        let background = pool
+            .submit(Priority::Background, CancelToken::new(), |_| ())
+            .await
+            .unwrap();
+        let shutting_down = tokio::spawn({
+            let pool = Arc::clone(&pool);
+            async move { pool.shutdown().await }
+        });
+        assert_eq!(result(background).await, Err(JobError::ShutDown));
+        assert_eq!(pool.counters().queued_background(), 0);
+        assert_eq!(
+            pool.submit(Priority::Background, CancelToken::new(), |_| ())
+                .await
+                .unwrap_err(),
+            SubmitJobError::ShutDown
+        );
+        held.release().await;
+        timeout(WAIT, shutting_down)
+            .await
+            .expect("timed out shutting down")
+            .unwrap()
+            .unwrap();
     }
 
     /// Waits until `gate` holds one job.

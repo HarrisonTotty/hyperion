@@ -346,9 +346,10 @@ impl Harness {
                 outbound.held_requests(),
                 pool.queued_interactive(),
                 pool.queued_bulk(),
+                pool.queued_background(),
                 pool.running(),
             ),
-            (0, 0, 0, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0),
             "something outlived the server: {stats:?}"
         );
         assert_eq!(

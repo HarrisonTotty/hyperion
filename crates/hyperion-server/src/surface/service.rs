@@ -38,7 +38,7 @@ use tokio::task::{AbortHandle, JoinSet};
 
 use super::{FieldCache, FieldKey, InputsSource};
 use crate::cache::LruCounters;
-use crate::compute::sky::bulk;
+use crate::compute::sky::queued;
 use crate::compute::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, GeneratedSystem, JobError,
     Priority, SingleFlight, SubmitJobError, panic_message,
@@ -553,18 +553,22 @@ impl Fields {
             // Waited for before the job is queued, so that a pass past the bound holds no place in
             // the bulk queue (R09.T17.a), and counted in `waited_ms`. Tokio's acquire is
             // cancel-safe: a flight whose every waiter goes while it waits drops the wait, and its
-            // pass never runs, as a queued job is skipped.
-            let permit = match turn {
-                Turn::Asked => PassPermit::new(
-                    passes
-                        .acquire_owned()
-                        .await
-                        .expect("the service never closes its passes' semaphore"),
-                    released,
+            // pass never runs, as a queued job is skipped. A prefetched pass is queued behind every
+            // asked one, in the background queue (R09.T17).
+            let (permit, priority) = match turn {
+                Turn::Asked => (
+                    PassPermit::new(
+                        passes
+                            .acquire_owned()
+                            .await
+                            .expect("the service never closes its passes' semaphore"),
+                        released,
+                    ),
+                    Priority::Bulk,
                 ),
-                Turn::Prefetched(permit) => permit,
+                Turn::Prefetched(permit) => (permit, Priority::Background),
             };
-            let (field, pass) = bulk(&pool, &token, move |_: &CancelToken| {
+            let (field, pass) = queued(&pool, priority, &token, move |_: &CancelToken| {
                 // The job holds the permit, not the flight, so that it is freed when the job ends
                 // however it ends: run to its end, or panicked (dropped as the pool's
                 // `catch_unwind` unwinds), or dropped unrun (cancelled, refused, or with the pool).
@@ -631,7 +635,8 @@ enum Turn {
     /// Asked for (a request's [`SurfaceService::field`], or `survey_pass`'s
     /// [`SurfaceService::prefetch`]): the flight waits for its permit in the semaphore's queue.
     Asked,
-    /// Started by a system's prefetch with the permit it took ([`prefetch_permit`]).
+    /// Started by a system's prefetch with the permit it took ([`prefetch_permit`]); its job is
+    /// queued at [`Priority::Background`], behind every asked pass's.
     Prefetched(PassPermit),
 }
 
@@ -802,9 +807,14 @@ async fn prefetch_nearest(
     // Cancels the plan's job, if still queued, once the prefetch is given up.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
     let (source, planned) = (Arc::clone(&fields.source), Arc::clone(&system));
-    let plan = match bulk(&fields.pool, &token, move |token: &CancelToken| {
-        nearest_modelled(source.as_ref(), galaxy, &planned, near, t, token)
-    })
+    let plan = match queued(
+        &fields.pool,
+        Priority::Background,
+        &token,
+        move |token: &CancelToken| {
+            nearest_modelled(source.as_ref(), galaxy, &planned, near, t, token)
+        },
+    )
     .await
     {
         Ok(plan) => plan,
@@ -1320,6 +1330,7 @@ mod tests {
     use tokio::time::timeout;
 
     use super::*;
+    use crate::compute::sky::bulk;
     use crate::compute::{FlushProbe, GalaxyKey, JobReceiver, Priority};
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
     use crate::testing::WAIT;
@@ -2280,6 +2291,68 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
+    /// With every worker busy, an asked pass queued after a prefetched one is taken first: the
+    /// prefetched pass waits in the background queue, and the first worker freed takes the asked
+    /// pass from the bulk queue (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn an_asked_pass_queued_after_a_prefetched_one_runs_first_with_every_worker_busy() {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "a prefetched pass runs and the next waits in the background queue",
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
+        )
+        .await;
+        let asked = order[5];
+        let asking = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(asked, &crowded().0).await })
+        };
+        until("the asked pass is queued", || {
+            pool.counters().queued_bulk() == 1
+        })
+        .await;
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the asked pass runs", || source.entered(asked) == 2).await;
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(order[2]),
+                counters.queued_background(),
+                counters.running()
+            ),
+            (1, 1, 2),
+            "the prefetched pass still waits: {counters:?}"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        timeout(WAIT, asking).await.unwrap().unwrap().unwrap();
+        until("the prefetched pass runs", || source.entered(order[2]) == 2).await;
+        drop(prefetch);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
     /// A system's prefetch dropped gives up its passes: one queued is skipped and one running is
     /// not kept, so that only the field it had before stays, and the next body is never read past
     /// the plan (rendering plan R09, R09.T17).
@@ -2308,7 +2381,7 @@ mod tests {
         source.open(order[0]);
         until(
             "one pass runs and one is queued behind the held worker",
-            || source.entered(order[1]) == 2 && pool.counters().queued_bulk() == 1,
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
         )
         .await;
         drop(prefetch);
