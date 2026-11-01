@@ -10038,5 +10038,22 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (`discLuminanceAboveRgb`), not above 65,504: the Provides' "cd/m² above 65,504" changes.
     `discExcessLuminanceRgb` is gone. An eye view's sources fade over the reach's last 10°
     (`EYE_GLARE_FADE_RAD`, `eyeGlareShare`); each source takes the share of its disc the frame's
-    bodies leave the camera (`glareSources`' `occluders` and `annuli`). Air between is not taken.
+    bodies leave the camera (`glareSources`' `occluders` and `annuli`).
+  - _The glare through the air between_ (2026-11-02, the setting Sun's halo). A host disc's glare
+    sources take its light as the air between dims it, through every atmosphere the frame draws
+    (`frameGlareAir`, `glareSources`' new `air`, `GlareAirOf`, `NO_AIR`): `view/post/glareAir.ts`
+    marches the tables' oracle (`opticalDepth.ts`, whose `amountAlong` is now exported) along each
+    line of sight, each absorber through the star's light slot's curves, slot 0's for a star
+    outside the body's lights as the composite reads it, on the tables' figure, to the star or the
+    air's top, 0 where the line meets the datum (`glareLineAir`). Where the two limbs' optical
+    depths differ by over 0.05 or the ground cuts the disc, the disc is integrated across, 16
+    Gauss–Legendre lines along the body's vertical on the span that clears the ground and 8 points
+    along each chord (`glareDiscAir`, `discLightThroughAir`), within 1% of a 48 × 48 brute force
+    from 5° to −0.1°; its excess is the dimmed disc's above the threshold
+    (`discLuminanceAboveThroughRgb` where the air is the same across it). The science check
+    (2026-11-02) found the first form, one line through the centre raised by the disc's radius
+    where it met the ground, at 0.45/0.33/0.15 of the disc's light at 0° and 2.6 to 5.5 times it
+    just below. Not taken: a cloud deck's table, the gravity bands' scale heights and refraction,
+    as the composite takes none of them for the disc; the ground the lines meet is the datum, the
+    share's the body's sphere.
   - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
