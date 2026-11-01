@@ -354,7 +354,7 @@ impl<'a> GlobalListSource<'a> {
     /// The streams of `list`, `galaxy`'s global list, whose tube tables the source reads to answer
     /// a range query of `query`, in number order: those whose shells its sphere meets at its time,
     /// padded at [`UNBOUND_PAD_SPEED`] as its hits are, which holds every stream its census at the
-    /// epoch reads too; under [`StreamShellRules::Unbounded`] every stream.
+    /// epoch reads too; under the held shell rule (`StreamShellRules::Unbounded`) every stream.
     ///
     /// A caller that builds tables off the query's own thread, as a server's pool does, builds
     /// these before it asks, so that the query reads no table cold.

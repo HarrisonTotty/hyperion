@@ -148,7 +148,7 @@ impl ServedQuery {
     /// The same query reading the global list through `list`, the galaxy's list and tube tables:
     /// from generator version 27 the list's members, the centre's among them, are served beside
     /// the grid in place of the centre's bare source (P10.T10.b's registration, P09.T37.b), and
-    /// below it `list` is read for nothing ([`beside_the_grid`]).
+    /// below it `list` is read for nothing (the crate's `beside_the_grid`).
     ///
     /// The list is built on the pool before the query, since a job never waits on another, so the
     /// caller takes it from the [`GlobalListService`](super::GlobalListService) first, with the
