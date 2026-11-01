@@ -1,8 +1,9 @@
 //! The scene subscription, live, over a real socket (rendering plan R03, R03.T8.a): subscribe in a
 //! pinned system and receive its bodies as `system_bodies` answers them, a heartbeat each second,
 //! the ship stand-in's changes pushed to every subscription of the universe, a departure from the
-//! system, and the refusals of an unknown subscription and of a camera out of reach; and the
-//! system's place on the scene against the chart's row (R03.T16.b).
+//! system, and the refusals of an unknown subscription and of a camera out of reach; the system's
+//! place on the scene against the chart's row (R03.T16.b); and a ship beside a brown dwarf and a
+//! rogue planet, which plan 14 gives bodies from generator version 26 (P14.T27).
 
 mod common;
 
@@ -12,9 +13,9 @@ use common::scene::{
     systems, universe_on,
 };
 use hyperion_protocol::{
-    CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, MassLayer,
-    NotificationBody, RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest,
-    SceneClockStateDto, SystemBodiesRequest, SystemsInRangeRequest,
+    BodyKindDto, CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto,
+    MassLayer, NotificationBody, RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest,
+    SceneClockStateDto, SystemBodiesRequest, SystemExistenceDto, SystemsInRangeRequest,
 };
 use hyperion_server::scene::{CraftState, SceneKnowledge};
 use hyperion_sim::id::BodyId;
@@ -42,7 +43,8 @@ async fn scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_repo
     moving_the_stand_in_out_of_the_system_pushes_no_system(&server).await;
     an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_their_fields(&server)
         .await;
-    a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26(&server).await;
+    a_ship_beside_a_brown_dwarf_or_a_rogue_planet_arrives_is_served_its_bodies_and_leaves(&server)
+        .await;
     server.stop().await;
 }
 
@@ -210,22 +212,66 @@ async fn moving_the_stand_in_out_of_the_system_pushes_no_system(server: &TestSer
     assert_eq!(departure.ship, Some(in_the_halo()));
 }
 
-/// P14.T27 at generator version 24: a ship 1 au from a brown dwarf or a rogue planet is not in its
-/// frame, since `frame_at` walks layers F and G only under the holds that give their objects
-/// bodies; `scene_free_floating.rs` asks with both lifted. 26's bump turns this into a test of the
-/// arrival. Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`]
-/// on its shared server, in a universe of its own.
-async fn a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26(server: &TestServer) {
-    let (mut client, universe) = universe_on(server, "Scene: free-floating at 24").await;
-    for object in free_floating() {
-        set_ship(&mut client, &universe, in_system(&object), 0).await;
+/// A ship beside each free-floating object arrives in its frame at the scene's entry ratio, holds
+/// its bodies as `system_bodies` answers them, the brown dwarf with its one star as its host and the
+/// rogue planet with none, and departs when it moves to the halo (P14.T27). Run by
+/// [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its shared
+/// server, in a universe of its own for each.
+async fn a_ship_beside_a_brown_dwarf_or_a_rogue_planet_arrives_is_served_its_bodies_and_leaves(
+    server: &TestServer,
+) {
+    let [dwarf, rogue] = free_floating();
+    for (object, name) in [(&dwarf, "brown dwarf"), (&rogue, "rogue planet")] {
+        let (mut client, universe) = universe_on(server, &format!("Scene: {name}")).await;
+        set_ship(&mut client, &universe, in_system(object), 0).await;
         let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Full).await;
-        assert_ne!(
-            state.system.map(|scene| scene.system.hosts.system),
-            Some(object.clone()),
-            "26's bump puts a ship beside {} in its frame (P14.T27): test the arrival instead",
-            object.as_str()
-        );
+        let scene = state.system.expect("the ship is in the object's frame");
+        assert_eq!(&scene.system.hosts.system, object, "{name}");
+        assert!(state.tidal_radius_m.is_some_and(|radius| radius > 0.0));
+        let (answer, _) = client
+            .request_among_notifications(RequestBody::SystemBodies(SystemBodiesRequest {
+                universe: universe.clone(),
+                system: object.clone(),
+                time: TIME,
+                detail: DetailLevelDto::Full,
+            }))
+            .await;
+        let Ok(ResponseBody::SystemBodies(expected)) = answer else {
+            panic!("system_bodies answers for the {name}: {answer:?}");
+        };
+        assert_eq!(scene.system, *expected, "{name}");
+        assert_eq!(scene.grants.len(), scene.system.bodies.len());
+        let hosts = &scene.system.hosts;
+        assert_eq!(hosts.existence, SystemExistenceDto::Exists);
+        if object == &rogue {
+            // A rogue planet has no star: an empty host list, its own age and [Fe/H].
+            assert!(hosts.stars.is_empty() && hosts.hierarchy.nodes.is_empty());
+            assert!(scene.system.zones.is_empty() && scene.system.system_plane.is_none());
+            let first = scene.system.bodies.first().expect("the object is a body");
+            assert_eq!(first.id.to_parts().1, 0x0000);
+            assert_eq!(first.kind, BodyKindDto::Planet);
+            assert_eq!(first.parent, None, "the object is its system's root");
+        } else {
+            assert_eq!(
+                hosts.stars.len(),
+                1,
+                "a brown dwarf is its system's one star"
+            );
+        }
+        let mut seen = set_ship(&mut client, &universe, in_the_halo(), 0).await;
+        let departure = loop {
+            let notification = match seen.pop() {
+                Some((_, NotificationBody::Scene(notification))) => notification,
+                // No alerts subscription is open, so none is sent; skip one all the same.
+                Some((_, NotificationBody::Alerts(_))) => continue,
+                None => next_scene(&mut client).await.1,
+            };
+            if notification.arrival.is_some() {
+                break notification;
+            }
+        };
+        assert_eq!(departure.arrival, Some(SceneArrivalDto::NoSystem), "{name}");
+        client.close().await;
     }
 }
 

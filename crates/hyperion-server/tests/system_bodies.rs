@@ -147,17 +147,15 @@ async fn system_bodies_and_body_records_are_the_sims_and_cached() {
     each_bodys_record_is_the_sims_and_the_lists(&server).await;
     a_body_the_system_does_not_hold_is_unknown_body(&server).await;
     mass_and_orbit_gives_no_bulk_section(&server).await;
-    a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(&server).await;
-    a_rogue_planet_s_bodies_are_refused_until_the_26_bump(&server).await;
+    a_brown_dwarf_s_bodies_are_the_sims_snapshot(&server).await;
+    a_rogue_planet_s_bodies_are_the_sims_snapshot(&server).await;
     server.stop().await;
 }
 
-/// P14.T27.a at generator version 24: a free-floating brown dwarf's bodies are refused as the
-/// sim's `SystemContext::for_system` refuses it, `unknown_system` naming the field, and nothing is
-/// generated for it, although the system cache holds its stars. 26's bump gives it bodies: this
-/// property then becomes a test of them.
-async fn a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(server: &TestServer) {
-    use hyperion_sim::galaxy::placement::{ResolveSystemError, generate_cell};
+/// P14.T27.a, from generator version 26: a free-floating brown dwarf's bodies are the sim's
+/// snapshot of its system, with the brown dwarf its system's one star.
+async fn a_brown_dwarf_s_bodies_are_the_sims_snapshot(server: &TestServer) {
+    use hyperion_sim::galaxy::placement::generate_cell;
     use hyperion_sim::id::Layer;
     let (mut client, universe) = joined(server, "Kepler Reach brown dwarfs").await;
     let mut records = Vec::new();
@@ -169,55 +167,22 @@ async fn a_brown_dwarf_s_bodies_are_refused_until_the_26_bump(server: &TestServe
             records.first().copied()
         })
         .expect("the solar circle holds brown dwarfs");
-    assert_eq!(
-        SystemContext::for_system(galaxy(), dwarf.id()),
-        Err(ResolveSystemError::LayerNotGenerated(Layer::BrownDwarf)),
-        "26's bump gives the brown dwarfs their bodies (P14.T27.a): test them here instead"
-    );
-    let generated = server.stats().bodies().generated();
     let raw = dwarf.id().raw();
-    let error = refused(
+    let (ctx, planets) = sim_system(raw);
+    let answer = bodies(
         &mut client,
         bodies_request(&universe, raw, at_years(0), DetailLevelDto::Full),
     )
     .await;
-    assert_eq!(
-        error.code,
-        ErrorCode::UnknownSystem,
-        "{raw:#018x}: {error:?}"
-    );
-    assert_eq!(error.field.as_deref(), Some("system"), "{error:?}");
-    let error = refused(
-        &mut client,
-        detail_request(
-            &universe,
-            BodyIdHex::from_parts(raw, 0x0100),
-            at_years(0),
-            DetailLevelDto::Full,
-        ),
-    )
-    .await;
-    assert_eq!(
-        error.code,
-        ErrorCode::UnknownSystem,
-        "{raw:#018x}: {error:?}"
-    );
-    assert_eq!(error.field.as_deref(), Some("body"), "{error:?}");
-    assert_eq!(
-        server.stats().bodies().generated(),
-        generated,
-        "nothing generated"
-    );
+    assert_eq!(answer.hosts.stars.len(), 1, "{raw:#018x}");
+    assert_bodies_are_the_sims(&answer, &ctx, &planets);
     client.close().await;
 }
 
-/// P14.T27.b at generator version 24: a rogue planet's bodies are refused as the sim's
-/// `SystemContext::for_system` refuses it, `unknown_system` naming the field, its object's and its
-/// first moon's records too, and nothing is generated for it; the system cache, which holds no
-/// stars for it, stores nothing either. 26's bump gives it bodies: this property then becomes a
-/// test of them.
-async fn a_rogue_planet_s_bodies_are_refused_until_the_26_bump(server: &TestServer) {
-    use hyperion_sim::galaxy::placement::{ResolveSystemError, generate_cell};
+/// P14.T27.b, from generator version 26: a rogue planet's bodies are the sim's snapshot of its
+/// system, with no star: its object, body `0x0000`, is its root, and its record is served.
+async fn a_rogue_planet_s_bodies_are_the_sims_snapshot(server: &TestServer) {
+    use hyperion_sim::galaxy::placement::generate_cell;
     use hyperion_sim::id::Layer;
     let (mut client, universe) = joined(server, "Kepler Reach rogue planets").await;
     let mut records = Vec::new();
@@ -229,47 +194,31 @@ async fn a_rogue_planet_s_bodies_are_refused_until_the_26_bump(server: &TestServ
             records.first().copied()
         })
         .expect("the solar circle holds rogue planets");
-    assert_eq!(
-        SystemContext::for_system(galaxy(), rogue.id()),
-        Err(ResolveSystemError::LayerNotGenerated(Layer::RoguePlanet)),
-        "26's bump gives the rogue planets their bodies (P14.T27.b): test them here instead"
-    );
-    let generated = server.stats().bodies().generated();
     let raw = rogue.id().raw();
-    let error = refused(
+    let (ctx, planets) = sim_system(raw);
+    let answer = bodies(
         &mut client,
         bodies_request(&universe, raw, at_years(0), DetailLevelDto::Full),
     )
     .await;
-    assert_eq!(
-        error.code,
-        ErrorCode::UnknownSystem,
-        "{raw:#018x}: {error:?}"
-    );
-    assert_eq!(error.field.as_deref(), Some("system"), "{error:?}");
-    for index in [0x0000, 0x0100] {
-        let error = refused(
-            &mut client,
-            detail_request(
-                &universe,
-                BodyIdHex::from_parts(raw, index),
-                at_years(0),
-                DetailLevelDto::Full,
-            ),
-        )
-        .await;
-        assert_eq!(
-            error.code,
-            ErrorCode::UnknownSystem,
-            "{raw:#018x}/{index:#06x}: {error:?}"
-        );
-        assert_eq!(error.field.as_deref(), Some("body"), "{error:?}");
-    }
-    assert_eq!(
-        server.stats().bodies().generated(),
-        generated,
-        "nothing generated"
-    );
+    assert!(answer.hosts.stars.is_empty(), "{raw:#018x}");
+    assert_bodies_are_the_sims(&answer, &ctx, &planets);
+    let object = answer.bodies.first().expect("the object is a body");
+    assert_eq!(object.id.to_parts().1, 0x0000);
+    assert_eq!(object.kind, BodyKindDto::Planet);
+    assert_eq!(object.parent, None, "the object is its system's root");
+    let record = detail(
+        &mut client,
+        detail_request(
+            &universe,
+            object.id.clone(),
+            at_years(0),
+            DetailLevelDto::Full,
+        ),
+    )
+    .await
+    .record;
+    assert_eq!(record.id, object.id);
     client.close().await;
 }
 

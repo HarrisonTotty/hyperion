@@ -656,26 +656,3 @@ fn two_runs_place_the_same_objects() {
         }
     }
 }
-
-/// The planetary stage's entry refuses a free-floating object until plan 14's P14.T27 gives brown
-/// dwarfs and rogue planets their hosts; P13.T5.a routes brown dwarfs through the stellar stage,
-/// which the planetary context does not yet read for them.
-#[test]
-fn a_free_floating_object_has_no_stellar_context_yet() {
-    use hyperion_sim::planetary::SystemContext;
-    let galaxy = milky_way();
-    let mut cell = Vec::new();
-    for layer in LAYERS {
-        let record = sun_cells(&galaxy, layer, 64)
-            .into_iter()
-            .find_map(|key| {
-                generate_cell(&galaxy, key, &mut cell);
-                cell.first().copied()
-            })
-            .expect("the solar circle holds free-floating objects");
-        assert_eq!(
-            SystemContext::for_system(&galaxy, record.id()).err(),
-            Some(ResolveSystemError::LayerNotGenerated(layer))
-        );
-    }
-}

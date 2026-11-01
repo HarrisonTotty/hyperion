@@ -1,4 +1,4 @@
-//! P14.T27.b's tests: a rogue planet's hold, its context, its object derived with no star, its
+//! P14.T27.b's tests: a rogue planet's context, its object derived with no star, its
 //! satellites with design note 13's ejection cut, their indices, and its determinism.
 
 use hyperion_testkit::float::assert_same_bits;
@@ -7,10 +7,11 @@ use hyperion_testkit::order::assert_order_independent;
 use super::*;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, ResolveSystemError, SystemRecord, generate_cell};
+use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord, generate_cell};
 use crate::galaxy::substellar::{ROGUE_PLANET_MAX_MSUN, ROGUE_PLANET_MIN_MSUN};
 use crate::id::Layer;
 use crate::orbit::KeplerElements;
+use crate::planetary::HostKind;
 use crate::planetary::context::SystemContext;
 use crate::planetary::derive::{OrbitSense, PlanetClass};
 use crate::planetary::fate::BodyState;
@@ -25,8 +26,8 @@ use crate::planetary::rings::Ring;
 use crate::planetary::satellites::{
     Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_inside,
 };
-use crate::planetary::system::{PlanetarySystem, RoguePlanet, generate, generate_planets};
-use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
+use crate::planetary::system::{PlanetarySystem, RoguePlanet, generate};
+use crate::planetary::testing::with_every_26_hold;
 use crate::stellar::substellar::giant_cooling;
 use crate::stellar::system::draw_metallicity;
 use crate::time::{ClockWindow, UniverseTime};
@@ -110,65 +111,11 @@ fn rogue_planets_of_every_mass(n: usize) -> Vec<SystemRecord> {
         .collect()
 }
 
-/// The context and whole system of `record` under the rogue planets' rules, from its record.
+/// The context and whole system of `record`, from its record.
 fn whole(record: &SystemRecord) -> (SystemContext, PlanetarySystem) {
-    with_rogue_planets(RoguePlanetRules::Bodies, || {
-        let ctx = SystemContext::from_record(galaxy(), record);
-        let system = generate(seed(), &ctx);
-        (ctx, system)
-    })
-}
-
-/// P14.T27.b is held until the 25 → 26 bump: a rogue planet's system is refused, inside 26's
-/// helper alone, apart from the brown dwarfs' hold.
-#[test]
-fn the_rogue_planets_are_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < ROGUE_PLANET_HOSTS_VERSION,
-        "the 25 → 26 bump gives the rogue planets their bodies (P14.T27.b): delete \
-         `ROGUE_PLANET_HOSTS_VERSION`, `RoguePlanetRules` with its `Held` arm and the held arm of \
-         `generates`, the tests' `with_rogue_planets`, its switch in `with_every_26_hold` and \
-         this test; open the client's `SYSTEM` view to rogue planets (`SystemsPanel.tsx`'s \
-         `freeFloating`, which then holds nothing); delete `tests/substellar_placement.rs`'s \
-         `a_free_floating_object_has_no_stellar_context_yet` with the brown dwarfs' half; turn \
-         the server's `a_rogue_planet_s_bodies_are_refused_until_the_26_bump` into a test of its \
-         bodies; move the server's `scene_free_floating.rs` summary tests, \
-         `a_rogue_planet_s_summary_is_the_hosts_of_its_bodies` and \
-         `a_rogue_planet_s_observed_summary_is_its_summary_when_its_light_left`, into \
-         `system_summary.rs` as plain tests, in place of its \
-         `a_rogue_planet_s_summary_is_refused_until_the_26_bump`; delete \
-         `admit_free_floating_hosts_in_this_process` with T27.a's hold, fold the rest of the \
-         server's `scene_free_floating.rs` into `scene.rs` and turn `scene.rs`'s \
-         `a_ship_beside_a_free_floating_object_is_not_in_its_frame_before_26` into a test of the \
-         arrival; `frame_at` then walks layers F and G whatever the arms"
-    );
-    let rogue = rogue_planets(1)[0];
-    let refused = Err(ResolveSystemError::LayerNotGenerated(Layer::RoguePlanet));
-    assert_eq!(RoguePlanetRules::in_force(), RoguePlanetRules::Held);
-    assert!(!generates(SystemKind::RoguePlanet));
-    assert_eq!(SystemContext::for_system(galaxy(), rogue.id()), refused);
-    assert_eq!(
-        with_every_26_hold(RoguePlanetRules::in_force),
-        RoguePlanetRules::Bodies
-    );
-    assert_eq!(
-        with_every_26_hold(|| {
-            with_rogue_planets(RoguePlanetRules::Held, RoguePlanetRules::in_force)
-        }),
-        RoguePlanetRules::Held
-    );
-    // The two holds are apart: each arm leaves the other's kind as it was.
-    with_rogue_planets(RoguePlanetRules::Bodies, || {
-        assert!(generates(SystemKind::RoguePlanet));
-        assert!(!generates(SystemKind::BrownDwarf));
-        let context = SystemContext::for_system(galaxy(), rogue.id()).expect("generated");
-        assert_eq!(context.host_kind(), HostKind::RoguePlanet);
-    });
-    with_substellar_hosts(SubstellarHostRules::BrownDwarfs, || {
-        assert!(!generates(SystemKind::RoguePlanet));
-        assert_eq!(SystemContext::for_system(galaxy(), rogue.id()), refused);
-    });
-    assert_eq!(RoguePlanetRules::in_force(), RoguePlanetRules::Held);
+    let ctx = SystemContext::from_record(galaxy(), record);
+    let system = generate(seed(), &ctx);
+    (ctx, system)
 }
 
 /// The context's lean: no star, and the object's plan 13 record, its mass, age and [Fe/H], with a
@@ -176,52 +123,23 @@ fn the_rogue_planets_are_held_only_until_the_26_bump() {
 #[test]
 fn a_rogue_planet_s_context_holds_no_star_and_its_own_record() {
     for record in rogue_planets(40) {
-        with_rogue_planets(RoguePlanetRules::Bodies, || {
-            let ctx = SystemContext::for_system(galaxy(), record.id()).expect("generated");
-            assert_eq!(ctx, SystemContext::from_record(galaxy(), &record));
-            assert_eq!(ctx.host_kind(), HostKind::RoguePlanet);
-            assert_eq!(ctx.stars(), []);
-            assert!(ctx.hierarchy().is_none());
-            assert_eq!(ctx.zones(), []);
-            assert_eq!(ctx.zone_stars(), []);
-            assert_eq!(ctx.xuv_histories(), []);
-            assert_eq!(ctx.rogue_planet_mass(), Some(record.primary_initial_mass()));
-            assert_eq!(ctx.system_mass(), record.primary_initial_mass());
-            assert_eq!(ctx.composition(), &draw_metallicity(galaxy(), &record));
-            assert_same_bits(ctx.age_at_epoch().value(), record.age_at_epoch().value());
-            assert!(ctx.alpha_fe().is_some());
-            let tidal = ctx.tidal_radius().value();
-            assert!(tidal.is_finite() && tidal > 0.0);
-            assert!(ctx.strip_radius() < ctx.tidal_radius());
-            assert_eq!(ctx.heap_bytes(), 0);
-        });
-    }
-}
-
-/// Every stellar system and every brown dwarf is bit-identical under both arms of the rogue
-/// planets' hold: its context and its planets.
-#[test]
-fn every_system_with_stars_is_bit_identical_under_both_arms() {
-    let records = sample_records(
-        galaxy(),
-        120,
-        SampleFilter::primary_masses(SolarMasses::new(0.08), SolarMasses::new(2.0)),
-    )
-    .unwrap();
-    for record in &records {
-        let run = |rules| {
-            with_rogue_planets(rules, || {
-                let ctx = SystemContext::from_record(galaxy(), record);
-                let planets = generate_planets(seed(), &ctx);
-                (ctx, planets)
-            })
-        };
-        assert_eq!(
-            run(RoguePlanetRules::Held),
-            run(RoguePlanetRules::Bodies),
-            "{:?}",
-            record.id()
-        );
+        let ctx = SystemContext::for_system(galaxy(), record.id()).expect("generated");
+        assert_eq!(ctx, SystemContext::from_record(galaxy(), &record));
+        assert_eq!(ctx.host_kind(), HostKind::RoguePlanet);
+        assert_eq!(ctx.stars(), []);
+        assert!(ctx.hierarchy().is_none());
+        assert_eq!(ctx.zones(), []);
+        assert_eq!(ctx.zone_stars(), []);
+        assert_eq!(ctx.xuv_histories(), []);
+        assert_eq!(ctx.rogue_planet_mass(), Some(record.primary_initial_mass()));
+        assert_eq!(ctx.system_mass(), record.primary_initial_mass());
+        assert_eq!(ctx.composition(), &draw_metallicity(galaxy(), &record));
+        assert_same_bits(ctx.age_at_epoch().value(), record.age_at_epoch().value());
+        assert!(ctx.alpha_fe().is_some());
+        let tidal = ctx.tidal_radius().value();
+        assert!(tidal.is_finite() && tidal > 0.0);
+        assert!(ctx.strip_radius() < ctx.tidal_radius());
+        assert_eq!(ctx.heap_bytes(), 0);
     }
 }
 

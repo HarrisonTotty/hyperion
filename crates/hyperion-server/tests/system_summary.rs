@@ -10,11 +10,13 @@ mod common;
 
 use std::sync::OnceLock;
 
+use common::scene::TIME;
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, GalacticPosition, HierarchyNodeDto, Modelled, ObjectKindDto, ObservedDto, OrbitDto,
-    PhaseDto, QueryModeDto, RemnantDto, RequestBody, RequestError, ResponseBody, ServerMessage,
-    StarSummaryDto, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    DetailLevelDto, ErrorCode, GalacticPosition, HierarchyNodeDto, Modelled, ObjectKindDto,
+    ObservedDto, OrbitDto, PhaseDto, QueryModeDto, RemnantDto, RequestBody, RequestError,
+    ResolveSystemRequest, ResolvedSystem, ResponseBody, ServerMessage, StarSummaryDto,
+    SystemBodiesRequest, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
     UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::coords::LyCell;
@@ -481,7 +483,6 @@ async fn pinned_summaries_are_the_sims_and_refusals_name_their_field() {
     a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left(&server).await;
     an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre(&server)
         .await;
-    a_rogue_planet_s_summary_is_refused_until_the_26_bump(&server).await;
     server.stop().await;
 }
 
@@ -678,40 +679,116 @@ async fn an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_fo
     client.close().await;
 }
 
-/// P14.T27.b at generator version 24: a rogue planet's summary is refused in either mode,
-/// `unknown_system` naming `system`, as its bodies are, and nothing is generated or cached for it.
-/// 26's bump gives it bodies, and so a starless summary: `scene_free_floating.rs`'s summary tests
-/// then replace this one.
-///
-/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
-async fn a_rogue_planet_s_summary_is_refused_until_the_26_bump(server: &TestServer) {
-    let (mut client, universe) = joined(server, "Kepler Reach: rogue planets").await;
+/// `system` at [`TIME`] in `mode`, as `resolve_system` answers it.
+async fn resolved_in(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    system: &SystemIdHex,
+    mode: QueryModeDto,
+) -> ResolvedSystem {
+    let request = RequestBody::ResolveSystem(ResolveSystemRequest {
+        universe: universe.clone(),
+        system: system.clone(),
+        time: TIME,
+        mode,
+    });
+    match client.request(request).await {
+        Ok(ResponseBody::ResolveSystem(resolved)) => *resolved,
+        other => panic!("expected {system:?} resolved, got {other:?}"),
+    }
+}
+
+/// P14.T27.b: a rogue planet's `system_summary` is the hosts `system_bodies` answers with its
+/// bodies at the same time, its starless summary, at the scene's time and 900 years before it.
+#[tokio::test]
+async fn a_rogue_planet_s_summary_is_the_hosts_of_its_bodies() {
+    let server = TestServer::start().await;
     let [_, rogue] = common::scene::free_floating();
-    let systems = server.stats().systems().entries();
-    let generated = server.stats().bodies().generated();
-    for mode in [QueryModeDto::Now, observed_from(COREWARD)] {
-        let error = refused(
+    let (mut client, universe) = joined(&server, "Summary: rogue planet").await;
+    let before = UniverseTime {
+        seconds: TIME.seconds - 900 * SECONDS_PER_JULIAN_YEAR,
+        nanos: 0,
+    };
+    for time in [TIME, before] {
+        // The summary first, so that it is answered from a body cache that has not seen the planet.
+        let summary = summary_in(
             &mut client,
-            request_in(&universe, rogue.to_u64(), at_years(0), mode),
+            &universe,
+            rogue.to_u64(),
+            time,
+            QueryModeDto::Now,
         )
         .await;
-        assert_eq!(
-            (error.code, error.field.as_deref()),
-            (ErrorCode::UnknownSystem, Some("system")),
-            "{mode:?}: {error:?}"
-        );
+        let answer = client
+            .request(RequestBody::SystemBodies(SystemBodiesRequest {
+                universe: universe.clone(),
+                system: rogue.clone(),
+                time,
+                detail: DetailLevelDto::Bulk,
+            }))
+            .await;
+        let Ok(ResponseBody::SystemBodies(bodies)) = answer else {
+            panic!("system_bodies answers for the rogue planet: {answer:?}");
+        };
+        assert_eq!(summary, bodies.hosts, "{time:?}");
+        assert_eq!(summary.existence, SystemExistenceDto::Exists);
+        assert!(summary.stars.is_empty() && summary.hierarchy.nodes.is_empty());
+        assert_eq!(summary.observed, None);
     }
+    client.close().await;
+    server.stop().await;
+}
+
+/// P14.T27.b: a rogue planet's summary asked from 300 ly away is its starless summary when the light
+/// the observer receives left it, as `now` answers it at that time, with the observation
+/// `resolve_system` gives the same observer, on the same line (lean, 2026-11-01).
+#[tokio::test]
+async fn a_rogue_planet_s_observed_summary_is_its_summary_when_its_light_left() {
+    let server = TestServer::start().await;
+    let [_, rogue] = common::scene::free_floating();
+    let (mut client, universe) = joined(&server, "Observed summary: rogue planet").await;
+    let here = resolved_in(&mut client, &universe, &rogue, QueryModeDto::Now).await;
+    let [x, y, z] = here.record.position.cell_ly;
+    let mode = QueryModeDto::Observed {
+        observer: GalacticPosition {
+            cell_ly: [x, y + 300, z],
+            offset_m: [0.0; 3],
+        },
+    };
+    let seen = summary_in(&mut client, &universe, rogue.to_u64(), TIME, mode).await;
     assert_eq!(
-        server.stats().systems().entries(),
-        systems,
-        "nothing cached"
+        (&seen.universe, &seen.system, seen.time),
+        (&universe, &rogue, TIME)
     );
+    let Some(light) = seen.observed else {
+        panic!("an observed summary carries its observation: {seen:?}");
+    };
+    let traced = resolved_in(&mut client, &universe, &rogue, mode).await;
+    assert_eq!(traced.record.observed.as_ref(), Some(&light));
+    assert!(
+        (299.0..301.0).contains(&light.light_age_yr),
+        "{} years",
+        light.light_age_yr
+    );
+    // The light left inside the clock window, so `now` is asked at the emitted time itself.
+    let then = summary_in(
+        &mut client,
+        &universe,
+        rogue.to_u64(),
+        light.emitted,
+        QueryModeDto::Now,
+    )
+    .await;
     assert_eq!(
-        server.stats().bodies().generated(),
-        generated,
-        "nothing generated"
+        SystemSummaryDto {
+            time: light.emitted,
+            observed: None,
+            ..seen
+        },
+        then
     );
     client.close().await;
+    server.stop().await;
 }
 
 /// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.

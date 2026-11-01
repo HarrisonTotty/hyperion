@@ -3556,7 +3556,7 @@ mod tests {
         }
     }
 
-    /// P14.T27.b, ahead of 26's bump: a rogue planet's system converts, its context built from its
+    /// P14.T27.b: a rogue planet's system converts, its context built from its
     /// record, which `SystemContext::from_record` gives under every version's rules. It has no
     /// zone and no plane; its object is sent with no parent and no orbit, its moons about it, and
     /// its rings' gaps name its moons in the planet slots, `0x0100` upward.

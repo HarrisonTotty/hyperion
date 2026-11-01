@@ -3060,8 +3060,8 @@ select.form-field__input:not([aria-disabled="true"]):hover {
  */
 /*
  * The readout gives up one line, but no more, while `OPEN SYSTEM`'s held reason wraps under the
- * button at 1280 x 720 (`BODIES NOT YET MODELLED`, the orchestrator's ruling 134.5), so that the
- * reason is never pushed out of the panel.
+ * button at 1280 x 720 (the orchestrator's ruling 134.5), so that the reason is never pushed out of
+ * the panel.
  */
 .system-readout__scroll {
   position: relative;

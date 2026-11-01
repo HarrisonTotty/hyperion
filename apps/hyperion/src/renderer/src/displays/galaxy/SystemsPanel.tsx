@@ -116,9 +116,8 @@ interface SystemsPanelProps {
  * announced with every selection and a live region holds text only (the orchestrator's rulings 13
  * and 14). It opens the `SYSTEM` display on the selected system at the time of the chart on show
  * (plan 14, P14.T41.a). A display control, it only changes what the console shows, so it needs no
- * link; with nothing selected it is held back and says why, and with a free-floating brown dwarf or
- * planet selected, whose bodies plan 14 has not yet modelled, it says `BODIES NOT YET MODELLED`
- * (plan 13, P13.T8.d; ruling 134.5).
+ * link; with nothing selected it is held back and says why (ruling 134.5). It opens a free-floating
+ * brown dwarf or planet too, whose bodies plan 14 models from generator version 26 (P14.T27).
  *
  * Selecting a system asks the server for its stars at the chart's time (`system_summary`, plan 06,
  * P06.T36; a brown dwarf is a system of one, and a free-floating planet, which has none, asks
@@ -218,12 +217,10 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
     blackHole.shown !== null &&
     (blackHole.shown.timeYr !== chartTimeYr || failedState(blackHole.state));
   const bands = chart.bands;
-  // A free-floating object has no system to open until plan 14 gives it bodies (P14.T27). An object
-  // of a layer this build does not know is offered, and the server answers for what it has.
-  const freeFloating =
-    selected !== null && (selected.kind === "brown_dwarf" || selected.kind === "rogue_planet");
+  // An object of a layer this build does not know is offered, and the server answers for what it
+  // has.
   const target =
-    open === null || result === null || selected === null || bands === null || freeFloating
+    open === null || result === null || selected === null || bands === null
       ? null
       : systemTargetFor(open.id, selected, result.timeYr, bands);
   const [generation, setGeneration] = useState(0);
@@ -448,7 +445,7 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
              * A subject and a state (ruling 113.5): at 1280 x 720 it wraps whole onto its own line
              * under the button, through the row's flex-wrap (the orchestrator's ruling 134.5).
              */}
-            {freeFloating ? "BODIES NOT YET MODELLED" : "NO SYSTEM SELECTED"}
+            NO SYSTEM SELECTED
           </span>
         ) : null}
       </div>

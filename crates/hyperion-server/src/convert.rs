@@ -684,9 +684,8 @@ enum RowStellar {
 /// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
 /// none either: it has no star to describe. With `include_stellar`, a rogue planet's row, which
 /// never has a brief, carries its metallicity instead, the one [`draw_metallicity`] gives it and
-/// its stars would share (plan 13, P13.T5.d); below generator version 26 `system_summary` refuses
-/// it, and from 26 its summary and its bodies' hosts, a starless summary (P14.T27.b), state it
-/// again.
+/// its stars would share (plan 13, P13.T5.d); its summary and its bodies' hosts, a starless
+/// summary (P14.T27.b), state it again.
 /// In observed mode the row carries `observed` (plan 12, P12.T6), its brief, when asked for, is the
 /// one when the light left it, and it is otherwise the present's.
 ///

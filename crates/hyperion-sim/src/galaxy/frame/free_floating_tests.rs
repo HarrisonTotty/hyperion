@@ -1,5 +1,5 @@
-//! P14.T27's frame search: layers F and G walked under the holds that give their objects bodies,
-//! against a brute-force search over every nearby system of the layers admitted.
+//! P14.T27's frame search: layers F and G walked with the stellar layers, against a brute-force
+//! search over every nearby system of the layers.
 
 use std::collections::BTreeMap;
 
@@ -7,10 +7,6 @@ use super::*;
 use crate::Seed;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, generate_cell};
-use crate::planetary::hosts::substellar::{
-    RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
-};
-use crate::planetary::testing::with_every_26_hold;
 
 /// The seed of the galaxy these ships fly in.
 const SEED: u64 = 0x0e14_0027_f000_0001;
@@ -45,47 +41,16 @@ impl CellCache for Keep {
     }
 }
 
-/// The arms of the two holds, as a test runs `run` under them: neither, each alone, and both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Arms {
-    Held,
-    BrownDwarfs,
-    RoguePlanets,
-    Both,
-}
-
-impl Arms {
-    const ALL: [Self; 4] = [
-        Self::Held,
-        Self::BrownDwarfs,
-        Self::RoguePlanets,
-        Self::Both,
-    ];
-
-    /// `run`'s result under these arms on this thread.
-    fn run<R>(self, run: impl FnOnce() -> R) -> R {
-        let (dwarfs, rogues) = match self {
-            Self::Held => (SubstellarHostRules::Held, RoguePlanetRules::Held),
-            Self::BrownDwarfs => (SubstellarHostRules::BrownDwarfs, RoguePlanetRules::Held),
-            Self::RoguePlanets => (SubstellarHostRules::Held, RoguePlanetRules::Bodies),
-            Self::Both => (SubstellarHostRules::BrownDwarfs, RoguePlanetRules::Bodies),
-        };
-        with_substellar_hosts(dwarfs, || with_rogue_planets(rogues, run))
-    }
-
-    /// The layers a ship can be held by under these arms, in `frame_layers`' order, written out
-    /// apart from it.
-    fn layers(self) -> Vec<Layer> {
-        let mut layers = vec![Layer::E, Layer::D, Layer::C, Layer::B, Layer::A];
-        if matches!(self, Self::BrownDwarfs | Self::Both) {
-            layers.push(Layer::BrownDwarf);
-        }
-        if matches!(self, Self::RoguePlanets | Self::Both) {
-            layers.push(Layer::RoguePlanet);
-        }
-        layers
-    }
-}
+/// The layers a ship can be held by, in `frame_layers`' order, written out apart from it.
+const LAYERS: [Layer; 7] = [
+    Layer::E,
+    Layer::D,
+    Layer::C,
+    Layer::B,
+    Layer::A,
+    Layer::BrownDwarf,
+    Layer::RoguePlanet,
+];
 
 /// The first `n` objects of `layer`'s cells along the solar circle, 26,000 ly out on +y.
 fn objects(layer: Layer, n: usize) -> Vec<SystemRecord> {
@@ -181,27 +146,18 @@ fn ships_beside(records: &[SystemRecord]) -> Vec<(SystemRecord, GalacticPosition
     ships
 }
 
-/// The layers each pair of arms admits: the stellar ones always, layer F with the brown dwarfs'
-/// hold and layer G with the rogue planets', and below 26 neither.
+/// The search walks the stellar layers and then layers F and G.
 #[test]
-fn the_free_floating_layers_are_walked_under_the_holds_that_give_them_bodies() {
-    for arms in Arms::ALL {
-        let walked: Vec<Layer> = arms.run(|| frame_layers().map(|spec| spec.layer()).collect());
-        assert_eq!(walked, arms.layers(), "{arms:?}");
-    }
-    let held: Vec<Layer> = frame_layers().map(|spec| spec.layer()).collect();
-    assert_eq!(held, Arms::Held.layers(), "the version's rules hold both");
-    let at_26: Vec<Layer> =
-        with_every_26_hold(|| frame_layers().map(|spec| spec.layer()).collect());
-    assert_eq!(at_26, Arms::Both.layers());
+fn the_free_floating_layers_are_walked() {
+    let walked: Vec<Layer> = frame_layers().map(|spec| spec.layer()).collect();
+    assert_eq!(walked, LAYERS);
 }
 
 /// The plan's test: beside brown dwarfs and rogue planets, at the epoch and at the clock window's
-/// end, `frame_at` finds exactly the frame a brute-force search over every admitted layer finds,
-/// under each pair of arms; under the arm that gives an object bodies a ship beside it is in its
-/// frame, and under the other arms never.
+/// end, `frame_at` finds exactly the frame a brute-force search over every layer finds, and a ship
+/// beside an object is in its frame at least 18 times of the 36 for each kind.
 #[test]
-fn beside_free_floating_objects_the_search_finds_the_brute_force_frame_under_the_arms() {
+fn beside_free_floating_objects_the_search_finds_the_brute_force_frame() {
     let galaxy = galaxy();
     let dwarfs = objects(Layer::BrownDwarf, 6);
     let rogues = objects(Layer::RoguePlanet, 6);
@@ -210,36 +166,30 @@ fn beside_free_floating_objects_the_search_finds_the_brute_force_frame_under_the
         .chain(ships_beside(&rogues))
         .collect();
     let mut cache = Keep::default();
-    let mut held_by_object = [0_usize; 4];
-    for (n, arms) in Arms::ALL.into_iter().enumerate() {
-        let layers = arms.layers();
-        for (object, ship) in &ships {
-            for t in [UniverseTime::EPOCH, ClockWindow::END] {
-                let found = arms
-                    .run(|| frame_at(galaxy, &mut cache, &[], ship, t, None))
-                    .expect("a time inside the clock window");
-                assert_eq!(
-                    found,
-                    brute_force_frame(&mut cache, &layers, ship, t),
-                    "{arms:?}: a ship beside {:?} at {t}",
-                    object.id()
-                );
-                let admitted = layers.contains(&object.layer());
-                if found == Some(object.id()) {
-                    assert!(admitted, "{arms:?}: {:?} holds the ship", object.id());
-                    held_by_object[n] += 1;
+    let (mut by_dwarfs, mut by_rogues) = (0_usize, 0_usize);
+    for (object, ship) in &ships {
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            let found = frame_at(galaxy, &mut cache, &[], ship, t, None)
+                .expect("a time inside the clock window");
+            assert_eq!(
+                found,
+                brute_force_frame(&mut cache, &LAYERS, ship, t),
+                "a ship beside {:?} at {t}",
+                object.id()
+            );
+            if found == Some(object.id()) {
+                match object.layer() {
+                    Layer::BrownDwarf => by_dwarfs += 1,
+                    _ => by_rogues += 1,
                 }
             }
         }
     }
-    println!(
-        "ships held by their object under {:?}: {held_by_object:?}",
-        Arms::ALL
+    println!("ships held by their object: {by_dwarfs} brown dwarfs, {by_rogues} rogue planets");
+    assert!(
+        by_dwarfs >= 18 && by_rogues >= 18,
+        "{by_dwarfs} {by_rogues}"
     );
-    let [held, dwarfs_only, rogues_only, both] = held_by_object;
-    assert_eq!(held, 0);
-    assert!(dwarfs_only >= 18 && rogues_only >= 18, "{held_by_object:?}");
-    assert_eq!(both, dwarfs_only + rogues_only);
 }
 
 /// A brown dwarf a light-year away takes a ship from a star three light-years away exactly when

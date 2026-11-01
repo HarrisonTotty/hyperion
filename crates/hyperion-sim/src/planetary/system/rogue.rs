@@ -1,5 +1,5 @@
-//! A rogue planet's system (plan 14, design note 13, P14.T27.b), from generator version 26
-//! (`hosts::substellar`'s `ROGUE_PLANET_HOSTS_VERSION`): the object, body `0x0000`, derived with no
+//! A rogue planet's system (plan 14, design note 13, P14.T27.b), from generator version 26: the
+//! object, body `0x0000`, derived with no
 //! star, and its satellites, by P14.T17–T20 with design note 13's ejection cut.
 //!
 //! A rogue planet runs the satellite path only, as a planet without a star (design note 13). Its

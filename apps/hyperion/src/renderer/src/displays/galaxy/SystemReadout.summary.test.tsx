@@ -639,8 +639,8 @@ const BROWN_DWARF = aSunlikeStar({
   mass_loss_rate_msun_per_yr: 0,
 });
 
-describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () => {
-  it("asks nothing of a planet's stars, and holds OPEN SYSTEM back saying its bodies are not modelled", async () => {
+describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d; plan 14, P14.T27)", () => {
+  it("asks nothing of a planet's stars, and offers OPEN SYSTEM for its bodies", async () => {
     const { user, socket } = await renderFreeFloating();
 
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ G-1, PLANET,/ }));
@@ -649,8 +649,7 @@ describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () =>
     expect(valueOf("KIND")).toBe("PLANET");
     expect(valueOf("BULK")).toBe("NOT YET MODELLED");
     const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
-    expect(open).toHaveAttribute("aria-disabled", "true");
-    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("reads a brown dwarf's kind, class and temperature from its summary, as a system of one", async () => {
@@ -674,7 +673,7 @@ describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () =>
     expect(valueOf("T EFF")).toMatch(/^1,?100 K$/u);
     expect(valueOf("MASS")).toBe("0.050 M");
     const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
-    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 });
 

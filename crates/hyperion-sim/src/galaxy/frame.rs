@@ -25,14 +25,13 @@ use std::fmt;
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::placement::{
-    CellCache, Existence, LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, SystemKind, SystemRecord,
+    CellCache, Existence, LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, SystemRecord,
 };
 use crate::galaxy::query::{
     LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, position_at, walk_pad,
 };
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
-use crate::planetary::hosts::substellar::generates;
 use crate::time::{ClockWindow, UniverseTime};
 use crate::units::{LightYears, Metres, SolarMasses};
 
@@ -226,17 +225,11 @@ pub fn select_frame(candidates: &[FrameCandidate], current: Option<SystemId>) ->
 /// of light-years, which the rotation curve does nowhere the grid places a system.
 const SEARCH_MARGIN: f64 = 1.25;
 
-/// The layers [`frame_at`] walks under the rules in force: every stellar layer, and each substellar
-/// layer whose objects the planetary stage generates (P14.T27): layer F from P14.T27.a's hold
-/// (`SubstellarHostRules::BrownDwarfs`) and layer G from P14.T27.b's
-/// (`RoguePlanetRules::Bodies`), both at generator version 26. A frame and its bodies flip
-/// together, so 26's bump deletes no hold of its own here.
+/// The layers [`frame_at`] walks: every stellar layer, and the substellar layers, whose objects the
+/// planetary stage generates from generator version 26 (P14.T27): layer F's brown dwarfs
+/// (P14.T27.a) and layer G's rogue planets (P14.T27.b).
 fn frame_layers() -> impl Iterator<Item = LayerSpec> {
-    STELLAR_LAYERS.into_iter().chain(
-        SUBSTELLAR_LAYERS
-            .into_iter()
-            .filter(|spec| generates(SystemKind::of_layer(spec.layer()))),
-    )
+    STELLAR_LAYERS.into_iter().chain(SUBSTELLAR_LAYERS)
 }
 
 /// The frame a ship at `ship` is in at time `t`, having been in `current`: a system's ID, or `None`

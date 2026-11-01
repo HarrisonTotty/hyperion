@@ -59,7 +59,6 @@ use std::error::Error;
 use std::fmt;
 
 use super::hosts::strip::{self, Surroundings};
-use super::hosts::substellar as substellar_hosts;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
@@ -644,11 +643,10 @@ impl SystemContext {
     ///
     /// Whatever [`resolve`] refuses: [`ResolveSystemError::NoSuchSystem`] for an ID that names no
     /// system and [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for the kinds plans
-    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets: each returns
-    /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here below generator version
-    /// 26, from which P14.T27.a gives a free-floating brown dwarf a [`HostKind::BrownDwarf`]
-    /// context and P14.T27.b a rogue planet, which has no stars (P13.T5.d), its
-    /// [`HostKind::RoguePlanet`] one (the [module documentation](self)).
+    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets: from generator version 26
+    /// P14.T27.a gives a free-floating brown dwarf a [`HostKind::BrownDwarf`] context and P14.T27.b
+    /// a rogue planet, which has no stars (P13.T5.d), its [`HostKind::RoguePlanet`] one (the
+    /// [module documentation](self)).
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         // A feature member is resolved once, here, rather than through `resolve` and again for
         // its stars: its interior is the costly part, and is kept for its surroundings too. So
@@ -691,10 +689,9 @@ impl SystemContext {
     ///
     /// # Errors
     ///
-    /// [`for_system`](Self::for_system)'s refusals of a system that resolves:
+    /// [`for_system`](Self::for_system)'s refusal of a system that resolves:
     /// [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for a member of the galactic
-    /// centre, and [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) for a
-    /// free-floating brown dwarf below generator version 26 (P14.T27.a).
+    /// centre.
     pub fn for_stars(galaxy: &Galaxy, stars: &SystemStars) -> Result<Self, ResolveSystemError> {
         refuse_ungenerated(stars.record())?;
         Ok(Self::from_stars_with(galaxy, &NoInteriorCache, stars))
@@ -786,7 +783,7 @@ impl SystemContext {
             Surroundings::of_record(galaxy, interiors, record, hierarchy.system_mass());
         Self {
             id: record.id(),
-            host_kind: substellar_hosts::host_kind(record.kind()),
+            host_kind: HostKind::from(record.kind()),
             composition: *stars.primary().composition(),
             // `SystemStars` lends its models; the copy keeps their built tracks, so nothing is
             // evolved twice.
@@ -1077,18 +1074,12 @@ impl SystemContext {
 ///
 /// # Errors
 ///
-/// - [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre: its members
-///   resolve since plan 09's P09.T27, but their stars take the centre's own composition and its
-///   black hole is no star.
-/// - [`ResolveSystemError::LayerNotGenerated`] for a system of a kind the stage does not generate
-///   under the rules in force ([`substellar_hosts::generates`]): a free-floating brown dwarf and a
-///   rogue planet below generator version 26.
+/// [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre: its members resolve
+/// since plan 09's P09.T27, but their stars take the centre's own composition and its black hole is
+/// no star.
 fn refuse_ungenerated(record: &SystemRecord) -> Result<(), ResolveSystemError> {
     if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
         return Err(ResolveSystemError::KindNotGenerated);
-    }
-    if !substellar_hosts::generates(record.kind()) {
-        return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
     }
     Ok(())
 }

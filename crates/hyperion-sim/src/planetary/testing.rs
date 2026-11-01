@@ -404,20 +404,6 @@ impl Error for SampleContextsError {
     }
 }
 
-/// Gives the free-floating hosts their systems for every thread of this process, ahead of their
-/// holds at generator version 26 (P14.T27.a's `SUBSTELLAR_HOSTS_VERSION` and P14.T27.b's
-/// `ROGUE_PLANET_HOSTS_VERSION`), for another crate's test binary: the server answers on its pool's
-/// threads, which a switch on the test's thread would not reach. A brown dwarf's and a rogue
-/// planet's systems are generated, and the frame search walks their layers
-/// ([`frame_at`](crate::galaxy::frame::frame_at)); every other 26 hold stays held, so every other
-/// system reads the version's records. It is one-way and process-wide, so a binary that calls it
-/// calls it at the start of every test, and holds no test that asks for the free-floating hosts at
-/// 25. Only a test binary calls this. 26's bump deletes it with the holds.
-#[cfg(feature = "testing")]
-pub fn admit_free_floating_hosts_in_this_process() {
-    super::hosts::substellar::admit_free_floating_in_this_process();
-}
-
 /// `run`'s result with every landed hold at generator version 26 in force on this thread, for a
 /// test that asserts a 26 figure: the holds at 26, each with its switch, which sets its rules back
 /// as it returns, a panic in `run` included. A test may set one hold back inside it to compare 26
@@ -425,10 +411,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds at 26:
 ///
-/// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
-///   `SubstellarHostRules::BrownDwarfs` through `with_substellar_hosts`.
-/// - a rogue planet's bodies, `ROGUE_PLANET_HOSTS_VERSION` (P14.T27.b), at
-///   `RoguePlanetRules::Bodies` through `with_rogue_planets`.
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
 ///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
@@ -439,11 +421,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::hosts::substellar::{
-        RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
-    };
-    let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
-    let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)

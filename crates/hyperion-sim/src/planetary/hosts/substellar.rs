@@ -1,13 +1,13 @@
 //! Substellar hosts: a free-floating brown dwarf's planets (plan 14, design note 13, P14.T27.a),
-//! behind their hold at generator version 26 (`SUBSTELLAR_HOSTS_VERSION`).
+//! from generator version 26.
 //!
 //! A free-floating brown dwarf is plan 13's object of layer F, 13 Jupiter masses to 0.08 M☉, with
 //! plan 06's stellar state: a single [`StarModel`](crate::stellar::system::StarModel) on the
-//! cooling fits ([`substellar::cooling`](crate::stellar::substellar::cooling)). From the hold's
-//! version it runs the stellar path with three changes, each keyed on the context's
+//! cooling fits ([`substellar::cooling`](crate::stellar::substellar::cooling)). From version 26
+//! it runs the stellar path with three changes, each keyed on the context's
 //! [`HostKind::BrownDwarf`]:
 //!
-//! - **The context.** [`SystemContext::for_system`] gives it one, where it was refused, and
+//! - **The context.** [`SystemContext::for_system`] gives it one, where it was refused to 25, and
 //!   [`SystemContext::from_stars`] calls its host [`HostKind::BrownDwarf`], so that a caller that
 //!   holds its stars (the server's body cache) builds the same context
 //!   ([`SystemContext::for_stars`]).
@@ -32,14 +32,13 @@
 //!
 //! **Only free-floating objects come here** (design note 13). A brown dwarf bound to a star is
 //! plan 11's component, and design note 10 treats it as one: its zone keeps the stellar row's
-//! `SubstellarCompact` weight, continuous with the stars' at 0.08 M☉, under both arms.
+//! `SubstellarCompact` weight, continuous with the stars' at 0.08 M☉.
 //!
 //! # Rogue planets (P14.T27.b)
 //!
 //! A rogue planet is plan 13's object of layer G, 0.3 M⊕ to 13 Jupiter masses, with its record and
-//! its metallicity and no star. From its own hold's version, `ROGUE_PLANET_HOSTS_VERSION` (26,
-//! apart from the brown dwarfs' so that the two delete independently), it runs the satellite path
-//! only, as a planet without a star (design note 13):
+//! its metallicity and no star. From generator version 26 it runs the satellite path only, as a
+//! planet without a star (design note 13):
 //!
 //! - **The context** ([`SystemContext::for_system`], [`HostKind::RoguePlanet`]) holds no star: no
 //!   stars, zones or hierarchy, and the object's mass, age and composition in their place.
@@ -54,17 +53,12 @@
 //!   moons inside [`EJECTED_MOON_HILL_SHARE`] of its birth Hill radius; heavier, it formed alone
 //!   and keeps them all. Its moons are `0x0100` upward, its rings `0x0080` upward.
 //!
-//! The client's `SYSTEM` view opens a brown dwarf and a rogue planet at 26's bump, not here: until
-//! then it says that their bodies are not yet modelled, and the server refuses their bodies as
-//! [`SystemContext::for_system`] does.
 
 use core::f64::consts::TAU;
 
-use crate::galaxy::placement::SystemKind;
 use crate::galaxy::substellar::BROWN_DWARF_MIN_MSUN;
 use crate::id::BodyId;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
-use crate::planetary::HostKind;
 use crate::planetary::architecture::{
     ArchitectureClass, CLASS_COUNT, ClassWeights, small_planet_metallicity_scaling,
 };
@@ -80,184 +74,7 @@ use crate::units::{
     AstronomicalUnits, Dex, EarthMasses, GravitationalParameter, JupiterMasses, Kilograms, Metres,
     Radians, SolarMasses,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed, math};
-
-/// The generator version from which a free-floating brown dwarf has planets (P14.T27.a): 26, the
-/// first galaxy train after the task lands (the bump plan).
-///
-/// It is T27.a's one hold. Below it [`SubstellarHostRules::in_force`] is
-/// [`SubstellarHostRules::Held`]: a brown dwarf's system is refused, a context built from its stars
-/// is [`HostKind::Stellar`], and every generated value is version 25's bit for bit. 26's bump
-/// deletes this hold, [`SubstellarHostRules`] with its `Held` arm, the tests' switch and its
-/// tripwire (`the_brown_dwarf_hosts_are_held_only_until_the_26_bump`).
-pub(crate) const SUBSTELLAR_HOSTS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T27.a's brown-dwarf hosts are in force (its hold, [`SUBSTELLAR_HOSTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SubstellarHostRules {
-    /// Version 25's and before: a free-floating brown dwarf has no planetary system, and a context
-    /// built from its stars is stellar.
-    Held,
-    /// Version 26's: a free-floating brown dwarf hosts a system of its own.
-    BrownDwarfs,
-}
-
-impl SubstellarHostRules {
-    /// The rules this generator version gives: the brown dwarfs' from
-    /// [`SUBSTELLAR_HOSTS_VERSION`], none below it; in the tests, the rules a test's switch sets on
-    /// its thread ([`with_substellar_hosts`]); behind the `testing` feature, the brown dwarfs'
-    /// wherever another crate's test binary has admitted the free-floating hosts for its whole
-    /// process ([`admit_free_floating_in_this_process`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        #[cfg(feature = "testing")]
-        if FREE_FLOATING_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
-            return Self::BrownDwarfs;
-        }
-        if GENERATOR_VERSION >= SUBSTELLAR_HOSTS_VERSION {
-            Self::BrownDwarfs
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The substellar hosts' rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<SubstellarHostRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the substellar hosts' rules `rules` on this thread, for the tests to reach
-/// the brown dwarfs' systems ahead of the bump; the version's rules are set back after, a panic in
-/// `run` included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_substellar_hosts<R>(rules: SubstellarHostRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SubstellarHostRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// The generator version from which a rogue planet has bodies (P14.T27.b): 26, as for the brown
-/// dwarfs' ([`SUBSTELLAR_HOSTS_VERSION`]).
-///
-/// It is T27.b's one hold, apart from T27.a's so that the two delete independently (lean,
-/// 2026-10-31). Below it [`RoguePlanetRules::in_force`] is [`RoguePlanetRules::Held`]: a rogue
-/// planet's system is refused, and every generated value is version 25's bit for bit, since no
-/// other system reads a rogue planet. 26's bump deletes this hold, [`RoguePlanetRules`] with its
-/// `Held` arm, the tests' switch and its tripwire
-/// (`the_rogue_planets_are_held_only_until_the_26_bump`).
-pub(crate) const ROGUE_PLANET_HOSTS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T27.b's rogue planets are in force (its hold, [`ROGUE_PLANET_HOSTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum RoguePlanetRules {
-    /// Version 25's and before: a rogue planet has no planetary system.
-    Held,
-    /// Version 26's: a rogue planet is body `0x0000` of a system of its own, with its moons and
-    /// rings.
-    Bodies,
-}
-
-impl RoguePlanetRules {
-    /// The rules this generator version gives: the rogue planets' bodies from
-    /// [`ROGUE_PLANET_HOSTS_VERSION`], none below it; in the tests, the rules a test's switch sets
-    /// on its thread ([`with_rogue_planets`]); behind the `testing` feature, the bodies wherever
-    /// another crate's test binary has admitted the free-floating hosts for its whole process
-    /// ([`admit_free_floating_in_this_process`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = ROGUE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        #[cfg(feature = "testing")]
-        if FREE_FLOATING_IN_THIS_PROCESS.load(core::sync::atomic::Ordering::Relaxed) {
-            return Self::Bodies;
-        }
-        if GENERATOR_VERSION >= ROGUE_PLANET_HOSTS_VERSION {
-            Self::Bodies
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The rogue planets' rules a test sets on its thread, `None` for the version's.
-    static ROGUE_RULES: core::cell::Cell<Option<RoguePlanetRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the rogue planets' rules `rules` on this thread, for the tests to reach
-/// their bodies ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_rogue_planets<R>(rules: RoguePlanetRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<RoguePlanetRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            ROGUE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(ROGUE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether another crate's test binary has admitted the free-floating hosts, brown dwarfs and rogue
-/// planets alike, for every thread of its process, ahead of both their holds
-/// ([`admit_free_floating_in_this_process`]): its code answers on threads of its own, such as the
-/// server's pool, which no thread's switch reaches. Never set in this crate's tests, nor outside the
-/// `testing` feature. 26's bump deletes it with the holds.
-#[cfg(feature = "testing")]
-static FREE_FLOATING_IN_THIS_PROCESS: core::sync::atomic::AtomicBool =
-    core::sync::atomic::AtomicBool::new(false);
-
-/// Puts both holds' arms, [`SubstellarHostRules::BrownDwarfs`] and [`RoguePlanetRules::Bodies`], in
-/// force for every thread of this process ([`FREE_FLOATING_IN_THIS_PROCESS`]); one-way.
-#[cfg(feature = "testing")]
-pub(crate) fn admit_free_floating_in_this_process() {
-    FREE_FLOATING_IN_THIS_PROCESS.store(true, core::sync::atomic::Ordering::Relaxed);
-}
-
-/// Whether the planetary stage generates the systems of kind `kind` under the rules in force:
-/// every star system, from [`SUBSTELLAR_HOSTS_VERSION`] the free-floating brown dwarfs, and from
-/// [`ROGUE_PLANET_HOSTS_VERSION`] the rogue planets.
-#[must_use]
-pub(crate) fn generates(kind: SystemKind) -> bool {
-    match kind {
-        SystemKind::Stellar => true,
-        SystemKind::BrownDwarf => {
-            SubstellarHostRules::in_force() == SubstellarHostRules::BrownDwarfs
-        }
-        SystemKind::RoguePlanet => RoguePlanetRules::in_force() == RoguePlanetRules::Bodies,
-    }
-}
-
-/// The host of a context built from the stars of a system of kind `kind`
-/// ([`SystemContext::from_stars`]): its own kind from [`SUBSTELLAR_HOSTS_VERSION`], so that a
-/// free-floating brown dwarf is [`HostKind::BrownDwarf`], and [`HostKind::Stellar`] for every
-/// system below it, as version 25 had it.
-#[must_use]
-pub(crate) fn host_kind(kind: SystemKind) -> HostKind {
-    match SubstellarHostRules::in_force() {
-        SubstellarHostRules::Held => HostKind::Stellar,
-        SubstellarHostRules::BrownDwarfs => HostKind::from(kind),
-    }
-}
+use crate::{Seed, math};
 
 /// The weight of `Barren` about a free-floating brown dwarf: 0.5, against
 /// [`BROWN_DWARF_CHAIN_WEIGHT`]'s 0.5 at 0.05 M☉ (plan 14, P14.T27.a's figures).
@@ -561,17 +378,17 @@ mod tests {
     use crate::Seed;
     use crate::galaxy::Galaxy;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::{
-        CellKey, Existence, ResolveSystemError, SystemRecord, generate_cell,
-    };
+    use crate::galaxy::placement::SystemKind;
+    use crate::galaxy::placement::{CellKey, Existence, SystemRecord, generate_cell};
     use crate::id::Layer;
+    use crate::planetary::HostKind;
     use crate::planetary::architecture::{SUBSTELLAR_LIMIT, class_weights};
     use crate::planetary::context::SystemContext;
     use crate::planetary::hosts::evolved::circularised;
     use crate::planetary::params::{HILL_STABLE_GAP, SPACING_GIANT_MASS};
     use crate::planetary::placement::{OrbitHost, mutual_hill_radius};
     use crate::planetary::system::{PlanetarySystem, generate, generate_planets};
-    use crate::planetary::testing::{SampleFilter, sample_records, with_every_26_hold};
+    use crate::planetary::testing::with_every_26_hold;
     use crate::stellar::multiplicity::SlotKind;
     use crate::stellar::system::SystemStars;
     use crate::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
@@ -623,54 +440,13 @@ mod tests {
         found
     }
 
-    /// The context and planets of `record` under the brown dwarfs' rules, as the server's body
-    /// cache builds them: its stars, then [`SystemContext::for_stars`].
+    /// The context and planets of `record`, as the server's body cache builds them: its stars, then
+    /// [`SystemContext::for_stars`].
     fn hosted(record: &SystemRecord) -> (SystemContext, PlanetarySystem) {
-        with_substellar_hosts(SubstellarHostRules::BrownDwarfs, || {
-            let stars = SystemStars::generate(galaxy(), record);
-            let ctx = SystemContext::for_stars(galaxy(), &stars)
-                .expect("a brown dwarf is generated under the new arm");
-            let planets = generate_planets(seed(), &ctx);
-            (ctx, planets)
-        })
-    }
-
-    /// P14.T27.a is held until the 25 → 26 bump: a brown dwarf's system is refused and a
-    /// context from its stars is stellar, inside 26's helper alone.
-    #[test]
-    fn the_brown_dwarf_hosts_are_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < SUBSTELLAR_HOSTS_VERSION,
-            "the 25 → 26 bump gives the free-floating brown dwarfs their planets (P14.T27.a): \
-             delete `SUBSTELLAR_HOSTS_VERSION`, `SubstellarHostRules` with its `Held` arm and the \
-             held arms of `generates` and `host_kind`, the tests' `with_substellar_hosts`, its \
-             switch in `with_every_26_hold` and this test; open the client's `SYSTEM` view to \
-             brown dwarfs (`SystemsPanel.tsx`'s `freeFloating`, which keeps rogue planets until \
-             P14.T27.b's hold lifts with this one); keep only the rogue planets in \
-             `tests/substellar_placement.rs`'s `a_free_floating_object_has_no_stellar_context_yet` \
-             (or delete it, with P14.T27.b's hold); and turn the server's \
-             `a_brown_dwarf_s_bodies_are_refused_until_the_26_bump` into a test of its bodies"
-        );
-        assert_eq!(SubstellarHostRules::in_force(), SubstellarHostRules::Held);
-        assert!(!generates(SystemKind::BrownDwarf));
-        assert_eq!(host_kind(SystemKind::BrownDwarf), HostKind::Stellar);
-        assert_eq!(
-            with_every_26_hold(SubstellarHostRules::in_force),
-            SubstellarHostRules::BrownDwarfs
-        );
-        assert_eq!(
-            with_every_26_hold(|| {
-                with_substellar_hosts(SubstellarHostRules::Held, SubstellarHostRules::in_force)
-            }),
-            SubstellarHostRules::Held
-        );
-        with_substellar_hosts(SubstellarHostRules::BrownDwarfs, || {
-            assert!(generates(SystemKind::BrownDwarf));
-            assert_eq!(host_kind(SystemKind::BrownDwarf), HostKind::BrownDwarf);
-            assert!(!generates(SystemKind::RoguePlanet));
-            assert_eq!(host_kind(SystemKind::Stellar), HostKind::Stellar);
-        });
-        assert_eq!(SubstellarHostRules::in_force(), SubstellarHostRules::Held);
+        let stars = SystemStars::generate(galaxy(), record);
+        let ctx = SystemContext::for_stars(galaxy(), &stars).expect("a brown dwarf is generated");
+        let planets = generate_planets(seed(), &ctx);
+        (ctx, planets)
     }
 
     /// The weights of P14.T27.a: `Barren` 0.5 and the chain 0.5 at 0.05 M☉, held to 0.08 M☉
@@ -724,38 +500,27 @@ mod tests {
         assert!(star.get(ArchitectureClass::Barren) < 0.01);
     }
 
-    /// `for_system` and the server's path, `for_stars` of the system's stars, agree for a brown
-    /// dwarf under both arms: both refuse it under the hold, and both give the same
-    /// `HostKind::BrownDwarf` context under the new arm, as `from_stars` and `from_record` do.
+    /// `for_system` and the server's path, `for_stars` of the system's stars, give a brown dwarf the
+    /// same `HostKind::BrownDwarf` context, as `from_stars` and `from_record` do.
     #[test]
-    fn for_system_and_the_body_cache_s_context_agree_for_a_brown_dwarf_under_both_arms() {
+    fn for_system_and_the_body_cache_s_context_agree_for_a_brown_dwarf() {
         for record in brown_dwarfs(40) {
             let id = record.id();
             let stars = SystemStars::generate(galaxy(), &record);
-            let refused = Err(ResolveSystemError::LayerNotGenerated(Layer::BrownDwarf));
-            with_substellar_hosts(SubstellarHostRules::Held, || {
-                assert_eq!(SystemContext::for_system(galaxy(), id), refused);
-                assert_eq!(SystemContext::for_stars(galaxy(), &stars), refused);
-                // Version 25's context from the stars, which nothing generates from.
-                let held = SystemContext::from_stars(galaxy(), &stars);
-                assert_eq!(held.host_kind(), HostKind::Stellar);
-            });
-            with_substellar_hosts(SubstellarHostRules::BrownDwarfs, || {
-                let context = SystemContext::for_system(galaxy(), id).expect("generated");
-                assert_eq!(context.host_kind(), HostKind::BrownDwarf);
-                assert_eq!(
-                    SystemContext::for_stars(galaxy(), &stars),
-                    Ok(context.clone())
-                );
-                assert_eq!(SystemContext::from_stars(galaxy(), &stars), context);
-                assert_eq!(SystemContext::from_record(galaxy(), &record), context);
-                assert_eq!(context.stars().len(), 1);
-                assert_eq!(
-                    context.hierarchy().unwrap().stars()[0].kind(),
-                    SlotKind::Star
-                );
-                assert!(context.hierarchy().unwrap().stars()[0].initial_mass() < SUBSTELLAR_LIMIT);
-            });
+            let context = SystemContext::for_system(galaxy(), id).expect("generated");
+            assert_eq!(context.host_kind(), HostKind::BrownDwarf);
+            assert_eq!(
+                SystemContext::for_stars(galaxy(), &stars),
+                Ok(context.clone())
+            );
+            assert_eq!(SystemContext::from_stars(galaxy(), &stars), context);
+            assert_eq!(SystemContext::from_record(galaxy(), &record), context);
+            assert_eq!(context.stars().len(), 1);
+            assert_eq!(
+                context.hierarchy().unwrap().stars()[0].kind(),
+                SlotKind::Star
+            );
+            assert!(context.hierarchy().unwrap().stars()[0].initial_mass() < SUBSTELLAR_LIMIT);
         }
     }
 
@@ -764,15 +529,13 @@ mod tests {
     #[test]
     fn a_brown_dwarf_s_disc_reads_its_cooling_fit_at_ten_myr() {
         for record in brown_dwarfs(20) {
-            let stars = SystemStars::generate(galaxy(), &record);
-            let held = with_substellar_hosts(SubstellarHostRules::Held, || {
-                SystemContext::from_stars(galaxy(), &stars)
-            });
             let (ctx, _) = hosted(&record);
             let mass = record.primary_initial_mass();
-            let young =
-                crate::stellar::substellar::cooling(mass, Years::new(1.0e7), held.composition())
-                    .expect("a brown dwarf's mass lies inside the cooling fits");
+            let cooled = |age: f64| {
+                crate::stellar::substellar::cooling(mass, Years::new(age), ctx.composition())
+                    .expect("a brown dwarf's mass lies inside the cooling fits")
+            };
+            let young = cooled(1.0e7);
             let zone_star = ctx.zone_stars()[0];
             assert_same_bits(
                 zone_star.zams_luminosity.value(),
@@ -780,7 +543,7 @@ mod tests {
             );
             assert_same_bits(zone_star.zams_radius.value(), young.radius().value());
             // Brighter young than old: the disc sees the young object.
-            assert!(zone_star.zams_luminosity > held.zone_stars()[0].zams_luminosity);
+            assert!(zone_star.zams_luminosity > cooled(5.0e9).luminosity());
         }
     }
 
@@ -1033,62 +796,6 @@ mod tests {
         assert!(
             inner < Metres::from(AstronomicalUnits::new(0.01)),
             "{inner:?}"
-        );
-    }
-
-    /// Every stellar system, its brown-dwarf companions included, is bit-identical under both arms:
-    /// its context, its planets and its records at the epoch, over a sample of M and K dwarfs
-    /// with every one that has a brown-dwarf companion generated whole.
-    #[test]
-    fn every_stellar_system_is_bit_identical_under_both_arms() {
-        let records = sample_records(
-            galaxy(),
-            300,
-            SampleFilter::primary_masses(SolarMasses::new(0.08), SolarMasses::new(0.8)),
-        )
-        .unwrap();
-        let mut companions = 0;
-        for record in &records {
-            let held = with_substellar_hosts(SubstellarHostRules::Held, || {
-                SystemContext::from_record(galaxy(), record)
-            });
-            let new = with_substellar_hosts(SubstellarHostRules::BrownDwarfs, || {
-                SystemContext::from_record(galaxy(), record)
-            });
-            assert_eq!(held, new);
-            assert_eq!(new.host_kind(), HostKind::Stellar);
-            let bound = new
-                .hierarchy()
-                .unwrap()
-                .stars()
-                .iter()
-                .any(|s| s.kind() == SlotKind::BrownDwarf);
-            let run = |rules| {
-                with_substellar_hosts(rules, || {
-                    if bound {
-                        let system = generate(seed(), &new);
-                        let snapshot = system.snapshot_at(&new, UniverseTime::EPOCH);
-                        (system, Some(snapshot))
-                    } else {
-                        (generate_planets(seed(), &new), None)
-                    }
-                })
-            };
-            assert_eq!(
-                run(SubstellarHostRules::Held),
-                run(SubstellarHostRules::BrownDwarfs),
-                "{:?}",
-                record.id()
-            );
-            companions += usize::from(bound);
-        }
-        println!(
-            "{companions} of {} with a brown-dwarf companion",
-            records.len()
-        );
-        assert!(
-            companions >= 3,
-            "the sample holds brown-dwarf companions: {companions}"
         );
     }
 

@@ -73,8 +73,7 @@ use crate::convert::{
 /// member of the galactic centre), in either mode; in observed mode, `bad_request` naming `mode`
 /// for a list member, whose motion the sim does not trace yet; `internal` if the pool is shutting
 /// down or the job panics; and `cancelled` if the client gave up before it ran. A rogue planet is
-/// refused as [`starless`] refuses it: `unknown_system` naming `system`, in either mode, below
-/// generator version 26 (P14.T27.b).
+/// answered by [`starless`] (P14.T27.b).
 pub(crate) async fn summary(
     state: Arc<AppState>,
     request: SystemSummaryRequest,
@@ -132,9 +131,8 @@ pub(crate) async fn summary(
 }
 
 /// A rogue planet's summary (P14.T27.b): its [`starless_summary`] from the context the body cache
-/// holds ([`bodies_of`]), the hosts `system_bodies` sends with its bodies. The body cache holds a
-/// rogue planet only where the sim generates its bodies, from generator version 26, so the
-/// summary, the frame and the bodies are answered from the same version.
+/// holds ([`bodies_of`]), the hosts `system_bodies` sends with its bodies, so that the summary, the
+/// frame and the bodies are answered from the same context.
 ///
 /// In observed mode it is the starless summary at the time the light the observer receives left
 /// the planet, with that light's `observed`, on the line `resolve_system` traces it on: a grid
@@ -144,8 +142,7 @@ pub(crate) async fn summary(
 /// # Errors
 ///
 /// `unknown_system` naming `system` where [`bodies_of`] refuses the ID, in either mode: one that
-/// `resolve` refuses and, below generator version 26, every rogue planet; and `queue_full`,
-/// `internal` or `cancelled` from either job.
+/// `resolve` refuses; and `queue_full`, `internal` or `cancelled` from either job.
 async fn starless(
     state: &Arc<AppState>,
     (key, galaxy): (GalaxyKey, Arc<Galaxy>),
@@ -354,11 +351,9 @@ pub(crate) async fn events(
 ///
 /// A miss builds the context from the stars the system cache holds, resolving and generating them
 /// there first if it holds none, so that the stars are evolved once for both caches. The context
-/// is refused as [`SystemContext::for_system`] refuses the ID ([`SystemContext::for_stars`]): a
-/// free-floating brown dwarf, whose stars the system cache holds, has no bodies until generator
-/// version 26 (P14.T27.a). A rogue planet, which has no stars for the system cache to hold, takes
-/// its context from [`SystemContext::for_system`] itself, which refuses it until 26 too
-/// (P14.T27.b).
+/// is refused as [`SystemContext::for_system`] refuses the ID ([`SystemContext::for_stars`]). A
+/// rogue planet, which has no stars for the system cache to hold, takes its context from
+/// [`SystemContext::for_system`] itself (P14.T27.b).
 pub(crate) async fn bodies_of(
     state: &Arc<AppState>,
     key: GalaxyKey,
