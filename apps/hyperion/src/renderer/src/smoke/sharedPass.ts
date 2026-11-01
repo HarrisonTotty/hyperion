@@ -603,11 +603,7 @@ const COMPARISON = { widthPx: 320, heightPx: 180 } as const;
 
 /** Each stride's clusters of each pass, blocks and strips together, for the log. */
 function stridesOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
-  return (stats ?? [])
-    .map((each) =>
-      [0, 1, 2, 3].map((l) => (each.byTemplate[l] ?? 0) + (each.byTemplate[l + 4] ?? 0)).join("/"),
-    )
-    .join(", ");
+  return (stats ?? []).map((each) => each.byStride.join("/")).join(", ");
 }
 
 /** The high setting's geometry at stride 1: its exact levers alone (plan R14, R14.T1.c). */
@@ -920,7 +916,7 @@ export async function checkShadowCascades(
     // Where no cluster qualifies for a stride (each patch's spacing above half of every texel it
     // casts into, as the fixture's smooth fine levels leave its selection), the frame is stride 1's.
     const anyStrided = (stridedStats ?? []).some((each) =>
-      each.byTemplate.some((n, t) => t % 4 !== 0 && n > 0),
+      each.byStride.some((n, l) => l > 0 && n > 0),
     );
     const unmoved = bytesDigest(exactTexels) === bytesDigest(stridedTexels);
     checks.check(

@@ -14,7 +14,7 @@ import {
   ClusterBuckets,
   MAX_LIST_ENTRIES,
 } from "./buckets";
-import { ClusterStats, passStats } from "./stats";
+import { ClusterStats, PASS_STATS_WORDS, passStats } from "./stats";
 import { terrainClusterMesh } from "./templates";
 
 const { templates } = terrainClusterMesh();
@@ -114,22 +114,25 @@ describe("the cluster path's buckets (plan R14, R14.T1.b)", () => {
 });
 
 describe("the cluster path's counters (plan R14, R14.T1.b)", () => {
-  it("counts each pass's clusters and triangles from its buckets' counts", () => {
-    const counts = Uint32Array.from([3, 0, 0, 1, 2, 0, 0, 0, ...templates.map(() => 0)]);
-    expect(passStats(counts, templates, ["cascade 1", "cascade 2"])).toEqual([
-      {
-        label: "cascade 1",
-        clusters: 6,
-        triangles: 3 * 128 + 2 + 2 * 16,
-        byTemplate: [3, 0, 0, 1, 2, 0, 0, 0],
-      },
-      { label: "cascade 2", clusters: 0, triangles: 0, byTemplate: [0, 0, 0, 0, 0, 0, 0, 0] },
+  it("reads each pass's clusters, triangles and clusters by stride from its reduction's words", () => {
+    const words = Uint32Array.from([6, 3 * 128 + 2 + 2 * 16, 5, 0, 0, 1, ...Array(6).fill(0)]);
+    expect([PASS_STATS_WORDS, passStats(words, ["cascade 1", "cascade 2"])]).toEqual([
+      6,
+      [
+        {
+          label: "cascade 1",
+          clusters: 6,
+          triangles: 3 * 128 + 2 + 2 * 16,
+          byStride: [5, 0, 0, 1],
+        },
+        { label: "cascade 2", clusters: 0, triangles: 0, byStride: [0, 0, 0, 0] },
+      ],
     ]);
   });
 
-  it("copies the counts by its bit-exact kernel and gives the read's answer as its latest", async () => {
+  it("reduces the counts by its bit-exact kernel, each template's triangles and stride its uniforms, and gives the read's answer as its latest", async () => {
     const engine = new AnsweringEngine(await fakeDevice());
-    engine.answer = Uint32Array.from([5, ...Array.from({ length: 7 }, () => 0)]);
+    engine.answer = Uint32Array.from([5, 5 * 128, 5, 0, 0, 0]);
     const buckets = new ClusterBuckets(engine, "test clusters", 1, templates, CAPACITIES);
     const stats = new ClusterStats(engine, "test clusters");
     expect(stats.latest()).toBeNull();
@@ -137,11 +140,22 @@ describe("the cluster path's counters (plan R14, R14.T1.b)", () => {
     await Promise.resolve();
     await Promise.resolve();
     const dispatched = engine.dispatched.at(-1);
+    const params = dispatched?.bindings.uniforms["params"] ?? new Uint32Array();
     expect([
       dispatched?.kernel,
       dispatched?.bindings.buffers["args"],
-      stats.latest()?.[0]?.triangles,
-    ]).toEqual(["cluster stats copy", buckets.args, 5 * 128]);
+      [...params.subarray(0, 2)],
+      [...params.subarray(4, 12)],
+      [...params.subarray(12, 20)],
+      stats.latest()?.[0],
+    ]).toEqual([
+      "cluster stats reduction",
+      buckets.args,
+      [1, 8],
+      [128, 32, 8, 2, 16, 8, 4, 2],
+      [0, 1, 2, 3, 0, 1, 2, 3],
+      { label: "cascade 1", clusters: 5, triangles: 5 * 128, byStride: [5, 0, 0, 0] },
+    ]);
     expect(engine.kernelPairs.at(-1)?.readback).toBe("bit-exact");
     stats.dispose();
     buckets.dispose();

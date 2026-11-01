@@ -1089,7 +1089,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     expect(writes.every((w) => w.bytes === 96 * 32 && w.offsetBytes % (96 * 32) === 0)).toBe(true);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const copies = (): number =>
-      made.engine.dispatched.filter((d) => d.kernel === "cluster stats copy").length;
+      made.engine.dispatched.filter((d) => d.kernel === "cluster stats reduction").length;
     const unmeasured = copies();
     made.pass.measureClusters(true);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
