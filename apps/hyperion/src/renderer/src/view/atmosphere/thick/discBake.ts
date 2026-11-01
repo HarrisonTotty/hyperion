@@ -31,6 +31,13 @@
  * along its ray to the top, the light slot's curves added at each node; read bilinearly. Its ground
  * shadow is the sphere's, as `source.wgsl`'s.
  *
+ * **A cloud deck** (R08.T16.b.2; `deckRead.ts`): where the medium is a deck's upper medium, its datum
+ * the deck's level surface (a giant's envelope floor among them), each view ray's light at the datum
+ * is the deck's own (`deckRead.ts`'s `deckGroundInto`, as `deckRead.wgsl`'s `deckGroundAt` reads it
+ * at a march's hit) through the ray's transmittance, in the bare ground's place, and the node's
+ * transmittance is 0, as the march's is where it meets a surface: the deck's light is in the table,
+ * and nothing of the disc's plain shading under it is drawn.
+ *
  * **The air's own light** (R08.T18.b; `thermalSource.ts`): a self-luminous medium's view rays also
  * gather what the kernels' thermal forms gather, each step's B̃ at its h\* times the depth it absorbs
  * through slot 0's path and step factor, and σ_s,k J_th of the bake's scattered thermal light where
@@ -71,6 +78,12 @@ import {
 } from "../opticalDepth";
 import type { MsSourceTable, ThickBakeBand } from "./bake";
 import {
+  deckGroundInto,
+  type DeckReadScratch,
+  deckReadScratch,
+  type PackedDeckTable,
+} from "./deckRead";
+import {
   bandsScattering,
   type MediumTemperature,
   type ThermalRgb,
@@ -106,6 +119,22 @@ export const DISC_SUN_TABLE = { cosines: 128, radii: 64, steps: 64 } as const;
 /** The view ray's steps from the top to the datum: quadratic towards the datum, as the march's. */
 export const DISC_VIEW_STEPS = 48;
 
+/**
+ * The view ray's steps over a cloud deck (R08.T16.b.2): 768, so that a giant's thin, dense decks
+ * above its floor are resolved. On the hand Jupiter's column (τ 8–17 above its floor), at the disc's
+ * centre at full phase, 48 steps put its blue 84% over 768's and its green 22%, 192 steps its red
+ * 4.8% over, and 768 lies within 2.3% of 3,072 in every channel; the whole disc then reads within
+ * 3.6% of the march at eight times the high setting's samples from 10⁹ m
+ * (`thick/discBakeJupiter.test.ts`). A table on a ground keeps {@link DISC_VIEW_STEPS}, its bits as
+ * before.
+ */
+export const DISC_DECK_VIEW_STEPS = 768;
+
+/** A bake's view steps: {@link DISC_DECK_VIEW_STEPS} over a deck, {@link DISC_VIEW_STEPS} on a ground. */
+function viewStepsOf(input: Pick<DiscBakeInput, "deck">): number {
+  return input.deck === undefined ? DISC_VIEW_STEPS : DISC_DECK_VIEW_STEPS;
+}
+
 /** What the disc's bake takes (the module's remarks). */
 export interface DiscBakeInput {
   /**
@@ -124,6 +153,17 @@ export interface DiscBakeInput {
   readonly source: PackedThickTable;
   /** A self-luminous medium's thermal source (R08.T18.b), for the table's thermal layers. */
   readonly thermal?: ThermalSource;
+  /**
+   * The cloud deck the medium stands on (R08.T16.b.2; the module's remarks, "A cloud deck"): its
+   * table, read at each view ray's datum in the bare ground's place; absent for a ground.
+   */
+  readonly deck?: DiscDeck;
+}
+
+/** A cloud deck as the disc's bake reads it: its table and its bands' ln s_b, ascending. */
+export interface DiscDeck {
+  readonly table: PackedDeckTable;
+  readonly lnBands: Float64Array;
 }
 
 /** A medium term as the bake reads it, in its band's frame. */
@@ -661,6 +701,8 @@ interface NodeScratch extends DecodedScratch {
   readonly source: ThickSource;
   readonly j: [number, number, number];
   readonly toSun: [number, number, number];
+  readonly deck: DeckReadScratch;
+  readonly reflected: [number, number, number];
 }
 
 /** A fresh {@link NodeScratch}. */
@@ -671,12 +713,21 @@ function nodeScratch(): NodeScratch {
     upper: thickSourceScratch(),
     j: [0, 0, 0],
     toSun: [0, 0, 0],
+    deck: deckReadScratch(),
+    reflected: [0, 0, 0],
   };
+}
+
+/** A node's deck, as {@link nodeAirInto} reads it: the band's own s_b beside the deck's table. */
+interface NodeDeck {
+  readonly deck: DiscDeck;
+  readonly gravityRatio: number;
 }
 
 /**
  * One node's air, π L ÷ E per channel, along a view ray: its sun at cosine `muSun` and azimuth
- * `azimuthRad` from the view's horizontal (the module's remarks).
+ * `azimuthRad` from the view's horizontal, and where `deck` is given the deck's light at the
+ * datum through the ray's transmittance (the module's remarks).
  */
 function nodeAirInto(
   frame: BandFrame,
@@ -686,6 +737,7 @@ function nodeAirInto(
   slot: number,
   muSun: number,
   azimuthRad: number,
+  deck: NodeDeck | null,
   scratch: NodeScratch,
   out: [number, number, number],
 ): void {
@@ -741,9 +793,40 @@ function nodeAirInto(
       (step.weight[at + 2] ?? 0) *
       (single2 * scratch.toSun[2] + multiple2);
   }
+  if (deck !== null) {
+    // At the datum, n = (0, 0, 1): the reflected light travels up the view, μ_v, and h⊥ is the
+    // view's and the sun's horizontal parts' dot product, d · s + μ_v μ₀.
+    const { toSun, reflected } = scratch;
+    sunTransmittanceInto(sun, frame.shell.bottomRadiusM, muSun, toSun);
+    deckGroundInto(
+      deck.deck.table,
+      deck.deck.lnBands,
+      deck.gravityRatio,
+      muSun,
+      muView,
+      dDotS + muView * muSun,
+      dDotS,
+      slot,
+      toSun,
+      scratch.deck,
+      reflected,
+    );
+    const through = ray.through[slot] ?? [1, 1, 1];
+    red += through[0] * reflected[0];
+    green += through[1] * reflected[1];
+    blue += through[2] * reflected[2];
+  }
   out[0] = Math.PI * red;
   out[1] = Math.PI * green;
   out[2] = Math.PI * blue;
+}
+
+/**
+ * A node's transmittance as the table's alpha holds it: the ray's to the datum, meaned over the
+ * channels, or 0 over a deck, whose light the table holds (the module's remarks, "A cloud deck").
+ */
+function nodeAlpha(through: Readonly<Rgb>, deck: NodeDeck | null): number {
+  return deck === null ? (through[0] + through[1] + through[2]) / 3 : 0;
 }
 
 /** The deepest sun under which the top of any band's air is lit: −√(1 − (R ÷ (R + H))²). */
@@ -777,7 +860,7 @@ export function discThermalMarcher(
   }
   const frame = bandFrameOf(input.medium, geometry);
   const lnBands = input.bands.map((each) => log(each.gravityRatio));
-  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
+  const steps = options.viewSteps ?? viewStepsOf(input);
   return (muView) => {
     const ray = viewRayOf(frame, input.source, input.curves, input.source.slots, muView, steps);
     const out: ThermalRgb = [0, 0, 0];
@@ -788,7 +871,7 @@ export function discThermalMarcher(
 
 /** A bake's options, for the tests' convergence. */
 export interface DiscBakeOptions {
-  /** The view ray's steps: {@link DISC_VIEW_STEPS}. */
+  /** The view ray's steps: {@link DISC_VIEW_STEPS}, or {@link DISC_DECK_VIEW_STEPS} over a deck. */
   readonly viewSteps?: number;
 }
 
@@ -819,11 +902,12 @@ export function discAirMarcher(
   const suns = Array.from({ length: slots }, (_, slot) =>
     sunTableOf(frame, rays, input.curves[slot] ?? input.curves[0] ?? []),
   );
-  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
+  const steps = options.viewSteps ?? viewStepsOf(input);
   const scratch = nodeScratch();
   const decoded = Array.from({ length: slots }, (_, slot) =>
     decodedThickLayer(input.source, band * slots + slot),
   );
+  const deck = nodeDeckOf(input, geometry);
   return (muView, muSun, azimuthRad, slot) => {
     const k = Math.min(slot, slots - 1);
     const ray = viewRayOf(frame, input.source, input.curves, slots, muView, steps);
@@ -840,12 +924,17 @@ export function discAirMarcher(
       k,
       muSun,
       azimuthRad,
+      deck,
       scratch,
       out,
     );
-    const through = ray.through[k] ?? [1, 1, 1];
-    return [out[0], out[1], out[2], (through[0] + through[1] + through[2]) / 3];
+    return [out[0], out[1], out[2], nodeAlpha(ray.through[k] ?? [1, 1, 1], deck)];
   };
+}
+
+/** A band's deck as its nodes read it, or `null` for a medium on a ground. */
+function nodeDeckOf(input: DiscBakeInput, band: ThickBakeBand): NodeDeck | null {
+  return input.deck === undefined ? null : { deck: input.deck, gravityRatio: band.gravityRatio };
 }
 
 /**
@@ -887,11 +976,12 @@ export function bakeDiscBand(
   const slots = source.slots;
   const sunFloor = discSunFloorOf(bands, input.medium.topHeightM);
   const lit = new Float32Array(slots * DISC_LAYER_VALUES);
-  const steps = options.viewSteps ?? DISC_VIEW_STEPS;
+  const steps = options.viewSteps ?? viewStepsOf(input);
   const scratch = nodeScratch();
   const air: [number, number, number] = [0, 0, 0];
   const frame = bandFrameOf(input.medium, geometry);
   const rays = sunRaysOf(frame);
+  const deck = nodeDeckOf(input, geometry);
   const views = Array.from({ length: DISC_VIEW_COSINES }, (_, v) =>
     viewRayOf(frame, source, input.curves, slots, discViewCosineAt(v), steps),
   );
@@ -915,10 +1005,9 @@ export function bakeDiscBand(
       for (let k = 0; k < DISC_AZIMUTHS; k += 1) {
         const azimuth = discAzimuthAt(k);
         views.forEach((ray, v) => {
-          nodeAirInto(frame, ray, sun, decoded, slot, muSun, azimuth, scratch, air);
-          const through = ray.through[slot] ?? [1, 1, 1];
+          nodeAirInto(frame, ray, sun, decoded, slot, muSun, azimuth, deck, scratch, air);
           lit.set(
-            [air[0], air[1], air[2], (through[0] + through[1] + through[2]) / 3],
+            [air[0], air[1], air[2], nodeAlpha(ray.through[slot] ?? [1, 1, 1], deck)],
             discTexelIndex(slot, s, v, k),
           );
         });
@@ -961,6 +1050,11 @@ export interface DiscBakeAir {
    * are baked, the bake's scattered thermal light among them where it holds it.
    */
   readonly temperature?: MediumTemperature;
+  /**
+   * The routed cloud deck the medium stands on (R08.T16.b.2), its packed table (`deckRead.ts`'s
+   * `packDeckTable`), with `bake` its J above the deck (`deckAboveTables`); absent for a ground.
+   */
+  readonly deck?: PackedDeckTable;
 }
 
 /**
@@ -1022,5 +1116,13 @@ function discBakeInputOf(
     bands,
     source,
     ...(thermal === undefined ? {} : { thermal }),
+    ...(air.deck === undefined
+      ? {}
+      : {
+          deck: {
+            table: air.deck,
+            lnBands: Float64Array.from(bands, (band) => log(band.gravityRatio)),
+          },
+        }),
   };
 }

@@ -75,6 +75,7 @@
     "src/renderer/src/view/atmosphere/thick/binConversion.ts",
     "src/renderer/src/view/atmosphere/thick/columnLayout.ts",
     "src/renderer/src/view/atmosphere/thick/deck.ts",
+    "src/renderer/src/view/atmosphere/thick/deckRead.ts",
     "src/renderer/src/view/atmosphere/thick/discreteOrdinates.ts",
     "src/renderer/src/view/atmosphere/thick/expSum.ts",
     "src/renderer/src/view/atmosphere/thick/linearAlgebra.ts",

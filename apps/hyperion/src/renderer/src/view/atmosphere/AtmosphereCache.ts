@@ -126,8 +126,10 @@
  * and given to its tables when it lands (`AtmosphereTables.setDiscReflectance`), kept with the entry
  * as a bake is. R07's disc reads it beyond the 10⁹ m boundary in place of the full passes. It
  * changes no label: until it lands, and where it fails (one `console.error`, never item 6's fault),
- * the body is drawn by the full passes at every distance, as before. A gas envelope asks none yet
- * (R08.T16.a.2's lean: its disc is R08.T16.b.2's to check at 10⁹ m).
+ * the body is drawn by the full passes at every distance, as before. A routed deck's body is asked
+ * its table once its deck's bake lands, the table baked on its upper medium over its deck, J the
+ * deck's own and its deck read at the datum (R08.T16.b.2); a gas envelope whose route is closed asks
+ * none, so that the full passes draw it at every distance until its gate opens.
  *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
  * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
@@ -207,7 +209,14 @@ import {
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
 import type { DeckSplit, DeckTables } from "./thick/deck";
-import { deckCorrectionAbove, deckDatumOf, upperMediumOf } from "./thick/deckRead";
+import {
+  deckAboveTables,
+  deckCorrectionAbove,
+  deckDatumOf,
+  type PackedDeckTable,
+  packDeckTable,
+  upperMediumOf,
+} from "./thick/deckRead";
 import type { PolarisationTable } from "./thick/polarisation";
 import {
   approximateRegime,
@@ -1105,11 +1114,44 @@ function thickBakeAskOf(
   };
 }
 
+/** What of a body's bakes its disc table reads (`discBakeAskOf`): J, the correction, its deck. */
+interface DiscLanded {
+  readonly bake: ReadonlyArray<MsSourceTable> | undefined;
+  readonly correction: ReadonlyArray<PolarisationTable> | undefined;
+  /** A routed deck's packed table (R08.T16.b.2), with `bake` its J above the deck. */
+  readonly deck: PackedDeckTable | undefined;
+}
+
+/**
+ * What a drawn entry's disc table reads of its landed bakes (R08.T16.b, R08.T16.b.2): a thick bake's
+ * J and the correction asked beside it; or a routed deck's J above it, the correction over it from
+ * the split as its tables hold it, and its packed table.
+ */
+function discLandedOf(
+  baked: BakedTables | null,
+  held: Pick<HeldBody<unknown>, "correction">,
+): DiscLanded {
+  if (baked?.kind === "deck") {
+    return {
+      bake: deckAboveTables(baked.tables),
+      correction:
+        baked.correction === null ? undefined : deckCorrectionAbove(baked.correction, baked.splitM),
+      deck: packDeckTable(baked.tables),
+    };
+  }
+  return {
+    bake: baked?.kind === "thick" ? baked.tables : undefined,
+    correction: held.correction?.state.kind === "baked" ? held.correction.state.tables : undefined,
+    deck: undefined,
+  };
+}
+
 /**
  * A drawn body's disc table request (R08.T16.b): its thick bake's request (`thickBakeAskOf`), every
  * band and light slot in one, with the medium as the tables hold it, its kernels' medium, the
  * tables' curves, and the routed bake and correction that have landed, which the job reads J from
- * in place of baking its own; `null` where no light lights it to bake under.
+ * in place of baking its own, and over a routed deck its deck's table (R08.T16.b.2); `null` where
+ * no light lights it to bake under.
  *
  * @throws RangeError as `thickBakeAskOf`.
  */
@@ -1118,10 +1160,7 @@ function discBakeAskOf(
   built: BuiltAtmosphere,
   tables: CachedTables,
   lights: ReadonlyArray<BodyLight>,
-  landed: {
-    readonly bake: ReadonlyArray<MsSourceTable> | undefined;
-    readonly correction: ReadonlyArray<PolarisationTable> | undefined;
-  },
+  landed: DiscLanded,
 ): DiscBakeAsk | null {
   if (built.sources === undefined) {
     return null;
@@ -1138,6 +1177,7 @@ function discBakeAskOf(
       curves: built.curves,
       ...(landed.bake === undefined ? {} : { bake: landed.bake }),
       ...(landed.correction === undefined ? {} : { correction: landed.correction }),
+      ...(landed.deck === undefined ? {} : { deck: landed.deck }),
       // A self-luminous medium's table holds its own light (R08.T18.b).
       ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
     },
@@ -1793,10 +1833,10 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       held.drawnThickSlots = thickSlots;
       const deck = entry.built === null ? null : this.#deckSplitOf(entry, entry.built.medium);
       if (tables !== null && entry.built !== null && deck !== null) {
-        // A routed deck's bake carries the correction over it: none is asked beside it. Nor is a
-        // disc table (R08.T16.b), whose bake reads no deck: beyond the boundary the full passes
-        // draw the deck's body, as they draw any body whose table has not landed.
+        // A routed deck's bake carries the correction over it: none is asked beside it. Its disc
+        // table (R08.T16.b.2) waits for it, reading its J and its deck on the upper medium.
         this.#bakeDeck(held, entry, entry.built, tables, deck);
+        this.#disc(held, entry, this.#tablesBuilt(entry, entry.built), true);
       } else {
         if (
           tables !== null &&
@@ -1808,7 +1848,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         }
         if (tables !== null && entry.built !== null) {
           this.#correct(held, entry, entry.built, tables);
-          this.#disc(held, entry, entry.built);
+          this.#disc(held, entry, entry.built, false);
         }
       }
     } else if (drawn !== null && drawn.built !== null && drawn.tables === null) {
@@ -1979,10 +2019,12 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           },
         });
         this.#giveBake(held);
+        this.#askWaitingDisc(held);
         break;
       case "failed":
         console.error(`the deck's bake of ${held.id} failed: ${outcome.message}`);
         this.#showBake(held, { made: bake.made, state: BAKE_FAILED });
+        this.#askWaitingDisc(held);
         break;
       case "cancelled":
         this.#cancelBake(held);
@@ -2204,13 +2246,18 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
 
   /**
    * Asks a drawn entry's disc table (the module's remarks) where its column takes one, or waits for
-   * its thick bake and correction under way; a request that cannot be formed or asked is a failed
-   * table, with one `console.error`.
+   * its thick bake and correction under way, or over a routed deck its deck's bake, `built` then its
+   * upper medium; a request that cannot be formed or asked is a failed table, with one
+   * `console.error`.
    */
-  #disc(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere): void {
-    // A gas envelope's disc waits on R08.T16.b.2's check of it at 10⁹ m (lean, 2026-11-01): the
-    // full passes draw it at every distance until then.
-    if (entry.envelope || built.sources === undefined || built.sources.length === 0) {
+  #disc(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, routedDeck: boolean): void {
+    // A gas envelope whose route is closed keeps the full passes at every distance (R08.T16.b.2):
+    // its table stands on its deck, which only its route bakes.
+    if (
+      (entry.envelope && !routedDeck) ||
+      built.sources === undefined ||
+      built.sources.length === 0
+    ) {
       return;
     }
     try {
@@ -2239,17 +2286,15 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     const { entry, built } = disc;
+    const baked = held.bake?.state.kind === "baked" ? held.bake.state.tables : null;
+    if (baked === null && this.#deckSplitOf(entry, entry.built?.medium ?? built.medium) !== null) {
+      // A routed deck's table reads its deck's bake, which failed: the full passes draw it.
+      held.disc = null;
+      return;
+    }
     let handle: DiscBake;
     try {
-      const ask = discBakeAskOf(entry.input, built, tables, held.lights, {
-        // A deck's body asks no disc table (`#draw`), so only a thick bake's J is read here.
-        bake:
-          held.bake?.state.kind === "baked" && held.bake.state.tables.kind === "thick"
-            ? held.bake.state.tables.tables
-            : undefined,
-        correction:
-          held.correction?.state.kind === "baked" ? held.correction.state.tables : undefined,
-      });
+      const ask = discBakeAskOf(entry.input, built, tables, held.lights, discLandedOf(baked, held));
       if (ask === null) {
         // No light to bake under: drawn by the full passes at every distance.
         held.disc = null;

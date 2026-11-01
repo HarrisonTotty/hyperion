@@ -17,8 +17,8 @@
  * - **The full passes** are the march's twin at the high setting's counts along each ray, ending at
  *   the datum where it meets it, as the mesh's depth ends it (`composite.wgsl`: the march's light,
  *   and the ground times its mean transmittance), routed (its tables holding the same thick table
- *   the bake read, as T14.d's routing would draw the body) and unrouted (Ψ_ms, as the product draws
- *   it today).
+ *   the bake read, as T14.d's routing would draw the body, and over a deck its table, as T15's
+ *   route would) and unrouted (Ψ_ms, as the product draws it today).
  */
 
 import { normalise, type Vec3, vec3 } from "../geometry/vec3";
@@ -48,6 +48,8 @@ import {
   twinView,
 } from "../view/atmosphere/tablesCpu";
 import { thickBakeBands, type ThickBakeBody } from "../view/atmosphere/thick/bake";
+import type { DeckTables } from "../view/atmosphere/thick/deck";
+import { deckAboveTables, packDeckTable } from "../view/atmosphere/thick/deckRead";
 import { bakeDiscReflectance } from "../view/atmosphere/thick/discBake";
 import { bakeKeptCase } from "../view/atmosphere/thick/keptBake";
 import { type PackedThickTable, packThickTable } from "../view/atmosphere/thick/read";
@@ -74,6 +76,12 @@ export interface DiscAirCase {
   readonly sources: ReadonlyArray<SpectralSource>;
   readonly curves: AbsorberCurveSlots;
   readonly body: AtmosphereBody;
+  /**
+   * The cloud deck the medium stands on (R08.T16.b.2), its bake's tables a band, the medium its
+   * upper medium and the body on the deck's datum: J its own, read by the table's bake and the
+   * routed passes, and its table at the datum; absent for a ground, J then the thick bake's.
+   */
+  readonly deck?: ReadonlyArray<DeckTables>;
 }
 
 /** A case's table and what it was baked from. */
@@ -92,17 +100,30 @@ export function bakedDiscAir(item: DiscAirCase): BakedDiscAir {
     gravity: item.body.gravity,
     bottomRadiusM: tableRadiusM(figure),
   };
-  const solved = bakeKeptCase(
-    { medium: item.medium, sources: item.sources },
-    keptBakeLightsOf(item.medium, [R06_SOLAR_BAKE_SPECTRUM]),
-    bakeBody,
-  );
+  const bands = thickBakeBands(bakeBody);
+  const { deck } = item;
+  const solved =
+    deck === undefined
+      ? bakeKeptCase(
+          { medium: item.medium, sources: item.sources },
+          keptBakeLightsOf(item.medium, [R06_SOLAR_BAKE_SPECTRUM]),
+          bakeBody,
+        )
+      : deckAboveTables(deck);
   const source = packThickTable(solved, kernelMedium(item.medium));
   const table = bakeDiscReflectance({
     medium: kernelMedium(item.medium),
     curves: item.curves,
-    bands: thickBakeBands(bakeBody),
+    bands,
     source,
+    ...(deck === undefined
+      ? {}
+      : {
+          deck: {
+            table: packDeckTable(deck),
+            lnBands: Float64Array.from(bands, (band) => log(band.gravityRatio)),
+          },
+        }),
   });
   return { table, source, bakeBody };
 }
@@ -126,7 +147,8 @@ export function fullPassTwins(item: DiscAirCase, baked: BakedDiscAir): FullPassT
     unrouted,
     oblateIrradianceTwin(unrouted, IRRADIANCE_KERNEL_OPTIONS, rows),
   );
-  return { unrouted, routed: { ...unrouted, thick: baked.source }, lighting };
+  const deck = item.deck === undefined ? {} : { deck: packDeckTable(item.deck) };
+  return { unrouted, routed: { ...unrouted, thick: baked.source, ...deck }, lighting };
 }
 
 /** The integrated radiance of each side at one phase, per channel, per unit of the sun's lx. */
@@ -179,6 +201,38 @@ function rgbOf(v: ReadonlyArray<number>): Rgb {
 }
 
 /**
+ * How {@link integratedRadianceAt} counts: its march's samples a multiple of the high setting's
+ * (1, the product's; more for a converged reference, R08.T16.b.2), and its quadrature's radii and
+ * azimuths (200 and 48).
+ */
+export interface IntegrationCounts {
+  readonly marchScale?: number;
+  readonly radii?: number;
+  readonly azimuths?: number;
+}
+
+/** The high setting's sizes with its march's counts `scale` times as many. */
+function marchSizesOf(scale: number): typeof TABLE_SIZES.high {
+  const high = TABLE_SIZES.high;
+  if (scale === 1) {
+    return high;
+  }
+  const steps = high.marchDepthSteps;
+  return {
+    ...high,
+    rayMarchSamples: high.rayMarchSamples * scale,
+    marchDepthSteps:
+      steps === null
+        ? null
+        : {
+            ...steps,
+            groundFloor: steps.groundFloor * scale,
+            groundFloorPerEdge: steps.groundFloorPerEdge * scale,
+          },
+  };
+}
+
+/**
  * The integrated radiance of a case's disc drawn by its table and of its full passes from 10⁹ m at
  * the phase angle `phaseDeg` (the module's remarks).
  */
@@ -187,7 +241,9 @@ export function integratedRadianceAt(
   baked: BakedDiscAir,
   twins: FullPassTwins,
   phaseDeg: number,
+  counts: IntegrationCounts = {},
 ): IntegratedRadiance {
+  const sizes = marchSizesOf(counts.marchScale ?? 1);
   const figure = item.body.figure;
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
@@ -259,8 +315,8 @@ export function integratedRadianceAt(
     unrouted: [0, 0, 0],
     limb: [0, 0, 0],
   };
-  const radii = 200;
-  const azimuths = 48;
+  const radii = counts.radii ?? 200;
+  const azimuths = counts.azimuths ?? 48;
   // Most of the radii within a twentieth of the limb, and on out over the shell.
   const radiusAt = (u: number): number =>
     u < 0.8 ? (u / 0.8) * 0.95 : 0.95 + ((u - 0.8) / 0.2) * (rMax - 0.95);
@@ -279,16 +335,19 @@ export function integratedRadianceAt(
       const d = bodyFixed(ray);
       const hit = datumHit(cameraM, d, a, c);
       const tSurfaceM = hit ?? Number.POSITIVE_INFINITY;
+      // Over a deck the march's ground is the deck, nothing drawn on it, so that it reads the
+      // deck's light there and its transmittance to it is 0 (R08.T16.b.2).
+      const routedSurfaceM = item.deck === undefined ? tSurfaceM : Number.POSITIVE_INFINITY;
       const routed = oblateRayMarchTexelTwin(
         twins.routed,
         view,
-        TABLE_SIZES.high,
-        oblateRayMarchRayAlongTwin(twins.routed, view, cameraM, d, tSurfaceM),
+        sizes,
+        oblateRayMarchRayAlongTwin(twins.routed, view, cameraM, d, routedSurfaceM),
       );
       const unrouted = oblateRayMarchTexelTwin(
         twins.unrouted,
         view,
-        TABLE_SIZES.high,
+        sizes,
         oblateRayMarchRayAlongTwin(twins.unrouted, view, cameraM, d, tSurfaceM),
       );
       let ground: Rgb = [0, 0, 0];

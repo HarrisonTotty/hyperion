@@ -1643,6 +1643,47 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]);
   });
 
+  it("asks a routed deck's disc table once its bake lands, on its upper medium, reading the deck's J and its table (R08.T16.b.2)", async () => {
+    const h = harness(undefined, routedDeck);
+    const view = h.cache.openView();
+    const bodies = [kept(A, { kind: "medium", built, labels: [], cover: COVER })];
+    view.noteFrame({ nowMs: 0, scene: null, bodies });
+    const asked = h.builder.discs.length;
+    const tables = madeAt(h, 0);
+    const decks = patternedDeckTables(tables.plan.bands, tables.built.medium, 1, 5_000);
+    latestDeck(h).settle({ kind: "baked", tables: decks, correction: null });
+    await microtasks();
+    view.noteFrame({ nowMs: 1, scene: null, bodies });
+    const disc = h.builder.discs.at(-1);
+    expect([
+      asked,
+      h.builder.discs.length,
+      disc?.ask.air.medium.topHeightM,
+      disc?.ask.air.bake === undefined ? null : disc.ask.air.bake.length,
+      disc?.ask.air.deck?.bands,
+      disc?.ask.air.correction,
+    ]).toEqual([
+      0,
+      1,
+      R05_EARTH_REFERENCE.topHeightM - 5_000,
+      decks.length,
+      decks.length,
+      undefined,
+    ]);
+  });
+
+  it("asks no disc table of a routed deck whose bake failed: the full passes draw it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const h = harness(undefined, routedDeck);
+    const view = h.cache.openView();
+    const bodies = [kept(A, { kind: "medium", built, labels: [], cover: COVER })];
+    view.noteFrame({ nowMs: 0, scene: null, bodies });
+    latestDeck(h).settle({ kind: "failed", message: "a test's" });
+    await microtasks();
+    view.noteFrame({ nowMs: 1, scene: null, bodies });
+    expect([h.builder.discs.length, error.mock.calls.length]).toEqual([0, 1]);
+  });
+
   it("splits an envelope at its floor, its deck read to the envelope's own", () => {
     const h = harness(undefined, routedDeck);
     // A grey cloud of τ 20 to the datum over R05's Earth: τ 10 is reached inside the air.

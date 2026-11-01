@@ -435,6 +435,10 @@ export class OpticsJobs {
     request: Extract<OpticsRequest, { kind: "disc-bake" | "disc-band-bake" }>,
     options: AssembleOptions,
   ): ReadonlyArray<MsSourceTable> {
+    if (request.air.deck !== undefined) {
+      // A deck's J is its own bake's, above the deck as its boundary: no solve here makes it.
+      throw new RangeError("a disc over a deck reads its deck's J, which its request carries");
+    }
     // The lights only where J is solved here: a routed bake's carries its own.
     const prepared = prepareBake(request.column, this.#bakeLights(request, options));
     return request.bands.map((band) => bakeMultipleScattering(prepared, request.body, band));

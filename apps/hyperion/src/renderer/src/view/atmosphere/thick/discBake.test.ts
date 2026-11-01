@@ -12,7 +12,7 @@ import {
   integratedRadianceAt,
 } from "../../../test/discAirCases";
 import { earthBody } from "../../../test/atmosphereFixtures";
-import { patternedThickBake } from "../../../test/thickTables";
+import { patternedDeckTables, patternedThickBake } from "../../../test/thickTables";
 import { seededRandom } from "../../../test/seededRandom";
 import {
   DISC_AZIMUTHS,
@@ -29,6 +29,7 @@ import { tableRadiusM } from "../hillaire";
 import { type AtmosphereMedium, phaseAt } from "../medium";
 import { kernelMedium, tablesPlanOf } from "../tables";
 import { thickBakeBands, type ThickBakeBody } from "./bake";
+import { deckGroundInto, deckReadScratch, packDeckTable } from "./deckRead";
 import { decodedThickLayer, decodedThickRead, discAirMarcher, discSunFloorOf } from "./discBake";
 import {
   addThickLayer,
@@ -148,6 +149,57 @@ describe("the disc's bake's march (R08.T16.b)", () => {
         }
       }
     }
+  });
+
+  it("reads a deck at the datum in the bare ground's place, through the ray's transmittance, its alpha 0 (R08.T16.b.2)", () => {
+    const tau = 0.05;
+    const medium = thinRayleigh(tau);
+    const plan = tablesPlanOf(null, 6_371_000);
+    const source = packThickTable(patternedThickBake(plan.bands, medium, 1), medium);
+    const deck = packDeckTable(patternedDeckTables(plan.bands, medium, 1, 1_000));
+    const lnBands = Float64Array.of(0);
+    const bare = discAirMarcher({ medium, curves: [], bands: plan.bands, source }, 0);
+    const decked = discAirMarcher(
+      { medium, curves: [], bands: plan.bands, source, deck: { table: deck, lnBands } },
+      0,
+    );
+    const scratch = deckReadScratch();
+    const reflected: [number, number, number] = [0, 0, 0];
+    let lit = 0;
+    for (const muView of [1, 0.6, 0.3]) {
+      for (const muSun of [0.9, 0.5, 0.1]) {
+        for (const azimuthRad of [0, 1.2, Math.PI]) {
+          const plain = bare(muView, muSun, azimuthRad, 0);
+          const over = decked(muView, muSun, azimuthRad, 0);
+          // The march's d = −v, v = (sin θ_v, 0, μ_v) towards the camera, at the datum's normal z.
+          const sinView = Math.sqrt(1 - muView * muView);
+          const sinSun = Math.sqrt(1 - muSun * muSun);
+          const along = -(sinView * sinSun * Math.cos(azimuthRad) + muView * muSun);
+          // The sun's transmittance does not enter: the deck's slot is the bake's own.
+          deckGroundInto(
+            deck,
+            lnBands,
+            1,
+            muSun,
+            muView,
+            along + muView * muSun,
+            along,
+            0,
+            [1, 1, 1],
+            scratch,
+            reflected,
+          );
+          for (const c of [0, 1, 2] as const) {
+            // The bare ray's transmittance to the datum, its alpha, in every channel alike.
+            const added = Math.PI * plain[3] * reflected[c];
+            expect(over[c]).toBeCloseTo(plain[c] + added, 12);
+            lit += added > 0 ? 1 : 0;
+          }
+          expect(over[3]).toBe(0);
+        }
+      }
+    }
+    expect(lit).toBeGreaterThan(0);
   });
 
   it("puts its floor at the deepest sun that lights the top of any band's air", () => {
