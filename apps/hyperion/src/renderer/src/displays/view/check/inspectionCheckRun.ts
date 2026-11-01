@@ -14,7 +14,9 @@
  *    `SYSTEM` through `App`'s opening, as `OPEN SYSTEM` opens a charted system, at the epoch.
  * 3. On `SYSTEM` the body's row is selected in the body list, `FOCUS BODY` pressed, which focuses it
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
- * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, the
+ * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, and
+ *    no `LIGHTING: PENDING` either, its sky's host discs having arrived (fix-retina-frame, after
+ *    the owner's Mac profile, whose low orbit window measured an unlit, empty frame), the
  *    exposure must stand at `AUTO`, which the inspection opens on, and, for a body whose record
  *    (`body_detail`, asked in step 1) has a surface, the ground at the line of sight on the lower
  *    plate must read the body's surveyed ground (`ELEVATION`), the inspection having surveyed it as
@@ -33,12 +35,15 @@
  *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
- * (with its reason), or where the primary's label block shows a fault line as it is captured, or as
- * it is captured maximized.
+ * (with its reason), where the primary's label block shows a fault line as it is captured, or as
+ * it is captured maximized, where it states `LIGHTING: NOT RECEIVED` or `LIGHTING: PENDING` as a
+ * capture is taken or a window begins, or where the primary drew no lit body larger than a point
+ * in a capture's frames or a window's ({@link LitBodyDraws}).
  *
  * With the frame profile (`--timing`; the owner's report, 2026-11-01) a window of frames is
  * measured as the first capture is taken, from orbit, and another as the close capture is
- * (`inspectionProfile.ts`), and the main process writes them once the run has passed.
+ * (`inspectionProfile.ts`), each once `LIGHTING: PENDING` is waited out, its record holding the
+ * label block's statements as it ended, and the main process writes them once the run has passed.
  */
 
 import {
@@ -57,6 +62,9 @@ import type { ServedWorldNames, ViewsCheckApi } from "../../../../../preload/api
 import { vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
+import type { FrameSubmission } from "../../../view/engine/types";
+import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
+import { PHOTOREAL_PASS_LABELS } from "../../../view/photoreal/passes";
 import { INSPECTION_SCENE_NAME } from "../../../view/scenes/inspectionScene";
 import { TERRAIN_NOT_MODELLED } from "../../../view/terrain/readouts";
 import { FOCUS_KEY, VIEW_BODY_KEY } from "../../system/OrbitMapPanel";
@@ -72,7 +80,7 @@ import {
 } from "./atmosphereCheckRun";
 import type { InspectionProfiler, ProfiledPlate } from "./inspectionProfile";
 import { viewDriver } from "./viewsCheckRun";
-import type { ViewsProbe } from "./viewsProbe";
+import { type SubmissionWatcher, viewOf, type ViewsProbe } from "./viewsProbe";
 
 /** How long each part of the inspection run may take. */
 export interface InspectionCheckTiming {
@@ -141,7 +149,8 @@ const GALACTIC_ORIGIN = galacticPositionFromLy([0, 0, 0]);
 /** What the inspection run drives and reads. */
 export interface InspectionCheckDeps {
   readonly api: Pick<ViewsCheckApi, "capture">;
-  readonly views: Pick<ViewsProbe, "drawTimes">;
+  /** The views probe: the primary's draws, and its submissions, by which a body is seen drawn. */
+  readonly views: Pick<ViewsProbe, "drawTimes" | "watch">;
   /** The link's request client, through which the run asks the server what it opens. */
   readonly requests: Pick<RequestClient, "request">;
   /** The universe and the body the launch names; `null` fails the run, which then asks nothing. */
@@ -190,6 +199,66 @@ export function inspectionGround(lines: ReadonlyArray<string>): InspectionGround
     return "not modelled";
   }
   return lines.some((line) => line.startsWith("ELEVATION ")) ? "surveyed" : "waiting";
+}
+
+/**
+ * What the label block's statements say of the view's lighting (`lightingStatement`): `pending`
+ * while `LIGHTING: PENDING` stands, `not received` while `LIGHTING: NOT RECEIVED` does, and `lit`
+ * with neither.
+ */
+export function inspectionLighting(
+  statements: ReadonlyArray<string>,
+): "lit" | "pending" | "not received" {
+  if (statements.includes(LIGHTING_PENDING)) {
+    return "pending";
+  }
+  return statements.includes(LIGHTING_NOT_RECEIVED) ? "not received" : "lit";
+}
+
+/**
+ * The beginnings of the names of the materials a lit body larger than a point is drawn with: its
+ * disc's and limb's (`BODY_DISC_MATERIALS` and their emissive and air forms), its figure's mesh
+ * (`SMOOTH_MESH_MATERIAL` and its forms) and its terrain's lit patches (`terrain-lit-…`).
+ */
+const LIT_BODY_MATERIALS = ["bodies:disc", "bodies:smoothMesh", "terrain-lit-"] as const;
+
+/**
+ * Whether `frame`, one of a view's submissions, draws a lit body larger than a point: a draw in
+ * its photorealistic `bodies` or `discs` pass (`PHOTOREAL_PASS_LABELS`) of one of
+ * {@link LIT_BODY_MATERIALS}. A body drawn as a point, or beyond the frame, draws none, nor do the
+ * host discs, whose material is the sky's.
+ */
+export function drawsLitBody(frame: Pick<FrameSubmission, "label" | "draws">): boolean {
+  return (
+    (frame.label === PHOTOREAL_PASS_LABELS.bodies || frame.label === PHOTOREAL_PASS_LABELS.discs) &&
+    frame.draws.some((draw) =>
+      LIT_BODY_MATERIALS.some((prefix) => draw.material.name.startsWith(prefix)),
+    )
+  );
+}
+
+/**
+ * The animation frames in which the primary drew a lit body larger than a point
+ * ({@link drawsLitBody}), as the views probe tells its submissions (`ViewsProbe.watch`), so that a
+ * capture or a window of an empty frame fails the run (fix-retina-frame).
+ */
+export class LitBodyDraws implements SubmissionWatcher {
+  #lastFrameMs: number | null = null;
+
+  submitted(owner: string, frame: FrameSubmission, frameMs: number | null): void {
+    if (frameMs !== null && viewOf(owner) === PRIMARY_VIEW_NAME && drawsLitBody(frame)) {
+      this.#lastFrameMs = Math.max(this.#lastFrameMs ?? frameMs, frameMs);
+    }
+  }
+
+  madeTarget(): void {
+    // Its targets say nothing of what it draws.
+  }
+
+  /** Whether the primary drew a lit body in an animation frame stamped `fromMs` or later. */
+  drewSince(fromMs: number): boolean {
+    return this.#lastFrameMs !== null && this.#lastFrameMs >= fromMs;
+  }
 }
 
 /** Metres in each of the `POSITION` line's units. */
@@ -264,14 +333,30 @@ function mapButton(document: Document, key: string): HTMLButtonElement | null {
 }
 
 /**
- * Runs the inspection run in `deps.document`'s consoles and returns what it captured.
+ * Runs the inspection run in `deps.document`'s consoles and returns what it captured, watching the
+ * views probe's submissions for the lit bodies the primary draws while it runs.
  *
  * @throws Error naming the step when the server refuses what is asked, when a control does not take
  *   effect within its wait, when `VIEW BODY` is held back, when `AUTO` does not settle, when a fault
- *   line stands on the primary's label block, or when the run is stopped through `deps.signal`
- *   (`STOPPED`).
+ *   line stands on the primary's label block, when its lighting is pending past the draw's wait or
+ *   not received, when a capture's or a window's frames drew no lit body, or when the run is stopped
+ *   through `deps.signal` (`STOPPED`).
  */
 export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<InspectionCapture> {
+  const bodies = new LitBodyDraws();
+  const unwatch = deps.views.watch(bodies);
+  try {
+    return await inspect(deps, bodies);
+  } finally {
+    unwatch();
+  }
+}
+
+/** {@link runInspectionCheck}'s steps, `bodies` the lit bodies the primary draws. */
+async function inspect(
+  deps: InspectionCheckDeps,
+  bodies: LitBodyDraws,
+): Promise<InspectionCapture> {
   const { document, timing } = deps;
   const served = deps.served;
   if (served === null) {
@@ -306,6 +391,31 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
       throw new Error("views check: the primary's label block is not shown");
     }
     return found;
+  };
+  /**
+   * Waits out `LIGHTING: PENDING` within the draw's wait, the sky's first reply with its host discs
+   * (its census may take its cores first), and fails on `LIGHTING: NOT RECEIVED`.
+   */
+  const lit = async (what: string): Promise<void> => {
+    await drawn.until(
+      `${what}'s lighting stayed pending`,
+      () => inspectionLighting(plate().statements) !== "pending",
+    );
+    if (inspectionLighting(plate().statements) === "not received") {
+      throw new Error(`views check: ${what} states ${LIGHTING_NOT_RECEIVED}`);
+    }
+  };
+  /** Fails unless `said` states the lighting held and the primary drew a lit body since `fromMs`. */
+  const shown = (what: string, said: PrimaryPlate, fromMs: number): void => {
+    const lighting = inspectionLighting(said.statements);
+    if (lighting !== "lit") {
+      throw new Error(
+        `views check: ${what} states ${lighting === "pending" ? LIGHTING_PENDING : LIGHTING_NOT_RECEIVED}`,
+      );
+    }
+    if (!bodies.drewSince(fromMs)) {
+      throw new Error(`views check: ${what} drew no lit body larger than a point`);
+    }
   };
 
   // 1. What the launch names, as the server describes it.
@@ -395,6 +505,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     "the inspection's atmosphere stayed pending",
     () => !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
   );
+  await lit("the inspection");
   await drawn.until(
     "the inspection did not open on AUTO",
     () => plate().line("EXPOSURE")?.endsWith(" AUTO") === true,
@@ -439,8 +550,11 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     await settled(read());
   };
   await settle();
-  /** Waits for `count` of the primary's draws from now, and for at least `leastMs` to pass. */
-  const framesDrawn = async (count = timing.framesBeforeCapture, leastMs = 0): Promise<void> => {
+  /**
+   * Waits for `count` of the primary's draws from now, and for at least `leastMs` to pass; returns
+   * when it began, ms.
+   */
+  const framesDrawn = async (count = timing.framesBeforeCapture, leastMs = 0): Promise<number> => {
     const fromMs = deps.nowMs();
     await until(
       `the primary did not draw ${String(count)} frames`,
@@ -448,33 +562,47 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
         deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >= count &&
         deps.nowMs() - fromMs >= leastMs,
     );
+    return fromMs;
   };
-  await framesDrawn();
-  const said = plate();
-  if (said.faults.length > 0) {
-    throw new Error(`views check: the inspection shows faults: ${said.faults.join("; ")}`);
-  }
-  const groundSaid = ground();
-  const label = inspectionCaptureLabel(served.body);
-  stopped();
-  await deps.api.capture(label);
+  /** Measures the profile's window `name`, lit, and fails where its frames drew no lit body. */
+  const measured = async (name: "orbit" | "close", what: string): Promise<void> => {
+    const profile = deps.profile;
+    if (profile === null) {
+      return;
+    }
+    await lit(what);
+    const fromMs = deps.nowMs();
+    await profile.measure(name, profiledPlate);
+    shown(what, plate(), fromMs);
+  };
   const profiledPlate = (): ProfiledPlate => {
     const now = plate();
     return { position: now.line("POSITION"), statements: now.statements };
   };
-  await deps.profile?.measure("orbit", profiledPlate);
+  const capturedFromMs = await framesDrawn();
+  const said = plate();
+  if (said.faults.length > 0) {
+    throw new Error(`views check: the inspection shows faults: ${said.faults.join("; ")}`);
+  }
+  shown("the inspection", said, capturedFromMs);
+  const groundSaid = ground();
+  const label = inspectionCaptureLabel(served.body);
+  stopped();
+  await deps.api.capture(label);
+  await measured("orbit", "the orbit window");
   // MAXIMIZE VIEW by its key, as an operator turns it on, captured, and off again.
   const maximized = (): boolean =>
     document.querySelector(".view__side")?.hasAttribute("hidden") === true;
   pressKey(document.body, MAXIMIZE_KEY);
   await until("MAXIMIZE VIEW did not hide the panels", maximized);
-  await framesDrawn();
+  const maximizedFromMs = await framesDrawn();
   const saidMaximized = plate();
   if (saidMaximized.faults.length > 0) {
     throw new Error(
       `views check: the maximized inspection shows faults: ${saidMaximized.faults.join("; ")}`,
     );
   }
+  shown("the maximized inspection", saidMaximized, maximizedFromMs);
   stopped();
   await deps.api.capture(`${label}-maximized`);
   pressKey(document.body, MAXIMIZE_KEY);
@@ -485,7 +613,8 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     ) ?? null;
   await press(gridOff, "the STYLE panel's GRID OFF");
   await until("GRID did not go OFF", () => gridOff()?.getAttribute("aria-pressed") === "true");
-  await framesDrawn();
+  const gridOffFromMs = await framesDrawn();
+  shown("the inspection with GRID OFF", plate(), gridOffFromMs);
   stopped();
   await deps.api.capture(`${label}-grid-off`);
   const orbit = {
@@ -576,16 +705,18 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
       inspectionGround(ground()) === "surveyed",
     () => [...plate().statements, ...ground()].join("; "),
   );
+  await lit("the close inspection");
   await settle();
-  await framesDrawn();
+  const closeFromMs = await framesDrawn();
   const close = plate();
   if (close.faults.length > 0) {
     throw new Error(`views check: the close inspection shows faults: ${close.faults.join("; ")}`);
   }
+  shown("the close inspection", close, closeFromMs);
   const closeGround = ground();
   stopped();
   await deps.api.capture(`${label}-close`);
-  await deps.profile?.measure("close", profiledPlate);
+  await measured("close", "the close window");
   return { ...orbit, closeGround };
 }
 

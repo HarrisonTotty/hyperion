@@ -10070,3 +10070,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (`ClientArgs.viewsCheckPixelRatio`): the window N times its setting's size at zoom N; a software
     launch's headless screen is N times 1920 × 1080. Pending: the owner's Mac profile at
     `--device-pixel-ratio 2`.
+- **The inspection run's lighting (lane fix-retina-frame, after the owner's Mac profile).**
+  `runInspectionCheck` waits out `LIGHTING: PENDING` (`hostLights.ts` `LIGHTING_PENDING`) within
+  `drawWaitMs` before AUTO settles, before the close capture and before each profile window. It
+  fails on `LIGHTING: NOT RECEIVED`, and where a capture's or a window's frames drew no lit body
+  larger than a point (`LitBodyDraws`, through `ViewsProbe.watch`; its `views` dependency now
+  includes `watch`). The windows' `statements` already held the plate's. Pending: the owner's Mac
+  low orbit window, re-run.

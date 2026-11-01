@@ -3,11 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { InspectionTimingWindow, SpikeEnd } from "../../../../../preload/api";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
+import type { DrawItem, FrameSubmission } from "../../../view/engine/types";
+import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
 import {
   closeRateStep,
+  drawsLitBody,
   INSPECTION_CHECK_TIMING,
   inspectionCaptureLabel,
   inspectionGround,
+  inspectionLighting,
+  LitBodyDraws,
   positionRangeM,
   recordInspectionCheck,
   runInspectionCheck,
@@ -79,7 +84,7 @@ describe("the inspection run (the owner's request)", () => {
     await expect(
       runInspectionCheck({
         api: { capture: () => Promise.resolve() },
-        views: { drawTimes: () => [] },
+        views: { drawTimes: () => [], watch: () => () => undefined },
         requests: noUniverses(),
         served: { universe: "3504954ff4feabf4", body: BODY },
         openSystem,
@@ -225,6 +230,70 @@ describe("the inspection run (the owner's request)", () => {
     expect(end.mock.calls).toEqual([
       [{ status: "fail", reason: "views check: VIEW BODY was held back" }],
     ]);
+  });
+});
+
+/** A draw of the material `material`, its other fields empty. */
+function drawOf(material: string): DrawItem {
+  return {
+    mesh: { kind: "mesh", name: "bodies:quad" },
+    material: { kind: "material", name: material },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+}
+
+/** A submission labelled `label` of draws of `materials`. */
+function submissionOf(label: string, materials: ReadonlyArray<string>): FrameSubmission {
+  return {
+    label,
+    viewRotation: new Float32Array(16),
+    projection: new Float32Array(16),
+    draws: materials.map(drawOf),
+    postProcesses: [],
+  };
+}
+
+describe("the inspection run's lighting and its bodies drawn (fix-retina-frame)", () => {
+  it("reads the lighting as pending, not received, or lit from the statements", () => {
+    expect(
+      [
+        [LIGHTING_PENDING, "ATMOSPHERE: APPROXIMATE"],
+        ["TERRAIN: STREAMING", LIGHTING_NOT_RECEIVED],
+        ["ATMOSPHERE: APPROXIMATE"],
+      ].map(inspectionLighting),
+    ).toEqual(["pending", "not received", "lit"]);
+  });
+
+  it("counts a body's disc, its figure's mesh or its terrain in the bodies and discs passes", () => {
+    expect(
+      [
+        submissionOf("bodies", ["bodies:smoothMeshAir"]),
+        submissionOf("bodies", ["terrain-lit-baked-offsets"]),
+        submissionOf("discs", ["sky:hostDisc", "bodies:discLimb"]),
+      ].map(drawsLitBody),
+    ).toEqual([true, true, true]);
+  });
+
+  it("counts no host disc alone, and no body material in another pass", () => {
+    expect(
+      [
+        submissionOf("discs", ["sky:hostDisc"]),
+        submissionOf("discs", []),
+        submissionOf("sky", ["bodies:disc"]),
+      ].map(drawsLitBody),
+    ).toEqual([false, false, false]);
+  });
+
+  it("sees the primary's lit bodies since a time, and not an instrument's or outside a frame", () => {
+    const bodies = new LitBodyDraws();
+    bodies.submitted("instrument-1:hdr", submissionOf("bodies", ["bodies:smoothMesh"]), 50);
+    bodies.submitted("view:hdr", submissionOf("bodies", ["bodies:smoothMesh"]), null);
+    const before = [bodies.drewSince(0)];
+    bodies.submitted("view:hdr", submissionOf("discs", ["bodies:disc"]), 20);
+    bodies.submitted("view:hdr", submissionOf("discs", ["sky:hostDisc"]), 40);
+    expect([...before, bodies.drewSince(20), bodies.drewSince(21)]).toEqual([false, true, false]);
   });
 });
 

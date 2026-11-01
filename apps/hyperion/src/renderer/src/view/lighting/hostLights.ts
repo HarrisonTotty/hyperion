@@ -72,9 +72,15 @@ export function lightingState(
   return skyPending ? "pending" : "hosts-not-received";
 }
 
+/** The label block's line while the sky is asked and none of its arrival is held. */
+export const LIGHTING_PENDING = "LIGHTING: PENDING";
+
+/** The label block's line where no light is held and none is asked. */
+export const LIGHTING_NOT_RECEIVED = "LIGHTING: NOT RECEIVED";
+
 /**
- * The label block's line for a lighting state, `null` when lit: `LIGHTING: PENDING` or
- * `LIGHTING: NOT RECEIVED` (decision-r07-owner-ux-signoff).
+ * The label block's line for a lighting state, `null` when lit: {@link LIGHTING_PENDING} or
+ * {@link LIGHTING_NOT_RECEIVED} (decision-r07-owner-ux-signoff).
  */
 export function lightingStatement(state: LightingState): string | null {
   let line: string | null;
@@ -83,10 +89,10 @@ export function lightingStatement(state: LightingState): string | null {
       line = null;
       break;
     case "pending":
-      line = "LIGHTING: PENDING";
+      line = LIGHTING_PENDING;
       break;
     case "hosts-not-received":
-      line = "LIGHTING: NOT RECEIVED";
+      line = LIGHTING_NOT_RECEIVED;
       break;
   }
   return line;
