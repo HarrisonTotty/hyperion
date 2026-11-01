@@ -78,6 +78,7 @@ import {
   startRun,
   startServerRun,
   stepRun,
+  summaryStatements,
   surveyEdgeNotes,
   withGridLine,
   withSceneStarsLine,
@@ -1000,6 +1001,23 @@ describe("the primary's statements while MAXIMIZE VIEW is on (the owner's reques
 
   it("states no line where there is nothing to fold", () => {
     expect([maximizedStatements([]), maximizedStatements([failed])]).toEqual([[], [failed]]);
+  });
+});
+
+describe("the label block's summary's statements (the owner's request, 2026-11-01)", () => {
+  const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
+
+  it("sets the fold after the key line, on one line", () => {
+    expect(summaryStatements([POSITIONS_FROM_SHIP], "9 SHOWS LABEL BLOCK")).toEqual([
+      "9 SHOWS LABEL BLOCK · STATEMENTS: 1 FOLDED",
+    ]);
+  });
+
+  it("states the key line alone where there is nothing to fold, a request's status after it", () => {
+    expect([
+      summaryStatements([], "9 SHOWS LABEL BLOCK"),
+      summaryStatements([failed], "9 SHOWS LABEL BLOCK"),
+    ]).toEqual([["9 SHOWS LABEL BLOCK"], ["9 SHOWS LABEL BLOCK", failed]]);
   });
 });
 

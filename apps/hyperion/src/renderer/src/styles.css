@@ -4605,6 +4605,32 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * The label block's summary while MAXIMIZE VIEW folds it (the owner's request, 2026-11-01): VIEW and
+ * the readings an operator acts on along one line, wrapping only between whole readings, and under
+ * them the line naming the key that shows the whole block, then any fault.
+ */
+.view-label--summary {
+  display: flex;
+  align-items: baseline;
+  column-gap: 1rem;
+}
+
+.view-label--summary > .view-label__class {
+  flex: none;
+  margin: 0;
+}
+
+.view-label--summary > .view-label__body {
+  min-width: 0;
+}
+
+.view-label--summary .view-label__lines {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1rem;
+}
+
 /* At its least two rows, its head and its position, so that VIEW's side column fits (R07.T19). */
 .view-list {
   display: flex;

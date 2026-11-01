@@ -18,7 +18,7 @@ export interface ViewRoomSizersProps {
   /** The upper plate's content, its reasons opened as the live plate's, for its copy beside the slots. */
   readonly upper: Pick<
     ViewLabelBlockProps,
-    "lines" | "statements" | "folds" | "countLine" | "faults"
+    "lines" | "statements" | "folds" | "countLine" | "faults" | "summary"
   >;
   /** The lower plate's parts, or none while the view states no terrain lines. */
   readonly lower: ReadonlyArray<LowerPlatePart<ReactNode>>;

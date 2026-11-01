@@ -23,7 +23,15 @@ import { stylesheetRule } from "../../test/stylesheet";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { NO_OWN_SHIP } from "./CameraControls";
 import type { KeyPress } from "../../view/camera/keys";
-import { GRID_KEY, MAXIMIZE_KEY, MAXIMIZED_KEYS, viewDisplayKey } from "./displayKeys";
+import {
+  GRID_KEY,
+  LABEL_BLOCK_FOLDS,
+  LABEL_BLOCK_KEY,
+  LABEL_BLOCK_KEYS,
+  MAXIMIZE_KEY,
+  MAXIMIZED_KEYS,
+  viewDisplayKey,
+} from "./displayKeys";
 import { PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
 import { POSITIONS_FROM_SHIP } from "./viewRun";
@@ -275,7 +283,11 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       await view.user.keyboard("+");
       view.advance(300);
-      expect(readingIn(primaryLabelBlock(), "FOV")).not.toBe(before);
+      await pressMaximize(view);
+      expect([before !== null, readingIn(primaryLabelBlock(), "FOV") !== before]).toEqual([
+        true,
+        true,
+      ]);
     });
 
     it("switches the style by its key", async () => {
@@ -393,12 +405,14 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
   });
 
   describe("the primary's statements", () => {
-    it("folds them to one line while it is on", async () => {
+    it("folds them to one line while it is on, after the label block's key", async () => {
       const view = await setup();
       await view.user.keyboard("3");
       view.advance(300);
       await pressMaximize(view);
-      expect(primaryStatements()).toEqual([expect.stringMatching(/^STATEMENTS: \d+ FOLDED$/u)]);
+      expect(primaryStatements()).toEqual([
+        expect.stringMatching(new RegExp(`^${LABEL_BLOCK_KEYS} · STATEMENTS: \\d+ FOLDED$`, "u")),
+      ]);
     });
 
     it("states them whole again once it is off", async () => {
@@ -409,6 +423,94 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       await pressMaximize(view);
       expect(primaryStatements()).toContain(POSITIONS_FROM_SHIP);
     });
+  });
+});
+
+/** The labels of the primary's label block's lines, in order. */
+function primaryLabels(): ReadonlyArray<string | null> {
+  return [...primaryLabelBlock().querySelectorAll("dt")].map((term) => term.textContent);
+}
+
+/** Presses the label block's key, as from the page. */
+async function pressLabelBlock(view: ViewDisplayHarness): Promise<void> {
+  await view.user.keyboard(LABEL_BLOCK_KEY);
+  view.advance(300);
+}
+
+describe("the primary's label block under MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
+  it("folds to its summary once on: its style, camera and exposure", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+  });
+
+  it("names on its summary the key that shows the whole block", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    expect(primaryStatements()[0]).toMatch(new RegExp(`^${LABEL_BLOCK_KEYS}`, "u"));
+  });
+
+  it("keeps the camera's rate in the summary in FREE", async () => {
+    const view = await setup();
+    await view.user.keyboard("3");
+    view.advance(300);
+    await pressMaximize(view);
+    expect(readingIn(primaryLabelBlock(), "CAMERA")).toMatch(/^FREE · RATE /u);
+  });
+
+  it("keeps GRID OFF in the summary while the grid is off", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    await view.user.keyboard("4");
+    await playFor(view, 4);
+    await view.user.keyboard(GRID_KEY);
+    view.advance(300);
+    expect(primaryLabels()).toEqual(["STYLE", "GRID", "CAMERA", "EXPOSURE"]);
+  });
+
+  it("shows the whole block by its key, its statements still folded after the key that folds it", async () => {
+    const view = await setup();
+    const whole = primaryLabels();
+    await pressMaximize(view);
+    await pressLabelBlock(view);
+    expect([primaryLabels(), primaryStatements()[0]?.startsWith(LABEL_BLOCK_FOLDS)]).toEqual([
+      whole,
+      true,
+    ]);
+  });
+
+  it("folds the whole block again by its key", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    await pressLabelBlock(view);
+    await pressLabelBlock(view);
+    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+  });
+
+  it("folds it again each time MAXIMIZE VIEW is turned on", async () => {
+    const view = await setup();
+    await pressMaximize(view);
+    await pressLabelBlock(view);
+    await pressMaximize(view);
+    await pressMaximize(view);
+    expect(primaryLabels()).toEqual(["STYLE", "CAMERA", "EXPOSURE"]);
+  });
+
+  it("restores the whole block exactly once off", async () => {
+    const view = await setup();
+    await view.user.keyboard("3");
+    view.advance(300);
+    const before = [primaryLabels(), primaryStatements()];
+    await pressMaximize(view);
+    await pressMaximize(view);
+    expect([primaryLabels(), primaryStatements()]).toEqual(before);
+  });
+
+  it("does nothing by its key while MAXIMIZE VIEW is off", async () => {
+    const view = await setup();
+    const before = primaryLabels();
+    await pressLabelBlock(view);
+    expect([before.length > 3, primaryLabels()]).toEqual([true, before]);
   });
 });
 
@@ -490,15 +592,14 @@ function press(key: string, overrides: Partial<KeyPress> = {}): KeyPress {
 }
 
 describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
-  it("reads 5 as the GRID row's and 6 as MAXIMIZE VIEW's", () => {
-    expect([viewDisplayKey(press(GRID_KEY)), viewDisplayKey(press(MAXIMIZE_KEY))]).toEqual([
-      "grid",
-      "maximize",
-    ]);
+  it("reads 5 as the GRID row's, 6 as MAXIMIZE VIEW's and 9 as the label block's", () => {
+    expect(
+      [GRID_KEY, MAXIMIZE_KEY, LABEL_BLOCK_KEY].map((key) => viewDisplayKey(press(key))),
+    ).toEqual(["grid", "maximize", "label-block"]);
   });
 
   it("reads no other key", () => {
-    expect(["4", "7", "m", "g"].map((key) => viewDisplayKey(press(key)))).toEqual([
+    expect(["4", "0", "m", "g"].map((key) => viewDisplayKey(press(key)))).toEqual([
       null,
       null,
       null,

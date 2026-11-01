@@ -1054,6 +1054,28 @@ export function maximizedStatements(
 }
 
 /**
+ * The lines the `PRIMARY` view's label block keeps in its summary while `MAXIMIZE VIEW` folds it
+ * (the owner's request, 2026-11-01): the readings an operator acts on, its style, `GRID OFF` while
+ * the grid is off, its camera with its rate or look, and its exposure.
+ */
+export const SUMMARY_LABELS: ReadonlySet<string> = new Set(["STYLE", "GRID", "CAMERA", "EXPOSURE"]);
+
+/**
+ * The statements of the label block's summary while `MAXIMIZE VIEW` folds it: one line, `keyLine`,
+ * the key that shows the whole block, with the statements' fold after a middle dot
+ * (`9 SHOWS LABEL BLOCK · STATEMENTS: 2 FOLDED`), then each request's status as
+ * {@link maximizedStatements} stands it.
+ */
+export function summaryStatements(
+  statements: ReadonlyArray<LabelStatement>,
+  keyLine: string,
+): ReadonlyArray<LabelStatement> {
+  const folded = maximizedStatements(statements);
+  const [head, ...rest] = folded;
+  return typeof head === "string" ? [`${keyLine} · ${head}`, ...rest] : [keyLine, ...folded];
+}
+
+/**
  * Each body kind's name in the list's `KIND` column, as the guide's nomenclature names it (its
  * `KIND` row): `PLANET`, `DWARF PLANET`, `MOON`, `UNRESOLVED CONTACT`, and `STAR`.
  */

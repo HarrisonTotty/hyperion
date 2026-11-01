@@ -54,6 +54,12 @@ export interface ViewLabelBlockProps {
   readonly className?: string | undefined;
   /** Receives the plate, which the display measures for its room (R10.T12.b). */
   readonly ref?: Ref<HTMLDivElement> | undefined;
+  /**
+   * Whether the plate stands as its summary while `MAXIMIZE VIEW` folds it (the owner's request,
+   * 2026-11-01): `VIEW` and its lines on one line, wrapping between whole readings where it must,
+   * then its statements; none of its lines scroll.
+   */
+  readonly summary?: boolean | undefined;
 }
 
 /** How a label block scrolls in its room ({@link ViewLabelBlockProps.scroll}). */
@@ -357,6 +363,7 @@ export function ViewLabelBlock({
   scroll,
   className,
   ref,
+  summary,
 }: ViewLabelBlockProps) {
   const ownFolds = useReasonFolds();
   const folds = given ?? ownFolds;
@@ -412,12 +419,13 @@ export function ViewLabelBlock({
       </dd>
     </div>
   );
+  const classes = [
+    "view-label",
+    ...(className === undefined ? [] : [className]),
+    ...(summary === true ? ["view-label--summary"] : []),
+  ].join(" ");
   return (
-    <div
-      className={className === undefined ? "view-label" : `view-label ${className}`}
-      id={id}
-      ref={ref}
-    >
+    <div className={classes} id={id} ref={ref}>
       <p className="view-label__class">VIEW</p>
       {/* A section is a region only while it is named: while it scrolls. */}
       <section

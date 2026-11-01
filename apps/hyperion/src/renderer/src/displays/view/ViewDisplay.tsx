@@ -96,7 +96,13 @@ import {
   styleRefusals,
   withPermission,
 } from "./styleRefusals";
-import { MAXIMIZE_KEY, maximizedKeys, viewDisplayKey } from "./displayKeys";
+import {
+  LABEL_BLOCK_FOLDS,
+  LABEL_BLOCK_KEYS,
+  MAXIMIZE_KEY,
+  maximizedKeys,
+  viewDisplayKey,
+} from "./displayKeys";
 import { InstrumentControls } from "./InstrumentControls";
 import { InstrumentsPanel, type InstrumentsPanelSlot, noRoomReason } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
@@ -228,8 +234,9 @@ import {
   labelStatements,
   type MarkRow,
   markRows,
-  maximizedStatements,
   PRESET_NAMES,
+  SUMMARY_LABELS,
+  summaryStatements,
   rangesFromCamera,
   runPose,
   SCENE_OPTIONS,
@@ -429,6 +436,11 @@ interface ViewStageProps {
    * they stand, and the primary's statements folded to one line.
    */
   readonly maximized: boolean;
+  /**
+   * Whether `MAXIMIZE VIEW` folds the primary's label block to its summary, as it does once on,
+   * until its key `9` shows the whole block (the owner's request, 2026-11-01).
+   */
+  readonly labelFolded: boolean;
   /** `MAXIMIZE VIEW`'s button, which takes the focus from a panel it hides where no canvas stands. */
   readonly maximizeRef: RefObject<HTMLButtonElement | null>;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
@@ -788,6 +800,7 @@ function ViewStage({
   placePage,
   onPlacePage,
   maximized,
+  labelFolded,
   maximizeRef,
   stars,
   countLine,
@@ -1719,9 +1732,6 @@ function ViewStage({
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
-  // The upper plate's statements: folded to one line while MAXIMIZE VIEW is on, so that the picture
-  // is clear (the owner's request, 2026-11-01).
-  const blockStatements = maximized ? maximizedStatements(primaryStatements) : primaryStatements;
   const primaryLines = withPlaceLines(
     withMeterLine(
       withQualityLine(
@@ -1744,12 +1754,24 @@ function ViewStage({
   );
   // The count line counts the range query's rows: none while the scene's own field is drawn.
   const primaryCount = viewSky.drawn === null && !shown.sceneStars ? countLine : null;
+  // The upper plate as it stands: while MAXIMIZE VIEW folds it, its summary, the readings an
+  // operator acts on and the key that shows the whole block, and nothing that scrolls (the owner's
+  // request, 2026-11-01); its faults stand in either.
+  const summary = maximized && labelFolded;
+  const plateLines = summary
+    ? primaryLines.filter((line) => SUMMARY_LABELS.has(line.label))
+    : primaryLines;
+  // Its statements fold to one line while MAXIMIZE VIEW is on, after the label block key's.
+  const plateStatements = maximized
+    ? summaryStatements(primaryStatements, summary ? LABEL_BLOCK_KEYS : LABEL_BLOCK_FOLDS)
+    : primaryStatements;
+  const plateCount = summary ? null : primaryCount;
 
   // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
   // the DOM, an external system, and kept only where they changed.
   const upperRef = useRef<HTMLDivElement | null>(null);
   const sizersRef = useRef<HTMLDivElement | null>(null);
-  const pinnedLines = pinnedLinesOf(primaryLines);
+  const pinnedLines = pinnedLinesOf(plateLines);
   useLayoutEffect(() => {
     const measure = (): void => {
       const measured = measureRoom({
@@ -2062,13 +2084,16 @@ function ViewStage({
               <ViewLabelBlock
                 ref={upperRef}
                 id={`${legendId}-label`}
-                lines={primaryLines}
-                statements={blockStatements}
+                lines={plateLines}
+                statements={plateStatements}
                 folds={primaryFolds}
-                countLine={primaryCount}
+                countLine={plateCount}
                 faults={faults}
-                scroll={{ from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }}
+                scroll={
+                  summary ? undefined : { from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }
+                }
                 className={plateClass}
+                summary={summary}
               />
               {lowerParts.length === 0 ? null : (
                 <ViewLowerPlate
@@ -2144,11 +2169,12 @@ function ViewStage({
                 <ViewRoomSizers
                   ref={sizersRef}
                   upper={{
-                    lines: primaryLines,
-                    statements: blockStatements,
+                    lines: plateLines,
+                    statements: plateStatements,
                     folds: primaryFolds,
-                    countLine: primaryCount,
+                    countLine: plateCount,
                     faults,
+                    summary,
                   }}
                   lower={lowerParts}
                   liveClass={plateClass}
@@ -2433,6 +2459,34 @@ function interimAt(
   return input;
 }
 
+/**
+ * `MAXIMIZE VIEW`'s setting (the owner's request, 2026-11-01): `off`; on with the primary's label
+ * block `folded` to its summary; or on with the whole `block`.
+ */
+type Maximize = "off" | "folded" | "block";
+
+/** `MAXIMIZE VIEW` turned on, its label block folded, or off. */
+function toggledMaximize(maximize: Maximize): Maximize {
+  return maximize === "off" ? "folded" : "off";
+}
+
+/** The label block's key under `MAXIMIZE VIEW`: the whole block or its summary; nothing while off. */
+function toggledLabelBlock(maximize: Maximize): Maximize {
+  let next: Maximize;
+  switch (maximize) {
+    case "off":
+      next = "off";
+      break;
+    case "folded":
+      next = "block";
+      break;
+    case "block":
+      next = "folded";
+      break;
+  }
+  return next;
+}
+
 function ViewPanels({
   engineSource = DEFAULT_ENGINE_SOURCE,
   setting = "high",
@@ -2461,17 +2515,23 @@ function ViewPanels({
   // CAMERA as the display mounts, the choice kept while it stays mounted, through every scene.
   const [placePage, setPlacePage] = useState<PlacePage>("camera");
   // MAXIMIZE VIEW (the owner's request, 2026-11-01): off as the display mounts, VIEW's own, and kept
-  // while it stays mounted, through every scene and while another display is shown.
-  const [maximized, setMaximized] = useState(false);
+  // while it stays mounted, through every scene and while another display is shown; on, with the
+  // primary's label block folded to its summary, as each time it is turned on, or whole.
+  const [maximize, setMaximize] = useState<Maximize>("off");
+  const maximized = maximize !== "off";
   const maximizeRef = useRef<HTMLButtonElement | null>(null);
-  // Its key acts from anywhere on the display but a text field, as the view's single keys do.
+  // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
+  // label block's only while it is on.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
-      if (viewDisplayKey(event) !== "maximize") {
-        return;
+      const key = viewDisplayKey(event);
+      if (key === "maximize") {
+        event.preventDefault();
+        setMaximize(toggledMaximize);
+      } else if (key === "label-block") {
+        event.preventDefault();
+        setMaximize(toggledLabelBlock);
       }
-      event.preventDefault();
-      setMaximized((on) => !on);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -2685,7 +2745,7 @@ function ViewPanels({
           aria-pressed={maximized}
           aria-keyshortcuts={MAXIMIZE_KEY}
           onClick={() => {
-            setMaximized((on) => !on);
+            setMaximize(toggledMaximize);
           }}
         >
           <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
@@ -2713,6 +2773,7 @@ function ViewPanels({
         placePage={placePage}
         onPlacePage={setPlacePage}
         maximized={maximized}
+        labelFolded={maximize === "folded"}
         maximizeRef={maximizeRef}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
@@ -2761,7 +2822,8 @@ function ViewPanels({
  * free camera's ramp and damping (Design note 18).
  *
  * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `4` the style, `5`
- * the `GRID` while its row stands, `6` `MAXIMIZE VIEW`, `]` and `[` the next and previous target,
+ * the `GRID` while its row stands, `6` `MAXIMIZE VIEW` and while it is on `9` the label block, `]`
+ * and `[` the next and previous target,
  * `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown, and the platform's primary modifier with the
  * up and down arrows, R07.T19.f). A drag on a canvas turns its camera, the free camera itself, or
@@ -2774,8 +2836,11 @@ function ViewPanels({
  * `MAXIMIZE VIEW`, its button at the scene bar's end and its key `6`, is an interim layout until
  * the panels are designed again (the owner's request, 2026-11-01). On, the stage takes the
  * display's whole body: the side columns are hidden, their panels kept as they stand, so that off
- * restores them as they were; the scene bar and the header strip stay; the primary's statements
- * fold to one line (`maximizedStatements`); the instruments open stand in their slots over the
+ * restores them as they were; the scene bar and the header strip stay; the primary's label block
+ * folds to its summary, `VIEW` with its style, `GRID OFF` while it holds, its camera and its
+ * exposure, then `9 SHOWS LABEL BLOCK` with its statements folded to one line after it
+ * (`summaryStatements`), until its key `9` shows the whole block, `9 FOLDS LABEL BLOCK` with its
+ * statements still folded, and folds it again; the instruments open stand in their slots over the
  * stage, which they are part of; and under the key legend a line names the key that shows the
  * panels again, the `CONTROLS` view where it is an instrument and that view's selection, and the
  * hidden panels' faults and statuses stand under it, as the compact layout's do under its row of
