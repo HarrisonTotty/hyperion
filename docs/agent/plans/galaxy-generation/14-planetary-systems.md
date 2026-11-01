@@ -33722,35 +33722,18 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     greenhouse step (`AntiGreenhouse`, `step_anti_greenhouse`) as `T_s`⁴ = (1 − γ) `T_grey`⁴ +
     (γ ÷ 2) `T_base`⁴ (`anti_greenhouse`); `escaping::absorbed_share` gives 1 − A.
   - _Not built:_ the refits of `GREENHOUSE_NITROGEN` on Titan with the haze.
-  - _Part 5, the envelope's own Bond albedo (lane p14-t24hb-part5, 2026-11-01), held at 27:_
-    `ENVELOPE_BOND_VERSION` = 27, `EnvelopeBondRules::{ClassTable, Own}`, `with_envelope_bond` in
-    `with_every_27_hold`; `envelope_bond::gas_envelope_bond` replaces `giant_bond` in
-    `surface_mix::area_mixed`, the class table where the closed form gives no column. No wire
-    member; the record's envelope is unchanged.
-    - _Route (a), on the snapshot path:_ `envelope_bond::column::snapshot_column`, a closed form
-      of the decks' columns (the decks' bases, Ackerman and Marley's column at the base's
-      saturation slope, eq. 13's sizes at the base, the record's τ, hazes and dayside cut), about a
-      protosolar host (lean): the snapshot carries no \[Fe/H], C/O or formation distance. The
-      light: `envelope_bond::bin_albedos`, δ-Eddington adding over 8 g-points a bin to a black
-      floor at τ(550) 10. New `pub(crate)`: `condense::settling_size_at`, `deck_phase`;
-      `envelope_atmosphere::haze_mode_at`, `soot_weight`.
-    - _Ported:_ `envelope_bond/opacity.rs` (K&T's CH₄ and the alkali wings from the client's
-      tables; DACE's CH₄, H₂O, CO and H₂–H₂ from Nicholls's SOCRATES `Dayspring` files, CC BY 4.0,
-      a fetched dataset `nicholls_2025_dayspring` with its `reduce.py`; Mie tables of the client's
-      index files). Not ported: H₂–He pairs, NH₃, PH₃, CH₄ over 800–851 nm, the alkali cores.
-    - _Photometry:_ the giant templates' `reference_bond` stays T51.b's class I, so at 27 a giant's
-      geometric albedos follow its own Bond albedo; ruling 9's anchor on its analogue's own albedo
-      is 27's bump's to decide.
-    - _The figures_ (pinned in `envelope_bond::tests`; outbox): Jupiter 0.286, Saturn 0.190,
-      Uranus 0.483, Neptune 0.525, the hot fixture 0.132. The decks, not the light, miss the
-      measured giants (findings): the GRS chromophore column, no cold-giant tropospheric haze, the
-      ice giants' CH₄ deck high.
+  - _Part 5, the envelope's own Bond albedo, held at 27:_ `ENVELOPE_BOND_VERSION`,
+    `EnvelopeBondRules::{ClassTable, Own}`, `with_envelope_bond` in `with_every_27_hold`;
+    `envelope_bond::gas_envelope_bond` replaces `giant_bond` in `surface_mix`. No wire member.
+    - _Route (a):_ `envelope_bond::column::snapshot_column`, a closed form of the decks' columns
+      on the snapshot path, about a protosolar host (lean, 2026-11-01: the snapshot carries no
+      \[Fe/H], C/O or formation distance); the class table where it gives no column.
+    - _Not ported:_ H₂–He pairs, NH₃, PH₃, CH₄ over 800–851 nm, the alkali cores
+      (`envelope_bond/opacity.rs`, from `hyperion-fit/data/nicholls_2025_dayspring`).
+    - _Photometry:_ `reference_bond` stays T51.b's class I (lean, 2026-11-01); its anchor on the
+      analogue's own albedo is 27's bump's to decide.
     - _27's movers:_ `under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_satellites`
-      (slow): gas envelopes' albedo, `T_eq` and envelope, and their satellites. Over 442 systems,
-      354 gas envelopes move (no satellite does); the temperate ones (`T_eq` 300–450 K) split
-      between a water-cloud branch (about 0.7) and a clear one (0.03–0.15); a soot-shrouded warm
-      sub-Neptune takes 0 (the closure's γ₂ < 0, clipped) and the golden hot Jupiter 0.228
-      (findings).
+      (slow).
   - _26's movers_ (by name): `under_every_26_hold_the_scattering_movers_are_stated` (slow) and
     `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
   - _The form by the air (fix, 2026-11-01; in the `PoreGas` arm, no new hold):_ the outer system's
