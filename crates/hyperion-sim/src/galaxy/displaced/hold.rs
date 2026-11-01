@@ -207,6 +207,7 @@ fn the_version_s_galaxy_holds_no_displaced_class() {
 
 /// `with_rules` refuses another displaced arm, which the build reads.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "the displaced classes' arm is read when a galaxy is built")]
 fn with_rules_refuses_another_displaced_arm() {
     let _ = field_only()
@@ -217,6 +218,7 @@ fn with_rules_refuses_another_displaced_arm() {
 /// `with_rules` refuses other stellar rules for a galaxy that holds the classes, whose class table
 /// read the kick law under its own.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(
     expected = "the displaced classes' table was built under the galaxy's stellar rules"
 )]
