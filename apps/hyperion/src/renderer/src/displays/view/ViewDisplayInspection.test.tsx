@@ -19,7 +19,7 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
-import type { InspectionOpening } from "./ViewSceneProvider";
+import { type InspectionOpening, inspectionOption } from "./ViewSceneProvider";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -35,7 +35,7 @@ function earthOpening(): InspectionOpening {
     throw new Error(`the slice's answer is unusable: ${result.fault}`);
   }
   return {
-    inspection: {
+    option: inspectionOption({
       universe: aUniverse().id,
       place: {
         kind: "charted",
@@ -47,7 +47,7 @@ function earthOpening(): InspectionOpening {
       bodies: result.bodies,
       body: FIXTURE_EARTH,
       time: { seconds: 3_600, nanos: 0 },
-    },
+    }),
     sequence: 1,
   };
 }
@@ -104,6 +104,16 @@ describe("VIEW's body inspection (the owner's request)", () => {
         .requestsOfKind("sky")
         .some((request) => request.body.exclude_system === FIXTURE_SYSTEM),
     ).toBe(true);
+  });
+
+  it("gives the focus to the scene shown when its CLOSE goes with it", async () => {
+    const view = await inspecting();
+    screen.getByRole("button", { name: "CLOSE BODY INSPECTION" }).focus();
+
+    await view.user.keyboard("{Enter}");
+    view.advance(100);
+
+    expect(sceneButton("SERVER")).toHaveFocus();
   });
 
   it("closes back to the scene shown before it, and is no longer offered", async () => {

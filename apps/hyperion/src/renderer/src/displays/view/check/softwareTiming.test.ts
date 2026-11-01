@@ -5,10 +5,12 @@ import { HANDOVER_CHECK_TIMING, SERVED_HANDOVER_CHECK_TIMING } from "./handoverC
 import {
   atmosphereCheckTimingOf,
   handoverCheckTimingOf,
+  inspectionCheckTimingOf,
   SOFTWARE_WAIT_FACTOR,
   terrainCheckTimingOf,
   viewsCheckTimingOf,
 } from "./softwareTiming";
+import { INSPECTION_CHECK_TIMING } from "./inspectionCheckRun";
 import { TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
 import { VIEWS_CHECK_TIMING } from "./viewsCheckRun";
 
@@ -65,6 +67,15 @@ describe("the software mode's timings (R01.T16)", () => {
     ]).toEqual([300_000, 1_500_000]);
   });
 
+  it("stretch the inspection run's waits for a control, its drawing and AUTO (the owner's request)", () => {
+    expect(inspectionCheckTimingOf(INSPECTION_CHECK_TIMING, "software")).toEqual({
+      ...INSPECTION_CHECK_TIMING,
+      waitMs: 5 * INSPECTION_CHECK_TIMING.waitMs,
+      drawWaitMs: 5 * INSPECTION_CHECK_TIMING.drawWaitMs,
+      settleMaxMs: 5 * INSPECTION_CHECK_TIMING.settleMaxMs,
+    });
+  });
+
   it("leave every other mode's timings as they are", () => {
     for (const mode of OTHER_MODES) {
       expect([
@@ -72,11 +83,13 @@ describe("the software mode's timings (R01.T16)", () => {
         atmosphereCheckTimingOf(ATMOSPHERE_CHECK_TIMING.smoke, mode),
         terrainCheckTimingOf(TERRAIN_CHECK_TIMING.full, mode),
         handoverCheckTimingOf(HANDOVER_CHECK_TIMING, mode),
+        inspectionCheckTimingOf(INSPECTION_CHECK_TIMING, mode),
       ]).toEqual([
         VIEWS_CHECK_TIMING.full,
         ATMOSPHERE_CHECK_TIMING.smoke,
         TERRAIN_CHECK_TIMING.full,
         HANDOVER_CHECK_TIMING,
+        INSPECTION_CHECK_TIMING,
       ]);
     }
   });

@@ -2261,20 +2261,28 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
       expect(inspection?.bodies.bodies.map((body) => body.id)).toContain(PLANET_ID);
     });
 
-    it("opens a selected moon of the focused planet, and the planet for its ring", async () => {
+    it("opens a selected moon of the focused planet", async () => {
       const opened = vi.fn<(inspection: BodyInspection) => void>();
       const { user, socket } = renderView(opened);
       await answer(socket, populatedBodies());
       await selectRow(user, /\/257,/);
       await user.keyboard("c");
       await user.click(viewBody());
-      await selectRow(user, /\/384,/);
-      await user.click(viewBody());
 
       expect(opened.mock.calls.map(([inspection]) => inspection.body)).toEqual([
         `${FIXTURE_SYSTEM}.0101`,
-        PLANET_ID,
       ]);
+    });
+
+    it("opens the focused planet for a selected ring of it", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(opened);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/384,/);
+      await user.keyboard("c");
+      await user.click(viewBody());
+
+      expect(opened.mock.calls.map(([inspection]) => inspection.body)).toEqual([PLANET_ID]);
     });
   });
 

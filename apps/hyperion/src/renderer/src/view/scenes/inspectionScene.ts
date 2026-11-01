@@ -17,21 +17,18 @@
  *   opened, so that the body turns as it does; its script is a month long and no inspection plays
  *   it to its end.
  * - **Its camera** has no own ship to sit in: it starts free, in the body's frame, on the body's
- *   day side ({@link INSPECTION_PHASE_DEG} round from its star about its pole and
- *   {@link INSPECTION_ELEVATION_DEG} above its equator, so that a ring plane opens), looking at its
- *   centre with its pole up, at the distance at which its disc fills {@link INSPECTION_DISC_SHARE}
- *   of the view's height at the default field of view on a 16:9 view, both settings' windows.
+ *   day side ({@link INSPECTION_ROUND_DEG} round from its star about its pole and
+ *   {@link INSPECTION_ELEVATION_DEG} out of its equator on the star's side, so that a ring plane
+ *   opens on its lit face), looking at its centre with its pole up, at the distance at which its
+ *   disc spans {@link INSPECTION_DISC_SHARE} of the view's smaller side at the default field of
+ *   view: framed for the view's own aspect at its first frame with a size
+ *   (`KeptScene.framedPoseFor`), and for a 16:9 view until then.
  * - **Its tidal radius**, which bounds only a camera flown out of the system, is the kept scenes'
  *   (`KEPT_TIDAL_RADIUS_M`): the server states a system's in its scene alone (a lean of this
  *   change, 2026-11-01).
  */
 
-import {
-  type BodyIdHex,
-  type DetailLevelDto,
-  type UniverseIdHex,
-  type UniverseTime,
-} from "@hyperion/protocol";
+import type { BodyIdHex, DetailLevelDto, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 
 import { add, cross, dot, normalise, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { timeAfter } from "../../lib/scene/lightTime";
@@ -53,19 +50,23 @@ export const INSPECTION_SCENE_NAME = "BODY INSPECTION";
 /** How long the inspection's script runs, s: 30 days at one second a second. */
 export const INSPECTION_DURATION_S = 30 * 86_400;
 
-/** The share of the view's height the body's disc fills as the inspection opens. */
+/** The share of the view's smaller side the body's disc fills as the inspection opens. */
 export const INSPECTION_DISC_SHARE = 2 / 3;
 
-/** The view's aspect the framing is made for, width over height: 1920 × 1080's and 1280 × 720's. */
+/** The aspect a view is framed for before its size is known, width over height: 16:9. */
 export const INSPECTION_ASPECT = 16 / 9;
 
 /**
- * How far round from its star the camera stands about the body's pole, degrees: the day side seen
- * near gibbous, its terminator in the view.
+ * How far round from its star the camera stands about the body's pole, degrees: with
+ * {@link INSPECTION_ELEVATION_DEG}, the body is seen gibbous at a phase angle from 37° to 70°,
+ * whatever its star's declination (44° with the star on its equator), its terminator in the view.
  */
-export const INSPECTION_PHASE_DEG = 40;
+export const INSPECTION_ROUND_DEG = 40;
 
-/** How far above the body's equator the camera stands, degrees, so that a ring plane opens. */
+/**
+ * How far out of the body's equator the camera stands, on its star's side, degrees, so that a ring
+ * plane opens on its lit face.
+ */
 export const INSPECTION_ELEVATION_DEG = 20;
 
 /**
@@ -103,7 +104,7 @@ const RAD_PER_DEG = Math.PI / 180;
  * since the record carries the orbit's period, and m its Earth masses times
  * {@link EARTH_MASS_KG}; `null` without them.
  */
-export function hillRadiusOf(body: SystemBody): number | null {
+export function hillRadiusMOf(body: SystemBody): number | null {
   if (body.massMearth.state !== "ok" || body.orbit.state !== "ok") {
     return null;
   }
@@ -126,7 +127,7 @@ function inspectionSystem(inspection: BodyInspection): SceneSystem {
   const grant: BodyGrant = { level: bodies.granted, seen: null };
   const hillRadiiM = new Map<BodyIdHex, number>();
   for (const body of bodies.bodies) {
-    const radiusM = hillRadiusOf(body);
+    const radiusM = hillRadiusMOf(body);
     if (radiusM !== null) {
       hillRadiiM.set(body.id, radiusM);
     }
@@ -166,18 +167,23 @@ function drawnAt(
   return serverSceneAtPush(parts, place);
 }
 
-/** The vertical field of view at the default horizontal one on a view of {@link INSPECTION_ASPECT}, rad. */
-function verticalFovRad(): number {
-  return 2 * Math.atan(Math.tan((DEFAULT_FOV_DEG * RAD_PER_DEG) / 2) / INSPECTION_ASPECT);
-}
-
 /**
- * The distance from a body's centre, m, at which its disc of `radiusM` fills
- * {@link INSPECTION_DISC_SHARE} of the view's height: its angular radius sin⁻¹(R ÷ d) a third of
- * the vertical field.
+ * The distance from a body's centre, m, at which its disc of `radiusM` spans
+ * {@link INSPECTION_DISC_SHARE} s of a view's smaller side on screen at the default horizontal
+ * field of view.
+ *
+ * @remarks
+ * A sphere seen at its angular radius α = sin⁻¹(R ÷ d) projects, on the view's rectilinear
+ * projection, to a disc of radius f tan α against the half-side f tan(½ FOV) across that side, so
+ * its share is tan α ÷ tan(½ FOV). With x = s tan(½ FOV_x) ÷ max(aspect, 1), the smaller
+ * half-side's tangent times s, tan α = x, and d = R ÷ sin(tan⁻¹ x) = R √(1 + x²) ÷ x.
+ *
+ * @param aspect - The view's width over its height.
  */
-export function framedDistanceM(radiusM: number): number {
-  return radiusM / Math.sin((verticalFovRad() * INSPECTION_DISC_SHARE) / 2);
+export function framedDistanceM(radiusM: number, aspect: number): number {
+  const x =
+    (INSPECTION_DISC_SHARE * Math.tan((DEFAULT_FOV_DEG * RAD_PER_DEG) / 2)) / Math.max(aspect, 1);
+  return (radiusM * Math.hypot(1, x)) / x;
 }
 
 /** `v` turned by `angleRad` about the unit axis `axis` (Rodrigues' rotation formula). */
@@ -196,23 +202,27 @@ function across(pole: Vec3): Vec3 {
 }
 
 /**
- * The camera's pose as the inspection opens: in `body`'s frame, on its day side, round from its
- * star about its pole and above its equator, at the framed distance, looking at its centre with its
- * pole up. The pole is its figure's, else its orbit's normal (Design note 14), else galactic north.
+ * The camera's pose as the inspection opens on a view of `aspect`, width over height: in `body`'s
+ * frame, on its day side, round from its star about its pole and out of its equator on the star's
+ * side, at the framed distance, looking at its centre with its pole up. The pole is its figure's, else its orbit's
+ * normal (Design note 14), else galactic north.
  */
-export function framedPose(body: ViewBody, star: ViewBody): CameraPose {
+export function framedPose(body: ViewBody, star: ViewBody, aspect: number): CameraPose {
   const pole = normalise(body.appearance?.figure?.pole ?? body.orbitNormal ?? GALACTIC_NORTH);
   const towardStar = sub(star.centreM, body.centreM);
   const level = sub(towardStar, scale(pole, dot(towardStar, pole)));
   const sunward = norm(level) > 0 ? normalise(level) : across(pole);
-  const round = turned(sunward, pole, INSPECTION_PHASE_DEG * RAD_PER_DEG);
+  const round = turned(sunward, pole, INSPECTION_ROUND_DEG * RAD_PER_DEG);
+  // Out of the equator on the star's side, so that the phase stays on the day side however far
+  // the star stands from the equator, and a ring is seen on its lit face.
+  const side = dot(towardStar, pole) < 0 ? -1 : 1;
   const elevation = INSPECTION_ELEVATION_DEG * RAD_PER_DEG;
   const outward = normalise(
-    add(scale(round, Math.cos(elevation)), scale(pole, Math.sin(elevation))),
+    add(scale(round, Math.cos(elevation)), scale(pole, side * Math.sin(elevation))),
   );
   return {
     frame: { kind: "body", body: body.id },
-    positionM: scale(outward, framedDistanceM(body.radiusM)),
+    positionM: scale(outward, framedDistanceM(body.radiusM, aspect)),
     orientation: lookAlong(scale(outward, -1), pole),
   };
 }
@@ -239,7 +249,7 @@ export function inspectionScene(inspection: BodyInspection): KeptScene {
   if (drawn === undefined || !(drawn.radiusM > 0) || star === null) {
     throw new Error(`the inspected body ${body} is not drawn with a radius beside a star`);
   }
-  const pose = framedPose(drawn, star);
+  const pose = framedPose(drawn, star, INSPECTION_ASPECT);
   const sceneAt = (tS: number): ViewScene => {
     const scene = drawnAt(system, place, body, time, timeAfter(time, tS));
     if (scene === null) {
@@ -260,6 +270,7 @@ export function inspectionScene(inspection: BodyInspection): KeptScene {
     durationS: INSPECTION_DURATION_S,
     sceneAt,
     cameraAt: () => pose,
+    framedPoseFor: (aspect) => framedPose(drawn, star, aspect),
     startStyle: "photorealistic",
   };
 }

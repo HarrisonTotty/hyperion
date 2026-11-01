@@ -64,9 +64,10 @@
 # --inspection --universe <ID> --body <ID> runs the inspection run instead (the owner's request,
 # 2026-11-01): on a running server, the universe opened on GALAXY, the body's system on SYSTEM, the
 # body selected, FOCUS BODY and VIEW BODY pressed, and VIEW's photorealistic body inspection of it
-# captured once AUTO has settled, as between-inspection-<system>-<index>.png under
-# target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
-# when a step does not take effect, VIEW BODY is held back, or a fault line stands on the capture.
+# captured once AUTO has settled, as between-inspection-<system>-<index>.png, then with GRID OFF as
+# between-inspection-<system>-<index>-grid-off.png, under target/views-check/inspection/. One
+# setting, high unless given, and one body a launch; it exits 1 when a step does not take effect,
+# VIEW BODY is held back, or a fault line stands on the capture.
 #
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and

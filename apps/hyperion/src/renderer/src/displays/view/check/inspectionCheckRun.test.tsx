@@ -57,24 +57,29 @@ describe("the inspection run (the owner's request)", () => {
     expect(openSystem).not.toHaveBeenCalled();
   });
 
-  it("ends passed once its capture is taken, and failed with the reason it threw", async () => {
+  it("ends passed once its capture is taken", async () => {
     const end = vi.fn<() => Promise<void>>(() => Promise.resolve());
-    const signal = new AbortController().signal;
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await recordInspectionCheck(
       { end },
       () => Promise.resolve({ label: "a", frame: null, exposure: null, statements: [] }),
-      signal,
+      new AbortController().signal,
     );
+
+    expect(end.mock.calls).toEqual([[{ status: "pass" }]]);
+  });
+
+  it("ends failed with the reason the run threw", async () => {
+    const end = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
     await recordInspectionCheck(
       { end },
       () => Promise.reject(new Error("views check: VIEW BODY was held back")),
-      signal,
+      new AbortController().signal,
     );
 
     expect(end.mock.calls).toEqual([
-      [{ status: "pass" }],
       [{ status: "fail", reason: "views check: VIEW BODY was held back" }],
     ]);
   });

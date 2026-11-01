@@ -26,6 +26,14 @@ import {
   stateNearEarth,
 } from "../../test/sceneFixture";
 import { servedRun } from "../../test/servedRun";
+import { galacticPositionFromLy } from "@hyperion/protocol";
+import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
+import {
+  FIXTURE_SYSTEM as SLICE_SYSTEM,
+  FIXTURE_UNIVERSE,
+  sliceBodies,
+} from "../../test/planetaryFixture";
+import { inspectionScene } from "../../view/scenes/inspectionScene";
 import { viewSceneFromServer } from "../../view/scene/fromServer";
 import {
   aViewCraft,
@@ -43,6 +51,7 @@ import {
   commandRun,
   contourIntervalLine,
   followRun,
+  framedRun,
   lookReading,
   photorealStatements,
   PHOTOREAL_PREPARING,
@@ -223,6 +232,45 @@ describe("a view's run", () => {
 function forward(run: ViewRun) {
   return rotate(run.camera.pose.orientation, vec3(0, 0, -1));
 }
+
+/** The slice's Earth's body inspection. */
+function earthInspection(): KeptScene {
+  const result = toSystemBodiesModel(sliceBodies(), "H7K 4C0RFZ D-7");
+  if (result.kind !== "ok") {
+    throw new Error(`the slice's answer is unusable: ${result.fault}`);
+  }
+  return inspectionScene({
+    universe: FIXTURE_UNIVERSE,
+    place: {
+      kind: "charted",
+      system: SLICE_SYSTEM,
+      designation: "H7K 4C0RFZ D-7",
+      barycentre: galacticPositionFromLy([26_000, 0, 12]),
+    },
+    model: result.model,
+    bodies: result.bodies,
+    body: FIXTURE_EARTH,
+    time: { seconds: 0, nanos: 0 },
+  });
+}
+
+describe("a run framed on its view's aspect (the owner's request)", () => {
+  it("takes the kept scene's pose for the aspect while its camera is free", () => {
+    const kept = earthInspection();
+    const framed = framedRun(startRun(kept), 1.26);
+    expect(framed.camera.pose).toEqual(kept.framedPoseFor?.(1.26));
+    expect(framed.camera.style).toBe("photorealistic");
+  });
+
+  it("leaves a scene that frames nothing, and a camera at its seat, as they are", () => {
+    const precision = startRun(precisionScene());
+    expect(framedRun(precision, 1.26)).toBe(precision);
+    const pose = earthInspection().cameraAt(0);
+    const seated = startRun({ ...precisionScene(), framedPoseFor: () => pose });
+    expect(seated.camera.preset).toBe("seat");
+    expect(framedRun(seated, 1.26)).toBe(seated);
+  });
+});
 
 describe("a view's run turned by a drag or the arrows (R07.T19.f)", () => {
   const turn = { yawRad: 0.3, pitchRad: 0 };

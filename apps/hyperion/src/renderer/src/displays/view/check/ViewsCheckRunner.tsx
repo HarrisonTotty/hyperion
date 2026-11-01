@@ -1,7 +1,11 @@
 import type { RequestClient } from "@hyperion/protocol";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-import type { GraphicsLaunchMode, ViewsCheckApi } from "../../../../../preload/api";
+import type {
+  GraphicsLaunchMode,
+  ServedWorldNames,
+  ViewsCheckApi,
+} from "../../../../../preload/api";
 import type { SystemTarget } from "../../system/systemTarget";
 import { pageAtmosphereFixtures } from "../../../view/scenes/atmosphereScene";
 import {
@@ -39,7 +43,12 @@ import type { ViewsProbe } from "./viewsProbe";
 export type CheckedRun =
   | { readonly kind: "several-views" }
   | { readonly kind: "atmosphere" }
-  | { readonly kind: "inspection"; readonly requests: RequestClient }
+  | {
+      readonly kind: "inspection";
+      readonly requests: RequestClient;
+      /** The body the launch names, which the preload holds an inspection launch to. */
+      readonly served: ServedWorldNames | null;
+    }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
       readonly kind: "handover";
@@ -163,10 +172,7 @@ export function ViewsCheckRunner({
         );
         break;
       case "inspection": {
-        const { served } = api.launch;
-        if (served === undefined) {
-          throw new Error("an inspection launch names its universe and body");
-        }
+        const { served } = run;
         ended = recordInspectionCheck(
           api,
           () =>

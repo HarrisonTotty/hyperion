@@ -1,3 +1,4 @@
+import { RequestClient } from "@hyperion/protocol";
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -127,6 +128,28 @@ describe("ViewsCheckRunner", () => {
       "views check: the atmosphere run failed:",
       [[{ status: "fail", reason: "views check: VIEW did not show its primary view within 60 s" }]],
     ]);
+  });
+
+  it("runs the inspection run on an inspection launch (the owner's request)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { ...checkApi(), launch: { ...checkApi().launch, run: "inspection" as const } };
+    const requests = new RequestClient(() => false);
+    render(
+      <ViewsCheckRunner
+        api={api}
+        probe={new ViewsProbe()}
+        run={{ kind: "inspection", requests, served: null }}
+        launchMode="vulkan"
+        openSystem={() => undefined}
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(api.end).toHaveBeenCalledWith({
+        status: "fail",
+        reason: "views check: the inspection launch names no universe and body",
+      });
+    });
   });
 
   it("waits five times as long in the check-only software mode (R01.T16)", async () => {

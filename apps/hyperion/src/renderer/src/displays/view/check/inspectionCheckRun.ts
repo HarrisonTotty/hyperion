@@ -15,7 +15,8 @@
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
  * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, the
  *    exposure is put under `AUTO` (`ENABLE`), and once `AUTO` has settled and a few frames are drawn
- *    the page is captured as `inspection-<system>-<index>`.
+ *    the page is captured as `inspection-<system>-<index>`, then again with the `STYLE` panel's
+ *    `GRID` at `OFF`, the image bare, as `inspection-<system>-<index>-grid-off`.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
  * (with its reason), or where the primary's label block shows a fault line as it is captured.
@@ -37,6 +38,7 @@ import type { ServedWorldNames, ViewsCheckApi } from "../../../../../preload/api
 import { vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { INSPECTION_SCENE_NAME } from "../../../view/scenes/inspectionScene";
+import { FOCUS_KEY, VIEW_BODY_KEY } from "../../system/OrbitMapPanel";
 import type { SystemTarget } from "../../system/systemTarget";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import { exposureEv100, primaryPlate, type PrimaryPlate } from "./atmosphereCheckRun";
@@ -87,8 +89,8 @@ export interface InspectionCheckDeps {
   readonly views: Pick<ViewsProbe, "drawTimes">;
   /** The link's request client, through which the run asks the server what it opens. */
   readonly requests: Pick<RequestClient, "request">;
-  /** The universe and the body the launch names. */
-  readonly served: ServedWorldNames;
+  /** The universe and the body the launch names; `null` fails the run, which then asks nothing. */
+  readonly served: ServedWorldNames | null;
   /** Opens the `SYSTEM` display on a system (`App`'s, as `OPEN SYSTEM` calls it). */
   readonly openSystem: (target: SystemTarget) => void;
   readonly document: Document;
@@ -101,6 +103,7 @@ export interface InspectionCheckDeps {
 
 /** What the run captured, and what the primary's label block said as it was, for its tests. */
 export interface InspectionCapture {
+  /** The capture's label, with `GRID` at `ON`; the second's adds `-grid-off`. */
   readonly label: string;
   readonly frame: string | null;
   readonly exposure: string | null;
@@ -135,7 +138,11 @@ function mapButton(document: Document, key: string): HTMLButtonElement | null {
  *   (`STOPPED`).
  */
 export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<InspectionCapture> {
-  const { document, timing, served } = deps;
+  const { document, timing } = deps;
+  const served = deps.served;
+  if (served === null) {
+    throw new Error("views check: the inspection launch names no universe and body");
+  }
   const driver = viewDriver(deps);
   const { stopped, wait, until, press, controls } = driver;
   const drawn = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.drawWaitMs } });
@@ -215,7 +222,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     `SYSTEM did not select ${served.body}`,
     () => row()?.getAttribute("aria-selected") === "true",
   );
-  const focus = (): HTMLButtonElement | null => mapButton(document, "C");
+  const focus = (): HTMLButtonElement | null => mapButton(document, FOCUS_KEY);
   if (focus()?.getAttribute("aria-pressed") !== "true") {
     await press(focus, "FOCUS BODY");
   }
@@ -224,7 +231,7 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     () => focus()?.getAttribute("aria-pressed") === "true",
     () => controls.reasonOf(focus()),
   );
-  const viewBody = (): HTMLButtonElement | null => mapButton(document, "V");
+  const viewBody = (): HTMLButtonElement | null => mapButton(document, VIEW_BODY_KEY);
   await until(
     "VIEW BODY was held back",
     () => viewBody() !== null && viewBody()?.getAttribute("aria-disabled") !== "true",
@@ -278,13 +285,16 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
     await settled(ev);
   };
   await settled(read());
-  const fromMs = deps.nowMs();
-  await until(
-    `the primary did not draw ${String(timing.framesBeforeCapture)} frames`,
-    () =>
-      deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >=
-      timing.framesBeforeCapture,
-  );
+  const framesDrawn = async (): Promise<void> => {
+    const fromMs = deps.nowMs();
+    await until(
+      `the primary did not draw ${String(timing.framesBeforeCapture)} frames`,
+      () =>
+        deps.views.drawTimes(PRIMARY_VIEW_NAME, fromMs, Number.POSITIVE_INFINITY).length >=
+        timing.framesBeforeCapture,
+    );
+  };
+  await framesDrawn();
   const said = plate();
   if (said.faults.length > 0) {
     throw new Error(`views check: the inspection shows faults: ${said.faults.join("; ")}`);
@@ -292,6 +302,15 @@ export async function runInspectionCheck(deps: InspectionCheckDeps): Promise<Ins
   const label = inspectionCaptureLabel(served.body);
   stopped();
   await deps.api.capture(label);
+  const gridOff = (): HTMLButtonElement | null =>
+    [...document.querySelectorAll<HTMLButtonElement>(".view-style__grid button")].find(
+      (button) => button.textContent.trim() === "OFF",
+    ) ?? null;
+  await press(gridOff, "the STYLE panel's GRID OFF");
+  await until("GRID did not go OFF", () => gridOff()?.getAttribute("aria-pressed") === "true");
+  await framesDrawn();
+  stopped();
+  await deps.api.capture(`${label}-grid-off`);
   return {
     label,
     frame: said.line("FRAME"),

@@ -7,7 +7,11 @@ import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
-import { type InspectionOpening, ViewSceneProvider } from "./displays/view/ViewSceneProvider";
+import {
+  type InspectionOpening,
+  inspectionOption,
+  ViewSceneProvider,
+} from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
 import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
@@ -120,7 +124,7 @@ function checkProbesOf(
       run = { kind: "atmosphere" };
       break;
     case "inspection":
-      run = { kind: "inspection", requests };
+      run = { kind: "inspection", requests, served: launch.served ?? null };
       break;
     case "terrain":
       run = { kind: "terrain", terrain: terrainProbe([]) };
@@ -223,8 +227,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * display is not rendered again for it.
  *
  * `VIEW BODY` on the `SYSTEM` display's orbit map opens its body in `VIEW`'s body inspection (the
- * owner's request, 2026-11-01): `App` keeps the latest opening, counted as a system's opening is,
- * hands it to `ViewSceneProvider`, which chooses it, and switches to `VIEW`; the callback is stable.
+ * owner's request, 2026-11-01): `App` makes its kept scene as it is pressed and keeps the latest
+ * opening, counted as a system's opening is, hands it to `ViewSceneProvider`, which shows it, and
+ * switches to `VIEW`; the callback is stable.
  *
  * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
  * R07.T17), which holds for the run.
@@ -314,7 +319,9 @@ export function App() {
   }, []);
   const [inspection, setInspection] = useState<InspectionOpening | null>(null);
   const viewBody = useCallback((body: BodyInspection): void => {
-    setInspection((previous) => ({ inspection: body, sequence: (previous?.sequence ?? 0) + 1 }));
+    // Made here, as the operator opens it, not in a render.
+    const option = inspectionOption(body);
+    setInspection((previous) => ({ option, sequence: (previous?.sequence ?? 0) + 1 }));
     setActiveDisplay("view");
   }, []);
   const target = systemOpening?.target ?? null;

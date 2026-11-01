@@ -26,6 +26,8 @@ import {
   equatorNormal,
   focusHeldReason,
   focusTarget,
+  inspectionHeldReason,
+  inspectionTarget,
   LONE_BODY_FIT_RADII,
 } from "./bodyFrame";
 import { METRES_PER_AU } from "./orbitScale";
@@ -138,6 +140,66 @@ describe("focusTarget", () => {
     expect(focusTarget(body(BELT, bodies), bodies)).toBeNull();
     expect(focusTarget(body(DESTROYED_PLANET, bodies), bodies)).toBeNull();
     expect(focusTarget(null, bodies)).toBeNull();
+  });
+});
+
+describe("inspectionTarget, VIEW BODY's body (the owner's request)", () => {
+  it("is the focused planet, or a moon of it that is selected", () => {
+    const bodies = bodiesOf();
+    const planet = body(PLANET, bodies);
+
+    expect(inspectionTarget(planet, null)?.id).toBe(PLANET);
+    expect(inspectionTarget(planet, body(MOON, bodies))?.id).toBe(MOON);
+    expect(inspectionTarget(planet, body(RING, bodies))?.id).toBe(PLANET);
+  });
+
+  it("is the focused planet for a moon of another planet, and none with no focus", () => {
+    const bodies = bodiesOf();
+    const elsewhere: SystemBody = {
+      ...body(MOON, bodies),
+      parent: { kind: "body", id: DESTROYED_PLANET },
+    };
+
+    expect(inspectionTarget(body(PLANET, bodies), elsewhere)?.id).toBe(PLANET);
+    expect(inspectionTarget(null, body(MOON, bodies))).toBeNull();
+  });
+});
+
+describe("inspectionHeldReason, why VIEW BODY is held back (the owner's request)", () => {
+  /** The moon of the focused planet with `change` made, as the selection. */
+  function heldFor(change: Partial<SystemBody>): string | null {
+    const bodies = bodiesOf();
+    return inspectionHeldReason(body(PLANET, bodies), { ...body(MOON, bodies), ...change });
+  }
+
+  it("holds nothing back for a focused planet and a selected moon of it", () => {
+    const bodies = bodiesOf();
+    expect(inspectionHeldReason(body(PLANET, bodies), null)).toBeNull();
+    expect(inspectionHeldReason(body(PLANET, bodies), body(MOON, bodies))).toBeNull();
+  });
+
+  it("says no body is focused before one is", () => {
+    expect(inspectionHeldReason(null, body(PLANET))).toBe("NO BODY FOCUSED");
+  });
+
+  it("names a body not present by its kind and state", () => {
+    expect(heldFor({ state: body(DESTROYED_PLANET).state })).toBe("MOON DESTROYED");
+  });
+
+  it("names the section it would be drawn from as its state stands", () => {
+    expect(heldFor({ orbit: { state: "not_resolved" } })).toBe("ORBIT NOT RESOLVED");
+    expect(heldFor({ figure: { state: "not_modelled" }, bulk: { state: "not_modelled" } })).toBe(
+      "BULK NOT YET MODELLED",
+    );
+    expect(heldFor({ massMearth: { state: "not_resolved" } })).toBe("MASS NOT RESOLVED");
+  });
+
+  it("says what is missing where a section does not apply", () => {
+    expect(heldFor({ orbit: { state: "not_applicable" } })).toBe("NO ORBIT");
+    expect(
+      heldFor({ figure: { state: "not_applicable" }, bulk: { state: "not_applicable" } }),
+    ).toBe("NO RADIUS");
+    expect(heldFor({ massMearth: { state: "not_applicable" } })).toBe("NO MASS");
   });
 });
 

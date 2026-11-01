@@ -211,6 +211,7 @@ import {
 import {
   commandRun,
   EASED_MOVES_STATEMENT,
+  framedRun,
   type LabelLine,
   type LabelStatement,
   photorealStatements,
@@ -774,6 +775,8 @@ function ViewStage({
   const serverRef = useRef<ServerInput | null>(null);
   const [initial] = useState(() => initialRun(source));
   const runRef = useRef<ViewRun>(initial);
+  // Whether the run has been framed for the stage's aspect, as a kept scene may ask once.
+  const framedRef = useRef(false);
   const [published, setPublished] = useState<Published>({
     run: initial,
     anchors: [],
@@ -835,10 +838,11 @@ function ViewStage({
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
+  // A kept scene of served bodies is lit by its sky, as the server's is (the owner's request).
+  const servedScene = server === null ? (shown.run.scene.served ?? null) : null;
   const viewSky = useViewSky({
-    universe,
-    // A kept scene of served bodies is lit by its sky, as the server's is (the owner's request).
-    place: server?.place ?? shown.run.scene.served?.place ?? null,
+    universe: servedScene?.universe ?? universe,
+    place: server?.place ?? servedScene?.place ?? null,
     run: shown.run,
     exposure,
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
@@ -1214,6 +1218,12 @@ function ViewStage({
       lastMs = nowMs;
       const inputs = inputsRef.current;
       const current = serverRef.current;
+      // A kept scene framed on its view's aspect, the body inspection's, takes its pose at the
+      // stage's first frame with a size, before the camera has been flown (the owner's request).
+      if (!framedRef.current && inputs.size !== null && inputs.size.heightPx > 0) {
+        framedRef.current = true;
+        runRef.current = framedRun(runRef.current, inputs.size.widthPx / inputs.size.heightPx);
+      }
       const run = stepRun(runRef.current, {
         // The server's scene where the ship sees it at this frame's time (R03's `frameAt`).
         serverScene: current === null ? null : serverSceneAtFrame(current, nowMs),
@@ -2349,7 +2359,7 @@ function ViewPanels({
   const interim = useInterimStars(
     server === null
       ? {
-          universe,
+          universe: served?.universe ?? universe,
           system: keptStart.system,
           centre: keptStart.barycentre,
           time: keptStart.time,
@@ -2390,6 +2400,17 @@ function ViewPanels({
     () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),
     [terrain, watchTerrain],
   );
+  // The SCENE selector, whose pressed scene takes the focus from a CLOSE that goes with the
+  // inspection, once the render that removes it is laid out.
+  const scenesRef = useRef<HTMLFieldSetElement | null>(null);
+  const refocusScene = useRef(false);
+  useLayoutEffect(() => {
+    if (!refocusScene.current) {
+      return;
+    }
+    refocusScene.current = false;
+    scenesRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+  });
   const lines = [
     ...(serverChosen && standing.annunciation !== null ? [standing.annunciation] : []),
     ...(server !== null && scene.cameraFault !== null
@@ -2399,9 +2420,9 @@ function ViewPanels({
   return (
     <div className="view-display">
       <div className="view-display__bar">
-        <fieldset className="preset-buttons" aria-label="Scene">
+        <fieldset className="preset-buttons" aria-label="Scene" ref={scenesRef}>
           <span className="field__label">SCENE</span>
-          {[SERVER_SCENE_NAME, ...offered.map((each) => each.name)].map((name) => (
+          {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
             <button
               key={name}
               type="button"
@@ -2418,14 +2439,31 @@ function ViewPanels({
             </button>
           ))}
           {inspection === null ? null : (
-            <button
-              type="button"
-              className="control preset-buttons__button"
-              aria-label={`CLOSE ${inspection.option.name}`}
-              onClick={closeInspection}
-            >
-              CLOSE
-            </button>
+            // The inspection and its CLOSE stay on one line as the selector wraps.
+            <span className="view-display__inspection">
+              <button
+                type="button"
+                className="control preset-buttons__button"
+                aria-pressed={inspection.option.name === sceneName}
+                onClick={() => {
+                  choose(inspection.option.name);
+                }}
+              >
+                {inspection.option.name}
+              </button>
+              <button
+                type="button"
+                className="control preset-buttons__button view-display__inspection-close"
+                aria-label={`CLOSE ${inspection.option.name}`}
+                onClick={() => {
+                  // The button goes with the inspection: the focus goes to the scene shown.
+                  refocusScene.current = true;
+                  closeInspection();
+                }}
+              >
+                CLOSE
+              </button>
+            </span>
           )}
         </fieldset>
         {lines.length === 0 ? null : (

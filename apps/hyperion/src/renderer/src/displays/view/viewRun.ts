@@ -176,6 +176,19 @@ export function startRun(kept: KeptScene): ViewRun {
 }
 
 /**
+ * `run` with its free camera framed for its view's `aspect`, width over height, where its kept scene
+ * frames one (`KeptScene.framedPoseFor`, `VIEW`'s body inspection's; the owner's request,
+ * 2026-11-01); `run` itself for any other scene or camera.
+ */
+export function framedRun(run: ViewRun, aspect: number): ViewRun {
+  const pose =
+    run.source.kind === "kept" && run.camera.preset === "free"
+      ? run.source.kept.framedPoseFor?.(aspect)
+      : undefined;
+  return pose === undefined ? run : { ...run, camera: { ...run.camera, pose } };
+}
+
+/**
  * A run of the server's scene from `scene`, its first frame, the camera at the seat of the ship
  * stand-in; each step takes the scene its frame brings.
  */

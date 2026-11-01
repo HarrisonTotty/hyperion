@@ -24,6 +24,13 @@ export interface KeptScene {
   /** The scripted camera's pose at `tS` seconds into the script. */
   cameraAt(tS: number): CameraPose;
   /**
+   * The free camera's start pose framed for a view `aspect` wide for each unit high, which a view
+   * takes in its default pose's place at its first frame with a size: `VIEW`'s body inspection's,
+   * which frames its body's disc on the view's smaller side (the owner's request, 2026-11-01).
+   * Absent, as for every other kept scene, the camera starts at the scene's default pose.
+   */
+  readonly framedPoseFor?: (aspect: number) => CameraPose;
+  /**
    * The style a view of it starts in: `photorealistic` for `VIEW`'s body inspection (the owner's
    * request, 2026-11-01), drawn so once the view may draw it; the wireframe where absent, as every
    * other kept scene starts.

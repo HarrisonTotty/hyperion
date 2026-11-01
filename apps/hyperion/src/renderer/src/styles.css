@@ -4178,6 +4178,22 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The body inspection's choice and its CLOSE, kept on one line as the selector wraps, CLOSE set
+ * apart from the scenes by a space and a hairline, since it chooses no scene (the owner's request,
+ * 2026-11-01).
+ */
+.view-display__inspection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.view-display__inspection-close {
+  margin-inline-start: 0.5rem;
+  border-inline-start: 1px solid var(--line);
+}
+
 /* Where the server's scene stands, beside the SCENE selector: one line per condition. */
 .view-display__status {
   display: flex;
