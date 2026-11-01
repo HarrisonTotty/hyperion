@@ -67,11 +67,10 @@
 //! 60°", Turbet et al. 2019, App. A), so about another host its `S_eff` is the flux alone and the
 //! steam's spectral response is extrapolated, recorded.
 //!
-//! # Not on the record before 26
+//! # On the record from 26
 //!
-//! The record's envelope section calls it from generator version 26 (`system::envelope`'s hold,
-//! `SUPERCRITICAL_ENVELOPE_VERSION`); before it a solid body's under a supercritical envelope is
-//! not modelled.
+//! The record's envelope section calls it from generator version 26 (P14.T53.f); before it a solid
+//! body's under a supercritical envelope was not modelled.
 //!
 //! # Determinism
 //!

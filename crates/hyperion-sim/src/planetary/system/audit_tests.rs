@@ -36,7 +36,6 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use super::envelope::supercritical_envelope_in_force;
 use super::tests::{
     CLOSURE_HOTHOUSE_BODY, EnvelopeBody, GOLDEN_SYSTEMS_SEED, HOTHOUSE_BODY, LOOK72_OCEANS, SEED,
     envelope_tag_faults, golden_contexts, limit_now, look72_audit_contexts, look72_galaxy,
@@ -1057,9 +1056,7 @@ impl AuditBody {
             let composition = atmosphere.composition();
             let total: f64 = composition.iter().map(|&(_, x)| x).sum();
             let nodes = profile.nodes();
-            // A solid body's supercritical envelope is modelled from 26 alone (P14.T53.f).
-            if (envelope.supercritical().is_some() && !supercritical_envelope_in_force())
-                || !positive(atmosphere.internal_temperature().value())
+            if !positive(atmosphere.internal_temperature().value())
                 || !positive(atmosphere.irradiation_temperature().value())
                 || !positive(join)
                 || nodes.windows(2).any(|pair| {

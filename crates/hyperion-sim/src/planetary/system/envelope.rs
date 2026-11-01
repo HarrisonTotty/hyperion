@@ -11,8 +11,8 @@
 //! From generator version 26 a solid body's under a supercritical envelope is its supercritical
 //! envelope's model ([`record_supercritical_envelope`], P14.T53.f): its published air's visible
 //! atmosphere and a water envelope's transit radius
-//! ([`supercritical`](crate::planetary::hooks::envelope_atmosphere::supercritical)), behind its hold
-//! ([`SUPERCRITICAL_ENVELOPE_VERSION`]).
+//! ([`supercritical`](crate::planetary::hooks::envelope_atmosphere::supercritical)), from
+//! generator version 26.
 //!
 //! The chain ([`envelope_of`]): the host's \[α/Fe\] and the body's formation zone, which no
 //! default replaces; P14.T24.d's internal temperature, the record's heat blended with its cooling
@@ -51,81 +51,6 @@ use crate::planetary::record::{Envelope, Modelled, Section};
 use crate::units::{
     Dex, EarthMasses, Kelvin, Metres, MetresPerSecondSquared, Watts, WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a solid body's supercritical envelope is on the record, its
-/// envelope section [`Section::Ok`] where its model gives one (P14.T53.f): 26, the planetary bump
-/// after 25's, since P14.T53.f was placed with 25's train but not built (decision-p14-t53b-part3
-/// §7).
-///
-/// It is P14.T53.f's one hold. Below it [`SupercriticalEnvelopeRules::in_force`] is
-/// [`SupercriticalEnvelopeRules::Held`]: such a body's envelope section is not modelled, as every
-/// figure on the record is version 25's bit for bit. 26's bump deletes this hold,
-/// [`SupercriticalEnvelopeRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_supercritical_envelope_is_held_only_until_the_26_bump`).
-pub(crate) const SUPERCRITICAL_ENVELOPE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether a solid body's supercritical envelope is modelled on the record (its hold,
-/// [`SUPERCRITICAL_ENVELOPE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SupercriticalEnvelopeRules {
-    /// Version 25's and before: a solid body's envelope section under a supercritical envelope is
-    /// not modelled.
-    Held,
-    /// Version 26's: it is its supercritical envelope's model ([`record_supercritical_envelope`]).
-    Modelled,
-}
-
-impl SupercriticalEnvelopeRules {
-    /// The rules this generator version gives: the model from [`SUPERCRITICAL_ENVELOPE_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_supercritical_envelope`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SUPERCRITICAL_ENVELOPE_VERSION {
-            Self::Modelled
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The supercritical envelope's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<SupercriticalEnvelopeRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the supercritical envelope's rules `rules` on this thread, for the tests to
-/// reach P14.T53.f ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_supercritical_envelope<R>(
-    rules: SupercriticalEnvelopeRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SupercriticalEnvelopeRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// Whether a solid body's supercritical envelope is modelled on the record
-/// ([`SupercriticalEnvelopeRules::Modelled`]); never under its hold.
-#[must_use]
-pub(crate) fn supercritical_envelope_in_force() -> bool {
-    SupercriticalEnvelopeRules::in_force() == SupercriticalEnvelopeRules::Modelled
-}
 
 /// What a record's envelope reads of its body, its host and its time, as plain values, each the
 /// record's own (`PlanetarySystem::envelope_inputs`).
@@ -319,13 +244,10 @@ pub(crate) struct SupercriticalOf<'a> {
 }
 
 /// The record's envelope section of a solid body's supercritical envelope `of` describes
-/// (P14.T53.f): not modelled under its hold ([`supercritical_envelope_in_force`]) and for every
-/// refusal of [`supercritical_envelope_of`], whose reason the record does not keep.
+/// (P14.T53.f, from generator version 26): not modelled for every refusal of
+/// [`supercritical_envelope_of`], whose reason the record does not keep.
 #[must_use]
 pub(super) fn record_supercritical_envelope(of: &SupercriticalOf<'_>) -> Section<Envelope> {
-    if !supercritical_envelope_in_force() {
-        return Section::NotModelled;
-    }
     supercritical_envelope_of(of).map_or(Section::NotModelled, Section::Ok)
 }
 

@@ -1422,34 +1422,6 @@ fn the_molten_decks_envelope_is_the_same_twice() {
     );
 }
 
-/// P14.T53.f is held until the 25 → 26 bump: the rules in force are version 25's, a solid body's
-/// envelope under a supercritical envelope not modelled, and the tests' switch reaches the model.
-#[test]
-fn the_supercritical_envelope_is_held_only_until_the_26_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < SUPERCRITICAL_ENVELOPE_VERSION,
-        "the 25 → 26 bump puts P14.T53.f's supercritical envelope on the record (decision-p14-t53b-\
-         part3 §7; main, 2026-10-30): delete `SUPERCRITICAL_ENVELOPE_VERSION`, \
-         `SupercriticalEnvelopeRules` with its `Held` arm and `supercritical_envelope_in_force`'s \
-         guard in `record_supercritical_envelope`, the tests' `with_supercritical_envelope`, its \
-         switch in `with_every_26_hold` (and the helper, if no other 26 hold is left), and this \
-         test"
-    );
-    assert_eq!(
-        SupercriticalEnvelopeRules::in_force(),
-        SupercriticalEnvelopeRules::Held
-    );
-    assert!(!supercritical_envelope_in_force());
-    assert!(with_supercritical_envelope(
-        SupercriticalEnvelopeRules::Modelled,
-        supercritical_envelope_in_force
-    ));
-    assert!(!supercritical_envelope_in_force());
-    assert!(crate::planetary::testing::with_every_26_hold(
-        supercritical_envelope_in_force
-    ));
-}
-
 /// One record's modes, by path: its envelope's (`"envelope"`) and its surface's inventory's
 /// (`"surface"`), each with its envelope's photosphere for an envelope's.
 fn modes_of(record: &BodyRecord) -> Vec<(&'static str, Option<f64>, Vec<AerosolMode>)> {

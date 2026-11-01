@@ -450,9 +450,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
-/// - a solid body's supercritical envelope's, `SUPERCRITICAL_ENVELOPE_VERSION` (P14.T53.f), at
-///   `SupercriticalEnvelopeRules::Modelled` through `with_supercritical_envelope`: its envelope
-///   section's model, which nothing else reads;
 /// - a loop deck's mode drawn on its own column, `DECK_PROFILE_VERSION` (P14.T52.g), at
 ///   `DeckProfileRules::Saturation` through `with_deck_profile`: its profile's exponent the
 ///   smaller of its deck's `f_sed` and its saturation's log-slope at the base;
@@ -485,9 +482,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
-    use crate::planetary::system::envelope::{
-        SupercriticalEnvelopeRules, with_supercritical_envelope,
-    };
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
@@ -498,7 +492,6 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
-    let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
     let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
     let run = move || with_formation_draws(FormationDrawRules::Drawn, run);

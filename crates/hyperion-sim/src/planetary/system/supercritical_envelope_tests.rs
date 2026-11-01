@@ -3,13 +3,10 @@
 //! §11.1's three systems water worlds, and (run by name) over the 400 sample systems and the
 //! golden systems.
 
-use std::time::Instant;
-
 use hyperion_testkit::order::assert_order_independent;
 
 use super::audit_tests::{AuditCase, AuditSet, audit_walk};
-use super::envelope::{SupercriticalEnvelopeRules, with_supercritical_envelope};
-use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
+use super::tests::{SEED, sample};
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::generate;
 use crate::planetary::hooks::envelope_atmosphere::supercritical::STEAM_FIT_EARTH_INSOLATION;
@@ -21,7 +18,6 @@ use crate::planetary::hooks::surface::STANDARD_GRAVITY;
 use crate::planetary::hooks::surface::atmosphere_mole_fractions;
 use crate::planetary::record::{Modelled, Section};
 use crate::planetary::testing::with_every_26_hold;
-use crate::rng::Seed;
 use crate::substance::{SubstanceId, by_key};
 use crate::time::UniverseTime;
 use crate::units::WattsPerSquareMetre;
@@ -42,20 +38,16 @@ fn digest(text: &str) -> u64 {
     })
 }
 
-/// One body of the census at the epoch: its record's digests, whole and but its envelope, and its
-/// supercritical envelope's figures.
+/// One body of the census at the epoch: its record's digest and its supercritical envelope's
+/// figures.
 #[derive(Debug, Clone)]
 struct CensusBody {
     /// "{set or system} {id} {kind}".
     label: String,
     /// The digest of its record.
     digest: u64,
-    /// The digest of its record but its envelope section.
-    outside_the_envelope: u64,
     /// Whether its published state is `SteamEnvelope`.
     steam: bool,
-    /// Whether its surface is not applicable and its class solid: under a supercritical envelope.
-    under_a_supercritical_envelope: bool,
     /// Its supercritical envelope's figures where its envelope section is `Ok` with one.
     figures: Option<Figures>,
 }
@@ -128,10 +120,8 @@ fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
     let record = case.record;
     let air = case.derived.atmosphere();
     let text = format!("{record:?}");
-    let envelope = format!("{:?}", record.envelope());
-    let outside = text.replacen(&envelope, "", 1);
     let label = format!("{system} {} {}", record.identity().id(), case.kind);
-    let solid = record
+    let _solid = record
         .bulk()
         .ok()
         .is_some_and(|bulk| bulk.class().has_solid_surface());
@@ -212,9 +202,7 @@ fn body_of(system: &str, case: &AuditCase<'_>) -> CensusBody {
     CensusBody {
         label,
         digest: digest(&text),
-        outside_the_envelope: digest(&outside),
         steam: air.published_state() == SurfaceState::SteamEnvelope,
-        under_a_supercritical_envelope: solid && matches!(record.surface(), Section::NotApplicable),
         figures,
     }
 }
@@ -240,55 +228,15 @@ fn sample_sets(ids: &[&str]) -> Vec<(String, AuditSet)> {
         .collect()
 }
 
-/// The whole sample and the golden systems.
-fn every_set() -> Vec<(String, AuditSet)> {
-    sample()
-        .iter()
-        .enumerate()
-        .map(|(index, ctx)| (format!("s{index}"), ("sample", SEED, ctx.clone())))
-        .chain(
-            golden_contexts()
-                .into_iter()
-                .map(|(name, ctx)| (name.to_owned(), (name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx))),
-        )
-        .collect()
-}
-
-/// The census under every 26 hold, with the supercritical envelope's own hold at `rules`.
-fn census_under(rules: SupercriticalEnvelopeRules, sets: &[(String, AuditSet)]) -> Vec<CensusBody> {
-    with_every_26_hold(|| with_supercritical_envelope(rules, || census_of(sets)))
-}
-
-/// Between `held` and `modelled`, one walk's bodies in one order each: the labels of the bodies
-/// whose records differ, each asserted to differ in its envelope section alone, from not modelled
-/// to its supercritical envelope's model.
-fn movers(held: &[CensusBody], modelled: &[CensusBody]) -> Vec<String> {
-    assert_eq!(held.len(), modelled.len(), "one walk's bodies, both rules");
-    let mut moved = Vec::new();
-    for (was, now) in held.iter().zip(modelled) {
-        assert_eq!(was.label, now.label, "one walk's order");
-        if was.digest == now.digest {
-            continue;
-        }
-        assert_eq!(
-            was.outside_the_envelope, now.outside_the_envelope,
-            "{}: only the envelope section moves",
-            now.label
-        );
-        assert!(
-            was.under_a_supercritical_envelope && was.figures.is_none() && now.figures.is_some(),
-            "{}: a supercritical envelope's section, not modelled under its hold, is modelled",
-            now.label
-        );
-        moved.push(now.label.clone());
-    }
-    moved
+/// The census under every 26 hold.
+fn census_under(sets: &[(String, AuditSet)]) -> Vec<CensusBody> {
+    with_every_26_hold(|| census_of(sets))
 }
 
 /// decision-p14-t53a-thick-co2 §11.1's three systems water worlds, under every 26 hold: each is a
 /// steam envelope whose envelope section is its model, H₂O, every figure finite, its profile
 /// monotone in pressure and meeting its surface, no deck based at or above water's critical point;
-/// the same bits twice (D4); and against its own hold set back, only their envelope sections move.
+/// the same bits twice (D4).
 #[test]
 fn under_every_26_hold_the_three_systems_water_worlds_take_their_steam_envelope() {
     let ids: Vec<&str> = WATER_WORLDS.iter().map(|&(system, _)| system).collect();
@@ -298,9 +246,8 @@ fn under_every_26_hold_the_three_systems_water_worlds_take_their_steam_envelope(
         WATER_WORLDS.len(),
         "each system is in the sample"
     );
-    let held = census_under(SupercriticalEnvelopeRules::Held, &sets);
-    let modelled = census_under(SupercriticalEnvelopeRules::Modelled, &sets);
-    let again = census_under(SupercriticalEnvelopeRules::Modelled, &sets);
+    let modelled = census_under(&sets);
+    let again = census_under(&sets);
     assert!(
         modelled
             .iter()
@@ -328,12 +275,6 @@ fn under_every_26_hold_the_three_systems_water_worlds_take_their_steam_envelope(
         assert_eq!(figures.condensable, water.as_str(), "{id}");
         // Held at ice's vapour pressure aloft, the deep gas's 9–32% of water is gone.
         assert!(figures.water.2 < 1e-6, "{id}: {:?}", figures.water);
-    }
-    let moved = movers(&held, &modelled);
-    eprintln!("moved: {moved:?}");
-    for (system, index) in WATER_WORLDS {
-        let id = format!("{system}.{index}");
-        assert!(moved.iter().any(|label| label.contains(&id)), "{id} moves");
     }
 }
 
@@ -377,87 +318,4 @@ fn under_every_26_hold_a_supercritical_envelope_is_the_same_alone_and_in_any_ord
         }
     });
     assert_eq!(supercritical, 3, "the three water worlds' envelopes");
-}
-
-/// P14.T53.f's census over the 400 sample systems and the golden systems, run by name: every
-/// published body under every 26 hold, with the supercritical envelope's own hold set back and in
-/// force.
-///
-/// - **Only the supercritical envelopes move**: a body's record is the held one's to the bit but
-///   its envelope section, and that only where it is under a supercritical envelope, from not
-///   modelled to its model, asserted ([`movers`]).
-/// - **Every modelled envelope's figures** are finite, its profile monotone in pressure and
-///   meeting its surface, no deck based at or above its condensable's critical point, and each
-///   condensable at most its saturation at 1 bar and 10 mbar, asserted ([`body_of`]); the walk
-///   under its rules gives the same bits twice (D4).
-/// - Printed: the steam envelopes (part 3's census at 25 found none in 1,706 bodies), the bodies
-///   under a supercritical envelope, the modelled ones with their figures, the largest inflation,
-///   the golden systems' movers (26's bump re-blesses their goldens), and each walk's time.
-#[test]
-#[ignore = "a measurement for the 26 bless, run by name: the 400 sample systems, walked three times"]
-fn under_every_26_hold_only_the_supercritical_envelopes_move_over_the_400() {
-    let sets = every_set();
-    let start = Instant::now();
-    let held = census_under(SupercriticalEnvelopeRules::Held, &sets);
-    let walk_held = start.elapsed();
-    let start = Instant::now();
-    let modelled = census_under(SupercriticalEnvelopeRules::Modelled, &sets);
-    let walk_modelled = start.elapsed();
-    let again = census_under(SupercriticalEnvelopeRules::Modelled, &sets);
-    assert!(
-        modelled
-            .iter()
-            .zip(&again)
-            .all(|(a, b)| a.label == b.label && a.digest == b.digest),
-        "the same bits twice"
-    );
-    eprintln!(
-        "the walks (pod): held {walk_held:?}, modelled {walk_modelled:?}, {} bodies",
-        modelled.len()
-    );
-    let moved = movers(&held, &modelled);
-    let steam: Vec<&str> = modelled
-        .iter()
-        .filter(|body| body.steam)
-        .map(|body| body.label.as_str())
-        .collect();
-    let under: Vec<&str> = modelled
-        .iter()
-        .filter(|body| body.under_a_supercritical_envelope)
-        .map(|body| body.label.as_str())
-        .collect();
-    eprintln!(
-        "{} steam envelopes: {steam:?}; {} bodies under a supercritical envelope: {under:?}",
-        steam.len(),
-        under.len()
-    );
-    let mut largest: Option<(f64, &str)> = None;
-    for body in &modelled {
-        if let Some(figures) = &body.figures {
-            eprintln!("modelled {}: {}", body.label, figures.line());
-            if let Some(z) = figures.inflation_m
-                && largest.is_none_or(|(most, _)| z > most)
-            {
-                largest = Some((z, body.label.as_str()));
-            }
-        } else if body.under_a_supercritical_envelope {
-            eprintln!(
-                "not modelled under a supercritical envelope: {}",
-                body.label
-            );
-        }
-    }
-    eprintln!(
-        "{} movers: {moved:?}; the largest inflation {}",
-        moved.len(),
-        largest.map_or_else(
-            || "none modelled".to_owned(),
-            |(z, label)| format!("{:.1} km ({label})", z / 1e3)
-        )
-    );
-    let golden: Vec<&String> = moved
-        .iter()
-        .filter(|label| !label.starts_with('s'))
-        .collect();
-    eprintln!("the golden systems' movers, for 26's bless: {golden:?}");
 }
