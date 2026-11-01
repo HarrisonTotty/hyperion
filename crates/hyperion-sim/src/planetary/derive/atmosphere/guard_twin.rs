@@ -1110,9 +1110,9 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
             with_every_26_hold(|| with_scattering_held(run))
         };
         let bodies = vec![
-            derive(),
+            with_melt_oxygen(MeltOxygenRules::Held, derive),
             every_26(&|| with_melt_oxygen(MeltOxygenRules::Held, derive)),
-            with_melt_oxygen(MeltOxygenRules::Published, derive),
+            derive(),
             every_26(&derive),
         ];
         derived.push((id, bodies));

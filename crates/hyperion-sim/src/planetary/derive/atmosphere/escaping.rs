@@ -2156,22 +2156,19 @@ fn carbon_monoxide(
     }
 }
 
-/// The generator version from which a molten body whose melt takes its O₂ publishes its published
-/// air's own surface (P14.T53.g; decision-p14-t53a-thick-co2 §11.2's ruled follow-up): 26, the
-/// planetary bump after 25's, whose list it missed.
-///
-/// It is P14.T53.g's one hold. Below it [`MeltOxygenRules::in_force`] is [`MeltOxygenRules::Held`]:
-/// such a body publishes the `T_s` and τ its greenhouse solved with the O₂ in the column, and every
-/// figure is version 24's and 25's bit for bit. 26's bump deletes this hold, [`MeltOxygenRules`]
-/// with its `Held` arm, the tests' switch and its tripwire
-/// (`the_melt_oxygen_is_held_only_until_the_26_bump`).
-pub(crate) const MELT_OXYGEN_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T53.g's surface on the published air is in force (its hold,
-/// [`MELT_OXYGEN_VERSION`]).
+/// Whether P14.T53.g's surface on the published air is in force: from generator version 26, and in
+/// the tests its held arm, their oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MeltOxygenRules {
-    /// Version 25's and before: the solve's `T_s` and τ, its column's O₂ included.
+    /// Version 25's and before: the solve's `T_s` and τ, its column's O₂ included, the tests'
+    /// oracle ([`with_melt_oxygen`]).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "version 25's arm, the tests' oracle since the 26 bump"
+        )
+    )]
     Held,
     /// Version 26's: the published air's own `T_s` and τ, at least the solidus
     /// ([`published_air_surface`]).
@@ -2179,33 +2176,27 @@ pub(crate) enum MeltOxygenRules {
 }
 
 impl MeltOxygenRules {
-    /// The rules this generator version gives: the published air's from [`MELT_OXYGEN_VERSION`],
-    /// the solve's below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_melt_oxygen`]).
+    /// The rules in force: the published air's; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_melt_oxygen`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = MELT_OXYGEN_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= MELT_OXYGEN_VERSION {
-            Self::Published
-        } else {
-            Self::Held
-        }
+        Self::Published
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The melt's oxygen's rules a test sets on its thread, `None` for the version's.
+    /// The melt's oxygen's rules a test sets on its thread, `None` for the published air's.
     static MELT_OXYGEN_RULES: core::cell::Cell<Option<MeltOxygenRules>> =
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the melt's oxygen's rules `rules` on this thread, for the tests to reach
-/// P14.T53.g ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
+/// `run`'s result with the melt's oxygen's rules `rules` on this thread, the held arm the tests'
+/// oracle; the published air's are set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_melt_oxygen<R>(rules: MeltOxygenRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2313,9 +2304,9 @@ fn published_air_surface(
 /// the runaway limit at its hosts' peak alone, or in a hothouse's re-solve a runaway
 /// (`present_state`, P14.T53.b part 1 (a) and (c)), its water following the division's state
 /// ([`Atmosphere::water_state`]). A molten surface's melt takes the air's O₂, and from generator
-/// version 26 (P14.T53.g, behind its hold, [`MeltOxygenRules`]) such a body publishes its published
-/// air's own surface, at least the solidus, with that air's τ ([`published_air_surface`]); below it,
-/// the solve's, its column's O₂ included.
+/// version 26 (P14.T53.g) such a body publishes its published air's own surface, at least the
+/// solidus, with that air's τ ([`published_air_surface`]); to 25, the solve's, its column's O₂
+/// included.
 #[must_use]
 fn finish(
     body: &Body<'_>,

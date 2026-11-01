@@ -425,8 +425,6 @@ pub fn admit_free_floating_hosts_in_this_process() {
 ///
 /// The holds at 26:
 ///
-/// - a molten body's surface on its published air, `MELT_OXYGEN_VERSION` (P14.T53.g), at
-///   `MeltOxygenRules::Published` through `with_melt_oxygen`.
 /// - a free-floating brown dwarf's planets, `SUBSTELLAR_HOSTS_VERSION` (P14.T27.a), at
 ///   `SubstellarHostRules::BrownDwarfs` through `with_substellar_hosts`.
 /// - a rogue planet's bodies, `ROGUE_PLANET_HOSTS_VERSION` (P14.T27.b), at
@@ -446,14 +444,11 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::atmosphere::{
-        LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
-    };
+    use crate::planetary::derive::atmosphere::{LineSwitchRules, with_line_switch};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
-    let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);

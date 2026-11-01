@@ -6673,32 +6673,6 @@ fn water_column_kg(inputs: &AtmosphereInputs, air: &Atmosphere) -> f64 {
     air.inventory_weights().of(Gas::Water).value() * 4.0 * core::f64::consts::PI * r * r / g
 }
 
-/// P14.T53.g is held until the 25 → 26 bump: the rules in force are version 25's and before, a
-/// molten body publishing its solve's `T_s` and τ, and 26's helper reaches its published air's.
-#[test]
-fn the_melt_oxygen_is_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
-    assert!(
-        crate::GENERATOR_VERSION < escaping::MELT_OXYGEN_VERSION,
-        "the 25 → 26 bump puts P14.T53.g's surface on the published air on the record \
-         (decision-p14-t53a-thick-co2 §11.2): delete `MELT_OXYGEN_VERSION`, `MeltOxygenRules` \
-         with its `Held` arm and the guard that reads it in `escaping::finish`, the tests' \
-         `with_melt_oxygen`, its switch in `with_every_26_hold` (and the helper, if no other 26 \
-         hold is left), the `Held` arms of `guard_twin`'s tests and their held figures, \
-         `locked_climate_tests::deck_alone`'s set-back, and this test"
-    );
-    assert_eq!(MeltOxygenRules::in_force(), MeltOxygenRules::Held);
-    assert_eq!(
-        with_every_26_hold(MeltOxygenRules::in_force),
-        MeltOxygenRules::Published
-    );
-    assert_eq!(
-        with_every_26_hold(|| with_melt_oxygen(MeltOxygenRules::Held, MeltOxygenRules::in_force)),
-        MeltOxygenRules::Held
-    );
-    assert_eq!(MeltOxygenRules::in_force(), MeltOxygenRules::Held);
-}
-
 /// P14.T53.i is held until the 25 → 26 bump: the rules in force are version 25's and before, a
 /// solve under the line publishing its last step's partial pressures, and 26's helper reaches the
 /// one switch.
