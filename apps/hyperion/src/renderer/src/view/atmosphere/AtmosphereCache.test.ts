@@ -1543,9 +1543,9 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]).toEqual([{ kind: "cloudDeck", deckAltitudeM: 5_000 }, 0, 0, R05_EARTH_REFERENCE]);
   });
 
-  it("asks none under the product's route, which routes no deck while no deck gate passes (R08.T15.b.2)", () => {
+  it("asks none under the product's route, which routes no deck while no deck gate passes, keeping APPROXIMATE with its reason (R08.T15.b.2)", () => {
     const h = harness(undefined, "product");
-    note(
+    const report = note(
       h,
       [
         kept(A, { kind: "medium", built, labels: [], cover: COVER }),
@@ -1560,7 +1560,17 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
       h.builder.decks.length,
       h.builder.bakes.length,
       madeAt(h, 0).built.medium,
-    ]).toEqual(["cloudDeck", "cloudDeck", 0, 0, R05_EARTH_REFERENCE]);
+      report.labels,
+      report.reasons.get(A),
+    ]).toEqual([
+      "cloudDeck",
+      "cloudDeck",
+      0,
+      0,
+      R05_EARTH_REFERENCE,
+      ["atmosphereApproximate"],
+      [THICK_REASON],
+    ]);
   });
 
   it("draws a routed one on its upper medium, asks its deck's bake on its own figure, and gives its tables the deck and the correction over it", async () => {

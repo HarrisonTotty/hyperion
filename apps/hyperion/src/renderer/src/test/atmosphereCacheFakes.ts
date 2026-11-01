@@ -1,5 +1,6 @@
 import type { BuiltAtmosphere, CachedTables } from "../view/atmosphere/AtmosphereCache";
 import type { DiscReflectanceTable } from "../view/atmosphere/discTable";
+import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import { type AtmosphereBody, type TablesPlan, tablesPlanOf } from "../view/atmosphere/tables";
 import type { MsSourceTable } from "../view/atmosphere/thick/bake";
 import type { DeckTables } from "../view/atmosphere/thick/deck";
@@ -34,6 +35,8 @@ export class FakeTables implements CachedTables {
   discThrows: Error | null = null;
   /** Every deck {@link FakeTables.setDeckTables} took, in order, `null` for one taken away (R08.T15.a.2). */
   readonly decks: Array<ReadonlyArray<DeckTables> | null> = [];
+  /** The whole column each deck came with (R08.T15.b.2), in the same order. */
+  readonly deckColumns: Array<AtmosphereMedium | null> = [];
   /** What `setDeckTables` throws while set, taking nothing. */
   deckThrows: Error | null = null;
   disposed = false;
@@ -77,11 +80,15 @@ export class FakeTables implements CachedTables {
     this.discs.push(table);
   }
 
-  setDeckTables(bands: ReadonlyArray<DeckTables> | null): void {
+  setDeckTables(
+    bands: ReadonlyArray<DeckTables> | null,
+    column: AtmosphereMedium | null = null,
+  ): void {
     if (this.deckThrows !== null) {
       throw this.deckThrows;
     }
     this.decks.push(bands);
+    this.deckColumns.push(column);
   }
 
   dispose(): void {

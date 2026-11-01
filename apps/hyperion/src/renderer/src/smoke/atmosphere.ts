@@ -2397,7 +2397,7 @@ export async function checkBelowDeckFrameTwins(
   );
   try {
     const tables = atmosphere.tables;
-    withDeckTable(tables, 1, EARTH_DECK_ALTITUDE_M, true);
+    withDeckTable(tables, 1, EARTH_DECK_ALTITUDE_M, kernelMedium(R05_EARTH_REFERENCE));
     const packed = tables.belowDeckPacked;
     if (packed === null) {
       throw new Error("the deck's tables hold a table below it");
@@ -3270,13 +3270,15 @@ export async function checkMarchOneBand(
  * A smoke check's deck for `tables` (R08.T15.a.2): `test/thickTables.ts`'s deck pattern over the
  * tables' medium, the deck's upper medium, and its J above it with the correction's pattern summed
  * in, one layer a band and light slot of `slots` (at least one): the deck's every series, G, G_β
- * and its phase in every texel of its read, and the march's bare ground read through them.
+ * and its phase in every texel of its read, and the march's bare ground read through them. With a
+ * `column`, the whole medium as the kernels read it, the deck stands over a surface with the
+ * pattern's table below it (R08.T15.b.2), its paths reading `column`'s depth and extinction.
  */
 export function withDeckTable(
   tables: AtmosphereTables,
   slots: number,
   deckAltitudeM: number,
-  below = false,
+  column: AtmosphereMedium | null = null,
 ): void {
   const count = Math.max(1, slots);
   tables.setDeckTables(
@@ -3285,8 +3287,9 @@ export function withDeckTable(
       kernelMedium(tables.medium),
       count,
       deckAltitudeM,
-      below,
+      column !== null,
     ),
+    column,
   );
   // The correction over the deck, brought to the split as the deck's J is.
   const correction = patternedDeckCorrection(
@@ -7149,7 +7152,12 @@ async function checkSurfaceLighting(
       withThickTable(tables, surface.curves.length);
     }
     if (deckAltitudeM !== null) {
-      withDeckTable(tables, surface.curves.length, deckAltitudeM, true);
+      withDeckTable(
+        tables,
+        surface.curves.length,
+        deckAltitudeM,
+        kernelMedium(R05_EARTH_REFERENCE),
+      );
     }
     const packed = tables.thickPacked;
     const below = tables.belowDeckPacked;

@@ -486,7 +486,7 @@ describe("the kernels beneath a deck (R08.T15.b.2)", () => {
 });
 
 describe("AtmosphereTables' table below a deck (R08.T15.b.2)", () => {
-  it("holds a deck over a surface's table below, counts its bytes, and gives it up with the deck", async () => {
+  it("holds a deck over a surface's table below, of its whole column, counts its bytes, and gives it up with the deck", async () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, EARTH_ABOVE_DECK, tableRadiusM(WGS84));
     const before = tables.rowBytes;
@@ -498,10 +498,12 @@ describe("AtmosphereTables' table below a deck (R08.T15.b.2)", () => {
       DECK_ALTITUDE_M,
       true,
     );
-    tables.setDeckTables(over);
+    const column = kernelMedium(R05_EARTH_REFERENCE);
+    expect(() => tables.setDeckTables(over)).toThrow(/reads its whole column/u);
+    tables.setDeckTables(over, column);
     expect([tables.belowDeckBytes, tables.rowBytes - before]).toEqual([
-      2 * 436_000,
-      2 * (436_000 + 159_744 + 388_864),
+      2 * 436_800,
+      2 * (436_800 + 159_744 + 388_864),
     ]);
     expect(tables.belowDeckLighting).toBe(tables.belowDeckTable);
     expect(
@@ -509,14 +511,14 @@ describe("AtmosphereTables' table below a deck (R08.T15.b.2)", () => {
     ).toBeDefined();
     engine.loseDevice();
     engine.restore();
-    expect([tables.belowDeckTable === null, tables.belowDeckBytes]).toEqual([false, 2 * 436_000]);
+    expect([tables.belowDeckTable === null, tables.belowDeckBytes]).toEqual([false, 2 * 436_800]);
     // An envelope's deck has none, and the lit passes bind the stub.
     tables.setDeckTables(
       patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 2, DECK_ALTITUDE_M),
     );
     expect([tables.belowDeckTable, tables.belowDeckBytes]).toEqual([null, 0]);
     expect(tables.belowDeckLighting.name).toBe(stub.name);
-    tables.setDeckTables(over);
+    tables.setDeckTables(over, column);
     tables.setDeckTables(null);
     expect([tables.belowDeckTable, tables.belowDeckBytes]).toEqual([null, 0]);
     tables.dispose();
@@ -542,6 +544,7 @@ describe("HillaireAtmosphere beneath a deck (R08.T15.b.2)", () => {
     );
     tables.setDeckTables(
       patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 1, DECK_ALTITUDE_M, true),
+      kernelMedium(R05_EARTH_REFERENCE),
     );
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
     const drawn = (camera: AtmosphereCamera): ReadonlyArray<string> => {

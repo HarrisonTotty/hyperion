@@ -107,8 +107,8 @@ describe("the table below a deck's shape (R08.T15.b.2)", () => {
     ]);
   });
 
-  it("packs a band and light into 436,000 B, 50 × 545 texels, its values' f32 bits", () => {
-    const packed = packBelowDeckTable(decks(TWO_BANDS, 2));
+  it("packs a band and light into 436,800 B, 50 × 546 texels, its values' f32 bits", () => {
+    const packed = packBelowDeckTable(decks(TWO_BANDS, 2), MEDIUM);
     expect([
       packed.widthTexels,
       packed.heightTexels,
@@ -122,8 +122,8 @@ describe("the table below a deck's shape (R08.T15.b.2)", () => {
       BELOW_DECK_TABLE_ROWS,
       4,
       4 * BELOW_DECK_TABLE_WIDTH * BELOW_DECK_TABLE_ROWS * 4,
-      436_000,
-      4 * 436_000,
+      436_800,
+      4 * 436_800,
       SPLIT_M,
     ]);
   });
@@ -139,19 +139,25 @@ describe("the table below a deck's shape (R08.T15.b.2)", () => {
       throw new Error("a slot");
     }
     const nan = Float32Array.from(slot.radiance, (x, i) => (i === 7 ? Number.NaN : x));
-    expect(() => packBelowDeckTable([])).toThrow(RangeError);
-    expect(() => packBelowDeckTable([{ ...band, below: null }])).toThrow(RangeError);
+    expect(() => packBelowDeckTable([], MEDIUM)).toThrow(RangeError);
+    expect(() => packBelowDeckTable([{ ...band, below: null }], MEDIUM)).toThrow(RangeError);
     expect(() =>
-      packBelowDeckTable([{ ...band, below: { ...below, sunCosines: below.sunCosines.slice(1) } }]),
+      packBelowDeckTable(
+        [{ ...band, below: { ...below, sunCosines: below.sunCosines.slice(1) } }],
+        MEDIUM,
+      ),
     ).toThrow(RangeError);
     expect(() =>
-      packBelowDeckTable([{ ...band, below: { ...below, slots: [{ ...slot, radiance: nan }] } }]),
+      packBelowDeckTable(
+        [{ ...band, below: { ...below, slots: [{ ...slot, radiance: nan }] } }],
+        MEDIUM,
+      ),
     ).toThrow(RangeError);
   });
 });
 
 describe("the reads below a deck (R08.T15.b.2)", () => {
-  const packed = packBelowDeckTable(decks(ONE_BAND, 2));
+  const packed = packBelowDeckTable(decks(ONE_BAND, 2), MEDIUM);
   const scratch = belowDeckReadScratch();
   const out: [number, number, number] = [0, 0, 0];
   const sky: [number, number, number] = [0, 0, 0];
@@ -285,26 +291,31 @@ describe("the reads below a deck (R08.T15.b.2)", () => {
     expect(worst).toBeLessThan(1e-6);
   });
 
-  it("reads a path's depth as the plane-parallel path's, slant and level", () => {
+  it("reads a path's depth in the column's own extinction, geometric between the altitudes: slant, level and vertical", () => {
     const slant: [number, number, number] = [0, 0, 0];
     const level: [number, number, number] = [0, 0, 0];
     const vertical: [number, number, number] = [0, 0, 0];
-    // From 500 m up to 2,500 m along 4 km, and 4 km level at 500 m, on a gravity ratio of 1.1.
+    // From 550 m up to 2,750 m along 4 km, and 4 km level at 550 m, on a gravity ratio of 1.1,
+    // across the column's exponential gas, which the geometric read takes exactly.
     belowDeckPathDepthInto(packed, [0], 1.1, 550, 2_750, 4_000, scratch, slant);
     belowDeckPathDepthInto(packed, [0], 1.1, 550, 550, 4_000, scratch, level);
     belowDeckOpticalDepthInto(packed, [0], 1, 0, scratch, vertical);
+    const [gas] = MEDIUM.terms;
+    const scaleHeightM = 8_000;
     for (let c = 0; c < 3; c += 1) {
-      const sigmaStar = (3 + 0.2 * c) / SPLIT_M;
-      expect([entry(slant, c), entry(level, c), entry(vertical, c)]).toEqual([
-        expect.closeTo(4_000 * 1.1 * sigmaStar, 5),
-        expect.closeTo(4_000 * 1.1 * sigmaStar, 5),
-        expect.closeTo(belowPatternDepth(0, SPLIT_M, 0, c), 5),
-      ]);
+      const sigma = (h: number): number => (gas?.scattering[c] ?? 0) * Math.exp(-h / scaleHeightM);
+      const mean = (scaleHeightM * (sigma(550) - sigma(2_750))) / 2_200;
+      const top = sigma(0) * scaleHeightM * -Math.expm1(-MEDIUM.topHeightM / scaleHeightM);
+      expect([
+        entry(slant, c) / (4_000 * 1.1 * mean),
+        entry(level, c) / (4_000 * 1.1 * sigma(550)),
+        entry(vertical, c) / top,
+      ]).toEqual([expect.closeTo(1, 6), expect.closeTo(1, 6), expect.closeTo(1, 6)]);
     }
   });
 
   it("reads linearly in ln s between two bands", () => {
-    const two = packBelowDeckTable(decks(TWO_BANDS, 1));
+    const two = packBelowDeckTable(decks(TWO_BANDS, 1), MEDIUM);
     const lnBands = TWO_BANDS.map((band) => Math.log(band.gravityRatio));
     const read = (s: number): number => {
       belowDeckRadianceInto(two, lnBands, s, 1_000, 0.5, -0.6, 0.1, 0, scratch, out);
@@ -340,7 +351,7 @@ describe("the table below a deck's light against the whole column's solve (R08.T
       if (below === null) {
         throw new Error("a deck over a surface has a table below it");
       }
-      const packed = packBelowDeckTable([table]);
+      const packed = packBelowDeckTable([table], kernelMedium(fixture.medium));
       const lnBands = [Math.log(band.gravityRatio)];
       const grid = prepared.upper.grid;
       const ground = grid.layers + (prepared.deck.interfaceHeightsM.length - 1);

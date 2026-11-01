@@ -787,7 +787,9 @@ export function referenceTwin(
   };
   // Beneath a deck over a surface, its table below (R08.T15.b.2); an envelope's deck has none.
   const belowTable =
-    deck !== null && deck.tables[0]?.below !== null ? packBelowDeckTable(deck.tables) : null;
+    deck !== null && deck.tables[0]?.below !== null
+      ? packBelowDeckTable(deck.tables, kernelMedium(medium))
+      : null;
   const lnBands = oblate.bands.map((each) => log(each.gravityRatio));
   // The sky's irradiance at the ground: the table's ground row, which the ground reads alone.
   const groundRow = Array.from({ length: IRRADIANCE_SIZE.widthTexels }, (_, x) => [x, 0] as const);

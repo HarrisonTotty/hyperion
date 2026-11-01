@@ -160,17 +160,17 @@ function digestOf(source: string): string {
  * before, so that their pixels hold.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f32909a9975726f9"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f32909a9975726f9"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "11347e79679e477d"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "6651e4c18ec800b4"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f42c280bcdf436a"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f42c280bcdf436a"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "8386129da1b73e0c"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bc5c9ada26f0f319"],
   ...[
-    ["terrain-lit-baked-offsets", "a38cc5145f451b52"],
-    ["terrain-lit-face-differences", "54b9d289d2d68433"],
-    ["terrain-depth-baked-offsets", "1175bcca76b2bb71"],
-    ["terrain-depth-face-differences", "f083f1b92725b794"],
-    ["terrain-shadow-baked-offsets", "74765402e32d1005"],
-    ["terrain-shadow-face-differences", "849b5268de0a5428"],
+    ["terrain-lit-baked-offsets", "7193d9cd210fae4f"],
+    ["terrain-lit-face-differences", "55f9745e1498290a"],
+    ["terrain-depth-baked-offsets", "62e422242ad49526"],
+    ["terrain-depth-face-differences", "78e83e7adc2000f7"],
+    ["terrain-shadow-baked-offsets", "3a12ec1c40e69ab8"],
+    ["terrain-shadow-face-differences", "be182c8f800204c1"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

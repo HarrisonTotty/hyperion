@@ -636,6 +636,11 @@ type BakedTables =
       readonly tables: ReadonlyArray<DeckTables>;
       readonly correction: ReadonlyArray<PolarisationTable> | null;
       readonly splitM: number;
+      /**
+       * The whole medium as the kernels read it, whose depth and extinction the table below a deck
+       * over a surface reads (R08.T15.b.2; `AtmosphereTables`' `setDeckTables`).
+       */
+      readonly column: AtmosphereMedium;
     };
 
 /** A drawn entry's thick bake, with the labels and reasons the entry was made with. */
@@ -1851,20 +1856,26 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     const bake: HeldBake<T> = { made, state: { kind: "baking", handle } };
     this.#showBake(held, bake);
-    void this.#deckLanded(held, bake, handle, split).catch((error: unknown) => {
-      console.error(`the deck's bake of ${held.id} could not be taken:`, error);
-      if (!this.#disposed && this.#bodies.get(held.id) === held && held.bake === bake) {
-        this.#showBake(held, { made, state: BAKE_FAILED });
-      }
-    });
+    void this.#deckLanded(held, bake, handle, split, kernelMedium(built.medium)).catch(
+      (error: unknown) => {
+        console.error(`the deck's bake of ${held.id} could not be taken:`, error);
+        if (!this.#disposed && this.#bodies.get(held.id) === held && held.bake === bake) {
+          this.#showBake(held, { made, state: BAKE_FAILED });
+        }
+      },
+    );
   }
 
-  /** Takes a deck's bake's outcome, unless the body has moved on from it, as {@link #bakeLanded}. */
+  /**
+   * Takes a deck's bake's outcome, unless the body has moved on from it, as {@link #bakeLanded}:
+   * `column`, the whole medium as the kernels read it, goes with it to the tables (R08.T15.b.2).
+   */
   async #deckLanded(
     held: HeldBody<T>,
     bake: HeldBake<T>,
     handle: DeckBake,
     split: DeckSplit,
+    column: AtmosphereMedium,
   ): Promise<void> {
     const outcome = await handle.outcome;
     if (this.#disposed || this.#bodies.get(held.id) !== held || held.bake !== bake) {
@@ -1881,6 +1892,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
               tables: outcome.tables,
               correction: outcome.correction,
               splitM: split.altitudeM,
+              column,
             },
             given: null,
           },
@@ -1950,7 +1962,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           if (baked.correction !== null) {
             tables.setPolarisationCorrection(deckCorrectionAbove(baked.correction, baked.splitM));
           }
-          tables.setDeckTables(baked.tables);
+          tables.setDeckTables(baked.tables, baked.column);
           break;
       }
       state.given = tables;

@@ -24214,10 +24214,12 @@ beams)` gives the cosines a solve reads: the nodes and the user cosines going ou
     T16.a.2 opens `envelope` on `giant-deck`'s envelope variant alone.
   - `AtmosphereCacheOptions.routes` takes a third argument, `envelope`. Its default is
     `thickBakeRouted || deckRouted`, so a routed `cloudDeck` body asks `deck-bake`.
-  - _The table below, packed_ (`thick/deckRead.ts`): `packBelowDeckTable`, `rgba32uint` of `f32` words,
-    50 × 545 texels, 436,000 B a band and light, no half float. Its info row holds each altitude's
-    h\* and the kernels' vertical depth, −μ₀ ln T_k at the top sun row. T15.b.1's 208,896 B was
-    m ≤ 1; the table holds m ≤ 2 since T14.d.1.
+  - _The table below, packed_ (`thick/deckRead.ts`): `packBelowDeckTable(bands, column)`,
+    `rgba32float`, 50 × 546 texels, 436,800 B a band and light, no half float. Its two info rows
+    hold each altitude's h\*, the kernels' vertical depth and their extinction, from `column`, the
+    whole medium as the kernels read it (absorbers' curves left out). A channel's converted beam is
+    noise near a Venus ground, so the depth is not read from it. T15.b.1's 208,896 B was m ≤ 1; the
+    table holds m ≤ 2 since T14.d.1. `AtmosphereTables.setDeckTables(bands, column)` takes it.
   - _The reads_: `belowDeckRadianceInto` (m ≤ 2 by the deck read's Chebyshev factors, each mode over
     sinᵐ θ_v sinᵐ θ₀), `belowDeckLightInto` (the sky is `irradiance`, the sun `direct`, so the
     beam is not counted twice), `belowDeckPathDepthInto` and `belowDeckOpticalDepthInto`. Below

@@ -13,7 +13,7 @@ import { lookAlong } from "../../camera/quaternion";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
 import { type AtmosphereCamera, type SunState, TABLE_SIZES } from "../hillaire";
 import { MARCH_TOLERANCE } from "../marchSteps";
-import type { AtmosphereMedium } from "../medium";
+import { type AtmosphereMedium, columnLengthM, densityAt } from "../medium";
 import { bodyGravity } from "../oblate";
 import { kernelMedium } from "../tables";
 import {
@@ -851,14 +851,17 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
   );
 
   it(
-    "draws aerial perspective beneath as I(h_obs) − T I(h_target), T of the path's depth, to 0.1%",
+    "draws aerial perspective beneath as I(h_obs) − T I(h_target), T of the column's own extinction, to 0.2%",
     { timeout: TWIN_TIMEOUT_MS },
     () => {
-      // A level path of 2 km at row 4's height, its target at nearly the same height: the light
-      // I (1 − T), T = e^(−σ* d), σ* the pattern's (3 + 0.2 c) ÷ split.
+      // A level path of 2 km from 840 m, inside the interval between rows 4 and 5 (750 and
+      // 937.5 m), so that the cone's rays' targets (±17 m about the axis's) stay within it: the
+      // light I(h) − T I(h_t), T = e^(−σ d), σ the kernels' own extinction there.
+      const heightM = 840;
       const level: ReferenceGeometry = {
         ...UP,
         name: "level",
+        observer: { heightM, latitudeDeg: 0 },
         view: { zenithDeg: 90, azimuthDeg: 90 },
         maxDistanceM: 2_000,
       };
@@ -870,16 +873,26 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
       for (let c = 0; c < 3; c += 1) {
         // Level, the light travels at μ 0, between travel cells 7 and 8, its azimuth 90° from
         // the sun's: Σ_m Iᵐ cos mΔφ, m = 0 and 2, the m = 2 term −I² at Δφ 90°.
-        const at = (s: number, m: number): number =>
+        const at = (a: number, s: number, m: number): number =>
           0.5 *
-          (belowPatternAt(4, s, 7, 0, 0, m, c).radiance +
-            belowPatternAt(4, s, 8, 0, 0, m, c).radiance);
+          (belowPatternAt(a, s, 7, 0, 0, m, c).radiance +
+            belowPatternAt(a, s, 8, 0, 0, m, c).radiance);
         const sines = Math.sqrt(1 - mu0 * mu0) * Math.sqrt(1 - (0.5 / 8) ** 2);
-        const field = (s: number): number => at(s, 0) - at(s, 2) * sines ** 2;
-        const sky = (1 - fs) * field(s0) + fs * field(s0 + 1);
-        const t = Math.exp(-(2_000 * (3 + 0.2 * c)) / SPLIT_M);
-        // Measured 2026-11-01: 1.0 × 10⁻⁴, the target's rise of 0.3 m on the sphere and the slices.
-        expect(Math.abs((radiance[c] ?? Number.NaN) / (sky * (1 - t)) - 1)).toBeLessThan(1e-3);
+        const field = (a: number, s: number): number => at(a, s, 0) - at(a, s, 2) * sines ** 2;
+        const skyAt = (a: number): number => (1 - fs) * field(a, s0) + fs * field(a, s0 + 1);
+        const skyHere = (h: number): number => {
+          const f = (h - altitudeAt(4)) / (altitudeAt(5) - altitudeAt(4));
+          return (1 - f) * skyAt(4) + f * skyAt(5);
+        };
+        // The target 2 km on, risen t² ÷ (√(r² + t²) + r) on the sphere.
+        const r = RADIUS_M + heightM;
+        const rise = 2_000 ** 2 / (Math.sqrt(r * r + 2_000 ** 2) + r);
+        // T of the kernels' own extinction at the path's height (`packBelowDeckTable`'s column).
+        const t = Math.exp(-2_000 * kernelExtinctionAt(medium, heightM + rise / 2, c));
+        const expected = skyHere(heightM) - t * skyHere(heightM + rise);
+        // Measured 2026-11-01: 1.1 × 10⁻³ in red, the column's extinction read geometrically
+        // between the rows where the aerosol's profile is not exponential.
+        expect(Math.abs((radiance[c] ?? Number.NaN) / expected - 1)).toBeLessThan(2e-3);
       }
     },
   );
@@ -891,7 +904,7 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
       const t = twin();
       const up = t.transmittanceAlong(UP, axisOf(UP));
       const down = t.transmittanceAlong(UP, { x: -1, y: 0, z: 0 });
-      const expected = Math.exp(-belowPatternDepth(altitudeAt(4), SPLIT_M, 0, 1));
+      const expected = Math.exp(-kernelDepthAt(medium, altitudeAt(4), 1));
       expect([up[0] / expected, up[1] / expected, up[2] / expected, ...down]).toEqual([
         expect.closeTo(1, 6),
         expect.closeTo(1, 6),
@@ -903,6 +916,27 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
     },
   );
 });
+
+/** The kernels' extinction of `medium` at h*, channel `c`, m⁻¹: each term's, its forward delta out. */
+function kernelExtinctionAt(medium: AtmosphereMedium, heightM: number, c: number): number {
+  return kernelMedium(medium).terms.reduce(
+    (sum, term) =>
+      sum +
+      ((term.scattering[c] ?? 0) + (term.absorption[c] ?? 0)) * densityAt(term.density, heightM),
+    0,
+  );
+}
+
+/** The kernels' vertical optical depth of `medium` from its top to h*, channel `c`. */
+function kernelDepthAt(medium: AtmosphereMedium, heightM: number, c: number): number {
+  return kernelMedium(medium).terms.reduce(
+    (sum, term) =>
+      sum +
+      ((term.scattering[c] ?? 0) + (term.absorption[c] ?? 0)) *
+        (columnLengthM(term.density, medium.topHeightM) - columnLengthM(term.density, heightM)),
+    0,
+  );
+}
 
 /** A deck band whose own light is scaled by `scale`: its series, G and G_β. */
 function scaledDeck(band: DeckTables, scale: number): DeckTables {

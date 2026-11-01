@@ -10,8 +10,9 @@
 // v x 3 + m mode m's I^m / (sin^m theta_v sin^m theta0) at travel cosine (v + 1/2) / 8 - 1,
 // m = 0 ... 2, at texel 48 the downward irradiance the kernels' beam leaves out and at 49 the
 // kernels' beam's transmission from the top, red, green and blue in the first three values; then the
-// info row, 544, at texel a the kernels' vertical optical depth from the top per channel and the
-// altitude's h* in the fourth. A one-texel stub holds no table. Each read is
+// info rows, 544, at texel a the kernels' vertical optical depth from the top per channel and the
+// altitude's h* in the fourth, and 545, at texel a their extinction per unit of h*. A one-texel stub
+// holds no table. Each read is
 // linear between the cells' centres in h*, mu0 and mu, held at the table's edges, and in ln s
 // between the bands about the point's s, the nearer band beyond them; under the first sun row
 // (1/64) the field and the sky's irradiance are scaled by mu0 / (1/64), and nothing lights the
@@ -28,6 +29,7 @@ const BELOW_DECK_IRRADIANCE_TEXEL : u32 = 48u;
 const BELOW_DECK_DIRECT_TEXEL : u32 = 49u;
 const BELOW_DECK_TABLE_WIDTH : u32 = 50u;
 const BELOW_DECK_INFO_ROW : u32 = 544u;
+const BELOW_DECK_EXTINCTION_ROW : u32 = 545u;
 
 // Texel (x, y) of `layer`: its four values.
 fn belowDeckTexel(table : texture_2d_array<f32>, layer : u32, x : u32, y : u32) -> vec4f {
@@ -304,34 +306,64 @@ fn belowDeckDepthAt(
   return depth;
 }
 
-// One layer's mean of sigma* = -d tau / d h* between h* `lowM` and `highM` (at most a millimetre
-// apart: the interval's about `lowM`), summed interval by interval over the altitudes.
+// The integral of sigma over [x0, x1] inside an altitude interval [h0, h1] whose extinction runs
+// from s0 to s1, geometric in h where both are above 0, else linear (`thick/deckRead.ts`'s
+// intervalDepth).
+fn belowDeckIntervalDepth(h0 : f32, h1 : f32, s0 : f32, s1 : f32, x0 : f32, x1 : f32) -> f32 {
+  let span = h1 - h0;
+  let f0 = (x0 - h0) / span;
+  let f1 = (x1 - h0) / span;
+  if (s0 > 0.0 && s1 > 0.0) {
+    let lr = log(s1 / s0);
+    if (abs(lr) > 1e-6) {
+      return s0 * span * (exp(lr * f1) - exp(lr * f0)) / lr;
+    }
+  }
+  return span * (s0 * (f1 - f0) + 0.5 * (s1 - s0) * (f1 * f1 - f0 * f0));
+}
+
+// The extinction at a share `f` of an interval from s0 to s1: geometric where both are above 0.
+fn belowDeckExtinctionAt(s0 : f32, s1 : f32, f : f32) -> f32 {
+  if (s0 > 0.0 && s1 > 0.0) {
+    return s0 * exp(f * log(s1 / s0));
+  }
+  return (1.0 - f) * s0 + f * s1;
+}
+
+// One layer's mean of the kernels' extinction sigma* (the second info row) between h* `lowM` and
+// `highM`, read geometrically between the altitudes; sigma*(lowM) where they lie within a
+// millimetre.
 fn belowDeckLayerExtinction(
   table : texture_2d_array<f32>,
   layer : u32,
   lowM : f32,
   highM : f32,
 ) -> vec3f {
-  let level = !(highM - lowM > 1e-3);
-  var first = 0u;
-  var last = BELOW_DECK_ALTITUDES - 1u;
-  if (level) {
-    first = belowDeckAltitudePlace(table, layer, lowM).i0;
-    last = first + 1u;
-  }
-  var sum = vec3f(0.0);
-  for (var a = first; a < last; a++) {
-    let lower = belowDeckTexel(table, layer, a, BELOW_DECK_INFO_ROW);
-    let upper = belowDeckTexel(table, layer, a + 1u, BELOW_DECK_INFO_ROW);
-    var overlap = 1.0;
-    if (!level) {
-      overlap = max(min(highM, upper.w) - max(lowM, lower.w), 0.0);
+  var sigma = vec3f(0.0);
+  if (!(highM - lowM > 1e-3)) {
+    let place = belowDeckAltitudePlace(table, layer, lowM);
+    let lower = belowDeckTexel(table, layer, place.i0, BELOW_DECK_EXTINCTION_ROW).xyz;
+    let upper = belowDeckTexel(table, layer, place.i0 + 1u, BELOW_DECK_EXTINCTION_ROW).xyz;
+    for (var c = 0u; c < 3u; c++) {
+      sigma[c] = belowDeckExtinctionAt(lower[c], upper[c], place.f);
     }
-    if (overlap > 0.0) {
-      sum += overlap * (lower.xyz - upper.xyz) / (upper.w - lower.w);
+    return sigma;
+  }
+  for (var a = 0u; a + 1u < BELOW_DECK_ALTITUDES; a++) {
+    let h0 = belowDeckTexel(table, layer, a, BELOW_DECK_INFO_ROW).w;
+    let h1 = belowDeckTexel(table, layer, a + 1u, BELOW_DECK_INFO_ROW).w;
+    let x0 = max(lowM, h0);
+    let x1 = min(highM, h1);
+    if (!(x1 > x0)) {
+      continue;
+    }
+    let lower = belowDeckTexel(table, layer, a, BELOW_DECK_EXTINCTION_ROW).xyz;
+    let upper = belowDeckTexel(table, layer, a + 1u, BELOW_DECK_EXTINCTION_ROW).xyz;
+    for (var c = 0u; c < 3u; c++) {
+      sigma[c] += belowDeckIntervalDepth(h0, h1, lower[c], upper[c], x0, x1);
     }
   }
-  return sum / select(highM - lowM, 1.0, level);
+  return sigma / (highM - lowM);
 }
 
 // The optical depth of a straight path of `distanceM` beneath a deck from h* `fromM` to h* `toM`

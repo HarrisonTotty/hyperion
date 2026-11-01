@@ -995,7 +995,7 @@ export interface PerPlanetRow {
   readonly thickBytes: number;
   /**
    * What a routed cloud deck's tables take (R08.T15.b.2): `thick/deckRead.ts`'s deck table, 159,744 B
-   * a band and light slot, and over a surface its table below, 436,000 B more; 0 where the body takes
+   * a band and light slot, and over a surface its table below, 436,800 B more; 0 where the body takes
    * no deck. Its J above the deck is {@link PerPlanetRow.thickBytes}'s. Not in `baseBytes`, as the
    * thick table is not.
    */
@@ -2951,11 +2951,18 @@ export class AtmosphereTables {
    *
    * @param bands - The deck's tables (`thick/deck.ts`'s `bakeDeck`), one a latitude band of the
    *   tables' plan, in its order, each at its band's s.
-   * @throws RangeError for bands that are not the plan's, as `packDeckTable` or `packThickTable`
-   *   refuse them or the correction held, and the tables keep what they held; `EngineUnavailable`
+   * @param column - Under a deck over a surface, the whole medium the deck was baked from as the
+   *   kernels read it (`kernelMedium`), whose depth and extinction the table below's paths read
+   *   (`thick/deckRead.ts`'s `packBelowDeckTable`); `null` for an envelope's deck.
+   * @throws RangeError for bands that are not the plan's, as `packDeckTable`, `packBelowDeckTable`
+   *   or `packThickTable` refuse them or the correction held, or for a deck over a surface given no
+   *   column, and the tables keep what they held; `EngineUnavailable`
    *   while the engine has no device (a loss); or Error once they are disposed.
    */
-  setDeckTables(bands: ReadonlyArray<DeckTables> | null): void {
+  setDeckTables(
+    bands: ReadonlyArray<DeckTables> | null,
+    column: AtmosphereMedium | null = null,
+  ): void {
     this.#checkPlanBands("deck", bands);
     if (bands === null) {
       this.#releaseDeck();
@@ -2963,7 +2970,15 @@ export class AtmosphereTables {
       return;
     }
     const packed = packDeckTable(bands);
-    const below = bands[0]?.below === null ? null : packBelowDeckTable(bands);
+    let below: PackedBelowDeckTable | null = null;
+    if (bands[0]?.below !== null) {
+      if (column === null) {
+        throw new RangeError(
+          "a deck over a surface's table below reads its whole column, not given",
+        );
+      }
+      below = packBelowDeckTable(bands, column);
+    }
     this.#pack(deckAboveTables(bands), this.#correction);
     const texture = this.#uploadDeck(packed);
     const belowTexture = below === null ? null : this.#uploadBelow(below);
@@ -2990,7 +3005,7 @@ export class AtmosphereTables {
 
   /**
    * The table below the deck's bytes as allocated, B (R08.T15.b.2; `thick/deckRead.ts`'s
-   * `belowDeckTableBytes`): 436,000 a band and light slot; 0 without one.
+   * `belowDeckTableBytes`): 436,800 a band and light slot; 0 without one.
    */
   get belowDeckBytes(): number {
     return this.#below === null ? 0 : belowDeckTableBytes(this.#below.packed);
