@@ -34052,9 +34052,10 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     keeps no e goes circular (e = 0); the budget's k₂ ÷ Q is capped at the planet's class k₂ ÷ 100
     (research-leans-19); a 13 Jupiter-mass giant's heated tail is recorded, not bounded (11.1 W m⁻²
     at the Sun's age; the heated branch's Im k₂ is P14.T55.j's).
-  - _The edge:_ a damped moon often sits where its ocean freezes. Derived afresh on its damped
-    orbit (its insolation reads e), 143 of 5,000 take the other branch, yet keep their budget and
-    age to 10⁻⁶. The record's own passes (its law, a kept or lagged bulk) are not the model's.
+  - _The model and the record:_ derived afresh on its damped orbit (its insolation reads e), each
+    of 5,000 moons keeps its model's branch, budget and age to 10⁻⁶ (the 143 flips first recorded
+    read the models outside every 27 hold). The record's own passes (its law, a kept or lagged
+    bulk) are not the model's.
   - _For 27's bump:_ delete what `the_eccentricity_damping_is_held_only_until_the_27_bump` lists;
     restate `a_forced_eccentricity_holds_only_in_a_resonance_that_holds` (its held arm),
     `neighbouring_moons_satisfy_the_floor_about_their_planet_and_resonant_ones_sit_at_two_to_one`

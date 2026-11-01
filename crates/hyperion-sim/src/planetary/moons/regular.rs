@@ -5376,7 +5376,8 @@ mod tests {
     /// is circular; no ocean-branch moon is at 10 W m⁻² or more, and from 1 Gyr no moon of the
     /// table's giants on any branch ([`HeatedTail`]). Returned: the census's lines, the largest
     /// ratio of a fresh pair's heat to its budget, the smallest of a fresh free moon's damping time
-    /// to the age, and the moons at 10 W m⁻² or more.
+    /// to the age, and the moons at 10 W m⁻² or more. Its caller reads it under the rules the
+    /// census damped under, whose tides its models solve again.
     #[expect(
         clippy::too_many_lines,
         reason = "every pair's budget and every moon's age, branch and flux checked and tallied"
@@ -5507,17 +5508,20 @@ mod tests {
     /// their budget and under the k₂ ÷ Q ceiling, per giant (research-leans-20: about 30% of a
     /// gas giant's pairs, half an ice giant's; about 9% with B ≤ 0), the counts at 10 and 1 W m⁻²
     /// or more, the largest flux, and the ocean branch's size against the drawn eccentricities'.
-    /// A moon damped to where its ocean freezes sits at the branch's edge, where the heat jumps,
-    /// so a fresh derivation on its damped orbit, whose insolation reads its eccentricity, may
-    /// keep the ocean: the largest ratio of a fresh pair's heat to its budget and the smallest of a
-    /// fresh free moon's damping time to the age are held within 1% (1.000000 and 1.000000 as
-    /// built).
+    /// A fresh derivation on a damped orbit, whose insolation reads its eccentricity, is not its
+    /// model, which was derived on the orbit as placed: the largest ratio of a fresh pair's heat to
+    /// its budget and the smallest of a fresh free moon's damping time to the age are held within
+    /// 1% (1.000000 and 1.000002 as built, no moon on another branch than its model's). The models
+    /// are read under the rules that damped them.
     #[test]
     fn under_every_27_hold_the_generated_moons_take_their_eccentricities_at_their_age() {
         use crate::planetary::moons::tides::TidalBranch;
+        use crate::planetary::testing::with_every_27_hold;
         let giants = census_giants();
         let census = damping_census(&giants, SOLAR_AGE, 5_000, true);
-        let (lines, fresh_ratio, fresh_tau, _) = census_checks(&giants, SOLAR_AGE, &census);
+        // The models are read under the rules that damped them.
+        let (lines, fresh_ratio, fresh_tau, _) =
+            with_every_27_hold(|| census_checks(&giants, SOLAR_AGE, &census));
         let moons = &census.0;
         let damped = moons
             .iter()
@@ -5533,14 +5537,16 @@ mod tests {
                     .is_some_and(|(t, _)| t.branch() == TidalBranch::Ocean)
             })
             .count();
-        let flipped = moons
-            .iter()
-            .filter(|m| {
-                let e = m.at.moon.orbit().eccentricity().value();
-                m.at.model
-                    .is_some_and(|model| model.tides_branch(e) != m.own.branch())
-            })
-            .count();
+        let flipped = with_every_27_hold(|| {
+            moons
+                .iter()
+                .filter(|m| {
+                    let e = m.at.moon.orbit().eccentricity().value();
+                    m.at.model
+                        .is_some_and(|model| model.tides_branch(e) != m.own.branch())
+                })
+                .count()
+        });
         eprintln!(
             "{lines}  {damped} damped; {drawn_ocean} on the ocean branch at the drawn e. Derived \
              afresh on the damped orbits: {flipped} moons on another branch than their model's, a \
@@ -5564,7 +5570,10 @@ mod tests {
         for years in [1e7, 1e8, 1e9, 1e10] {
             let age = Years::new(years);
             let census = damping_census(&giants, age, 5_000, false);
-            let (lines, fresh_ratio, fresh_tau, tail) = census_checks(&giants, age, &census);
+            let (lines, fresh_ratio, fresh_tau, tail) =
+                crate::planetary::testing::with_every_27_hold(|| {
+                    census_checks(&giants, age, &census)
+                });
             eprintln!(
                 "{lines}  derived afresh: a pair's heat at most {fresh_ratio:.6} of its budget, a \
                  free moon's damping time at least {fresh_tau:.6} of the age; {tail} at 10 W m⁻² \
