@@ -137,6 +137,7 @@ import { type CacheInsert, type DrawSet, DrawSetResolver, PatchCache } from "./c
 import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
 import { frustumOf, horizonCone, inFrustum } from "./cull";
 import { vertexSpacing } from "./cube";
+import { pixelAngleRad } from "./handover";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
   CLUSTER_LIT_PASS,
@@ -164,7 +165,7 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
-import { TimeMorph } from "./timeMorph";
+import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
   finestPatchSizeM,
   type GroundContact,
@@ -196,7 +197,7 @@ import {
 } from "./lookahead";
 import { joinDemand } from "./priority";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
-import { TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
+import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { type TerrainMaterialSource, terrainMaterialOf } from "./materialSet";
 import {
@@ -775,6 +776,60 @@ interface Resident {
    * again.
    */
   readonly interior: boolean;
+  /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
+  readonly sizes: BakeSizes;
+}
+
+/**
+ * A bake's sizes as the time morph's spans read them (R10.T16.i; `timeMorph.ts`' `MorphSpans`),
+ * over its surveyed vertices, the reference surface's elsewhere.
+ */
+interface BakeSizes {
+  /** The largest |h₀ − h₁|, m: how far its morph moves the ground, a refine's or a coarsen's. */
+  readonly morphM: number;
+  /** The largest |h₀|, m: how far a rise out of the datum moves it. */
+  readonly reliefM: number;
+  /** h₀ at every {@link SIZE_STRIDE}th vertex each way, m, 0 off the survey: a rebake's change. */
+  readonly coarseM: Float32Array;
+}
+
+/** The vertices between the samples of {@link BakeSizes.coarseM}, each way. */
+const SIZE_STRIDE = 4;
+
+/** The samples of {@link BakeSizes.coarseM} along a side. */
+const SIZE_SIDE = (PATCH_VERTICES_PER_SIDE - 1) / SIZE_STRIDE + 1;
+
+/** `bake`'s {@link BakeSizes}. */
+function bakeSizesOf(bake: BakedPatch): BakeSizes {
+  const mask = bake.layers?.surveyMask;
+  const h = bake.heights;
+  let morphM = 0;
+  let reliefM = 0;
+  const coarseM = new Float32Array(SIZE_SIDE * SIZE_SIDE);
+  for (let y = 0; y < PATCH_VERTICES_PER_SIDE; y += 1) {
+    for (let x = 0; x < PATCH_VERTICES_PER_SIDE; x += 1) {
+      const v = y * PATCH_VERTICES_PER_SIDE + x;
+      if (mask !== undefined && mask[v] !== 255) {
+        continue;
+      }
+      const own = h[2 * v] ?? 0;
+      morphM = Math.max(morphM, Math.abs(own - (h[2 * v + 1] ?? 0)));
+      reliefM = Math.max(reliefM, Math.abs(own));
+      if (x % SIZE_STRIDE === 0 && y % SIZE_STRIDE === 0) {
+        coarseM[(y / SIZE_STRIDE) * SIZE_SIDE + x / SIZE_STRIDE] = own;
+      }
+    }
+  }
+  return { morphM, reliefM, coarseM };
+}
+
+/** The largest change between two bakes' {@link BakeSizes.coarseM}, m. */
+function coarseChangeM(older: BakeSizes, newer: BakeSizes): number {
+  let changeM = 0;
+  for (let n = 0; n < newer.coarseM.length; n += 1) {
+    changeM = Math.max(changeM, Math.abs((newer.coarseM[n] ?? 0) - (older.coarseM[n] ?? 0)));
+  }
+  return changeM;
 }
 
 /** A drafted bake waiting for its refined normals. */
@@ -1451,6 +1506,8 @@ export class TerrainPass {
   #observers = NO_OBSERVERS;
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #morphInMs: number | undefined;
+  /** The pixels each change moves the ground by, from the resident patches' sizes (R10.T16.i). */
+  readonly #morphSpans: MorphSpans;
   /** The lookahead's clock ({@link TerrainPassOptions.lookaheadClockMs}), or `null` for none. */
   readonly #lookaheadClockMs: (() => number) | null;
   /** The time of the last step on the lookahead's clock, ms; `null` before the first. */
@@ -1541,6 +1598,12 @@ export class TerrainPass {
     this.#onSelect = options.onSelect ?? null;
     this.#frustumMargin = options.frustumMargin ?? "none";
     this.#morphInMs = options.morphInMs;
+    this.#morphSpans = {
+      morphPx: (keyString) =>
+        this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.morphM ?? 0),
+      risePx: (keyString) =>
+        this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.reliefM ?? 0),
+    };
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
     this.#geometry = options.geometry ?? SETTINGS[options.setting].geometry;
@@ -2730,7 +2793,7 @@ export class TerrainPass {
       cache,
       resolver: new DrawSetResolver(cache),
       holds: new CoarseFineHolds(layout.slots.slotCount),
-      morph: new TimeMorph(layout.slots.slotCount, this.#morphInMs),
+      morph: new TimeMorph(layout.slots.slotCount, this.#morphInMs, this.#morphSpans),
       fades: new TransitionFades(layout.slots.slotCount),
       fadesAtMs: null,
       drawnKeys: [],
@@ -2838,6 +2901,7 @@ export class TerrainPass {
     // A rebake of a drawn patch takes a spare slot, where one is, so that the older bake fades out
     // from its own (R10.T16.i).
     const rebake = device.residents.has(keyString);
+    const sizes = bakeSizesOf(bake);
     let retired: number | null = null;
     let stored: CacheInsert;
     if (rebake) {
@@ -2858,7 +2922,9 @@ export class TerrainPass {
       this.#forget(device, stored.evicted);
     }
     if (rebake) {
-      device.morph.rebake(keyString, retired);
+      const older = device.residents.get(keyString)?.sizes;
+      const changeM = older === undefined ? sizes.reliefM : coarseChangeM(older, sizes);
+      device.morph.rebake(keyString, retired, this.#screenPx(keyString, changeM));
       this.#releaseRetired(device);
     }
     let upload: ReturnType<TerrainResources["upload"]>;
@@ -2901,6 +2967,7 @@ export class TerrainPass {
         surveyCellCode(bake.key.level, layers.fieldLevel) === 0,
       originHeightM: Math.fround(bake.originHeightM),
       interior: isInteriorBake(layers),
+      sizes,
     });
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
@@ -3511,6 +3578,36 @@ export class TerrainPass {
         )
       );
     };
+  }
+
+  /**
+   * The most pixels `sizeM` metres of ground over the resident patch keyed `keyString` subtend in a
+   * view of the last step (R10.T16.i): seen square on from the view's camera at the patch's nearest
+   * (its origin's distance less its bounding radius), a centre pixel's angle each; 0 for a patch
+   * not resident.
+   */
+  #screenPx(keyString: string, sizeM: number): number {
+    const patch = this.#device.cache.get(keyString);
+    if (patch === undefined || !(sizeM > 0)) {
+      return 0;
+    }
+    let px = 0;
+    for (const view of this.#selected?.views ?? []) {
+      const camera = this.#stepped.get(view.id);
+      if (camera === undefined) {
+        continue;
+      }
+      const nearestM = Math.max(
+        1,
+        norm(sub(patch.originM, camera.positionM)) - patch.boundingRadiusM,
+      );
+      const radPerPx = pixelAngleRad(
+        { orientation: camera.orientation, fovXRad: view.fovXRad },
+        view.viewport,
+      );
+      px = Math.max(px, sizeM / nearestM / radPerPx);
+    }
+    return px;
   }
 
   /** The drawn instances' fades at the draw time `nowMs`, made once a time ({@link Device.fades}). */

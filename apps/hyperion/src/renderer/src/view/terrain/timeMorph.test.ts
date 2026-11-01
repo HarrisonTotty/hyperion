@@ -6,7 +6,7 @@ import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { slotLayout } from "./slotLayout";
 import { DATUM_SLOT } from "./gpu/uniforms";
-import { fadeAt, MORPH_IN_MS, TimeMorph } from "./timeMorph";
+import { fadeAt, MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
 
 /** A cache of `slots` slots holding `keys`. */
 function cacheWith(keys: ReadonlyArray<PatchKey>, slots = 32): PatchCache {
@@ -170,6 +170,38 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     ]);
   });
 
+  it("joins a coarser patch's own parts with no hold and no rise", () => {
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    const joined = morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    expect([areas(joined), footprints(morph, 1_000), morph.coarsensSwapped]).toEqual([
+      [patchKeyString(ROOT)],
+      [],
+      0,
+    ]);
+  });
+
+  it("raises a coarsen's finer patches alone, not the coarser patch's own parts, and releases them alone", () => {
+    const [first] = CHILDREN;
+    const cache = cacheWith([ROOT, first]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    const fine = selectionOf(CHILDREN);
+    morph.present(resolver.resolve(fine), cache, unseen);
+    morph.footprintsAt(0);
+    morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    const rising = footprints(morph, 1_000);
+    footprints(morph, 1_000 + MORPH_IN_MS / 2);
+    morph.present(resolver.resolve(fine), cache, unseen);
+    expect([rising, footprints(morph, 1_000 + MORPH_IN_MS / 2)]).toEqual([
+      [[patchKeyString(first), 0]],
+      [[patchKeyString(first), 0.5]],
+    ]);
+  });
+
   it("holds a coarsen's finer patches until its fade is 1, rising from 0, then presents the coarser", () => {
     const cache = cacheWith([ROOT, ...CHILDREN]);
     const resolver = new DrawSetResolver(cache);
@@ -257,6 +289,35 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
       0,
       [7],
     ]);
+  });
+
+  it("lengthens a change by the pixels it moves the ground, a pixel a 60 Hz frame, to the longest", () => {
+    const [first, second] = CHILDREN;
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    // A refine moving the ground 40 px, and a rebake 1,000 px.
+    const morph = new TimeMorph(32, MORPH_IN_MS, { morphPx: () => 40, risePx: () => 0 });
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    cache.insert({
+      key: first,
+      generation: 1,
+      originM: vec3(0, 0, 0),
+      heightRangeM: [0, 0],
+      boundingRadiusM: 1,
+    });
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.rebake(patchKeyString(second), 7, 1_000);
+    morph.footprintsAt(1_000);
+    const spanMs = 40 * MORPH_MS_PER_PX;
+    expect([
+      MORPH_MS_PER_PX,
+      footprints(morph, 1_000 + spanMs / 2),
+      footprints(morph, 1_000 + MORPH_MAX_MS - 1).length,
+      morph.takeReleased(),
+      footprints(morph, 1_000 + MORPH_MAX_MS),
+      morph.takeReleased(),
+    ]).toEqual([25, [[patchKeyString(first), 0.5]], 0, [], [], [7]]);
   });
 
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {

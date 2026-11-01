@@ -156,7 +156,7 @@ describe("the seamless probe's summary", () => {
       frameMovePxMax: 3,
       frameNormalDeg: { max: 1 },
       framePopsPerS: 0.5,
-      framePopsByCause: { fade: 0, rebake: 0, refine: 2, coarsen: 0, appear: 0 },
+      framePopsByCause: { fade: 0, rebake: 0, refine: 2, coarsen: 0, appear: 0, survey: 0 },
       appearsWithoutTransition: 1,
       appearMovePxMax: 7,
     });

@@ -562,6 +562,16 @@ function morphedNormal(
   return coarse === null ? own : mixed(own, coarse, Math.min(k, 1));
 }
 
+/**
+ * The drawn ground at a place: its height above the datum, its shading normal (`null` with no
+ * normals), and whether the survey holds it, or the reference surface stands there instead.
+ */
+interface DrawnPlace {
+  readonly h: number;
+  readonly normal: Vec3 | null;
+  readonly surveyed: boolean;
+}
+
 /** The drawn ground of a frame's instances seen from one camera: each vertex made once. */
 class DrawnSurfaces {
   readonly #figure: BodyFigure;
@@ -620,19 +630,14 @@ class DrawnSurfaces {
    * `inst`'s drawn surface at (u, v) of its area's quads: its height on the mesh's triangle there,
    * and the shading normal at its k, `terrainLitShade.wgsl`'s, the datum's `datum` off survey.
    */
-  at(
-    inst: DrawnInstance,
-    u: number,
-    v: number,
-    datum: Vec3,
-  ): { readonly h: number; readonly normal: Vec3 | null } {
+  at(inst: DrawnInstance, u: number, v: number, datum: Vec3): DrawnPlace {
     const h = sampleOn((x, y) => this.vertex(inst, x, y)[0], u, v);
     const k = this.kAt(inst, u, v);
     const s = 2 ** inst.levels;
     const su = (inst.partI * QUADS + u) / s;
     const sv = (inst.partJ * QUADS + v) / s;
     if (!this.#masks.surveyed(inst.held, su, sv)) {
-      return { h, normal: datum };
+      return { h, normal: datum, surveyed: false };
     }
     let normal = morphedNormal(inst.held, inst, su, sv, k);
     if (normal !== null && inst.rebakeFade > 0) {
@@ -642,7 +647,7 @@ class DrawnSurfaces {
           : datum;
       normal = older === null ? normal : mixed(normal, older, inst.rebakeFade);
     }
-    return { h, normal };
+    return { h, normal, surveyed: true };
   }
 }
 
@@ -776,7 +781,7 @@ function frameChangeOf(
           continue;
         }
         const cover = coverOf(before, ancestors, inst.area, x, y);
-        let then: { readonly h: number; readonly normal: Vec3 | null };
+        let then: DrawnPlace;
         if (cover !== null) {
           covered = true;
           then = surfaces.at(cover.inst, cover.u, cover.v, datum);
@@ -787,7 +792,7 @@ function frameChangeOf(
             continue;
           }
           bare = true;
-          then = { h: 0, normal: datum };
+          then = { h: 0, normal: datum, surveyed: false };
         }
         const sinIncidence = norm(cross(datum, normalise(rel)));
         const px = (Math.abs(drawn.h - then.h) * sinIncidence * pxPerRad) / norm(rel);
@@ -808,7 +813,7 @@ function frameChangeOf(
             cover === null
               ? { cause: "appear", levelBefore: -1, movePx: px, normalDeg: deg, k, kBefore: 0 }
               : {
-                  cause: causeOf(inst, cover.inst),
+                  cause: drawn.surveyed === then.surveyed ? causeOf(inst, cover.inst) : "survey",
                   levelBefore: cover.inst.held.key.level,
                   movePx: px,
                   normalDeg: deg,

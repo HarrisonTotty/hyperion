@@ -38,10 +38,32 @@ import { DATUM_SLOT, MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 
 /**
- * The time a change of the drawn ground morphs in over, ms: a hand value (the brief's 0.4 s), the
- * seamless probe's to set.
+ * The time a change of the drawn ground morphs in over at least, ms: a hand value (the brief's
+ * 0.4 s), the seamless probe's to set.
  */
 export const MORPH_IN_MS = 400;
+
+/**
+ * How long a change morphs in over for each pixel it moves the ground on screen, ms: one pixel a
+ * frame at 60 Hz where the smoothstep is steepest, 1.5 ÷ T (the seamless lane's bound, brief 2's
+ * step 4).
+ */
+export const MORPH_MS_PER_PX = (1.5 * 1000) / 60;
+
+/** The longest a change morphs in over, ms: a hand value, so that a rebake's spare slot comes back. */
+export const MORPH_MAX_MS = 4_000;
+
+/**
+ * The spans of the drawn ground's changes (R10.T16.i): each change's span is at least the morph's
+ * own, and as long as {@link MORPH_MS_PER_PX} makes it for the pixels it moves the ground, to at
+ * most {@link MORPH_MAX_MS}. The pass's, from its patches' sizes on screen.
+ */
+export interface MorphSpans {
+  /** The pixels a refine or coarsen moves the ground by over `keyString`'s patch: its own morph. */
+  morphPx(keyString: string): number;
+  /** The pixels a rise out of the datum moves the ground by over `keyString`'s patch: its relief. */
+  risePx(keyString: string): number;
+}
 
 /** The fade a transition from `from` to `to` that began at `startMs` has reached at `nowMs`: smoothstep. */
 export function fadeAt(
@@ -75,6 +97,8 @@ interface Transition {
   readonly from: number;
   readonly to: number;
   startMs: number | null;
+  /** The time its fade takes, ms ({@link MorphSpans}). */
+  readonly spanMs: number;
   /**
    * What is drawn in the area's place until the fade reaches {@link Transition.to}: a coarsen's,
    * the finer instances that were and parts of the coarser patch over the rest; a deferred
@@ -158,6 +182,7 @@ function within(inner: PatchKey, outer: PatchKey): boolean {
  */
 export class TimeMorph {
   readonly #spanMs: number;
+  readonly #spans: MorphSpans | null;
   readonly #set: PresentedSet;
   /** The transitions in progress, by their area's `patchKeyString`. */
   #transitions = new Map<string, Transition>();
@@ -173,8 +198,11 @@ export class TimeMorph {
   readonly #areas: string[] = [];
   /** Each presented instance's heights' fade word at the last draw time ({@link TimeMorph.heightWords}). */
   readonly #heightWords: Uint32Array;
-  /** The rebakes fading, by their patch's `patchKeyString`: the older bake's slot and the start. */
-  readonly #rebakes = new Map<string, { readonly slot: number; startMs: number | null }>();
+  /** The rebakes fading, by their patch's `patchKeyString`: the older bake's slot, start and span. */
+  readonly #rebakes = new Map<
+    string,
+    { readonly slot: number; startMs: number | null; readonly spanMs: number }
+  >();
   /** The rebakes' words at the last draw time (`fadeWord`'s bits 8 to 31), by key string. */
   readonly #rebakeWords = new Map<string, number>();
   /** The older bakes' slots whose fades have ended, for the pass to free. */
@@ -183,10 +211,13 @@ export class TimeMorph {
   /**
    * @param capacity - The most instances a draw set presents: the cache's slot count, which the
    *   instance records hold.
-   * @param spanMs - The time a change morphs in over, ms; {@link MORPH_IN_MS} by default.
+   * @param spanMs - The time a change morphs in over at least, ms; {@link MORPH_IN_MS} by default.
+   * @param spans - The pixels each change moves the ground by, which lengthen its span; with none,
+   *   every change takes `spanMs`.
    */
-  constructor(capacity: number, spanMs = MORPH_IN_MS) {
+  constructor(capacity: number, spanMs = MORPH_IN_MS, spans: MorphSpans | null = null) {
     this.#spanMs = spanMs;
+    this.#spans = spans;
     this.#heightWords = new Uint32Array(capacity);
     this.#set = {
       count: 0,
@@ -239,9 +270,10 @@ export class TimeMorph {
    * Starts the fade of the patch keyed `keyString` from its older bake, kept in `oldSlot`, to its
    * newer one; with `oldSlot` `null` (no slot was spare), counts the swap. A fade of the patch in
    * progress gives up its own older bake's slot ({@link TimeMorph.takeReleased}), and the new one
-   * starts from the newer bake it had.
+   * starts from the newer bake it had. `changePx` is the pixels the two bakes' ground differs by on
+   * screen, which lengthens the fade ({@link MorphSpans}).
    */
-  rebake(keyString: string, oldSlot: number | null): void {
+  rebake(keyString: string, oldSlot: number | null, changePx = 0): void {
     const going = this.#rebakes.get(keyString);
     if (going !== undefined) {
       this.#released.push(going.slot);
@@ -252,7 +284,7 @@ export class TimeMorph {
       this.#rebakesSwapped += 1;
       return;
     }
-    this.#rebakes.set(keyString, { slot: oldSlot, startMs: null });
+    this.#rebakes.set(keyString, { slot: oldSlot, startMs: null, spanMs: this.#spanFor(changePx) });
     // At its start: the older bake's whole, until the first draw stamps it.
     this.#rebakeWords.set(keyString, ((255 << 8) | (oldSlot << 16)) >>> 0);
   }
@@ -356,7 +388,13 @@ export class TimeMorph {
             this.#coarsensSwapped += 1;
           } else {
             // A refine's hold gone from the cache: the finer patch refines from 1 at once.
-            transitions.set(areaString, { ...next, from: 1, startMs: null, held: null });
+            transitions.set(areaString, {
+              ...next,
+              from: 1,
+              startMs: null,
+              held: null,
+              spanMs: this.#morphSpan(drawn.keyString),
+            });
           }
         }
       }
@@ -385,7 +423,7 @@ export class TimeMorph {
   /**
    * The fall from a coarsen given up over `area`, which was held in an ancestor's coarsen that the
    * selection has refined back into: from the fade that coarsen reached, so that nothing jumps;
-   * `null` where no ancestor's coarsen held it.
+   * `null` where no ancestor's coarsen held it rising (the coarser patch's own parts drew it).
    */
   #releasedOver(area: PatchKey): Transition | null {
     for (const going of this.#transitions.values()) {
@@ -393,9 +431,9 @@ export class TimeMorph {
         going.held !== null &&
         going.to === 1 &&
         going.area.level < area.level &&
-        within(area, going.area)
+        going.footprints.some((footprint) => within(area, footprint))
       ) {
-        const reached = fadeAt(going.from, going.to, going.startMs, this.#nowMs, this.#spanMs);
+        const reached = fadeAt(going.from, going.to, going.startMs, this.#nowMs, going.spanMs);
         return reached > 0
           ? {
               area,
@@ -405,6 +443,7 @@ export class TimeMorph {
               to: 0,
               startMs: null,
               held: null,
+              spanMs: going.spanMs,
             }
           : null;
       }
@@ -459,6 +498,7 @@ export class TimeMorph {
             to: going.to,
             startMs: going.startMs,
             held: [{ keyString: was.keyString, within: area, standIn: was.standIn }],
+            spanMs: going.spanMs,
           };
         }
         const between = this.#nextLevel(area, was.patch.key.level, drawn, cache);
@@ -470,6 +510,7 @@ export class TimeMorph {
           to: 0,
           startMs: null,
           held: between === null ? null : [between],
+          spanMs: this.#morphSpan(between?.keyString ?? drawn.keyString),
         };
       }
       // Drawn by the same patch, or a coarser one: a transition in progress there goes on over
@@ -484,28 +525,66 @@ export class TimeMorph {
             to: going.to,
             startMs: going.startMs,
             held: null,
+            spanMs: going.spanMs,
           };
     }
     // Finer instances drawn before over the area: a coarsen, held with parts of the coarser patch
-    // over the rest of the area, where they did not cover it all (ground newly in view).
+    // over the rest of the area, where they did not cover it all (ground newly in view). Parts the
+    // coarser patch drew itself are its own surface already: they hold, but do not rise.
     const finer: PresentedPatch[] = [];
+    const rising: PatchKey[] = [];
     let reached = 0;
+    let ownReached = 0;
+    let ownSpanMs = this.#spanMs;
+    let spanMs = this.#spanMs;
     for (const [areaString, was] of before) {
       if (within(areaOf(was), area)) {
         finer.push(was);
+        const own = was.keyString === drawn.keyString;
+        if (!own) {
+          rising.push(areaOf(was));
+          spanMs = Math.max(spanMs, this.#morphSpan(was.keyString));
+        }
         const going = this.#transitions.get(areaString);
         if (going !== undefined) {
-          reached = Math.max(
-            reached,
-            fadeAt(going.from, going.to, going.startMs, this.#nowMs, this.#spanMs),
-          );
+          const fade = fadeAt(going.from, going.to, going.startMs, this.#nowMs, going.spanMs);
+          if (own) {
+            ownReached = Math.max(ownReached, going.rise ? 0 : fade);
+            ownSpanMs = Math.max(ownSpanMs, going.spanMs);
+          } else {
+            reached = Math.max(reached, fade);
+          }
         }
       }
+    }
+    if (finer.length > 0 && rising.length === 0) {
+      // The coarser patch's own parts joined: a fall in progress on them goes on over the area.
+      return ownReached > 0
+        ? {
+            area,
+            footprints: [area],
+            rise: false,
+            from: ownReached,
+            to: 0,
+            startMs: null,
+            held: null,
+            spanMs: ownSpanMs,
+          }
+        : null;
     }
     if (finer.length === 0) {
       // Nothing drawn here before: ground a view saw rises out of the reference surface there.
       return before.size > 0 && seenBefore(area)
-        ? { area, footprints: [], rise: true, from: 1, to: 0, startMs: null, held: null }
+        ? {
+            area,
+            footprints: [],
+            rise: true,
+            from: 1,
+            to: 0,
+            startMs: null,
+            held: null,
+            spanMs: this.#spanFor(this.#spans?.risePx(drawn.keyString) ?? 0),
+          }
         : null;
     }
     const rest = restOf(area, finer.map(areaOf), drawn.patch.key.level + MAX_SUB_PATCH_LEVELS);
@@ -523,12 +602,13 @@ export class TimeMorph {
     ];
     return {
       area,
-      footprints: finer.map(areaOf),
+      footprints: rising,
       rise: false,
       from: reached,
       to: 1,
       startMs: null,
       held,
+      spanMs,
     };
   }
 
@@ -573,9 +653,19 @@ export class TimeMorph {
       transition.to,
       transition.startMs,
       this.#nowMs,
-      this.#spanMs,
+      transition.spanMs,
     );
     return transition.to >= 1 ? fade >= 1 : fade <= 0;
+  }
+
+  /** The span of a change moving the ground `px` pixels on screen ({@link MorphSpans}), ms. */
+  #spanFor(px: number): number {
+    return Math.max(this.#spanMs, Math.min(MORPH_MAX_MS, MORPH_MS_PER_PX * px));
+  }
+
+  /** The span of a refine or coarsen over `keyString`'s patch's own morph, ms. */
+  #morphSpan(keyString: string): number {
+    return this.#spanFor(this.#spans?.morphPx(keyString) ?? 0);
   }
 
   /** `transition`'s held patches as the cache holds them now, with `views`; `null` if one is gone. */
@@ -601,8 +691,8 @@ export class TimeMorph {
     this.#nowMs = Math.max(this.#nowMs, nowMs);
     for (const [keyString, rebake] of this.#rebakes) {
       rebake.startMs ??= nowMs;
-      const fade = fadeAt(1, 0, rebake.startMs, nowMs, this.#spanMs);
-      if (nowMs - rebake.startMs >= this.#spanMs) {
+      const fade = fadeAt(1, 0, rebake.startMs, nowMs, rebake.spanMs);
+      if (nowMs - rebake.startMs >= rebake.spanMs) {
         this.#rebakes.delete(keyString);
         this.#rebakeWords.delete(keyString);
         this.#released.push(rebake.slot);
@@ -618,8 +708,14 @@ export class TimeMorph {
     const rises = new Map<string, number>();
     for (const [areaString, transition] of this.#transitions) {
       transition.startMs ??= nowMs;
-      const fade = fadeAt(transition.from, transition.to, transition.startMs, nowMs, this.#spanMs);
-      const ended = nowMs - transition.startMs >= this.#spanMs;
+      const fade = fadeAt(
+        transition.from,
+        transition.to,
+        transition.startMs,
+        nowMs,
+        transition.spanMs,
+      );
+      const ended = nowMs - transition.startMs >= transition.spanMs;
       if (transition.held === null && ended && fade <= 0) {
         this.#transitions.delete(areaString);
         continue;

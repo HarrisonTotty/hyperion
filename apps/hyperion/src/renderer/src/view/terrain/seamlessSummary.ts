@@ -90,10 +90,11 @@ export interface SeamFrameChange {
 /**
  * What a frame's change of an instance came from (R10.T16.i), at its worst vertex: its fades or
  * holds alone (`fade`), a newer bake of the patch drawing it (`rebake`), a finer or a coarser patch
- * than drew that ground the frame before (`refine`, `coarsen`), or nothing drawn there before
- * (`appear`).
+ * than drew that ground the frame before (`refine`, `coarsen`), nothing drawn there before
+ * (`appear`), or the survey's edge, the ground surveyed in one frame and the reference surface in
+ * the other (`survey`: a finer bake's survey cells are finer, and the mask has no fade).
  */
-export type SeamPopCause = "fade" | "rebake" | "refine" | "coarsen" | "appear";
+export type SeamPopCause = "fade" | "rebake" | "refine" | "coarsen" | "appear" | "survey";
 
 /** An instance whose change in a frame showed ({@link SeamFrameChange.pops}). */
 export interface SeamPop {
@@ -320,6 +321,7 @@ function popsByCause(pops: ReadonlyArray<SeamPop>): Record<SeamPopCause, number>
     refine: 0,
     coarsen: 0,
     appear: 0,
+    survey: 0,
   };
   for (const pop of pops) {
     counts[pop.cause] += 1;
