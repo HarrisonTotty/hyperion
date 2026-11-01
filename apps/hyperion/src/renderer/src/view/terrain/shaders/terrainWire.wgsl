@@ -15,7 +15,11 @@
 //   |fract(u − ½) − ½| ÷ length(dpdxFine(u), dpdyFine(u)), the gradient's length rather than
 //   `fwidth` (after Golus 2021), the derivatives taken in uniform control flow, before the
 //   survey's discard. A family fades from 6 px of its lines' spacing to nothing at 3 px, the minor
-//   first; the coastline, at the field's sea level where the world has a sea, is always drawn.
+//   first, the spacing judged over a coarser footprint than the pixel's: u's change a pixel from
+//   each grid vertex to the vertices CONTOUR_FADE_QUADS along its row and its column, as placed for
+//   the frame (`wire_footprint`), interpolated, so that a far line whose facets' slopes scatter
+//   about the fade's band is drawn whole rather than in pieces; the coastline, at the field's sea
+//   level where the world has a sea, is always drawn.
 // - The graticule, R02's, on the terrain's own height (Design note 14): each vertex's geocentric
 //   latitude and longitude less its patch origin's, from its offset (`wire_graticule_offsets`),
 //   plus the origin's less its lines', formed in f64 on the CPU (`graticulePatch`), so that no
@@ -26,7 +30,8 @@
 //   the survey's edge, are the ground's depth alone: no line is drawn on them.
 // - The depth is pushed away from the camera as the occluders' is (R07.T16.d): `occluderSlopePx`
 //   pixels of its screen slope and 2⁻¹⁶ of the depth, so that a mark on the ground, the survey edge
-//   on its rim, stands in front of it rather than z-fighting with it.
+//   on its rim, stands in front of it rather than z-fighting with it; a skirt or a fin by at least
+//   the ground's slope over the footprint, so that none stands in front of the ground beside it.
 
 struct Draw {
   // Zero: each instance carries its own origin.
@@ -69,10 +74,15 @@ struct WirePhase {
 
 @group(2) @binding(18) var<storage, read> wire_phases : array<WirePhase>;
 
-// The fade's spacings, CSS px (`terrainWire.ts`' CONTOUR_FADE_PX), and the index's period.
+// The fade's spacings, CSS px (`terrainWire.ts`' CONTOUR_FADE_PX), its footprint, quads
+// (CONTOUR_FADE_QUADS), and the index's period.
 const CONTOUR_FULL_PX : f32 = 6.0;
 const CONTOUR_GONE_PX : f32 = 3.0;
+const CONTOUR_FADE_QUADS : f32 = 4.0;
 const CONTOUR_INDEX_EVERY : f32 = 5.0;
+// How many of the ground's depth slopes over the footprint a skirt or a fin is pushed by at least
+// (`terrainWire.ts`' SKIRT_PUSH_GROUND_SLOPES).
+const SKIRT_PUSH_GROUND_SLOPES : f32 = 2.0;
 // The constant depth push, a fraction of the depth: 2^-16, as the occluders' and `terrainDepth.wgsl`'s.
 const WIRE_DEPTH_FRACTION : f32 = 0.0000152587890625;
 // π ÷ 2 and 2π.
@@ -94,6 +104,9 @@ struct WireVertexOut {
   @location(5) graticuleUv : vec2f,
   // The patch origin's nearest parallel's and meridian's indices.
   @location(6) @interpolate(flat) graticuleLines : vec2f,
+  // The footprint at the grid vertex (`wire_footprint`), a skirt's or a fin's that it hangs from: x
+  // how far u changes a device pixel over it, y how far the ground's depth does.
+  @location(7) footprint : vec2f,
 }
 
 // atan2(y, x) of either sign of y, through preciseTrig.wgsl's `preciseAtan2` (R08's Design note
@@ -125,6 +138,79 @@ fn wire_graticule_offsets(phase : WirePhase, q : vec3f) -> vec2f {
   return vec2f(wire_atan2(n - delta * sinLat, w + delta * cosLat), dLon);
 }
 
+// The grid index CONTOUR_FADE_QUADS from `i` along a row or a column, inside the patch
+// (`terrainWire.ts`' `contourFadeNeighbour`).
+fn wire_fade_neighbour(i : f32) -> f32 {
+  return select(i - CONTOUR_FADE_QUADS, i + CONTOUR_FADE_QUADS, i + CONTOUR_FADE_QUADS <= 64.0);
+}
+
+// A grid vertex of the footprint, as placed for the frame: its clip position and its contour
+// coordinate.
+struct WireFootprintVertex {
+  clip : vec4f,
+  u : f32,
+}
+
+// Grid vertex `grid` of `instance`, its u from the patch's h₀ and φ.
+fn wire_footprint_vertex(
+  grid : vec2f,
+  instance : u32,
+  h0 : f32,
+  phase : f32,
+) -> WireFootprintVertex {
+  let v = patchVertexOf(vec3f(grid, 0.0), instance);
+  var out : WireFootprintVertex;
+  out.clip = frame.clipProjection * frame.viewRotation * vec4f(v.fromCameraM, 1.0);
+  out.u = (v.heightM - h0 + phase) * draw.contour.w;
+  return out;
+}
+
+// A clip position's place on the screen, device px about its centre.
+fn wire_screen_px(clip : vec4f) -> vec2f {
+  return clip.xy / clip.w * 0.5 * frame.viewport.xy;
+}
+
+// How far a value changes a device pixel over a footprint whose two steps on the screen, px, are
+// `a` and `b` and across which it changes by `dv_a` and `dv_b` (`terrainWire.ts`'
+// `footprintPerPx`): the length of the screen gradient g with Δv = g · Δs for both, never less than
+// its change a pixel along either, which bounds |g| from below and stands for it where the
+// footprint is seen edge-on, its two steps on one line of the screen.
+fn wire_footprint_slope(a : vec2f, b : vec2f, dv_a : f32, dv_b : f32) -> f32 {
+  let det = max(abs(a.x * b.y - a.y * b.x), 1e-30);
+  let along = max(abs(dv_a) / max(length(a), 1e-30), abs(dv_b) / max(length(b), 1e-30));
+  return max(length(vec2f(dv_a * b.y - dv_b * a.y, a.x * dv_b - b.x * dv_a)) / det, along);
+}
+
+// The footprint at grid vertex `grid` of `instance`, whose clip position is `clip` and coordinate
+// `u`, to the grid vertices CONTOUR_FADE_QUADS from it along its row and its column: x how far u
+// changes a device pixel over it, which fades the contours; y how far the ground's depth does,
+// which pushes a skirt or a fin as far as the ground beside it; both 0 where any of the three lies
+// behind the camera, ground a few quads from it, where no line stands close to the next.
+fn wire_footprint(
+  grid : vec2f,
+  instance : u32,
+  clip : vec4f,
+  u : f32,
+  h0 : f32,
+  phase : f32,
+) -> vec2f {
+  let along_row = vec2f(wire_fade_neighbour(grid.x), grid.y);
+  let along_column = vec2f(grid.x, wire_fade_neighbour(grid.y));
+  let row = wire_footprint_vertex(along_row, instance, h0, phase);
+  let column = wire_footprint_vertex(along_column, instance, h0, phase);
+  if (!(clip.w > 0.0 && row.clip.w > 0.0 && column.clip.w > 0.0)) {
+    return vec2f(0.0);
+  }
+  let s0 = wire_screen_px(clip);
+  let a = wire_screen_px(row.clip) - s0;
+  let b = wire_screen_px(column.clip) - s0;
+  let z0 = clip.z / clip.w;
+  return vec2f(
+    wire_footprint_slope(a, b, row.u - u, column.u - u),
+    wire_footprint_slope(a, b, row.clip.z / row.clip.w - z0, column.clip.z / column.clip.w - z0),
+  );
+}
+
 @vertex
 fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> WireVertexOut {
   let placed = lit_place(grid, instance);
@@ -143,6 +229,10 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   let step = max(draw.graticule.x, 1e-30);
   out.graticuleUv = (phase.latLon.xy + wire_graticule_offsets(phase, v.offsetM)) / step;
   out.graticuleLines = phase.latLon.zw;
+  // The footprint at the grid vertex, a skirt's or a fin's that it hangs from.
+  let gridClip = frame.clipProjection * frame.viewRotation * vec4f(v.fromCameraM, 1.0);
+  out.footprint =
+    wire_footprint(grid.xy, instance, gridClip, out.contourU, rec.h0M, phase.contour.x);
   return out;
 }
 
@@ -172,11 +262,12 @@ fn wire_modulo(x : f32, m : f32) -> f32 {
 }
 
 // A fragment's contours over black (`terrainWire.ts`' `contourShade`): the minor and index
-// families in `--text-muted`, faded by their spacing, then the coastline in `--text`.
+// families in `--text-muted`, each antialiased by the fragment's own gradient and faded by its
+// spacing over the fade's footprint, then the coastline in `--text`.
 fn wire_contours(in : WireVertexOut, u_per_px : f32, sea_per_px : f32) -> vec3f {
   let u = in.contourU;
   let on_index = wire_modulo(round(u), CONTOUR_INDEX_EVERY) == 0.0;
-  let minor_spacing = 1.0 / max(u_per_px, 1e-30);
+  let minor_spacing = 1.0 / max(in.footprint.x, 1e-30);
   var minor = 0.0;
   if (!on_index) {
     minor = wire_line_coverage(wire_line_distance_px(u, u_per_px), draw.contourWidthsPx.x) *
@@ -247,7 +338,14 @@ fn fragmentMain(in : WireVertexOut) -> WireFragment {
   }
   var out : WireFragment;
   out.colour = vec4f(colour, 1.0);
-  // Away is smaller under reversed-Z.
-  out.depth = clamp(depth * (1.0 - WIRE_DEPTH_FRACTION) - draw.occluderSlopePx * depth_slope, 0.0, 1.0);
+  // Away is smaller under reversed-Z. A skirt or a fin, the ground's depth alone, is pushed at
+  // least as far as the ground beside it (`terrainWire.ts`' `wirePushSlope`): pushed by its own
+  // slope, shallower than the grazing ground's, it stood in front of the ground's pushed depth for
+  // a few pixels from each seam and cut the contours there.
+  var push_slope = depth_slope;
+  if (in.kind != LIT_GRID) {
+    push_slope = max(depth_slope, SKIRT_PUSH_GROUND_SLOPES * in.footprint.y);
+  }
+  out.depth = clamp(depth * (1.0 - WIRE_DEPTH_FRACTION) - draw.occluderSlopePx * push_slope, 0.0, 1.0);
   return out;
 }

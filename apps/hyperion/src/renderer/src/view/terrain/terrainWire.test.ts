@@ -36,22 +36,28 @@ import { WIRE_PHASE_RECORD_BYTES, WirePhaseRecords } from "./gpu/uniforms";
 import terrainWireWgsl from "./shaders/terrainWire.wgsl?raw";
 import {
   CONTOUR_FADE_PX,
+  CONTOUR_FADE_QUADS,
   CONTOUR_FIELD_CH,
   CONTOUR_INDEX_EVERY,
   contourFade,
+  contourFadeNeighbour,
   contourInterval,
   contourIntervalReading,
   contourLengthReading,
   contourPhase,
   contourShade,
   contourStepM,
+  footprintPerPx,
+  type FootprintVertex,
   type GraticulePatch,
   graticuleOffsetsRad,
   graticulePatch,
   heightAboveGroundM,
   lineCoverage,
+  SKIRT_PUSH_GROUND_SLOPES,
   TERRAIN_WIRE_MATERIALS,
   terrainWireMaterialSpec,
+  wirePushSlope,
 } from "./terrainWire";
 
 const f = Math.fround;
@@ -389,26 +395,28 @@ describe.each([1, 2])(
     const perPxAt = (spacingPx: number): number => 1 / (spacingPx * scale);
 
     it("draws a minor contour in full at 6 px of spacing", () => {
-      expect(contourShade(1, perPxAt(6), null, scale).minor).toBeCloseTo(1, 12);
+      expect(contourShade(1, perPxAt(6), perPxAt(6), null, scale).minor).toBeCloseTo(1, 12);
     });
 
     it("draws a minor contour at half strength at 4.5 px of spacing", () => {
-      expect(contourShade(1, perPxAt(4.5), null, scale).minor).toBeCloseTo(0.5, 12);
+      expect(contourShade(1, perPxAt(4.5), perPxAt(4.5), null, scale).minor).toBeCloseTo(0.5, 12);
     });
 
     it("draws no minor contour at 3 px of spacing", () => {
-      expect(contourShade(1, perPxAt(3), null, scale).minor).toBe(0);
+      expect(contourShade(1, perPxAt(3), perPxAt(3), null, scale).minor).toBe(0);
     });
 
     it("still draws the index contour in full where the minor ones are gone: minor before index", () => {
       expect([
-        contourShade(1, perPxAt(3), null, scale).minor,
-        contourShade(5, perPxAt(3), null, scale).index,
+        contourShade(1, perPxAt(3), perPxAt(3), null, scale).minor,
+        contourShade(5, perPxAt(3), perPxAt(3), null, scale).index,
       ]).toEqual([0, 1]);
     });
 
     it("fades the index contour from 6 px of its own spacing, five minor ones, to nothing at 3 px", () => {
-      const fades = [1.2, 0.9, 0.6].map((px) => contourShade(5, perPxAt(px), null, scale).index);
+      const fades = [1.2, 0.9, 0.6].map(
+        (px) => contourShade(5, perPxAt(px), perPxAt(px), null, scale).index,
+      );
       expect(fades.map((fade, i) => Math.abs(fade - (1 - 0.5 * i)))).toEqual([
         expect.closeTo(0, 12),
         expect.closeTo(0, 12),
@@ -420,7 +428,7 @@ describe.each([1, 2])(
       const perPx = perPxAt(10);
       const across = integratePx(
         4 * scale,
-        (x) => contourShade(5 + x * perPx, perPx, null, scale).index,
+        (x) => contourShade(5 + x * perPx, perPx, perPx, null, scale).index,
       );
       expect(across).toBeCloseTo(1.5 * scale, 5);
     });
@@ -429,7 +437,7 @@ describe.each([1, 2])(
       const perPx = perPxAt(10);
       const minors = Array.from({ length: 801 }, (_, i) => {
         const x = (i - 400) * 0.01 * scale;
-        return contourShade(5 + x * perPx, perPx, null, scale).minor;
+        return contourShade(5 + x * perPx, perPx, perPx, null, scale).minor;
       });
       expect(Math.max(...minors)).toBe(0);
     });
@@ -438,19 +446,49 @@ describe.each([1, 2])(
       const perPx = perPxAt(10);
       const minor = integratePx(
         4 * scale,
-        (x) => contourShade(2 + x * perPx, perPx, null, scale).minor,
+        (x) => contourShade(2 + x * perPx, perPx, perPx, null, scale).minor,
       );
       const index = integratePx(
         4 * scale,
-        (x) => contourShade(2 + x * perPx, perPx, null, scale).index,
+        (x) => contourShade(2 + x * perPx, perPx, perPx, null, scale).index,
       );
       expect([minor, index]).toEqual([expect.closeTo(scale, 5), 0]);
+    });
+
+    // R10.T11's lever: the fade reads the footprint's spacing, the antialiasing the fragment's.
+    it("draws a minor contour in full at 6 px of the footprint's spacing, whatever the fragment's", () => {
+      expect(
+        [3.5, 6, 40].map((px) => contourShade(1, perPxAt(px), perPxAt(6), null, scale).minor),
+      ).toEqual([1, 1, 1].map(() => expect.closeTo(1, 12)));
+    });
+
+    it("draws no minor contour at 3 px of the footprint's spacing, whatever the fragment's", () => {
+      expect(
+        [3, 6, 40].map((px) => contourShade(1, perPxAt(px), perPxAt(3), null, scale).minor),
+      ).toEqual([0, 0, 0]);
+    });
+
+    it("fades the index contour at the footprint's spacing too, after the minor ones", () => {
+      expect([
+        contourShade(1, perPxAt(10), perPxAt(3), null, scale).minor,
+        contourShade(5, perPxAt(10), perPxAt(3), null, scale).index,
+        contourShade(5, perPxAt(10), perPxAt(0.9), null, scale).index,
+      ]).toEqual([0, 1, expect.closeTo(0.5, 12)]);
+    });
+
+    it("antialiases a line from the fragment's own gradient: 1 px times the scale across a minor contour at any footprint spacing over 6 px", () => {
+      const perPx = perPxAt(3.5);
+      const across = integratePx(
+        1.5 * scale,
+        (x) => contourShade(2 + x * perPx, perPx, perPxAt(8), null, scale).minor,
+      );
+      expect(across).toBeCloseTo(scale, 5);
     });
 
     it.each([0.001, 1, 1_000])(
       "draws the coastline in full at sea level, its height changing %s m a px",
       (perPxM) => {
-        expect(contourShade(0.3, 0.01, { aboveSeaM: 0, perPxM }, scale).coastline).toBe(1);
+        expect(contourShade(0.3, 0.01, 0.01, { aboveSeaM: 0, perPxM }, scale).coastline).toBe(1);
       },
     );
 
@@ -458,13 +496,13 @@ describe.each([1, 2])(
       const perPxM = 0.37;
       const across = integratePx(
         scale + 2,
-        (x) => contourShade(0.3, 0.01, { aboveSeaM: x * perPxM, perPxM }, scale).coastline,
+        (x) => contourShade(0.3, 0.01, 0.01, { aboveSeaM: x * perPxM, perPxM }, scale).coastline,
       );
       expect(across).toBeCloseTo(2 * scale, 5);
     });
 
     it("draws no coastline on a world with no sea", () => {
-      expect(contourShade(0.3, 0.01, null, scale).coastline).toBe(0);
+      expect(contourShade(0.3, 0.01, 0.01, null, scale).coastline).toBe(0);
     });
   },
 );
@@ -473,10 +511,250 @@ describe("the shader's contour constants", () => {
   it.each([
     ["CONTOUR_FULL_PX", CONTOUR_FADE_PX.full],
     ["CONTOUR_GONE_PX", CONTOUR_FADE_PX.gone],
+    ["CONTOUR_FADE_QUADS", CONTOUR_FADE_QUADS],
+    ["SKIRT_PUSH_GROUND_SLOPES", SKIRT_PUSH_GROUND_SLOPES],
     ["CONTOUR_INDEX_EVERY", CONTOUR_INDEX_EVERY],
   ] as const)("declares %s as terrainWire.ts does", (name, value) => {
     const declared = new RegExp(`const ${name} : f32 = ([0-9.]+);`, "u").exec(terrainWireWgsl)?.[1];
     expect(Number(declared)).toBe(value);
+  });
+});
+
+/** A grid vertex (x, y) of a patch drawn as the affine `screen` maps it, with `u` its coordinate. */
+function fadeVertexAt(
+  x: number,
+  y: number,
+  screen: (x: number, y: number) => readonly [number, number],
+  u: (x: number, y: number) => number,
+): FootprintVertex {
+  return { screenPx: screen(x, y), value: u(x, y) };
+}
+
+/** The footprint's u change a px at grid vertex (x, y), its neighbours as the shader takes them. */
+function footprintAt(
+  x: number,
+  y: number,
+  screen: (x: number, y: number) => readonly [number, number],
+  u: (x: number, y: number) => number,
+): number {
+  return footprintPerPx(
+    fadeVertexAt(x, y, screen, u),
+    fadeVertexAt(contourFadeNeighbour(x), y, screen, u),
+    fadeVertexAt(x, contourFadeNeighbour(y), screen, u),
+  );
+}
+
+/** A coordinate affine on the grid, 0.37 x − 0.11 y + 5. */
+function affineU(x: number, y: number): number {
+  return 0.37 * x - 0.11 * y + 5;
+}
+
+/** A row of facets 4 px wide on the screen, its rows 40 px apart. */
+function facetScreen(x: number, y: number): readonly [number, number] {
+  return [4 * x, 40 * y];
+}
+
+/** A coordinate rising 1 and 0.6 a facet in turn along a row. */
+function facetU(x: number): number {
+  return 0.8 * x + (x % 2 === 1 ? 0.2 : 0);
+}
+
+describe("the fade's footprint (R10.T11's lever; terrainWire.wgsl's wire_fade_per_px)", () => {
+  it("takes the vertex 4 quads on along a row or a column, or back where that leaves the patch", () => {
+    const neighbours = Array.from({ length: 65 }, (_, i) => contourFadeNeighbour(i));
+    expect([
+      CONTOUR_FADE_QUADS,
+      neighbours.every((n) => n >= 0 && n <= 64),
+      neighbours.every((n, i) => Math.abs(n - i) === CONTOUR_FADE_QUADS),
+      neighbours.slice(58, 65),
+    ]).toEqual([4, true, true, [62, 63, 64, 57, 58, 59, 60]]);
+  });
+
+  it.each([
+    ["square", (x: number, y: number) => [12 * x, 12 * y] as const],
+    [
+      "turned and sheared",
+      (x: number, y: number) => [3 * x - 7 * y + 400, 5 * x + 2 * y - 90] as const,
+    ],
+    ["foreshortened", (x: number, y: number) => [9 * x, 0.4 * y] as const],
+  ] as const)(
+    "is the screen gradient's length for a coordinate affine on a %s grid",
+    (_name, screen) => {
+      // u = 0.37 x − 0.11 y + 5 on the grid, and its gradient on the screen through the map's inverse.
+      const u = affineU;
+      const [ox, oy] = screen(0, 0);
+      const [ex, ey] = screen(1, 0).map((c, k) => c - (k === 0 ? ox : oy));
+      const [fx, fy] = screen(0, 1).map((c, k) => c - (k === 0 ? ox : oy));
+      const det = (ex ?? 0) * (fy ?? 0) - (ey ?? 0) * (fx ?? 0);
+      const g = [
+        (0.37 * (fy ?? 0) - -0.11 * (ey ?? 0)) / det,
+        ((ex ?? 0) * -0.11 - (fx ?? 0) * 0.37) / det,
+      ];
+      const expected = Math.hypot(g[0] ?? 0, g[1] ?? 0);
+      expect([0, 17, 60, 64].map((x) => footprintAt(x, 64 - x, screen, u) / expected)).toEqual(
+        [1, 1, 1, 1].map(() => expect.closeTo(1, 12)),
+      );
+    },
+  );
+
+  it("draws a family in full where a vertex of the footprint lies behind the camera", () => {
+    const at: FootprintVertex = { screenPx: [0, 0], value: 0 };
+    expect([
+      footprintPerPx({ screenPx: null, value: 0 }, { screenPx: [4, 0], value: 9 }, at),
+      footprintPerPx(at, { screenPx: null, value: 9 }, { screenPx: [0, 4], value: 9 }),
+      footprintPerPx(at, { screenPx: [4, 0], value: 9 }, { screenPx: null, value: 9 }),
+    ]).toEqual([0, 0, 0]);
+  });
+
+  it("takes u's change along its steps on a footprint seen edge-on, and fades where they disagree", () => {
+    const at: FootprintVertex = { screenPx: [10, 10], value: 1 };
+    const steady = footprintPerPx(
+      at,
+      { screenPx: [13, 14], value: 1.5 },
+      { screenPx: [16, 18], value: 2 },
+    );
+    const folded = footprintPerPx(
+      at,
+      { screenPx: [13, 14], value: 1.5 },
+      { screenPx: [16, 18], value: 1.5 },
+    );
+    expect([steady, contourFade(1 / folded, 1)]).toEqual([expect.closeTo(0.1, 12), 0]);
+  });
+
+  it("is never less than u's change a pixel along either step", () => {
+    const random = seededRandom(0x5eed);
+    const shortfalls = Array.from({ length: 1_000 }, () => {
+      const p = (): readonly [number, number] => [400 * random() - 200, 400 * random() - 200];
+      const [v, a, b] = [p(), p(), p()];
+      const [u0, ua, ub] = [10 * random(), 10 * random(), 10 * random()];
+      const perPx = footprintPerPx(
+        { screenPx: v, value: u0 },
+        { screenPx: a, value: ua },
+        { screenPx: b, value: ub },
+      );
+      const step = (s: readonly [number, number], u: number): number =>
+        Math.abs(u - u0) / Math.hypot(s[0] - v[0], s[1] - v[1]);
+      return Math.max(step(a, ua), step(b, ub)) - perPx;
+    });
+    expect(Math.max(...shortfalls)).toBeLessThanOrEqual(1e-12);
+  });
+
+  // The defect it ends: far facets whose slopes scatter about the fade's band, a line across them.
+  it("holds a family's fade along a line whose facets' own spacings scatter through the fade's band", () => {
+    // A row of facets 4 px wide, u rising 1 and 0.6 a facet in turn: facet by facet its spacing is
+    // 4 px then 6.7 px, across the band's edge; over the footprint, 5 px, everywhere.
+    const screen = facetScreen;
+    const u = facetU;
+    const facets = Array.from({ length: 12 }, (_, x) => contourFade(4 / (u(x + 1) - u(x)), 1));
+    const footprint = Array.from({ length: 12 }, (_, x) =>
+      contourFade(1 / footprintAt(x, 0, screen, u), 1),
+    );
+    expect([Math.min(...facets), Math.max(...facets)]).toEqual([expect.closeTo(1 / 3, 12), 1]);
+    expect(footprint).toEqual(footprint.map(() => expect.closeTo(2 / 3, 12)));
+  });
+});
+
+/**
+ * A camera `GRAZE_H_M` over flat ground, pitched `GRAZE_PITCH_RAD` down, focal length `GRAZE_F_PX`,
+ * reversed-Z with its near plane at 1 m: a ray's hits at row `r` px above the screen's centre on
+ * the ground and on the skirt hanging below a seam `GRAZE_SEAM_M` ahead, with their depths.
+ */
+const GRAZE_H_M = 4_000;
+const GRAZE_PITCH_RAD = 8 * RAD;
+const GRAZE_F_PX = 1_000;
+const GRAZE_SEAM_M = 30_000;
+const GRAZE_SKIRT_M = 400;
+
+/** The depth, reversed-Z with its near plane at 1 m, of a camera-relative point. */
+function grazeDepth(y: number, z: number): number {
+  return 1 / (y * Math.cos(GRAZE_PITCH_RAD) - z * Math.sin(GRAZE_PITCH_RAD));
+}
+
+/** A point's row on the screen, px above the centre, camera-relative (along, up), metres. */
+function grazeRow(y: number, z: number): number {
+  const across = y * Math.sin(GRAZE_PITCH_RAD) + z * Math.cos(GRAZE_PITCH_RAD);
+  return (GRAZE_F_PX * across) / (y * Math.cos(GRAZE_PITCH_RAD) - z * Math.sin(GRAZE_PITCH_RAD));
+}
+
+/** The ray at row `r`: (along, up) of its direction, the view axis's component 1. */
+function grazeRay(r: number): readonly [number, number] {
+  const t = r / GRAZE_F_PX;
+  return [
+    Math.cos(GRAZE_PITCH_RAD) + t * Math.sin(GRAZE_PITCH_RAD),
+    -Math.sin(GRAZE_PITCH_RAD) + t * Math.cos(GRAZE_PITCH_RAD),
+  ];
+}
+
+/** The depth at row `r` of the ground, or of the skirt below the seam where the ray meets it. */
+function grazeDepthAt(r: number, surface: "ground" | "skirt"): number | null {
+  const [dy, dz] = grazeRay(r);
+  const t = surface === "ground" ? GRAZE_H_M / -dz : GRAZE_SEAM_M / dy;
+  // Camera-relative along and up, and the height over the ground.
+  const [y, z] = [t * dy, t * dz];
+  const heightM = GRAZE_H_M + z;
+  if (surface === "skirt" && !(heightM <= 0 && heightM >= -GRAZE_SKIRT_M)) {
+    return null;
+  }
+  return t > 0 ? grazeDepth(y, z) : null;
+}
+
+describe("the skirts' and fins' depth push (R10.T11's far contours in pieces; wirePushSlope)", () => {
+  const OCCLUDER_SLOPE_PX = 3;
+  /** A surface's depth slope at row `r`, per px, by a central difference. */
+  const slopeAt = (r: number, surface: "ground" | "skirt"): number =>
+    Math.abs(
+      ((grazeDepthAt(r + 0.01, surface) ?? 0) - (grazeDepthAt(r - 0.01, surface) ?? 0)) / 0.02,
+    );
+  /** The ground's depth slope over a footprint at the seam: the grid vertex, 400 m across, 400 m nearer. */
+  const groundFootprint = (): number => {
+    const vertex = (across: number, along: number): FootprintVertex => {
+      const z = -GRAZE_H_M;
+      const depth = grazeDepth(along, z);
+      const row = grazeRow(along, z);
+      const viewZ = 1 / depth;
+      return { screenPx: [(GRAZE_F_PX * across) / viewZ, row], value: depth };
+    };
+    return footprintPerPx(
+      vertex(0, GRAZE_SEAM_M),
+      vertex(400, GRAZE_SEAM_M),
+      vertex(0, GRAZE_SEAM_M - 400),
+    );
+  };
+  /** The rows under the seam where the ray meets the skirt behind the ground, px. */
+  const rows = (): number[] => {
+    const seam = grazeRow(GRAZE_SEAM_M, -GRAZE_H_M);
+    return Array.from({ length: 200 }, (_, k) => seam - 0.05 * (k + 1)).filter(
+      (r) => grazeDepthAt(r, "skirt") !== null,
+    );
+  };
+  /** How far the skirt's pushed depth stands in front of the ground's at each of those rows. */
+  const inFront = (pushOf: (own: number) => number): number[] =>
+    rows().map((r) => {
+      const ground = (grazeDepthAt(r, "ground") ?? 0) - OCCLUDER_SLOPE_PX * slopeAt(r, "ground");
+      const skirt =
+        (grazeDepthAt(r, "skirt") ?? 0) - OCCLUDER_SLOPE_PX * pushOf(slopeAt(r, "skirt"));
+      return skirt - ground;
+    });
+
+  it("stood a skirt pushed by its own slope in front of the grazing ground for pixels below the seam", () => {
+    const front = inFront((own) => own);
+    expect([rows().length > 10, front.filter((d) => d > 0).length > 10]).toEqual([true, true]);
+  });
+
+  it("keeps a skirt pushed as wirePushSlope has it behind the ground at every row", () => {
+    const ground = groundFootprint();
+    expect([
+      ground / slopeAt(grazeRow(GRAZE_SEAM_M, -GRAZE_H_M), "ground"),
+      Math.max(...inFront((own) => wirePushSlope("skirt", own, ground))),
+    ]).toEqual([expect.closeTo(1, 6), expect.toSatisfy((d: number) => d <= 0)]);
+  });
+
+  it("pushes the grid by its own slope alone, as R07.T16.d's occluders are, and a skirt or a fin by twice the ground's at least", () => {
+    expect([
+      wirePushSlope("grid", 2, 9),
+      wirePushSlope("skirt", 2, 9),
+      wirePushSlope("fin", 5, 1),
+    ]).toEqual([2, 18, 5]);
   });
 });
 
