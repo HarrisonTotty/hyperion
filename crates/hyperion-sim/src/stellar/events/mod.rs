@@ -975,7 +975,8 @@ mod tests {
                 swept[2] += 1;
             }
         }
-        for mass in [50.0, 60.0, 80.0] {
+        // From 26 a solar star under 55 M☉ has no window (P06.T42.b's enforced limit).
+        for mass in [55.0, 60.0, 80.0] {
             let s = star_through(mass, 0.5, |t| {
                 let w = t.window_where(PhasePredicate::Lbv).unwrap();
                 (w.start().value(), w.end().value())

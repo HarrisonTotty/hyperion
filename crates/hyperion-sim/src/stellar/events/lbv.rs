@@ -856,7 +856,9 @@ mod tests {
     }
 
     /// The bound holds at 43 instants of each bin, its ends included, from a bin before the window
-    /// to a bin after it, for 40–150 M☉ at solar metallicity and at [Fe/H] = −1.
+    /// to a bin after it, for 40–150 M☉ at solar metallicity and at [Fe/H] = −1: over 10,000
+    /// instants, since from 26 the enforced Humphreys–Davidson limit's windows are fewer and
+    /// shorter (10,922, measured; P06.T42.b).
     #[test]
     fn the_bound_holds_across_mass_composition_and_the_window() {
         let bins = bins();
@@ -905,7 +907,7 @@ mod tests {
                 }
             }
         }
-        assert!(checked > 20_000, "{checked} instants");
+        assert!(checked > 10_000, "{checked} instants");
     }
 
     /// A rate model that accepts every candidate of a model's bins: the same bound, and the rate
@@ -1007,7 +1009,9 @@ mod tests {
     fn every_mark_follows_its_law() {
         let s = past_window(150.0);
         let model = LbvModel::of(&s).unwrap();
-        let eruptions = list_many(&model, 12, around(&model));
+        // Thirteen series: from 26 the enforced Humphreys–Davidson limit's window is shorter
+        // (P06.T42.b), and twelve list 491.
+        let eruptions = list_many(&model, 13, around(&model));
         assert!(eruptions.len() > 500, "{}", eruptions.len());
         assert_log_uniform(
             "ejected mass",
