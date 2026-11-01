@@ -24297,3 +24297,7 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     photometry under the medium's air above 1 bar, while `TEST JUPITER` stands on its datum.
   - _Pending, the owner's RTX run_: an envelope's routed frame against
     `decision-r08-t11-frame.md`'s 16.67 ms, before the route opens; the views check's looks.
+- **R08.T12.h, `giant-deck` re-traced** (2026-11-01): its reference is the deep estimator's at the
+  pilot's counts in `sampleCounts.json`, and `refusals.json`'s rows follow it: 270 of its 720
+  geometry values pass σ ≤ T ÷ 8, the capped day and twilight views and its four aggregates refused
+  at their caps. `sanityRanges.json` holds no giant row and is unchanged.
