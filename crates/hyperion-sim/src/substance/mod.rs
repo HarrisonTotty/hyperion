@@ -399,7 +399,7 @@ pub fn by_key(key: &str) -> Option<SubstanceId> {
 }
 
 /// Every row in force, in registry order: rows 115 on, P14.T52.e's carriers, from generator
-/// version 27 ([`CARRIERS_VERSION`]) alone.
+/// version 27 (`CARRIERS_VERSION`) alone.
 ///
 /// # Panics
 ///
@@ -408,7 +408,7 @@ pub fn ids() -> impl ExactSizeIterator<Item = SubstanceId> {
     (0..rows_in_force()).map(row_id)
 }
 
-/// The rows P14.T52.e appends, which join the registry at [`CARRIERS_VERSION`], in registry
+/// The rows P14.T52.e appends, which join the registry at `CARRIERS_VERSION`, in registry
 /// order; none once they are in force.
 ///
 /// For `hyperion-fit`'s `thermo_equilibrium`, which emits their records ahead of the bump, and
